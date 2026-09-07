@@ -5491,8 +5491,41 @@ impl VbcCodegen {
                     f.descriptor.id.0,
                     f.instructions.len()
                 );
-                for (pc, ins) in f.instructions.iter().enumerate() {
-                    eprintln!("[vbc-dump]   {:>4}: {:?}", pc, ins);
+                // T1243 — PRINT THE UNIT THE RUNTIME ACTUALLY USES.
+                // The interpreter's `pc` is a BYTE OFFSET into a
+                // variable-length stream: dispatch_table/mod.rs reads
+                // `bytecode[pc]` for the opcode, steps `advance_pc(1)`
+                // over that one byte, and the handler's read_reg /
+                // read_varint consume the operand bytes after it. This
+                // loop's `enumerate()` is an INSTRUCTION INDEX. Both
+                // used to print as "pc", so matching an error line —
+                // `... at Map.get_key_value (pc=103)` — against a dump
+                // row named 103 named a DIFFERENT instruction, and
+                // named it confidently: in the case that found this,
+                // index 103 was a `Ret`, which cannot dereference
+                // anything, while byte offset 103 was the GetF that
+                // did. Nothing errors when the two are confused; the
+                // reader simply gets the wrong line.
+                //
+                // So print both, with the byte offset FIRST because
+                // that is the one an error message can be matched
+                // against. `encode_instructions` is the same encoder
+                // the module builder uses (module.rs bytecode_length),
+                // so the offsets are the real ones rather than a second
+                // opinion about them.
+                let mut scratch: Vec<u8> = Vec::with_capacity(16);
+                let mut byte_off = 0usize;
+                for (idx, ins) in f.instructions.iter().enumerate() {
+                    scratch.clear();
+                    let size = crate::bytecode::encode_instructions(
+                        std::slice::from_ref(ins),
+                        &mut scratch,
+                    );
+                    eprintln!(
+                        "[vbc-dump]   pc={:>5}  #{:<4} {:?}",
+                        byte_off, idx, ins
+                    );
+                    byte_off += size;
                 }
             }
         }
