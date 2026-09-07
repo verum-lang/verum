@@ -61,10 +61,11 @@ REPO = Path(__file__).resolve().parents[2]
 DOCS = Path(os.environ.get("VERUM_STDLIB_DOCS")
             or (REPO.parent / "website" / "docs" / "stdlib"))
 RUN_DIRECTIVES = {"run", "run-interpreter"}
-BASELINE = 378  # 2026-09-07: 385 -> 378 when vcs/specs/core/io/
-                # fs_operations_run.vr began EXECUTING the filesystem
-                # basics. Lowered by coverage, not by argument — the
-                # only way this number is meant to move.
+BASELINE = 372  # Lowered by COVERAGE, never by argument — the only way
+                # this number is meant to move.
+                #   385 -> 378  vcs/specs/core/io/fs_operations_run.vr
+                #   378 -> 372  .../core/base/iterator_adapters_run.vr
+                #               .../core/simd/vec_lanes_run.vr
 
 BLOCK = re.compile(r"```verum\n(.*?)```", re.S)
 CALL = re.compile(r"\.([a-z_][a-z0-9_]*)\s*\(")

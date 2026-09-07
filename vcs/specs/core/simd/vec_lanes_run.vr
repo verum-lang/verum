@@ -1,0 +1,41 @@
+// @test: run
+// @level: L1
+// @tier: 0
+// @tags: simd, coverage
+// @timeout: 20000
+// @expected-stdout-begin
+// lanes 10.0,20.0,30.0,40.0
+// roundtrip 100
+// @expected-stdout-end
+// @description: A SIMD vector built from an array really holds four
+//   distinct lanes, and reading them back gives them all.
+//
+// WHY ONLY THIS MUCH. Measured 2026-09-07, the documented SIMD surface
+// splits cleanly:
+//
+//   WORKS   from_array, to_array — pinned here
+//   BROKEN  splat does not broadcast (lane 0 only); all seven horizontal
+//           reductions return their receiver; add ends the build with an
+//           internal compiler error
+//
+// The broken three are NOT pinned, here or anywhere: a spec that
+// recorded today's answers would cement them. They carry their own rows.
+//
+// THE VALUES ARE THE POINT. Four DIFFERENT lanes, and a hand-written sum
+// that is none of them (100 is not 10, 40, or a lane count). An
+// implementation storing one value, or reading lane 0 four times, prints
+// something else on both lines. That is the same probe design the
+// reductions failed: on a splat vector every lane is equal and a wrong
+// answer is indistinguishable from a right one.
+
+mount core.simd.{Vec4f};
+
+fn main() {
+    let src: [Float32; 4] = [10.0, 20.0, 30.0, 40.0];
+    let out = Vec4f.from_array(src).to_array();
+    print(f"lanes {out[0]},{out[1]},{out[2]},{out[3]}");
+
+    let mut total: Float32 = 0.0;
+    for i in 0..4 { total = total + out[i]; }
+    print(f"roundtrip {total}");
+}

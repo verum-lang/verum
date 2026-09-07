@@ -1,0 +1,57 @@
+// @test: run
+// @level: L1
+// @tier: 0
+// @tags: base, iterator, maybe, coverage
+// @timeout: 20000
+// @expected-stdout-begin
+// is_none_or true,false,true
+// map_while len=2 first=10 last=20
+// pairwise len=3
+// zip_longest len=4
+// @expected-stdout-end
+// @description: Four documented adapters RUN, each asserted by a value
+//   rather than by the absence of a crash.
+//
+// WHY THIS FILE EXISTS. Measured 2026-09-07: `is_none_or`, `map_while`,
+// `pairwise` and `zip_longest` are documented on the stdlib reference
+// and executed by NOTHING — no spec marked `run`, no un-ignored
+// core-test, no by-example programme. They are correct today; nobody
+// would notice if they stopped being so.
+//
+// Each line is chosen so a plausible wrong implementation gives a
+// DIFFERENT answer:
+//
+//   is_none_or   three cases, and the middle one is the load-bearing
+//                falsifier: an implementation that ignored the
+//                predicate and answered `is_none` would print
+//                true,TRUE,true. `None` answering true is the
+//                definition, not an accident.
+//   map_while    stops at the first None AND maps — len alone would not
+//                separate "stopped correctly" from "mapped nothing", so
+//                the elements are printed too (10 and 20, not 1 and 2).
+//   pairwise     THREE pairs from four elements. `len` here is the
+//                whole assertion: 4 would mean it paired past the end,
+//                2 would mean it consumed in twos instead of sliding.
+//   zip_longest  FOUR from lengths 4 and 1 — `zip` would give 1, so the
+//                number distinguishes the two adapters outright.
+
+mount core.collections.{List};
+
+fn main() {
+    let s3: Maybe<Int> = Maybe.Some(3);
+    let s1: Maybe<Int> = Maybe.Some(1);
+    let n: Maybe<Int> = Maybe.None;
+    print(f"is_none_or {s3.is_none_or(|v| v > 2)},{s1.is_none_or(|v| v > 2)},{n.is_none_or(|v| v > 2)}");
+
+    let l: List<Int> = List.from([1, 2, 3, 4]);
+
+    let mw: List<Int> = l.iter().map_while(|v| if v < 3 { Maybe.Some(v * 10) } else { Maybe.None }).collect();
+    print(f"map_while len={mw.len()} first={mw[0]} last={mw[1]}");
+
+    let pw: List<(Int, Int)> = l.iter().pairwise().collect();
+    print(f"pairwise len={pw.len()}");
+
+    let short: List<Int> = List.from([9]);
+    let zl: List<(Maybe<Int>, Maybe<Int>)> = l.iter().zip_longest(short.iter()).collect();
+    print(f"zip_longest len={zl.len()}");
+}
