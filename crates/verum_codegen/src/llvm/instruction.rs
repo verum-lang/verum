@@ -4539,7 +4539,23 @@ pub fn lower_instruction<'ctx>(
         // receiver → loud diagnostic (pinned no-silent-stub rule);
         // Tier-0 is the dynamic fallback.
         Instruction::GetFieldNamed { dst, obj, name } => {
-            match resolve_named_field_index(ctx, obj.0, *name) {
+            // WHICH BRANCH, ALWAYS — not "which branch fired".  A trace
+            // that prints only inside the arm under suspicion cannot
+            // report that the arm was never entered, and that reading has
+            // cost this session and the adjacent one a fix each today.
+            let resolved = resolve_named_field_index(ctx, obj.0, *name);
+            if std::env::var("VERUM_TRACE_BYNAME").is_ok() {
+                eprintln!(
+                    "[byname-branch] fn={} name_sid={} -> {}",
+                    ctx.function().get_name().to_str().unwrap_or("?"),
+                    name,
+                    match resolved {
+                        Some(i) => format!("POSITIONAL lower_get_field idx={}", i),
+                        None => "DYNAMIC lower_field_named_dynamic".to_string(),
+                    },
+                );
+            }
+            match resolved {
                 Some(fidx) => lower_get_field(ctx, *dst, *obj, fidx),
                 // Phase 3: receiver type unknown at lowering time —
                 // closed-world type_id switch over the module's
@@ -30305,6 +30321,12 @@ fn lower_field_named_dynamic<'ctx>(
     // Field name + candidate (type_id, position) set from the module
     // type table — FIRST descriptor per id wins, mirroring
     // `VbcModule::get_type`.
+    // FIELD-TYPE AGREEMENT (T1207).  The candidate scan below already
+    // walks each type's field descriptors to find the name, so the field's
+    // TYPE is in hand at the same moment as its position.  Collected here
+    // because the merge block at the bottom has to stamp it and cannot
+    // recover it afterwards — the phi is an i64 and says nothing.
+    let mut field_types: Vec<TypeRef> = Vec::new();
     let (fname, candidates): (String, Vec<(u32, u32)>) = {
         let Some(vbc) = ctx.vbc_module() else {
             ctx.emit_unimplemented_sub_op("GetFieldNamed(no-module)", 0x03);
@@ -30371,6 +30393,7 @@ fn lower_field_named_dynamic<'ctx>(
                 .position(|fd| vbc.strings.get(fd.name) == Some(fname))
             {
                 cands.push((td.id.0, pos as u32));
+                field_types.push(td.fields[pos].type_ref.clone());
             }
         }
         (fname.to_string(), cands)
@@ -30529,6 +30552,74 @@ fn lower_field_named_dynamic<'ctx>(
             phi.add_incoming(&[(&(*val), *bb)]);
         }
         ctx.set_register(d.0, phi.as_basic_value());
+
+        // **T1207 — THE LOAD IS RIGHT AND THE TYPE WAS THROWN AWAY.**
+        // The dispatch above reads the receiver's header at run time and
+        // loads the correct slot; measured on a three-field probe, three
+        // fields give three distinct addresses. What was missing is any
+        // mark on `d`: the phi is a bare i64, so a following `ToString`
+        // has nothing to dispatch on and formats the value as a number.
+        // A `Text` then prints its address, a `Float` prints the bits of
+        // 2.5, and an `Int` prints CORRECTLY — which is why every
+        // integer-payload control on this row passed while the defect was
+        // live, and why it stayed invisible to gates that check exit
+        // codes.
+        //
+        // ONLY ON AGREEMENT. The candidate set is every module type that
+        // carries this field name; when they disagree about the field's
+        // type, stamping any one of them would be the FIELD-ACCESS-BYNAME-1
+        // guess in a new costume — the same "pick the plausible one"
+        // this instruction exists to retire. Disagreement leaves the
+        // register unmarked, which is exactly today's behaviour and no
+        // worse than it.
+        //
+        // AFTER `set_register`, NEVER BEFORE. `set_register` clears the
+        // register's type marks; a stamp written first is erased by the
+        // store it was meant to describe (T1194's shape, which cost a
+        // full day on an adjacent row when a tag was read after the store
+        // that clears it).
+        let agree = field_types.first().filter(|f| field_types.iter().all(|t| t == *f));
+        if std::env::var("VERUM_TRACE_BYNAME").is_ok() {
+            eprintln!(
+                "[byname-stamp] fn={} field={} dst={} candidates={} -> {}",
+                ctx.function().get_name().to_str().unwrap_or("?"),
+                fname,
+                d.0,
+                field_types.len(),
+                match agree {
+                    Some(t) => format!("STAMP {:?}", t),
+                    None => "no agreement, left unmarked".to_string(),
+                },
+            );
+        }
+        // NOT STAMPED — MEASURED, AND THE GUARD IS WHY.
+        //
+        // Stamping `d` with the field's type when every candidate agrees
+        // is sound and was written here; it is inert for the case this
+        // row is about, and the trace above says exactly why:
+        //
+        //     field=first   candidates=21  no agreement
+        //     field=second  candidates=16  no agreement
+        //
+        // Twenty-one module types carry a field named `first` and they do
+        // not agree on its type. Agreement is not a viable guard for
+        // ordinary field names, and stamping ANY of a disagreeing set
+        // would be the FIELD-ACCESS-BYNAME-1 guess in a new costume —
+        // the very thing this instruction exists to retire.
+        //
+        // Across the whole stdlib the stamp fired 10 times (9 Concrete,
+        // 1 Instantiated) and changed no measured behaviour, so it is not
+        // kept: an edit whose effect on its own row is zero and whose
+        // effects elsewhere are unverified is not an improvement, it is
+        // unmeasured behaviour.
+        //
+        // WHERE THE FIX ACTUALLY IS, from the same measurement: the
+        // receiver's type is unknown HERE, which is why this dynamic arm
+        // was taken at all (96 of 96 decisions in this programme are
+        // DYNAMIC). Narrowing the candidate set needs the receiver's
+        // static type — the `Dated<T>` instantiation — recovered upstream,
+        // not a better tie-break down here.
+        let _ = agree;
     }
     Ok(())
 }
