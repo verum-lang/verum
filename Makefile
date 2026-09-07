@@ -129,6 +129,16 @@ check-doc-cli-flags: ## Gate: every CLI flag the docs show must exist in the bin
 #	 `repl --proof`, `export --all-formats`, `export --format`).
 	VERUM_DOCS_DIR=docs python3 scripts/ci/check_doc_cli_flags.py
 
+check-doc-module-paths: ## Gate: a `verum_x::a::b` citation in the docs must name a module that exists
+	python3 scripts/ci/check_doc_module_paths.py --self-test
+#	 Floor of 200: the site carries 212 such citations today. A floor
+#	 rather than a zero-check — a pattern that stops matching reports
+#	 "0 citations, 0 unresolved" and looks green. The first version of
+#	 this gate anchored on the closing backtick and could not see a
+#	 path followed by a call signature; two defects sat in that gap.
+	VERUM_DOCS_DIR="$(WEBSITE_DOCS)" python3 scripts/ci/check_doc_module_paths.py --min-citations 200
+	VERUM_DOCS_DIR=docs python3 scripts/ci/check_doc_module_paths.py --min-citations 40
+
 check-doc-config-structs: ## Gate: a doc page describing a config struct must name one that exists, with its real defaults and enum values
 	python3 scripts/ci/check_doc_config_structs.py --self-test
 #	 Floor of 9: the pages carrying either a `## <Name>Config` heading
