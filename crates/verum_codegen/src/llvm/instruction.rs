@@ -20046,7 +20046,95 @@ fn lower_call_method<'ctx>(
                         .functions
                         .get(entry.index)
                         .map(|fd| fd.return_type.clone());
-                    resolved_func_name = Some(fname.to_string());
+                    // MONO-CALLM-REACHES-ITS-SPECIALISATION-1 (T1214).
+                    //
+                    // Strategy 2 searches by the SUFFIX `.collect`; a
+                    // specialisation is `Range.collect$mono$2_512i2`,
+                    // which does not end in `.collect`, so this search
+                    // cannot see it and commits to the unspecialised
+                    // body — the one whose `from_iter` is unresolved and
+                    // whose Tier-1 lowering is an abort. The merger's
+                    // `MonoIdRemap` maps FUNCTION ids and a `CallM`
+                    // carries a METHOD id, so the remap and this lookup
+                    // never meet.
+                    //
+                    // Prefer a specialisation of the function just
+                    // resolved when the module holds EXACTLY ONE — the
+                    // condition the merger already applies for its
+                    // blanket route (`spec_count == 1`), extended to the
+                    // name path rather than invented. Two or more need
+                    // the call site's type args, unknown here.
+                    //
+                    // MEASURED INERT ONCE AND REVERTED, against a binary
+                    // that lacked `verum_vbc::reachability`'s bare-name
+                    // fix (21e24cf53) — without it no specialisation was
+                    // a by-name candidate, so the LLVM-module lookup
+                    // below had nothing to find. Restored to be measured
+                    // ON TOP of that commit, which is where its premise
+                    // first holds.
+                    let mut chosen = fname.to_string();
+                    if !vbc_mod.specializations.is_empty() {
+                        let prefix = format!("{}$mono$", fname);
+                        let mut hits = vbc_mod.functions.iter().filter_map(|fd| {
+                            let n = vbc_mod.get_string(fd.name)?;
+                            n.starts_with(&prefix)
+                                // The specialisation must be one that WILL be
+                                // lowered. Asking the LLVM function for
+                                // `count_basic_blocks() > 0` cannot answer
+                                // that: bodies lower in module order, so at
+                                // the moment `main` is lowered the
+                                // specialisation is still the bodyless
+                                // declaration Phase 1 emitted, and the check
+                                // rejected every single site — measured, the
+                                // preference fired ZERO times while the body
+                                // was demonstrably lowered (it is absent from
+                                // the 242 `[lower-skip]` names).
+                                //
+                                // The VBC descriptor answers it directly and
+                                // at the right time: a descriptor carrying
+                                // instructions gets a body.
+                                .then(|| (n.to_string(), fd.instructions.is_some()))
+                        });
+                        let trace = std::env::var_os("VERUM_AOT_TRACE_CALLM").is_some()
+                            || std::env::var_os("VERUM_TRACE_MONO_ALL").is_some();
+                        match (hits.next(), hits.next()) {
+                            (Some((first, has_body)), None) => {
+                                let decl = ctx.get_module().get_function(&first);
+                                let arity_ok = decl.is_some_and(|f| {
+                                    f.count_params() == llvm_fn_candidate.count_params()
+                                });
+                                if has_body && arity_ok {
+                                    if trace {
+                                        eprintln!(
+                                            "[callm]   S2 -> specialisation {:?} (was {:?})",
+                                            first, fname
+                                        );
+                                    }
+                                    chosen = first;
+                                } else if trace {
+                                    // A zero must be diagnosable: say WHICH
+                                    // condition refused, not merely that
+                                    // nothing happened.
+                                    eprintln!(
+                                        "[callm]   S2 kept {:?}: spec={:?} has_body={} declared={} arity_ok={}",
+                                        fname,
+                                        first,
+                                        has_body,
+                                        decl.is_some(),
+                                        arity_ok
+                                    );
+                                }
+                            }
+                            (Some(_), Some(_)) if trace => {
+                                eprintln!(
+                                    "[callm]   S2 kept {:?}: more than one specialisation",
+                                    fname
+                                );
+                            }
+                            _ => {}
+                        }
+                    }
+                    resolved_func_name = Some(chosen);
                     resolved_return_type = ret_ty;
                     break;
                 }

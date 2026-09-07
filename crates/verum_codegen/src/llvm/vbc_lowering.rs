@@ -1152,6 +1152,24 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                 && !reachable.contains(&func_desc.id.0)
             {
                 skipped_unreachable += 1;
+                // NAME THE SKIPPED SPECIALISATIONS. The count below is
+                // reported through `tracing::info!`, which does not reach
+                // stderr in a normal run — so "was this body lowered?"
+                // had no answer at all, and three attempts to read it off
+                // the emitted IR failed because `spec.ll` is a post-prune
+                // artefact (53 declares and 515 defines for a 28 750-
+                // function module): it says what SURVIVED, never what was
+                // produced.
+                //
+                // Only `$mono$` bodies are named, and only under
+                // `VERUM_TRACE_MONO_ALL` — the whole skipped set is tens
+                // of thousands of functions and would drown the run.
+                if std::env::var_os("VERUM_TRACE_MONO_ALL").is_some()
+                    && let Some(n) = vbc_module.strings.get(func_desc.name)
+                    && n.contains("$mono$")
+                {
+                    eprintln!("[lower-skip] id={} name={:?}", func_desc.id.0, n);
+                }
                 continue;
             }
             if let Some(ref instructions) = func_desc.instructions {
