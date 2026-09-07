@@ -142,10 +142,10 @@ impl EscapeCategory {
     pub const fn optimization_hint(&self) -> &'static str {
         match self {
             EscapeCategory::NoEscape => "SBGL: 0ns (reference dies in scope)",
-            EscapeCategory::LocalEscape => "CBGR: ~15ns (cannot return raw pointer from SBGL)",
-            EscapeCategory::HeapEscape => "CBGR: ~15ns (heap storage requires generation tracking)",
-            EscapeCategory::ThreadEscape => "CBGR: ~15ns (thread safety requires full checks)",
-            EscapeCategory::Unknown => "CBGR: ~15ns (conservative default)",
+            EscapeCategory::LocalEscape => "CBGR: ~1.5ns (cannot return raw pointer from SBGL)",
+            EscapeCategory::HeapEscape => "CBGR: ~1.5ns (heap storage requires generation tracking)",
+            EscapeCategory::ThreadEscape => "CBGR: ~1.5ns (thread safety requires full checks)",
+            EscapeCategory::Unknown => "CBGR: ~1.5ns (conservative default)",
         }
     }
 }
@@ -335,7 +335,7 @@ impl EscapePatternDetector {
             EscapeCategory::LocalEscape => vec![
                 "Consider returning owned values instead of references",
                 "Use &checked T if lifetime can be statically proven",
-                "Profile to verify ~15ns overhead is acceptable",
+                "Profile to verify the ~1.5ns check is acceptable",
             ]
             .into(),
             EscapeCategory::HeapEscape => vec![

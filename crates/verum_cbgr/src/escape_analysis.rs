@@ -89,7 +89,7 @@ pub enum EscapeState {
 /// (`"NoEscape"` / `"MayEscape"` / `"Escapes"` / `"Unknown"`).
 /// `display` is the user-facing diagnostic form returned by `as_str`
 /// — the bare name plus a CBGR overhead annotation
-/// (`"NoEscape (0ns)"` / `"MayEscape (~15ns)"` / …) preserved
+/// (`"NoEscape (0ns)"` / `"MayEscape (~1.5ns)"` / …) preserved
 /// verbatim from the legacy implementation. `allows_optimization`
 /// and `requires_cbgr` carry the dataflow-classification flags
 /// previously living in two parallel `matches!()` calls.
@@ -119,19 +119,19 @@ impl EscapeState {
             },
             Self::MayEscape => EscapeStateMeta {
                 name: "MayEscape",
-                display: "MayEscape (~15ns)",
+                display: "MayEscape (~1.5ns)",
                 allows_optimization: false,
                 requires_cbgr: true,
             },
             Self::Escapes => EscapeStateMeta {
                 name: "Escapes",
-                display: "Escapes (~15ns)",
+                display: "Escapes (~1.5ns)",
                 allows_optimization: false,
                 requires_cbgr: true,
             },
             Self::Unknown => EscapeStateMeta {
                 name: "Unknown",
-                display: "Unknown (~15ns)",
+                display: "Unknown (~1.5ns)",
                 allows_optimization: false,
                 requires_cbgr: true,
             },
@@ -201,7 +201,7 @@ impl EscapeState {
     }
 
     /// User-facing string with CBGR overhead annotation
-    /// (`"NoEscape (0ns)"`, `"MayEscape (~15ns)"`, …). Use
+    /// (`"NoEscape (0ns)"`, `"MayEscape (~1.5ns)"`, …). Use
     /// [`EscapeState::name`] for round-trip-safe parsing.
     #[inline]
     #[must_use]
@@ -522,8 +522,8 @@ impl fmt::Display for EscapeAnalysisStats {
             self.no_escape_count,
             self.no_escape_percentage()
         )?;
-        writeln!(f, "  MayEscape (~15ns):    {}", self.may_escape_count)?;
-        writeln!(f, "  Escapes (~15ns):      {}", self.escapes_count)?;
+        writeln!(f, "  MayEscape (~1.5ns):   {}", self.may_escape_count)?;
+        writeln!(f, "  Escapes (~1.5ns):     {}", self.escapes_count)?;
         writeln!(f, "  Unknown:              {}", self.unknown_count)?;
         writeln!(f, "  Escape points:        {}", self.escape_points_detected)?;
         writeln!(f, "  Dataflow iterations:  {}", self.iterations)?;
@@ -1223,9 +1223,9 @@ mod tests {
         // legacy implementation (each carries the CBGR overhead
         // bracket).
         assert_eq!(EscapeState::NoEscape.as_str(), "NoEscape (0ns)");
-        assert_eq!(EscapeState::MayEscape.as_str(), "MayEscape (~15ns)");
-        assert_eq!(EscapeState::Escapes.as_str(), "Escapes (~15ns)");
-        assert_eq!(EscapeState::Unknown.as_str(), "Unknown (~15ns)");
+        assert_eq!(EscapeState::MayEscape.as_str(), "MayEscape (~1.5ns)");
+        assert_eq!(EscapeState::Escapes.as_str(), "Escapes (~1.5ns)");
+        assert_eq!(EscapeState::Unknown.as_str(), "Unknown (~1.5ns)");
         // Classification: `allows_optimization` is the lone NoEscape
         // bit, `requires_cbgr` is its negation. Cross-pin: the two
         // flags are exact complements.

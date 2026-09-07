@@ -258,7 +258,7 @@ fn analyze_escape(vr_files: &[PathBuf]) -> Result<()> {
     }
 
     if !non_promotable.is_empty() {
-        println!("  {} References Kept at Tier 0 (~15ns CBGR):", "!".yellow());
+        println!("  {} References Kept at Tier 0 (~1.5ns CBGR):", "!".yellow());
         println!();
 
         for info in &non_promotable {
@@ -293,7 +293,7 @@ fn analyze_escape(vr_files: &[PathBuf]) -> Result<()> {
         global_stats.tier1_count,
         global_stats.promotion_rate() * 100.0
     );
-    println!("    Tier 0 (~15ns):     {}", global_stats.tier0_count);
+    println!("    Tier 0 (~1.5ns):    {}", global_stats.tier0_count);
     if global_stats.tier2_count > 0 {
         println!("    Tier 2 (unsafe):    {}", global_stats.tier2_count);
     }

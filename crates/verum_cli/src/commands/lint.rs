@@ -2910,7 +2910,7 @@ fn check_cbgr_hotspot(path: &Path, info: &FileInfo, issues: &mut List<LintIssue>
                         line: loop_start_line + 1,
                         column: 1,
                         message: format!(
-                            "Tight loop contains {} reference dereference(s) with CBGR overhead (~15ns each)",
+                            "Tight loop contains {} reference dereference(s) with CBGR overhead (~1.5ns each)",
                             deref_lines.len()
                         ),
                         suggestion: Some(

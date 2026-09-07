@@ -209,7 +209,7 @@ fn format_cbgr_cost(cost: &CbgrCostInfo) -> String {
 
     if cost.tier == 0 {
         result.push_str("\n> **Note**: CBGR-managed references provide runtime memory safety ");
-        result.push_str("with automatic generation tracking. The ~15ns overhead ensures ");
+        result.push_str("with automatic generation tracking. The 1.2–1.7 ns check ensures ");
         result.push_str("no use-after-free errors.\n");
     } else if cost.tier == 1 {
         result.push_str("\n> **Note**: Statically verified references have zero runtime overhead ");
@@ -942,7 +942,7 @@ pub fn format_reference_type_hover(tier: RefTier, is_mut: bool, inner_type: &str
     let (syntax, overhead, description, note) = match tier {
         RefTier::Managed => (
             if is_mut { "&mut" } else { "&" },
-            "~15ns per dereference",
+            "~1.5ns per dereference (measured)",
             "**CBGR-managed reference** (Tier 0)\n\n\
             Full CBGR protection with generation tracking. \
             Memory layout: ThinRef (16 bytes) or FatRef (24 bytes).",

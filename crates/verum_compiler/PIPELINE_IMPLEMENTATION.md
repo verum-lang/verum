@@ -250,7 +250,7 @@ Tier 1 (AOT/LLVM) → Tier 0 (Interpreter)
 |--------|--------|--------|
 | Compilation Speed | > 50K LOC/sec | ✅ Achieved (~1.4M LOC/sec parse, ~900K LOC/sec VBC codegen) |
 | Type Checking | < 100ms/10K LOC | ⏳ Pending |
-| CBGR Overhead | < 15ns per check | ✅ Achieved (~0.93ns gen+epoch check) |
+| CBGR Overhead | < 15ns per check | ✅ Achieved — **1.2–1.7 ns** measured (`cargo bench -p verum_cbgr --bench production_targets`, 2026-09-05: 1.61 valid, 1.69 gen+epoch, 1.20 invalid, 1.25 batched). The ~0.93 ns this row carried since April was ~2x LOW and was retired by that re-measurement. |
 | Check Elimination | 50-90% typical | ⏳ Pending |
 | Runtime Performance | 1x native C (parity bar) | ⏳ Pending |
 | Memory Overhead | < 5% vs unsafe | ⏳ Pending |

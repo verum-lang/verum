@@ -624,9 +624,9 @@ Must be one of: none, runtime, static, fast, formal, proof, thorough, reliable, 
 
     // CBGR cost transparency (semantic honesty)
     let cbgr_note = match ref_mode {
-        ReferenceMode::Managed => "CBGR ~15ns/check (use &checked for hot paths)",
+        ReferenceMode::Managed => "CBGR ~1.5ns/check (use &checked for hot paths)",
         ReferenceMode::Checked => "CBGR 0ns (statically verified)",
-        ReferenceMode::Mixed => "CBGR ~5-15ns avg (escape analysis active)",
+        ReferenceMode::Mixed => "CBGR ~1.5ns/check on the unpromoted share (escape analysis active)",
     };
     ui::note(cbgr_note);
 

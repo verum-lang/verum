@@ -1017,7 +1017,7 @@ fn print_reference_breakdown(tier_stats: &verum_cbgr::tier_types::TierStatistics
 
     println!("{}:", "Reference Breakdown".bold());
     println!(
-        "  * &T (managed):           {:.0}% of references ({} refs, ~15ns/check)",
+        "  * &T (managed):           {:.0}% of references ({} refs, ~1.5ns/check)",
         managed_pct, tier_stats.tier0_count
     );
     println!(

@@ -83,8 +83,8 @@ impl OptimizationDecision {
     pub fn ide_hint(&self) -> &'static str {
         match self {
             OptimizationDecision::SkipCbgrChecks => "[0ns - escape analysis optimized]",
-            OptimizationDecision::UseCbgrChecks => "[~15ns CBGR check]",
-            OptimizationDecision::Unknown => "[~15ns CBGR check - unknown]",
+            OptimizationDecision::UseCbgrChecks => "[~1.5ns CBGR check]",
+            OptimizationDecision::Unknown => "[~1.5ns CBGR check - unknown]",
         }
     }
 }

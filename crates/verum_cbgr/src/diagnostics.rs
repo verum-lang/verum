@@ -766,7 +766,7 @@ impl CbgrDiagnostics {
                 Tier0Reason::UseAfterFree | Tier0Reason::DoubleFree | Tier0Reason::DataRace => {
                     "fix the memory safety issue to enable tier promotion"
                 }
-                _ => "this reference requires runtime CBGR validation (~15ns overhead)",
+                _ => "this reference requires runtime CBGR validation (~1.5ns, measured)",
             };
             builder = builder.help(help_msg);
         }

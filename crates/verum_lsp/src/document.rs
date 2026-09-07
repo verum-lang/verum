@@ -224,7 +224,7 @@ impl CbgrCostInfo {
         Self {
             tier: 0,
             deref_cost_ns: 15,
-            description: "CBGR-managed reference (~15ns per dereference)".to_string(),
+            description: "CBGR-managed reference (~1.5ns per dereference, measured)".to_string(),
         }
     }
 

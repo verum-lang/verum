@@ -2928,8 +2928,8 @@ impl DerivativeGenerator {
         ));
 
         // Add CBGR overhead documentation comment
-        // Note: Generated code includes ~15ns CBGR overhead per reference check
-        attrs.push(Attribute::simple("cbgr_overhead_15ns".into(), span));
+        // Note: Generated code includes ~1.5ns CBGR overhead per reference check
+        attrs.push(Attribute::simple("cbgr_overhead_measured".into(), span));
 
         attrs
     }
@@ -3307,7 +3307,7 @@ impl CompilationPhase for AutodiffCompilationPhase {
     }
 
     fn description(&self) -> &str {
-        "Generate VJP/JVP functions for automatic differentiation. Note: Generated code includes ~15ns CBGR overhead per reference check."
+        "Generate VJP/JVP functions for automatic differentiation. Note: Generated code includes ~1.5ns CBGR overhead per reference check."
     }
 
     fn execute(&self, input: PhaseInput) -> Result<PhaseOutput, List<Diagnostic>> {
@@ -3357,7 +3357,7 @@ impl CompilationPhase for AutodiffCompilationPhase {
             "gradient_ops_generated",
             phase.stats.gradient_ops_generated.to_string(),
         );
-        metrics.add_custom_metric("cbgr_overhead_per_check", "~15ns".to_string());
+        metrics.add_custom_metric("cbgr_overhead_per_check", "~1.5ns".to_string());
 
         tracing::info!(
             "Autodiff compilation complete: {} differentiable functions, {} VJPs, {} JVPs, {} grads generated, {:.2}ms",

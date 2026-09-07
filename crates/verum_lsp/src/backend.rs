@@ -2359,7 +2359,7 @@ impl Backend {
                     && cbgr_cost.tier == 0 {
                         recommendations.push(serde_json::json!({
                             "title": format!("Convert {}() to use &checked references", name),
-                            "description": "CBGR managed references have ~15ns overhead per dereference. Consider using &checked if escape analysis proves safety.",
+                            "description": "CBGR managed references cost 1.2–1.7 ns per dereference (measured; the ≤ 15 ns figure is the design target). Consider using &checked if escape analysis proves safety.",
                             "type": "cbgr",
                             "priority": "medium",
                             "impact": format!("Save {}ns per dereference", cbgr_cost.deref_cost_ns),

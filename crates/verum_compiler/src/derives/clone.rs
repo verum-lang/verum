@@ -55,7 +55,7 @@ impl DeriveMacro for DeriveClone {
     }
 
     fn doc_comment(&self) -> &'static str {
-        "Auto-generated Clone implementation with CBGR-aware deep copy (~15ns per field)."
+        "Auto-generated Clone implementation with CBGR-aware deep copy (~1.5ns per field)."
     }
 }
 

@@ -161,7 +161,7 @@ let x: NonNegative = 0;  // OK"#
             .into(),
             see_also: vec![
                 "Refinement types constrain values at compile-time via predicates (e.g., Int{> 0}); the SMT solver (Z3) verifies constraints are satisfiable".into(),
-                "CBGR (Counting-Based Generational References) provides memory safety with ~15ns overhead per reference check".into(),
+                "CBGR (Counting-Based Generational References) provides memory safety with 1.2–1.7 ns per reference check".into(),
                 "Runtime validation: use @verify for compile-time proofs or explicit if/match guards for runtime checks".into(),
             ]
             .into(),
@@ -957,7 +957,7 @@ fn process(data: &Data) {
                 },
             ].into(),
             see_also: vec![
-                "CBGR system: Counting-Based Generational References detect use-after-free by comparing generation counters in references vs allocation headers (~15ns check overhead)".into(),
+                "CBGR system: Counting-Based Generational References detect use-after-free by comparing generation counters in references vs allocation headers (1.2–1.7 ns per check, measured)".into(),
                 "Memory safety: Verum's three-tier reference model (&T default CBGR, &checked T zero-cost compiler-proven, &unsafe T manual proof) prevents dangling references".into(),
             ].into(),
         },

@@ -2079,7 +2079,7 @@ pub fn info(features: bool, llvm: bool, all: bool) -> Result<(), CliError> {
     if features || all {
         println!("{}", "Features:".bold());
         println!("  {} Refinement types with SMT verification", "✓".green());
-        println!("  {} CBGR memory management (<15ns overhead)", "✓".green());
+        println!("  {} CBGR memory management (1.2–1.7ns measured)", "✓".green());
         println!("  {} Bidirectional type checking", "✓".green());
         println!("  {} Stream comprehensions", "✓".green());
         println!("  {} Context system (DI)", "✓".green());

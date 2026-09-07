@@ -214,7 +214,7 @@ fn extract_functions_from_ast(
                 } else if attr_name == "verify" || attr_name == "proven" {
                     verification_status = Text::from("Proven");
                 } else if attr_name == "cost" {
-                    cbgr_cost = Some(Text::from("~15ns per CBGR check"));
+                    cbgr_cost = Some(Text::from("~1.5ns per CBGR check (measured)"));
                 } else if attr_name == "time" {
                     if let Some(ref args) = attr.args {
                         time_complexity = Some(format!("{:?}", args).into());
@@ -283,7 +283,7 @@ fn extract_functions_from_ast(
             });
 
             if has_cbgr && cbgr_cost.is_none() {
-                cbgr_cost = Some(Text::from("~15ns per CBGR check"));
+                cbgr_cost = Some(Text::from("~1.5ns per CBGR check (measured)"));
             }
 
             // Check for pure/no_escape annotations
@@ -593,7 +593,7 @@ fn generate_index(
     html.push_str("<h2>About Verum Documentation</h2>\n");
     html.push_str("<p>This documentation includes comprehensive cost annotations:</p>\n");
     html.push_str("<ul>\n");
-    html.push_str("<li><strong>CBGR Cost:</strong> Runtime overhead for reference checks (~15ns per check)</li>\n");
+    html.push_str("<li><strong>CBGR Cost:</strong> Runtime overhead for reference checks (~1.5ns per check)</li>\n");
     html.push_str("<li><strong>Verification Status:</strong> Proven (0ns), Runtime checked, or Unverified</li>\n");
     html.push_str("<li><strong>Complexity:</strong> Time and space complexity analysis</li>\n");
     html.push_str("<li><strong>Performance:</strong> Detailed performance characteristics</li>\n");

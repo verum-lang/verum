@@ -52,7 +52,7 @@ impl DeriveMacro for DeriveDebug {
     }
 
     fn doc_comment(&self) -> &'static str {
-        "Auto-generated Debug implementation with CBGR-aware formatting (~15ns overhead per reference check)."
+        "Auto-generated Debug implementation with CBGR-aware formatting (~1.5ns per reference check)."
     }
 }
 

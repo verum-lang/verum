@@ -179,7 +179,7 @@ impl CbgrHintProvider {
                 if analysis.is_promotable() {
                     out.push_str(
                         "\n> ✓ **Promotable.** This borrow never escapes its scope. Replacing \
-                         `&` with `&checked` eliminates the ~15ns runtime check at zero risk.\n",
+                         `&` with `&checked` eliminates the ~1.5ns runtime check at zero risk.\n",
                     );
                     out.push_str(
                         "\nRun the *Promote to `&checked T`* code action to apply \
@@ -187,7 +187,7 @@ impl CbgrHintProvider {
                     );
                 } else if matches!(analysis.tier, ReferenceTier::Tier0 { .. }) {
                     out.push_str(&format!(
-                        "\n> Not promotable: {}. The ~15ns CBGR check is required for safety.\n",
+                        "\n> Not promotable: {}. The ~1.5ns CBGR check is required for safety.\n",
                         analysis.escape.reason()
                     ));
                 }
@@ -481,7 +481,7 @@ impl CbgrHintProvider {
         let label = if can_promote {
             InlayHintLabel::String("0ns".to_string())
         } else {
-            InlayHintLabel::String("~15ns".to_string())
+            InlayHintLabel::String("~1.5ns".to_string())
         };
 
         InlayHint {
@@ -502,12 +502,12 @@ impl CbgrHintProvider {
 
     /// Create overhead hint for non-promotable reference.
     fn create_overhead_hint(&self, ref_info: ReferenceInfo, reason: EscapeResult) -> InlayHint {
-        let label = InlayHintLabel::String("~15ns".to_string());
+        let label = InlayHintLabel::String("~1.5ns".to_string());
 
         let tooltip = if self.detailed_hints() {
-            format!("CBGR overhead ~15ns per deref — {}", reason.reason())
+            format!("CBGR overhead ~1.5ns per deref — {}", reason.reason())
         } else {
-            "CBGR overhead ~15ns per deref".to_string()
+            "CBGR overhead ~1.5ns per deref".to_string()
         };
 
         InlayHint {

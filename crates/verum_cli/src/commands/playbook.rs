@@ -55,7 +55,7 @@ pub fn execute(options: PlaybookOptions) -> Result<()> {
 
     // Show tier info
     let tier_desc = match tier {
-        0 => "Tier 0: Interpreter (full CBGR validation, ~15ns/check)",
+        0 => "Tier 0: Interpreter (full CBGR validation, ~1.5ns/check)",
         1 => "Tier 1: AOT Native (production, native-C parity bar)",
         _ => unreachable!(),
     };

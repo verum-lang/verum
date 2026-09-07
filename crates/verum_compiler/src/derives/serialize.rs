@@ -52,7 +52,7 @@ impl DeriveMacro for DeriveSerialize {
     }
 
     fn doc_comment(&self) -> &'static str {
-        "Auto-generated Serialize implementation (~15ns CBGR per field serialization)."
+        "Auto-generated Serialize implementation (~1.5ns CBGR per field serialization)."
     }
 }
 
