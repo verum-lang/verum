@@ -19446,12 +19446,31 @@ fn lower_call_method<'ctx>(
                 if is_slice_iter(recv_base.as_deref())
                     || (recv_base.is_none() && is_slice_iter(method_type_prefix))
                 {
-                    return emit_listiter_eager_walk(
-                        ctx,
-                        dst,
-                        receiver,
-                        Some(Reg(args.start.0)),
-                    );
+                    // T1259 / T0260 — the eager walk returns a LIST, and
+                    // the static type of `xs.iter().map(f)` is a
+                    // `MappedIter`. Every later operation on it that is
+                    // ALSO intercepted works; the first one that reaches
+                    // a real `MappedIter` body reads a List through a
+                    // MappedIter's field layout.
+                    //
+                    // Measured: `.next()` loads MappedIter field 0 at
+                    // +24, which on the List it actually gets is `len`.
+                    // For `[1,2,3]` that is 3, `ListIter.next` derefs it,
+                    // and 3 + 24 = 27 = 0x1b — the exact fault address.
+                    //
+                    // The band-aid was invisible while the generic
+                    // `MappedIter.next` was unreachable (T1214 made it
+                    // reachable). `VERUM_NO_ITER_EAGER_WALK=1` skips the
+                    // interception so the lazy path can be MEASURED
+                    // rather than argued about; the default is unchanged.
+                    if std::env::var_os("VERUM_NO_ITER_EAGER_WALK").is_none() {
+                        return emit_listiter_eager_walk(
+                            ctx,
+                            dst,
+                            receiver,
+                            Some(Reg(args.start.0)),
+                        );
+                    }
                 }
             }
 
