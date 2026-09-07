@@ -259,6 +259,21 @@ pub struct BytecodeSpecializer<'a> {
     /// Maps register index -> known type at that register.
     #[allow(dead_code)] // T0134
     register_types: HashMap<u16, TypeRef>,
+    /// Which TYPE PARAMETER a register holds, for registers produced by
+    /// `LoadT { type_ref: Generic(idx) }`.
+    ///
+    /// T1214: the devirtualiser used to read witness slot 0
+    /// unconditionally. That is right when the receiver IS the first
+    /// type parameter — `future_poll_sync<F: Future>` calling
+    /// `future.poll()` — and wrong for a call whose receiver is a LATER
+    /// one. `collect<C: FromIterator<Self.Item>>(self) -> C` calls
+    /// `C.from_iter(self)`, and `C` is slot 1: the resolver asked for
+    /// `Range.from_iter` (slot 0, the iterator's own element type
+    /// parameter) and found nothing, while `List.from_iter` — slot 1 —
+    /// exists and is found the moment it is asked for.
+    ///
+    /// Rebuilt per body, in a pre-pass over the decoded instructions.
+    loadt_generic_regs: HashMap<u16, TypeParamId>,
     /// New constants generated during specialization.
     new_constants: Vec<Constant>,
     /// New type descriptors generated during specialization.
@@ -296,6 +311,7 @@ impl<'a> BytecodeSpecializer<'a> {
             instantiated_types: HashMap::new(),
             next_type_id: max_type_id + 1,
             register_types: HashMap::new(),
+            loadt_generic_regs: HashMap::new(),
             new_constants: Vec::new(),
             new_type_descriptors: Vec::new(),
             stats: SpecializerStats::default(),
@@ -382,6 +398,19 @@ impl<'a> BytecodeSpecializer<'a> {
             }
         })?;
         crate::bytecode::jump_offsets_to_instr_indices(&mut instrs);
+        // T1214 pre-pass: a `CallM` whose RECEIVER came from
+        // `LoadT { type_ref: Generic(idx) }` is a call on a type
+        // PARAMETER, and `idx` says which one. Recorded before the
+        // walk because the `LoadT` always precedes its use, and read
+        // by `devirt_dyn_method_id` instead of the hardcoded slot 0.
+        self.loadt_generic_regs.clear();
+        for instr in instrs.iter() {
+            if let crate::instruction::Instruction::LoadT { dst, type_ref } = instr
+                && let TypeRef::Generic(idx) = type_ref
+            {
+                self.loadt_generic_regs.insert(dst.0, *idx);
+            }
+        }
         for instr in instrs.iter_mut() {
             self.stats.total_instructions += 1;
             self.specialize_instr_value(instr);
@@ -491,8 +520,18 @@ impl<'a> BytecodeSpecializer<'a> {
                     }
                 }
             }
-            I::CallM { method_id, .. } => {
-                if let Some(devirt) = self.devirt_dyn_method_id(*method_id) {
+            I::CallM {
+                method_id, receiver, ..
+            } => {
+                // Which type parameter is the receiver? Slot 0 unless
+                // the pre-pass saw a `LoadT{Generic(idx)}` fill this
+                // register (T1214).
+                let slot = self
+                    .loadt_generic_regs
+                    .get(&receiver.0)
+                    .copied()
+                    .unwrap_or(TypeParamId(0));
+                if let Some(devirt) = self.devirt_dyn_method_id(*method_id, slot) {
                     *method_id = devirt;
                 }
             }
@@ -806,7 +845,7 @@ impl<'a> BytecodeSpecializer<'a> {
             })
     }
 
-    fn devirt_dyn_method_id(&self, method_id: u32) -> Option<u32> {
+    fn devirt_dyn_method_id(&self, method_id: u32, slot: TypeParamId) -> Option<u32> {
         let name = self
             .module
             .get_string(crate::types::StringId(method_id))?
@@ -828,7 +867,7 @@ impl<'a> BytecodeSpecializer<'a> {
         // like `ReadyFuture<Text>` is carried as `Instantiated { base, args }`
         // (the args preserve the payload type for associated-type resolution);
         // the concrete method lives on the base `ReadyFuture.poll`.
-        let tid = match self.substitution.get(TypeParamId(0))? {
+        let tid = match self.substitution.get(slot)? {
             TypeRef::Concrete(id) => id,
             TypeRef::Instantiated { base, .. } => base,
             _ => return None,
@@ -854,8 +893,8 @@ impl<'a> BytecodeSpecializer<'a> {
                 .iter()
                 .any(|f| self.module.get_string(f.name).is_some_and(|s| s == concrete));
             eprintln!(
-                "[mono-callm] dyn='{}' -> concrete='{}' found={}",
-                name, concrete, hit
+                "[mono-callm] dyn='{}' slot={} -> concrete='{}' found={}",
+                name, slot.0, concrete, hit
             );
         }
         self.module
