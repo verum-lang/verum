@@ -102,7 +102,16 @@ def named_symbol(text: str, end: int) -> str | None:
     """A symbol from the parenthetical or backticks right after the anchor."""
     tail = text[end:end + 90]
     m = re.match(r"\s*\(([^)]{1,80})\)", tail)
-    blob = m.group(1) if m else tail[:40]
+    if m:
+        blob = m.group(1)
+    else:
+        # A FIXED CUT SLICES AN IDENTIFIER IN HALF, and half an identifier
+        # is a false accusation: `handle_deref` became `handle_de`,
+        # `ItemKind` became `ItemKi`, `fat_ref.ptr` became `fat_ref.r`.
+        # Each was then reported ABSENT from a file that contains the
+        # whole name. Cut at the last word boundary instead, and drop the
+        # trailing fragment.
+        blob = re.sub(r"[A-Za-z0-9_.:]*$", "", tail[:40])
     for cand in SYMBOL.findall(blob):
         # A PARENTHETICAL NAMING ANOTHER FILE IS NOT A SYMBOL TO FIND HERE.
         # `stdlib_index.rs:150` (… core_metadata.rs …) says where the reader
@@ -133,6 +142,9 @@ def self_test() -> int:
          named_symbol("`x.rs:1` (UNRESOLVED_FN_ID -> zero)", 8),
          lambda s: s == "UNRESOLVED_FN_ID"),
     ]
+    checks.append(("a name CUT BY THE WINDOW is dropped, not reported half",
+                   named_symbol("`x.rs:1` sits in handle_deref which is long",
+                                8), lambda s: s != "handle_de"))
     checks.append(("a parenthetical naming ANOTHER FILE is not a symbol",
                    named_symbol("`a.rs:1` (see core_metadata.rs)", 8),
                    lambda s: s is None))

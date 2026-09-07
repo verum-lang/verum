@@ -587,7 +587,7 @@ so nobody has to find them twice.
 Found by cross-referencing every `T\d{4}` in `docs/` against the task
 pool's done/dead sets — the same lens that found five muted guards in
 `vcs/specs` (de14a8003) and the nanoid pins in `core-tests`
-(541d7347e). `internal/website/docs` is CLEAN by this check: zero pages
+(541d7347e). THE REFERENCE DOCUMENTATION SITE — a separate repository, not this one — is CLEAN by the same lens: zero pages
 call a closed task open.
 
 ## B. Conformance debt (core-tests / vcs)
