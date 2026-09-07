@@ -16604,9 +16604,18 @@ impl VbcCodegen {
         if let TypeKind::Generic { base, args } = &ty.kind {
             let base_ref = self.resolve_type_ref_scoped(base, generic_param_map, preserve_refs);
             if let TypeRef::Concrete(base_id) = base_ref {
+                // T1228 — same arity rule as `type_name_to_type_ref_mono`:
+                // an argument that cannot be resolved HOLDS ITS POSITION
+                // as a `Generic` placeholder instead of vanishing. The
+                // comment below says positional recovery happens at the
+                // callsite witness layer — which a dropped element makes
+                // impossible for every argument AFTER it, since they all
+                // shift down one slot.
                 let arg_refs: Vec<TypeRef> = args
                     .iter()
-                    .filter_map(|arg| match arg {
+                    .enumerate()
+                    .map(|(i, arg)| {
+                        Self::position_or_generic(i, match arg {
                         verum_ast::ty::GenericArg::Type(inner_ty) => {
                             Some(self.resolve_type_ref_scoped(
                                 inner_ty,
@@ -16616,15 +16625,18 @@ impl VbcCodegen {
                         }
                         // CONST-GENERIC-VALUE-CARRY-1: a LITERAL const arg
                         // carries its value (`StackAllocator<1024>` →
-                        // ConstValue(1024)); symbolic const-param mentions
-                        // keep the legacy drop (positional recovery happens
-                        // at the callsite witness layer).
+                        // ConstValue(1024)). A SYMBOLIC const-param
+                        // mention still yields no value, but it no longer
+                        // vanishes — the wrapper above turns it into a
+                        // positional `Generic`, so the callsite witness
+                        // layer can still recover it by index.
                         verum_ast::ty::GenericArg::Const(expr) => {
                             Self::render_const_generic_arg(expr)
                                 .and_then(|s| s.parse::<i64>().ok())
                                 .map(TypeRef::ConstValue)
                         }
                         _ => None,
+                        })
                     })
                     .collect();
                 return TypeRef::Instantiated {
@@ -17487,6 +17499,19 @@ impl VbcCodegen {
             }
             _ => None,
         }
+    }
+
+    /// Keep a generic argument's POSITION when its value is unknown.
+    ///
+    /// T1228: three sites built `TypeRef::Instantiated { args }` with
+    /// `filter_map`, so an argument that failed to resolve disappeared
+    /// and every argument after it moved down a slot. Consumers read
+    /// those lists BY INDEX (`args.iter().take(k).enumerate()`), and
+    /// they already treat `Generic` as "not known yet" — so the honest
+    /// stand-in for an unresolved argument is a `Generic` at its own
+    /// index, never an absence.
+    fn position_or_generic(i: usize, resolved: Option<TypeRef>) -> TypeRef {
+        resolved.unwrap_or(TypeRef::Generic(crate::types::TypeParamId(i as u16)))
     }
 
     /// Renders a const-generic ARGUMENT expression as its canonical

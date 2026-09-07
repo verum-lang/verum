@@ -8546,9 +8546,53 @@ impl VbcCodegen {
             }
             let base_id = *self.type_name_to_id.get(base_name)?;
             let inner = &name[lt + 1..close];
-            let args: Vec<crate::types::TypeRef> = Self::split_top_level_commas(inner)
-                .into_iter()
-                .filter_map(|a| self.type_name_to_type_ref_mono(a.trim()))
+            // T1228 — ARITY HONESTY, the rule the tuple branch fifteen
+            // lines above already states and this branch did not keep.
+            //
+            // `filter_map` DROPPED every argument that failed to
+            // resolve, and a bare type parameter fails BY DESIGN (the
+            // `generic_type_params.contains(name)` arm below returns
+            // `None` deliberately). So `ListIter<T>` produced
+            // `args: []` for a ONE-parameter type, and
+            // `MappedIter<ListIter, F>` produced ONE argument for a
+            // TWO-parameter type — measured, under `VERUM_TRACE_MONO`:
+            //
+            //   recv_name="ListIter<T>"
+            //     recv_tr=Instantiated { base: 1273, args: [] }
+            //   recv_name="MappedIter<ListIter, F>"
+            //     recv_tr=Instantiated { base: 1033,
+            //                            args: [Concrete(1273)] }
+            //
+            // The consumer is POSITIONAL and already knows about
+            // placeholders — `rargs.iter().take(impl_k).enumerate()`
+            // skips `TypeRef::Generic(_)` and binds the rest by INDEX.
+            // It cannot work unless the positions survive, and dropping
+            // a leading unresolvable argument silently shifts every
+            // argument after it into the wrong slot.
+            //
+            // So an unresolvable argument becomes a Generic placeholder
+            // that HOLDS ITS POSITION. When the name is a type
+            // parameter of the enclosing function its ordered index is
+            // known and used; otherwise the argument's own position
+            // stands in, which keeps the slot occupied without
+            // claiming a binding — every consumer treats `Generic` as
+            // "not yet known".
+            let parts = Self::split_top_level_commas(inner);
+            let args: Vec<crate::types::TypeRef> = parts
+                .iter()
+                .enumerate()
+                .map(|(i, a)| {
+                    let a = a.trim();
+                    self.type_name_to_type_ref_mono(a).unwrap_or_else(|| {
+                        let idx = self
+                            .ctx
+                            .generic_type_params_ordered
+                            .iter()
+                            .position(|p| p == a)
+                            .unwrap_or(i);
+                        crate::types::TypeRef::Generic(crate::types::TypeParamId(idx as u16))
+                    })
+                })
                 .collect();
             Some(crate::types::TypeRef::Instantiated {
                 base: base_id,
@@ -27373,11 +27417,30 @@ impl VbcCodegen {
                                 && let Some(ref parent_type) = func_info.parent_type_name
                             {
                                 if !args.is_empty() {
-                                    let arg_types: Vec<String> = args
+                                    // T1228 — ARITY HONESTY at the NAME
+                                    // level, feeding the same rule
+                                    // `type_name_to_type_ref_mono` keeps
+                                    // when it parses this text back.
+                                    //
+                                    // `filter_map` + `!arg_types.is_empty()`
+                                    // accepted a PARTIAL list: a two-argument
+                                    // constructor with one untypeable
+                                    // argument rendered `Pair<Int>` — a name
+                                    // with the wrong arity, stated
+                                    // confidently, which then parses into an
+                                    // `Instantiated` whose args are one short
+                                    // and whose positions are shifted.
+                                    //
+                                    // All-or-nothing: either every argument
+                                    // yields a name, or the bare parent name
+                                    // is returned. `Maybe` says less than
+                                    // `Maybe<Node>` and nothing false;
+                                    // `Pair<Int>` says more and gets it wrong.
+                                    let arg_types: Option<Vec<String>> = args
                                         .iter()
-                                        .filter_map(|arg| self.extract_expr_type_name(arg))
+                                        .map(|arg| self.extract_expr_type_name(arg))
                                         .collect();
-                                    if !arg_types.is_empty() {
+                                    if let Some(arg_types) = arg_types {
                                         return Some(format!(
                                             "{}<{}>",
                                             parent_type,
