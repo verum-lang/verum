@@ -6471,6 +6471,25 @@ pub(super) fn dispatch_primitive_method(
             "sin" => Value::from_f64(v.sin()),
             "cos" => Value::from_f64(v.cos()),
             "tan" => Value::from_f64(v.tan()),
+            // T1235b: the hyperbolics were the only transcendentals with no
+            // arm here, so `x.tanh()` fell through into the Verum body
+            // (`core/math/hyperbolic.vr:118`) and never reached the tape —
+            // `grad(tanh)` stayed 0.0 while `grad(exp)` was fixed, because
+            // `exp` HAS an arm and its body is never entered.
+            //
+            // A free-function wrapper in `calls.rs` was tried first and
+            // measured INERT: `tanh` is not an intrinsic, it is a Verum
+            // function, so the intrinsic dispatcher never sees it. Reverted.
+            //
+            // SEMANTIC NOTE, stated because it is a real change: these arms
+            // answer from Rust's libm rather than from the Verum polynomial,
+            // exactly as `exp`/`ln`/`sqrt`/`sin`/`cos` above already do. The
+            // precedent is theirs; if platform-determinism ever matters for
+            // the hyperbolics, it matters for those five first.
+            "sinh" => Value::from_f64(v.sinh()),
+            "cosh" => Value::from_f64(v.cosh()),
+            "tanh" => Value::from_f64(v.tanh()),
+            "atanh" => Value::from_f64(v.atanh()),
             "asin" => Value::from_f64(v.asin()),
             "acos" => Value::from_f64(v.acos()),
             "atan" => Value::from_f64(v.atan()),

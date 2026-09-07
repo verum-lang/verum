@@ -465,6 +465,19 @@ pub(crate) fn unary_float_tape_op_by_name(name: &str) -> Option<TapeOp> {
         "sin" => TapeOp::Sin,
         "cos" => TapeOp::Cos,
         "abs" => TapeOp::Abs,
+        // The FREE-FUNCTION half (T1235b). These four have no arm in
+        // `method_dispatch.rs` at all — `x.tanh()` falls through the
+        // method intercept into the stdlib body and is answered by
+        // `calls.rs::try_dispatch_intrinsic_named`, which now tapes
+        // through this same table. They were missing from the first
+        // version because the table was built from what the METHOD
+        // intercept handles, and these are exactly the names it does
+        // not; the acceptance caught it — 57/6 unchanged, the same six
+        // tanh tests.
+        "tanh" => TapeOp::Tanh,
+        "sinh" => TapeOp::Sinh,
+        "cosh" => TapeOp::Cosh,
+        "atanh" => TapeOp::Atanh,
         _ => return None,
     })
 }
