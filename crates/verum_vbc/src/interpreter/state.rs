@@ -431,10 +431,12 @@ pub struct InterpreterState {
     /// VARIABLE, so the substitution outlived the call and the
     /// variable stopped being a wrapper:
     ///
-    ///     let s: Shared<dyn Src> = Shared.new(Git { url: "a" });
-    ///     s.strong_count()   // 1
-    ///     s.describe()       // "git", via the deref hop
-    ///     s.strong_count()   // PANIC: no `strong_count` on `Git`
+    /// ```text
+    /// let s: Shared<dyn Src> = Shared.new(Git { url: "a" });
+    /// s.strong_count()   // 1
+    /// s.describe()       // "git", via the deref hop
+    /// s.strong_count()   // PANIC: no `strong_count` on `Git`
+    /// ```
     ///
     /// This carries the substitute beside the register instead. The
     /// re-run takes it at entry and clears it, so exactly one read

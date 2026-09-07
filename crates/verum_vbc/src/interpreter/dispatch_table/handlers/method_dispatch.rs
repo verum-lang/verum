@@ -5030,8 +5030,10 @@ fn func_id_parent_compatible_with_receiver(
 ///
 /// Measured in six lines:
 ///
-///     let m: Map<Text, E> = Map.new();
-///     for e in m.values() { }        -> panic
+/// ```text
+/// let m: Map<Text, E> = Map.new();
+/// for e in m.values() { }        -> panic
+/// ```
 ///
 /// while inserting and then REMOVING first answers 0 correctly, because
 /// the insert allocated the table. So the arms are already right about
