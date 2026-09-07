@@ -11728,6 +11728,100 @@ impl VbcCodegen {
         // a CallG witness is delivered.  An associated-type projection
         // (`Self.Item`) has no witness index and still falls to the
         // literal — that is the remaining non-primitive-T gap.
+        // ──────────────────────────────────────────────────────────
+        // Phase 0-witness (T1214): a TYPE PARAMETER receiver takes the
+        // witness form for ANY method, with or without arguments.
+        // ──────────────────────────────────────────────────────────
+        //
+        // The witness channel used to live INSIDE the primitive-identity
+        // table below, so it was reachable only for the three names that
+        // have a hardcoded literal AND only when `args.is_empty()`. Two
+        // conditions, neither of which is about witnesses.
+        //
+        // What that cost, measured with the trace this file already
+        // carries (`VERUM_TRACE_TPCALL=1`):
+        //
+        //     method=default              -> task17 witness   (LoadT)
+        //     C.blank(), Q.blank()        -> flat-path branch (LoadK "C")
+        //
+        // The flat-path branch compiles the parameter's NAME to a text
+        // constant and dispatches on it, so the receiver arrives at
+        // runtime as `Text<small>` — raw bits 0x…43 is the letter `C`.
+        // `Iterator.collect`'s `C.from_iter(self)` fails BOTH conditions
+        // at once: `from_iter` has no literal identity, and it has an
+        // argument.
+        //
+        // Order matters: this runs before the identity table so a named
+        // parameter with a known position always takes the witness form.
+        // The table stays as the FALLBACK for receivers with no witness
+        // index — `Self.Item.default()`, the associated-type projection
+        // that has no position to load.
+        if let ExprKind::Path(recv_path) = &receiver.kind
+            && recv_path.segments.len() == 1
+            && let PathSegment::Name(recv_ident) = &recv_path.segments[0]
+            && let Some(idx) = self
+                .ctx
+                .generic_type_params_ordered
+                .iter()
+                .position(|p| p == recv_ident.name.as_str())
+        {
+            if std::env::var_os("VERUM_TRACE_TPCALL").is_some() {
+                eprintln!(
+                    "[tpcall] T1214 witness: recv={} method={} idx={} args={}",
+                    recv_ident.name.as_str(),
+                    method.name.as_str(),
+                    idx,
+                    args.len()
+                );
+            }
+            let recv_reg = self.ctx.alloc_temp();
+            self.ctx.emit(Instruction::LoadT {
+                dst: recv_reg,
+                type_ref: crate::types::TypeRef::Generic(crate::types::TypeParamId(
+                    idx as u16,
+                )),
+            });
+            crate::codegen::bare_method::record("<witness>", method.name.as_str());
+            // Arguments go in a contiguous block, as every CallM expects.
+            let mut arg_regs: Vec<Reg> = Vec::with_capacity(args.len());
+            for a in args.iter() {
+                let r = self
+                    .compile_expr(a)?
+                    .or_internal("type-param method call: arg has no value")?;
+                arg_regs.push(r);
+            }
+            let args_start = if arg_regs.is_empty() {
+                Reg(0)
+            } else {
+                let first = self.ctx.registers.alloc_fresh();
+                for _ in 1..arg_regs.len() {
+                    self.ctx.registers.alloc_fresh();
+                }
+                for (i, &src) in arg_regs.iter().enumerate() {
+                    let dst = Reg(first.0 + i as u16);
+                    if src != dst {
+                        self.ctx.emit(Instruction::Mov { dst, src });
+                    }
+                }
+                first
+            };
+            let method_id = self.ctx.intern_string_raw(method.name.as_str());
+            let result = self.ctx.alloc_temp();
+            self.ctx.emit(Instruction::CallM {
+                dst: result,
+                receiver: recv_reg,
+                method_id,
+                args: crate::instruction::RegRange {
+                    start: args_start,
+                    // `count` is a u8 — the instruction encoding's own
+                    // limit, matched by every other CallM emission here.
+                    count: arg_regs.len() as u8,
+                },
+            });
+            self.ctx.free_temp(recv_reg);
+            return Ok(Some(result));
+        }
+
         let task17_primitive_identity = match method.name.as_str() {
             "default" | "zero" => Some(0i64),
             "one" => Some(1i64),
