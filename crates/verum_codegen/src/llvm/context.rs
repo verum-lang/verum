@@ -24,7 +24,7 @@ pub struct ExceptionHandler<'ctx> {
 }
 
 use super::cbgr::CbgrLowering;
-use super::error::{BuildExt, LlvmLoweringError, OptionExt, Result};
+use super::error::{BuildExt, LlvmLoweringError, Result};
 use super::register_types::{MethodDispatchTable, RegisterType, RegisterTypeMap};
 use super::types::{RefTier, TypeLowering};
 use std::sync::Arc;
