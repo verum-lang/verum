@@ -433,6 +433,30 @@ impl InstantiationGraph {
     }
 
     /// Gets specialization by key.
+    ///
+    /// ALWAYS ANSWERS `None` IN A REAL COMPILE, and the reason is not a
+    /// bug in this function. Measured 2026-09-07: `record_specialization`
+    /// is called from exactly one place in the tree — the unit test
+    /// below — and `record_specialization_by_key` from nowhere at all,
+    /// so `specialization_map` is empty in every production run.
+    ///
+    /// The mechanism reads as live: there is a key type, a hash, a
+    /// lookup, a recorder and a green test. The test is green because it
+    /// fills the map itself — it proves "the map works when something is
+    /// in it" and never asks "does anything put something in it".
+    ///
+    /// THE ROUTING THAT ACTUALLY HAPPENS is in
+    /// `merger.rs::rewrite_references`, through its `id_remap` (blanket,
+    /// for a generic function with exactly one instantiation) and
+    /// `site_route` (per-site, keyed by `(generic_fn, type_args)`).
+    /// Both are populated from `output.specializations` and both work —
+    /// `[mono-route] generic_fn=14510 -> specialized_fn=28749` is a
+    /// measured line, not a hope.
+    ///
+    /// Left in place rather than deleted because the half-built path may
+    /// be wanted; documented because a reader who takes it for the live
+    /// mechanism loses an hour, which is how this note came to be
+    /// written.
     pub fn get_specialization_by_key(&self, key: &InstantiationKey) -> Option<FunctionId> {
         let hash = key.compute_hash();
         self.by_hash

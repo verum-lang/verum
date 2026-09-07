@@ -497,6 +497,13 @@ impl<'a> BytecodeSpecializer<'a> {
                     .map(|t| self.substitution.apply(t))
                     .collect();
                 let key = InstantiationKey::new(FunctionId(*func_id), substituted.clone());
+                // This lookup ALWAYS misses — nothing outside a unit test
+                // ever calls `record_specialization*`, so the graph's
+                // `specialization_map` is empty in a real compile (see
+                // the note on `get_specialization_by_key`). The `None`
+                // arm below is therefore the only one that runs, and the
+                // routing to specialisations happens later, in
+                // `merger.rs::rewrite_references`.
                 match self.graph.get_specialization_by_key(&key) {
                     Some(spec_fn) => {
                         // Direct call to the specialization.  The
