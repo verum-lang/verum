@@ -91,6 +91,10 @@ check-doc-blocks-parse: ## Gate: every ```verum block must parse, per tree — n
 check-doc-names-exist: ## Gate: a name a doc example uses must exist in core/ — no build needed
 	python3 scripts/ci/check_doc_names_exist.py --check
 
+check-doc-methods-exercised: ## Gate: a method the stdlib reference documents should be EXECUTED somewhere — no build needed
+	python3 scripts/ci/check_doc_methods_exercised.py --self-test
+	python3 scripts/ci/check_doc_methods_exercised.py
+
 check-by-example: ## Gate: the 22 docs/by-example programs must compile — needs a build
 	python3 scripts/ci/check_by_example_compiles.py --self-test
 	python3 scripts/ci/check_by_example_compiles.py
