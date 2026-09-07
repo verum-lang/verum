@@ -267,6 +267,32 @@ pub fn analyze_with_roots(module: &VbcModule, extra_roots: &[u32]) -> Reachabili
             }
         }
     };
+    // The by-name closure decides which same-name candidates survive,
+    // and until now it printed NOTHING. Four links of T1214 were closed
+    // only after a trace was added to the stage that held them; the
+    // fifth stalled exactly where no trace existed, and two builds went
+    // into guessing what this loop does.
+    //
+    // `VERUM_TRACE_MONO_ALL=1` — the same lever as the three curated
+    // name filters in the mono path — reports what the closure was
+    // asked and what it answered. Diagnostic only.
+    if std::env::var_os("VERUM_TRACE_MONO_ALL").is_some() {
+        let mut names: Vec<&str> = out.called_method_names.iter().map(|s| s.as_str()).collect();
+        names.sort_unstable();
+        eprintln!(
+            "[reach-byname] called_method_names={} bare_name_buckets={} roots_reachable={}",
+            names.len(),
+            by_bare_name.len(),
+            out.reachable_ids.len()
+        );
+        for probe in ["collect", "from_iter", "next"] {
+            let called = out.called_method_names.contains(probe);
+            let bucket = by_bare_name.get(probe).map(|v| v.len()).unwrap_or(0);
+            eprintln!(
+                "[reach-byname]   probe={probe:?} in_called={called} candidates={bucket}"
+            );
+        }
+    }
     loop {
         let mut newly: Vec<u32> = Vec::new();
         for (bare, ids) in &by_bare_name {
