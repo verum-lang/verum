@@ -18,19 +18,24 @@ receiver-specialisation of `collect` — Args, ByRef, FilterIter,
 MappedIter, Range, TransducedIter — carried a Tier-1 abort. Tier 0 was
 right throughout, because it resolves from the actual receiver.
 
-THE COUNT THAT MATTERS IS NOT THE INTERSECTION — it is how many owners
-each name has. The lookup (`find_variant_parent_type_by_args`) returns
-None when two sum types own the same variant name, so:
+"AMBIGUOUS" BELOW DOES NOT MEAN SAFE, AND THE FOUNDING CASE PROVES IT.
+The owner count here is taken over ALL of `core/`; the compiler's lookup
+is over the functions REGISTERED IN ONE COMPILE, and a program mounts a
+subset. `C` has two owners in `core/` — `FFIAbi` and `ReprKind`
+(core/meta/attribute.vr) — so it lands in the AMBIGUOUS list, and it is
+the row that actually fires: a probe mounting only `core.prelude.*`
+emits `CallM method 'FFIAbi.from_iter' unresolved`, because that graph
+carries `core/math/internal.vr` and not `meta/attribute`.
 
-    UNIQUE owner   → the lookup answers → the name is LIVE ammunition
-    2+ owners      → the lookup declines → inert TODAY, and it becomes
-                     live the moment one of the owners is deleted or
-                     stops being mounted
+So read the two lists as:
 
-`C` itself has two owners in `core/` (`FFIAbi` and `ReprKind`), which is
-exactly why this hid: it only fires in a program whose mount graph
-carries one of them and not the other. So a two-owner row is not a
-clean bill; it is a row whose verdict depends on the PROGRAM.
+    UNIQUE owner in core/  → unique in EVERY program that mounts it
+    2+ owners in core/     → unique in SOME programs, and the lookup
+                             answers there. The verdict is a property of
+                             the mount graph, not of this census.
+
+A zero in the LIVE column is therefore not a clean bill. It says only
+that no name is unconditionally live.
 
 WHY IT IS A LIST AND NOT A GATE. A variant may legitimately be named
 `C`, `T` or `E` — a calling convention, a grade, a type tag — and a
@@ -178,7 +183,7 @@ def main() -> int:
     ambiguous = [v for v in shared if len({o for o, _ in owners[v]}) > 1]
     print(f"names that are BOTH               : {len(shared)}\n")
 
-    print(f"LIVE — one owning sum type, so the bare-name lookup ANSWERS "
+    print(f"ONE OWNER IN core/ — unconditionally live wherever mounted "
           f"({len(live)}):")
     for v in live:
         # ONE OWNER TYPE can still be declared in more than one file
@@ -191,10 +196,11 @@ def main() -> int:
         print(f"   {v:<16} owner {own:<22} {where}{extra}")
         for u, ln in uses[:2]:
             print(f"   {'':<16}   used as a parameter at {u}:{ln}")
-    print(f"\nAMBIGUOUS — two or more owners, so the lookup DECLINES today "
-          f"({len(ambiguous)}). Not a clean bill: the verdict depends on which "
-          f"owners a given program mounts, and deleting one owner makes the "
-          f"row live:")
+    print(f"\nTWO OR MORE OWNERS IN core/ ({len(ambiguous)}) — NOT inert. The "
+          f"compiler resolves over one COMPILE's registered functions, so a "
+          f"name ambiguous here is unique in any program that mounts one owner "
+          f"and not the other. `C` is in this list and is the row that fires "
+          f"(T1214):")
     for v in ambiguous:
         owns = sorted({o for o, _ in owners[v]})
         print(f"   {v:<16} owners {', '.join(owns)}")
