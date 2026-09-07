@@ -101,6 +101,15 @@ def resolve(index, path: str):
 def named_symbol(text: str, end: int) -> str | None:
     """A symbol from the parenthetical or backticks right after the anchor."""
     tail = text[end:end + 90]
+    # THE ANCHOR IS ITSELF INSIDE THE PARENTHESES. `(`supervisor.vr:723`)`
+    # leaves a tail that OPENS with `)`, so there is no trailing
+    # parenthetical describing this anchor — and reading on picks up the
+    # next clause's name instead. Three rows were exactly this: the
+    # register's `(…supervisor.vr:723`), and `PostgresDatabase.connect(url)`
+    # by …` had the anchor accused of not containing a symbol that belongs
+    # to the sentence AFTER it. All three anchors were exact to the line.
+    if tail.lstrip().startswith(")"):
+        return None
     m = re.match(r"\s*\(([^)]{1,80})\)", tail)
     if m:
         blob = m.group(1)
@@ -148,6 +157,10 @@ def self_test() -> int:
          named_symbol("`x.rs:1` (UNRESOLVED_FN_ID -> zero)", 8),
          lambda s: s == "UNRESOLVED_FN_ID"),
     ]
+    checks.append(("an anchor INSIDE parentheses takes no symbol from what "
+                   "follows the closing paren",
+                   named_symbol("(`a/b.rs:12`), and `Other.thing(x)` by …", 12),
+                   lambda s: s is None))
     checks.append(("a crate name is not a symbol",
                    named_symbol("`x.rs:1` (verum_codegen owns this)", 8),
                    lambda s: s != "verum_codegen"))
