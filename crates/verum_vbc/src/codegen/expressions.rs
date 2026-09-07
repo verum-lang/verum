@@ -26511,6 +26511,62 @@ impl VbcCodegen {
         None
     }
 
+    /// The type name of a range expression, carrying its element type
+    /// when an endpoint names one.
+    ///
+    /// T1214: `Range` has ONE type parameter, and both name inferrers
+    /// returned the bare `"Range"` for every range expression. The
+    /// receiver-instantiation leg needs `Instantiated { base, args }`
+    /// and a bare name yields `Concrete`, so `(0..n).collect()` left
+    /// the specialisation's slot 0 as `Generic` — and the Tier-1 abort
+    /// "method 'from_iter' has no compiled candidate" is downstream of
+    /// exactly that. Measured under `VERUM_TRACE_MONO`:
+    ///
+    ///     [t0330] fn=9637 parent_tid=517 impl_k=1
+    ///             recv_name="Range" recv_tr=Concrete(TypeId(517))
+    ///
+    /// `impl_k=1` against zero arguments in the name.
+    ///
+    /// ARITY HONESTY, the same rule the three T1228 sites keep: when no
+    /// endpoint names a type, return the BARE name. A `Range<?>` or a
+    /// name whose argument count does not match the type's parameter
+    /// count is worse than a bare one — it is a confident wrong answer,
+    /// and it is parsed back by `type_name_to_type_ref_mono`.
+    ///
+    /// The generic spelling is safe for the layout consumers the old
+    /// comment worried about: `resolve_field_index_impl` strips `<...>`
+    /// in three places before looking a record layout up.
+    fn range_type_name(&self, start: Option<&Expr>, end: Option<&Expr>) -> String {
+        let elem = start
+            .or(end)
+            .and_then(|e| {
+                self.extract_expr_type_name(e)
+                    .or_else(|| self.infer_expr_type_name(e))
+                    // THE LINK THAT WAS MISSING. `(0..5)` has an
+                    // UNSUFFIXED integer literal for an endpoint, and
+                    // both name inferrers answer `None` for one — the
+                    // `LiteralKind::Int` arm returns a name only for a
+                    // SUFFIXED literal, because an unsuffixed one's type
+                    // is context-dependent. So without this the helper
+                    // fell straight back to the bare `"Range"` it was
+                    // written to replace, and measured as changing
+                    // nothing at all.
+                    //
+                    // `literal_default_type_name` is the tree's own
+                    // answer for exactly this position ("an unsuffixed
+                    // one defaults to `Int` in this FREE position"), and
+                    // the T0330 leg that consumes this name already
+                    // consults it for its receiver. Same helper, same
+                    // reason, one link earlier.
+                    .or_else(|| Self::literal_default_type_name(e))
+            })
+            .filter(|t| !t.is_empty());
+        match elem {
+            Some(t) => format!("Range<{t}>"),
+            None => "Range".to_string(),
+        }
+    }
+
     /// Best-effort static type NAME of an expression, used for overload and
     /// variant disambiguation. `None` when the shape carries no usable name.
     pub fn extract_expr_type_name(&self, expr: &Expr) -> Option<String> {
@@ -27883,7 +27939,9 @@ impl VbcCodegen {
             // map: "Range" → TypeId::RANGE) and lets
             // `register_variable_type` / `resolve_field_index` look up
             // the canonical 3-field map.
-            ExprKind::Range { .. } => Some("Range".to_string()),
+            ExprKind::Range { start, end, .. } => Some(
+                self.range_type_name(start.as_deref(), end.as_deref()),
+            ),
             _ => None,
         }
     }
@@ -29042,7 +29100,9 @@ impl VbcCodegen {
             // `(1..=10).<field>` access without an intermediate
             // let-binding mis-resolved field offsets via the global
             // field-name interner.
-            ExprKind::Range { .. } => Some("Range".to_string()),
+            ExprKind::Range { start, end, .. } => Some(
+                self.range_type_name(start.as_deref(), end.as_deref()),
+            ),
             // Type expression in expression position (`B<7>` as the
             // receiver of `B<7>.new()`) — its "type name" IS the rendered
             // type, generic args INCLUDED.  CONST-GENERIC-VALUE-CARRY-1:
