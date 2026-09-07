@@ -16854,6 +16854,65 @@ impl TypeChecker {
         // parents are in the registry.  Otherwise fall through to the
         // first-registered-wins discipline (mirrors
         // `register_variant_type_name_first_wins`).
+        // ── HORIZON FACTS (computed once; the parent PICK below, the
+        // precedence rule and the language law all SHARE them — one
+        // definition of "horizon", per docs/architecture/language-law-
+        // visibility-and-boolean-clarity.md §1.4) ──────────────────────
+        // Judged only for THIS file's own body: stranger modules' bodies
+        // (imports in flight) keep their own resolution — the same
+        // in-flight guard mount-scoped selection uses.
+        let judging_this_file = self.imports_in_progress.is_empty()
+            && self.glob_imports_in_progress.is_empty();
+        // Horizon membership of ONE candidate owner: the pinned prelude
+        // trio, an explicit mount of the TYPE or of the CONSTRUCTOR leaf,
+        // or the type declared in-file (current_module_declared_types
+        // tracks those).  Pinned carriers come from the ONE canonical
+        // registry (well_known_types — already layout-pinned there),
+        // never a local string list (the crate's no-hardcoded-stdlib
+        // rule; the LAW spec §1.4 defines the trio as a LANGUAGE fact and
+        // the registry is where language facts live).
+        let parent_in_horizon = |parent: &str| -> bool {
+            parent == verum_common::well_known_types::type_names::MAYBE
+                || parent == verum_common::well_known_types::type_names::RESULT
+                || parent == verum_common::well_known_types::type_names::ORDERING
+                || self.explicit_imports.contains(parent)
+                || self.explicit_imports.contains(name)
+                || self.current_module_declared_types.contains(parent)
+        };
+        // ── HORIZON-PREFERRED FALLBACK (T1234) ────────────────────────
+        // Where the ladder below runs out of explicit signal it used to
+        // take `parents.first()` — BAKE-DECLARATION ORDER, which is no
+        // fact about the call site at all.  `Ok` is owned by both
+        // `ExitCode` (unit) and `Result` (payload) and the bake declares
+        // ExitCode first, so `r.and_then(Ok)` resolved to the UNIT ctor,
+        // `bare_payload_ctor_as_fn` saw `params.is_empty()` and declined,
+        // and the argument stayed `Named("Ok")` against an expected
+        // `fn(T) -> Result<U, E>`.
+        //
+        // Prefer an owner inside this file's horizon.  Safe by
+        // construction in the one direction that matters: E430 fires
+        // exactly when the chosen owner is OUTSIDE the horizon, so moving
+        // the pick toward an in-horizon owner can only silence that
+        // warning, never raise it.  When NO owner is in the horizon —
+        // `PageExhausted`, owned by `AllocError` and `HeapError`, in a
+        // file that mounts neither — every candidate is equally distant
+        // and the pick stays exactly what it was.
+        //
+        // The first attempt at this task made unit ctors YIELD the bare
+        // name at REGISTRATION instead.  It fixed the same pole, changed
+        // no programme's behaviour, and cost 4522 new E430 across the 22
+        // by-example programmes — because that claim is what makes 264
+        // bare names usable without a mount.  The asker's horizon is not
+        // knowable at registration.  It is knowable HERE.
+        let horizon_first = |parents: &List<Text>| -> Option<Text> {
+            if judging_this_file
+                && let Some(p) =
+                    parents.iter().find(|p| parent_in_horizon(p.as_str()))
+            {
+                return Some(p.clone());
+            }
+            parents.first().cloned()
+        };
         let hinted: Option<Text> = expected_parent.and_then(|want| {
             parents.iter().find(|p| {
                 let ps = p.as_str();
@@ -16906,44 +16965,13 @@ impl TypeChecker {
                     break;
                 }
             }
-            chosen.unwrap_or_else(|| {
-                parents
-                    .first()
-                    .cloned()
-                    .expect("parents non-empty by outer get(?)")
-            })
+            chosen
+                .or_else(|| horizon_first(parents))
+                .expect("parents non-empty by outer get(?)")
         } else {
-            parents.first()?.clone()
+            horizon_first(parents)?
         };
-        // ── HORIZON FACTS (computed once; the precedence rule and the
-        // language law below SHARE them — one definition of "horizon",
-        // per docs/architecture/language-law-visibility-and-boolean-
-        // clarity.md §1.4) ─────────────────────────────────────────────
-        // Judged only for THIS file's own body: stranger modules' bodies
-        // (imports in flight) keep their own resolution — the same
-        // in-flight guard mount-scoped selection uses.
-        let judging_this_file = self.imports_in_progress.is_empty()
-            && self.glob_imports_in_progress.is_empty();
-        // Pinned prelude carriers come from the ONE canonical registry
-        // (well_known_types — already layout-pinned there), never a
-        // local string list (the crate's no-hardcoded-stdlib rule; the
-        // LAW spec §1.4 defines the trio as a LANGUAGE fact and the
-        // registry is where language facts live).
-        let parent_is_trio = matches!(
-            parent_name.as_str(),
-            n if n == verum_common::well_known_types::type_names::MAYBE
-                || n == verum_common::well_known_types::type_names::RESULT
-                || n == verum_common::well_known_types::type_names::ORDERING
-        );
-        // Horizon membership: the pinned trio, an explicit mount of the
-        // TYPE or of the CONSTRUCTOR leaf, or the type declared in-file
-        // (current_module_declared_types tracks those).
-        let in_horizon = parent_is_trio
-            || self.explicit_imports.contains(parent_name.as_str())
-            || self.explicit_imports.contains(name)
-            || self
-                .current_module_declared_types
-                .contains(parent_name.as_str());
+        let in_horizon = parent_in_horizon(parent_name.as_str());
         // ── TYPE-NAME PRECEDENCE over ambient constructors ────────────
         // (name-resolution.md rule the law made LOUD on its first live
         // run: bare `Shared` — the prelude TYPE — was being answered by

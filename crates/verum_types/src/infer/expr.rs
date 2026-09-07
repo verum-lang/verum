@@ -258,10 +258,46 @@ impl TypeChecker {
             Type::Generic { name: n, .. } => Some(n.as_str().to_string()),
             _ => None,
         };
+        // T1234: the guard above extracts a HEAD, and a `Type::Variant`
+        // has none — so an owner bound in EXPANDED form fell into
+        // `None => false` and returned before the ctor table was ever
+        // asked.  That is the whole of `r.and_then(Ok)`: the unit claim
+        // (infer/helpers.rs) binds bare `Ok` to ExitCode's variant type,
+        // `env.lookup` hands back
+        //   `Ok(Unit) | GenericError(Unit) | … | Custom(Int)`,
+        // head is None, and the synth declined without ever learning
+        // that `Result.Ok(T)` also owns the name.
+        //
+        // A Variant that CONTAINS `name` is the ctor's own binding —
+        // the same fact `head == name` states, written in expanded
+        // form — so it satisfies T0617's question rather than evading
+        // it.  The unrelated-binding case T0617 was bought by (a mounted
+        // `const E: Float` colliding with `ParsedResource.E`) is not a
+        // Variant and still returns false here.
+        //
+        // This does NOT make unit ctors into functions: `None` reaches
+        // the same line, resolves to `Maybe.None`, and is declined below
+        // by `params.is_empty()` — the arm that keeps 0-arg ctors as
+        // VALUES.  Only a name whose resolved owner carries a payload
+        // gets past that, which is exactly the shape being fixed.
         let is_ctor_nominal = match head.as_deref() {
             Some(h) => h == name || parents.iter().any(|p| p.as_str() == h),
-            None => false,
+            None => matches!(
+                resolved_ty,
+                Type::Variant(vs) if vs.contains_key(&Text::from(name))
+            ),
         };
+        if crate::ctor_trace_enabled() {
+            eprintln!(
+                "[ctor-trace]   T1234 guard: name={:?} head={:?} \
+                 variant_owner={} => is_ctor_nominal={}",
+                name,
+                head,
+                matches!(resolved_ty, Type::Variant(vs)
+                    if vs.contains_key(&Text::from(name))),
+                is_ctor_nominal,
+            );
+        }
         if !is_ctor_nominal {
             return None;
         }
