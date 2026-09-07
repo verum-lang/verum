@@ -1,0 +1,60 @@
+// @test: differential
+// @level: L0
+// @tier: 0,1
+// @tags: vbc, codegen, generics, mono, iterator, collect, regression
+// @timeout: 120000
+// @expected-exit: 0
+// @expected-stdout-begin
+// len=5
+// sum=10
+// @expected-stdout-end
+//
+// THE GROUND WON BY T1214, pinned narrowly so it cannot be lost while
+// the wider row is still open.
+//
+// `(0..5).collect()` aborted at Tier 1 with
+//
+//     AOT dispatch fault: method 'from_iter' has no compiled candidate
+//     in this module (in `Range.collect`)
+//
+// and the reason was FOUR independent links, each of which had to be
+// closed before the next became visible:
+//
+//   1. the receiver's NAME carried no type argument, so the
+//      instantiation leg bound nothing (`Range` rather than
+//      `Range<Int>` — an unsuffixed integer literal has no type name of
+//      its own, and `literal_default_type_name` was consulted one link
+//      too late);
+//   2. the witness was read from type-parameter slot ZERO, always,
+//      while `collect<C>`'s receiver `C` is slot 1;
+//   3. the call site resolved by the method-name SUFFIX `.collect`,
+//      which cannot match `Range.collect$mono$…`, so the specialisation
+//      was never reached even though it was built, routed and lowered;
+//   4. the runtime type switch inside `List.from_iter` admitted an arm
+//      only if the candidate already had LLVM basic blocks — and bodies
+//      lower in MODULE ORDER, so `Range.next` (IR line 114 702) had
+//      none while `List.from_iter` (103 955) was being built.
+//
+// WHY A SEPARATE SPEC RATHER THAN A LINE IN THE EXISTING ONE.
+// `collect-return-param-vs-variant-name.vr` is the row's acceptance and
+// still fails: its SECOND `collect` — over a `MappedIter` — dies on a
+// receiver whose runtime type id matches none of the switch's 347 arms,
+// including the arm for `MappedIter` itself. That is a value-TAG
+// question, a different family, and it will keep that spec red for as
+// long as it takes. This one pins what already works, so a regression
+// in any of the four links above is caught the day it happens instead
+// of the day the wider row finally goes green.
+//
+// `sum` is not decoration: it drives the SAME `Range.next` dispatch
+// through a different protocol default, so a fix that special-cases
+// `collect` alone fails here.
+
+mount core.prelude.*;
+
+fn main() {
+    let xs: List<Int> = (0..5).collect();
+    print(f"len={xs.len()}");
+
+    let s: Int = (1..=4).sum();
+    print(f"sum={s}");
+}
