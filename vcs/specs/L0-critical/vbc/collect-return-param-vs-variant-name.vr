@@ -3,6 +3,20 @@
 // @tier: 0,1
 // @tags: vbc, codegen, generics, name-resolution, iterator, collect, regression
 // @timeout: 60000
+// @expected-exit: 0
+// @expected-stdout-begin
+// range=5
+// mapped=5
+// abi=Stdcall
+// second=C
+// @expected-stdout-end
+//
+// THE VALUES ARE NAMED, NOT ONLY THE AGREEMENT. A `differential` spec
+// asks the two tiers to agree, and two tiers agree perfectly when both
+// are wrong in the same way. Pre-fix Tier 1 does not reach any of these
+// lines — it aborts inside `Range.collect` — but a future change that
+// broke Tier 0 the same way would satisfy a bare agreement check and
+// fail this one, which is the point.
 //
 // T1214 — a GENERIC RETURN PARAMETER loses its name to a VARIANT
 // CONSTRUCTOR, and the whole of `collect()` dies at Tier 1 with it.
@@ -31,12 +45,19 @@
 // one generic body compiled once per receiver, mis-resolving the same
 // name every time.
 //
-// THIS SPEC CREATES THE COLLISION RATHER THAN BORROWING IT, and that is
-// the point of the local `Abi` below. Keyed on `FFIAbi`, the spec would
-// pass or fail depending on whether the mount graph happened to drag
-// `core/math/internal.vr` in — and a regression guard that is green for
-// a reason unrelated to its subject is worse than no guard. Declaring
-// the variant here makes the collision a property of the file.
+// THAT CLAIM WAS MINE AND IT WAS WRONG, so it is corrected here rather
+// than quietly dropped. This header used to say the local `Abi` below
+// CREATES the collision, on the reasoning that keying on `FFIAbi` would
+// make the spec depend on the mount graph. Measured instead: a probe
+// mounting only `core.prelude.*` and declaring NO local sum type already
+// produces
+//
+//     in `Args.collect`: CallM method 'FFIAbi.from_iter' unresolved
+//
+// so `core/math/internal.vr` is in the prelude's graph and the collision
+// is core's, not this file's. `Abi` therefore earns its place as a
+// CONTROL and not as the subject — see the two negative controls in
+// `main`, which are the half of this spec a naive fix would break.
 //
 // AND IT IS PROGRAM-DEPENDENT IN THE OTHER DIRECTION TOO, which is why
 // it hid for so long. TWO core types declare a variant named `C` —
