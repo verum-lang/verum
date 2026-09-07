@@ -684,6 +684,8 @@ pub struct CodegenContext {
     /// is compiled - we emit `ByteArrayElementAddr` instead of `GetE + Ref` to get
     /// the actual memory address of the element rather than its value.
     pub byte_array_vars: HashSet<String>,
+    /// Element counts for the entries of `byte_array_vars` (T1192).
+    pub byte_array_sizes: HashMap<String, usize>,
 
     /// Task #18 — escape-analysis result for the current function.
     ///
@@ -1590,6 +1592,7 @@ impl CodegenContext {
             carried_mount_bindings: HashMap::new(),
             module_aliases: HashMap::new(),
             byte_array_vars: HashSet::new(),
+            byte_array_sizes: HashMap::new(),
             current_fn_escaping_vars: HashSet::new(),
             typed_array_vars: HashMap::new(),
             try_recover_depth: 0,
@@ -1621,6 +1624,7 @@ impl CodegenContext {
             pending_static_call_type_args: None,
             typed_array_vars: HashMap::new(),
             byte_array_vars: HashSet::new(),
+            byte_array_sizes: HashMap::new(),
             required_contexts: HashSet::new(),
             explicit_mount_names: HashSet::new(),
             expected_fn_value_arity: None,
@@ -1806,6 +1810,33 @@ impl CodegenContext {
     /// instead of `GetE + Ref` to get the actual memory address.
     pub fn mark_byte_array_var(&mut self, name: &str) {
         self.byte_array_vars.insert(name.to_string());
+    }
+
+    /// Record a byte array's ELEMENT COUNT alongside the mark above.
+    ///
+    /// `[Byte; N]` is a fixed-size TYPE, so N cannot change under a
+    /// binding and `arr.len()` on such a variable is a compile-time
+    /// constant. Recording it here is the only place the count survives:
+    /// the allocation is `verum_cbgr_allocate(N)`, which returns a
+    /// HEADERLESS block — no object header in front of the pointer and
+    /// no length word inside it — so nothing downstream can ask the
+    /// value how long it is (T1192).
+    pub fn set_byte_array_size(&mut self, name: &str, size: usize) {
+        self.byte_array_sizes.insert(name.to_string(), size);
+    }
+
+    /// Forget one name's size, for a re-binding that is NOT a byte
+    /// array — `let buf: [Byte; 16] = …;` then an inner `let buf = …;`
+    /// must not keep answering 16.
+    pub fn forget_byte_array_size(&mut self, name: &str) {
+        self.byte_array_sizes.remove(name);
+    }
+
+    /// The recorded element count, or `None` for "not known here" —
+    /// never zero. A caller must fall through to the `Len` opcode
+    /// rather than treat the absence as an answer.
+    pub fn byte_array_size(&self, name: &str) -> Option<usize> {
+        self.byte_array_sizes.get(name).copied()
     }
 
     /// Checks if a variable is a byte array.
@@ -2466,6 +2497,10 @@ impl CodegenContext {
         // ALSO see the enclosing function's generics, so not clearing is
         // correct for them too.
         self.byte_array_vars.clear();
+        // T1192 — the SIZES go with the marks. Same key (variable name),
+        // same lifetime; separating them would give one of the two a
+        // stale entry the other cannot see.
+        self.byte_array_sizes.clear();
         self.typed_array_vars.clear();
         self.active_pattern_cache.clear();
         self.raw_pointer_regs.clear();

@@ -810,6 +810,9 @@ impl VbcCodegen {
                 // Mark the variable as a byte array for address computation
                 if let verum_ast::PatternKind::Ident { name, .. } = &pattern.kind {
                     self.ctx.mark_byte_array_var(&name.name);
+                    // T1192: the count as well as the fact.
+                    self.ctx
+                        .set_byte_array_size(&name.name, byte_array_size);
                 }
 
                 return Ok(None);
@@ -876,6 +879,9 @@ impl VbcCodegen {
                 // Mark the variable as a byte array
                 if let verum_ast::PatternKind::Ident { name, .. } = &pattern.kind {
                     self.ctx.mark_byte_array_var(&name.name);
+                    // T1192: the count as well as the fact.
+                    self.ctx
+                        .set_byte_array_size(&name.name, byte_array_size);
                 }
 
                 return Ok(None);
@@ -942,6 +948,9 @@ impl VbcCodegen {
                 // Mark the variable as a byte array
                 if let verum_ast::PatternKind::Ident { name, .. } = &pattern.kind {
                     self.ctx.mark_byte_array_var(&name.name);
+                    // T1192: the count as well as the fact.
+                    self.ctx
+                        .set_byte_array_size(&name.name, byte_array_size);
                 }
 
                 return Ok(None);

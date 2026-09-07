@@ -1,0 +1,79 @@
+// @test: differential
+// @level: L0
+// @tier: 0,1
+// @tags: vbc, codegen, aot, byte-array, len, packed, regression
+// @timeout: 30000
+// @expected-exit: 0
+// @expected-stdout-begin
+// len16=16
+// len8=8
+// @expected-stdout-end
+//
+// T1192 — `len()` on a packed `[Byte; N]` read the array's OWN DATA and
+// called the result a length, at Tier 1.
+//
+// `[Byte; N]` lowers to `verum_cbgr_allocate(N)`, which returns a
+// HEADERLESS block: the pointer addresses the first data byte, so there
+// is no `ObjectHeader` in front of it and no length word anywhere in the
+// allocation. Every probe in `lower_len` assumes otherwise — the
+// slice-cell probe reads word 0, the List arm reads a `type_id` at
+// offset 0 and a length at 24, the Pack arm reads 32 — so each of them
+// reads this array's contents. The length is known only at the
+// allocation site, and that is where it is now recorded.
+//
+// MEASURED, NOT PREDICTED. Before the fix, Tier 1 answers
+//
+//     len16=0   len8=0   sum=0
+//
+// against Tier 0's 16 / 8 / 8. I had written here that `len8` would print
+// 0x4141414141414141 — the eight `65` bytes read as one little-endian
+// word — and that is NOT what happens: the read answers 0. The prediction
+// is kept, struck, because it is the more tempting reading and the next
+// person will make it: "a probe that reads data bytes prints the data" is
+// only true if the probe gets as far as loading them.
+//
+// The non-zero fill stays anyway, and now for a reason that survives the
+// correction: `len8=0` on a buffer full of 65s cannot be an honest
+// answer about ANY array, whereas `len16=0` on a zero-filled one is
+// merely wrong. If a future regression prints the data after all, this
+// line is where it shows.
+//
+// WHY A VALUE POLE AND NOT ONLY TIER AGREEMENT. `differential` asks the
+// tiers to AGREE, and two tiers agree perfectly when both are wrong the
+// same way — the adjacent session lost a day to exactly that this week.
+// So the expected stdout above names the numbers. If a future change
+// makes Tier 0 also read the data bytes, this spec fails, which is the
+// correct outcome and is not what a bare agreement check would do.
+//
+// FOUND BY `docs/by-example/19-file-io`, which printed
+// `write failed: <a 10-digit address>` at Tier 1 and exited 0 — an
+// ADDRESS in the position of an error value, with no crash and no
+// diagnostic. Its honest output is `wrote 29 bytes to …` followed by
+// `total lines: 3`.
+
+mount core.prelude.*;
+
+fn main() {
+    // Zero-filled: the plain case.
+    let buf16: [Byte; 16] = [0; 16];
+    print(f"len16={buf16.len()}");
+
+    // NON-ZERO fill, so that "read the data" and "answer zero" are
+    // different answers rather than the same one.
+    let buf8: [Byte; 8] = [65; 8];
+    print(f"len8={buf8.len()}");
+
+    // THE LOOP CHECK THAT USED TO BE HERE MOVED OUT, and why is worth
+    // keeping. It summed `[1; 8]` through `while i < ones.len()` and
+    // expected 8 — a length that is usable as a BOUND, not merely
+    // printable. With the length fixed the loop now runs, and the sum is
+    // still 0, because INDEXING a packed byte array reads 0 at Tier 1.
+    // That is a different instruction and a different row (T1220):
+    // measured with a literal bound `while i < 4`, so the loop provably
+    // runs, `[7; 4]` still sums to 0 while Tier 0 gives 28.
+    //
+    // Keeping it here would make this spec unfalsifiable in the way its
+    // own header warns about: "did the length fix work" and "does
+    // indexing work" would share one number, and the row that is fixed
+    // could not be told from the row that is not.
+}

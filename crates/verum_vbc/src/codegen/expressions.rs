@@ -2267,6 +2267,7 @@ impl VbcCodegen {
 
                 // Fallback for nullary variant constructors not yet registered as functions.
                 // Try to find a qualified name (Type.Variant) that matches.
+
                 if name
                     .chars()
                     .next()
@@ -13448,6 +13449,49 @@ impl VbcCodegen {
         // Handle built-in methods that map to dedicated opcodes
         // BUT only if the receiver doesn't have a user-defined method with the same name
         if method.name == "len" && args.is_empty() {
+            // T1192 — A PACKED `[Byte; N]` KNOWS ITS LENGTH ONLY HERE.
+            //
+            // `[Byte; N]` lowers to `verum_cbgr_allocate(N)`, which
+            // returns a HEADERLESS block: the pointer addresses the first
+            // data byte, so there is no object header in front of it and
+            // no length word inside it. Every AOT probe in `lower_len`
+            // assumes otherwise — the slice-cell probe reads word 0, the
+            // List arm reads a `type_id` at 0 and a length at 24, the Pack
+            // arm reads 32 — so each of them reads this array's own
+            // contents or past its allocation. Measured before this fix:
+            // `[Byte; 16]` answered 16 at Tier 0 and **0** at Tier 1, with
+            // rc=0 and no diagnostic, so a `while i < buf.len()` loop over
+            // a scratch buffer simply did not run.
+            //
+            // `N` is part of the TYPE and cannot change under a binding,
+            // so this is a compile-time constant and belongs in the
+            // frontend, where the annotation was read
+            // (`codegen/statements.rs` computes `byte_array_size` and
+            // marks the variable).
+            //
+            // THE FIX WAS TRIED IN THE BACKEND FIRST AND COULD NOT WORK,
+            // which is why it is here: a per-register fact set at the
+            // `NewByteArray` arm needs the size operand to be an LLVM
+            // constant, and `FunctionContext::get_register` emits a
+            // `build_load` because `vbc_lowering.rs` enables alloca mode
+            // UNCONDITIONALLY ("Fix: always enable alloca mode"). The
+            // constant test could not fire once, in any program. Doing it
+            // here also retires the per-register fact entirely — no
+            // propagation through `Mov`, no clear-list entry, none of the
+            // T1167 / T1194 stale-fact shape.
+            if let ExprKind::Path(path) = &receiver.kind
+                && path.segments.len() == 1
+                && let verum_ast::ty::PathSegment::Name(ident) = &path.segments[0]
+                && let Some(n) = self.ctx.byte_array_size(&ident.name)
+            {
+                let result = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::LoadI {
+                    dst: result,
+                    value: n as i64,
+                });
+                return Ok(Some(result));
+            }
+
             // Check if receiver has a user-defined len method.
             // Skip stdlib collection types — their len must use the built-in Len opcode
             // which reads from the correct runtime memory offset. Compiled stdlib methods
@@ -19462,6 +19506,14 @@ impl VbcCodegen {
                 by_ref: _by_ref,
             } => {
                 let var_reg = self.ctx.define_var(&name.name, *mutable);
+                // T1192 — ANY new binding of this name drops a recorded
+                // byte-array size. The map is keyed by NAME, so a `let`
+                // in an inner block, a match arm, a `for` binding or a
+                // parameter that reuses the name must not keep answering
+                // the outer array's length. The byte-array `let` path
+                // marks AFTER calling this, so forgetting here and
+                // re-recording there is the correct order.
+                self.ctx.forget_byte_array_size(&name.name);
                 // When by_ref is true, the scrutinee is already a pointer to the value
                 // (from GetVariantDataRef). We bind this pointer directly - it acts as
                 // a mutable reference that can be dereferenced with * and written through.
