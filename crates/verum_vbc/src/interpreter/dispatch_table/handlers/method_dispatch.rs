@@ -309,6 +309,48 @@ fn transparent_wrapper_inner_matches_receiver(
 }
 
 /// Call method: `dst = receiver.method(args...)`
+/// T1235: tape a float METHOD that `dispatch_primitive_method` answered
+/// directly.
+///
+/// `x * x` reaches the `BinaryF` opcode and `float_arith.rs` records it, so
+/// `grad(x*x)` is right. `x.exp()` is answered here by the intercept — no
+/// opcode, no tape node — and the adjoint of a node that was never recorded
+/// is ZERO, which is what `grad(exp)` returned. The rule
+/// (`TapeOp::Exp`), the mapping and `record_unop` all already existed; the
+/// call simply never arrived where they hang.
+///
+/// Registers are the tape's index (`node_for(src)` / `bind(dst)`), which is
+/// why this lives in `handle_call_method` — `dispatch_primitive_method` sees
+/// the receiver as a VALUE and has neither.
+///
+/// No-op unless a gradient scope is active: `record_unop` returns early when
+/// the receiver has no tape node.
+#[inline]
+fn tape_float_method(
+    state: &mut InterpreterState,
+    method_name: &str,
+    receiver: &crate::value::Value,
+    result: &crate::value::Value,
+    dst: Reg,
+    receiver_reg: Reg,
+) {
+    let bare = method_name.rsplit('.').next().unwrap_or(method_name);
+    let Some(op) = crate::interpreter::autodiff_record::unary_float_tape_op_by_name(bare) else {
+        return;
+    };
+    if !receiver.is_float() || !result.is_float() {
+        return;
+    }
+    crate::interpreter::autodiff_record::record_unop(
+        state,
+        op,
+        dst,
+        receiver_reg,
+        receiver.as_f64(),
+        result.as_f64(),
+    );
+}
+
 pub(in super::super) fn handle_call_method(
     state: &mut InterpreterState,
 ) -> InterpreterResult<DispatchResult> {
@@ -613,6 +655,7 @@ pub(in super::super) fn handle_call_method(
         || (is_ref_metadata_method && receiver.is_ptr() && !receiver.is_nil()))
         && let Some(result) = dispatch_primitive_method(state, &receiver, &method_name, &args)?
     {
+        tape_float_method(state, &method_name, &receiver, &result, dst, receiver_reg);
         state.set_reg(dst, result);
         return Ok(DispatchResult::Continue);
     }
@@ -1153,6 +1196,7 @@ pub(in super::super) fn handle_call_method(
 
     if let Some(result) = dispatch_primitive_method(state, &dispatch_receiver, &method_name, &args)?
     {
+        tape_float_method(state, &method_name, &dispatch_receiver, &result, dst, receiver_reg);
         state.set_reg(dst, result);
         return Ok(DispatchResult::Continue);
     }

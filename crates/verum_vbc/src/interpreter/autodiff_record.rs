@@ -440,6 +440,35 @@ pub(crate) fn finish_recording(state: &mut InterpreterState, output_reg: Reg) ->
     state.grad_tape.finish_scope(output)
 }
 
+/// Maps a float METHOD NAME to its tape operation — the name-keyed twin of
+/// [`unary_float_tape_op`], for the receiver-method path.
+///
+/// T1235: `x * x` lowers to a `BinaryF` opcode and `float_arith.rs` records
+/// it, so `grad(x*x)` is correct. `x.exp()` lowers to a `CallM` that
+/// `method_dispatch` answers directly with `v.exp()`, reaching no opcode and
+/// recording nothing — so the adjoint of a node that was never taped is zero,
+/// and `grad(exp)` returned exactly 0.0 rather than a wrong number.
+///
+/// ONLY names whose semantics match a rule here. Deliberately absent:
+///   `log`   takes a BASE argument in the intercept (`v.log(base)`) — binary,
+///           not the natural log; `ln` is the unary one and maps to `Log`.
+///   `log2`, `log10`, `tan`, `asin`, `acos`, `atan`, `cbrt`, `signum`,
+///           `floor`, `ceil`, `round`, `trunc`, `fract`
+///           have no VJP rule in `saved_for_unop`, and inventing one here
+///           would put a wrong derivative where a missing one is at least
+///           visible.
+pub(crate) fn unary_float_tape_op_by_name(name: &str) -> Option<TapeOp> {
+    Some(match name {
+        "sqrt" => TapeOp::Sqrt,
+        "exp" => TapeOp::Exp,
+        "ln" => TapeOp::Log,
+        "sin" => TapeOp::Sin,
+        "cos" => TapeOp::Cos,
+        "abs" => TapeOp::Abs,
+        _ => return None,
+    })
+}
+
 /// Maps a float unary sub-opcode (see `handlers::float_arith`) to its tape
 /// operation, or `None` when no VJP rule covers it.
 pub(crate) fn unary_float_tape_op(sub_op: u8) -> Option<TapeOp> {
