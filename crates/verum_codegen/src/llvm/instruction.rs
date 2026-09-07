@@ -28285,6 +28285,60 @@ fn lower_mem_extended<'ctx>(
                 .or_llvm_err()?
             .basic_value_or("NewByteArray: expected return value")?;
             ctx.set_register(dst_reg, result);
+
+            // T1220 — OPERAND 2 IS THE INIT VALUE AND THIS ARM USED TO
+            // IGNORE IT. The VBC emitter passes three operands,
+            // `[result, size, init]`, and loads the init with `LoadI`
+            // from the declaration (codegen/statements.rs). Tier 0
+            // honours it; Tier 1 allocated N bytes and wrote nothing, so
+            // every element read whatever `verum_cbgr_allocate` left —
+            // zero.
+            //
+            // MEASURED: `let a: [Byte; 4] = [7; 4];` gave `a[0] == 7` at
+            // Tier 0 and `0` at Tier 1, with rc=0 and no diagnostic.
+            //
+            // `[0; N]` WAS CORRECT BY ACCIDENT, which is why a scratch
+            // buffer never showed it: the allocation already reads zero,
+            // so only a non-zero fill is observably dropped. The list
+            // form `[1, 2, 3]` is unaffected — it emits one
+            // `ByteArrayStore` per element and always did.
+            //
+            // The value comes from a register, i.e. a `build_load` under
+            // alloca mode and never an LLVM constant; `llvm.memset` takes
+            // a value OPERAND, so it is passed straight through and no
+            // constant folding is attempted — see the note on
+            // `FunctionContext::get_register` for why one would not work.
+            if operands.len() >= 3 {
+                let init = ctx.get_register(op_reg(operands, 2))?;
+                if init.is_int_value() && size.is_int_value() {
+                    let i8_type = ctx.types().i8_type();
+                    let bool_type = ctx.types().bool_type();
+                    let void_type = ctx.types().void_type();
+                    let init_i8 = ctx
+                        .builder()
+                        .build_int_truncate(init.into_int_value(), i8_type, "ba_init8")
+                        .or_llvm_err()?;
+                    let ft = void_type.fn_type(
+                        &[ptr_ty.into(), i8_type.into(), i64_ty.into(), bool_type.into()],
+                        false,
+                    );
+                    let memset_fn = super::error::get_or_declare_function(
+                        ctx.get_module(),
+                        "llvm.memset.p0.i64",
+                        ft,
+                    );
+                    let _ = ctx.builder().build_call(
+                        memset_fn,
+                        &[
+                            result.into(),
+                            init_i8.into(),
+                            size.into(),
+                            bool_type.const_zero().into(),
+                        ],
+                        "ba_fill",
+                    );
+                }
+            }
             Ok(())
         }
 
@@ -28620,6 +28674,7 @@ fn lower_mem_extended<'ctx>(
             let dst_reg = op_reg(operands, 0);
             if sub_op == 0x34 {
                 // Allocate: same as NewByteArray but size = count * element_size
+                //
                 let size = if operands.len() >= 2 {
                     ctx.get_register(op_reg(operands, 1))?
                 } else {

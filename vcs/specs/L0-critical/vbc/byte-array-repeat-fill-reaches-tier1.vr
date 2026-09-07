@@ -1,0 +1,75 @@
+// @test: differential
+// @level: L0
+// @tier: 0,1
+// @tags: vbc, codegen, aot, byte-array, repeat-literal, initialisation, regression
+// @timeout: 30000
+// @expected-exit: 0
+// @expected-stdout-begin
+// len=4
+// e0=7
+// e3=7
+// sum=28
+// list0=1
+// list2=3
+// @expected-stdout-end
+//
+// T1220 — `[Byte; N] = [v; N]` allocated N bytes at Tier 1 and NEVER
+// WROTE `v`. Every element read zero.
+//
+// The VBC emitter passes three operands for `NewByteArray` —
+// `[result, size, init]` — and loads the fill with `LoadI` from the
+// declaration. The AOT arm read operands 0 and 1 and stopped, so the
+// block came back from `verum_cbgr_allocate` untouched. The interpreter
+// honours the init, which is why the two tiers disagreed:
+//
+//     tier 0   len=4  e0=7  e3=7  sum=28
+//     tier 1   len=4  e0=0  e3=0  sum=0     rc=0, no diagnostic
+//
+// THE FILL VALUE IS 7 AND THAT IS THE WHOLE POINT. `[0; N]` was CORRECT
+// BY ACCIDENT — a fresh allocation already reads zero — so the defect
+// was invisible in exactly the shape that uses it most, a zeroed scratch
+// buffer. Only a non-zero fill can tell "initialised" from "never
+// written", and this spec would pass on the broken compiler if it used
+// zero.
+//
+// THE LOOP BOUND IS A LITERAL, deliberately. `while i < 4` runs four
+// times whatever `len()` answers, so a wrong sum here can only be the
+// READ. Keyed on `ones.len()` instead, this spec would have been
+// entangled with T1192 (the length of a packed byte array, fixed
+// separately) and neither row could be told from the other.
+//
+// AND THE LIST FORM IS THE CONTROL, MEASURED RATHER THAN ASSUMED.
+// `[1, 2, 3]` does not use the init operand at all — the emitter unrolls
+// one `ByteArrayStore` per element. Run on the UNFIXED compiler, both
+// tiers already print `list0=1 list2=3`, so this half was working before
+// the fix and must keep working after it. A change that filled the block
+// but broke the stores would pass the first four lines and fail the last
+// two.
+//
+// Stated as a measurement because it started as an assumption: the
+// sentence above originally said "so it worked before this fix" with
+// nothing behind it, which is the same shape as a comment asserting a
+// property the machinery makes unobservable.
+
+mount core.prelude.*;
+
+fn main() {
+    let ones: [Byte; 4] = [7; 4];
+    print(f"len={ones.len()}");
+    print(f"e0={ones[0] as Int}");
+    print(f"e3={ones[3] as Int}");
+
+    let mut s: Int = 0;
+    let mut i: Int = 0;
+    while i < 4 {
+        s = s + (ones[i as usize] as Int);
+        i = i + 1;
+    }
+    print(f"sum={s}");
+
+    // CONTROL — the other literal form, which never used the init
+    // operand and must be unaffected.
+    let listed: [Byte; 3] = [1, 2, 3];
+    print(f"list0={listed[0] as Int}");
+    print(f"list2={listed[2] as Int}");
+}
