@@ -8330,6 +8330,11 @@ impl VbcCodegen {
         // `Instantiated { base = parent }` receiver arg maps onto them
         // positionally.  Additive: `or_insert` semantics via bind's map
         // entry — signature-derived bindings keep priority.
+        // T1228: which of the six conditions does this leg leave on?
+        // Three readings of it have been wrong today, so the leg reports
+        // its own verdict under `VERUM_TRACE_MONO` rather than being
+        // guessed at again. Diagnostic only.
+        let t1228_trace = std::env::var_os("VERUM_TRACE_MONO").is_some();
         if let Some(desc) = self
             .functions
             .iter()
@@ -8340,6 +8345,20 @@ impl VbcCodegen {
             let impl_k = self.type_by_id(parent_tid)
                 .map(|t| t.type_params.len())
                 .unwrap_or(0);
+            if t1228_trace {
+                let rn = args
+                    .first()
+                    .and_then(|r| self.infer_expr_type_name(r))
+                    .unwrap_or_else(|| "<none>".into());
+                eprintln!(
+                    "[t0330] fn={} parent_tid={} impl_k={} recv_name={:?} recv_tr={:?}",
+                    func_id,
+                    parent_tid.0,
+                    impl_k,
+                    rn,
+                    self.type_name_to_type_ref_mono(&strip_ref(&rn)),
+                );
+            }
             if impl_k > 0
                 && let Some(recv) = args.first()
                 && let Some(recv_name) = self
@@ -8400,7 +8419,21 @@ impl VbcCodegen {
             // Archive callees have no self.functions descriptor — the
             // carry-derived name (or empty) plus the raw id keeps the
             // bind outcome visible for them too.
-            if nm.contains("poll_sync") || nm.contains("ready") || nm.is_empty() || nm.contains("fmt") || nm.contains("collect") || nm.contains("partition") {
+            // T1228: the curated name list answers only about the names
+            // someone already suspected. `VERUM_TRACE_MONO_ALL=1` lifts it,
+            // so a question like "is a `Unit`-typed self UNIVERSAL for
+            // protocol-default bodies, or specific to `collect`?" costs a
+            // run rather than a source edit and a build. Diagnostic only —
+            // it changes what is printed, never what is emitted.
+            let trace_all = std::env::var_os("VERUM_TRACE_MONO_ALL").is_some();
+            if trace_all
+                || nm.contains("poll_sync")
+                || nm.contains("ready")
+                || nm.is_empty()
+                || nm.contains("fmt")
+                || nm.contains("collect")
+                || nm.contains("partition")
+            {
                 eprintln!(
                     "[mono-record] '{}' id={} param_trs={:?} nargs={} bindings={:?}",
                     nm, func_id, param_trs, args.len(), bindings
