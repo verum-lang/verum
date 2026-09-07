@@ -175,9 +175,13 @@ arithmetic**:
   buffers → the write runs off the allocation → SIGBUS.
 
 **Why interp is fine:** the interpreter **intercepts** the Text
-mutation methods natively (`method_dispatch.rs:527` — push/push_str/
-push_char), so it never executes the Verum body's `ptr_offset`; and its
-raw `ptr_offset` handler (`ffi_extended.rs:1101`) is element-stride
+mutation methods natively (`handlers/text_static_runtime.rs`, the
+`"push_byte" | "push_str" | "push" | "push_char"` arm — the
+`method_dispatch.rs:527` anchor this paragraph carried had drifted, and
+the file itself has since moved under `handlers/`), so it never executes
+the Verum body's `ptr_offset`; and its raw `ptr_offset` handler
+(`ffi_extended.rs:1101` — line since drifted onto FFI symbol loading) is
+element-stride
 aware via `fat_ref.reserved` (1/2/4/8). Only AOT compiles the Verum
 body and hits the hard-coded stride 8.
 
