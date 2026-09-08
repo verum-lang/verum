@@ -16060,28 +16060,15 @@ fn lower_call_method<'ctx>(
                     // So when the receiver's type IS known, take ITS entry. The
                     // hint comes from `lower_ctx_get`, which stamps the
                     // PROVIDER's type name — the whole point of that stamp.
-                    let recv_hint: Option<String> = ctx
-                        .sticky_type_hint(receiver.0)
-                        .map(|s| s.to_string())
-                        .or_else(|| ctx.get_obj_register_type(receiver.0).map(|s| s.to_string()));
-                    let chosen_entry = recv_hint
-                        .as_deref()
-                        .and_then(|hint| {
-                            let want = format!("{hint}.{method_name}");
-                            dispatch_entries.iter().find(|(_, fname)| {
-                                fname == &want
-                                    || fname.rsplit('.').next() == Some(method_name)
-                                        && fname
-                                            .strip_suffix(&format!(".{method_name}"))
-                                            .map(|p| p.rsplit('.').next().unwrap_or(p) == hint)
-                                            .unwrap_or(false)
-                            })
-                        })
-                        .or_else(|| dispatch_entries.first());
+                    let chosen_entry = dispatch_entry_for_receiver(
+                        ctx,
+                        receiver,
+                        method_name,
+                        &dispatch_entries,
+                    );
                     if std::env::var_os("VERUM_TRACE_DYN").is_some() {
                         eprintln!(
-                            "[dyn-dispatch] mark method='{method_name}' recv_hint={recv_hint:?} \
-                             entries={} chosen={:?}",
+                            "[dyn-dispatch] mark method='{method_name}' entries={} chosen={:?}",
                             dispatch_entries.len(),
                             chosen_entry.map(|(_, f)| f.as_str()),
                         );
@@ -36289,6 +36276,49 @@ fn build_alloc_err_value<'ctx>(
         .or_llvm_err()?)
 }
 
+/// Pick the dispatch entry that belongs to THIS receiver, not the first one.
+///
+/// Both type-switch builders mark their result from an entry's declared
+/// return type, and both used to take `entries.first()` on the ground that
+/// "every implementation of one protocol method declares the same return".
+/// That holds for a real protocol and fails for the by-name probe that fills
+/// these tables when there is no protocol behind the call — measured twice:
+///
+///   * `[dyn-dispatch] method='fetch' entries=8 (protocols=0, name_probe=8)`
+///     — eight unrelated types own a method called `fetch`, and
+///     `Resolver.query` was being asked for `Database.query`'s return type;
+///   * `wrapper-method-tier-parity` REGRESSED when a T1214 fix widened arm
+///     admission from 1 candidate to 5: with one, `entries.first()` was
+///     `GitSource.describe` and the `Text` was marked; with five it was
+///     somebody else's, and `heap=git:u` became `heap=4338467120`. The extra
+///     arms are correct — the assumption about their ORDER was not.
+///
+/// The receiver's own type settles it whenever it is known. Nothing is
+/// invented when it is not: the caller keeps its previous first-entry
+/// behaviour.
+fn dispatch_entry_for_receiver<'a>(
+    ctx: &FunctionContext<'_, '_>,
+    receiver: Reg,
+    method_name: &str,
+    entries: &'a [(u32, String)],
+) -> Option<&'a (u32, String)> {
+    let bare = method_name.rsplit('.').next().unwrap_or(method_name);
+    let hint: Option<String> = ctx
+        .sticky_type_hint(receiver.0)
+        .map(|s| s.to_string())
+        .or_else(|| ctx.get_obj_register_type(receiver.0).map(|s| s.to_string()));
+    let by_receiver = hint.as_deref().and_then(|h| {
+        let h_short = h.rsplit('.').next().unwrap_or(h);
+        let suffix = format!(".{bare}");
+        entries.iter().find(|(_, fname)| {
+            fname.strip_suffix(&suffix).is_some_and(|prefix| {
+                prefix == h || prefix.rsplit('.').next().unwrap_or(prefix) == h_short
+            })
+        })
+    });
+    by_receiver.or_else(|| entries.first())
+}
+
 fn build_runtime_type_switch<'ctx>(
     ctx: &mut FunctionContext<'_, 'ctx>,
     receiver: Reg,
@@ -36745,7 +36775,9 @@ fn build_runtime_type_switch<'ctx>(
     // (`clone`) has no single static return representation — the
     // primitive-default arms return the RAW receiver — so marking it as
     // a heap handle would render a cloned scalar as a bogus pointer.
-    if let Some((self_tid, first_fname)) = entries.first() {
+    if let Some((self_tid, first_fname)) =
+        dispatch_entry_for_receiver(ctx, receiver, method_name, entries)
+    {
         let ret_type = ctx.vbc_module().and_then(|vbc| {
             vbc.find_function_by_name(first_fname.as_str())
                 .and_then(|fid| vbc.get_function(fid))
