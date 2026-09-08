@@ -95,6 +95,10 @@ check-doc-methods-exercised: ## Gate: a method the stdlib reference documents sh
 	python3 scripts/ci/check_doc_methods_exercised.py --self-test
 	python3 scripts/ci/check_doc_methods_exercised.py
 
+check-doc-methods-declared: ## Gate: a method a doc example CALLS must be declared in core/ — no build needed
+	python3 scripts/ci/check_doc_methods_declared.py --self-test
+	python3 scripts/ci/check_doc_methods_declared.py
+
 check-by-example: ## Gate: the 22 docs/by-example programs must compile — needs a build
 	python3 scripts/ci/check_by_example_compiles.py --self-test
 	python3 scripts/ci/check_by_example_compiles.py
