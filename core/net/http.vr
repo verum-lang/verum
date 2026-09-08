@@ -678,8 +678,14 @@ implement Response {
     }
 
     /// Builder: insert/replace a single header, returning a new Response.
+    ///
+    /// `Headers` (this file, above) declares `set` / `append` and no
+    /// `insert`, so the call this used to make resolved by NAME across
+    /// the whole program and panicked with a candidate list of maps and
+    /// sets. `set` replaces, which is what the doc-comment promises.
+    /// (T1273)
     public fn header(mut self, name: Text, value: Text) -> Response {
-        self.headers.insert(name, value);
+        self.headers.set(&name, &value);
         self
     }
 }
