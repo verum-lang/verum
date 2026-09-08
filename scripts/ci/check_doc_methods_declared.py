@@ -54,7 +54,12 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 DOCS = Path(os.environ.get("VERUM_STDLIB_DOCS") or (REPO.parent / "website" / "docs"))
 CORE = REPO / "core"
-BASELINE = 118  # measured 2026-09-08; a ratchet, and it may only go down
+BASELINE = 111  # Lowered by FIXING, never by argument.
+                #   118 -> 114  the Postgres/MySQL config builders
+                #               (with_host, with_port, with_user,
+                #                with_database, with_password_from_env)
+                #   114 -> 111  H3Response.with_body, OpenOptions.open_async,
+                #               ServerOptions.with_cert_pem/with_key_pem
 
 BLOCK = re.compile(r"```verum\n(.*?)```", re.S)
 CALL = re.compile(r"\.([a-z_][a-z0-9_]*)\s*\(")
