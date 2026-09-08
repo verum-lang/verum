@@ -54,12 +54,30 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 DOCS = Path(os.environ.get("VERUM_STDLIB_DOCS") or (REPO.parent / "website" / "docs"))
 CORE = REPO / "core"
-BASELINE = 108  # Lowered by FIXING, never by argument.
+BASELINE = 83  # Lowered by FIXING, never by argument.
                 #   118 -> 114  the Postgres/MySQL config builders
                 #               (with_host, with_port, with_user,
                 #                with_database, with_password_from_env)
                 #   114 -> 111  H3Response.with_body, OpenOptions.open_async,
                 #               ServerOptions.with_cert_pem/with_key_pem
+                #    93 ->  83  NOT a fix: the census stopped counting
+                #               names it found in COMMENTS inside the
+                #               blocks. Eleven of them, and every one was
+                #               a correction naming the wrong name so a
+                #               reader would recognise it. Counting those
+                #               makes a corrected page look like a
+                #               regression — it pushed this gate one
+                #               ABOVE its own new baseline the moment the
+                #               five pages below landed.
+                #   108 ->  93  five pages that taught an API their
+                #               library does not have: the cli builder
+                #               (App.new/.about/FlagSpec.new/.takes_value),
+                #               the server request (req.uri/.read_body),
+                #               Response.with_headers/with_body/
+                #               Headers.new_with/get_first, Text.to_bytes,
+                #               Semaphore.acquire_owned, HttpClient.builder
+                #               and its pool/tls/user_agent/max_redirects,
+                #               MockResolver.with_a/with_aaaa/with_txt.
                 #   111 -> 108  Table.widths, DialogButton.primary,
                 #               Menu.orientation — all three on the term
                 #               pages, all three refused by `verum check`
@@ -70,6 +88,27 @@ BASELINE = 108  # Lowered by FIXING, never by argument.
 
 BLOCK = re.compile(r"```verum\n(.*?)```", re.S)
 CALL = re.compile(r"\.([a-z_][a-z0-9_]*)\s*\(")
+
+# A COMMENT inside a ```verum block is prose, and prose in these blocks
+# is usually ABOUT the wrong name — "the builder is `.body(..)`, not
+# `.with_body(..)`". Counting it puts the corrected name back in the
+# census the correction was written to empty, which happened on
+# 2026-09-08 and pushed the count one ABOVE its own new baseline.
+#
+# Stripping is deliberately conservative in the direction that keeps
+# calls: a `//` tail is removed only when no quote opens earlier on the
+# line, so `let u = "http://x"; a.b()` keeps `b`.
+def strip_comments(code: str) -> str:
+    out = []
+    for line in code.split("\n"):
+        stripped = line.lstrip()
+        if stripped.startswith("//"):
+            continue
+        i = line.find("//")
+        if i >= 0 and '"' not in line[:i]:
+            line = line[:i]
+        out.append(line)
+    return "\n".join(out)
 # `[<(]` — a generic declaration has `<` where a plain one has `(`.
 DECL = re.compile(r"\bfn\s+([a-z_][a-z0-9_]*)\s*[<(]")
 
@@ -100,6 +139,12 @@ def self_test() -> int:
         print("self-test: a FIELD must not read as a declaration"); bad += 1
     if CALL.findall("Style.new().fg(c).add_modifier(M.BOLD)") != ["new", "fg", "add_modifier"]:
         print("self-test: the call pattern misses a chained call"); bad += 1
+    if CALL.findall(strip_comments("    // the builder is `.body(..)`, not `.with_body(..)`")) != []:
+        print("self-test: a full-line COMMENT still reads as a call"); bad += 1
+    if CALL.findall(strip_comments("x.foo()   // and not .bar()")) != ["foo"]:
+        print("self-test: a trailing comment still reads as a call"); bad += 1
+    if CALL.findall(strip_comments('let u = "http://x"; a.b()')) != ["b"]:
+        print("self-test: a URL in a string ate the rest of the line"); bad += 1
     print("self-test: OK" if not bad else f"self-test: {bad} FAILED")
     return bad
 
@@ -132,7 +177,7 @@ def main() -> int:
     pages: dict[str, set[str]] = {}
     for f in sorted(list(DOCS.rglob("*.md")) + list(DOCS.rglob("*.mdx"))):
         for m in BLOCK.finditer(f.read_text(errors="ignore")):
-            for name in CALL.findall(m.group(1)):
+            for name in CALL.findall(strip_comments(m.group(1))):
                 if name not in declared:
                     pages.setdefault(name, set()).add(
                         f.relative_to(DOCS).as_posix())
