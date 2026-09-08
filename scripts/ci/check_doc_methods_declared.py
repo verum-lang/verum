@@ -54,12 +54,24 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 DOCS = Path(os.environ.get("VERUM_STDLIB_DOCS") or (REPO.parent / "website" / "docs"))
 CORE = REPO / "core"
-BASELINE = 72  # Lowered by FIXING, never by argument.
+BASELINE = 61  # Lowered by FIXING, never by argument.
                 #   118 -> 114  the Postgres/MySQL config builders
                 #               (with_host, with_port, with_user,
                 #                with_database, with_password_from_env)
                 #   114 -> 111  H3Response.with_body, OpenOptions.open_async,
                 #               ServerOptions.with_cert_pem/with_key_pem
+                #    72 ->  61  NOT a fix, the second of its kind: eleven
+                #               names are DECLARED by the page that calls
+                #               them — `fn from_a` next to `b.from_b()`,
+                #               the FFI page's own `sodium_init` extern
+                #               block, the UrlLike macro's synthesised
+                #               `to_url_query`. A page teaching with an
+                #               example type is the floor, not debt, and
+                #               mixing the two makes the number mean two
+                #               things at once. They are still printed,
+                #               under `floor:`, so a real API that starts
+                #               being declared on the page instead of in
+                #               core/ cannot hide there silently.
                 #    83 ->  72  eight pages: the shell command DSLs (sum
                 #               types, not builders, and they do not run),
                 #               List.group_by vs into_group_map*,
@@ -154,6 +166,9 @@ def self_test() -> int:
         print("self-test: a trailing comment still reads as a call"); bad += 1
     if CALL.findall(strip_comments('let u = "http://x"; a.b()')) != ["b"]:
         print("self-test: a URL in a string ate the rest of the line"); bad += 1
+    # The floor rule reads DECL over the same blocks the calls come from.
+    if DECL.findall("fn from_a() { b.from_b(); }") != ["from_a"]:
+        print("self-test: a page-local declaration is not seen"); bad += 1
     print("self-test: OK" if not bad else f"self-test: {bad} FAILED")
     return bad
 
@@ -184,16 +199,35 @@ def main() -> int:
     print(f"control: {len(CONTROL)}/{len(CONTROL)} known answers correct")
 
     pages: dict[str, set[str]] = {}
+    # A page that DECLARES the helper it calls is not documenting an
+    # absent API — it is teaching with an example type, and that is the
+    # floor. Tracked separately so the debt number means one thing.
+    self_declared: dict[str, set[str]] = {}
     for f in sorted(list(DOCS.rglob("*.md")) + list(DOCS.rglob("*.mdx"))):
-        for m in BLOCK.finditer(f.read_text(errors="ignore")):
-            for name in CALL.findall(strip_comments(m.group(1))):
+        text = f.read_text(errors="ignore")
+        blocks = [strip_comments(m.group(1)) for m in BLOCK.finditer(text)]
+        page_decls: set[str] = set()
+        for b in blocks:
+            page_decls |= set(DECL.findall(b))
+        rel = f.relative_to(DOCS).as_posix()
+        for b in blocks:
+            for name in CALL.findall(b):
                 if name not in declared:
-                    pages.setdefault(name, set()).add(
-                        f.relative_to(DOCS).as_posix())
+                    pages.setdefault(name, set()).add(rel)
+                    if name in page_decls:
+                        self_declared.setdefault(name, set()).add(rel)
+
+    floor = sorted(n for n in pages
+                   if n in self_declared and pages[n] <= self_declared[n])
+    for n in floor:
+        del pages[n]
 
     total = len(pages)
     print(f"check-doc-methods-declared: {total} method name(s) called by a doc "
           f"example are declared nowhere in core/ (baseline {BASELINE})")
+    print(f"  floor: {len(floor)} more are declared by the page that calls "
+          f"them — reader-owned example helpers, not debt "
+          f"({', '.join(floor[:6])}{', …' if len(floor) > 6 else ''})")
     for name, ps in sorted(pages.items(), key=lambda kv: -len(kv[1]))[:10]:
         print(f"  {len(ps):>2} page(s)  .{name:<22} e.g. {sorted(ps)[0]}")
 
