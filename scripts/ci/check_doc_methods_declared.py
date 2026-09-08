@@ -54,12 +54,14 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 DOCS = Path(os.environ.get("VERUM_STDLIB_DOCS") or (REPO.parent / "website" / "docs"))
 CORE = REPO / "core"
-BASELINE = 61  # Lowered by FIXING, never by argument.
+BASELINE = 59  # Lowered by FIXING, never by argument.
                 #   118 -> 114  the Postgres/MySQL config builders
                 #               (with_host, with_port, with_user,
                 #                with_database, with_password_from_env)
                 #   114 -> 111  H3Response.with_body, OpenOptions.open_async,
                 #               ServerOptions.with_cert_pem/with_key_pem
+                #    61 ->  59  TokenStream.as_text_literal (two meta
+                #               pages) and H3Server.stats' three readers.
                 #    72 ->  61  NOT a fix, the second of its kind: eleven
                 #               names are DECLARED by the page that calls
                 #               them — `fn from_a` next to `b.from_b()`,
