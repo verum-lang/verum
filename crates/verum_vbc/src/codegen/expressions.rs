@@ -13932,6 +13932,66 @@ impl VbcCodegen {
                 .unwrap_or(false)
         };
 
+        // T1276 — `buf.as_ptr()` ON A FIXED-SIZE ARRAY IS `(&buf[..]).as_ptr()`.
+        //
+        // A packed `[T; N]` receiver carries the type name `List`
+        // (`vbc_lowering` marks an array parameter and an array local
+        // alike), so `receiver_defines_own_ptr_method` was true and the
+        // call fell through to `List.as_ptr`, which reads `self.ptr` at
+        // `LIST_PTR_OFFSET` — offset 24 into a HEADERLESS allocation,
+        // i.e. the array's own bytes or past its end. Measured: NULL at
+        // Tier 1, and `open(2)` answered EFAULT through it.
+        //
+        // `ffi-byte-buffer-contract.md` rule 3 documents this spelling
+        // as the wrong one and the subslice as the right one. Documented
+        // is not the same as intended: Rust's `[u8; N]` answers its own
+        // data pointer, and the frontend already knows both N and the
+        // stride. So build the slice and Unslice it — byte-identical to
+        // what `&buf[..]` emits, which is the form that works.
+        if (method.name == "as_ptr" || method.name == "as_mut_ptr")
+            && args.is_empty()
+            && let ExprKind::Path(rpath) = &receiver.kind
+            && rpath.segments.len() == 1
+            && let PathSegment::Name(rident) = &rpath.segments[0]
+            && let Some(elem_sz) = self.ctx.get_typed_array_elem_size(&rident.name)
+            && let Some(n) = self.ctx.fixed_array_count(&rident.name)
+        {
+            let start_reg = self.ctx.alloc_temp();
+            self.ctx.emit(Instruction::LoadSmallI {
+                dst: start_reg,
+                value: 0,
+            });
+            let len_reg = self.ctx.alloc_temp();
+            self.ctx.emit(Instruction::LoadI {
+                dst: len_reg,
+                value: n as i64,
+            });
+            let slice_reg = self.ctx.alloc_temp();
+            let mut sl_ops = Vec::<u8>::with_capacity(8);
+            Self::write_reg(&mut sl_ops, slice_reg.0);
+            Self::write_reg(&mut sl_ops, receiver_reg.0);
+            Self::write_reg(&mut sl_ops, start_reg.0);
+            Self::write_reg(&mut sl_ops, len_reg.0);
+            Self::write_reg(&mut sl_ops, elem_sz as u16);
+            self.ctx.emit(Instruction::CbgrExtended {
+                sub_op: crate::instruction::CbgrSubOpcode::RefSlice as u8,
+                operands: sl_ops,
+            });
+            let result = self.ctx.alloc_temp();
+            let mut un_ops = Vec::<u8>::with_capacity(4);
+            Self::write_reg(&mut un_ops, result.0);
+            Self::write_reg(&mut un_ops, slice_reg.0);
+            self.ctx.emit(Instruction::CbgrExtended {
+                sub_op: crate::instruction::CbgrSubOpcode::Unslice as u8,
+                operands: un_ops,
+            });
+            self.ctx.free_temp(start_reg);
+            self.ctx.free_temp(len_reg);
+            self.ctx.free_temp(slice_reg);
+            self.ctx.free_temp(receiver_reg);
+            return Ok(Some(result));
+        }
+
         if method.name == "as_ptr" && args.is_empty() && !receiver_defines_own_ptr_method {
             // slice.as_ptr() -> extract pointer from fat pointer using Unslice
             let result = self.ctx.alloc_temp();

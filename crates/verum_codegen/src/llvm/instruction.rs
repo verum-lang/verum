@@ -26308,6 +26308,44 @@ fn lower_cbgr_extended<'ctx>(
             let i8_ty = ctx.types().i8_type();
             let ptr_ty = ctx.types().ptr_type();
             let fat_ref_ptr = as_ptr(ctx, fat_ref, "fat_ref_ptr")?;
+            // T1276 — THE STATIC OFFSET GUESS, one arm over from where
+            // SliceLen (0x05) already retired it.
+            //
+            // A register MARKED as a slice was assumed to be a Pack and
+            // read at 24. But the canonical #48 producer emits a
+            // 24-byte cell `{data@0, len@8, elem@16}`, and 24 is PAST
+            // that allocation — so `(&buf[..]).as_ptr()` on a packed
+            // `[Byte; N]` returned **NULL**, and the kernel said so
+            // independently: `open(2)` answered errno 14 (EFAULT) for
+            // every path-taking syscall on darwin, i.e. no file could be
+            // created at Tier 1.
+            //
+            // `emit_container_view` is the one classifier and reproduces
+            // the old answer exactly where the old answer was right: a
+            // genuine Pack reads `PACK_DATA_OFF` = 24, a Text or CBGR
+            // fat ref reads word 0 through the cell arm (its word 0 IS
+            // the data pointer), and an unstamped List reads
+            // `LIST_PTR_OFFSET`. Same shape as 0x05, 0x08 and 0x09.
+            //
+            // A TEXT REGISTER KEEPS THE FLAT READ, deliberately: its
+            // word 0 is a data pointer only while the Text is non-empty,
+            // and an empty one holding a null there would leave the cell
+            // probe and be re-read at `LIST_PTR_OFFSET` — garbage where
+            // today's answer is an honest 0. The classification is
+            // confined to the registers that actually carry a container.
+            //
+            // `VERUM_NO_UNSLICE_CELLVIEW` restores the static guess.
+            let src_is_text = ctx.is_text_register(src_reg) || ctx.is_string_register(src_reg);
+            if !src_is_text && std::env::var_os("VERUM_NO_UNSLICE_CELLVIEW").is_none() {
+                let (uv_data, _uv_len, _uv_elem) =
+                    emit_container_view(ctx, fat_ref_ptr, "unsl")?;
+                let base_ptr = ctx
+                    .builder()
+                    .build_int_to_ptr(uv_data, ctx.types().ptr_type(), "unsl_base_ptr")
+                    .or_llvm_err()?;
+                ctx.set_register(dst, base_ptr.into());
+                return Ok(());
+            }
             // Text uses flat layout: ptr at offset 0
             // Slices (Pack) have 24-byte header: ptr at offset 24
             // CBGR fat refs: ptr at offset 0

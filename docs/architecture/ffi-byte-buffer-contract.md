@@ -22,9 +22,12 @@ patterns below → `sent=4`, `recv=4`, payload bytes `112,105,110,103`
 1. A byte buffer destined for a C `void*` MUST be a **packed `[Byte; N]`**
    (annotated), never a bare `[0_u8; N]`.
 2. Hand it to the FFI as a **subslice `&buf[..]`** or an **element address
-   `&buf[0]`**, never as a bare `&buf` / `&mut buf`.
-3. `.as_ptr()` / `.as_mut_ptr()` return the packed data pointer **only on a
-   subslice `FatRef`** (a `&[Byte]` param), never on a raw array object.
+   `&buf[0]`**. A bare `&buf` / `&mut buf` unsizes to the same thing
+   since SLICE-COERCE-ARR-1 (byte arrays) and T1269 (every `[T; N]`) —
+   the subslice remains the clearer spelling, not a requirement.
+3. `.as_ptr()` / `.as_mut_ptr()` return the packed data pointer on a
+   subslice `FatRef` **and, since T1276, on the array itself**. Both
+   answered NULL at Tier 1 before that, for two different reasons.
 4. `safe_*` wrappers take `&[Byte]` / `&mut [Byte]` and call `.as_mut_ptr()`.
    **Never `transmute` the slice value** to a pointer.
 5. `sockaddr_in` is laid out per-platform: BSD/macOS `{ sin_len@0,
@@ -163,19 +166,65 @@ Canonical constructor: `container_to_slice_fat_ref`
 fixed `*const Value` read would truncate a byte slice to the first element's
 tag bits.
 
-## 3. `.as_ptr()` / `.as_mut_ptr()` — subslice only
+## 3. `.as_ptr()` / `.as_mut_ptr()` — both spellings, since T1276
 
-> **`Unslice` (`cbgr.rs:1615`, emitted by `as_ptr`/`as_mut_ptr` at
-> `expressions.rs:10311`/`10336`) returns `fat_ref.ptr()` for a `FatRef`
-> and the `BYTE_SLICE` payload ptr for a byte view — but for a RAW array
-> object (`is_ptr`, no `FatRef`) it returns the OBJECT BASE (the header),
-> NOT the data.**
+> **`Unslice` returns `fat_ref.ptr()` for a `FatRef` and the `BYTE_SLICE`
+> payload ptr for a byte view. For a RAW array object it USED TO return
+> the OBJECT BASE (the header), not the data — and at Tier 1 it returned
+> NULL. Both spellings now address the array's own first byte.**
 
-Therefore `packed_array.as_mut_ptr()` (called directly on a `[Byte; N]`
-variable) hands the callee the `ObjectHeader`; a `getsockname` write then
-lands on the header and corrupts `header.size` (observed: length reads back
-as `16` = `sin_len`, then any subslice/index throws
-"index `<ptr>` for list of length 16"). The subslice form is mandatory:
+### RESOLVED (T1276): the bare form answers the data pointer
+
+Measured 2026-09-08, and BOTH spellings were broken at Tier 1 — the one
+this section called wrong and the one it called right:
+
+    buf.as_ptr()          tier 0: 30787343192   tier 1: 0
+    (&buf[..]).as_ptr()   tier 0: 30787343192   tier 1: 0
+
+Two separate causes, one per spelling, each hidden behind the other
+while both answered zero:
+
+* The SUBSLICE form reached `Unslice` (CBGR 0x04), which guessed the
+  pointer's offset statically — a slice-marked register was assumed to
+  be a Pack and read at 24, while the canonical producer emits a 24-byte
+  cell `{data@0, len@8, elem@16}` whose 24 is past the allocation. The
+  neighbouring `SliceLen` (0x05) had retired the identical guess long
+  before, and 0x08/0x09 with it; 0x04 was the last one guessing. It now
+  goes through the same `emit_container_view`, which reproduces the old
+  answer exactly where the old answer was right (a genuine Pack still
+  reads 24). A Text register keeps the flat read deliberately: its word
+  0 is a data pointer only while it is non-empty.
+* The BARE form never reached `Unslice` at all. A packed array carries
+  the type name `List`, so "the receiver defines its own `as_ptr`" held
+  and the call dispatched to `List.as_ptr`, which reads `self.ptr` at
+  `LIST_PTR_OFFSET` — 24 bytes into a HEADERLESS allocation. Named by a
+  `VERUM_AOT_TRACE_CALLM` line rather than by reading code:
+  `method="List.as_ptr" recv_r4 type_name=Some("List")`. It now lowers
+  to the same `RefSlice`+`Unslice` pair that `&buf[..].as_ptr()` emits,
+  using the N and the stride the frontend already holds.
+
+Pinned by `vcs/specs/L0-critical/vbc/array-as-ptr-addresses-its-data.vr`,
+which proves the pointer addresses DATA without dereferencing it: the
+step from `&buf[..]` to `&buf[1..]` is exactly one byte, which a
+header-addressing pointer cannot satisfy. (It avoids a raw read on
+purpose — `ptr_read::<Byte>` reads two bytes at Tier 0 today, so a
+dereference would diverge for an unrelated reason.)
+
+WHAT THE NULL COST: `open(2)` answered errno 14 (EFAULT) for every
+path-taking syscall on darwin — nine callers go through `copy_path_nul`
+— so `File.create` failed and nothing could be written at Tier 1
+(T1192). `File.create` now succeeds; the file layer's remaining Tier-1
+failure is the `FileDesc(Int)` newtype reading its `.0` as an address,
+which is a different row.
+
+### The history this section was written for
+
+`packed_array.as_mut_ptr()` (called directly on a `[Byte; N]` variable)
+used to hand the callee the `ObjectHeader`; a `getsockname` write then
+landed on the header and corrupted `header.size` (observed: length reads
+back as `16` = `sin_len`, then any subslice/index throws
+"index `<ptr>` for list of length 16"). The subslice form was mandatory
+and is still the clearer spelling in a signature that takes `&mut [Byte]`:
 
 ```verum
 // WRONG — as_mut_ptr on the raw array → object header
@@ -188,6 +237,9 @@ fn get_name(fd: Int, s: &mut [Byte], l: &mut UInt32) -> Int {
 
 The stdlib `safe_getsockname`/`safe_getsockopt`/`safe_recvfrom` are correct:
 they take `&mut [Byte]` params (subslice `FatRef`s) and call `.as_mut_ptr()`.
+Since T1276 the bare form is correct too, so this is a style preference
+rather than a rule — but a signature that says `&mut [Byte]` still
+documents the intent better than one that says `&mut [Byte; N]`.
 
 ## 4. `safe_*` wrappers — never `transmute` the slice value
 

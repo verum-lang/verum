@@ -1,0 +1,71 @@
+// @test: differential
+// @level: L0
+// @tags: array, slice, as_ptr, ffi, unslice, tier-parity, regression
+// @tier: 0,1
+// @timeout: 60000
+// @expected-exit: 0
+// @expected-stdout-begin
+// raw_nonzero=true sub_nonzero=true same=true
+// step1=1 step4=4
+// text_nonzero=true
+// @expected-stdout-end
+//
+// T1276. `.as_ptr()` on a packed `[Byte; N]` answered **NULL** at tier
+// 1, in BOTH spellings — the bare `buf.as_ptr()` that
+// `ffi-byte-buffer-contract.md` rule 3 calls wrong, and the
+// `(&buf[..]).as_ptr()` it calls right.
+//
+// TWO SEPARATE CAUSES, one per spelling, and each hid behind the other
+// while both answered zero.
+//
+//   * The subslice form reached `Unslice` (CBGR 0x04), which guessed
+//     the pointer's offset STATICALLY: a register marked as a slice was
+//     assumed to be a Pack and read at 24. The canonical producer emits
+//     a 24-byte cell `{data@0, len@8, elem@16}`, so 24 is past that
+//     allocation. The neighbouring arm `SliceLen` (0x05) had already
+//     retired the identical guess, and 0x08 and 0x09 with it; 0x04 was
+//     the last one guessing.
+//
+//   * The bare form never reached `Unslice` at all. A packed array
+//     carries the type name `List`, so the receiver "defines its own
+//     as_ptr" and the call dispatched to `List.as_ptr`, which reads
+//     `self.ptr` at LIST_PTR_OFFSET — offset 24 into a HEADERLESS
+//     allocation, i.e. the array's own bytes or past its end. Named by
+//     a `VERUM_AOT_TRACE_CALLM` line, not by reading code:
+//     `method="List.as_ptr" recv_r4 type_name=Some("List")`.
+//
+// WHAT IT COST. `open(2)` answered errno 14 (EFAULT) for every
+// path-taking syscall on darwin — nine callers go through
+// `copy_path_nul` — so `File.create` failed and nothing could be
+// written at tier 1 (T1192).
+//
+// WHY THIS SPEC DOES NOT DEREFERENCE THE POINTER. `ptr_read::<Byte>`
+// reads two bytes at tier 0 today (a `[Byte;8]` holding 65,66 answers
+// 16961 = 0x4241), so a raw read would diverge for a reason that has
+// nothing to do with this row. The arithmetic proves the same thing
+// without touching memory: if the pointer addressed a HEADER rather
+// than the data, the step between `&buf[..]` and `&buf[1..]` would not
+// be one byte.
+
+mount core.prelude.*;
+
+fn main() {
+    let mut buf: [Byte; 8] = [0 as Byte; 8];
+    buf[0] = 65 as Byte;
+    buf[1] = 66 as Byte;
+
+    let raw: Int = buf.as_ptr() as Int;
+    let sub: Int = (&buf[..]).as_ptr() as Int;
+    print(f"raw_nonzero={raw != 0} sub_nonzero={sub != 0} same={raw == sub}");
+
+    // Byte stride: the address of element 1 is one past element 0.
+    // A header-addressing pointer cannot satisfy this.
+    let at1: Int = (&buf[1..]).as_ptr() as Int;
+    let at4: Int = (&buf[4..]).as_ptr() as Int;
+    print(f"step1={at1 - raw} step4={at4 - raw}");
+
+    // The Text path is the control: it was never broken and must stay
+    // so — `Unslice` keeps its flat read for a Text register.
+    let t: Text = "abc".to_text();
+    print(f"text_nonzero={(t.as_ptr() as Int) != 0}");
+}
