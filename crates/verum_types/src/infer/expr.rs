@@ -7451,16 +7451,20 @@ impl TypeChecker {
                     } = func_ty
                     {
                         // Check arity
-                        if params.len().abs_diff(args.len()) > 1 {
-                            return Err(TypeError::Other(verum_common::Text::from(
-                                format!(
-                                    "{} expects {} argument(s), got {}",
-                                    name_str,
-                                    params.len(),
-                                    args.len()
-                                ),
-                            )));
-                        }
+                        // T1270: a ±1 tolerance is not the self-parameter rule.
+                        let params = match Self::effective_params(params.as_slice(), args.len(), None) {
+                            Some(effective) => effective,
+                            None => {
+                                return Err(TypeError::Other(verum_common::Text::from(
+                                    format!(
+                                        "{} expects {} argument(s), got {}",
+                                        name_str,
+                                        params.len(),
+                                        args.len()
+                                    ),
+                                )));
+                            }
+                        };
                         // Check arguments
                         // NLL: Set call argument context for proper borrow release
                         let old_call_context = self.in_call_arg_context;
@@ -8672,15 +8676,19 @@ impl TypeChecker {
                         ..
                     } => {
                         // Check arity
-                        if params.len().abs_diff(args.len()) > 1 {
-                            return Err(TypeError::Other(verum_common::Text::from(
-                                format!(
-                                    "Rank-2 function expects {} argument(s), got {}",
-                                    params.len(),
-                                    args.len()
-                                ),
-                            )));
-                        }
+                        // T1270: a ±1 tolerance is not the self-parameter rule.
+                        let params = match Self::effective_params(params.as_slice(), args.len(), None) {
+                            Some(effective) => effective,
+                            None => {
+                                return Err(TypeError::Other(verum_common::Text::from(
+                                    format!(
+                                        "Rank-2 function expects {} argument(s), got {}",
+                                        params.len(),
+                                        args.len()
+                                    ),
+                                )));
+                            }
+                        };
 
                         // Context satisfaction check
                         if let Some(ref callee_contexts) = contexts {

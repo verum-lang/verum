@@ -168,10 +168,15 @@ async fn supervised_task() using [Logger] {
     // `supervisor.supervise(factory, spec)` — see
     // `core/runtime/supervisor.vr`. Each child is a future factory plus
     // a ChildSpec carrying its restart policy.
+    //
+    // `ChildSpec.temporary` and `.permanent` are CONSTRUCTORS taking the
+    // child's name — `fn temporary(name: Text) -> Self`. They stood here
+    // with no argument, and the checker accepted it until T1270: the
+    // missing argument arrived as Unit and became the child's `name`.
     let supervisor = inject Supervisor;
-    supervisor.supervise(|| do_work_1(), ChildSpec.temporary()).await?;
-    supervisor.supervise(|| do_work_2(), ChildSpec.permanent()).await?;
-    supervisor.supervise(|| do_work_3(), ChildSpec.temporary()).await?
+    supervisor.supervise(|| do_work_1(), ChildSpec.temporary("work-1")).await?;
+    supervisor.supervise(|| do_work_2(), ChildSpec.permanent("work-2")).await?;
+    supervisor.supervise(|| do_work_3(), ChildSpec.temporary("work-3")).await?
 }
 
 // Context inheritance example

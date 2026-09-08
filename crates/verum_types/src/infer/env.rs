@@ -8902,6 +8902,80 @@ impl TypeChecker {
         self.diagnostic_sources.push(error);
     }
 
+    /// The parameters a call's arguments are actually checked against,
+    /// or `None` when the counts cannot be reconciled at all.
+    ///
+    /// A descriptor may or may not carry a leading `self`, so a declared
+    /// list ONE LONGER than the argument list can be legitimate. That is
+    /// the whole of the licence, and it is spent only when the leading
+    /// parameter is receiver-shaped.
+    ///
+    /// Twenty sites used to write the same thing as
+    /// `params.len().abs_diff(args.len()) > 1`, and a plain ±1 tolerance
+    /// is not that rule — it is three rules, two of them wrong. Measured
+    /// 2026-09-08 (T1270), with the `zip` below walking the shorter side:
+    ///
+    ///     fn f(a: Text, b: Int, c: Int)   W.f("x", 5)   was ACCEPTED,
+    ///                                     and printed  a=[x] b=5 c=()
+    ///     fn new(a: Text)                 W.new("x", "surplus")
+    ///                                     was ACCEPTED, surplus dropped
+    ///
+    /// The first is the expensive one: the unmatched parameter arrives as
+    /// Unit and is written into a field of ANY declared type with no
+    /// mismatch reported. Two or more out was already refused, and
+    /// instance methods and free functions were correct in both
+    /// directions — so this was the qualified/static path alone.
+    ///
+    /// `infer/modules.rs`'s bound-protocol arm already stated the rule
+    /// for itself and said why: *establish the FACT instead of assuming
+    /// it*. This is that arm's test, lifted so the other nineteen share
+    /// it.
+    pub(crate) fn effective_params<'p>(
+        params: &'p [Type],
+        args_len: usize,
+        recv: Option<&Type>,
+    ) -> Option<&'p [Type]> {
+        if params.len() == args_len {
+            return Some(params);
+        }
+        if params.len() == args_len + 1 && Self::is_receiver_param(&params[0], recv) {
+            return Some(&params[1..]);
+        }
+        None
+    }
+
+    /// Is this leading parameter the receiver rather than an argument?
+    ///
+    /// `Self` inside an INSTANTIATED protocol scheme is a fresh type
+    /// variable — not a named type, and not structurally equal to the
+    /// receiver — which is why `Type::Var` counts here. The receiver type
+    /// is compared when the caller has one; several arms do not.
+    pub(crate) fn is_receiver_param(param: &Type, recv: Option<&Type>) -> bool {
+        fn peel(t: &Type) -> &Type {
+            match t {
+                Type::Reference { inner, .. }
+                | Type::CheckedReference { inner, .. }
+                | Type::UnsafeReference { inner, .. }
+                | Type::Ownership { inner, .. } => peel(inner),
+                other => other,
+            }
+        }
+        let p = peel(param);
+        if matches!(p, Type::Var(_)) {
+            return true;
+        }
+        if let Type::Named { path, .. } = p {
+            match path.segments.last() {
+                Some(verum_ast::ty::PathSegment::SelfValue) => return true,
+                Some(verum_ast::ty::PathSegment::Name(n)) if n.name.as_str() == "Self" => {
+                    return true
+                }
+                _ => {}
+            }
+        }
+        matches!(recv, Some(r) if p == peel(r))
+    }
+
     /// Build a `WrongArgCount` and, under stdlib single-file mode, RECORD
     /// it as a diagnostic before returning it.
     ///
@@ -8923,6 +8997,7 @@ impl TypeChecker {
     /// The Err is still returned, so recovery paths that swallow it for
     /// the bake's sake keep working — but the local verdict is on the
     /// record either way. Leniency where it was earned, not everywhere.
+    #[track_caller]
     pub(crate) fn arity_error(
         &mut self,
         method: Text,

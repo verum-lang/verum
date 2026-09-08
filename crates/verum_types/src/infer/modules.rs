@@ -22560,9 +22560,13 @@ impl TypeChecker {
                                         // Protocol method signatures now EXCLUDE self parameter
                                         // (self is handled implicitly as the receiver)
                                         // Check argument count directly
-                                        if params.len().abs_diff(args.len()) > 1 {
-                                            return Err(self.arity_error(method_name.clone(), params.len(), args.len(), span));
-                                        }
+                                        // T1270: a ±1 tolerance is not the self-parameter rule.
+                                        let params = match Self::effective_params(params.as_slice(), args.len(), None) {
+                                            Some(effective) => effective,
+                                            None => {
+                                                return Err(self.arity_error(method_name.clone(), params.len(), args.len(), span));
+                                            }
+                                        };
 
                                         // Type check each argument with substitution
                                         for (arg, param_ty) in args.iter().zip(params.iter()) {
@@ -23019,9 +23023,13 @@ impl TypeChecker {
                     ..
                 } = &method_ty
                 {
-                    if params.len().abs_diff(args.len()) > 1 {
-                        return Err(self.arity_error(verum_common::Text::from(method.name.as_str()), params.len(), args.len(), span));
-                    }
+                    // T1270: a ±1 tolerance is not the self-parameter rule.
+                    let params = match Self::effective_params(params.as_slice(), args.len(), None) {
+                        Some(effective) => effective,
+                        None => {
+                            return Err(self.arity_error(verum_common::Text::from(method.name.as_str()), params.len(), args.len(), span));
+                        }
+                    };
                     for (arg, param_ty) in args.iter().zip(params.iter()) {
                         let resolved_param = self.unifier.apply(param_ty);
                         self.check_expr(arg, &resolved_param)?;
@@ -23145,9 +23153,13 @@ impl TypeChecker {
                     ..
                 } = &method_ty
                 {
-                    if params.len().abs_diff(args.len()) > 1 {
-                        return Err(self.arity_error(method_name_text, params.len(), args.len(), span));
-                    }
+                    // T1270: a ±1 tolerance is not the self-parameter rule.
+                    let params = match Self::effective_params(params.as_slice(), args.len(), None) {
+                        Some(effective) => effective,
+                        None => {
+                            return Err(self.arity_error(method_name_text, params.len(), args.len(), span));
+                        }
+                    };
 
                     // Bind type variables from receiver type args
                     let receiver_type_args: List<Type> = match &recv_ty {
@@ -23285,9 +23297,13 @@ impl TypeChecker {
             } = &method_ty
             {
                 // Protocol methods don't include self in params (we already excluded it during registration)
-                if params.len().abs_diff(args.len()) > 1 {
-                    return Err(self.arity_error(method_name_text, params.len(), args.len(), span));
-                }
+                // T1270: a ±1 tolerance is not the self-parameter rule.
+                let params = match Self::effective_params(params.as_slice(), args.len(), None) {
+                    Some(effective) => effective,
+                    None => {
+                        return Err(self.arity_error(method_name_text, params.len(), args.len(), span));
+                    }
+                };
 
                 // Type check each argument
                 for (arg, param_ty) in args.iter().zip(params.iter()) {
@@ -23345,9 +23361,13 @@ impl TypeChecker {
                         } = &method_ty
                         {
                             // Check argument count
-                            if params.len().abs_diff(args.len()) > 1 {
-                                return Err(self.arity_error(method_name_text, params.len(), args.len(), span));
-                            }
+                            // T1270: a ±1 tolerance is not the self-parameter rule.
+                            let params = match Self::effective_params(params.as_slice(), args.len(), None) {
+                                Some(effective) => effective,
+                                None => {
+                                    return Err(self.arity_error(method_name_text, params.len(), args.len(), span));
+                                }
+                            };
 
                             // Type check each argument
                             for (arg, param_ty) in args.iter().zip(params.iter()) {
@@ -23393,9 +23413,13 @@ impl TypeChecker {
                                 ..
                             } = &method_ty
                             {
-                                if params.len().abs_diff(args.len()) > 1 {
-                                    return Err(self.arity_error(method_name_text, params.len(), args.len(), span));
-                                }
+                                // T1270: a ±1 tolerance is not the self-parameter rule.
+                                let params = match Self::effective_params(params.as_slice(), args.len(), None) {
+                                    Some(effective) => effective,
+                                    None => {
+                                        return Err(self.arity_error(method_name_text, params.len(), args.len(), span));
+                                    }
+                                };
                                 for (arg, param_ty) in args.iter().zip(params.iter()) {
                                     let resolved_param = self.unifier.apply(param_ty);
                                     self.check_expr(arg, &resolved_param)?;
@@ -23841,9 +23865,13 @@ impl TypeChecker {
                 {
                     let method_name_text = verum_common::Text::from(method.name.as_str());
                     // Check argument count (method params don't include self)
-                    if params.len().abs_diff(args.len()) > 1 {
-                        return Err(self.arity_error(method_name_text, params.len(), args.len(), span));
-                    }
+                    // T1270: a ±1 tolerance is not the self-parameter rule.
+                    let params = match Self::effective_params(params.as_slice(), args.len(), None) {
+                        Some(effective) => effective,
+                        None => {
+                            return Err(self.arity_error(method_name_text, params.len(), args.len(), span));
+                        }
+                    };
 
                     // CRITICAL FIX: Bind type variables in the method signature to receiver's type args
                     // e.g., for Wrapper<Int>.get() where return type is &τ_fresh,
@@ -24476,9 +24504,13 @@ impl TypeChecker {
                     } = method_ty
                     {
                         // Allow ±1 tolerance for self-param counting
-                        if params.len().abs_diff(args.len()) > 1 {
-                            return Err(self.arity_error(method_name.to_text(), params.len(), args.len(), span));
-                        }
+                        // T1270: a ±1 tolerance is not the self-parameter rule.
+                        let params = match Self::effective_params(params.as_slice(), args.len(), None) {
+                            Some(effective) => effective,
+                            None => {
+                                return Err(self.arity_error(method_name.to_text(), params.len(), args.len(), span));
+                            }
+                        };
 
                         for (arg, param_ty) in args.iter().zip(params.iter()) {
                             let resolved_param = self.unifier.apply(param_ty);
@@ -24514,9 +24546,13 @@ impl TypeChecker {
                             ..
                         } = candidate
                         {
-                            if params.len().abs_diff(args.len()) > 1 {
-                                continue;
-                            }
+                            // T1270: a ±1 tolerance is not the self-parameter rule.
+                            let params = match Self::effective_params(params.as_slice(), args.len(), None) {
+                                Some(effective) => effective,
+                                None => {
+                                    continue;
+                                }
+                            };
                             // Check if all arg types are compatible with params
                             let mut compatible = true;
                             if arg_types.len() == params.len() {
@@ -24579,9 +24615,13 @@ impl TypeChecker {
 
                     if args_pre_compatible {
                         // Allow ±1 tolerance for self-param counting
-                        if params.len().abs_diff(args.len()) > 1 {
-                            return Err(self.arity_error(method_name.to_text(), params.len(), args.len(), span));
-                        }
+                        // T1270: a ±1 tolerance is not the self-parameter rule.
+                        let params = match Self::effective_params(params.as_slice(), args.len(), None) {
+                            Some(effective) => effective,
+                            None => {
+                                return Err(self.arity_error(method_name.to_text(), params.len(), args.len(), span));
+                            }
+                        };
 
                         for (arg, param_ty) in args.iter().zip(params.iter()) {
                             let resolved_param = self.unifier.apply(param_ty);
@@ -24652,9 +24692,12 @@ impl TypeChecker {
                     .iter()
                     .find(|c| c.name == method_name_for_ctor)
                 {
-                    // ±1 tolerance for self-param counting (matches
-                    // the env-lookup arm above).
-                    if ctor.args.len().abs_diff(args.len()) > 1 {
+                    // A variant constructor has no receiver, so there is
+                    // no self-parameter to be ±1 about: the counts match
+                    // or the call is wrong. The tolerance that stood here
+                    // let `Some()` and `Some(a, b)` both through, and the
+                    // zip below walks the shorter side. (T1270)
+                    if ctor.args.len() != args.len() {
                         return Err(self.arity_error(method_name.to_text(), ctor.args.len(), args.len(), span));
                     }
                     // Type-check each argument against the
@@ -24761,9 +24804,13 @@ impl TypeChecker {
                                 {
                                     // Check argument count
                                     // Allow ±1 tolerance for self-param counting
-                                    if params.len().abs_diff(args.len()) > 1 {
-                                        return Err(self.arity_error(method.name.clone(), params.len(), args.len(), span));
-                                    }
+                                    // T1270: a ±1 tolerance is not the self-parameter rule.
+                                    let params = match Self::effective_params(params.as_slice(), args.len(), None) {
+                                        Some(effective) => effective,
+                                        None => {
+                                            return Err(self.arity_error(method.name.clone(), params.len(), args.len(), span));
+                                        }
+                                    };
 
                                     // Type check each argument
                                     for (arg, param_ty) in args.iter().zip(params.iter()) {
@@ -26058,9 +26105,13 @@ impl TypeChecker {
                                                     {
                                                         // For STATIC protocol methods (like From::from), there's no self param
                                                         // The params should already be correct
-                                                        if params.len().abs_diff(args.len()) > 1 {
-                                                            return Err(self.arity_error(method_name.to_text(), params.len(), args.len(), span));
-                                                        }
+                                                        // T1270: a ±1 tolerance is not the self-parameter rule.
+                                                        let params = match Self::effective_params(params.as_slice(), args.len(), None) {
+                                                            Some(effective) => effective,
+                                                            None => {
+                                                                return Err(self.arity_error(method_name.to_text(), params.len(), args.len(), span));
+                                                            }
+                                                        };
 
                                                         // Type check each argument
                                                         for (arg, param_ty) in
@@ -26126,9 +26177,13 @@ impl TypeChecker {
                         // unification + coercion handle refinement, numeric
                         // canonicalization, and reference auto-borrow.
                         // Allow ±1 tolerance for self-param counting.
-                        if params.len().abs_diff(args.len()) > 1 {
-                            return Err(self.arity_error(method_name.to_text(), params.len(), args.len(), span));
-                        }
+                        // T1270: a ±1 tolerance is not the self-parameter rule.
+                        let params = match Self::effective_params(params.as_slice(), args.len(), None) {
+                            Some(effective) => effective,
+                            None => {
+                                return Err(self.arity_error(method_name.to_text(), params.len(), args.len(), span));
+                            }
+                        };
 
                         for (arg, param_ty) in args.iter().zip(params.iter()) {
                             let resolved_param = self.unifier.apply(param_ty);
@@ -26208,9 +26263,13 @@ impl TypeChecker {
 
                             if args_pre_compatible {
                                 // Check argument count
-                                if params.len().abs_diff(args.len()) > 1 {
-                                    return Err(self.arity_error(method_name.to_text(), params.len(), args.len(), span));
-                                }
+                                // T1270: a ±1 tolerance is not the self-parameter rule.
+                                let params = match Self::effective_params(params.as_slice(), args.len(), None) {
+                                    Some(effective) => effective,
+                                    None => {
+                                        return Err(self.arity_error(method_name.to_text(), params.len(), args.len(), span));
+                                    }
+                                };
 
                                 // Type check each argument and accumulate substitution
                                 for (arg, param_ty) in args.iter().zip(params.iter()) {
@@ -26249,8 +26308,9 @@ impl TypeChecker {
                             .iter()
                             .find(|c| c.name == ctor_method_name)
                         {
-                            // ±1 tolerance for self-param counting.
-                            if ctor.args.len().abs_diff(args.len()) > 1 {
+                            // A variant constructor has no receiver — see
+                            // the sibling arm above. (T1270)
+                            if ctor.args.len() != args.len() {
                                 return Err(self.arity_error(method_name.to_text(), ctor.args.len(), args.len(), span));
                             }
                             // GENERIC-CTOR-FRESHNESS-1 (§52, fix A2):
@@ -26616,9 +26676,13 @@ impl TypeChecker {
                                 // No matching signature found - use first one for error message
                                 if let Some(Type::Function { params, .. }) = method_types.first() {
                                     // Allow ±1 tolerance for self-param counting
-                                    if params.len().abs_diff(args.len()) > 1 {
-                                        return Err(self.arity_error(method_name.to_text(), params.len(), args.len(), span));
-                                    }
+                                    // T1270: a ±1 tolerance is not the self-parameter rule.
+                                    let params = match Self::effective_params(params.as_slice(), args.len(), None) {
+                                        Some(effective) => effective,
+                                        None => {
+                                            return Err(self.arity_error(method_name.to_text(), params.len(), args.len(), span));
+                                        }
+                                    };
                                     // Fall through to let regular type checking produce the error
                                 }
                             }
