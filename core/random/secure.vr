@@ -119,9 +119,39 @@ public fn fill_secure(buf: &mut List<Byte>) {
 /// destination at every call site, which the AOT path lowers to a
 /// register-resident draw on `N <= 64` for x86-64 / aarch64.
 public fn fill_secure_array<const N: Int>(buf: &mut [Byte; N]) {
-    if N == 0 { return; }
+    // THE LENGTH COMES FROM THE BUFFER, NOT FROM `N`.
+    //
+    // Measured 2026-09-08 (T1267), Tier 0: this function wrote NOTHING.
+    // A `[Byte; 12]` preset to 7 came back all sevens, and a preset to 0
+    // came back all zeros, at sizes 12 and 32, across runs — while the
+    // `List` sibling below, byte-identical apart from its bound, filled
+    // correctly every time. Since the very first statement was
+    // `if N == 0 { return; }`, `N` was reading as ZERO in a call from
+    // another module; the loop bound would have written eight bytes
+    // otherwise.
+    //
+    // The control that rules out the other candidate: a USER function
+    // taking a concrete `&mut [Byte; 12]` writes through fine
+    // (`b0=1 b5=6 b11=12`). So the reference is sound and the const
+    // generic is not.
+    //
+    // WHAT THIS COST: four callers, all in security code —
+    // `password_hash` salt, `token.generate_bytes`, `token` numeric, and
+    // `otp`. `core.security.token.generate_hex(16)` returned
+    // `00000000000000000000000000000000` twice in a row. And the comment
+    // at `core/security/token.vr:73` already describes this class as
+    // FIXED: the migration from `fill_secure` to `fill_secure_array` was
+    // the fix, and the destination was a no-op too.
+    //
+    // `buf.len()` on a fixed-size array is measured to answer correctly
+    // (12 for a `[Byte; 12]`, directly and through a `&` parameter), so
+    // the bound is taken from there. `N` stays in the signature because
+    // callers name it; its VALUE is not trusted until the const-generic
+    // substitution it depends on is fixed (T0313's family).
+    let n: Int = buf.len();
+    if n == 0 { return; }
     let mut i: Int = 0;
-    while i + 8 <= N {
+    while i + 8 <= n {
         let r: UInt64 = @intrinsic("random_u64");
         buf[i + 0] = (r        & 0xff_u64) as Byte;
         buf[i + 1] = ((r >> 8 ) & 0xff_u64) as Byte;
@@ -133,10 +163,10 @@ public fn fill_secure_array<const N: Int>(buf: &mut [Byte; N]) {
         buf[i + 7] = ((r >> 56) & 0xff_u64) as Byte;
         i = i + 8;
     }
-    if i < N {
+    if i < n {
         let r: UInt64 = @intrinsic("random_u64");
         let mut shift: UInt64 = 0_u64;
-        while i < N {
+        while i < n {
             buf[i] = ((r >> shift) & 0xff_u64) as Byte;
             i = i + 1;
             shift = shift + 8_u64;

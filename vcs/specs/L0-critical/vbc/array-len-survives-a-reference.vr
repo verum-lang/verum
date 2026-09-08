@@ -1,0 +1,55 @@
+// @test: differential
+// @level: L0
+// @tier: 0,1
+// @tags: array, slice, len, reference, tier-parity, regression
+// @timeout: 60000
+// @expected-exit: 0
+// @expected-stdout-begin
+// local=12
+// arr_ro=12 arr_rw=12
+// slice_full=12 slice_sub=12
+// list_slice=12
+// @expected-stdout-end
+//
+// T1269. An array knows its length where it is declared and forgets it
+// the moment it crosses a function boundary — at tier 1, and only there:
+//
+//                           tier 0   tier 1
+//     a.len()  (local)         12       12
+//     &[Byte; 12] parameter    12        0
+//     &mut [Byte; 12] param    12        0
+//     &[Byte] from the array   12        0
+//     &[Byte] from a List      12       12
+//
+// The last row is the control that names the axis: a `List`-backed slice
+// carries its count across the same boundary, so the AOT has the
+// machinery and the array-to-reference leg does not use it.
+//
+// WRITES ARE NOT AFFECTED, which is what makes this quiet. A function
+// taking `&mut [Byte; 12]` and looping to a LITERAL 12 fills the caller's
+// array correctly at both tiers. Only the COUNT arrives as zero — so a
+// loop bounded by `buf.len()` does nothing and reports success.
+//
+// WHAT IT COST. `core.security.token.generate_hex(16)` returned
+// `00000000000000000000000000000000` at tier 1 (T1267): the CSPRNG fill
+// is a loop over `buf.len()`. Four callers in security code — password
+// salt, two token forms, one-time passwords — all silently produced
+// all-zero output. The `List` sibling of the same function was correct
+// throughout, which is exactly the row above that stays 12.
+
+mount core.prelude.*;
+
+fn arr_ro(buf: &[Byte; 12]) -> Int { buf.len() }
+fn arr_rw(buf: &mut [Byte; 12]) -> Int { buf.len() }
+fn slice_ro(buf: &[Byte]) -> Int { buf.len() }
+fn slice_rw(buf: &mut [Byte]) -> Int { buf.len() }
+
+fn main() {
+    let mut a: [Byte; 12] = [0 as Byte; 12];
+    print(f"local={a.len()}");
+    print(f"arr_ro={arr_ro(&a)} arr_rw={arr_rw(&mut a)}");
+    print(f"slice_full={slice_ro(&a)} slice_sub={slice_rw(&mut a[..])}");
+
+    let l: List<Byte> = List.from_elem(0 as Byte, 12);
+    print(f"list_slice={slice_ro(&l[..])}");
+}
