@@ -61,11 +61,19 @@ REPO = Path(__file__).resolve().parents[2]
 DOCS = Path(os.environ.get("VERUM_STDLIB_DOCS")
             or (REPO.parent / "website" / "docs" / "stdlib"))
 RUN_DIRECTIVES = {"run", "run-interpreter"}
-BASELINE = 372  # Lowered by COVERAGE, never by argument — the only way
+BASELINE = 366  # Lowered by COVERAGE, never by argument — the only way
                 # this number is meant to move.
                 #   385 -> 378  vcs/specs/core/io/fs_operations_run.vr
                 #   378 -> 372  .../core/base/iterator_adapters_run.vr
                 #               .../core/simd/vec_lanes_run.vr
+                #   372 -> 366  .../core/random/rng_surface_run.vr
+                # The count had drifted UP to 380 first, and not through
+                # anyone's fault: the stdlib reference's random section was
+                # corrected twice on 2026-09-08 (methods on the wrong
+                # receiver; nine entries that are free functions, not `Rng`
+                # methods), and a correction that names REAL methods adds
+                # them to the documented set. The ratchet's rule held — the
+                # answer was coverage, not a raised baseline.
 
 BLOCK = re.compile(r"```verum\n(.*?)```", re.S)
 CALL = re.compile(r"\.([a-z_][a-z0-9_]*)\s*\(")

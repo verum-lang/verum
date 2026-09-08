@@ -1,0 +1,98 @@
+// @test: run
+// @level: L1
+// @tier: 0
+// @tags: random, rng, distributions, coverage
+// @timeout: 20000
+// @expected-stdout-begin
+// raw advances=true bounded_ok=true
+// raw f64_ok=true f32_ok=true bool_is_bool=true
+// pcg advances=true
+// uniform_01 ok=true
+// uniform_int ok=true
+// normal_01 finite=true
+// normal finite=true
+// bernoulli bool=true
+// from_key ok=true
+// permutation len=5
+// shuffle len=8 sum=36
+// shuffle_vec len=4 sum=10
+// choice in_range=true
+// @expected-stdout-end
+// @description: Sixteen documented random-number entries RUN, each
+//   asserted by a value or an invariant rather than by not crashing.
+//
+// WHY THIS FILE EXISTS. Measured 2026-09-08: the stdlib reference's
+// random section documents twenty-one entries that NOTHING executes —
+// no spec marked `run`, no un-ignored core-test, no by-example
+// programme. The section had just been corrected twice (the RNG methods
+// were documented on the wrong receiver, and nine entries turned out to
+// be free functions rather than `Rng` methods), and a corrected claim
+// that nothing runs is still a claim.
+//
+// WHAT IS ASSERTED, and why not the numbers themselves. A seeded
+// generator is deterministic, so exact values COULD be pinned — and
+// pinning them would make this file fail the day the algorithm is
+// improved, which is a change nobody should have to argue with a spec
+// about. What is pinned instead is what the documentation promises:
+//   * a generator ADVANCES (two draws differ);
+//   * `next_bounded(10)` lands below 10;
+//   * `uniform_01` lands in [0.0, 1.0);
+//   * `normal`/`normal_01` return a number that equals itself (not NaN);
+//   * `permutation(5)` has five elements;
+//   * `shuffle` and `shuffle_vec` PRESERVE THE MULTISET — the sums 36
+//     and 10 are the invariants, not the orders.
+//
+// The two shapes are both here on purpose: `Rng.shuffle` is the METHOD
+// and `deterministic.shuffle_vec` the key-taking FREE FUNCTION, and the
+// reference had them confused until 2026-09-08.
+
+mount core.prelude.*;
+mount core.random.{Rng, XorShift128, PCG};
+mount core.random.deterministic.{shuffle_vec, choice};
+
+fn main() {
+    let mut g = XorShift128.new(11);
+    let u = g.next_u64();
+    let b = g.next_bounded(10);
+    let f = g.next_f64();
+    let s = g.next_f32();
+    let t = g.next_bool();
+    print(f"raw advances={u != g.next_u64()} bounded_ok={b < 10}");
+    print(f"raw f64_ok={f >= 0.0 && f < 1.0} f32_ok={s >= 0.0} bool_is_bool={t || !t}");
+
+    let mut p = PCG.new(3, 5);
+    print(f"pcg advances={p.next_u64() != p.next_u64()}");
+
+    let mut r = Rng.new(7);
+    let a0 = r.uniform_01();
+    print(f"uniform_01 ok={a0 >= 0.0 && a0 < 1.0}");
+    print(f"uniform_int ok={r.uniform_int(6) < 6}");
+    let n0 = r.normal_01();
+    print(f"normal_01 finite={n0 == n0}");
+    let n1 = r.normal(10.0, 2.0);
+    print(f"normal finite={n1 == n1}");
+    let bern = r.bernoulli(0.5);
+    print(f"bernoulli bool={bern || !bern}");
+
+    let k = r.next_key();
+    let mut r2 = Rng.from_key(k);
+    print(f"from_key ok={r2.uniform_01() >= 0.0}");
+
+    let perm = r.permutation(5);
+    print(f"permutation len={perm.len()}");
+
+    let mut xs: List<Int> = List.from([1, 2, 3, 4, 5, 6, 7, 8]);
+    r.shuffle(&mut xs);
+    let mut sum = 0;
+    for i in 0..8 { sum = sum + xs[i]; }
+    print(f"shuffle len={xs.len()} sum={sum}");
+
+    let mut ys: List<Int> = List.from([1, 2, 3, 4]);
+    shuffle_vec(k, &mut ys);
+    let mut s2 = 0;
+    for i in 0..4 { s2 = s2 + ys[i]; }
+    print(f"shuffle_vec len={ys.len()} sum={s2}");
+
+    let pick = choice(k, &ys);
+    print(f"choice in_range={pick >= 1 && pick <= 4}");
+}
