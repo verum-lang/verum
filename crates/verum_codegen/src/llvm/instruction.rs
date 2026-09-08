@@ -38078,6 +38078,31 @@ fn lower_len<'ctx>(
     // Also check flow-sensitive override for registers reused between List and Text.
     let vbc_idx = ctx.current_vbc_instr_idx();
     if ctx.is_list_register(arr.0) || ctx.is_len_list_override(vbc_idx) {
+        // T1269 — A LIST-MARKED REGISTER MAY HOLD A SLICE CELL.
+        //
+        // A `[T; N]` PARAMETER is marked as a list (`vbc_lowering.rs`,
+        // `TypeRef::Array` arm) because the descriptor erases `&`; but a
+        // caller writing `&a` or `&a[..]` hands over a 24-byte cell
+        // `{data@0, len@8, elem@16}`. The hand-rolled select below reads
+        // BOTH @24 and @32 unconditionally — for a cell that is past the
+        // allocation — and then picks the list slot, so `&[Byte; 12]`
+        // answered 0 while its `&[Byte]` twin answered 12 from the same
+        // FatRef.
+        //
+        // `emit_container_view` is the ONE authority over exactly the
+        // three shapes this path hand-rolls two of, and it BRANCHES, so
+        // the object-side loads never execute on a cell. A real list is
+        // unaffected: its word 0 is an `ObjectHeader` type_id, far below
+        // the heap floor, so the cell arm cannot fire for it.
+        //
+        // `VERUM_NO_LEN_CELLVIEW` restores the hand-rolled select, so
+        // both polarities are reachable from one binary.
+        if std::env::var_os("VERUM_NO_LEN_CELLVIEW").is_none() {
+            let arr_ptr = as_ptr(ctx, ctx.get_register(arr.0)?, "listv_ptr")?;
+            let (_lv_data, lv_len, _lv_elem) = emit_container_view(ctx, arr_ptr, "lenlv")?;
+            ctx.set_register(dst.0, lv_len.into());
+            return Ok(());
+        }
         // PACK-HEADER-STAMP-1: `&[Byte]`-typed record fields get the
         // LIST register mark (byte-collection family), but the VALUE is
         // a slice Pack {ptr@24, len@32} produced by as_bytes — reading

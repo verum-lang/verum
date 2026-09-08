@@ -9,26 +9,37 @@
 // arr_ro=12 arr_rw=12
 // slice_full=12 slice_sub=12
 // list_slice=12
+// int_local=5 int_slice=5 int_whole=5
 // @expected-stdout-end
 //
-// T1269. An array knows its length where it is declared and forgets it
-// the moment it crosses a function boundary — at tier 1, and only there:
+// T1269. An array knew its length where it was declared and forgot it
+// the moment it crossed a function boundary — at tier 1, and only there:
 //
-//                           tier 0   tier 1
+//                           tier 0   tier 1 (before)
 //     a.len()  (local)         12       12
 //     &[Byte; 12] parameter    12        0
 //     &mut [Byte; 12] param    12        0
 //     &[Byte] from the array   12        0
 //     &[Byte] from a List      12       12
+//     [Int; 5].len() (local)    5        0
+//     &ai  (bare, typed)        5        1
 //
-// The last row is the control that names the axis: a `List`-backed slice
-// carries its count across the same boundary, so the AOT has the
-// machinery and the array-to-reference leg does not use it.
+// The `List` row is the control that names the axis: a `List`-backed
+// slice carries its count across the same boundary, so the machinery
+// exists and the array-to-reference leg did not use it.
 //
-// WRITES ARE NOT AFFECTED, which is what makes this quiet. A function
-// taking `&mut [Byte; 12]` and looping to a LITERAL 12 fills the caller's
-// array correctly at both tiers. Only the COUNT arrives as zero — so a
-// loop bounded by `buf.len()` does nothing and reports success.
+// WHY THE ARRAY CANNOT ANSWER FOR ITSELF. `[T; N]` allocates through
+// `verum_cbgr_allocate`, whose header sits BEHIND the returned pointer
+// and carries `{base_offset, total}` — not a type_id and not a length.
+// Every forward offset a probe might read (0, 24, 32) lands in the
+// array's own DATA. So `Len` on such a value is not a lookup that
+// happens to fail; there is nothing there to look up. N lives in the
+// TYPE, and the frontend is the only place it survives.
+//
+// WHAT MADE IT QUIET. Writes were never affected: a function taking
+// `&mut [Byte; 12]` and looping to a LITERAL 12 filled the caller's
+// array correctly at both tiers. Only the COUNT arrived as zero — so a
+// loop bounded by `buf.len()` did nothing and reported success.
 //
 // WHAT IT COST. `core.security.token.generate_hex(16)` returned
 // `00000000000000000000000000000000` at tier 1 (T1267): the CSPRNG fill
@@ -37,11 +48,11 @@
 // all-zero output. The `List` sibling of the same function was correct
 // throughout, which is exactly the row above that stays 12.
 //
-// THIS SPEC IS RED AT TIER 1 TODAY. It is a guard written ahead of its
-// fix, the same shape `context-method-return-keeps-its-type.vr` had for
-// T1210: it states the property in the form the fix has to satisfy, so
-// the day it goes green is measured rather than announced. Read a
-// failure here as T1269 still open, not as a fresh regression.
+// THE CONTROL THAT NAMED THE LINK. In one binary, before the fix,
+// `slice_ro(&a[0..12])` answered 12 while `slice_ro(&a[..])` answered 0.
+// Literal bounds emit no `Len` at all, so the callee side was never at
+// fault: the zero was manufactured at the caller and travelled INTO the
+// FatRef as its length.
 
 mount core.prelude.*;
 
@@ -49,6 +60,7 @@ fn arr_ro(buf: &[Byte; 12]) -> Int { buf.len() }
 fn arr_rw(buf: &mut [Byte; 12]) -> Int { buf.len() }
 fn slice_ro(buf: &[Byte]) -> Int { buf.len() }
 fn slice_rw(buf: &mut [Byte]) -> Int { buf.len() }
+fn int_ro(buf: &[Int]) -> Int { buf.len() }
 
 fn main() {
     let mut a: [Byte; 12] = [0 as Byte; 12];
@@ -58,4 +70,9 @@ fn main() {
 
     let l: List<Byte> = List.from_elem(0 as Byte, 12);
     print(f"list_slice={slice_ro(&l[..])}");
+
+    // The typed half: a non-byte array lost its length the same way,
+    // and a BARE `&ai` did not unsize at all (it answered 1).
+    let ai: [Int; 5] = [0; 5];
+    print(f"int_local={ai.len()} int_slice={int_ro(&ai[..])} int_whole={int_ro(&ai)}");
 }

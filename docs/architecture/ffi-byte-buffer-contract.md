@@ -92,6 +92,32 @@ Two consequences, each one a measured defect rather than a caution:
   already reads zero — which is why the defect was invisible in the
   shape that uses it most, a zeroed scratch buffer (T1220).
 
+* **The frontend answer had to be given at EVERY site that asks, and
+  T1192 gave it at one.** `a.len()` folded to a constant; `&a[..]` did
+  not, and its omitted end still lowered to `Len { arr }` — the same
+  probe of the same headerless block, now feeding the FatRef's LENGTH.
+  So the count arrived as 0 inside every callee taking `&[Byte]`, which
+  is a correct read of a correctly built FatRef that was built with a
+  zero. Measured in one binary: `f(&a[0..12])` = 12 and `f(&a[..])` = 0,
+  literal bounds emitting no `Len` at all. The typed half was never
+  covered — `[Int; 5]` answered **0** even for a plain local `.len()`,
+  because only byte arrays recorded a count. T1269 records the count for
+  every `[T; N]`, including an array PARAMETER (`&[Byte; 12]`, whose N is
+  in its own declaration), and folds it at all six asking sites:
+  `.len()`, `is_empty()`, the free `len(x)`, `&a[..]`, `a[..]` and a bare
+  `&a`.
+* **A `[T; N]` PARAMETER is marked as a LIST register at Tier 1**
+  (`vbc_lowering.rs`, the `TypeRef::Array` arm — the descriptor erases
+  `&`), and a caller writing `&a` hands over a 24-byte slice cell
+  `{data@0, len@8, elem@16}`. The list arm of `lower_len` read `@24` and
+  `@32` — the second past a cell's allocation — so `&[Byte; 12]`
+  answered 0 while its `&[Byte]` twin answered 12 from the SAME FatRef.
+  That arm now goes through `emit_container_view`, the one authority
+  over {cell | stamped-pack | unstamped-list}, which branches rather
+  than selecting; a real list is unaffected because its word 0 is an
+  `ObjectHeader` type_id, far below the heap floor. `VERUM_NO_LEN_CELLVIEW`
+  restores the old select.
+
 Neither is a reason to prefer the NaN-boxed form: the packed form is
 still the only contiguous ABI bytes. It is a reason not to reason about
 a Tier-1 byte buffer from the interpreter's layout.
@@ -235,11 +261,18 @@ a raw array-object pointer. `recv_from(&mut buf)` (bare) works. Rust unsizes
 `recv_like(&mut buf)`/`dump(&buf)` print; stdlib `recv_from(&mut buf)` →
 `BARE_ROUNDTRIP_OK`; subslice forms + tcp `local_addr` unchanged.
 
-The gate is `get_typed_array_elem_size == Some(1)` (byte arrays) — the minimal
+The gate WAS `get_typed_array_elem_size == Some(1)` (byte arrays) — the minimal
 non-regressive blast radius. A `&arr as &unsafe Byte` cast is unaffected (it
-parses `&(arr as …)`, inner Cast not Path). FOLLOW-UP: broadening the gate to
-`Some(_)` so typed `[T; N]` arrays also unsize is a clean coherence extension,
-pending a check that typed arrays are tracked and their `&arr[..]` is verified.
+parses `&(arr as …)`, inner Cast not Path).
+
+**FOLLOW-UP DONE (T1269): the gate is now `Some(_)`, every `[T; N]`.** The
+narrow gate was itself producing a wrong answer, not merely declining to
+improve one: a bare `&ai` on a `[Int; 5]` did not unsize, so the callee got
+the array value and `buf.len()` answered **1** — a third wrong answer beside
+the 0 that `&ai[..]` gave. The stride is no longer assumed: it comes from the
+same `get_typed_array_elem_size` the range arm already trusted and travels as
+the fifth `RefSlice` operand. `VERUM_NO_TYPED_ARRAY_UNSIZE` restores the
+byte-only guard, so both polarities are reachable from one binary.
 
 A parallel coherence option: route `[0_u8; N]` (byte-literal `Repeat`)
 through `NewByteArray` so every byte buffer is packed regardless of

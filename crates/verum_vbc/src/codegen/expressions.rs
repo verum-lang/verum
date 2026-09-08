@@ -4775,6 +4775,34 @@ impl VbcCodegen {
     // ==================== Unary Operations ====================
 
     /// Compiles a unary operation.
+    /// The compile-time element count of a fixed-size array named by a
+    /// BARE PATH, or `None` for "not known here".
+    ///
+    /// T1269. The count is the only thing that survives: `[T; N]`
+    /// allocates headerless (`NewByteArray` 0x30 / `NewTypedArray`
+    /// 0x34), so at Tier 1 nothing reachable from the pointer can answer
+    /// "how long is this" and the `Len` opcode reads the array's own
+    /// data or past its allocation. Where this returns `Some(n)` the
+    /// caller must emit `LoadI n`; where it returns `None` it must fall
+    /// through to `Len` — the absence is not an answer, and zero is
+    /// never a legitimate return here.
+    ///
+    /// COVERAGE BOUNDARY, stated so it is not later read as
+    /// "that case does not arise": the tracking is keyed by NAME, so
+    /// `self.buf[..]` and `xs[i][..]` have no key and get `None`.
+    fn static_array_count(&self, expr: &Expr) -> Option<usize> {
+        let ExprKind::Path(path) = &expr.kind else {
+            return None;
+        };
+        if path.segments.len() != 1 {
+            return None;
+        }
+        let PathSegment::Name(ident) = &path.segments[0] else {
+            return None;
+        };
+        self.ctx.fixed_array_count(&ident.name)
+    }
+
     fn compile_unary(&mut self, op: UnOp, inner: &Expr) -> CodegenResult<Option<Reg>> {
         if std::env::var("VERUM_TRACE_UNARY_REF").is_ok()
             && matches!(op, UnOp::Ref | UnOp::RefMut)
@@ -5046,6 +5074,24 @@ impl VbcCodegen {
                     });
                     self.ctx.free_temp(one_reg);
                 }
+            } else if let Some(n) = self.static_array_count(arr_expr) {
+                // T1269 — `&a[..]` ON A FIXED-SIZE ARRAY MUST NOT ASK
+                // THE ARRAY HOW LONG IT IS.
+                //
+                // The omitted end used to lower to `Len { arr }`, which
+                // at Tier 1 probes a headerless allocation and answers
+                // 0; the zero then travelled INTO the FatRef as its
+                // length, so every `buf.len()` inside the callee — a
+                // correct read of a correct FatRef — returned 0 as well.
+                // Measured on `[Byte; 12]`: `ro_len(&a[0..12])` = 12 and
+                // `ro_len(&a[..])` = 0 in the same binary, which is the
+                // witness that the callee side was never at fault.
+                //
+                // N is part of the TYPE, so the literal is exact.
+                self.ctx.emit(Instruction::LoadI {
+                    dst: end_reg,
+                    value: n as i64,
+                });
             } else {
                 self.ctx.emit(Instruction::Len {
                     dst: end_reg,
@@ -5114,10 +5160,11 @@ impl VbcCodegen {
             return Ok(Some(dest));
         }
 
-        // SLICE-COERCE-ARR-1 (#24): `&arr` / `&mut arr` on a WHOLE byte-array
-        // variable unsizes to a slice — semantically `&arr[..]` — so it
-        // reaches an `&[Byte]` parameter (and its `.as_ptr()`/`.as_mut_ptr()`)
-        // as a `reserved=1` packed `FatRef`, NOT a raw array-object pointer.
+        // SLICE-COERCE-ARR-1 (#24): `&arr` / `&mut arr` on a WHOLE
+        // fixed-size-array variable unsizes to a slice — semantically
+        // `&arr[..]` — so it reaches an `&[T]` parameter (and its
+        // `.as_ptr()`/`.as_mut_ptr()`) as a packed `FatRef`, NOT a raw
+        // array-object pointer.
         //
         // Without this, a bare `recv_from(&mut buf)` handed the callee the
         // ObjectHeader base, so `buf.as_mut_ptr()` (Unslice) returned the
@@ -5126,45 +5173,73 @@ impl VbcCodegen {
         // `&[u8; N]` → `&[u8]`; Verum's bare-`&arr` lowering did not.
         //
         // The emitted sequence is byte-identical to the `&arr[..]` RefSlice
-        // arm above (start 0, len = `Len(arr)`), which is the witness that
-        // this lowering is correct (probe: `&buf[..]` yields the packed data
-        // pointer, bare `&buf` did not).  Gated to byte arrays
-        // (`get_typed_array_elem_size == Some(1)`) so only genuine `[Byte; N]`
-        // buffers change; every other `&x` keeps its existing lowering.  A
-        // `&arr as &unsafe Byte` cast parses as `&(arr as …)` (inner is a
-        // Cast, not a Path), so raw-pointer casts are unaffected.
+        // arm above (start 0, len = the declared N), which is the witness
+        // that this lowering is correct (probe: `&buf[..]` yields the packed
+        // data pointer, bare `&buf` did not).  Gated to variables the
+        // frontend TRACKS as fixed-size arrays (`get_typed_array_elem_size`
+        // answers), so only genuine `[T; N]` buffers change; every other
+        // `&x` keeps its existing lowering.  A `&arr as &unsafe Byte` cast
+        // parses as `&(arr as …)` (inner is a Cast, not a Path), so
+        // raw-pointer casts are unaffected.
+        // T1269 WIDENED THIS ARM FROM `[Byte; N]` TO EVERY `[T; N]`.
+        // A bare `&ai` on a `[Int; 5]` did NOT unsize, so the callee got
+        // the array value rather than a FatRef and `buf.len()` answered
+        // **1** — a third wrong answer next to the 0 of `&ai[..]`. The
+        // stride is no longer assumed to be one: it comes from the same
+        // `get_typed_array_elem_size` the range arm already trusts, and
+        // travels as the fifth operand.
+        //
+        // `VERUM_NO_TYPED_ARRAY_UNSIZE` restores the byte-only guard, so
+        // both polarities are reachable from one binary.
+        let unsize_stride_floor: usize =
+            if std::env::var_os("VERUM_NO_TYPED_ARRAY_UNSIZE").is_some() {
+                1
+            } else {
+                usize::MAX
+            };
         if matches!(op, UnOp::Ref | UnOp::RefMut)
             && let ExprKind::Path(path) = &inner.kind
             && path.segments.len() == 1
             && let PathSegment::Name(ident) = &path.segments[0]
-            && self.ctx.get_typed_array_elem_size(&ident.name) == Some(1)
+            && let Some(elem_sz) = self.ctx.get_typed_array_elem_size(&ident.name)
+            && (elem_sz == 1 || unsize_stride_floor == usize::MAX)
         {
+            let static_n = self.ctx.fixed_array_count(&ident.name);
             let arr_reg = self
                 .compile_expr(inner)?
-                .or_internal("&arr: byte-array operand has no value")?;
+                .or_internal("&arr: array operand has no value")?;
             let start_reg = self.ctx.alloc_temp();
             self.ctx.emit(Instruction::LoadSmallI {
                 dst: start_reg,
                 value: 0,
             });
             let len_reg = self.ctx.alloc_temp();
-            self.ctx.emit(Instruction::Len {
-                dst: len_reg,
-                arr: arr_reg,
-                type_hint: 0,
-            });
+            if let Some(n) = static_n {
+                // T1269: the declared N, not a runtime probe of a
+                // headerless allocation — see `static_array_count`.
+                self.ctx.emit(Instruction::LoadI {
+                    dst: len_reg,
+                    value: n as i64,
+                });
+            } else {
+                self.ctx.emit(Instruction::Len {
+                    dst: len_reg,
+                    arr: arr_reg,
+                    type_hint: 0,
+                });
+            }
             let dest = self.ctx.alloc_temp();
             let mut operands = Vec::<u8>::with_capacity(8);
             Self::write_reg(&mut operands, dest.0);
             Self::write_reg(&mut operands, arr_reg.0);
             Self::write_reg(&mut operands, start_reg.0);
             Self::write_reg(&mut operands, len_reg.0);
-            // SLICE-STATIC-ELEM-1 (T1213): this arm's own guard is
-            // `get_typed_array_elem_size(..) == Some(1)`, so the stride
-            // is known to be one byte. Carried as a fifth operand so
-            // Tier 1 need not re-derive it by reading the array's own
-            // first word as a type_id.
-            Self::write_reg(&mut operands, 1);
+            // SLICE-STATIC-ELEM-1 (T1213): the stride the DECLARATION
+            // fixed, carried as a fifth operand so Tier 1 need not
+            // re-derive it by reading the array's own first word as a
+            // type_id. T1269: it is `elem_sz`, not the constant 1, now
+            // that the arm admits `[T; N]`.
+            Self::write_reg(&mut operands, elem_sz as u16);
             self.ctx.emit(Instruction::CbgrExtended {
                 sub_op: crate::instruction::CbgrSubOpcode::RefSlice as u8,
                 operands,
@@ -7298,6 +7373,18 @@ impl VbcCodegen {
                     // the WKT length type-hint (same as the `.len()` method
                     // path) instead of failing UndefinedFunction("len").
                     if func_name == "len" && args.len() == 1 {
+                        // T1269: the free-function spelling of `.len()`
+                        // folds on the same rule as the method one — a
+                        // fixed-size array's count lives only in the
+                        // frontend (see `static_array_count`).
+                        if let Some(n) = self.static_array_count(&args[0]) {
+                            let result = self.ctx.alloc_temp();
+                            self.ctx.emit(Instruction::LoadI {
+                                dst: result,
+                                value: n as i64,
+                            });
+                            return Ok(Some(result));
+                        }
                         let arg_reg = self
                             .compile_expr(&args[0])?
                             .or_internal("len() argument has no value")?;
@@ -13664,7 +13751,13 @@ impl VbcCodegen {
         // Handle built-in methods that map to dedicated opcodes
         // BUT only if the receiver doesn't have a user-defined method with the same name
         if method.name == "len" && args.is_empty() {
-            // T1192 — A PACKED `[Byte; N]` KNOWS ITS LENGTH ONLY HERE.
+            // T1192 — A PACKED `[T; N]` KNOWS ITS LENGTH ONLY HERE.
+            //
+            // T1269 widened this from `[Byte; N]` to every fixed-size
+            // array: `NewTypedArray` (0x34) allocates through the same
+            // headerless allocator as `NewByteArray` (0x30), so
+            // `[Int; 5]` answered **0** for `.len()` at Tier 1 by
+            // exactly the reasoning below, one opcode over.
             //
             // `[Byte; N]` lowers to `verum_cbgr_allocate(N)`, which
             // returns a HEADERLESS block: the pointer addresses the first
@@ -13697,7 +13790,7 @@ impl VbcCodegen {
             if let ExprKind::Path(path) = &receiver.kind
                 && path.segments.len() == 1
                 && let verum_ast::ty::PathSegment::Name(ident) = &path.segments[0]
-                && let Some(n) = self.ctx.byte_array_size(&ident.name)
+                && let Some(n) = self.ctx.fixed_array_count(&ident.name)
             {
                 let result = self.ctx.alloc_temp();
                 self.ctx.emit(Instruction::LoadI {
@@ -13943,11 +14036,23 @@ impl VbcCodegen {
             if !has_user_defined {
                 // slice.is_empty() -> slice.len() == 0
                 let len_result = self.ctx.alloc_temp();
-                self.ctx.emit(Instruction::Len {
-                    dst: len_result,
-                    arr: receiver_reg,
-                    type_hint: is_empty_type_hint,
-                });
+                if let Some(n) = self.static_array_count(receiver) {
+                    // T1269 — same fold as `.len()` one branch up. Left
+                    // out, `[Byte; 12].is_empty()` answered TRUE at Tier
+                    // 1: `Len` probes a headerless allocation, gets 0,
+                    // and 0 == 0. A guard written as `if buf.is_empty()
+                    // { return }` therefore returned.
+                    self.ctx.emit(Instruction::LoadI {
+                        dst: len_result,
+                        value: n as i64,
+                    });
+                } else {
+                    self.ctx.emit(Instruction::Len {
+                        dst: len_result,
+                        arr: receiver_reg,
+                        type_hint: is_empty_type_hint,
+                    });
+                }
                 // Emit a proper comparison with zero
                 let zero_reg = self.ctx.alloc_temp();
                 self.ctx.emit(Instruction::LoadI {
@@ -19728,7 +19833,7 @@ impl VbcCodegen {
                 // the outer array's length. The byte-array `let` path
                 // marks AFTER calling this, so forgetting here and
                 // re-recording there is the correct order.
-                self.ctx.forget_byte_array_size(&name.name);
+                self.ctx.forget_fixed_array_count(&name.name);
                 // When by_ref is true, the scrutinee is already a pointer to the value
                 // (from GetVariantDataRef). We bind this pointer directly - it acts as
                 // a mutable reference that can be dereferenced with * and written through.
@@ -23355,6 +23460,17 @@ impl VbcCodegen {
                     });
                     self.ctx.free_temp(one_reg);
                 }
+            } else if let Some(n) = self.static_array_count(base) {
+                // T1269 — the un-borrowed twin of the `&a[..]` arm in
+                // `compile_unary`. `Len` on a fixed-size array probes a
+                // headerless allocation and answers 0 at Tier 1; N is
+                // part of the TYPE, so the literal is exact. Kept in
+                // step with that arm deliberately: the two lowerings are
+                // meant to stay byte-identical.
+                self.ctx.emit(Instruction::LoadI {
+                    dst: end_reg,
+                    value: n as i64,
+                });
             } else {
                 self.ctx.emit(Instruction::Len {
                     dst: end_reg,

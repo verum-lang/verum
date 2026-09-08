@@ -812,7 +812,7 @@ impl VbcCodegen {
                     self.ctx.mark_byte_array_var(&name.name);
                     // T1192: the count as well as the fact.
                     self.ctx
-                        .set_byte_array_size(&name.name, byte_array_size);
+                        .set_fixed_array_count(&name.name, byte_array_size);
                 }
 
                 return Ok(None);
@@ -881,7 +881,7 @@ impl VbcCodegen {
                     self.ctx.mark_byte_array_var(&name.name);
                     // T1192: the count as well as the fact.
                     self.ctx
-                        .set_byte_array_size(&name.name, byte_array_size);
+                        .set_fixed_array_count(&name.name, byte_array_size);
                 }
 
                 return Ok(None);
@@ -950,7 +950,7 @@ impl VbcCodegen {
                     self.ctx.mark_byte_array_var(&name.name);
                     // T1192: the count as well as the fact.
                     self.ctx
-                        .set_byte_array_size(&name.name, byte_array_size);
+                        .set_fixed_array_count(&name.name, byte_array_size);
                 }
 
                 return Ok(None);
@@ -1140,6 +1140,12 @@ impl VbcCodegen {
             // index read can emit TypedArrayLoad with the 0x80 flag — T0356).
             if let verum_ast::PatternKind::Ident { name, .. } = &pattern.kind {
                 self.ctx.mark_typed_array_var(&name.name, elem_size, is_float);
+                // T1269: the COUNT as well, on the same footing as the
+                // byte-array path above. `NewTypedArray` allocates
+                // through the same headerless allocator, so `[Int; 5]`
+                // could not answer its own `.len()` at Tier 1 either —
+                // measured 0, with rc=0 and no diagnostic.
+                self.ctx.set_fixed_array_count(&name.name, count);
             }
 
             return Ok(None);
@@ -1493,7 +1499,7 @@ impl VbcCodegen {
         None
     }
 
-    fn detect_byte_array_type(&self, ty: Option<&verum_ast::Type>) -> Option<usize> {
+    pub(crate) fn detect_byte_array_type(&self, ty: Option<&verum_ast::Type>) -> Option<usize> {
         use verum_ast::literal::LiteralKind;
         use verum_ast::ty::{PathSegment, TypeKind};
 
@@ -1530,7 +1536,10 @@ impl VbcCodegen {
     /// threaded to `NewTypedArray` so the packed array is stamped with the
     /// float-typed heap `TypeId` (F64 / F32) and every access decodes
     /// coherently.
-    fn detect_typed_array_type(&self, ty: Option<&verum_ast::Type>) -> Option<(usize, usize, bool)> {
+    pub(crate) fn detect_typed_array_type(
+        &self,
+        ty: Option<&verum_ast::Type>,
+    ) -> Option<(usize, usize, bool)> {
         use verum_ast::literal::LiteralKind;
         use verum_ast::ty::{PathSegment, TypeKind};
 
