@@ -36,6 +36,12 @@
 // salt, two token forms, one-time passwords — all silently produced
 // all-zero output. The `List` sibling of the same function was correct
 // throughout, which is exactly the row above that stays 12.
+//
+// THIS SPEC IS RED AT TIER 1 TODAY. It is a guard written ahead of its
+// fix, the same shape `context-method-return-keeps-its-type.vr` had for
+// T1210: it states the property in the form the fix has to satisfy, so
+// the day it goes green is measured rather than announced. Read a
+// failure here as T1269 still open, not as a fresh regression.
 
 mount core.prelude.*;
 
