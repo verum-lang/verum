@@ -59,7 +59,20 @@ CORE = os.path.join(REPO, "core")
 # defects it found. The composition of the floor moved rather than shrank:
 # covering `src/pages/index.tsx` added `UartRegisters`, and one of A97's
 # original survivors is gone.
-BASELINE = 21
+BASELINE = 18  # 21 -> 18 on 2026-09-08: `MockResolver` left
+               # cookbook/dns.md (there is no mock resolver and
+               # `Resolver` is not a context), and `FileSigner` left
+               # cookbook/quic-server.md and tutorials/h3-service.md
+               # (no `sign.vr` module, and `CertSigner` has no
+               # implementation anywhere in core/).
+               #
+               # All 18 that remain are reader-owned example types —
+               # FakeDatabase, MyError, MemoryFs, AiClient,
+               # RecordingLogger, UartRegisters and the like. That is
+               # the floor A97 describes, and it does not come down by
+               # editing pages: it comes down only if an example stops
+               # inventing a type, which usually makes the example
+               # worse.
 
 BLOCK = re.compile(r"^```verum(?:[ \t][^\n]*)?\n(.*?)^```", re.M | re.S)
 DECL = re.compile(
