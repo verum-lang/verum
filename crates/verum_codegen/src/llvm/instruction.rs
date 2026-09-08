@@ -36813,6 +36813,49 @@ fn lower_ctx_get<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, dst: Reg, ctx_type: 
     let value = runtime.lower_ctx_get(ctx.builder(), &module, slot)?;
     ctx.set_register(dst.0, value.into());
 
+    // **T1210** — stamp the CONTEXT TYPE on the destination.
+    //
+    // This arm used to store the value and say nothing about it, so the
+    // register that a following `CallM` uses as its receiver had no type at
+    // all: `Database.query` could not resolve, `resolved_return_type` came
+    // back `None`, and the `Text` it returns reached `ToString` unmarked and
+    // printed as its pointer. The same value RETURNED from the enclosing
+    // function printed correctly, because that path is stamped from the
+    // function's own return type — one value, two paths to the formatter,
+    // and only one of them typed.
+    //
+    // The context TYPE is the right name even though the runtime value is
+    // the provided implementation: the method SIGNATURES are declared on the
+    // context (`context Database { async fn query(sql: Text) -> Text; }`), so
+    // it is what resolves the return type. Dispatch stays dynamic; only the
+    // static return type is being recovered here.
+    if std::env::var_os("VERUM_NO_CTXGET_TYPE_STAMP").is_none() {
+        // `ctx_type` is a STRING id, not a type id. VBC codegen emits
+        // `CtxGet { ctx_type: self.intern_string(&ctx_name) }`
+        // (codegen/expressions.rs and codegen/mod.rs, both sites), so the
+        // name lives in the STRING table. Looking it up as a `TypeId` — which
+        // is what this row's own diagnosis proposed — returns `None` on every
+        // context in the module, and the edit measures as a no-op: two
+        // polarities of a kill switch printed the same address, differing
+        // only by ASLR.
+        let ctx_name = ctx
+            .vbc_module()
+            .and_then(|m| m.get_string(StringId(ctx_type)).map(|s| s.to_string()));
+        if std::env::var_os("VERUM_TRACE_CTXGET").is_some() {
+            eprintln!("[ctxget] dst=r{} ctx_type={ctx_type} name={ctx_name:?}", dst.0);
+        }
+        if let Some(name) = ctx_name {
+            // BOTH stamps, because the two are read by different consumers and
+            // only the second one feeds method resolution. Measured: with
+            // `set_obj_register_type` alone the spec did not move a character —
+            // `lower_call_method` builds `receiver_type_name` from the sticky
+            // hint (priority 0) and `reg_types`, not from the obj-type map,
+            // which the Channel special case a thousand lines earlier does use.
+            ctx.set_obj_register_type(dst.0, name.clone());
+            ctx.set_sticky_type_hint(dst.0, name);
+        }
+    }
+
     Ok(())
 }
 
@@ -39090,7 +39133,16 @@ fn callee_yields_ref_payload(ctx: &FunctionContext<'_, '_>, receiver: Reg, metho
     };
     let method_name = match m.get_string(StringId(method_id)) {
         Some(n) if !n.is_empty() => n.to_string(),
-        _ => return false,
+        _ => {
+            // An instrument that cannot find its input has to SAY so. This
+            // early return used to be silent, and a call whose method id
+            // resolved to no string simply did not appear in the trace — which
+            // reads as "that call site was never lowered".
+            if std::env::var_os("VERUM_TRACE_REFPAYLOAD").is_some() {
+                eprintln!("[refpay] method_id={method_id} resolves to NO NAME, recv=r{}", receiver.0);
+            }
+            return false;
+        }
     };
     let bare = method_name
         .rsplit('.')
