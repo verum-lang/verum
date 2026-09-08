@@ -54,12 +54,21 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 DOCS = Path(os.environ.get("VERUM_STDLIB_DOCS") or (REPO.parent / "website" / "docs"))
 CORE = REPO / "core"
-BASELINE = 83  # Lowered by FIXING, never by argument.
+BASELINE = 72  # Lowered by FIXING, never by argument.
                 #   118 -> 114  the Postgres/MySQL config builders
                 #               (with_host, with_port, with_user,
                 #                with_database, with_password_from_env)
                 #   114 -> 111  H3Response.with_body, OpenOptions.open_async,
                 #               ServerOptions.with_cert_pem/with_key_pem
+                #    83 ->  72  eight pages: the shell command DSLs (sum
+                #               types, not builders, and they do not run),
+                #               List.group_by vs into_group_map*,
+                #               recv_with_timeout and `buf.as_unsafe()`,
+                #               Text.url_encode/url_decode, byte_stream/
+                #               utf8_chunks/after_at, and the QUIC/H3 TLS
+                #               half — parse_cert_chain_pem and FileSigner
+                #               are declared nowhere and CertSigner has no
+                #               implementation at all.
                 #    93 ->  83  NOT a fix: the census stopped counting
                 #               names it found in COMMENTS inside the
                 #               blocks. Eleven of them, and every one was
