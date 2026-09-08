@@ -61,12 +61,19 @@ REPO = Path(__file__).resolve().parents[2]
 DOCS = Path(os.environ.get("VERUM_STDLIB_DOCS")
             or (REPO.parent / "website" / "docs" / "stdlib"))
 RUN_DIRECTIVES = {"run", "run-interpreter"}
-BASELINE = 366  # Lowered by COVERAGE, never by argument — the only way
+BASELINE = 341  # Lowered by COVERAGE, never by argument — the only way
                 # this number is meant to move.
                 #   385 -> 378  vcs/specs/core/io/fs_operations_run.vr
                 #   378 -> 372  .../core/base/iterator_adapters_run.vr
                 #               .../core/simd/vec_lanes_run.vr
                 #   372 -> 366  .../core/random/rng_surface_run.vr
+                #   366 -> 341  .../core/term/widget_builders_run.vr
+                # The term page rose to 373 first, the same way and for
+                # the same reason: correcting it against the `implement`
+                # blocks replaced four names declared NOWHERE
+                # (Table.widths, DialogButton.primary, Menu.orientation,
+                # Scrollbar.new) with real ones, and real names count.
+                # 82 of its 132 methods ran nothing; 51 do now.
                 # The count had drifted UP to 380 first, and not through
                 # anyone's fault: the stdlib reference's random section was
                 # corrected twice on 2026-09-08 (methods on the wrong

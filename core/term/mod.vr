@@ -9,9 +9,16 @@
 // 7-layer architecture from raw termios to full TUI application framework:
 //
 
-// Layer 6: Application Framework (App, Screen, Router, CommandPalette)
+// Layer 6: Application Framework (Model, run, Command, Subscription,
+//          prompts, OSC 133 semantic zones)
+//          `App`, `Screen`, `Router` and `CommandPalette` are NOT
+//          shipped: this comment listed them, `website:docs/stdlib/term.md`
+//          copied the list, and readers were sent after a `router.route(…)`
+//          builder that is declared nowhere. What Layer 6 exports is
+//          `core/term/app/mod.vr` and nothing besides.
 // Layer 5: Widget Library (Paragraph, Table, List, Tabs, Input, etc.)
-// Layer 4: Layout Engine (Rect, Constraint, Flex, Grid)
+// Layer 4: Layout Engine (Rect, LayoutConstraint, TermLayout, Flex,
+//          FlexLayout, GridLayout)
 // Layer 3: Rendering Engine (Cell, Buffer, Frame, Viewport)
 // Layer 2: Style & Color (Color, Rgb, Hsl, Style, Theme)
 // Layer 1: Event System (Event, KeyEvent, MouseEvent, EventStream)

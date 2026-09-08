@@ -1,0 +1,158 @@
+// @test: run
+// @level: L1
+// @tier: 0
+// @tags: term, widget, builder, coverage
+// @timeout: 120000
+// @expected-stdout-begin
+// block bits=15 pad_top=1
+// paragraph lines=2
+// line spans=2 width=3
+// table rows=1 widths=2 gap=3
+// menu items=3
+// gauge ratio=0.5
+// gauge pct-ratio=0.25
+// tabs selected=1 count=3
+// dialog body=1 buttons=2 pct=40
+// sparkline data=3 max=Some(9)
+// barchart groups=1 w=3
+// textarea numbers=true tab=4
+// notification width=40
+// scrollbar v=Vertical h=Horizontal
+// canvas bounds=(0.0, 100.0) shapes=1
+// spinner built
+// list items=2
+// term-builders-ok
+// @expected-stdout-end
+// @description: The Layer-5 widget BUILDERS run, each asserted by a
+//   value the builder actually stored.
+//
+// WHY THIS FILE EXISTS. Measured 2026-09-08: 82 of the 132 methods the
+// `core.term` reference page documents were called by nothing that
+// runs — no spec marked `run`, no un-ignored core-test, no by-example
+// programme. The page had drifted accordingly: `Table.widths`,
+// `DialogButton.primary`, `Menu.orientation` and `Scrollbar.new` were
+// documented and are declared nowhere, `Spinner.frames` and
+// `Notification.new` named the wrong shape, and three of five widget
+// STATE records had wrong field names. Correcting the page against the
+// `implement` blocks is one thing; keeping it correct needs the
+// builders to be exercised, which is this file.
+//
+// Each printed value is chosen so a plausible wrong implementation
+// prints something different:
+//
+//   block        bits=15 is `Borders.ALL` as a BIT SET — a sum-type
+//                reading would not have a `bits` at all, and a wrong
+//                constant would print 1, 2, 4 or 8.
+//   line         width=3 over spans "xy" and "z" — the sum, so a
+//                width that measured only the first span prints 2.
+//   table        widths=2 is the load-bearing one: the widths are a
+//                CONSTRUCTOR argument, and an implementation that
+//                dropped them (as a `.widths(…)` builder would have
+//                to) prints 0.
+//   menu         items=3 counts the separator, which `is_selectable`
+//                excludes — an implementation filtering separators
+//                out at construction prints 2.
+//   gauge        the SAME field read twice: `.ratio(0.5)` and
+//                `.percent(25)` must land in one place, 0.5 and 0.25.
+//                Two fields would print 0.5 and 25.
+//   dialog       body=1 with `Dialog.new(body)` — the body is a
+//                constructor argument that becomes ONE `Line`; and
+//                buttons=2 is the explicit pair, not the OK/Cancel
+//                default that `new` installs, so it proves `.buttons`
+//                REPLACED rather than appended (4 would mean append).
+//   scrollbar    Vertical/Horizontal come from two CONSTRUCTORS —
+//                there is no `Scrollbar.new(orientation)`.
+//   canvas       bounds print as the pair `x_bounds` stored from two
+//                Floats; shapes=1 proves `.paint` takes a Shape and
+//                accumulates rather than replacing.
+//
+// NOT asserted, deliberately: `Spinner`'s fields. Reading them hits
+// the by-name field fallback (`[field-guess] 'frames' has 36
+// position-disagreeing candidates`, FIELD-ACCESS-BYNAME-1) and answers
+// from another type's record. A value that comes from a guess is worse
+// evidence than none, so the line says only that the builder ran.
+//
+// NOT covered here: RENDERING. `Buffer.new` fills its cells with a
+// `Style` that holds one of its five fields, so `Block.render` panics
+// inside `Style.patch` before drawing anything (T1271). When that is
+// fixed, the render half belongs in a sibling file that asserts on
+// `Buffer.to_lines()`.
+mount core.term.widget.{Block, Borders, BorderType, Paragraph, Line, TextSpan,
+                        Wrap, Alignment, Table, TableRow, TableCell,
+                        HighlightSpacing, Menu, MenuItem, Scrollbar, Canvas,
+                        Spinner, Notification, TermGauge, TextInput, TextArea,
+                        WrapMode, Sparkline, BarChart, BarGroup, Bar, Tabs,
+                        SelectableList, Dialog, DialogButton, DialogState};
+mount core.term.widget.canvas.{LineShape, Marker};
+mount core.term.layout.{Margin, LayoutConstraint};
+mount core.term.style.{Style, Color};
+
+fn main() {
+    let b = Block.new().title("T").title_alignment(Alignment.Center)
+        .borders(Borders.ALL).border_type(BorderType.Rounded)
+        .border_style(Style.new().fg(Color.Cyan)).padding(Margin.uniform(1));
+    print(f"block bits={b.borders.bits} pad_top={b.padding.top}");
+
+    let p = Paragraph.new().text([Line.raw("a"), Line.styled("b", Style.new().bold())])
+        .wrap(Wrap.WordWrap).alignment(Alignment.Left).scroll((0, 2));
+    print(f"paragraph lines={p.text.len()}");
+
+    let l = Line.from([TextSpan.raw("xy"), TextSpan.styled("z", Style.new().dim())]);
+    print(f"line spans={l.spans.len()} width={l.width()}");
+
+    let t = Table.new([TableRow.new(["a", "b"])],
+                      [LayoutConstraint.Length(8), LayoutConstraint.Fill(1)])
+        .header(TableRow.new(["id", "name"])).column_spacing(3)
+        .highlight_spacing(HighlightSpacing.WhenSelected);
+    print(f"table rows={t.rows.len()} widths={t.widths.len()} gap={t.column_spacing}");
+
+    let m = Menu.new([MenuItem.new("New").shortcut("Ctrl+N"),
+                      MenuItem.separator(),
+                      MenuItem.new("Export").submenu([MenuItem.new("JSON")])]);
+    print(f"menu items={m.items.len()}");
+
+    let g = TermGauge.new().ratio(0.5).label_text("50%").use_unicode(true);
+    print(f"gauge ratio={g.ratio}");
+    let g2 = TermGauge.new().percent(25);
+    print(f"gauge pct-ratio={g2.ratio}");
+
+    let tb = Tabs.new(["a", "b", "c"]).select(1).divider("|").padding(2, 2);
+    print(f"tabs selected={tb.selected} count={tb.titles.len()}");
+
+    let d = Dialog.new("body").title("T").width_percent(40)
+        .buttons([DialogButton.new("Cancel"), DialogButton.new("Delete")]);
+    print(f"dialog body={d.body.len()} buttons={d.buttons.len()} pct={d.width_percent}");
+
+    let sp = Sparkline.new([1.0, 2.0, 3.0]).max(9.0).bar_style(Style.new().bold());
+    print(f"sparkline data={sp.data.len()} max={sp.max}");
+
+    let bc = BarChart.new([BarGroup.new([Bar.new(3.0).label("mon")])])
+        .bar_width(3).bar_gap(1).group_gap(2);
+    print(f"barchart groups={bc.groups.len()} w={bc.bar_width}");
+
+    let ti = TextInput.new().placeholder("t").mask('*');
+    let ta = TextArea.new().line_numbers(true).wrap(WrapMode.NoWrap).tab_width(4);
+    print(f"textarea numbers={ta.show_line_numbers} tab={ta.tab_width}");
+
+    let n = Notification.warning("w").title("s").width(40);
+    print(f"notification width={n.width}");
+
+    let sb = Scrollbar.vertical().thumb_style(Style.new().dim())
+        .thumb_symbol("#").no_arrows();
+    let sh = Scrollbar.horizontal();
+    print(f"scrollbar v={sb.orientation} h={sh.orientation}");
+
+    let c = Canvas.new().x_bounds(0.0, 100.0).y_bounds(0.0, 50.0)
+        .marker(Marker.Braille)
+        .paint(Heap.new(LineShape.new(0.0, 0.0, 5.0, 5.0, Color.Red)));
+    print(f"canvas bounds={c.x_bounds} shapes={c.shapes.len()}");
+
+    let spn = Spinner.dots().label_text("w").style(Style.new().bold());
+    print("spinner built");
+
+    let sl = SelectableList.new([Line.raw("f1"), Line.raw("f2")])
+        .highlight_symbol("> ");
+    print(f"list items={sl.items.len()}");
+
+    print("term-builders-ok");
+}
