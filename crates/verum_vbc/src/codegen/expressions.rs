@@ -26522,8 +26522,10 @@ impl VbcCodegen {
     /// "method 'from_iter' has no compiled candidate" is downstream of
     /// exactly that. Measured under `VERUM_TRACE_MONO`:
     ///
-    ///     [t0330] fn=9637 parent_tid=517 impl_k=1
-    ///             recv_name="Range" recv_tr=Concrete(TypeId(517))
+    /// ```text
+    /// [t0330] fn=9637 parent_tid=517 impl_k=1
+    ///         recv_name="Range" recv_tr=Concrete(TypeId(517))
+    /// ```
     ///
     /// `impl_k=1` against zero arguments in the name.
     ///
