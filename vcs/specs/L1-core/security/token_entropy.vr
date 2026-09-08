@@ -1,0 +1,104 @@
+// @test: run
+// @level: L1
+// @tier: 0,1
+// @tags: security, token, csprng, entropy, tier-parity, regression
+// @timeout: 120000
+// @expected-exit: 0
+// @expected-stdout-begin
+// preset changed=true nonzero=true
+// hex len=32 hexonly=true nonzero=true
+// hex differ=true
+// urlsafe len=22 nonzero=true
+// bytes len=24 nonzero=true
+// @expected-stdout-end
+//
+// T1267 / T1269. Every token this generator produced was ALL ZEROES,
+// and two calls returned the same value:
+//
+//     generate_hex(16)     -> 00000000000000000000000000000000  (twice)
+//     generate_urlsafe(16) -> AAAAAAAAAAAAAAAAAAAAAA
+//
+// TWO DEFECTS IN SERIES, one per tier, and each hid the other:
+//
+//   * Tier 0 — `fill_secure_array<const N: Int>(buf: &mut [Byte; N])`
+//     took its bound from `N`, which read as 0, so its first line
+//     (`if N == 0 { return; }`) returned before writing anything. The
+//     bound now comes from `buf.len()`. The `List` sibling
+//     `fill_secure(&mut List<Byte>)` — byte-identical logic over a
+//     length — was correct throughout, which is what named the axis.
+//
+//   * Tier 1 — `buf.len()` on a `[T; N]` behind a reference answered
+//     **0** (T1269), so the corrected loop ran zero times and reported
+//     success. A count, not a value: writes through the same reference
+//     always landed.
+//
+// WHY THIS IS A `run` SPEC AND NOT A KAT. The output is random by
+// construction, so every line here is an INVARIANT: the buffer changed
+// from its preset, the hex is 32 characters of [0-9a-f], two draws
+// differ, and nothing is all-zero. An all-zero token satisfies "length
+// 32" and "hex alphabet" — `nonzero` is the line that would have caught
+// the original defect on its own, and `differ` is the one that catches
+// a fixed seed.
+//
+// FOUR CALLERS IN SECURITY CODE depended on the broken fill: password
+// salt (`core/security/password_hash.vr`), two token forms
+// (`core/security/token.vr`) and one-time passwords
+// (`core/security/otp.vr`). The comment above one of them already
+// described this class believing it fixed — the migration to
+// `fill_secure_array` WAS the earlier fix, and its destination was a
+// no-op too.
+
+mount core.prelude.*;
+mount core.security.token.{generate_hex, generate_urlsafe, generate_bytes};
+mount core.random.secure.{fill_secure_array};
+
+fn is_hex_lower(t: &Text) -> Bool {
+    let mut ok: Bool = true;
+    for c in t.chars() {
+        let d: Bool = c >= '0' && c <= '9';
+        let l: Bool = c >= 'a' && c <= 'f';
+        if !(d || l) { ok = false; }
+    }
+    ok
+}
+
+fn text_nonzero(t: &Text) -> Bool {
+    let mut nz: Bool = false;
+    for c in t.chars() {
+        if c != '0' && c != 'A' { nz = true; }
+    }
+    nz
+}
+
+fn main() {
+    // The preset distinguishes "wrote zeros" from "wrote nothing":
+    // a buffer preset to 7 that comes back all 7s was never touched.
+    let mut p: [Byte; 16] = [7 as Byte; 16];
+    fill_secure_array(&mut p);
+    let mut changed: Bool = false;
+    let mut nonzero: Bool = false;
+    let mut i: Int = 0;
+    while i < 16 {
+        if p[i] != (7 as Byte) { changed = true; }
+        if p[i] != (0 as Byte) { nonzero = true; }
+        i = i + 1;
+    }
+    print(f"preset changed={changed} nonzero={nonzero}");
+
+    let a: Text = generate_hex(16);
+    let b: Text = generate_hex(16);
+    print(f"hex len={a.len()} hexonly={is_hex_lower(&a)} nonzero={text_nonzero(&a)}");
+    print(f"hex differ={a != b}");
+
+    let u: Text = generate_urlsafe(16);
+    print(f"urlsafe len={u.len()} nonzero={text_nonzero(&u)}");
+
+    let bs: List<Byte> = generate_bytes(24);
+    let mut bnz: Bool = false;
+    let mut j: Int = 0;
+    while j < bs.len() {
+        if bs[j] != (0 as Byte) { bnz = true; }
+        j = j + 1;
+    }
+    print(f"bytes len={bs.len()} nonzero={bnz}");
+}
