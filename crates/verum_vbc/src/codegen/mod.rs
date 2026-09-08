@@ -8716,7 +8716,12 @@ impl VbcCodegen {
                 ..Default::default()
             };
             carrier.protocols.push(impl_record);
-            self.types.push(carrier);
+            // Through the one door, so `type_index` stays warm — the
+            // comment on `push_type_descriptor` claims it is the ONLY
+            // `self.types.push` in the crate, and this site was the
+            // exception that made the claim false. `type_by_id` is
+            // defensive and degraded to a scan for exactly this carrier.
+            self.push_type_descriptor(carrier);
             return Ok(());
         }
 
@@ -9357,7 +9362,7 @@ impl VbcCodegen {
                             {
                                 let tid = self.type_name_to_id.get(ty_name.as_str()).copied();
                                 let has_desc = tid
-                                    .map(|t| self.types.iter().any(|d| d.id == t))
+                                    .map(|t| self.type_by_id(t).is_some())
                                     .unwrap_or(false);
                                 eprintln!(
                                     "[impl-attach] proto={} ty={} tid={:?} has_desc={}",
@@ -24495,7 +24500,7 @@ impl VbcCodegen {
         // (repeat archive merges) — nothing to do.
         if let Some(q) = qualified_key.as_deref()
             && let Some(&qid) = self.type_name_to_id.get(q)
-            && self.types.iter().any(|d| d.id == qid)
+            && self.type_by_id(qid).is_some()
         {
             return;
         }
@@ -24514,7 +24519,7 @@ impl VbcCodegen {
         let (new_id, owns_simple_key) =
             match self.type_name_to_id.get(&name_str).copied() {
                 Some(existing_id) => {
-                    if self.types.iter().any(|d| d.id == existing_id) {
+                    if self.type_by_id(existing_id).is_some() {
                         // Case (c): simple slot taken by another type.
                         match qualified_key.as_deref() {
                             Some(_) => (self.alloc_user_type_id(), false),
@@ -25005,7 +25010,7 @@ impl VbcCodegen {
             // Push the stub IF no descriptor for this id has been
             // pushed yet (first-wins, mirrors `import_archive_type`'s
             // existing discipline).
-            if !self.types.iter().any(|t| t.id == codegen_id) {
+            if self.type_by_id(codegen_id).is_none() {
                 let stub_name_id = crate::types::StringId(
                     self.ctx.intern_string_raw(&proto_name),
                 );
