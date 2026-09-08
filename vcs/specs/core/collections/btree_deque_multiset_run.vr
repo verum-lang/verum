@@ -1,0 +1,99 @@
+// @test: run
+// @level: L1
+// @tier: 0
+// @tags: collections, btree, deque, multiset, coverage
+// @timeout: 120000
+// @expected-stdout-begin
+// first=1
+// last=3
+// pop_first=1
+// pop_last=3
+// btree-left=1
+// deque head=2 tail=2
+// remainder=2
+// multiset distinct_len=2 card=3
+// multiset pairs=2
+// map for-loop seen=3 sum=6
+// @expected-stdout-end
+// @description: Nine documented collection methods RUN, each asserted by
+//   a value a plausible wrong implementation would not print.
+//
+// WHY THIS FILE EXISTS. Measured 2026-09-08: 27 of the 139 methods the
+// collections reference documents are called by nothing that executes.
+// Ten of those are the entry API, blocked by T1196. These are the rest
+// that a spec can reach today.
+//
+// Each line is chosen so a wrong answer differs:
+//
+//   btree      keys go in 2,1,3 and come out 1 then 3, so the ORDER is
+//              the assertion — an unsorted map prints 2 for `first`.
+//              `pop_first`/`pop_last` then remove those same two and
+//              `btree-left=1` proves both removed rather than one.
+//   deque      `front_mut`/`back_mut` write through the borrow before
+//              `split_off(2)` splits 4 elements into 2 and 2; a
+//              `split_off` that kept the tail would print 4 and 0.
+//              `chunks_exact_remainder(3)` over the 2 that remain is 2 —
+//              an implementation returning the CHUNKS rather than the
+//              remainder prints 0.
+//   multiset   distinct_len=2 and cardinality=3 from three insertions of
+//              two values: one number would not separate the two
+//              meanings, and `pairs=2` says `to_count_list` groups.
+//   map        `seen=3 sum=6` over a `for` loop, and the loop is here
+//              deliberately — `.count()` on the SAME iterator dies at
+//              `MapIter.next` (op 0x62), while the loop runs. Counting
+//              by hand pins the half that works instead of cementing
+//              the half that does not.
+//
+// NOT PINNED, deliberately, and each carries its own row:
+//
+//   Map.values_mut()          Null pointer dereference at
+//                             MapValuesMut.next (op 0x62) — T1196
+//   *.count() on a map-derived iterator
+//                             same opcode at MapIter.next, while `for`
+//                             over the same iterator works — T1196 note
+//   BloomFilter, CountMinSketch
+//                             [xmod-unresolved] cross-module call to
+//                             core.collections.bloom.hmac_sha256: the
+//                             callee's body is absent from the assembled
+//                             module — T1172's family
+//
+// A spec that recorded today's answer for any of those would cement it.
+mount core.collections.btree.{BTreeMap};
+mount core.collections.deque.{Deque};
+mount core.collections.map.{Map};
+mount core.collections.multiset.{Multiset};
+
+fn main() {
+    let mut b: BTreeMap<Int, Text> = BTreeMap.new();
+    b.insert(2, "two"); b.insert(1, "one"); b.insert(3, "three");
+    match b.first_key_value() { Maybe.Some((k, _)) => print(f"first={k}"), Maybe.None => print("first=none") }
+    match b.last_key_value()  { Maybe.Some((k, _)) => print(f"last={k}"),  Maybe.None => print("last=none") }
+    match b.pop_first() { Maybe.Some((k, _)) => print(f"pop_first={k}"), Maybe.None => print("pop_first=none") }
+    match b.pop_last()  { Maybe.Some((k, _)) => print(f"pop_last={k}"),  Maybe.None => print("pop_last=none") }
+    print(f"btree-left={b.len()}");
+
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(1); d.push_back(2); d.push_back(3); d.push_back(4);
+    match d.front_mut() { Maybe.Some(v) => { *v = 10; }, Maybe.None => {} }
+    match d.back_mut()  { Maybe.Some(v) => { *v = 40; }, Maybe.None => {} }
+    let tail = d.split_off(2);
+    print(f"deque head={d.len()} tail={tail.len()}");
+    print(f"remainder={d.chunks_exact_remainder(3).len()}");
+
+    let mut ms: Multiset<Text> = Multiset.new();
+    ms.insert("x"); ms.insert("x"); ms.insert("y");
+    print(f"multiset distinct_len={ms.distinct_len()} card={ms.cardinality()}");
+    print(f"multiset pairs={ms.to_count_list().len()}");
+
+    // The falsifier for the note above: a `for` loop over a map-derived
+    // iterator RUNS, while `.count()` on the same iterator dies at
+    // MapIter.next. Counting by hand keeps this spec green and pins the
+    // half that works.
+    let mut m: Map<Text, Int> = Map.new();
+    m.insert("a", 1); m.insert("b", 2); m.insert("c", 3);
+    let mut seen = 0;
+    let mut sum = 0;
+    for (_, v) in &m { seen = seen + 1; sum = sum + v; }
+    print(f"map for-loop seen={seen} sum={sum}");
+
+}
