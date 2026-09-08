@@ -4002,6 +4002,22 @@ pub fn lower_instruction<'ctx>(
             // (T1194's lesson, arriving here for the third time).
             if callee_yields_ref_payload(ctx, *receiver, *method_id) {
                 ctx.mark_maybe_ref_payload(dst.0);
+                // **T1261** — carry the ELEMENT type onto the `Maybe` as well.
+                // `.iter()` already stamps its result with `[Concrete(TEXT)]`
+                // and `GetVariantData` already propagates those args to the
+                // extracted payload; what was missing is this join, so the
+                // propagation had nothing to propagate and a peeled `&Text`
+                // reached the f-string as an unmarked pointer.
+                //
+                // One CONCRETE arg only: a `Map<K, V>` receiver carries two
+                // and its yielded item is a tuple, not a `K` — the same
+                // restriction the `iter`/`into_iter` stamping states.
+                let elem_args = ctx.get_generic_type_args(receiver.0).cloned().filter(|a| {
+                    a.len() == 1 && !matches!(a[0], TypeRef::Generic(_))
+                });
+                if let Some(args) = elem_args {
+                    ctx.set_generic_type_args(dst.0, args);
+                }
             }
             Ok(())
         }
@@ -5493,7 +5509,18 @@ pub fn lower_instruction<'ctx>(
                 // E.g., Maybe<List<List<Int>>> → extracted List gets [Instantiated{LIST,[INT]}]
                 // so that GetE and for-in can track nested element types.
                 if let Some(type_args) = ctx.get_generic_type_args(variant.0).cloned() {
-                    ctx.set_generic_type_args(dst.0, type_args);
+                    ctx.set_generic_type_args(dst.0, type_args.clone());
+                    // **T1261** — and for a payload this arm just PEELED, mark
+                    // from them. The args say `Text`, the register now holds a
+                    // real Text handle, and without the mark the f-string
+                    // emitter integer-formats a correct pointer (`alpha` came
+                    // out as 4301226128). Scoped to the peeled case on purpose:
+                    // every other extraction keeps exactly the marks it had.
+                    if payload_is_ref {
+                        if let Some(elem) = type_args.first().cloned() {
+                            mark_register_from_return_type(ctx, dst.0, &elem);
+                        }
+                    }
                 }
                 // T0241 RESULT-PAYLOAD-CLASSIFY: Maybe<Text> payloads are
                 // classified above, but Result<T,E> had no equivalent — the

@@ -13,6 +13,8 @@
 // byref=1
 // byref=2
 // byref=3
+// text=alpha
+// rec=7
 // @expected-stdout-end
 //
 // T1260. `ListIter<T>` declares `Item = &T`, so `xs.iter().next()` yields
@@ -40,7 +42,20 @@
 //          and green throughout, because `IterNext` already peels the
 //          slot for custom iterators. That cell is the control that
 //          says the fix belongs at the OTHER producer and not in the
-//          loop lowering.
+//          loop lowering;
+//   text   a `Text` element through the same binding (T1261). The load
+//          alone was not enough here: with the slot peeled the register
+//          held a real Text handle and the f-string still printed
+//          4301226128, because nothing had marked the register as text.
+//          One wrong number replacing another is the failure this cell
+//          exists to catch;
+//   rec    a record element, whose field access used to ABORT the
+//          binary ("field 'x' not found on receiver's runtime type") —
+//          the field was being looked for on a slot address. Formatting
+//          resolves statically from a register mark and field access
+//          resolves at runtime from the object header, which is why
+//          these two cells fail differently and had to be fixed by
+//          different means.
 //
 // The `byref` cell also refutes a plausible story: it stays green with
 // `VERUM_NO_ITER_EAGER_WALK=1`, so the eager-walk band-aid is not what
@@ -51,6 +66,8 @@
 // that peeled both would pass here while corrupting `iter_mut`.
 
 mount core.prelude.*;
+
+type Point is { x: Int, y: Int };
 
 fn main() {
     let xs = [1, 2, 3];
@@ -70,5 +87,17 @@ fn main() {
 
     for y in xs.iter() {
         print(f"byref={y}");
+    }
+
+    let words = ["alpha", "beta"];
+    match words.iter().next() {
+        Maybe.Some(w) => print(f"text={w}"),
+        Maybe.None => print("text=none"),
+    }
+
+    let pts = [Point { x: 7, y: 8 }, Point { x: 9, y: 10 }];
+    match pts.iter().next() {
+        Maybe.Some(p) => print(f"rec={p.x}"),
+        Maybe.None => print("rec=none"),
     }
 }

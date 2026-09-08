@@ -133,10 +133,15 @@ Scope, stated because guessing here is expensive:
 
 Regression guard:
 `vcs/specs/L0-critical/vbc/ref-payload-from-variant-loads-its-element.vr`.
-Its four cells separate the load from the mark on purpose: a
-`List<Point>` element now reaches `p.x` (which used to PANIC, not
-misprint), while a `List<Text>` element still prints as a number — the
-load is fixed, the register's text mark is a different row.
+Its six cells separate the load from the mark on purpose, because the
+two fail differently and needed different fixes: a `List<Point>` element
+reaches `p.x` (which used to ABORT the binary — the field was being
+looked for on a slot address), while a `List<Text>` element needed the
+element type carried onto the `Maybe` as well (T1261). With the slot
+peeled and no mark, the register held a correct Text handle and the
+f-string still printed `4301226128`: formatting resolves statically from
+a register mark, field access resolves at runtime from the object
+header.
 
 ---
 
