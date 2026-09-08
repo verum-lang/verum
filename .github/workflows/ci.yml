@@ -759,6 +759,11 @@ jobs:
           python3 scripts/ci/check_doc_methods_declared.py --min-pages 300
           python3 scripts/ci/check_doc_methods_exercised.py --self-test
           python3 scripts/ci/check_doc_methods_exercised.py --min-pages 30
+          # A page that declares a status must RENDER the same one. The
+          # 2026-09-07 sweep keyed on the component and so could not see
+          # a page that renders none.
+          python3 scripts/ci/check_doc_status_badge.py --self-test
+          python3 scripts/ci/check_doc_status_badge.py --min-pages 40
 
       # `check_doc_blocks_parse` has been in the tree for weeks as a
       # Makefile target with NO CI caller and no `--check` flag on the one
