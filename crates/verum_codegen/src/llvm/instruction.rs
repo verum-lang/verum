@@ -38999,16 +38999,42 @@ fn mark_call_result_from_retname<'ctx>(
     dst: u16,
     resolved_fn_name: &str,
 ) {
-    if ctx.get_obj_register_type(dst).is_some()
-        || ctx.is_text_register(dst)
-        || ctx.is_string_register(dst)
-        || ctx.is_list_register(dst)
-        || ctx.is_slice_register(dst)
-        || ctx.is_map_register(dst)
-        || ctx.is_set_register(dst)
-        || ctx.is_float_register(dst)
-        || ctx.is_bool_register(dst)
-    {
+    // THE GUARD REPORTS ITSELF. This early return used to be silent and
+    // sat BEFORE the trace below, so "already marked, nothing to do" and
+    // "this function was never called" produced the same evidence: no line
+    // at all. Three instruments in this file had that shape and all three
+    // misled a diagnosis in one session.
+    let already = if ctx.get_obj_register_type(dst).is_some() {
+        Some("obj_type")
+    } else if ctx.is_text_register(dst) {
+        Some("text")
+    } else if ctx.is_string_register(dst) {
+        Some("string")
+    } else if ctx.is_list_register(dst) {
+        Some("list")
+    } else if ctx.is_slice_register(dst) {
+        Some("slice")
+    } else if ctx.is_map_register(dst) {
+        Some("map")
+    } else if ctx.is_set_register(dst) {
+        Some("set")
+    } else if ctx.is_float_register(dst) {
+        Some("float")
+    } else if ctx.is_bool_register(dst) {
+        Some("bool")
+    } else {
+        None
+    };
+    if let Some(why) = already {
+        if std::env::var("VERUM_TRACE_RETMARK").is_ok() {
+            eprintln!(
+                "[retmark] in={} fn={} dst=r{} SKIPPED: already {}",
+                ctx.function_name().as_str(),
+                resolved_fn_name,
+                dst,
+                why
+            );
+        }
         return;
     }
     let found = ctx.vbc_module().and_then(|m| {
