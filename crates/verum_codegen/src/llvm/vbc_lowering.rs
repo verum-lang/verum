@@ -3506,9 +3506,33 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                 if let Ok(filter) = std::env::var("VERUM_TRACE_PARAMMARK")
                     && (filter == "1" || func_name.contains(&filter))
                 {
+                    // The declared spelling is printed WITH ITS RAW ID, and
+                    // the id is the part to trust.
+                    //
+                    // `TypeId(14)` means three different things — a raw
+                    // pointer (`&unsafe T`, deliberate), `USize` (which
+                    // aliases PTR), and "a name that did not resolve" — so a
+                    // census over the number alone counts all three as one.
+                    // `ParamDescriptor.type_name` (PARAMNAME-CARRY) looks like
+                    // the way to separate them, and READ HERE it does not
+                    // work. Measured: all three `fd: FileDesc` params of
+                    // `safe_write`/`safe_close`/`safe_fstat` resolve to
+                    // `clock_skew_sec`, and `buf: &[Byte]` to
+                    // `core.sys.file_ops`.
+                    //
+                    // What that shows is narrow and worth stating exactly: an
+                    // id carried in an ARCHIVE-imported descriptor does not
+                    // index the MERGED string table. It does not show the
+                    // carry is broken — `archive_ctx_loader` reads the same
+                    // field against the ARCHIVE's own table, which is where
+                    // the id belongs, and that path is untouched by this.
+                    //
+                    // So: sid= is evidence, spelling= is a lead, and a lead
+                    // read from the wrong table is not evidence at all.
+                    let declared = vbc_module.get_string(p.type_name).unwrap_or("");
                     eprintln!(
-                        "[parammark] {} p{} type_ref={:?}",
-                        func_name, i, p.type_ref
+                        "[parammark] {} p{} type_ref={:?} sid={} spelling={:?}",
+                        func_name, i, p.type_ref, p.type_name.0, declared
                     );
                 }
                 match &p.type_ref {
