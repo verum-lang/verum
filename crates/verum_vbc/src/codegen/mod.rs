@@ -2267,6 +2267,17 @@ impl VbcCodegen {
                 m.insert("Int8".to_string(), TypeId::I8);
                 m.insert("I8".to_string(), TypeId::I8);
                 m.insert("i8".to_string(), TypeId::I8);
+                // 128-bit: present in `TypeId` (I128 = 17, U128 = 18, T0272)
+                // and in the canonical registry's alias matrix
+                // (`("Int128", 128, …, &["I128", "i128"])`), and ABSENT here
+                // until now — the exact drift the comment above warns about.
+                // Measured (T1263): `[ptrfall] name=Int128 module=core.base`
+                // 180 times in one bake, plus 175 for `UInt128`, each landing
+                // on the `TypeId::PTR` unknown carrier because this table had
+                // no entry to find.
+                m.insert("Int128".to_string(), TypeId::I128);
+                m.insert("I128".to_string(), TypeId::I128);
+                m.insert("i128".to_string(), TypeId::I128);
                 m.insert("UInt".to_string(), TypeId::U64);
                 m.insert("UInt64".to_string(), TypeId::U64);
                 m.insert("U64".to_string(), TypeId::U64);
@@ -2277,6 +2288,9 @@ impl VbcCodegen {
                 m.insert("UInt16".to_string(), TypeId::U16);
                 m.insert("U16".to_string(), TypeId::U16);
                 m.insert("u16".to_string(), TypeId::U16);
+                m.insert("UInt128".to_string(), TypeId::U128);
+                m.insert("U128".to_string(), TypeId::U128);
+                m.insert("u128".to_string(), TypeId::U128);
                 m.insert("UInt8".to_string(), TypeId::U8);
                 m.insert("U8".to_string(), TypeId::U8);
                 m.insert("u8".to_string(), TypeId::U8);
@@ -17072,7 +17086,31 @@ impl VbcCodegen {
                 match self.get_well_known_type_id(&type_name) {
                     Some(type_id) => TypeRef::Concrete(type_id),
                     None => {
-                        // Truly unknown type — use PTR as generic carrier
+                        // Truly unknown type — use PTR as generic carrier.
+                        //
+                        // AND SAY WHICH NAME. `TypeId::PTR` is three facts at
+                        // once — a raw pointer, `USize` (it aliases PTR), and
+                        // "this name did not resolve" — so a descriptor
+                        // carrying it cannot be read backwards to the miss.
+                        // Measured (T1263): `safe_write(fd: FileDesc, …)`
+                        // records `Concrete(TypeId(14))` for a concrete,
+                        // named, non-generic parameter, and `fd.0` then
+                        // lowers as an object field read at +24 — address 25
+                        // for `FileDesc(1)`, a guaranteed SIGSEGV, which is
+                        // the root under T1192.
+                        //
+                        // Two indirect attempts to count the misses both
+                        // measured something else (a PTR census counts the
+                        // legitimate ones too; a `[typebind]` census reads 2
+                        // of the 9 sites that write the table). The name is
+                        // known HERE and nowhere else.
+                        if std::env::var("VERUM_TRACE_PTRFALL").is_ok() {
+                            eprintln!(
+                                "[ptrfall] name={type_name} module={} impl={}",
+                                self.config.module_name,
+                                self.ctx.current_impl_type_name.as_deref().unwrap_or("-")
+                            );
+                        }
                         TypeRef::Concrete(TypeId::PTR)
                     }
                 }
