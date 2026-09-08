@@ -745,6 +745,20 @@ jobs:
           python3 scripts/ci/check_doc_module_paths.py --self-test
           python3 scripts/ci/check_doc_module_paths.py --min-citations 200
           VERUM_DOCS_DIR=docs python3 scripts/ci/check_doc_module_paths.py --min-citations 40
+          # And two more that landed as Makefile targets with no caller —
+          # the third and fourth time on this axis, which is why the
+          # floors below are not optional. Both read only the website
+          # checkout; neither needs the binary.
+          #
+          #   declared  — a method a doc example CALLS should be declared
+          #               somewhere in core/. Reader-owned example helpers
+          #               are separated out and printed, not counted.
+          #   exercised — a method the stdlib reference DOCUMENTS should be
+          #               called by something that actually runs.
+          python3 scripts/ci/check_doc_methods_declared.py --self-test
+          python3 scripts/ci/check_doc_methods_declared.py --min-pages 300
+          python3 scripts/ci/check_doc_methods_exercised.py --self-test
+          python3 scripts/ci/check_doc_methods_exercised.py --min-pages 30
 
       # `check_doc_blocks_parse` has been in the tree for weeks as a
       # Makefile target with NO CI caller and no `--check` flag on the one

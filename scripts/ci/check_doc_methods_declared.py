@@ -52,7 +52,9 @@ import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
-DOCS = Path(os.environ.get("VERUM_STDLIB_DOCS") or (REPO.parent / "website" / "docs"))
+DOCS = Path(os.environ.get("VERUM_STDLIB_DOCS")
+            or os.environ.get("VERUM_DOCS_DIR")
+            or (REPO.parent / "website" / "docs"))
 CORE = REPO / "core"
 BASELINE = 59  # Lowered by FIXING, never by argument.
                 #   118 -> 114  the Postgres/MySQL config builders
@@ -205,7 +207,9 @@ def main() -> int:
     # absent API — it is teaching with an example type, and that is the
     # floor. Tracked separately so the debt number means one thing.
     self_declared: dict[str, set[str]] = {}
+    pages_scanned = 0
     for f in sorted(list(DOCS.rglob("*.md")) + list(DOCS.rglob("*.mdx"))):
+        pages_scanned += 1
         text = f.read_text(errors="ignore")
         blocks = [strip_comments(m.group(1)) for m in BLOCK.finditer(text)]
         page_decls: set[str] = set()
@@ -223,6 +227,20 @@ def main() -> int:
                    if n in self_declared and pages[n] <= self_declared[n])
     for n in floor:
         del pages[n]
+
+    # A FLOOR, for the reason this file's neighbours carry one: a gate
+    # whose input went missing prints the same clean line as a clean
+    # corpus. `--min-pages` turns "I found nothing" into a failure.
+    floor_pages = 0
+    for i, a in enumerate(sys.argv):
+        if a == "--min-pages" and i + 1 < len(sys.argv):
+            floor_pages = int(sys.argv[i + 1])
+    if pages_scanned < floor_pages:
+        print(f"check-doc-methods-declared: only {pages_scanned} page(s) "
+              f"scanned under {DOCS}, expected at least {floor_pages} — the "
+              "corpus is missing or the glob stopped matching. A census of "
+              "nothing is not a clean census.")
+        return 1
 
     total = len(pages)
     print(f"check-doc-methods-declared: {total} method name(s) called by a doc "

@@ -58,8 +58,12 @@ import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
+# `VERUM_DOCS_DIR` names the whole website `docs/`, which is what CI
+# checks out; this gate reads its `stdlib/` subtree.
+_DOCS_ROOT = os.environ.get("VERUM_DOCS_DIR")
 DOCS = Path(os.environ.get("VERUM_STDLIB_DOCS")
-            or (REPO.parent / "website" / "docs" / "stdlib"))
+            or (Path(_DOCS_ROOT) / "stdlib" if _DOCS_ROOT
+                else REPO.parent / "website" / "docs" / "stdlib"))
 RUN_DIRECTIVES = {"run", "run-interpreter"}
 BASELINE = 338  # Lowered by COVERAGE, never by argument — the only way
                 # this number is meant to move.
@@ -163,6 +167,24 @@ def main() -> int:
     if len(held) != len(known_broken):
         print("  CONTROL FAILED — the census says a known-broken method is "
               "covered, so its zeros mean nothing. Fix before reading counts.")
+        return 1
+
+    # A FLOOR, same reason as the sibling gates carry one: an input that
+    # went missing prints the same clean line as a clean corpus.
+    floor_pages = 0
+    for i, a in enumerate(sys.argv):
+        if a == "--min-pages" and i + 1 < len(sys.argv):
+            floor_pages = int(sys.argv[i + 1])
+    if len(rows) < floor_pages:
+        print(f"check-doc-methods-exercised: only {len(rows)} stdlib page(s) "
+              f"with documented methods under {DOCS}, expected at least "
+              f"{floor_pages} — the corpus is missing or the pattern stopped "
+              "matching. A census of nothing is not a clean census.")
+        return 1
+    if not files:
+        print("check-doc-methods-exercised: the EXECUTED corpus is empty — "
+              "no spec, core-test or by-example programme was found, so every "
+              "method would report unexercised. Refusing to report a count.")
         return 1
 
     print(f"check-doc-methods-exercised: {unexercised} of {total} documented "

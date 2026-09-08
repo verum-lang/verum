@@ -111,6 +111,8 @@ gates-docs: check-doc-examples check-examples-run check-homepage-examples check-
             check-doc-cli-flags check-doc-anchors check-doc-error-codes \
             check-grammar-docs-match check-by-example check-doc-blocks-parse \
             check-doc-names-exist check-doc-method-names \
+            check-doc-module-paths check-doc-config-structs \
+            check-doc-methods-declared check-doc-methods-exercised \
             check-doc-iterator-items ## Every documentation gate CI runs — needs a build
 	@echo "gates-docs: all documentation gates green"
 
