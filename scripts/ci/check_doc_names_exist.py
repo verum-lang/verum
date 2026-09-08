@@ -52,7 +52,14 @@ CORE = os.path.join(REPO, "core")
 
 # Every `(name, page)` pair the site carries today.  Lowering it is the work;
 # raising it means a doc started naming something the library does not have.
-BASELINE = 22
+#
+# 22 -> 21 on 2026-09-08: measured 21, and a ratchet standing one above its
+# own count is a ratchet that admits a twenty-second fictional name without
+# saying so — which is exactly the entry route A97 documents for all five
+# defects it found. The composition of the floor moved rather than shrank:
+# covering `src/pages/index.tsx` added `UartRegisters`, and one of A97's
+# original survivors is gone.
+BASELINE = 21
 
 BLOCK = re.compile(r"^```verum(?:[ \t][^\n]*)?\n(.*?)^```", re.M | re.S)
 DECL = re.compile(
