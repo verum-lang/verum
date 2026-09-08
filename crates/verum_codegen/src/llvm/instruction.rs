@@ -16047,7 +16047,46 @@ fn lower_call_method<'ctx>(
                     // either `Generic(_)` or its own `Concrete`/`Instantiated`
                     // type id (== the dispatched type id), so both spellings are
                     // recognised.
-                    if let Some((self_tid, first_fname)) = dispatch_entries.first() {
+                    // **T1210** — "the first entry is representative" holds for a
+                    // real protocol and NOT for the by-name probe that fills
+                    // this table when `protocols=0`. Measured on a context
+                    // method: `[dyn-dispatch] method='fetch' entries=8
+                    // (protocols=0, name_probe=8)` — eight unrelated types in
+                    // the module own a method named `fetch`, and their declared
+                    // returns have no reason to agree. Its sibling in the same
+                    // program shows the other pole: `method='tally' entries=1`,
+                    // one candidate, and that line of the spec was always right.
+                    //
+                    // So when the receiver's type IS known, take ITS entry. The
+                    // hint comes from `lower_ctx_get`, which stamps the
+                    // PROVIDER's type name — the whole point of that stamp.
+                    let recv_hint: Option<String> = ctx
+                        .sticky_type_hint(receiver.0)
+                        .map(|s| s.to_string())
+                        .or_else(|| ctx.get_obj_register_type(receiver.0).map(|s| s.to_string()));
+                    let chosen_entry = recv_hint
+                        .as_deref()
+                        .and_then(|hint| {
+                            let want = format!("{hint}.{method_name}");
+                            dispatch_entries.iter().find(|(_, fname)| {
+                                fname == &want
+                                    || fname.rsplit('.').next() == Some(method_name)
+                                        && fname
+                                            .strip_suffix(&format!(".{method_name}"))
+                                            .map(|p| p.rsplit('.').next().unwrap_or(p) == hint)
+                                            .unwrap_or(false)
+                            })
+                        })
+                        .or_else(|| dispatch_entries.first());
+                    if std::env::var_os("VERUM_TRACE_DYN").is_some() {
+                        eprintln!(
+                            "[dyn-dispatch] mark method='{method_name}' recv_hint={recv_hint:?} \
+                             entries={} chosen={:?}",
+                            dispatch_entries.len(),
+                            chosen_entry.map(|(_, f)| f.as_str()),
+                        );
+                    }
+                    if let Some((self_tid, first_fname)) = chosen_entry {
                         if let Some(ret_type) = vbc
                             .find_function_by_name(first_fname.as_str())
                             .and_then(|fid| vbc.get_function(fid))
@@ -36841,10 +36880,22 @@ fn lower_ctx_get<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, dst: Reg, ctx_type: 
         let ctx_name = ctx
             .vbc_module()
             .and_then(|m| m.get_string(StringId(ctx_type)).map(|s| s.to_string()));
+        // PREFER THE PROVIDER. The context name is what the register IS
+        // conceptually, but a context owns no function descriptors — dumped:
+        // `VERUM_DUMP_VBC="Db."` finds `FakeDb.fetch` and `FakeDb.tally` and
+        // no `Db.fetch` — so a `Db` receiver resolves no method and no return
+        // type, which is exactly the state this row was left in by the first
+        // half of the fix. The provider's descriptors DO exist and carry the
+        // declared `-> Text`. Dispatch is unaffected: this only decides which
+        // signature the caller reads.
+        let provider = ctx.ctx_provider_type(ctx_type);
         if std::env::var_os("VERUM_TRACE_CTXGET").is_some() {
-            eprintln!("[ctxget] dst=r{} ctx_type={ctx_type} name={ctx_name:?}", dst.0);
+            eprintln!(
+                "[ctxget] dst=r{} ctx_type={ctx_type} name={ctx_name:?} provider={provider:?}",
+                dst.0
+            );
         }
-        if let Some(name) = ctx_name {
+        if let Some(name) = provider.or(ctx_name) {
             // BOTH stamps, because the two are read by different consumers and
             // only the second one feeds method resolution. Measured: with
             // `set_obj_register_type` alone the spec did not move a character —

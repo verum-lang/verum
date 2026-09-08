@@ -420,6 +420,12 @@ pub struct FunctionContext<'a, 'ctx> {
     /// string-id), so every FunctionContext of the same module computes
     /// the SAME table with no shared mutable state.
     ctx_slot_map: Option<HashMap<u32, u32>>,
+    /// T1210 — `ctx_type` (a string id) → the TYPE NAME of the value that
+    /// `provide`s it, or `None` when the module provides it from more than
+    /// one type and the answer would be a guess. Built once per
+    /// FunctionContext from the whole module, because `provide` and the
+    /// matching `get` live in DIFFERENT functions.
+    ctx_provider_map: Option<HashMap<u32, Option<String>>>,
 
     /// Tracks which struct fields contain list values.
     /// Key: (obj_register, field_idx), Value: true if field holds a list.
@@ -874,6 +880,7 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
             pending_call_witness: None,
             ctx_provide_slots: Vec::new(),
             ctx_slot_map: None,
+            ctx_provider_map: None,
             struct_list_fields: HashMap::new(),
             struct_string_fields: HashMap::new(),
             obj_register_types: HashMap::new(),
@@ -984,6 +991,7 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
             pending_call_witness: None,
             ctx_provide_slots: Vec::new(),
             ctx_slot_map: None,
+            ctx_provider_map: None,
             struct_list_fields: HashMap::new(),
             struct_string_fields: HashMap::new(),
             obj_register_types: HashMap::new(),
@@ -2358,6 +2366,69 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
         Some(next)
     }
 
+    /// T1210 — the TYPE that provides this context, if the module names
+    /// exactly one.
+    ///
+    /// A context declares signatures and owns no function descriptors, so
+    /// `Db.fetch` resolves to nothing and its declared `-> Text` never
+    /// reaches Tier 1. The IMPLEMENTATION does have descriptors, and the
+    /// module says which one it is — at the `provide`, in another function:
+    ///
+    /// ```text
+    /// fn 'main'
+    ///   0: New         { dst: Reg(0), type_id: 4279 }      <- FakeDb
+    ///   3: Mov         { dst: Reg(2), src: Reg(0) }
+    ///   4: CtxProvide  { ctx_type: 43634, value: Reg(2) }
+    /// ```
+    ///
+    /// So the map is built by walking each `CtxProvide`'s value register back
+    /// to the `New` that made it. Dispatch stays dynamic — only the STATIC
+    /// return type is being recovered.
+    ///
+    /// TWO providers of one context answer `None`, not "the first one":
+    /// picking either would be a guess, and a wrong receiver type reads a
+    /// scalar as a heap pointer. Anything the walk cannot read answers `None`
+    /// for the same reason.
+    pub fn ctx_provider_type(&mut self, ctx_type: u32) -> Option<String> {
+        if self.ctx_provider_map.is_none() {
+            let mut map: HashMap<u32, Option<String>> = HashMap::new();
+            if let Some(m) = self.vbc_module {
+                for func in &m.functions {
+                    let Some(instrs) = &func.instructions else {
+                        continue;
+                    };
+                    for (i, ins) in instrs.iter().enumerate() {
+                        let verum_vbc::Instruction::CtxProvide {
+                            ctx_type: ct,
+                            value,
+                            ..
+                        } = ins
+                        else {
+                            continue;
+                        };
+                        let found = provider_type_name(m, instrs, i, value.0);
+                        match map.get(ct) {
+                            // Already the same answer, or already ambiguous.
+                            Some(prev) if *prev == found => {}
+                            Some(_) => {
+                                map.insert(*ct, None);
+                            }
+                            None => {
+                                map.insert(*ct, found);
+                            }
+                        }
+                    }
+                }
+            }
+            self.ctx_provider_map = Some(map);
+        }
+        self.ctx_provider_map
+            .as_ref()
+            .and_then(|m| m.get(&ctx_type))
+            .cloned()
+            .flatten()
+    }
+
     /// Register a reference in a register for escape tracking.
     ///
     /// Call this when creating a reference (Ref/RefMut instructions).
@@ -3439,4 +3510,51 @@ mod tests {
         assert_eq!(ReferenceSource::HeapLoad.as_str(), "heap_load");
         assert_eq!(ReferenceSource::LocalAlloca.as_str(), "local_alloca");
     }
+}
+
+/// T1210 — walk a `CtxProvide`'s value register back to the `New` that built
+/// it and name that type.
+///
+/// The arms say, for each instruction, whether it can define the register we
+/// are tracking; one this list does not know is a BARRIER and ends the walk
+/// with `None`. That asymmetry is deliberate and was learned the hard way on
+/// T1260: a walk whose unknown-instruction case is "keep going" can cross a
+/// definition it cannot see and name the wrong type, and a wrong receiver
+/// type reads a scalar as a heap pointer.
+fn provider_type_name(
+    m: &verum_vbc::VbcModule,
+    instrs: &[verum_vbc::Instruction],
+    provide_idx: usize,
+    value_reg: u16,
+) -> Option<String> {
+    use verum_vbc::Instruction as I;
+    let mut r = value_reg;
+    for prev in instrs[..provide_idx].iter().rev() {
+        match prev {
+            I::Mov { dst, src } if dst.0 == r => r = src.0,
+            I::New { dst, type_id, .. } if dst.0 == r => {
+                return m.get_type_name(verum_vbc::types::TypeId(*type_id));
+            }
+            I::MakeVariantTyped { dst, type_id, .. } if dst.0 == r => {
+                return m.get_type_name(verum_vbc::types::TypeId(*type_id));
+            }
+            // Known instructions that cannot define `r` here — walk on.
+            I::Mov { .. } | I::New { .. } | I::MakeVariantTyped { .. } => {}
+            I::LoadI { dst, .. } | I::LoadK { dst, .. } | I::LoadUnit { dst } if dst.0 != r => {}
+            I::SetF { .. } | I::SetVariantData { .. } | I::DropRef { .. } => {}
+            // A NEIGHBOURING `provide` is not a definition of anything. Two
+            // contexts provided in one function put a `CtxProvide` between the
+            // second one's value and the `New` that built it — measured on
+            // `docs/by-example/16-context-system`, where `Logger` (the first
+            // provide) resolved and `Database` (the second) did not, for no
+            // other reason than this barrier.
+            I::CtxProvide { .. }
+            | I::CtxEnd
+            | I::DebugPrint { .. }
+            | I::Jmp { .. }
+            | I::JmpNot { .. } => {}
+            _ => break,
+        }
+    }
+    None
 }
