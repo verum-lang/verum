@@ -4555,6 +4555,41 @@ impl VbcCodegen {
         }
     }
 
+    /// Export the simple names this module declares as TRANSPARENT
+    /// WRAPPERS (newtype / one-element tuple / quotient), so the stdlib
+    /// bootstrap can seed them into later modules' codegen.
+    ///
+    /// T1192 — the bake builds a fresh `VbcCodegen` per module, so this
+    /// cache starts empty each time and a newtype declared in another
+    /// module is invisible. Both sides of codegen then take the opaque
+    /// path (`New`+`SetF` to construct, `GetF` to read), which is
+    /// self-consistent inside the archive and INCOMPATIBLE with user
+    /// code, where the flag is recovered from the archive descriptor and
+    /// `x.0` compiles to an identity `Mov`. The analogue of
+    /// `export_type_layouts`'s D2b registry, for the transparency fact.
+    pub fn export_newtype_names(&self) -> std::collections::HashSet<String> {
+        self.ctx.newtype_names.clone()
+    }
+
+    /// Import transparent-wrapper names from a global registry built by
+    /// the stdlib bootstrap from previously-compiled modules.
+    /// **Additive**: this module's own `compile_type_decl` runs after the
+    /// seed and inserts its own declarations, so a local declaration is
+    /// never lost.
+    ///
+    /// The CALLER is responsible for excluding simple names declared by
+    /// more than one module — see `ambiguous_core_type_names` in
+    /// `pipeline.rs`. This cache is keyed on the simple name, and
+    /// `compile_type_decl`'s "a declaration takes its own name back"
+    /// removal is user-phase only, so during the bake nothing here would
+    /// undo a wrong seed. T1108 measured what that costs: two of five
+    /// consumers returned the receiver's address.
+    pub fn import_newtype_names(&mut self, names: &std::collections::HashSet<String>) {
+        for name in names {
+            self.ctx.newtype_names.insert(name.clone());
+        }
+    }
+
     /// Export this module's resolved type-alias map (`alias name → base
     /// type name`) into a global registry so a later module's codegen can
     /// resolve a cross-module alias used as a namespace — e.g.

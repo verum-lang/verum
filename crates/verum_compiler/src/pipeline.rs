@@ -953,6 +953,46 @@ pub struct CompilationPipeline<'s> {
     /// `global_type_layout_registry`.
     global_type_alias_registry: std::collections::HashMap<String, String>,
 
+    /// Simple names of TRANSPARENT-WRAPPER types (newtype `type X is T;`,
+    /// one-element tuple, quotient) declared by already-compiled core
+    /// modules, seeded into each later module's codegen
+    /// (`import_newtype_names`).  Mirrors `global_type_layout_registry`.
+    ///
+    /// T1192 — WHY THIS EXISTS.  The bake compiles one module per
+    /// DIRECTORY and builds a FRESH `VbcCodegen` for each, so
+    /// `newtype_names` — codegen's "this name is transparent" cache —
+    /// starts empty every time.  A newtype declared in another directory
+    /// is therefore absent from it, and BOTH sides of codegen fall to the
+    /// opaque path: the constructor emits `New`+`SetF` and `x.0` emits
+    /// `GetF`.  That pair is self-consistent, so archive-internal code
+    /// works.  User code is compiled separately and DOES recover the flag
+    /// from the archive descriptor, so it treats the same type as
+    /// transparent and compiles `x.0` to an identity `Mov`.  A value that
+    /// crosses that boundary is built opaque and read transparently, and
+    /// yields its own ADDRESS — measured: `fd.0 + 0` = 36066691904,
+    /// `fd.0 == 3` false, and `fd.0 > 0` TRUE, which is why every
+    /// `if fd >= 0` guard passes.  Twenty-three public `core/` functions
+    /// return such a value today.
+    ///
+    /// AMBIGUOUS NAMES ARE NEVER PUBLISHED — see
+    /// `ambiguous_core_type_names`.
+    global_transparent_newtypes: std::collections::HashSet<String>,
+
+    /// Simple type names declared by MORE THAN ONE core module, computed
+    /// once from every parsed AST before the compile loop.
+    ///
+    /// The transparency seed above is keyed on the SIMPLE name, and T1108
+    /// measured what that costs when a name is shared: a record named
+    /// `NtStatus` and a two-element tuple named `Handle` both inherited a
+    /// stdlib newtype's flag and returned the RECEIVER'S ADDRESS — two of
+    /// five consumers wrong.  `compile_type_decl`'s "a declaration takes
+    /// its own name back" removal is USER-PHASE ONLY, so during the bake
+    /// nothing would undo a wrong seed.  Names in this set are therefore
+    /// never seeded at all; measured 2026-09-09, three core names qualify
+    /// (`Snapshot`, `Fd`, `ExecutorHandle`) and none of them is one of the
+    /// twenty-three that cross the boundary.
+    ambiguous_core_type_names: std::collections::HashSet<String>,
+
     /// Global blanket-impl registry (`implement<T: Base> Derived for T`) for
     /// cross-module blanket application (T0625).  Harvested from each module's
     /// codegen after it compiles and seeded into the next module's codegen
@@ -1211,6 +1251,8 @@ impl<'s> CompilationPipeline<'s> {
             global_function_registry: std::collections::HashMap::new(),
             global_type_layout_registry: std::collections::HashMap::new(),
             global_type_alias_registry: std::collections::HashMap::new(),
+            global_transparent_newtypes: std::collections::HashSet::new(),
+            ambiguous_core_type_names: std::collections::HashSet::new(),
             global_blanket_impl_registry: Vec::new(),
             global_protocol_registry: std::collections::HashMap::new(),
             compiled_stdlib_modules: std::collections::HashMap::new(),
@@ -1325,6 +1367,8 @@ impl<'s> CompilationPipeline<'s> {
             global_function_registry: std::collections::HashMap::new(),
             global_type_layout_registry: std::collections::HashMap::new(),
             global_type_alias_registry: std::collections::HashMap::new(),
+            global_transparent_newtypes: std::collections::HashSet::new(),
+            ambiguous_core_type_names: std::collections::HashSet::new(),
             global_blanket_impl_registry: Vec::new(),
             global_protocol_registry: std::collections::HashMap::new(),
             compiled_stdlib_modules: std::collections::HashMap::new(),

@@ -765,6 +765,50 @@ impl<'s> CompilationPipeline<'s> {
             .map(|(name, _)| name.as_str())
             .collect();
 
+        // T1192 — SIMPLE NAMES DECLARED BY MORE THAN ONE MODULE, computed
+        // once so the transparency seed below can refuse them.
+        //
+        // The seed is keyed on the SIMPLE name because codegen's
+        // `newtype_names` cache is, and T1108 measured what a shared name
+        // costs there: a record named `NtStatus` and a two-element tuple
+        // named `Handle` inherited a stdlib newtype's flag and returned the
+        // RECEIVER'S ADDRESS — two of five consumers wrong. The repair for
+        // that ("a declaration takes its own name back",
+        // `compile_type_decl`) is USER-PHASE ONLY, so during the bake
+        // nothing would undo a wrong seed. Refusing ambiguous names is
+        // therefore not caution, it is the only place the discipline can
+        // live on this path.
+        {
+            let mut declared_in: std::collections::HashMap<&str, &str> =
+                std::collections::HashMap::new();
+            for (module_name, ast_modules) in &all_parsed_modules {
+                for (_file_path, ast_module) in ast_modules {
+                    for item in &ast_module.items {
+                        let verum_ast::ItemKind::Type(td) = &item.kind else {
+                            continue;
+                        };
+                        let name = td.name.name.as_str();
+                        match declared_in.get(name) {
+                            Some(first) if *first != module_name.as_str() => {
+                                self.ambiguous_core_type_names.insert(name.to_string());
+                            }
+                            Some(_) => {}
+                            None => {
+                                declared_in.insert(name, module_name.as_str());
+                            }
+                        }
+                    }
+                }
+            }
+            if config.verbose {
+                eprintln!(
+                    "  transparency seed: {} simple type name(s) declared by more than \
+one module and therefore never seeded",
+                    self.ambiguous_core_type_names.len()
+                );
+            }
+        }
+
         for (idx, (module_name, ast_modules_with_paths)) in all_parsed_modules.iter().enumerate() {
             let module_start = std::time::Instant::now();
             let module = modules_to_compile
@@ -2335,6 +2379,15 @@ impl<'s> CompilationPipeline<'s> {
         // so a use of an imported alias as a namespace resolves. Additive
         // / first-wins — this module's own alias decls always win.
         codegen.import_type_aliases(&self.global_type_alias_registry);
+        // T1192: seed the transparent-wrapper names declared by earlier
+        // modules. Without this every module starts with an empty
+        // `newtype_names` (a fresh codegen per module), so a newtype from
+        // another directory compiles OPAQUE on both sides — self-consistent
+        // inside the archive, and incompatible with user code, which
+        // recovers the flag from the archive descriptor. A value crossing
+        // that boundary returns its own address. Additive; this module's
+        // own declarations are inserted by `compile_type_decl` afterwards.
+        codegen.import_newtype_names(&self.global_transparent_newtypes);
         // Seed blanket impls (`implement<T: Base> Derived for T`) harvested
         // from previously compiled (dependency-ordered) modules, so a blanket
         // declared in one module applies to implementors declared in another.
@@ -2660,6 +2713,13 @@ impl<'s> CompilationPipeline<'s> {
         // a cross-module alias as a namespace stay lenient panic-stubs).
         for (name, target) in codegen.export_type_aliases() {
             self.global_type_alias_registry.entry(name).or_insert(target);
+        }
+        // T1192: publish this module's transparent-wrapper names, minus the
+        // ones another module also declares (see `ambiguous_core_type_names`).
+        for name in codegen.export_newtype_names() {
+            if !self.ambiguous_core_type_names.contains(&name) {
+                self.global_transparent_newtypes.insert(name);
+            }
         }
         // Publish this module's blanket impls (T0625) so later, dependent
         // modules apply them to their own implementors of the bound protocol.
