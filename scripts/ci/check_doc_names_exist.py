@@ -59,7 +59,17 @@ CORE = os.path.join(REPO, "core")
 # defects it found. The composition of the floor moved rather than shrank:
 # covering `src/pages/index.tsx` added `UartRegisters`, and one of A97's
 # original survivors is gone.
-BASELINE = 18  # 21 -> 18 on 2026-09-08: `MockResolver` left
+BASELINE = 16  # 18 -> 16 on 2026-09-09: `OpenFlag` left
+               # architecture-types/orthogonality.md — the direct-write
+               # example named `sys.io.open` / `OpenFlag.WriteOnly`, and
+               # neither exists (the flags are module-level `O_WRONLY` /
+               # `O_CREAT`); the block now calls `core.io.file.write_bytes`,
+               # verified by RUNNING it. And `Colour` left
+               # architecture/overview.md — one letter from the stdlib's
+               # real `Color`, in a fragment of two bare `match`es; the
+               # block now declares its own `Shade` and is a program.
+               #
+               # 21 -> 18 on 2026-09-08: `MockResolver` left
                # cookbook/dns.md (there is no mock resolver and
                # `Resolver` is not a context), and `FileSigner` left
                # cookbook/quic-server.md and tutorials/h3-service.md
