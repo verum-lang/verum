@@ -1843,11 +1843,20 @@ impl VbcCodegen {
             PathSegment::Name(ident) => {
                 let name = &ident.name;
 
-                // Diagnostic: trace bare `None`/`Some` resolution for
-                // bare-variant-closure-body defect investigation.
-                if std::env::var("VERUM_TRACE_BARE_VARIANT").is_ok()
-                    && (name.as_str() == "None" || name.as_str() == "Some")
-                {
+                // Diagnostic: trace bare-variant resolution.
+                //
+                // The filter is the VALUE, matched as a substring on the
+                // name — the `VERUM_TRACE_CALLRES` / `VERUM_TRACE_FNREG`
+                // convention in this same file. It used to be hardcoded
+                // to `None`/`Some`, the two names the defect that
+                // prompted it happened to involve, which made the lever
+                // useless for every later investigation: verum-35 spent
+                // a T1315 session unable to ask this site about
+                // `Timeout` even though the printout it needed was
+                // already written. An empty value matches nothing rather
+                // than everything, so the bake's noise floor is a choice
+                // the caller makes.
+                if bare_variant_trace_matches(name.as_str()) {
                     eprintln!(
                         "[bare-variant-trace] compile_simple_path name={:?} current_return_type_name={:?}",
                         name.as_str(),
@@ -1959,9 +1968,7 @@ impl VbcCodegen {
                     .and_then(|prefix| {
                         let qualified = format!("{}.{}", prefix, name);
                         let r = self.ctx.lookup_function(&qualified).cloned();
-                        if std::env::var("VERUM_TRACE_BARE_VARIANT").is_ok()
-                            && (name.as_str() == "None" || name.as_str() == "Some")
-                        {
+                        if bare_variant_trace_matches(name.as_str()) {
                             eprintln!(
                                 "[bare-variant-trace] expected_prefixed qualified={} found={} variant_tag={:?}",
                                 qualified,
@@ -44131,5 +44138,21 @@ fn bind_generic_free(
             }
 }
         _ => {}
+    }
+}
+
+/// `VERUM_TRACE_BARE_VARIANT` gate — the value is a SUBSTRING filter on
+/// the bare name, matching `VERUM_TRACE_CALLRES` and `VERUM_TRACE_FNREG`
+/// in this file.
+///
+/// It was hardcoded to `None` / `Some` — the two names the investigation
+/// that added it happened to involve — so the printout existed and could
+/// not be aimed anywhere else. An empty value matches NOTHING: turning
+/// the whole bake's bare-variant resolution on is a decision the caller
+/// makes by naming something, not an accident of exporting the variable.
+fn bare_variant_trace_matches(name: &str) -> bool {
+    match std::env::var("VERUM_TRACE_BARE_VARIANT") {
+        Ok(filter) => !filter.is_empty() && name.contains(&filter),
+        Err(_) => false,
     }
 }
