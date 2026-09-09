@@ -1,0 +1,99 @@
+// @test: run
+// @level: L0
+// @tier: 0,1
+// @tags: ffi, variadic, abi, regression
+// @timeout: 60000
+// @expected-exit: 0
+// @expected-stdout-begin
+// one n=2 b=[52,50]
+// two n=2 b=[55,57]
+// sep n=3 b=[55,45,57]
+// none n=5 b=[97,98]
+// @expected-stdout-end
+//
+// T1304. `...` used to be a syntax with no semantics: the parser
+// accepted it, `FfiSignature` carried `is_variadic` and
+// `fixed_param_count`, the archive round-tripped both, and Tier 1
+// already built `fn_type(params, is_variadic)` from them — but no call
+// could reach any of that. The call-site arity check rejected the extra
+// arguments, and the interpreter prepared one cached CIF per symbol
+// with `prep_cif`, which cannot describe a call.
+//
+//     snprintf(buf, 32, fmt, 42)   error: expected 3, found 4
+//     snprintf(buf, 32, fmt)       returned 2 and wrote "hi"
+//
+// The degenerate call worked and the useful one did not.
+//
+// WHY IT MATTERS BEYOND `snprintf`. `open` and `fcntl` are declared with
+// fixed third parameters while C declares both variadic, and on arm64
+// Apple the variadic arguments travel on the STACK. The mode never
+// arrives: two `open(2)` calls in one program produced 0o212 and 0o644.
+// `safe_set_nonblocking(fd, true)` returns `Ok(())`, does not set
+// `O_NONBLOCK`, and sets 0x400000 — which the kernel reads as `O_DSYNC`.
+// Fixing those declarations needs a working variadic call first, which
+// is what this spec pins.
+//
+// THE FORMAT IS BUILT BYTE BY BYTE WITH AN EXPLICIT NUL, and that is
+// not fussiness. `Text.as_ptr()` is length-prefixed with no terminator
+// (T1317), so a `Text` format makes the C callee read past the end —
+// at Tier 0 it produced five bytes of garbage while the identical
+// handmade format produced "7-9", and at Tier 1 it happened to work.
+// A spec written with a `Text` format would therefore be testing the
+// heap's next byte, not the variadic tail, and would diverge between
+// tiers for a reason that has nothing to do with this row.
+//
+// `%ld` is used rather than `%d` deliberately. Verum's `Int` is 64-bit,
+// so `%ld` is the specifier whose width the mapping guarantees; `%d`
+// reads 32 bits and works only because arm64 is little-endian and the
+// value fits. Pinning `%d` would pin an accident.
+
+mount core.prelude.*;
+
+@ffi("libSystem.B.dylib")
+extern {
+    public fn snprintf(buf: &unsafe Byte, size: Int, fmt: &Byte, ...) -> Int32;
+}
+
+fn put_ld(f: &mut [Byte; 16], at: Int) -> Int {
+    f[at] = 37 as Byte;      // %
+    f[at + 1] = 108 as Byte; // l
+    f[at + 2] = 100 as Byte; // d
+    at + 3
+}
+
+fn main() {
+    // one tail argument
+    let mut f1: [Byte; 16] = [0 as Byte; 16];
+    let e1 = put_ld(&mut f1, 0);
+    f1[e1] = 0 as Byte;
+    let mut b1: [Byte; 32] = [0 as Byte; 32];
+    let n1 = unsafe { snprintf(b1.as_mut_ptr() as &unsafe Byte, 32, f1.as_ptr() as &Byte, 42) };
+    print(f"one n={n1} b=[{b1[0]},{b1[1]}]");
+
+    // two tail arguments, back to back
+    let mut f2: [Byte; 16] = [0 as Byte; 16];
+    let a2 = put_ld(&mut f2, 0);
+    let e2 = put_ld(&mut f2, a2);
+    f2[e2] = 0 as Byte;
+    let mut b2: [Byte; 32] = [0 as Byte; 32];
+    let n2 = unsafe { snprintf(b2.as_mut_ptr() as &unsafe Byte, 32, f2.as_ptr() as &Byte, 7, 9) };
+    print(f"two n={n2} b=[{b2[0]},{b2[1]}]");
+
+    // two tail arguments with a literal between them
+    let mut f3: [Byte; 16] = [0 as Byte; 16];
+    let a3 = put_ld(&mut f3, 0);
+    f3[a3] = 45 as Byte;     // '-'
+    let e3 = put_ld(&mut f3, a3 + 1);
+    f3[e3] = 0 as Byte;
+    let mut b3: [Byte; 32] = [0 as Byte; 32];
+    let n3 = unsafe { snprintf(b3.as_mut_ptr() as &unsafe Byte, 32, f3.as_ptr() as &Byte, 7, 9) };
+    print(f"sep n={n3} b=[{b3[0]},{b3[1]},{b3[2]}]");
+
+    // no tail at all — the degenerate call must keep working
+    let mut f4: [Byte; 16] = [0 as Byte; 16];
+    f4[0] = 97 as Byte; f4[1] = 98 as Byte; f4[2] = 99 as Byte;
+    f4[3] = 100 as Byte; f4[4] = 101 as Byte; f4[5] = 0 as Byte;
+    let mut b4: [Byte; 32] = [0 as Byte; 32];
+    let n4 = unsafe { snprintf(b4.as_mut_ptr() as &unsafe Byte, 32, f4.as_ptr() as &Byte) };
+    print(f"none n={n4} b=[{b4[0]},{b4[1]}]");
+}
