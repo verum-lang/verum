@@ -311,6 +311,8 @@ check-rings-census: ## Report the core/ inter-module dependency graph (never fai
 
 check-internal-refs: ## Gate: no references to the internal/ directory in tracked files
 	bash scripts/ci/check_no_internal_refs.sh
+	python3 scripts/ci/check_spec_citation_names.py --self-test
+	python3 scripts/ci/check_spec_citation_names.py
 
 check-per-register-privacy: ## Gate: no per-register fact in FunctionContext may be `pub` — source only
 	python3 scripts/ci/check_per_register_fields_private.py --self-test
