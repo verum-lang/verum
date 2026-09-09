@@ -198,6 +198,47 @@ surface T0708 (bounded-var dispatch E404 `_`), qualified-keyed
 `metadata.types` (T0691 stone), bake-vs-user pipeline unification
 T0692.
 
+**The bake-vs-user disagreement runs BOTH ways, measured 2026-09-09.**
+"The bake is stricter" is the intuitive reading and it is wrong: neither
+pipeline's acceptance contains the other's. Ten spellings of "mutate a
+variant payload", one source per row, both pipelines:
+
+| form | bake | `verum run` |
+|---|---|---|
+| `match s` (`&Sum`), read `(*x)` | accepts | E409 |
+| `match s` (`&mut Sum`), `x = x + n` | STUB | rc=1, same message |
+| `match &mut self.f`, `x = x + n` | STUB | rc=0, **write silently lost** |
+| `match &mut self.f`, `ref mut` + `*x =` | accepts | rc=0, **silently lost** |
+| tuple variant, `ref mut` + `*v =` | accepts | works |
+| `*x =` with no `ref` | accepts | E409 |
+| rebuild through `self.field` | accepts | works |
+| rebuild by assigning the matched local | accepts | E310 |
+
+The bake refuses exactly one of ten; the interpreter refuses three and
+mis-executes two more. Their refusals do not overlap except on one row.
+A separate case runs the other way: a bare associated const
+(`const Solo: Int = 9;` read as `Solo`) is `E100: unbound variable` in
+EVERY position under `verum run` — inside the `implement`, outside it,
+`UPPER_SNAKE` or not — while the bake accepts it outside an `implement`
+block and stubs it inside. So the bake also accepts a form the language
+does not have.
+
+Two roots behind those rows are now separate tasks with reproductions:
+T1334 (a mutable binding into a RECORD-variant payload discards the
+write, while the tuple-variant form writes through, and the spelling
+`docs/language/patterns.md` teaches is one of the broken ones) and T1342
+(bare-name resolution inside `implement`; its variant half is fixed —
+the expected-type probe was prefixing the HEAD of a generic return type
+instead of its ARGUMENTS).
+
+THE INSTRUMENT THAT MADE THIS CHEAP is worth more than the table:
+`verum stdlib precompile --stdlib-path <any directory>` accepts any
+directory, so a two-file "stdlib" bakes in 0.06s and emits real
+`[lenient] SKIP` lines. Twelve competing explanations were ruled out on
+it in one evening; on a 12-minute `core/` bake the refutations alone
+would have cost over two hours. Documented in
+`precompiled-stdlib-archive.md`.
+
 A descriptor field can also be the ONLY carrier of a fact: the lazy
 symbol closure is computed from source TEXT, before inference, so
 `f"{a.cmp(b)}"` reached `Int.cmp` but not the `Ordering` it returns —
