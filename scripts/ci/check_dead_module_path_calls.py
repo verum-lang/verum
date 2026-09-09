@@ -77,6 +77,19 @@ CORE = Path(__file__).resolve().parents[2] / "core"
 # `root.seg.…​.leaf(` with at least three segments; roots are lower-case, so
 # a type-qualified static (`List.new`) is not matched.
 CALL = re.compile(r"\b((?:[a-z_][a-z0-9_]*)(?:\.[a-z_][a-z0-9_]*){2,})\s*\(")
+# THE SAME CALL WITH A TYPE IN THE MIDDLE — `core.io.file.File.read_to_text(p)`.
+# `CALL` above requires every segment to be lower-case, so it stops at
+# `core.io.file` (not followed by `(`) and never sees the leaf. That blind
+# spot is not hypothetical: `core/security/x509/trust_store.vr:213` called
+# `core.io.file.File.read_to_text`, which nothing declares — the free
+# function is `read_to_string` and it is not on the type — and the stub it
+# became panicked at run time through `TrustStore.system()` and therefore
+# through `ClientOptions.with_system_trust()` in the H3 client (T1316).
+# Measured when this pattern was added: 57 call sites of this shape reach a
+# module root, and exactly one had a leaf declared nowhere — the one above.
+TYPED_CALL = re.compile(
+    r"\b((?:[a-z_][a-z0-9_]*)(?:\.[a-z_][a-z0-9_]*)+"
+    r"\.[A-Z][A-Za-z0-9_]*\.[a-z_][a-z0-9_]*)\s*\(")
 MOUNT = re.compile(r"^\s*(?:public\s+)?mount\s+([A-Za-z_][\w.]*)")
 DECL = re.compile(r"\bfn\s+([a-z_][a-z0-9_]*)")
 
@@ -101,6 +114,8 @@ def module_roots(text: str) -> set[str]:
 
 
 def main() -> int:
+    if "--self-test" in sys.argv:
+        return self_test()
     sources = sorted(CORE.rglob("*.vr"))
     if not sources:
         print(f"check-dead-module-path-calls: no .vr files under {CORE}", file=sys.stderr)
@@ -118,7 +133,7 @@ def main() -> int:
         for lineno, line in enumerate(text.splitlines(), 1):
             if line.lstrip().startswith("//"):
                 continue
-            for match in CALL.finditer(line):
+            for match in list(CALL.finditer(line)) + list(TYPED_CALL.finditer(line)):
                 dotted = match.group(1)
                 if dotted.split(".")[0] not in roots:
                     continue
@@ -157,6 +172,37 @@ def main() -> int:
 
     print(f"check-dead-module-path-calls: {total} known dead calls, none new")
     return 0
+
+
+def self_test() -> int:
+    """Known answers for both call shapes, because a widened pattern that
+    swallows real calls is worse than the blind spot it removes."""
+    bad = 0
+    cases = [
+        # (line, pattern, expected dotted matches)
+        ("core.time.rfc3339.to_epoch(x)", CALL, ["core.time.rfc3339.to_epoch"]),
+        ("core.io.file.File.read_to_text(p)", TYPED_CALL,
+         ["core.io.file.File.read_to_text"]),
+        # The lower-case pattern must NOT half-match the typed form: it
+        # stops at `core.io.file`, which is not followed by `(`.
+        ("core.io.file.File.read_to_text(p)", CALL, []),
+        # A type-qualified static is not a module path and never was.
+        ("List.new()", CALL, []),
+        ("List.new()", TYPED_CALL, []),
+        # Two segments is not enough for either.
+        ("m.absent()", CALL, []),
+        ("m.absent()", TYPED_CALL, []),
+        # A generic on the way through must not be read as a segment.
+        ("core.a.b.Type.method(x)", TYPED_CALL, ["core.a.b.Type.method"]),
+    ]
+    for line, pattern, want in cases:
+        got = [m.group(1) for m in pattern.finditer(line)]
+        if got != want:
+            name = "CALL" if pattern is CALL else "TYPED_CALL"
+            print(f"self-test: {name} on {line!r} gave {got}, wanted {want}")
+            bad += 1
+    print("self-test: OK" if not bad else f"self-test: {bad} FAILED")
+    return bad
 
 
 if __name__ == "__main__":

@@ -210,7 +210,7 @@ fn try_load_linux_bundle() -> Result<TrustStore, TrustError> {
 }
 
 fn read_file_to_text(path: &Text) -> Result<Text, TrustError> {
-    match core.io.file.File.read_to_text(path) {
+    match core.io.file.read_to_string(path) {
         Result.Ok(t) => Result.Ok(t),
         Result.Err(e) => Result.Err(TrustError.IoFailure(Text.from(f"read {path} failed"))),
     }
