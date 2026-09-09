@@ -2056,7 +2056,20 @@ pub mod type_names {
             "INFINITY" | "infinity" => Some(f64::INFINITY),
             "NEG_INFINITY" | "neg_infinity" => Some(f64::NEG_INFINITY),
             "NAN" | "nan" => Some(f64::NAN),
-            "MIN_POSITIVE" | "min_positive" if bits == 64 => Some(f64::MIN_POSITIVE),
+            // The 32-bit arm was MISSING while `MIN`, `MAX` and `EPSILON`
+            // each carry one, so `Float32.MIN_POSITIVE` fell out of this
+            // table and out of every rung below it. It did not fail
+            // loudly for a user: `core/base/primitives.vr:4039`
+            // implements `Float32.is_normal` as
+            // `self.abs() >= Float32.MIN_POSITIVE`, so the BAKE could not
+            // compile that body, skipped it, and the call fell through to
+            // the f64 implementation — `1e-40` reported as normal when it
+            // is subnormal as an f32. A predicate wrong on exactly the
+            // values it exists to detect (T1314).
+            "MIN_POSITIVE" | "min_positive" if bits == 32 => {
+                Some(f32::MIN_POSITIVE as f64)
+            }
+            "MIN_POSITIVE" | "min_positive" => Some(f64::MIN_POSITIVE),
             "PI" | "pi" if bits == 64 => Some(std::f64::consts::PI),
             "E" | "e" if bits == 64 => Some(std::f64::consts::E),
             _ => None,
