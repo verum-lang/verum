@@ -1,7 +1,7 @@
 // =============================================================================
 // style/text_builder.vr - Quick styled text creation helpers
 // =============================================================================
-// Convenience functions for creating styled Spans without manual Style
+// Convenience functions for creating styled TextSpans without manual Style
 // construction. Provides bold(), italic(), color-named helpers, etc.
 //
 
@@ -15,7 +15,34 @@
 )
 module core.term.style.text_builder;
 
-mount super.super.widget.paragraph.{Span, Line};
+// Two things had to change here, and the second is the surprising one.
+//
+// (1) `paragraph` declares `TextSpan`, not `Span`. Mounting it as
+//     `Span` bound every helper below to the AMBIENT `Span`
+//     (`core.meta`'s `MetaSpan`, the macro-hygiene span), so
+//     `bold("hi").content` did not exist and nothing produced here
+//     could go into a `Line`. A module-qualified mount does not catch
+//     that: an ambient name satisfies it.
+//
+// (2) The path must be ABSOLUTE. Measured 2026-09-09 as a
+//     single-variable A/B over two stdlib bakes of an otherwise
+//     identical tree:
+//
+//     ```text
+//     mount super.super.widget.paragraph.{TextSpan, Line}
+//         -> TextSpan.styled(a, b) dispatches as a 3-arg METHOD on
+//            its first argument; the call fails
+//     mount core.term.widget.paragraph.{TextSpan, Line}
+//         -> bold content=[hi], line spans=2 width=2
+//     ```
+//
+//     The `super`-spelled mount records a path the receiver-qualified
+//     method resolver cannot reconcile with the registry's absolute
+//     one. That is a compiler defect (T1277), open and reproducible;
+//     this file spells the mount absolutely rather than wait on it.
+//     451 `super` mounts remain in core/, 180 with uppercase leaves.
+//     (T1268)
+mount core.term.widget.paragraph.{TextSpan, Line};
 mount super.style.Style;
 mount super.modifier.Modifier;
 mount super.color.Color;
@@ -25,57 +52,57 @@ mount super.color.Color;
 // =============================================================================
 
 /// Create a bold span.
-public fn bold(text: Text) -> Span { Span.styled(text, Style.new().bold()) }
+public fn bold(text: Text) -> TextSpan { TextSpan.styled(text, Style.new().bold()) }
 
 /// Create an italic span.
-public fn italic(text: Text) -> Span { Span.styled(text, Style.new().italic()) }
+public fn italic(text: Text) -> TextSpan { TextSpan.styled(text, Style.new().italic()) }
 
 /// Create a dim span.
-public fn dim(text: Text) -> Span { Span.styled(text, Style.new().dim()) }
+public fn dim(text: Text) -> TextSpan { TextSpan.styled(text, Style.new().dim()) }
 
 /// Create an underlined span.
-public fn underlined(text: Text) -> Span { Span.styled(text, Style.new().underlined()) }
+public fn underlined(text: Text) -> TextSpan { TextSpan.styled(text, Style.new().underlined()) }
 
 /// Create a crossed-out span.
-public fn crossed_out(text: Text) -> Span { Span.styled(text, Style.new().crossed_out()) }
+public fn crossed_out(text: Text) -> TextSpan { TextSpan.styled(text, Style.new().crossed_out()) }
 
 /// Create a reversed (inverted) span.
-public fn reversed(text: Text) -> Span { Span.styled(text, Style.new().reversed()) }
+public fn reversed(text: Text) -> TextSpan { TextSpan.styled(text, Style.new().reversed()) }
 
 // =============================================================================
 // Foreground / background color helpers
 // =============================================================================
 
 /// Create a span with a specific foreground color.
-public fn fg(text: Text, color: Color) -> Span { Span.styled(text, Style.new().fg(color)) }
+public fn fg(text: Text, color: Color) -> TextSpan { TextSpan.styled(text, Style.new().fg(color)) }
 
 /// Create a span with a specific background color.
-public fn bg(text: Text, color: Color) -> Span { Span.styled(text, Style.new().bg(color)) }
+public fn bg(text: Text, color: Color) -> TextSpan { TextSpan.styled(text, Style.new().bg(color)) }
 
 // =============================================================================
 // Named color shortcuts (foreground)
 // =============================================================================
 
 /// Red foreground text.
-public fn red(text: Text) -> Span { fg(text, Color.Red) }
+public fn red(text: Text) -> TextSpan { fg(text, Color.Red) }
 
 /// Green foreground text.
-public fn green(text: Text) -> Span { fg(text, Color.Green) }
+public fn green(text: Text) -> TextSpan { fg(text, Color.Green) }
 
 /// Blue foreground text.
-public fn blue(text: Text) -> Span { fg(text, Color.Blue) }
+public fn blue(text: Text) -> TextSpan { fg(text, Color.Blue) }
 
 /// Yellow foreground text.
-public fn yellow(text: Text) -> Span { fg(text, Color.Yellow) }
+public fn yellow(text: Text) -> TextSpan { fg(text, Color.Yellow) }
 
 /// Cyan foreground text.
-public fn cyan(text: Text) -> Span { fg(text, Color.Cyan) }
+public fn cyan(text: Text) -> TextSpan { fg(text, Color.Cyan) }
 
 /// Magenta foreground text.
-public fn magenta(text: Text) -> Span { fg(text, Color.Magenta) }
+public fn magenta(text: Text) -> TextSpan { fg(text, Color.Magenta) }
 
 /// White foreground text.
-public fn white(text: Text) -> Span { fg(text, Color.White) }
+public fn white(text: Text) -> TextSpan { fg(text, Color.White) }
 
 /// Grey foreground text.
-public fn grey(text: Text) -> Span { fg(text, Color.Grey) }
+public fn grey(text: Text) -> TextSpan { fg(text, Color.Grey) }
