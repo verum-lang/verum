@@ -152,19 +152,35 @@ implement QuicPath {
         }
     }
 
+    /// THREE SPELLINGS FAIL HERE AND THE FOURTH IS THIS ONE (T1334).
+    /// A `match` arm binds a RECORD-variant field by value, so
+    /// `sent_bytes = sent_bytes + n` assigned to the copy and the
+    /// anti-amplification budget never moved — silently, rc=0, at both
+    /// tiers. `*sent_bytes = …` is refused instead (E409: the binding is
+    /// not a reference). And `{ sent_bytes: ref mut sb } => *sb = …`,
+    /// which is the spelling `docs/language/patterns.md` teaches, is
+    /// silently inert as well. The same `ref mut` on a TUPLE variant
+    /// works, which is what makes the gap invisible. Rebuilding the
+    /// variant is the form that works today.
     public fn on_bytes_sent(&mut self, n: UInt64) {
-        match &mut self.state {
-            PathState.Unvalidated { received_bytes: _, sent_bytes } => {
-                sent_bytes = sent_bytes + n;
+        match &self.state {
+            PathState.Unvalidated { received_bytes, sent_bytes } => {
+                let rb = received_bytes;
+                let sb = sent_bytes + n;
+                self.state = PathState.Unvalidated { received_bytes: rb, sent_bytes: sb };
             },
             _ => {},
         }
     }
 
+    /// Same shape as `on_bytes_sent`: the arm binding is a copy, so the
+    /// variant is rebuilt rather than assigned into.
     public fn on_bytes_received(&mut self, n: UInt64) {
-        match &mut self.state {
-            PathState.Unvalidated { received_bytes, sent_bytes: _ } => {
-                received_bytes = received_bytes + n;
+        match &self.state {
+            PathState.Unvalidated { received_bytes, sent_bytes } => {
+                let rb = received_bytes + n;
+                let sb = sent_bytes;
+                self.state = PathState.Unvalidated { received_bytes: rb, sent_bytes: sb };
             },
             _ => {},
         }

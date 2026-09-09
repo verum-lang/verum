@@ -60,14 +60,18 @@ BASELINE_PANIC_STUBS = 2
 # reported as a NAME rather than hidden inside an unchanged number.  The
 # population is T1315's, whose taxonomy is six causes; this file only has
 # to notice membership changing.
+#
+# 11 -> 9 on 2026-09-09: `QuicPath.on_bytes_sent` and `on_bytes_received`
+# left, and the roster is how that was checked. The gate reported
+# `0 new, 2 gone` and named both, against a prediction of exactly those
+# two written down before the bake started. A count would have said `9`
+# and left "which two" to be taken on trust.
 OBSERVED = {
     # name                                cause, as the bake itself prints it
     "Notification.warning":               "undefined variable: Style",
     "Notification.success":               "undefined variable: Style",
     "Notification.info":                  "undefined variable: Style",
     "Notification.error":                 "undefined variable: Style",
-    "QuicPath.on_bytes_sent":             "cannot assign to immutable variable: sent_bytes",
-    "QuicPath.on_bytes_received":         "cannot assign to immutable variable: received_bytes",
     "verify_cog":                         "undefined variable: VerificationFailed",
     "verify_cog_precomputed_hashes":      "undefined variable: VerificationFailed",
     "id_geometric":                       "undefined function: identity_functor",
