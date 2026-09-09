@@ -41,7 +41,7 @@ import re
 import sys
 from pathlib import Path
 
-BASELINE = 80  # Lowered by FIXING a page, never by argument.
+BASELINE = 78  # Lowered by FIXING a page, never by argument.
                #
                # 101 -> 99 on 2026-09-09: `stdlib/async.md`'s
                # `RetryConfig` had four fields and every one of the four
@@ -80,7 +80,20 @@ BASELINE = 80  # Lowered by FIXING a page, never by argument.
                # one) and `stdlib/compress.md`'s `IoError` for
                # `IoFailure`.
                #
-               # The remaining 80 are a real backlog, not noise — spot-
+               # 80 -> 78, and a gate correction inside it: the
+               # sum-vs-record test asked whether a `|` appeared before
+               # the first `{`, so `core/context/error.vr`'s
+               # `ContextError` — whose FIRST arm omits the leading pipe
+               # — read as a record and a correct page was reported as
+               # disagreeing about the KIND of the type. The test now
+               # looks for a `|` outside any brace group.
+               #
+               # The fixes were `stdlib/action.md`: `Primitive` (eight
+               # `Epsilon`-prefixed variants, not seven bare ones),
+               # `Enactment`, `Articulation`, `EffectKind`, `LazyDesign`
+               # and a `GaugeCanonical` type that does not exist.
+               #
+               # The remaining 78 are a real backlog, not noise — spot-
                # checked against `core/`: `stdlib/architecture.md`
                # documents `Capability` with TEN variants and core/ has
                # nine completely different ones, not a single name in
@@ -107,14 +120,25 @@ def shape(body: str) -> tuple[str, frozenset[str]]:
     stripped = re.sub(r"//[^\n]*", "", body)
     if "protocol" in stripped:
         return ("other", frozenset())
-    if "{" in stripped and "|" not in stripped.split("{", 1)[0]:
+
+    # Sum-or-record is decided by a `|` OUTSIDE any brace group, not by
+    # one before the first `{`. `core/context/error.vr`'s `ContextError`
+    # writes its FIRST arm without a leading pipe —
+    #
+    #     public type ContextError is
+    #         NotFound { context_name: Text }
+    #         | NotProvided { … }
+    #
+    # so "no `|` before the first `{`" read a five-variant sum as a
+    # record, and the gate reported a correct page as disagreeing about
+    # the KIND of the type.
+    outside = re.sub(r"\{[^{}]*\}", "", stripped)
+    if "|" in outside:
+        return ("sum", frozenset(VARIANT.findall(outside)))
+    if "{" in stripped:
         inner = stripped[stripped.index("{") + 1: stripped.rindex("}")] \
             if "}" in stripped else stripped
         return ("record", frozenset(FIELD.findall(inner)))
-    if "|" in stripped:
-        # a sum: names at the head of each arm, ignoring record payloads
-        arms = re.sub(r"\{[^}]*\}", "", stripped)
-        return ("sum", frozenset(VARIANT.findall(arms)))
     return ("other", frozenset())
 
 
@@ -166,6 +190,11 @@ def self_test() -> int:
     k, n = shape("\n    | Foo\n    | Bar(Int)\n    | Baz { x: Int }")
     if (k, n) != ("sum", frozenset({"Foo", "Bar", "Baz"})):
         bad += 1; print(f"self-test: a sum is not read — got {n}")
+    # The measured false positive: a first arm with NO leading pipe.
+    k, n = shape("\n    NotFound { a: Text }\n    | NotProvided { b: Text }")
+    if k != "sum" or n != frozenset({"NotFound", "NotProvided"}):
+        bad += 1
+        print(f"self-test: a sum whose first arm omits `|` reads as {k} {n}")
     k, _ = shape(" protocol { fn x(); }")
     if k != "other":
         bad += 1; print("self-test: a protocol is not skipped")
