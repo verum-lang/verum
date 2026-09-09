@@ -56,7 +56,24 @@ DOCS = Path(os.environ.get("VERUM_STDLIB_DOCS")
             or os.environ.get("VERUM_DOCS_DIR")
             or (REPO.parent / "website" / "docs"))
 CORE = REPO / "core"
-BASELINE = 47  # Lowered by FIXING, never by argument.
+BASELINE = 45  # Lowered by FIXING, never by argument.
+                #    47 ->  45  NOT a fix, the fourth of its kind, and
+                #               the authority is the GRAMMAR rather
+                #               than a judgement call: a call inside a
+                #               `using [...]` clause is a CONTEXT
+                #               TRANSFORM (`verum.ebnf:1035`,
+                #               `context_transform = '.' , identifier`),
+                #               supplied by whoever declares the
+                #               context, and the grammar's own example
+                #               is `using [Database.transactional()]`.
+                #               Asking core/ whether it declares `fn
+                #               transactional` is the wrong index.
+                #               Exactly two names live only there:
+                #               `.transactional` and `.traced`.
+                #               `.readonly` from the same chain is not
+                #               among them because core/ happens to
+                #               declare that name — the gate could only
+                #               have been right here by accident.
                 #    49 ->  47  the same marker in the site's PLURAL
                 #               spelling: `.streaming` under
                 #               h3-server.md's ":::warning Every
@@ -151,6 +168,32 @@ BASELINE = 47  # Lowered by FIXING, never by argument.
 
 BLOCK = re.compile(r"```verum\n(.*?)```", re.S)
 CALL = re.compile(r"\.([a-z_][a-z0-9_]*)\s*\(")
+
+# A call inside a `using [...]` clause is a CONTEXT TRANSFORM, not a method.
+# `grammar/verum.ebnf:1035` is the authority and settles it without a vote:
+#
+#     context_transform = '.' , identifier , [ '(' , [ transform_args ] , ')' ] ;
+#
+# — a bare `identifier`, supplied by whoever declares the context, and the
+# grammar's own worked example two lines above is
+# `using [Database.transactional(), Cache.scoped()]`.  Asking `core/` whether
+# it declares `fn transactional` is asking the wrong index: the site was
+# quoting the grammar and being scored against the library.
+#
+# Measured 2026-09-09: exactly two names appear ONLY in this position —
+# `.transactional` (language/syntax.md, reference/grammar-ebnf.md) and
+# `.traced` (language/context-system.md, `Store.readonly().traced()`).
+# `.readonly` from that same chain is NOT among them, because a method of
+# that name does exist in `core/` — which is the shape of the false positive
+# this removes: the gate could only ever be right by accident here.
+USING_CLAUSE = re.compile(r"\busing\s*\[[^\]]*\]")
+
+
+def calls_outside_using(block: str) -> list[str]:
+    """Method names called in `block`, minus the context-transform position."""
+    spans = [m.span() for m in USING_CLAUSE.finditer(block)]
+    return [m.group(1) for m in re.finditer(r"\.([a-z_][a-z0-9_]*)\s*\(", block)
+            if not any(s <= m.start() < e for s, e in spans)]
 
 # A section the page MARKS as unshipped is honest documentation of a plan,
 # not rot.  Carried over verbatim from `check_doc_names_exist.py`, which has
@@ -248,6 +291,13 @@ def self_test() -> int:
     # The floor rule reads DECL over the same blocks the calls come from.
     if DECL.findall("fn from_a() { b.from_b(); }") != ["from_a"]:
         print("self-test: a page-local declaration is not seen"); bad += 1
+    # A context transform is not a method call (grammar/verum.ebnf:1035).
+    if calls_outside_using("fn tx() using [Database.transactional()] {}") != []:
+        print("self-test: a context transform still reads as a method call"); bad += 1
+    if calls_outside_using("fn a() using [Store.readonly().traced()] { x.real() }") != ["real"]:
+        print("self-test: the using narrowing swallowed a call OUTSIDE the clause"); bad += 1
+    if calls_outside_using("y.keep()") != ["keep"]:
+        print("self-test: a plain call was lost with no using clause present"); bad += 1
     print("self-test: OK" if not bad else f"self-test: {bad} FAILED")
     return bad
 
@@ -292,7 +342,7 @@ def main() -> int:
             page_decls |= set(DECL.findall(b))
         rel = f.relative_to(DOCS).as_posix()
         for b in blocks:
-            for name in CALL.findall(b):
+            for name in calls_outside_using(b):
                 if name not in declared:
                     pages.setdefault(name, set()).add(rel)
                     if name in page_decls:
