@@ -65,7 +65,7 @@ DOCS = Path(os.environ.get("VERUM_STDLIB_DOCS")
             or (Path(_DOCS_ROOT) / "stdlib" if _DOCS_ROOT
                 else REPO.parent / "website" / "docs" / "stdlib"))
 RUN_DIRECTIVES = {"run", "run-interpreter"}
-BASELINE = 299  # Lowered by COVERAGE, never by argument — the only way
+BASELINE = 293  # Lowered by COVERAGE, never by argument — the only way
                 # this number is meant to move.
                 #   385 -> 378  vcs/specs/core/io/fs_operations_run.vr
                 #   378 -> 372  .../core/base/iterator_adapters_run.vr

@@ -1,0 +1,95 @@
+// @test: run
+// @level: L1
+// @tier: 0
+// @tags: mem, arena, shared, allocator, diagnostics, coverage
+// @timeout: 300000
+// @expected-stdout-begin
+// arena aligned=0 contains=true stranger=false
+// shared unique=true weak=0->1 alive=true
+// shared shared=false ptr_eq=true
+// shared make_unique=5
+// defaults shared=0 heap=0
+// bump cap=4096 used=0
+// view size=64 align=8 caps=255 epoch=0
+// @expected-stdout-end
+// @description: Nine documented core.mem methods RUN, each asserted by a
+//   value a plausible wrong implementation would not print.
+//
+// WHY THIS FILE EXISTS. Measured 2026-09-09: 13 of the 53 methods the
+// mem reference documents were called by nothing that executes. Four of
+// those cannot be reached from a passing spec today — `capabilities`
+// and `current_epoch` refuse on a Heap receiver (T1189), `new_zeroed`
+// derefs to the carrier (T1284) and `try_unwrap` loses its payload
+// (T1285). These are the other nine.
+//
+// Each line is chosen so a wrong answer differs:
+//
+//   arena     `alloc_aligned(64, 32)` must return an address ≡ 0 mod 32,
+//             so the modulus IS the assertion — the unaligned bump
+//             pointer prints 8 or 24. `contains_ptr` is then asked
+//             TWICE, once about the address the arena just returned and
+//             once about the address 1, so an implementation that
+//             answers `true` unconditionally fails the second half.
+//
+//   shared    `weak_count` goes 0 -> 1 across a single `downgrade()`,
+//             which a no-op downgrade would print as 0->0. `is_unique`
+//             is asserted in the SAME line and stays `true`, because it
+//             reads the strong count alone — that pairing is the point:
+//             the two conditions are documented as different and this
+//             line is what makes them different in evidence.
+//             `ptr_eq` compares two clones of one allocation, so a
+//             value-comparing implementation would still print true —
+//             but `is_unique` flipping to false in the same line is
+//             what proves the clone actually happened.
+//
+//   defaults  `Shared.new_default` and `Heap.new_default` both deref to
+//             0 for Int. Not a strong assertion on its own; it is here
+//             because a constructor that returned the CARRIER instead
+//             of the value prints a pointer-shaped number, which is
+//             exactly the T1284 signature on the neighbouring
+//             `new_zeroed`.
+//
+//   bump      `MemStackAllocator.init(4096)` must report the capacity
+//             it was asked for and a zero bump offset. A stub that
+//             ignored its argument prints a different capacity.
+//
+//   view      `MemHeaderView.from_header` unpacks a header built with
+//             capabilities 0x00FF. It prints caps=255 and epoch=0,
+//             which is the packing order stated by `pack_epoch_caps`
+//             (caps HIGH, epoch LOW) — swap the halves and this line
+//             reads caps=0 epoch=255. The mem reference documented the
+//             swap until 2026-09-09; this line is what stops it coming
+//             back.
+
+mount core.mem.{GenerationalArena, ArenaConfig, MemStackAllocator, MemHeaderView, AllocationHeader};
+mount core.base.{Heap, Shared};
+
+fn main() {
+    let mut ar = GenerationalArena.with_config(ArenaConfig.fixed(4096));
+    let p = ar.alloc_aligned(64, 32);
+    print(f"arena aligned={p % 32} contains={ar.contains_ptr(p)} stranger={ar.contains_ptr(1)}");
+
+    let s = Shared.new(7);
+    let before = s.weak_count();
+    let w = s.downgrade();
+    print(f"shared unique={s.is_unique()} weak={before}->{s.weak_count()} alive={w.is_alive()}");
+
+    let t = s.clone();
+    print(f"shared shared={s.is_unique()} ptr_eq={s.ptr_eq(&t)}");
+
+    let mut m = Shared.new(5);
+    print(f"shared make_unique={*m.make_unique()}");
+
+    let sd: Shared<Int> = Shared.new_default();
+    let hd: Heap<Int> = Heap.new_default();
+    print(f"defaults shared={*sd} heap={*hd}");
+
+    match MemStackAllocator.init(4096) {
+        Result.Ok(b)  => print(f"bump cap={b.capacity} used={b.offset}"),
+        Result.Err(_) => print("bump refused"),
+    }
+
+    let h = AllocationHeader.new(64, 8, 3, 0x00FF);
+    let v = MemHeaderView.from_header(&h);
+    print(f"view size={v.size} align={v.alignment} caps={v.capabilities} epoch={v.epoch}");
+}
