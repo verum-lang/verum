@@ -60,7 +60,11 @@ mount core.collections.map.{Map};
 mount core.net.addr.{SocketAddr};
 mount core.net.http.{Method, StatusCode, Headers, Response};
 mount core.net.h3.server.{H3Server, ServerOptions, H3ServerError, H3Handler};
-mount core.net.h3.request.{H3Request, H3Response, H3Method, H3Status};
+// `H3Status` was mounted here and is declared NOWHERE in core/;
+// `H3Response.status` takes a plain `UInt16` (`h3/request.vr:148`), so
+// every `H3Status.X` below fabricated a variant that went out on the
+// wire in place of a status code. (T1302)
+mount core.net.h3.request.{H3Request, H3Response, H3Method};
 mount core.net.h3.error.{H3Error};
 mount core.net.tls13.cipher_suite.{CipherSuite};
 mount core.net.tls13.named_group.{NamedGroup};
@@ -191,14 +195,14 @@ implement<H: Handler + Send + Sync + 'static> WarpH3Server<H> {
             let cur = in_flight_outer.fetch_add(1, MemoryOrdering.AcqRel) + 1;
             if cur > max {
                 in_flight_outer.fetch_sub(1, MemoryOrdering.AcqRel);
-                return H3Response.status(H3Status.ServiceUnavailable)
+                return H3Response.status(503)
                     .text(f"server saturated");
             }
             // Drain rejection — once shutdown begins, new requests
             // get a courteous 503 instead of being silently dropped.
             if drain_outer.load(MemoryOrdering.Acquire) {
                 in_flight_outer.fetch_sub(1, MemoryOrdering.AcqRel);
-                return H3Response.status(H3Status.ServiceUnavailable)
+                return H3Response.status(503)
                     .header(&f"connection", &f"close")
                     .text(f"server draining");
             }
@@ -301,8 +305,9 @@ fn h3_to_weft_request(req: H3Request) -> WeftRequest {
 }
 
 fn weft_to_h3_response(resp: Response) -> H3Response {
-    let status = H3Status.from_u16(resp.status.as_u16());
-    let mut h3 = H3Response.status(status);
+    // `H3Response.status` already takes a UInt16, so the conversion the
+    // absent `H3Status.from_u16` promised is the identity.
+    let mut h3 = H3Response.status(resp.status.as_u16());
 
     // Translate Weft headers to H3 trailing headers in emission order.
     let names = resp.headers.names();
@@ -342,14 +347,14 @@ implement WeftError {
         // Maps every real WeftError variant (see core.net.weft.error) to its
         // HTTP/3 status, mirroring the canonical WeftError.status() surface.
         let status = match self {
-            WeftError.BadRequest(_)         => H3Status.BadRequest,          // 400
-            WeftError.RouteNotFound         => H3Status.NotFound,            // 404
-            WeftError.MethodNotAllowed      => H3Status.MethodNotAllowed,    // 405
-            WeftError.ExtractionRejected(_) => H3Status.BadRequest,          // 400
-            WeftError.Timeout               => H3Status.GatewayTimeout,      // 504
-            WeftError.Overloaded            => H3Status.ServiceUnavailable,  // 503
-            WeftError.UpstreamIo(_)         => H3Status.BadGateway,          // 502
-            WeftError.Internal(_)           => H3Status.InternalServerError, // 500
+            WeftError.BadRequest(_)         => 400_u16,
+            WeftError.RouteNotFound         => 404_u16,
+            WeftError.MethodNotAllowed      => 405_u16,
+            WeftError.ExtractionRejected(_) => 400_u16,
+            WeftError.Timeout               => 504_u16,
+            WeftError.Overloaded            => 503_u16,
+            WeftError.UpstreamIo(_)         => 502_u16,
+            WeftError.Internal(_)           => 500_u16,
         };
         H3Response.status(status).text(self.to_text())
     }

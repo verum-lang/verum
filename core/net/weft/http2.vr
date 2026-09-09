@@ -473,7 +473,8 @@ pub async fn run_h2_session<H: Handler>(
                     let _ = guard.note_protocol_violation(monotonic_now_ms());
                     if guard.is_poisoned() {
                         let _ = send_goaway(
-                            &mut stream, 0, ErrorCode.EnhanceYourCalm,
+                            &mut stream, 0,
+                            ErrorCode.new(ErrorCode.ENHANCE_YOUR_CALM),
                         ).await;
                         return Result.Err(Http2Error.ExcessiveRstStream);
                     }
@@ -515,7 +516,8 @@ pub async fn run_h2_session<H: Handler>(
                 streams.remove(&stream_id);
                 if !healthy {
                     let _ = send_goaway(
-                        &mut stream, 0, ErrorCode.EnhanceYourCalm,
+                        &mut stream, 0,
+                        ErrorCode.new(ErrorCode.ENHANCE_YOUR_CALM),
                     ).await;
                     return Result.Err(Http2Error.ExcessiveRstStream);
                 }
@@ -528,7 +530,8 @@ pub async fn run_h2_session<H: Handler>(
                 // falls through to the GOAWAY emission below.
                 if guard.should_refuse_new_stream() {
                     let _ = send_goaway(
-                        &mut stream, 0, ErrorCode.EnhanceYourCalm,
+                        &mut stream, 0,
+                        ErrorCode.new(ErrorCode.ENHANCE_YOUR_CALM),
                     ).await;
                     return Result.Err(Http2Error.ExcessiveRstStream);
                 }
@@ -552,7 +555,7 @@ pub async fn run_h2_session<H: Handler>(
     }
 
     // Best-effort GOAWAY on clean exit.
-    let _ = send_goaway(&mut stream, 0, ErrorCode.NoError).await;
+    let _ = send_goaway(&mut stream, 0, ErrorCode.new(ErrorCode.NO_ERROR)).await;
     Result.Ok(())
 }
 
@@ -599,10 +602,10 @@ async fn read_preface(stream: &mut TcpStream, token: &CancellationToken) -> Bool
 
 fn build_server_settings(limits: &Http2Limits) -> Frame {
     let mut params: List<(UInt16, UInt32)> = List.new();
-    params.push((SettingId.MaxConcurrentStreams as UInt16, limits.max_concurrent_streams as UInt32));
-    params.push((SettingId.InitialWindowSize    as UInt16, limits.initial_window_size    as UInt32));
-    params.push((SettingId.MaxFrameSize         as UInt16, limits.max_frame_size         as UInt32));
-    params.push((SettingId.MaxHeaderListSize    as UInt16, limits.max_header_list_size   as UInt32));
+    params.push((SettingId.MAX_CONCURRENT_STREAMS, limits.max_concurrent_streams as UInt32));
+    params.push((SettingId.INITIAL_WINDOW_SIZE,    limits.initial_window_size    as UInt32));
+    params.push((SettingId.MAX_FRAME_SIZE,         limits.max_frame_size         as UInt32));
+    params.push((SettingId.MAX_HEADER_LIST_SIZE,   limits.max_header_list_size   as UInt32));
     Frame.SettingsFrame { ack: false, params: params }
 }
 
