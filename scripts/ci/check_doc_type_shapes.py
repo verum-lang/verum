@@ -41,7 +41,7 @@ import re
 import sys
 from pathlib import Path
 
-BASELINE = 48  # Lowered by FIXING a page, never by argument.
+BASELINE = 41  # Lowered by FIXING a page, never by argument.
                #
                # 101 -> 99 on 2026-09-09: `stdlib/async.md`'s
                # `RetryConfig` had four fields and every one of the four
@@ -119,10 +119,61 @@ CORE = REPO / "core"
 
 BLOCK = re.compile(r"```verum\n(.*?)```", re.S)
 # `type Name is` … up to the terminating `;`
-DECL = re.compile(
-    r"(?:^|\n)\s*(?:public\s+|pub\s+)?type\s+([A-Z][A-Za-z0-9_]*)"
-    r"(?:<[^>]*>)?\s+is\b(.*?);", re.S)
-FIELD = re.compile(r"(?:^|,)\s*([a-z_][a-z0-9_]*)\s*:", re.M)
+DECL_HEAD = re.compile(
+    r"(?:^|\n)[ \t]*(?:public\s+|pub\s+)?type\s+([A-Z][A-Za-z0-9_]*)"
+    r"(?:<[^>]*>)?\s+is\b")
+
+
+def declarations(text: str):
+    """(name, body) for every `type X is …` in `text`.
+
+    The body ends at the first `;` OUTSIDE a brace group, or — when the
+    declaration is a record whose closing `}` carries no `;` — at that
+    `}`. Delimiting on the first `;` alone was wrong for 668 of core/'s
+    records, which close with a bare `}`:
+
+        public type FsEvent is {
+            pub path: Text,
+            pub kind: FsEventKind,
+        }
+
+    `grammar/verum.ebnf`'s `type_definition_body` mandates the `;` and
+    the parser accepts its absence; whichever of those is the defect,
+    the census has to read the tree as it IS. Running past that `}`
+    swallowed the NEXT declaration's body, so `FsEvent` was measured
+    with `FsWatcher`'s field and a page naming `path`/`kind` was
+    reported as naming fields core/ does not have.
+    """
+    for m in DECL_HEAD.finditer(text):
+        i, depth, saw_brace = m.end(), 0, False
+        while i < len(text):
+            c = text[i]
+            if c == "{":
+                depth += 1; saw_brace = True
+            elif c == "}":
+                depth -= 1
+                if depth == 0:
+                    j = i + 1
+                    while j < len(text) and text[j] in " \t\r\n":
+                        j += 1
+                    # `};` ends here; so does a bare `}` that is not
+                    # followed by more of the same declaration.
+                    if j >= len(text) or text[j] != "|":
+                        yield m.group(1), text[m.end():i + 1]
+                        break
+            elif c == ";" and depth == 0:
+                yield m.group(1), text[m.end():i]
+                break
+            i += 1
+        else:
+            if saw_brace or depth:
+                yield m.group(1), text[m.end():]
+# A field may carry a visibility modifier — 35 in core/ do, e.g.
+# `core/sys/fs_watch.vr`'s `FsEvent { pub path: Text, pub kind: … }`.
+# Without skipping it the collector saw NO fields there and the gate
+# reported a page listing exactly `path` and `kind` as wrong.
+FIELD = re.compile(
+    r"(?:^|,)\s*(?:public\s+|pub\s+)?([a-z_][a-z0-9_]*)\s*:", re.M)
 # A variant may carry attributes: `variant = { attribute } , identifier
 # , [ variant_data ] , …` (grammar/verum.ebnf:815, whose own example
 # is `@default Ok | @deprecated Legacy | Error(Text)`). Skipping them
@@ -194,8 +245,7 @@ def collect(text: str) -> dict[str, tuple[str, frozenset[str]]]:
     # inside a comment measures the comment.
     text = re.sub(r"//[^\n]*", "", text)
     out: dict[str, tuple[str, frozenset[str]]] = {}
-    for m in DECL.finditer(text):
-        name, body = m.group(1), m.group(2)
+    for name, body in declarations(text):
         kind, names = shape(body)
         if kind == "other" or not names:
             continue
@@ -215,8 +265,7 @@ def collect_all(text: str) -> dict[str, list[tuple[str, frozenset[str]]]]:
     """
     text = re.sub(r"//[^\n]*", "", text)
     out: dict[str, list[tuple[str, frozenset[str]]]] = {}
-    for m in DECL.finditer(text):
-        name, body = m.group(1), m.group(2)
+    for name, body in declarations(text):
         kind, names = shape(body)
         if kind == "other" or not names:
             continue
