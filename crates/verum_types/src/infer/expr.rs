@@ -4023,6 +4023,31 @@ impl TypeChecker {
                     } else if args.len() == 1 {
                         // Fallback: single-arg generic types are likely smart pointer wrappers
                         Ok(self.unifier.apply(&args[0]))
+                    } else if named_primitive_value(path) {
+                        // TRANSPARENT DEREF REACHES SIZED INTEGERS TOO
+                        // (T1338).  The `_` arm at the bottom of this match
+                        // grants `*x` on a value type the identity meaning
+                        // the CBGR model gives it — and it was reachable
+                        // only for the types that own a `Type` variant.
+                        // `Bool`, `Int`, `Float`, `Char` and `Text` do;
+                        // `Int8`…`UInt64` do not, so they arrived here as
+                        // `Named` and were refused.
+                        //
+                        // Measured before the change — one shape, only the
+                        // FIELD TYPE varying:
+                        //
+                        //   Int v=1   Float v=1.0   Bool v=true   Text v=a
+                        //   Int8 Int32 Int64 UInt8 UInt32 UInt64 -> E409
+                        //
+                        // Same declaration, same operator, same scrutinee:
+                        // the verdict followed the WIDTH. That is the
+                        // representation deciding a language question.
+                        //
+                        // E409 keeps its job — a `Named` type that is not a
+                        // primitive value (`Process`, a user record) still
+                        // cannot be dereferenced, which is the case the
+                        // error registry pins.
+                        Ok(inner_ty.clone())
                     } else {
                         // E409 with the operator's span: this used to be a
                         // bare `TypeError::Other`, which carries no location,
@@ -14517,5 +14542,25 @@ impl TypeChecker {
         self.borrow_tracker.exit_scope();
         self.ctx.exit_scope();
         Ok(result)
+    }
+}
+
+/// True when a `Type::Named` path names a PRIMITIVE VALUE type (T1338).
+///
+/// `Bool`, `Int`, `Float`, `Char` and `Text` each own a `Type` variant, so
+/// they never reach the `Named` arm of the deref rule. Every sized integer
+/// — `Int8`, `Int32`, `Int64`, `UInt8`, `UInt32`, `UInt64` and their
+/// aliases — is carried as `Named`, and used to be refused there while its
+/// unsized sibling was accepted. The set comes from
+/// `well_known_types::type_names`, so a new width lands here without a
+/// second list to keep in step.
+fn named_primitive_value(path: &verum_ast::ty::Path) -> bool {
+    match path.segments.last() {
+        Some(verum_ast::ty::PathSegment::Name(ident)) => {
+            verum_common::well_known_types::type_names::is_primitive_value_type(
+                ident.name.as_str(),
+            )
+        }
+        _ => false,
     }
 }
