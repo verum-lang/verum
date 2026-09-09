@@ -52,10 +52,19 @@
 // travel.
 
 mount core.prelude.*;
+mount core.io.fs.{remove_file};
+mount core.io.path.{Path};
 mount core.io.{File};
 
 fn main() {
     let p: Text = "/tmp/verum-spec-fd-plausible.txt".to_text();
+    // THE SPEC MUST NOT DEPEND ON ITS OWN LEFTOVER. Until T1304 lands,
+    // this file is created with a mode drawn from the stack, and a
+    // previous run can leave it unwritable — measured: `-r-x------`,
+    // after which `File.create` fails for a reason that has nothing to
+    // do with what is being tested. Remove it first; a missing file is
+    // the state this spec means to start from.
+    let _ = remove_file(&Path.new(&p));
     match File.create(&p) {
         Ok(f) => {
             let r: Int = f.as_raw_fd();
