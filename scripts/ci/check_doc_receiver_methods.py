@@ -52,7 +52,8 @@ CTOR_BIND = re.compile(
     r"\blet\s+(?:mut\s+)?([a-z_]\w*)\s*=\s*([A-Z]\w*)\s*(?:<[^>=;]*>)?\s*\.\s*([a-z_]\w*)\s*\(")
 
 
-def ctor_binds(body: str, ctors: dict[str, set[str]]) -> dict[str, str]:
+def ctor_binds(body: str, ctors: dict[str, set[str]],
+               fallible: dict[str, set[str]] | None = None) -> dict[str, str]:
     """`let x = Type.ctor(…);` — and ONLY when that is the whole
     initialiser.
 
@@ -71,7 +72,9 @@ def ctor_binds(body: str, ctors: dict[str, set[str]]) -> dict[str, str]:
     out: dict[str, str] = {}
     for m in CTOR_BIND.finditer(body):
         var, ty, ctor = m.group(1), m.group(2), m.group(3)
-        if ctor not in ctors.get(ty, ()):
+        plain = ctor in ctors.get(ty, ())
+        fall = fallible is not None and ctor in fallible.get(ty, ())
+        if not (plain or fall):
             continue
         i, depth, n = m.end() - 1, 0, len(body)
         while i < n:
@@ -85,8 +88,26 @@ def ctor_binds(body: str, ctors: dict[str, set[str]]) -> dict[str, str]:
             i += 1
         while i < n and body[i] in " \t":
             i += 1
-        if i < n and body[i] == ";":
-            out[var] = ty
+        # A PLAIN constructor proves the type only when nothing follows
+        # the call (the rule above). A FALLIBLE one proves it only when a
+        # `?` follows, and then it proves it exactly: `?` unwraps the
+        # `Result<T, E>` the constructor returns, so the binding is a T.
+        # `.await` in between changes the timing and not the type.
+        #
+        # Measured when this landed: 260 -> 291 proven receivers, and the
+        # 31 newly proven ones carried TWO real defects, both on
+        # `cookbook/h3-server.md` — `server.serve(...)` five times and
+        # `server.local_addr()` once, on an `H3Server` that declares
+        # `bind` / `run` / `run_with` and a `local_addr` FIELD. `serve`
+        # exists one type over, on the `H3Handler` protocol, which is why
+        # the page read correctly.
+        terms = (";",) if plain else ()
+        if fall:
+            terms = terms + ("?;", ".await?;")
+        for term in terms:
+            if body.startswith(term, i):
+                out[var] = ty
+                break
     return out
 PAGE_FN = re.compile(r"\bfn\s+([a-z_]\w*)")
 # Same generous filter the sibling gates use: a page that TEACHES a
@@ -180,6 +201,12 @@ def core_surface() -> tuple[dict[str, set[str]], dict[str, set[str]], set[str]]:
     """
     methods: dict[str, set[str]] = {}
     ctors: dict[str, set[str]] = {}
+    # A FALLIBLE constructor — `Result<T, E>` — proves nothing on its
+    # own, because the binding is a `Result`. Paired with a `?` it
+    # proves everything, because `?` is exactly the operator that
+    # unwraps it. So the two halves are tracked together and neither
+    # is used alone: see `ctor_binds`.
+    fallible: dict[str, set[str]] = {}
     universal: set[str] = set()
     # A type that Derefs forwards every method of its target, and the
     # target is a type PARAMETER for the ones that matter — `Shared<T>`,
@@ -238,10 +265,12 @@ def core_surface() -> tuple[dict[str, set[str]], dict[str, set[str]], set[str]]:
                 r = signature_return(body, fm.end())
                 if r == ty or r == "Self" or r.startswith(ty + "<"):
                     ctors.setdefault(ty, set()).add(fn_name)
+                elif re.match(r"Result\s*<\s*(?:" + re.escape(ty) + r"|Self)\b", r):
+                    fallible.setdefault(ty, set()).add(fn_name)
     for ty, proto in impl_of:
         if proto in protocols:
             methods.setdefault(ty, set()).update(protocols[proto])
-    return methods, ctors, universal, derefs
+    return methods, ctors, universal, derefs, fallible
 
 
 def denied_on_page(text: str) -> set[str]:
@@ -269,7 +298,7 @@ def denied_on_page(text: str) -> set[str]:
     return out
 
 
-def scan(methods, ctors, universal, derefs):
+def scan(methods, ctors, universal, derefs, fallible=None):
     hits, proven = [], 0
     for p in sorted(list(DOCS.rglob("*.md")) + list(DOCS.rglob("*.mdx"))):
         rel = p.relative_to(DOCS).as_posix()
@@ -282,7 +311,7 @@ def scan(methods, ctors, universal, derefs):
             for var, ty in ANNOT.findall(body):
                 if ty in methods:
                     bound[var] = ty
-            bound.update(ctor_binds(body, ctors))
+            bound.update(ctor_binds(body, ctors, fallible))
             for m in CALL.finditer(body):
                 recv, meth = m.group(1), m.group(2)
                 ty = bound.get(recv)
@@ -301,8 +330,12 @@ def scan(methods, ctors, universal, derefs):
 
 def self_test() -> int:
     bad = 0
-    methods = {"Arena": {"alloc", "reset"}, "Map": {"insert", "get"}}
+    methods = {"Arena": {"alloc", "reset"}, "Map": {"insert", "get"},
+               "Conn": {"send", "close"}}
     ctors = {"Arena": {"new"}}
+    # A constructor that answers `Result<Conn, E>`: proves nothing alone,
+    # proves `Conn` when the binding ends in `?`.
+    fallible = {"Conn": {"open"}}
     universal = {"clone"}
 
     def run(body):
@@ -312,7 +345,7 @@ def self_test() -> int:
         for var, ty in ANNOT.findall(body):
             if ty in methods:
                 bound[var] = ty
-        bound.update(ctor_binds(body, ctors))
+        bound.update(ctor_binds(body, ctors, fallible))
         out = []
         for m in CALL.finditer(body):
             r, meth = m.group(1), m.group(2)
@@ -358,6 +391,17 @@ def self_test() -> int:
                   file=sys.stderr)
         else:
             print(f"  [ok] {label}")
+    # A fallible constructor proves the type ONLY through `?`.
+    if run("let c = Conn.open(a)?;  c.zzz();") != ["zzz"]:
+        print("self-test: `?` on a Result-returning ctor did not prove the type"); bad += 1
+    if run("let c = Conn.open(a).await?;  c.zzz();") != ["zzz"]:
+        print("self-test: `.await?` on a Result-returning ctor did not prove it"); bad += 1
+    # WITHOUT the `?` the binding is a Result, and nothing is proven.
+    if run("let c = Conn.open(a);  c.zzz();") != []:
+        print("self-test: a Result binding with no `?` was treated as the type"); bad += 1
+    # And a real method on that same proven receiver stays silent.
+    if run("let c = Conn.open(a)?;  c.send(x);") != []:
+        print("self-test: a declared method on a proven receiver was reported"); bad += 1
     print("self-test: OK" if not bad else f"self-test: {bad} FAILED")
     return bad
 
@@ -369,7 +413,7 @@ def main() -> int:
         print("check-doc-receiver-methods: docs or core/ absent — UNMEASURED.")
         return 0
 
-    methods, ctors, universal, derefs = core_surface()
+    methods, ctors, universal, derefs, fallible = core_surface()
 
     # A FLOOR. An instrument that stopped matching prints the same clean
     # line as a clean tree.
@@ -393,7 +437,7 @@ def main() -> int:
                 for var, ty in ANNOT.findall(body):
                     if ty in methods:
                         bound[var] = ty
-                bound.update(ctor_binds(body, ctors))
+                bound.update(ctor_binds(body, ctors, fallible))
                 for m in CALL.finditer(body):
                     recv, meth = m.group(1), m.group(2)
                     ty = bound.get(recv)
@@ -409,7 +453,7 @@ def main() -> int:
             print(f"{len(set(hits))} finding(s) in {path}")
             return 0
 
-    hits, proven = scan(methods, ctors, universal, derefs)
+    hits, proven = scan(methods, ctors, universal, derefs, fallible)
 
     if proven < floor:
         print(f"check-doc-receiver-methods: only {proven} proven receiver "
