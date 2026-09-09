@@ -222,14 +222,29 @@ jobs:
           shared-key: vbc-guardrails
           cache-on-failure: true
 
-      - name: Run the four gated targets
+      # EVERY test target with the feature, not a hand-listed set (T1349).
+      #
+      # The list used to name four targets, and a file gated on
+      # `#![cfg(feature = "codegen")]` that nobody added to it ran in NO
+      # job at all: `integration-vbc` invokes `--tests` with DEFAULT
+      # features, and `codegen` is not default, so such a file compiles
+      # to an EMPTY test binary there. Measured 2026-09-09: six
+      # `verum_vbc/tests/` files are gated on the feature, ONE was named
+      # here, and the other FIVE — impl_assoc_types_carry_tests,
+      # ml_serving_intrinsic_route, own_decl_layout_evict_pin,
+      # protocol_signature_reference_carry, t1172_stage5_bare_name_capture
+      # — executed nowhere. Four of them had been dark for months.
+      #
+      # A hand-maintained roster rots because nothing fails when the tree
+      # gains a file and the list does not; `--tests` covers a new gated
+      # file the moment it lands. Measured before widening: the full
+      # sweep is green on this tree — 49 test-result lines, 49 ok, 0
+      # failed, 2642 tests passed — so this costs coverage nothing and
+      # buys five suites.
+      - name: Every gated test target
         timeout-minutes: 120
         run: >
-          cargo test --locked -p verum_vbc --features codegen
-          --test layout_invariant_verifier_tests
-          --test intrinsic_key_resolution_gate
-          --test intrinsic_call_arity_tests
-          --test global_type_table_consistency_tests
+          cargo test --locked -p verum_vbc --features codegen --tests
 
       # The workspace unit-test job runs with DEFAULT features, and
       # `codegen` is not one of them (verum_vbc/Cargo.toml) — so every
