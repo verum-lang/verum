@@ -184,10 +184,17 @@ public fn verify_cog(
     let signature_bytes = decode_signature(&sig.signature)?;
 
     // Step 4: Ed25519 verify.
+    // T1342: `VerificationFailed` is declared as a variant by SEVEN types
+    // in core/ (five under security/, plus this one), and a bare variant
+    // name whose spelling is shared is not always resolved — the whole
+    // function becomes a panic stub with `undefined variable:
+    // VerificationFailed`. The other variants of this same type are used
+    // bare a dozen lines away and resolve, because their names are unique.
+    // Qualifying is the form that works.
     let to_verify = concat_hashes(&manifest_hash, &source_hash);
     match security.ecc.ed25519.verify(&public_key, &to_verify, &signature_bytes) {
         Result.Ok(_)  => Result.Ok(()),
-        Result.Err(_) => Result.Err(VerificationFailed),
+        Result.Err(_) => Result.Err(CogSignatureError.VerificationFailed),
     }
 }
 
@@ -219,7 +226,7 @@ public fn verify_cog_precomputed_hashes(
     let to_verify = concat_hashes(manifest_sha256, source_sha256);
     match security.ecc.ed25519.verify(&public_key, &to_verify, &signature_bytes) {
         Result.Ok(_)  => Result.Ok(()),
-        Result.Err(_) => Result.Err(VerificationFailed),
+        Result.Err(_) => Result.Err(CogSignatureError.VerificationFailed),
     }
 }
 

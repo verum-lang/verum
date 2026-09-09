@@ -146,7 +146,14 @@ implement DbConnectionPool {
     /// the pool is empty (the caller layers retry/backoff on top).
     public fn try_acquire(&mut self) -> Result<Lease, PoolError> {
         if self.closed { return Result.Err(PoolClosed); }
-        if self.free.len() == 0 { return Result.Err(Timeout); }
+        // T1342: `Timeout` is declared as a variant by SEVENTEEN types in
+        // core/, and a bare variant name whose spelling is shared is not
+        // resolved inside a METHOD — the whole function becomes a panic
+        // stub with `undefined variable: Timeout`. `PoolClosed` and
+        // `InvalidLease` two lines away are unique names and resolve
+        // bare, which is what makes the gap invisible. Qualifying the
+        // variant is the form that works.
+        if self.free.len() == 0 { return Result.Err(PoolError.Timeout); }
         let idx = self.free[self.free.len() - 1];
         let mut new_free: List<Int> = List.new();
         let mut k: Int = 0;

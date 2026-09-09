@@ -67,17 +67,27 @@ BASELINE_PANIC_STUBS = 2
 # two written down before the bake started. A count would have said `9`
 # and left "which two" to be taken on trust.
 #
+# 5 -> 2 on 2026-09-09, and TWO is the baseline: the ratchet is GREEN
+# for the first time since it landed. `DbConnectionPool.try_acquire`
+# and both `verify_cog` functions left when their shared-name variants
+# were qualified (T1342). Again `0 new`, again the departures named.
+#
+# The two that remain are the ORIGINAL baseline and are not a
+# regression: `compose_geometric` and `id_geometric` call
+# `compose_functors` / `identity_functor`, which nothing in the tree
+# declares, and the neighbouring `*_handle` functions return
+# `FunctorHandle` where the fields are `InfinityFunctor<Y, X>`.
+# Writing them from a call site would be inventing a design nobody
+# wrote. See T1344.
+#
 # 9 -> 5 on 2026-09-09: the four `Notification` constructors left, again
 # against a prediction written before the bake — `0 new, 4 gone`, and the
 # gate named all four. Root cause T1337 (a method call on an associated
 # const), worked around at the four call sites.
 OBSERVED = {
     # name                                cause, as the bake itself prints it
-    "verify_cog":                         "undefined variable: VerificationFailed",
-    "verify_cog_precomputed_hashes":      "undefined variable: VerificationFailed",
     "id_geometric":                       "undefined function: identity_functor",
     "compose_geometric":                  "undefined function: compose_functors",
-    "DbConnectionPool.try_acquire":       "undefined variable: Timeout",
 }
 
 # TWO SPELLINGS, and reading only one made the pattern miss half a
