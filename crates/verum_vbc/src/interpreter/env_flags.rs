@@ -16,8 +16,11 @@
 
 use std::sync::OnceLock;
 
-/// Every cached flag.  Adding a variant is the ONLY step — the name
-/// table and the cache size follow it.
+/// Every cached flag.  Adding a variant takes THREE edits, not one:
+/// the variant, its `name()` arm, and its `index()` arm — both matches
+/// are exhaustive, so the compiler names each omission in turn. (The
+/// header used to say adding a variant was the only step; `index()` is
+/// hand-numbered and refutes that.)
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Flag {
     /// `VERUM_CBGR_LEGACY_ALLOC`
@@ -82,6 +85,10 @@ pub(crate) enum Flag {
     TracePushStr,
     /// `VERUM_TRACE_PUSH_STR_X`
     TracePushStrX,
+    /// `VERUM_TRACE_SPECFACT` — same name the AOT lowering uses for
+    /// the SAME instruction (verum_codegen/src/llvm/instruction.rs),
+    /// so one env var shows both tiers' reading of one `Spec`.
+    TraceSpecfact,
     /// `VERUM_TRACE_STATICMUT`
     TraceStaticmut,
     /// `VERUM_TRACE_STATIC_CALL`
@@ -128,6 +135,7 @@ impl Flag {
             Flag::TracePtrwrite => "VERUM_TRACE_PTRWRITE",
             Flag::TracePushStr => "VERUM_TRACE_PUSH_STR",
             Flag::TracePushStrX => "VERUM_TRACE_PUSH_STR_X",
+            Flag::TraceSpecfact => "VERUM_TRACE_SPECFACT",
             Flag::TraceStaticmut => "VERUM_TRACE_STATICMUT",
             Flag::TraceStaticCall => "VERUM_TRACE_STATIC_CALL",
             Flag::TraceTcp => "VERUM_TRACE_TCP",
@@ -141,6 +149,13 @@ impl Flag {
             Flag::CbgrLegacyIntRefs => 1,
             Flag::DebugFs => 2,
             Flag::DisableUnitDynDispatch => 3,
+            // 4 was a HOLE — the numbering jumped 3 -> 5, so `COUNT`
+            // (36) sized an array whose last index (35) was one past
+            // the 35 flags that existed. Taking the hole keeps every
+            // other flag's index fixed: renumbering would silently
+            // re-point every cached entry if some other table ever
+            // hard-codes one.
+            Flag::TraceSpecfact => 4,
             Flag::SuffixCompatLegacy => 5,
             Flag::TraceAsptr => 6,
             Flag::TraceCallmEq => 7,

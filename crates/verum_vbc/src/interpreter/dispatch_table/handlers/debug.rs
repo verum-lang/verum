@@ -678,16 +678,76 @@ fn format_set_for_print_depth(
 // JIT Hint Operations (0xD4-0xD5)
 // ============================================================================
 
-/// Spec (0xD4) - JIT specialization hint.
+/// Spec (0xD4) - the carried POINTEE fact for an interior raw pointer.
 ///
 /// Encoding: opcode + reg + type_id (varint)
-/// Effect: No-op in interpreter (JIT optimization hint).
+/// Effect: re-tags `reg` as a pointer when the fact says so and the tag
+/// was lost. The header used to read "no-op in interpreter (JIT
+/// optimization hint)", which is what this instruction was DESIGNED as
+/// and is no longer what it is (T0447 gave it a second job, T1196
+/// needed a third).
 pub(in super::super) fn handle_spec(
     state: &mut InterpreterState,
 ) -> InterpreterResult<DispatchResult> {
-    let _reg = read_reg(state)?;
-    let _type_id = read_varint(state)?;
-    // JIT optimization hint - no-op in interpreter
+    let reg = read_reg(state)?;
+    let type_id = read_varint(state)?;
+
+    // ── T1196 — RESTORE THE TAG THE ARITHMETIC DROPPED ────────────────
+    // `unsafe { &*self.entries.offset(idx) }` is not lowered as a call
+    // to the `offset` intrinsic (which does return `Value::from_ptr`).
+    // Codegen emits `LoadI <stride>` + `BinaryI Mul` + `BinaryI Add`,
+    // and `handle_addi`'s final arm — whose own comment names the case,
+    // "pointer-tagged from compiled stdlib" — computes the right
+    // address and stores it with `Value::from_i64`. THE ARITHMETIC IS
+    // CORRECT; only the tag is wrong. `GetF` then refuses the Int
+    // receiver, and its bridge-extent rescue declines CORRECTLY: an
+    // element inside a raw entries array is not a bridge extent and
+    // never was one. Every non-intercepted `Map` body that walks the
+    // entries array died this way (`entry`, `remove_entry`,
+    // `get_key_value`); `Map.get` differs only in being intercepted and
+    // never running this code.
+    //
+    // This instruction is where the fact lives. It is emitted from
+    // EXACTLY ONE site in the tree (codegen/expressions.rs, the
+    // ptr-arithmetic intercept, under `stride_bytes > 8` and a resolved
+    // type name — `grep -rn "Instruction::Spec" crates/` is the whole
+    // census: that emitter, the encoder/decoder/remap, two roundtrip
+    // tests, and the AOT consumer). Tier 1 has ALREADY used it since
+    // T0447 to mark the register inline-struct + element-stride; Tier 0
+    // read both operands and dropped them.
+    //
+    // TYPE, NOT DATA. The decision to re-tag comes from the compiler's
+    // assertion, not from inspecting the value — `is_ptr()` is also true
+    // of a boxed integer, and deciding an address by looking at a number
+    // is the trap this tree has been bitten by repeatedly. The only
+    // thing asked of the value is whether the tag is currently missing.
+    let val = state.get_reg(reg);
+    let restorable = !val.is_ptr() && val.is_int();
+    if crate::interpreter::env_flags::is_set(
+        crate::interpreter::env_flags::Flag::TraceSpecfact,
+    ) {
+        // BOTH POLARITIES. A trace that printed only the re-tags could
+        // not be compared against the registers that arrive correct, and
+        // "no line" would be indistinguishable from "never reached".
+        eprintln!(
+            "[spec-fact] reg={} type_id={} raw=0x{:016x} tag={:?} \
+             already_ptr={} retagged={} in={}",
+            reg.0,
+            type_id,
+            val.bits(),
+            val.tag(),
+            val.is_ptr(),
+            restorable,
+            state
+                .call_stack
+                .current_function_name(&state.module)
+                .unwrap_or_default(),
+        );
+    }
+    if restorable {
+        let addr = val.as_i64() as usize;
+        state.set_reg(reg, Value::from_ptr(addr as *mut u8));
+    }
     Ok(DispatchResult::Continue)
 }
 
