@@ -66,12 +66,13 @@ BASELINE_PANIC_STUBS = 2
 # `0 new, 2 gone` and named both, against a prediction of exactly those
 # two written down before the bake started. A count would have said `9`
 # and left "which two" to be taken on trust.
+#
+# 9 -> 5 on 2026-09-09: the four `Notification` constructors left, again
+# against a prediction written before the bake — `0 new, 4 gone`, and the
+# gate named all four. Root cause T1337 (a method call on an associated
+# const), worked around at the four call sites.
 OBSERVED = {
     # name                                cause, as the bake itself prints it
-    "Notification.warning":               "undefined variable: Style",
-    "Notification.success":               "undefined variable: Style",
-    "Notification.info":                  "undefined variable: Style",
-    "Notification.error":                 "undefined variable: Style",
     "verify_cog":                         "undefined variable: VerificationFailed",
     "verify_cog_precomputed_hashes":      "undefined variable: VerificationFailed",
     "id_geometric":                       "undefined function: identity_functor",

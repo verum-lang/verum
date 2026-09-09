@@ -68,6 +68,14 @@ public type Notification is {
 // Constructors & Builder API
 // =============================================================================
 
+// A METHOD CALL ON AN ASSOCIATED CONST DOES NOT COMPILE (T1337).
+// `Style.DEFAULT.fg(Color.Blue)` reports `undefined variable: Style` —
+// the head of the chain is resolved as a value rather than as a type —
+// and the bake replaces the whole constructor with a panic stub. The
+// bare const (`style: Style.DEFAULT`) is fine, which is why every other
+// widget in this directory compiles. `Style.new()` returns
+// `Style.DEFAULT` (core/term/style/style.vr:52), so this is the same
+// value reached through a call the resolver does get right.
 implement Notification {
     /// Create an info notification.
     public fn info(msg: Text) -> Notification {
@@ -75,7 +83,7 @@ implement Notification {
             title: Maybe.None,
             message: msg,
             level: NotificationLevel.Info,
-            style: Style.DEFAULT.fg(Color.Blue),
+            style: Style.new().fg(Color.Blue),
             border_type: BorderType.Rounded,
             width: 40,
             visible: true,
@@ -88,7 +96,7 @@ implement Notification {
             title: Maybe.None,
             message: msg,
             level: NotificationLevel.Warning,
-            style: Style.DEFAULT.fg(Color.Yellow),
+            style: Style.new().fg(Color.Yellow),
             border_type: BorderType.Rounded,
             width: 40,
             visible: true,
@@ -101,7 +109,7 @@ implement Notification {
             title: Maybe.None,
             message: msg,
             level: NotificationLevel.Error,
-            style: Style.DEFAULT.fg(Color.Red),
+            style: Style.new().fg(Color.Red),
             border_type: BorderType.Rounded,
             width: 40,
             visible: true,
@@ -114,7 +122,7 @@ implement Notification {
             title: Maybe.None,
             message: msg,
             level: NotificationLevel.Success,
-            style: Style.DEFAULT.fg(Color.Green),
+            style: Style.new().fg(Color.Green),
             border_type: BorderType.Rounded,
             width: 40,
             visible: true,

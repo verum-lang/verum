@@ -213,13 +213,24 @@ public fn spawn(entry: LinuxThreadFn, arg: &unsafe Byte, stack_size: USize) -> R
 
     // Allocate stack with guard page
     let total_size = actual_stack_size + STACK_GUARD_SIZE;
+    // A METHOD CALL ON AN ASSOCIATED CONST DOES NOT COMPILE (T1337):
+    // calling `to_unix_flags()` directly on `MemProt.READ_WRITE` reports
+    // that TYPE as an undefined variable, and the whole function becomes
+    // a panic stub. Binding the
+    // const first and calling the method on the binding is the same value
+    // by a route the resolver gets right — verified in a minimal bake, on
+    // the shape rather than on this file: NOTHING ON THIS MACHINE CAN
+    // COMPILE A @cfg(linux) BODY, so this is a source-level transform
+    // applied on the strength of the reproduction, not a measured fix here.
+    let prot = MemProt.READ_WRITE;
+    let mapf = MapFlags.PRIVATE_ANON;
     let stack_base = unsafe {
         syscall_raw(
             SYS_MMAP,
             0,
             total_size as Int,
-            MemProt.READ_WRITE.to_unix_flags(),
-            MapFlags.PRIVATE_ANON.to_unix_flags(),
+            prot.to_unix_flags(),
+            mapf.to_unix_flags(),
             -1,
             0
         )
