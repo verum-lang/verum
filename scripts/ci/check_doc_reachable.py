@@ -44,15 +44,14 @@ LINK = re.compile(r"\]\(([^)\s]+)\)")
 # KEYED, not silenced — the sibling gates' rule: a bare number carries no
 # owner, so a floor cannot be told from a debt. Each key names the task
 # that removes it.
-KNOWN_UNREACHABLE = {
-    "stdlib/theory_interop":
-        "T1278 — a SECOND, different page for a module that already has "
-        "`stdlib/theory-interop.md`. Not a stale copy: it carries "
-        "sections the live page lacks (module layout, architecture "
-        "stack, quick start, status, foundational alignment), so it "
-        "cannot be deleted without a merge. Remove this key when T1278 "
-        "closes; the page must then be gone, not merely linked.",
-}
+#
+# Empty as of 2026-09-09: the one entry (`stdlib/theory_interop`, the
+# unreachable half of a duplicated page) was closed by merging its five
+# unique sections into `stdlib/theory-interop.md` and deleting it —
+# T1278. A key is meant to be temporary, and this gate FAILS on a key
+# that no longer applies, so the emptiness is checked rather than
+# assumed.
+KNOWN_UNREACHABLE: dict[str, str] = {}
 ID = re.compile(r"'([A-Za-z0-9][A-Za-z0-9_\-/]*)'")
 EXEMPT_LEAF = {"index", "overview"}
 
