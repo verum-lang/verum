@@ -13,7 +13,9 @@
 use std::collections::HashMap;
 use std::fmt;
 
-use libffi::low::{CodePtr, call, ffi_abi_FFI_DEFAULT_ABI, ffi_cif, ffi_type, prep_cif, types};
+use libffi::low::{
+    CodePtr, call, ffi_abi_FFI_DEFAULT_ABI, ffi_cif, ffi_type, prep_cif, prep_cif_var, types,
+};
 
 use super::CTypeRuntime;
 use super::marshal::{ArrayBufferInfo, MarshalError, Marshaller};
@@ -86,6 +88,36 @@ impl From<FfiPlatformError> for FfiError {
 impl From<MarshalError> for FfiError {
     fn from(e: MarshalError) -> Self {
         FfiError::Marshal(e)
+    }
+}
+
+/// T1304 — the C type to use for an argument in a variadic call's TAIL.
+///
+/// A variadic declaration says nothing about the types after `...`, so
+/// the only source is the runtime value. C's default argument
+/// promotions apply to that tail: `float` is passed as `double`, and
+/// integer types narrower than `int` are passed as `int`.
+///
+/// WHAT THIS MAPPING IS AND IS NOT. Verum's `Int` is 64-bit and its
+/// `Float` is 64-bit, so `I64`/`F64` are the promoted forms and no
+/// widening is needed. That makes the mapping right for every
+/// specifier that reads 64 bits — `%ld`, `%lld`, `%f`, `%p` — and
+/// WRONG for `%d`, which reads 32. The format string lives in the
+/// callee, not here, so no choice made at this point can be correct for
+/// every format; this one is correct for the widths Verum can actually
+/// produce, and a caller that needs `%d` must say `%ld` or pass through
+/// a fixed-arity shim.
+fn variadic_tail_ctype(v: &Value) -> CTypeRuntime {
+    if v.is_float() {
+        // C promotes float to double in the variadic tail; Verum's
+        // Float is already 64-bit, so this is the promoted form.
+        CTypeRuntime::F64
+    } else if v.is_ptr() {
+        CTypeRuntime::Ptr
+    } else {
+        // Ints, Bools and anything else Verum can hand over travel as a
+        // 64-bit integer — see the width note above.
+        CTypeRuntime::I64
     }
 }
 
@@ -709,12 +741,71 @@ impl FfiRuntime {
         // Now get the symbol and call it
         let symbol = self.symbols.get(&idx).unwrap();
 
-        // Check argument count
-        if args.len() != symbol.arg_types.len() {
+        // T1304 — A VARIADIC EXTERN IS CALLED WITH MORE ARGUMENTS THAN
+        // IT DECLARES, and the CIF must describe THIS CALL.
+        //
+        // `ffi_prep_cif_var` is not a variant of `ffi_prep_cif` over the
+        // same subject: it describes a CALL SITE, because it needs to
+        // know where the fixed part ends. `snprintf(buf, n, "%d", x)`
+        // and `snprintf(buf, n, "%s%d", s, x)` therefore need DIFFERENT
+        // cifs, and the per-symbol cache above cannot hold both. So a
+        // variadic symbol bypasses the cache and prepares its cif here,
+        // from the actual arguments. Non-variadic calls are untouched —
+        // they keep the cached cif and the identical code path.
+        let (sym_is_variadic, sym_fixed_n) = module
+            .get_ffi_symbol(symbol_id)
+            .map(|s| {
+                (
+                    s.signature.is_variadic,
+                    s.signature.fixed_param_count as usize,
+                )
+            })
+            .unwrap_or((false, symbol.arg_types.len()));
+
+        // The declared types cover the fixed part only; the tail's types
+        // come from the values (see `variadic_tail_ctype`).
+        let mut effective_arg_types: Vec<CTypeRuntime> = symbol.arg_types.clone();
+        if sym_is_variadic && args.len() > effective_arg_types.len() {
+            for extra in &args[effective_arg_types.len()..] {
+                effective_arg_types.push(variadic_tail_ctype(extra));
+            }
+        }
+
+        // Check argument count. For a variadic symbol the tail was just
+        // materialised, so this still catches "fewer than declared".
+        if args.len() != effective_arg_types.len() {
             return Err(FfiError::ArgumentCountMismatch {
-                expected: symbol.arg_types.len(),
+                expected: effective_arg_types.len(),
                 got: args.len(),
             });
+        }
+
+        // Prepare a call-site cif for the variadic case. Held in this
+        // frame so it outlives the call; `variadic_atypes` must outlive
+        // it too, which is why both are bound here and not in a block.
+        let mut variadic_cif: Option<Box<ffi_cif>> = None;
+        let mut variadic_atypes: Vec<*mut ffi_type> = if sym_is_variadic {
+            effective_arg_types
+                .iter()
+                .map(|t| ctype_to_ffi_type(*t))
+                .collect()
+        } else {
+            Vec::new()
+        };
+        if sym_is_variadic {
+            let mut cif = Box::new(ffi_cif::default());
+            unsafe {
+                prep_cif_var(
+                    cif.as_mut(),
+                    ffi_abi_FFI_DEFAULT_ABI,
+                    sym_fixed_n,
+                    variadic_atypes.len(),
+                    ctype_to_ffi_type(symbol.return_type),
+                    variadic_atypes.as_mut_ptr(),
+                )
+                .map_err(|_| FfiError::CifPreparationFailed)?;
+            }
+            variadic_cif = Some(cif);
         }
 
         // Clear any previous ref arg storage
@@ -743,7 +834,7 @@ impl FfiRuntime {
         // Track struct pointer arguments for write-back: (layout_idx, obj_ptr, buffer_idx)
         let mut struct_ptr_writebacks: Vec<(u16, *mut u8, usize)> = Vec::new();
 
-        for (i, (arg, ctype)) in args.iter().zip(symbol.arg_types.iter()).enumerate() {
+        for (i, (arg, ctype)) in args.iter().zip(effective_arg_types.iter()).enumerate() {
             // Handle struct-by-value arguments specially
             if let CTypeRuntime::StructValue(layout_idx) = ctype {
                 // Get the struct layout
@@ -853,8 +944,12 @@ impl FfiRuntime {
             arg_ptrs[*arg_idx] = struct_arg_buffers[*buffer_idx].as_ptr() as *mut std::ffi::c_void;
         }
 
-        // Get symbol info for call
-        let cif_ptr = symbol.cif.as_ref() as *const ffi_cif as *mut ffi_cif;
+        // Get symbol info for call. A variadic symbol uses the
+        // call-site cif built above; everything else uses the cached one.
+        let cif_ptr = match &variadic_cif {
+            Some(c) => c.as_ref() as *const ffi_cif as *mut ffi_cif,
+            None => symbol.cif.as_ref() as *const ffi_cif as *mut ffi_cif,
+        };
         let code_ptr = CodePtr::from_ptr(symbol.ptr as *const std::ffi::c_void);
         let return_type = symbol.return_type;
 
