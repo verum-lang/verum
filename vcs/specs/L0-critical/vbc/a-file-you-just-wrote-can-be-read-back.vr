@@ -1,0 +1,82 @@
+// @test: run
+// @level: L0
+// @tier: 0,1
+// @tags: ffi, variadic, file, permissions, regression
+// @timeout: 60000
+// @expected-exit: 0
+// @expected-stdout-begin
+// wrote=true flushed=true
+// read_back=true len=4
+// @expected-stdout-end
+//
+// T1304. `File.create(path)` creates the file with a mode nobody asked
+// for, and the program that wrote it cannot read it back.
+//
+//     File.create + BufWriter + write_all + flush   all report ok
+//     the four bytes ARE on disk
+//     read_to_string on the same path               FAILS
+//     ls -l                                          --wx--x---
+//
+// The requested mode is `DEFAULT_FILE_MODE = 0o644` (core/io/file.vr).
+// It is not umask: 0o212 (an earlier observation of the same defect)
+// SETS the group-execute bit, and umask can only CLEAR bits.
+//
+// WHY THE MODE IS WRONG. `open` is declared with a fixed third
+// parameter (`core/sys/darwin/libsystem.vr`), and C declares it
+// VARIADIC — `int open(const char *, int, ...)`. On arm64 Apple the
+// variadic arguments travel on the STACK, so the callee reads the mode
+// from a stack slot the caller never wrote. What it finds is whatever
+// the call history left there:
+//
+//     two open(2) calls IN ONE PROGRAM produced 0o212 and 0o644
+//
+// which is the measurement that rules out "a constant did not arrive" —
+// a misread constant is wrong the same way twice.
+//
+// THE SAME MECHANISM HAS A SECOND, COSTLIER MEMBER. `fcntl` is declared
+// the same way, so `safe_set_nonblocking(fd, true)` returns `Ok(())`,
+// does NOT set `O_NONBLOCK`, and sets 0x400000 instead — which the
+// kernel reads as `O_DSYNC`. A caller that asks for non-blocking I/O
+// gets synchronous writes and a blocking descriptor, and the return
+// value says success.
+//
+// WHY THIS SPEC IS PORTABLE AND STABLE. It names no platform symbol:
+// it writes a file through the documented API and reads it back. The
+// residue varies with call HISTORY, so it varies between programs — but
+// a fixed program has a fixed history, and this one produced the same
+// mode on three consecutive runs.
+//
+// RED AT BOTH TIERS TODAY, by design — a guard written ahead of its
+// fix. The `read_back` line is the one that matters: `wrote` and
+// `flushed` are already true and prove nothing, which is exactly the
+// property that let this defect travel.
+
+mount core.prelude.*;
+mount core.io.{File, BufWriter, read_to_string};
+
+fn main() {
+    let p: Text = "/tmp/verum-spec-write-read-back.txt".to_text();
+    let mut wrote: Bool = false;
+    let mut flushed: Bool = false;
+
+    match File.create(&p) {
+        Ok(f) => {
+            let mut w = BufWriter.new(f);
+            match w.write_all("abcd".to_text().as_bytes()) {
+                Ok(()) => { wrote = true; }
+                Err(_) => {}
+            }
+            match w.flush() {
+                Ok(()) => { flushed = true; }
+                Err(_) => {}
+            }
+        }
+        Err(_) => {}
+    }
+    print(f"wrote={wrote} flushed={flushed}");
+
+    match read_to_string(&p) {
+        Ok(t) => print(f"read_back=true len={t.len()}"),
+        Err(_) => print("read_back=false len=0"),
+    }
+}
