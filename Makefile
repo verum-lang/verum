@@ -49,6 +49,12 @@ check-bake-diagnostics: ## Gate (T0723): FIELD-GUESS + panic-stub counts in a ba
 	@test -n "$(BAKE_LOG)" || { echo "usage: make check-bake-diagnostics BAKE_LOG=<path>"; exit 2; }
 	python3 scripts/ci/check_bake_diagnostics.py "$(BAKE_LOG)" --check
 
+.PHONY: check-stage5-stub-sharing
+check-stage5-stub-sharing: ## Gate (T1172): stage-5 stub ids standing for several names — needs VERUM_TRACE_QCALL=1 in the bake
+	@test -n "$(BAKE_LOG)" || { echo "usage: make check-stage5-stub-sharing BAKE_LOG=<path>"; exit 2; }
+	python3 scripts/ci/check_stage5_stub_sharing.py --self-test
+	python3 scripts/ci/check_stage5_stub_sharing.py "$(BAKE_LOG)" --check
+
 check-archive-size: ## Gate (T0737): embedded stdlib archive size — a per-module duplication shows up as a MULTIPLE
 	python3 scripts/ci/check_archive_size.py "$(or $(ARCHIVE),target/precompiled-stdlib/runtime.vbca)" --check
 

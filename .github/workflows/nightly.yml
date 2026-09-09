@@ -92,11 +92,32 @@ jobs:
       # in the act of repairing the gate. It comes down by fixing (T1315).
       - name: Stdlib bake diagnostics (ratchet, advisory)
         continue-on-error: true
+        env:
+          # Turns the stage-5 mint site's trace on, so ONE bake feeds BOTH
+          # ratchets below. Costs ~580 extra log lines and no extra time.
+          VERUM_TRACE_QCALL: "1"
         run: |
           target/release/verum stdlib precompile \
             --stdlib-path core -o /tmp/nightly-bake.vbca > /tmp/bake.log 2>&1 || true
           echo "bake log: $(wc -l < /tmp/bake.log) lines"
           make check-bake-diagnostics BAKE_LOG=/tmp/bake.log
+
+      # The second ratchet off the SAME log (T1172): how many stage-5 stub
+      # ids stand for more than one name. A mount miss in one function
+      # installs a stub in the shared slot under the SIMPLE name,
+      # authoritatively, and every later call of that name in the unit
+      # resolves to it — so one id ends up meaning many qualified targets
+      # (measured: 23 names on 4269801471) and the runtime diagnostic
+      # `stub never resolved id=…` cannot name the offender.
+      #
+      # READ THE DIRECTION, NEVER THE MAGNITUDE. Both this count and its
+      # neighbour count CONSEQUENCES: repairing ONE dead name moved the
+      # stub population 78 -> 63 on 2026-09-09, and repairing one other
+      # moved the panic-stub count 11 -> 7. A fall of fifteen is not
+      # fifteen fixes, and a rise of one is one new ROOT.
+      - name: Stage-5 stub sharing (ratchet, advisory)
+        continue-on-error: true
+        run: make check-stage5-stub-sharing BAKE_LOG=/tmp/bake.log
 
       - name: Run VCS L0+L1+L2+L3 full
         working-directory: vcs
