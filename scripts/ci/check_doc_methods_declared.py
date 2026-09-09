@@ -56,7 +56,12 @@ DOCS = Path(os.environ.get("VERUM_STDLIB_DOCS")
             or os.environ.get("VERUM_DOCS_DIR")
             or (REPO.parent / "website" / "docs"))
 CORE = REPO / "core"
-BASELINE = 45  # Lowered by FIXING, never by argument.
+BASELINE = 44  # Lowered by FIXING, never by argument.
+                #    45 ->  44  cookbook/h3-client.md stopped calling
+                #               `.header(...)` on an `H3Request` — the
+                #               builder is `.with_header(...)`, and the
+                #               same block also invented `H3Request.new`
+                #               and a `.body(...)` setter (T1319).
                 #    47 ->  45  NOT a fix, the fourth of its kind, and
                 #               the authority is the GRAMMAR rather
                 #               than a judgement call: a call inside a
