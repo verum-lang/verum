@@ -257,6 +257,7 @@ check-type-param-name-rule: ## Ratchet: places deciding "is this a type paramete
 	python3 scripts/ci/check_type_param_name_rule_ratchet.py
 
 check-error-code-namespaces: ## Gate: one namespace for error codes — no code means two things.
+	python3 scripts/ci/check_error_code_namespaces.py --self-test
 	python3 scripts/ci/check_error_code_namespaces.py
 
 check-guard-in-argument-position: ## Gate (T0981): a lock guard in argument position self-deadlocks.

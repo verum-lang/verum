@@ -388,7 +388,8 @@ def self_test():
     if compare(before, before) != ([], []):
         print("self-test: an unchanged population reported a difference")
         return 1
-    print("[ok] self-test: a same-size swap is reported")
+    print(f"[ok] self-test: roster holds {len(KNOWN)} pair(s); "
+          f"a same-size swap is reported")
     return 0
 
 
