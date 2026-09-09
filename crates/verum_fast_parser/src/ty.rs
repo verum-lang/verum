@@ -3429,7 +3429,7 @@ impl<'a> RecursiveParser<'a> {
         }
 
         // Check for universe level parameter: universe u
-        // Universe polymorphism -- preferred form per verum-ext.md §2.1.
+        // Universe polymorphism -- preferred form per grammar/verum.ebnf.
         // Grammar: universe_param = 'universe' , identifier ;
         // Example: @universe_poly fn id<universe u, A: Type(u)>(x: A) -> A { x }
         // Note: 'universe' is context-sensitive -- only acts as a keyword inside generic params.

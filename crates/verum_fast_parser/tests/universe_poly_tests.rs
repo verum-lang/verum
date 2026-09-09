@@ -14,7 +14,8 @@
 )]
 //! Parser tests for universe polymorphism syntax.
 //!
-//! Tests the `universe u` generic parameter form (verum-ext.md §2.1) and the
+//! Tests the `universe u` generic parameter form (grammar/verum.ebnf,
+//! `universe_param = 'universe' , identifier ;`) and the
 //! existing `u: Level` alternative form. Also tests `Type(max(u, v))` level
 //! expressions inside type annotations.
 //!

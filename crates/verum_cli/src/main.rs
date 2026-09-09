@@ -1671,7 +1671,9 @@ enum Commands {
  /// framework with its Diakrisis ν-rank and intensional flag.
  ///
  /// the per-theorem coord audit is
- /// **default-on** per `verification-architecture.md` §A.Z.4.
+ /// **default-on**; the behaviour is stated in full below rather than
+ /// cited, because the document that citation named is not in this
+ /// repository (T1350).
  /// Bare `verum audit` runs dependency-audit + coord-audit
  /// together; pass `--no-coord` to skip the coord pass.
  /// `--coord` (this flag) keeps its legacy meaning of

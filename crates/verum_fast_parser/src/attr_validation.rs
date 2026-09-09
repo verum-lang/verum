@@ -554,7 +554,10 @@ impl AttributeValidator {
             // @universe_poly marks a fn/type declaration as universe-polymorphic.
             // It signals that the declaration uses universe level parameters (introduced
             // via `universe u` or `u: Level` in generic param lists).
-            // Spec: verum-ext.md §2.1 - Universe Polymorphism
+            // Spec: grammar/verum.ebnf — `universe_param = 'universe' ,
+            // identifier ;` (§ Extended generic_param). The internal
+            // note this used to cite is unreachable to a reader of this
+            // repository (T1350).
             "universe_poly" => {
                 target.contains(AttributeTarget::Function) || target.contains(AttributeTarget::Type)
             }
