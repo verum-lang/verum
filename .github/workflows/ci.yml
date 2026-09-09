@@ -774,6 +774,17 @@ jobs:
           # core/? Nothing asked before, and a reader copies the shape.
           python3 scripts/ci/check_doc_type_shapes.py --self-test
           python3 scripts/ci/check_doc_type_shapes.py --min-types 300
+          # And the rung ABOVE the method gates: a method the page calls
+          # on a receiver whose TYPE the block itself proves — by an
+          # annotation, or by a constructor whose core return type IS
+          # that type. `check_doc_method_names` looks only at UPPERCASE
+          # receivers; `check_doc_methods_declared` asks whether the name
+          # exists ANYWHERE in core/. Neither could see
+          # `cookbook/arenas.md`, whose whole tutorial called
+          # `insert`/`get`/`remove` — all real Map methods — on a bump
+          # arena that has none of them.
+          python3 scripts/ci/check_doc_receiver_methods.py --self-test
+          python3 scripts/ci/check_doc_receiver_methods.py --min-proven 150
 
       # `check_doc_blocks_parse` has been in the tree for weeks as a
       # Makefile target with NO CI caller and no `--check` flag on the one
