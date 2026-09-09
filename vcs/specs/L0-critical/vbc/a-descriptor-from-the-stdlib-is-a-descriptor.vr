@@ -1,0 +1,69 @@
+// @test: run
+// @level: L0
+// @tier: 0,1
+// @tags: newtype, field-access, archive, file, regression
+// @timeout: 60000
+// @expected-exit: 0
+// @expected-stdout-begin
+// nonneg=true plausible=true
+// @expected-stdout-end
+//
+// T1192. A value RETURNED FROM A BAKED FUNCTION loses the reading of
+// its own field. `File.create(path)` stores `fd.as_raw()` into
+// `File.fd`, and what arrives there is not the descriptor:
+//
+//     f.as_raw_fd()   >= 0      true      <- every validity guard passes
+//                     <  4096   FALSE     <- it is a heap address
+//
+// BOTH TIERS, and that is the point of this spec. The tier-1 half was
+// visible (`fd.0` reads 4391403520 where tier 0 reads {3}); the tier-0
+// half hides behind the interpreter's rendering, and only arithmetic
+// exposes it — measured on a `FileDesc` from `safe_open`:
+//
+//     fd.0 == 3     false
+//     fd.0 >  0     TRUE
+//     fd.0 +  1     50851175201
+//
+// So `if fd >= 0 { … }` — the shape every caller writes — is satisfied
+// by a pointer, and the wrong descriptor travels on in silence. That is
+// why the failure surfaces far from its cause: `core.io.file.write`
+// reports `write failed` while the file it created sits on disk, empty.
+//
+// FIVE CONTROLS, none of which reproduce, which is what narrows this to
+// the ARCHIVE boundary rather than to newtypes, generics or Result:
+//
+//     FileDesc(3).0                          3    local construction
+//     FileDesc(i32v as Int).0                3    an Int32 payload
+//     fn f() -> FileDesc { FileDesc(3) }     3    a stdlib type returned
+//                                                 from a USER function
+//     fn f() -> Result<FileDesc, Text>       3    the Result wrapper
+//     a user's own `type MyFd is (Int)`      3    newtypes as such
+//
+// Rebuilding does not help either — `FileDesc(fd.as_raw())` is equally
+// wrong, because `as_raw()` already returns the damaged value. The
+// corruption enters at the RETURN from a baked function and survives
+// both an explicit annotation and a re-wrap.
+//
+// THIS SPEC IS RED AT BOTH TIERS TODAY. It is a guard written ahead of
+// its fix — the same shape `array-len-survives-a-reference.vr` had for
+// T1269 — so the day it goes green is measured rather than announced.
+// `plausible` is the line that matters: `nonneg` is already true and
+// proves nothing, which is exactly the property that let this defect
+// travel.
+
+mount core.prelude.*;
+mount core.io.{File};
+
+fn main() {
+    let p: Text = "/tmp/verum-spec-fd-plausible.txt".to_text();
+    match File.create(&p) {
+        Ok(f) => {
+            let r: Int = f.as_raw_fd();
+            // A real descriptor is a small non-negative integer. The
+            // upper bound is deliberately generous: any process limit
+            // in use is far below it, and a heap address is far above.
+            print(f"nonneg={r >= 0} plausible={r < 4096}");
+        }
+        Err(_) => print("create failed"),
+    }
+}
