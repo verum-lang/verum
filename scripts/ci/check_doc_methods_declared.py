@@ -56,7 +56,32 @@ DOCS = Path(os.environ.get("VERUM_STDLIB_DOCS")
             or os.environ.get("VERUM_DOCS_DIR")
             or (REPO.parent / "website" / "docs"))
 CORE = REPO / "core"
-BASELINE = 58  # Lowered by FIXING, never by argument.
+BASELINE = 49  # Lowered by FIXING, never by argument.
+                #    57 ->  49  NOT a fix, and the third of its kind: eight
+                #               names sit inside a section the page MARKS as
+                #               unshipped, and this gate was painting the
+                #               pages that said so. `testing-tui.md` opens
+                #               its third section with ":::caution Not
+                #               shipped / None of this section exists.
+                #               `VirtualTerminal`, `ManualRuntime`,
+                #               `type_keys`, `expect_row`, `run_one_frame`
+                #               and `block_on_with_fake_clock` are absent
+                #               from `core/` — measured, not guessed" —
+                #               this gate's own finding, written down before
+                #               the gate existed. Its sibling
+                #               `check_doc_names_exist.py` has honoured
+                #               these markers since 1eb0a71c4; this one did
+                #               not, so one page was scored twice under two
+                #               rules. Verified before landing: all eight
+                #               calls fall between an unshipped admonition
+                #               and the next `##` heading (scheduler.md:52
+                #               after :32, repl.md:278-279 after :265,
+                #               dns.md:236 after :217, and five in
+                #               testing-tui.md). A false POSITIVE is the
+                #               expensive kind here: it teaches readers to
+                #               ignore the number.
+                #    58 ->  57  measured, not acted on: one name left the
+                #               census on its own between two runs.
                 #   118 -> 114  the Postgres/MySQL config builders
                 #               (with_host, with_port, with_user,
                 #                with_database, with_password_from_env)
@@ -116,6 +141,37 @@ BASELINE = 58  # Lowered by FIXING, never by argument.
 
 BLOCK = re.compile(r"```verum\n(.*?)```", re.S)
 CALL = re.compile(r"\.([a-z_][a-z0-9_]*)\s*\(")
+
+# A section the page MARKS as unshipped is honest documentation of a plan,
+# not rot.  Carried over verbatim from `check_doc_names_exist.py`, which has
+# honoured these markers since 1eb0a71c4 — until now the two gates scored the
+# same page under two different rules, and the page that wrote down this
+# gate's own finding was the one being painted for it.  The phrasings are
+# collected from the admonition headers actually in use, not guessed.
+UNSHIPPED = re.compile(
+    r"^:::[a-z]+[^\n]*(?:not shipped|not implemented|not available|"
+    r"does not exist|does not compile|not in the standard library|"
+    r"cannot be evaluated|not yet|no snapshot|no linter|planned|"
+    r"describes a design)[^\n]*$", re.I | re.M)
+# The marker scopes to the SECTION, not to the admonition: the illustrative
+# blocks follow the `:::` close, so cutting at it would leave every name
+# behind.  Measured on the eight names this removes — each falls between an
+# unshipped admonition and the next `##`.
+NEXT_HEADING = re.compile(r"^##\s", re.M)
+
+
+def drop_unshipped(text: str) -> str:
+    """Drop each marked section, from its marker to the next heading."""
+    out, pos = [], 0
+    for m in UNSHIPPED.finditer(text):
+        if m.start() < pos:
+            continue
+        nxt = NEXT_HEADING.search(text, m.end())
+        stop = nxt.start() if nxt else len(text)
+        out.append(text[pos:m.start()])
+        pos = stop
+    out.append(text[pos:])
+    return "".join(out)
 
 # A COMMENT inside a ```verum block is prose, and prose in these blocks
 # is usually ABOUT the wrong name — "the builder is `.body(..)`, not
@@ -213,7 +269,7 @@ def main() -> int:
     pages_scanned = 0
     for f in sorted(list(DOCS.rglob("*.md")) + list(DOCS.rglob("*.mdx"))):
         pages_scanned += 1
-        text = f.read_text(errors="ignore")
+        text = drop_unshipped(f.read_text(errors="ignore"))
         blocks = [strip_comments(m.group(1)) for m in BLOCK.finditer(text)]
         page_decls: set[str] = set()
         for b in blocks:
