@@ -56,7 +56,17 @@ DOCS = Path(os.environ.get("VERUM_STDLIB_DOCS")
             or os.environ.get("VERUM_DOCS_DIR")
             or (REPO.parent / "website" / "docs"))
 CORE = REPO / "core"
-BASELINE = 49  # Lowered by FIXING, never by argument.
+BASELINE = 47  # Lowered by FIXING, never by argument.
+                #    49 ->  47  the same marker in the site's PLURAL
+                #               spelling: `.streaming` under
+                #               h3-server.md's ":::warning Every
+                #               builder below is one of the four that
+                #               do not exist", and `.throttle_filter`
+                #               under async.md's "Three combinators on
+                #               that list do not exist". The regex knew
+                #               only the singular. Nine headers newly
+                #               match, three retrospective ones are
+                #               excluded by tense — see UNSHIPPED.
                 #    57 ->  49  NOT a fix, and the third of its kind: eight
                 #               names sit inside a section the page MARKS as
                 #               unshipped, and this gate was painting the
@@ -147,12 +157,18 @@ CALL = re.compile(r"\.([a-z_][a-z0-9_]*)\s*\(")
 # honoured these markers since 1eb0a71c4 — until now the two gates scored the
 # same page under two different rules, and the page that wrote down this
 # gate's own finding was the one being painted for it.  The phrasings are
-# collected from the admonition headers actually in use, not guessed.
+# collected from the admonition headers actually in use, not guessed — see
+# the longer note in that sibling, which records the 2026-09-09 widening
+# (the plural "do not exist", the counting forms, and the tense exclusion
+# that keeps retrospective notes countable).  The two regexes are kept
+# IDENTICAL on purpose: two gates disagreeing about what "unshipped"
+# means is how one page came to be scored under two rules to begin with.
 UNSHIPPED = re.compile(
-    r"^:::[a-z]+[^\n]*(?:not shipped|not implemented|not available|"
-    r"does not exist|does not compile|not in the standard library|"
-    r"cannot be evaluated|not yet|no snapshot|no linter|planned|"
-    r"describes a design)[^\n]*$", re.I | re.M)
+    r"^:::[a-z]+(?![^\n]*(?:used to|were not real|was stale))[^\n]*"
+    r"(?:not shipped|not implemented|not available|"
+    r"do(?:es)? not exist|does not compile|not in the standard library|"
+    r"cannot be evaluated|cannot be written|none of these|not yet|"
+    r"no snapshot|no linter|planned|describes a design)[^\n]*$", re.I | re.M)
 # The marker scopes to the SECTION, not to the admonition: the illustrative
 # blocks follow the `:::` close, so cutting at it would leave every name
 # behind.  Measured on the eight names this removes — each falls between an

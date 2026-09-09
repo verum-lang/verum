@@ -119,11 +119,29 @@ RANGE_OP = re.compile(r"\.\.")
 # "Not shipped", "does not exist", "Not available", "not in the standard
 # library", "does not compile", "cannot be evaluated today", "No snapshot
 # helper", "not available", "describes a design".
+#
+# 2026-09-09: the list was collected from ONE spelling of the same marker.
+# Dumping every `^:::` header on the site — 60 distinct — showed nine more
+# that say the same thing in the PLURAL or by counting: "Every builder below
+# is one of the four that do not exist", "These two mounts name modules that
+# do not exist", "None of these four commands exists", "Twenty-four of these
+# do not exist yet", "The TLS half of this tutorial cannot be written today".
+# Hence `do(?:es)? not exist`, `none of these`, `cannot be written`.
+#
+# AND ONE EXCLUSION, which the same dump made necessary. Three headers are
+# RETROSPECTIVES — "Three names this page used to list do not exist", "Four
+# names on this page were not real", "The method IS checked — this caution
+# was stale". Those sections are CORRECT now, and dropping them would blind
+# the gate to a future regression on exactly the pages that already had one.
+# They are excluded by their own tense. Measured today: excluding them hides
+# nothing, because none of the three sections contributes a name to either
+# census — so the exclusion costs zero and buys the future case.
 UNSHIPPED = re.compile(
-    r"^:::[a-z]+[^\n]*(?:not shipped|not implemented|not available|"
-    r"does not exist|does not compile|not in the standard library|"
-    r"cannot be evaluated|not yet|no snapshot|no linter|planned|"
-    r"describes a design)[^\n]*$", re.I | re.M)
+    r"^:::[a-z]+(?![^\n]*(?:used to|were not real|was stale))[^\n]*"
+    r"(?:not shipped|not implemented|not available|"
+    r"do(?:es)? not exist|does not compile|not in the standard library|"
+    r"cannot be evaluated|cannot be written|none of these|not yet|"
+    r"no snapshot|no linter|planned|describes a design)[^\n]*$", re.I | re.M)
 # The marker scopes to the SECTION, not to the admonition.  Measured on
 # `testing-tui.md`: its ":::caution Not shipped / None of this section
 # exists" closes after the prose and the illustrative blocks follow it, so
