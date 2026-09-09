@@ -736,13 +736,20 @@ pub fn execute(opts: TestOptions) -> Result<()> {
     }
 
     if cfg.coverage && !quiet {
+        // T1341 — say what actually happened. `--coverage` adds a
+        // per-function counter array (`__verum_coverage_counters`,
+        // internal linkage, bumped on entry —
+        // `verum_codegen/src/llvm/vbc_lowering.rs`) to each test binary.
+        // Nothing exports it: the array is internal, no atexit hook dumps
+        // it, and the tree contains no instrprof / profraw / profdata
+        // machinery at all. The previous wording announced "Coverage data
+        // written to <dir>/coverage/" and named `llvm-cov report`, so a
+        // reader went looking for a profdata that was never produced and
+        // doubted their own invocation first.
         ui::output(&format!("{}", "coverage:".bold()));
         ui::output(&format!("  Functions instrumented: {}", total));
-        ui::output(&format!(
-            "  Coverage data written to {}/coverage/",
-            test_target_dir.display()
-        ));
-        ui::output("  Use `llvm-cov report` to generate detailed reports");
+        ui::output("  Export is not implemented yet: the counters live in");
+        ui::output("  the test binary and are not written to disk (T1341).");
     }
 
     // Fuzz orchestration (#299): when [test].fuzzing = true, after
@@ -1939,14 +1946,23 @@ fn run_test_aot(test: &Test, target_dir: &Path, cfg: &TestRunCfg) -> TestResult 
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or("test");
-    // Unique per (test file, test fn) — the output binary, like the merged
-    // source and its `.o`/`.ll`, must not collide across the many test
-    // files that share a stem ("unit_test"), or parallel `par_iter`
-    // workers overwrite each other's binaries (running the wrong / a
-    // half-written executable). See `unique_merged_stem`.
+    // Unique per (test file, test fn, @test_case row) — the output
+    // binary, like the merged source and its `.o`/`.ll`, must not
+    // collide across the many test files that share a stem
+    // ("unit_test"), or parallel `par_iter` workers overwrite each
+    // other's binaries (running the wrong / a half-written executable).
+    // See `unique_merged_stem`.
+    //
+    // T1340: the ROW belongs in the key for the same reason. The four
+    // entries of a `@test_case` table share a file and a function name
+    // and differ only in their arguments, so without them all four
+    // compiled to ONE binary path — the collision this comment was
+    // written about, arriving through a door nobody had opened yet.
+    let case_args = test.case_args.as_deref();
+    let args_src = case_args_to_verum_literals(case_args).unwrap_or_default();
     let binary_name = format!(
         "test_{}",
-        unique_merged_stem(&test.file, test.fn_name.as_deref(), stem)
+        unique_merged_stem(&test.file, test.fn_name.as_deref(), &args_src, stem)
     );
     let output_path = target_dir.join(&binary_name);
 
@@ -2001,6 +2017,7 @@ fn run_test_aot(test: &Test, target_dir: &Path, cfg: &TestRunCfg) -> TestResult 
         target_dir,
         test.fn_name.as_deref(),
         keep_ignored_fn,
+        case_args,
     )
     .or_else(|| {
         synthesise_test_main_only(
@@ -2008,6 +2025,7 @@ fn run_test_aot(test: &Test, target_dir: &Path, cfg: &TestRunCfg) -> TestResult 
             target_dir,
             test.fn_name.as_deref(),
             keep_ignored_fn,
+            case_args,
         )
     })
     .unwrap_or_else(|| test.file.clone());
@@ -2217,6 +2235,7 @@ fn synthesise_test_input_with_crate_root(
     target_dir: &Path,
     test_fn_name: Option<&str>,
     keep_ignored_fn: Option<&str>,
+    case_args: Option<&[crate::commands::property::TreeValue]>,
 ) -> Option<PathBuf> {
     let mut cur = test_file.parent()?;
     let cog_root = loop {
@@ -2258,11 +2277,20 @@ fn synthesise_test_input_with_crate_root(
     // on natural completion (any panic / assert-fail aborts the
     // process before reaching the final 0). This mirrors how
     // run_test_interpret extracts the test fn and calls it directly.
+    // T1340 — a `@test_case` row's arguments belong in this call. They
+    // were dropped here, so every parametrised test compiled as
+    // `add_table();` against a three-parameter fn and died with
+    // `error<E102>: Function requires at least 3 arguments, got 0` in a
+    // generated file the author never wrote. Discovery already carried
+    // them (the `[0]`..`[3]` suffixes come from the same rows), and the
+    // interpreter path already used them — only the AOT wrapper, the
+    // DEFAULT tier, did not.
+    let args_src = case_args_to_verum_literals(case_args)?;
     let synth_main = match test_fn_name {
         Some(name) => format!(
             "\n\n// === T0.5.2 synthetic main — invokes the @test fn ===\n\
-             public fn main() -> Int {{\n    {}();\n    0\n}}\n",
-            name
+             public fn main() -> Int {{\n    {}({});\n    0\n}}\n",
+            name, args_src
         ),
         None => String::new(),
     };
@@ -2270,7 +2298,7 @@ fn synthesise_test_input_with_crate_root(
     let stem = test_file.file_stem()?.to_str()?;
     let merged_path = target_dir.join(format!(
         "test_{}.merged.vr",
-        unique_merged_stem(test_file, test_fn_name, stem)
+        unique_merged_stem(test_file, test_fn_name, &args_src, stem)
     ));
     if std::fs::create_dir_all(target_dir).is_err() {
         return None;
@@ -2297,17 +2325,85 @@ fn synthesise_test_input_with_crate_root(
 /// so the merged content differs per test. Keying the merged path on
 /// the bare stem makes parallel `par_iter` workers write the SAME
 /// `target/test/test_unit_test.merged.vr` concurrently; the interleaved
+/// Render one `@test_case` argument as the Verum literal the synthetic
+/// main will pass (T1340).
+///
+/// Total over exactly the variants `expr_to_tree_value` can produce —
+/// `Int`, `Bool`, `Float`, `Text` — and `None` for anything else, so a
+/// new literal kind accepted by the parser cannot be silently rendered
+/// wrong here. `case_args_to_verum_literals` turns a `None` into "do not
+/// synthesise", which surfaces as a compile error naming the missing
+/// entry point rather than as a call with the wrong arguments.
+/// `tree_value_kinds_all_render` pins the pair together.
+pub fn tree_value_to_verum_literal(v: &crate::commands::property::TreeValue) -> Option<String> {
+    use crate::commands::property::TreeValue;
+    match v {
+        TreeValue::Int { value, .. } => Some(value.to_string()),
+        TreeValue::Bool(b) => Some(b.to_string()),
+        // `grammar/verum.ebnf:212` — `float_lit = decimal_lit , '.' ,
+        // decimal_lit , [ exponent ]`. The dot with digits on BOTH sides
+        // is REQUIRED, and an exponent is only legal after one. Rust's
+        // `{:?}` gives the shortest round-tripping form, which is `1.0`
+        // for ordinary values but `1e300` — no dot — once the exponent
+        // takes over, and `inf` / `NaN` for the non-finite ones. Emitting
+        // those verbatim would put a token the Verum lexer cannot read
+        // into a generated file the author never sees.
+        TreeValue::Float(f) => {
+            if !f.is_finite() {
+                return None;
+            }
+            let raw = format!("{:?}", f);
+            Some(match raw.find(['e', 'E']) {
+                // `1e300` -> `1.0e300`; the mantissa keeps its own dot
+                // when it already has one (`1.5e300` is untouched).
+                Some(i) if !raw[..i].contains('.') => {
+                    format!("{}.0{}", &raw[..i], &raw[i..])
+                }
+                _ => raw,
+            })
+        }
+        TreeValue::Text { value, .. } => Some(format!("{:?}", value)),
+        _ => None,
+    }
+}
+
+/// The argument list for a `@test_case` row, or `None` when the row has
+/// an argument this renderer does not cover.
+pub fn case_args_to_verum_literals(
+    case_args: Option<&[crate::commands::property::TreeValue]>,
+) -> Option<String> {
+    let Some(args) = case_args else {
+        return Some(String::new());
+    };
+    let mut out = Vec::with_capacity(args.len());
+    for a in args {
+        out.push(tree_value_to_verum_literal(a)?);
+    }
+    Some(out.join(", "))
+}
+
 /// writes corrupt it, and the malformed source lowers to malformed IR
 /// that SIGSEGVs LLVM during `generate_native` — aborting the entire
 /// `verum test --aot` run (0 results from N tests). Folding the full
 /// source path + test-fn into the stem makes every concurrent
 /// compilation target its own files. Deterministic (fixed-key
 /// `DefaultHasher`) so re-runs reuse the same scratch names.
-fn unique_merged_stem(test_file: &Path, test_fn_name: Option<&str>, stem: &str) -> String {
+fn unique_merged_stem(
+    test_file: &Path,
+    test_fn_name: Option<&str>,
+    args_src: &str,
+    stem: &str,
+) -> String {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     test_file.hash(&mut hasher);
     test_fn_name.hash(&mut hasher);
+    // T1340 — the four rows of a `@test_case` table share a file AND a
+    // function name, so without the arguments in the key all four would
+    // target ONE merged path and race each other exactly the way
+    // different tests used to. The arguments are what makes them
+    // different tests.
+    args_src.hash(&mut hasher);
     format!("{}_{:016x}", stem, hasher.finish())
 }
 
@@ -2334,22 +2430,25 @@ fn synthesise_test_main_only(
     target_dir: &Path,
     test_fn_name: Option<&str>,
     keep_ignored_fn: Option<&str>,
+    case_args: Option<&[crate::commands::property::TreeValue]>,
 ) -> Option<PathBuf> {
     let test_fn = test_fn_name?;
+    // T1340 — see the sibling in `synthesise_test_input_with_crate_root`.
+    let args_src = case_args_to_verum_literals(case_args)?;
     let test_source =
         strip_ignored_tests(&std::fs::read_to_string(test_file).ok()?, keep_ignored_fn);
     let stem = test_file.file_stem()?.to_str()?;
     let merged_path = target_dir.join(format!(
         "test_{}.merged.vr",
-        unique_merged_stem(test_file, test_fn_name, stem)
+        unique_merged_stem(test_file, test_fn_name, &args_src, stem)
     ));
     if std::fs::create_dir_all(target_dir).is_err() {
         return None;
     }
     let synth_main = format!(
         "\n\n// === task #16 close — synthetic main wraps the @test fn ===\n\
-         public fn main() -> Int {{\n    {}();\n    0\n}}\n",
-        test_fn
+         public fn main() -> Int {{\n    {}({});\n    0\n}}\n",
+        test_fn, args_src
     );
     let merged = format!(
         "// Auto-synthesised by task #16 — no crate-root merge needed.\n\
