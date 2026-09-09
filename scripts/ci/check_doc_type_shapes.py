@@ -41,7 +41,7 @@ import re
 import sys
 from pathlib import Path
 
-BASELINE = 99  # Lowered by FIXING a page, never by argument.
+BASELINE = 86  # Lowered by FIXING a page, never by argument.
                #
                # 101 -> 99 on 2026-09-09: `stdlib/async.md`'s
                # `RetryConfig` had four fields and every one of the four
@@ -51,7 +51,23 @@ BASELINE = 99  # Lowered by FIXING a page, never by argument.
                # `jitter`), with two constructors that do not exist; and
                # `RecoveryStrategy.None` is `NoRecovery`.
                #
-               # The remaining 99 are a real backlog, not noise — spot-
+               # 99 -> 92 was NOT a fix: the collector delimited a
+               # declaration at the first `;`, and
+               # `core/compress/mod.vr`'s `Algorithm` carries the doc
+               # line "(headerless; used inside gzip/zlib/pkzip)". Four
+               # variants of a correct page were reported absent from a
+               # type that has them. Comments are stripped BEFORE the
+               # delimiter is looked for now, and the self-test carries
+               # that case. Caught by spot-checking the third page
+               # rather than the first two.
+               #
+               # 92 -> 86 by fixing `stdlib/architecture.md`: its
+               # `Capability`, `Foundation`, `MsfsStratum`, `Lifecycle`,
+               # `ArchMetric` and `CounterfactualReport` were a
+               # different vocabulary from `core/architecture/` — of the
+               # ten capability variants it listed, not one exists.
+               #
+               # The remaining 86 are a real backlog, not noise — spot-
                # checked against `core/`: `stdlib/architecture.md`
                # documents `Capability` with TEN variants and core/ has
                # nine completely different ones, not a single name in
@@ -111,6 +127,14 @@ def module_for(rel: str) -> str | None:
 
 
 def collect(text: str) -> dict[str, tuple[str, frozenset[str]]]:
+    # Comments are stripped BEFORE the declaration is delimited, not
+    # after. `core/compress/mod.vr`'s `Algorithm` carries the doc line
+    # "RFC 1951 raw deflate (headerless; used inside gzip/zlib/pkzip)",
+    # and that semicolon ended the declaration four variants early —
+    # the gate then reported Deflate, Zlib, Brotli and Zstd as absent
+    # from a type that has all four. A census whose delimiter can appear
+    # inside a comment measures the comment.
+    text = re.sub(r"//[^\n]*", "", text)
     out: dict[str, tuple[str, frozenset[str]]] = {}
     for m in DECL.finditer(text):
         name, body = m.group(1), m.group(2)
@@ -135,6 +159,13 @@ def self_test() -> int:
     d = collect("```\ntype A is { p: Int };\n```")
     if "A" not in d:
         bad += 1; print("self-test: a declaration is not collected")
+    # The measured false positive: a `;` inside a doc comment must not
+    # end the declaration.
+    d = collect("type A is\n  /// a; b\n  | X\n  | Y;\n")
+    if d.get("A", (None, frozenset()))[1] != frozenset({"X", "Y"}):
+        bad += 1
+        print(f"self-test: a semicolon in a COMMENT ends the declaration — "
+              f"got {d.get('A')}")
     k, n = shape(" { cols: Int, rows: Int }")
     if n != frozenset({"cols", "rows"}):
         bad += 1; print(f"self-test: fields on ONE line are missed — got {n}")
