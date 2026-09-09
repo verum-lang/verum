@@ -1063,6 +1063,106 @@ impl<'s> CompilationPipeline<'s> {
                         },
                         _ => continue,
                     };
+                    // ASSOCIATED CONSTANTS, EVERY TYPE, QUALIFIED KEY ONLY
+                    // (T1277). This runs BEFORE the canonical-set guard
+                    // below, and deliberately so.
+                    //
+                    // `ImplItemKind::Const` is a SEPARATE arm from
+                    // `Function` (verum_ast decl.rs), and the item filter
+                    // beneath handles only `Function`. So no associated
+                    // constant has ever been pre-registered — and the
+                    // canonical set would have excluded these types even
+                    // if it had been.
+                    //
+                    // Measured 2026-09-09 on an unmodified tree: 50 of
+                    // the 64 `[T0545]` rung-4 fabrications
+                    // (codegen/expressions.rs:22971) are associated
+                    // constants of non-canonical types read from a
+                    // consumer compiled BEFORE the declarer —
+                    // `Style.DEFAULT` x32, `Modifier.*` x12,
+                    // `TransportErrorCode.*` x6. Rung 4 emits
+                    // `MakeVariant(intern("Style.DEFAULT"))` where a Call
+                    // belongs, so the value that reaches the program is a
+                    // string id. `RenderCell.EMPTY` is not even visible
+                    // as a member from a user program.
+                    //
+                    // The sibling correlate that gave it away: a consumer
+                    // in the DECLARER'S OWN parent module resolves
+                    // (core.term.style.style reading Modifier.NONE from
+                    // its sibling core.term.style.modifier), and every
+                    // consumer outside it fabricates — including eighteen
+                    // files that already mount the declaring module
+                    // directly. Mount spelling is not the axis; compile
+                    // ORDER is, and this pre-pass is what makes order
+                    // irrelevant for the names it covers.
+                    //
+                    // QUALIFIED KEY ONLY, and that is what makes widening
+                    // past the canonical set safe: `DEFAULT` / `NONE` /
+                    // `BOLD` collide across dozens of types, so a bare-key
+                    // registration would hand the first-wins slot to an
+                    // arbitrary declarer. `Type.MEMBER` cannot collide.
+                    // Same discipline the record-layout seeder above
+                    // already uses — qualified authoritative, bare
+                    // first-wins.
+                    for impl_item in impl_decl.items.iter() {
+                        let (const_name, const_ty) = match &impl_item.kind {
+                            ImplItemKind::Const { name, ty, .. } => (name, ty),
+                            _ => continue,
+                        };
+                        let qualified =
+                            format!("{}.{}", target_type_name, const_name.name);
+                        if self.global_function_registry.contains_key(&qualified) {
+                            continue;
+                        }
+                        let const_return_type_name = {
+                            let n = verum_vbc::codegen::VbcCodegen::extract_type_name_from_ast(
+                                const_ty,
+                            );
+                            if n.is_empty() || n == "()" {
+                                None
+                            } else if n == "Self" {
+                                Some(target_type_name.clone())
+                            } else {
+                                Some(n)
+                            }
+                        };
+                        let stub_id = FunctionId(
+                            verum_vbc::stub_ranges::STAGE1_BASE - stubs_registered as u32,
+                        );
+                        let info = FunctionInfo {
+                            id: stub_id,
+                            param_count: 0,
+                            param_names: vec![],
+                            param_type_names: vec![],
+                            is_async: false,
+                            is_generator: false,
+                            contexts: vec![],
+                            return_type: None,
+                            yield_type: None,
+                            intrinsic_name: None,
+                            variant_tag: None,
+                            parent_type_name: Some(target_type_name.clone()),
+                            variant_payload_types: None,
+                            is_partial_pattern: false,
+                            takes_self_mut_ref: false,
+                            return_type_name: const_return_type_name,
+                            return_type_inner: None,
+                            is_const: true,
+                            is_transparent_wrapper: false,
+                            param_closure_return_type_names: Vec::new(),
+                        };
+                        if let Ok(filter) = std::env::var("VERUM_TRACE_STUB")
+                            && filter != "1"
+                            && qualified.contains(&filter)
+                        {
+                            eprintln!(
+                                "[stage-1const] stub '{}' id={}",
+                                qualified, stub_id.0
+                            );
+                        }
+                        self.global_function_registry.insert(qualified, info);
+                        stubs_registered += 1;
+                    }
                     if !is_canonical_stdlib_type(target_type_name.as_str()) {
                         continue;
                     }
