@@ -111,11 +111,12 @@ jobs:
       # `stub never resolved id=…` cannot name the offender.
       #
       # READ THE DIRECTION; THE MAGNITUDE IS NOT A DEFECT COUNT. The census
-      # itself shows why: 23 of the 89 names share ONE id, so stub LINES
-      # and distinct roots are different quantities. The one delta measured
-      # so far is 1:1 — repairing `sys.darwin.thread.thread_yield` moved
-      # the stub count 78 -> 77 and left the id count at 16 — which says
-      # the ratio CAN be one, not that it always is.
+      # shows why: on this tree ONE id stands for five unrelated names
+      # (InvalidInput, NotFound, access_name, flags_default,
+      # open_readonly), so stub LINES and distinct roots are different
+      # quantities. The one delta measured so far is 1:1 — repairing one
+      # dead name moved another session's stub count by exactly one — which
+      # says the ratio CAN be one, not that it always is.
       - name: Stage-5 stub sharing (ratchet, advisory)
         continue-on-error: true
         run: make check-stage5-stub-sharing BAKE_LOG=/tmp/bake.log

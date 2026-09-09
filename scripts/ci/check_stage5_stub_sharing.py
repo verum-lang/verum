@@ -11,27 +11,37 @@ compilation unit then resolves to the stub.  Because the id is minted per
 MINT SITE and the name is captured per NAME, one id ends up standing for
 many different qualified targets.
 
-Measured 2026-09-09 on a baseline bake (T1172):
+Measured 2026-09-09 18:09 on a complete bake of this tree (rc=0, archive
+written, 5718 log lines):
 
-    581 [qcall] lines, 89 distinct names over 34 ids
-     78 "stage-5 stub" lines over 16 ids
-     ELEVEN of those 16 carry more than one name
-     worst: 23 names on 4269801471 (STAGE5_BASE - 0)
+     11 "stage-5 mount-miss stub" lines over 6 ids
+     TWO of those 6 carry more than one name
+     worst: 5 names on 4269801471 (STAGE5_BASE - 0) —
+            InvalidInput, NotFound, access_name, flags_default,
+            open_readonly
 
-That last number is why the runtime diagnostic cannot help: `stub never
-resolved id=4269801471` is true of twenty-three different names, and two
-sessions spent an hour each chasing it from the id alone.
+That last line is why the runtime diagnostic cannot help on its own:
+`stub never resolved id=4269801471` is true of five unrelated names, and
+two sessions spent an hour each chasing it from the id alone.
+
+A LARGER CENSUS WAS QUOTED HERE FIRST — 78 stub lines over 16 ids, 11
+shared, worst 23 — and it is NOT this tree's. It came from another
+session's bake at a different moment (before two dead-name repairs
+landed, and while `open` was declared variadic), and I adopted it
+without taking my own. The baseline below is the number this tree
+produces; the other one is left in the record because a reader who finds
+it elsewhere should know which tree it describes rather than assume the
+gate drifted.
 
 THE NUMBER IS A COUNT OF NAMES, NOT OF ROOTS, and the census itself
 says so: 23 of the 89 names share ONE id.  So `N stub lines` and `N
 defects` are different quantities, and the ratio is neither known nor
 constant.
 
-MEASURED DELTAS, so nobody has to guess the ratio: repairing one dead
-name (`sys.darwin.thread.thread_yield`) moved the stub count 78 -> 77 —
-one line for one root — and left the id count at 16 and the `[lenient]
-SKIP` population unchanged at 11.  One measurement is one measurement:
-it says the ratio CAN be 1:1, not that it always is.
+MEASURED DELTA, so nobody has to guess the ratio: repairing one dead
+name (`sys.darwin.thread.thread_yield`) moved that session's stub count
+by exactly one and left its id count unchanged.  One measurement is one
+measurement: it says the ratio CAN be 1:1, not that it always is.
 
 A larger claim (one root moving the count by fifteen) was briefly
 recorded here on 2026-09-09 and is RETRACTED: its inputs were read from
@@ -71,7 +81,7 @@ STUB = re.compile(
 
 # Set from the measurement above.  Lowered by FIXING — a root removed —
 # never by argument, and never raised to match a drift.
-BASELINE_SHARED_IDS = 11
+BASELINE_SHARED_IDS = 2
 
 
 def census(text: str):
