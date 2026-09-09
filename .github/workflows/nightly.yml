@@ -72,6 +72,32 @@ jobs:
           python3 scripts/ci/check_file_vs_project_parity.py \
             --verum target/release/verum
 
+      # The panic-stub ratchet, and the same T1073 class as its neighbour
+      # above: `scripts/ci/check_bake_diagnostics.py` is correct,
+      # self-documented, wired to `make check-bake-diagnostics`, and
+      # reachable from NOTHING — it wants a bake LOG (a bake is ~12 min, so
+      # it deliberately does not bake itself) and no job produced one. The
+      # count drifted from its baseline of 2 to ELEVEN unobserved.
+      #
+      # The bake's own diagnostics are invisible by default for the reason
+      # A-FABRICATE records: the stdlib is baked inside `verum_compiler`'s
+      # build.rs, and cargo hides build-script output on a successful build.
+      # A DIRECT `verum stdlib precompile` is the only way to see them.
+      #
+      # Advisory, and it will be RED on its first run — 11 against a
+      # baseline of 2 (T1315 has the taxonomy: 4 names that exist nowhere,
+      # 5 that exist but not as written, 2 genuine body errors). THE
+      # BASELINE MUST NOT BE RAISED TO MATCH: a ratchet lowered by argument
+      # is not a ratchet, and raising this one would bless nine regressions
+      # in the act of repairing the gate. It comes down by fixing (T1315).
+      - name: Stdlib bake diagnostics (ratchet, advisory)
+        continue-on-error: true
+        run: |
+          target/release/verum stdlib precompile \
+            --stdlib-path core -o /tmp/nightly-bake.vbca > /tmp/bake.log 2>&1 || true
+          echo "bake log: $(wc -l < /tmp/bake.log) lines"
+          make check-bake-diagnostics BAKE_LOG=/tmp/bake.log
+
       - name: Run VCS L0+L1+L2+L3 full
         working-directory: vcs
         # The vtest RUNNER process (not a test child) has died SIGSEGV
