@@ -1,0 +1,70 @@
+// @test: run
+// @level: L1
+// @tier: 0
+// @tags: term, render, cell, const, visibility, regression
+// @timeout: 120000
+// @expected-stdout-begin
+// empty skip=false width=1 grapheme=[ ]
+// empty style fg=false bg=false
+// default style fg=false bg=false
+// distinct eq_self=true eq_other=false
+// @expected-stdout-end
+// @description: A public associated constant declared on a stdlib type is
+//   reachable from a user program, and carries the record its declaration
+//   names.
+//
+// WHY THIS FILE EXISTS. `RenderCell.EMPTY` (core/term/render/cell.vr:27) is
+// a `public const` and was reachable on a binary built 2026-08-31 — that
+// binary ran this exact expression and printed `skip=false grapheme=[ ]`.
+// On 2026-09-09 the same source answered
+//
+//   error<E404>: field 'EMPTY' not found on type 'RenderCell'.
+//   Available members: [eq, grapheme, reset, set_char, skip, style, width]
+//
+// The constant had not moved; the archive had. Writing the precompiled
+// stdlib runs a visibility-demotion pass that asks, of a BARE LEAF name,
+// "is this name private somewhere and public nowhere?" — and the walk that
+// answered the public half could see only TOP-LEVEL declarations. A private
+// top-level `const EMPTY` in core/collections/map.vr therefore put "EMPTY"
+// into the private set, the public `RenderCell.EMPTY` could not put it into
+// the public set because it is an ASSOCIATED constant, and the descriptor
+// was stamped private on its way into the archive. One name, measured: of
+// 55 core types declaring a public associated const, exactly one differed
+// between the two binaries. See T1306.
+//
+// WHY EACH LINE. A spec that only asserted "this compiles" would pass on a
+// constant that resolved to nothing, which is the failure mode next door
+// (T1277 / A-FABRICATE: an unresolved qualifier becomes a fabricated value
+// rather than an error). So every line names a value a fabrication would
+// get wrong:
+//
+//   line 1  the three fields the declaration writes — `skip` false, a
+//           single-space grapheme, and therefore width 1. A fabricated
+//           record prints width 0 or an empty grapheme.
+//   line 2  the constant's own `Style`, reached THROUGH the constant. Both
+//           halves false is what `Style.DEFAULT` means; a cell carrying a
+//           fabricated style either panics on the field read or answers
+//           `true`.
+//   line 3  `Style.DEFAULT` asked directly. Its leaf name `DEFAULT` has no
+//           private top-level declaration anywhere in core, so it was never
+//           demoted and worked throughout. Keeping it here is what makes
+//           line 2 diagnostic: if BOTH go wrong the fault is in constants
+//           generally, if only line 1-2 go wrong it is this defect again.
+//   line 4  `eq` against itself and against a cell that was written to, so
+//           the constant is shown to be a usable value and not merely a
+//           name that resolves.
+mount core.term.render.cell.RenderCell;
+mount core.term.style.style.Style;
+
+fn main() {
+    let e = RenderCell.EMPTY;
+    print(f"empty skip={e.skip} width={e.width()} grapheme=[{e.grapheme}]");
+    print(f"empty style fg={e.style.has_fg()} bg={e.style.has_bg()}");
+
+    let d = Style.DEFAULT;
+    print(f"default style fg={d.has_fg()} bg={d.has_bg()}");
+
+    let mut other = RenderCell.EMPTY;
+    other.set_char(&"X", Style.DEFAULT);
+    print(f"distinct eq_self={e.eq(&e)} eq_other={e.eq(&other)}");
+}

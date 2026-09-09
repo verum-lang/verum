@@ -532,6 +532,42 @@ fn scan_private_declarations(
                 })
                 .unwrap_or_default();
             for item in &module.items {
+                // An `implement` block PUBLISHES names too, and this walk
+                // could not see them: it matched only top-level `Const` /
+                // `Type` items, while the demotion below asks its question
+                // about a BARE LEAF name.  So one private top-level
+                // `const EMPTY` (core/collections/map.vr) put "EMPTY" into
+                // `priv_names`, nothing could ever put it into
+                // `pub_names`, and `private_only` therefore answered TRUE
+                // for the public `RenderCell.EMPTY` — demoting a declared
+                // constant out of every user program's view while the
+                // stdlib's own bake, which never runs this pass, kept
+                // using it (T1306).
+                //
+                // The invariant: any declaration form that can feed
+                // `priv_names` must be able to feed `pub_names`, or the
+                // leaf question has no true answer.  This arm only ADDS to
+                // `pub_names` — never to `priv_names` or `out` — so it can
+                // un-hide a descriptor and can never hide one that is
+                // visible today.
+                if let verum_ast::ItemKind::Impl(impl_decl) = &item.kind {
+                    for impl_item in impl_decl.items.iter() {
+                        if !matches!(impl_item.visibility, Visibility::Public) {
+                            continue;
+                        }
+                        let assoc_name = match &impl_item.kind {
+                            verum_ast::decl::ImplItemKind::Const { name, .. } => {
+                                name.name.as_str()
+                            }
+                            verum_ast::decl::ImplItemKind::Type { name, .. } => {
+                                name.name.as_str()
+                            }
+                            _ => continue,
+                        };
+                        pub_names.insert(assoc_name.to_string());
+                    }
+                    continue;
+                }
                 let (vis, name) = match &item.kind {
                     verum_ast::ItemKind::Const(d) => (&d.visibility, d.name.name.as_str()),
                     verum_ast::ItemKind::Type(d) => (&d.visibility, d.name.name.as_str()),
