@@ -23212,10 +23212,14 @@ impl TypeChecker {
 
                     self.apply_fn_bound_extraction(&type_bounds, span);
 
-                    // OVERLOAD GUARD: same as early/primary paths
-                    let params_cloned = params.clone();
+                    // OVERLOAD GUARD: same as early/primary paths.
+                    // `params` is a slice since T1270 made `effective_params`
+                    // return one, so the `.clone()` this line used to carry
+                    // copied the REFERENCE and did nothing — rustc's
+                    // `noop_method_call` said so. Iterating the slice directly
+                    // is what the code already meant.
                     let mut signature_mismatch = false;
-                    for (arg, param_ty) in args.iter().zip(params_cloned.iter()) {
+                    for (arg, param_ty) in args.iter().zip(params.iter()) {
                         if matches!(&arg.kind, ExprKind::Closure { .. }) {
                             let subst_param_ty = param_ty.apply_subst(&combined_subst);
                             let resolved_param = self.unifier.apply(&subst_param_ty);
@@ -23230,7 +23234,7 @@ impl TypeChecker {
                     }
                     if !signature_mismatch {
                         // Type check arguments
-                        for (arg, param_ty) in args.iter().zip(params_cloned.iter()) {
+                        for (arg, param_ty) in args.iter().zip(params.iter()) {
                             let subst_param_ty = param_ty.apply_subst(&combined_subst);
                             self.check_expr(arg, &subst_param_ty)?;
                         }
@@ -23992,8 +23996,10 @@ impl TypeChecker {
                     }
                     self.apply_fn_bound_extraction(&type_bounds, span);
 
-                    // Clone params for iteration to avoid borrow issues
-                    let params_cloned = params.clone();
+                    // `params` is a slice since T1270; the `.clone()` that
+                    // stood here copied the reference and was a no-op, and the
+                    // comment above it ("clone to avoid borrow issues") described
+                    // a borrow problem that no longer exists.
 
                     // OVERLOAD GUARD: If any argument is a closure but the corresponding
                     // parameter type (after substitution) is a concrete non-function type,
@@ -24002,7 +24008,7 @@ impl TypeChecker {
                     // Example: List.position(value: &T) vs Iterator.position(pred: fn(&T)->Bool)
                     {
                         let mut signature_mismatch = false;
-                        for (arg, param_ty) in args.iter().zip(params_cloned.iter()) {
+                        for (arg, param_ty) in args.iter().zip(params.iter()) {
                             if matches!(&arg.kind, ExprKind::Closure { .. }) {
                                 let subst_param_ty = param_ty.apply_subst(&combined_subst);
                                 let resolved_param = self.unifier.apply(&subst_param_ty);
@@ -24024,7 +24030,7 @@ impl TypeChecker {
                             // which may have a matching overload accepting a closure.
                         } else {
                             // Type check each argument (with substituted param types)
-                            for (arg, param_ty) in args.iter().zip(params_cloned.iter()) {
+                            for (arg, param_ty) in args.iter().zip(params.iter()) {
                                 let subst_param_ty = param_ty.apply_subst(&combined_subst);
                                 self.check_expr(arg, &subst_param_ty)?;
                             }
