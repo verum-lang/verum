@@ -785,6 +785,13 @@ jobs:
           # arena that has none of them.
           python3 scripts/ci/check_doc_receiver_methods.py --self-test
           python3 scripts/ci/check_doc_receiver_methods.py --min-proven 150
+          # And the rung above THAT: could the call RUN? Arity needs no
+          # type inference and no build, and it catches documentation
+          # transliterated from another language's calling convention —
+          # `Shared.strong_count(&s)` names a real method on a real type
+          # and cannot be written that way.
+          python3 scripts/ci/check_doc_call_arity.py --self-test
+          python3 scripts/ci/check_doc_call_arity.py --min-calls 600
 
       # `check_doc_blocks_parse` has been in the tree for weeks as a
       # Makefile target with NO CI caller and no `--check` flag on the one

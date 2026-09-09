@@ -103,6 +103,10 @@ check-doc-receiver-methods: ## Gate: a method called on a receiver whose TYPE th
 	python3 scripts/ci/check_doc_receiver_methods.py --self-test
 	python3 scripts/ci/check_doc_receiver_methods.py --min-proven 150
 
+check-doc-call-arity: ## Gate: a documented `Type.method(...)` call must pass an argument count the declaration accepts — no build needed
+	python3 scripts/ci/check_doc_call_arity.py --self-test
+	python3 scripts/ci/check_doc_call_arity.py --min-calls 600
+
 check-doc-reachable: ## Gate: every doc page must be reachable from the sidebar or another page — no build needed
 	python3 scripts/ci/check_doc_reachable.py --self-test
 	python3 scripts/ci/check_doc_reachable.py --min-pages 300
@@ -131,6 +135,7 @@ gates-docs: check-doc-examples check-examples-run check-homepage-examples check-
             check-doc-methods-declared check-doc-methods-exercised \
             check-doc-status-badge check-doc-reachable \
             check-doc-type-shapes check-doc-receiver-methods \
+            check-doc-call-arity \
             check-doc-iterator-items ## Every documentation gate CI runs — needs a build
 	@echo "gates-docs: all documentation gates green"
 
