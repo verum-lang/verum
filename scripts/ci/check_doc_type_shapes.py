@@ -41,7 +41,7 @@ import re
 import sys
 from pathlib import Path
 
-BASELINE = 76  # Lowered by FIXING a page, never by argument.
+BASELINE = 56  # Lowered by FIXING a page, never by argument.
                #
                # 101 -> 99 on 2026-09-09: `stdlib/async.md`'s
                # `RetryConfig` had four fields and every one of the four
@@ -123,7 +123,17 @@ DECL = re.compile(
     r"(?:^|\n)\s*(?:public\s+|pub\s+)?type\s+([A-Z][A-Za-z0-9_]*)"
     r"(?:<[^>]*>)?\s+is\b(.*?);", re.S)
 FIELD = re.compile(r"(?:^|,)\s*([a-z_][a-z0-9_]*)\s*:", re.M)
-VARIANT = re.compile(r"(?:^|\|)\s*([A-Z][A-Za-z0-9_]*)")
+# A variant may carry attributes: `variant = { attribute } , identifier
+# , [ variant_data ] , …` (grammar/verum.ebnf:815, whose own example
+# is `@default Ok | @deprecated Legacy | Error(Text)`). Skipping them
+# was not optional — `core/runtime/supervisor.vr` writes
+# `| @default EscalateToParent`, the collector saw no variant there,
+# and the gate then reported a page naming `EscalateToParent` as
+# naming a variant core/ does not have. One such variant exists in
+# core/ today, and the gate was wrong about exactly it.
+VARIANT = re.compile(
+    r"(?:^|\|)\s*(?:@[a-z_][A-Za-z0-9_]*(?:\([^)]*\))?\s+)*"
+    r"([A-Z][A-Za-z0-9_]*)")
 
 
 def shape(body: str) -> tuple[str, frozenset[str]]:
@@ -249,6 +259,15 @@ def self_test() -> int:
         bad += 1; print("self-test: a hyphenated stdlib page loses its module")
     if module_for("cookbook/arenas.md") is not None:
         bad += 1; print("self-test: a cookbook page was given a module")
+    # An ATTRIBUTED variant is still a variant.
+    _, n = shape("\n | RestartSubtree\n | @default EscalateToParent\n | Terminate")
+    if n != frozenset({"RestartSubtree", "EscalateToParent", "Terminate"}):
+        bad += 1
+        print(f"self-test: an @attributed variant is dropped — got {n}")
+    _, n = shape("\n | @serde(rename = \"a\") Alpha\n | Beta")
+    if n != frozenset({"Alpha", "Beta"}):
+        bad += 1
+        print(f"self-test: an attribute WITH ARGS eats its variant — got {n}")
     # the measured case that motivated the gate
     _, cs = shape("\n | BlinkingBlock | SteadyBlock | BlinkingBar;")
     if cs != frozenset({"BlinkingBlock", "SteadyBlock", "BlinkingBar"}):
