@@ -265,12 +265,14 @@ check-protocol-form: ## Gate (T0794): protocols in core/ use the grammatical `ty
 	python3 scripts/ci/check_protocol_form.py
 
 check-constant-time-duplication: ## Gate (T0817): a constant-time comparator hand-rolled outside core/subtle/ — one implementation should carry that promise
+	python3 scripts/ci/check_constant_time_duplication.py --self-test
 	python3 scripts/ci/check_constant_time_duplication.py
 
 check-cfg-block-tail: ## Gate (T0805): a function whose value is meant to come from an @cfg block — a gated block is a statement, so the function yields Unit
 	python3 scripts/ci/check_cfg_block_tail.py
 
 check-protocol-conformance: ## Gate (T0812): an implement block missing a method its protocol requires — type-checks today and panics at the call
+	python3 scripts/ci/check_protocol_conformance.py --self-test
 	python3 scripts/ci/check_protocol_conformance.py
 
 check-platform-call-parity: ## Gate (T0808): calls into core/sys/<platform>/ naming something that module does not provide — silent nil on the platform you are not testing on

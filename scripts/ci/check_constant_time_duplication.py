@@ -60,7 +60,39 @@ DECL = re.compile(
     r"((?:ct_|constant_time_)\w*)\s*[<(]"
 )
 
-BASELINE = 8
+# THE COUNT BECAME A ROSTER, 2026-09-09 (T1330).  A bare count says how
+# many duplicate constant-time declarations are tolerated and never WHICH,
+# so the shape it cannot report is the SWAP: route one through
+# `core.subtle`, add another somewhere else, and the total is unchanged and
+# the gate prints `none new`.  Measured the same day on a sibling gate of
+# identical construction (`check_platform_call_parity.py`): with the
+# population held at one and its membership replaced, the count ratchet
+# printed `[ok] … none new` over a tree that had just acquired the defect.
+#
+# The key is `(name, file)` and carries NO line number: a roster keyed on
+# positions goes red when an unrelated edit above shifts a line, which
+# teaches the reader to re-baseline without looking.
+KNOWN: set[tuple[str, str]] = {
+    ("ct_eq", "core/database/postgres/auth/scram.vr"),
+    ("constant_time_bytes_eq", "core/net/tls13/handshake/client_sm.vr"),
+    ("constant_time_eq", "core/net/tls13/handshake/psk.vr"),
+    ("constant_time_eq", "core/net/tls13/handshake/resume_verify.vr"),
+    ("constant_time_bytes_eq", "core/net/tls13/handshake/server_sm.vr"),
+    ("ct_eq_bytes", "core/security/kdf/argon2.vr"),
+    ("ct_eq", "core/security/sigstore/rekor.vr"),
+    ("ct_eq_hex", "core/security/tuf/client.vr"),
+}
+
+
+def compare(
+    found: set[tuple[str, str]],
+    roster: set[tuple[str, str]],
+) -> tuple[list, list]:
+    """Split what the tree has against what the roster claims.
+
+    Separated from the scan so a control can drive it without a tree —
+    the half a count ratchet has and never tests."""
+    return sorted(found - roster), sorted(roster - found)
 
 
 def shown_path(path: Path) -> str:
@@ -70,43 +102,83 @@ def shown_path(path: Path) -> str:
         return str(path)
 
 
+def self_test() -> int:
+    """THE SWAP, which is the shape the count ratchet could not report and
+    the reason this gate carries a roster.  Population size is 1 in both
+    polarities; the membership differs, and a count is satisfied by both."""
+    before = {("ct_eq", "core/security/sigstore/rekor.vr")}
+    after = {("ct_eq", "core/security/tuf/client.vr")}
+    appeared, disappeared = compare(after, before)
+    if not appeared or not disappeared:
+        print(
+            "self-test: a swap of equal size reported nothing — the roster "
+            "comparison has degenerated back into a count",
+            file=sys.stderr,
+        )
+        return 1
+    if compare(before, before) != ([], []):
+        print("self-test: an unchanged population reported a difference", file=sys.stderr)
+        return 1
+    print("[ok] self-test: a same-size swap is reported")
+    return 0
+
+
 def main() -> int:
+    if "--self-test" in sys.argv:
+        return self_test()
+
     sources = sorted(CORE.rglob("*.vr"))
     if not sources:
         print(f"check-constant-time-duplication: no .vr files under {CORE}", file=sys.stderr)
         return 2
 
-    findings = []
+    findings: dict[tuple[str, str], list[str]] = {}
     for path in sources:
         if CANONICAL in path.parents:
             continue
+        rel = shown_path(path)
         for lineno, line in enumerate(path.read_text(errors="ignore").splitlines(), 1):
             m = DECL.match(line)
             if m:
-                findings.append((f"{shown_path(path)}:{lineno}", m.group(1)))
+                findings.setdefault((m.group(1), rel), []).append(f"{rel}:{lineno}")
 
-    total = len(findings)
-    if "--list" in sys.argv or total > BASELINE:
-        stream = sys.stderr if total > BASELINE else sys.stdout
+    total = sum(len(v) for v in findings.values())
+    appeared, disappeared = compare(set(findings), KNOWN)
+    bad = bool(appeared) or bool(disappeared)
+
+    if "--list" in sys.argv or bad:
+        stream = sys.stderr if bad else sys.stdout
         print(
             f"constant-time duplication: {total} declaration(s) outside core/subtle/ "
-            f"(baseline {BASELINE})",
+            f"({len(KNOWN)} on the roster)",
             file=stream,
         )
-        for site, name in findings:
-            print(f"  {name}\n      {site}", file=stream)
+        for key in sorted(findings):
+            mark = "NEW " if key in set(appeared) else "    "
+            print(f"  {mark}{key[0]}", file=stream)
+            for site in findings[key]:
+                print(f"          {site}", file=stream)
 
-    if total > BASELINE:
+    if appeared:
         print(
-            "\nRoute the call through core.subtle.constant_time instead. A name that\n"
-            "promises constant time should have one implementation to promise it of.",
+            "\nThe declaration(s) marked NEW are not on the roster in this file.\n"
+            "Route the call through core.subtle.constant_time instead. A name that\n"
+            "promises constant time should have one implementation to promise it of.\n"
+            "If it has to stay, add it to KNOWN with the reason.",
             file=sys.stderr,
         )
         return 1
-    if total < BASELINE:
-        print(f"constant-time duplication: {total} found, below baseline {BASELINE} — lower it.")
+    if disappeared:
+        print(
+            "constant-time duplication: the roster claims declaration(s) the tree no "
+            "longer has —\n"
+            + "".join(f"  {name}  {rel}\n" for name, rel in disappeared)
+            + "Remove them from KNOWN in this file; the population shrank and the\n"
+            "roster has to say so by name, not by a smaller number.",
+            file=sys.stderr,
+        )
         return 1
-    print(f"[ok] constant-time duplication: {total} known declaration(s), none new")
+    print(f"[ok] constant-time duplication: {total} known declaration(s), roster exact")
     return 0
 
 

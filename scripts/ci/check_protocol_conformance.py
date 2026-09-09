@@ -79,7 +79,63 @@ SIG_ANY = re.compile(
     r"(?:(?:public|pub)\s+)?(?:async\s+|unsafe\s+|pure\s+)*\bfn\s+(\w+)\s*[<(]"
 )
 
-BASELINE = 6
+# THE COUNT BECAME A ROSTER, 2026-09-09 (T1330).  A bare count says how
+# many incomplete implementations are tolerated and never WHICH, so the
+# shape it cannot report is the SWAP: complete one implementation, break
+# another, and the total is unchanged and the gate prints `none new`.
+# Measured the same day on a sibling gate of identical construction
+# (`check_platform_call_parity.py`): with the population held at one and
+# its membership replaced, the count ratchet printed `[ok] … none new`
+# over a tree that had just acquired the defect.
+#
+# The key is `(protocol, target, file)` and carries NO line number: a
+# roster keyed on positions goes red when an unrelated edit above shifts
+# a line, which teaches the reader to re-baseline without looking.
+#
+# All six are in `core/math/`, and none is reachable from the language
+# runtime — they are category-theory example structures whose protocols
+# demand law methods (`associativity`, `left_identity`, …) that the
+# example does not carry.  See T0812.
+KNOWN: set[tuple[str, str, str]] = {
+    ("Category", "SetCategory", "core/math/concrete_accessible.vr"),
+    ("Category", "SmallCatCategory", "core/math/concrete_accessible.vr"),
+    ("Category", "TopCategory", "core/math/concrete_accessible.vr"),
+    ("Sieve", "ToposExampleMaximalSieve", "core/math/examples.vr"),
+    ("InfPresheaf", "ConstantInfPresheaf", "core/math/examples.vr"),
+    ("InfSubobjectClassifier", "TrivialInfSubobjectClassifier", "core/math/examples.vr"),
+}
+
+
+def compare(
+    found: set[tuple[str, str, str]],
+    roster: set[tuple[str, str, str]],
+) -> tuple[list, list]:
+    """Split what the tree has against what the roster claims.
+
+    Separated from the scan so a control can drive it without a tree —
+    the half a count ratchet has and never tests."""
+    return sorted(found - roster), sorted(roster - found)
+
+
+def self_test() -> int:
+    """THE SWAP, which is the shape the count ratchet could not report and
+    the reason this gate carries a roster.  Population size is 1 in both
+    polarities; the membership differs, and a count is satisfied by both."""
+    before = {("Category", "SetCategory", "core/math/concrete_accessible.vr")}
+    after = {("Category", "TopCategory", "core/math/concrete_accessible.vr")}
+    appeared, disappeared = compare(after, before)
+    if not appeared or not disappeared:
+        print(
+            "self-test: a swap of equal size reported nothing — the roster "
+            "comparison has degenerated back into a count",
+            file=sys.stderr,
+        )
+        return 1
+    if compare(before, before) != ([], []):
+        print("self-test: an unchanged population reported a difference", file=sys.stderr)
+        return 1
+    print("[ok] self-test: a same-size swap is reported")
+    return 0
 
 
 def shown_path(path: Path) -> str:
@@ -141,6 +197,9 @@ def collect_protocols(sources):
 
 
 def main() -> int:
+    if "--self-test" in sys.argv:
+        return self_test()
+
     sources = [(p, p.read_text(errors="ignore").splitlines()) for p in sorted(CORE.rglob("*.vr"))]
     if not sources:
         print(f"check-protocol-conformance: no .vr files under {CORE}", file=sys.stderr)
@@ -148,7 +207,7 @@ def main() -> int:
 
     required, defaulted = collect_protocols(sources)
 
-    findings = []
+    findings: dict[tuple[str, str, str], tuple[str, list]] = {}
     for path, lines in sources:
         for i, line in enumerate(lines):
             m = IMPL.match(line)
@@ -166,28 +225,48 @@ def main() -> int:
                 provided.update(SIG_LINE.findall(lines[j]))
             missing = required[protocol] - provided - defaulted.get(protocol, set())
             if missing:
-                findings.append((f"{shown_path(path)}:{i + 1}", protocol, m.group(2), sorted(missing)))
+                rel = shown_path(path)
+                findings[(protocol, m.group(2), rel)] = (f"{rel}:{i + 1}", sorted(missing))
 
     total = len(findings)
-    if "--list" in sys.argv or total > BASELINE:
-        stream = sys.stderr if total > BASELINE else sys.stdout
-        print(f"protocol conformance: {total} incomplete implementations (baseline {BASELINE})",
-              file=stream)
-        for site, protocol, target, missing in findings:
-            shown = ", ".join(missing[:4]) + ("…" if len(missing) > 4 else "")
-            print(f"  {protocol} for {target} is missing {shown}\n      {site}", file=stream)
+    appeared, disappeared = compare(set(findings), KNOWN)
+    bad = bool(appeared) or bool(disappeared)
 
-    if total > BASELINE:
+    if "--list" in sys.argv or bad:
+        stream = sys.stderr if bad else sys.stdout
         print(
-            "\nEach of these type-checks and panics at the call instead. A bound on\n"
-            "the protocol promises a method the type does not have.",
+            f"protocol conformance: {total} incomplete implementations "
+            f"({len(KNOWN)} on the roster)",
+            file=stream,
+        )
+        for key in sorted(findings):
+            protocol, target, _ = key
+            site, missing = findings[key]
+            mark = "NEW " if key in set(appeared) else "    "
+            shown = ", ".join(missing[:4]) + ("…" if len(missing) > 4 else "")
+            print(f"  {mark}{protocol} for {target} is missing {shown}\n          {site}",
+                  file=stream)
+
+    if appeared:
+        print(
+            "\nThe implementation(s) marked NEW are not on the roster in this file.\n"
+            "Each type-checks and panics at the call instead. A bound on the\n"
+            "protocol promises a method the type does not have. If one has to\n"
+            "stay, add it to KNOWN with the reason.",
             file=sys.stderr,
         )
         return 1
-    if total < BASELINE:
-        print(f"protocol conformance: {total} found, below baseline {BASELINE} — lower BASELINE.")
+    if disappeared:
+        print(
+            "protocol conformance: the roster claims implementation(s) the tree no "
+            "longer has —\n"
+            + "".join(f"  {proto} for {target}  {rel}\n" for proto, target, rel in disappeared)
+            + "Remove them from KNOWN in this file; the population shrank and the\n"
+            "roster has to say so by name, not by a smaller number.",
+            file=sys.stderr,
+        )
         return 1
-    print(f"[ok] protocol conformance: {total} known-incomplete implementations, none new")
+    print(f"[ok] protocol conformance: {total} known-incomplete implementations, roster exact")
     return 0
 
 
