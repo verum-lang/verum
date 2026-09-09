@@ -39,7 +39,6 @@ modifier.  The declaration regex therefore admits `public`/`private`,
 declaration pattern is narrower than the language reports absences that are
 its own.
 """
-import collections
 import io
 import os
 import re
@@ -59,30 +58,78 @@ CORE = os.path.join(REPO, "core")
 # defects it found. The composition of the floor moved rather than shrank:
 # covering `src/pages/index.tsx` added `UartRegisters`, and one of A97's
 # original survivors is gone.
-BASELINE = 16  # 18 -> 16 on 2026-09-09: `OpenFlag` left
-               # architecture-types/orthogonality.md — the direct-write
-               # example named `sys.io.open` / `OpenFlag.WriteOnly`, and
-               # neither exists (the flags are module-level `O_WRONLY` /
-               # `O_CREAT`); the block now calls `core.io.file.write_bytes`,
-               # verified by RUNNING it. And `Colour` left
-               # architecture/overview.md — one letter from the stdlib's
-               # real `Color`, in a fragment of two bare `match`es; the
-               # block now declares its own `Shade` and is a program.
-               #
-               # 21 -> 18 on 2026-09-08: `MockResolver` left
-               # cookbook/dns.md (there is no mock resolver and
-               # `Resolver` is not a context), and `FileSigner` left
-               # cookbook/quic-server.md and tutorials/h3-service.md
-               # (no `sign.vr` module, and `CertSigner` has no
-               # implementation anywhere in core/).
-               #
-               # All 18 that remain are reader-owned example types —
-               # FakeDatabase, MyError, MemoryFs, AiClient,
-               # RecordingLogger, UartRegisters and the like. That is
-               # the floor A97 describes, and it does not come down by
-               # editing pages: it comes down only if an example stops
-               # inventing a type, which usually makes the example
-               # worse.
+# THE COUNT BECAME A ROSTER, 2026-09-09 (T1330).  A bare `BASELINE = 16`
+# said how many fictional names the site was allowed to carry and never
+# WHICH, so the shape it could not report is the SWAP: fix one page, let
+# another invent a name, and `len(pairs)` is unchanged and the gate passes.
+# Measured the same day on a sibling gate of identical construction
+# (`check_platform_call_parity.py`): population held at one, membership
+# replaced, and the count ratchet printed `[ok] … none new` over a tree
+# that had just acquired the defect.
+#
+# This gate is where a swap is MOST likely, because its population lives in
+# a different repository than the ratchet: the site is edited by commits
+# that never touch this file, so a fix and a regression can land in the
+# same week without either being visible here as a number.
+#
+# The key is `(name, page)`, which is what the census already produced.
+#
+# HOW THE POPULATION GOT HERE, kept because each removal was a real fix
+# and the next reader should not re-litigate them:
+#
+#   22 -> 21  2026-09-08.  Measured 21 while the ratchet said 22, and a
+#             ratchet standing one above its own count admits a
+#             twenty-second fictional name without saying so — the entry
+#             route A97 documents for all five defects it found.  The
+#             composition moved rather than shrank: covering
+#             `src/pages/index.tsx` added `UartRegisters`.
+#   21 -> 18  2026-09-08.  `MockResolver` left cookbook/dns.md (there is
+#             no mock resolver and `Resolver` is not a context);
+#             `FileSigner` left cookbook/quic-server.md and
+#             tutorials/h3-service.md (no `sign.vr`, and `CertSigner` has
+#             no implementation anywhere in core/).
+#   18 -> 16  2026-09-09.  `OpenFlag` left architecture-types/
+#             orthogonality.md — the direct-write example named
+#             `sys.io.open` / `OpenFlag.WriteOnly` and neither exists (the
+#             flags are module-level `O_WRONLY` / `O_CREAT`); the block now
+#             calls `core.io.file.write_bytes`, verified by RUNNING it.
+#             `Colour` left architecture/overview.md — one letter from the
+#             stdlib's real `Color`, in a fragment of two bare `match`es;
+#             the block now declares its own `Shade` and is a program.
+#
+# ALL SIXTEEN ARE READER-OWNED EXAMPLE TYPES — FakeDatabase, MyError,
+# MemoryFs, AiClient, RecordingLogger, UartRegisters and the like.  That is
+# the floor A97 describes, and it does not come down by editing pages: it
+# comes down only if an example stops inventing a type, which usually makes
+# the example worse.  So the roster is not a to-do list; it is a statement
+# that these sixteen are deliberate and a seventeenth would not be.
+KNOWN = {
+    ("AiClient", "cookbook/resilience.md"),
+    ("Analytics", "language/context-system.md"),
+    ("FakeDatabase", "cookbook/testing-recipes.md"),
+    ("FakeDatabase", "guides/testing-best-practices.md"),
+    ("FraudClient", "architecture-types/orthogonality.md"),
+    ("HttpServer", "language/context-system.md"),
+    ("MemoryFs", "cookbook/file-io.md"),
+    ("MyAuditLog", "stdlib/database.md"),
+    ("MyError", "stdlib/base.md"),
+    ("RecordingLogger", "cookbook/testing-recipes.md"),
+    ("ScopeInfo", "verification/tactic-dsl.md"),
+    ("SessionInvariant", "reference/grammar-ebnf.md"),
+    ("Sodium", "language/ffi.md"),
+    ("SqlParser", "language/meta/literal-handlers.md"),
+    ("SqlParser", "language/meta/token-api.md"),
+    ("UartRegisters", "src/pages/index.tsx"),
+}
+
+
+def compare(found, roster):
+    """Split what the site has against what the roster claims.
+
+    Separated from the census so a control can drive it without a docs
+    tree — the half a count ratchet has and never tests."""
+    return sorted(found - roster), sorted(roster - found)
+
 
 BLOCK = re.compile(r"^```verum(?:[ \t][^\n]*)?\n(.*?)^```", re.M | re.S)
 DECL = re.compile(
@@ -234,16 +281,28 @@ def homepage_samples():
     """
     if not os.path.isfile(HOMEPAGE):
         return []
-    try:
-        import importlib.util
-        spec = importlib.util.spec_from_file_location(
-            "homepage_gate",
-            os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                         "check_homepage_examples.py"))
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
-    except Exception:
-        return []
+    # A BROKEN OWNER GATE IS NOT AN EMPTY HOMEPAGE.  This used to be
+    # `except Exception: return []`, which reports the same thing for "the
+    # page has no Verum samples" and "the module that reads it could not be
+    # loaded" — so renaming or breaking `check_homepage_examples.py` would
+    # have silently dropped `src/pages/index.tsx` out of this census with no
+    # line of output.  Observed for real: a copy of this gate run from a
+    # directory without its sibling reported the homepage's one known pair
+    # as GONE, and under the old count ratchet that would have read as
+    # 15 <= 16 and passed.
+    owner = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                         "check_homepage_examples.py")
+    if not os.path.isfile(owner):
+        raise SystemExit(
+            f"check-doc-names-exist: {owner} is missing — the homepage census "
+            "reads its blocks through that gate, and refusing is the only "
+            "honest answer. Reporting an empty homepage would look like a "
+            "clean page."
+        )
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("homepage_gate", owner)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
     src = io.open(HOMEPAGE, encoding="utf-8", errors="replace").read()
     return [body for _, body in mod.blocks(src)]
 
@@ -315,20 +374,57 @@ def _skip_or_fail(argv, what: str) -> int:
     return 0
 
 
+def self_test():
+    """THE SWAP, which is the shape the count ratchet could not report and
+    the reason this gate carries a roster.  Population size is 1 in both
+    polarities; the membership differs, and a count is satisfied by both."""
+    before = {("MyError", "stdlib/base.md")}
+    after = {("MyError", "stdlib/database.md")}
+    appeared, disappeared = compare(after, before)
+    if not appeared or not disappeared:
+        print("self-test: a swap of equal size reported nothing — the roster "
+              "comparison has degenerated back into a count")
+        return 1
+    if compare(before, before) != ([], []):
+        print("self-test: an unchanged population reported a difference")
+        return 1
+    print("[ok] self-test: a same-size swap is reported")
+    return 0
+
+
 def main(argv):
+    if "--self-test" in argv:
+        return self_test()
     if not os.path.isdir(DOCS):
         return _skip_or_fail(argv, "check-doc-names-exist: docs not present")
     declared, pairs = census()
-    by_name = collections.Counter(n for n, _ in pairs)
+    found = set(pairs)
+    appeared, disappeared = compare(found, KNOWN)
     print(f"check-doc-names-exist: {len(pairs)} (name, page) pair(s) name "
           f"something absent from core/'s {len(declared)} declarations "
-          f"(baseline {BASELINE})")
-    for name, count in by_name.most_common(20):
-        pages = sorted({p for n, p in pairs if n == name})
-        print(f"    {count:3d} page(s)  {name:22s} e.g. {pages[0]}")
-    if "--check" in argv and len(pairs) > BASELINE:
-        print(f"check-doc-names-exist: FAIL — {len(pairs)} exceeds {BASELINE}")
+          f"({len(KNOWN)} on the roster)")
+    for name, page in sorted(found):
+        mark = "NEW " if (name, page) in set(appeared) else "    "
+        print(f"    {mark}{name:22s} {page}")
+
+    if "--check" not in argv:
+        return 0
+    if appeared:
+        print("check-doc-names-exist: FAIL — the pair(s) marked NEW are not on "
+              "the roster in this file.\n"
+              "A doc example names something core/ does not declare. Fix the\n"
+              "page, or add the pair to KNOWN with the reason it is deliberate\n"
+              "(a reader-owned example type usually is).")
         return 1
+    if disappeared:
+        print("check-doc-names-exist: FAIL — the roster claims pair(s) the site "
+              "no longer has —")
+        for name, page in disappeared:
+            print(f"    {name:22s} {page}")
+        print("Remove them from KNOWN in this file; the population shrank and\n"
+              "the roster has to say so by name, not by a smaller number.")
+        return 1
+    print(f"check-doc-names-exist: {len(pairs)} known pair(s), roster exact")
     return 0
 
 
