@@ -41,7 +41,17 @@ import re
 import sys
 from pathlib import Path
 
-BASELINE = 23  # Lowered by FIXING a page, never by argument.
+BASELINE = 0   # Lowered by FIXING a page, never by argument.
+               #
+               # ZERO as of 2026-09-09. Every `type X is …` block on a
+               # `stdlib/<module>` page agrees with `core/<module>` —
+               # 429 declarations compared. A new mismatch is now a
+               # RED gate on the commit that introduces it, which is
+               # the whole point of having walked it down from 101.
+               #
+               # Do not raise this to land a page. A shape that
+               # disagrees with core/ is a record literal a reader
+               # copies and cannot compile.
                #
                # 101 -> 99 on 2026-09-09: `stdlib/async.md`'s
                # `RetryConfig` had four fields and every one of the four
