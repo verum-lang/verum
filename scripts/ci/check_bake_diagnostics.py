@@ -75,16 +75,28 @@ OBSERVED = {
     "DbConnectionPool.try_acquire":       "undefined variable: Timeout",
 }
 
-# `[lenient] SKIP top-level fn <name> (bug-class)` or
-# `[lenient] SKIP <Type>.<method> (bug-class)` — the name is what sits
-# between the marker and the class, with `top-level fn ` dropped.
-SKIP_NAME = re.compile(r"\[lenient\] SKIP (?:top-level fn )?([A-Za-z_][\w.]*)\s*\(")
+# TWO SPELLINGS, and reading only one made the pattern miss half a
+# `--verbose` log (measured 2026-09-09):
+#
+#   WARN   [lenient] SKIP top-level fn verify_cog (bug-class): …
+#   DEBUG  [lenient] SKIP top-level fn verify_cog: …
+#
+# The name is what sits between the marker and either the class or the
+# colon, with `top-level fn ` dropped. Both forms name the same function,
+# which is why the count is taken over the SET.
+SKIP_NAME = re.compile(r"\[lenient\] SKIP (?:top-level fn )?([A-Za-z_][\w.]*)\s*[(:]")
 
 
 def counts(log_text: str) -> tuple[int, int]:
+    """FIELD-GUESS lines, and STUBBED FUNCTIONS — not stub LINES.
+
+    Counting lines made the number depend on the log's verbosity: a
+    `--verbose` bake prints each skip twice (a WARN and a DEBUG), so the
+    same tree measured 11 without the flag and 18 with it.  A ratchet
+    whose value moves with a logging flag is not measuring the tree.
+    Measured 2026-09-09 on two logs of the same population."""
     guesses = sum(1 for line in log_text.splitlines() if "FIELD-GUESS-HARD-1" in line)
-    stubs = sum(1 for line in log_text.splitlines() if "[lenient] SKIP" in line)
-    return guesses, stubs
+    return guesses, len(skipped_names(log_text))
 
 
 def skipped_names(log_text: str) -> set[str]:
@@ -188,19 +200,29 @@ def main() -> int:
 
     names = skipped_names(text)
     print(f"FIELD-GUESS-HARD-1 : {guesses} (baseline {BASELINE_FIELD_GUESS})")
-    print(f"[lenient] SKIP     : {stubs} (baseline {BASELINE_PANIC_STUBS}, "
-          f"{len(OBSERVED)} on the roster)")
+    print(f"stubbed function(s): {stubs} (baseline {BASELINE_PANIC_STUBS}, "
+          f"{len(OBSERVED)} on the roster) "
+          f"— {sum(1 for l in text.splitlines() if '[lenient] SKIP' in l)} log line(s)")
 
-    # THE TWO READINGS MUST AGREE.  `stubs` counts lines, `names` parses
-    # them; a SKIP line the pattern cannot read would shrink the roster
-    # comparison silently while leaving the count right, which is the
-    # exact shape this file exists to refuse.
-    if len(names) != stubs:
+    # EVERY SKIP LINE MUST YIELD A NAME.  This used to compare the line
+    # count against the parsed-name count and refuse when they differed —
+    # which fired on a `--verbose` log for the wrong reason: the pattern
+    # had read every name, and the log simply printed each skip twice.
+    # The guard was right to fire and wrong about why, so it now asks the
+    # question it meant to ask: is there a SKIP line this pattern cannot
+    # read? A pattern gap would shrink the roster comparison silently,
+    # which is the shape this file exists to refuse.
+    unparsed = [
+        line.strip()
+        for line in text.splitlines()
+        if "[lenient] SKIP" in line and not SKIP_NAME.search(line)
+    ]
+    if unparsed:
         print(
-            f"the line count ({stubs}) and the parsed names ({len(names)}) "
-            f"disagree — SKIP_NAME did not read every SKIP line, so the "
-            f"roster comparison below would be taken over a subset. Fix the "
-            f"pattern before reading either number.",
+            f"{len(unparsed)} SKIP line(s) that SKIP_NAME cannot read, so the "
+            f"roster comparison below would be taken over a subset. First:\n"
+            f"    {unparsed[0][:160]}\n"
+            "Fix the pattern before reading any number.",
             file=sys.stderr,
         )
         return 2
