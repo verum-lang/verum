@@ -61,7 +61,14 @@ mount core.intrinsics.{
     executor_block_on,
     single_thread_block_on,
 };
-mount mem.{Alloc, Layout, AllocError, TieredAllocator, SimpleAllocator, StackAllocator};
+mount mem.{Alloc, Layout, AllocError, TieredAllocator, SimpleAllocator};
+// `StackAllocator` is `core.runtime.stack_alloc`'s, not `core.mem`'s —
+// mounting it from `mem` never resolved. It is const-generic, so a
+// profile names a SIZE at the use site: the `SmallStackAllocator` ALIAS
+// does not carry the constructor (`SmallStackAllocator.new()` answers
+// `unbound variable`, measured 2026-09-09), while
+// `StackAllocator<4096>.new()` returns `cap=4096 used=0`. (T1296)
+mount .stack_alloc.{StackAllocator};
 mount core.{Result, Text};
 mount core.sync.atomic.{AtomicU32, MemoryOrdering};
 // Note: do NOT alias `Ordering = MemoryOrdering` here — it collides with
@@ -666,13 +673,14 @@ implement RuntimeConfig for SyncRuntime {
 /// Memory footprint: ~256 bytes runtime overhead
 @cfg(any(runtime = "no_heap", runtime = "embedded"))
 public type EmbeddedRuntime is {
-    /// Stack allocator with fixed buffer
-    allocator: StackAllocator,
+    /// Bump allocator over a fixed 4 KiB inline buffer — the size the
+    /// module documents as "small, typical embedded".
+    allocator: StackAllocator<4096>,
 };
 
 @cfg(any(runtime = "no_heap", runtime = "embedded"))
 implement RuntimeConfig for EmbeddedRuntime {
-    type Allocator = StackAllocator;
+    type Allocator = StackAllocator<4096>;
     type Executor = NoopExecutor;
     type IoDriver = NoopDriver;
 
@@ -680,9 +688,9 @@ implement RuntimeConfig for EmbeddedRuntime {
         // No TLS in embedded (single-threaded)
         // Just initialize stack allocator
 
-        // Stack buffer is compile-time allocated
-        let allocator = StackAllocator.init()
-            .map_err(|e| RuntimeInitError.AllocatorInitFailed(e))?;
+        // The buffer is inline in the type, so construction cannot
+        // fail and there is no `init()` to call — `new()` is total.
+        let allocator = StackAllocator<4096>.new();
 
         Result.Ok(Self { allocator })
     }
@@ -691,7 +699,7 @@ implement RuntimeConfig for EmbeddedRuntime {
         self.allocator.reset();
     }
 
-    fn allocator_ref(&self) -> &StackAllocator {
+    fn allocator_ref(&self) -> &StackAllocator<4096> {
         &self.allocator
     }
 

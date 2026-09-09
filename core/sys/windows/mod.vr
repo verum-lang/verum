@@ -208,14 +208,17 @@ public mount kernel32.{
     LeaveCriticalSection,
     TryEnterCriticalSection,
     DeleteCriticalSection,
-    CreateEventA,
+    // The ...W (wide) forms are what kernel32.vr declares; the ...A
+    // names re-exported here until 2026-09-09 were dead binds, and
+    // every consumer in core/ already reaches for the W ones. (T1296)
+    CreateEventW,
     SetEvent,
     ResetEvent,
     WaitForSingleObject,
     WaitForMultipleObjects,
-    CreateMutexA,
+    CreateMutexW,
     ReleaseMutex,
-    CreateSemaphoreA,
+    CreateSemaphoreW,
     ReleaseSemaphore,
     InitializeSRWLock,
     AcquireSRWLockExclusive,

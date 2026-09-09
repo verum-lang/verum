@@ -149,7 +149,12 @@ public mount .allocator.{
     ctx_alloc, ctx_alloc_zeroed, ctx_dealloc, ctx_realloc,
     CONTEXT_SLOT_ALLOCATOR,
     // Specialized allocators (for runtime configurations)
-    TieredAllocator, SimpleAllocator, StackAllocator,
+    // `StackAllocator` used to be listed here and never resolved:
+    // `allocator.vr` declares `MemStackAllocator`, and the const-generic
+    // `StackAllocator<const SIZE: Int>` lives in `core/runtime/stack_alloc.vr`
+    // — a different module, re-exported by `core.runtime`. Mount it from
+    // there. (T1296)
+    TieredAllocator, SimpleAllocator, MemStackAllocator,
     // Statistics
     AllocStats, get_alloc_stats, get_global_alloc_stats,
 };
