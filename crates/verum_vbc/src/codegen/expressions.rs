@@ -6694,8 +6694,53 @@ impl VbcCodegen {
             // Qualified spelling FIRST so stub-name preservation records
             // the unambiguous form (canonical_name_better prefers dots).
             self.ctx.register_function(qualified.clone(), info.clone());
-            self.ctx
-                .register_function_authoritative(func_name.clone(), info);
+            // THE BARE NAME GETS A PLAIN REGISTRATION, NOT AN AUTHORITATIVE
+            // ONE (T1172).  This entry is a PLACEHOLDER minted because a
+            // mount missed, and `register_function_authoritative` hands it
+            // a MOUNT's privileges.  The one that matters is
+            // `explicit_mount_names`: membership there makes the
+            // INTRINSIC-MOUNT-COLLISION rule below (`mount_preferred`,
+            // :6869) prefer the bare-slot binding "over an unmounted
+            // same-name function selected by arg-type overload".  A stub
+            // must never be able to present itself as the user's explicit
+            // choice — that is the whole hazard this line removes.
+            //
+            // MEASURED, BOTH POLARITIES, ONE CONTEXT
+            // (`tests/t1172_stage5_bare_name_capture.rs`), stub arity 3
+            // then a real `open` of arity 2 registered after it:
+            //
+            //   authoritative  bare        open#3  open#2  explicit_mount
+            //   true           real(4242)  STUB    real    true
+            //   false          real(4242)  STUB    real    false
+            //
+            // Read the row that did NOT move first.  `open#3` holds the
+            // STUB either way, so the arity-fallback failure — the shape
+            // where declaring `open` variadic drops the real call's arity
+            // from 3 to 2 and `lookup_function_with_arity` lands on
+            // `open#3` — is NOT fixed by this line.  The authoritative
+            // form writes that key directly; the plain form reaches the
+            // same place through `register_function`'s own collision
+            // branch, which demotes the displaced entry to
+            // `<name>#<its arity>`.  Anyone reading this line as a cure
+            // for that failure will be wrong, and an earlier draft of this
+            // comment said exactly that.
+            //
+            // What DOES move is the last column, and only it.
+            //
+            // CENSUS OF THE LIVE POPULATION (my own bake, 2026-09-09,
+            // `VERUM_TRACE_QCALL=1`): eleven stage-5 stub lines over six
+            // ids; two ids carry more than one name; worst is five names
+            // on id 4269801471 (`InvalidInput`, `NotFound`, `access_name`,
+            // `flags_default`, `open_readonly`).  That id-sharing is a
+            // SEPARATE defect — `stage5_stub_counter` restarts at 0 per
+            // `CodegenContext` (`context.rs:1585`) — and this line does
+            // not touch it; the ratchet
+            // `scripts/ci/check_stage5_stub_sharing.py` measures that one.
+            //
+            // Genuine mounts are unaffected: they register through
+            // `codegen/mod.rs:11040`, which still calls the authoritative
+            // form.
+            self.ctx.register_function(func_name.clone(), info);
         }
         let suffix_match_lookup = || -> Option<(String, FunctionInfo)> {
             if !func_name.contains("::") || is_qualified_module_path {
