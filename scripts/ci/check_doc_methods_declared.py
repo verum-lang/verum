@@ -171,6 +171,52 @@ BASELINE = 44  # Lowered by FIXING, never by argument.
                 #               page had a `.navigate(…)` builder on a
                 #               type that is declared nowhere.
 
+# THE COUNT GAINED A ROSTER, 2026-09-09 (T1330).  The history above is
+# kept in full and is the reason: it reads, and a 44-line list does not
+# replace it.  But a count cannot report a SWAP — fix one page, let
+# another invent a method, and `total` is unchanged and the gate passes —
+# and this population lives in a DIFFERENT REPOSITORY than the ratchet, so
+# a fix and a regression can land in the same week with neither visible
+# here as a number.  Measured the same day on a sibling gate of identical
+# construction (`check_platform_call_parity.py`): population held at one,
+# membership replaced, and the count printed `[ok] … none new` over a tree
+# that had just acquired the defect.
+#
+# The key is the NAME, which is this gate's subject: "a method declared
+# nowhere in core/".  Moving the same undeclared call from one page to
+# another is deliberately NOT reported — the name still exists nowhere,
+# and that is the thing being counted.  The pages are printed, not keyed.
+#
+# `inv` is the one entry that is not simply an absent API: it is DECLARED
+# by one of the two pages that call it and not by the other, so it sits
+# above the floor rather than in it.  That asymmetry is why the floor
+# predicate is `pages[n] <= self_declared[n]` and not `n in self_declared`
+# — the stricter reading drops `inv` and gives 43.
+KNOWN = {
+    "absent", "as_symbol", "buffer_unordered", "build_request", "contains_whitespace",
+    "cve_glyph", "domain", "emit_pushed", "fetch_or_load", "find_user",
+    "first_order_holds", "from_parsed", "from_pem_path", "from_row", "get_page",
+    "get_profile", "groups", "has_nan", "infer_param_types", "into_user",
+    "inv", "is_config_error", "is_infinity_topos", "is_user_error", "lookup_lemma",
+    "meta", "node_iter", "on_get", "par_map", "param_names",
+    "pretty", "read_record", "replace_all_with", "seeded_with", "span_within",
+    "take_request_info", "to_cache_key", "to_canonical", "to_canonical_sql", "to_scalar",
+    "unchecked", "verifies", "widget", "with_dir",
+}
+assert BASELINE == len(KNOWN), (
+    f"BASELINE says {BASELINE}, the roster holds {len(KNOWN)} — they are two "
+    "spellings of one fact and must not drift"
+)
+
+
+def compare(found: set, roster: set) -> tuple[list, list]:
+    """Split what the site has against what the roster claims.
+
+    Separated from the census so a control can drive it without a docs
+    tree — the half a count ratchet has and never tests."""
+    return sorted(found - roster), sorted(roster - found)
+
+
 BLOCK = re.compile(r"```verum\n(.*?)```", re.S)
 CALL = re.compile(r"\.([a-z_][a-z0-9_]*)\s*\(")
 
@@ -303,6 +349,19 @@ def self_test() -> int:
         print("self-test: the using narrowing swallowed a call OUTSIDE the clause"); bad += 1
     if calls_outside_using("y.keep()") != ["keep"]:
         print("self-test: a plain call was lost with no using clause present"); bad += 1
+    # THE SWAP, which is the shape the count could not report and the
+    # reason this gate gained a roster alongside its history.  Population
+    # size is 1 in both polarities; the membership differs, and a count is
+    # satisfied by both.
+    app, gone = compare({"with_dir"}, {"widget"})
+    if not app or not gone:
+        print("self-test: a swap of equal size reported nothing — the roster "
+              "comparison has degenerated back into a count")
+        bad += 1
+    if compare({"widget"}, {"widget"}) != ([], []):
+        print("self-test: an unchanged population reported a difference")
+        bad += 1
+
     print("self-test: OK" if not bad else f"self-test: {bad} FAILED")
     return bad
 
@@ -373,20 +432,30 @@ def main() -> int:
         return 1
 
     total = len(pages)
+    appeared, disappeared = compare(set(pages), KNOWN)
     print(f"check-doc-methods-declared: {total} method name(s) called by a doc "
-          f"example are declared nowhere in core/ (baseline {BASELINE})")
+          f"example are declared nowhere in core/ ({len(KNOWN)} on the roster)")
     print(f"  floor: {len(floor)} more are declared by the page that calls "
           f"them — reader-owned example helpers, not debt "
           f"({', '.join(floor[:6])}{', …' if len(floor) > 6 else ''})")
-    for name, ps in sorted(pages.items(), key=lambda kv: -len(kv[1]))[:10]:
-        print(f"  {len(ps):>2} page(s)  .{name:<22} e.g. {sorted(ps)[0]}")
+    shown = sorted(pages.items(), key=lambda kv: (kv[0] not in set(appeared),
+                                                  -len(kv[1])))
+    for name, ps in (shown if appeared else shown[:10]):
+        mark = "NEW " if name in set(appeared) else "    "
+        print(f"  {mark}{len(ps):>2} page(s)  .{name:<22} e.g. {sorted(ps)[0]}")
 
-    if total > BASELINE:
-        print(f"  ABOVE BASELINE by {total - BASELINE}. A method that exists "
-              "nowhere is one a reader cannot call.")
+    if appeared:
+        print(f"\n  {len(appeared)} name(s) marked NEW are not on the roster in "
+              f"this file: {' '.join(appeared)}\n"
+              "  A method that exists nowhere is one a reader cannot call. Fix\n"
+              "  the page, or add the name to KNOWN with the reason it stays.")
         return 1
-    if total < BASELINE:
-        print(f"  BELOW baseline by {BASELINE - total} — lower it.")
+    if disappeared:
+        print(f"\n  The roster claims {len(disappeared)} name(s) the site no "
+              f"longer calls: {' '.join(disappeared)}\n"
+              "  Remove them from KNOWN and lower BASELINE in the same commit —\n"
+              "  the ground gained is recorded by NAME, not by a smaller number.")
+        return 1
     return 0
 
 
