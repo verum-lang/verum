@@ -68,7 +68,7 @@ KNOWN = {
     "17-meta-system.md", "18-advanced-protocols.md", "20-error-handling.md",
     "26-unified-execution-architecture.md", "40-terminal-tui-architecture.md",
     "RUNTIME_CONSOLIDATION_PLAN.md", "SPIFFE-ID.md", "SPIFFE.md",
-    "audit1.md", "cbgr-implementation.md", "improvements.md",
+    "audit1.md", "cbgr-implementation.md", "database.md", "improvements.md",
     "math-spec.md", "meta-audit.md", "metrics-architecture.md",
     "mimalloc-allocator-plan.md", "new-arch-spec.md", "new-features.md",
     "observability.md", "sqlite-native.md", "tls-quic.md",
@@ -82,6 +82,24 @@ def tracked(*globs: str) -> list[str]:
         ["git", "ls-files", *globs], cwd=REPO, capture_output=True, text=True
     ).stdout.split("\n")
     return [p for p in out if p]
+
+
+# A NAME MATCH IS NOT A LINK RESOLUTION, and this set is the measured
+# proof. `database.md` exists as `website/docs/stdlib/database.md`, so the
+# website lookup below counted four citations as reachable — but they read
+#
+#     // Spec: database.md §4.1 + §5.5    core/database/mysql/transaction.vr:14
+#     // Spec: database.md §6.1.6         core/database/postgres/copy.vr:14
+#
+# and the site page has ZERO numbered headings, while the document those
+# section numbers belong to has 172. The citations mean a different
+# document that happens to share a filename.
+#
+# Counting an ambiguous name as reachable is the expensive direction: a
+# reader sent to the site page for §6.1.6 concludes they misread the
+# citation. So an ambiguous name is treated as unreachable — a false RED
+# at worst, and it costs a comment.
+AMBIGUOUS = {"database.md"}
 
 
 def website_docs() -> set[str]:
@@ -103,7 +121,7 @@ def website_docs() -> set[str]:
 
 def scan() -> dict[str, list[str]]:
     """Cited document names that nothing a reader can open provides."""
-    provided = {pathlib.Path(p).name for p in tracked()} | website_docs()
+    provided = ({pathlib.Path(p).name for p in tracked()} | website_docs()) - AMBIGUOUS
     found: dict[str, list[str]] = {}
     for rel in tracked("*.rs", "*.vr"):
         try:
