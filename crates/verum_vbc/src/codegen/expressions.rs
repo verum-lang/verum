@@ -1960,23 +1960,52 @@ impl VbcCodegen {
                 // expected-type prefix lookup binds correctly in the AOT
                 // codegen path where strict resolution surfaces the issue;
                 // Tier-0 interp tolerated this via lenient skip.
+                // EXPECTED-TYPE-GENERIC-ARG-1 (T1342). The declared type is
+                // carried as TEXT, and only its HEAD used to be tried:
+                // `"Wrap<Lease, Ea>"` yielded `Wrap`, so the lookup asked for
+                // `Wrap.Dup`. For a generic WRAPPER that is structurally the
+                // wrong type — a variant named in this position belongs to a
+                // type ARGUMENT (`Ea`), never to the wrapper. Measured with
+                // `VERUM_TRACE_BARE_VARIANT=Dup`:
+                //
+                //     compile_simple_path name="Dup"
+                //         current_return_type_name=Some("Wrap<Lease, Ea>")
+                //     expected_prefixed qualified=Wrap.Dup found=false
+                //
+                // `current_return_type_inner` would carry those arguments and
+                // would be the right input, but it is populated ONLY by the
+                // archive loader (T1343: 2 writers there, 29 elsewhere all
+                // `None`), so every function compiled from source in its own
+                // unit sees `None`. The arguments are parsed out of the text
+                // instead, which needs no other machinery to be repaired
+                // first.
+                //
+                // The HEAD is still tried FIRST, so the field-init behaviour
+                // the block below describes is unchanged; this only adds
+                // candidates after it.
                 let expected_prefixed_info: Option<crate::codegen::context::FunctionInfo> = self
                     .ctx
                     .current_return_type_name
                     .as_ref()
-                    .map(|t| t.split('<').next().unwrap_or(t).to_string())
-                    .and_then(|prefix| {
-                        let qualified = format!("{}.{}", prefix, name);
-                        let r = self.ctx.lookup_function(&qualified).cloned();
-                        if bare_variant_trace_matches(name.as_str()) {
-                            eprintln!(
-                                "[bare-variant-trace] expected_prefixed qualified={} found={} variant_tag={:?}",
-                                qualified,
-                                r.is_some(),
-                                r.as_ref().and_then(|i| i.variant_tag)
-                            );
+                    .and_then(|t| {
+                        let mut found = None;
+                        for prefix in expected_type_prefixes(t) {
+                            let qualified = format!("{}.{}", prefix, name);
+                            let r = self.ctx.lookup_function(&qualified).cloned();
+                            if bare_variant_trace_matches(name.as_str()) {
+                                eprintln!(
+                                    "[bare-variant-trace] expected_prefixed qualified={} found={} variant_tag={:?}",
+                                    qualified,
+                                    r.is_some(),
+                                    r.as_ref().and_then(|i| i.variant_tag)
+                                );
+                            }
+                            if r.is_some() {
+                                found = r;
+                                break;
+                            }
                         }
-                        r
+                        found
                     });
                 //
                 // **Qualified-suffix fallback (task #138)**. The archive
@@ -44150,6 +44179,64 @@ fn bind_generic_free(
 /// not be aimed anywhere else. An empty value matches NOTHING: turning
 /// the whole bake's bare-variant resolution on is a decision the caller
 /// makes by naming something, not an accident of exporting the variable.
+/// Type-name prefixes to try when resolving a bare name against the
+/// EXPECTED type of its position (T1342).
+///
+/// The expected type reaches codegen as text — `"Wrap<Lease, Ea>"` — and
+/// only its head used to be tried. A variant named in that position
+/// belongs to a type ARGUMENT far more often than to the wrapper, so the
+/// arguments are candidates too. The head stays FIRST: this only appends.
+///
+/// Splitting is bracket-depth aware; a naive `split(',')` would cut
+/// `Result<A, Map<K, V>>` inside the nested generic and offer `Map<K` as
+/// a type name.
+fn expected_type_prefixes(ty: &str) -> Vec<String> {
+    let head = ty.split('<').next().unwrap_or(ty).trim();
+    let mut out = Vec::new();
+    if !head.is_empty() {
+        out.push(head.to_string());
+    }
+    let (Some(open), Some(close)) = (ty.find('<'), ty.rfind('>')) else {
+        return out;
+    };
+    if close <= open + 1 {
+        return out;
+    }
+    let inner = &ty[open + 1..close];
+    let mut depth = 0usize;
+    let mut start = 0usize;
+    let mut args: Vec<&str> = Vec::new();
+    for (i, ch) in inner.char_indices() {
+        match ch {
+            '<' | '(' | '[' => depth += 1,
+            '>' | ')' | ']' => depth = depth.saturating_sub(1),
+            ',' if depth == 0 => {
+                args.push(&inner[start..i]);
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    args.push(&inner[start..]);
+    for arg in args {
+        let arg_head = arg.split('<').next().unwrap_or(arg).trim();
+        // `&mut T` / `&T` in a type argument position: the reference
+        // marker is not part of the name.
+        let arg_head = arg_head
+            .trim_start_matches('&')
+            .trim_start_matches("mut ")
+            .trim();
+        if !arg_head.is_empty()
+            && arg_head != head
+            && arg_head.chars().next().is_some_and(|c| c.is_ascii_uppercase())
+            && !out.iter().any(|p| p == arg_head)
+        {
+            out.push(arg_head.to_string());
+        }
+    }
+    out
+}
+
 fn bare_variant_trace_matches(name: &str) -> bool {
     match std::env::var("VERUM_TRACE_BARE_VARIANT") {
         Ok(filter) => !filter.is_empty() && name.contains(&filter),
