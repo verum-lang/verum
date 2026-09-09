@@ -1,0 +1,71 @@
+// @test: run
+// @level: L1
+// @tier: 0
+// @tags: text, char, escape, coverage
+// @timeout: 60000
+// @expected-stdout-begin
+// expand4 [a   bb  c] len=9
+// expand2 [a bb  c] len=7
+// try_to_float 3.5 -> 3.5 half=1.75
+// try_to_float abc is none=true
+// escape_default nl=[\n] a=[a]
+// escape_unicode a=[\u{0061}] e=[\u{00e9}]
+// is_valid_unicode a=true e=true
+// 
+// @expected-stdout-end
+// @description: Five documented text and char operations RUN, each
+//   asserted by a value that separates a right answer from a plausible
+//   wrong one.
+//
+// WHY THIS FILE EXISTS. Measured 2026-09-09: ten of the 172 methods the
+// text reference documents are called by nothing that executes. Two of
+// those ten are the Map entry API (T1245), one is a formatter helper.
+// These five are the rest that a spec can reach.
+//
+//   expand_tabs   TWO tab sizes, because one number cannot tell "pad to
+//                 the next STOP" from "replace a tab with N spaces":
+//                 size 4 gives 9 characters, size 2 gives 7. An
+//                 implementation substituting a fixed run prints 11 and
+//                 7, or 9 and 9.
+//   try_to_float  the VALUE and then half of it — `3.5` and `1.75`. An
+//                 implementation answering `Some` with a Text, or with
+//                 the integer part, fails on the second number rather
+//                 than on the first.
+//   escape_default  a control character AND a plain letter, so escaping
+//                 everything (`\u{0061}` for `a`) or nothing (a raw
+//                 newline) both print something else.
+//   escape_unicode  ASCII and non-ASCII — `\u{0061}` and `\u{00e9}`.
+//                 A four-digit-only formatter would print `\u{e9}`.
+//   is_valid_unicode  both, as the control for the line above.
+//
+// NOT PINNED, and it carries its own row: `Text.matches` and
+// `Text.match_indices` answer EMPTY on a haystack where `find` returns
+// `Some(1)` and `contains` returns true — a silent wrong answer, with
+// the first `next()` already `None` while the `slice` and `find` its
+// body performs both succeed at the call site (T1279). A spec that
+// recorded today's zero would cement it.
+fn main() {
+    // expand_tabs — the stop, not a fixed number of spaces. Two sizes,
+    // because one number cannot tell "pad to the next stop" from
+    // "replace a tab with N spaces".
+    let t = "a\tbb\tc";
+    print(f"expand4 [{t.expand_tabs(4)}] len={t.expand_tabs(4).len()}");
+    print(f"expand2 [{t.expand_tabs(2)}] len={t.expand_tabs(2).len()}");
+
+    // try_to_float — the VALUE, not merely Some/None
+    match "3.5".try_to_float() {
+        Maybe.Some(v) => print(f"try_to_float 3.5 -> {v} half={v / 2.0}"),
+        Maybe.None    => print("try_to_float 3.5 -> None"),
+    }
+    print(f"try_to_float abc is none={\"abc\".try_to_float() is Maybe.None}");
+
+    // Char escapes — a control character, a plain letter, and a
+    // non-ASCII one, so an implementation that escapes everything or
+    // nothing prints something else on at least one line.
+    let nl = '\n';
+    let a = 'a';
+    let e = 'é';
+    print(f"escape_default nl=[{nl.escape_default()}] a=[{a.escape_default()}]");
+    print(f"escape_unicode a=[{a.escape_unicode()}] e=[{e.escape_unicode()}]");
+    print(f"is_valid_unicode a={a.is_valid_unicode()} e={e.is_valid_unicode()}");
+}
