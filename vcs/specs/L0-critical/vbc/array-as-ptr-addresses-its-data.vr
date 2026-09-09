@@ -39,8 +39,8 @@
 // `copy_path_nul` — so `File.create` failed and nothing could be
 // written at tier 1 (T1192).
 //
-// WHY THIS SPEC DOES NOT DEREFERENCE THE POINTER. `ptr_read::<Byte>`
-// reads two bytes at tier 0 today (a `[Byte;8]` holding 65,66 answers
+// WHY THIS SPEC DOES NOT DEREFERENCE THE POINTER. `ptr_read` reads
+// two bytes at tier 0 today (a `[Byte;8]` holding 65,66 answers
 // 16961 = 0x4241), so a raw read would diverge for a reason that has
 // nothing to do with this row. The arithmetic proves the same thing
 // without touching memory: if the pointer addressed a HEADER rather

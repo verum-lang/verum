@@ -96,8 +96,55 @@ DECL = re.compile(r"\bfn\s+([a-z_][a-z0-9_]*)")
 # Roots that always name a module rather than a value.
 ALWAYS_MODULE_ROOTS = {"core", "super", "cog"}
 
-# Known count at the time the gate landed; the gate ratchets DOWNWARD only.
-BASELINE = 7
+# THE COUNT BECAME A ROSTER, 2026-09-09 (T1320).  `BASELINE = 7` said how
+# many dead calls were tolerated and never WHICH, so the one shape it could
+# not report was the SWAP: repoint one call, introduce another, and the
+# total is still 7 and the gate still prints `none new`.  Measured on a
+# scratch tree the same day against the sibling gate
+# (`check_platform_call_parity.py`, identical construction): with the
+# population held at one and its membership replaced, the count ratchet
+# printed `[ok] … none new` — a sentence that was false as written.
+#
+# The turnover is not hypothetical either.  Two entries left this
+# population today (`thread_yield`, both platforms, e88d25fd4) and the
+# gate's whole reaction was to demand a smaller number — a request to edit
+# the INSTRUMENT, which is the opposite of what a ratchet is for.
+#
+# The key is `(dotted-path, file)` and carries NO line number: a roster
+# keyed on positions goes red when an unrelated edit above shifts a line,
+# which teaches the reader to re-baseline without looking.
+#
+# The five that remain, and why each is still open:
+#
+#   core.time.rfc3339.format_iso8601_basic   core/storage/s3/client.vr
+#   core.runtime.env.random_u8               core/net/weft/tracing.vr
+#   core.shell.stream.stream_lines           core/shell/command.vr
+#   sys.windows.time.query_performance_counter_ns  core/mem/segment.vr
+#   sys.windows.thread.thread_join           core/runtime/thread.vr
+#
+# The last two are Windows-only and also on the roster of
+# `check_platform_call_parity.py`, which reaches them from the other side;
+# `thread_join` needs its call FORM changed to a method
+# (`core/sys/windows/thread.vr:281` declares `join`), not a new
+# declaration.  See T1320.
+KNOWN: set[tuple[str, str]] = {
+    ("core.time.rfc3339.format_iso8601_basic", "core/storage/s3/client.vr"),
+    ("core.runtime.env.random_u8", "core/net/weft/tracing.vr"),
+    ("core.shell.stream.stream_lines", "core/shell/command.vr"),
+    ("sys.windows.time.query_performance_counter_ns", "core/mem/segment.vr"),
+    ("sys.windows.thread.thread_join", "core/runtime/thread.vr"),
+}
+
+
+def compare(
+    found: set[tuple[str, str]],
+    roster: set[tuple[str, str]],
+) -> tuple[list, list]:
+    """Split what the tree has against what the roster claims.
+
+    Separated from the scan so a control can drive it without a tree —
+    the half the count ratchet had, and never tested."""
+    return sorted(found - roster), sorted(roster - found)
 
 
 def module_roots(text: str) -> set[str]:
@@ -127,9 +174,10 @@ def main() -> int:
     for text in texts.values():
         declared.update(DECL.findall(text))
 
-    findings: dict[str, list[str]] = defaultdict(list)
+    findings: dict[tuple[str, str], list[str]] = defaultdict(list)
     for path, text in texts.items():
         roots = module_roots(text)
+        rel = str(path.relative_to(CORE.parent))
         for lineno, line in enumerate(text.splitlines(), 1):
             if line.lstrip().startswith("//"):
                 continue
@@ -139,38 +187,53 @@ def main() -> int:
                     continue
                 leaf = dotted.rsplit(".", 1)[1]
                 if leaf not in declared:
-                    rel = path.relative_to(CORE.parent)
-                    findings[leaf].append(f"{rel}:{lineno}  {dotted}()")
+                    findings[(dotted, rel)].append(f"{rel}:{lineno}")
 
     total = sum(len(sites) for sites in findings.values())
-    if total > BASELINE:
+    appeared, disappeared = compare(set(findings), KNOWN)
+    bad = bool(appeared) or bool(disappeared)
+
+    if "--list" in sys.argv or bad:
+        stream = sys.stderr if bad else sys.stdout
         print(
-            f"check-dead-module-path-calls: {total} module-path calls name a "
-            f"callee declared nowhere in core/ (baseline {BASELINE}).\n"
+            f"check-dead-module-path-calls: {total} module-path call(s) name a "
+            f"callee declared nowhere in core/ ({len(KNOWN)} on the roster).\n"
             "The compiler does not diagnose these: each evaluates to `nil` and\n"
             "satisfies whatever return type the caller declared.\n",
-            file=sys.stderr,
+            file=stream,
         )
-        for leaf in sorted(findings, key=lambda k: (-len(findings[k]), k)):
-            print(f"  {leaf}", file=sys.stderr)
-            for site in findings[leaf]:
-                print(f"      {site}", file=sys.stderr)
+        for key in sorted(findings, key=lambda k: (k[0] not in {a[0] for a in appeared}, k)):
+            dotted, _ = key
+            mark = "NEW " if key in set(appeared) else "    "
+            print(f"  {mark}{dotted}()", file=stream)
+            for site in findings[key]:
+                print(f"          {site}", file=stream)
+
+    if appeared:
         print(
-            "\nRepoint each call at the real callee, or declare it. If a call is\n"
+            "\nThe call(s) marked NEW are not on the roster in this file.\n"
+            "Repoint each at the real callee, or declare it. If a call is\n"
             "legitimately unreachable-by-name, deleting it is the honest fix —\n"
-            "it does nothing today except return nil.",
+            "it does nothing today except return nil. If it has to stay, add it\n"
+            "to KNOWN with the reason.",
             file=sys.stderr,
         )
         return 1
 
-    if total < BASELINE:
+    if disappeared:
         print(
-            f"check-dead-module-path-calls: {total} found, below the baseline of "
-            f"{BASELINE} — lower BASELINE to {total} so the ground stays held."
+            "check-dead-module-path-calls: the roster claims call(s) the tree no "
+            "longer has —\n"
+            + "".join(f"  {dotted}()  {rel}\n" for dotted, rel in disappeared)
+            + "Remove them from KNOWN in this file; the population shrank and the\n"
+            "roster has to say so by name, not by a smaller number.",
+            file=sys.stderr,
         )
         return 1
 
-    print(f"check-dead-module-path-calls: {total} known dead calls, none new")
+    print(
+        f"check-dead-module-path-calls: {total} known dead call(s), roster exact"
+    )
     return 0
 
 
@@ -201,6 +264,22 @@ def self_test() -> int:
             name = "CALL" if pattern is CALL else "TYPED_CALL"
             print(f"self-test: {name} on {line!r} gave {got}, wanted {want}")
             bad += 1
+    # THE SWAP, which is the shape the count ratchet could not report and
+    # the reason this gate carries a roster.  Population size is 1 in both
+    # polarities; the membership differs.  A count is satisfied by both.
+    before = {("sys.windows.thread.thread_join", "core/runtime/thread.vr")}
+    after = {("sys.windows.thread.thread_detach", "core/runtime/thread.vr")}
+    appeared, disappeared = compare(after, before)
+    if not appeared or not disappeared:
+        print(
+            "self-test: a swap of equal size reported nothing — the roster "
+            "comparison has degenerated back into a count"
+        )
+        bad += 1
+    if compare(before, before) != ([], []):
+        print("self-test: an unchanged population reported a difference")
+        bad += 1
+
     print("self-test: OK" if not bad else f"self-test: {bad} FAILED")
     return bad
 

@@ -118,12 +118,44 @@ LIST_REEXPORT = re.compile(r"public\s+mount\s+\.?([a-z_]\w*)\.\{(.*?)\}\s*;", re
 # — lower BASELINE" and failing on it, which is the ratchet doing its
 # job.
 #
-# The six remaining are the population the paragraph above triages, minus
-# the one already gone: `thread_yield` on darwin, and on windows
-# `GetCommandLineA`, `write_stderr`, `thread_join`, `thread_yield` and
-# `query_performance_counter_ns`.  Five of the six are Windows, which
-# nothing here can run.
-BASELINE = 6
+# THE COUNT BECAME A ROSTER, 2026-09-09 (T1320).  A bare `BASELINE = 6`
+# says how MANY are tolerated and never which, so the one shape it cannot
+# report is the SWAP: fix one call, introduce another, and `total` is
+# still 6 and the gate still prints `[ok] … none new`.  That is not a
+# hypothetical — this population turns over.  Two entries left it today
+# (`thread_yield`, both platforms, e88d25fd4) and the gate's only reaction
+# was to demand a smaller number, which is a request to edit the
+# INSTRUMENT rather than a statement about the TREE.
+#
+# So the tolerated set is now written out by name.  A new one fails
+# because it is not in KNOWN; a fixed one fails because KNOWN still
+# claims it.  Both verdicts name the entry, and neither can be satisfied
+# by adjusting a number.
+#
+# The key is `(platform, module, leaf)` and carries NO line number
+# deliberately: a roster keyed on positions goes red when an unrelated
+# edit above shifts a line, which trains the reader to re-baseline
+# without looking.
+#
+# What is in it, and why each is still open — all four are Windows, which
+# nothing on this machine can build or run:
+#
+#   GetCommandLineA               core/sys/init.vr:660
+#   write_stderr                  core/sys/init.vr:370
+#   thread_join                   core/runtime/thread.vr:168
+#   query_performance_counter_ns  core/mem/segment.vr:987
+#
+# `thread_join` is the one that is NOT a missing binding: the target
+# exists as a METHOD (`core/sys/windows/thread.vr:281`, `join`), so the
+# call site needs its FORM changed to `self.platform.join()`, not a new
+# declaration.  The other three need a real binding at the kernel32
+# boundary.  See T1320.
+KNOWN: set[tuple[str, str, str]] = {
+    ("windows", "mod", "GetCommandLineA"),
+    ("windows", "mod", "write_stderr"),
+    ("windows", "thread", "thread_join"),
+    ("windows", "time", "query_performance_counter_ns"),
+}
 
 _declared: dict[Path, set[str]] = {}
 
@@ -214,6 +246,19 @@ def scan() -> tuple[dict, list, int]:
     return missing, no_module, resolved
 
 
+def compare(
+    found: set[tuple[str, str, str]],
+    roster: set[tuple[str, str, str]],
+) -> tuple[list, list]:
+    """Split the tree's unresolved set against the roster.
+
+    Separated from `main` for one reason: it is the half a control can
+    drive without a tree.  `scan()` needs a real `core/`, so a verdict
+    computed inside `main` can only be exercised by building one — which
+    is why the count ratchet this replaced was never tested at all."""
+    return sorted(found - roster), sorted(roster - found)
+
+
 def self_test() -> int:
     """The extractor has one failure mode that does not announce itself: a
     `^`-anchored DECL applied to whole-file text without re.M matches only
@@ -236,7 +281,31 @@ def self_test() -> int:
     if "arc4random_buf" not in names or "write" not in names:
         print("self-test: known libsystem symbols absent from the extraction", file=sys.stderr)
         return 1
-    print(f"[ok] self-test: extractor sees {len(names)} declarations in libsystem.vr")
+
+    # THE SWAP, which is the shape the count ratchet could not report and
+    # the reason this gate carries a roster.  Population size is 1 in both
+    # polarities; the membership differs.  `BASELINE = 1` is satisfied by
+    # both, and the old gate printed `[ok] … none new` over the second —
+    # measured 2026-09-09 against a scratch tree, and "none new" was
+    # false as written.
+    before = {("windows", "thread", "thread_join")}
+    after = {("windows", "thread", "absent_one")}
+    appeared, disappeared = compare(after, before)
+    if not appeared or not disappeared:
+        print(
+            "self-test: a swap of equal size reported nothing — the roster "
+            "comparison has degenerated back into a count",
+            file=sys.stderr,
+        )
+        return 1
+    if compare(before, before) != ([], []):
+        print("self-test: an unchanged population reported a difference", file=sys.stderr)
+        return 1
+
+    print(
+        f"[ok] self-test: extractor sees {len(names)} declarations in "
+        "libsystem.vr; a same-size swap is reported"
+    )
     return 0
 
 
@@ -245,34 +314,54 @@ def main() -> int:
         return self_test()
 
     missing, no_module, resolved = scan()
+    appeared, disappeared = compare(set(missing.keys()), KNOWN)
     total = sum(len(v) for v in missing.values()) + len(no_module)
+    bad = bool(appeared) or bool(disappeared) or bool(no_module)
 
-    if "--list" in sys.argv or total > BASELINE:
-        stream = sys.stderr if total > BASELINE else sys.stdout
+    if "--list" in sys.argv or bad:
+        stream = sys.stderr if bad else sys.stdout
         print(
             f"platform calls: {resolved} resolved, {total} unresolved "
-            f"(baseline {BASELINE})",
+            f"({len(KNOWN)} on the roster)",
             file=stream,
         )
         for (platform, module, leaf), sites in sorted(missing.items()):
-            print(f"  core/sys/{platform}/{module}.vr does not provide `{leaf}`", file=stream)
+            mark = "NEW " if (platform, module, leaf) in set(appeared) else "    "
+            print(
+                f"  {mark}core/sys/{platform}/{module}.vr does not provide `{leaf}`",
+                file=stream,
+            )
             for site in sites:
-                print(f"      {site}", file=stream)
+                print(f"          {site}", file=stream)
         for site, dotted in no_module:
-            print(f"  no such module: {dotted}\n      {site}", file=stream)
+            print(f"  NEW no such module: {dotted}\n          {site}", file=stream)
 
-    if total > BASELINE:
+    if appeared or no_module:
         print(
-            "\nEach of these evaluates to `nil` on the platform it targets, and\n"
-            "nothing reports it — including the compiler, and including a test\n"
-            "run on a different platform.",
+            "\nThe entries marked NEW are not on the roster in this file.\n"
+            "Each evaluates to `nil` on the platform it targets, and nothing\n"
+            "reports it — including the compiler, and including a test run on\n"
+            "a different platform.  Fix the call, or add it to KNOWN with the\n"
+            "reason it has to stay.",
             file=sys.stderr,
         )
         return 1
-    if total < BASELINE:
-        print(f"platform calls: {total} unresolved, below baseline {BASELINE} — lower BASELINE.")
+    if disappeared:
+        print(
+            "platform calls: the roster claims entries the tree no longer has —\n"
+            + "".join(
+                f"  core/sys/{platform}/{module}.vr `{leaf}`\n"
+                for platform, module, leaf in disappeared
+            )
+            + "Remove them from KNOWN in this file; the population shrank and the\n"
+            "roster has to say so by name, not by a smaller number.",
+            file=sys.stderr,
+        )
         return 1
-    print(f"[ok] platform-call parity: {resolved} resolved, {total} known-unresolved, none new")
+    print(
+        f"[ok] platform-call parity: {resolved} resolved, "
+        f"{total} known-unresolved, roster exact"
+    )
     return 0
 
 
