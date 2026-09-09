@@ -110,11 +110,12 @@ jobs:
       # (measured: 23 names on 4269801471) and the runtime diagnostic
       # `stub never resolved id=…` cannot name the offender.
       #
-      # READ THE DIRECTION, NEVER THE MAGNITUDE. Both this count and its
-      # neighbour count CONSEQUENCES: repairing ONE dead name moved the
-      # stub population 78 -> 63 on 2026-09-09, and repairing one other
-      # moved the panic-stub count 11 -> 7. A fall of fifteen is not
-      # fifteen fixes, and a rise of one is one new ROOT.
+      # READ THE DIRECTION; THE MAGNITUDE IS NOT A DEFECT COUNT. The census
+      # itself shows why: 23 of the 89 names share ONE id, so stub LINES
+      # and distinct roots are different quantities. The one delta measured
+      # so far is 1:1 — repairing `sys.darwin.thread.thread_yield` moved
+      # the stub count 78 -> 77 and left the id count at 16 — which says
+      # the ratio CAN be one, not that it always is.
       - name: Stage-5 stub sharing (ratchet, advisory)
         continue-on-error: true
         run: make check-stage5-stub-sharing BAKE_LOG=/tmp/bake.log

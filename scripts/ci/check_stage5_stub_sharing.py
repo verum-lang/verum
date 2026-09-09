@@ -22,14 +22,23 @@ That last number is why the runtime diagnostic cannot help: `stub never
 resolved id=4269801471` is true of twenty-three different names, and two
 sessions spent an hour each chasing it from the id alone.
 
-THE NUMBER IS A COUNT OF CONSEQUENCES, NOT OF DEFECTS.  One root — a
-single bare name captured by a stub — produces many stub lines
-downstream.  Measured the same day: repairing ONE dead name
-(`sys.darwin.thread.thread_yield`) moved the stub count 78 -> 63, and
-repairing one other (`core.io.file.File.read_to_text`) moved the
-`[lenient] SKIP` population 11 -> 7.  So a fall of fifteen does not mean
-fifteen things were fixed, and a rise of one does not mean one defect
-arrived — it means a root did.  Read the direction, never the magnitude.
+THE NUMBER IS A COUNT OF NAMES, NOT OF ROOTS, and the census itself
+says so: 23 of the 89 names share ONE id.  So `N stub lines` and `N
+defects` are different quantities, and the ratio is neither known nor
+constant.
+
+MEASURED DELTAS, so nobody has to guess the ratio: repairing one dead
+name (`sys.darwin.thread.thread_yield`) moved the stub count 78 -> 77 —
+one line for one root — and left the id count at 16 and the `[lenient]
+SKIP` population unchanged at 11.  One measurement is one measurement:
+it says the ratio CAN be 1:1, not that it always is.
+
+A larger claim (one root moving the count by fifteen) was briefly
+recorded here on 2026-09-09 and is RETRACTED: its inputs were read from
+a bake log that was still being written, by a wait loop that grepped
+after its timeout instead of stopping.  Corrected against the finished
+files.  Read the direction; treat the magnitude as unexplained until
+some measurement explains it.
 
 INPUT
 -----
