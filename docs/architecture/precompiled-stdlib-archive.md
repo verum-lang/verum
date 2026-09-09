@@ -1156,6 +1156,61 @@ This cost is paid **once per publish**, amortised over every install of
 that cog version — typically 100s-10000s of installs in registry-scale
 ecosystems. Win is enormous.
 
+## A two-file stdlib bakes in 0.06s — the bake as a probe
+
+`--stdlib-path` accepts ANY directory, not just the workspace's `core/`.
+A directory holding a `mod.vr` and one module is a complete stdlib as far
+as the precompiler is concerned:
+
+```
+$ cat probe/core/mod.vr
+public mount m.*;
+$ cat probe/core/m.vr
+module core.m;
+type Style is { fg: Int };
+implement Style {
+    public const DEFAULT: Style = Style { fg: 0 };
+    public fn fg(&self, c: Int) -> Style { Style { fg: c } }
+}
+public fn probe() -> Style { Style.DEFAULT.fg(3) }
+
+$ verum stdlib precompile --stdlib-path probe/core -o /tmp/x.vbca --verbose
+WARN [lenient] SKIP top-level fn probe (bug-class): undefined variable: Style …
+Modules compiled 1 · Functions compiled 22 · Duration 0.06s
+```
+
+**Why this matters more than it looks.** The bake is the only pipeline
+that reports `[lenient] SKIP` — a function that failed to compile and was
+replaced by a stub that panics at run time. Those diagnostics are
+invisible by default (the stdlib is baked inside `verum_compiler`'s
+`build.rs`, and cargo hides build-script output on success), and a full
+`core/` bake costs ~12 minutes. So "does the bake accept this shape?" was
+a question nobody asked casually. At 0.06s it becomes a unit test.
+
+Measured this way on 2026-09-09, each answer one variable at a time:
+
+* a method call on an associated const (`Style.DEFAULT.fg(..)`) is
+  rejected with `undefined variable: Style`, while the bare const is
+  accepted — six competing explanations were ruled out in under a minute
+  (T1337);
+* of ten spellings of "mutate a variant payload", the bake rejects
+  exactly one, and it is not the one the interpreter rejects (T1334).
+
+**Two rules the probes taught, both the hard way.**
+
+The fixture must contain its own types. Returning `Result<T, E>` from a
+probe stubs every function in it with `undefined function: Result.Err` —
+the prelude is not there. When that happened, the fixture's positive
+CONTROL failed identically to its subject, and two silences read as one
+clean result. A control that goes quiet with its subject is an instrument
+failure, not evidence.
+
+Read the log with a pattern that admits a hyphen. Skips are printed in
+two spellings, `SKIP top-level fn <name> (bug-class): …` for a free
+function and `SKIP <Type>.<method> (bug-class): …` for a method, and a
+verbose bake prints each of them twice (WARN and DEBUG). A character
+class of `[A-Za-z0-9_.]` silently drops every free function.
+
 ## Performance / size summary
 
 | Metric | Today | After this design | Change |
