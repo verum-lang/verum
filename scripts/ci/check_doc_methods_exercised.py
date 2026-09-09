@@ -65,12 +65,22 @@ DOCS = Path(os.environ.get("VERUM_STDLIB_DOCS")
             or (Path(_DOCS_ROOT) / "stdlib" if _DOCS_ROOT
                 else REPO.parent / "website" / "docs" / "stdlib"))
 RUN_DIRECTIVES = {"run", "run-interpreter"}
-BASELINE = 323  # Lowered by COVERAGE, never by argument — the only way
+BASELINE = 299  # Lowered by COVERAGE, never by argument — the only way
                 # this number is meant to move.
                 #   385 -> 378  vcs/specs/core/io/fs_operations_run.vr
                 #   378 -> 372  .../core/base/iterator_adapters_run.vr
                 #               .../core/simd/vec_lanes_run.vr
                 #   372 -> 366  .../core/random/rng_surface_run.vr
+                #   323 -> 299  .../core/term/layout_style_run.vr
+                #   The count went UP to 325 first, and a peer's A/B
+                #   named the cause before I did: rewriting the term
+                #   pages against `core/` replaced invented names with
+                #   real ones, so the DENOMINATOR grew 1382 -> 1384 and
+                #   two real methods joined the documented set. The
+                #   signature that tells this from a regression is that
+                #   both numbers move; a regression moves the numerator
+                #   alone. Answered with coverage, per the rule at the
+                #   top of this comment.
                 #   328 -> 323  .../core/text/expand_escape_parse_run.vr
                 #   338 -> 328  .../core/collections/btree_deque_multiset_run.vr
                 #   341 -> 338  the peer's work, not mine — noted here so

@@ -1,0 +1,124 @@
+// @test: run
+// @level: L1
+// @tier: 0
+// @tags: term, layout, style, coverage
+// @timeout: 120000
+// @expected-stdout-begin
+// rect split h=10,30 v=5,15
+// centered x=15 y=8 w=10 h=4
+// buffer w=8 h=3 in=true out=false
+// termlayout parts=2
+// flex parts=2
+// grid rows=2 cols=2
+// style has_bg=true bits=72
+// rgb->hsl->rgb r=30 g=144 b=255
+// themes differ=true auto-dark=true
+// table footer-set=true
+// widget-styles-ok
+// 
+// @expected-stdout-end
+// @description: Twenty-two more documented `core.term` operations RUN —
+//   the layout solvers, the style setters, the colour conversions and
+//   the widget knobs the first spec did not reach.
+//
+// WHY A SECOND FILE. `vcs/specs/core/term/widget_builders_run.vr`
+// covered the widget CONSTRUCTORS. What stayed uncovered was everything
+// that computes: the three layout engines, `Rect`'s splitters, the
+// buffer's bounds check, the `Style` setters that are not `bold`, the
+// Rgb/Hsl conversions and the themes. Correcting the term pages against
+// `core/` on 2026-09-09 replaced invented names with real ones, which
+// ADDED those to the documented set — the ratchet moved up by two, and
+// this is the answer to that rather than a raised baseline.
+//
+// Each line separates a right answer from a plausible wrong one:
+//
+//   rect split   a 40-wide Rect cut at 10 must give 10 AND 30 — an
+//                implementation returning (whole, empty) prints 40,0.
+//   centered     15 and 8 are (40-10)/2 and (20-4)/2; an off-by-one in
+//                the halving prints 14 or 16.
+//   buffer       in_bounds at the LAST cell (7,2) and one past the edge
+//                (8,0) — one number would not separate `<` from `<=`.
+//   grid         2x2 from two tracks by two tracks; a solver that
+//                returned a flat list prints rows=4 cols=1.
+//   style        bits=72 is underlined(8) | reversed(64). A single
+//                setter would print 8 or 64, and `not_italic` clearing
+//                more than it should would print less.
+//   rgb          30,144,255 back out of Hsl unchanged — a conversion
+//                that rounds through integer degrees loses at least one
+//                channel here, which is why dodgerblue and not grey.
+//   themes       dark and light must DIFFER, and `auto_detect` on a
+//                black background must pick dark. Either alone passes
+//                a palette that returns one table for both.
+mount core.term.layout.{Rect, Margin, LayoutConstraint, Flex, TermLayout,
+                        FlexLayout, FlexItem, AlignItems, AlignContent,
+                        GridLayout, GridTrack};
+mount core.term.layout.shortcuts.{centered};
+mount core.term.style.{Style, Color, Rgb, Theme};
+mount core.term.render.{Buffer};
+mount core.term.widget.{Table, TableRow, TermGauge, Menu, MenuItem};
+
+fn main() {
+    // Rect — the two splitters answer PAIRS, and `centered` insets.
+    let area = Rect.new(0, 0, 40, 20);
+    let (l, r) = area.split_horizontal(10);
+    let (t, b) = area.split_vertical(5);
+    print(f"rect split h={l.width},{r.width} v={t.height},{b.height}");
+    let c = centered(area, 10, 4);
+    print(f"centered x={c.x} y={c.y} w={c.width} h={c.height}");
+
+    // Buffer — from_rect takes its size from the Rect; in_bounds is the check.
+    let buf = Buffer.from_rect(Rect.new(0, 0, 8, 3));
+    print(f"buffer w={buf.width} h={buf.height} in={buf.in_bounds(7, 2)} out={buf.in_bounds(8, 0)}");
+
+    // TermLayout — four builders, then split.
+    let rows = TermLayout.vertical()
+        .constraints([LayoutConstraint.Length(3), LayoutConstraint.Fill(1)])
+        .margin(Margin.uniform(1))
+        .flex(Flex.Start)
+        .spacing(1)
+        .split(area);
+    print(f"termlayout parts={rows.len()}");
+
+    // FlexLayout — column, both alignment knobs.
+    let fl = FlexLayout.column()
+        .align_items(AlignItems.Center)
+        .align_content(AlignContent.SpaceBetween)
+        .gap(2);
+    let items = [FlexItem.new().fixed(4), FlexItem.new().grow(1.0)];
+    print(f"flex parts={fl.compute(area, &items).len()}");
+
+    // GridLayout — the two per-axis gaps, then compute.
+    let g = GridLayout.new([GridTrack.Fixed(10), GridTrack.Fr(1.0)],
+                           [GridTrack.Fixed(5),  GridTrack.Fr(1.0)])
+        .column_gap(1)
+        .row_gap(2);
+    let cells = g.compute(&area);
+    print(f"grid rows={cells.len()} cols={cells[0].len()}");
+
+    // Style — bg, underlined, reversed, and the negating setter.
+    let st = Style.new().bg(Color.Blue).underlined().reversed().not_italic();
+    print(f"style has_bg={st.has_bg()} bits={st.add_modifier.bits}");
+
+    // Colour conversions round-trip through Hsl.
+    let rgb = Rgb.new(30, 144, 255);
+    let back = rgb.to_hsl().to_rgb();
+    print(f"rgb->hsl->rgb r={back.r} g={back.g} b={back.b}");
+
+    // Themes.
+    let d = Theme.dark();
+    let li = Theme.light();
+    // The two themes must DIFFER — a palette that returned one table
+    // for both would print equal on this line and nothing else would
+    // notice.
+    let a = Theme.auto_detect(Maybe.Some(Rgb.new(0, 0, 0)));
+    print(f"themes differ={d.surface != li.surface} auto-dark={a.surface == d.surface}");
+
+    // Widget builders that were left out of the first spec.
+    let tbl = Table.new([TableRow.new(["a"])], [LayoutConstraint.Fill(1)])
+        .footer(TableRow.new(["total"]))
+        .highlight_style(Style.new().bold());
+    print(f"table footer-set={tbl.footer is Maybe.Some}");
+    let gg = TermGauge.new().gauge_style(Style.new().bold());
+    let mn = Menu.new([MenuItem.new("x")]).shortcut_style(Style.new().dim());
+    print("widget-styles-ok");
+}
