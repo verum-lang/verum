@@ -1,2 +1,0 @@
-docs/language/copatterns.md#c8080340
-docs/stdlib/net/weft/overview.md#db3fcebd
