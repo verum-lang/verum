@@ -322,12 +322,12 @@ implement Thread {
 
         @cfg(target_os = "macos")
         {
-            sys.darwin.thread.thread_yield();
+            sys.darwin.thread.yield_now();
         }
 
         @cfg(target_os = "windows")
         {
-            sys.windows.thread.thread_yield();
+            sys.windows.thread.yield_now();
         }
     }
 

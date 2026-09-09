@@ -176,6 +176,15 @@ extern {
     // Process Control
     // =========================================================================
 
+    /// Yield the processor. C: `int sched_yield(void);` (`sched.h`).
+    ///
+    /// T1320 — darwin had NO yield primitive at all. `Thread.yield_now()`
+    /// called `sys.darwin.thread.thread_yield()`, a name declared
+    /// nowhere, so the call became a stage-5 stub and PANICKED at Tier 0.
+    /// Windows has `yield_now` (`sys/windows/thread.vr:379`); this is the
+    /// darwin half of the same interface.
+    fn sched_yield() -> Int32;
+
     /// Get process ID. C: `pid_t getpid(void);` (`pid_t = int32_t`).
     fn getpid() -> Int32;
 

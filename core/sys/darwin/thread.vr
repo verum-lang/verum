@@ -46,6 +46,7 @@ mount super.libsystem.{
     pthread_cond_timedwait, pthread_cond_signal, pthread_cond_broadcast,
     pthread_threadid_np,
     __ulock_wait, __ulock_wake,
+    sched_yield,
     errno,
 };
 mount super.tls.{create_thread_tls, cleanup_thread_tls};
@@ -256,6 +257,21 @@ implement DarwinThread {
 }
 
 /// Get the current thread's pthread handle.
+/// Yield the remaining time slice to the scheduler.
+///
+/// T1320 — the name this file was expected to provide. `core/runtime`
+/// called `sys.darwin.thread.thread_yield()`, which nothing declared,
+/// so the call minted a stage-5 stub and panicked. Named `yield_now` to
+/// match `sys/windows/thread.vr:379`, so `Thread.yield_now()` reaches
+/// one name on both platforms.
+///
+/// `sched_yield` cannot fail in any way a caller can act on — POSIX
+/// gives it a return code, Darwin always returns 0 — so the result is
+/// dropped rather than surfaced as a `Result` nobody would branch on.
+public fn yield_now() {
+    let _ = unsafe { sched_yield() };
+}
+
 public fn current_thread() -> PthreadT {
     unsafe { pthread_self() }
 }
