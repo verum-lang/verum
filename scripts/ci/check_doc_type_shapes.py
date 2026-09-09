@@ -41,7 +41,7 @@ import re
 import sys
 from pathlib import Path
 
-BASELINE = 86  # Lowered by FIXING a page, never by argument.
+BASELINE = 82  # Lowered by FIXING a page, never by argument.
                #
                # 101 -> 99 on 2026-09-09: `stdlib/async.md`'s
                # `RetryConfig` had four fields and every one of the four
@@ -67,7 +67,14 @@ BASELINE = 86  # Lowered by FIXING a page, never by argument.
                # different vocabulary from `core/architecture/` — of the
                # ten capability variants it listed, not one exists.
                #
-               # The remaining 86 are a real backlog, not noise — spot-
+               # 86 -> 82 by fixing `stdlib/cog.md`: the manifest's
+               # identity table is `[cog]` not `[package]`,
+               # dependencies are a MAP keyed by name, the archive keeps
+               # its index and payloads as parallel lists, and
+               # `ResolveError` has two arms where the page listed three
+               # different ones.
+               #
+               # The remaining 82 are a real backlog, not noise — spot-
                # checked against `core/`: `stdlib/architecture.md`
                # documents `Capability` with TEN variants and core/ has
                # nine completely different ones, not a single name in
