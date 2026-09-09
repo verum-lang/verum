@@ -129,6 +129,35 @@ MUST_FAIL = re.compile(
     re.I,
 )
 
+# A marker that names a CODE is a claim about WHICH refusal the reader
+# will meet, and it has to be checked (T1345). Requiring only "some
+# error" let `docs/changelog.md`'s
+#
+#     match &limits.max_age {
+#         Maybe.Some(n) => Maybe.Some(*n),   // error<E409>: cannot dereference
+#
+# count as correctly refused while failing with `unbound variable:
+# limits` — an E100 — so the page's actual claim about E409 was never
+# exercised and could go on being wrong indefinitely.
+#
+# Only the unambiguous `error<E123>` spelling counts. A bare `E400`
+# in prose ("✗ E400 at type check") is too noisy to gate on: it appears
+# in explanations that are not markers.
+NAMED_CODE = re.compile(r"//[^\n]*error<(E\d+)>", re.I)
+
+
+def codes_claimed(body: str) -> set:
+    """Error codes a must-fail block names in its own comments."""
+    return set(m.upper() for m in NAMED_CODE.findall(body))
+
+
+def codes_seen(err_lines) -> set:
+    """Error codes the compiler actually emitted."""
+    out = set()
+    for line in err_lines:
+        out.update(m.upper() for m in re.findall(r"error<(E\d+)>", line))
+    return out
+
 # Failures that are this tool's limitation rather than a defect in the
 # prose. Each one is a block that is correct in its page and incomplete
 # on its own.
@@ -184,13 +213,38 @@ def binary_age_hours(binary: Path) -> float:
     return (newest - bin_mtime) / 3600.0 if newest > bin_mtime else 0.0
 
 
+# Coverage, measured on every call to `blocks()` so the headline count
+# can never be read as coverage again (T1345); widening the scan is T1346.
+#
+# The gate compiles only blocks that carry their own `fn main(`, because
+# a snippet without one has no entry point and fails for that reason
+# rather than for anything the page claims. That exclusion is correct
+# and it is also almost the whole corpus:
+#
+#     verum blocks in docs/                   2822
+#       …scanned (contain `fn main(`)           67   (2.4%)
+#       …skipped                              2755
+#     must-fail blocks across ALL of docs/      58
+#       …of those naming an explicit code       16   <- none scanned
+#
+# So "0 examples a reader cannot trust" is true of 2.4% of the pages.
+# Printing the denominator beside it is the minimum honesty; widening
+# the scan to snippets needs a wrapper and a context per block and is
+# filed separately.
+COVERAGE = {"total": 0, "scanned": 0}
+
+
 def blocks():
+    COVERAGE["total"] = 0
+    COVERAGE["scanned"] = 0
     for d in sorted(DOCS.rglob("*.md")):
         text = d.read_text(errors="ignore")
         for m in BLOCK.finditer(text):
             body = m.group(1)
+            COVERAGE["total"] += 1
             if "fn main(" not in body:
                 continue
+            COVERAGE["scanned"] += 1
             line = text[: m.start()].count("\n") + 1
             yield d.relative_to(DOCS.parent), line, body
 
@@ -378,6 +432,7 @@ def main() -> int:
     buckets: Counter[str] = Counter()
     detail: dict[str, list] = defaultdict(list)
     stale_markers: list = []
+    wrong_refusals: list = []
     keys: dict[str, tuple] = {}
 
     with tempfile.TemporaryDirectory() as tmp:
@@ -399,11 +454,23 @@ def main() -> int:
             if MUST_FAIL.search(body):
                 # Checked the other way round: this block is documented
                 # as not compiling, so compiling is the failure.
-                if errs:
-                    buckets["counter-example, correctly refused"] += 1
-                else:
+                if not errs:
                     buckets["STALE MARKER — marked as failing, compiles"] += 1
                     stale_markers.append((rel, line, ""))
+                    continue
+                # …and when the marker names a code, failing for some
+                # OTHER reason is its own defect: the page is teaching a
+                # refusal the reader will not meet (T1345).
+                claimed = codes_claimed(body)
+                if claimed:
+                    seen = codes_seen(errs)
+                    if not (claimed & seen):
+                        buckets["WRONG REFUSAL — marked as one code, fails as another"] += 1
+                        wrong_refusals.append(
+                            (rel, line, f"marked {sorted(claimed)}, got {sorted(seen) or ['(no code)']}")
+                        )
+                        continue
+                buckets["counter-example, correctly refused"] += 1
                 continue
 
             k = classify(body, errs)
@@ -417,12 +484,18 @@ def main() -> int:
         print(f"{v:4d}  {k}")
 
     real = ("PARSE ERROR", "API / semantic", "TIMEOUT",
-            "STALE MARKER — marked as failing, compiles")
+            "STALE MARKER — marked as failing, compiles",
+            "WRONG REFUSAL — marked as one code, fails as another")
     print()
     for k in real:
         if not detail.get(k) and k not in buckets:
             continue
-        rows = detail.get(k) or stale_markers if "STALE" in k else detail.get(k, [])
+        if "STALE" in k:
+            rows = detail.get(k) or stale_markers
+        elif "WRONG REFUSAL" in k:
+            rows = detail.get(k) or wrong_refusals
+        else:
+            rows = detail.get(k, [])
         if not rows:
             continue
         print(f"--- {k} ---")
@@ -430,7 +503,13 @@ def main() -> int:
             print(f"  {rel}:{line}  {e}")
 
     n_real = sum(buckets[k] for k in real)
-    print(f"\ncheck-doc-examples: {n_real} example(s) a reader cannot trust")
+    skipped = COVERAGE["total"] - COVERAGE["scanned"]
+    print(
+        f"\ncheck-doc-examples: {n_real} example(s) a reader cannot trust"
+        f"  [of {COVERAGE['scanned']} scanned; {skipped} of "
+        f"{COVERAGE['total']} verum blocks carry no `fn main(` and are NOT "
+        f"checked — T1346]"
+    )
 
     tracked = {k: v for k, v in keys.items() if v[0] in real}
     if args.write_baseline:
