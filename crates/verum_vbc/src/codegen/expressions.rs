@@ -7599,8 +7599,36 @@ impl VbcCodegen {
             return self.compile_record_call_form(&func_name, &func_info, args);
         }
 
+        // T1304 — A VARIADIC EXTERN MAY BE CALLED WITH MORE ARGUMENTS
+        // THAN IT DECLARES. That is the whole point of `...`, and until
+        // this exception existed the marker was a syntax with no
+        // semantics: measured on one declaration, `snprintf(buf, 32,
+        // fmt)` compiled and ran while `snprintf(buf, 32, fmt, 42)`
+        // answered `expected 3, found 4`.
+        //
+        // The fact is read from the FFI symbol rather than carried on
+        // `FunctionInfo`, because it is ALREADY there and already
+        // correct: `create_ffi_signature` sets
+        // `FfiSignature.is_variadic` from the declaration, the archive
+        // round-trips it (serialize.rs has the test), and Tier 1
+        // already builds `fn_type(params, is_variadic)` from it in six
+        // places. Adding a sixth signature flag to `FunctionInfo` would
+        // have meant 63 mechanical insertions across five files — one of
+        // them a file another session is holding uncommitted — to
+        // duplicate a fact the tree already records.
+        //
+        // The relaxation is one-directional: it can only ADMIT extra
+        // arguments for a name that resolves to a variadic extern, never
+        // reject a call that was previously accepted.
+        let callee_is_variadic_extern = self
+            .ffi_function_map
+            .get(&func_name)
+            .and_then(|sid| self.ffi_symbols.get(sid.0 as usize))
+            .map(|sym| sym.signature.is_variadic)
+            .unwrap_or(false);
+
         // Check argument count — allow fewer args if function has default params
-        if args.len() > func_info.param_count {
+        if args.len() > func_info.param_count && !callee_is_variadic_extern {
             // T0723 probe. This error is the visible end of the
             // bare-simple-name clobber: a later-compiled module overwrites
             // the bare slot, and a call inside the module that OWNS a
