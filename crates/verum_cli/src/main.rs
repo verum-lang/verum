@@ -408,7 +408,13 @@ enum Commands {
  /// Compile each test to native and spawn (Tier 1, default).
         #[clap(long, conflicts_with = "interp")]
         aot: bool,
- /// Presentation: pretty | terse | json (libtest convention).
+ /// Presentation: pretty | terse | json (libtest convention),
+ /// or a CI report: junit | tap | sarif.
+ ///
+ /// All six are implemented by `TestFormat::parse` and emit real
+ /// output — the help listed the first three only, so the CI
+ /// formats existed and were discoverable nowhere but the website
+ /// (T1339).
         #[clap(long, value_name = "FMT", default_value = "pretty")]
         format: Text,
  /// Print discovered tests and exit without running them.
