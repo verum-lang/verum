@@ -90,9 +90,16 @@ FENCE = re.compile(r"^```verum\n(.*?)^```", re.M | re.S)
 CALL = re.compile(r"\b([A-Z][A-Za-z0-9_]*)\.([a-z_][A-Za-z0-9_]*)\s*\(")
 DENIAL = re.compile(
     r"(does not exist|do not exist|not exist|no such|never existed|"
+    r"there is no|there are no|has no|have no|"
     r"is not a|are not|not shipped|not implemented|invented|fiction|"
     r"undeclared|removed|renamed|until 2026|previously|earlier version|"
     r"was not real|were not real|does not|did not)", re.I)
+# `there is no X` / `X has no Y` were missing until 2026-09-09, and the
+# gate went red on `token-api.md`, a page whose whole sentence is "There
+# is no `TokenStream.as_text_literal()`." Its sibling `macro-kinds.md`
+# said the same thing as "`TokenStream` has no `as_text_literal`" and
+# also missed. A filter that refuses the two most natural spellings of a
+# denial does not measure denials — it measures phrasing.
 
 # KEYED, not counted. A bare number cannot see a SWAP — one fiction
 # repaired while another appears keeps the total unchanged — and a
@@ -160,6 +167,10 @@ def self_test() -> int:
          "```verum\nWidget.frobnicate(p)\n```\n", set()),
         ("a denial is not an accusation",
          "```verum\n// File.open_async does not exist\nFile.open_async(p)\n```\n", set()),
+        ("`there is no X` is a denial too",
+         "```verum\n// There is no `File.open_async()`.\nFile.open_async(p)\n```\n", set()),
+        ("`X has no Y` is a denial too",
+         "```verum\n// `File` has no open_async\nFile.open_async(p)\n```\n", set()),
         ("a method the DOCS declare is admitted",
          "```verum\nfn open_async(p: Text) {}\nFile.open_async(p)\n```\n", set()),
     ]
