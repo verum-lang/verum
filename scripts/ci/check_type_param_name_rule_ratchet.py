@@ -66,9 +66,64 @@ NAMEISH = re.compile(
     r"(?:^|[^A-Za-z0-9_])(?:name|ident|tname|oname|s|str|"
     r"[a-z_]*_name|[a-z_]*_ident)$", re.I)
 
-# Raise ONLY with a measurement and a reason. Lowering is the goal.
-BASELINE = 11
+# THE COUNT BECAME A ROSTER, 2026-09-09 (T1330).  `BASELINE = 11` said how
+# many sites decide type-parameter-ness from a spelling and never WHICH, so
+# the shape it could not report is the SWAP: remove one site, add another,
+# and the total is unchanged and the gate passes.  Measured the same day on
+# a sibling gate of identical construction (`check_platform_call_parity.py`):
+# population held at one, membership replaced, and the count printed
+# `[ok] … none new` over a tree that had just acquired the defect.
+#
+# THE KEY IS DELIBERATELY NOT A LINE NUMBER, and this gate is the one where
+# that matters most: its population lives in `crates/`, including six sites
+# in `codegen/expressions.rs` — a 28,000-line file under active edit.  A
+# roster keyed on positions would go red every time somebody inserts a
+# function above line 20,227, which teaches the reader to re-baseline
+# without reading.
+#
+# So the key is `(file, threshold, source-text)` and the value is HOW MANY
+# times that exact test appears in that file.  Text alone does not
+# identify a site — `s.len() <= 2` occurs three times in one file — which
+# is why the count rides along.
+#
+# WHAT THIS DOES NOT CATCH, stated rather than left to be discovered: one
+# `s.len() <= 2` deleted in `expressions.rs` and another `s.len() <= 2`
+# added elsewhere in the SAME file.  That is a move, and this gate's
+# subject is how many places decide by spelling, which a move does not
+# change.  Every other swap — new file, new threshold, new spelling,
+# different multiplicity — is reported by name.
+KNOWN: dict[tuple[str, str, str], int] = {
+    ("crates/verum_smt/src/gat_verification.rs", "== 1",
+     "if name.len() == 1 && name.chars().all(|c| c.is_uppercase()) {"): 1,
+    ("crates/verum_types/src/dependent_match.rs", "== 1",
+     "if name.as_str().len() == 1 && name.as_str().chars().all(|c| c.is_uppercase()) {"): 1,
+    ("crates/verum_types/src/infer/path_resolution.rs", "== 1",
+     "if name.len() == 1 && name.chars().next().is_some_and(|c| c.is_ascii_uppercase()) {"): 1,
+    ("crates/verum_types/src/unify.rs", "== 1", "name.len() == 1"): 1,
+    ("crates/verum_types/src/unify.rs", "== 1", "oname.len() == 1"): 1,
+    ("crates/verum_vbc/src/codegen/expressions.rs", "<= 2", "s.len() <= 2"): 2,
+    ("crates/verum_vbc/src/codegen/expressions.rs", "<= 2",
+     "s.len() <= 2 && s.chars().all(|c| c.is_uppercase() || c.is_numeric())"): 2,
+    ("crates/verum_vbc/src/codegen/expressions.rs", "<= 2",
+     "if ret_type_name.len() <= 2"): 2,
+}
+BASELINE = sum(KNOWN.values())
 BASELINE_THRESHOLDS = {"== 1": 5, "<= 2": 6}
+
+
+def compare(found: dict, roster: dict) -> tuple[list, list, list]:
+    """Split what the tree has against what the roster claims.
+
+    Three lists, not two: a key can be NEW, GONE, or present at a
+    different multiplicity.  Separated from the scan so a control can
+    drive it without a tree — the half a count ratchet has and never
+    tests."""
+    appeared = sorted(k for k in found if k not in roster)
+    disappeared = sorted(k for k in roster if k not in found)
+    changed = sorted(
+        (k, roster[k], found[k]) for k in found if k in roster and found[k] != roster[k]
+    )
+    return appeared, disappeared, changed
 
 
 def scan(root):
@@ -94,8 +149,17 @@ def scan(root):
                 shown = str(f.relative_to(REPO))
             except ValueError:      # self-test runs on a temp dir
                 shown = str(f)
-            rows.append((shown, i + 1, f"{m.group('op')} {m.group('n')}"))
+            rows.append((shown, i + 1, f"{m.group('op')} {m.group('n')}", line.strip()))
     return rows
+
+
+def population(rows) -> dict[tuple[str, str, str], int]:
+    """Rows collapsed onto the roster key: file, threshold, source text."""
+    counts: dict[tuple[str, str, str], int] = {}
+    for shown, _lineno, threshold, text in rows:
+        key = (shown, threshold, text)
+        counts[key] = counts.get(key, 0) + 1
+    return counts
 
 
 def self_test() -> int:
@@ -126,8 +190,36 @@ def self_test() -> int:
         print("  SELF-TEST FAIL: baseline must be positive", file=sys.stderr)
         bad += 1
     else:
-        print(f"  [ok] baseline is {BASELINE} across {len(BASELINE_THRESHOLDS)} "
-          f"threshold(s): {BASELINE_THRESHOLDS}")
+        print(f"  [ok] roster holds {BASELINE} site(s) across "
+              f"{len(BASELINE_THRESHOLDS)} threshold(s): {BASELINE_THRESHOLDS}")
+
+    # THE SWAP, which is the shape the count ratchet could not report and
+    # the reason this gate carries a roster.  Population size is 1 in both
+    # polarities; the membership differs, and a count is satisfied by both.
+    before = {("a.rs", "== 1", "name.len() == 1"): 1}
+    after = {("b.rs", "== 1", "name.len() == 1"): 1}
+    app, gone, chg = compare(after, before)
+    if not app or not gone:
+        print("  SELF-TEST FAIL: a swap of equal size reported nothing — the "
+              "roster comparison has degenerated back into a count", file=sys.stderr)
+        bad += 1
+    else:
+        print("  [ok] a same-size swap across files is reported")
+
+    # And the multiplicity change, which is what makes the roster more than
+    # a set: the same spelling in the same file, twice instead of once.
+    app, gone, chg = compare({("a.rs", "== 1", "name.len() == 1"): 2}, before)
+    if app or gone or not chg:
+        print("  SELF-TEST FAIL: a multiplicity change was not reported",
+              file=sys.stderr)
+        bad += 1
+    else:
+        print("  [ok] a repeat of a known spelling is reported (1 -> 2)")
+
+    if compare(before, before) != ([], [], []):
+        print("  SELF-TEST FAIL: an unchanged population reported a difference",
+              file=sys.stderr)
+        bad += 1
     return 1 if bad else 0
 
 
@@ -145,28 +237,40 @@ def main() -> int:
               "report OK.", file=sys.stderr)
         return 2
 
-    if n > BASELINE:
+    appeared, disappeared, changed = compare(population(rows), KNOWN)
+
+    if appeared or changed:
         print(f"type-param-name-rule: FAIL — {n} site(s) decide type-parameter-ness "
-              f"from a name's spelling, baseline {BASELINE}. New site(s):",
-              file=sys.stderr)
-        for r in rows:
-            print(f"    {r[0]}:{r[1]}   threshold {r[2]}", file=sys.stderr)
-        print("\nDo not add an eleventh spelling of this rule. Ask the BINDING: a "
+              f"from a name's spelling, and the roster in this file does not "
+              f"account for all of them.", file=sys.stderr)
+        for f, threshold, text in appeared:
+            here = [r for r in rows if (r[0], r[2], r[3]) == (f, threshold, text)]
+            print(f"    NEW  {f}   threshold {threshold}", file=sys.stderr)
+            for r in here:
+                print(f"           line {r[1]}   {text}", file=sys.stderr)
+        for (f, threshold, text), was, now in changed:
+            print(f"    {was} -> {now}  {f}   threshold {threshold}\n"
+                  f"           {text}", file=sys.stderr)
+        print("\nDo not add another spelling of this rule. Ask the BINDING: a "
               "type parameter is one that was declared, and a declared parameter "
               "reaches the checker as a TypeVar rather than a `Named`. If the "
               "binding is genuinely gone by the time you need the answer, that "
-              "erasure is the defect worth fixing.", file=sys.stderr)
+              "erasure is the defect worth fixing. If a site has to stay, add it "
+              "to KNOWN with the reason.", file=sys.stderr)
         return 1
 
-    if n < BASELINE:
-        print(f"type-param-name-rule: FAIL — {n} site(s), BELOW the baseline of "
-              f"{BASELINE}. That is good news the gate cannot accept silently: "
-              f"lower the baseline to {n} in this file, in the same commit that "
-              f"removed the site(s), so the next regression is measured against "
-              f"what is actually there.", file=sys.stderr)
+    if disappeared:
+        print(f"type-param-name-rule: FAIL — the roster claims site(s) the tree no "
+              f"longer has:", file=sys.stderr)
+        for f, threshold, text in disappeared:
+            print(f"    {f}   threshold {threshold}\n           {text}", file=sys.stderr)
+        print("That is good news the gate cannot accept silently: remove them from "
+              "KNOWN in this file, in the same commit that removed the site(s), so "
+              "the next regression is measured against what is actually there — "
+              "and by name, not by a smaller number.", file=sys.stderr)
         return 1
 
-    print(f"[ok] type-param-name-rule: {n} site(s) at baseline, "
+    print(f"[ok] type-param-name-rule: {n} site(s), roster exact, "
           f"thresholds {dict(thresholds)}")
     if len(thresholds) > 1:
         print(f"     NOTE: the copies DISAGREE — a two-character type name is a "
