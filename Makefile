@@ -4,6 +4,7 @@
 # before pushing — they catch stale-match build breaks across
 # the dependency graph without waiting for the CI run.
 
+.PHONY: check-shipped-path-parity
 .PHONY: gates-source check-private-types-off-public-surface check-grammar-covers-keywords check-grammar-docs-match check-doc-anchors check-doc-error-codes check-known-tables check-parser-attrs check-gate-tables check-dead-module-path-calls check-platform-call-parity check-protocol-conformance check-cfg-block-tail check-constant-time-duplication check-arch-attestation check-type-name-collisions check-barename-collisions check-barename-census check-rings check-rings-census check check-workspace check-tests check-strict test build help check-vr-syntax check-markers check-internal-refs check-op-bytes check-inventory check-inventory-live check-silent-acceptance check-name-census check-panic-surface check-per-register-privacy check-early-return-tenants check-dup-emitters check-homepage-examples check-doc-indented-blocks check-examples-run check-doc-status-badge check-doc-reachable check-doc-type-shapes
 
 help: ## Show available targets
@@ -126,6 +127,11 @@ check-doc-status-badge: ## Gate: a page that declares a status must RENDER the s
 check-doc-methods-declared: ## Gate: a method a doc example CALLS must be declared in core/ — no build needed
 	python3 scripts/ci/check_doc_methods_declared.py --self-test
 	python3 scripts/ci/check_doc_methods_declared.py
+
+check-shipped-path-parity: ## Gate (T0816): a spec the conformance runner accepts must also run under `verum run` — needs a built binary (VERUM_BIN=... to point at one)
+	python3 scripts/ci/check_shipped_path_parity.py --self-test
+	@test -n "$(VERUM_BIN)" || { echo "usage: make check-shipped-path-parity VERUM_BIN=<path to verum>"; exit 2; }
+	python3 scripts/ci/check_shipped_path_parity.py "$(VERUM_BIN)"
 
 check-by-example: ## Gate: the 22 docs/by-example programs must compile — needs a build
 	python3 scripts/ci/check_by_example_compiles.py --self-test

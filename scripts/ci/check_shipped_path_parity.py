@@ -42,12 +42,38 @@ from __future__ import annotations
 
 import pathlib
 import re
+import shutil
 import subprocess
+import tempfile
 import sys
 
 # Frozen at the measured divergence. Lower it in the same commit that earns
 # it; a silently improving number is how a gate stops measuring.
-BASELINE_DIVERGENT = 1
+# THE COUNT BECAME A ROSTER AND THE HARNESS WAS FIXED, 2026-09-09
+# (T1330). Both mattered, and the harness mattered more:
+#
+#   run in place, from the repo root   29 divergent
+#   each spec alone in a temp dir       2 divergent, 26 correct, 1 timeout
+#
+# Twenty-six of twenty-nine were the gate supplying its own findings —
+# see ISOLATION_NOTE. A count of 29 against a baseline of 1 would have
+# read as a catastrophic regression and been about the corpus layout.
+#
+# The two that survive isolation are both async and both known:
+# `block_on` completes and prints nothing (T0734).
+DIVERGENT = {
+    "vcs/specs/L0-critical/stdlib-runtime/async_basic.vr",
+    "vcs/specs/L2-standard/async/block_on_end_to_end.vr",
+}
+BASELINE_DIVERGENT = len(DIVERGENT)
+
+
+def compare(found: set, roster: set) -> tuple[list, list]:
+    """Split what the corpus has against what the roster claims.
+
+    Separated from the run so a control can drive it without a binary —
+    the half a count ratchet has and never tests."""
+    return sorted(found - roster), sorted(roster - found)
 
 # Per-spec wall-clock ceiling. Generous on purpose: this gate judges OUTPUT,
 # never speed, and a timeout must not be mistaken for a divergence — it is
@@ -71,9 +97,78 @@ def eligible(path: pathlib.Path) -> bool:
     )
 
 
+ISOLATION_NOTE = """EACH SPEC RUNS IN A DIRECTORY OF ITS OWN, and that is not tidiness.
+
+`verum run <path>` resolves the PROJECT from the file's directory, so a
+spec run from the repo root drags in every sibling under `vcs/specs/`.
+Measured 2026-09-09 on `bitwise_precedence.vr`:
+
+    from the repo root   1469 errors, all from OTHER files
+                         (errors/yield_errors, calls/method_call, ...)
+    alone in a temp dir  `14 14 12 30 5 ok` — exactly what it declares
+
+Run in place, this gate reported 29 divergences. Twenty-six of them are
+that: correct in isolation. TWO are real. A gate whose harness supplies
+most of its own findings is measuring itself, and the number it printed
+was about the corpus layout, not about the shipped path."""
+
+
+def run_isolated(verum: pathlib.Path, spec: pathlib.Path) -> str:
+    """Run one spec alone, so the answer is about the SPEC.
+
+    Raises `subprocess.TimeoutExpired`, which the caller counts
+    separately — a timeout is not a divergence."""
+    with tempfile.TemporaryDirectory(prefix="parity-") as d:
+        local = pathlib.Path(d) / spec.name
+        shutil.copy(spec, local)
+        out = subprocess.run(
+            [str(verum), "run", spec.name],
+            capture_output=True,
+            text=True,
+            timeout=TIMEOUT_S,
+            cwd=d,
+        ).stdout
+    # The `Running <file> (interpreter)` banner is the runner talking, not
+    # the program; comparing it against `@expected-stdout` would make every
+    # spec divergent.
+    return "\n".join(
+        l for l in out.splitlines() if not l.strip().startswith("Running ")
+    )
+
+
+def self_test() -> int:
+    """THE SWAP, which is the shape a count cannot report, plus the two
+    things the harness must not get wrong."""
+    a, b = "vcs/specs/x/one.vr", "vcs/specs/x/two.vr"
+    app, gone = compare({a}, {b})
+    if not app or not gone:
+        print("self-test: a swap of equal size reported nothing — the roster "
+              "comparison has degenerated back into a count", file=sys.stderr)
+        return 1
+    if compare({a}, {a}) != ([], []):
+        print("self-test: an unchanged population reported a difference",
+              file=sys.stderr)
+        return 1
+    # The banner is the runner talking; leaving it in makes every spec
+    # divergent, which is a green-looking way to measure nothing.
+    if "Running" in "\n".join(
+        l for l in "Running x.vr (interpreter)\nreal output".splitlines()
+        if not l.strip().startswith("Running ")
+    ):
+        print("self-test: the runner banner is not stripped", file=sys.stderr)
+        return 1
+    print(f"[ok] self-test: roster holds {len(DIVERGENT)} spec(s); a same-size "
+          f"swap is reported; the runner banner is stripped")
+    return 0
+
+
 def main() -> int:
+    if "--self-test" in sys.argv[1:]:
+        return self_test()
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
-    check = "--check" in sys.argv[1:]
+    # `--check` is accepted and ignored: the verdict no longer lives in
+    # a flag. See the comment beside the roster.
+    _ = "--check" in sys.argv[1:]
     specs_dir = pathlib.Path("vcs/specs")
     for a in sys.argv[1:]:
         if a.startswith("--specs="):
@@ -101,12 +196,7 @@ def main() -> int:
     for spec in candidates:
         want = declared_stdout(spec.read_text(encoding="utf-8", errors="ignore"))
         try:
-            got = subprocess.run(
-                [str(verum), "run", str(spec)],
-                capture_output=True,
-                text=True,
-                timeout=TIMEOUT_S,
-            ).stdout
+            got = run_isolated(verum, spec)
         except subprocess.TimeoutExpired:
             timed_out.append(spec)
             continue
@@ -127,25 +217,35 @@ def main() -> int:
         print(f"        declared: {(want or '')[:70]!r}")
         print(f"        shipped : {got.strip()[:70]!r}")
 
-    if not check:
-        return 0
+    # THE VERDICT IS NOT CONDITIONAL ON A FLAG. It used to end both
+    # branches with `return 1 if args.check else 0`, and nothing in the
+    # Makefile or CI invoked this script at all — so a finding could not
+    # have been reported even if something had. `--check` is still
+    # accepted so existing invocations keep working; it no longer decides
+    # whether a failure is one.
+    appeared, disappeared = compare({str(s) for s, _, _ in divergent}, DIVERGENT)
+    for path in appeared:
+        print(f"    NEW {path}", file=sys.stderr)
 
-    if len(divergent) > BASELINE_DIVERGENT:
+    if appeared:
         print(
-            f"RATCHET: {len(divergent)} specs pass the conformance runner and fail "
-            f"under `verum run` (baseline {BASELINE_DIVERGENT}). Each one is green "
-            f"in CI and broken for users.",
+            f"\n{len(appeared)} spec(s) pass the conformance runner and fail under "
+            f"`verum run`, and are not on the roster in this file. Each one is "
+            f"green in CI and broken for every user of the language.",
             file=sys.stderr,
         )
         return 1
-    if len(divergent) < BASELINE_DIVERGENT:
+    if disappeared:
         print(
-            f"RATCHET: divergence dropped to {len(divergent)} (baseline "
-            f"{BASELINE_DIVERGENT}). Lower the baseline in the same commit that "
-            f"earns it.",
+            f"\nThe roster claims {len(disappeared)} spec(s) that now agree: "
+            f"{' '.join(disappeared)}\n"
+            f"Remove them from DIVERGENT in this file — the ground gained is "
+            f"recorded by NAME, not by a smaller number.",
             file=sys.stderr,
         )
         return 1
+    print(f"[ok] shipped-path parity: {len(matched)} agree, {len(divergent)} "
+          f"known-divergent, roster exact")
     return 0
 
 
