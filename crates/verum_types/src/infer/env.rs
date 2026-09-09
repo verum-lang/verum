@@ -8915,10 +8915,12 @@ impl TypeChecker {
     /// is not that rule — it is three rules, two of them wrong. Measured
     /// 2026-09-08 (T1270), with the `zip` below walking the shorter side:
     ///
-    ///     fn f(a: Text, b: Int, c: Int)   W.f("x", 5)   was ACCEPTED,
-    ///                                     and printed  a=[x] b=5 c=()
-    ///     fn new(a: Text)                 W.new("x", "surplus")
-    ///                                     was ACCEPTED, surplus dropped
+    /// ```text
+    /// fn f(a: Text, b: Int, c: Int)   W.f("x", 5)   was ACCEPTED,
+    ///                                 and printed  a=[x] b=5 c=()
+    /// fn new(a: Text)                 W.new("x", "surplus")
+    ///                                 was ACCEPTED, surplus dropped
+    /// ```
     ///
     /// The first is the expensive one: the unmatched parameter arrives as
     /// Unit and is written into a field of ANY declared type with no
