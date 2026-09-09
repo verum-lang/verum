@@ -4,7 +4,7 @@
 # before pushing — they catch stale-match build breaks across
 # the dependency graph without waiting for the CI run.
 
-.PHONY: gates-source check-private-types-off-public-surface check-grammar-covers-keywords check-grammar-docs-match check-doc-anchors check-doc-error-codes check-known-tables check-parser-attrs check-gate-tables check-dead-module-path-calls check-platform-call-parity check-protocol-conformance check-cfg-block-tail check-constant-time-duplication check-arch-attestation check-type-name-collisions check-barename-collisions check-barename-census check-rings check-rings-census check check-workspace check-tests check-strict test build help check-vr-syntax check-markers check-internal-refs check-op-bytes check-inventory check-inventory-live check-silent-acceptance check-name-census check-panic-surface check-per-register-privacy check-early-return-tenants check-dup-emitters check-homepage-examples check-doc-indented-blocks check-examples-run check-doc-status-badge check-doc-reachable
+.PHONY: gates-source check-private-types-off-public-surface check-grammar-covers-keywords check-grammar-docs-match check-doc-anchors check-doc-error-codes check-known-tables check-parser-attrs check-gate-tables check-dead-module-path-calls check-platform-call-parity check-protocol-conformance check-cfg-block-tail check-constant-time-duplication check-arch-attestation check-type-name-collisions check-barename-collisions check-barename-census check-rings check-rings-census check check-workspace check-tests check-strict test build help check-vr-syntax check-markers check-internal-refs check-op-bytes check-inventory check-inventory-live check-silent-acceptance check-name-census check-panic-surface check-per-register-privacy check-early-return-tenants check-dup-emitters check-homepage-examples check-doc-indented-blocks check-examples-run check-doc-status-badge check-doc-reachable check-doc-type-shapes
 
 help: ## Show available targets
 	@grep -hE '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -95,6 +95,10 @@ check-doc-methods-exercised: ## Gate: a method the stdlib reference documents sh
 	python3 scripts/ci/check_doc_methods_exercised.py --self-test
 	python3 scripts/ci/check_doc_methods_exercised.py
 
+check-doc-type-shapes: ## Gate: a `type X is …` in the docs must match core/ — no build needed
+	python3 scripts/ci/check_doc_type_shapes.py --self-test
+	python3 scripts/ci/check_doc_type_shapes.py --min-types 300
+
 check-doc-reachable: ## Gate: every doc page must be reachable from the sidebar or another page — no build needed
 	python3 scripts/ci/check_doc_reachable.py --self-test
 	python3 scripts/ci/check_doc_reachable.py --min-pages 300
@@ -122,6 +126,7 @@ gates-docs: check-doc-examples check-examples-run check-homepage-examples check-
             check-doc-module-paths check-doc-config-structs \
             check-doc-methods-declared check-doc-methods-exercised \
             check-doc-status-badge check-doc-reachable \
+            check-doc-type-shapes \
             check-doc-iterator-items ## Every documentation gate CI runs — needs a build
 	@echo "gates-docs: all documentation gates green"
 

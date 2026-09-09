@@ -769,6 +769,11 @@ jobs:
           # well as its docs/, so VERUM_SITE_DIR rather than the docs dir.
           python3 scripts/ci/check_doc_reachable.py --self-test
           VERUM_SITE_DIR=.website python3 scripts/ci/check_doc_reachable.py --min-pages 300
+          # The rung between "the type NAME exists" and "the METHOD is
+          # declared": does the SHAPE a page prints match the one in
+          # core/? Nothing asked before, and a reader copies the shape.
+          python3 scripts/ci/check_doc_type_shapes.py --self-test
+          python3 scripts/ci/check_doc_type_shapes.py --min-types 300
 
       # `check_doc_blocks_parse` has been in the tree for weeks as a
       # Makefile target with NO CI caller and no `--check` flag on the one
