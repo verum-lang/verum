@@ -41,7 +41,7 @@ import re
 import sys
 from pathlib import Path
 
-BASELINE = 78  # Lowered by FIXING a page, never by argument.
+BASELINE = 76  # Lowered by FIXING a page, never by argument.
                #
                # 101 -> 99 on 2026-09-09: `stdlib/async.md`'s
                # `RetryConfig` had four fields and every one of the four
@@ -93,7 +93,18 @@ BASELINE = 78  # Lowered by FIXING a page, never by argument.
                # `Enactment`, `Articulation`, `EffectKind`, `LazyDesign`
                # and a `GaugeCanonical` type that does not exist.
                #
-               # The remaining 78 are a real backlog, not noise — spot-
+               # 78 -> 76, and a second gate correction: the
+               # collector kept only the FIRST declaration per name, so
+               # `stdlib/database.md`'s loom section was compared
+               # against the cross-adapter `DbError` and twenty-one
+               # variants were reported absent. It keeps every
+               # declaration now and a page matching ANY of them passes.
+               # The page was still wrong, differently: loom's type is
+               # `SqliteApiDbError`, and the comment in
+               # `core/database/sqlite/error.vr` claiming the two SHARE
+               # the bare name had gone stale at the rename.
+               #
+               # The remaining 76 are a real backlog, not noise — spot-
                # checked against `core/`: `stdlib/architecture.md`
                # documents `Capability` with TEN variants and core/ has
                # nine completely different ones, not a single name in
@@ -182,6 +193,27 @@ def collect(text: str) -> dict[str, tuple[str, frozenset[str]]]:
     return out
 
 
+def collect_all(text: str) -> dict[str, list[tuple[str, frozenset[str]]]]:
+    """Every declaration per name, not the first.
+
+    One module subtree can declare a name twice on purpose.
+    `core/database` has TWO `DbError`s and says so in a comment: "Loom's
+    own SQLite-specific DbError lives in a sibling namespace and shares
+    the bare name with our common surface." A first-wins collector
+    compared the loom section of the page against the common type and
+    reported twenty-one variants as absent from a page that is right.
+    """
+    text = re.sub(r"//[^\n]*", "", text)
+    out: dict[str, list[tuple[str, frozenset[str]]]] = {}
+    for m in DECL.finditer(text):
+        name, body = m.group(1), m.group(2)
+        kind, names = shape(body)
+        if kind == "other" or not names:
+            continue
+        out.setdefault(name, []).append((kind, names))
+    return out
+
+
 def self_test() -> int:
     bad = 0
     k, n = shape(" { a: Int, b: Text }")
@@ -237,12 +269,12 @@ def main() -> int:
         if a == "--min-types" and i + 1 < len(sys.argv):
             floor = int(sys.argv[i + 1])
 
-    per_module: dict[str, dict[str, tuple[str, frozenset[str]]]] = {}
+    per_module: dict[str, dict[str, list[tuple[str, frozenset[str]]]]] = {}
 
-    def shapes_of(module: str) -> dict[str, tuple[str, frozenset[str]]]:
+    def shapes_of(module: str) -> dict[str, list[tuple[str, frozenset[str]]]]:
         if module not in per_module:
             root = CORE / module
-            per_module[module] = collect("\n".join(
+            per_module[module] = collect_all("\n".join(
                 f.read_text(errors="ignore") for f in root.rglob("*.vr")
             )) if root.is_dir() else {}
         return per_module[module]
@@ -259,18 +291,23 @@ def main() -> int:
             for name, (kind, names) in collect(m.group(1)).items():
                 if name not in core_shapes:
                     continue           # reader-owned example type: the floor
-                ckind, cnames = core_shapes[name]
+                candidates = core_shapes[name]
                 compared += 1
-                if kind != ckind:
-                    mismatches.append(
-                        f"{rel}: `{name}` is a {kind} here and a {ckind} in core/")
+                # A page matching ANY declaration of that name is right;
+                # a module may hold two types under one name on purpose.
+                if any(kind == ck and not (names - cn) for ck, cn in candidates):
                     continue
-                missing = sorted(names - cnames)
-                if missing:
-                    label = "variant" if kind == "sum" else "field"
+                same_kind = [cn for ck, cn in candidates if ck == kind]
+                if not same_kind:
+                    kinds = "/".join(sorted({ck for ck, _ in candidates}))
                     mismatches.append(
-                        f"{rel}: `{name}` names {label}(s) core/ does not have: "
-                        + ", ".join(missing))
+                        f"{rel}: `{name}` is a {kind} here and a {kinds} in core/")
+                    continue
+                missing = sorted(min((names - cn for cn in same_kind), key=len))
+                label = "variant" if kind == "sum" else "field"
+                mismatches.append(
+                    f"{rel}: `{name}` names {label}(s) core/ does not have: "
+                    + ", ".join(missing))
 
     if compared < floor:
         print(f"check-doc-type-shapes: only {compared} declaration(s) compared, "

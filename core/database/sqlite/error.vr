@@ -36,11 +36,13 @@ mount core.database.common.error.{
     ConnectionErrorKind, AuthErrorKind, TimeoutPhase,
     EncodeFault,
 };
-// Loom's own SQLite-specific DbError lives in a sibling namespace and
-// shares the bare name `DbError` with our common surface. We import
-// loom's variants directly so pattern arms can name them, but we
-// don't bring loom's `DbError` type into scope (the function signature
-// references it via the fully-qualified path).
+// Loom's own SQLite-specific error type lives in a sibling namespace.
+// It is `SqliteApiDbError` (l7_api/database.vr:66) — the bare name
+// `DbError` belongs to the common cross-adapter surface, and this
+// comment used to claim the two SHARED it, which stopped being true
+// when loom's was renamed. We import loom's variants directly so
+// pattern arms can name them, without bringing its type into scope
+// (the function signature references it via the fully-qualified path).
 mount core.database.sqlite.native.l7_api.{
     DbOk, DbGeneric, DbBusy, DbLocked, DbOutOfMemory, DbReadonly,
     DbInterrupted, DbIoError, DbCorrupt, DbFull, DbCannotOpen,
