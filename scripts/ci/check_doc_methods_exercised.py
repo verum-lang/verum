@@ -65,8 +65,15 @@ DOCS = Path(os.environ.get("VERUM_STDLIB_DOCS")
             or (Path(_DOCS_ROOT) / "stdlib" if _DOCS_ROOT
                 else REPO.parent / "website" / "docs" / "stdlib"))
 RUN_DIRECTIVES = {"run", "run-interpreter"}
-BASELINE = 293  # Lowered by COVERAGE, never by argument — the only way
+BASELINE = 292  # Lowered by COVERAGE, never by argument — the only way
                 # this number is meant to move.
+                #   293 -> 292  NOT coverage: one method left the
+                #               census between two runs, and the
+                #               denominator rose 1381 -> 1401 in the
+                #               same interval. Recorded rather than
+                #               credited — a ratchet standing above
+                #               its own count admits the next
+                #               regression without saying so.
                 #   385 -> 378  vcs/specs/core/io/fs_operations_run.vr
                 #   378 -> 372  .../core/base/iterator_adapters_run.vr
                 #               .../core/simd/vec_lanes_run.vr
