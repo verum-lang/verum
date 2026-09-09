@@ -52,13 +52,37 @@ SKIP_DIRS = {"target", ".git", "tests", "benches", "examples"}
 # lock inside any of these callees turns it into the compiler's bug.
 #
 # Verified 2026-08-30: `resolve_symbol` and `validate_new_name` take no
-# lock at all; `document.rs:776` hands the guard to a caller-supplied
-# closure, which is the shape to watch — the closure is not ours.
-KNOWN: set[tuple[str, int]] = {
-    ("crates/verum_lsp/src/rename.rs", 528),
-    ("crates/verum_lsp/src/rename.rs", 532),
-    ("crates/verum_lsp/src/document.rs", 776),
+# lock at all; the `document.rs` entry hands the guard to a
+# caller-supplied closure, which is the shape to watch — the closure is
+# not ours.
+#
+# KEYED ON THE MATCHED TEXT, NOT THE LINE NUMBER (T1348). The first
+# version keyed on `(file, line)` and rotted the moment anything above a
+# blessed site was edited: `document.rs:776` drifted to 798 between
+# 2026-08-30 and 2026-09-09, and the gate then reported ONE NEW HIT plus
+# ONE STALE ENTRY for a single occurrence that had not changed at all
+# (`git log -L 798,798` dates the line to the initial commit, four
+# months before this gate existed). A line-keyed roster turns every edit
+# above a blessed site into a false regression AND a false
+# disappearance, and the tempting one-character repair — add 798 —
+# blesses the same occurrence twice and leaves the next edit to rebreak
+# it.
+#
+# Text keys drift with the code because they ARE the code. Whitespace is
+# collapsed so reindentation does not count as a change.
+KNOWN: set[tuple[str, str]] = {
+    ("crates/verum_lsp/src/rename.rs",
+     "let symbol = resolve_symbol(&document.read(), position, primary_uri)"),
+    ("crates/verum_lsp/src/rename.rs",
+     "validate_new_name(&document.read(), &symbol, &new_name)?;"),
+    ("crates/verum_lsp/src/document.rs",
+     "self.documents.get(uri).map(|entry| f(&entry.read()))"),
 }
+
+
+def norm(line: str) -> str:
+    """Roster key: the matched line with runs of whitespace collapsed."""
+    return " ".join(line.split())
 
 
 def is_comment(line: str) -> bool:
@@ -91,8 +115,9 @@ def main() -> int:
             # or the guard is followed by `,`.
             if re.search(r"&\s*[\w.]+\s*\.\s*(read|write|lock)\s*\(\s*\)\s*[,)]", line):
                 rel = str(path.relative_to(REPO))
-                if (rel, n) in KNOWN:
-                    known_seen.add((rel, n))
+                key = (rel, norm(line))
+                if key in KNOWN:
+                    known_seen.add(key)
                     continue
                 hits.append((rel, n, line.strip()[:100]))
 

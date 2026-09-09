@@ -268,10 +268,10 @@ check-type-param-name-rule: ## Ratchet: places deciding "is this a type paramete
 
 check-error-code-namespaces: ## Gate: one namespace for error codes — no code means two things.
 	python3 scripts/ci/check_error_code_namespaces.py --self-test
-	python3 scripts/ci/check_error_code_namespaces.py
+	python3 scripts/ci/check_error_code_namespaces.py --check
 
 check-guard-in-argument-position: ## Gate (T0981): a lock guard in argument position self-deadlocks.
-	python3 scripts/ci/check_guard_in_argument_position.py
+	python3 scripts/ci/check_guard_in_argument_position.py --check
 
 check-protocol-form: ## Gate (T0794): protocols in core/ use the grammatical `type X is protocol` form
 	python3 scripts/ci/check_protocol_form.py
