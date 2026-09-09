@@ -25,6 +25,7 @@ Usage:
 from __future__ import annotations
 
 import pathlib
+import re
 import sys
 
 # FIELD-GUESS reached ZERO on 2026-08-14. The last site was not an unwritten
@@ -47,13 +48,107 @@ BASELINE_FIELD_GUESS = 0
 BASELINE_PANIC_STUBS = 2
 
 
+# THE COUNT GAINED A ROSTER, 2026-09-09 (T1330) — AND THE BASELINE STAYS
+# AT TWO.  `nightly.yml` records the standing decision in as many words:
+# "THE BASELINE MUST NOT BE RAISED TO MATCH: a ratchet lowered by argument
+# is not a ratchet, and raising this one would bless nine regressions in
+# the act of repairing the gate."  So this roster is NOT a baseline.  It
+# describes the current RED by name, and the gate stays red at 11 > 2.
+#
+# What it buys, which the count could not: a twelfth stub, or a swap that
+# keeps the total at eleven while replacing one name with another, is
+# reported as a NAME rather than hidden inside an unchanged number.  The
+# population is T1315's, whose taxonomy is six causes; this file only has
+# to notice membership changing.
+OBSERVED = {
+    # name                                cause, as the bake itself prints it
+    "Notification.warning":               "undefined variable: Style",
+    "Notification.success":               "undefined variable: Style",
+    "Notification.info":                  "undefined variable: Style",
+    "Notification.error":                 "undefined variable: Style",
+    "QuicPath.on_bytes_sent":             "cannot assign to immutable variable: sent_bytes",
+    "QuicPath.on_bytes_received":         "cannot assign to immutable variable: received_bytes",
+    "verify_cog":                         "undefined variable: VerificationFailed",
+    "verify_cog_precomputed_hashes":      "undefined variable: VerificationFailed",
+    "id_geometric":                       "undefined function: identity_functor",
+    "compose_geometric":                  "undefined function: compose_functors",
+    "DbConnectionPool.try_acquire":       "undefined variable: Timeout",
+}
+
+# `[lenient] SKIP top-level fn <name> (bug-class)` or
+# `[lenient] SKIP <Type>.<method> (bug-class)` — the name is what sits
+# between the marker and the class, with `top-level fn ` dropped.
+SKIP_NAME = re.compile(r"\[lenient\] SKIP (?:top-level fn )?([A-Za-z_][\w.]*)\s*\(")
+
+
 def counts(log_text: str) -> tuple[int, int]:
     guesses = sum(1 for line in log_text.splitlines() if "FIELD-GUESS-HARD-1" in line)
     stubs = sum(1 for line in log_text.splitlines() if "[lenient] SKIP" in line)
     return guesses, stubs
 
 
+def skipped_names(log_text: str) -> set[str]:
+    """The stubbed functions BY NAME.
+
+    Kept separate from `counts` so the two can disagree loudly: a SKIP
+    line this pattern cannot parse would silently shrink the roster
+    comparison while leaving the count right, so `main` checks that the
+    two agree before reading either."""
+    return {m.group(1) for m in SKIP_NAME.finditer(log_text)}
+
+
+def compare(found: set, roster: set) -> tuple[list, list]:
+    """Split what the bake produced against what the roster claims.
+
+    Separated from the scan so a control can drive it without a bake —
+    the half a count ratchet has and never tests."""
+    return sorted(found - roster), sorted(roster - found)
+
+
+def self_test() -> int:
+    """Both halves, and both must be able to FAIL.
+
+    The pattern half: a SKIP line the name pattern cannot read shrinks the
+    roster comparison while leaving the count right — `main` refuses on
+    that disagreement, and this checks the pattern reads both spellings.
+    The roster half: THE SWAP, which is the shape a count cannot report."""
+    bad = 0
+    sample = (
+        "[lenient] SKIP top-level fn verify_cog (bug-class): undefined variable\n"
+        "[lenient] SKIP QuicPath.on_bytes_sent (bug-class): cannot assign\n"
+    )
+    got = skipped_names(sample)
+    if got != {"verify_cog", "QuicPath.on_bytes_sent"}:
+        print(f"self-test: SKIP_NAME read {sorted(got)} from two lines — the "
+              "top-level and method spellings are not both handled",
+              file=sys.stderr)
+        bad += 1
+    if len(got) != sum(1 for l in sample.splitlines() if "[lenient] SKIP" in l):
+        print("self-test: the parsed names and the line count disagree on a "
+              "sample where they must not", file=sys.stderr)
+        bad += 1
+
+    app, gone = compare({"a"}, {"b"})
+    if not app or not gone:
+        print("self-test: a swap of equal size reported nothing — the roster "
+              "comparison has degenerated back into a count", file=sys.stderr)
+        bad += 1
+    if compare({"a"}, {"a"}) != ([], []):
+        print("self-test: an unchanged population reported a difference",
+              file=sys.stderr)
+        bad += 1
+
+    if bad:
+        return 1
+    print(f"[ok] self-test: SKIP_NAME reads {len(got)} name(s) from two "
+          f"spellings; roster holds {len(OBSERVED)}, baseline stays at "
+          f"{BASELINE_PANIC_STUBS}; a same-size swap is reported")
+    return 0
+
+
 def main() -> int:
+    if "--self-test" in sys.argv[1:]:
+        return self_test()
     args = [a for a in sys.argv[1:] if a != "--check"]
     check = "--check" in sys.argv[1:]
     if len(args) != 1:
@@ -91,13 +186,46 @@ def main() -> int:
         )
         return 2
 
+    names = skipped_names(text)
     print(f"FIELD-GUESS-HARD-1 : {guesses} (baseline {BASELINE_FIELD_GUESS})")
-    print(f"[lenient] SKIP     : {stubs} (baseline {BASELINE_PANIC_STUBS})")
+    print(f"[lenient] SKIP     : {stubs} (baseline {BASELINE_PANIC_STUBS}, "
+          f"{len(OBSERVED)} on the roster)")
+
+    # THE TWO READINGS MUST AGREE.  `stubs` counts lines, `names` parses
+    # them; a SKIP line the pattern cannot read would shrink the roster
+    # comparison silently while leaving the count right, which is the
+    # exact shape this file exists to refuse.
+    if len(names) != stubs:
+        print(
+            f"the line count ({stubs}) and the parsed names ({len(names)}) "
+            f"disagree — SKIP_NAME did not read every SKIP line, so the "
+            f"roster comparison below would be taken over a subset. Fix the "
+            f"pattern before reading either number.",
+            file=sys.stderr,
+        )
+        return 2
+
+    appeared, disappeared = compare(names, set(OBSERVED))
+    for n in sorted(names):
+        mark = "NEW " if n in set(appeared) else "    "
+        print(f"    {mark}{n}  —  {OBSERVED.get(n, 'cause not on the roster')}")
+    for n in disappeared:
+        print(f"    GONE {n}  —  no longer stubbed; remove it from OBSERVED")
 
     if not check:
         return 0
 
     failed = False
+    if appeared or disappeared:
+        print(
+            f"MEMBERSHIP CHANGED: {len(appeared)} new, {len(disappeared)} gone. "
+            f"The roster in this file is a description of the current red, not "
+            f"a baseline — update it in the commit that changes the population, "
+            f"and do NOT raise BASELINE_PANIC_STUBS to match (nightly.yml "
+            f"records why). The population is T1315's.",
+            file=sys.stderr,
+        )
+        failed = True
     for name, got, want in (
         ("FIELD-GUESS-HARD-1", guesses, BASELINE_FIELD_GUESS),
         ("panic stubs", stubs, BASELINE_PANIC_STUBS),

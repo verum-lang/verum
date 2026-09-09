@@ -47,6 +47,7 @@ check-stdlib-proofs: ## Gate (T0230): stdlib theorem-proof ratchet — clean fil
 
 check-bake-diagnostics: ## Gate (T0723): FIELD-GUESS + panic-stub counts in a bake log
 	@test -n "$(BAKE_LOG)" || { echo "usage: make check-bake-diagnostics BAKE_LOG=<path>"; exit 2; }
+	python3 scripts/ci/check_bake_diagnostics.py --self-test
 	python3 scripts/ci/check_bake_diagnostics.py "$(BAKE_LOG)" --check
 
 .PHONY: check-stage5-stub-sharing
