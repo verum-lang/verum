@@ -41,7 +41,7 @@ import re
 import sys
 from pathlib import Path
 
-BASELINE = 82  # Lowered by FIXING a page, never by argument.
+BASELINE = 80  # Lowered by FIXING a page, never by argument.
                #
                # 101 -> 99 on 2026-09-09: `stdlib/async.md`'s
                # `RetryConfig` had four fields and every one of the four
@@ -74,7 +74,13 @@ BASELINE = 82  # Lowered by FIXING a page, never by argument.
                # `ResolveError` has two arms where the page listed three
                # different ones.
                #
-               # The remaining 82 are a real backlog, not noise — spot-
+               # 82 -> 80: `stdlib/configuration.md`'s `ConfigValue`
+               # (eight bare variants for fourteen `Config`-prefixed
+               # ones, with TOML's four date/time shapes collapsed into
+               # one) and `stdlib/compress.md`'s `IoError` for
+               # `IoFailure`.
+               #
+               # The remaining 80 are a real backlog, not noise — spot-
                # checked against `core/`: `stdlib/architecture.md`
                # documents `Capability` with TEN variants and core/ has
                # nine completely different ones, not a single name in
