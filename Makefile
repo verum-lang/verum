@@ -254,7 +254,7 @@ check-grammar-docs-match: ## Gate: EBNF shown in the documentation must match gr
 check-barename-census: ## Report every colliding (name,arity) pair with its modules (never fails)
 	python3 scripts/ci/check_barename_collisions.py
 
-gates-source: check-private-types-off-public-surface check-error-code-namespaces check-guard-in-argument-position check-grammar-covers-keywords check-grammar-docs-match check-doc-anchors check-doc-error-codes check-known-tables check-parser-attrs check-gate-tables check-markers check-vr-syntax check-str-alias check-op-bytes check-internal-refs check-rings check-arch-attestation check-type-name-collisions check-barename-collisions check-panic-surface check-per-register-privacy check-early-return-tenants check-dup-emitters check-bake-prepass-parity check-protocol-form check-dead-module-path-calls check-platform-call-parity check-protocol-conformance check-cfg-block-tail check-meta-function-names check-ffi-reference-tiers check-constant-time-duplication check-type-param-name-rule ## Every gate that needs only the SOURCE TREE — no build, no artefacts
+gates-source: check-private-types-off-public-surface check-error-code-namespaces check-guard-in-argument-position check-grammar-covers-keywords check-grammar-docs-match check-doc-anchors check-doc-error-codes check-known-tables check-parser-attrs check-gate-tables check-markers check-vr-syntax check-str-alias check-op-bytes check-internal-refs check-rings check-arch-attestation check-type-name-collisions check-barename-collisions check-panic-surface check-per-register-privacy check-early-return-tenants check-dup-emitters check-bake-prepass-parity check-protocol-form check-dead-module-path-calls check-platform-call-parity check-protocol-conformance check-cfg-block-tail check-meta-function-names check-ffi-reference-tiers check-intrinsic-keys-implemented check-constant-time-duplication check-type-param-name-rule ## Every gate that needs only the SOURCE TREE — no build, no artefacts
 # `check-register-shas` is NOT in that list, and its name used to sit
 # after the `##` above, where make read it as help text — the target
 # existed, the gate worked, and the aggregate never called it
@@ -291,6 +291,10 @@ check-protocol-form: ## Gate (T0794): protocols in core/ use the grammatical `ty
 check-constant-time-duplication: ## Gate (T0817): a constant-time comparator hand-rolled outside core/subtle/ — one implementation should carry that promise
 	python3 scripts/ci/check_constant_time_duplication.py --self-test
 	python3 scripts/ci/check_constant_time_duplication.py
+
+check-intrinsic-keys-implemented: ## Freeze the SET of declared-but-unimplemented `verum.*` intrinsic keys (T1368)
+	python3 scripts/ci/check_intrinsic_keys_implemented.py --self-test
+	python3 scripts/ci/check_intrinsic_keys_implemented.py --check
 
 check-ffi-reference-tiers: ## Gate (T1192/T1358): the three FFI sites that consult repr_c_types through a reference must match ALL THREE CBGR tiers
 	python3 scripts/ci/check_ffi_reference_tiers.py --self-test
