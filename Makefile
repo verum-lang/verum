@@ -159,6 +159,8 @@ gates-docs: check-doc-examples check-examples-run check-homepage-examples check-
             check-doc-module-paths check-doc-config-structs \
             check-doc-methods-declared check-doc-methods-exercised \
             check-doc-meta-functions \
+            check-doc-calls-that-trap check-doc-status-matches-inventory \
+            check-doc-mounts-resolve check-doc-error-code-meaning \
             check-doc-status-badge check-doc-reachable \
             check-doc-type-shapes check-doc-receiver-methods \
             check-doc-call-arity \
@@ -260,7 +262,7 @@ check-grammar-docs-match: ## Gate: EBNF shown in the documentation must match gr
 check-barename-census: ## Report every colliding (name,arity) pair with its modules (never fails)
 	python3 scripts/ci/check_barename_collisions.py
 
-gates-source: check-private-types-off-public-surface check-error-code-namespaces check-guard-in-argument-position check-grammar-covers-keywords check-grammar-docs-match check-doc-anchors check-doc-error-codes check-known-tables check-parser-attrs check-gate-tables check-markers check-vr-syntax check-str-alias check-op-bytes check-internal-refs check-rings check-arch-attestation check-type-name-collisions check-barename-collisions check-panic-surface check-per-register-privacy check-early-return-tenants check-dup-emitters check-bake-prepass-parity check-protocol-form check-dead-module-path-calls check-platform-call-parity check-protocol-conformance check-cfg-block-tail check-meta-function-names check-ffi-reference-tiers check-intrinsic-keys-implemented check-doc-calls-that-trap check-doc-status-matches-inventory check-doc-mounts-resolve check-diagnostic-levers check-doc-error-code-meaning check-constant-time-duplication check-type-param-name-rule ## Every gate that needs only the SOURCE TREE — no build, no artefacts
+gates-source: check-private-types-off-public-surface check-error-code-namespaces check-guard-in-argument-position check-grammar-covers-keywords check-grammar-docs-match check-doc-anchors check-doc-error-codes check-known-tables check-parser-attrs check-gate-tables check-markers check-vr-syntax check-str-alias check-op-bytes check-internal-refs check-rings check-arch-attestation check-type-name-collisions check-barename-collisions check-panic-surface check-per-register-privacy check-early-return-tenants check-dup-emitters check-bake-prepass-parity check-protocol-form check-dead-module-path-calls check-platform-call-parity check-protocol-conformance check-cfg-block-tail check-meta-function-names check-ffi-reference-tiers check-intrinsic-keys-implemented check-diagnostic-levers check-constant-time-duplication check-type-param-name-rule ## Every gate that needs only the SOURCE TREE — no build, no artefacts
 # `check-register-shas` is NOT in that list, and its name used to sit
 # after the `##` above, where make read it as help text — the target
 # existed, the gate worked, and the aggregate never called it

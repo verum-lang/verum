@@ -164,8 +164,15 @@ def main() -> int:
         return rc
 
     if not DOCS.is_dir():
-        print(f"[skip] {DOCS} not present (the site is a separate checkout).")
-        return 0
+        print(
+            f"check-doc-calls-that-trap: no website at {DOCS} — REFUSING to report OK. "
+            f"A gate whose INPUT is missing is a failed checkout, not "
+            f"'nothing to do'; set VERUM_DOCS_DIR. Measured 2026-09-10: "
+            f"this gate sat in the source-only aggregate, whose CI job has "
+            f"no website, and reported OK on every run.",
+            file=sys.stderr,
+        )
+        return 2
     if not ROSTER.is_file():
         print(f"[FAIL] roster missing: {ROSTER} — refusing to judge.")
         return 2

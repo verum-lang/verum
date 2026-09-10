@@ -753,6 +753,20 @@ jobs:
           python3 scripts/ci/check_doc_anchors.py
           python3 scripts/ci/check_doc_error_codes_exist.py
           python3 scripts/ci/check_grammar_docs_match.py
+          # Four gates added 2026-09-10 that read the WEBSITE and were
+          # wired into `gates-source` by mistake — that job has no
+          # website checkout, so all four reported OK on every CI run
+          # while passing locally. They now REFUSE a missing input
+          # (rc=2) instead of skipping, which is what makes this step
+          # the only place they can run. See T1388.
+          python3 scripts/ci/check_doc_calls_that_trap.py --self-test
+          python3 scripts/ci/check_doc_calls_that_trap.py --check
+          python3 scripts/ci/check_doc_status_matches_inventory.py --self-test
+          python3 scripts/ci/check_doc_status_matches_inventory.py
+          python3 scripts/ci/check_doc_mounts_resolve.py --self-test
+          python3 scripts/ci/check_doc_mounts_resolve.py
+          python3 scripts/ci/check_doc_error_code_meaning.py --self-test
+          python3 scripts/ci/check_doc_error_code_meaning.py
           # Two more that need only the website checkout, added
           # 2026-09-07 with a CALLER from the start — the whole reason
           # this step's comment exists is that gates landed as Makefile

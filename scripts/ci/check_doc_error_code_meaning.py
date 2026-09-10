@@ -195,8 +195,15 @@ def main() -> int:
     if "--self-test" in sys.argv:
         return self_test()
     if not PAGE.is_file():
-        print(f"[skip] {PAGE} not present (the site is a separate checkout).")
-        return 0
+        print(
+            f"check-doc-error-code-meaning: no website at {PAGE} — REFUSING to report OK. "
+            f"A gate whose INPUT is missing is a failed checkout, not "
+            f"'nothing to do'; set VERUM_DOCS_DIR. Measured 2026-09-10: "
+            f"this gate sat in the source-only aggregate, whose CI job has "
+            f"no website, and reported OK on every run.",
+            file=sys.stderr,
+        )
+        return 2
 
     emit = emitter_messages()
     doc = documented()
