@@ -70,8 +70,33 @@ HEAD = re.compile(
     r"(?:^|\n)[ \t]*(?:public\s+)?type\s+([A-Z][A-Za-z0-9_]*)\s*(?:<[^>]*>)?\s+is\s*\{"
 )
 FIELD_NAME = re.compile(r"[a-z_][a-z0-9_]*")
-KNOWN: dict[str, str] = {}
+# The page is right and `core/` is not. Each entry names why, and goes
+# STALE — and fails — the moment the two agree again.
+KNOWN: dict[str, str] = {
+    # `core/runtime/env.vr` carries `Env`-prefixed near-duplicates of
+    # types that already exist in `core/runtime/recovery.vr`, and they
+    # have DRIFTED rather than merely been copied:
+    # `InlineRetryPolicy.backoff_type` against
+    # `EnvInlineRetryPolicy.backoff_strategy`, padding `[Byte; 12]`
+    # against `[Byte; 11]`. The architecture page documents the
+    # originals, which is the pair that should survive; pointing it at
+    # the duplicates would enshrine them. Removal is tracked on the
+    # compiler side (T1378's residual).
+    "RecoveryContext.circuit_breakers_inline": "core holds the Env- duplicate",
+    "RecoveryContext.retry_policies_inline": "core holds the Env- duplicate",
+    "RecoveryContext.retry_policies_overflow": "core holds the Env- duplicate",
+    "InlineRetryPolicy._padding": "12 vs 11 — the duplicates drifted",
+    "ConcurrencyContext.isolation": "core holds the Env- duplicate",
+    "ConcurrencyContext.restart_policy": "core holds the Runtime- duplicate",
+    "ConcurrencyContext.task_id": "core holds the Env- duplicate",
+}
 FLOOR = 150
+
+# Pages that document `core/` itself. Tutorials, the cookbook and the
+# language reference declare EXAMPLE types whose names collide with real
+# ones — `Response`, `Matrix`, `Counter` — so comparing them reports a
+# reader's own code as disagreeing with the library.
+ZONES = ("stdlib", "architecture")
 
 SUM = re.compile(
     r"(?:^|\n)[ \t]*(?:public\s+)?type\s+([A-Z][A-Za-z0-9_]*)\s*(?:<[^>]*>)?"
@@ -235,7 +260,8 @@ def main() -> int:
             if got:
                 core_v[m.group(1)].append(got)
 
-    pages = sorted((DOCS / "stdlib").rglob("*.md")) if (DOCS / "stdlib").is_dir() else []
+    pages = [q for z in ZONES if (DOCS / z).is_dir()
+             for q in sorted((DOCS / z).rglob("*.md"))]
     doc: dict[str, list[tuple[dict[str, str], str]]] = collections.defaultdict(list)
     doc_v: dict[str, list[tuple[dict[str, str], str]]] = collections.defaultdict(list)
     for p in pages:
@@ -252,15 +278,20 @@ def main() -> int:
 
     comparable = sum(1 for n in set(doc) & set(core) if len(core[n]) == 1)
     off: list[str] = []
+    used: set[str] = set()
     for name in sorted(set(doc) & set(core)):
         if len(core[name]) != 1:
             continue
         c = core[name][0]
         for d, page in doc[name]:
             for fld, dt in sorted(d.items()):
-                if fld in c and c[fld] != dt and KNOWN.get(f"{name}.{fld}") is None:
-                    off.append(f"{name}.{fld}  page {dt!r} vs core {c[fld]!r}"
-                               f"   [{page}]")
+                if fld not in c or c[fld] == dt:
+                    continue
+                key = f"{name}.{fld}"
+                if KNOWN.get(key) is not None:
+                    used.add(key)
+                    continue
+                off.append(f"{key}  page {dt!r} vs core {c[fld]!r}   [{page}]")
 
     for name in sorted(set(doc_v) & set(core_v)):
         if len(core_v[name]) != 1:
@@ -283,6 +314,15 @@ def main() -> int:
           f"sum type(s) — {len(off)} field(s) or variant payload(s) carrying "
           f"a type core does not "
           f"({len(KNOWN)} on the roster)")
+
+    stale = sorted(set(KNOWN) - used)
+    if stale:
+        print(f"\n{len(stale)} roster entry/entries no longer differ from "
+              f"core — the tree caught up, so the exemption has nothing left "
+              f"to exempt:", file=sys.stderr)
+        for k in stale:
+            print(f"    - {k}: {KNOWN[k]}", file=sys.stderr)
+        return 1
 
     if comparable < FLOOR:
         print(f"\nonly {comparable} type(s) were comparable, below the floor "
