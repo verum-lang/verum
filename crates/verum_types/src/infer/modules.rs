@@ -24400,11 +24400,24 @@ impl TypeChecker {
             // `[lenient] SKIP <fn>` for every body it gives up on. Warn
             // level, unconditional: a lever would put the reader back in
             // the position of having to know to ask.
-            eprintln!(
-                "[lenient-check] method `{}` on `{}` was NOT resolved and was                  accepted — a single-file check of a core/ module cannot see                  sibling `implement` blocks, so method existence is not                  checked here. Run the bake to have this verified.",
-                method.name.as_str(),
-                recv_ty
-            );
+            // Once per (method, receiver), not once per call site. The
+            // COUNT said a per-call line was fine — 17 suppressions over
+            // 40 `core/` files, worst file 6. Reading the OUTPUT said
+            // otherwise: all six in that file were the same `weak` on
+            // `CancellationFlag`, and six identical lines teach a reader
+            // nothing the first did not. A diagnostic that repeats itself
+            // is how a diagnostic stops being read.
+            let key = (method.name.as_str().to_string(), format!("{}", recv_ty));
+            if self.lenient_method_reported.insert(key) {
+                eprintln!(
+                    "[lenient-check] method `{}` on `{}` was NOT resolved and \
+accepted: a single-file check of a core/ module cannot see sibling \
+`implement` blocks, so method existence is not checked here. Run the \
+bake to have this verified.",
+                    method.name.as_str(),
+                    recv_ty
+                );
+            }
             return Ok(InferResult::new(Type::Unknown));
         }
 
