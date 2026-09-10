@@ -260,7 +260,7 @@ check-grammar-docs-match: ## Gate: EBNF shown in the documentation must match gr
 check-barename-census: ## Report every colliding (name,arity) pair with its modules (never fails)
 	python3 scripts/ci/check_barename_collisions.py
 
-gates-source: check-private-types-off-public-surface check-error-code-namespaces check-guard-in-argument-position check-grammar-covers-keywords check-grammar-docs-match check-doc-anchors check-doc-error-codes check-known-tables check-parser-attrs check-gate-tables check-markers check-vr-syntax check-str-alias check-op-bytes check-internal-refs check-rings check-arch-attestation check-type-name-collisions check-barename-collisions check-panic-surface check-per-register-privacy check-early-return-tenants check-dup-emitters check-bake-prepass-parity check-protocol-form check-dead-module-path-calls check-platform-call-parity check-protocol-conformance check-cfg-block-tail check-meta-function-names check-ffi-reference-tiers check-intrinsic-keys-implemented check-doc-calls-that-trap check-doc-status-matches-inventory check-constant-time-duplication check-type-param-name-rule ## Every gate that needs only the SOURCE TREE — no build, no artefacts
+gates-source: check-private-types-off-public-surface check-error-code-namespaces check-guard-in-argument-position check-grammar-covers-keywords check-grammar-docs-match check-doc-anchors check-doc-error-codes check-known-tables check-parser-attrs check-gate-tables check-markers check-vr-syntax check-str-alias check-op-bytes check-internal-refs check-rings check-arch-attestation check-type-name-collisions check-barename-collisions check-panic-surface check-per-register-privacy check-early-return-tenants check-dup-emitters check-bake-prepass-parity check-protocol-form check-dead-module-path-calls check-platform-call-parity check-protocol-conformance check-cfg-block-tail check-meta-function-names check-ffi-reference-tiers check-intrinsic-keys-implemented check-doc-calls-that-trap check-doc-status-matches-inventory check-doc-mounts-resolve check-constant-time-duplication check-type-param-name-rule ## Every gate that needs only the SOURCE TREE — no build, no artefacts
 # `check-register-shas` is NOT in that list, and its name used to sit
 # after the `##` above, where make read it as help text — the target
 # existed, the gate worked, and the aggregate never called it
@@ -305,6 +305,10 @@ check-doc-calls-that-trap: ## A site page must not teach a call that panics on a
 check-doc-status-matches-inventory: ## Gate (T1379): a stdlib page may not claim a conformance status GREENER than core-tests/INVENTORY.md
 	python3 scripts/ci/check_doc_status_matches_inventory.py --self-test
 	python3 scripts/ci/check_doc_status_matches_inventory.py
+
+check-doc-mounts-resolve: ## Gate (T1381): a `mount core.a.b.{Name}` in the docs must name something that module has
+	python3 scripts/ci/check_doc_mounts_resolve.py --self-test
+	python3 scripts/ci/check_doc_mounts_resolve.py
 
 check-intrinsic-keys-implemented: ## Freeze the SET of declared-but-unimplemented `verum.*` intrinsic keys (T1368)
 	python3 scripts/ci/check_intrinsic_keys_implemented.py --self-test
