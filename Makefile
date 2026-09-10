@@ -105,6 +105,11 @@ check-doc-methods-exercised: ## Gate: a method the stdlib reference documents sh
 	python3 scripts/ci/check_doc_methods_exercised.py --self-test
 	python3 scripts/ci/check_doc_methods_exercised.py --min-pages 30
 
+.PHONY: check-doc-meta-functions
+check-doc-meta-functions: ## Gate: a doc example must not teach a meta-function the compiler does not accept — no build needed
+	python3 scripts/ci/check_doc_meta_functions.py --self-test
+	python3 scripts/ci/check_doc_meta_functions.py --min-blocks 2000
+
 check-doc-type-shapes: ## Gate: a `type X is …` in the docs must match core/ — no build needed
 	python3 scripts/ci/check_doc_type_shapes.py --self-test
 	python3 scripts/ci/check_doc_type_shapes.py --min-types 300
@@ -153,6 +158,7 @@ gates-docs: check-doc-examples check-examples-run check-homepage-examples check-
             check-doc-names-exist check-doc-method-names \
             check-doc-module-paths check-doc-config-structs \
             check-doc-methods-declared check-doc-methods-exercised \
+            check-doc-meta-functions \
             check-doc-status-badge check-doc-reachable \
             check-doc-type-shapes check-doc-receiver-methods \
             check-doc-call-arity \
