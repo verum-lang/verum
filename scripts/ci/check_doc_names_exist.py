@@ -103,6 +103,32 @@ CORE = os.path.join(REPO, "core")
 # comes down only if an example stops inventing a type, which usually makes
 # the example worse.  So the roster is not a to-do list; it is a statement
 # that these sixteen are deliberate and a seventeenth would not be.
+# A COLLIDING NAME IS NOT GATEABLE THE WAY AN ABSENT ONE IS, measured
+# 2026-09-11 so it is not re-measured. This gate finds a name `core/`
+# declares NOWHERE. The neighbouring failure — a name `core/` declares
+# in SEVERAL modules, where the page means one and a reader's mounts
+# bring another — bit this campaign five times in one day:
+#
+#     Router      core/net/weft routes HTTP; the terminal page meant a
+#                 screen router that does not exist
+#     Punct       a SQL lexer's punctuation; the meta page meant a token
+#     Group       an algebra protocol; the meta page meant a token group
+#     Span        THREE of them — core/meta (hygiene), core/tracing, and
+#                 the terminal's TextSpan, which is the one meant
+#     Database    core's context, and a weft example's own declaration
+#
+# Every one was a real defect and every one was found BY HAND. A gate is
+# still the wrong instrument: 131 type names in `core/` are declared in
+# two or more modules, 54 of them are mentioned on the site, and
+# `Database` alone appears on 24 pages where the module is obvious from
+# context. A rule requiring every mention to be qualified would report
+# hundreds of correct sentences — the false-positive direction this
+# campaign has already paid for twice.
+#
+# What DOES work is the census as a worklist, and the shape to look for
+# is a page teaching a bare `Name.method(...)` for a Name whose module
+# the page never states.
+
 KNOWN = {
     ("AiClient", "cookbook/resilience.md"),
     ("Analytics", "language/context-system.md"),
