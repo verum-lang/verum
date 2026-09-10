@@ -1,14 +1,1 @@
-[
- [
-  "language/context-system.md",
-  "`provide` does not check that the provider implements the context"
- ],
- [
-  "language/modules.md",
-  "The compiler does not enforce these scopes yet"
- ],
- [
-  "language/modules.md",
-  "`mount core.*` costs a great deal and buys nothing"
- ]
-]
+[]

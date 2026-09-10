@@ -43,17 +43,29 @@ would leave a count unmoved, so rows are listed by (page, title) and
 both a NEW one and a VANISHED one fail. Removing a row is how the number
 goes down, and that requires giving the box its address.
 
-WHAT THE CAMPAIGN ACTUALLY FOUND, 35 -> 5 in one day: six boxes were
-simply naked and gained a command; nine were never naked at all and the
-gate was wrong about them (see `has_indented_code`); and the rest were
-rewritten one at a time. FIVE of those rewrites turned up a claim that
-was WRONG, not merely unaddressed — a page denying a `Router` that
-exists under another meaning, an h3 caution denying a writer and a
-cancellation the library ships, a token-API census denying two names
-declared elsewhere, a line number that had moved eight lines, a type
-declared absent that is present. Every one surfaced while writing the
-command down, which is the argument for this gate in one sentence: you
-cannot write the address of a claim you have not re-checked.
+THE ROSTER IS NOW EMPTY, 35 -> 0 in one day, and that is the strongest
+state rather than a finished one: every measured claim on the site
+carries something a reader can run, so the only thing this gate can
+report is a NEW one. Verified against an empty roster — a naked box
+added to any page still fails it.
+
+WHAT THE CAMPAIGN ACTUALLY FOUND. Six boxes were simply naked and gained
+a command. NINE were never naked at all and the gate was wrong about them
+(see `has_indented_code`). The rest were rewritten one at a time, and
+SEVEN of those rewrites turned up a claim that was WRONG rather than
+merely unaddressed:
+
+    a page denying a `Router` that exists under another meaning
+    an h3 caution denying a writer and a cancellation core ships
+    a token-API census denying two names declared elsewhere
+    a line number that had moved eight lines
+    a `Map.get_optional` the library does not declare
+    five of six rows in a defect table, all already fixed
+    a workaround still taught after the defect closed
+
+Every one surfaced while writing the command down, which is the argument
+for this gate in one sentence: you cannot write the address of a claim
+you have not re-checked.
 
 A TITLE IS NOT UNIQUE ON A PAGE. `reference/meta-functions.md` carries
 two boxes both titled "Not yet callable" — one measuring the sigil, one
