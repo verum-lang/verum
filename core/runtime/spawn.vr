@@ -103,8 +103,21 @@ mount super.supervisor.{
     ChildSpec,
     ChildId,
 };
+// THE MODULE WAS RIGHT AND THE NAME WAS WRONG. This mount said
+// `core.intrinsics.{FutureHandle}`, and `core.intrinsics` has no such
+// type — it re-exports `RawFutureHandle` (mod.vr:151), declared
+// `is (*const Byte)` in intrinsics/runtime/async_ops.vr:34.
+// `core.runtime.async_ops` does declare a `FutureHandle`, but it is
+// `is (Int)` — a different type, and not the one the single use site
+// wants: the line below is annotated "cast wrapped future to OPAQUE
+// handle for intrinsic", and `spawn_with_env(future: RawFutureHandle, …)`
+// is what it feeds.
+//
+// Repointing the MODULE compiles the `cannot find` error away and leaves
+// `expected 'RawFutureHandle', found 'FutureHandle'` behind, which is how
+// the wrong half announces itself.
 mount core.intrinsics.{
-            FutureHandle,
+            RawFutureHandle,
 };
 
 // =============================================================================
@@ -210,8 +223,8 @@ implement InlineContextStorage {
         }
         let idx = self.count as Int;
         self.entries[idx] = InlineContextEntry {
-            type_id_hash: type_id.hash(),
-            value_ptr: value as *const () as *const (),
+            type_id_hash: type_id.hash_value() as UInt64,
+            value_ptr: value as &unsafe Byte as *const (),
             _padding: 0,
         };
         self.count += 1;
@@ -938,8 +951,11 @@ where type
         // Set environment as current for this task
         ctx_set(EXEC_ENV_SLOT, &child_env as &unsafe Byte);
 
-        // Execute future
-        let result = future.await;
+        // Execute future. The annotation is load-bearing: `F: Future<T>`
+        // gives the await its type, and without it inference reports
+        // `error<E404>: Ambiguous type for result` — the last of this
+        // file's five (T1366).
+        let result: T = future.await;
 
         // Clear environment before task completion
         ctx_set(EXEC_ENV_SLOT, 0 as &unsafe Byte);
@@ -948,7 +964,7 @@ where type
     };
 
     // Spawn on executor - cast wrapped future to opaque handle for intrinsic
-    let handle: FutureHandle = transmute(wrapped_future);
+    let handle: RawFutureHandle = transmute(wrapped_future);
     let opaque_result = core.intrinsics.spawn_with_env(handle, task_id as UInt64);
     // Cast opaque join handle back to typed JoinHandle
     transmute(opaque_result)
