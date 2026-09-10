@@ -137,24 +137,39 @@ LIST_REEXPORT = re.compile(r"public\s+mount\s+\.?([a-z_]\w*)\.\{(.*?)\}\s*;", re
 # edit above shifts a line, which trains the reader to re-baseline
 # without looking.
 #
-# What is in it, and why each is still open — all four are Windows, which
+# What is in it, and why each is still open — both are Windows, which
 # nothing on this machine can build or run:
 #
 #   GetCommandLineA               core/sys/init.vr:660
 #   write_stderr                  core/sys/init.vr:370
-#   thread_join                   core/runtime/thread.vr:168
-#   query_performance_counter_ns  core/mem/segment.vr:987
 #
-# `thread_join` is the one that is NOT a missing binding: the target
-# exists as a METHOD (`core/sys/windows/thread.vr:281`, `join`), so the
-# call site needs its FORM changed to `self.platform.join()`, not a new
-# declaration.  The other three need a real binding at the kernel32
-# boundary.  See T1320.
+# Both need a real binding at the kernel32 boundary.
+#
+# TWO LEFT THE ROSTER, 2026-09-10 (09ccfc35e, T1320), and the roster
+# demanded the edit BY NAME — which is the whole point of writing the
+# tolerated set out instead of counting it.  A number would have been
+# satisfied by "smaller is fine" and said nothing about which:
+#
+#   thread_join                   core/runtime/thread.vr:168
+#       Never a missing binding.  The target existed as a METHOD
+#       (`core/sys/windows/thread.vr:281`, `join(&mut self)`) while the
+#       call site used the free-function FORM the linux and darwin arms
+#       use.  Now `self.platform.join()`.
+#   query_performance_counter_ns  core/mem/segment.vr:987
+#       Named the syscall behind the branch rather than what the two
+#       branches above it are called.  Now
+#       `sys.windows.time.monotonic_nanos()` (windows/time.vr:277),
+#       which is what it always meant.
+#
+# NOTE the coverage that the first of those moved INTO: `value.method()`
+# is call form 3 in the T1320 census, and this gate extracts only
+# `module.path.fn(...)`.  A method call that names nothing is invisible
+# here BY CONSTRUCTION — `join` was verified declared before the roster
+# entry was removed, and the next such fix has to be verified the same
+# way rather than trusted to this gate going quiet.
 KNOWN: set[tuple[str, str, str]] = {
     ("windows", "mod", "GetCommandLineA"),
     ("windows", "mod", "write_stderr"),
-    ("windows", "thread", "thread_join"),
-    ("windows", "time", "query_performance_counter_ns"),
 }
 
 _declared: dict[Path, set[str]] = {}
