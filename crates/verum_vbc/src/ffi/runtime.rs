@@ -846,7 +846,14 @@ impl FfiRuntime {
                     let obj_ptr = arg.as_ptr::<u8>();
                     if !obj_ptr.is_null() {
                         // Use helper function to marshal Verum struct to C buffer
-                        unsafe { marshal_verum_struct_to_c(layout, obj_ptr, &mut struct_buffer) };
+                        unsafe {
+                            marshal_verum_struct_to_c(
+                                layout,
+                                &module.ffi_layouts,
+                                obj_ptr,
+                                &mut struct_buffer,
+                            )
+                        };
                     }
 
                     // Track this as a struct argument (we'll set arg_ptrs[i] to point directly to the buffer later)
@@ -867,7 +874,14 @@ impl FfiRuntime {
                     let obj_ptr = arg.as_ptr::<u8>();
                     if !obj_ptr.is_null() {
                         // Use helper function to marshal Verum struct to C buffer
-                        unsafe { marshal_verum_struct_to_c(layout, obj_ptr, &mut struct_buffer) };
+                        unsafe {
+                            marshal_verum_struct_to_c(
+                                layout,
+                                &module.ffi_layouts,
+                                obj_ptr,
+                                &mut struct_buffer,
+                            )
+                        };
                     }
 
                     // Track for write-back: (layout_idx, obj_ptr, buffer_idx)
@@ -1002,7 +1016,14 @@ impl FfiRuntime {
             if let Some(layout) = module.ffi_layouts.get(*layout_idx as usize) {
                 let struct_buffer = &struct_arg_buffers[*buffer_idx];
                 // Use helper function to marshal C buffer back to Verum struct
-                unsafe { marshal_c_to_verum_struct(layout, struct_buffer, *obj_ptr) };
+                unsafe {
+                    marshal_c_to_verum_struct(
+                        layout,
+                        &module.ffi_layouts,
+                        struct_buffer,
+                        *obj_ptr,
+                    )
+                };
             }
         }
 
@@ -1306,11 +1327,76 @@ pub(crate) unsafe fn marshal_field_from_c(
 /// - struct_buffer must be large enough to hold the marshalled struct
 unsafe fn marshal_verum_struct_to_c(
     layout: &crate::module::FfiStructLayout,
+    layouts: &[crate::module::FfiStructLayout],
     obj_ptr: *const u8,
     struct_buffer: &mut [u8; 256],
 ) {
     // SAFETY: Caller guarantees obj_ptr points to a valid Verum heap object
     // and struct_buffer is large enough to hold the marshalled struct.
+    unsafe {
+        let base = struct_buffer.as_mut_ptr();
+        marshal_verum_struct_to_c_at(layout, layouts, obj_ptr, base, struct_buffer.len(), 0, 0);
+    }
+}
+
+/// How deep a chain of by-value structs may nest before marshalling gives
+/// up.
+///
+/// The codegen side cannot emit a cycle — `generate_ffi_struct_layout_inner`
+/// carries a recursion stack — but this function reads `nested_layout` out
+/// of a `.vbc` module, which is an untrusted input (see
+/// `tests/red_team_bytecode_trust_boundary.rs`). A hand-written archive can
+/// point a layout at itself, and the depth cap is what keeps that a wrong
+/// answer instead of a stack overflow.
+const MAX_FFI_STRUCT_NESTING: u32 = 8;
+
+/// Whether to narrate the nested-struct walk, cached so the env is read
+/// once and not per field.
+///
+/// Every `continue` in the two `_at` functions below is a SILENT SKIP —
+/// the exact shape that made this defect cost a shipped release: a
+/// nested record that does not travel produces a plausible wrong value
+/// (a file modified at the epoch), never an error. The walk cannot
+/// return one, so the least it can do is say which condition refused
+/// when asked. Same lever as the argument trace above.
+fn ffi_struct_trace() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var("VERUM_TRACE_FFI_ARG").is_ok())
+}
+
+/// Why a `StructValue` field did not recurse. Called only on the
+/// refusing paths, so it costs nothing on the normal one.
+fn trace_nested_skip(which: &str, slot: usize, depth: u32, reason: &str) {
+    if ffi_struct_trace() {
+        eprintln!("[ffi-struct] {which} slot={slot} depth={depth} SKIPPED: {reason}");
+    }
+}
+
+/// Copies one Verum record into the C buffer at `base_off`, recursing into
+/// record-typed fields.
+///
+/// # Safety
+///
+/// - `obj_ptr` points to a live Verum heap object with at least
+///   `layout.fields.len()` slots
+/// - `buf` is writable for `buf_len` bytes
+///
+/// `pub` for one reason, stated so nobody widens it further: this is
+/// raw-pointer code whose defect was invisible for the life of the
+/// feature, and the only way to gate it directly is to call it. See
+/// `tests/t1359_nested_struct_marshalling.rs`. Not part of the crate's
+/// intended surface.
+#[doc(hidden)]
+pub unsafe fn marshal_verum_struct_to_c_at(
+    layout: &crate::module::FfiStructLayout,
+    layouts: &[crate::module::FfiStructLayout],
+    obj_ptr: *const u8,
+    buf: *mut u8,
+    buf_len: usize,
+    base_off: usize,
+    depth: u32,
+) {
+    // SAFETY: see the function contract.
     unsafe {
         // The Verum-side slot index is the field's DECLARED POSITION (heap
         // objects store fields contiguously at HEADER + pos*sizeof(Value), the
@@ -1321,13 +1407,60 @@ unsafe fn marshal_verum_struct_to_c(
         // enumeration index is exactly the object slot; `field.offset` remains
         // the (independent) packed C-struct byte offset. (#32)
         for (slot, field) in layout.fields.iter().enumerate() {
+            let Some(off) = base_off.checked_add(field.offset as usize) else {
+                continue;
+            };
+            // The buffer is a fixed 256 bytes and `field.offset` is a u32
+            // read from the module, so this bound is the only thing
+            // standing between a malformed layout and a write past the
+            // box. It was absent until T1359.
+            if off.saturating_add(field.size as usize) > buf_len {
+                continue;
+            }
+
             let value_ptr = obj_ptr
                 .add(crate::interpreter::OBJECT_HEADER_SIZE)
                 .add(slot * std::mem::size_of::<Value>());
             let field_value = *(value_ptr as *const Value);
 
-            let c_field_ptr = struct_buffer.as_mut_ptr().add(field.offset as usize);
-            marshal_field_to_c(field_value, field.c_type, c_field_ptr);
+            // A record-typed field is a heap object of its own: the slot
+            // holds a POINTER to it, not its bytes. C wants the bytes
+            // inline, so follow the pointer and lay the nested record out
+            // at this field's offset. Skipping it (the pre-T1359
+            // behaviour, `CType::StructValue => {}`) is why a
+            // `DarwinStat.st_mtime` reached `fstat` as sixteen zero bytes.
+            if field.c_type == crate::module::CType::StructValue {
+                if depth >= MAX_FFI_STRUCT_NESTING {
+                    trace_nested_skip("to_c", slot, depth, "nesting depth cap");
+                    continue;
+                }
+                match field.nested_layout.and_then(|i| layouts.get(i as usize)) {
+                    None => trace_nested_skip("to_c", slot, depth, "no nested layout on the field"),
+                    Some(nested) if !field_value.is_ptr() || field_value.is_nil() => {
+                        let _ = nested;
+                        trace_nested_skip("to_c", slot, depth, "slot holds no object");
+                    }
+                    Some(nested) => {
+                        let nested_obj = field_value.as_ptr::<u8>();
+                        if nested_obj.is_null() {
+                            trace_nested_skip("to_c", slot, depth, "slot holds a null pointer");
+                        } else {
+                            marshal_verum_struct_to_c_at(
+                                nested,
+                                layouts,
+                                nested_obj,
+                                buf,
+                                buf_len,
+                                off,
+                                depth + 1,
+                            );
+                        }
+                    }
+                }
+                continue;
+            }
+
+            marshal_field_to_c(field_value, field.c_type, buf.add(off));
         }
     }
 }
@@ -1340,24 +1473,105 @@ unsafe fn marshal_verum_struct_to_c(
 /// - struct_buffer must contain valid marshalled data
 unsafe fn marshal_c_to_verum_struct(
     layout: &crate::module::FfiStructLayout,
+    layouts: &[crate::module::FfiStructLayout],
     struct_buffer: &[u8; 256],
     obj_ptr: *mut u8,
 ) {
     // SAFETY: Caller guarantees obj_ptr points to a valid writable Verum heap object
     // and struct_buffer contains valid marshalled data.
     unsafe {
+        marshal_c_to_verum_struct_at(
+            layout,
+            layouts,
+            struct_buffer.as_ptr(),
+            struct_buffer.len(),
+            obj_ptr,
+            0,
+            0,
+        );
+    }
+}
+
+/// Reads one C struct at `base_off` back into a Verum record, recursing
+/// into record-typed fields.
+///
+/// # Safety
+///
+/// - `obj_ptr` points to a live writable Verum heap object with at least
+///   `layout.fields.len()` slots
+/// - `buf` is readable for `buf_len` bytes
+///
+/// `pub` for the same single reason as its twin above — see that note.
+#[doc(hidden)]
+pub unsafe fn marshal_c_to_verum_struct_at(
+    layout: &crate::module::FfiStructLayout,
+    layouts: &[crate::module::FfiStructLayout],
+    buf: *const u8,
+    buf_len: usize,
+    obj_ptr: *mut u8,
+    base_off: usize,
+    depth: u32,
+) {
+    // SAFETY: see the function contract.
+    unsafe {
         // See `marshal_verum_struct_to_c`: the Verum-side slot is the field's
         // declared position (enumeration index), NOT the global interned
         // `field.name` id. `field.offset` is the packed C-struct byte offset
         // the kernel wrote through. (#32)
         for (slot, field) in layout.fields.iter().enumerate() {
-            let c_field_ptr = struct_buffer.as_ptr().add(field.offset as usize);
+            let Some(off) = base_off.checked_add(field.offset as usize) else {
+                continue;
+            };
+            if off.saturating_add(field.size as usize) > buf_len {
+                continue;
+            }
+
             let value_ptr = obj_ptr
                 .add(crate::interpreter::OBJECT_HEADER_SIZE)
                 .add(slot * std::mem::size_of::<Value>())
                 as *mut Value;
 
-            if let Some(field_value) = marshal_field_from_c(field.c_type, c_field_ptr) {
+            // The nested record already exists as a heap object — the
+            // caller built it before the call — so write THROUGH the slot's
+            // pointer rather than replacing the slot. Replacing it would
+            // hand the caller a different object than the one they passed,
+            // which is not what `&mut record` means on either side of the
+            // boundary.
+            if field.c_type == crate::module::CType::StructValue {
+                if depth >= MAX_FFI_STRUCT_NESTING {
+                    trace_nested_skip("from_c", slot, depth, "nesting depth cap");
+                    continue;
+                }
+                let existing = *value_ptr;
+                match field.nested_layout.and_then(|i| layouts.get(i as usize)) {
+                    None => {
+                        trace_nested_skip("from_c", slot, depth, "no nested layout on the field")
+                    }
+                    Some(nested) if !existing.is_ptr() || existing.is_nil() => {
+                        let _ = nested;
+                        trace_nested_skip("from_c", slot, depth, "slot holds no object");
+                    }
+                    Some(nested) => {
+                        let nested_obj = existing.as_ptr::<u8>();
+                        if nested_obj.is_null() {
+                            trace_nested_skip("from_c", slot, depth, "slot holds a null pointer");
+                        } else {
+                            marshal_c_to_verum_struct_at(
+                                nested,
+                                layouts,
+                                buf,
+                                buf_len,
+                                nested_obj,
+                                off,
+                                depth + 1,
+                            );
+                        }
+                    }
+                }
+                continue;
+            }
+
+            if let Some(field_value) = marshal_field_from_c(field.c_type, buf.add(off)) {
                 *value_ptr = field_value;
             }
         }

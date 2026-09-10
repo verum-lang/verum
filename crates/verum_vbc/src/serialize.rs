@@ -1355,6 +1355,7 @@ mod tests {
                     offset: 0,
                     size: 8,
                     align: 8,
+                    nested_layout: None,
                 },
                 FfiStructField {
                     name: y_name,
@@ -1362,6 +1363,7 @@ mod tests {
                     offset: 8,
                     size: 8,
                     align: 8,
+                    nested_layout: None,
                 },
             ],
             verum_type: None,

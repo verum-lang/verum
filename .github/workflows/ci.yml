@@ -241,10 +241,20 @@ jobs:
       # sweep is green on this tree — 49 test-result lines, 49 ok, 0
       # failed, 2642 tests passed — so this costs coverage nothing and
       # buys five suites.
+      #
+      # `ffi` JOINS `codegen` HERE (T1359). `ffi/mod.rs` gates
+      # `pub mod runtime` — the whole libffi marshalling path — on that
+      # feature, `ffi` is not in the default set, and NO job's feature
+      # list named it. The module reaches a CI compiler only
+      # transitively, because `verum_compiler` declares
+      # `verum_vbc = { features = ["codegen", "ffi"] }` and feature
+      # unification switches it on inside that build graph: compiled
+      # there, gated nowhere. The same shape as the five orphaned files
+      # above, one level down — a feature instead of a target.
       - name: Every gated test target
         timeout-minutes: 120
         run: >
-          cargo test --locked -p verum_vbc --features codegen --tests
+          cargo test --locked -p verum_vbc --features codegen,ffi --tests
 
       # The workspace unit-test job runs with DEFAULT features, and
       # `codegen` is not one of them (verum_vbc/Cargo.toml) — so every

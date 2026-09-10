@@ -13323,6 +13323,31 @@ impl VbcCodegen {
         type_name: &str,
         fields: &verum_common::List<verum_ast::decl::RecordField>,
     ) -> u16 {
+        let no_siblings = std::collections::HashMap::new();
+        let mut in_progress: Vec<String> = Vec::new();
+        self.generate_ffi_struct_layout_inner(type_name, fields, &no_siblings, &mut in_progress)
+    }
+
+    /// The body of [`Self::generate_ffi_struct_layout`], plus what a record
+    /// with a RECORD-TYPED FIELD needs: the sibling declarations, so a nested
+    /// type's layout can be built before the outer type is sized (T1359).
+    ///
+    /// `in_progress` is the recursion stack, and it is a real guard rather
+    /// than a formality: a record that contains itself by value is not
+    /// expressible in C either, and without the stack this function would
+    /// recurse until it overflowed instead of saying so.
+    fn generate_ffi_struct_layout_inner(
+        &mut self,
+        type_name: &str,
+        fields: &verum_common::List<verum_ast::decl::RecordField>,
+        siblings: &std::collections::HashMap<
+            String,
+            verum_common::List<verum_ast::decl::RecordField>,
+        >,
+        in_progress: &mut Vec<String>,
+    ) -> u16 {
+        in_progress.push(type_name.to_string());
+
         // Calculate C-compatible layout
         let mut layout_fields = Vec::new();
         let mut current_offset: u32 = 0;
@@ -13330,10 +13355,36 @@ impl VbcCodegen {
 
         for field in fields.iter() {
             let field_name = field.name.name.to_string();
+
+            // A field whose type is a RECORD must have that record's layout
+            // in hand before this one can be sized — otherwise
+            // `verum_type_to_ctype` misses `repr_c_types` and answers
+            // `CType::Ptr` for it. Pre-fix `pregenerate_ffi_struct_layouts`
+            // iterated a `HashSet`, so whether the nested layout happened to
+            // exist yet was decided by hash order: the same source produced
+            // a 64-byte or a 96-byte `DarwinStat` on different runs of the
+            // same binary. Build it here instead of hoping (T1359).
+            if let Some(nested_name) = Self::ffi_referenced_struct_name(&field.ty)
+                && !self.repr_c_types.contains_key(&nested_name)
+                && !in_progress.iter().any(|n| n == &nested_name)
+                && let Some(nested_fields) = siblings.get(&nested_name).cloned()
+            {
+                self.generate_ffi_struct_layout_inner(
+                    &nested_name,
+                    &nested_fields,
+                    siblings,
+                    in_progress,
+                );
+            }
+
             let c_type = self.verum_type_to_ctype(&verum_common::Maybe::Some(field.ty.clone()));
 
             // Get size and alignment for this C type
-            let (field_size, field_align) = self.ctype_size_align(c_type);
+            let (field_size, field_align) = self.ffi_field_size_align(c_type, &field.ty);
+            // …and, for a nested record, WHICH record: `CType` says
+            // "struct by value" and cannot say whose, so the marshaller
+            // needs the layout index carried on the field itself.
+            let nested_layout_idx = self.ffi_nested_layout_index(c_type, &field.ty);
 
             // Align current offset
             let alignment = field_align as u32;
@@ -13350,6 +13401,7 @@ impl VbcCodegen {
                 offset: current_offset,
                 size: field_size,
                 align: field_align,
+                nested_layout: nested_layout_idx,
             });
 
             current_offset += field_size as u32;
@@ -13373,7 +13425,53 @@ impl VbcCodegen {
         self.repr_c_types.insert(type_name.to_string(), layout_idx);
         self.ffi_layouts.push(layout);
 
+        in_progress.pop();
         layout_idx
+    }
+
+    /// Size and alignment of one FFI struct FIELD.
+    ///
+    /// [`Self::ctype_size_align`] answers per C-TYPE, and for
+    /// `CType::StructValue` it cannot: the C type carries no layout
+    /// identity, so it returned `(0, 1)` under a comment saying the work
+    /// was still to do. A nested record therefore occupied ZERO bytes,
+    /// which put every field after it at the wrong offset and left the
+    /// struct short by the whole nested payload. Measured on
+    /// `DarwinStat` (four `DarwinTimespec` fields, 64 bytes of C
+    /// timespecs): `st_size` landed at offset 32 where the platform puts
+    /// it at 96, so a read of it returned `st_atimespec.tv_sec` — a Unix
+    /// timestamp presented as a file size, with no diagnostic (T1359).
+    ///
+    /// The field's own AST type does carry the identity, so ask it here.
+    /// A `StructValue` whose layout is still missing keeps the old
+    /// answer rather than inventing one; the recursion in
+    /// `generate_ffi_struct_layout_inner` is what makes that case rare,
+    /// and `check_ffi_struct_layouts` is what makes it visible.
+    fn ffi_field_size_align(&self, c_type: CType, ty: &verum_ast::ty::Type) -> (u16, u16) {
+        if c_type == CType::StructValue
+            && let Some(name) = Self::ffi_referenced_struct_name(ty)
+            && let Some(&idx) = self.repr_c_types.get(&name)
+            && let Some(nested) = self.ffi_layouts.get(idx as usize)
+        {
+            return (nested.size as u16, nested.align);
+        }
+        self.ctype_size_align(c_type)
+    }
+
+    /// The `ffi_layouts` index of a field's nested record layout, or
+    /// `None` for every field that is not a struct by value.
+    ///
+    /// Same question as [`Self::ffi_field_size_align`] asks, answered for
+    /// the marshaller instead of the layout arithmetic: it needs to reach
+    /// the nested layout's FIELDS to copy them, not just its size.
+    fn ffi_nested_layout_index(&self, c_type: CType, ty: &verum_ast::ty::Type) -> Option<u16> {
+        if c_type == CType::StructValue
+            && let Some(name) = Self::ffi_referenced_struct_name(ty)
+            && let Some(&idx) = self.repr_c_types.get(&name)
+        {
+            return Some(idx);
+        }
+        None
     }
 
     /// If `ty` names a struct-shaped type at an FFI boundary — either a bare
@@ -13522,13 +13620,33 @@ impl VbcCodegen {
 
         // 3. Generate a layout for each referenced record not already present
         //    (idempotent w.r.t. the Pass 2 @repr(C) generation site).
-        for name in needed {
+        //
+        //    SORTED, and that is not tidiness. `needed` is a `HashSet`, whose
+        //    iteration order Rust randomises per process. A record with a
+        //    record-typed field is sized from `repr_c_types`, so hash order
+        //    decided whether the NESTED type's layout existed yet when the
+        //    OUTER type was laid out — nested first gave `CType::StructValue`,
+        //    outer first gave `CType::Ptr`, and the two answers are eight
+        //    bytes apart per field. One binary, one source file, two layouts,
+        //    chosen by the hasher's seed. Sorting removes the seed from the
+        //    output; the recursion inside `generate_ffi_struct_layout_inner`
+        //    removes the ORDER from it, so neither alone is load-bearing and
+        //    both are cheap (T1359).
+        let mut ordered: Vec<String> = needed.into_iter().collect();
+        ordered.sort();
+        for name in ordered {
             if self.repr_c_types.contains_key(&name) {
                 continue;
             }
             if let Some(fields) = record_fields.get(&name) {
                 let fields = fields.clone();
-                self.generate_ffi_struct_layout(&name, &fields);
+                let mut in_progress: Vec<String> = Vec::new();
+                self.generate_ffi_struct_layout_inner(
+                    &name,
+                    &fields,
+                    &record_fields,
+                    &mut in_progress,
+                );
             }
         }
     }
@@ -13543,7 +13661,16 @@ impl VbcCodegen {
             CType::I64 | CType::U64 | CType::F64 => (8, 8),
             CType::Ptr | CType::CStr | CType::FnPtr | CType::Size | CType::Ssize => (8, 8), // 64-bit pointers
             CType::StructPtr | CType::ArrayPtr => (8, 8),
-            CType::StructValue => (0, 1), // Should be replaced with actual layout
+            // A struct BY VALUE has no size at this level and never will:
+            // `CType` is a bare tag with no layout identity, so this
+            // function cannot tell a 16-byte timespec from a 144-byte
+            // stat. Callers that hold the field's AST type must go
+            // through `ffi_field_size_align`, which can. Reaching this
+            // arm means the identity was unavailable, and (0, 1) is then
+            // the honest answer rather than a guess — it makes the field
+            // occupy nothing instead of silently occupying the wrong
+            // thing. See T1359 for what the guess cost.
+            CType::StructValue => (0, 1),
         }
     }
 
@@ -24205,9 +24332,31 @@ impl VbcCodegen {
             module.ffi_symbols.push(symbol_entry);
         }
 
-        // Transfer FFI struct layouts for @repr(C) types
+        // Transfer FFI struct layouts for @repr(C) types.
+        //
+        // The NAME needs the same remap the FFI symbols get ten lines
+        // up: codegen string ids are dense indices, module string ids
+        // are byte offsets into the module's table, and a clone carried
+        // the index across as if it were an offset. Every built module
+        // therefore held layout names that resolved to an unrelated
+        // string or to nothing at all — invisible because the runtime
+        // reaches a layout by INDEX (`module.ffi_layouts.get(idx)`) and
+        // never by name, and because `serialize.rs`'s round-trip test
+        // builds its `FfiStructLayout` by hand with
+        // `module.intern_string("Point")` instead of taking one from
+        // the codegen, so it asserted the name survives a path the name
+        // never travels (T1360).
+        //
+        // `FfiStructField::name` is deliberately NOT remapped: it is a
+        // GLOBAL interned FIELD id, not a module string id — see the
+        // note in `marshal_verum_struct_to_c` about why using it as a
+        // slot index is a defect.
         for layout in &self.ffi_layouts {
-            module.ffi_layouts.push(layout.clone());
+            let mut entry = layout.clone();
+            if let Some(mapped) = string_id_map.get(entry.name.0 as usize) {
+                entry.name = *mapped;
+            }
+            module.ffi_layouts.push(entry);
         }
 
         // Set V-LLSI profile flags: interpretable, systems (AOT-only), embedded (no-heap)
@@ -26353,21 +26502,80 @@ impl VbcCodegen {
     }
 
     /// Bug B helper — import an archive `@repr(C)` struct layout into this
-    /// codegen's `ffi_layouts`, returning the consumer-side index. Layouts
-    /// are self-contained (absolute offsets/sizes; field "name" slots are
-    /// positional indices, not string lookups), so finalize copies them
-    /// verbatim — we mirror that here with a plain clone+push.
-    fn import_archive_ffi_layout(
+    /// codegen's `ffi_layouts`, returning the consumer-side index.
+    ///
+    /// Offsets, sizes and the positional field "name" slots are absolute
+    /// and travel unchanged. `FfiStructField::nested_layout` does NOT: it
+    /// is an INDEX INTO THE LAYOUT TABLE, so it means one thing in the
+    /// archive and another here, and it is remapped recursively below —
+    /// the same treatment `return_layout_idx` and `param_layout_indices`
+    /// get thirty lines up, and for the same reason.
+    ///
+    /// This docstring used to say the layouts were "self-contained …
+    /// copies them verbatim", and that was true until T1359 gave a field
+    /// a table reference. The sentence is kept in mind rather than
+    /// deleted: a plain `clone()` of a struct that has gained a
+    /// cross-reference still compiles, still passes every gate, and
+    /// silently means something else — nothing but reading catches it.
+    ///
+    /// `#[doc(hidden)] pub`, with this and the import below, for one
+    /// reason: the remap is unobservable from outside this module, and a
+    /// gate that cannot reach the table cannot check it. Not part of the
+    /// intended surface. See `tests/t1359_ffi_layout_import_remap.rs`.
+    #[doc(hidden)]
+    pub fn ffi_layouts_mut(&mut self) -> &mut Vec<FfiStructLayout> {
+        &mut self.ffi_layouts
+    }
+
+    /// See the note on [`Self::ffi_layouts_mut`].
+    #[doc(hidden)]
+    pub fn import_archive_ffi_layout(
         &mut self,
         archive_module: &crate::module::VbcModule,
         archive_layout_idx: u16,
     ) -> Option<u16> {
-        let layout = archive_module
+        let mut memo: std::collections::HashMap<u16, u16> = std::collections::HashMap::new();
+        self.import_archive_ffi_layout_rec(archive_module, archive_layout_idx, &mut memo)
+    }
+
+    /// The body of [`Self::import_archive_ffi_layout`], carrying the memo
+    /// that makes a nested layout arrive ONCE however many fields name it
+    /// (`DarwinStat` names `DarwinTimespec` four times) and that resolves
+    /// a cycle to the entry already reserved for it.
+    ///
+    /// The reservation happens BEFORE the fields are walked, which is what
+    /// makes the cycle case terminate rather than needing a separate
+    /// guard: a layout that reaches itself finds its own index in the memo.
+    /// Archives are untrusted input (`tests/red_team_bytecode_trust_boundary.rs`),
+    /// so a self-referential layout is a thing a reader must survive, not
+    /// a thing codegen promises never to emit.
+    fn import_archive_ffi_layout_rec(
+        &mut self,
+        archive_module: &crate::module::VbcModule,
+        archive_layout_idx: u16,
+        memo: &mut std::collections::HashMap<u16, u16>,
+    ) -> Option<u16> {
+        if let Some(&already) = memo.get(&archive_layout_idx) {
+            return Some(already);
+        }
+        let mut layout = archive_module
             .ffi_layouts
             .get(archive_layout_idx as usize)?
             .clone();
+
+        // Reserve the consumer-side slot first, so a nested chain that
+        // comes back here resolves instead of recursing.
         let new_idx = self.ffi_layouts.len() as u16;
-        self.ffi_layouts.push(layout);
+        self.ffi_layouts.push(layout.clone());
+        memo.insert(archive_layout_idx, new_idx);
+
+        for field in layout.fields.iter_mut() {
+            if let Some(nested) = field.nested_layout {
+                field.nested_layout =
+                    self.import_archive_ffi_layout_rec(archive_module, nested, memo);
+            }
+        }
+        self.ffi_layouts[new_idx as usize] = layout;
         Some(new_idx)
     }
 }
