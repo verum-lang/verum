@@ -643,6 +643,37 @@ implement Text {
         self.ptr
     }
 
+    /// The text's bytes followed by a NUL, as the C-facing platform
+    /// APIs require.
+    ///
+    /// Returns an OWNED `List<Byte>` rather than a borrow: the NUL is
+    /// not part of the text's own storage, so there is nothing to
+    /// borrow it from. A caller that needs a pointer takes `.as_ptr()`
+    /// on the result and must keep that list alive for as long as the
+    /// pointer is used.
+    ///
+    /// T1320 — `core/io/process.vr:589` and `:648` called
+    /// `as_null_terminated_bytes()` under `@cfg(target_os = "windows")`
+    /// and NOTHING IN THE TREE DECLARED IT. That is the worst cell of
+    /// the dead-name family: a `value.method(...)` call under a foreign
+    /// `@cfg`, which no grep of call forms and no bake log reaches,
+    /// because the branch compiles nowhere in CI. Unlike its four
+    /// siblings this one was not a misspelling — no null-terminating
+    /// helper existed anywhere in core/ — so the name was a gap rather
+    /// than a typo, and the fix is the function rather than the call.
+    public fn as_null_terminated_bytes(&self) -> List<Byte> {
+        let mut out: List<Byte> = List.new();
+        let src = self.as_bytes();
+        let n = src.len();
+        let mut i = 0;
+        while i < n {
+            out.push(src[i]);
+            i = i + 1;
+        }
+        out.push(0);
+        out
+    }
+
     /// Number of Unicode characters (code points).
     public fn char_count(&self) -> Int {
         let mut count = 0;
