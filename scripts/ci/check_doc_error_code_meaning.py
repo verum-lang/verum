@@ -246,6 +246,15 @@ def main() -> int:
         return 2
 
     comparable = sorted(set(emit) & set(doc))
+    # A CODE THE COMPILER EMITS AND THE PAGE DOES NOT LIST is invisible in
+    # the worst way: a reader who meets `error<E613>` and looks it up finds
+    # nothing at all, which reads as "you imagined it" rather than "this is
+    # undocumented". Measured 2026-09-11: the page carried 49 codes and the
+    # compiler emitted 40 more — the whole E6xx context band past E602,
+    # fifteen E4xx type errors, the affine and linear E3xx family. All 40
+    # were added after checking each against its EMIT SITE, so this list
+    # starts empty and any regrowth is a new gap.
+    undocumented = sorted(set(emit) - set(doc))
     off = [c for c in comparable
            if c not in FAIR_SUMMARY and disagrees(doc[c], emit[c])]
     stale = sorted(c for c in FAIR_SUMMARY
@@ -254,6 +263,7 @@ def main() -> int:
     print(f"check-doc-error-code-meaning: {len(doc)} documented code(s), "
           f"{len(emit)} with an emitter message, {len(comparable)} comparable "
           f"— {len(off)} describing something the compiler never prints, "
+          f"{len(undocumented)} emitted but unlisted, "
           f"{len(FAIR_SUMMARY)} fair summaries on the roster")
 
     for c in off:
@@ -262,7 +272,10 @@ def main() -> int:
     for c in stale:
         print(f"    - {c} now shares vocabulary with its message; drop it from "
               f"FAIR_SUMMARY so the roster keeps meaning something")
-    return 1 if (off or stale) else 0
+    for c in undocumented:
+        print(f"    ? {c} is emitted but has no row on the reference page — "
+              f"emits {emit[c][0][:60]!r}")
+    return 1 if (off or stale or undocumented) else 0
 
 
 if __name__ == "__main__":
