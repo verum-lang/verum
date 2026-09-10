@@ -156,7 +156,30 @@ def accepted_names() -> set[str]:
 # THE DISCLOSED SET IS STILL PRINTED. A disclaimer beside a block does not
 # unteach the block, so these rows are reported — under their own heading,
 # without failing — and re-read when the roster moves.
-DISCLOSED = re.compile(r"\bE0410\b")
+DISCLOSED_MARK = re.compile(r"\bE0410\b")
+# HOW CLOSE COUNTS. A page-level rule ("this page mentions E0410, so
+# every name on it is disclosed") was the first version, and writing the
+# tour's banner showed what it costs: one box disclosing ONE name would
+# silence the whole page for every future one. Disclosure is per-NAME and
+# proximity-based — the name must appear within this many lines of an
+# E0410 mention, i.e. inside or beside the box that explains it.
+DISCLOSE_WINDOW = 25
+
+
+def disclosed_names(text: str) -> set[str]:
+    """Names this page explicitly says do not work, by naming the
+    compiler's own diagnostic beside them."""
+    lines = text.splitlines()
+    marks = [i for i, l in enumerate(lines) if DISCLOSED_MARK.search(l)]
+    if not marks:
+        return set()
+    out: set[str] = set()
+    for m in marks:
+        lo = max(0, m - DISCLOSE_WINDOW)
+        hi = min(len(lines), m + DISCLOSE_WINDOW + 1)
+        for l in lines[lo:hi]:
+            out |= set(re.findall(r"@([a-z_][a-z0-9_]*)", l))
+    return out
 
 DEFINES = re.compile(
     r"^\s*(?:pub\s+|public\s+)?(?:meta\s+fn|macro)\s+([A-Za-z_][A-Za-z0-9_]*)",
@@ -167,17 +190,18 @@ def extract(dest: pathlib.Path) -> tuple[int, dict[str, str], dict[str, set[str]
     """Every ```verum block as a .vr file.
 
     Returns (block count, file->page, page->names it defines,
-    pages that already disclose the E0410/Unit behaviour)."""
+    page -> the names it explicitly discloses)."""
     origin: dict[str, str] = {}
     defined: dict[str, set[str]] = {}
-    disclosed: set[str] = set()
+    disclosed: dict[str, set[str]] = {}
     n = 0
     for page in sorted(DOCS.rglob("*.md")) + sorted(DOCS.rglob("*.mdx")):
         rel = str(page.relative_to(DOCS))
         page_text = page.read_text(errors="ignore")
         defined.setdefault(rel, set()).update(DEFINES.findall(page_text))
-        if DISCLOSED.search(page_text):
-            disclosed.add(rel)
+        dn = disclosed_names(page_text)
+        if dn:
+            disclosed[rel] = dn
         for i, m in enumerate(BLOCK.finditer(page.read_text(errors="ignore"))):
             stem = rel.replace("/", "__").rsplit(".", 1)[0]
             out = dest / f"{stem}__{i}.vr"
@@ -218,6 +242,27 @@ def self_test() -> int:
         if "derive" in got:
             print("self-test: a declaration attribute was reported as a call")
             bad += 1
+    # DISCLOSURE IS PER-NAME, NOT PER-PAGE. The first version keyed on
+    # "does this page mention E0410 anywhere", and writing a caution box
+    # for ONE name on the tour showed the cost: the box would have
+    # silenced every other name on that page, for good.
+    page = "\n".join([
+        "prose about @alpha",           # far from the mark
+        *[""] * 40,
+        "the compiler warns E0410 on @beta and evaluates it to Unit",
+    ])
+    d = disclosed_names(page)
+    if "beta" not in d:
+        print("self-test: a name beside an E0410 mention is not disclosed")
+        bad += 1
+    if "alpha" in d:
+        print("self-test: a name 40 lines from the only E0410 mention was "
+              "disclosed — the rule went back to page-level")
+        bad += 1
+    if disclosed_names("no diagnostic named here, just @gamma"):
+        print("self-test: a page with no E0410 mention disclosed something")
+        bad += 1
+
     if bad:
         print(f"self-test: {bad} FAILED")
         return 1
@@ -269,8 +314,16 @@ def main() -> int:
                 continue          # the page defines the macro it calls
             have.setdefault(page, set()).add(name)
 
-    shown = {p: ns for p, ns in have.items() if p in disclosed}
-    have = {p: ns for p, ns in have.items() if p not in disclosed}
+    shown = {}
+    trimmed = {}
+    for p, ns in have.items():
+        d = ns & disclosed.get(p, set())
+        rest = ns - d
+        if d:
+            shown[p] = d
+        if rest:
+            trimmed[p] = rest
+    have = trimmed
     total = sum(len(v) for v in have.values())
     print(f"check-doc-meta-functions: {total} (page, name) pair(s) teaching a "
           f"meta-function the compiler does not accept, over {blocks} block(s) "
