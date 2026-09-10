@@ -25,8 +25,10 @@
 //
 // MEASURED 2026-09-10, before the fix:
 //
-//     tier 0    a=4869986  b=277503000  c=0  tv_sec=0  tv_nsec=0
-//     tier 1    a=0        b=0          c=0  tv_sec=0  tv_nsec=0
+//     tier 0    a=1789077992  b=234076  c=0  tv_sec=0  tv_usec=0
+//     tier 1    a=0           b=0       c=0  tv_sec=0  tv_usec=0
+//
+// and `a` matched `int(time.time())` exactly on the same second.
 //
 // Tier 0 is CORRECT there and Tier 1 is silently empty. The call returns
 // `rc=0` at both tiers, and nothing is printed, logged or raised — the
@@ -35,7 +37,7 @@
 // WHY THE THREE DUMMY FIELDS. A Verum heap object is a 24-byte header
 // followed by its field slots (the OBJECT_HEADER_SIZE constant in
 // verum_common's layout module, which carries a drift contract).
-// Tier 1 handed the callee the object's BASE, so `clock_gettime` wrote its
+// Tier 1 handed the callee the object's BASE, so `gettimeofday` wrote its
 // 16 bytes over the header — the type id and the size — and no field was
 // touched. With only two fields a fix that offset by the wrong amount could
 // still land the seconds in `tv_sec` and look green. With three fields
@@ -45,49 +47,68 @@
 // WHAT THE FIELDS MEAN. C writes `struct timespec { tv_sec; tv_nsec }` at
 // the pointer's offset 0, so the seconds land in the FIRST field of the
 // record and the nanoseconds in the second — whatever those fields are
-// called. `a` and `b` carry them; `tv_sec`/`tv_nsec` are named that way
+// called. `a` and `b` carry them; `tv_sec`/`tv_usec` are named that way
 // deliberately, to stay ZERO, because a spec that let the C payload land in
 // a field whose name matches would be pinning a coincidence.
 //
-// The assertion is on SHAPE, not on a value: a monotonic clock's seconds
-// cannot be zero on a machine that has been up (this one, 56 days), and
-// nanoseconds are below one billion by definition. A spec that pinned the
+// The assertion is on SHAPE and a FLOOR, not on a reading: the epoch second
+// cannot be below the floor asserted, and microseconds are below one
+// million by definition. A spec that pinned the
 // literal reading would fail every second of every day.
 
 mount core.io.println;
 
 @ffi("libSystem.B.dylib")
 extern {
-    @ffi_name("clock_gettime")
-    public fn spec_clock_gettime(clk_id: Int32, tp: &mut Wide) -> Int32;
+    // `int gettimeofday(struct timeval *tp, void *tzp)`.
+    //
+    // NOT `clock_gettime`, and the reason is a trap this spec must not
+    // fall into. `crates/verum_codegen/src/llvm/syscall_registry.rs`
+    // redirects three names to Verum's own wrappers at Tier 1 —
+    // `clock_gettime` to `__verum_clock_gettime` among them — so a spec
+    // written on that name compares libSystem at Tier 0 against a Verum
+    // wrapper at Tier 1 and calls the difference a tier divergence.
+    // `gettimeofday` is in neither table, so both tiers call the same
+    // libSystem symbol and the comparison means what it says.
+    // The Verum name is prefixed so it cannot collide with a mounted
+    // `gettimeofday`; `@ffi_name` supplies the C symbol dlsym must find.
+    // Without it the run dies with
+    //     symbol 'spec_gettimeofday' not found in library
+    // which is at least a LOUD failure — the spec cannot silently
+    // measure nothing.
+    @ffi_name("gettimeofday")
+    public fn spec_gettimeofday(tp: &mut Wide, tzp: Int) -> Int32;
 }
 
-public type Wide is { a: Int, b: Int, c: Int, tv_sec: Int, tv_nsec: Int };
+public type Wide is { a: Int, b: Int, c: Int, tv_sec: Int, tv_usec: Int };
 
 fn main() {
-    let mut w = Wide { a: 0, b: 0, c: 0, tv_sec: 0, tv_nsec: 0 };
+    let mut w = Wide { a: 0, b: 0, c: 0, tv_sec: 0, tv_usec: 0 };
 
-    // 6 is CLOCK_MONOTONIC on darwin.
-    let rc = unsafe { spec_clock_gettime(6, &mut w) };
+    let rc = unsafe { spec_gettimeofday(&mut w, 0) };
 
     // PRINT BEFORE ASSERTING. `assert_eq` reports only that two values
     // differ and never shows them, so a failing run would say the struct
     // is wrong without saying what came back — and "all zeros" versus
     // "the right bytes at the wrong offset" are different defects that
     // must not look alike in the log.
-    println(f"rc={rc} a={w.a} b={w.b} c={w.c} tv_sec={w.tv_sec} tv_nsec={w.tv_nsec}");
+    println(f"rc={rc} a={w.a} b={w.b} c={w.c} tv_sec={w.tv_sec} tv_usec={w.tv_usec}");
 
     assert_eq(rc, 0);
 
     // The callee's 16 bytes land at C offset 0 — the first two fields.
-    assert(w.a > 0);
+    // `a` is the epoch SECOND: an exact, externally checkable number
+    // (`date +%s`), not merely "nonzero". 1789077992 was the reading
+    // when this spec was written; the bound below is a floor that a
+    // clock cannot fall under, so the spec never needs updating.
+    assert(w.a > 1700000000);
     assert(w.b >= 0);
-    assert(w.b < 1000000000);
+    assert(w.b < 1000000);           // tv_usec is MICROseconds
 
     // ...and nowhere else. These three sit past the timespec and must be
     // untouched; if the seconds appear HERE, the offset is wrong by
     // exactly the amount this spec exists to catch.
     assert_eq(w.c, 0);
     assert_eq(w.tv_sec, 0);
-    assert_eq(w.tv_nsec, 0);
+    assert_eq(w.tv_usec, 0);
 }
