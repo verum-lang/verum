@@ -15,6 +15,13 @@ module core.context.provider;
 
 mount super.scope.Scope;
 mount super.super.runtime.ctx_bridge.{env_ctx_get, env_ctx_set, env_ctx_end};
+// `@bitcast` is not a meta-function: it types as `Unit` and this file
+// carried three `expected Int, found Unit` errors because of it. The real
+// `bitcast` (core/intrinsics/conversion.vr:94) exists but panics with
+// "not implemented in this build ... no registry entry". `transmute` is
+// implemented and measured working, including a record through a generic
+// and back (T1352).
+mount core.intrinsics.memory.{transmute};
 
 /// Provider<T> — a type that lazily provides context values.
 ///
@@ -211,7 +218,7 @@ implement ScopedProvider<T> {
     /// and popped after the body completes (even on error).
     public fn run<R>(&self, body: fn() -> R) -> R {
         // Push context onto the TLS stack
-        let raw_value: Int = @bitcast(self.value);
+        let raw_value: Int = transmute<T, Int>(self.value);
         env_ctx_set(self.slot_id, raw_value);
         // Execute the body
         let result = body();
@@ -231,7 +238,7 @@ implement ScopedProvider<T> {
     /// })?;   // slot already popped, even if this is Err
     /// ```
     public fn try_run<R, E>(&self, body: fn() -> Result<R, E>) -> Result<R, E> {
-        let raw_value: Int = @bitcast(self.value);
+        let raw_value: Int = transmute<T, Int>(self.value);
         env_ctx_set(self.slot_id, raw_value);
         let result = body();
         // Pop BEFORE returning so the slot is released on Ok and Err alike.
@@ -253,7 +260,7 @@ public fn get_context<T>(slot_id: Int) -> Maybe<T> {
     if raw == 0 {
         Maybe.None
     } else {
-        Maybe.Some(@bitcast(raw))
+        Maybe.Some(transmute<Int, T>(raw))
     }
 }
 
