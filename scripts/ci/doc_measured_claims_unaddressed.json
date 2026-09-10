@@ -4,20 +4,12 @@
   "What this rule does not cover"
  ],
  [
-  "cookbook/quic-server.md",
-  "These two mounts name modules that do not exist"
- ],
- [
   "language/context-system.md",
   "`provide` does not check that the provider implements the context"
  ],
  [
   "language/copatterns.md",
   "This example does not compile today"
- ],
- [
-  "language/meta/token-api.md",
-  "Half of this page is a design, not an API"
  ],
  [
   "language/modules.md",
@@ -36,23 +28,7 @@
   "h:caddc1f3"
  ],
  [
-  "stdlib/net/weft/overview.md",
-  "`Response.ok(...)` was not a thing — and nothing in the library was us"
- ],
- [
   "stdlib/sys.md",
   "Read the per-module table with its date"
- ],
- [
-  "tutorials/h3-service.md",
-  "No per-connection stats on the server"
- ],
- [
-  "tutorials/h3-service.md",
-  "Not shipped — `H3Response` has no `.streaming(...)`"
- ],
- [
-  "verification/networking.md",
-  "`@forall` was the wrong spelling; `forall` is real"
  ]
 ]
