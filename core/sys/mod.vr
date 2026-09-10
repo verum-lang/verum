@@ -707,11 +707,20 @@ public mount .windows.{
     Once,
     Barrier,
     // Thread Functions
-    thread_spawn,
-    thread_join,
-    thread_detach,
-    thread_yield,
-    thread_sleep_ms,
+    // T1320 — this block carried a `thread_` prefix the module never
+    // adopted. Of the six names, FIVE were declared nowhere in the tree:
+    // thread_spawn, thread_join, thread_detach, thread_yield and
+    // thread_sleep_ms. A re-export of a name nothing declares reads
+    // exactly like a re-export of a real one, and no gate asked.
+    //
+    // Two had a same-meaning replacement one spelling away — `spawn`
+    // (windows/thread.vr) and `yield_now` (same file) — and are named
+    // here now. Three had nothing to point at: `join` exists only as a
+    // METHOD on WindowsThread, so it cannot be re-exported as a free
+    // name, and no `detach` or `sleep_ms` is declared at all. Those are
+    // dropped rather than renamed; they were never reachable.
+    spawn,
+    yield_now,
     current_thread_id,
     // Once Constants
     ONCE_NOT_STARTED,
