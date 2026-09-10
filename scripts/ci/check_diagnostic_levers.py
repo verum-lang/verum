@@ -4,10 +4,16 @@
 WHY THIS EXISTS
 ---------------
 Most `VERUM_*` levers are presence flags — any value turns them on.
-Eighteen take a SUBSTRING matched against a name, so `LEVER=1` selects
-names containing the digit one, which is usually none, and prints
-nothing. An empty trace is indistinguishable from a code path that
-never ran.
+Twenty-one match their value against a name, so `LEVER=1` selects names
+containing the digit one, which is usually none, and prints nothing.
+An empty trace is indistinguishable from a code path that never ran.
+
+TWO MATCH KINDS, and they disagree about the empty string. A substring
+lever shows everything for `LEVER=` (`name.contains("")` is true);
+`VERUM_TRACE_TYPE_CLAIM` compares for EQUALITY (`w == "*" || w == name`)
+and shows nothing for it. Seven levers additionally guard with
+`!v.is_empty()`, so no value shows everything at all. The page carries
+the per-lever answer; this gate only keeps the ROSTER exact.
 
 Measured 2026-09-10: that reading was reached twice in one session by
 two people, and the second time it was filed as a missing-instrument
@@ -22,17 +28,26 @@ filter-shaped is the dangerous one: a reader who checks the reference,
 finds nothing, and concludes "it must be a flag" is exactly the person
 this page is for.
 
-FINDING THE SHAPE — three binding forms, and the first version of this
-detector knew only one:
+FINDING THE SHAPE — four binding forms, added one census at a time,
+each after a count that looked complete without it:
 
-    let x    = env::var("L")            let-binding
-    if let Ok(x) = env::var("L")        THE CONFIRMED CASE
+    let x    = env::var("L")            let-binding          ->  1 lever
+    if let Ok(x) = env::var("L")        carried DUMP_VBC     -> 18 levers
     let Ok(x) = env::var("L") else      let-else
+    match env::var("L") { Ok(x) => …    carried TYPE_CLAIM,
+                                        BARE_VARIANT, CANON  -> 21 levers
 
-`VERUM_DUMP_VBC` uses the second, so a detector that knew only the
-first reported ONE filter-shaped lever in the whole tree and missed the
-one that had just cost a session. A detector that cannot find the case
-you already know about has not measured anything yet.
+Every one of those three numbers looked like an answer. The first was
+caught because `VERUM_DUMP_VBC` — whose behaviour was already known —
+was absent from it; the second because a peer applied the same test to
+a lever of their own and found the equality form.
+
+    A DETECTOR THAT CANNOT FIND A CASE WHOSE ANSWER YOU ALREADY KNOW
+    HAS NOT MEASURED ANYTHING YET.
+
+The self-test carries that as an anchor: `VERUM_TRACE_TYPE_CLAIM` must
+be on the page, and the match-arm form must be recognised. Without an
+anchor a population count cannot be refuted — it always looks plausible.
 """
 
 from __future__ import annotations
@@ -51,6 +66,11 @@ BIND = re.compile(
     r"let\s+(?:mut\s+)?([a-z_][a-z0-9_]*))\s*=\s*[^;]*"
     r'env::var(?:_os)?\("(VERUM_[A-Z0-9_]+)"\)'
 )
+# The FOURTH form, and the one that carried three levers past a census
+# that looked complete: `match env::var("L") { Ok(v) => … }`.  The name
+# is bound in an ARM, on a later line than the call.
+CALL = re.compile(r'env::var(?:_os)?\("(VERUM_[A-Z0-9_]+)"\)')
+ARM = re.compile(r"(?:Ok|Some)\(([a-z_][a-z0-9_]*)\)\s*=>")
 ROW = re.compile(r"^\|\s*`(VERUM_[A-Z0-9_]+)`\s*\|", re.M)
 WINDOW = 60
 
@@ -64,20 +84,34 @@ def filter_shaped() -> dict[str, str]:
         except OSError:
             continue
         for i, line in enumerate(lines):
-            m = BIND.search(line)
-            if not m:
+            c = CALL.search(line)
+            if not c or line.lstrip().startswith("//"):
                 continue
-            var = m.group(1) or m.group(2) or m.group(3)
-            lever = m.group(4)
+            lever = c.group(1)
             if lever in out:
                 continue
-            window = "\n".join(lines[i + 1: i + 1 + WINDOW])
+            b = BIND.search(line)
+            var = (b.group(1) or b.group(2) or b.group(3)) if b else None
+            if var is None:
+                for j in range(i, min(i + 4, len(lines))):
+                    a = ARM.search(lines[j])
+                    if a:
+                        var = a.group(1)
+                        break
+            if var is None:
+                continue
+            window = "\n".join(lines[i: i + 1 + WINDOW])
             v = re.escape(var)
-            used = re.compile(
+            substring = re.compile(
                 rf"\.contains\(&?{v}\)|starts_with\(&?{v}\)|"
                 rf"ends_with\(&?{v}\)|split\(&?{v}\)|{v}\s*!=\s*\"\*\""
             )
-            if used.search(window):
+            # `w == "*" || w == name` — equality against a NAME, not a
+            # literal. The `== "*"` half is what tells the two apart from
+            # a plain `== "1"` presence comparison.
+            exact = (re.search(rf"{v}\s*==\s*[a-z_][a-z0-9_.()]*\b(?!\")", window)
+                     and f'{var} == "*"' in window)
+            if substring.search(window) or exact:
                 out[lever] = f"{f.relative_to(REPO)}:{i + 1}"
     return out
 
@@ -91,6 +125,11 @@ def documented() -> set[str]:
 def self_test() -> int:
     bad = 0
     cases = {
+        "match arm (carried TYPE_CLAIM, BARE_VARIANT, CANON)":
+            'match std::env::var("VERUM_E") {\n'
+            '    Ok(w) => w == "*" || w == name,\n'
+            '    Err(_) => false,\n'
+            '}\n',
         "if-let (the confirmed form)":
             'if let Ok(filter) = std::env::var("VERUM_A") {\n'
             '    if filter != "*" && !name.contains(&filter) { continue; }\n',
@@ -105,14 +144,24 @@ def self_test() -> int:
         lines = src.split("\n")
         found = False
         for i, line in enumerate(lines):
-            m = BIND.search(line)
-            if not m:
+            if not CALL.search(line):
                 continue
-            var = m.group(1) or m.group(2) or m.group(3)
+            b = BIND.search(line)
+            var = (b.group(1) or b.group(2) or b.group(3)) if b else None
+            if var is None:
+                for j in range(i, min(i + 4, len(lines))):
+                    a = ARM.search(lines[j])
+                    if a:
+                        var = a.group(1)
+                        break
+            if var is None:
+                continue
             v = re.escape(var)
-            window = "\n".join(lines[i + 1:])
-            if re.search(rf"\.contains\(&?{v}\)|starts_with\(&?{v}\)|{v}\s*!=\s*\"\*\"",
-                         window):
+            window = "\n".join(lines[i:])
+            if (re.search(rf"\.contains\(&?{v}\)|starts_with\(&?{v}\)|{v}\s*!=\s*\"\*\"",
+                          window)
+                    or (re.search(rf"{v}\s*==\s*[a-z_][a-z0-9_.()]*\b(?!\")", window)
+                        and f'{var} == "*"' in window)):
                 found = True
         if not found:
             print(f"self-test: {label} not recognised", file=sys.stderr)
@@ -136,8 +185,16 @@ def self_test() -> int:
     if bad:
         print(f"self-test: {bad} FAILED", file=sys.stderr)
         return 1
+    anchor = "VERUM_TRACE_TYPE_CLAIM"
+    if anchor not in documented():
+        print(f"self-test: the anchor {anchor} is not on the page", file=sys.stderr)
+        bad += 1
+    if bad:
+        print(f"self-test: {bad} FAILED", file=sys.stderr)
+        return 1
     print(f"[ok] self-test: {len(cases)} binding form(s) recognised, "
-          f"1 presence flag rejected, {len(documented())} row(s) parsed")
+          f"1 presence flag rejected, {len(documented())} row(s) parsed, "
+          f"anchor {anchor} present")
     return 0
 
 
