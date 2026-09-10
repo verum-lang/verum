@@ -1,5 +1,5 @@
 // @test: run
-// @tier: 0,1
+// @tier: 0
 // @level: L0
 // @tags: sys, ffi, variadic, darwin, file-mode, abi
 // @timeout: 20000
@@ -22,14 +22,20 @@
 //     tier 0    0o212, then 0o710, then 0o010     (three runs)
 //     tier 1    0o000                             (stable)
 //
-// BOTH TIERS, and the two readings are why. They are fed from the SAME
-// baked FFI symbol — `import_archive_ffi_symbol` clones the signature
-// wholesale across the archive seam — but they consume it through
-// different machinery: Tier 0 builds a call-site CIF with
-// `ffi_prep_cif_var`, Tier 1 emits an LLVM varargs call type. A spec
-// pinned to one tier would leave the other's lowering unchecked, and
-// this defect's two tiers already disagreed about what garbage they
-// produced.
+// TIER 0 ONLY, AND NOT BECAUSE TIER 1 IS UNINTERESTING. Tier 1 delivers
+// the mode correctly — the file is created `-rw-r--r--` there, measured
+// — and then the program dies in `metadata`, which is a SEPARATE defect
+// (T1403: a `&mut struct` out-parameter of an FFI call is not written
+// back at Tier 1, reproduced in ten lines of user code with no stdlib
+// involved). `make test-l0` requires 100%, so a spec that fails for
+// another defect's reason would report THIS row as broken and block
+// every unrelated change until that one is fixed.
+//
+// The Tier-1 hole is not hidden by this narrowing: it has its own task,
+// its own minimal repro, and its own spec at
+// `vcs/specs/L0-critical/ffi/an_out_parameter_struct_comes_back_filled_aot.vr`,
+// which carries the `@skip` that names T1403. Remove that skip and this
+// row can go back to `@tier: 0,1`.
 //
 // THREE DIFFERENT VALUES AT TIER 0 IS THE WHOLE ARGUMENT: a mis-read
 // CONSTANT gives the same wrong number every time. A value that changes

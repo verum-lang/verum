@@ -1,0 +1,91 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: ffi, out-param, struct, abi, differential, regression
+// @timeout: 60000
+// @expected-exit: 0
+//
+// AN OUT-PARAMETER STRUCT COMES BACK FILLED — TIER 0 (T1403).
+//
+// This is the half that PASSES today. It exists so that a future change
+// to Tier 0's marshalling cannot quietly break the behaviour that is
+// currently correct: `runtime.rs` packs the Verum object into a C buffer
+// and copies the callee's writes back, and that is what makes the
+// numbers below land where C says they should.
+//
+// The Tier-1 half lives beside this file, suffixed `_aot`, and carries
+// the `@skip` that names the open defect.
+//
+// A C function that reports through a pointer parameter — `clock_gettime`,
+// `stat`, `getsockname`, `waitpid`, every `*_r` variant — writes into the
+// caller's storage. This spec asks the only question that matters at that
+// boundary: after the call, does the caller SEE those bytes?
+//
+// MEASURED 2026-09-10, before the fix:
+//
+//     tier 0    a=4869986  b=277503000  c=0  tv_sec=0  tv_nsec=0
+//     tier 1    a=0        b=0          c=0  tv_sec=0  tv_nsec=0
+//
+// Tier 0 is CORRECT there and Tier 1 is silently empty. The call returns
+// `rc=0` at both tiers, and nothing is printed, logged or raised — the
+// program simply reads back the zeros it started with.
+//
+// WHY THE THREE DUMMY FIELDS. A Verum heap object is a 24-byte header
+// followed by its field slots (the OBJECT_HEADER_SIZE constant in
+// verum_common's layout module, which carries a drift contract).
+// Tier 1 handed the callee the object's BASE, so `clock_gettime` wrote its
+// 16 bytes over the header — the type id and the size — and no field was
+// touched. With only two fields a fix that offset by the wrong amount could
+// still land the seconds in `tv_sec` and look green. With three fields
+// ahead of them, ONLY an offset of exactly one header puts the seconds in
+// `a`; any other offset puts them somewhere this spec names out loud.
+//
+// WHAT THE FIELDS MEAN. C writes `struct timespec { tv_sec; tv_nsec }` at
+// the pointer's offset 0, so the seconds land in the FIRST field of the
+// record and the nanoseconds in the second — whatever those fields are
+// called. `a` and `b` carry them; `tv_sec`/`tv_nsec` are named that way
+// deliberately, to stay ZERO, because a spec that let the C payload land in
+// a field whose name matches would be pinning a coincidence.
+//
+// The assertion is on SHAPE, not on a value: a monotonic clock's seconds
+// cannot be zero on a machine that has been up (this one, 56 days), and
+// nanoseconds are below one billion by definition. A spec that pinned the
+// literal reading would fail every second of every day.
+
+mount core.io.println;
+
+@ffi("libSystem.B.dylib")
+extern {
+    @ffi_name("clock_gettime")
+    public fn spec_clock_gettime(clk_id: Int32, tp: &mut Wide) -> Int32;
+}
+
+public type Wide is { a: Int, b: Int, c: Int, tv_sec: Int, tv_nsec: Int };
+
+fn main() {
+    let mut w = Wide { a: 0, b: 0, c: 0, tv_sec: 0, tv_nsec: 0 };
+
+    // 6 is CLOCK_MONOTONIC on darwin.
+    let rc = unsafe { spec_clock_gettime(6, &mut w) };
+
+    // PRINT BEFORE ASSERTING. `assert_eq` reports only that two values
+    // differ and never shows them, so a failing run would say the struct
+    // is wrong without saying what came back — and "all zeros" versus
+    // "the right bytes at the wrong offset" are different defects that
+    // must not look alike in the log.
+    println(f"rc={rc} a={w.a} b={w.b} c={w.c} tv_sec={w.tv_sec} tv_nsec={w.tv_nsec}");
+
+    assert_eq(rc, 0);
+
+    // The callee's 16 bytes land at C offset 0 — the first two fields.
+    assert(w.a > 0);
+    assert(w.b >= 0);
+    assert(w.b < 1000000000);
+
+    // ...and nowhere else. These three sit past the timespec and must be
+    // untouched; if the seconds appear HERE, the offset is wrong by
+    // exactly the amount this spec exists to catch.
+    assert_eq(w.c, 0);
+    assert_eq(w.tv_sec, 0);
+    assert_eq(w.tv_nsec, 0);
+}
