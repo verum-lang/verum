@@ -23,6 +23,9 @@ from __future__ import annotations
 
 import argparse
 import collections
+import contextlib
+import io
+import os
 import pathlib
 import re
 import sys
@@ -299,7 +302,45 @@ def self_test() -> int:
     if bad:
         print(f"self-test: {bad} case(s) FAILED", file=sys.stderr)
         return 1
-    print(f"[ok] self-test: {len(SELF_TEST_ARITY) + 2} extractor case(s) hold")
+    # THE ROSTER HALVES, both pinned by a defect they actually had.
+    bad = 0
+
+    # 1. `want=None` means THE EXPECTATION IS ABSENT and must REFUSE.
+    #    An earlier draft fell back to the default roster here and
+    #    compared 132 colliding type names against 617 colliding
+    #    function names — rc=1 where the honest answer is rc=2. The
+    #    polarity run caught it; this keeps it caught.
+    buf = io.StringIO()
+    with contextlib.redirect_stderr(buf):
+        absent_rc = check_membership({("x", 0): {"a.vr"}}, None, "<absent>")
+    if absent_rc != 2:
+        print("self-test: an ABSENT expectation must refuse (rc=2), not diff "
+              f"— got rc={absent_rc}")
+        print(buf.getvalue().rstrip()[:400])
+        bad += 1
+
+    # 2. `scope_expectation` must FILTER, not echo. A row whose files are
+    #    all outside sqlite/native has no business in the sqlite scope.
+    probe = {
+        "only_outside/1": {"base/a.vr", "text/b.vr"},
+        "spans_boundary/1": {"base/a.vr", SQLITE_NATIVE + "/c.vr"},
+    }
+    derived = {
+        "/".join(str(k) for k in key): mods
+        for key, mods in collisions(
+            {(lab.rpartition("/")[0], int(lab.rpartition("/")[2])): f
+             for lab, f in probe.items()}, "sqlite").items()
+    }
+    if set(derived) != {"spans_boundary/1"}:
+        print(f"self-test: the sqlite derivation is not filtering — got "
+              f"{sorted(derived)}")
+        bad += 1
+
+    if bad:
+        print(f"self-test: {bad} FAILED")
+        return 1
+    print(f"[ok] self-test: {len(SELF_TEST_ARITY) + 2} extractor case(s) hold, "
+          "plus the roster refusal and the scope derivation")
     return 0
 
 
@@ -471,7 +512,33 @@ def collisions(found, scope: str) -> dict[tuple[str, int], set[str]]:
     return out
 
 
-MEMBERSHIP = pathlib.Path(__file__).with_name("barename_collision_membership.txt")
+# The roster paths are overridable so a POLARITY CONTROL can travel the
+# gate's exact route without mutating a tracked file — the control that
+# runs beside the subject instead of through it is the one that lies.
+MEMBERSHIP = pathlib.Path(
+    os.environ.get("VERUM_BARENAME_MEMBERSHIP")
+    or pathlib.Path(__file__).with_name("barename_collision_membership.txt"))
+# `--kind types` asks a DIFFERENT question of a DIFFERENT population —
+# two top-level TYPE declarations sharing a simple name — so its key is
+# `(name,)` and not `(name, arity)`. One roster describes one population;
+# this one gets its own file rather than a scope column in the first.
+MEMBERSHIP_TYPES = pathlib.Path(
+    os.environ.get("VERUM_BARENAME_TYPES_MEMBERSHIP")
+    or pathlib.Path(__file__).with_name("barename_collision_types_membership.txt"))
+
+# THE SCOPES DO NOT NEED THEIR OWN ROSTERS, and that is a property of
+# `collisions()` rather than a convenience: it is a PURE FILTER on
+# (name, modules) — `prelude` keeps names the prelude exports, `sqlite`
+# keeps names declared on both sides of the sqlite/native boundary.
+# Every input it reads is already stored in the `all` roster, so the
+# sqlite and prelude expectations are DERIVED from it. A separate sidecar
+# for each would be a second copy of the same facts, free to disagree.
+#
+# What the derivation does NOT cover, stated rather than discovered
+# later: the prelude's own export list is read live, so a name entering
+# or leaving the prelude moves BOTH sides together and shows up as a
+# COUNT change, not as membership movement. The roster describes
+# collisions; it does not describe the prelude.
 
 # WHY A ROSTER AND NOT ONLY A COUNT.
 #
@@ -499,11 +566,12 @@ def membership_lines(coll: dict) -> list[str]:
     return out
 
 
-def read_membership() -> dict[str, set[str]] | None:
-    if not MEMBERSHIP.is_file():
+def read_membership(path: pathlib.Path = None) -> dict[str, set[str]] | None:
+    path = path or MEMBERSHIP
+    if not path.is_file():
         return None
     got: dict[str, set[str]] = {}
-    for line in MEMBERSHIP.read_text().splitlines():
+    for line in path.read_text().splitlines():
         line = line.rstrip("\n")
         if not line or line.startswith("#"):
             continue
@@ -512,14 +580,39 @@ def read_membership() -> dict[str, set[str]] | None:
     return got
 
 
-def check_membership(coll: dict) -> int:
+def scope_expectation(scope: str) -> dict[str, set[str]] | None:
+    """The sqlite / prelude expectation, DERIVED from the `all` roster by
+    the same filter the live side goes through."""
+    want = read_membership(MEMBERSHIP)
+    if want is None:
+        return None
+    as_coll: dict[tuple[str, int], set[str]] = {}
+    for label, files in want.items():
+        name, _, arity = label.rpartition("/")
+        if not arity.isdigit():
+            continue
+        as_coll[(name, int(arity))] = files
+    return {
+        "/".join(str(k) for k in key): mods
+        for key, mods in collisions(as_coll, scope).items()
+    }
+
+
+def check_membership(coll: dict, want: dict[str, set[str]] | None = None,
+                     source: str = None) -> int:
     """Compare the live membership against the roster. Absent roster is a
     REFUSAL, not a pass: an instrument that cannot find its input gets
     stricter."""
-    want = read_membership()
+    # NO FALLBACK HERE, and the reason is a defect this very function
+    # shipped for one polarity run: `want=None` means THE EXPECTATION IS
+    # ABSENT, and reading the default roster instead compared 132 colliding
+    # TYPE names against 617 colliding FUNCTION names — rc=1 with a
+    # 749-line diff where the honest answer was rc=2, "your roster is
+    # missing". Every caller names its own expectation.
+    source = source or MEMBERSHIP.name
     if want is None:
         print(
-            f"REFUSING TO PASS: {MEMBERSHIP.name} is missing. The count baseline "
+            f"REFUSING TO PASS: {source} is missing. The count baseline "
             f"alone is blind to a swap of equal size. Regenerate it with "
             f"--write-membership in a commit that says why.",
             file=sys.stderr,
@@ -603,6 +696,19 @@ def main() -> int:
     if args.kind == "types":
         found = collect_types()
         coll = {k: v for k, v in found.items() if len(v) > 1}
+        if args.write_membership:
+            MEMBERSHIP_TYPES.write_text("\n".join([
+                "# Membership roster for check_barename_collisions.py "
+                "--check --kind types.",
+                "# One line per colliding SIMPLE TYPE NAME: the name, a TAB, then",
+                "# every module that declares a top-level type by it. The count",
+                "# baseline answers 'did the population grow'; this answers 'did",
+                "# its membership change' — a rename that trades one collision",
+                "# for another holds the count and moves these lines.",
+                "# Regenerate with: --check --kind types --write-membership",
+            ] + membership_lines(coll)) + "\n")
+            print(f"wrote {MEMBERSHIP_TYPES.name}: {len(coll)} names")
+            return 0
         for (name,), mods in sorted(coll.items()):
             print(f"{name:28s} {', '.join(sorted(mods))}")
         print(f"\n{len(coll)} colliding type names, public or private [types]")
@@ -616,6 +722,10 @@ def main() -> int:
                 file=sys.stderr,
             )
             return 1
+        if args.check:
+            # The count agreed — the state in which a SWAP is invisible.
+            return check_membership(coll, read_membership(MEMBERSHIP_TYPES),
+                                    MEMBERSHIP_TYPES.name)
         return 0
 
     found = collect(typed=args.typed)
@@ -624,8 +734,12 @@ def main() -> int:
     if args.write_membership:
         if args.scope != "all" or args.typed:
             print(
-                "--write-membership is defined for the untyped `all` scope only: "
-                "the roster is one file and must describe one population.",
+                f"--write-membership is not defined for --scope {args.scope}"
+                f"{' --typed' if args.typed else ''}: the sqlite and prelude "
+                "expectations are DERIVED from the `all` roster by the same "
+                "filter the live side uses, so writing them would be a second "
+                "copy of the same facts, free to disagree. Regenerate "
+                f"{MEMBERSHIP.name} instead.",
                 file=sys.stderr,
             )
             return 2
@@ -688,9 +802,18 @@ def main() -> int:
 
     # The count agreed. That is exactly the state in which a SWAP is
     # invisible, so the membership question is asked HERE and not earlier.
-    if args.scope == "all" and not args.typed:
-        return check_membership(coll)
-    return 0
+    if args.typed:
+        # The typed axis carries counts alone, and deliberately: the
+        # Makefile runs `--check`, `--scope sqlite`, `--scope prelude` and
+        # `--kind types`, never `--typed`. Its baselines document a
+        # measurement rather than gate one, and a roster nothing runs is a
+        # file that rots. Say so instead of shipping it.
+        return 0
+    if args.scope == "all":
+        return check_membership(coll, read_membership(MEMBERSHIP), MEMBERSHIP.name)
+    return check_membership(
+        coll, scope_expectation(args.scope),
+        f"{MEMBERSHIP.name} (filtered to --scope {args.scope})")
 
 
 if __name__ == "__main__":
