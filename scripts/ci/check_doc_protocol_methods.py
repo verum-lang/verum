@@ -49,6 +49,31 @@ FOUR NARROWINGS, EACH FROM A FALSE ACCUSATION
 Narrowing 4 is the one to remember. The first three produced wrong
 REPORTS; the fourth produced a wrong EDIT, because absence read as a
 finding is acted on.
+
+WHY THIS DOES NOT COVER `context`, measured 2026-09-10 so it is not
+re-measured. A context is a distinct declaration — `public context
+Logger { fn info(msg: Text); }` — and nothing reads it, which looks like
+an obvious gap. It is not gateable the same way. The site has 20
+comparable (page, context) pairs and the set comparison reports TEN
+disagreements, of which ZERO are defects:
+
+  * a tutorial that shows two of `Logger`'s nine methods is teaching,
+    not documenting a smaller surface;
+  * `net/weft/overview.md` declares its own `context Database` with
+    `find`/`save` over the page's own `User` and `UserId`. That is a
+    reader-supplied context that happens to reuse a name `core` also
+    uses — narrowing 2 of `check_doc_names_exist`, in a new place.
+
+Seven further documented contexts (`Http`, `Principal`, `RateLimiter`,
+`Settings`, `Store`, …) are declared nowhere in `core/` at all, for the
+same reason.
+
+WHAT DID FIND A DEFECT was much narrower: `stdlib/context.md` states a
+count in each heading — "`Clock` — testable time (2 methods)" — and
+`Clock` has three. Nine of the ten headings were exact. There are only
+ten such headings on the site and all are in that one file, so this is
+written down rather than gated; if the pattern spreads, the check is
+five lines.
 """
 
 from __future__ import annotations
