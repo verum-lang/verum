@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""A documented record field must carry the type `core/` gives it.
+"""A documented type declaration must carry the types `core/` gives it.
 
 WHY A SEPARATE GATE FROM `check_doc_type_shapes`
 ------------------------------------------------
@@ -73,6 +73,46 @@ FIELD_NAME = re.compile(r"[a-z_][a-z0-9_]*")
 KNOWN: dict[str, str] = {}
 FLOOR = 150
 
+SUM = re.compile(
+    r"(?:^|\n)[ \t]*(?:public\s+)?type\s+([A-Z][A-Za-z0-9_]*)\s*(?:<[^>]*>)?"
+    r"\s+is\s+((?:[^;]|\{[^}]*\})*?);"
+)
+# A variant is TUPLE `Name(T)` or RECORD `Name { f: T }`. The two differ
+# in how a reader constructs and matches them, so a reader cannot swap
+# one for the other and they must not both read as "no payload" — which
+# is what a tuple-only pattern does, and it hid five findings on one
+# page while reporting core as having nothing there.
+VARIANT = re.compile(r"([A-Z][A-Za-z0-9_]*)\s*(\([^)]*\)|\{[^}]*\})?")
+
+
+def variants(body: str) -> dict[str, str]:
+    """variant name -> its payload, normalised. {} when not a sum."""
+    if "|" not in body:
+        return {}
+    out: dict[str, str] = {}
+    for arm in split_fields(body.replace("|", ",")):
+        arm = re.sub(r"//[^\n]*", "", arm).strip()
+        m = VARIANT.match(arm)
+        if not m:
+            continue
+        pay = re.sub(r"\s+", "", m.group(2) or "")
+        if pay in ("(...)", "(\u2026)", "{...}", "{\u2026}"):
+            pay = "ELIDED"          # the page's own abbreviation, not a claim
+        elif pay.startswith("{"):
+            # a RECORD variant: field ORDER is not part of the pattern a
+            # reader writes, and the NAMES are not part of a positional
+            # one — compare the type multiset.
+            inner = ",".join(sorted(x.split(":", 1)[-1]
+                                    for x in pay[1:-1].split(",") if x))
+            pay = "{" + inner + "}"
+        elif pay:
+            # `(err: OSError)` is the same arm as `(OSError)` to anyone
+            # matching positionally.
+            inner = ",".join(x.split(":", 1)[-1] for x in pay[1:-1].split(","))
+            pay = "(" + inner + ")"
+        out[m.group(1)] = pay
+    return out
+
 
 def decls(text: str):
     """(name, body) with BALANCED braces."""
@@ -141,6 +181,20 @@ def self_test() -> int:
         print("self-test: two declarations were not both found", file=sys.stderr)
         bad += 1
 
+    v = variants("Fullscreen | Inline { height: Int } | Fixed(Rect)")
+    if v != {"Fullscreen": "", "Inline": "{Int}", "Fixed": "(Rect)"}:
+        print(f"self-test: a record variant was read as a tuple one: {v}",
+              file=sys.stderr)
+        bad += 1
+    v = variants("A(err: OSError) | B(...) | C")
+    if v != {"A": "(OSError)", "B": "ELIDED", "C": ""}:
+        print(f"self-test: payload name or elision not normalised: {v}",
+              file=sys.stderr)
+        bad += 1
+    if variants("{ x: Int }") != {}:
+        print("self-test: a record was read as a sum", file=sys.stderr)
+        bad += 1
+
     for label, doc_t, core_t in (
         ("TaskId.id", "UInt64", "Int"),
         ("ChatMessage.role", "Text", "AgentRole"),
@@ -153,7 +207,7 @@ def self_test() -> int:
     if bad:
         print(f"self-test: {bad} FAILED", file=sys.stderr)
         return 1
-    print(f"[ok] self-test: 3 extraction cases, 3 anchors, "
+    print(f"[ok] self-test: 3 field cases, 3 variant cases, 3 anchors, "
           f"{len(KNOWN)} on the roster")
     return 0
 
@@ -169,19 +223,32 @@ def main() -> int:
         return 2
 
     core: dict[str, list[dict[str, str]]] = collections.defaultdict(list)
+    core_v: dict[str, list[dict[str, str]]] = collections.defaultdict(list)
     for f in CORE.rglob("*.vr"):
-        for name, body in decls(f.read_text(errors="replace")):
+        text = f.read_text(errors="replace")
+        for name, body in decls(text):
             got = fields(body)
             if got:
                 core[name].append(got)
+        for m in SUM.finditer(text):
+            got = variants(m.group(2))
+            if got:
+                core_v[m.group(1)].append(got)
 
     pages = sorted((DOCS / "stdlib").rglob("*.md")) if (DOCS / "stdlib").is_dir() else []
     doc: dict[str, list[tuple[dict[str, str], str]]] = collections.defaultdict(list)
+    doc_v: dict[str, list[tuple[dict[str, str], str]]] = collections.defaultdict(list)
     for p in pages:
-        for name, body in decls(p.read_text(errors="replace")):
+        text = p.read_text(errors="replace")
+        rel = str(p.relative_to(DOCS))
+        for name, body in decls(text):
             got = fields(body)
             if got:
-                doc[name].append((got, str(p.relative_to(DOCS))))
+                doc[name].append((got, rel))
+        for m in SUM.finditer(text):
+            got = variants(m.group(2))
+            if got:
+                doc_v[m.group(1)].append((got, rel))
 
     comparable = sum(1 for n in set(doc) & set(core) if len(core[n]) == 1)
     off: list[str] = []
@@ -195,9 +262,26 @@ def main() -> int:
                     off.append(f"{name}.{fld}  page {dt!r} vs core {c[fld]!r}"
                                f"   [{page}]")
 
+    for name in sorted(set(doc_v) & set(core_v)):
+        if len(core_v[name]) != 1:
+            continue
+        c = core_v[name][0]
+        for d, page in doc_v[name]:
+            for arm, dp in sorted(d.items()):
+                if arm not in c or c[arm] == dp:
+                    continue
+                if "ELIDED" in (dp, c[arm]):
+                    continue
+                if KNOWN.get(f"{name}.{arm}") is not None:
+                    continue
+                off.append(f"{name}.{arm}  page {dp or '(no payload)'!r} vs "
+                           f"core {c[arm] or '(no payload)'!r}   [{page}]")
+
     print(f"check-doc-field-types: {len(doc)} record type(s) documented across "
           f"{len(pages)} page(s), {comparable} declared exactly once in core "
-          f"— {len(off)} field(s) carrying a type core does not "
+          f"and {sum(1 for n in set(doc_v)&set(core_v) if len(core_v[n])==1)} "
+          f"sum type(s) — {len(off)} field(s) or variant payload(s) carrying "
+          f"a type core does not "
           f"({len(KNOWN)} on the roster)")
 
     if comparable < FLOOR:
