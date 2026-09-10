@@ -918,6 +918,10 @@ pub struct VbcCodegen {
     /// bodies (each module's literals resolve against its own types;
     /// already-compiled bodies keep their baked indices).
     user_claimed_type_names: std::collections::HashSet<(String, String)>,
+    /// T1369 — which MODULE won the simple type key, so a sibling's
+    /// declaration cannot mistake that key's id for its own.
+    /// `claim_local_type_id` reads it; `claim_user_type_name` writes it.
+    type_name_claim_owner: std::collections::HashMap<String, String>,
 
     /// Type field type names: maps (type_name, field_name) → field_type_name.
     /// Used to infer the type of field access expressions for chained access.
@@ -2217,6 +2221,7 @@ impl VbcCodegen {
             next_field_id: 0,
             type_field_layouts: std::collections::HashMap::new(),
             user_claimed_type_names: std::collections::HashSet::new(),
+            type_name_claim_owner: std::collections::HashMap::new(),
             type_field_type_names: std::collections::HashMap::new(),
             type_field_refinements: std::collections::HashMap::new(),
             type_refinements: std::collections::HashMap::new(),
@@ -3151,6 +3156,8 @@ impl VbcCodegen {
                 self.type_name_to_id.get(type_name).map(|i| i.0)
             );
         }
+        self.type_name_claim_owner
+            .insert(type_name.to_string(), module_name.to_string());
         if let Some(old_id) = self
             .type_name_to_id
             .insert(type_name.to_string(), type_id)
@@ -5950,8 +5957,42 @@ impl VbcCodegen {
             );
         }
         if let Some(&existing) = self.type_name_to_id.get(type_name) {
-            let foreign = self.archive_claimed_type_ids.contains(&existing.0)
-                && std::env::var_os("VERUM_DISABLE_LOCAL_TYPE_SHADOW").is_none();
+            // T1369 — "the name already has an id" is not "that id is
+            // mine". It is mine only while ONE type declares the name.
+            //
+            // The prepass claims every declared simple name before any
+            // declaration is compiled, so by the time a declaration asks
+            // for its id the LAST claim owns the key. Two modules
+            // declaring `S` therefore both received the second one's id,
+            // measured with the tree's own VERUM_TRACE_CTOR:
+            //
+            //   CLAIM name=S module=core.pa new_id=19
+            //   CLAIM name=S module=core.pb new_id=20 displacing=Some(19)
+            //   claim_local_type_id 'S' existing=Some(20) archive_claimed=false
+            //   claim_local_type_id 'S' existing=Some(20) archive_claimed=false
+            //
+            // The first module's descriptor was then built under the
+            // second's id, and the second's own descriptor lost to it in
+            // push_type_dedupe on richness. The emitted `New` carried the
+            // wrong field_count and every field read the wrong index.
+            //
+            // The concept was already here — an id belonging to someone
+            // else gets a fresh one — but the only owner it could name
+            // was an ARCHIVE, and a same-bake sibling reports
+            // archive_claimed=false. `type_name_claim_owner` records
+            // which module won the key, and both it and
+            // `current_source_module` come from resolve_full_module_path,
+            // so they are the same spelling of the same fact.
+            let claimed_elsewhere = match (
+                self.type_name_claim_owner.get(type_name),
+                self.ctx.current_source_module.as_ref(),
+            ) {
+                (Some(owner), Some(here)) => owner != here,
+                _ => false,
+            };
+            let foreign = claimed_elsewhere
+                || self.archive_claimed_type_ids.contains(&existing.0)
+                    && std::env::var_os("VERUM_DISABLE_LOCAL_TYPE_SHADOW").is_none();
             if !foreign {
                 return existing;
             }
