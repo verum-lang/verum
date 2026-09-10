@@ -13,9 +13,14 @@ Two spellings are in use — `Exxx` in `verum_error`'s registry and `E0xxx`
 in `verum_diagnostics`' explanations plus `verum_compiler`'s lints — and
 where their digits coincide their MEANINGS do not:
 
-    E0101 use-after-free        E101 undefined type
-    E0313 integer overflow      E313 dangling reference
+    E0101 use-after-free        E101 type not found
+    E0313 integer overflow      E313 cannot move a value while borrowed
     E0203 `?` type mismatch     E203 module not found
+
+(The three-digit meanings above are quoted from the registry and were
+re-checked 2026-09-10, when two of them turned out to have drifted from
+what their emitter prints — which is the same family of defect one layer
+up, and is why they are quoted rather than paraphrased.)
 
 So a user who types the code they saw, minus a leading zero that no other
 code has, is confidently told about something else. That is worse than
@@ -155,6 +160,57 @@ def scan() -> tuple[set[str], set[str], set[str]]:
     return three, four, known
 
 
+# SECOND QUESTION, same subject: the code a user SEES must be the code the
+# diagnostic carries.
+#
+# Measured 2026-09-10 — one instance, and it prints like this:
+#
+#     error<E204>: E600: circular constant dependency detected: …
+#
+# The renderer prints the diagnostic's own code, and the message text then
+# opens with a SECOND, stale one.  `verum explain E600` answers about the
+# context system.  This is the same defect this file exists for, arriving
+# by a third route: not two namespaces disagreeing, but one message
+# carrying a number that stopped being true.
+#
+# It is invisible to a regex over `.code(…).message(format!("E…`, because
+# the message is assembled in a local `let mut msg = format!(…)` first.  So
+# the scan is per MATCH ARM: find the arm's `.code("Exxx")` and any `"Eyyy:`
+# literal inside the same arm, and compare.
+#
+# The legacy `VerumError::Other` strings in `error_conversions.rs` open
+# with their code DELIBERATELY — that carrier has no code field — and are
+# not in scope here: they are matched only when the same arm also calls
+# `.code(...)`, which is what makes the two disagree.
+ARM_HEAD = re.compile(r'^            ([A-Z][A-Za-z0-9_]*)\s*(\{|\(|=>)')
+ARM_CODE = re.compile(r'\.code\("(E\d{3,4})"\)')
+ARM_LITERAL = re.compile(r'"(E\d{3,4}): ')
+STALE_IN_MESSAGE_BASELINE = 0
+
+
+def stale_code_literals() -> list[tuple[str, int, str, str]]:
+    """(file, line, own code, foreign code) per diagnostic whose message
+    text opens with a code that is not its own."""
+    out = []
+    for path in sorted((REPO / "crates").rglob("*.rs")):
+        parts = path.parts
+        if "tests" in parts or "target" in parts or "benches" in parts:
+            continue
+        lines = path.read_text(errors="ignore").split("\n")
+        heads = [i for i, l in enumerate(lines) if ARM_HEAD.match(l)]
+        for k, i in enumerate(heads):
+            j = heads[k + 1] if k + 1 < len(heads) else min(i + 60, len(lines))
+            arm = "\n".join(lines[i:j])
+            own = ARM_CODE.search(arm)
+            if not own:
+                continue
+            for m in ARM_LITERAL.finditer(arm):
+                if m.group(1) != own.group(1):
+                    out.append((path.relative_to(REPO).as_posix(), i + 1,
+                                own.group(1), m.group(1)))
+    return out
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--check", action="store_true")
@@ -216,6 +272,24 @@ def main() -> int:
             f"Remove them from KNOWN in this file (and from ARRIVED_UNBLESSED "
             f"if listed there) so the ratchet holds the ground gained — by "
             f"name, not by a smaller number.",
+            file=sys.stderr,
+        )
+        return 1
+
+    stale = stale_code_literals()
+    print(f"diagnostics whose MESSAGE opens with a code that is not their "
+          f"own: {len(stale)} (baseline {STALE_IN_MESSAGE_BASELINE})")
+    for f, ln, own, foreign in stale:
+        print(f"    {f}:{ln}  carries {own} but the text opens {foreign}:")
+    if len(stale) != STALE_IN_MESSAGE_BASELINE:
+        direction = "above" if len(stale) > STALE_IN_MESSAGE_BASELINE else "below"
+        print(
+            f"\n{len(stale)} such message(s), {direction} the baseline of "
+            f"{STALE_IN_MESSAGE_BASELINE}. The renderer already prints the "
+            f"diagnostic's code; a second one inside the text is a number "
+            f"that stopped being true, and it is the one the reader will "
+            f"type into `verum explain`. Delete the literal, or adjust the "
+            f"baseline in a commit that says which message changed and why.",
             file=sys.stderr,
         )
         return 1

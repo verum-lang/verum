@@ -2,7 +2,7 @@
 // @tier: 0
 // @level: L0
 // @tags: modules, visibility, errors, negative
-// @expect-error: E601
+// @expect-error: E202
 // @description: Test that private items cannot be accessed from outside
 
 /// Visibility violation tests.
@@ -30,7 +30,7 @@ module secret {
 
 fn main() -> Int {
     // ERROR: Cannot access private function
-    let x = secret.private_fn();  // E601: visibility error
+    let x = secret.private_fn();  // E202: visibility error
 
     0
 }

@@ -1,6 +1,12 @@
-//! MODULE-IDENTITY-1 / E602 self-mount pins (T0236).
+//! MODULE-IDENTITY-1 / mount-ambiguity pins (T0236).
 //!
-//! Class: false `E602: ambiguous name` on relative (`super.`) mounts
+//! The code moved E602 -> E105 in T1386: `ambiguous name` is a
+//! NAME-RESOLUTION condition and E6xx is the context system, whose
+//! E602 (`context cycle`) has no emitter at all.  The file was named
+//! for the code; it is named for the CONDITION now, because the pins
+//! are about ambiguity, not about a number.
+//!
+//! Class: false `ambiguous name` on relative (`super.`) mounts
 //! when a file is type-checked standalone.
 //!
 //! Root cause: `phase_type_check` computed the file's real module path
@@ -13,7 +19,7 @@
 //! minted TWO import-source spellings for the SAME target module
 //! (`cog.sub.helper` from Pass 0 vs `cog.helper` from the check loop),
 //! and the import-ambiguity check (`sources.len() > 1`) reported a
-//! false E602 on every relatively-mounted name.  This made 27
+//! a false ambiguity on every relatively-mounted name.  This made 27
 //! theorem-bearing `core/` files unverifiable standalone (all of
 //! `core/verify/kernel_v0/` plus 12 `core/math/` files), blocking the
 //! T0230 proof-ratchet gate from claiming 66 theorems.
@@ -88,11 +94,11 @@ fn check_file(input: PathBuf) -> (bool, String) {
 }
 
 /// FALSE-POSITIVE PIN: a nested file that `super.`-mounts a sibling
-/// must NOT report E602 — the mount names ONE module, even though the
+/// must NOT report E105 — the mount names ONE module, even though the
 /// import machinery visits the mount more than once.
 ///
 /// Pre-fix this failed with:
-///   `E602: ambiguous name: 'Widget' is imported from multiple
+///   `E105: ambiguous name: 'Widget' is imported from multiple
 ///    modules: cog.sub.helper, cog.helper`
 /// (two spellings of the same file, minted by the two passes running
 /// under different module identities).
@@ -112,7 +118,7 @@ fn super_mount_from_nested_file_is_not_ambiguous() {
 
     let (ok, diagnostics) = check_file(leaf);
     assert!(
-        !diagnostics.contains("E602"),
+        !diagnostics.contains("E105"),
         "self-mount must not be reported as ambiguous; diagnostics:\n{}",
         diagnostics
     );
@@ -124,7 +130,7 @@ fn super_mount_from_nested_file_is_not_ambiguous() {
 }
 
 /// GENUINE-AMBIGUITY PIN: two DISTINCT sibling modules exporting the
-/// same name, both mounted — E602 must still fire, and must name both
+/// same name, both mounted — E105 must still fire, and must name both
 /// real sources.
 #[test]
 fn distinct_modules_same_name_still_fire_e602() {
@@ -148,13 +154,13 @@ fn distinct_modules_same_name_still_fire_e602() {
         "two distinct modules exporting the same mounted name must fail the check"
     );
     assert!(
-        diagnostics.contains("E602") && diagnostics.contains("ambiguous"),
-        "genuine ambiguity must surface as E602; diagnostics:\n{}",
+        diagnostics.contains("E105") && diagnostics.contains("ambiguous"),
+        "genuine ambiguity must surface as E105; diagnostics:\n{}",
         diagnostics
     );
     assert!(
         diagnostics.contains("alpha") && diagnostics.contains("beta"),
-        "E602 must name both distinct source modules; diagnostics:\n{}",
+        "E105 must name both distinct source modules; diagnostics:\n{}",
         diagnostics
     );
 }

@@ -461,21 +461,21 @@ impl From<TypeError> for VerumError {
                 ..
             } => VerumError::Other {
                 message: format!(
-                    "E601: visibility error: '{}' is {} in module '{}'",
+                    "E202: visibility error: '{}' is {} in module '{}'",
                     name, visibility, module_path
                 ).into(),
             },
 
             TypeError::AmbiguousName { name, sources, .. } => VerumError::Other {
                 message: format!(
-                    "E602: ambiguous name: '{}' is imported from multiple modules: {}",
+                    "E105: ambiguous name: '{}' is imported from multiple modules: {}",
                     name, sources
                 ).into(),
             },
 
             TypeError::CircularConstantDependency { cycle_path, .. } => VerumError::Other {
                 message: format!(
-                    "E600: circular constant dependency detected: {}",
+                    "E204: circular constant dependency detected: {}",
                     cycle_path
                 ).into(),
             },

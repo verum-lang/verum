@@ -562,7 +562,7 @@ impl<'s> CompilationPipeline<'s> {
         // unverifiable standalone.  One identity ⇒ both passes mint the
         // same source string ⇒ the existing exact-string dedup
         // collapses them.  Pinned by
-        // `verum_compiler/tests/mount_self_ambiguity_e602_tests.rs`.
+        // `verum_compiler/tests/mount_ambiguity_code_tests.rs`.
         if !current_module_path_str.is_empty() {
             checker.set_current_module_path(current_module_path_str.as_str());
         }

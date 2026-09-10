@@ -86,22 +86,15 @@ INDEX_FLOOR = 40
 # An entry goes STALE the moment the registry catches up, and stale is a
 # failure: an exemption nobody can see being used is a standing licence.
 PAGE_FOLLOWS_EMITTER: dict[str, str] = {
-    # Found only after the meaning gate learned to follow a message
-    # BUILT IN A VARIABLE — five codes are reachable no other way, and
-    # this is the one where the page was wrong. `ambiguous name` reads
-    # as an import clash; the emitter is about PROTOCOLS.
-    "E105": "emits `ambiguous method call: `m` could refer to multiple "
-            "protocols` — the registry's `ambiguous name` names a "
-            "different clash",
-    "E311": "emits `cannot borrow ... because field ... is already borrowed`",
-    "E313": "emits `cannot move ... while it is borrowed`",
-    "E501": "emits `invalid refinement predicate`, and at a second site "
-            "`meta function ... must be pure but has side effects`",
-    "E502": "emits `meta function ... uses runtime context(s) ... not "
-            "available at compile time`",
-    "E503": "emits `pure function ... has side effects`",
-    "E601": "emits `visibility error: '...' is <vis> in module '...'`",
-    "E602": "emits `ambiguous name: '...' is imported from multiple modules`",
+    # EMPTY, and that is the finished state rather than an untested one.
+    #
+    # It held eight entries for the length of one afternoon: E105, E311,
+    # E313, E501, E502, E503, E601, E602 — every code where the page had
+    # been corrected against the emitter while the registry still said
+    # something else.  T1386 moved three of those emitters onto codes that
+    # already meant the right thing and corrected five descriptions, and
+    # this gate then named all eight as stale in one run.  That is what the
+    # roster is for: an exemption that expires loudly beats a comment.
 }
 
 ALLOWED = {
@@ -149,8 +142,20 @@ def citations(text: str) -> list[tuple[int, str]]:
 # E400 must be found (they are emitted constantly), E203 and E202 must
 # not. A run where the controls disagree is a broken instrument, not a
 # finding.
-EMIT_BASELINE = 14
-EMIT_CONTROLS = [("E100", True), ("E400", True), ("E203", False), ("E202", False)]
+# T1386 moved three diagnostics off codes belonging to another category,
+# and this gate's controls are where that shows up as a fact rather than a
+# claim.  `E202 private item imported` had NO emit site and was on the dead
+# list; `VisibilityError` now carries it, so the control flips to True and
+# E202 leaves the list.  `E601` and `E602` join it, having been vacated.
+# The baseline therefore moves 14 -> 15: MINUS one, PLUS two.  Counting only
+# the direction you expected is how a partial renumbering passes — half the
+# emit sites moved would show as 14 -> 14.
+EMIT_BASELINE = 15
+EMIT_CONTROLS = [
+    ("E100", True), ("E400", True), ("E203", False),
+    ("E202", True),                 # was False until T1386 gave it an emitter
+    ("E601", False), ("E602", False),  # vacated by T1386; nothing emits them
+]
 
 
 def emitted_codes(registry_path: Path) -> set[str]:
@@ -294,9 +299,17 @@ def main() -> int:
             ok = False
         if args.registry.is_file():
             m = registry_meanings(args.registry)
-            if m.get("E105") != "ambiguous name":
+            # Anchored on the SHAPE of the parse, not on one description's
+            # wording: pinning the literal text made this self-test fail the
+            # first time the registry was legitimately corrected, which is
+            # the opposite of what a self-test is for.
+            if not m.get("E105", "").startswith("ambiguous"):
                 print("self-test FAIL: registry descriptions are not parsed "
                       f"(E105 read as {m.get('E105')!r})")
+                ok = False
+            if len(m) < 200 or any(not v for v in m.values()):
+                print(f"self-test FAIL: parsed {len(m)} description(s), "
+                      "some empty — the entry shape changed")
                 ok = False
         print("self-test: ok" if ok else "self-test: FAILED")
         return 0 if ok else 1
@@ -313,13 +326,26 @@ def main() -> int:
 
     docs_root = args.docs
     if not docs_root.is_dir():
+        # T1388.  This used to print SKIPPED and return 0, and the target
+        # was wired into `gates-source` — a job with no website checkout.
+        # So all three questions reported OK in CI while measuring nothing,
+        # and the passing run was indistinguishable from a real one: the
+        # only difference was a line on stderr that a green job nobody
+        # reads does not show.  Four sibling gates had the identical shape.
+        #
+        # A gate that cannot find its INPUT must get STRICTER, not quieter.
+        # The target now lives in `gates-docs`, which runs where the site is
+        # checked out; `--require-docs` is kept for callers that pass it,
+        # but it no longer decides whether a missing corpus is a failure.
         print(
-            "check-doc-error-codes: SKIPPED — NOT CHECKED "
-            f"(no documentation tree at {docs_root}; pass --docs PATH, "
-            "or --require-docs to make this a failure)",
+            f"check-doc-error-codes: no documentation tree at {docs_root} — "
+            "REFUSING to report OK. This gate's whole subject is the site; "
+            "with the site absent there is nothing to check and 'nothing to "
+            "check' must not read as 'checked, fine'. Point --docs or "
+            "VERUM_DOCS_DIR at a website checkout.",
             file=sys.stderr,
         )
-        return 1 if args.require_docs else 0
+        return 2
 
     bad: list[str] = []
     cited = 0

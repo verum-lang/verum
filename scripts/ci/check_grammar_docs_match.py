@@ -209,12 +209,23 @@ def main() -> int:
         # reporting success without comparing anything ever since.
         # Say so in words that cannot be read as "checked and clean".
         print(
-            "check-grammar-docs-match: SKIPPED — NOT CHECKED "
-            f"(no documentation tree at {docs_root}; pass --docs PATH, "
-            "or --require-docs to make this a failure)",
+        # T1388.  This printed SKIPPED and returned 0, and the target was
+        # ALSO wired into `gates-source` — a job with no website checkout.
+        # There it reported OK while measuring nothing, and a passing run
+        # was indistinguishable from a real one: the only difference was a
+        # stderr line that a green job nobody reads does not show.  Seven
+        # gates had this shape; the target now runs only in `gates-docs`,
+        # where the site is checked out.
+        #
+        # A gate that cannot find its INPUT must get STRICTER, not quieter.
+            f"check-grammar-docs-match: no documentation tree at {docs_root} — REFUSING "
+            "to report OK. This gate's subject is the site; with the site "
+            "absent there is nothing to check, and 'nothing to check' must "
+            "not read as 'checked, fine'. Point --docs or VERUM_DOCS_DIR at "
+            "a website checkout.",
             file=sys.stderr,
         )
-        return 1 if args.require_docs else 0
+        return 2
 
     auth = rules(AUTHORITY.read_text())
     docs = doc_rules(docs_root)

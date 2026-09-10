@@ -300,13 +300,13 @@ pub static REGISTRY: Lazy<HashMap<&'static str, ErrorCodeEntry>> = Lazy::new(|| 
         ErrorCodeEntry { code: "E102", numeric: 102, category: ErrorCategory::NameResolution, description: "wrong number of arguments to a function or method" },
         ErrorCodeEntry { code: "E103", numeric: 103, category: ErrorCategory::NameResolution, description: "field not found on type" },
         ErrorCodeEntry { code: "E104", numeric: 104, category: ErrorCategory::NameResolution, description: "duplicate definition" },
-        ErrorCodeEntry { code: "E105", numeric: 105, category: ErrorCategory::NameResolution, description: "ambiguous name" },
+        ErrorCodeEntry { code: "E105", numeric: 105, category: ErrorCategory::NameResolution, description: "ambiguous name — it could refer to several protocols, or be imported from more than one module" },
         ErrorCodeEntry { code: "E106", numeric: 106, category: ErrorCategory::NameResolution, description: "unresolved type placeholder" },
 
         // ── E2xx: Module ──────────────────────────────────────────────────────
         ErrorCodeEntry { code: "E200", numeric: 200, category: ErrorCategory::Module, description: "import not found" },
         ErrorCodeEntry { code: "E201", numeric: 201, category: ErrorCategory::Module, description: "circular import" },
-        ErrorCodeEntry { code: "E202", numeric: 202, category: ErrorCategory::Module, description: "private item imported" },
+        ErrorCodeEntry { code: "E202", numeric: 202, category: ErrorCategory::Module, description: "visibility error — the named item is not visible from this module" },
         ErrorCodeEntry { code: "E203", numeric: 203, category: ErrorCategory::Module, description: "module not found" },
         ErrorCodeEntry { code: "E204", numeric: 204, category: ErrorCategory::Module, description: "circular constant dependency" },
 
@@ -317,9 +317,9 @@ pub static REGISTRY: Lazy<HashMap<&'static str, ErrorCodeEntry>> = Lazy::new(|| 
         ErrorCodeEntry { code: "E305", numeric: 305, category: ErrorCategory::Memory, description: "use of an uninitialized or partially initialized value" },
         ErrorCodeEntry { code: "E306", numeric: 306, category: ErrorCategory::Memory, description: "capability violation" },
         ErrorCodeEntry { code: "E310", numeric: 310, category: ErrorCategory::Memory, description: "borrow conflict; also use after move, an invalid index, and a `&checked` reference that may escape" },
-        ErrorCodeEntry { code: "E311", numeric: 311, category: ErrorCategory::Memory, description: "double move" },
+        ErrorCodeEntry { code: "E311", numeric: 311, category: ErrorCategory::Memory, description: "field already borrowed — cannot borrow while a field of it is" },
         ErrorCodeEntry { code: "E312", numeric: 312, category: ErrorCategory::Memory, description: "lifetime error" },
-        ErrorCodeEntry { code: "E313", numeric: 313, category: ErrorCategory::Memory, description: "dangling reference" },
+        ErrorCodeEntry { code: "E313", numeric: 313, category: ErrorCategory::Memory, description: "cannot move a value while it is borrowed" },
         ErrorCodeEntry { code: "E314", numeric: 314, category: ErrorCategory::Memory, description: "borrow conflict" },
         ErrorCodeEntry { code: "E315", numeric: 315, category: ErrorCategory::Memory, description: "use after free" },
         ErrorCodeEntry { code: "E316", numeric: 316, category: ErrorCategory::Memory, description: "double free" },
@@ -364,9 +364,9 @@ pub static REGISTRY: Lazy<HashMap<&'static str, ErrorCodeEntry>> = Lazy::new(|| 
 
         // ── E5xx: Verification ────────────────────────────────────────────────
         ErrorCodeEntry { code: "E500", numeric: 500, category: ErrorCategory::Verification, description: "contract violated" },
-        ErrorCodeEntry { code: "E501", numeric: 501, category: ErrorCategory::Verification, description: "SMT solver timeout" },
-        ErrorCodeEntry { code: "E502", numeric: 502, category: ErrorCategory::Verification, description: "refinement predicate false" },
-        ErrorCodeEntry { code: "E503", numeric: 503, category: ErrorCategory::Verification, description: "precondition not satisfied" },
+        ErrorCodeEntry { code: "E501", numeric: 501, category: ErrorCategory::Verification, description: "invalid refinement predicate; also: a meta function declared pure has side effects" },
+        ErrorCodeEntry { code: "E502", numeric: 502, category: ErrorCategory::Verification, description: "a meta function uses runtime contexts, which are not available at compile time" },
+        ErrorCodeEntry { code: "E503", numeric: 503, category: ErrorCategory::Verification, description: "a pure function has side effects" },
         ErrorCodeEntry { code: "E504", numeric: 504, category: ErrorCategory::Verification, description: "postcondition not established" },
         ErrorCodeEntry { code: "E505", numeric: 505, category: ErrorCategory::Verification, description: "corecursive function is non-productive" },
         ErrorCodeEntry { code: "E506", numeric: 506, category: ErrorCategory::Verification, description: "meta argument violates its refinement" },

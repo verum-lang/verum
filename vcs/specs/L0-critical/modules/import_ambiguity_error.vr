@@ -2,7 +2,7 @@
 // @tier: 0
 // @level: L0
 // @tags: modules, imports, ambiguity, error
-// @expect-error: E602
+// @expect-error: E105
 
 /// Import ambiguity detection.
 /// When the same name is imported from multiple modules,

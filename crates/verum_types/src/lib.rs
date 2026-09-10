@@ -3369,7 +3369,7 @@ impl TypeError {
                 builder.build()
             }
 
-            RecursionLimit(msg) => DiagnosticBuilder::error().code("E804")
+            RecursionLimit(msg) => DiagnosticBuilder::error().code("E321")
                 .message(format!("recursion limit exceeded: {}", msg))
                 .build(),
 
@@ -3486,7 +3486,7 @@ impl TypeError {
                 module_path,
                 span,
             } => {
-                let mut builder = DiagnosticBuilder::error().code("E601")
+                let mut builder = DiagnosticBuilder::error().code("E202")
                 .message(format!(
                     "visibility error: '{}' is {} in module '{}'",
                     name, visibility, module_path
@@ -3502,7 +3502,7 @@ impl TypeError {
                 sources,
                 span,
             } => {
-                let mut builder = DiagnosticBuilder::error().code("E602")
+                let mut builder = DiagnosticBuilder::error().code("E105")
                 .message(format!(
                     "ambiguous name: '{}' is imported from multiple modules: {}",
                     name, sources
@@ -3518,8 +3518,14 @@ impl TypeError {
                 constants_in_cycle,
                 span,
             } => {
+                // The renderer prints this diagnostic's own code, which is
+                // E204.  The text used to open with a SECOND one — `E600:`,
+                // a number this error stopped carrying — so a user saw
+                // `error<E204>: E600: circular constant dependency …` and
+                // `verum explain E600` answered about the context system.
+                // `check-error-code-namespaces` now holds that class at zero.
                 let mut msg = format!(
-                    "E600: circular constant dependency detected: {}\n  \
+                    "circular constant dependency detected: {}\n  \
                      The following constants form a cycle:\n",
                     cycle_path
                 );
