@@ -70,6 +70,8 @@ from __future__ import annotations
 
 import collections
 import pathlib
+import contextlib
+import io
 import re
 import sys
 
@@ -82,6 +84,47 @@ STUB = re.compile(
 # Set from the measurement above.  Lowered by FIXING — a root removed —
 # never by argument, and never raised to match a drift.
 BASELINE_SHARED_IDS = 2
+
+# THE COUNT BECAME A ROSTER (T1330). `2 of 6` says how many ids stand for
+# several names and never WHICH, so the one shape it cannot report is the
+# SWAP: one collision resolves, another appears, the total holds and the
+# gate prints `baseline 2`.
+#
+# THE KEY IS THE NAME SET, NOT THE ID. An id is a hash of whatever the
+# stub was minted from; the names are what actually collide, and they are
+# what a reader can act on. (The ids are stable enough to quote —
+# 4269801471 appears in this file's own docstring from an earlier run AND
+# in the `ExecutionEnv.new()` panic measured 2026-09-10 — but that is
+# context, not identity.)
+#
+# Measured 2026-09-10 from a full instrumented bake: 599 [qcall] lines,
+# 75 stubs, 6 ids, 2 of them shared.
+KNOWN_SHARED: set[tuple[str, ...]] = {
+    ("InvalidInput", "NotFound", "access_name", "flags_default", "open_readonly"),
+    ("BcTerminated", "open_admin"),
+}
+
+
+def compare_membership(shared: dict) -> int:
+    """Report a swap. Equal counts with different name sets must NOT pass."""
+    have = {tuple(sorted(names)) for names in shared.values()}
+    if have == KNOWN_SHARED:
+        print(f"  membership matches the roster ({len(have)} group(s)).")
+        return 0
+    new_groups = sorted(have - KNOWN_SHARED)
+    gone = sorted(KNOWN_SHARED - have)
+    if new_groups:
+        print(f"  MEMBERSHIP MOVED: {len(new_groups)} name-set(s) not on the roster:")
+        for g in new_groups:
+            print(f"    + {', '.join(g)}")
+    if gone:
+        print(f"  MEMBERSHIP MOVED: {len(gone)} roster name-set(s) the bake no "
+              "longer produces:")
+        for g in gone:
+            print(f"    - {', '.join(g)}")
+    print("  A `+` group is a new collision; a `-` group is one that resolved "
+          "and must leave KNOWN_SHARED in the commit that earned it.")
+    return 1
 
 
 def census(text: str):
@@ -107,6 +150,7 @@ def self_test() -> int:
     )
     by_id, records = census(sample)
     if len(records) != 3:
+
         print(f"self-test: parsed {len(records)} records, wanted 3"); bad += 1
     if sorted(by_id) != ["4269801458", "4269801471"]:
         print(f"self-test: ids {sorted(by_id)}"); bad += 1
@@ -118,6 +162,20 @@ def self_test() -> int:
     # the exact failure its neighbours carry a floor against.
     if census("nothing here\n")[1]:
         print("self-test: parsed records out of an empty log"); bad += 1
+
+    # THE MEMBERSHIP HALF, proved by FAILING. A compare that looked only at
+    # the COUNT passes every assertion above and dies here — which is the
+    # defect this gate carried until T1330.
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        swapped = compare_membership({1: {"BcTerminated", "open_SWAPPED"},
+                                      2: set(sorted(KNOWN_SHARED)[0])})
+        identical = compare_membership({i: set(g) for i, g in enumerate(KNOWN_SHARED)})
+    if swapped == 0:
+        print("self-test: compare_membership PASSED a same-size swap"); bad += 1
+    if identical != 0:
+        print("self-test: compare_membership rejected the roster itself"); bad += 1
+
     print("self-test: OK" if not bad else f"self-test: {bad} FAILED")
     return bad
 
@@ -171,7 +229,11 @@ def main() -> int:
         print(f"  BELOW baseline by {BASELINE_SHARED_IDS - len(shared)} — lower "
               "BASELINE_SHARED_IDS so the ground stays held.")
         return 1 if check else 0
-    return 0
+
+    # The count agreed. That is exactly the state in which a SWAP is
+    # invisible, so the membership question is asked HERE and not earlier.
+    rc = compare_membership(shared)
+    return rc if check else 0
 
 
 if __name__ == "__main__":
