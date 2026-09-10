@@ -767,8 +767,8 @@ jobs:
           python3 scripts/ci/check_doc_mounts_resolve.py
           python3 scripts/ci/check_doc_error_code_meaning.py --self-test
           python3 scripts/ci/check_doc_error_code_meaning.py
-          python3 scripts/ci/check_doc_method_return_types.py --self-test
-          python3 scripts/ci/check_doc_method_return_types.py
+          python3 scripts/ci/check_doc_method_signatures.py --self-test
+          python3 scripts/ci/check_doc_method_signatures.py
           # Two more that need only the website checkout, added
           # 2026-09-07 with a CALLER from the start — the whole reason
           # this step's comment exists is that gates landed as Makefile

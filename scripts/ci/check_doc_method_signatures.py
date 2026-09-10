@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""A documented method must return what `core/` says it returns.
+"""A documented method signature must be the one `core/` declares.
 
 WHY THIS AND NOT ITS FIVE SIBLINGS
 ----------------------------------
@@ -67,9 +67,47 @@ OWNER = re.compile(
 )
 METH = re.compile(
     r"^\s*(?:public\s+)?fn\s+([a-z_][a-z0-9_]*)\s*(?:<[^(>]*>)?\s*\(\s*"
-    r"(?:&(?:mut\s+|checked\s+|unsafe\s+)?self|mut\s+self|self)\b[^)]{0,200}\)"
-    r"\s*->\s*([^{;\n]+)"
+    r"(&(?:mut\s+|checked\s+|unsafe\s+)?self|mut\s+self|self)\s*"
+    r"(?:,([^)]{0,200}))?\)"
+    r"\s*(?:->\s*([^{;\n]+))?"
 )
+
+
+def receiver(s: str) -> str:
+    return re.sub(r"\s+", " ", s.strip())
+
+
+def param_types(s: str | None) -> str:
+    """TYPES only, positionally.
+
+    A parameter NAME is not part of a positional call, and comparing
+    names made 23 of 27 findings cosmetic — `min` against `min_level`,
+    `f` against `frame`, `cb` against `callback`. Splitting on commas
+    at depth zero keeps `Result<A, B>` and `(A, B)` in one piece.
+    """
+    if not s:
+        return ""
+    s = s.split("//")[0].strip().rstrip(",")
+    pieces, depth, cur = [], 0, ""
+    for ch in s:
+        if ch in "<([":
+            depth += 1
+        elif ch in ">)]":
+            depth -= 1
+        if ch == "," and depth == 0:
+            pieces.append(cur)
+            cur = ""
+        else:
+            cur += ch
+    pieces.append(cur)
+    out = []
+    for piece in pieces:
+        ty = piece.split(":", 1)[1] if ":" in piece else piece
+        ty = re.sub(r"\s+", "", ty)
+        if "Self." in ty:
+            return "ASSOC"
+        out.append(ty)
+    return ",".join(out)
 # Findings the page is right about. Empty, and that is the finished
 # state: the twenty-two it was built from are corrected, not tolerated.
 KNOWN: dict[tuple[str, str], str] = {}
@@ -98,7 +136,10 @@ def harvest(text: str) -> dict[tuple[str, str], set[str]]:
             continue
         m = METH.match(line)
         if m and owner:
-            out.setdefault((owner, m.group(1)), set()).add(norm(m.group(2)))
+            out.setdefault((owner, m.group(1)), set()).add(
+                (receiver(m.group(2)), param_types(m.group(3)),
+                 norm(m.group(4)) if m.group(4) else "NORETURN")
+            )
     return out
 
 
@@ -161,8 +202,26 @@ def self_test() -> int:
     if bad:
         print(f"self-test: {bad} FAILED", file=sys.stderr)
         return 1
-    print(f"[ok] self-test: 2 owner-tracking cases, 5 normalisations, "
-          f"3 anchors, {len(KNOWN)} on the roster")
+    for label, src, want in (
+        ("names ignored, types kept", "min: ContextLogLevel", "ContextLogLevel"),
+        ("depth-zero split", "a: Result<A, B>, b: Int", "Result<A,B>,Int"),
+        ("associated parameter", "msg: Self.Msg", "ASSOC"),
+        ("no parameters", None, ""),
+    ):
+        got = param_types(src)
+        if got != want:
+            print(f"self-test: param {label}: {src!r} -> {got!r}, wanted {want!r}",
+                  file=sys.stderr)
+            bad += 1
+    if receiver("&mut  self") != "&mut self":
+        print("self-test: receiver normalisation", file=sys.stderr)
+        bad += 1
+    if bad:
+        print(f"self-test: {bad} FAILED", file=sys.stderr)
+        return 1
+    print(f"[ok] self-test: 2 owner-tracking cases, 5 return normalisations, "
+          f"4 parameter cases, 1 receiver case, 3 anchors, "
+          f"{len(KNOWN)} on the roster")
     return 0
 
 
@@ -171,7 +230,7 @@ def main() -> int:
         return self_test()
     if not DOCS.is_dir():
         print(
-            f"check-doc-method-return-types: no website at {DOCS} — REFUSING "
+            f"check-doc-method-signatures: no website at {DOCS} — REFUSING "
             f"to report OK. A gate whose INPUT is missing is a failed "
             f"checkout, not 'nothing to do'; set VERUM_DOCS_DIR.",
             file=sys.stderr,
@@ -190,29 +249,33 @@ def main() -> int:
             for r in v:
                 doc[k].add((r, str(p.relative_to(DOCS))))
 
-    comparable = 0
-    off: list[str] = []
+    off: dict[str, list[str]] = {"receiver": [], "parameters": [], "return": []}
     for k in sorted(set(doc) & set(core)):
         if len(core[k]) != 1:
             continue
-        c = next(iter(core[k]))
-        if c in SKIP:
-            continue
-        for d, page in sorted(doc[k]):
-            if d in SKIP or d == c:
-                continue
-            comparable += 1
+        cr, cp, ct = next(iter(core[k]))
+        for (dr, dp, dt), page in sorted(doc[k]):
             if KNOWN.get(k):
                 continue
-            off.append(f"{k[0]}.{k[1]}  page {d!r} vs core {c!r}   [{page}]")
-        if not any(d in SKIP for d, _ in doc[k]):
-            comparable += 0
+            where = f"{k[0]}.{k[1]}"
+            if dr != cr:
+                off["receiver"].append(
+                    f"{where}  page {dr!r} vs core {cr!r}   [{page}]")
+            elif dp != cp and "ASSOC" not in (dp, cp):
+                off["parameters"].append(
+                    f"{where}  page ({dp}) vs core ({cp})   [{page}]")
+            elif (dt != ct and dt not in SKIP and ct not in SKIP
+                  and "NORETURN" not in (dt, ct)):
+                off["return"].append(
+                    f"{where}  page {dt!r} vs core {ct!r}   [{page}]")
 
     total = sum(1 for k in set(doc) & set(core) if len(core[k]) == 1)
-    print(f"check-doc-method-return-types: {len(doc)} documented (owner, "
+    found = sum(len(v) for v in off.values())
+    print(f"check-doc-method-signatures: {len(doc)} documented (owner, "
           f"method) pair(s) across {len(pages)} page(s), {total} comparable "
-          f"against core — {len(off)} returning something core does not "
-          f"({len(KNOWN)} on the roster)")
+          f"against core — {len(off['receiver'])} receiver, "
+          f"{len(off['parameters'])} parameter and {len(off['return'])} return "
+          f"disagreement(s) ({len(KNOWN)} on the roster)")
 
     if total < FLOOR:
         print(f"\nonly {total} pair(s) were comparable, below the floor of "
@@ -223,13 +286,14 @@ def main() -> int:
               file=sys.stderr)
         return 2
 
-    for s in off:
-        print(f"    + {s}")
-    if off:
-        print("  A reader writes the `match` this row promises. Correct the "
-              "page, or add the pair to KNOWN with why core is the one that "
-              "is wrong.")
-    return 1 if off else 0
+    for axis in ("receiver", "parameters", "return"):
+        for s in off[axis]:
+            print(f"    + [{axis}] {s}")
+    if found:
+        print("  A reader copies the signature and the compiler refuses it. "
+              "Correct the page, or add the pair to KNOWN with why core is "
+              "the one that is wrong.")
+    return 1 if found else 0
 
 
 if __name__ == "__main__":
