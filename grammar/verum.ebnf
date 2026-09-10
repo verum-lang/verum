@@ -1458,7 +1458,22 @@ ffi_item = ffi_function_decl
          | ffi_ownership_spec ;
 
 ffi_function_decl = '@extern' , '(' , string_lit , [ ',' , calling_convention_attr ] , ')' ,
-                    'fn' , identifier , [ generics ] , '(' , param_list , ')' , [ '->' , type_expr ] , ';' ;
+                    'fn' , identifier , [ generics ] , '(' , ffi_param_list , ')' , [ '->' , type_expr ] , ';' ;
+
+(* A FOREIGN declaration may end in `...`, mirroring the C prototype it     *)
+(* describes: `int open(const char *path, int oflag, ...)`.  Only a FOREIGN *)
+(* one — a Verum function body has no way to read the tail, and the         *)
+(* checker refuses a call that passes one (E102).                           *)
+(*                                                                          *)
+(* This production was MISSING while four layers implemented the feature    *)
+(* and `website:docs/language/ffi.md` taught it: the parser sets            *)
+(* `is_variadic`, VBC codegen carries it, LLVM honours it at eight sites,   *)
+(* and the Tier-0 FFI runtime prepares a per-call-site CIF for it.  A       *)
+(* variadic call works and is measured to work; the grammar simply did not  *)
+(* say so.  Added 2026-09-10 (T1397) after checking all three foreign       *)
+(* forms accept it.                                                         *)
+ffi_param_list  = [ param , { ',' , param } , [ ',' , '...' ] , [ ',' ] ]
+                | '...' ;
 
 (* Extern block - groups FFI functions with a common ABI *)
 (* Examples:
@@ -1473,7 +1488,7 @@ ffi_function_decl = '@extern' , '(' , string_lit , [ ',' , calling_convention_at
 *)
 extern_block = 'extern' , [ string_lit ] , '{' , { extern_fn_decl } , '}' ;
 extern_fn_decl = [ visibility ] , 'fn' , identifier , [ generics ] ,
-                 '(' , param_list , ')' , [ '->' , type_expr ] , ';' ;
+                 '(' , ffi_param_list , ')' , [ '->' , type_expr ] , ';' ;
 
 calling_convention_attr = 'calling_convention' , '=' , string_lit ;
 
