@@ -71,6 +71,7 @@ mount io.file.{File, read_to_string as file_read_to_string, read as file_read, w
 @cfg(target_os = "linux")
 mount sys.linux.syscall.{
     stat as sys_stat,
+    stat_zeroed as sys_stat_zeroed,
     lstat as sys_lstat,
     mkdir as sys_mkdir,
     rmdir as sys_rmdir,
@@ -95,6 +96,7 @@ mount sys.linux.syscall.{
 @cfg(target_os = "macos")
 mount sys.darwin.libsystem.{
     safe_stat as sys_stat,
+    safe_stat_zeroed as sys_stat_zeroed,
     safe_lstat as sys_lstat,
     safe_mkdir as sys_mkdir,
     safe_rmdir as sys_rmdir,
@@ -677,7 +679,7 @@ implement Drop for ReadDir {
 public fn metadata(path: &Path) -> IoResult<Metadata> {
     let path_str = path.as_str();
     let path_bytes = path_str.as_bytes();
-    let mut stat_buf = unsafe { @zeroed() as Stat };
+    let mut stat_buf: Stat = sys_stat_zeroed();
 
     match sys_stat(path_bytes, &mut stat_buf) {
         Result.Ok(()) => {
@@ -692,7 +694,7 @@ public fn metadata(path: &Path) -> IoResult<Metadata> {
 public fn symlink_metadata(path: &Path) -> IoResult<Metadata> {
     let path_str = path.as_str();
     let path_bytes = path_str.as_bytes();
-    let mut stat_buf = unsafe { @zeroed() as Stat };
+    let mut stat_buf: Stat = sys_stat_zeroed();
 
     match sys_lstat(path_bytes, &mut stat_buf) {
         Result.Ok(()) => {

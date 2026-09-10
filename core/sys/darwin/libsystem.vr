@@ -735,6 +735,24 @@ public type KEvent is {
 };
 
 /// kevent64 structure (64-bit ident)
+/// A zeroed `KEvent`, for the fixed-size arrays a kqueue driver keeps.
+///
+/// A FREE function, not `implement KEvent`: a second `KEvent` is declared
+/// privately in `core/sys/fs_watch.vr`, and giving a colliding name methods
+/// moves `check-type-name-collisions` off its baseline (measured on `Stat`
+/// the same day). Replaces `@zero<KEvent>()`, which is not a meta-function
+/// and typed as `Unit` — see T1352.
+public fn kevent_zeroed() -> KEvent {
+    return KEvent {
+        ident: 0,
+        filter: 0,
+        flags: 0,
+        fflags: 0,
+        data: 0,
+        udata: 0 as &unsafe Byte,
+    };
+}
+
 public type KEvent64 is {
     ident: UInt64,
     filter: Int16,
@@ -746,11 +764,27 @@ public type KEvent64 is {
 };
 
 /// stat structure
+/// FIELD ORDER IS C's ORDER, NOT A CHOICE. The FFI marshaller derives
+/// `FfiStructLayout` from the DECLARED order under C alignment rules, so a
+/// record reordered relative to its C counterpart packs the wrong bytes
+/// even when the parameter correctly resolves to `StructPtr`.
+///
+/// Measured with clang `offsetof` on Darwin (T1192):
+///     st_dev 0(4)  st_mode 4(2)  st_nlink 6(2)  st_ino 8(8)
+///     st_uid 16(4) st_gid 20(4)  st_rdev 24(4)
+///     st_atimespec 32(16) st_mtimespec 48(16) st_ctimespec 64(16)
+///     st_birthtimespec 80(16) st_size 96(8) st_blocks 104(8)
+///     st_blksize 112(4) st_flags 116(4) st_gen 120(4)   sizeof = 144
+///
+/// `st_ino` used to be declared SECOND while C has it FOURTH. Alignment
+/// put it on offset 8 anyway, so a probe that checked `st_ino` alone
+/// agreed and proved nothing — every other field after `st_dev` was
+/// displaced.
 public type DarwinStat is {
     st_dev: Int32,
-    st_ino: UInt64,
     st_mode: UInt16,
     st_nlink: UInt16,
+    st_ino: UInt64,
     st_uid: UInt32,
     st_gid: UInt32,
     st_rdev: Int32,
@@ -764,6 +798,39 @@ public type DarwinStat is {
     st_flags: UInt32,
     st_gen: UInt32,
 };
+
+/// A zeroed `DarwinStat` — the buffer `fstat(2)` and `stat(2)` fill in.
+///
+/// This exists because the spelling the stdlib used until 2026-09-10,
+/// `unsafe { @zeroed() }`, is NOT IN THE LANGUAGE. Measured on all three
+/// forms in one programme: `@zeroed()` warns `E0410: unknown
+/// meta-function` and then types as `Unit` (the `@` set is the
+/// compile-time one — `@const`, `@cfg`, `@file`, …); bare `zeroed()` and
+/// `unsafe { zeroed() }` both fail `E100: unbound variable`. The
+/// `zeroed` entry in the VBC intrinsic registry has no callable spelling
+/// in expression position — only array-initialiser position recognises
+/// the bare name.
+///
+/// Typing as `Unit` is why `File.size()` was red at BOTH tiers: the
+/// buffer handed to the FFI was a zero-byte object, so `safe_fstat`
+/// reported failure (`size ERR {Other, None}`) and a direct field read
+/// panicked with `field index 11 … exceeds object data size 0
+/// type_id=16777230 type='?'`. Data size 0 is the signature of `Unit`,
+/// not of a mis-laid struct — which is why `@repr(C)` on this type was
+/// the wrong fix and was withdrawn before it shipped. A caller-built
+/// buffer survives the same call and reads back correctly.
+public fn safe_stat_zeroed() -> DarwinStat {
+        return DarwinStat {
+            st_dev: 0, st_ino: 0, st_mode: 0, st_nlink: 0,
+            st_uid: 0, st_gid: 0, st_rdev: 0,
+            st_atime: DarwinTimespec { tv_sec: 0, tv_nsec: 0 },
+            st_mtime: DarwinTimespec { tv_sec: 0, tv_nsec: 0 },
+            st_ctime: DarwinTimespec { tv_sec: 0, tv_nsec: 0 },
+            st_birthtime: DarwinTimespec { tv_sec: 0, tv_nsec: 0 },
+            st_size: 0, st_blocks: 0, st_blksize: 0,
+        st_flags: 0, st_gen: 0,
+    };
+}
 
 /// sockaddr (generic)
 /// Platform-local bare alias (T0435): `Stat` on Darwin IS DarwinStat

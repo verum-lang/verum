@@ -540,6 +540,17 @@ attribute_item  = '@' , attribute , item ;
  *   - @ludic_design               VVA Part B §10.
  *   - @cut_elimination[(bound=<int>)]            VVA Part B §10.
  *
+ * THE FALLTHROUGH IS FOR ATTRIBUTE POSITION ONLY.  "Ignored as
+ * advisory" is a sound default where the marker annotates a
+ * declaration: dropping it loses advice, not a value.  In EXPRESSION
+ * position the same tolerance is not benign — an `@name(...)` the
+ * type checker does not know becomes `Unit`, a zero-byte object, with
+ * only a parser warning (E0410).  A buffer built that way and handed
+ * to an FFI is a pointer to nothing; a function body consisting of one
+ * such call returns `Unit` whatever its signature says.  Measured
+ * 2026-09-10 on `@zeroed()` in the standard library's `fstat` path.
+ * Gate: `scripts/ci/check_meta_function_names.py`.
+ *
  * Per V8.1 META1 architectural principle: typed attributes are
  * reserved for compiler-internal dispatch where Rust-side performance
  * and TCB constraints matter. Every advisory marker that doesn't

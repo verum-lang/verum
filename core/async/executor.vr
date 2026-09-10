@@ -1048,7 +1048,8 @@ implement AsyncRuntime {
             ready_queue: Mutex.new(List.new()),
             timer_queue: Mutex.new(List.new()),
             next_task_id: AtomicInt.new(1),
-            io_results: [@zero<CompletionResult>(); 64],
+            // `CompletionResult.zeroed()`, not `@zero<...>()` — T1352.
+            io_results: [CompletionResult.zeroed(); 64],
             io_result_count: 0,
             io_engine_ptr: 0,
             tick_count: AtomicInt.new(0),

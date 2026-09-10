@@ -471,6 +471,95 @@ def collisions(found, scope: str) -> dict[tuple[str, int], set[str]]:
     return out
 
 
+MEMBERSHIP = pathlib.Path(__file__).with_name("barename_collision_membership.txt")
+
+# WHY A ROSTER AND NOT ONLY A COUNT.
+#
+# The count baselines below answer "did the population grow". They cannot
+# answer "did its MEMBERSHIP change", and a swap of equal size prints
+# `OK: 617 collisions [all], at baseline.` A file that stops colliding and
+# another that starts are two separate events, and the one that starts is
+# the one worth reading.
+#
+# The roster lives in a sidecar rather than inline because 617 entries would
+# be most of this file — the tree already keeps baselines that way
+# (`panic_surface_baseline.txt`, `core_compile_known_failures.txt`).
+#
+# It reports WHICH names moved, not merely that something did. A digest
+# alone would say "something changed" and reproduce, one level up, the
+# problem this exists to close.
+
+
+def membership_lines(coll: dict) -> list[str]:
+    """`name/arity<TAB>file,file,...`, sorted, one line per colliding key."""
+    out = []
+    for key, modules in sorted(coll.items()):
+        label = "/".join(str(k) for k in key)
+        out.append(f"{label}\t{','.join(sorted(modules))}")
+    return out
+
+
+def read_membership() -> dict[str, set[str]] | None:
+    if not MEMBERSHIP.is_file():
+        return None
+    got: dict[str, set[str]] = {}
+    for line in MEMBERSHIP.read_text().splitlines():
+        line = line.rstrip("\n")
+        if not line or line.startswith("#"):
+            continue
+        label, _, files = line.partition("\t")
+        got[label] = set(f for f in files.split(",") if f)
+    return got
+
+
+def check_membership(coll: dict) -> int:
+    """Compare the live membership against the roster. Absent roster is a
+    REFUSAL, not a pass: an instrument that cannot find its input gets
+    stricter."""
+    want = read_membership()
+    if want is None:
+        print(
+            f"REFUSING TO PASS: {MEMBERSHIP.name} is missing. The count baseline "
+            f"alone is blind to a swap of equal size. Regenerate it with "
+            f"--write-membership in a commit that says why.",
+            file=sys.stderr,
+        )
+        return 2
+    have = {
+        "/".join(str(k) for k in key): set(mods) for key, mods in coll.items()
+    }
+    new = sorted(set(have) - set(want))
+    gone = sorted(set(want) - set(have))
+    moved = sorted(k for k in set(have) & set(want) if have[k] != want[k])
+    if not (new or gone or moved):
+        print(f"OK: membership matches the roster ({len(have)} names).")
+        return 0
+    if new:
+        print(f"MEMBERSHIP: {len(new)} name(s) newly colliding:", file=sys.stderr)
+        for k in new[:10]:
+            print(f"  + {k}: {', '.join(sorted(have[k]))}", file=sys.stderr)
+    if gone:
+        print(f"MEMBERSHIP: {len(gone)} name(s) no longer colliding:", file=sys.stderr)
+        for k in gone[:10]:
+            print(f"  - {k}", file=sys.stderr)
+    if moved:
+        print(
+            f"MEMBERSHIP: {len(moved)} name(s) kept their count but CHANGED FILES "
+            f"— the swap a count cannot see:",
+            file=sys.stderr,
+        )
+        for k in moved[:10]:
+            print(f"  ~ {k}", file=sys.stderr)
+            print(f"      was: {', '.join(sorted(want[k]))}", file=sys.stderr)
+            print(f"      now: {', '.join(sorted(have[k]))}", file=sys.stderr)
+    print(
+        "\n  Every line above is a real change to which bodies a bare name can "
+        "reach.\n  Regenerate with --write-membership in the commit that earns it.",
+        file=sys.stderr,
+    )
+    return 1
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--check", action="store_true", help="ratchet mode")
@@ -493,6 +582,15 @@ def main() -> int:
         "--typed",
         action="store_true",
         help="key on (name, arity, first-param type): duplicated WORK, not a shared verb",
+    )
+    ap.add_argument(
+        "--write-membership",
+        action="store_true",
+        help=(
+            "regenerate the membership roster from the tree. Run it in the same "
+            "commit that earns the change, never to silence a failure you have "
+            "not read."
+        ),
     )
     args = ap.parse_args()
 
@@ -522,6 +620,26 @@ def main() -> int:
 
     found = collect(typed=args.typed)
     coll = collisions(found, args.scope)
+
+    if args.write_membership:
+        if args.scope != "all" or args.typed:
+            print(
+                "--write-membership is defined for the untyped `all` scope only: "
+                "the roster is one file and must describe one population.",
+                file=sys.stderr,
+            )
+            return 2
+        header = [
+            "# Membership roster for check_barename_collisions.py --check.",
+            "# One line per colliding (name, arity): the name, a TAB, then every",
+            "# file that declares it. The count baselines in the script answer",
+            "# 'did the population grow'; this answers 'did its membership change',",
+            "# which a count of equal size cannot.",
+            "# Regenerate with: check_barename_collisions.py --check --write-membership",
+        ]
+        MEMBERSHIP.write_text("\n".join(header + membership_lines(coll)) + "\n")
+        print(f"wrote {MEMBERSHIP.name}: {len(coll)} names")
+        return 0
     if args.typed:
         if args.scope == "prelude":
             print(
@@ -567,6 +685,11 @@ def main() -> int:
         return 1
 
     print(f"OK: {count} collisions [{args.scope}], at baseline.")
+
+    # The count agreed. That is exactly the state in which a SWAP is
+    # invisible, so the membership question is asked HERE and not earlier.
+    if args.scope == "all" and not args.typed:
+        return check_membership(coll)
     return 0
 
 

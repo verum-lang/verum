@@ -559,7 +559,32 @@ pub(in super::super) fn handle_get_field(
                 ty.variants.len()
             ),
             Some(ty) => format!(" — descriptor declares NO fields (kind {:?})", ty.kind),
-            None => " — no type descriptor found for that id".to_string(),
+            // The most informative case in this match, and the one that
+            // used to say the least. No descriptor for the id means the
+            // object was never CONSTRUCTED — not constructed to a
+            // different layout. Measured twice on one line of
+            // `core/io/file.vr` (T1192): `unsafe { @zeroed() }` is not a
+            // meta-function, so the buffer typed as `Unit` and the FFI
+            // received a zero-byte object. Both times the arithmetic in
+            // the first half of this message sent a reader after a layout
+            // defect — the exact detour the comment on the Sum arm above
+            // predicts, in the one arm that did not warn about it.
+            //
+            // The two numbers also come from DIFFERENT places: `type_id`
+            // is read from the runtime object's header, while the field
+            // INDEX was fixed at compile time by whichever declaration won
+            // name resolution. When the object is empty the index is the
+            // only one of the two that carries information — and if two
+            // declarations of one name have different field orders, the
+            // index says which one won.
+            None => " — NO type descriptor for that id, so this object was \
+                     never CONSTRUCTED rather than built to a different \
+                     layout (an expression that typed as Unit, or a value \
+                     of a type that did not resolve). The offsets above \
+                     describe an EMPTY object: data size 0 means ABSENT, \
+                     not mis-laid. The field index came from compile-time \
+                     name resolution, not from this object"
+                .to_string(),
         };
         return Err(InterpreterError::Panic {
             message: format!(

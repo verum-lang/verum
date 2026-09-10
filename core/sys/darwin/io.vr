@@ -38,6 +38,7 @@ mount sys.io_engine.{
 mount super.libsystem.{
     kqueue as raw_kqueue, kevent, kevent64, close as raw_close, read, write,
     KEvent, KEvent64, Timespec,
+    kevent_zeroed,
     EVFILT_READ, EVFILT_WRITE, EVFILT_TIMER, EVFILT_USER,
     EVFILT_VNODE, EVFILT_SIGNAL, EVFILT_PROC,
     EV_ADD, EV_DELETE, EV_ENABLE, EV_DISABLE, EV_ONESHOT, EV_CLEAR,
@@ -251,8 +252,10 @@ implement KqueueDriver {
             kq: kq_fd,
             open: true,
             pending: 0,
-            events: [@zero<KEvent>(); 256],
-            changes: [@zero<KEvent>(); 256],
+            // `kevent_zeroed()`, not `@zero<KEvent>()`: the latter is not a
+            // meta-function, so both arrays used to hold 256 `Unit`s (T1352).
+            events: [kevent_zeroed(); 256],
+            changes: [kevent_zeroed(); 256],
             num_changes: 0,
             wake_registered: false,
         };

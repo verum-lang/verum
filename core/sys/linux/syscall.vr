@@ -40,6 +40,9 @@ mount core.intrinsics.syscall6;
 // mirror that the unifier accepts against `[Byte]` /
 // `[UInt8]` at FFI boundaries).
 mount core.base.coercion.{IntCoercible, BytewiseFfi};
+// See the note in core/base/env.vr: `@unreachable()` is not a
+// meta-function, and the bare name needs this mount here.
+mount core.base.panic.{unreachable};
 
 // Architecture-specific syscall numbers. `sys.linux.arch` chooses the
 // right numeric value for x86_64 or aarch64 via @cfg(target_arch).
@@ -503,13 +506,13 @@ public fn gettid() -> Int {
 public fn exit(code: Int) -> ! {
     unsafe { syscall_raw(SYS_EXIT, code, 0, 0, 0, 0, 0) };
     // This should never return
-    @unreachable()
+    unreachable("exit syscall returned")
 }
 
 /// Exit the process (all threads).
 public fn exit_group(code: Int) -> ! {
     unsafe { syscall_raw(SYS_EXIT_GROUP, code, 0, 0, 0, 0, 0) };
-    @unreachable()
+    unreachable("exit_group syscall returned")
 }
 
 /// Nanosleep (high-precision sleep).
@@ -712,6 +715,23 @@ public type Stat is {
     st_ctime_nsec: Int64,
     _unused: [Int64; 3],
 };
+
+/// A zeroed `Stat` — the buffer `fstat(2)`/`stat(2)`/`lstat(2)` fill in.
+/// Twin of `DarwinStat.zeroed()`; see that one for why the previous
+/// spelling (`unsafe { @zeroed() }`) typed as `Unit` and handed the FFI a
+/// zero-byte object. UNVERIFIED ON LINUX from this checkout: written to
+/// the same shape as the Darwin one, which is measured.
+public fn stat_zeroed() -> Stat {
+        return Stat {
+            st_dev: 0, st_ino: 0, st_nlink: 0, st_mode: 0,
+            st_uid: 0, st_gid: 0, _pad0: 0, st_rdev: 0,
+            st_size: 0, st_blksize: 0, st_blocks: 0,
+            st_atime_sec: 0, st_atime_nsec: 0,
+            st_mtime_sec: 0, st_mtime_nsec: 0,
+            st_ctime_sec: 0, st_ctime_nsec: 0,
+        _unused: [0 as Int64; 3],
+    };
+}
 
 /// Open a file.
 ///

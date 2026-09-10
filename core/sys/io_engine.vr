@@ -359,6 +359,14 @@ public type BytesTransferred is UInt32;
 public type ErrnoCode is Int32{> 0};
 
 implement CompletionResult {
+    /// A zeroed result, for the fixed-size completion arrays a driver
+    /// keeps. Replaces `@zero<CompletionResult>()`, which is not a
+    /// meta-function and typed as `Unit` (T1352). `CompletionResult` is
+    /// declared once, so an associated function adds no name collision.
+    public fn zeroed() -> CompletionResult {
+        return CompletionResult { user_data: 0, result: 0, flags: 0 };
+    }
+
     /// Create a successful completion result
     @inline
     public pure fn success(user_data: UInt64, bytes: BytesTransferred) -> CompletionResult {

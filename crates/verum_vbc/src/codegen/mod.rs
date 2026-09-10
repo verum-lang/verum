@@ -13390,7 +13390,32 @@ impl VbcCodegen {
         use verum_ast::ty::TypeKind;
         match &ty.kind {
             TypeKind::Path(path) => Some(path.to_string()),
-            TypeKind::Reference { inner, .. } | TypeKind::Pointer { inner, .. } => {
+            // ALL THREE REFERENCE TIERS, not just the default one. CBGR
+            // spells a reference three ways — `&T`, `&checked T`,
+            // `&unsafe T` — and the AST gives each its own variant
+            // (`Reference`, `CheckedReference`, `UnsafeReference`).
+            // Matching only the first is why #32's fix reached
+            // `mach_timebase_info(info: &mut MachTimebaseInfo)` and did
+            // NOT reach `fstat(fd: Int32, buf: &unsafe DarwinStat)`.
+            //
+            // Measured 2026-09-10 (T1192): with the tier-2 spelling the
+            // parameter collapsed to `CType::Ptr`, the marshaller handed C
+            // the raw heap-object pointer, and `fstat(2)` wrote `struct
+            // stat` starting at the OBJECT HEADER. The proof is a number:
+            // the panic reported `type_id=16777230` and the file's own
+            // `st_dev` is 16777230 — the first field of `struct stat`
+            // landing exactly on the first field of `ObjectHeader`.
+            //
+            // Seven sites in `core/` use this spelling with a record, all
+            // in `core/sys/darwin/libsystem.vr`: DarwinStat x3 (fstat,
+            // stat, lstat), KEvent, KEvent64, DIR, Dirent. Only `Dirent`
+            // escaped, because it carries `@repr(C)` and so got a layout
+            // from the OTHER registration path — which is why T0916 looked
+            // like an attribute problem and was closed by adding one.
+            TypeKind::Reference { inner, .. }
+            | TypeKind::CheckedReference { inner, .. }
+            | TypeKind::UnsafeReference { inner, .. }
+            | TypeKind::Pointer { inner, .. } => {
                 if let TypeKind::Path(path) = &inner.kind {
                     Some(path.to_string())
                 } else {
@@ -13789,7 +13814,14 @@ impl VbcCodegen {
                     TypeKind::Text => CType::CStr, // String as C string
                     TypeKind::Unit => CType::Void,
                     TypeKind::Never => CType::Void, // Never returns
-                    TypeKind::Reference { inner, .. } | TypeKind::Pointer { inner, .. } => {
+                    // All three CBGR reference tiers reach C the same way;
+                    // see `ffi_referenced_struct_name` for why matching only
+                    // the default tier let `&unsafe <record>` collapse to a
+                    // bare pointer and hand C the object header.
+                    TypeKind::Reference { inner, .. }
+                    | TypeKind::CheckedReference { inner, .. }
+                    | TypeKind::UnsafeReference { inner, .. }
+                    | TypeKind::Pointer { inner, .. } => {
                         // Check if the inner type is a @repr(C) struct - use StructPtr
                         if let TypeKind::Path(path) = &inner.kind {
                             let name = path.to_string();
@@ -13824,8 +13856,16 @@ impl VbcCodegen {
                         let name = path.to_string();
                         self.repr_c_types.get(&name).copied()
                     }
-                    // Reference to struct type - extract the inner type
-                    TypeKind::Reference { inner, .. } | TypeKind::Pointer { inner, .. } => {
+                    // Reference to struct type - extract the inner type.
+                    // All three CBGR tiers, for the reason spelled out at
+                    // `ffi_referenced_struct_name`: `&unsafe <record>` is a
+                    // separate AST variant, and matching only the default
+                    // tier is what let `fstat`'s buffer reach C as a bare
+                    // pointer to the object HEADER.
+                    TypeKind::Reference { inner, .. }
+                    | TypeKind::CheckedReference { inner, .. }
+                    | TypeKind::UnsafeReference { inner, .. }
+                    | TypeKind::Pointer { inner, .. } => {
                         if let TypeKind::Path(path) = &inner.kind {
                             let name = path.to_string();
                             self.repr_c_types.get(&name).copied()

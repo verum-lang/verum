@@ -1102,6 +1102,17 @@ public type EpollEvent is {
     data: UInt64,  // User data (typically fd or pointer)
 };
 
+implement EpollEvent {
+    /// A zeroed event, for the fixed-size arrays `epoll_wait` fills.
+    /// Replaces `@zero<EpollEvent>()`, which is not a meta-function and
+    /// typed as `Unit` (T1352). `EpollEvent` is declared once, so an
+    /// associated function adds no name collision.
+    /// UNVERIFIED FROM THIS CHECKOUT — macOS host.
+    public fn zeroed() -> EpollEvent {
+        return EpollEvent { events: 0, data: 0 };
+    }
+}
+
 // =============================================================================
 // Epoll Driver (Fallback for older kernels)
 // =============================================================================
@@ -1640,7 +1651,8 @@ implement IOEngine for EpollDriver {
         let actual_timeout = if min_complete == 0 { 0 } else { timeout_ms };
 
         let max_events = results.len().min(64) as Int;
-        let mut epoll_events: [EpollEvent; 64] = [@zero<EpollEvent>(); 64];
+        // `EpollEvent.zeroed()`, not `@zero<...>()` — T1352.
+        let mut epoll_events: [EpollEvent; 64] = [EpollEvent.zeroed(); 64];
 
         match self.wait(&mut epoll_events, actual_timeout) {
             Result.Ok(count) => {

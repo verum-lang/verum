@@ -48,6 +48,7 @@ mount sys.linux.syscall.{
     write as sys_write,
     lseek as sys_lseek,
     fstat as sys_fstat,
+    stat_zeroed as sys_stat_zeroed,
     fsync as sys_fsync,
     ftruncate as sys_ftruncate,
     dup as sys_dup,
@@ -86,6 +87,7 @@ mount sys.darwin.libsystem.{
     safe_write as sys_write,
     safe_lseek as sys_lseek,
     safe_fstat as sys_fstat,
+    safe_stat_zeroed as sys_stat_zeroed,
     safe_fsync as sys_fsync,
     safe_ftruncate as sys_ftruncate,
     safe_dup as sys_dup,
@@ -283,8 +285,24 @@ implement File {
     // Get file size.
     public fn size(&self) -> IoResult<Int> {
         let fd = FileDesc.from_raw(self.fd);
-        // Initialize stat buffer with zeros (syscall will fill it)
-        let mut stat_buf: Stat = unsafe { @zeroed() };
+        // `sys_stat_zeroed()`, NOT `unsafe { @zeroed() }`: the latter is
+        // not a meta-function, types as `Unit`, and handed `fstat` a
+        // zero-byte object.
+        //
+        // A FREE function mounted per platform, not an associated
+        // function on `Stat`. `Stat` is declared by BOTH platform
+        // modules (a record in `sys/linux/syscall.vr`, an alias in
+        // `sys/darwin/libsystem.vr`), so an `implement` block on either
+        // side makes the bare name a method-bearing collision and moves
+        // `check-type-name-collisions` off its baseline.
+        //
+        // SEPARATELY, and NOT caused by that: the line below emits
+        // `GetF { field_idx: 8 }` on macOS, which is `st_size` in the
+        // LINUX layout; the Darwin index is 11. Measured with and
+        // without an `implement` block — the index is 8 in both, so the
+        // carrier is the cfg-gated mount of an ambiguous type name, not
+        // the methods. Reproduced in four files and filed on its own.
+        let mut stat_buf: Stat = sys_stat_zeroed();
         match sys_fstat(fd, &mut stat_buf) {
             Result.Ok(()) => Result.Ok(stat_buf.st_size as Int),
             Result.Err(e) => Result.Err(StreamError.from_raw_os_error(e.code)),
