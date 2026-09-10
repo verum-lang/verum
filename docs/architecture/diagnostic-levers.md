@@ -2,7 +2,7 @@
 
 Most `VERUM_*` environment levers in this tree are presence flags — the
 code asks `is_some()` or `is_ok()`, and any value at all turns them on.
-Twenty-one are not: their value is matched against a name, and what
+Twenty-two are not: their value is matched against a name, and what
 `=1` does to them ranges from "nothing" to "somebody else's trace".
 
 ```
@@ -48,6 +48,7 @@ no output as a way to lose an afternoon.
 | `VERUM_TRACE_CALLBIND` | substring | `` (empty) | callee name |
 | `VERUM_TRACE_CALLRES` | substring | **nothing does** | callee name |
 | `VERUM_TRACE_CANON` | substring | `` , `*`, `1`, `true`, `all` | canonical path |
+| `VERUM_TRACE_CONST_RESOLVE` | substring | `` (empty) or `*` | function name |
 | `VERUM_TRACE_DEREF` | substring | `` (empty) or `1` | value/type shape |
 | `VERUM_TRACE_FNREG` | substring | `` (empty) | function name |
 | `VERUM_TRACE_FNTABLE` | substring | `` (empty) | function name |
@@ -114,4 +115,4 @@ before believing a population.
 
 Presence-flag levers are deliberately NOT listed. There are over two
 hundred of them, they behave the way a reader expects, and enumerating
-them would bury the twenty-one that do not.
+them would bury the twenty-two that do not.

@@ -4,7 +4,7 @@
 WHY THIS EXISTS
 ---------------
 Most `VERUM_*` levers are presence flags — any value turns them on.
-Twenty-one match their value against a name, so `LEVER=1` selects names
+Twenty-two match their value against a name, so `LEVER=1` selects names
 containing the digit one, which is usually none, and prints nothing.
 An empty trace is indistinguishable from a code path that never ran.
 
@@ -36,11 +36,16 @@ each after a count that looked complete without it:
     let Ok(x) = env::var("L") else      let-else
     match env::var("L") { Ok(x) => …    carried TYPE_CLAIM,
                                         BARE_VARIANT, CANON  -> 21 levers
+    env::var("L").map(|x| …)            carried CONST_RESOLVE -> 22 levers
 
-Every one of those three numbers looked like an answer. The first was
-caught because `VERUM_DUMP_VBC` — whose behaviour was already known —
-was absent from it; the second because a peer applied the same test to
-a lever of their own and found the equality form.
+Every one of those four numbers looked like an answer, and none was
+refuted by inspection. Each was refuted by a lever whose behaviour
+somebody already knew being absent from the list — twice by a peer
+applying the test to this detector after reading it here.
+
+The fifth form is the sharpest: the name is a CLOSURE PARAMETER, bound
+by nothing the other four look for, and the lever's FIRST appearance in
+that same condition is a bare `is_ok()`.
 
     A DETECTOR THAT CANNOT FIND A CASE WHOSE ANSWER YOU ALREADY KNOW
     HAS NOT MEASURED ANYTHING YET.
@@ -71,6 +76,12 @@ BIND = re.compile(
 # is bound in an ARM, on a later line than the call.
 CALL = re.compile(r'env::var(?:_os)?\("(VERUM_[A-Z0-9_]+)"\)')
 ARM = re.compile(r"(?:Ok|Some)\(([a-z_][a-z0-9_]*)\)\s*=>")
+# The FIFTH form: the name arrives as a CLOSURE PARAMETER —
+# `env::var("L").map(|w| name.contains(&w))`.  Nothing is bound with
+# `let`, nothing is matched with an arm, so the four earlier forms walk
+# straight past it.
+CLOSURE = re.compile(r"\.(?:map|map_or|map_or_else|is_ok_and|and_then)\s*\(\s*\|"
+                     r"([a-z_][a-z0-9_]*)\|")
 ROW = re.compile(r"^\|\s*`(VERUM_[A-Z0-9_]+)`\s*\|", re.M)
 WINDOW = 60
 
@@ -94,7 +105,7 @@ def filter_shaped() -> dict[str, str]:
             var = (b.group(1) or b.group(2) or b.group(3)) if b else None
             if var is None:
                 for j in range(i, min(i + 4, len(lines))):
-                    a = ARM.search(lines[j])
+                    a = ARM.search(lines[j]) or CLOSURE.search(lines[j])
                     if a:
                         var = a.group(1)
                         break
@@ -125,6 +136,11 @@ def documented() -> set[str]:
 def self_test() -> int:
     bad = 0
     cases = {
+        "closure parameter (carried CONST_RESOLVE)":
+            'if std::env::var("VERUM_F").is_ok()\n'
+            '    && std::env::var("VERUM_F")\n'
+            '        .map(|w| func_name.contains(&w) || w == "*")\n'
+            '        .unwrap_or(false)\n',
         "match arm (carried TYPE_CLAIM, BARE_VARIANT, CANON)":
             'match std::env::var("VERUM_E") {\n'
             '    Ok(w) => w == "*" || w == name,\n'
@@ -150,7 +166,7 @@ def self_test() -> int:
             var = (b.group(1) or b.group(2) or b.group(3)) if b else None
             if var is None:
                 for j in range(i, min(i + 4, len(lines))):
-                    a = ARM.search(lines[j])
+                    a = ARM.search(lines[j]) or CLOSURE.search(lines[j])
                     if a:
                         var = a.group(1)
                         break
@@ -185,16 +201,18 @@ def self_test() -> int:
     if bad:
         print(f"self-test: {bad} FAILED", file=sys.stderr)
         return 1
-    anchor = "VERUM_TRACE_TYPE_CLAIM"
-    if anchor not in documented():
-        print(f"self-test: the anchor {anchor} is not on the page", file=sys.stderr)
-        bad += 1
+    for anchor in ("VERUM_TRACE_TYPE_CLAIM", "VERUM_TRACE_CONST_RESOLVE"):
+        if anchor not in documented():
+            print(f"self-test: the anchor {anchor} is not on the page",
+                  file=sys.stderr)
+            bad += 1
+    anchor = "2 anchors"
     if bad:
         print(f"self-test: {bad} FAILED", file=sys.stderr)
         return 1
     print(f"[ok] self-test: {len(cases)} binding form(s) recognised, "
           f"1 presence flag rejected, {len(documented())} row(s) parsed, "
-          f"anchor {anchor} present")
+          f"{anchor} present")
     return 0
 
 
