@@ -1,0 +1,87 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, stdlib, name-collision, mount, record
+// @timeout: 15000
+// @expected-exit: 0
+//
+// A MOUNTED RECORD GETS ITS OWN MODULE'S LAYOUT (T1369).
+//
+// Two modules of the archive declare `Child`:
+//
+//     core/sys/process_ops.vr:99   pid, stdout_fd, stderr_fd            all Int
+//     core/io/process.vr:310       pid, stdout_fd, stderr_fd, stdin_fd  Maybe<Int>
+//
+// A program that mounted the FIRST one by path and wrote its
+// three-field literal was told:
+//
+//     error<E400>: Type mismatch in field 'stdout_fd' of 'Child':
+//                  expected 'Maybe<Int>', found 'Int'
+//     error: Missing required field 'stdin_fd' of type Maybe<Int>
+//
+// — the OTHER module's shape, on an explicit mount naming this one.
+//
+// THE CAUSE WAS AN ORDER, NOT A MISSING REGISTRATION. A record's
+// `type_defs` entry is the self-referential `Named(<simple>)`
+// placeholder; its fields live under a separate
+// `__struct_fields_<simple>` key. The qualified loader registers both,
+// and the qualified field map was CORRECT the whole time — all four of
+// these existed at once:
+//
+//     Child                                       Named("Child")
+//     __struct_fields_Child                       {…, stdin_fd}  Maybe<Int>
+//     core.sys.process_ops.Child                  Named("Child")   <- no module
+//     core.sys.process_ops.__struct_fields_Child  {pid, stdout_fd, stderr_fd}
+//
+// `lookup_record_type` probed the plain qualified key FIRST, hit it,
+// and returned a pointer to the BARE name — which is last-write-wins
+// across the whole of `core/` — so the probe below it, holding this
+// module's actual layout, never ran. A bare self-ref is a REDIRECT into
+// the ambiguous namespace, not an answer.
+//
+// The three other consumers of that helper already probe
+// `__struct_fields_` first (`resolve_to_record_type`, the field-map
+// resolution in `infer/expr.rs`, and variant record construction);
+// `lookup_record_type` was the one that had them backwards.
+//
+// WHY AN L0 SPEC. `make check-type-name-collisions` is GREEN at 132
+// colliding simple names. The collision is known and permitted; what
+// must not be permitted is an explicit mount resolving to a DIFFERENT
+// module's declaration of the name, because nothing in either source
+// file shows it.
+
+mount core.sys.process_ops.{Child};
+mount core.context.provider.{ScopedProvider};
+
+fn main() {
+    // The mounted module's own three-field shape, with `Int` fields.
+    let s = Child { pid: 7, stdout_fd: 11, stderr_fd: 12 };
+    assert_eq(s.pid, 7);
+    assert_eq(s.stdout_fd, 11);
+    assert_eq(s.stderr_fd, 12);
+
+    // THE OTHER HALF, and it is the one a fix can silently break: the
+    // four-field `Child` must still be reachable by its full path with
+    // its `Maybe<Int>` fields. A change that made the mounted name win
+    // everywhere would pass the assertions above and break this.
+    let io = core.io.process.Child {
+        pid: 9,
+        stdout_fd: Maybe.None,
+        stderr_fd: Maybe.None,
+        stdin_fd: Maybe.None,
+    };
+    assert_eq(io.pid, 9);
+
+    // THE NAMED REGRESSION. The tree records that registering qualified
+    // keys for a unique GENERIC record once flipped this same probe
+    // "from miss to hit with a value shape its record-literal consumer
+    // can't use" (`ParseResult<Int>`, E103). A generic record's plain
+    // slot holds the bare self-ref too — exactly what is now declined —
+    // so a uniquely-named generic record is the shape most at risk, and
+    // no collision is involved in it at all.
+    let p = ScopedProvider { slot_id: 4, value: 9 };
+    assert_eq(p.slot_id, 4);
+    assert_eq(p.value, 9);
+
+    print("mounted record layout: ok");
+}

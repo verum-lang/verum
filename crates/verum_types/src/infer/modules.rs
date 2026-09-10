@@ -2798,6 +2798,53 @@ impl TypeChecker {
                             // Publish under the LOCAL name so
                             // `mount m.{X as Y}` binds `Y`, matching
                             // how the free-fn arm uses `bind_name`.
+                            //
+                            // MOUNT-RENAME-KEEPS-ITS-MODULE-1.  A record's
+                            // registration is the self-referential
+                            // `Named(<simple>)` placeholder, so a RENAMED
+                            // mount published `SysChild -> Named("Child")`
+                            // — a redirect into the bare, last-write-wins
+                            // namespace, which for a colliding name is
+                            // another module's record.  Measured 2026-09-10
+                            // (T1369): `mount core.sys.process_ops.{Child
+                            // as SysChild}` then resolved to the four-field
+                            // `core.io.process.Child`, while the same
+                            // file's fully qualified literal was correct.
+                            //
+                            // The rename is the one place the user wrote
+                            // the module down and the binding threw it
+                            // away.  Keep it: publish the QUALIFIED name,
+                            // which is the `Type::Named` a qualified
+                            // literal already produces and resolves.
+                            //
+                            // Only for a rename (`bind_name != item_name`):
+                            // under its own name the placeholder is the
+                            // normal registration and other consumers
+                            // depend on that shape.
+                            let ty = match &ty {
+                                Type::Named { path, args }
+                                    if args.is_empty()
+                                        && bind_name != item_name
+                                        && path.segments.len() == 1
+                                        && matches!(path.segments.first(),
+                                            Some(verum_ast::ty::PathSegment::Name(id))
+                                                if id.name.as_str() == item_name)
+                                        && std::env::var_os(
+                                            "VERUM_NO_MOUNT_RENAME_QUALIFY").is_none() =>
+                                {
+                                    Type::Named {
+                                        path: verum_ast::ty::Path::single(
+                                            verum_ast::ty::Ident::new(
+                                                format!("{}.{}", module_path.as_str(),
+                                                        item_name),
+                                                verum_ast::Span::dummy(),
+                                            ),
+                                        ),
+                                        args: List::new(),
+                                    }
+                                }
+                                _ => ty,
+                            };
                             self.ctx.define_type(bind_name, ty);
                             true
                         })
@@ -14191,20 +14238,42 @@ impl TypeChecker {
         name: &str,
         key_prefix: &str,
     ) -> Option<Type> {
+        // `VERUM_TRACE_MOUNT_SCOPED=<name>` (or `=1`) — this helper has
+        // SEVEN ways to decline and returned a bare `None` for all of
+        // them, so a caller that fell back could not tell "not mounted"
+        // from "mounted, key absent".  Every decline now names the
+        // condition that refused.
+        let trace = std::env::var("VERUM_TRACE_MOUNT_SCOPED")
+            .is_ok_and(|v| v == "1" || v == name);
+        macro_rules! decline {
+            ($why:expr) => {{
+                if trace {
+                    eprintln!(
+                        "[mount-scoped] '{}{}' DECLINE: {}",
+                        key_prefix, name, $why
+                    );
+                }
+                return None;
+            }};
+        }
         let name_text = verum_common::Text::from(name);
-        let sources = self.imported_names.get(&name_text)?;
+        let Some(sources) = self.imported_names.get(&name_text) else {
+            decline!("not in imported_names (name is not explicitly mounted)")
+        };
         // Ambiguous mount — caller decides whether to surface an
         // `AmbiguousName` error; we just decline.
         if sources.len() != 1 {
-            return None;
+            decline!(format!("ambiguous mount: {} sources", sources.len()))
         }
-        let source = sources.iter().next()?;
+        let Some(source) = sources.iter().next() else {
+            decline!("source set non-empty but yielded no element")
+        };
         let source_str = source.as_str();
         let canonical = source_str
             .strip_prefix("cog.")
             .unwrap_or(source_str);
         if canonical.is_empty() || canonical == "cog" {
-            return None;
+            decline!(format!("source {:?} carries no module path", source_str))
         }
         // Fast path: direct `<canonical>.<prefix><name>` probe.
         // Covers the non-re-exporting case where the mount path
@@ -14214,7 +14283,19 @@ impl TypeChecker {
         let direct_qualified =
             format!("{}.{}{}", canonical, key_prefix, name);
         if let Option::Some(ty) = self.ctx.lookup_type(&direct_qualified) {
+            if trace {
+                eprintln!(
+                    "[mount-scoped] '{}{}' HIT direct key {:?}",
+                    key_prefix, name, direct_qualified
+                );
+            }
             return Some(ty.clone());
+        }
+        if trace {
+            eprintln!(
+                "[mount-scoped] '{}{}' miss on direct key {:?} — trying the re-export hop",
+                key_prefix, name, direct_qualified
+            );
         }
         // Re-export hop: consult the source module's export table
         // to find the canonical owning module.  Handles mounts that
@@ -14225,16 +14306,22 @@ impl TypeChecker {
         let registry = self.module_registry.read();
         let src_info = match registry.get_by_path_aliased(canonical) {
             Maybe::Some(info) => info,
-            Maybe::None => return None,
+            Maybe::None => {
+                decline!(format!("module {:?} is not in the registry", canonical))
+            }
         };
         let item = match src_info.exports.get(&name_text) {
             Maybe::Some(it) => it,
-            Maybe::None => return None,
+            Maybe::None => {
+                decline!(format!("module {:?} exports no {:?}", canonical, name))
+            }
         };
         let owning_module_id = item.source_module;
         let owning_info = match registry.get(owning_module_id) {
             Maybe::Some(info) => info,
-            Maybe::None => return None,
+            Maybe::None => {
+                decline!(format!("export names module id {:?}, absent from the registry", owning_module_id))
+            }
         };
         let owning_path = owning_info.path.to_string();
         let owning_canonical = owning_path
@@ -14248,6 +14335,12 @@ impl TypeChecker {
         let owning_qualified =
             format!("{}.{}{}", owning_canonical, key_prefix, name);
         if let Some(ty) = self.ctx.lookup_type(&owning_qualified) {
+            if trace {
+                eprintln!(
+                    "[mount-scoped] '{}{}' HIT owning key {:?}",
+                    key_prefix, name, owning_qualified
+                );
+            }
             return Some(ty.clone());
         }
         // Fallback: when the export table's `source_module` points
@@ -14278,10 +14371,19 @@ impl TypeChecker {
         for canonical_path in child_paths {
             let candidate = format!("{}{}", canonical_path, suffix);
             if let Some(ty) = self.ctx.lookup_type(&candidate) {
+                if trace {
+                    eprintln!(
+                        "[mount-scoped] '{}{}' HIT child key {:?}",
+                        key_prefix, name, candidate
+                    );
+                }
                 return Some(ty.clone());
             }
         }
-        None
+        decline!(format!(
+            "owning key {:?} absent and no child of {:?} publishes it",
+            owning_qualified, owning_canonical
+        ))
     }
 
     /// REEXPORT-FIELDS-LAZY-1 — drive the mount-scoped METADATA
@@ -14550,7 +14652,54 @@ impl TypeChecker {
                     // rationale.  Probe the plain type slot first,
                     // then the `__struct_fields_` variant for
                     // record-payload variants.
-                    if let Some(ty) = self.lookup_type_mount_scoped(name, "") {
+                    // MOUNT-PLACEHOLDER-DEFERS-TO-FIELDS-1.  These two
+                    // probes are in the wrong order for a COLLIDING name,
+                    // and the first one wins with a value that carries no
+                    // information.
+                    //
+                    // A record's `type_defs` entry is the self-referential
+                    // `Named(<simple>)` placeholder; its FIELDS live under
+                    // a separate `__struct_fields_<simple>` key.  The
+                    // qualified loader registers both, and the qualified
+                    // field map is correct — measured 2026-09-10, ctx held
+                    // all four of these at once:
+                    //
+                    //   Child                                    Named("Child")
+                    //   __struct_fields_Child                    {pid, stdout_fd: Maybe<Int>,
+                    //                                             stderr_fd: Maybe<Int>,
+                    //                                             stdin_fd: Maybe<Int>}
+                    //   core.sys.process_ops.Child               Named("Child")   <- no module
+                    //   core.sys.process_ops.__struct_fields_Child  {pid, stdout_fd,
+                    //                                             stderr_fd}  all Int
+                    //
+                    // So the plain probe HIT the right key and handed back
+                    // a pointer to the BARE name — which is last-write-wins
+                    // across the whole of `core/` — while the probe below
+                    // it, holding this module's actual layout, never ran.
+                    // `mount core.sys.process_ops.{Child}` therefore built
+                    // the four-field `core.io.process.Child`.
+                    //
+                    // A bare self-ref is a REDIRECT, not an answer: prefer
+                    // the field map, and keep the placeholder only if there
+                    // is no qualified layout to prefer.  The value shape
+                    // returned here is the one the `__struct_fields_` probe
+                    // was added to return, so its record-literal consumer
+                    // already handles it.
+                    //
+                    // `VERUM_NO_QUALIFIED_SELFREF=1` — A/B kill switch.
+                    let plain = self.lookup_type_mount_scoped(name, "");
+                    let plain_is_redirect = plain.as_ref().is_some_and(|ty| {
+                        std::env::var_os("VERUM_NO_QUALIFIED_SELFREF").is_none()
+                            && matches!(ty, Type::Named { path, args }
+                                if args.is_empty()
+                                    && path.segments.len() == 1
+                                    && matches!(path.segments.first(),
+                                        Some(verum_ast::ty::PathSegment::Name(id))
+                                            if id.name.as_str() == name))
+                    });
+                    if let Some(ty) = plain
+                        && !plain_is_redirect
+                    {
                         return Ok(ty);
                     }
                     if let Some(ty) = self
@@ -14558,11 +14707,11 @@ impl TypeChecker {
                     {
                         return Ok(ty);
                     }
-                    // Guard `mount_scoped_source` use; we only consult
-                    // it above to short-circuit the ambiguity branch,
-                    // so suppress the unused warning here.
-                    let _ = mount_scoped_source;
-
+                    if plain_is_redirect
+                        && let Some(ty) = self.lookup_type_mount_scoped(name, "")
+                    {
+                        return Ok(ty);
+                    }
                     // Look up in type definitions
                     match self.ctx.lookup_type(name) {
                         Option::Some(ty) => return Ok(ty.clone()),
