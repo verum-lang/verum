@@ -1,0 +1,100 @@
+// @test: run
+// @tier: 0
+// @level: L2
+// @tags: stdlib, io, fs, metadata, dispatch, mount, builtin-fallback
+// @timeout: 60000
+// @expected-stdout: agree=true plausible=true
+// @expected-exit: 0
+//
+// A METHOD CALL DOES NOT DEPEND ON WHETHER ITS TYPE IS NAMED IN THE MOUNT.
+//
+// `md.len()` on an `io.fs.Metadata` used to answer a small wrong number
+// when the file was opened through the bare `mount core.io.fs;` form,
+// and the right one when `Metadata` was also named in the mount. Same
+// file, same call, same run — one mount line apart:
+//
+//     mount core.io.fs;                          md.len() -> 1
+//     mount core.io.fs.{metadata, Metadata};     md.len() -> 10
+//
+// The receiver's type was not resolvable at the call site, so the call
+// fell back to the builtin container-length opcode instead of
+// dispatching to `Metadata.len`. There was no diagnostic: a wrong
+// NUMBER, silently, on a call that looks correct.
+//
+// ONE IS THE WRONG ANSWER, AND THAT IS WHAT THIS SPEC WATCHES FOR.
+// `Metadata` is `{ raw: FsMetadataRaw }` — exactly one field — so the
+// builtin length of the record is 1. The two flags printed below are
+// chosen so the fallback cannot produce them:
+//
+//     agree      the two mount spellings answer the same
+//     plausible  the answer is not 1, the field count
+//
+// Under the defect `bare` was 1 and `named` was the real length, so
+// BOTH flags flip. Under the fix both hold, on any platform, without
+// pinning a number this spec would have to know in advance.
+//
+// IT STATS A PATH IT DOES NOT CREATE, deliberately, and IT LIVES IN A
+// DIRECTORY OF ITS OWN. Both are consequences of the same thing: a spec
+// is compiled together with its directory, so a broken neighbour fails
+// it for a reason that is not its subject.
+//
+// Measured while writing this. The identical file PASSES here and FAILS
+// one directory up, in `stdlib/io/`, with
+//
+//     Null pointer dereference: op=opcode 0x63 at OpenOptions.write
+//
+// which this spec never calls — `stdlib/io/file_write.vr` does, eight
+// times. Four of the six specs in that directory are red today. An
+// earlier version of this file also wrote its own fixture with
+// `fs.write_str` and hit the same opcode, so the write is gone too.
+//
+// `/tmp` is present wherever this suite runs, and its length is not 1
+// on any of them.
+//
+// The fix guards the fallback on a known non-container receiver. This
+// spec pins the OUTCOME rather than the guard.
+//
+// WHY A SPEC AND NOT A UNIT TEST. The defect crosses the whole tier-0
+// path — mount resolution, method dispatch, the VBC opcode choice — and
+// its symptom is a plausible number rather than a crash. It also reached
+// the documentation, which taught naming the type as a workaround.
+
+mount core.io.fs;
+mount core.io.fs.{metadata, Metadata};
+mount core.io.path.{Path};
+mount core.io.println;
+
+fn main() {
+    let path = "/tmp";
+
+    let mut bare_len = -1;
+    let mut named_len = -1;
+
+    // THE SUBJECT: the receiver's type is not named in this call's mount
+    // path. This is the spelling that answered 1.
+    match fs.metadata(&fs.Path.from_str(&path)) {
+        Result.Ok(md) => { bare_len = md.len(); }
+        Result.Err(e) => {
+            // ASSERT, do not merely print: a branch that prints and
+            // returns leaves the exit code at 0, and `@expected-exit: 0`
+            // would then pass a run that measured nothing.
+            println(&"bare metadata failed");
+            assert(false);
+        }
+    }
+
+    // THE CONTROL: the same question with the type named. It was always
+    // right, so a run where BOTH answers are wrong means the fixture or
+    // the filesystem changed rather than the dispatch.
+    match metadata(&Path.new(path)) {
+        Result.Ok(md) => { named_len = md.len(); }
+        Result.Err(e) => { println(&"named metadata failed"); assert(false); }
+    }
+
+    let agree = bare_len == named_len;
+    let plausible = bare_len != 1;
+
+    assert(agree);
+    assert(plausible);
+    println(&f"agree={agree} plausible={plausible}");
+}
