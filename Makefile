@@ -6,7 +6,7 @@
 
 .PHONY: check-newtype-transparency
 .PHONY: check-shipped-path-parity
-.PHONY: gates-source check-private-types-off-public-surface check-grammar-covers-keywords check-grammar-docs-match check-doc-anchors check-doc-error-codes check-known-tables check-parser-attrs check-gate-tables check-dead-module-path-calls check-platform-call-parity check-protocol-conformance check-cfg-block-tail check-constant-time-duplication check-arch-attestation check-type-name-collisions check-barename-collisions check-barename-census check-rings check-rings-census check check-workspace check-tests check-strict test build help check-vr-syntax check-markers check-internal-refs check-op-bytes check-inventory check-inventory-live check-silent-acceptance check-name-census check-panic-surface check-per-register-privacy check-early-return-tenants check-dup-emitters check-homepage-examples check-doc-indented-blocks check-examples-run check-doc-status-badge check-doc-reachable check-doc-type-shapes
+.PHONY: gates-source check-private-types-off-public-surface check-grammar-covers-keywords check-grammar-docs-match check-doc-anchors check-doc-error-codes check-known-tables check-parser-attrs check-gate-tables check-dead-module-path-calls check-platform-call-parity check-protocol-conformance check-cfg-block-tail check-constant-time-duplication check-arch-attestation check-archive-panic-stubs check-type-name-collisions check-barename-collisions check-barename-census check-rings check-rings-census check check-workspace check-tests check-strict test build help check-vr-syntax check-markers check-internal-refs check-op-bytes check-inventory check-inventory-live check-silent-acceptance check-name-census check-panic-surface check-per-register-privacy check-early-return-tenants check-dup-emitters check-homepage-examples check-doc-indented-blocks check-examples-run check-doc-status-badge check-doc-reachable check-doc-type-shapes
 
 help: ## Show available targets
 	@grep -hE '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -60,6 +60,10 @@ check-stage5-stub-sharing: ## Gate (T1172): stage-5 stub ids standing for severa
 
 check-archive-size: ## Gate (T0737): embedded stdlib archive size — a per-module duplication shows up as a MULTIPLE
 	python3 scripts/ci/check_archive_size.py "$(or $(ARCHIVE),target/precompiled-stdlib/runtime.vbca)" --check
+
+check-archive-panic-stubs: ## Gate: the shipped archive must not gain panic-stubs — reads the ARTIFACT, no bake log needed
+	python3 scripts/ci/check_archive_panic_stubs.py --self-test
+	python3 scripts/ci/check_archive_panic_stubs.py "$(or $(ARCHIVE),target/precompiled-stdlib/runtime.vbca)"
 
 check-barename-collisions: ## Gate (T0538): free-fn (name,arity) collisions across core/ — ratchet
 	python3 scripts/ci/check_barename_collisions.py --self-test
