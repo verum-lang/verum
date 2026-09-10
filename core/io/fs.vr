@@ -866,6 +866,10 @@ public fn read_dir(path: &Path) -> IoResult<ReadDir> {
         Result.Ok(fd) => {
             Result.Ok(ReadDir {
                 fd: fd,
+                // macOS-only handle; this is the Linux branch, and an
+                // omitted field is not a compile error on the annotated
+                // path today — it reads back as a float zero (T1367).
+                dir_handle: 0,
                 base_path: path.to_path_buf(),
                 buffer: [0; READDIR_BUFFER_SIZE],
                 buffer_pos: 0,

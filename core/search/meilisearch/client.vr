@@ -47,7 +47,11 @@ mount core.encoding.json.{
     json_object, json_string, json_array, json_number, json_bool,
     encode, decode,
 };
-mount net.http.{HttpClient, Request, Response, Method, StatusCode, HttpError};
+mount net.http.{HttpClient, Request, Response, Method, StatusCode, HttpError,
+                // T1367 — the literals below omitted `version`, and an
+                // omitted field is not a compile error today: it reads
+                // back as a float zero whatever the declared type.
+                Version};
 // Fix: was `mount async_.sleep_seconds;` — non-existent module path
 // + function name.  The canonical async sleep accepting whole seconds
 // is `core.async.timer.sleep_secs`.
@@ -397,6 +401,7 @@ async fn get<C: HttpClient>(
     let req = Request {
         method:  Method.Get,
         url:     url.clone(),
+        version: Version.Http11,
         headers: auth_headers(cfg, Maybe.None),
         body:    List.new(),
     };
@@ -411,6 +416,7 @@ async fn delete<C: HttpClient>(
     let req = Request {
         method:  Method.Delete,
         url:     url.clone(),
+        version: Version.Http11,
         headers: auth_headers(cfg, Maybe.None),
         body:    List.new(),
     };
@@ -426,6 +432,7 @@ async fn post_json<C: HttpClient>(
     let req = Request {
         method:  Method.Post,
         url:     url.clone(),
+        version: Version.Http11,
         headers: auth_headers(cfg, Maybe.Some("application/json")),
         body:    body_bytes,
     };
@@ -441,6 +448,7 @@ async fn patch_json<C: HttpClient>(
     let req = Request {
         method:  Method.Patch,
         url:     url.clone(),
+        version: Version.Http11,
         headers: auth_headers(cfg, Maybe.Some("application/json")),
         body:    body_bytes,
     };

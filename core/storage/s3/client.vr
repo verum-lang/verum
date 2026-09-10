@@ -47,7 +47,11 @@ module core.storage.s3.client;
 mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
 mount collections.{List, Map};
 mount core.encoding.hex.{encode as hex_encode};
-mount net.http.{HttpClient, Request, Response, Method, StatusCode, HttpError};
+mount net.http.{HttpClient, Request, Response, Method, StatusCode, HttpError,
+                // T1367 — the literals below omitted `version`, and an
+                // omitted field is not a compile error today: it reads
+                // back as a float zero whatever the declared type.
+                Version};
 mount core.hash.crypto.sha256.{Sha256, digest};
 mount time.system_time.epoch_seconds;
 mount time.rfc3339.{Rfc3339Time};
@@ -153,6 +157,7 @@ implement<C: HttpClient> ObjectStore for S3Client<C> {
         let req = Request {
             method:  Method.Put,
             url:     url.clone(),
+            version: Version.Http11,
             headers,
             body:    data.clone(),
         };
@@ -216,6 +221,7 @@ implement<C: HttpClient> ObjectStore for S3Client<C> {
         let req = Request {
             method:  Method.Get,
             url:     url.clone(),
+            version: Version.Http11,
             headers,
             body:    List.new(),
         };
@@ -256,6 +262,7 @@ implement<C: HttpClient> ObjectStore for S3Client<C> {
         let req = Request {
             method:  Method.Head,
             url:     url.clone(),
+            version: Version.Http11,
             headers,
             body:    List.new(),
         };
@@ -295,6 +302,7 @@ implement<C: HttpClient> ObjectStore for S3Client<C> {
         let req = Request {
             method:  Method.Delete,
             url:     url.clone(),
+            version: Version.Http11,
             headers,
             body:    List.new(),
         };
@@ -345,6 +353,7 @@ implement<C: HttpClient> ObjectStore for S3Client<C> {
         let req = Request {
             method:  Method.Get,
             url:     url,
+            version: Version.Http11,
             headers,
             body:    List.new(),
         };
@@ -411,6 +420,7 @@ implement<C: HttpClient> ObjectStore for S3Client<C> {
         let req = Request {
             method:  Method.Head,
             url:     url,
+            version: Version.Http11,
             headers,
             body:    List.new(),
         };

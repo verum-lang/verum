@@ -438,11 +438,19 @@ fn install_runtime<R: RuntimeConfig>(runtime: R) -> Result<(), InitError> {
             cbgr_tier: detect_cbgr_tier(),
             allocator: runtime.allocator_ref(),
             shared_registry: SharedRegistry.new(),
+            // T1367 — these three were omitted, and an omitted field is
+            // not a compile error on the annotated path: it reads back
+            // as a float zero whatever the declared type says.
+            gen_tracker: GenTracker.new(),
+            send_boundary: false,
+            send_boundary_count: 0,
         },
         capabilities: CapabilityContext {
             slots: ContextSlots.new(),
             static_deps: Map.new(),
             dynamic_ctx: Map.new(),
+            parent_snapshot: Maybe.None,
+            middleware_chain: MiddlewareChain.empty(),
         },
         error_recovery: RecoveryContext.new(),
         concurrency: ConcurrencyContext {

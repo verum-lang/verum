@@ -311,14 +311,14 @@ implement AsyncPgoutputBufferedConsumer {
             let mut found: Bool = false;
             while i < (bufs.len() as Int) {
                 if bufs[i].0 == s.xid {
-                    bufs[i] = (s.xid, BufferedTx { changes: List.new() });
+                    bufs[i] = (s.xid, BufferedTx { changes: List.new(), bytes_estimate: 0 });
                     found = true;
                     break;
                 }
                 i = i + 1;
             }
             if !found {
-                bufs.push((s.xid, BufferedTx { changes: List.new() }));
+                bufs.push((s.xid, BufferedTx { changes: List.new(), bytes_estimate: 0 }));
             }
         } else {
             // Resume — buffer must already exist; if not, create
@@ -330,7 +330,7 @@ implement AsyncPgoutputBufferedConsumer {
                 i = i + 1;
             }
             if !found {
-                bufs.push((s.xid, BufferedTx { changes: List.new() }));
+                bufs.push((s.xid, BufferedTx { changes: List.new(), bytes_estimate: 0 }));
             }
         }
         drop(bufs);

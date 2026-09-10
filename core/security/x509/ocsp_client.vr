@@ -92,7 +92,11 @@ mount core.security.x509.oid.{Oid};
 mount core.security.x509.chain.{verify_signature, ChainError};
 mount core.hash.legacy.sha1.{Sha1};
 mount core.hash.crypto.sha256.{Sha256};
-mount net.http.{HttpClient, Request, Response, Method, StatusCode, HttpError};
+mount net.http.{HttpClient, Request, Response, Method, StatusCode, HttpError,
+                // T1367 — the literals below omitted `version`, and an
+                // omitted field is not a compile error today: it reads
+                // back as a float zero whatever the declared type.
+                Version};
 mount time.system_time.{epoch_seconds};
 
 // =============================================================================
@@ -392,6 +396,7 @@ public async fn fetch_ocsp_response<C: HttpClient>(
     let req = Request {
         method:  Method.Post,
         url:     url.clone(),
+        version: Version.Http11,
         headers,
         body:    request_der.clone(),
     };
