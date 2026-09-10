@@ -34719,23 +34719,59 @@ fn lower_ffi_extended<'ctx>(
                 )
             })?;
 
-            // Operand format: symbol_idx:u32, arg_count:u8, ret_reg:u8, [arg_regs...]
+            // Operand format (the ENCODER's, expressions.rs:8104 — this
+            // comment used to say `ret_reg:u8` and stop at the arg list,
+            // which is how both decode bugs below survived):
+            //   symbol_idx:u32 RAW, arg_count:u8 RAW, ret_reg:VARINT,
+            //   [arg_regs: VARINT...], mut_ref_count:u8,
+            //   [(arg_idx:u8, source_reg:VARINT)...]
+            // The trailer is not consumed here; T1403 is the task for it.
             if operands.len() < 6 {
                 return Err(LlvmLoweringError::internal(
                     "FFI call: insufficient operands",
                 ));
             }
 
+            // T1412 — DECODE POSITIONALLY, because this operand stream is
+            // NOT an all-varint register list and both previous readings of
+            // it were wrong in opposite directions.
+            //
+            // The layout the ENCODER writes
+            // (`verum_vbc/src/codegen/expressions.rs:8104`) is
+            //     symbol_idx:u32   FOUR RAW little-endian bytes
+            //     arg_count:u8     ONE RAW byte
+            //     ret_reg          varint (`write_reg`: <128 one byte, else
+            //                      0x80|(reg>>8) then the low byte)
+            //     [arg_regs...]    varints
+            //     mut_ref_count:u8, [(arg_idx:u8, source_reg:varint)...]
+            //
+            // `op_reg(operands, 5)` walked varints FROM BYTE ZERO, so it
+            // parsed the four raw index bytes as varints. Measured on
+            // hardware with 130 externs all bound to `getpid` via
+            // `@ffi_name` — identical callee, only the index differs:
+            //     tier 0   first=66532 last=66532 equal=true
+            //     tier 1   first=66420 last=0     equal=false
+            // At symbol index 128 the first raw byte is 0x80, its high bit
+            // makes the varint reader consume two bytes, every later index
+            // shifts by one, and the call's result was written to the wrong
+            // register.
+            //
+            // The argument loop had the opposite bug: `operands[6 + i]` read
+            // a FLAT byte where the encoder wrote a varint — the exact
+            // pattern `op_reg`'s own docstring says was already fixed once,
+            // applied to `ret_reg` above and not to the loop below it.
             let symbol_idx =
                 u32::from_le_bytes([operands[0], operands[1], operands[2], operands[3]]);
             let arg_count = operands[4] as usize;
-            let ret_reg = op_reg(operands, 5);
-
-            if operands.len() < 6 + arg_count {
-                return Err(LlvmLoweringError::internal(
-                    "FFI call: insufficient argument registers",
-                ));
-            }
+            let mut op_pos = 5usize;
+            let ret_reg = read_reg_varlen(operands, &mut op_pos)?;
+            let arg_regs: Vec<u16> = {
+                let mut v = Vec::with_capacity(arg_count);
+                for _ in 0..arg_count {
+                    v.push(read_reg_varlen(operands, &mut op_pos)?);
+                }
+                v
+            };
 
             // Look up FFI symbol
             let ffi_symbol = vbc_module
@@ -34808,7 +34844,7 @@ fn lower_ffi_extended<'ctx>(
             let mut args: Vec<BasicMetadataValueEnum> = Vec::with_capacity(arg_count);
             let expected_param_types: Vec<_> = llvm_fn.get_type().get_param_types();
             for i in 0..arg_count {
-                let arg_reg = operands[6 + i] as u16;
+                let arg_reg = arg_regs[i];
                 let arg_val = ctx.get_register(arg_reg)?;
                 let coerced = if i < expected_param_types.len() {
                     if let Ok(expected_ty) = BasicTypeEnum::try_from(expected_param_types[i]) {
@@ -34893,8 +34929,13 @@ fn lower_ffi_extended<'ctx>(
 
             // Phase 5: TransferTo ownership — mark argument registers as consumed
             if ffi_symbol.ownership == verum_vbc::module::FfiOwnership::TransferTo {
+                // Same decoded registers as the call above — T1412. This
+                // site had the identical flat `operands[6 + i]` read, so
+                // under a 128+ symbol index or register it marked the WRONG
+                // registers consumed: an ownership transfer recorded against
+                // a value that was never passed.
                 for i in 0..arg_count {
-                    let arg_reg = operands[6 + i] as u16;
+                    let arg_reg = arg_regs[i];
                     ctx.reg_types_mut().mark_consumed_ffi(arg_reg);
                     tracing::debug!(
                         "FFI TransferTo: register r{} consumed by call to {}",

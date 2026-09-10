@@ -1,0 +1,318 @@
+// @test: run
+// @tier: 0,1
+// @level: L0
+// @tags: ffi, codegen, aot, operand-encoding, regression
+// @timeout: 120000
+// @expected-exit: 0
+//
+// AN FFI SYMBOL PAST THE 128th STILL RETURNS ITS VALUE (T1412).
+//
+// The VBC `CallFfi*` instruction encodes
+//
+//     symbol_idx:u32   FOUR RAW little-endian bytes
+//     arg_count:u8     ONE RAW byte
+//     ret_reg          VARINT  (<128 one byte, else 0x80|(reg>>8) + low)
+//     [arg_regs...]    VARINTs
+//
+// and Tier 1 decoded the return register with a helper that walks
+// VARINTS FROM BYTE ZERO — so it parsed the four raw index bytes as
+// varints. At symbol index 128 the first raw byte is 0x80, its high bit
+// makes the reader consume two bytes, every later index shifts by one,
+// and the call's result was written to the wrong register.
+//
+// MEASURED before the fix, this exact program:
+//
+//     tier 0    first=66532 last=66532 equal=true
+//     tier 1    first=66420 last=0     equal=false
+//
+// WHY 130 DECLARATIONS AND WHY THEY ARE ALL THE SAME FUNCTION. Every one
+// binds the C symbol `getpid` through `@ffi_name`, so the callee is
+// identical across all of them and the ONLY thing that varies is the
+// symbol INDEX. A spec that used 130 different C functions would fail
+// for 130 possible reasons; this one can only fail for the index.
+//
+// `getpid()` returns the process id — the same value on every call
+// within one run, which is the invariant. No external oracle is needed
+// and the spec cannot rot: it does not pin a number, it pins that two
+// calls to one function agree.
+
+mount core.io.println;
+
+@ffi("libSystem.B.dylib")
+extern {
+    @ffi_name("getpid")
+    public fn spec_getpid_0() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_1() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_2() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_3() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_4() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_5() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_6() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_7() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_8() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_9() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_10() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_11() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_12() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_13() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_14() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_15() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_16() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_17() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_18() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_19() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_20() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_21() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_22() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_23() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_24() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_25() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_26() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_27() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_28() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_29() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_30() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_31() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_32() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_33() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_34() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_35() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_36() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_37() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_38() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_39() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_40() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_41() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_42() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_43() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_44() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_45() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_46() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_47() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_48() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_49() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_50() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_51() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_52() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_53() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_54() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_55() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_56() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_57() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_58() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_59() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_60() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_61() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_62() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_63() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_64() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_65() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_66() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_67() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_68() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_69() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_70() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_71() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_72() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_73() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_74() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_75() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_76() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_77() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_78() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_79() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_80() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_81() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_82() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_83() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_84() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_85() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_86() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_87() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_88() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_89() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_90() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_91() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_92() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_93() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_94() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_95() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_96() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_97() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_98() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_99() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_100() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_101() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_102() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_103() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_104() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_105() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_106() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_107() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_108() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_109() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_110() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_111() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_112() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_113() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_114() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_115() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_116() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_117() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_118() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_119() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_120() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_121() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_122() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_123() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_124() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_125() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_126() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_127() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_128() -> Int32;
+    @ffi_name("getpid")
+    public fn spec_getpid_129() -> Int32;
+}
+
+fn main() {
+    let first = unsafe { spec_getpid_0() };
+    let last  = unsafe { spec_getpid_129() };
+
+    // PRINT BEFORE ASSERTING: "both zero" and "they disagree" are
+    // different failures and must not look alike in the log.
+    println(f"first={first} last={last} equal={first == last}");
+
+    // A pid is never 0 for a running process, so this catches the case
+    // where BOTH reads land in an untouched register.
+    assert(first > 0);
+    assert(last > 0);
+    assert_eq(first, last);
+}
