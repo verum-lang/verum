@@ -183,11 +183,43 @@ def self_test() -> int:
         print("self-test: the fair-summary roster lost an entry", file=sys.stderr)
         bad += 1
 
+    # `emitter_messages` carries the variable-built-message narrowing —
+    # five codes are reachable only through it, one of which was the
+    # E105 finding — and no case reached it until 2026-09-10.
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        crate = pathlib.Path(tmp) / "verum_probe" / "src"
+        crate.mkdir(parents=True)
+        (crate / "lib.rs").write_text(
+            'fn a() { DiagnosticBuilder::error().code("E900")'
+            '.message("a literal message here"); }\n'
+            'fn b() {\n'
+            '    let mut msg = format!("built in a variable: {}", x);\n'
+            '    msg.push_str("  help: more");\n'
+            '    let _ = DiagnosticBuilder::error().code("E901").message(msg);\n'
+            '}\n'
+        )
+        global CRATES
+        saved, CRATES = CRATES, pathlib.Path(tmp)
+        try:
+            got = emitter_messages()
+        finally:
+            CRATES = saved
+    if "a literal message here" not in " ".join(got.get("E900", [])):
+        print(f"self-test: a literal message was not read: {got.get('E900')}",
+              file=sys.stderr)
+        bad += 1
+    if "built in a variable" not in " ".join(got.get("E901", [])):
+        print(f"self-test: a message BUILT IN A VARIABLE was not read: "
+              f"{got.get('E901')}", file=sys.stderr)
+        bad += 1
+
     if bad:
         print(f"self-test: {bad} FAILED", file=sys.stderr)
         return 1
     print(f"[ok] self-test: {len(cases)} case(s), 1 anchor, "
-          f"{len(FAIR_SUMMARY)} fair summaries pinned")
+          f"{len(FAIR_SUMMARY)} fair summaries pinned, "
+          f"2 emitter-message forms read")
     return 0
 
 

@@ -161,7 +161,7 @@ gates-docs: check-doc-examples check-examples-run check-homepage-examples check-
             check-doc-meta-functions \
             check-doc-calls-that-trap check-doc-status-matches-inventory \
             check-doc-mounts-resolve check-doc-error-code-meaning \
-            check-doc-method-signatures \
+            check-doc-method-signatures check-doc-field-types \
             check-doc-status-badge check-doc-reachable \
             check-doc-type-shapes check-doc-receiver-methods \
             check-doc-call-arity \
@@ -324,6 +324,10 @@ check-doc-error-code-meaning: ## Gate (T1387): a documented error code must mean
 check-doc-method-signatures: ## Gate (T1390): a documented method signature — receiver, parameter types, return — must be the one core/ declares
 	python3 scripts/ci/check_doc_method_signatures.py --self-test
 	python3 scripts/ci/check_doc_method_signatures.py
+
+check-doc-field-types: ## Gate (T1393): a documented record field must carry the type core/ gives it
+	python3 scripts/ci/check_doc_field_types.py --self-test
+	python3 scripts/ci/check_doc_field_types.py
 
 check-intrinsic-keys-implemented: ## Freeze the SET of declared-but-unimplemented `verum.*` intrinsic keys (T1368)
 	python3 scripts/ci/check_intrinsic_keys_implemented.py --self-test

@@ -246,11 +246,52 @@ def self_test() -> int:
             print(f"self-test: read a module call out of {src!r}", file=sys.stderr)
             bad += 1
 
+    # `exported` carries all five extractor corrections and was reached
+    # by NO self-test case until 2026-09-10 — verified by hand at build
+    # time and never again. A function whose narrowings are exercised
+    # only once is a comment with a return value.
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        mod = pathlib.Path(tmp) / "probe"
+        mod.mkdir()
+        (mod / "mod.vr").write_text(
+            "public mount .map.Map;\n"
+            "public mount .map.Iter as Cursor;\n"
+            "public mount .other.{Alpha, Beta as Gamma};\n"
+            "public module submod;\n"
+            "public type Rounding is HalfEven | HalfUp;\n"
+            "public type affine LockHandle is { fd: Int };\n"
+            "public fn open(p: Text) -> Int { 0 }\n"
+        )
+        global CORE
+        saved, CORE = CORE, pathlib.Path(tmp)
+        try:
+            got = exported("core.probe")
+        finally:
+            CORE = saved
+    if got is None:
+        print("self-test: exported() did not find the probe module",
+              file=sys.stderr)
+        bad += 1
+    else:
+        names, glob = got
+        want = {"Map", "Cursor", "Alpha", "Gamma", "submod", "Rounding",
+                "HalfEven", "HalfUp", "LockHandle", "open"}
+        if not want <= names:
+            print(f"self-test: exported() lost {sorted(want - names)}",
+                  file=sys.stderr)
+            bad += 1
+        if glob:
+            print("self-test: a glob re-export was seen where there is none",
+                  file=sys.stderr)
+            bad += 1
+
     if bad:
         print(f"self-test: {bad} FAILED", file=sys.stderr)
         return 1
     print(f"[ok] self-test: {len(cases)} declaration form(s), "
-          f"1 multi-line list, 1 dotted call, 4 non-claims rejected")
+          f"1 multi-line list, 1 dotted call, 4 non-claims rejected, "
+          f"10 exported names over 6 re-export forms")
     return 0
 
 
