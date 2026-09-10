@@ -40,6 +40,13 @@ ADMONITIONS TOO, by the same walk. `:::caution` … `:::` is Docusaurus,
 not CommonMark, and an unclosed one absorbs the rest of the page in the
 same way. Markers inside a code fence are content, which is why this
 cannot be done with two independent counts.
+
+FOUR-COLON NESTING (`::::caution` wrapping a `:::note`) is invisible to
+the admonition half — the patterns match exactly three colons. Measured
+2026-09-10: the site has ZERO `::::` lines, so this costs nothing today,
+and the behaviour if they appear is still sane. A `::::` block whose
+inner `:::` is properly closed passes; one whose inner `:::` is left
+open is reported, which is what it is.
 """
 
 from __future__ import annotations
