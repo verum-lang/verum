@@ -22,6 +22,13 @@ Measured 2026-09-10, first full run over the site:
       7 THE MODULE DOES NOT EXIST
       8 the module exists and does not have the name
 
+Ten of those fourteen were a WRONG MODULE rather than a missing name —
+`Path` lives in `core.io.path`, `Rng` in `core.random.deterministic`,
+`SentPacketInfo` in `...recovery.pn_space` — so the fix was to point
+the mount at the module that declares the thing. That is the shape this
+gate exists to find: the name is real, the path a reader copies is not,
+and a gate asking "does this leaf exist somewhere" says yes to all ten.
+
 FIVE CORRECTIONS BEFORE THE FIRST NUMBER WAS WORTH PRINTING, each found
 by checking a suspected finding against the tree rather than believing
 the count. They are the self-test:
@@ -89,20 +96,33 @@ IDENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
 # Known, each with why it is still here.  Identity, not a count: a swap
 # holds the number and moves these rows.
+# Ten of the first fourteen were a WRONG MODULE, not a missing name, and
+# were fixed by pointing the mount at the module that declares the thing:
+#
+#   core.io.fs.Path                 -> core.io.path
+#   core.random.Rng                 -> core.random.deterministic
+#   core.net.http2.StreamEvent      -> core.net.http2.stream (the page's
+#                                      own module table already said so)
+#   ...loss_detection.SentPacketInfo -> ...pn_space (loss_detection mounts
+#                                      it PRIVATELY, which is not a re-export)
+#   core.net.h3.qpack.HeaderField   -> the name is `QpackHeaderField`
+#   core.prelude.{Bool,Int,Maybe,List,Text} — built-in; no mount needed and
+#                                      no `core/prelude` to mount from
+#
+# The four below are different in kind: the name is declared NOWHERE in
+# core/. Each is marked at the line a reader copies — a note further down
+# the page does not stop anybody pasting the block — but a marker makes
+# the page honest, not correct, so they stay here until the declarations
+# exist.
 KNOWN: dict[str, list[str]] = {
-    # `core/prelude` is not a directory or a file. Five names on one page.
-    "core.prelude": ["Bool", "Int", "List", "Maybe", "Text"],
     # `core/security/x509/` has neither a `parse` nor a `sign` submodule.
     "core.security.x509.parse": ["parse_cert_chain_pem"],
     "core.security.x509.sign": ["FileSigner"],
-    # The module exists; the name is not in it.
-    "core.io.fs": ["Path"],
+    # `core/signal/mod.vr` shows `ctrl_c()` in its own doc comment and
+    # declares no such function.
     "core.signal": ["ctrl_c"],
+    # The tour's framework-axiom example. `Site` is real; the axiom is not.
     "core.math.frameworks.lurie_htt": ["sheafification_is_infinity_topos"],
-    "core.net.http2": ["StreamEvent"],
-    "core.random": ["Rng"],
-    "core.net.h3.qpack": ["HeaderField"],
-    "core.net.quic.recovery.loss_detection": ["SentPacketInfo"],
 }
 
 
