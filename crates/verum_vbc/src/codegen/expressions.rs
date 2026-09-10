@@ -13996,7 +13996,21 @@ impl VbcCodegen {
                 self.ctx.free_temp(receiver_reg);
                 return Ok(Some(result));
             }
-            if !has_user_defined_len {
+            // T1370. `has_user_defined_len` is answered from a
+            // MOUNT-scoped registry while ordinary method dispatch is
+            // not, so an unmounted receiver type loses the method here
+            // and keeps it everywhere else. Measured: with `Metadata`
+            // unmounted, `m.is_file()` is correct and `m.len()` is 1
+            // against a raw.size of 10. A record is never a builtin
+            // container, so there is nothing for `Len` to mean on one —
+            // fall through to the dispatch that already works.
+            let receiver_is_known_non_container = self
+                .extract_expr_type_name(receiver)
+                .map(|tn| VbcCodegen::strip_generic_args(&tn).to_string())
+                .filter(|b| !b.is_empty())
+                .map(|b| WKT::from_name(&b).is_none() && !b.starts_with('['))
+                .unwrap_or(false);
+            if !has_user_defined_len && !receiver_is_known_non_container {
                 let result = self.ctx.alloc_temp();
                 self.ctx.emit(Instruction::Len {
                     dst: result,
@@ -14202,7 +14216,21 @@ impl VbcCodegen {
                 (found, hint)
             };
 
-            if !has_user_defined {
+            // T1370. `has_user_defined_is_empty` is answered from a
+            // MOUNT-scoped registry while ordinary method dispatch is
+            // not, so an unmounted receiver type loses the method here
+            // and keeps it everywhere else. Measured: with `Metadata`
+            // unmounted, `m.is_file()` is correct and `m.len()` is 1
+            // against a raw.size of 10. A record is never a builtin
+            // container, so there is nothing for `Len` to mean on one —
+            // fall through to the dispatch that already works.
+            let receiver_is_known_non_container = self
+                .extract_expr_type_name(receiver)
+                .map(|tn| VbcCodegen::strip_generic_args(&tn).to_string())
+                .filter(|b| !b.is_empty())
+                .map(|b| !type_names::is_builtin_method_type(&b) && !b.starts_with('['))
+                .unwrap_or(false);
+            if !has_user_defined && !receiver_is_known_non_container {
                 // slice.is_empty() -> slice.len() == 0
                 let len_result = self.ctx.alloc_temp();
                 if let Some(n) = self.static_array_count(receiver) {
