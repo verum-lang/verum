@@ -84,19 +84,21 @@ KNOWN: dict[str, list[str]] = {
     # check — `error<E400>: expected '@builtin_path', found 'Unit'` —
     # and never reaches the code generation that would have handled it.
     # A binding gap over a working runtime, not an unimplemented feature.
-    "language/dependent-types.md": ["builtin_refl", "builtin_sym", "builtin_transport"],
+    #
+    # SHRANK 2026-09-10: both pages now quote the E0410 warning in their
+    # own status box, so `builtin_refl` on the first and
+    # `builtin_path` / `builtin_refl` on the second are DISCLOSED rather
+    # than taught, and the disclosure path reports them instead. The
+    # remaining names appear further down each page, outside the forty
+    # lines the disclosure rule reaches.
+    "language/dependent-types.md": ["builtin_sym", "builtin_transport"],
     "verification/cubical-hott.md": [
-        "builtin_path", "builtin_refl", "builtin_sym", "builtin_trans",
-        "builtin_transport",
+        "builtin_sym", "builtin_trans", "builtin_transport",
     ],
     # `@llm_oracle` — called at core/math/tactics.vr:663 and declared
     # nowhere. Two pages teach it.
     "language/proof-dsl.md": ["llm_oracle"],
     "reference/tactics.md": ["llm_oracle"],
-    # `@const_slot_for` — the same name core/runtime/env.vr:368 uses to
-    # pick a context slot, where it types as Unit and the `slot <
-    # CONTEXT_SLOT_COUNT` comparison beneath it is comparing Unit.
-    "architecture/execution-environment.md": ["const_slot_for"],
     # A PLACEHOLDER, not a promise, and there is no mechanical way to tell
     # the two apart: the surrounding prose is "the brace forms `@name[…]`
     # and `@name{…}` exist for DSLs that prefer square brackets", so
