@@ -162,9 +162,23 @@ def instantiates(generic: str, concrete: str) -> bool:
     return re.fullmatch(pat, concrete) is not None
 
 
+TIER = re.compile(r"&(?:checked|unsafe)\s*")
+
+
 def self_consistent(sigs: set[tuple[str, str, str]]) -> bool:
-    """Every pair either identical or one an instantiation of the other."""
-    flat = sorted("|".join(s) for s in sigs)
+    """Every pair either identical or one an instantiation of the other.
+
+    REFERENCE TIERS ARE ONE TYPE. `&T`, `&checked T` and `&unsafe T`
+    differ in what the compiler proves, not in what is passed, and
+    documenting all three of a method is the language's own idiom — see
+    the three-tier table in CLAUDE.md. A page showing them together is
+    teaching CBGR, not contradicting itself.
+
+    The normalisation belongs HERE and not in the comparison against
+    core: a page that says `&checked User` where core says `&User` IS a
+    difference the reader meets, and that axis must keep seeing it.
+    """
+    flat = sorted(TIER.sub("&", "|".join(s)) for s in sigs)
     for a in flat:
         for b in flat:
             if a is b or a == b:
@@ -258,12 +272,18 @@ def self_test() -> int:
         print("self-test: a concrete instantiation was read as a contradiction",
               file=sys.stderr)
         bad += 1
+    tiers = {("&self", "&User", "Int"), ("&self", "&checkedUser", "Int"),
+             ("&self", "&unsafeUser", "Int")}
+    if not self_consistent(tiers):
+        print("self-test: three CBGR reference tiers were read as a "
+              "contradiction", file=sys.stderr)
+        bad += 1
     if bad:
         print(f"self-test: {bad} FAILED", file=sys.stderr)
         return 1
     print(f"[ok] self-test: 2 owner-tracking cases, 5 return normalisations, "
           f"4 parameter cases, 1 receiver case, 3 anchors, "
-          f"1 self-contradiction pair vs 1 teaching pair, "
+          f"1 self-contradiction pair vs 2 legitimate pairs, "
           f"{len(KNOWN)} on the roster")
     return 0
 
