@@ -10,10 +10,14 @@ cd "$(git rev-parse --show-toplevel)"
 # Allowlist:
 #   .gitignore                 — the ignore rule for internal/ itself
 #   k_arch_v_alignment.rs      — the kernel gate names the pattern to forbid it
+#   check_doc_no_internal_artefacts.py — same reason, for the WEBSITE side:
+#                              its self-test must carry the real removed
+#                              line as a fixture, or it proves nothing
 violations=$(git grep -nE '(^|[^A-Za-z0-9_.])internal/([A-Za-z0-9_-]+/|[A-Za-z0-9_-]+\.(md|pdf|vr|rs|tex|toml|json))' \
   -- ':!.gitignore' \
      ':!crates/verum_kernel/tests/k_arch_v_alignment.rs' \
      ':!scripts/ci/check_no_internal_refs.sh' \
+     ':!scripts/ci/check_doc_no_internal_artefacts.py' \
   || true)
 if [ -n "$violations" ]; then
   echo "FORBIDDEN internal/-directory references in tracked files:" >&2
