@@ -40,8 +40,9 @@ use verum_fast_parser::VerumParser;
 use verum_lexer::Lexer;
 use verum_vbc::codegen::{CodegenConfig, VbcCodegen};
 use verum_vbc::ffi::runtime::{marshal_c_to_verum_struct_at, marshal_verum_struct_to_c_at};
-use verum_vbc::interpreter::OBJECT_HEADER_SIZE;
-use verum_vbc::module::{FfiStructLayout, VbcModule};
+use verum_vbc::interpreter::{OBJECT_HEADER_SIZE, ObjectHeader};
+use verum_vbc::types::TypeId;
+use verum_vbc::module::{CType, FfiStructField, FfiStructLayout, VbcModule};
 use verum_vbc::value::Value;
 
 /// `Outer` mirrors the shape that matters: a scalar, a nested record,
@@ -108,6 +109,29 @@ struct FakeObject {
 
 const HEADER_WORDS: usize = OBJECT_HEADER_SIZE / std::mem::size_of::<u64>();
 
+/// Words written past the object's declared data area and checked for
+/// change. They stand in for a fault: this fixture cannot put the object
+/// at the end of a page, so an overrun is detected by SENTINEL rather
+/// than by SIGSEGV. Said plainly because the difference matters — a
+/// sentinel proves a write happened, a fault proves it left the
+/// allocation.
+const GUARD_WORDS: usize = 4;
+
+/// The sentinel must be a VALID NaN-boxed value, not a memorable bit
+/// pattern, and that is not decoration.
+///
+/// Measured while taking this test's polarity: with `0xDEADBEEF…` in the
+/// guard words, reverting the bound made the to-C leg read one of them
+/// and call `as_i64()` on it, which `debug_assert`s in `value.rs` — the
+/// test went red on the READ and never reached the write-back leg, so
+/// the sentinel it exists for was never exercised. A readable sentinel
+/// lets the out-of-bounds READ pass through harmlessly (a read changes
+/// nothing a sentinel can see anyway) and leaves the out-of-bounds
+/// WRITE to trip it, which is the half a sentinel can actually prove.
+fn guard_value() -> Value {
+    Value::from_i64(0x5E5E_5E5E)
+}
+
 impl FakeObject {
     fn new(slots: usize) -> Self {
         assert_eq!(
@@ -115,9 +139,39 @@ impl FakeObject {
             0,
             "the header must be a whole number of words for this fixture to be aligned"
         );
-        Self {
-            words: vec![0u64; HEADER_WORDS + slots],
+        let mut words = vec![0u64; HEADER_WORDS + slots + GUARD_WORDS];
+        for w in words.iter_mut().skip(HEADER_WORDS + slots) {
+            *w = guard_value().to_bits();
         }
+        let mut me = Self { words };
+        // A REAL header, not zeros. `size` is what the marshaller now
+        // bounds the slot walk against (T1361); a zeroed header declares
+        // an object with no data and every field is correctly skipped —
+        // which would make every test in this file pass for the wrong
+        // reason.
+        let header = ObjectHeader::new(
+            TypeId(1),
+            0,
+            (slots * std::mem::size_of::<Value>()) as u32,
+        );
+        // SAFETY: `words` is 8-aligned (Vec<u64>) and at least
+        // HEADER_WORDS long, which is `OBJECT_HEADER_SIZE` bytes.
+        unsafe {
+            *(me.words.as_mut_ptr() as *mut ObjectHeader) = header;
+        }
+        me
+    }
+
+    /// True while nothing has been written past the declared data area.
+    fn guards_intact(&self) -> bool {
+        self.words
+            .iter()
+            .skip(HEADER_WORDS + self.slots())
+            .all(|w| *w == guard_value().to_bits())
+    }
+
+    fn slots(&self) -> usize {
+        self.words.len() - HEADER_WORDS - GUARD_WORDS
     }
     fn ptr(&mut self) -> *mut u8 {
         self.words.as_mut_ptr() as *mut u8
@@ -310,4 +364,84 @@ fn a_field_offset_past_the_buffer_is_refused() {
     );
     assert_eq!(read_i64(&buf, OFF_MID_HI), 2);
     assert_eq!(read_i64(&buf, OFF_TAIL), 0x0F00);
+}
+
+/// T1361 — the walk is bounded by the RECEIVER, not only by the buffer.
+///
+/// `layout.fields.len()` is compiled into the module; the object comes
+/// from the caller's register. A `.vbc` module is untrusted input, so a
+/// layout claiming more fields than the receiver has slots must not read
+/// past the object on the way out or WRITE past it coming back.
+///
+/// The overrun is caught by sentinel words after the data area, not by a
+/// fault — this fixture cannot page-align the tail. A sentinel proves a
+/// write happened; only a guard page would prove it left the allocation.
+#[test]
+fn a_layout_with_more_fields_than_the_receiver_has_slots_is_bounded() {
+    let m = compile();
+    let mut forged = layout(&m, "Outer").clone();
+    // Three real fields become seven, the extra four naming slots the
+    // receiver does not have.
+    for i in 0..4u32 {
+        forged.fields.push(FfiStructField {
+            name: forged.fields[0].name,
+            c_type: CType::I64,
+            offset: 32 + i * 8,
+            size: 8,
+            align: 8,
+            nested_layout: None,
+        });
+    }
+
+    let mut inner = FakeObject::new(2);
+    inner.set(0, Value::from_i64(1));
+    inner.set(1, Value::from_i64(2));
+    let mut outer = FakeObject::new(3);
+    outer.set(0, Value::from_i64(7));
+    outer.set(1, Value::from_ptr(inner.ptr()));
+    outer.set(2, Value::from_i64(9));
+
+    let mut buf = [0u8; 256];
+    // SAFETY: the object is sized for three slots; the point of the test
+    // is that the four forged fields do not reach past it.
+    unsafe {
+        marshal_verum_struct_to_c_at(
+            &forged,
+            &m.ffi_layouts,
+            outer.ptr(),
+            buf.as_mut_ptr(),
+            buf.len(),
+            0,
+            0,
+        );
+    }
+    assert!(
+        outer.guards_intact(),
+        "the to-C leg read past the receiver's data area"
+    );
+    // The real fields still travelled.
+    assert_eq!(read_i64(&buf, OFF_HEAD), 7);
+    assert_eq!(read_i64(&buf, OFF_TAIL), 9);
+
+    // And the write-back leg, where an unbounded walk is corruption
+    // rather than a stray read.
+    write_i64(&mut buf, 32, 0x1111_1111);
+    write_i64(&mut buf, 40, 0x2222_2222);
+    // SAFETY: as above.
+    unsafe {
+        marshal_c_to_verum_struct_at(
+            &forged,
+            &m.ffi_layouts,
+            buf.as_ptr(),
+            buf.len(),
+            outer.ptr(),
+            0,
+            0,
+        );
+    }
+    assert!(
+        outer.guards_intact(),
+        "the from-C leg WROTE past the receiver's data area — this is heap corruption"
+    );
+    assert_eq!(outer.get(0).as_i64(), 7, "in-range slots still travel");
 }

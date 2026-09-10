@@ -1372,6 +1372,30 @@ fn trace_nested_skip(which: &str, slot: usize, depth: u32, reason: &str) {
     }
 }
 
+/// How many DATA bytes the receiver actually has, or `None` when the
+/// pointer is not a readable object header.
+///
+/// The two sides of the marshalling walk come from different places:
+/// `layout.fields.len()` is compiled into the module, the object is
+/// whatever the caller's register holds. Codegen builds both from one
+/// declaration, so they agree in practice — but a `.vbc` module is
+/// untrusted input (`tests/red_team_bytecode_trust_boundary.rs`), and a
+/// layout with more fields than the receiver has slots is an
+/// out-of-bounds READ on the to-C leg and an out-of-bounds WRITE coming
+/// back. The object's own header says how big it is and was sitting at
+/// `obj_ptr` unread until T1361.
+///
+/// `try_from_ptr` rather than a raw deref: it rejects null, misaligned,
+/// and NaN-box special-value markers (a `FatRef` payload is 8-aligned
+/// and points at unmapped memory), so a mis-dispatched value yields
+/// `None` here instead of a fault.
+fn receiver_data_bytes(obj_ptr: *const u8) -> Option<usize> {
+    // SAFETY: `try_from_ptr` is the alignment- and marker-checked
+    // accessor; it returns None rather than dereferencing anything it
+    // cannot prove is a header.
+    unsafe { crate::interpreter::ObjectHeader::try_from_ptr(obj_ptr).map(|h| h.size as usize) }
+}
+
 /// Copies one Verum record into the C buffer at `base_off`, recursing into
 /// record-typed fields.
 ///
@@ -1398,6 +1422,7 @@ pub unsafe fn marshal_verum_struct_to_c_at(
 ) {
     // SAFETY: see the function contract.
     unsafe {
+        let data_bytes = receiver_data_bytes(obj_ptr);
         // The Verum-side slot index is the field's DECLARED POSITION (heap
         // objects store fields contiguously at HEADER + pos*sizeof(Value), the
         // same order `resolve_field_index` / GetF use). `field.name` is a
@@ -1416,6 +1441,22 @@ pub unsafe fn marshal_verum_struct_to_c_at(
             // box. It was absent until T1359.
             if off.saturating_add(field.size as usize) > buf_len {
                 continue;
+            }
+
+            // The RECEIVER's bound, which is a different question from the
+            // buffer's above: that one asks whether the C side has room,
+            // this one whether the Verum object has the slot at all.
+            let slot_end = (slot + 1) * std::mem::size_of::<Value>();
+            match data_bytes {
+                None => {
+                    trace_nested_skip("to_c", slot, depth, "receiver has no readable header");
+                    continue;
+                }
+                Some(have) if slot_end > have => {
+                    trace_nested_skip("to_c", slot, depth, "slot past the receiver's data area");
+                    continue;
+                }
+                Some(_) => {}
             }
 
             let value_ptr = obj_ptr
@@ -1514,6 +1555,7 @@ pub unsafe fn marshal_c_to_verum_struct_at(
 ) {
     // SAFETY: see the function contract.
     unsafe {
+        let data_bytes = receiver_data_bytes(obj_ptr);
         // See `marshal_verum_struct_to_c`: the Verum-side slot is the field's
         // declared position (enumeration index), NOT the global interned
         // `field.name` id. `field.offset` is the packed C-struct byte offset
@@ -1524,6 +1566,21 @@ pub unsafe fn marshal_c_to_verum_struct_at(
             };
             if off.saturating_add(field.size as usize) > buf_len {
                 continue;
+            }
+
+            // The receiver's bound. This leg WRITES, so an unbounded walk
+            // here is not a stray read but heap corruption.
+            let slot_end = (slot + 1) * std::mem::size_of::<Value>();
+            match data_bytes {
+                None => {
+                    trace_nested_skip("from_c", slot, depth, "receiver has no readable header");
+                    continue;
+                }
+                Some(have) if slot_end > have => {
+                    trace_nested_skip("from_c", slot, depth, "slot past the receiver's data area");
+                    continue;
+                }
+                Some(_) => {}
             }
 
             let value_ptr = obj_ptr
