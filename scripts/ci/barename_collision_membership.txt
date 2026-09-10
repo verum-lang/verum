@@ -619,5 +619,5 @@ write/2	io/file.vr,io/fs.vr,shell/builtins.vr,sys/linux/syscall.vr
 write_bytes/2	io/file.vr,protobuf/wire.vr
 write_str/2	io/fs.vr,shell/builtins.vr
 write_varint/2	net/http3/frame.vr,protobuf/wire.vr
-yield_now/0	async/intrinsics.vr,async/task.vr,sys/darwin/thread.vr,sys/windows/thread.vr
+yield_now/0	async/intrinsics.vr,async/task.vr,sys/darwin/thread.vr,sys/linux/thread.vr,sys/windows/thread.vr
 zeroed/0	database/sqlite/native/expr_decorrelation/eligibility.vr,database/sqlite/native/pushdown_filter_api/eligibility.vr,database/sqlite/native/query_flattening_rule/context.vr

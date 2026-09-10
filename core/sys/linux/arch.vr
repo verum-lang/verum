@@ -452,6 +452,16 @@ public const SYS_EXIT_GROUP: Int = 231;
 @cfg(target_arch = "aarch64")
 public const SYS_EXIT_GROUP: Int = 94;
 
+// `sched_yield`. Open-coded as `@syscall(24)` / `@syscall(124)` in
+// core/runtime/thread.vr until 2026-09-10; `@syscall` is not a
+// meta-function, so both branches typed as `Unit` and `yield_now` was a
+// no-op on Linux — a spin loop that never yielded, with no external
+// symptom (T1352).
+@cfg(target_arch = "x86_64")
+public const SYS_SCHED_YIELD: Int = 24;
+@cfg(target_arch = "aarch64")
+public const SYS_SCHED_YIELD: Int = 124;
+
 @cfg(target_arch = "x86_64")
 public const SYS_WAIT4: Int = 61;
 @cfg(target_arch = "aarch64")

@@ -43,6 +43,7 @@ mount core.intrinsics.{
 };
 mount sys.linux.syscall.{
     syscall_raw,
+    sched_yield,
     SYS_CLONE, SYS_CLONE3, SYS_FUTEX, SYS_GETTID,
     SYS_MMAP, SYS_MUNMAP, SYS_MPROTECT,
 };
@@ -441,6 +442,19 @@ public const FUTEX_WAKE_BITSET_PRIVATE: Int = FUTEX_WAKE_BITSET | FUTEX_PRIVATE_
 
 /// Match any bitset
 public const FUTEX_BITSET_MATCH_ANY: UInt32 = 0xFFFFFFFF;
+
+/// Yield the current thread's time slice.
+///
+/// Symmetric with `sys/darwin/thread.vr`'s `yield_now`, which wraps
+/// libSystem's `sched_yield`. `core/runtime/thread.vr` used to open-code
+/// this branch as `@syscall(24)` / `@syscall(124)`, and `@syscall` is not
+/// a meta-function: both typed as `Unit`, so a Linux spin loop never
+/// yielded. That is the quietest member of T1352 — no crash, no wrong
+/// value, only a loop that does not give way.
+/// UNVERIFIED FROM THIS CHECKOUT — macOS host.
+public fn yield_now() {
+    let _ = sched_yield();
+}
 
 /// Wait on a futex if value matches expected.
 ///

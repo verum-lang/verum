@@ -313,11 +313,11 @@ implement Thread {
     public fn yield_now() {
         @cfg(target_os = "linux")
         {
-            // sched_yield. Syscall number differs per arch:
-            //  x86_64: 24
-            //  aarch64: 124
-            @cfg(target_arch = "x86_64")  { @syscall(24); }
-            @cfg(target_arch = "aarch64") { @syscall(124); }
+            // `sys.linux.thread.yield_now()`, symmetric with the two
+            // branches below. This was open-coded as `@syscall(24)` /
+            // `@syscall(124)`, and `@syscall` is not a meta-function:
+            // both typed as `Unit`, so the loop never yielded (T1352).
+            sys.linux.thread.yield_now();
         }
 
         @cfg(target_os = "macos")

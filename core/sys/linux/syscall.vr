@@ -78,6 +78,7 @@ public mount sys.linux.arch.{
     // Process control
     SYS_CLONE, SYS_CLONE3, SYS_EXECVE,
     SYS_EXIT, SYS_EXIT_GROUP, SYS_WAIT4, SYS_KILL,
+    SYS_SCHED_YIELD,
 
     // File descriptors
     SYS_DUP, SYS_FCNTL,
@@ -513,6 +514,16 @@ public fn exit(code: Int) -> ! {
 public fn exit_group(code: Int) -> ! {
     unsafe { syscall_raw(SYS_EXIT_GROUP, code, 0, 0, 0, 0, 0) };
     unreachable("exit_group syscall returned")
+}
+
+/// Yield the remainder of this thread's time slice to the scheduler.
+///
+/// `sched_yield(2)` returns 0 on Linux and cannot fail in practice; the
+/// raw result is returned rather than swallowed so a caller can see a
+/// negative errno if one ever appears.
+/// UNVERIFIED FROM THIS CHECKOUT — macOS host.
+public fn sched_yield() -> Int {
+    unsafe { syscall_raw(SYS_SCHED_YIELD, 0, 0, 0, 0, 0, 0) }
 }
 
 /// Nanosleep (high-precision sleep).

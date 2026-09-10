@@ -111,7 +111,6 @@ KNOWN: dict[str, int] = {
     "bitcast": 3,
     "stack_alloc": 3,
     "builtin_path_app": 2,
-    "syscall": 2,
     "transport_roundtrip": 2,
     "builtin_absurd": 1,
     "builtin_ap": 1,
