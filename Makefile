@@ -170,7 +170,8 @@ gates-docs: check-doc-examples check-examples-run check-homepage-examples check-
             check-doc-status-badge check-doc-reachable \
             check-doc-type-shapes check-doc-receiver-methods \
             check-doc-call-arity \
-            check-doc-iterator-items ## Every documentation gate CI runs — needs a build
+            check-doc-iterator-items check-doc-no-internal-artefacts \
+            check-doc-fences-close ## Every documentation gate CI runs — needs a build
 	@echo "gates-docs: all documentation gates green"
 
 check-doc-method-names: ## Gate: a method a doc example calls on a `core/` type must exist (the receiver gate checks only the RECEIVER)
@@ -186,6 +187,14 @@ list-doc-absent-methods: ## LIST (never a gate): doc methods called on a VARIABL
 check-doc-iterator-items: ## Gate: a doc line naming a core iterator type AND its item must agree with what `next` yields
 	python3 scripts/ci/check_doc_iterator_items.py --self-test
 	python3 scripts/ci/check_doc_iterator_items.py
+
+check-doc-no-internal-artefacts: ## Gate: the public site must carry no task IDs, no FV-N labels and no link into internal/
+	python3 scripts/ci/check_doc_no_internal_artefacts.py --self-test
+	python3 scripts/ci/check_doc_no_internal_artefacts.py
+
+check-doc-fences-close: ## Gate: no page may leave a code fence or admonition open, or open one inside another
+	python3 scripts/ci/check_doc_fences_close.py --self-test
+	python3 scripts/ci/check_doc_fences_close.py
 
 check-doc-cli-flags: ## Gate: every CLI flag the docs show must exist in the binary — needs a build
 	python3 scripts/ci/check_doc_cli_flags.py --self-test

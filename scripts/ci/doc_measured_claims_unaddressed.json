@@ -10,9 +10,5 @@
  [
   "language/modules.md",
   "`mount core.*` costs a great deal and buys nothing"
- ],
- [
-  "stdlib/collections.md",
-  "h:caddc1f3"
  ]
 ]

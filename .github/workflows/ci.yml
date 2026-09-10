@@ -775,6 +775,10 @@ jobs:
           python3 scripts/ci/check_doc_protocol_methods.py
           python3 scripts/ci/check_doc_measured_claims_addressed.py --self-test
           python3 scripts/ci/check_doc_measured_claims_addressed.py
+          python3 scripts/ci/check_doc_no_internal_artefacts.py --self-test
+          python3 scripts/ci/check_doc_no_internal_artefacts.py
+          python3 scripts/ci/check_doc_fences_close.py --self-test
+          python3 scripts/ci/check_doc_fences_close.py
           # Two more that need only the website checkout, added
           # 2026-09-07 with a CALLER from the start — the whole reason
           # this step's comment exists is that gates landed as Makefile
