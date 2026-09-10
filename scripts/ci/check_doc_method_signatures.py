@@ -124,10 +124,30 @@ def norm(t: str) -> str:
     return t
 
 
+# A reference page may list a type's methods under a `## `Name`` heading
+# with NO `implement` wrapper — `api-widgets.md` does it for every widget.
+# The heading IS the owner there, and a reader treats it as one. Without
+# this the harvest saw 363 of the corpus's 556 method declarations. The
+# 193 it could not attribute were NOT hiding defects — 25 more became
+# comparable and zero of them disagreed — but coverage that holds only
+# because the invisible part happened to be correct is not coverage.
+# The name may carry type parameters — `## `Dropdown<T>`` — and a
+# pattern that demands a closing backtick right after the identifier
+# leaves the PREVIOUS heading in force, so a whole section's methods
+# are attributed to the type above it. That produced a false
+# "self-contradiction" on `TextArea.handle_key`.
+HEADING = re.compile(r"^#{2,4}\s+`([A-Z][A-Za-z0-9_]*)(?:<[^`]*>)?`")
+
+
 def harvest(text: str) -> dict[tuple[str, str], set[str]]:
     out: dict[tuple[str, str], set[str]] = {}
-    owner = None
+    owner = heading = None
     for line in text.split("\n"):
+        h = HEADING.match(line)
+        if h:
+            heading = h.group(1)
+            owner = None
+            continue
         if line[:1] in ("}", ")"):
             owner = None
         o = OWNER.match(line)
@@ -135,8 +155,9 @@ def harvest(text: str) -> dict[tuple[str, str], set[str]]:
             owner = o.group(1) or o.group(3) or o.group(4) or o.group(2)
             continue
         m = METH.match(line)
-        if m and owner:
-            out.setdefault((owner, m.group(1)), set()).add(
+        who = owner or heading
+        if m and who:
+            out.setdefault((who, m.group(1)), set()).add(
                 (receiver(m.group(2)), param_types(m.group(3)),
                  norm(m.group(4)) if m.group(4) else "NORETURN")
             )
