@@ -24,7 +24,7 @@
 //! | E2xx  | Module   | E200 import not found, E201 circular import |
 //! | E3xx  | Memory / Lifetime | E305 uninitialized value, E310 use-after-move |
 //! | E4xx  | Type system | E400 type mismatch, E401 invalid cast |
-//! | E5xx  | Verification | E500 contract violated, E501 SMT timeout |
+//! | E5xx  | Verification | E500 contract violated, E501 invalid refinement |
 //! | E6xx  | Context system | E600 context not provided, E603 context mismatch |
 //! | E8xx  | FFI | E800 unsafe FFI violation, E803 inline-asm operand |
 //! | E9xx  | Internal | E900 ICE, E901 compiler assertion failed |
@@ -74,7 +74,7 @@ pub enum ErrorCategory {
     Memory,
     /// Type-system errors — type mismatch, invalid cast (E4xx).
     Type,
-    /// Formal-verification errors — SMT timeout, contract violation (E5xx).
+    /// Formal-verification errors — contract violation, invalid refinement (E5xx).
     Verification,
     /// Context-system errors — missing / conflicting DI contexts (E6xx).
     Context,
@@ -367,7 +367,7 @@ pub static REGISTRY: Lazy<HashMap<&'static str, ErrorCodeEntry>> = Lazy::new(|| 
         ErrorCodeEntry { code: "E501", numeric: 501, category: ErrorCategory::Verification, description: "invalid refinement predicate; also: a meta function declared pure has side effects" },
         ErrorCodeEntry { code: "E502", numeric: 502, category: ErrorCategory::Verification, description: "a meta function uses runtime contexts, which are not available at compile time" },
         ErrorCodeEntry { code: "E503", numeric: 503, category: ErrorCategory::Verification, description: "a pure function has side effects" },
-        ErrorCodeEntry { code: "E504", numeric: 504, category: ErrorCategory::Verification, description: "postcondition not established" },
+        ErrorCodeEntry { code: "E504", numeric: 504, category: ErrorCategory::Verification, description: "`.await` used outside an async context" },
         ErrorCodeEntry { code: "E505", numeric: 505, category: ErrorCategory::Verification, description: "corecursive function is non-productive" },
         ErrorCodeEntry { code: "E506", numeric: 506, category: ErrorCategory::Verification, description: "meta argument violates its refinement" },
 
