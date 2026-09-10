@@ -5075,6 +5075,59 @@ impl ProtocolChecker {
     /// introduces a cycle in the superprotocol hierarchy.
     pub fn register_protocol(&mut self, protocol: Protocol) -> Result<(), ProtocolError> {
         let name = protocol.name.clone();
+        let mut protocol = protocol;
+        // PROTOCOL-REREGISTRATION-KEEPS-THE-RECEIVER-1 (T1378).
+        //
+        // A protocol is registered MORE THAN ONCE — measured on `Any`,
+        // which `check_object_safety` sees three times, correct twice:
+        //
+        //   Any::type_id receiver_kind=Some(SelfRef) -> SelfRef
+        //   Any::type_id receiver_kind=Some(SelfRef) -> SelfRef
+        //   Any::type_id receiver_kind=None          -> None    <- third
+        //
+        // and the third then reports the OPPOSITE of what the declaration
+        // says: `fn type_id(&self)` "has no self parameter".
+        //
+        // The receiver kind is a field the four `ProtocolMethod`
+        // constructors CANNOT express — every one hardcodes
+        // `Maybe::None` — and the only site that sets it correctly
+        // (`infer/decls.rs:2036`) builds the struct literally, bypassing
+        // them. So any registration built through a constructor means
+        // "receiver unknown", and `check_object_safety` cannot recover it:
+        // its fallback infers from `params[0]`, and a protocol method's
+        // `params` never contains `self`, so an unknown receiver always
+        // reads as NO receiver.
+        //
+        // A re-registration must therefore not DOWNGRADE what is already
+        // known. `Maybe::None` here means "this path could not say", not
+        // "this method has no receiver" — the two are different claims and
+        // only the first is ever true of a constructor-built record.
+        //
+        // Deliberately narrow: it fills a gap, never overwrites. A later
+        // registration that DOES know its receiver kind still wins.
+        //
+        // `VERUM_NO_PROTOCOL_RECEIVER_CARRY=1` — A/B kill switch.
+        if std::env::var_os("VERUM_NO_PROTOCOL_RECEIVER_CARRY").is_none()
+            && let Some(prev) = self.protocols.get(&name)
+        {
+            for (mname, method) in protocol.methods.iter_mut() {
+                if matches!(method.receiver_kind, Maybe::None)
+                    && let Some(old) = prev.methods.get(mname)
+                    && let Maybe::Some(rk) = old.receiver_kind
+                {
+                    method.receiver_kind = Maybe::Some(rk);
+                    if std::env::var("VERUM_TRACE_OBJSAFE")
+                        .is_ok_and(|v| v == "1" || v.as_str() == name.as_str())
+                    {
+                        eprintln!(
+                            "[objsafe] re-registration of {}::{} carried \
+                             receiver_kind={:?} forward from the previous record",
+                            name, mname, rk
+                        );
+                    }
+                }
+            }
+        }
         self.protocols.insert(name.clone(), protocol);
         // Invalidate caches when new protocol is registered
         self.methods_cache.clear();
