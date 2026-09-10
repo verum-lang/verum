@@ -166,7 +166,7 @@ gates-docs: check-doc-examples check-examples-run check-homepage-examples check-
             check-doc-calls-that-trap check-doc-status-matches-inventory \
             check-doc-mounts-resolve check-doc-error-code-meaning \
             check-doc-method-signatures check-doc-field-types \
-            check-doc-protocol-methods \
+            check-doc-protocol-methods check-doc-measured-claims \
             check-doc-status-badge check-doc-reachable \
             check-doc-type-shapes check-doc-receiver-methods \
             check-doc-call-arity \
@@ -337,6 +337,10 @@ check-doc-field-types: ## Gate (T1393): a documented record field must carry the
 check-doc-protocol-methods: ## Gate (T1393): a documented protocol must offer the method set core/ declares
 	python3 scripts/ci/check_doc_protocol_methods.py --self-test
 	python3 scripts/ci/check_doc_protocol_methods.py
+
+check-doc-measured-claims: ## Gate (T1397): a box that says MEASURED must say how to measure it again
+	python3 scripts/ci/check_doc_measured_claims_addressed.py --self-test
+	python3 scripts/ci/check_doc_measured_claims_addressed.py
 
 check-intrinsic-keys-implemented: ## Freeze the SET of declared-but-unimplemented `verum.*` intrinsic keys (T1368)
 	python3 scripts/ci/check_intrinsic_keys_implemented.py --self-test

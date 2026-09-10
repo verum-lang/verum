@@ -1,0 +1,142 @@
+[
+ [
+  "architecture/module-system.md",
+  "What this rule does not cover"
+ ],
+ [
+  "architecture/runtime-tiers.md",
+  "Two enums, and this table is the other one"
+ ],
+ [
+  "cookbook/dns.md",
+  "Not shipped"
+ ],
+ [
+  "cookbook/dns.md",
+  "There is no cache"
+ ],
+ [
+  "cookbook/json.md",
+  "The error surface here was wrong"
+ ],
+ [
+  "cookbook/quic-server.md",
+  "These two mounts name modules that do not exist"
+ ],
+ [
+  "language/async-concurrency.md",
+  "Awaiting does not consume, and the call type is erased"
+ ],
+ [
+  "language/capability-types.md",
+  "The attenuation is enforced, and the name is a plain identifier"
+ ],
+ [
+  "language/context-system.md",
+  "The method IS checked — this caution was stale"
+ ],
+ [
+  "language/context-system.md",
+  "`provide` does not check that the provider implements the context"
+ ],
+ [
+  "language/copatterns.md",
+  "The productivity check cannot be what rejects it today"
+ ],
+ [
+  "language/copatterns.md",
+  "This example does not compile today"
+ ],
+ [
+  "language/meta/token-api.md",
+  "Half of this page is a design, not an API"
+ ],
+ [
+  "language/modules.md",
+  "The compiler does not enforce these scopes yet"
+ ],
+ [
+  "language/modules.md",
+  "`mount core.*` costs a great deal and buys nothing"
+ ],
+ [
+  "language/quantifiers.md",
+  "A quantified refinement on a TYPE does not parse yet"
+ ],
+ [
+  "language/tagged-literals.md",
+  "The content is not validated"
+ ],
+ [
+  "language/universes.md",
+  "The codes below are not the compiler's"
+ ],
+ [
+  "reference/meta-functions.md",
+  "Not yet callable"
+ ],
+ [
+  "stdlib/cli.md",
+  "Not shipped"
+ ],
+ [
+  "stdlib/collections.md",
+  "h:caddc1f3"
+ ],
+ [
+  "stdlib/net/weft/overview.md",
+  "`Response.ok(...)` was not a thing — and nothing in the library was us"
+ ],
+ [
+  "stdlib/net/weft/spiffe.md",
+  "Not shipped"
+ ],
+ [
+  "stdlib/security/capabilities.md",
+  "`@cap` is not implemented — this page describes a design"
+ ],
+ [
+  "stdlib/security/labels.md",
+  "The type checker does not say \"no\" — labels are runtime values"
+ ],
+ [
+  "stdlib/status-convention.md",
+  "The aggregate rule cannot be evaluated today"
+ ],
+ [
+  "stdlib/sys.md",
+  "Read the per-module table with its date"
+ ],
+ [
+  "stdlib/term.md",
+  "Not shipped"
+ ],
+ [
+  "stdlib/term/guides/testing-tui.md",
+  "Not shipped"
+ ],
+ [
+  "tooling/testing.md",
+  "Export is not implemented yet"
+ ],
+ [
+  "tutorials/h3-service.md",
+  "No per-connection stats on the server"
+ ],
+ [
+  "tutorials/h3-service.md",
+  "Not shipped — `H3Response` has no `.streaming(...)`"
+ ],
+ [
+  "tutorials/h3-service.md",
+  "The TLS half of this tutorial cannot be written today"
+ ],
+ [
+  "verification/networking.md",
+  "`@forall` was the wrong spelling; `forall` is real"
+ ],
+ [
+  "verification/tactic-dsl.md",
+  "No linter flags these today"
+ ]
+]
