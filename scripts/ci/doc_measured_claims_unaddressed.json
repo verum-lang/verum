@@ -1,9 +1,5 @@
 [
  [
-  "architecture/module-system.md",
-  "What this rule does not cover"
- ],
- [
   "language/context-system.md",
   "`provide` does not check that the provider implements the context"
  ],
@@ -18,10 +14,6 @@
  [
   "language/modules.md",
   "`mount core.*` costs a great deal and buys nothing"
- ],
- [
-  "reference/meta-functions.md",
-  "Not yet callable @fa3675e7"
  ],
  [
   "stdlib/collections.md",
