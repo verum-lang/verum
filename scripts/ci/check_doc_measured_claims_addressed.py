@@ -38,10 +38,22 @@ WHAT COUNTS AS AN ADDRESS
     the evidence is GOOD, only refusing a measured claim with nothing at
     all to run.
 
-THE ROSTER IS NOT A COUNT. Thirty-five boxes predate the rule; a swap
-of two would leave a count unmoved, so they are listed by (page, title)
-and both a NEW one and a VANISHED one fail. Removing a row is how the
-number goes down, and that requires giving the box its address.
+THE ROSTER IS NOT A COUNT. It opened at thirty-five; a swap of two
+would leave a count unmoved, so rows are listed by (page, title) and
+both a NEW one and a VANISHED one fail. Removing a row is how the number
+goes down, and that requires giving the box its address.
+
+WHAT THE CAMPAIGN ACTUALLY FOUND, 35 -> 5 in one day: six boxes were
+simply naked and gained a command; nine were never naked at all and the
+gate was wrong about them (see `has_indented_code`); and the rest were
+rewritten one at a time. FIVE of those rewrites turned up a claim that
+was WRONG, not merely unaddressed — a page denying a `Router` that
+exists under another meaning, an h3 caution denying a writer and a
+cancellation the library ships, a token-API census denying two names
+declared elsewhere, a line number that had moved eight lines, a type
+declared absent that is present. Every one surfaced while writing the
+command down, which is the argument for this gate in one sentence: you
+cannot write the address of a claim you have not re-checked.
 
 A TITLE IS NOT UNIQUE ON A PAGE. `reference/meta-functions.md` carries
 two boxes both titled "Not yet callable" — one measuring the sigil, one
