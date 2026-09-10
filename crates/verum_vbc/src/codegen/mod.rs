@@ -22504,12 +22504,48 @@ impl VbcCodegen {
                 .insert((type_name.to_string(), name.clone()), ty.clone());
         }
 
-        // Set the layout under the first-registration guard — see
-        // invariant #1 above.
-        if !self.type_field_layouts.contains_key(type_name) {
-            self.type_field_layouts
-                .insert(type_name.to_string(), field_names.clone());
-        }
+        // T1369 — LAST WINS, so that the layout and the type id cannot
+        // belong to different modules.
+        //
+        // This guard was `if !contains_key(type_name)`, first-wins.
+        // `type_name` here is the SIMPLE name — the caller at :9691
+        // passes `&type_decl.name.name` — and the simple key's other
+        // half, `type_name_to_id`, is LAST-wins, because
+        // `claim_user_type_name` inserts unconditionally. Two modules
+        // declaring one simple name therefore split the type: the id
+        // went to whichever claimed last, the layout to whichever
+        // compiled first.
+        //
+        // Measured with VERUM_TRACE_TYPE_CLAIM, two modules declaring
+        // `S`, pa with two fields and pb with one:
+        //
+        //   CLAIM name=S module=core.pa new_id=19 displacing=None
+        //   EVICT name=S layout_was=None
+        //   CLAIM name=S module=core.pb new_id=20 displacing=Some(19)
+        //   READ  name=S id=Some(20) layout=Some(2)
+        //
+        // pb won the id, pa kept the layout, and pb's own constructor
+        // emitted `New { type_id: 20, field_count: 2 }` — a two-field
+        // allocation for a one-field record, and a wrong field INDEX
+        // whenever the two declarations share a field name. That last
+        // case is why `Stat` broke silently: colliding types with
+        // disjoint field names fail loudly on FIELD-GUESS-HARD-1
+        // instead.
+        //
+        // The claim already evicts this key (`type_field_layouts.remove`
+        // in `claim_user_type_name`), and the trace shows that eviction
+        // firing with `layout_was=None` — it runs in the PREPASS, before
+        // any declaration is compiled, so there is nothing to evict yet.
+        // Adding an eviction was therefore not the fix; making the write
+        // itself follow the same rule as the id is.
+        //
+        // Both rules are now "the last module in unit order", and the
+        // prepass and the declaration walk visit files in the same
+        // order, so the two halves land on the same module. For a name
+        // only ONE type declares — every non-colliding name in the tree
+        // — this is a no-op: the key is written once either way.
+        self.type_field_layouts
+            .insert(type_name.to_string(), field_names.clone());
 
         // Cross-module field access support: also register under the simple name
         // (without module path) so imports using unqualified names can find fields.
