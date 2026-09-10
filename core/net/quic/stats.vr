@@ -7,10 +7,30 @@
 //
 
 // Production QUIC deployments need rich observability. This module
-// ships a single aggregated `QuicStats` struct fed by the rx/tx/
-// recovery/key-update hot paths. The fields mirror the well-trodden
-// set that appears in every production QUIC library (quiche, msquic,
-// gQUIC) so operators moving between stacks see familiar metrics.
+// ships a single aggregated `QuicStats` struct, plus a Prometheus
+// renderer for it. The fields mirror the well-trodden set that appears
+// in every production QUIC library (quiche, msquic, gQUIC) so
+// operators moving between stacks see familiar metrics.
+//
+// WHO FILLS IT IN: YOU DO. Measured 2026-09-10 (T1326): nothing in the
+// QUIC stack constructs, stores or returns a `QuicStats` — the only
+// mention outside this file and `stats_prometheus.vr` is the re-export
+// in `mod.vr`. The rx/tx/recovery/key-update paths do not feed it,
+// because they do not run: `QuicConnection`'s whole surface is
+// `@intrinsic("verum.quic.*")`, and those seventeen keys have no
+// implementation, so a connection traps on its first call with
+// `@intrinsic(...) is not implemented in this build`.
+//
+// That does NOT make this module dead. The renderer is real and was
+// measured working: a hand-built `QuicStats` renders 5917 bytes of
+// Prometheus text. So this is a FORM THE CALLER FILLS IN — accumulate
+// the counters yourself, hand them to `render_connection`. Treat it as
+// a shape and an exporter, not as something a connection hands you.
+//
+// The condition under which this note expires, so it cannot go stale
+// in silence: the moment any `verum.quic.*` intrinsic is implemented
+// and a connection begins accumulating, this paragraph is wrong and
+// must be replaced by the accessor's name.
 //
 
 // # Design
