@@ -31,10 +31,12 @@ cannot be orphaned by an edit somewhere else. A command does it too, as
 long as it is written out rather than described.
 
 WHAT COUNTS AS AN ADDRESS
-    a fenced block, or an inline / leading `verum`, `grep`, `strings`,
-    `cargo`, `make`, `python3`. Deliberately generous: this gate is not
-    judging whether the evidence is GOOD, only refusing a measured claim
-    with nothing at all to run.
+    a fenced block, an INDENTED block (this site sets `format: 'md'`,
+    so four spaces really is a code block — see `has_indented_code`),
+    or an inline / leading `verum`, `grep`, `strings`, `cargo`, `make`,
+    `python3`. Deliberately generous: this gate is not judging whether
+    the evidence is GOOD, only refusing a measured claim with nothing at
+    all to run.
 
 THE ROSTER IS NOT A COUNT. Thirty-five boxes predate the rule; a swap
 of two would leave a count unmoved, so they are listed by (page, title)
@@ -78,12 +80,72 @@ ROSTER = pathlib.Path(__file__).resolve().parent / "doc_measured_claims_unaddres
 
 BOX = re.compile(r":::(caution|warning|danger|note|info|tip)([^\n]*)\n(.*?)\n:::", re.S)
 MEASURED = re.compile(r"\bmeasured\b|\bre-measured\b", re.I)
-ADDRESS = re.compile(
+RUNNABLE = re.compile(
     r"```|`(?:verum|grep|strings|cargo|make|python3)\b|"
     r"^\s*(?:verum|grep|strings|cargo|make)\s",
     re.M,
 )
+MARKER = re.compile(r"^(\s*)(?:[-*+]|\d+[.)])(\s+)\S")
 FLOOR = 40
+
+
+def has_indented_code(body: str) -> bool:
+    """A CommonMark indented code block, without a Markdown parser.
+
+    THIS IS AN ADDRESS TOO, and leaving it out was a false accusation.
+    The site sets `format: 'md'` in `docusaurus.config.ts`, so its 370
+    pages compile as CommonMark rather than MDX — measured by running
+    `@mdx-js/mdx` both ways over one page's block: under `md` it becomes
+    `<pre><code>`, under `mdx` the compile FAILS, because `error<E018>:`
+    in a paragraph is read as an unclosed JSX tag. So an indented block
+    on this site really is code, and a box printing its program that way
+    carries the strongest evidence there is — the input travels with the
+    claim. Ten such boxes were being reported as having nothing to run.
+
+    CI installs no Python packages, so this cannot call a Markdown
+    library; it is a hand rule, validated against `markdown-it-py` in
+    commonmark mode over all 203 admonitions on the site (13 positive,
+    190 negative, 0 disagreements) and over nine adversarial fixtures.
+
+    THE LIST CASE IS WHY THE FIXTURES EXIST. A first version asked only
+    for four spaces after a blank line, which the corpus agreed with —
+    and it read a list item's continuation paragraph as code. That error
+    runs the WRONG WAY for a ratchet: a box with no evidence would count
+    as addressed and leave the roster silently. Inside a list item whose
+    content starts at column N, CommonMark wants N+4.
+    """
+    fence = False
+    prev_blank = True
+    content_col = 0
+    for line in body.split("\n"):
+        s = line.strip()
+        if s.startswith("```") or s.startswith("~~~"):
+            fence = not fence
+            prev_blank = False
+            continue
+        if fence:
+            continue
+        if not s:
+            prev_blank = True
+            continue
+        indent = len(line) - len(line.lstrip(" "))
+        if indent < content_col and not prev_blank:
+            content_col = 0
+        m = MARKER.match(line)
+        if m and indent <= content_col + 3:
+            content_col = len(m.group(1)) + (len(m.group(0)) - len(m.group(1)) - 1)
+            prev_blank = False
+            continue
+        if prev_blank and indent >= content_col + 4:
+            return True
+        if indent < content_col:
+            content_col = 0
+        prev_blank = False
+    return False
+
+
+def has_address(body: str) -> bool:
+    return bool(RUNNABLE.search(body)) or has_indented_code(body)
 
 
 def digest(body: str) -> str:
@@ -121,7 +183,7 @@ def page_rows(rel: str, text: str) -> tuple[int, int, list[list[str]]]:
         # and those cost more than a miss. A digest moves only when the
         # claim's own text moves, which is when it should be re-read.
         key = base if dup[base] == 1 else f"{base} @{digest(body)}"
-        if ADDRESS.search(body):
+        if has_address(body):
             addressed += 1
         else:
             naked.append([rel, key])
@@ -151,6 +213,22 @@ def self_test() -> int:
          ":::caution T\nMeasured 2026-09-10: it does not work.\n:::\n", False),
         ("an unmeasured box is not judged",
          ":::note T\nThis section is a design.\n:::\n", None),
+        # AN INDENTED BLOCK IS CODE ON THIS SITE (`format: 'md'`), so a
+        # box printing its program that way carries its own input.
+        ("an indented block counts",
+         ":::caution T\nMeasured 2026-09-10:\n\n    verum check x.vr\n"
+         "      -> error<E018>\n:::\n", True),
+        # AND THE ONE THAT RUNS THE WRONG WAY. A list item's continuation
+        # paragraph is also four spaces in, and reading it as code would
+        # EXCUSE a naked claim — the roster would lose a row nobody
+        # addressed. Checked against markdown-it-py when the rule was
+        # written; this fixture is what keeps it checked.
+        ("a list continuation is not code",
+         ":::caution T\nMeasured 2026-09-10.\n\n* the first point\n\n"
+         "    a continuation of that point, not a program\n:::\n", False),
+        ("an indent inside a fence is not a second block",
+         ":::caution T\nMeasured.\n\n```\n    indented inside\n```\n:::\n",
+         True),
     ]
     for label, src, want in cases:
         m = BOX.search(src)
@@ -169,7 +247,7 @@ def self_test() -> int:
             print(f"self-test: {label}: the claim was not seen", file=sys.stderr)
             bad += 1
             continue
-        if bool(ADDRESS.search(m.group(3))) != want:
+        if has_address(m.group(3)) != want:
             print(f"self-test: {label}: address detection wrong", file=sys.stderr)
             bad += 1
 

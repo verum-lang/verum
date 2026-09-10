@@ -8,14 +8,6 @@
   "Two enums, and this table is the other one"
  ],
  [
-  "cookbook/dns.md",
-  "Not shipped"
- ],
- [
-  "cookbook/dns.md",
-  "There is no cache"
- ],
- [
   "cookbook/json.md",
   "The error surface here was wrong"
  ],
@@ -24,24 +16,8 @@
   "These two mounts name modules that do not exist"
  ],
  [
-  "language/async-concurrency.md",
-  "Awaiting does not consume, and the call type is erased"
- ],
- [
-  "language/capability-types.md",
-  "The attenuation is enforced, and the name is a plain identifier"
- ],
- [
-  "language/context-system.md",
-  "The method IS checked — this caution was stale"
- ],
- [
   "language/context-system.md",
   "`provide` does not check that the provider implements the context"
- ],
- [
-  "language/copatterns.md",
-  "The productivity check cannot be what rejects it today"
  ],
  [
   "language/copatterns.md",
@@ -60,24 +36,12 @@
   "`mount core.*` costs a great deal and buys nothing"
  ],
  [
-  "language/quantifiers.md",
-  "A quantified refinement on a TYPE does not parse yet"
- ],
- [
   "language/tagged-literals.md",
   "The content is not validated"
  ],
  [
-  "language/universes.md",
-  "The codes below are not the compiler's"
- ],
- [
   "reference/meta-functions.md",
   "Not yet callable @fa3675e7"
- ],
- [
-  "stdlib/cli.md",
-  "Not shipped"
  ],
  [
   "stdlib/collections.md",
@@ -88,32 +52,12 @@
   "`Response.ok(...)` was not a thing — and nothing in the library was us"
  ],
  [
-  "stdlib/net/weft/spiffe.md",
-  "Not shipped"
- ],
- [
-  "stdlib/security/capabilities.md",
-  "`@cap` is not implemented — this page describes a design"
- ],
- [
-  "stdlib/security/labels.md",
-  "The type checker does not say \"no\" — labels are runtime values"
- ],
- [
   "stdlib/status-convention.md",
   "The aggregate rule cannot be evaluated today"
  ],
  [
   "stdlib/sys.md",
   "Read the per-module table with its date"
- ],
- [
-  "stdlib/term.md",
-  "Not shipped"
- ],
- [
-  "stdlib/term/guides/testing-tui.md",
-  "Not shipped"
  ],
  [
   "tooling/testing.md",
@@ -126,10 +70,6 @@
  [
   "tutorials/h3-service.md",
   "Not shipped — `H3Response` has no `.streaming(...)`"
- ],
- [
-  "tutorials/h3-service.md",
-  "The TLS half of this tutorial cannot be written today"
  ],
  [
   "verification/networking.md",
