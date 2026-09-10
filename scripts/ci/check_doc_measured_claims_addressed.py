@@ -41,6 +41,19 @@ of two would leave a count unmoved, so they are listed by (page, title)
 and both a NEW one and a VANISHED one fail. Removing a row is how the
 number goes down, and that requires giving the box its address.
 
+A TITLE IS NOT UNIQUE ON A PAGE. `reference/meta-functions.md` carries
+two boxes both titled "Not yet callable" — one measuring the sigil, one
+pointing at it. Rows are compared as SETS, so under a title-only key
+those two are one row: address either and the set does not move, the
+gate stays green, and the surviving unaddressed claim is unwatched.
+Measured on a two-box fixture, 2 boxes gave 1 row. A repeated title
+therefore takes a body digest, and the digest rather than an occurrence
+index because a box inserted above renumbers the rest — one NEW and one
+GONE reported for an edit that addressed nothing. The self-test probes
+the key of ONE box across three neighbourhoods; comparing sets cannot
+see the renumbering, because the inserted box fills the key its
+neighbour vacated and the old set stays a subset of the new.
+
 Some are legitimately un-addressable — `architecture/module-system.md`'s
 "What this rule does not cover" makes a claim about scope, not about
 behaviour, and there is nothing to point at. Those stay on the roster
@@ -50,6 +63,7 @@ its shrinking is the measure of the campaign.
 
 from __future__ import annotations
 
+import collections
 import hashlib
 import json
 import os
@@ -72,26 +86,57 @@ ADDRESS = re.compile(
 FLOOR = 40
 
 
+def digest(body: str) -> str:
+    return hashlib.blake2s(body.encode()).hexdigest()[:8]
+
+
 def key_of(title: str, body: str) -> str:
     """A stable name for the box. Falls back to a body digest when the
     admonition carries no title — one on the site does."""
-    return (title.strip() or
-            "h:" + hashlib.blake2s(body.encode()).hexdigest()[:8])[:70]
+    return (title.strip() or "h:" + digest(body))[:70]
+
+
+def page_rows(rel: str, text: str) -> tuple[int, int, list[list[str]]]:
+    """The measured boxes of ONE page, keyed uniquely within it."""
+    boxes = [(m.group(2), m.group(3)) for m in BOX.finditer(text)
+             if MEASURED.search(m.group(3))]
+    dup = collections.Counter(key_of(t, b) for t, b in boxes)
+
+    measured = addressed = 0
+    naked: list[list[str]] = []
+    for title, body in boxes:
+        measured += 1
+        base = key_of(title, body)
+        # A page may carry the SAME title twice — `meta-functions.md` has
+        # two "Not yet callable" boxes, the second pointing at the first
+        # for its evidence. `have` and `want` are SETS, so one title on
+        # one page is ONE row however many boxes wear it: address one of
+        # a pair and the set does not move, the gate stays green, and the
+        # other unaddressed claim is invisible. Measured on a two-box
+        # fixture: 2 boxes -> 1 row.
+        #
+        # The suffix is the BODY, not the position. An occurrence index
+        # renumbers when a box is inserted above, which reports one NEW
+        # and one GONE where nothing was addressed — a false accusation,
+        # and those cost more than a miss. A digest moves only when the
+        # claim's own text moves, which is when it should be re-read.
+        key = base if dup[base] == 1 else f"{base} @{digest(body)}"
+        if ADDRESS.search(body):
+            addressed += 1
+        else:
+            naked.append([rel, key])
+    return measured, addressed, naked
 
 
 def scan(root: pathlib.Path) -> tuple[int, int, list[list[str]]]:
     measured = addressed = 0
     naked: list[list[str]] = []
     for p in sorted(root.rglob("*.md")):
-        for m in BOX.finditer(p.read_text(errors="replace")):
-            body = m.group(3)
-            if not MEASURED.search(body):
-                continue
-            measured += 1
-            if ADDRESS.search(body):
-                addressed += 1
-            else:
-                naked.append([str(p.relative_to(root)), key_of(m.group(2), body)])
+        pm, pa, pn = page_rows(str(p.relative_to(root)),
+                               p.read_text(errors="replace"))
+        measured += pm
+        addressed += pa
+        naked.extend(pn)
     return measured, addressed, naked
 
 
@@ -133,6 +178,41 @@ def self_test() -> int:
               file=sys.stderr)
         bad += 1
 
+    # THE ANCHOR. Two boxes, one title, one page — the shape that
+    # `reference/meta-functions.md` actually carries. Keyed on the title
+    # alone they are ONE row in a set, and addressing either leaves the
+    # roster unmoved while an unaddressed claim goes unwatched.
+    a = ":::caution Not yet callable\nMeasured: the first fails.\n:::\n"
+    b = ":::caution Not yet callable\nMeasured: the second fails too.\n:::\n"
+    a_fixed = (":::caution Not yet callable\nMeasured: the first fails.\n"
+               "```\nverum check x\n```\n:::\n")
+    third = ":::caution Not yet callable\nMeasured: a third, inserted.\n:::\n"
+
+    pair = page_rows("p.md", a + b)[2]
+    if len({tuple(r) for r in pair}) != 2:
+        print(f"self-test: two same-titled boxes collapsed into "
+              f"{len({tuple(r) for r in pair})} row(s): {pair}", file=sys.stderr)
+        bad += 1
+
+    # THE KEY OF A BOX MUST NOT DEPEND ON ITS NEIGHBOURS. Comparing SETS
+    # cannot see this: renumber the rows and a third box fills the key
+    # the second vacated, so the old set is still a subset of the new one
+    # and a subset test reports no change. Each variant below is
+    # therefore probed for the row belonging to `b` ITSELF, by position.
+    #
+    # This is what rules out an occurrence index. Under one, `b` is #2
+    # beside `a` and #3 once a box is inserted above — one NEW and one
+    # GONE reported for an edit that addressed nothing, and a false
+    # accusation costs more than a miss.
+    for label, text, idx in (("a box inserted above", third + a + b, 2),
+                             ("the neighbour addressed", a_fixed + b, 0)):
+        rows = page_rows("p.md", text)[2]
+        if len(rows) <= idx or tuple(rows[idx]) != tuple(pair[1]):
+            print(f"self-test: {label} changed the key of an untouched box: "
+                  f"{rows[idx] if len(rows) > idx else None} was {pair[1]}",
+                  file=sys.stderr)
+            bad += 1
+
     if not ROSTER.is_file():
         print(f"self-test: {ROSTER.name} is missing — the roster IS the "
               f"baseline, and without it this gate cannot fail",
@@ -144,6 +224,7 @@ def self_test() -> int:
         return 1
     rows = json.loads(ROSTER.read_text()) if ROSTER.is_file() else []
     print(f"[ok] self-test: {len(cases)} address cases, 1 digest case, "
+          f"3 duplicate-title cases, "
           f"{len(rows)} row(s) on the roster")
     return 0
 
