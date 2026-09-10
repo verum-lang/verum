@@ -24379,6 +24379,32 @@ impl TypeChecker {
         // from implement blocks in sibling modules may not be
         // registered in single-file check mode.
         if self.stdlib_single_file_mode {
+            // T1396 — THE RELAXATION IS SOUND; THE SILENCE IS NOT.
+            //
+            // Checking one `core/` file alone cannot see sibling modules'
+            // `implement` blocks, so refusing every unresolved method
+            // would report hundreds of false ones. But the run then ends
+            // on `Finished checking`, and a reader takes that for "this
+            // file checks" — while NO method call in it was checked for
+            // existence at all.
+            //
+            // Measured 2026-09-10: replacing a real call in
+            // `core/runtime/env.vr` with `cb.definitely_not_a_method(name)`
+            // — a name that occurs NOWHERE in the tree — changed nothing.
+            // The same shape reports `no method named …` as a user file
+            // and passes clean as a `core/` file, so any reasoning of the
+            // form "it is called in core and the checker does not object,
+            // therefore it exists" is void.
+            //
+            // Say what was swallowed, the way the bake already says
+            // `[lenient] SKIP <fn>` for every body it gives up on. Warn
+            // level, unconditional: a lever would put the reader back in
+            // the position of having to know to ask.
+            eprintln!(
+                "[lenient-check] method `{}` on `{}` was NOT resolved and was                  accepted — a single-file check of a core/ module cannot see                  sibling `implement` blocks, so method existence is not                  checked here. Run the bake to have this verified.",
+                method.name.as_str(),
+                recv_ty
+            );
             return Ok(InferResult::new(Type::Unknown));
         }
 
