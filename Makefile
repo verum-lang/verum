@@ -103,7 +103,7 @@ check-doc-names-exist: ## Gate: a name a doc example uses must exist in core/ �
 
 check-doc-methods-exercised: ## Gate: a method the stdlib reference documents should be EXECUTED somewhere — no build needed
 	python3 scripts/ci/check_doc_methods_exercised.py --self-test
-	python3 scripts/ci/check_doc_methods_exercised.py
+	python3 scripts/ci/check_doc_methods_exercised.py --min-pages 30
 
 check-doc-type-shapes: ## Gate: a `type X is …` in the docs must match core/ — no build needed
 	python3 scripts/ci/check_doc_type_shapes.py --self-test

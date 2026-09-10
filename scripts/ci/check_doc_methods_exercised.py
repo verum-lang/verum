@@ -50,8 +50,18 @@ version that runs with no build.
 
 UNEXERCISED IS NOT BROKEN. It means nobody would notice if it broke.
 `Map.entry` is what that looks like when it happens.
+
+TWO HALVES, and the second exists because the first is swap-blind
+(T1330). The COUNT answers "did the population grow"; it cannot answer
+"did its membership change", and 292 holds just as well when one page
+gains coverage and another loses it. `doc_methods_unexercised.txt` names
+the population, one `page<TAB>method` per line, and is compared ONLY when
+the count agrees with the baseline — that is precisely the state in which
+a swap is invisible. A missing roster is a REFUSAL (rc=2), not a pass.
 """
 from __future__ import annotations
+import contextlib
+import io
 import os
 import re
 import sys
@@ -111,6 +121,60 @@ BLOCK = re.compile(r"```verum\n(.*?)```", re.S)
 CALL = re.compile(r"\.([a-z_][a-z0-9_]*)\s*\(")
 DIRECTIVE = re.compile(r"^// @test: *([a-z-]+)", re.M)
 
+# THE ROSTER. A count answers "did the population grow"; it cannot answer
+# "did its membership change". 292 pairs held steady while one page gains a
+# covered method and another loses one is a SWAP, and the count prints
+# `baseline 292` over it. The roster is a sidecar rather than 292 lines of
+# Python for the same reason `barename_collision_membership.txt` is: a
+# roster this size belongs beside the gate, not inside it.
+#
+# KEY = (page, method name). Deliberately NOT a line number — this
+# population lives in a DIFFERENT REPOSITORY than the gate, edited by
+# commits that never touch this file, so a positional key would redden on
+# unrelated prose edits and teach the reader to re-baseline without looking.
+ROSTER = Path(os.environ.get("VERUM_DOC_METHODS_ROSTER")
+              or (Path(__file__).resolve().parent
+                  / "doc_methods_unexercised.txt"))
+
+
+def membership(rows) -> list[str]:
+    """The population as identities, one per line: `page<TAB>method`."""
+    return sorted(f"{page}\t{name}"
+                  for page, _n, missing in rows for name in missing)
+
+
+def read_roster() -> list[str] | None:
+    if not ROSTER.is_file():
+        return None
+    return sorted(l for l in ROSTER.read_text(encoding="utf8").splitlines()
+                  if l.strip() and not l.startswith("#"))
+
+
+def compare(current: list[str], roster: list[str]) -> int:
+    """Report a SWAP. Equal sizes with different members must NOT pass —
+    that degenerate form is what the self-test falsifies."""
+    cur, ros = set(current), set(roster)
+    if cur == ros:
+        return 0
+    appeared = sorted(cur - ros)
+    vanished = sorted(ros - cur)
+    print(f"  MEMBERSHIP MOVED while the count held at {len(current)}: "
+          f"{len(appeared)} newly unexercised, {len(vanished)} no longer.")
+    for line in appeared[:20]:
+        page, name = line.split("\t")
+        print(f"    + {page:<28} .{name}()   documented, nothing runs it")
+    if len(appeared) > 20:
+        print(f"    + … {len(appeared) - 20} more")
+    for line in vanished[:20]:
+        page, name = line.split("\t")
+        print(f"    - {page:<28} .{name}()   now exercised — delete this row")
+    if len(vanished) > 20:
+        print(f"    - … {len(vanished) - 20} more")
+    print("  Regenerate with --write-membership ONLY after reading the list: "
+          "a `+` row is a regression, a `-` row is the coverage this "
+          "ratchet exists to collect.")
+    return 1
+
 
 def executed_corpus_files() -> list[Path]:
     """Only the files something actually runs."""
@@ -149,6 +213,28 @@ def self_test() -> int:
         print("self-test: the call pattern misses a chained call"); bad += 1
     if BLOCK.findall("```verum\nfn main() {}\n```") != ["fn main() {}\n"]:
         print("self-test: the block pattern does not extract a verum block"); bad += 1
+
+    # THE MEMBERSHIP HALF, proved by FAILING. A `compare()` degenerated
+    # back into a size check ("equal sizes, no difference") passes every
+    # count assertion above and dies exactly here, by name — which is the
+    # whole defect this gate was carrying.
+    a = ["a.md\tfoo", "b.md\tbar"]
+    swapped = ["a.md\tfoo", "b.md\tbaz"]
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        same_size_swap = compare(a, swapped)
+        identical = compare(a, list(a))
+    if same_size_swap == 0:
+        print("self-test: compare() PASSED a same-size swap — the roster is "
+              "decorative and the gate is still count-only")
+        print(buf.getvalue().rstrip())
+        bad += 1
+    if identical != 0:
+        print("self-test: compare() rejected an identical population")
+        print(buf.getvalue().rstrip())
+        bad += 1
+    if membership([("p.md", 3, ["z", "a"])]) != ["p.md\ta", "p.md\tz"]:
+        print("self-test: membership() is not the sorted (page, name) key"); bad += 1
     print("self-test: OK" if not bad else f"self-test: {bad} FAILED")
     return bad
 
@@ -207,18 +293,51 @@ def main() -> int:
         return 1
 
     print(f"check-doc-methods-exercised: {unexercised} of {total} documented "
-          f"methods are called by nothing that runs (baseline {BASELINE})")
+          f"methods across {len(rows)} page(s) are called by nothing that "
+          f"runs (baseline {BASELINE})")
     for name, n, missing in sorted(rows, key=lambda r: -len(r[2]))[:10]:
         if missing:
             print(f"  {len(missing):>4} of {n:<4} {name}")
+
+    current = membership(rows)
+
+    if "--write-membership" in sys.argv:
+        ROSTER.write_text(
+            "# Population of `check-doc-methods-exercised`: one line per\n"
+            "# (stdlib reference page, method name) that NOTHING THAT RUNS\n"
+            "# calls. Generated by `--write-membership`; a `-` row in a gate\n"
+            "# failure is coverage that was won and this file must lose.\n"
+            + "\n".join(current) + "\n", encoding="utf8")
+        print(f"wrote {len(current)} rows to {ROSTER}")
+        return 0
 
     if unexercised > BASELINE:
         print(f"  ABOVE BASELINE by {unexercised - BASELINE}. A method with no "
               "execution evidence is one nobody would notice breaking.")
         return 1
+
+    roster = read_roster()
+    if roster is None:
+        print(f"  NO ROSTER at {ROSTER}. The count alone cannot report a swap, "
+              "so this gate has nothing to check membership against. "
+              "Refusing rather than passing — regenerate with "
+              "`--write-membership`.")
+        return 2
+
     if unexercised < BASELINE:
         print(f"  BELOW baseline by {BASELINE - unexercised} — lower it.")
-    return 0
+        won = sorted(set(roster) - set(current))
+        for line in won[:25]:
+            page, name = line.split("\t")
+            print(f"    - {page:<28} .{name}()   now exercised")
+        if len(won) > 25:
+            print(f"    - … {len(won) - 25} more")
+        return 0
+
+    # The count AGREES with the baseline. That is precisely the state in
+    # which a swap is invisible, so the membership question is asked here
+    # and not earlier.
+    return compare(current, roster)
 
 
 if __name__ == "__main__":
