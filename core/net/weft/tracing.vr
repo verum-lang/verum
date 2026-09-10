@@ -46,6 +46,7 @@ mount core.net.weft.service.{Layer};
 mount core.net.weft.handler.{WeftRequest, Handler};
 mount core.net.weft.error.{WeftError, IntoResponse};
 mount core.net.weft.response_ext.{resp_with_header};
+mount core.random.secure.{secure_random_bytes};
 
 // =============================================================================
 // Trace context
@@ -110,10 +111,22 @@ fn random_hex(n_chars: Int) -> Text {
         0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37,
         0x38, 0x39, 0x61, 0x62, 0x63, 0x64, 0x65, 0x66,
     ];
+    // ONE DRAW FOR THE WHOLE ID. The old shape called
+    // `core.runtime.env.random_u8()` once per character — a name declared
+    // NOWHERE in the tree (T1320), so every trace id in this file came
+    // from a call that could not resolve. `secure_random_bytes` is
+    // declared, public and ungated, and its chain is implemented at both
+    // tiers: fill_secure -> @intrinsic("random_u64"), present in the VBC
+    // registry AND in the LLVM lowering.
+    //
+    // Four bits per byte is deliberate, not waste: a hex digit carries
+    // exactly a nibble, so a 32-char trace id still gets its full 128
+    // bits. Packing two digits per byte would change the draw size and
+    // buy nothing a reader can observe.
+    let bytes = secure_random_bytes(n_chars);
     let mut i: Int = 0;
     while i < n_chars {
-        let r = core.runtime.env.random_u8();
-        out.push_byte(HEX[(r & 0x0F) as Int]);
+        out.push_byte(HEX[(bytes[i] & 0x0F) as Int]);
         i = i + 1;
     }
     out.finish()
