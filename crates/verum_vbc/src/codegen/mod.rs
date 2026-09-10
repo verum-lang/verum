@@ -5944,6 +5944,23 @@ impl VbcCodegen {
     /// the bare name authoritatively; the import stays reachable via
     /// its module-qualified key.  Kill-switch:
     /// VERUM_DISABLE_LOCAL_TYPE_SHADOW=1 restores blind adoption.
+    /// T1369 step (c). Record `"{module}.{name}" -> id` beside the simple
+    /// key, so a module can reach ITS OWN descriptor by name even when a
+    /// sibling owns the bare spelling. Additive: nothing reads the
+    /// qualified key unless it exists, and it exists only for a locally
+    /// declared name.
+    fn note_per_module_type_key(&mut self, type_name: &str, tid: crate::types::TypeId) {
+        if type_name.contains('.') {
+            return;
+        }
+        if let Some(here) = self.ctx.current_source_module.clone() {
+            if !here.is_empty() {
+                self.type_name_to_id
+                    .insert(format!("{}.{}", here, type_name), tid);
+            }
+        }
+    }
+
     fn claim_local_type_id(&mut self, type_name: &str) -> crate::types::TypeId {
         if std::env::var("VERUM_TRACE_CTOR").is_ok() {
             eprintln!(
@@ -5993,6 +6010,7 @@ impl VbcCodegen {
             let archive_foreign = self.archive_claimed_type_ids.contains(&existing.0)
                 && std::env::var_os("VERUM_DISABLE_LOCAL_TYPE_SHADOW").is_none();
             if !claimed_elsewhere && !archive_foreign {
+                self.note_per_module_type_key(type_name, existing);
                 return existing;
             }
             let tid = self.alloc_user_type_id();
@@ -6041,10 +6059,12 @@ impl VbcCodegen {
                     },
                 );
             }
+            self.note_per_module_type_key(type_name, tid);
             return tid;
         }
         let tid = self.alloc_user_type_id();
         self.type_name_to_id.insert(type_name.to_string(), tid);
+        self.note_per_module_type_key(type_name, tid);
         tid
     }
 
@@ -21341,7 +21361,29 @@ impl VbcCodegen {
                 Some(i) => &tn[..i],
                 None => tn,
             };
-            if let Some(&tid) = self.type_name_to_id.get(stripped)
+            // T1369 step (c). This lookup keyed on the SIMPLE name, and
+            // two modules declaring one record name share that key — the
+            // last writer wins, so the descriptor found here belongs to
+            // whichever module claimed last. Measured on the miniature:
+            // `make_a` emitted `SetF { field_idx: 0 }` TWICE, because
+            // `shared` was answered from pb's one-field descriptor while
+            // `a_only` fell through to pa's layout. Step (b) made the
+            // LAYOUT per-module; without this the descriptor path answers
+            // first for every field the two types share.
+            //
+            // Absent — every name only one module declares — the
+            // qualified key misses and this falls straight through to the
+            // simple key below, unchanged.
+            let per_module_tid = match self.ctx.current_source_module.clone() {
+                Some(here) if !here.is_empty() && !stripped.contains('.') => self
+                    .type_name_to_id
+                    .get(&format!("{}.{}", here, stripped))
+                    .copied(),
+                _ => None,
+            };
+            if let Some(&tid) = per_module_tid
+                .as_ref()
+                .or_else(|| self.type_name_to_id.get(stripped))
                 && let Some(td) = self.type_by_id(tid)
                 && matches!(td.kind, crate::types::TypeKind::Record)
             {
