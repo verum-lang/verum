@@ -166,6 +166,7 @@ gates-docs: check-doc-examples check-examples-run check-homepage-examples check-
             check-doc-calls-that-trap check-doc-status-matches-inventory \
             check-doc-mounts-resolve check-doc-error-code-meaning \
             check-doc-method-signatures check-doc-field-types \
+            check-doc-protocol-methods \
             check-doc-status-badge check-doc-reachable \
             check-doc-type-shapes check-doc-receiver-methods \
             check-doc-call-arity \
@@ -332,6 +333,10 @@ check-doc-method-signatures: ## Gate (T1390): a documented method signature — 
 check-doc-field-types: ## Gate (T1393): a documented record field must carry the type core/ gives it
 	python3 scripts/ci/check_doc_field_types.py --self-test
 	python3 scripts/ci/check_doc_field_types.py
+
+check-doc-protocol-methods: ## Gate (T1393): a documented protocol must offer the method set core/ declares
+	python3 scripts/ci/check_doc_protocol_methods.py --self-test
+	python3 scripts/ci/check_doc_protocol_methods.py
 
 check-intrinsic-keys-implemented: ## Freeze the SET of declared-but-unimplemented `verum.*` intrinsic keys (T1368)
 	python3 scripts/ci/check_intrinsic_keys_implemented.py --self-test
