@@ -13015,6 +13015,15 @@ impl VbcCodegen {
                 ownership,
             });
             self.ffi_function_map.insert(name.clone(), symbol_id);
+            // T1304/T1397 — a variadic declaration must stay findable by
+            // an over-long call. `ctx` resolves functions by EXACT arity and
+            // `FunctionInfo` has no variadic flag, so `open(path, flags, mode)`
+            // could not reach `open(path, flags, ...)` and fell through to a
+            // stage-5 stub. Same fact `expressions.rs` already reads for the
+            // argument-COUNT check — that one runs AFTER resolution.
+            if self.ffi_symbols[symbol_id.0 as usize].signature.is_variadic {
+                self.ctx.variadic_ffi_fns.insert(name.clone());
+            }
 
             // Store contract metadata (requires/ensures) for debug-mode assertion generation
             if !ffi_func.requires.is_empty() || !ffi_func.ensures.is_empty() {
@@ -13203,6 +13212,17 @@ impl VbcCodegen {
         ));
         let mut sig = FfiSignature::new(return_type, param_types);
         sig.is_variadic = func.signature.is_variadic;
+        // `FfiSignature::new` leaves `fixed_param_count` at 0, and the
+        // interpreter feeds exactly that field to `ffi_prep_cif_var` as
+        // `nfixed`. A variadic boundary declaration built here therefore
+        // said "ZERO fixed parameters", which on arm64 Apple puts EVERY
+        // argument — the leading pointer included — into the stack area
+        // the callee reads its varargs from. The extern-block path next
+        // door has always set this from `params.len()`; the boundary path
+        // never did. `...` is not pushed into `params` by the parser
+        // (`parse_function_params_with_variadic` sets the flag and
+        // breaks), so the length IS the fixed count.
+        sig.fixed_param_count = func.signature.params.len() as u8;
         sig
     }
 
@@ -13282,6 +13302,15 @@ impl VbcCodegen {
 
             // Track function name -> FFI symbol ID mapping
             self.ffi_function_map.insert(func_name.clone(), symbol_id);
+            // T1304/T1397 — a variadic declaration must stay findable by
+            // an over-long call. `ctx` resolves functions by EXACT arity and
+            // `FunctionInfo` has no variadic flag, so `open(path, flags, mode)`
+            // could not reach `open(path, flags, ...)` and fell through to a
+            // stage-5 stub. Same fact `expressions.rs` already reads for the
+            // argument-COUNT check — that one runs AFTER resolution.
+            if self.ffi_symbols[symbol_id.0 as usize].signature.is_variadic {
+                self.ctx.variadic_ffi_fns.insert(func_name.clone());
+            }
             // Honor `@ffi_name` / `@link_name`: the dlsym key is the C
             // symbol, not the Verum extern fn name — extern-block fns
             // are FunctionDecls carrying their per-fn attributes.
@@ -13986,6 +14015,15 @@ impl VbcCodegen {
 
         // Track function name -> FFI symbol ID mapping
         self.ffi_function_map.insert(func_name.clone(), symbol_id);
+        // T1304/T1397 — a variadic declaration must stay findable by
+        // an over-long call. `ctx` resolves functions by EXACT arity and
+        // `FunctionInfo` has no variadic flag, so `open(path, flags, mode)`
+        // could not reach `open(path, flags, ...)` and fell through to a
+        // stage-5 stub. Same fact `expressions.rs` already reads for the
+        // argument-COUNT check — that one runs AFTER resolution.
+        if self.ffi_symbols[symbol_id.0 as usize].signature.is_variadic {
+            self.ctx.variadic_ffi_fns.insert(func_name.clone());
+        }
         // Honor `@ffi_name` / `@link_name` for standalone `@ffi` externs
         // too (same rationale as the boundary path).
         if let Some(c_name) = self.extract_ffi_symbol_name(&func.attributes) {
@@ -26853,6 +26891,9 @@ impl VbcCodegen {
         }
 
         let new_idx = self.ffi_symbols.len() as u32;
+        // `sym_name` is moved into `ffi_function_map` below; the variadic
+        // set needs the same string.
+        let sym_name_for_variadic = sym_name.clone();
         let mut new_sym = sym;
         new_sym.name = StringId(0); // finalize re-interns from ffi_function_map
         new_sym.library_idx = new_library_idx;
@@ -26861,6 +26902,30 @@ impl VbcCodegen {
         if !sym_name.is_empty() {
             self.ffi_function_map
                 .insert(sym_name, FfiSymbolId(new_idx));
+        }
+        // T1304 — the variadic fact crosses the archive seam WITH the
+        // symbol.
+        //
+        // This is the FOURTH writer of `ffi_function_map`, and the only
+        // one that is not a declaration: it imports a symbol out of the
+        // baked archive when a copied body references it, cloning
+        // `sym.signature` wholesale — so `is_variadic` is already correct
+        // here and was simply never read.
+        //
+        // It is NOT what makes Tier 1 work; the caller
+        // (`merge_archive_function_bodies`) copies already-emitted
+        // bytecode and only remaps the `symbol_idx` operand, so no call is
+        // re-resolved on that path. What this reaches is a consumer
+        // codegen that resolves a name against an IMPORTED symbol — a user
+        // file mounting a variadic extern and calling it with a tail. The
+        // three declaration-time sites cannot see that compile.
+        //
+        // One-directional, like the rest of the change: it can only make a
+        // previously-refused call resolvable.
+        if !sym_name_for_variadic.is_empty()
+            && self.ffi_symbols[new_idx as usize].signature.is_variadic
+        {
+            self.ctx.variadic_ffi_fns.insert(sym_name_for_variadic);
         }
         cache.insert(archive_sym_idx, new_idx);
         Some(new_idx)

@@ -256,6 +256,23 @@ pub struct CodegenContext {
     /// previously did `lookup_function(name)` and risked first-wins
     /// shadow should migrate to `lookup_function_in_scope(scope, name)`.
     pub scoped_functions: HashMap<(String, String), FunctionInfo>,
+
+    /// T1304/T1397 — names of FFI functions declared VARIADIC (`...`).
+    ///
+    /// Function RESOLUTION here matches arity EXACTLY, and `FunctionInfo`
+    /// carries no variadic flag, so a call with a tail argument cannot find
+    /// a `2 fixed + ...` declaration and falls through to a stage-5 stub.
+    /// Measured 2026-09-10: declaring darwin's `open` variadic made
+    /// `File.create` panic with `stub never resolved (func_id=4269801458)`
+    /// — the file stopped being created at all, where before it was created
+    /// with the wrong mode.
+    ///
+    /// `expressions.rs` ALREADY has this relaxation for the argument-COUNT
+    /// check (`callee_is_variadic_extern`, via `ffi_function_map`). That
+    /// check runs AFTER resolution, so it never got the chance. This set
+    /// carries the same fact to the earlier decision, because
+    /// `ffi_function_map` lives on `VbcCodegen` and is not reachable here.
+    pub variadic_ffi_fns: std::collections::HashSet<String>,
     /// NAMES of free fns DECLARED by the unit being compiled (user-phase
     /// AST declarations only; stdlib bake — `prefer_existing_functions` —
     /// never writes here). Bare-name call resolution consults this
@@ -1577,6 +1594,7 @@ impl CodegenContext {
             function_param_defaults: HashMap::new(),
             ambiguous_function_names: std::collections::HashSet::new(),
             scoped_functions: HashMap::new(),
+            variadic_ffi_fns: std::collections::HashSet::new(),
             unit_declared_fns: std::collections::HashSet::new(),
             canonical_index: HashMap::new(),
             prefer_existing_functions: false,
@@ -3584,7 +3602,7 @@ impl CodegenContext {
         {
             let key = (scope.clone(), name.to_string());
             if let Some(info) = self.scoped_functions.get(&key)
-                && info.param_count == arity
+                && self.arity_admits(name, info, arity)
             {
                 return Some(info);
             }
@@ -3592,12 +3610,99 @@ impl CodegenContext {
         self.lookup_function_with_arity(name, arity)
     }
 
+    /// Does a declaration of `param_count` parameters accept a call of
+    /// `arity` arguments?
+    ///
+    /// Exactly — unless the name is a VARIADIC FFI declaration, in which
+    /// case any arity at or above the fixed count is accepted, which is
+    /// what `...` means. One-directional, like the sibling relaxation in
+    /// `expressions.rs`: it can only ADMIT a call that used to be refused,
+    /// never refuse one that used to be admitted.
+    pub fn arity_admits(&self, name: &str, info: &FunctionInfo, arity: usize) -> bool {
+        if info.param_count == arity {
+            return true;
+        }
+        // KILL-SWITCH: `VERUM_NO_VARIADIC_ARITY=1` makes this function the
+        // `==` it replaced, in the SAME binary.
+        //
+        // It exists because the alternative evidence is not evidence. The
+        // set `variadic_ffi_fns` can be empty, and an empty set makes this
+        // relaxation byte-identical to the comparison it replaced — a fix
+        // that changes nothing looks exactly like a fix that works, and
+        // this session has already shipped and then deleted two changes
+        // whose A/B turned out byte-identical on and off. Comparing two
+        // BUILDS cannot separate "the relaxation fired" from "the second
+        // build differed for another reason"; comparing two RUNS of one
+        // binary can.
+        if std::env::var("VERUM_NO_VARIADIC_ARITY").is_ok_and(|v| v != "0") {
+            return false;
+        }
+        // FROM HERE THE ANSWER IS "NO" UNLESS THREE CONDITIONS HOLD, AND
+        // THE TRACE NAMES THE ONE THAT REFUSED.
+        //
+        // A guard with several conditions that prints only its verdict
+        // turns every negative into an unreadable zero: "the relaxation
+        // did not fire" and "it fired and this candidate was not the one"
+        // leave identical evidence. Each `verdict` below is the refusing
+        // condition in the words of the thing being decided.
+        //
+        // A qualified call site spells the name `a.b.open`; the FFI map is
+        // keyed by the bare symbol, so both spellings are asked.
+        let bare = name.rsplit('.').next().unwrap_or(name);
+        let is_declared_variadic =
+            self.variadic_ffi_fns.contains(bare) || self.variadic_ffi_fns.contains(name);
+
+        let (admitted, verdict): (bool, &str) = if arity < info.param_count {
+            // Variadic does not mean "any call". Fewer arguments than the
+            // FIXED part is a missing argument, not a tail.
+            (false, "refused: fewer arguments than the declaration's fixed part")
+        } else if info.id.0 != u32::MAX {
+            // ONLY THE FOREIGN DECLARATION ITSELF. The set is context-wide
+            // and a bake puts every module in one context, so membership
+            // says "somewhere a variadic extern named `open` exists" — not
+            // "this candidate is it". A module's own `fn open(a, b)` would
+            // otherwise start accepting `open(a, b, c)` and bind three
+            // arguments to two parameters. `register_ffi_extern_function`
+            // stamps `FunctionId(u32::MAX)` on an extern exactly because it
+            // is not callable through `Call`; that sentinel is the
+            // discriminator.
+            (false, "refused: candidate has a real id, so it has a body, and a body cannot read a tail")
+        } else if !is_declared_variadic {
+            (false, "refused: no variadic FFI declaration is registered under this name")
+        } else {
+            (true, "ADMITTED")
+        };
+
+        // `VERUM_TRACE_VARIADIC_ARITY=1` (or a name substring). It exists
+        // because the set can be EMPTY — nothing in `core/` need be
+        // declared variadic — and an empty set makes this function
+        // byte-identical to the `==` it replaced. A change that cannot be
+        // observed firing has not been shown to work; and a zero that
+        // cannot say which condition refused has not been shown to mean
+        // anything.
+        if let Ok(f) = std::env::var("VERUM_TRACE_VARIADIC_ARITY")
+            && (f.is_empty() || f == "1" || name.contains(&f))
+        {
+            eprintln!(
+                "[variadic-arity] `{}` (fixed={}, id={}, called with {}) -> {} \
+[{} variadic ffi decl(s) known]",
+                name,
+                info.param_count,
+                info.id.0,
+                arity,
+                verdict,
+                self.variadic_ffi_fns.len(),
+            );
+        }
+        admitted
+    }
+
     /// Looks up a function by name with arity disambiguation.
     /// When the primary lookup returns a function with wrong arity,
     /// checks for an arity-qualified alternative (name#arity).
     pub fn lookup_function_with_arity(&self, name: &str, arity: usize) -> Option<&FunctionInfo> {
         if let Some(info) = self.functions.get(name) {
-            if info.param_count == arity {
+            if self.arity_admits(name, info, arity) {
                 self.note_resolution(name, info);
                 return Some(info);
             }
@@ -3803,6 +3908,10 @@ impl CodegenContext {
             Err(_) => false,
         };
         let accepts = |info: &FunctionInfo| -> bool {
+            // `arity_admits` is deliberately NOT consulted here: this
+            // ladder resolves qualified calls to BODIED functions and
+            // excludes the `u32::MAX` sentinel on the line above, which
+            // is the only kind of declaration a tail can belong to.
             info.id.0 != u32::MAX && info.param_count == arity
         };
         // Exact-key probe with the `name#arity` alt-key fallback

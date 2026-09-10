@@ -7113,11 +7113,38 @@ impl VbcCodegen {
                 // scope-first discipline and adds the `name#arity`
                 // probe. It can still return a wrong-arity primary when
                 // no alt-key exists; the filter below is what rejects
-                // that, and it is unchanged.
-                self.ctx
+                // that — see the T1304 note under it for the one case
+                // the filter now lets through.
+                //
+                // T1304. The filter asks `arity_admits`, not `==`, and
+                // that ONE word is the whole of this task's runtime half.
+                //
+                // `open` is declared `(path, oflag, ...)` — two fixed
+                // parameters — and called `open(path, flags, mode)`.
+                // The lookup above now returns the extern (that is the
+                // sibling change in `context.rs`), and an `==` filter
+                // here threw it straight back out. `unit_decl_lookup`
+                // became `None`, the ladder fell through to the global
+                // scan, and the scan found `core.sys.linux.syscall.open`
+                // — three parameters, a real id, another platform's
+                // wrapper. `user_fn_matches_arity` below then said yes,
+                // a plain `Call` was emitted, and on darwin that body is
+                // a panic-stub: `func_id=4269801458`, no file created at
+                // either tier. The declaration was never missing; an
+                // arity-exact filter made it unreachable.
+                //
+                // Non-variadic names are untouched: `arity_admits`
+                // returns `param_count == arity` for every name that is
+                // not a registered variadic FFI declaration.
+                let candidate = self
+                    .ctx
                     .lookup_function_with_arity_in_scope(&func_name, args.len())
-                    .cloned()
-                    .filter(|info| info.param_count == args.len() && is_free_fn(info))
+                    .cloned();
+                candidate
+                    .filter(|info| {
+                        self.ctx.arity_admits(&func_name, info, args.len())
+                            && is_free_fn(info)
+                    })
                     .map(|info| (func_name.clone(), info))
             } else {
                 None

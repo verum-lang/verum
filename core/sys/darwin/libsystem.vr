@@ -49,10 +49,22 @@ extern {
     /// Write to file descriptor. Same shape as `read`. T0.4 fix.
     public fn write(fd: Int32, buf: &Byte, nbyte: Int) -> Int;
 
-    /// Open file. C: `int open(const char *path, int oflag, mode_t mode);`.
-    /// `oflag` is `int` (Int32); `mode_t` is `uint32_t` on modern Darwin.
+    /// Open file. C: `int open(const char *path, int oflag, ...);`.
+    ///
+    /// VARIADIC, and that is not a detail. C declares the third argument
+    /// with `...`, and on arm64 Apple a variadic argument travels on the
+    /// STACK while a fixed one travels in a register. Declared here with
+    /// a fixed `mode: UInt32`, the mode went into `w2`, libSystem read
+    /// the stack, and the file was created with whatever was there —
+    /// 0o212, 0o710, 0o010 across three runs at tier 0, 0o000 at tier 1.
+    /// Three different values from one constant is the proof it was read
+    /// from the stack and not mis-converted.
+    ///
+    /// `oflag` is `int` (Int32); the mode the caller passes is `mode_t`,
+    /// `uint32_t` on modern Darwin, and is promoted to `int` in the
+    /// variadic tail like every integer argument there.
     /// Return is the new file descriptor (`int`, Int32).
-    public fn open(path: &Byte, oflag: Int32, mode: UInt32) -> Int32;
+    public fn open(path: &Byte, oflag: Int32, ...) -> Int32;
 
     /// Close file descriptor.
     ///

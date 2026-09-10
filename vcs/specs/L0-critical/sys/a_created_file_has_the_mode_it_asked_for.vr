@@ -1,0 +1,120 @@
+// @test: run
+// @tier: 0,1
+// @level: L0
+// @tags: sys, ffi, variadic, darwin, file-mode, abi
+// @timeout: 20000
+// @expected-exit: 0
+//
+// A CREATED FILE HAS THE MODE IT ASKED FOR (T1304).
+//
+// `File.create` requests `DEFAULT_FILE_MODE = 0o644`
+// (`core/io/file.vr:142`), passes it down through `open_with_flags` to
+// `sys_open`, and on darwin that reaches libSystem's `open`.
+//
+// WHAT WENT WRONG. C declares `int open(const char *path, int oflag, …)`
+// — VARIADIC. On arm64 Apple a variadic argument travels on the STACK,
+// not in an argument register. Declared with a fixed third parameter,
+// `mode` was placed in `w2` and the callee read the stack, so the file
+// got whatever happened to be there.
+//
+// MEASURED before the fix, same program, same request of 0o644:
+//
+//     tier 0    0o212, then 0o710, then 0o010     (three runs)
+//     tier 1    0o000                             (stable)
+//
+// BOTH TIERS, and the two readings are why. They are fed from the SAME
+// baked FFI symbol — `import_archive_ffi_symbol` clones the signature
+// wholesale across the archive seam — but they consume it through
+// different machinery: Tier 0 builds a call-site CIF with
+// `ffi_prep_cif_var`, Tier 1 emits an LLVM varargs call type. A spec
+// pinned to one tier would leave the other's lowering unchecked, and
+// this defect's two tiers already disagreed about what garbage they
+// produced.
+//
+// THREE DIFFERENT VALUES AT TIER 0 IS THE WHOLE ARGUMENT: a mis-read
+// CONSTANT gives the same wrong number every time. A value that changes
+// run to run is read from somewhere whose contents depend on call
+// history — the stack. Tier 1's stability fits the same story: an AOT
+// frame is deterministic, so its garbage is constant garbage.
+//
+// WHY THIS IS L0 AND NOT A UNIT TEST. A file created 0o000 is one nobody
+// can read back, and a file created with an execute bit is a security
+// defect on its own. Both were produced by this path. The failure is
+// silent: `write_all` and `flush` both answer `ok`, the bytes are on
+// disk, and only the read back fails — which reads as an I/O defect
+// rather than a permissions one.
+//
+// The fix is one token in `core/sys/darwin/libsystem.vr`: declare `open`
+// with `...` so the tail travels the way C expects. It is checked here
+// by OUTCOME — the mode the operating system recorded — not by reading
+// the declaration back.
+
+mount core.io.file.{File};
+mount core.io.fs.{metadata, remove_file};
+mount core.io.path.{Path};
+mount core.io.println;
+
+fn main() {
+    let path = "/tmp/verum_spec_t1304_mode.txt";
+
+    // REMOVE FIRST, and this is not tidiness. `O_CREAT|O_TRUNC` applies
+    // the mode ONLY when it creates the file — re-opening an existing one
+    // truncates it and leaves its mode alone. Verified:
+    //     create 0o600 -> 0o600 ; re-create 0o644 -> STILL 0o600
+    // So a spec that does not unlink reads whatever an earlier run left,
+    // and would have passed or failed on history rather than on this
+    // build. An Err here is the ordinary "it was not there" case and is
+    // ignored deliberately.
+    match remove_file(Path.new(path)) {
+        Result.Ok(_) => {}
+        Result.Err(e) => {}
+    }
+
+    match File.create(path) {
+        Result.Ok(f) => {}
+        Result.Err(e) => {
+            // ASSERT, do not just print. A branch that prints "FAIL" and
+            // returns leaves the exit code at 0, and `@expected-exit: 0`
+            // then passes a run that measured nothing.
+            println("could not create the probe file");
+            assert(false);
+        }
+    }
+
+    match metadata(Path.new(path)) {
+        Result.Ok(m) => {
+            let got = m.permissions().mode();
+
+            // MASK OFF THE FILE-TYPE BITS. `Metadata.permissions()` builds
+            // `Permissions { mode: self.raw.mode }` directly
+            // (core/io/fs.vr:303) while `Permissions.from_mode` applies
+            // `& PERM_MASK` — so what comes back is the whole `st_mode`,
+            // type bits included: 0o100710, not 0o710. That inconsistency
+            // is its own defect, recorded separately; this spec is about
+            // the MODE, so it masks and says why.
+            let perms = got & 0o7777;
+
+            // PRINT BEFORE ASSERTING. `assert_eq` reports only
+            // `assertion failed: left != right` and never shows the
+            // values, so a failing run would say the mode is wrong
+            // without saying what it is. The three pre-fix readings
+            // (0o212, 0o710, 0o010) are the evidence that this is stack
+            // garbage and not a mis-read constant; a spec that hides the
+            // number throws that evidence away.
+            // OCTAL, because the subject is a POSIX mode and decimal
+            // hides it. `{perms}` alone prints 420 for a correct file and
+            // 456 for the 0o710 reading measured before the fix — two
+            // decimal numbers that a reader has to convert before either
+            // means anything, in the one place where the number IS the
+            // evidence. `:o` lowers to `Int.to_octal`
+            // (`core/base/primitives.vr:387`, via
+            // `safe_interpolation.rs:311`).
+            println(f"created mode = 0o{perms:o} (raw st_mode 0o{got:o})");
+            assert_eq(perms, 0o644);
+        }
+        Result.Err(e) => {
+            println("could not stat the probe file");
+            assert(false);
+        }
+    }
+}

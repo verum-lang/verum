@@ -69,6 +69,7 @@ no output as a way to lose an afternoon.
 | `VERUM_TRACE_UNDEF_VAR` | substring | **nothing does** | variable name |
 | `VERUM_TRACE_UNIFY` | substring | `` (empty) | either type's shape |
 | `VERUM_TRACE_UNIFY_ENTRY` | substring | `` (empty) | either type's shape |
+| `VERUM_TRACE_VARIADIC_ARITY` | substring | `` (empty) or `1` | callee name |
 | `VERUM_TRACE_WANTED` | substring | `` (empty) | wanted name |
 
 Two further notes the column cannot carry:
