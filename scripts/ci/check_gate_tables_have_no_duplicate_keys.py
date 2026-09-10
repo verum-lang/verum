@@ -115,7 +115,15 @@ def main() -> int:
         print(f"check-gate-tables: no gate scripts under {args.dir} — "
               "refusing to pass vacuously", file=sys.stderr)
         return 1
-    bad = 0
+    # TWO CONDITIONS, TWO COUNTERS. `duplicates()` returns both a real
+    # duplicate key and a file it could not PARSE, and this printed one
+    # number under the duplicates' name. A neighbour hit exactly that:
+    # an intermediate edit left a gate script with an IndentationError,
+    # and the verdict read "88 gate scripts, 1 duplicate keys" — sending
+    # the reader to look for a duplicate that did not exist. A verdict
+    # line must name the condition that produced it.
+    dup = 0
+    unparseable = 0
     for f in files:
         for line, msg in duplicates(f):
             try:
@@ -123,9 +131,15 @@ def main() -> int:
             except ValueError:
                 shown = f  # --dir may point outside the repo (a probe)
             print(f"  {shown}:{line}: {msg}", file=sys.stderr)
-            bad += 1
-    print(f"check-gate-tables: {len(files)} gate scripts, {bad} duplicate keys")
-    return 1 if bad else 0
+            if msg.startswith("could not parse"):
+                unparseable += 1
+            else:
+                dup += 1
+    summary = f"{dup} duplicate key(s)"
+    if unparseable:
+        summary += f", {unparseable} file(s) that do not PARSE"
+    print(f"check-gate-tables: {len(files)} gate scripts, {summary}")
+    return 1 if (dup or unparseable) else 0
 
 
 if __name__ == "__main__":
