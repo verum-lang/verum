@@ -22625,6 +22625,31 @@ impl VbcCodegen {
         self.type_field_layouts
             .insert(type_name.to_string(), field_names.clone());
 
+        // T1369 step (a) — A PER-MODULE LAYOUT KEY FOR A LOCAL DECLARATION.
+        //
+        // `type_name` for a locally-declared type is the bare name, and two
+        // modules declaring `S` both write it. The insert above is
+        // deliberately LAST-wins (cdab21f88) so the layout and the type id
+        // belong to the same module; what neither policy can do is keep BOTH
+        // layouts, because one String key holds one Vec.
+        //
+        // Measured consequence, build11: the sibling-borrow fix gives the
+        // losing module a fresh TypeId and `READ name=S id=Some(20)
+        // layout=Some(1)` still answers for both — the id was separated, the
+        // layout was not.
+        //
+        // Additive: a second key, no lookup changed. Nothing that resolves by
+        // bare name behaves differently today; afterwards a per-module layout
+        // exists to resolve TO.
+        if !type_name.contains('.') {
+            if let Some(here) = self.ctx.current_source_module.clone() {
+                if !here.is_empty() {
+                    self.type_field_layouts
+                        .insert(format!("{}.{}", here, type_name), field_names.clone());
+                }
+            }
+        }
+
         // Cross-module field access support: also register under the simple name
         // (without module path) so imports using unqualified names can find fields.
         // e.g., "module_a.Point" → also register as "Point"
