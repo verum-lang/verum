@@ -143,7 +143,35 @@ def harvest(text: str) -> dict[tuple[str, str], set[str]]:
     return out
 
 
-SKIP = {"Self", "ASSOC", "UNPARSED"}
+SKIP = {"Self", "ASSOC", "UNPARSED", "NORETURN"}
+VARTOK = re.compile(r"(?<![A-Za-z0-9_])([A-Z][0-9]?)(?![A-Za-z0-9_])")
+
+
+def instantiates(generic: str, concrete: str) -> bool:
+    """Is `concrete` `generic` with its type VARIABLES filled in?
+
+    A page that gives `next() -> Maybe<T>` and then `-> Maybe<Int>` is
+    teaching, not contradicting itself. A lone uppercase token is the
+    grammar's type variable; anything longer is a type name.
+    """
+    if not VARTOK.search(generic):
+        return False
+    pat = re.escape(generic)
+    for v in set(VARTOK.findall(generic)):
+        pat = pat.replace(re.escape(v), r"[A-Za-z0-9_<>,\[\]&\(\)]+")
+    return re.fullmatch(pat, concrete) is not None
+
+
+def self_consistent(sigs: set[tuple[str, str, str]]) -> bool:
+    """Every pair either identical or one an instantiation of the other."""
+    flat = sorted("|".join(s) for s in sigs)
+    for a in flat:
+        for b in flat:
+            if a is b or a == b:
+                continue
+            if not instantiates(a, b) and not instantiates(b, a):
+                return False
+    return True
 
 
 def self_test() -> int:
@@ -219,8 +247,23 @@ def self_test() -> int:
     if bad:
         print(f"self-test: {bad} FAILED", file=sys.stderr)
         return 1
+    pre_fix = {("&mut self", "&Text", "IoResult<()>"),
+               ("&mut self", "&[Byte]", "IoResult<()>")}
+    if self_consistent(pre_fix):
+        print("self-test: the write_dcs anchor is no longer a contradiction",
+              file=sys.stderr)
+        bad += 1
+    teaching = {("&mut self", "", "Maybe<T>"), ("&mut self", "", "Maybe<Int>")}
+    if not self_consistent(teaching):
+        print("self-test: a concrete instantiation was read as a contradiction",
+              file=sys.stderr)
+        bad += 1
+    if bad:
+        print(f"self-test: {bad} FAILED", file=sys.stderr)
+        return 1
     print(f"[ok] self-test: 2 owner-tracking cases, 5 return normalisations, "
           f"4 parameter cases, 1 receiver case, 3 anchors, "
+          f"1 self-contradiction pair vs 1 teaching pair, "
           f"{len(KNOWN)} on the roster")
     return 0
 
@@ -249,7 +292,20 @@ def main() -> int:
             for r in v:
                 doc[k].add((r, str(p.relative_to(DOCS))))
 
-    off: dict[str, list[str]] = {"receiver": [], "parameters": [], "return": []}
+    # A PAGE THAT CONTRADICTS ITSELF needs no core to be wrong, and no
+    # comparison against the tree finds it when both declarations are
+    # wrong the same way. Measured: `api-raw.md` declared `write_dcs`
+    # twice, twenty-seven lines apart, `&Text` and `&[Byte]`.
+    off: dict[str, list[str]] = {
+        "self-contradiction": [], "receiver": [], "parameters": [], "return": [],
+    }
+    for p in pages:
+        rel = str(p.relative_to(DOCS))
+        for k, sigs in harvest(p.read_text(errors="replace")).items():
+            clean = {s for s in sigs if not (set(s) & SKIP)}
+            if len(clean) > 1 and not self_consistent(clean):
+                shown = "; ".join(f"({s[0]}, {s[1]}) -> {s[2]}" for s in sorted(clean))
+                off["self-contradiction"].append(f"{k[0]}.{k[1]}  {shown}   [{rel}]")
     for k in sorted(set(doc) & set(core)):
         if len(core[k]) != 1:
             continue
@@ -273,7 +329,8 @@ def main() -> int:
     found = sum(len(v) for v in off.values())
     print(f"check-doc-method-signatures: {len(doc)} documented (owner, "
           f"method) pair(s) across {len(pages)} page(s), {total} comparable "
-          f"against core — {len(off['receiver'])} receiver, "
+          f"against core — {len(off['self-contradiction'])} page(s) "
+          f"contradicting themselves, {len(off['receiver'])} receiver, "
           f"{len(off['parameters'])} parameter and {len(off['return'])} return "
           f"disagreement(s) ({len(KNOWN)} on the roster)")
 
@@ -286,7 +343,7 @@ def main() -> int:
               file=sys.stderr)
         return 2
 
-    for axis in ("receiver", "parameters", "return"):
+    for axis in ("self-contradiction", "receiver", "parameters", "return"):
         for s in off[axis]:
             print(f"    + [{axis}] {s}")
     if found:
