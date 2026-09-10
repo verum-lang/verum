@@ -73,15 +73,25 @@ FIELD_NAME = re.compile(r"[a-z_][a-z0-9_]*")
 # The page is right and `core/` is not. Each entry names why, and goes
 # STALE — and fails — the moment the two agree again.
 KNOWN: dict[str, str] = {
-    # `core/runtime/env.vr` carries `Env`-prefixed near-duplicates of
-    # types that already exist in `core/runtime/recovery.vr`, and they
-    # have DRIFTED rather than merely been copied:
-    # `InlineRetryPolicy.backoff_type` against
-    # `EnvInlineRetryPolicy.backoff_strategy`, padding `[Byte; 12]`
-    # against `[Byte; 11]`. The architecture page documents the
-    # originals, which is the pair that should survive; pointing it at
-    # the duplicates would enshrine them. Removal is tracked on the
-    # compiler side (T1378's residual).
+    # `core/runtime/env.vr` carries `Env`-prefixed duplicates of types
+    # that already exist in `core/runtime/recovery.vr`. Measured pair by
+    # pair, and the two pairs answer DIFFERENTLY:
+    #
+    #   InlineCircuitBreaker / EnvInlineCircuitBreaker
+    #       identical — ten fields, same names, same types, same
+    #       `_padding: [Byte; 18]`
+    #   InlineRetryPolicy / EnvInlineRetryPolicy
+    #       DRIFTED at equal field count — `backoff_type` against
+    #       `backoff_strategy`, `[Byte; 12]` against `[Byte; 11]`
+    #
+    # The second is the worse shape: two types that look
+    # interchangeable and are not, so a reader who finds either
+    # believes they have found the type. Counting fields would have
+    # called both identical; the names are what separate them.
+    #
+    # The architecture page documents the ORIGINALS, which is the set
+    # that should survive; pointing it at the duplicates would enshrine
+    # them. Removal is tracked on the compiler side.
     "RecoveryContext.circuit_breakers_inline": "core holds the Env- duplicate",
     "RecoveryContext.retry_policies_inline": "core holds the Env- duplicate",
     "RecoveryContext.retry_policies_overflow": "core holds the Env- duplicate",
