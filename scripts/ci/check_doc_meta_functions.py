@@ -67,13 +67,23 @@ BLOCK = re.compile(r"```verum\n(.*?)```", re.S)
 # A swap — one page stops teaching a name while another starts — holds a
 # count and moves these rows.
 KNOWN: dict[str, list[str]] = {
-    # The cubical/HoTT primitives. Measured 2026-09-10: `builtin_refl`,
-    # `builtin_path`, `builtin_interval`, `builtin_transport`,
-    # `builtin_hcomp`, `builtin_glue` — ZERO occurrences in `crates/`
-    # entire, in any of the three rosters. `core/math/hott.vr` declares
-    # both the TYPE and the CONSTRUCTOR through them, so the tour's own
-    # example fails to COMPILE (verum-23 ran it): `error<E400>: Type
-    # mismatch: expected '@builtin_path', found 'Unit'`.
+    # The cubical/HoTT primitives. Still real findings, and the reason is
+    # narrower than the first version of this comment claimed. That
+    # version said the names have ZERO occurrences in `crates/`; it was
+    # written from a grep for `"builtin_refl"` while the code writes the
+    # literal WITH the sigil, `"@builtin_refl"`. Searched correctly,
+    # ELEVEN of them have a code-generation arm apiece in
+    # `expressions::compile_call`, each emitting a `CubicalExtended`
+    # sub-op that the interpreter implements (twelve handlers) and LLVM
+    # lowers.
+    #
+    # What no layer supplies is their TYPE: the inference match has no
+    # arm, so each becomes `Unit` and will not unify with the declared
+    # return type. `core/math/hott.vr` declares both the TYPE and the
+    # CONSTRUCTOR through them, so the tour's example stops at the type
+    # check — `error<E400>: expected '@builtin_path', found 'Unit'` —
+    # and never reaches the code generation that would have handled it.
+    # A binding gap over a working runtime, not an unimplemented feature.
     "language/dependent-types.md": ["builtin_refl", "builtin_sym", "builtin_transport"],
     "verification/cubical-hott.md": [
         "builtin_path", "builtin_refl", "builtin_sym", "builtin_trans",
