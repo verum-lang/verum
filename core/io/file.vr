@@ -53,7 +53,7 @@ mount sys.linux.syscall.{
     ftruncate as sys_ftruncate,
     dup as sys_dup,
     FileDesc,
-    Stat,
+    Stat as SysStat,
     O_RDONLY, O_WRONLY, O_RDWR, O_CREAT, O_EXCL, O_TRUNC, O_APPEND,
     SEEK_SET, SEEK_CUR, SEEK_END,
 };
@@ -77,8 +77,9 @@ mount sys.linux.syscall.{
 //
 // Every signature below is IDENTICAL to the Linux one it replaces,
 // checked pairwise; `Stat` on Darwin IS `DarwinStat`
-// (`libsystem.vr:764`), so `safe_fstat`'s `&mut DarwinStat` and Linux's
-// `&mut Stat` are the same parameter after this mount.
+// (the `type Stat is DarwinStat;` alias there), so `safe_fstat`'s
+// `&mut DarwinStat` and Linux's `&mut Stat` are the same parameter
+// after this mount.
 @cfg(target_os = "macos")
 mount sys.darwin.libsystem.{
     safe_open as sys_open,
@@ -91,7 +92,7 @@ mount sys.darwin.libsystem.{
     safe_fsync as sys_fsync,
     safe_ftruncate as sys_ftruncate,
     safe_dup as sys_dup,
-    Stat,
+    DarwinStat as SysStat,
     O_RDONLY, O_WRONLY, O_RDWR, O_CREAT, O_EXCL, O_TRUNC, O_APPEND,
     SEEK_SET, SEEK_CUR, SEEK_END,
 };
@@ -101,7 +102,7 @@ mount sys.common.FileDesc;
 @cfg(target_os = "windows")
 mount sys.windows.kernel32.{
     safe_close as sys_close,
-    Stat,
+    Stat as SysStat,
     O_RDONLY, O_WRONLY, O_RDWR, O_CREAT, O_EXCL, O_TRUNC, O_APPEND,
     SEEK_SET, SEEK_CUR, SEEK_END,
 };
@@ -296,13 +297,26 @@ implement File {
         // side makes the bare name a method-bearing collision and moves
         // `check-type-name-collisions` off its baseline.
         //
-        // SEPARATELY, and NOT caused by that: the line below emits
-        // `GetF { field_idx: 8 }` on macOS, which is `st_size` in the
-        // LINUX layout; the Darwin index is 11. Measured with and
-        // without an `implement` block — the index is 8 in both, so the
-        // carrier is the cfg-gated mount of an ambiguous type name, not
-        // the methods. Reproduced in four files and filed on its own.
-        let mut stat_buf: Stat = sys_stat_zeroed();
+        // SEPARATELY, and NOT caused by that: this line used to name
+        // `Stat`, and on macOS that emitted `GetF { field_idx: 8 }` —
+        // `st_size` in the LINUX layout, where the Darwin index is 11.
+        //
+        // Cause, measured on a two-module miniature stdlib that bakes in
+        // under a second: when two modules declare the same SIMPLE name,
+        // both descriptors end up under ONE TypeId, and the dedupe then
+        // keeps whichever is RICHER — fields plus variant arities — with
+        // ties going to the first registered. An alias has richness 0, so
+        // `type Stat is DarwinStat` can never win against Linux's
+        // 18-field record, and `st_size` resolves at the record's index 8.
+        // The rule predicts that number from the field counts alone:
+        // 18 > 16.
+        //
+        // The fix is to name the type that is NOT ambiguous. `DarwinStat`
+        // is declared once; the macOS mount above aliases it to
+        // `SysStat`, and the same miniature shows a mount alias to a
+        // unique record name resolving at the correct index while the
+        // colliding simple name still does not (T1357).
+        let mut stat_buf: SysStat = sys_stat_zeroed();
         match sys_fstat(fd, &mut stat_buf) {
             Result.Ok(()) => Result.Ok(stat_buf.st_size as Int),
             Result.Err(e) => Result.Err(StreamError.from_raw_os_error(e.code)),

@@ -88,7 +88,7 @@ mount sys.linux.syscall.{
     close as sys_close,
     read as sys_read,
     write as sys_write,
-    Stat,
+    Stat as SysStat,
     FileDesc,
     O_RDONLY, O_WRONLY, O_CREAT, O_TRUNC, O_DIRECTORY,
 };
@@ -115,7 +115,7 @@ mount sys.darwin.libsystem.{
     safe_readdir as sys_readdir,
     safe_closedir as sys_closedir,
     errno,
-    Stat,
+    DarwinStat as SysStat,
     Dirent,
     DIR,
     O_RDONLY, O_WRONLY, O_CREAT, O_TRUNC, O_DIRECTORY,
@@ -180,7 +180,7 @@ public type FsMetadataRaw is {
 implement FsMetadataRaw {
     /// Create FsMetadataRaw from a native Stat structure.
     @cfg(target_os = "linux")
-    fn from_stat(stat: &Stat, follow_symlink: Bool) -> FsMetadataRaw {
+    fn from_stat(stat: &SysStat, follow_symlink: Bool) -> FsMetadataRaw {
         let mode = stat.st_mode as Int;
         let file_type = (stat.st_mode as UInt32) & S_IFMT;
 
@@ -200,7 +200,7 @@ implement FsMetadataRaw {
     }
 
     @cfg(target_os = "macos")
-    fn from_stat(stat: &Stat, follow_symlink: Bool) -> FsMetadataRaw {
+    fn from_stat(stat: &SysStat, follow_symlink: Bool) -> FsMetadataRaw {
         let mode = stat.st_mode as Int;
         let file_type = (stat.st_mode as UInt32) & S_IFMT;
 
@@ -679,7 +679,7 @@ implement Drop for ReadDir {
 public fn metadata(path: &Path) -> IoResult<Metadata> {
     let path_str = path.as_str();
     let path_bytes = path_str.as_bytes();
-    let mut stat_buf: Stat = sys_stat_zeroed();
+    let mut stat_buf: SysStat = sys_stat_zeroed();
 
     match sys_stat(path_bytes, &mut stat_buf) {
         Result.Ok(()) => {
@@ -694,7 +694,7 @@ public fn metadata(path: &Path) -> IoResult<Metadata> {
 public fn symlink_metadata(path: &Path) -> IoResult<Metadata> {
     let path_str = path.as_str();
     let path_bytes = path_str.as_bytes();
-    let mut stat_buf: Stat = sys_stat_zeroed();
+    let mut stat_buf: SysStat = sys_stat_zeroed();
 
     match sys_lstat(path_bytes, &mut stat_buf) {
         Result.Ok(()) => {
