@@ -6066,6 +6066,12 @@ impl VbcCodegen {
                         .insert(simple_name.clone(), q.clone());
                 }
                 Some(first) if first != &q => {
+                    if trace_type_binding(&simple_name) {
+                        eprintln!(
+                            "[type-claim] AMBIG  name={} first={} second={}",
+                            simple_name, first, q
+                        );
+                    }
                     self.ambiguous_bare_type_names.insert(simple_name.clone());
                 }
                 Some(_) => {}
@@ -25844,6 +25850,17 @@ impl VbcCodegen {
                     self.type_name_to_id.get(archive_name).copied()
                 }
             });
+            if trace_type_binding(archive_name) {
+                eprintln!(
+                    "[type-claim] REMAP  name={} archive_mod={:?} qualified={:?}                      ambiguous={} archive_ty_id={} -> {:?}",
+                    archive_name,
+                    archive_module.name,
+                    qualified_tid.map(|i| i.0),
+                    self.ambiguous_bare_type_names.contains(archive_name),
+                    ty.id.0,
+                    resolved.map(|i| i.0)
+                );
+            }
             match resolved {
                 Some(codegen_tid) => {
                     type_id_remap.insert(ty.id.0, codegen_tid.0);
