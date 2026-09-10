@@ -13332,8 +13332,47 @@ impl TypeChecker {
                 Type::Var(TypeVar::fresh())
             }
 
-            // Unknown meta-function - default to unit
-            _ => Type::unit(),
+            // Unknown meta-function - default to unit.
+            //
+            // T1352.  This arm is SILENT: a name the compiler does not
+            // know types as `Unit` and nothing is reported, so a
+            // misspelled or unimplemented `@meta` reads as a working call
+            // returning nothing.  43 sites in `core/` land here.
+            //
+            // It is not fixed by simply raising an error: 25 of those
+            // sites are in `core/math` and need a design decision
+            // (protocol-typed functor composition), so making this loud
+            // unconditionally would stop the stdlib baking.  What was
+            // missing is the ability to MEASURE that claim instead of
+            // repeating it, so this arm now has two levers and neither
+            // changes the default:
+            //
+            //   VERUM_TRACE_META_FN=1   name every unknown meta-function
+            //                           and where it was called
+            //   VERUM_STRICT_META_FN=1  make it an error, so one run says
+            //                           exactly which files stop compiling
+            //
+            // The second is the A/B this task needs: "what breaks if it
+            // speaks" becomes a list of names rather than an estimate.
+            unknown => {
+                if std::env::var_os("VERUM_TRACE_META_FN").is_some()
+                    || std::env::var_os("VERUM_STRICT_META_FN").is_some()
+                {
+                    eprintln!(
+                        "[meta-fn] unknown '@{}' with {} arg(s) — typing as Unit",
+                        unknown,
+                        args.len()
+                    );
+                }
+                if std::env::var_os("VERUM_STRICT_META_FN").is_some() {
+                    return Err(TypeError::Other(verum_common::Text::from(format!(
+                        "unknown meta-function `@{}`: no compiler builtin and no \
+                         `meta fn` of that name is in scope",
+                        unknown
+                    ))));
+                }
+                Type::unit()
+            }
         };
 
         Ok(InferResult::new(result_type))

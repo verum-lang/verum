@@ -11328,6 +11328,44 @@ impl ProtocolChecker {
                         _ => ReceiverKind::SelfValue,
                     }
                 };
+                // `VERUM_TRACE_OBJSAFE=<protocol>` (or `=1`) — this branch
+                // reports the OPPOSITE of what a declaration says whenever
+                // the registration it reads is not the declaration's own,
+                // and a bare `NoSelfParameter` cannot tell those apart.
+                // Measured 2026-09-10 (T1378): `Any` is declared once, at
+                // core/base/protocols.vr:1455, with `fn type_id(&self)`,
+                // and is reported as having no self parameter — but ONLY
+                // when the protocol comes from the ARCHIVE and a file uses
+                // `downcast_ref` and `as &dyn Any` in the same `implement`.
+                // The same shape over a LOCALLY declared protocol is clean.
+                //
+                // So the question is not "is the receiver missing" but
+                // "whose method is this": print the receiver kind, the
+                // parameter count and every method the registration holds.
+                if std::env::var("VERUM_TRACE_OBJSAFE")
+                    .is_ok_and(|v| v == "1" || v.as_str() == protocol_name.as_str())
+                {
+                    eprintln!(
+                        "[objsafe] {}::{} receiver_kind={:?} params={} type_params={} -> {:?}",
+                        protocol_name, method_name, method.receiver_kind,
+                        params.len(), type_params.len(), receiver
+                    );
+                    eprintln!(
+                        "[objsafe]   registration holds {} method(s): {}",
+                        protocol.methods.len(),
+                        protocol.methods.iter()
+                            .map(|(n, m)| format!(
+                                "{}(recv={:?},{}p{})",
+                                n, m.receiver_kind,
+                                match &m.ty {
+                                    Type::Function { params, .. } => params.len(),
+                                    _ => 0,
+                                },
+                                if m.has_default { ",default" } else { "" }))
+                            .collect::<Vec<_>>()
+                            .join(" ")
+                    );
+                }
                 match receiver {
                     ReceiverKind::None => {
                         errors.push(ObjectSafetyError::NoSelfParameter {

@@ -58,6 +58,7 @@ no output as a way to lose an afternoon.
 | `VERUM_TRACE_INTERNAL_ERR` | substring | `` (empty) | error text |
 | `VERUM_TRACE_MOUNT_AUTH` | **exact** | `1` | bare type name |
 | `VERUM_TRACE_MOUNT_SCOPED` | **exact** | `1` | bare type name |
+| `VERUM_TRACE_OBJSAFE` | **exact** | `1` | protocol name |
 | `VERUM_TRACE_PARAMMARK` | substring | `` (empty) or `1` | function name |
 | `VERUM_TRACE_QCALL` | substring | `` (empty) or `1` | dotted call path |
 | `VERUM_TRACE_STATIC_ALIAS` | substring | **nothing does** | alias name |
