@@ -91,6 +91,7 @@ TYPED_CALL = re.compile(
     r"\b((?:[a-z_][a-z0-9_]*)(?:\.[a-z_][a-z0-9_]*)+"
     r"\.[A-Z][A-Za-z0-9_]*\.[a-z_][a-z0-9_]*)\s*\(")
 MOUNT = re.compile(r"^\s*(?:public\s+)?mount\s+([A-Za-z_][\w.]*)")
+MODULE_DECL = re.compile(r"^\s*module\s+([A-Za-z_][\w.]*)\s*;", re.M)
 DECL = re.compile(r"\bfn\s+([a-z_][a-z0-9_]*)")
 
 # Roots that always name a module rather than a value.
@@ -127,6 +128,27 @@ ALWAYS_MODULE_ROOTS = {"core", "super", "cog"}
 # `thread_join` needs its call FORM changed to a method
 # (`core/sys/windows/thread.vr:281` declares `join`), not a new
 # declaration.  See T1320.
+# THE OTHER HALF OF THE QUESTION, added 2026-09-10 (T1374). Everything
+# above asks whether the LEAF is declared somewhere in core/. It never
+# asks whether the MODULE PATH exists — so a call to a real function name
+# through a WRONG module is invisible to a gate whose name is "dead module
+# path calls".
+#
+# Not hypothetical: `core/net/weft/tracing.vr` logs three span lines
+# through `core.base.logger.info` / `.warn`. The module is
+# `core.base.log`; `core.base.logger` does not exist. `info` IS declared
+# (log.vr:513), so the leaf check passes it and every span line in the
+# weft tracing layer goes to a path that cannot resolve.
+#
+# THE POPULATION IS ONE, measured before the check was written rather than
+# feared: 2496 module paths (every `module X;` plus all its prefixes)
+# against every fully-rooted `core.` call in the tree gives exactly one
+# distinct (prefix, file). So this half carries a roster of one, and a
+# second entry appearing is a real event.
+KNOWN_DEAD_MODULES: set[tuple[str, str]] = {
+    ("core.base.logger", "core/net/weft/tracing.vr"),
+}
+
 KNOWN: set[tuple[str, str]] = {
     ("core.shell.stream.stream_lines", "core/shell/command.vr"),
     ("sys.windows.time.query_performance_counter_ns", "core/mem/segment.vr"),
@@ -172,20 +194,51 @@ def main() -> int:
     for text in texts.values():
         declared.update(DECL.findall(text))
 
+    # Every module path this tree declares, plus each of its prefixes:
+    # `module core.net.weft.tracing;` makes `core`, `core.net`,
+    # `core.net.weft` and the full path all real.
+    modules: set[str] = set()
+    for text in texts.values():
+        for name in MODULE_DECL.findall(text):
+            parts = name.split(".")
+            for i in range(1, len(parts) + 1):
+                modules.add(".".join(parts[:i]))
+
     findings: dict[tuple[str, str], list[str]] = defaultdict(list)
+    dead_modules: dict[tuple[str, str], list[str]] = defaultdict(list)
     for path, text in texts.items():
         roots = module_roots(text)
         rel = str(path.relative_to(CORE.parent))
         for lineno, line in enumerate(text.splitlines(), 1):
             if line.lstrip().startswith("//"):
                 continue
-            for match in list(CALL.finditer(line)) + list(TYPED_CALL.finditer(line)):
-                dotted = match.group(1)
+            plain = [m.group(1) for m in CALL.finditer(line)]
+            typed = [m.group(1) for m in TYPED_CALL.finditer(line)]
+            for dotted in plain + typed:
                 if dotted.split(".")[0] not in roots:
                     continue
                 leaf = dotted.rsplit(".", 1)[1]
                 if leaf not in declared:
                     findings[(dotted, rel)].append(f"{rel}:{lineno}")
+            # THE MODULE-PATH HALF RUNS ON `CALL` ONLY, and the first
+            # version of it did not — which is exactly why it reported 32
+            # findings where the measured population is 1. In a TYPED_CALL
+            # (`core.net.http.StatusCode.ok(...)`) the segment before the
+            # leaf is a TYPE, so `rsplit(".", 1)[0]` yields
+            # `core.net.http.StatusCode` — a module path with a type glued
+            # on, which is never a module and was reported as a dead one.
+            # Every all-lower-case segment of a `CALL` match IS a module
+            # segment, so the question is only well-posed there.
+            #
+            # Fully-rooted `core.` paths only: a `super.`-relative or
+            # mount-aliased root cannot be resolved from one file's text,
+            # and guessing there would paint correct calls red.
+            for dotted in plain:
+                if dotted.split(".")[0] != "core":
+                    continue
+                prefix = dotted.rsplit(".", 1)[0]
+                if prefix not in modules:
+                    dead_modules[(prefix, rel)].append(f"{rel}:{lineno}")
 
     total = sum(len(sites) for sites in findings.values())
     appeared, disappeared = compare(set(findings), KNOWN)
@@ -229,8 +282,39 @@ def main() -> int:
         )
         return 1
 
+    # THE MODULE-PATH HALF, asked separately and reported separately: a
+    # dead LEAF and a dead MODULE are different defects with different
+    # fixes, and folding them into one number would hide whichever moved.
+    mod_total = sum(len(sites) for sites in dead_modules.values())
+    mod_new, mod_gone = compare(set(dead_modules), KNOWN_DEAD_MODULES)
+    if mod_new:
+        print(
+            f"check-dead-module-path-calls: {len(mod_new)} call(s) reach a MODULE "
+            "PATH that does not exist —\n"
+            + "".join(
+                f"  NEW {prefix}.*  {rel}\n"
+                + "".join(f"          {site}\n" for site in dead_modules[(prefix, rel)])
+                for prefix, rel in mod_new
+            )
+            + "The leaf may well be declared — that is why the other half of this\n"
+            "gate passes them. Check the MODULE: a typo one segment up sends a\n"
+            "real function name somewhere nothing answers.",
+            file=sys.stderr,
+        )
+        return 1
+    if mod_gone:
+        print(
+            "check-dead-module-path-calls: the module roster claims path(s) the "
+            "tree no longer has —\n"
+            + "".join(f"  {prefix}.*  {rel}\n" for prefix, rel in mod_gone)
+            + "Remove them from KNOWN_DEAD_MODULES in this file.",
+            file=sys.stderr,
+        )
+        return 1
+
     print(
-        f"check-dead-module-path-calls: {total} known dead call(s), roster exact"
+        f"check-dead-module-path-calls: {total} known dead call(s) and "
+        f"{mod_total} known dead module path(s), both rosters exact"
     )
     return 0
 
@@ -239,6 +323,21 @@ def self_test() -> int:
     """Known answers for both call shapes, because a widened pattern that
     swallows real calls is worse than the blind spot it removes."""
     bad = 0
+    # THE MODULE-PATH HALF'S FALSE-POSITIVE CLASS, pinned because it
+    # actually shipped for one run: applying the prefix test to a
+    # TYPED_CALL reported 32 dead modules where the population is 1. In
+    # `core.net.http.StatusCode.ok(...)` the segment before the leaf is a
+    # TYPE, so the prefix is a module path with a type glued on.
+    typed_line = "let s = core.net.http.StatusCode.ok(x);"
+    if [m.group(1) for m in CALL.finditer(typed_line)]:
+        print("self-test: CALL must NOT match a type-qualified call — the "
+              "module-path half keys on its matches and would read the type "
+              "as a module segment")
+        bad += 1
+    if not [m.group(1) for m in TYPED_CALL.finditer(typed_line)]:
+        print("self-test: TYPED_CALL stopped matching the type-qualified form")
+        bad += 1
+
     cases = [
         # (line, pattern, expected dotted matches)
         ("core.time.rfc3339.to_epoch(x)", CALL, ["core.time.rfc3339.to_epoch"]),
