@@ -108,7 +108,6 @@ CORE = REPO / "core"
 # grows by ten lines must not move this table, and a name that is SWAPPED
 # for another must not pass by keeping the total.
 KNOWN: dict[str, int] = {
-    "stack_alloc": 3,
     "builtin_path_app": 2,
     "transport_roundtrip": 2,
     "builtin_absurd": 1,

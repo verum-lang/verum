@@ -2057,22 +2057,39 @@ public fn set_env(name: &[Byte], value: &[Byte]) -> Result<(), OSError> {
     @cfg(target_os = "windows")
     {
         mount super.windows.kernel32.{SetEnvironmentVariableA};
-        // Create null-terminated copies on the stack
+        // Packed, NUL-terminated copies — the same shape the macOS branch
+        // of this function uses (darwin/libsystem.vr `safe_setenv`). Only
+        // an ANNOTATED `[Byte; N]` is contiguous ABI bytes; see
+        // docs/architecture/ffi-byte-buffer-contract.md.
         let name_len = name.len();
-        let name_buf = @stack_alloc(Byte, name_len + 1);
-        for i in 0..name_len {
-            unsafe { *(name_buf as &unsafe Byte).offset(i) = name[i]; }
+        if name_len > 255 {
+            return Result.Err(OSError.new(-1, "environment variable name too long"));
         }
-        unsafe { *(name_buf as &unsafe Byte).offset(name_len) = 0; }
-
         let value_len = value.len();
-        let value_buf = @stack_alloc(Byte, value_len + 1);
-        for i in 0..value_len {
-            unsafe { *(value_buf as &unsafe Byte).offset(i) = value[i]; }
+        if value_len > 4095 {
+            return Result.Err(OSError.new(-1, "environment variable value too long"));
         }
-        unsafe { *(value_buf as &unsafe Byte).offset(value_len) = 0; }
 
-        let result = SetEnvironmentVariableA(name_buf as &unsafe Byte, value_buf as &unsafe Byte);
+        let mut name_buf: [Byte; 256] = [0 as Byte; 256];
+        let mut i: Int = 0;
+        while i < name_len {
+            name_buf[i] = name[i];
+            i = i + 1;
+        }
+        name_buf[name_len] = 0 as Byte;
+
+        let mut value_buf: [Byte; 4096] = [0 as Byte; 4096];
+        let mut j: Int = 0;
+        while j < value_len {
+            value_buf[j] = value[j];
+            j = j + 1;
+        }
+        value_buf[value_len] = 0 as Byte;
+
+        let result = SetEnvironmentVariableA(
+            name_buf.as_ptr() as &unsafe Byte,
+            value_buf.as_ptr() as &unsafe Byte,
+        );
         if result {
             return Result.Ok(());
         } else {
@@ -2096,15 +2113,24 @@ public fn unset_env(name: &[Byte]) -> Result<(), OSError> {
     @cfg(target_os = "windows")
     {
         mount super.windows.kernel32.{SetEnvironmentVariableA};
-        // SetEnvironmentVariableA with null value deletes the variable
+        // SetEnvironmentVariableA with null value deletes the variable.
+        // Packed buffer, as in `set_env` above and the macOS sibling.
         let name_len = name.len();
-        let name_buf = @stack_alloc(Byte, name_len + 1);
-        for i in 0..name_len {
-            unsafe { *(name_buf as &unsafe Byte).offset(i) = name[i]; }
+        if name_len > 255 {
+            return Result.Err(OSError.new(-1, "environment variable name too long"));
         }
-        unsafe { *(name_buf as &unsafe Byte).offset(name_len) = 0; }
+        let mut name_buf: [Byte; 256] = [0 as Byte; 256];
+        let mut i: Int = 0;
+        while i < name_len {
+            name_buf[i] = name[i];
+            i = i + 1;
+        }
+        name_buf[name_len] = 0 as Byte;
 
-        let result = SetEnvironmentVariableA(name_buf as &unsafe Byte, 0 as &unsafe Byte);
+        let result = SetEnvironmentVariableA(
+            name_buf.as_ptr() as &unsafe Byte,
+            0 as &unsafe Byte,
+        );
         if result {
             return Result.Ok(());
         } else {
