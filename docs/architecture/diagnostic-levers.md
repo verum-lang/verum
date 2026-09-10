@@ -49,12 +49,17 @@ no output as a way to lose an afternoon.
 | `VERUM_TRACE_CALLRES` | substring | **nothing does** | callee name |
 | `VERUM_TRACE_CANON` | substring | `` , `*`, `1`, `true`, `all` | canonical path |
 | `VERUM_TRACE_CONST_RESOLVE` | substring | `` (empty) or `*` | function name |
+| `VERUM_TRACE_DEFTYPE` | **exact** | `1` | type key being defined |
 | `VERUM_TRACE_DEREF` | substring | `` (empty) or `1` | value/type shape |
 | `VERUM_TRACE_FNREG` | substring | `` (empty) | function name |
 | `VERUM_TRACE_FNTABLE` | substring | `` (empty) | function name |
+| `VERUM_TRACE_FN_RESOLVE` | substring | `` (empty) or `1` | function name |
 | `VERUM_TRACE_INSTANTIATE` | substring | **nothing does** | type name |
 | `VERUM_TRACE_INTERNAL_ERR` | substring | `` (empty) | error text |
+| `VERUM_TRACE_MOUNT_AUTH` | **exact** | `1` | bare type name |
+| `VERUM_TRACE_MOUNT_SCOPED` | **exact** | `1` | bare type name |
 | `VERUM_TRACE_PARAMMARK` | substring | `` (empty) or `1` | function name |
+| `VERUM_TRACE_QCALL` | substring | `` (empty) or `1` | dotted call path |
 | `VERUM_TRACE_STATIC_ALIAS` | substring | **nothing does** | alias name |
 | `VERUM_TRACE_STRDICE` | substring | **nothing does** | string content |
 | `VERUM_TRACE_STUB` | substring | `` (empty) | type name |

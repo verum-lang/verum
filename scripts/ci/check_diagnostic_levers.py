@@ -86,6 +86,52 @@ ROW = re.compile(r"^\|\s*`(VERUM_[A-Z0-9_]+)`\s*\|", re.M)
 WINDOW = 60
 
 
+def _candidates(lines: list[str], i: int) -> list[str]:
+    """Every name the lever's value could be bound to at line `i`.
+
+    NOT the first one found. `let trace = env::var("L").is_ok_and(|v| …)`
+    binds TWO — `trace` by the `let` and `v` by the closure — and taking
+    the `let` and stopping searched the window for `trace == name`, which
+    is not what the code says. The lever then read as not-filter-shaped
+    while this gate reported a clean count.
+    """
+    cands: list[str] = []
+    b = BIND.search(lines[i])
+    if b:
+        cands.append(b.group(1) or b.group(2) or b.group(3))
+    for j in range(i, min(i + 4, len(lines))):
+        a = ARM.search(lines[j]) or CLOSURE.search(lines[j])
+        if a and a.group(1) not in cands:
+            cands.append(a.group(1))
+    return [c for c in cands if c]
+
+
+def _pattern_use(window: str, var: str) -> bool:
+    """Is `var`'s VALUE used as a PATTERN in this window, not as a switch?
+
+    `.as_str()` / `.as_ref()` between the name and the comparison is
+    spelling, not meaning: `v.as_str() == protocol_name.as_str()` is the
+    same exact-match filter as `v == name`. Reading only the bare form hid
+    a lever this gate exists to find.
+    """
+    v = re.escape(var)
+    acc = r"(?:\.as_str\(\)|\.as_ref\(\)|\.trim\(\))*"
+    if re.search(
+        rf"\.contains\(&?{v}\)|starts_with\(&?{v}\)|"
+        rf"ends_with\(&?{v}\)|split\(&?{v}\)|{v}\s*!=\s*\"\*\"",
+        window,
+    ):
+        return True
+    # `w == "*" || w == name` — equality against a NAME, not a literal.
+    # The wildcard half confirms the value is a pattern rather than a
+    # switch; BOTH spellings of it are in use in this tree, `"*"` and
+    # `"1"`, and reading only the first reported `0 undocumented` over
+    # levers it could not see.
+    named = re.search(rf"{v}{acc}\s*==\s*[a-z_][a-z0-9_.()]*\b(?!\")", window)
+    wild = re.search(rf"{v}{acc}\s*==\s*\"(?:\*|1)\"", window)
+    return bool(named and wild)
+
+
 def filter_shaped() -> dict[str, str]:
     """lever -> the first site where its value is used as a pattern."""
     out: dict[str, str] = {}
@@ -101,28 +147,11 @@ def filter_shaped() -> dict[str, str]:
             lever = c.group(1)
             if lever in out:
                 continue
-            b = BIND.search(line)
-            var = (b.group(1) or b.group(2) or b.group(3)) if b else None
-            if var is None:
-                for j in range(i, min(i + 4, len(lines))):
-                    a = ARM.search(lines[j]) or CLOSURE.search(lines[j])
-                    if a:
-                        var = a.group(1)
-                        break
-            if var is None:
+            cands = _candidates(lines, i)
+            if not cands:
                 continue
             window = "\n".join(lines[i: i + 1 + WINDOW])
-            v = re.escape(var)
-            substring = re.compile(
-                rf"\.contains\(&?{v}\)|starts_with\(&?{v}\)|"
-                rf"ends_with\(&?{v}\)|split\(&?{v}\)|{v}\s*!=\s*\"\*\""
-            )
-            # `w == "*" || w == name` — equality against a NAME, not a
-            # literal. The `== "*"` half is what tells the two apart from
-            # a plain `== "1"` presence comparison.
-            exact = (re.search(rf"{v}\s*==\s*[a-z_][a-z0-9_.()]*\b(?!\")", window)
-                     and f'{var} == "*"' in window)
-            if substring.search(window) or exact:
+            if any(_pattern_use(window, c) for c in cands):
                 out[lever] = f"{f.relative_to(REPO)}:{i + 1}"
     return out
 
@@ -141,6 +170,18 @@ def self_test() -> int:
             '    && std::env::var("VERUM_F")\n'
             '        .map(|w| func_name.contains(&w) || w == "*")\n'
             '        .unwrap_or(false)\n',
+        # THREE FORMS THIS GATE COULD NOT SEE until 2026-09-10, each
+        # found by a lever it had silently omitted while reporting
+        # `0 undocumented`.
+        "let AND closure on one line (carried MOUNT_SCOPED)":
+            'let trace = std::env::var("VERUM_G")\n'
+            '    .is_ok_and(|v| v == "1" || v == name);\n',
+        "`1` as the wildcard instead of `*` (carried MOUNT_AUTH)":
+            'let g = std::env::var("VERUM_H")\n'
+            '    .is_ok_and(|v| v == "1" || v == name);\n',
+        "`.as_str()` before the comparison (carried OBJSAFE)":
+            'if std::env::var("VERUM_I")\n'
+            '    .is_ok_and(|v| v == "1" || v.as_str() == protocol_name.as_str())\n',
         "match arm (carried TYPE_CLAIM, BARE_VARIANT, CANON)":
             'match std::env::var("VERUM_E") {\n'
             '    Ok(w) => w == "*" || w == name,\n'
@@ -156,28 +197,19 @@ def self_test() -> int:
             'let Ok(pat) = std::env::var("VERUM_C") else { return; };\n'
             '    if n.starts_with(&pat) { eprintln!("y"); }\n',
     }
+    # The self-test used to REIMPLEMENT the detection inline, so it could
+    # not fail when the production path was wrong — and it did not, for
+    # three forms and six levers. It now calls the same two helpers
+    # `filter_shaped` calls, which is the only way a case here is evidence
+    # about the code that runs.
     for label, src in cases.items():
         lines = src.split("\n")
         found = False
         for i, line in enumerate(lines):
             if not CALL.search(line):
                 continue
-            b = BIND.search(line)
-            var = (b.group(1) or b.group(2) or b.group(3)) if b else None
-            if var is None:
-                for j in range(i, min(i + 4, len(lines))):
-                    a = ARM.search(lines[j]) or CLOSURE.search(lines[j])
-                    if a:
-                        var = a.group(1)
-                        break
-            if var is None:
-                continue
-            v = re.escape(var)
             window = "\n".join(lines[i:])
-            if (re.search(rf"\.contains\(&?{v}\)|starts_with\(&?{v}\)|{v}\s*!=\s*\"\*\"",
-                          window)
-                    or (re.search(rf"{v}\s*==\s*[a-z_][a-z0-9_.()]*\b(?!\")", window)
-                        and f'{var} == "*"' in window)):
+            if any(_pattern_use(window, c) for c in _candidates(lines, i)):
                 found = True
         if not found:
             print(f"self-test: {label} not recognised", file=sys.stderr)
