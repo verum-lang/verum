@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""A `mount core.a.b.{Name}` in the docs must name something that module has.
+"""A `mount core.a.b.{Name}` or `core.a.b.fn(...)` must name something real.
 
 WHY THIS AND NOT `check_doc_names_exist`
 ----------------------------------------
@@ -92,6 +92,15 @@ REEXPORT_ONE = re.compile(
 REEXPORT_MOD = re.compile(r"public\s+module\s+([a-z_][a-z0-9_]*)\s*;")
 REEXPORT_GLOB = re.compile(r"public\s+mount\s+\.?([a-z0-9_.]+)\s*\.\s*\*\s*;")
 DEMONSTRATION = re.compile(r"//.*error<E\d+>")
+# A dotted CALL is the same claim in the other syntax: `core.a.b.fn(...)`
+# says module `core.a.b` has a function `fn`.  Two segments minimum after
+# the root, so a method call on a value (`x.stats().pretty()`) cannot
+# masquerade as one.  Small population — 12 across the whole site — and
+# both of its first findings were real: `stats_prometheus.listener_exporter`
+# and `cli.plugin.discover`, neither declared anywhere in core/.
+CALL_PATH = re.compile(
+    r"\b((?:core|cog)(?:\.[a-z_][a-z0-9_]*){2,})\.([a-z_][a-z0-9_]*)\s*\("
+)
 IDENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
 # Known, each with why it is still here.  Identity, not a count: a swap
@@ -171,6 +180,12 @@ def scan(text: str) -> list[tuple[str, str]]:
             item = item.strip().split(" as ")[0].strip()
             if IDENT.fullmatch(item):
                 out.append((m.group(1), item))
+    for m in CALL_PATH.finditer(text):
+        line_end = text.find("\n", m.end())
+        line = text[m.start(): line_end if line_end != -1 else len(text)]
+        if DEMONSTRATION.search(line):
+            continue
+        out.append((m.group(1), m.group(2)))
     return out
 
 
@@ -218,11 +233,24 @@ def self_test() -> int:
         print(f"self-test: prose was read as a mount list: {prose}", file=sys.stderr)
         bad += 1
 
+    call = scan("Rendering goes through `core.net.quic.stats.render_endpoint(s)`.\n")
+    if call != [("core.net.quic.stats", "render_endpoint")]:
+        print(f"self-test: a dotted call path was not read: {call}", file=sys.stderr)
+        bad += 1
+
+    # A method chain on a VALUE is not a module path, and one segment
+    # after the root is a module, not a function in one.
+    for src in ("accepted.stats().snapshot().pretty();\n",
+                "core.time.now();\n"):
+        if scan(src):
+            print(f"self-test: read a module call out of {src!r}", file=sys.stderr)
+            bad += 1
+
     if bad:
         print(f"self-test: {bad} FAILED", file=sys.stderr)
         return 1
     print(f"[ok] self-test: {len(cases)} declaration form(s), "
-          f"1 multi-line list, 2 non-claims rejected")
+          f"1 multi-line list, 1 dotted call, 4 non-claims rejected")
     return 0
 
 
@@ -255,7 +283,8 @@ def main() -> int:
                 have[(mod, name)] = f"{page.name}: module has no `{name}`"
 
     print(f"check-doc-mounts-resolve: {len(seen)} distinct (module, name) "
-          f"pair(s) mounted across the docs — {ok} exported, {globbed} behind "
+          f"pair(s) mounted or called across the docs — {ok} exported, "
+          f"{globbed} behind "
           f"a glob re-export (undecided), {len(have)} unresolved "
           f"({len(want)} on the roster)")
 
