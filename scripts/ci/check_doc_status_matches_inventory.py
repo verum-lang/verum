@@ -104,7 +104,13 @@ TOKEN = re.compile(r"\*\*(" + "|".join(re.escape(t) for t in RANK) + r")\*\*")
 # its own input.  An unknown token is now rc=2, not a silent skip.
 ANY_BOLD = re.compile(r"\*\*([a-z][a-z -]{2,24})\*\*")
 INV_ROW = re.compile(r"\|\s*`([a-z0-9_/]+)`\s*\|")
-DOC_LINK = re.compile(r"core-tests/([a-z0-9_/]+)\)")
+# A row may cite the FOLDER or a file inside it — `.../core-tests/text/char)`
+# and `.../core-tests/text/char/audit.md)` are the same claim.  The first
+# version demanded a closing paren immediately after the folder and so
+# missed every audit.md link, which put a whole page's worth of rows in
+# the "carries a status nothing can check" bucket while they were in fact
+# linked.  Measured wrong before measured right.
+DOC_LINK = re.compile(r"core-tests/((?:[a-z0-9_]+/)*[a-z0-9_]+)(?:/[a-z0-9_.]+\.md)?\)")
 
 
 def inventory_status(text: str) -> tuple[dict[str, str], dict[str, str]]:
@@ -177,6 +183,14 @@ def self_test() -> int:
               file=sys.stderr)
         bad += 1
 
+    linked_via_file, _ = doc_rows(
+        "| `x.vr` | **partial** | [audit](https://x/core-tests/a/one/audit.md) |\n"
+    )
+    if linked_via_file != [(1, "a/one", "partial")]:
+        print(f"self-test: a link through the folder's audit.md was not "
+              f"resolved: {linked_via_file}", file=sys.stderr)
+        bad += 1
+
     rows, unlinked = doc_rows(
         "| `one.vr` | **partial** | [core-tests/a/one](https://x/core-tests/a/one) — ok |\n"
         "| `two.vr` | **partial** | [core-tests/a/two](https://x/core-tests/a/two) — ok |\n"
@@ -221,7 +235,7 @@ def self_test() -> int:
     print(f"[ok] self-test: {len(RANK)} ranks, 2 parsers, "
           f"3 polarity cases (1 over, 1 under, 1 absent), "
           f"1 unknown-word case, 1 superseded-token row, "
-          f"1 unlinked claim vs 1 legend row")
+          f"1 unlinked claim vs 1 legend row, 1 link through audit.md")
     return 0
 
 
@@ -264,7 +278,16 @@ def main() -> int:
         for i, mod, tok in rows:
             total += 1
             if mod not in inv:
-                absent.append(f"{page.name}:{i}  {mod} — page says {tok}")
+                # The folder exists (the link resolves) but the inventory
+                # records no status for it.  Nothing was measured, so
+                # nothing above rank 0 is supported — the page may say
+                # `unverified` / `undocumented` and no more.
+                if RANK[tok] > 0:
+                    absent.append(
+                        f"{page.name}:{i}  {mod} — page says {tok}, "
+                        f"inventory records nothing")
+                else:
+                    agree += 1
                 continue
             if RANK[tok] > RANK[inv[mod]]:
                 over.append(f"{page.name}:{i}  {mod}: page {tok} > tree {inv[mod]}")
@@ -287,7 +310,8 @@ def main() -> int:
             print(f"    + {s}")
     if absent:
         print("  NO INVENTORY ROW — the page links a conformance folder the")
-        print("  inventory does not carry; the status rests on nothing:")
+        print("  inventory records no status for, and claims more than")
+        print("  `unverified`; nothing measured supports it:")
         for s in absent:
             print(f"    ? {s}")
     if over or absent:
