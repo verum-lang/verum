@@ -24391,6 +24391,16 @@ impl VbcCodegen {
                 // (META-GROUP-XMODULE-1).
                 let type_name = record_key.clone();
                 let mut type_id_opt = self.type_name_to_id.get(&type_name).copied();
+                // T1369 — what the emitted `New { type_id }` actually
+                // reads, at the moment a literal is compiled.
+                if crate::codegen::trace_type_binding(&type_name) {
+                    eprintln!(
+                        "[type-claim] READ   name={} id={:?} layout={:?}",
+                        type_name,
+                        type_id_opt.map(|i| i.0),
+                        self.type_field_layouts.get(&type_name).map(|f| f.len())
+                    );
+                }
 
                 // **Cross-module record-construction TypeId synthesis**
                 // (closes XMOD-RECNEW-UNIT-1 / iterator-adapter `NEW ()`).

@@ -3091,6 +3091,14 @@ impl VbcCodegen {
             .user_claimed_type_names
             .insert((module_name.to_string(), type_name.to_string()))
         {
+            if trace_type_binding(type_name) {
+                eprintln!(
+                    "[type-claim] SKIP   name={} module={} (pair already claimed) holds={:?}",
+                    type_name,
+                    module_name,
+                    self.type_name_to_id.get(type_name).map(|i| i.0)
+                );
+            }
             return;
         }
         // First claim by THIS module: bind the simple key to a fresh id.
@@ -3119,7 +3127,30 @@ impl VbcCodegen {
         // entry). Lexical scoping: the declaring module owns its simple
         // key; the foreign layout stays reachable via its qualified key.
         let type_id = self.alloc_user_type_id();
+        if trace_type_binding(type_name) {
+            eprintln!(
+                "[type-claim] EVICT  name={} layout_was={:?}",
+                type_name,
+                self.type_field_layouts.get(type_name).map(|f| f.len())
+            );
+        }
         self.type_field_layouts.remove(type_name);
+        // T1369 — WHO BINDS THE SIMPLE NAME, AND IN WHAT ORDER.
+        // Set VERUM_TRACE_TYPE_CLAIM to a type name (or `*`) to print
+        // every binding of that name with its author. The question this
+        // answers cannot be read out of the source: the claim inserts
+        // unconditionally and the archive seed is first-wins, so on
+        // paper the claim always wins — and the artefact says the
+        // descriptor at the claimed id belongs to another module.
+        if trace_type_binding(type_name) {
+            eprintln!(
+                "[type-claim] CLAIM  name={} module={} new_id={} displacing={:?}",
+                type_name,
+                module_name,
+                type_id.0,
+                self.type_name_to_id.get(type_name).map(|i| i.0)
+            );
+        }
         if let Some(old_id) = self
             .type_name_to_id
             .insert(type_name.to_string(), type_id)
@@ -4549,6 +4580,14 @@ impl VbcCodegen {
         layouts: &std::collections::HashMap<String, Vec<String>>,
     ) {
         for (name, fields) in layouts {
+            if trace_type_binding(name) {
+                eprintln!(
+                    "[type-claim] SEEDL  name={} incoming_fields={} existing={:?}",
+                    name,
+                    fields.len(),
+                    self.type_field_layouts.get(name).map(|f| f.len())
+                );
+            }
             self.type_field_layouts
                 .entry(name.clone())
                 .or_insert_with(|| fields.clone());
@@ -5988,6 +6027,19 @@ impl VbcCodegen {
             self.next_type_id = id_val.saturating_add(1);
         }
         // First-wins on type-name lookup.
+        if trace_type_binding(&simple_name) {
+            eprintln!(
+                "[type-claim] SEED   name={} id={} {} fields={}",
+                simple_name,
+                ty.id.0,
+                if self.type_name_to_id.contains_key(&simple_name) {
+                    "(key taken, skipping)"
+                } else {
+                    "(binding)"
+                },
+                ty.fields.len()
+            );
+        }
         if !self.type_name_to_id.contains_key(&simple_name) {
             self.type_name_to_id.insert(simple_name.clone(), ty.id);
         }
@@ -27878,5 +27930,19 @@ mod tests {
         assert_eq!(a.max_tag_seen, 5);
         assert_eq!(a.missing_tags, vec![1, 3, 4]);
         assert!(a.duplicate_tags.is_empty());
+    }
+}
+
+
+/// T1369 — is this type name being watched by `VERUM_TRACE_TYPE_CLAIM`?
+///
+/// `*` watches every name; anything else is compared literally. Reading
+/// the variable per call is deliberate: the trace is off in every build
+/// that does not set it, and the sites it guards fire only while a type
+/// name is being bound, which is not a hot path.
+fn trace_type_binding(name: &str) -> bool {
+    match std::env::var("VERUM_TRACE_TYPE_CLAIM") {
+        Ok(w) => w == "*" || w == name,
+        Err(_) => false,
     }
 }
