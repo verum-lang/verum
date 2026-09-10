@@ -984,7 +984,12 @@ fn get_monotonic_time() -> UInt64 {
     }
 
     @cfg(target_os = "windows") {
-        return sys.windows.time.query_performance_counter_ns();
+        // `query_performance_counter_ns` was declared nowhere (T1320).
+        // `monotonic_nanos` IS what it meant: windows/time.vr:277 reads
+        // QueryPerformanceCounter and scales by its frequency to
+        // nanoseconds — and the name now matches the two branches above
+        // it instead of describing the syscall behind one of them.
+        return sys.windows.time.monotonic_nanos();
     }
 
     // UInt64 return — descriptive panic. A future unsupported target

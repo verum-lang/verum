@@ -149,7 +149,7 @@ implement ThreadJoinHandle<T> {
     ///
 
     /// Returns Err if the thread panicked.
-    public fn join(self) -> Result<T, ThreadError> {
+    public fn join(mut self) -> Result<T, ThreadError> {
         // Platform join blocks until thread exits
         @cfg(target_os = "linux")
         {
@@ -165,7 +165,14 @@ implement ThreadJoinHandle<T> {
 
         @cfg(target_os = "windows")
         {
-            sys.windows.thread.thread_join(self.platform)
+            // `thread_join` was declared NOWHERE (T1320), and the reason
+            // is a shape difference rather than a spelling one: on linux
+            // and darwin the join is a FREE function taking the platform
+            // handle, while windows/thread.vr:281 declares it as a METHOD
+            // on WindowsThread with a `&mut self` receiver. Hence the
+            // `mut self` on this function — the receiver has to own a
+            // mutable place to call it through.
+            self.platform.join()
                 .map_err(|_| ThreadError.JoinFailed)?;
         }
 

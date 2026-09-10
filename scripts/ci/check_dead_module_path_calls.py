@@ -157,10 +157,11 @@ KNOWN_DEAD_MODULES: set[tuple[str, str]] = {
     ("core.base.logger", "core/net/weft/tracing.vr"),
 }
 
-KNOWN: set[tuple[str, str]] = {
-    ("sys.windows.time.query_performance_counter_ns", "core/mem/segment.vr"),
-    ("sys.windows.thread.thread_join", "core/runtime/thread.vr"),
-}
+# EMPTY, and written as `set()` rather than `{}` — the latter is an empty
+# DICT in Python and `set - dict` raises. The population reached zero on
+# 2026-09-10 (T1320): five entries, of which three were repointed or
+# declared and two were the gate's own blind spots.
+KNOWN: set[tuple[str, str]] = set()
 
 
 def compare(
