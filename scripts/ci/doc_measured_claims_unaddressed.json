@@ -4,14 +4,6 @@
   "What this rule does not cover"
  ],
  [
-  "architecture/runtime-tiers.md",
-  "Two enums, and this table is the other one"
- ],
- [
-  "cookbook/json.md",
-  "The error surface here was wrong"
- ],
- [
   "cookbook/quic-server.md",
   "These two mounts name modules that do not exist"
  ],
@@ -36,10 +28,6 @@
   "`mount core.*` costs a great deal and buys nothing"
  ],
  [
-  "language/tagged-literals.md",
-  "The content is not validated"
- ],
- [
   "reference/meta-functions.md",
   "Not yet callable @fa3675e7"
  ],
@@ -52,16 +40,8 @@
   "`Response.ok(...)` was not a thing — and nothing in the library was us"
  ],
  [
-  "stdlib/status-convention.md",
-  "The aggregate rule cannot be evaluated today"
- ],
- [
   "stdlib/sys.md",
   "Read the per-module table with its date"
- ],
- [
-  "tooling/testing.md",
-  "Export is not implemented yet"
  ],
  [
   "tutorials/h3-service.md",
@@ -74,9 +54,5 @@
  [
   "verification/networking.md",
   "`@forall` was the wrong spelling; `forall` is real"
- ],
- [
-  "verification/tactic-dsl.md",
-  "No linter flags these today"
  ]
 ]
