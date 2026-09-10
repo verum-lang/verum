@@ -316,7 +316,7 @@ pub static REGISTRY: Lazy<HashMap<&'static str, ErrorCodeEntry>> = Lazy::new(|| 
         ErrorCodeEntry { code: "E304", numeric: 304, category: ErrorCategory::Memory, description: "affine value used more than once" },
         ErrorCodeEntry { code: "E305", numeric: 305, category: ErrorCategory::Memory, description: "use of an uninitialized or partially initialized value" },
         ErrorCodeEntry { code: "E306", numeric: 306, category: ErrorCategory::Memory, description: "capability violation" },
-        ErrorCodeEntry { code: "E310", numeric: 310, category: ErrorCategory::Memory, description: "borrow conflict; also an invalid index, and a `&checked` reference that may escape" },
+        ErrorCodeEntry { code: "E310", numeric: 310, category: ErrorCategory::Memory, description: "borrow conflict; also use after move, an invalid index, and a `&checked` reference that may escape" },
         ErrorCodeEntry { code: "E311", numeric: 311, category: ErrorCategory::Memory, description: "double move" },
         ErrorCodeEntry { code: "E312", numeric: 312, category: ErrorCategory::Memory, description: "lifetime error" },
         ErrorCodeEntry { code: "E313", numeric: 313, category: ErrorCategory::Memory, description: "dangling reference" },
@@ -530,10 +530,10 @@ pub static REGISTRY: Lazy<HashMap<&'static str, ErrorCodeEntry>> = Lazy::new(|| 
         // Module system (verum_modules::WarningKind).
         ErrorCodeEntry { code: "W001",  numeric: 2001, category: ErrorCategory::Module, description: "a declaration shadows a prelude name" },
         ErrorCodeEntry { code: "W002",  numeric: 2002, category: ErrorCategory::Module, description: "unused import" },
-        ErrorCodeEntry { code: "W003",  numeric: 2003, category: ErrorCategory::Module, description: "a glob import shadows an existing name" },
+        ErrorCodeEntry { code: "W003",  numeric: 2003, category: ErrorCategory::Module, description: "the same name arrives from two glob mounts" },
         ErrorCodeEntry { code: "W004",  numeric: 2004, category: ErrorCategory::Module, description: "deprecated item used" },
-        ErrorCodeEntry { code: "W005",  numeric: 2005, category: ErrorCategory::Module, description: "`self` shadowed by a binding" },
-        ErrorCodeEntry { code: "W006",  numeric: 2006, category: ErrorCategory::Module, description: "two modules claim the same name" },
+        ErrorCodeEntry { code: "W005",  numeric: 2005, category: ErrorCategory::Module, description: "a definition shadows one of the same name in an outer scope" },
+        ErrorCodeEntry { code: "W006",  numeric: 2006, category: ErrorCategory::Module, description: "one module name is declared both by a file and inline" },
 
         // General lints (verum_diagnostics::warning_codes).
         ErrorCodeEntry { code: "W0042", numeric: 2042, category: ErrorCategory::Async, description: "async placeholder future generated — async resolution is incomplete" },

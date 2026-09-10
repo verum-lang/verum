@@ -62,6 +62,13 @@ REGISTRY = REPO / "crates" / "verum_error" / "src" / "registry.rs"
 CODE = re.compile(r"\b([EW]\d{3,4})\b")
 FENCE = re.compile(r"^```.*?^```", re.S | re.M)
 REGISTRY_CODE = re.compile(r'code:\s*"([EW]\d+)"')
+REGISTRY_ENTRY = re.compile(
+    r'code:\s*"([EW]\d+)".*?description:\s*"([^"]*)"', re.S)
+# The code INDEX page: the one page whose second column is the code's
+# meaning rather than a severity or a page-local label.
+INDEX_PAGE = "reference/diagnostics.md"
+INDEX_ROW = re.compile(r'^\|\s*`?([EW]\d{3,4})`?\s*\|\s*([^|]+?)\s*\|', re.M)
+INDEX_FLOOR = 40
 
 # (code, page-suffix) pairs a page names in order to say they are absent.
 ALLOWED = {
@@ -124,6 +131,64 @@ def emitted_codes(registry_path: Path) -> set[str]:
     return {c for c in re.findall(r'"([EW]\d{3,4})"', text)}
 
 
+# THIRD QUESTION, same corpus and the one that motivated this section:
+# a code can be real, emitted, AND cited under the wrong MEANING.
+#
+# Measured 2026-09-10.  A user file mounting one simple type name from two
+# modules printed `error<E602>: ambiguous name: …`, and the index page said
+# `| E602 | context cycle |` — faithfully, because that is what the registry
+# says.  `context cycle` has no emitter anywhere in the tree; `ambiguous
+# name` already owns E105.  A reader looking up the code they were shown
+# read about a different subsystem, and the two existing questions above
+# both stayed green: the code EXISTS and something DOES emit it.
+#
+# Scope is deliberately the index page alone.  Run over every table on the
+# site the same comparison reports 17 rows, of which the majority are not
+# defects: `language/patterns.md` puts the SEVERITY in the second column
+# ("error" / "warning") and `verification/performance.md` uses short labels
+# ("Missing bound vars").  A gate that flags a table for having a label
+# column stops being read.  The index page is the one place whose second
+# column is a definition and whose reader is looking a code UP.
+#
+# A page text that is a PREFIX of the registry's is accepted: the registry
+# grew an "; also …" clause from a later measurement, so the page is
+# incomplete rather than wrong.
+def registry_meanings(path: Path) -> dict[str, str]:
+    return {m.group(1): m.group(2)
+            for m in REGISTRY_ENTRY.finditer(path.read_text(errors="ignore"))}
+
+
+def normalise_meaning(text: str) -> str:
+    """Compare meanings, not markdown.
+
+    The page writes `**module not found**; also \u0060Send\u0060 not
+    implemented` where the registry writes the same sentence plain.
+    Comparing raw strings makes that a false positive, and a false positive
+    over formatting is the expensive kind.
+    """
+    t = text.strip().lower().replace("**", "").replace("`", "")
+    for dash in ("\u2014", "\u2013", "\u2212"):
+        t = t.replace(dash, "-")
+    return re.sub(r"\s+", " ", t).rstrip(". ")
+
+
+def index_disagreements(docs_root: Path, meanings: dict[str, str]):
+    """(rows_compared, [(code, page_text, registry_text)])."""
+    page = docs_root / INDEX_PAGE
+    if not page.is_file():
+        return 0, []
+    compared, bad = 0, []
+    for code, text in INDEX_ROW.findall(page.read_text(errors="ignore")):
+        if code not in meanings:
+            continue          # question one already owns the absent case
+        compared += 1
+        p, r = normalise_meaning(text), normalise_meaning(meanings[code])
+        if p == r or r.startswith(p):
+            continue
+        bad.append((code, text.strip(), meanings[code]))
+    return compared, bad
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--docs", type=Path, default=DOCS)
@@ -162,6 +227,37 @@ def main() -> int:
                 ok = False
             if "E3050" in real:
                 print("self-test FAIL: E3050 is in the registry after all")
+                ok = False
+        # THIRD QUESTION's instrument.
+        if normalise_meaning("**module not found**; also `Send` not implemented") \
+                != normalise_meaning("module not found; also Send not implemented"):
+            print("self-test FAIL: markdown emphasis is not normalised away")
+            ok = False
+        if normalise_meaning("type not found \u2014 no declaration") \
+                != "type not found - no declaration":
+            print("self-test FAIL: an em dash is not folded to a hyphen")
+            ok = False
+        if normalise_meaning("context cycle") == normalise_meaning("ambiguous name"):
+            print("self-test FAIL: the E602 pair compares equal")
+            ok = False
+        if not normalise_meaning(
+                "recursive type without indirection; also wrong number of type "
+                "arguments").startswith(
+                normalise_meaning("recursive type without indirection")):
+            print("self-test FAIL: the prefix rule does not hold")
+            ok = False
+        if INDEX_ROW.findall("| `E602` | context cycle | yes |\n") \
+                != [("E602", "context cycle")]:
+            print("self-test FAIL: an index row is not read")
+            ok = False
+        if INDEX_ROW.findall("| `E0xx` | Parse | Lexing |\n") != []:
+            print("self-test FAIL: the range table read as a code row")
+            ok = False
+        if args.registry.is_file():
+            m = registry_meanings(args.registry)
+            if m.get("E105") != "ambiguous name":
+                print("self-test FAIL: registry descriptions are not parsed "
+                      f"(E105 read as {m.get('E105')!r})")
                 ok = False
         print("self-test: ok" if ok else "self-test: FAILED")
         return 0 if ok else 1
@@ -224,6 +320,14 @@ def main() -> int:
     for c in dead:
         print(f"    {c}")
 
+    meanings = registry_meanings(args.registry)
+    compared, disagree = index_disagreements(docs_root, meanings)
+    print(f"check-doc-error-codes-meaning: {len(disagree)} of {compared} "
+          f"index row(s) disagree with the registry")
+    for code, page_t, reg_t in disagree:
+        print(f"    {code}\n        page     = {page_t!r}"
+              f"\n        registry = {reg_t!r}")
+
     if bad:
         for b in sorted(set(bad)):
             print(b, file=sys.stderr)
@@ -231,6 +335,20 @@ def main() -> int:
               "code is real, add it there; if the page means to say a code "
               "does NOT exist, add the (code, page) pair to ALLOWED.",
               file=sys.stderr)
+        return 1
+    if compared < INDEX_FLOOR:
+        print(f"\nonly {compared} row(s) on {INDEX_PAGE} named a registered "
+              f"code, expected at least {INDEX_FLOOR}. The page or its table "
+              "shape is gone, so the meaning check measured almost nothing — "
+              "refusing rather than passing.", file=sys.stderr)
+        return 1
+    if disagree:
+        print(f"\n{len(disagree)} row(s) on {INDEX_PAGE} give a meaning the "
+              "registry does not. The reader looked the code UP, so this page "
+              "is where a wrong meaning costs most. Check which side the "
+              "EMITTER agrees with before editing either — measured once, it "
+              "was the registry that was wrong (W005 read `SelfShadowing` as "
+              "being about the `self` keyword).", file=sys.stderr)
         return 1
     if len(dead) != EMIT_BASELINE:
         direction = "above" if len(dead) > EMIT_BASELINE else "below"
