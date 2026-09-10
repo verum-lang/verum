@@ -92,7 +92,15 @@ TYPED_CALL = re.compile(
     r"\.[A-Z][A-Za-z0-9_]*\.[a-z_][a-z0-9_]*)\s*\(")
 MOUNT = re.compile(r"^\s*(?:public\s+)?mount\s+([A-Za-z_][\w.]*)")
 MODULE_DECL = re.compile(r"^\s*module\s+([A-Za-z_][\w.]*)\s*;", re.M)
-DECL = re.compile(r"\bfn\s+([a-z_][a-z0-9_]*)")
+# `fn NAME` and `fn* NAME` alike. The `*` matters: a GENERATOR
+# declaration (`public async fn* stream_lines(cmd_text: &Text)`) has no
+# space between `fn` and the star, so `\bfn\s+` missed every one of them
+# — six sites, five names, in core/ today. One of those names,
+# `core.shell.stream.stream_lines`, sat on this gate's roster as a DEAD
+# call for a day while its declaration was 60 lines above the caller's
+# own docstring pointing at it. A false PLUS on a roster is worse than a
+# blind spot: it sends someone to write a function that already exists.
+DECL = re.compile(r"\bfn\*?\s+([a-z_][a-z0-9_]*)")
 
 # Roots that always name a module rather than a value.
 ALWAYS_MODULE_ROOTS = {"core", "super", "cog"}
@@ -150,7 +158,6 @@ KNOWN_DEAD_MODULES: set[tuple[str, str]] = {
 }
 
 KNOWN: set[tuple[str, str]] = {
-    ("core.shell.stream.stream_lines", "core/shell/command.vr"),
     ("sys.windows.time.query_performance_counter_ns", "core/mem/segment.vr"),
     ("sys.windows.thread.thread_join", "core/runtime/thread.vr"),
 }
@@ -328,6 +335,17 @@ def self_test() -> int:
     # TYPED_CALL reported 32 dead modules where the population is 1. In
     # `core.net.http.StatusCode.ok(...)` the segment before the leaf is a
     # TYPE, so the prefix is a module path with a type glued on.
+    # GENERATOR DECLARATIONS. `fn* NAME` has no space after `fn`, and the
+    # narrow form of DECL missed all six in core/ — which put a declared
+    # `stream_lines` on this gate's DEAD roster.
+    if DECL.findall("public async fn* stream_lines(cmd_text: &Text)") != ["stream_lines"]:
+        print("self-test: DECL does not see a `fn*` generator declaration — "
+              "every generator in core/ would read as undeclared")
+        bad += 1
+    if DECL.findall("pub async fn stream_lines_bounded(") != ["stream_lines_bounded"]:
+        print("self-test: DECL stopped seeing a plain `fn` declaration")
+        bad += 1
+
     typed_line = "let s = core.net.http.StatusCode.ok(x);"
     if [m.group(1) for m in CALL.finditer(typed_line)]:
         print("self-test: CALL must NOT match a type-qualified call — the "
