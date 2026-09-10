@@ -21429,6 +21429,27 @@ impl VbcCodegen {
             {
                 return (pos, false);
             }
+            // T1369 step (b), case 1. The simple key holds ONE layout and
+            // the last writer wins, so a literal in `core.pa` resolved
+            // against `core.pb`'s fields whenever both declare the name.
+            // Step (a) writes each declaration its own module-qualified
+            // key; ask for it first. Absent — every name only one module
+            // declares — this falls straight through to the exact match
+            // below and nothing changes.
+            if !tn.contains('.')
+                && let Some(here) = self.ctx.current_source_module.clone()
+                && !here.is_empty()
+                && let Some(fields) = self.type_field_layouts.get(&format!("{}.{}", here, tn))
+                && let Some(pos) = fields.iter().position(|f| f == field_name)
+            {
+                if std::env::var("VERUM_DEBUG_FIELDS").is_ok() {
+                    tracing::debug!(
+                        "[FIELD] {}.{} -> per-MODULE idx {} (key {}.{})",
+                        tn, field_name, pos, here, tn
+                    );
+                }
+                return (pos as u32, false);
+            }
             // Try exact match first
             if let Some(fields) = self.type_field_layouts.get(tn)
                 && let Some(pos) = fields.iter().position(|f| f == field_name)
