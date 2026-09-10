@@ -5990,18 +5990,55 @@ impl VbcCodegen {
                 (Some(owner), Some(here)) => owner != here,
                 _ => false,
             };
-            let foreign = claimed_elsewhere
-                || self.archive_claimed_type_ids.contains(&existing.0)
-                    && std::env::var_os("VERUM_DISABLE_LOCAL_TYPE_SHADOW").is_none();
-            if !foreign {
+            let archive_foreign = self.archive_claimed_type_ids.contains(&existing.0)
+                && std::env::var_os("VERUM_DISABLE_LOCAL_TYPE_SHADOW").is_none();
+            if !claimed_elsewhere && !archive_foreign {
                 return existing;
             }
             let tid = self.alloc_user_type_id();
-            self.type_name_to_id.insert(type_name.to_string(), tid);
+            // THE REBIND IS NOT UNCONDITIONAL. Two kinds of "foreign"
+            // reach here and they want opposite things from the simple
+            // key:
+            //
+            //   archive-foreign — a LOCAL declaration shadowing an
+            //     imported type. It SHOULD take the key back; that is
+            //     LOCAL-TYPE-SHADOW, and it is why this insert exists.
+            //
+            //   sibling-foreign — another module of THIS unit claimed
+            //     the name in the prepass. Taking the key here hands it
+            //     to whichever declaration compiles first, and then the
+            //     rightful owner finds its own name pointing at a fresh
+            //     id and adopts THAT. Measured on the miniature after
+            //     the first attempt at this fix:
+            //
+            //       claim_local_type_id 'S' existing=Some(20)
+            //       … fresh local id 21          <- pa took id AND key
+            //       claim_local_type_id 'S' existing=Some(21)
+            //       make_a/make_b  New { type_id: 21, field_count: 2 }
+            //
+            //     Both ended on 21: the hybrid moved from one number to
+            //     another instead of going away.
+            //
+            // So a sibling borrows an id and leaves the name alone.
+            if archive_foreign {
+                self.type_name_to_id.insert(type_name.to_string(), tid);
+            }
             if std::env::var("VERUM_TRACE_CTOR").is_ok() {
                 eprintln!(
-                    "[ctor-trace] LOCAL-TYPE-SHADOW '{}': archive id {} shadowed by fresh local id {}",
-                    type_name, existing.0, tid.0
+                    "[ctor-trace] {} '{}': existing id {} -> fresh local id {} ({})",
+                    if archive_foreign {
+                        "LOCAL-TYPE-SHADOW"
+                    } else {
+                        "SIBLING-BORROW"
+                    },
+                    type_name,
+                    existing.0,
+                    tid.0,
+                    if archive_foreign {
+                        "key taken"
+                    } else {
+                        "key left with its owner"
+                    },
                 );
             }
             return tid;
