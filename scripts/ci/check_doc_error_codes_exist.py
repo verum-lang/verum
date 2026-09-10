@@ -71,6 +71,32 @@ INDEX_ROW = re.compile(r'^\|\s*`?([EW]\d{3,4})`?\s*\|\s*([^|]+?)\s*\|', re.M)
 INDEX_FLOOR = 40
 
 # (code, page-suffix) pairs a page names in order to say they are absent.
+# The page may differ from the registry when the EMITTER agrees with the
+# PAGE — the registry being the one that is wrong.  This gate's own
+# failure message has said "check which side the EMITTER agrees with"
+# since W005; there was simply no way to record the answer.
+#
+# Measured 2026-09-10: seven registry descriptions name a condition no
+# emit site produces, and the index page was a VERBATIM COPY of them.
+# That is why this check was green over all seven — two copies of one
+# mistake agree, and their agreement is what made it durable.  The page
+# now follows the emitter; `make check-doc-error-code-meaning` is the
+# gate that keeps it there.  The registry half is T1386.
+#
+# An entry goes STALE the moment the registry catches up, and stale is a
+# failure: an exemption nobody can see being used is a standing licence.
+PAGE_FOLLOWS_EMITTER: dict[str, str] = {
+    "E311": "emits `cannot borrow ... because field ... is already borrowed`",
+    "E313": "emits `cannot move ... while it is borrowed`",
+    "E501": "emits `invalid refinement predicate`, and at a second site "
+            "`meta function ... must be pure but has side effects`",
+    "E502": "emits `meta function ... uses runtime context(s) ... not "
+            "available at compile time`",
+    "E503": "emits `pure function ... has side effects`",
+    "E601": "emits `visibility error: '...' is <vis> in module '...'`",
+    "E602": "emits `ambiguous name: '...' is imported from multiple modules`",
+}
+
 ALLOWED = {
     ("E431", "language/language-laws.md"),
     ("E3050", "stdlib/context.md"),
@@ -178,15 +204,21 @@ def index_disagreements(docs_root: Path, meanings: dict[str, str]):
     if not page.is_file():
         return 0, []
     compared, bad = 0, []
+    stale = []
     for code, text in INDEX_ROW.findall(page.read_text(errors="ignore")):
         if code not in meanings:
             continue          # question one already owns the absent case
         compared += 1
         p, r = normalise_meaning(text), normalise_meaning(meanings[code])
-        if p == r or r.startswith(p):
+        agrees = p == r or r.startswith(p)
+        if code in PAGE_FOLLOWS_EMITTER:
+            if agrees:
+                stale.append(code)
+            continue
+        if agrees:
             continue
         bad.append((code, text.strip(), meanings[code]))
-    return compared, bad
+    return compared, bad, stale
 
 
 def main() -> int:
@@ -321,9 +353,10 @@ def main() -> int:
         print(f"    {c}")
 
     meanings = registry_meanings(args.registry)
-    compared, disagree = index_disagreements(docs_root, meanings)
+    compared, disagree, stale_follow = index_disagreements(docs_root, meanings)
     print(f"check-doc-error-codes-meaning: {len(disagree)} of {compared} "
-          f"index row(s) disagree with the registry")
+          f"index row(s) disagree with the registry "
+          f"({len(PAGE_FOLLOWS_EMITTER)} following the emitter by roster)")
     for code, page_t, reg_t in disagree:
         print(f"    {code}\n        page     = {page_t!r}"
               f"\n        registry = {reg_t!r}")
@@ -341,6 +374,13 @@ def main() -> int:
               f"code, expected at least {INDEX_FLOOR}. The page or its table "
               "shape is gone, so the meaning check measured almost nothing — "
               "refusing rather than passing.", file=sys.stderr)
+        return 1
+    if stale_follow:
+        print(f"\n{len(stale_follow)} code(s) on the PAGE_FOLLOWS_EMITTER "
+              f"roster now AGREE with the registry: "
+              f"{', '.join(sorted(stale_follow))}. The registry caught up, so "
+              "the exemption has nothing left to exempt — delete those rows.",
+              file=sys.stderr)
         return 1
     if disagree:
         print(f"\n{len(disagree)} row(s) on {INDEX_PAGE} give a meaning the "
