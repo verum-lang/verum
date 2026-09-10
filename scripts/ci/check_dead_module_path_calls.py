@@ -128,7 +128,6 @@ ALWAYS_MODULE_ROOTS = {"core", "super", "cog"}
 # (`core/sys/windows/thread.vr:281` declares `join`), not a new
 # declaration.  See T1320.
 KNOWN: set[tuple[str, str]] = {
-    ("core.time.rfc3339.format_iso8601_basic", "core/storage/s3/client.vr"),
     ("core.runtime.env.random_u8", "core/net/weft/tracing.vr"),
     ("core.shell.stream.stream_lines", "core/shell/command.vr"),
     ("sys.windows.time.query_performance_counter_ns", "core/mem/segment.vr"),

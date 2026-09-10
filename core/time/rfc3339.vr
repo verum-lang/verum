@@ -231,6 +231,34 @@ public fn format_rfc3339(t: &Rfc3339Time) -> Text {
     format_with_offset(t.unix_seconds, t.nanos, t.offset_minutes)
 }
 
+/// ISO 8601 **basic** form — `YYYYMMDDTHHMMSSZ`, no separators, no
+/// fractional part, always UTC.
+///
+/// This is the shape AWS SigV4 requires for `x-amz-date`, and
+/// `core/storage/s3/client.vr` has been CALLING it under this exact
+/// dotted path while it was declared nowhere (T1320). It is the extended
+/// form `format_utc` produces with every `-` and `:` removed.
+///
+/// ALWAYS UTC, deliberately, and not `format_impl`'s
+/// `unix + offset_minutes * 60`: a signature covers a Z-suffixed stamp,
+/// so rendering a value that carries a non-zero offset in its own zone
+/// would sign a time the service will not agree with. The offset is
+/// dropped, not honoured.
+public fn format_iso8601_basic(t: &Rfc3339Time) -> Text {
+    let (year, month, day, hour, minute, second) = decompose_unix(t.unix_seconds);
+
+    let mut out: List<Byte> = [];
+    push_padded(&mut out, year, 4);
+    push_padded(&mut out, month, 2);
+    push_padded(&mut out, day, 2);
+    out.push('T' as Byte);
+    push_padded(&mut out, hour, 2);
+    push_padded(&mut out, minute, 2);
+    push_padded(&mut out, second, 2);
+    out.push('Z' as Byte);
+    Text.from_utf8_unchecked(out.as_slice())
+}
+
 fn format_impl(unix: Int, nanos: Int, offset_minutes: Int, with_nanos: Bool) -> Text {
     // Shift to the requested zone for display.
     let local = unix + offset_minutes * 60;
