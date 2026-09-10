@@ -7415,7 +7415,42 @@ impl VbcCodegen {
         // exactly the multi-file hazard the bake's Pass 1a.5 was added
         // for (T0625).
         for module in files {
-            let module_key = format!("file:{:?}", module.file_id);
+            // T1369 — THE KEY MEANT TO DISTINGUISH MODULES DID NOT.
+            //
+            // `claim_user_type_name` guards on the pair
+            // (module_key, type_name) and returns early on a repeat, so
+            // that one module cannot claim its own simple name twice.
+            // Keyed on the file id, that guard is correct for a user
+            // compile and INERT for the bake: the bake parses every
+            // stdlib file through `verum_fast_parser::Parser::new`
+            // (pipeline/stdlib_bootstrap.rs), whose own docstring reads
+            // "Uses a default file ID of 0. For production use with
+            // proper file tracking, use `FastParser::parse_module`
+            // directly". Every file therefore arrives as FileId(0),
+            // every key is the same literal, and the FIRST declaration
+            // of a simple name anywhere in core/ takes it while every
+            // later module's claim is a no-op.
+            //
+            // The later module's DESCRIPTOR is still pushed — under the
+            // id `type_name_to_id` already holds — and `push_type_dedupe`
+            // then applies its richness rule between two DIFFERENT
+            // types, which is not the case that rule was written for.
+            //
+            // Measured on a miniature stdlib: with `S` declared 3-field
+            // in one module and 1-field in another, the 1-field module's
+            // OWN constructor emitted `New { type_id: 21, field_count: 3 }`
+            // — the other module's id AND object size. A third type
+            // declared right after it took id 22 rather than 23, which
+            // is how the skipped claim was shown to allocate nothing
+            // rather than be filtered out.
+            //
+            // The declared module path is what the key was reaching for,
+            // and it is already resolved a few lines above this loop for
+            // `unit_module_paths`. The file-id form stays as the
+            // fallback for a file with no `module X;` declaration, where
+            // it was never ambiguous.
+            let module_key = Self::resolve_full_module_path(module, &self.config.module_name)
+                .unwrap_or_else(|| format!("file:{:?}", module.file_id));
             for item in module.items.iter() {
                 if !self.should_compile_item(item) {
                     continue;
