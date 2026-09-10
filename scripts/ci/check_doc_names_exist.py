@@ -117,13 +117,20 @@ CORE = os.path.join(REPO, "core")
 #                 the terminal's TextSpan, which is the one meant
 #     Database    core's context, and a weft example's own declaration
 #
-# Every one was a real defect and every one was found BY HAND. A gate is
-# still the wrong instrument: 131 type names in `core/` are declared in
-# two or more modules, 54 of them are mentioned on the site, and
-# `Database` alone appears on 24 pages where the module is obvious from
-# context. A rule requiring every mention to be qualified would report
-# hundreds of correct sentences — the false-positive direction this
-# campaign has already paid for twice.
+# Every one was a real defect and every one was found BY HAND.
+#
+# THE SOURCE SIDE IS ALREADY GATED, and re-deriving that cost an hour:
+# `check_type_name_collisions.py` is a ratchet over exactly this, holding
+# a roster of 132 colliding names, and it had already learned the
+# narrowing this measurement stumbled into — `Item`, `Output` and
+# `IntoIter` are ASSOCIATED TYPES, which name no layout and must not be
+# counted. Read that gate before measuring collisions again.
+#
+# A DOCS-side gate is still the wrong instrument. 54 of those names are
+# mentioned on the site, and `Database` alone appears on 24 pages where
+# the module is obvious from context. A rule requiring every mention to
+# be qualified would report hundreds of correct sentences — the
+# false-positive direction this campaign has already paid for twice.
 #
 # What DOES work is the census as a worklist, and the shape to look for
 # is a page teaching a bare `Name.method(...)` for a Name whose module

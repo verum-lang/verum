@@ -66,17 +66,21 @@ def scripts_of(makefile: str, target: str) -> list[str]:
 
 def self_test() -> int:
     bad = 0
+    parsed = 0
     mk = ("gates-x: check-a check-b ## an aggregate\n"
           "\t@echo done\n\n"
           "check-a: ## a\n\tpython3 scripts/ci/check_a.py\n\n"
           "check-b: ## b\n\tpython3 scripts/ci/check_b.py\n")
+    parsed += 1
     if targets_of(mk, "gates-x") != ["check-a", "check-b"]:
         print("self-test: aggregate parsing wrong", file=sys.stderr)
         bad += 1
+    parsed += 1
     if scripts_of(mk, "check-a") != ["check_a.py"]:
         print("self-test: recipe parsing wrong", file=sys.stderr)
         bad += 1
     # A recipe with no script at all must not read as "invoked".
+    parsed += 1
     if scripts_of(mk, "check-missing") != []:
         print("self-test: a target with no recipe should yield no scripts",
               file=sys.stderr)
@@ -86,7 +90,7 @@ def self_test() -> int:
     # 28 correct targets.
     whole_re = lambda a, text: bool(
         re.search(rf"make\s+(?:[-\w]+\s+)*{re.escape(a)}(?=\s|$)", text, re.M))
-    for label, text, want in (
+    whole_cases = (
         ("a real invocation counts", "        run: make gates-x\n", True),
         ("with flags in between", "run: make -s gates-x\n", True),
         # THE TRAP THIS GATE FELL INTO WHILE BEING WRITTEN: a comment that
@@ -100,14 +104,16 @@ def self_test() -> int:
         # code rather than to the intent.
         ("a similarly-named target does not",
          "run: make gates-x-report\n", False),
-    ):
+    )
+    for label, text, want in whole_cases:
         if whole_re("gates-x", text) != want:
             print(f"self-test: {label}: expected {want}", file=sys.stderr)
             bad += 1
     if bad:
         print(f"self-test: {bad} FAILED", file=sys.stderr)
         return 1
-    print("[ok] self-test: 3 parsing cases, 4 whole-aggregate cases")
+    print(f"[ok] self-test: {parsed} parsing case(s), "
+          f"{len(whole_cases)} whole-aggregate case(s)")
     return 0
 
 
