@@ -234,11 +234,28 @@ fn format_value_for_print_depth(state: &InterpreterState, value: Value, depth: u
             // value.  Terminates: the pointee is a real value/object not in
             // `cbgr_mutable_ptrs` (a further-nested interior ref resolves in
             // one more hop), and the `depth` guard below bounds structures.
+            //
+            // THAT SECOND CLAUSE WAS FALSE BY CONSTRUCTION and this call
+            // was the only one of thirteen in this file that did not
+            // advance `depth` — so the guard it appealed to could not
+            // bound it. The first clause is a claim about the DATA, and
+            // T1192's layers 2 and 5 falsified it: once a nested record
+            // travelled back from C, a tracked pointer's pointee was
+            // tracked in turn and this recursed until the stack died.
+            // Measured: `sb.st_mtime.tv_sec` on a `DarwinStat` filled by
+            // `fstat(2)` killed the interpreter with SIGSEGV, reported
+            // inside `HashSet::contains` — the first thing each new frame
+            // touches, not the cause (T1365).
+            //
+            // A termination argument written in prose, beside twelve
+            // siblings that enforce it mechanically, reads as though it
+            // were enforced too. `depth + 1` costs one hop of headroom
+            // and removes the argument entirely.
             if state.cbgr_mutable_ptrs.contains(&(base_ptr as usize)) {
                 // SAFETY: a tracked interior pointer addresses a live,
                 // aligned `Value` slot (established at ref-creation time).
                 let pointee = unsafe { *(base_ptr as *const Value) };
-                return format_value_for_print_depth(state, pointee, depth);
+                return format_value_for_print_depth(state, pointee, depth + 1);
             }
             // Read the ObjectHeader to determine the type
             let header = unsafe { heap::ObjectHeader::ref_or_stub(base_ptr) };
