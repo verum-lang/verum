@@ -6493,6 +6493,65 @@ impl VbcCodegen {
                             .map(|v| v.arity as usize + v.fields.len())
                             .sum::<usize>()
                 };
+                // T1357 — REFINEMENT vs COLLISION, and this rule cannot
+                // tell them apart on its own. It is written for ONE type
+                // registered twice, the second time more completely, and
+                // it is keyed on `ty.id`. Two DIFFERENT types that a
+                // colliding SIMPLE NAME put under one id therefore reach
+                // it too, and it then picks a layout for a type that
+                // never had one — silently, because from here the two are
+                // indistinguishable.
+                //
+                // Measured on a two-module miniature stdlib (`verum
+                // stdlib precompile --stdlib-path`, under a second per
+                // bake): with `S` declared as a 2-field record in one
+                // module and a 4-field record in another, the 2-field
+                // module's OWN constructor emitted
+                // `New { field_count: 4 }` and wrote its own second field
+                // at index 3. Consumers are worse: an ALIAS has richness
+                // 0, so `type Stat is DarwinStat;` can never win against
+                // Linux's 18-field `Stat`, and `File.size()` read
+                // `st_size` at the Linux index on macOS.
+                //
+                // A refinement ADDS to what is already there; a collision
+                // REPLACES it. Field names separate the two. The
+                // ratchet reports 132 colliding type names across 280
+                // declarations in core/, so the population that reaches
+                // here is unknown until something counts it — this
+                // reports rather than refuses.
+                if std::env::var("VERUM_TRACE_TYPE_DEDUPE").is_ok()
+                    && richness(&ty) > richness(existing)
+                {
+                    let field_names = |t: &crate::types::TypeDescriptor| -> Vec<String> {
+                        t.fields
+                            .iter()
+                            .map(|f| {
+                                self.ctx
+                                    .strings
+                                    .get(f.name.0 as usize)
+                                    .cloned()
+                                    .unwrap_or_else(|| "?".to_string())
+                            })
+                            .collect()
+                    };
+                    let old_names = field_names(existing);
+                    let new_names = field_names(&ty);
+                    let refine = old_names.iter().all(|n| new_names.contains(n));
+                    let type_name = self
+                        .ctx
+                        .strings
+                        .get(ty.name.0 as usize)
+                        .cloned()
+                        .unwrap_or_else(|| "?".to_string());
+                    eprintln!(
+                        "[type-dedupe] {} id={} name={} existing={:?} incoming={:?}",
+                        if refine { "REFINE " } else { "COLLIDE" },
+                        ty.id.0,
+                        type_name,
+                        old_names,
+                        new_names
+                    );
+                }
                 if richness(&ty) > richness(existing) {
                     let mut ty = ty;
                     preserve_protocols(&mut self.types[idx], &mut ty);
