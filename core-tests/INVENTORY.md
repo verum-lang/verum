@@ -419,6 +419,7 @@ When adding new modules to this index, mark each with a status keyword:
 | **partial** | Subset of the API surface covered. Reasons for partial coverage cited in the module's `audit.md`. |
 | **regression-only** | Module is gated by upstream defects and no public-API tests pass yet — only `@ignore`d regressions exist to lock the bug shapes. |
 | **undocumented** | (website-first status) Page content is a best-effort snapshot; the module has not been routed through the conformance suite yet. In inventory rows it appears only for doc-only modules with no testable surface (e.g. `context/layer`). |
+| **unverified** | The suite has not been run against this module, so the row carries no measurement. Introduced with the liveness check (T0220), which refuses a green word over a suite nobody ran; it is the MOST COMMON status in this table and was missing from this legend until 2026-09-10. Distinct from **undocumented**: the module is routed into `core-tests/`, the result simply does not exist. |
 
 For the website API reference (see the sibling `website/` checkout) we lift the same
 keyword onto each module page so consumers see at a glance whether the API
