@@ -144,6 +144,20 @@ KNOWN_FAILURES = {
     # So: an entry here must name the task that owns it (the self-test
     # enforces that), and when the gate says REPAIRED, the entry goes —
     # leaving it would mean a regression could not be seen.
+    #
+    # IT REGRESSED, 2026-09-11. The same chapter fails again, and the
+    # reason is NEW — not the DropRef refcount T1205 fixed, and not either
+    # of the two re-keys before it. It now dies before producing output:
+    #
+    #     error: VBC execution error: Stack overflow: depth 16384
+    #            exceeds maximum 16384
+    #
+    # Keyed to today's reason deliberately, per the paragraph above: if the
+    # overflow is fixed and some older failure returns, this entry must not
+    # excuse it.
+    "by-example/13-channels":
+        "T1391 — interpreter stack overflow at depth 16384, measured "
+        "2026-09-11; repaired once under T1205 and regressed since",
 }
 
 TIMEOUT_RUN = 60
