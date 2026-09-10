@@ -288,8 +288,12 @@ public mount .linux.errno;
 public mount .linux.tls.{
     init_main_thread_tls,
     ThreadControlBlock,
-    ContextSlots,
-    TlsError,
+    // T1320 — `ContextSlots` and `TlsError` are not declared in
+    // sys/linux/tls.vr. It declares `RawContextSlots` (:153) and
+    // `ThreadLocalError` (:173); the two bare names had no declaration
+    // there or anywhere in core/, and sit in KNOWN_DANGLING.
+    RawContextSlots,
+    ThreadLocalError,
     get_context_slots,
     set_context_slots,
 };
@@ -425,10 +429,10 @@ public mount .darwin.{
 @cfg(target_os = "macos")
 public mount .darwin.{
     // TLS Types
-    TlsError,
-    ThreadControlBlock,
-    ContextSlots,
-    ContextEntry,
+    DarwinTlsError,
+    DarwinThreadControlBlock,
+    DarwinContextSlots,
+    DarwinContextEntry,
     // TLS Initialization
     init_tls_key,
     init_main_thread_tls,
@@ -639,10 +643,10 @@ public mount .windows.{
 @cfg(target_os = "windows")
 public mount .windows.{
     // TLS Types
-    TlsError,
-    ThreadControlBlock,
-    ContextSlots,
-    ContextEntry,
+    WindowsTlsError,
+    WindowsThreadControlBlock,
+    WindowsContextSlots,
+    WindowsContextEntry,
     // TLS Initialization
     init_tls_index,
     init_main_thread_tls,

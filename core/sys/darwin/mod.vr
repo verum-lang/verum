@@ -258,11 +258,19 @@ public mount .libsystem.{
 // =============================================================================
 
 public mount .tls.{
+    // T1320 — these four named types the module does not declare. It
+    // declares the Darwin-prefixed forms, and the bare names have no
+    // declaration anywhere in core/, which is why all four sit in
+    // KNOWN_DANGLING in crates/verum_vbc/tests/stdlib_mounts_resolve.rs.
+    // Naming the real ones rather than adding bare aliases: an alias in
+    // both platform modules would put one simple name on two
+    // declarations, which is T1369 exactly, in the file family where it
+    // does its damage.
     // Types
-    TlsError,
-    ThreadControlBlock,
-    ContextSlots,
-    ContextEntry,
+    DarwinTlsError,
+    DarwinThreadControlBlock,
+    DarwinContextSlots,
+    DarwinContextEntry,
     // Initialization
     init_tls_key,
     init_main_thread_tls,

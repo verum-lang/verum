@@ -1326,8 +1326,24 @@ public const CONTEXT_STACK_DEPTH: Int = 8;
 public type ContextSlots is {
     /// Bitmap tracking which slots are occupied (256 bits = 4 u64s).
     active: [UInt64; 4],
-    /// Context entries indexed by slot (platform-specific representation).
-    slots: [ContextEntry; 256],
+    // T1367/T1320 — a `slots: [ContextEntry; 256]` field stood here and
+    // was DEAD: no literal of this type set it, no method of this type
+    // read it, and `get`/`set`/`clear` keep only the `active` bitmap and
+    // delegate the storage itself to `ctx_get` / `ctx_set`. Every other
+    // `.slots` in this file belongs to `EmbeddedContextSlots`, a
+    // different type.
+    //
+    // It also named a type that DOES NOT EXIST. `ContextEntry` has no
+    // declaration anywhere in core/ in any form — what exists is
+    // `DarwinContextEntry` (sys/darwin/tls.vr:157) and
+    // `WindowsContextEntry` (sys/windows/tls.vr:152), identical to each
+    // other and to nothing here. A Rust struct of that name lives in
+    // crates/verum_vbc/src/interpreter/state.rs:1019, which is what a
+    // whole-tree grep finds first.
+    //
+    // Removing it rather than declaring the missing type: the field had
+    // no reader to satisfy, so inventing a shape for it would have
+    // cemented a guess.
 };
 
 implement ContextSlots {
