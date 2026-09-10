@@ -39,6 +39,15 @@ share none live on a roster with the reason.
 
 What it therefore catches is not "imprecise" but "about something
 else" — which is the whole population it was built from.
+
+AND THAT LEAVES A CLASS UNCAUGHT, named here so nobody reads a green
+run as more than it is. `E105` read "ambiguous name" against an emitter
+that says "ambiguous method call: `m` could refer to multiple
+protocols". Those are different conditions — one is an import clash,
+the other a protocol clash — and they share the word "ambiguous", so
+this gate passes them. Tightening to catch it would flag `E312` and
+`E406`, which are correct. A summary that is RELATED but wrong is
+outside what a word test can decide; it needs a reader.
 """
 
 from __future__ import annotations
@@ -57,6 +66,7 @@ PAGE = DOCS / "reference" / "diagnostics.md"
 
 CODE_CALL = re.compile(r'\.code\("(E\d{3})"\)')
 MESSAGE = re.compile(r'\.message\(\s*(?:format!\(\s*)?"([^"]{4,120})')
+VAR_MESSAGE = re.compile(r"\.message\(\s*([a-z_][a-z0-9_]*)\s*\)")
 ROW = re.compile(r"^\|\s*`(E\d{3})`\s*\|\s*([^|]+?)\s*\|", re.M)
 WORD = re.compile(r"[a-z]{4,}")
 
@@ -92,6 +102,23 @@ def emitter_messages() -> dict[str, list[str]]:
             s = MESSAGE.search(tail)
             if s:
                 out[m.group(1)].append(s.group(1).split("\\n")[0].strip())
+                continue
+            # `.message(msg)` where `msg` was BUILT ABOVE — five codes are
+            # reachable only this way, and one of them (E105) is a real
+            # disagreement the literal-only reader could not see. A
+            # message assembled with push_str is still the message the
+            # user reads.
+            v = VAR_MESSAGE.search(tail)
+            if not v:
+                continue
+            var = re.escape(v.group(1))
+            head = text[max(0, m.start() - 1400): m.start()]
+            last = None
+            for b in re.finditer(rf'let\s+(?:mut\s+)?{var}\s*=\s*'
+                                 rf'(?:format!\(\s*)?"([^"]{{4,120}})', head):
+                last = b
+            if last:
+                out[m.group(1)].append(last.group(1).split("\\n")[0].strip())
     return out
 
 

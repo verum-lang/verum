@@ -86,6 +86,13 @@ INDEX_FLOOR = 40
 # An entry goes STALE the moment the registry catches up, and stale is a
 # failure: an exemption nobody can see being used is a standing licence.
 PAGE_FOLLOWS_EMITTER: dict[str, str] = {
+    # Found only after the meaning gate learned to follow a message
+    # BUILT IN A VARIABLE — five codes are reachable no other way, and
+    # this is the one where the page was wrong. `ambiguous name` reads
+    # as an import clash; the emitter is about PROTOCOLS.
+    "E105": "emits `ambiguous method call: `m` could refer to multiple "
+            "protocols` — the registry's `ambiguous name` names a "
+            "different clash",
     "E311": "emits `cannot borrow ... because field ... is already borrowed`",
     "E313": "emits `cannot move ... while it is borrowed`",
     "E501": "emits `invalid refinement predicate`, and at a second site "
