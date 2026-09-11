@@ -164,6 +164,45 @@ def main() -> int:
         where = ", ".join(ss) if ss else "(recipe runs no scripts/ci script)"
         print(f"    + {agg} lists {t}, and no workflow names it or {where}. "
               f"It runs only when somebody types `make`.")
+
+    # THE SECOND KIND, which the loop above cannot see by construction.
+    #
+    # It asks whether every AGGREGATE MEMBER is reached, so a target in no
+    # aggregate at all is outside its question — and that is where gates
+    # go to be forgotten. Measured 2026-09-11: the Makefile declared 89
+    # `check-*` targets, 66 were in an aggregate (all reached, this gate
+    # was green), and of the remaining 23 SEVENTEEN were named by no
+    # workflow. Two of them were RED and had been for long enough that
+    # nobody knew — `check-register-rows` was reporting a false positive
+    # that hid a real one, and `check-register-shas` was refusing to
+    # report at all. A third, `check-newtype-transparency`, is labelled in
+    # the Makefile as the gate for T1192, which was open with exactly that
+    # symptom.
+    #
+    # Reported, not failed, and the reason is honest rather than timid: a
+    # target can legitimately live outside every aggregate (it needs a
+    # built artefact, a long-lived checkout, a binary path) and several
+    # here do. What must not happen is that it becomes invisible. The
+    # count is the ratchet a reader can watch; turning it into a failure
+    # would force every such target into an aggregate that cannot run it.
+    declared = sorted(set(re.findall(r"^(check-[a-z0-9-]+):", mk, re.M)))
+    in_aggregate = set()
+    for agg in AGGREGATES:
+        in_aggregate |= set(targets_of(mk, agg))
+    outside = []
+    for tgt in declared:
+        if tgt in in_aggregate:
+            continue
+        ss = scripts_of(mk, tgt)
+        if tgt in wf or any(s in wf for s in ss):
+            continue
+        outside.append(tgt)
+    print(f"check-gate-aggregates-invoked: {len(declared)} `check-*` "
+          f"target(s) declared, {len(in_aggregate)} in an aggregate, "
+          f"{len(outside)} in none and named by no workflow")
+    for tgt in outside:
+        print(f"    - {tgt}")
+
     return 1 if orphans else 0
 
 

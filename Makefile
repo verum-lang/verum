@@ -282,7 +282,31 @@ check-barename-census: ## Report every colliding (name,arity) pair with its modu
 	python3 scripts/ci/check_barename_collisions.py
 
 gates-source: check-private-types-off-public-surface check-error-code-namespaces check-guard-in-argument-position check-grammar-covers-keywords check-known-tables check-parser-attrs check-gate-tables check-markers check-vr-syntax check-str-alias check-op-bytes check-internal-refs check-rings check-arch-attestation check-type-name-collisions check-barename-collisions check-panic-surface check-per-register-privacy check-early-return-tenants check-dup-emitters check-bake-prepass-parity check-protocol-form check-dead-module-path-calls check-platform-call-parity check-protocol-conformance check-cfg-block-tail check-meta-function-names check-ffi-reference-tiers check-intrinsic-keys-implemented check-diagnostic-levers check-constant-time-duplication check-type-param-name-rule \
-            check-gate-aggregates-invoked ## Every gate that needs only the SOURCE TREE — no build, no artefacts
+            check-gate-aggregates-invoked check-register-rows check-test-mounts \
+            check-verdict-phases ## Every gate that needs only the SOURCE TREE — no build, no artefacts
+# THREE TARGETS JOINED THAT LIST 2026-09-11 (T1439) after a census of
+# which `check-*` targets any workflow actually invokes: 89 declared, 66
+# in an aggregate, and SEVENTEEN in none and named by nothing.  Two of the
+# seventeen were RED and had been long enough that nobody knew —
+# `check-register-rows` reported a false positive that hid a real one, and
+# `check-register-shas` refused to report at all.  `check-register-rows`,
+# `check-test-mounts` and `check-verdict-phases` read only the source tree
+# and are now here; the count is 14.
+#
+# The rest stay out ON PURPOSE and the reasons are worth keeping, because
+# "not in an aggregate" reads as neglect and here it is not:
+#   * check-archive-panic-stubs, check-archive-size — read the BUILT
+#     archive (`runtime.vbca`), so they belong to a job with artefacts.
+#   * check-newtype-transparency, check-phantom-mounts,
+#     check-shipped-path-parity — need a built binary path.
+#   * check-strict, check-tests, check-workspace — run cargo, not a
+#     source scan.
+#   * check-name-census — RED today (five ratchet categories grew while
+#     nothing invoked it; T1440).  Wiring a red gate teaches readers to
+#     ignore it.
+#   * check-barename-census, check-barename-method-census — census twins
+#     of a gate that IS in an aggregate; they report, they do not gate.
+#
 # `check-register-shas` is NOT in that list, and its name used to sit
 # after the `##` above, where make read it as help text — the target
 # existed, the gate worked, and the aggregate never called it
