@@ -106,6 +106,26 @@ pub(in super::super) fn try_intercept_file_runtime(
     if !qualifier_ok {
         return Ok(None);
     }
+    // T1437 — THE NAME AND ARITY ARE NOT ENOUGH, and the module guard above
+    // does not separate them either. `core/io/file.vr` declares BOTH
+    //
+    //     public fn write(path: &Text, contents: &Text)     :491
+    //     implement Write for File { fn write(&mut self, buf: &[Byte]) }  :373
+    //
+    // and counting `self` both are arity 2 in the same module. Intercepting
+    // the method took its RECEIVER for a path, found none, and wrote to the
+    // empty string — so `file.write(bytes)` from user code created the file
+    // and left it at zero length, reporting Err. Measured at tier 0.
+    //
+    // Every arm below takes its path as the FIRST argument (the two-path
+    // arms, `rename` and `copy`, read the second at +1), so one question
+    // settles all of them: if argument zero is not a path, this is not the
+    // free function being intercepted — decline, and let the real callee
+    // run. Declining is also the safe direction: the worst case is that a
+    // genuine file call is executed by the stdlib instead of by the host.
+    if try_extract_path_arg(state, args_start_reg, caller_base).is_none() {
+        return Ok(None);
+    }
     match bare {
         // Reads — both io.file (Text) and io.fs (Path) flavours.
         "read_to_string" if arg_count == 1 => {
@@ -693,7 +713,20 @@ fn value_is_text(v: &Value) -> bool {
 /// Falls back to the empty string when the value is none of the
 /// above — the caller's `std::fs::*` invocation will then surface a
 /// `NotFound` error which the script can match on.
-fn extract_path_arg(state: &InterpreterState, reg: u16, caller_base: u32) -> String {
+/// The path argument if the value IS one, `None` if it is not.
+///
+/// Split out of `extract_path_arg` for T1437: the intercept table keys on
+/// (bare name, arity, module), and `write/2` in the file module is BOTH the
+/// free `write(path, contents)` and `Write for File`'s
+/// `write(&mut self, buf)`. Deciding whether to intercept therefore needs
+/// to ask "is the first argument a path" WITHOUT committing to an answer —
+/// and it must ask the same recogniser that the committed path uses, not a
+/// copy of it, or the two drift.
+fn try_extract_path_arg(
+    state: &InterpreterState,
+    reg: u16,
+    caller_base: u32,
+) -> Option<String> {
     let v = state
         .registers
         .get(caller_base, crate::instruction::Reg(reg));
@@ -718,7 +751,7 @@ fn extract_path_arg(state: &InterpreterState, reg: u16, caller_base: u32) -> Str
     let unwrapped = super::cbgr_helpers::resolve_arg_value(state, v);
     // Fast path: it's already a Text.
     if value_is_text(&unwrapped) {
-        return extract_string(&unwrapped, state);
+        return Some(extract_string(&unwrapped, state));
     }
     // Slow path: drill through the canonical 1- or 2-field record
     // shapes carrying a Text payload.
@@ -740,7 +773,7 @@ fn extract_path_arg(state: &InterpreterState, reg: u16, caller_base: u32) -> Str
         {
             let field0 = unsafe { *(ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value) };
             if value_is_text(&field0) {
-                return extract_string(&field0, state);
+                return Some(extract_string(&field0, state));
             }
             // Second level (PathBuf-shaped): if field0 is itself a
             // 1-field record whose own field 0 is a Text, return
@@ -755,7 +788,7 @@ fn extract_path_arg(state: &InterpreterState, reg: u16, caller_base: u32) -> Str
                         *(inner_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value)
                     };
                     if value_is_text(&inner_field0) {
-                        return extract_string(&inner_field0, state);
+                        return Some(extract_string(&inner_field0, state));
                     }
                 }
             }
@@ -771,6 +804,24 @@ fn extract_path_arg(state: &InterpreterState, reg: u16, caller_base: u32) -> Str
     // the empty string, which no `std::fs` call can satisfy, and say
     // on the log what arrived so the diagnosis the rendering was for
     // is still one `VERUM_LOG=warn` away.
+    None
+}
+
+/// The path argument, or the empty string — which no `std::fs` call can
+/// satisfy — plus a line on the log saying what arrived.
+///
+/// Callers that have already decided to intercept use this. Callers still
+/// DECIDING use `try_extract_path_arg` and decline instead (T1437): a
+/// method that merely shares a name with an intercepted free function must
+/// run, not fail with an empty path.
+fn extract_path_arg(state: &InterpreterState, reg: u16, caller_base: u32) -> String {
+    if let Some(p) = try_extract_path_arg(state, reg, caller_base) {
+        return p;
+    }
+    let v = state
+        .registers
+        .get(caller_base, crate::instruction::Reg(reg));
+    let unwrapped = super::cbgr_helpers::resolve_arg_value(state, v);
     tracing::warn!(
         "file intercept: argument is not a path in any known shape \
          (received {}); refusing to treat its rendering as a filename",

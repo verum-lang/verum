@@ -1,0 +1,74 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: io, intercept, dispatch, regression
+// @timeout: 60000
+// @expected-exit: 0
+// @expected-stdout: file method write reaches the file
+//
+// A FILE METHOD NAMED LIKE AN INTERCEPTED FUNCTION STILL RUNS (T1437).
+//
+// The interpreter intercepts high-level file operations and serves them
+// from the host. It chooses what to intercept by BARE NAME, ARITY and
+// MODULE — and `core/io/file.vr` declares two things that match all
+// three:
+//
+//     public fn write(path: &Text, contents: &Text)            :491
+//     implement Write for File { fn write(&mut self, buf: …) }  :373
+//
+// Counting `self`, both are arity 2 in the same module. The intercept
+// took the METHOD's receiver for a path, found none, and — correctly
+// refusing to invent a filename from a rendering (T0899) — wrote to the
+// empty string. Measured before the fix, tier 0:
+//
+//     f.write(t.as_bytes())  ->  Err, file created, ZERO bytes
+//     WARN file intercept: argument is not a path in any known shape
+//
+// The failure was silent in the sense that matters: the programme got an
+// Err with no reason unless `VERUM_LOG=warn` was set, and `file.write`
+// is the spelling the `Write` protocol advertises.
+//
+// BOTH DIRECTIONS ARE PINNED HERE, and the second is why this spec is not
+// one assertion: a fix that simply stopped intercepting would pass the
+// method case and break the free function, which the host must keep
+// serving. The read-back is the third: an Ok that wrote nothing is
+// exactly the shape being removed.
+
+mount core.io.{File, write, read_to_string, println};
+
+fn main() {
+    // A — the METHOD. Before T1437 this created the file and wrote zero.
+    let path_a = "/tmp/verum-spec-t1437-a.txt";
+    match File.create(&path_a.to_text()) {
+        Result.Ok(mut f) => {
+            let t = "abc\n".to_text();
+            match f.write(t.as_bytes()) {
+                Result.Ok(n) => {
+                    print(f"method write n={n}");
+                    assert(n == 4);
+                }
+                Result.Err(_) => { print("method write ERR"); assert(false); }
+            }
+        }
+        Result.Err(_) => { print("create ERR"); assert(false); }
+    }
+
+    // B — the FREE FUNCTION, which the host must still intercept.
+    let path_b = "/tmp/verum-spec-t1437-b.txt";
+    match write(&path_b.to_text(), &"xyz\n".to_text()) {
+        Result.Ok(())  => print("free write ok"),
+        Result.Err(_)  => { print("free write ERR"); assert(false); }
+    }
+
+    // C — and the bytes are really there. An Ok that wrote nothing is the
+    // defect this spec exists for.
+    match read_to_string(&path_b.to_text()) {
+        Result.Ok(s) => {
+            print(f"read back {s.len()}");
+            assert(s.len() == 4);
+        }
+        Result.Err(_) => { print("read back ERR"); assert(false); }
+    }
+
+    print("file method write reaches the file");
+}
