@@ -67,55 +67,22 @@ BLOCK = re.compile(r"```verum\n(.*?)```", re.S)
 # A swap — one page stops teaching a name while another starts — holds a
 # count and moves these rows.
 KNOWN: dict[str, list[str]] = {
-    # The cubical/HoTT primitives. Still real findings, and the reason is
-    # narrower than the first version of this comment claimed. That
-    # version said the names have ZERO occurrences in `crates/`; it was
-    # written from a grep for `"builtin_refl"` while the code writes the
-    # literal WITH the sigil, `"@builtin_refl"`. Searched correctly,
-    # ELEVEN of them have a code-generation arm apiece in
-    # `expressions::compile_call`, each emitting a `CubicalExtended`
-    # sub-op that the interpreter implements (twelve handlers) and LLVM
-    # lowers.
+    # EMPTY, 2026-09-11, and empty is the point: every name this gate ever
+    # reported is now DISCLOSED on its own page, beside the block that teaches
+    # it, quoting the diagnostic the reader would actually see. The roster went
+    # 9 -> 8 -> 6 -> 1 -> 0 in one pass and not one entry left by the name
+    # becoming real:
     #
-    # What no layer supplies is their TYPE: the inference match has no
-    # arm, so each becomes `Unit` and will not unify with the declared
-    # return type. `core/math/hott.vr` declares both the TYPE and the
-    # CONSTRUCTOR through them, so the tour's example stops at the type
-    # check — `error<E400>: expected '@builtin_path', found 'Unit'` —
-    # and never reaches the code generation that would have handled it.
-    # A binding gap over a working runtime, not an unimplemented feature.
+    #   quantity        W0400 box on verification/quantitative-types.md
+    #   llm_oracle      E0410 box on language/proof-dsl.md and reference/tactics.md
+    #   builtin_sym     one line each under the blocks on
+    #   builtin_trans     verification/cubical-hott.md and
+    #   builtin_transport language/dependent-types.md, pointing at the box
+    #                     already above them
+    #   matrix          named as a placeholder standing for any bracket DSL
     #
-    # SHRANK 2026-09-10: both pages now quote the E0410 warning in their
-    # own status box, so `builtin_refl` on the first and
-    # `builtin_path` / `builtin_refl` on the second are DISCLOSED rather
-    # than taught, and the disclosure path reports them instead. The
-    # remaining names appear further down each page, outside the forty
-    # lines the disclosure rule reaches.
-    "language/dependent-types.md": ["builtin_sym", "builtin_transport"],
-    "verification/cubical-hott.md": [
-        "builtin_sym", "builtin_trans", "builtin_transport",
-    ],
-    # SHRANK 2026-09-11: `@llm_oracle` left this roster on both pages by
-    # being DISCLOSED. It is called at core/math/tactics.vr:663 and declared
-    # nowhere in the compiler, behind a `@cfg(feature = "llm_oracle")` gate
-    # that is off; each page now quotes the E0410 warning beside its block and
-    # says the example stops at the type check, `Unit` not unifying with
-    # `Giry<Prop>`.
-    # A PLACEHOLDER, not a promise, and there is no mechanical way to tell
-    # the two apart: the surrounding prose is "the brace forms `@name[…]`
-    # and `@name{…}` exist for DSLs that prefer square brackets", so
-    # `@matrix[...]` stands for any such DSL. Listed rather than silently
-    # excluded — a roster's job is to say what its count stands for.
-    "language/meta/macro-kinds.md": ["matrix"],
-    # SHRANK 2026-09-11: `verification/quantitative-types.md: quantity` left
-    # this roster by being DISCLOSED rather than by being fixed. The page now
-    # carries a status box quoting the diagnostic the reader will actually
-    # see — `warning<W0400>: unknown attribute` — because `@quantity(...)` is
-    # written in ATTRIBUTE position, where the compiler answers W0400 rather
-    # than the E0410 it gives a call. Widening DISCLOSED_MARK to accept both
-    # is what let an honest box count; before it, the only way to satisfy
-    # this gate was to print a code the page's reader never sees.
-
+    # So a NEW row here is a page that teaches an unaccepted name with no word
+    # about it — which is the only thing this gate was ever for.
 }
 # Derived from the data, never written beside it — a literal here is a
 # second source of truth that drifts.
