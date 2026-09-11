@@ -1034,8 +1034,26 @@ impl FfiRuntime {
             if let Some(reg) = storage.write_back_reg {
                 // Read the potentially modified value from storage
                 let raw_value = storage.read();
-                // Convert back to Value (as i64)
-                let value = Value::from_i64(raw_value as i64);
+                // T1410 — RE-BOX BY THE KIND THAT WAS MARSHALLED IN.
+                //
+                // This used to be `Value::from_i64(raw_value as i64)`
+                // unconditionally. The bytes were right and the TYPE was
+                // lost: `modf(3.75, &mut ip)` left `ip` reading
+                // 4613937818241073152, the IEEE bit pattern of 3.0, boxed
+                // as an integer. The obvious assertion for an out-parameter
+                // — `ip != 0.0`, "did anything get written" — passes on
+                // that, which is why it hid.
+                let value = match storage.kind {
+                    crate::ffi::marshal::RefArgKind::Float => {
+                        Value::from_f64(f64::from_bits(raw_value))
+                    }
+                    crate::ffi::marshal::RefArgKind::Bool => {
+                        Value::from_bool(raw_value != 0)
+                    }
+                    crate::ffi::marshal::RefArgKind::Int => {
+                        Value::from_i64(raw_value as i64)
+                    }
+                };
                 writebacks.push((reg, value));
             }
         }

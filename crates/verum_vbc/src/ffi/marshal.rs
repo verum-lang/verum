@@ -65,6 +65,33 @@ impl std::error::Error for MarshalError {}
 /// we allocate temporary storage, store the value there, and pass the address.
 /// After the FFI call, for mutable references, we read back the value.
 #[derive(Debug)]
+/// What KIND of Verum value the eight bytes in a `RefArgStorage` are.
+///
+/// T1410 — the write-back used to re-box every slot with
+/// `Value::from_i64`, whatever had been marshalled into it. For a
+/// `&mut Float` out-parameter the callee writes IEEE bits, and boxing
+/// those as an integer produced a correct number wearing the wrong type:
+/// `modf(3.75, &mut ip)` left `ip` reading 4613937818241073152, which is
+/// exactly the bit pattern of 3.0.
+///
+/// The value's kind IS known where the storage is created — the three
+/// branches there already ask `is_int` / `is_float` / `is_bool`. It was
+/// simply not carried to the place that needed it, which is why the
+/// defect survived an `ip != 0.0` check: the bytes arrive, only the type
+/// is lost.
+// No `#[derive(Debug)]`: `verum_common` provides a blanket `Debug`
+// for this crate's types, and deriving it here is E0119 — a
+// conflicting implementation. The crate's own `RefArgStorage`
+// twenty lines up carries `#[derive(Debug)]` and compiles, so the
+// blanket applies to enums and not to structs; that asymmetry is
+// why the mistake is easy to make in this file specifically.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum RefArgKind {
+    Int,
+    Float,
+    Bool,
+}
+
 pub struct RefArgStorage {
     /// The allocated storage for the value.
     /// Using Box to get a stable address on the heap.
@@ -72,14 +99,17 @@ pub struct RefArgStorage {
     /// The register index for write-back (if mutable).
     /// None for immutable references.
     pub write_back_reg: Option<u16>,
+    /// How to re-box the bytes on write-back (T1410).
+    pub kind: RefArgKind,
 }
 
 impl RefArgStorage {
     /// Creates new ref arg storage with an initial value.
-    pub fn new(value: u64, write_back_reg: Option<u16>) -> Self {
+    pub fn new(value: u64, write_back_reg: Option<u16>, kind: RefArgKind) -> Self {
         Self {
             storage: Box::new(value),
             write_back_reg,
+            kind,
         }
     }
 
@@ -247,7 +277,7 @@ impl Marshaller {
             // For integers (the common case), allocate storage
             if value.is_int() {
                 let i = value.as_i64();
-                let storage = RefArgStorage::new(i as u64, write_back_reg);
+                let storage = RefArgStorage::new(i as u64, write_back_reg, RefArgKind::Int);
                 let ptr = storage.as_ptr() as u64;
                 self.ref_arg_storage.push(storage);
                 return Ok(ptr);
@@ -256,7 +286,7 @@ impl Marshaller {
             // For floats passed by reference
             if value.is_float() {
                 let f = value.as_f64();
-                let storage = RefArgStorage::new(f.to_bits(), write_back_reg);
+                let storage = RefArgStorage::new(f.to_bits(), write_back_reg, RefArgKind::Float);
                 let ptr = storage.as_ptr() as u64;
                 self.ref_arg_storage.push(storage);
                 return Ok(ptr);
@@ -265,7 +295,7 @@ impl Marshaller {
             // For bools passed by reference
             if value.is_bool() {
                 let b = if value.as_bool() { 1u64 } else { 0u64 };
-                let storage = RefArgStorage::new(b, write_back_reg);
+                let storage = RefArgStorage::new(b, write_back_reg, RefArgKind::Bool);
                 let ptr = storage.as_ptr() as u64;
                 self.ref_arg_storage.push(storage);
                 return Ok(ptr);

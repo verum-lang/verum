@@ -1,0 +1,68 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: ffi, out-param, float, marshalling, regression
+// @timeout: 60000
+// @expected-exit: 0
+//
+// AN OUT-PARAMETER KEEPS ITS TYPE (T1410).
+//
+// Tier 0 marshals a `&mut` argument into temporary storage, calls, and
+// copies the result back into the caller's register. The copy-back used
+// to re-box every slot as an INTEGER, whatever had been marshalled in.
+//
+// MEASURED before the fix:
+//
+//     modf(3.75, &mut ip)    frac=0.75   ip=4613937818241073152
+//
+// `frac` is right. `ip` is not 3.0 — it is the IEEE-754 bit pattern OF
+// 3.0 read as an integer. The bytes arrived; only the type was lost.
+//
+// WHY THIS HID FOR SO LONG. The obvious assertion for an out-parameter
+// is "did anything get written" — `ip != 0.0` — and that PASSES on the
+// bit pattern. Only printing the value shows it. So this spec asserts
+// the VALUE, and prints it first.
+//
+// TIER 0 ONLY, and not because Tier 1 is uninteresting: `modf` at Tier 1
+// returns 0 for the mantissa as well, which is T1411 (an out-parameter
+// corrupts the call's RETURN value) and a different defect. Pinning both
+// here would make this row red for another task's reason, and
+// `make test-l0` requires 100%.
+//
+// THE INT ROW IS THE CONTROL. It was correct before the fix and must
+// stay correct after it — the repair added a per-kind branch, so the
+// kind that already worked is exactly what a careless branch would
+// break. `time(&mut secs)` is self-checking: it RETURNS what it writes,
+// so `secs == rc` needs no oracle.
+
+mount core.io.println;
+
+@ffi("libSystem.B.dylib")
+extern {
+    @ffi_name("modf")
+    public fn spec_modf(x: Float, iptr: &mut Float) -> Float;
+
+    @ffi_name("time")
+    public fn spec_time(t: &mut Int) -> Int;
+}
+
+fn main() {
+    let mut ip = 0.0;
+    let frac = spec_modf(3.75, &mut ip);
+
+    let mut secs = 0;
+    let rc = spec_time(&mut secs);
+
+    // PRINT BEFORE ASSERTING. "the float came back as a bit pattern" and
+    // "nothing came back at all" are different failures; the number says
+    // which, and `assert_eq` would show neither.
+    println(f"float_out={ip} frac={frac} int_out={secs} rc={rc}");
+
+    // 3.75 splits into 3.0 (written) and 0.75 (returned).
+    assert_eq(ip, 3.0);
+    assert_eq(frac, 0.75);
+
+    // The control: unchanged by this fix, and self-checking.
+    assert_eq(secs, rc);
+    assert(secs > 0);
+}
