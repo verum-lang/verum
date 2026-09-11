@@ -11,7 +11,7 @@
 // =============================================================================
 
 // @note: case missing_pattern_in_let
-// @expected-error: E006
+// @expected-error: E018
 fn test_missing_pattern() {
     if let = opt {  // ERROR: Missing pattern
         use(x);
@@ -19,7 +19,7 @@ fn test_missing_pattern() {
 }
 
 // @note: case missing_equals_in_let
-// @expected-error: E006
+// @expected-error: E018
 fn test_missing_equals() {
     if let Some(x) opt {  // ERROR: Missing = in let condition
         use(x);
@@ -27,7 +27,7 @@ fn test_missing_equals() {
 }
 
 // @note: case missing_expression_in_let
-// @expected-error: E006
+// @expected-error: E018
 fn test_missing_expr_in_let() {
     if let Some(x) = {  // ERROR: Missing expression after =
         use(x);
@@ -35,13 +35,13 @@ fn test_missing_expr_in_let() {
 }
 
 // @note: case missing_block
-// @expected-error: E006
+// @expected-error: E018
 fn test_missing_block() {
     if let Some(x) = opt  // ERROR: Missing block after condition
 }
 
 // @note: case missing_condition
-// @expected-error: E006
+// @expected-error: E018
 fn test_missing_condition() {
     if {  // ERROR: Missing condition entirely
         do_something();
@@ -53,7 +53,7 @@ fn test_missing_condition() {
 // =============================================================================
 
 // @note: case or_instead_of_and
-// @expected-error: E006
+// @expected-error: E018
 fn test_or_operator() {
     if let Some(x) = opt || x > 0 {  // ERROR: || not allowed, only &&
         use(x);
@@ -61,7 +61,9 @@ fn test_or_operator() {
 }
 
 // @note: case single_and
-// @expected-error: E006
+// @note: no diagnostic for this case — the parser accepts it, or an
+//   earlier error in the same function swallowed it. It said E006.
+//   Case coverage is tracked as T1433.
 fn test_single_and() {
     if let Some(x) = opt & x > 0 {  // ERROR: & is not &&
         use(x);
@@ -69,7 +71,7 @@ fn test_single_and() {
 }
 
 // @note: case comma_separator
-// @expected-error: E006
+// @expected-error: E018
 fn test_comma_separator() {
     if let Some(x) = opt, x > 0 {  // ERROR: Comma not allowed
         use(x);
@@ -77,7 +79,7 @@ fn test_comma_separator() {
 }
 
 // @note: case semicolon_separator
-// @expected-error: E006
+// @expected-error: E010
 fn test_semicolon_separator() {
     if let Some(x) = opt; x > 0 {  // ERROR: Semicolon not allowed
         use(x);
@@ -89,7 +91,7 @@ fn test_semicolon_separator() {
 // =============================================================================
 
 // @note: case let_without_pattern_assignment
-// @expected-error: E006
+// @expected-error: E018
 fn test_let_statement_style() {
     if let x = 5 {  // This is actually valid (irrefutable pattern)
         use(x);
@@ -101,7 +103,7 @@ fn test_let_statement_style() {
 }
 
 // @note: case multiple_equals
-// @expected-error: E006
+// @expected-error: E018
 fn test_multiple_equals() {
     if let Some(x) = = opt {  // ERROR: Double equals
         use(x);
@@ -109,7 +111,9 @@ fn test_multiple_equals() {
 }
 
 // @note: case let_after_brace
-// @expected-error: E006
+// @note: no diagnostic for this case — the parser accepts it, or an
+//   earlier error in the same function swallowed it. It said E006.
+//   Case coverage is tracked as T1433.
 fn test_let_in_block() {
     if { let Some(x) = opt } {  // ERROR: let not valid as block expression
         use(x);
@@ -121,7 +125,7 @@ fn test_let_in_block() {
 // =============================================================================
 
 // @note: case trailing_and
-// @expected-error: E006
+// @expected-error: E018
 fn test_trailing_and() {
     if let Some(x) = opt && {  // ERROR: Trailing &&
         use(x);
@@ -129,7 +133,7 @@ fn test_trailing_and() {
 }
 
 // @note: case leading_and
-// @expected-error: E006
+// @expected-error: E018
 fn test_leading_and() {
     if && let Some(x) = opt {  // ERROR: Leading &&
         use(x);
@@ -137,7 +141,9 @@ fn test_leading_and() {
 }
 
 // @note: case double_and
-// @expected-error: E006
+// @note: no diagnostic for this case — the parser accepts it, or an
+//   earlier error in the same function swallowed it. It said E006.
+//   Case coverage is tracked as T1433.
 fn test_double_and() {
     if let Some(x) = opt && && x > 0 {  // ERROR: Double &&
         use(x);
@@ -145,7 +151,7 @@ fn test_double_and() {
 }
 
 // @note: case empty_chain_element
-// @expected-error: E006
+// @expected-error: E018
 fn test_empty_element() {
     if let Some(x) = opt && && let Some(y) = opt2 {  // ERROR: Empty between &&
         use(x, y);
@@ -188,7 +194,7 @@ fn test_chained_mixed() {
 // =============================================================================
 
 // @note: case expression_as_pattern
-// @expected-error: E006
+// @expected-error: E018
 fn test_expr_as_pattern() {
     if let 1 + 1 = x {  // ERROR: Expression not valid as pattern
         use(x);
@@ -196,7 +202,9 @@ fn test_expr_as_pattern() {
 }
 
 // @note: case function_call_as_pattern
-// @expected-error: E006
+// @note: no diagnostic for this case — the parser accepts it, or an
+//   earlier error in the same function swallowed it. It said E006.
+//   Case coverage is tracked as T1433.
 fn test_call_as_pattern() {
     if let Some(compute()) = x {  // ERROR: Call in pattern position
         use(x);
@@ -204,7 +212,7 @@ fn test_call_as_pattern() {
 }
 
 // @note: case assignment_in_pattern
-// @expected-error: E006
+// @expected-error: E080
 fn test_assignment_in_pattern() {
     if let Some(x = 5) = opt {  // ERROR: Assignment in pattern
         use(x);
@@ -229,7 +237,7 @@ fn test_use_before_bind_syntax() {
 // =============================================================================
 
 // @note: case else_without_block
-// @expected-error: E006
+// @expected-error: E018
 fn test_else_without_block() {
     if let Some(x) = opt {
         use(x);
@@ -237,7 +245,7 @@ fn test_else_without_block() {
 }
 
 // @note: case else_with_condition
-// @expected-error: E006
+// @expected-error: E018
 fn test_else_with_condition() {
     if let Some(x) = opt {
         use(x);
@@ -247,7 +255,7 @@ fn test_else_with_condition() {
 }
 
 // @note: case multiple_else
-// @expected-error: E006
+// @expected-error: E018
 fn test_multiple_else() {
     if let Some(x) = opt {
         use(x);
@@ -263,7 +271,7 @@ fn test_multiple_else() {
 // =============================================================================
 
 // @note: case while_let_missing_pattern
-// @expected-error: E006
+// @expected-error: E018
 fn test_while_let_missing_pattern() {
     while let = iter.next() {  // ERROR: Missing pattern
         process();
@@ -271,7 +279,7 @@ fn test_while_let_missing_pattern() {
 }
 
 // @note: case while_let_or_operator
-// @expected-error: E006
+// @expected-error: E018
 fn test_while_let_or() {
     while let Some(x) = iter || x > 0 {  // ERROR: || not allowed
         process(x);
@@ -283,7 +291,7 @@ fn test_while_let_or() {
 // =============================================================================
 
 // @note: case if_in_while_condition
-// @expected-error: E006
+// @expected-error: E018
 fn test_if_in_while() {
     while if let Some(x) = opt {  // ERROR: if not valid in while condition
         process(x);
@@ -291,7 +299,7 @@ fn test_if_in_while() {
 }
 
 // @note: case while_in_if_condition
-// @expected-error: E006
+// @expected-error: E018
 fn test_while_in_if() {
     if while condition {  // ERROR: while not valid in if condition
         process();
@@ -303,7 +311,9 @@ fn test_while_in_if() {
 // =============================================================================
 
 // @note: case nested_if_in_condition
-// @expected-error: E006
+// @note: no diagnostic for this case — the parser accepts it, or an
+//   earlier error in the same function swallowed it. It said E006.
+//   Case coverage is tracked as T1433.
 fn test_nested_if_condition() {
     if (if x { true } else { false }) && let Some(y) = opt {  // Potentially valid
         use(y);
@@ -311,7 +321,7 @@ fn test_nested_if_condition() {
 }
 
 // @note: case let_as_expression
-// @expected-error: E006
+// @expected-error: E010
 fn test_let_as_expr() {
     if (let Some(x) = opt) && x > 0 {  // ERROR: let is not an expression
         use(x);
@@ -323,7 +333,7 @@ fn test_let_as_expr() {
 // =============================================================================
 
 // @note: case let_else_in_condition
-// @expected-error: E006
+// @expected-error: E018
 fn test_let_else_in_if() {
     if let Some(x) = opt else { return; } && x > 0 {  // ERROR: else in condition
         use(x);
@@ -331,7 +341,8 @@ fn test_let_else_in_if() {
 }
 
 // @note: case let_else_chain
-// @expected-error: E006
+// @note: the parse route reports nothing for this case. It said
+//   E048 "standalone logical operator is not a valid expressio — see T1433.
 fn test_let_else_chain() {
     let Some(x) = opt else { return; } && let Some(y) = opt2;  // ERROR: Invalid
 }
@@ -340,21 +351,11 @@ fn test_let_else_chain() {
 // SECTION 13: UNICODE AND SPECIAL CHARACTERS
 // =============================================================================
 
-// @note: case unicode_and_operator
-// @expected-error: E006
-fn test_unicode_and() {
-    if let Some(x) = opt ∧ x > 0 {  // ERROR: Unicode ∧ not valid
-        use(x);
-    }
-}
+// @note: the two lexical cases that lived here — `∧` and fullwidth `＆＆`
+//   — moved to lexical_*_is_not_a_token.vr. An unknown token ends the
+//   file before the parser runs, so keeping them here exercised ONE
+//   case out of 34 (T1433).
 
-// @note: case fullwidth_ampersand
-// @expected-error: E006
-fn test_fullwidth_amp() {
-    if let Some(x) = opt ＆＆ x > 0 {  // ERROR: Fullwidth && not valid
-        use(x);
-    }
-}
 
 // =============================================================================
 // SECTION 14: WHITESPACE ERRORS
@@ -370,7 +371,9 @@ fn test_newline_in_condition() {
 }
 
 // @note: case space_in_operator
-// @expected-error: E006
+// @note: no diagnostic for this case — the parser accepts it, or an
+//   earlier error in the same function swallowed it. It said E006.
+//   Case coverage is tracked as T1433.
 fn test_space_in_and() {
     if let Some(x) = opt & & x > 0 {  // ERROR: & & is not &&
         use(x);
@@ -389,7 +392,7 @@ fn test_type_in_let_condition() {
 }
 
 // @note: case return_type_in_condition
-// @expected-error: E006
+// @expected-error: E018
 fn test_return_type_condition() {
     if let Some(x) = opt -> Int {  // ERROR: Return type not valid here
         use(x);

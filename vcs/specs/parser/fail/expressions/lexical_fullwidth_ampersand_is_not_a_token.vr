@@ -1,0 +1,17 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, lexer, if-let, unicode, error-detection
+// @expected-error: E006 "unknown token"
+// @description: Fullwidth `＆＆` is not a token — the lexer refuses it.
+//
+// Separate from its sibling `lexical_unicode_and_is_not_a_token.vr` because
+// one unknown token masks every case after it: two lexical cases in one file
+// exercise one. See T1433.
+
+fn use_it(x: Int) -> Int { x }
+
+fn fullwidth_ampersand(opt: Maybe<Int>) {
+    if let Some(x) = opt ＆＆ x > 0 {
+        use_it(x);
+    }
+}

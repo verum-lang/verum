@@ -1,0 +1,19 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, lexer, if-let, unicode, error-detection
+// @expected-error: E006 "unknown token"
+// @description: `∧` is not a token — the lexer refuses it before the parser runs.
+//
+// ONE LEXICAL CASE PER FILE, and that is the point of this file existing.
+// Lexing precedes parsing, so the first unknown token ends the file: every
+// construct after it is never examined. `invalid_if_let_chains.vr` held this
+// case among 33 parse-level ones and exercised only this one — measured
+// 2026-09-11, the whole 397-line file produced a single diagnostic (T1433).
+
+fn use_it(x: Int) -> Int { x }
+
+fn unicode_and(opt: Maybe<Int>) {
+    if let Some(x) = opt ∧ x > 0 {
+        use_it(x);
+    }
+}
