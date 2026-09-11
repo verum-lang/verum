@@ -3610,12 +3610,123 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                         ctx.mark_bool_register(reg);
                     }
                     TypeRef::Concrete(tid) if *tid == TypeId::PTR => {
-                        // Generic type params (K, V, T) are compiled as PTR in compiled
-                        // module functions. The ptr value IS the value (via inttoptr),
-                        // not a real memory address. Mark so Deref does ptrtoint.
-                        // Skip register 0 (self) — instance methods' self IS a real pointer.
-                        if reg != 0 {
-                            ctx.mark_generic_ptr_register(reg);
+                        // PTR ARRIVES HERE FOR TWO DIFFERENT THINGS, and only one
+                        // of them is generic (T1263).
+                        //
+                        // Generic type params (K, V, T) are compiled as PTR: the
+                        // ptr value IS the value via inttoptr, and marking the
+                        // register generic is right for them.
+                        //
+                        // A NOMINAL type reached across modules ALSO collapses to
+                        // PTR — `fd: FileDesc` in `safe_write` does, while its
+                        // `Int`, `&[Byte]` and `&Byte` neighbours keep their refs.
+                        // Marking that generic loses the last chance to know it is
+                        // a newtype, so `lower_get_field`'s single-field branch
+                        // (instruction.rs:43284) cannot fire — it looks the type up
+                        // BY NAME from `get_obj_register_type` — and `fd.0` lowers
+                        // as an object field read at +24. For `FileDesc(3)` that is
+                        // address 27.
+                        //
+                        // PARAMNAME-CARRY separates them. The carry holds the
+                        // source-verbatim spelling: `"FileDesc"` names a type in
+                        // the module's table, `"T"` or `"F"` does not. So consult
+                        // it first and stamp the nominal name when it resolves to a
+                        // real single-field type; otherwise keep the generic mark.
+                        //
+                        // The carry is only readable here since the merge re-interns
+                        // it (codegen/mod.rs) — before that it indexed the ARCHIVE
+                        // pool and answered an unrelated word.
+                        // Strip the reference spelling before the lookup.
+                        // `trim_start_matches('&')` alone leaves "mut
+                        // Formatter", which names nothing — measured over one
+                        // compile, 87 of 163 refusals were that shape and 75
+                        // were bare names, so more than half of this arm's
+                        // input was unreachable by construction. The three
+                        // CBGR tiers spell their references `&mut`,
+                        // `&checked` and `&unsafe`.
+                        let carried = vbc_module
+                            .get_string(p.type_name)
+                            .filter(|t| !t.is_empty())
+                            .map(|t| {
+                                let mut s = t.trim();
+                                let was_ref = s.starts_with('&');
+                                s = s.strip_prefix('&').unwrap_or(s).trim_start();
+                                for kw in ["mut ", "checked ", "unsafe "] {
+                                    if let Some(rest) = s.strip_prefix(kw) {
+                                        s = rest.trim_start();
+                                        break;
+                                    }
+                                }
+                                (s.to_string(), was_ref)
+                            });
+                        let nominal = carried.filter(|(name, was_ref)| {
+                            vbc_module.types.iter().any(|td| {
+                                // A REFERENCE to a transparent wrapper must NOT
+                                // be stamped: that register holds an ADDRESS,
+                                // and `lower_get_field`'s single-field branch
+                                // would hand the address back as the wrapped
+                                // value — which is T1438, reproduced here in a
+                                // second place rather than fixed.
+                                !(*was_ref && td.is_transparent_wrapper)
+                                && vbc_module.get_string(td.name).is_some_and(|n| n == name)
+                                    // Same guard as the READER at
+                                    // instruction.rs, and for the same reason:
+                                    // `is_transparent_wrapper` is the source of
+                                    // truth, while a Verum-declared newtype's
+                                    // KIND is `Record`.
+                                    && (td.is_transparent_wrapper && td.fields.len() == 1
+                                        || td.kind == verum_vbc::types::TypeKind::Newtype
+                                        || (td.kind == verum_vbc::types::TypeKind::Tuple
+                                            && td.fields.len() == 1))
+                            })
+                        });
+                        match nominal.map(|(name, _)| name) {
+                            Some(name) => {
+                                if std::env::var("VERUM_TRACE_PARAMMARK").is_ok() {
+                                    eprintln!(
+                                        "[parammark] {} p{} PTR recovered as newtype '{}' via carry",
+                                        func_name, i, name
+                                    );
+                                }
+                                ctx.set_obj_register_type(reg, name);
+                            }
+                            None => {
+                                // A ZERO MUST SAY WHICH CONDITION REFUSED.
+                                // The success trace alone cannot tell "the
+                                // carry was empty" from "no type of that name"
+                                // from "the name is there and the kind check
+                                // rejected it" — and the first build of this
+                                // arm reported 0 recoveries out of 8081 params
+                                // with no way to choose between them. It was
+                                // the third.
+                                if std::env::var("VERUM_TRACE_PARAMMARK").is_ok()
+                                    && let Some(t) = vbc_module.get_string(p.type_name)
+                                    && !t.is_empty()
+                                {
+                                    let mut bare = t.trim();
+                                    bare = bare.strip_prefix('&').unwrap_or(bare).trim_start();
+                                    for kw in ["mut ", "checked ", "unsafe "] {
+                                        if let Some(rest) = bare.strip_prefix(kw) {
+                                            bare = rest.trim_start();
+                                            break;
+                                        }
+                                    }
+                                    let named = vbc_module.types.iter().any(|td| {
+                                        vbc_module
+                                            .get_string(td.name)
+                                            .is_some_and(|n| n == bare)
+                                    });
+                                    eprintln!(
+                                        "[parammark] {} p{} PTR NOT recovered: carry={:?}                                          name_in_table={} (kind/arity refused it if true)",
+                                        func_name, i, bare, named
+                                    );
+                                }
+                                // Skip register 0 (self) — an instance method's self
+                                // IS a real pointer.
+                                if reg != 0 {
+                                    ctx.mark_generic_ptr_register(reg);
+                                }
+                            }
                         }
                     }
                     TypeRef::Concrete(tid) if *tid == TypeId::CHANNEL => {
