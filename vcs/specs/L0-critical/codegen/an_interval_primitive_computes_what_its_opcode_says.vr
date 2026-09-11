@@ -1,0 +1,80 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: codegen, cubical, hott, meta-function, regression
+// @timeout: 60000
+// @expected-exit: 0
+// @expected-stdout: interval primitives compute
+//
+// AN INTERVAL PRIMITIVE COMPUTES WHAT ITS OPCODE SAYS (T1352).
+//
+// Four layers of the cubical interval were finished and the join between
+// two of them was empty:
+//
+//   the OPCODES exist       the cubical sub-opcode family carries
+//                           IntervalMeet 0x22, IntervalJoin 0x23,
+//                           IntervalRev 0x24
+//   the INTERPRETER runs    handlers/cubical.rs dispatches all seventeen
+//                           sub-ops; meet returns min, rev returns 1 - i
+//   core/ DECLARES          core/math/cubical.vr writes rev/meet/join on
+//                           top of the matching @builtin_* names
+//   codegen JOINED neither  no arm mapped the name onto the opcode
+//
+// So `meet(i, j)` compiled to `nil` while the instruction that computes
+// `i /\ j` sat unused. Every layer looks complete when read alone, which
+// is why a census by NAME kept producing different numbers — each one was
+// reading a different finished layer.
+//
+// MEASURED before the fix, this exact programme: every call returned nil,
+// and the only sign was `warning<E0410>: unknown meta-function` — which
+// was itself wrong, since the type checker accepts the whole `builtin_`
+// prefix by design.
+//
+// THE PROGRAMME DECLARES ITS OWN NAMES rather than mounting
+// core.math.cubical. That separates the FEATURE from the ARTEFACT: a
+// mount would also be testing whether the baked archive happens to export
+// them, and a failure there would read as this defect returning.
+//
+// The values are not arbitrary. The interpreter represents an interval
+// point as a plain integer, so the reduction rules are checkable
+// arithmetic:
+//     rev(i0) = 1 - 0 = i1        meet(i0, i1) = min(0, 1) = i0
+//     rev(i1) = 1 - 1 = i0        join(i0, i1) = max(0, 1) = i1
+
+public type I is @builtin_interval;
+
+public let i0: I = @builtin_i0;
+public let i1: I = @builtin_i1;
+
+public fn myrev(i: I) -> I {
+    @builtin_interval_rev(i)
+}
+
+public fn mymeet(i: I, j: I) -> I {
+    @builtin_interval_meet(i, j)
+}
+
+public fn myjoin(i: I, j: I) -> I {
+    @builtin_interval_join(i, j)
+}
+
+public fn myeq(a: I, b: I) -> Bool {
+    @builtin_interval_eq(a, b)
+}
+
+fn main() {
+    // Reversal swaps the endpoints.
+    assert(myeq(myrev(i0), i1));
+    assert(myeq(myrev(i1), i0));
+
+    // Meet is the minimum, join the maximum.
+    assert(myeq(mymeet(i0, i1), i0));
+    assert(myeq(myjoin(i0, i1), i1));
+
+    // And the equality used to judge the three above is itself decidable:
+    // without this line a `myeq` that always answered true would pass.
+    assert(myeq(i0, i0));
+    assert(!myeq(i0, i1));
+
+    print("interval primitives compute");
+}

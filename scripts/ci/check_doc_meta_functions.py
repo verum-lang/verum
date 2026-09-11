@@ -52,6 +52,7 @@ import tempfile
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from check_meta_function_names import (  # noqa: E402
+    codegen_builtin_roster,
     inference_roster,
     parser_roster,
     scan,
@@ -115,7 +116,12 @@ def attribute_roster() -> set[str]:
 
 
 def accepted_names() -> set[str]:
-    return parser_roster() | inference_roster() | attribute_roster()
+    return (
+        parser_roster()
+        | inference_roster()
+        | attribute_roster()
+        | codegen_builtin_roster()
+    )
 
 
 # A page may DEFINE the macro it then calls — that is the whole subject of

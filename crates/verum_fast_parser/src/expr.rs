@@ -233,8 +233,29 @@ fn find_similar_meta_function(unknown: &str) -> Option<&'static str> {
 }
 
 /// Check if a name is a known meta-function.
+///
+/// Three places in this compiler answer "is this `@name` known", and they
+/// have to agree, because a name one admits and another rejects produces a
+/// diagnostic about working code:
+///
+///   * this function — `@name(...)` in EXPRESSION position;
+///   * `attr_validation.rs` — `@name` on a DECLARATION;
+///   * `verum_types/src/infer/expr.rs` — the typing of a meta-call.
+///
+/// The flat `KNOWN_META_FUNCTIONS` list is not the whole answer, because the
+/// `builtin_` namespace is open by design: a `@builtin_*` name carries its
+/// semantics and its return type at the stdlib DECLARATION site rather than
+/// in a table inside the compiler, and the type checker admits the whole
+/// prefix with a fresh type variable for exactly that reason. The other two
+/// judges already encode the prefix rule; this one did not, and the gap was
+/// measurable — nine `@builtin_*` calls in `core/math/hott.vr` (`@builtin_refl`,
+/// `@builtin_transport`, `@builtin_hcomp`, …) were each reported as
+/// `unknown meta-function` while the type checker was deliberately accepting
+/// them. That is a false positive against correct stdlib code, and a false
+/// positive is the expensive kind: it argues for deleting a warning that is
+/// right about the other twelve names it finds.
 fn is_known_meta_function(name: &str) -> bool {
-    KNOWN_META_FUNCTIONS.contains(&name)
+    KNOWN_META_FUNCTIONS.contains(&name) || name.starts_with("builtin_")
 }
 
 /// Map Rust macro names to their Verum equivalents.

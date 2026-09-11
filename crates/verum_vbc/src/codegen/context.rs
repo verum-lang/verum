@@ -273,6 +273,13 @@ pub struct CodegenContext {
     /// carries the same fact to the earlier decision, because
     /// `ffi_function_map` lives on `VbcCodegen` and is not reachable here.
     pub variadic_ffi_fns: std::collections::HashSet<String>,
+
+    /// Meta-function names already reported as having no implementation.
+    ///
+    /// The diagnostic is about a NAME, not a call site: once the compiler
+    /// has said `@foo` is unimplemented, repeating it per occurrence turns a
+    /// true statement into the kind of noise that gets silenced wholesale.
+    pub reported_unimplemented_meta: std::collections::HashSet<String>,
     /// NAMES of free fns DECLARED by the unit being compiled (user-phase
     /// AST declarations only; stdlib bake — `prefer_existing_functions` —
     /// never writes here). Bare-name call resolution consults this
@@ -1595,6 +1602,7 @@ impl CodegenContext {
             ambiguous_function_names: std::collections::HashSet::new(),
             scoped_functions: HashMap::new(),
             variadic_ffi_fns: std::collections::HashSet::new(),
+            reported_unimplemented_meta: std::collections::HashSet::new(),
             unit_declared_fns: std::collections::HashSet::new(),
             canonical_index: HashMap::new(),
             prefer_existing_functions: false,

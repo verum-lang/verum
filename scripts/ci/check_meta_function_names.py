@@ -108,30 +108,15 @@ CORE = REPO / "core"
 # grows by ten lines must not move this table, and a name that is SWAPPED
 # for another must not pass by keeping the total.
 KNOWN: dict[str, int] = {
-    "builtin_path_app": 2,
+    # LOWERED 28 -> 8 on 2026-09-11 (T1352). Twenty names left this roster
+    # in one pass and NOT by being excused: nineteen `@builtin_*` names are
+    # now read from the arms that implement them (`codegen_builtin_roster`),
+    # and six of those arms were written by that task. A name here is one
+    # that still compiles to nothing.
     "transport_roundtrip": 2,
-    "builtin_absurd": 1,
-    "builtin_ap": 1,
-    "builtin_apd": 1,
     "builtin_construct_sheaf_topos": 1,
-    "builtin_glue": 1,
-    "builtin_hcomp": 1,
-    "builtin_i0": 1,
-    "builtin_i1": 1,
-    "builtin_interval": 1,
-    "builtin_interval_eq": 1,
-    "builtin_interval_join": 1,
-    "builtin_interval_meet": 1,
-    "builtin_interval_rev": 1,
-    "builtin_path": 1,
-    "builtin_refl": 1,
-    "builtin_sigma_path": 1,
-    "builtin_sym": 1,
     "builtin_theory_category": 1,
-    "builtin_trans": 1,
-    "builtin_transport": 1,
     "builtin_unglue": 1,
-    "const_slot_for": 1,
     "frame_address": 1,
     "llm_oracle": 1,
     "zero": 1,
@@ -176,6 +161,33 @@ def inference_roster() -> set[str]:
     for line in lines[start : start + 420]:
         if re.match(r'^            "', line):
             names |= set(re.findall(r'"([a-z_0-9]+)"', line.split("=>")[0]))
+    return names
+
+
+def codegen_builtin_roster() -> set[str]:
+    """THE `builtin_` NAMESPACE, read from the arms that implement it.
+
+    `@builtin_*` is an OPEN namespace: a name under it carries its meaning
+    at the stdlib declaration site, so the parser and the type checker
+    admit the whole prefix rather than a list (`is_known_meta_function`,
+    and `n if n.starts_with("builtin_")` in infer/expr.rs). Admitting the
+    prefix HERE too would make this gate blind — it would accept every
+    misspelling under the prefix, which is most of what it exists to catch.
+
+    So this roster is neither the prefix nor a transcription: it is the set
+    of names codegen has an arm for. `try_compile_builtin` holds the
+    cubical ones (keyed WITH the `@`, e.g. `"@builtin_refl" | "refl"`), and
+    `infer/helpers.rs` holds the meta-TYPE aliases (`@builtin_path`,
+    `@builtin_interval`). A `@builtin_*` name in neither place compiles to
+    `nil` and is exactly the shape this gate reports.
+    """
+    names: set[str] = set()
+    for rel in (
+        "crates/verum_vbc/src/codegen/expressions.rs",
+        "crates/verum_types/src/infer/helpers.rs",
+    ):
+        text = (REPO / rel).read_text()
+        names |= set(re.findall(r'"@(builtin_[a-z_0-9]+)"', text))
     return names
 
 
@@ -314,7 +326,13 @@ def main() -> int:
         )
         return 2
 
-    found = scan(CORE, parser_names | infer_names)
+    # The `builtin_` namespace is open, so neither literal roster above can
+    # contain it — but a name under it that codegen IMPLEMENTS is not an
+    # untyped call, it is a working one. Reading the implementing arms
+    # keeps this count about names that really do compile to nothing,
+    # instead of about the shape of two lists (T1352).
+    codegen_names = codegen_builtin_roster()
+    found = scan(CORE, parser_names | infer_names | codegen_names)
     total = sum(len(v) for v in found.values())
 
     new_names = sorted(set(found) - set(KNOWN))
@@ -326,7 +344,8 @@ def main() -> int:
     print(
         f"meta-function names accepted by the compiler: "
         f"{len(parser_names)} parser + {len(infer_names)} inference "
-        f"= {len(parser_names | infer_names)} distinct"
+        f"+ {len(codegen_names)} codegen "
+        f"= {len(parser_names | infer_names | codegen_names)} distinct"
     )
     print(f"untyped expression meta-calls in core/: {total} (roster {BASELINE})")
 

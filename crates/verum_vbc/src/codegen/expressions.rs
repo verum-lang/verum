@@ -10278,6 +10278,151 @@ impl VbcCodegen {
                 Ok(Some(Some(dst)))
             }
 
+            // THE INTERVAL LATTICE and PATH APPLICATION. The VBC sub-opcodes
+            // for these have existed since the cubical opcode family was
+            // laid out — `IntervalMeet` 0x22, `IntervalJoin` 0x23,
+            // `IntervalRev` 0x24, `PathApp` 0x02 — and `core/math/cubical.vr`
+            // declares each one on top of the matching `@builtin_*` name.
+            // What was missing was this table: no arm mapped the name onto
+            // the opcode, so `meet(i, j)` compiled to `nil` while the
+            // instruction that computes `i ∧ j` sat unused. Reading the
+            // opcode list beside the name list is what makes that visible;
+            // reading either alone shows a complete-looking half.
+            //
+            // Only the `@builtin_*` spelling is matched here, unlike the
+            // older arms beside them which also accept `refl` / `sym`.
+            // A bare `meet` or `absurd` is an ordinary name a user may
+            // well define, and claiming it in this table would silently
+            // outrank their function; the qualified spelling cannot be
+            // written by accident.
+            "@builtin_interval_rev" if args.len() == 1 => {
+                let i = self
+                    .compile_expr(&args[0])?
+                    .or_internal("interval_rev arg has no value")?;
+                let dst = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::CubicalExtended {
+                    sub_op: crate::instruction::CubicalSubOpcode::IntervalRev.to_byte(),
+                    dst,
+                    args: vec![i],
+                });
+                self.ctx.free_temp(i);
+                Ok(Some(Some(dst)))
+            }
+
+            "@builtin_interval_meet" | "@builtin_interval_join"
+                if args.len() == 2 =>
+            {
+                let i = self
+                    .compile_expr(&args[0])?
+                    .or_internal("interval op arg has no value")?;
+                let j = self
+                    .compile_expr(&args[1])?
+                    .or_internal("interval op arg has no value")?;
+                let sub_op = if name.ends_with("meet") {
+                    crate::instruction::CubicalSubOpcode::IntervalMeet
+                } else {
+                    crate::instruction::CubicalSubOpcode::IntervalJoin
+                };
+                let dst = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::CubicalExtended {
+                    sub_op: sub_op.to_byte(),
+                    dst,
+                    args: vec![i, j],
+                });
+                self.ctx.free_temp(i);
+                self.ctx.free_temp(j);
+                Ok(Some(Some(dst)))
+            }
+
+            // Decidable equality on interval endpoints. Unlike its three
+            // neighbours this one has no sub-opcode, and it does not need
+            // one: the interpreter represents an interval point as a plain
+            // integer (`handle_interval_meet` takes `as_integer_compatible`
+            // and returns `min`; `rev` returns `1 - i`), so equality on
+            // endpoints IS integer equality. `@ref_eq` in
+            // `compile_meta_function` is built the same way. Minting a
+            // sub-opcode to re-express `CmpI` would add a second spelling of
+            // one fact — the thing this whole defect is made of.
+            "@builtin_interval_eq" if args.len() == 2 => {
+                let a = self
+                    .compile_expr(&args[0])?
+                    .or_internal("interval_eq arg has no value")?;
+                let b = self
+                    .compile_expr(&args[1])?
+                    .or_internal("interval_eq arg has no value")?;
+                let dst = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::CmpI {
+                    op: CompareOp::Eq,
+                    dst,
+                    a,
+                    b,
+                });
+                self.ctx.free_temp(a);
+                self.ctx.free_temp(b);
+                Ok(Some(Some(dst)))
+            }
+
+            // `p(i)` — a path IS a function from the interval, so applying
+            // one is the elimination form the whole calculus rests on:
+            // `p(i0) = a` and `p(i1) = b` are what make a path a proof of
+            // equality rather than a pair of endpoints.
+            "@builtin_path_app" if args.len() == 2 => {
+                let path = self
+                    .compile_expr(&args[0])?
+                    .or_internal("path_app path has no value")?;
+                let point = self
+                    .compile_expr(&args[1])?
+                    .or_internal("path_app point has no value")?;
+                let dst = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::CubicalExtended {
+                    sub_op: crate::instruction::CubicalSubOpcode::PathApp.to_byte(),
+                    dst,
+                    args: vec![path, point],
+                });
+                self.ctx.free_temp(path);
+                self.ctx.free_temp(point);
+                Ok(Some(Some(dst)))
+            }
+
+            // `absurd` — ex falso quodlibet. `core/math/hott.vr` uses it
+            // once, as the body of a closure over `Void`:
+            //
+            //     all_paths: |a: Void, _b: Void| -> HottPath<Void>(a, _b) {
+            //         @builtin_absurd(a)
+            //     }
+            //
+            // The closure cannot be called, because `Void` has no
+            // inhabitant to call it with. That makes ANY emission correct
+            // by vacuity — which is exactly why the choice matters: `nil`
+            // would be indistinguishable from the silent unimplemented
+            // case, and it would return a value from a position that has
+            // none. `Unreachable` says what is true of the code instead,
+            // and it is the same instruction the built-in `unreachable()`
+            // emits.
+            "@builtin_absurd" => {
+                // The argument is still compiled: it may carry side
+                // effects, and skipping it would make register allocation
+                // depend on whether a name happened to be implemented.
+                for arg in args.iter() {
+                    if let Some(r) = self.compile_expr(arg)? {
+                        self.ctx.free_temp(r);
+                    }
+                }
+                // A register is still produced, and that is not a hedge.
+                // `@builtin_absurd(a)` sits in VALUE position — it is the
+                // body of a closure whose signature promises a path — so a
+                // caller downstream will ask this expression for its
+                // register. The built-in `unreachable()` can answer "no
+                // value" because `core/` only ever writes it in a unit
+                // position (a match arm beside `=> {}`); this one cannot.
+                // The `LoadNil` is dead code by construction: `Unreachable`
+                // follows it and nothing can read the register.
+                let dst = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::LoadNil { dst });
+                self.ctx.emit(Instruction::Unreachable);
+                Ok(Some(Some(dst)))
+            }
+
             "@builtin_sigma_path" => {
                 // sigma_path(p, q) — path in a sigma type
                 // At runtime: a pair of paths is just a pair
@@ -33232,8 +33377,92 @@ impl VbcCodegen {
                     });
                 }
             }
-            _ => {
-                // Unknown meta function - emit warning and nil
+            unknown => {
+                // T1352. This arm is the ONLY judge in the compiler that
+                // knows whether a meta-function name is IMPLEMENTED, and it
+                // was the only one that said nothing. The comment here used
+                // to read "emit warning and nil"; no warning was ever
+                // emitted, so the name silently became `nil`.
+                //
+                // Every other judge answers a TYPING question and lets
+                // unification decide whether the user hears anything, which
+                // makes loudness depend on how the call was written rather
+                // than on whether it works. Measured on one programme, four
+                // cells (`verum run`, Tier 0):
+                //
+                //   form              @totally_made_up      @builtin_refl
+                //                     (unknown -> Unit)     (prefix -> fresh var)
+                //   let x: Int = ...  E400 mismatch  LOUD   prints nil   SILENT
+                //   let x = ...       prints nil   SILENT   E404 ambig    LOUD
+                //
+                // Crosswise: each is silent in exactly one form, and in
+                // neither case because anything was checked. `core/math/
+                // hott.vr` writes `@builtin_refl(x)` in a body whose
+                // signature declares the return type — the silent cell — so
+                // nine such calls compile and return nil.
+                //
+                // Here the question has no such dependence: reaching this
+                // arm IS the proof that nothing implements the name, so the
+                // diagnostic cannot be a false positive. It is a warning
+                // rather than an error because the stdlib currently relies
+                // on the silence; `VERUM_STRICT_META_FN=1` (the same lever
+                // the type checker's unknown arm reads) turns it into a
+                // hard failure so one run names every site that depends on
+                // it.
+                // FIRST: the implementation may exist and simply be
+                // unreachable from this spelling. `try_compile_builtin`
+                // carries arms written to accept BOTH forms —
+                //
+                //     "@builtin_refl" | "refl" if args.len() == 1 => ...
+                //
+                // — so the `@`-prefixed string was anticipated there. It
+                // never arrived, because the only producer of that string is
+                // this MetaFunction route and this route did not consult it.
+                // Ten cubical names sit behind that door (refl, transport,
+                // hcomp, sym, trans, ap, apd, i0, i1, sigma_path); of the
+                // eleven `@builtin_*` calls in `core/math/hott.vr`, ten were
+                // compiling to `nil` with a working implementation one
+                // string-concatenation away.
+                //
+                // `try_compile_builtin` ends in `_ => Ok(None)`, so asking it
+                // about a name it does not know is free.
+                let qualified = format!("@{}", unknown);
+                let no_type_args = verum_common::List::new();
+                if let Some(result) = self.try_compile_builtin(&qualified, args, &no_type_args)? {
+                    self.ctx.free_temp(dest);
+                    return Ok(result);
+                }
+
+                // Only now is the name genuinely unimplemented. Reaching
+                // here IS the proof, so this cannot be a false positive —
+                // unlike every typing-side judge, which reports on what
+                // unification happened to notice.
+                if self
+                    .ctx
+                    .reported_unimplemented_meta
+                    .insert(unknown.to_string())
+                {
+                    tracing::warn!(
+                        "[meta-fn] `@{}` has no implementation — calls to it compile to `nil`",
+                        unknown
+                    );
+                }
+                if std::env::var_os("VERUM_TRACE_META_FN").is_some()
+                    || std::env::var_os("VERUM_STRICT_META_FN").is_some()
+                {
+                    eprintln!(
+                        "[meta-fn] unimplemented '@{}' with {} arg(s) in {} — compiling to nil",
+                        unknown,
+                        args.len(),
+                        self.ctx.current_file()
+                    );
+                }
+                if std::env::var_os("VERUM_STRICT_META_FN").is_some() {
+                    return Err(CodegenError::internal(format!(
+                        "meta-function `@{}` has no implementation (VERUM_STRICT_META_FN=1)",
+                        unknown
+                    )));
+                }
                 self.ctx.emit(Instruction::LoadNil { dst: dest });
             }
         }

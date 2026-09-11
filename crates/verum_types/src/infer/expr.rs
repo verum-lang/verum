@@ -13320,8 +13320,26 @@ impl TypeChecker {
             // This keeps the compiler free of per-intrinsic name
             // tables — the only special-casing is the `builtin_`
             // prefix, which is the declared namespace for
-            // compiler-bound meta-symbols (mirrored on the codegen
-            // side in verum_vbc/src/codegen/expressions.rs §4077+).
+            // compiler-bound meta-symbols. Two other judges of "is
+            // this `@name` known" carry the same prefix rule and have
+            // to keep carrying it: `attr_validation.rs`
+            // (`@name` on a DECLARATION) and `is_known_meta_function`
+            // in verum_fast_parser/src/expr.rs (`@name(...)` in
+            // EXPRESSION position, which did not have it until T1352 —
+            // nine `@builtin_*` calls in core/math/hott.vr were
+            // reported as unknown while this arm accepted them).
+            //
+            // What does NOT mirror it is codegen. This comment used to
+            // claim the rule was "mirrored on the codegen side in
+            // verum_vbc/src/codegen/expressions.rs §4077+"; that
+            // address is a `deref_mut` emit, and a tree-wide search for
+            // the prefix returns only the three sites named above. The
+            // consequence is visible rather than theoretical: accepting
+            // the name here with a fresh type variable lets
+            // `let x: Int = @builtin_refl(7)` type-check and print
+            // `nil`, because `compile_meta_function` has no arm for it.
+            // The diagnostic for that belongs where implementedness is
+            // known — that catch-all, which now says so (T1352).
             // Argument expressions are still synthesised for their
             // side-effects on the checker state (diagnostic
             // accumulation, constraint generation).

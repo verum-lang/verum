@@ -329,3 +329,75 @@ fn test_typo_suggestion_conts() {
     assert!(ok, "Should parse but warn about typo");
     assert_eq!(warnings.len(), 1, "Should produce exactly one warning");
 }
+
+// =============================================================================
+// THE `builtin_` NAMESPACE — three judges of "is this @name known" (T1352)
+// =============================================================================
+//
+// A `@builtin_*` name carries its semantics and its return type at the stdlib
+// DECLARATION site rather than in a table inside the compiler, so the set of
+// valid names under that prefix is open and cannot be a flat list. Three
+// places answer "is this `@name` known", and a name one admits while another
+// rejects produces a diagnostic about correct code:
+//
+//   * `is_known_meta_function` (src/expr.rs)  — `@name(...)` as an EXPRESSION
+//   * `validate_single_attr`   (src/attr_validation.rs) — `@name` on a DECL
+//   * `verum_types::infer::expr` — the typing of the meta-call (other crate)
+//
+// The first did not carry the prefix rule while the other two did. Measured on
+// `core/math/hott.vr`: fifteen `unknown meta-function` warnings, eleven of them
+// `@builtin_*` calls in expression position that the type checker was
+// deliberately accepting. These tests pin both directions — the prefix is
+// admitted, and the admission is narrow enough that a genuinely unknown name
+// is still reported.
+
+#[test]
+fn builtin_prefix_is_admitted_in_expression_position() {
+    // Every one of these appears in core/math/hott.vr.
+    for name in [
+        "@builtin_refl(x)",
+        "@builtin_transport(p, x)",
+        "@builtin_hcomp(phi, walls, base)",
+        "@builtin_sym(p)",
+        "@builtin_i0",
+        "@builtin_i1",
+    ] {
+        let (ok, warnings) = parse_expr_with_warnings(name);
+        assert!(ok, "Should parse {name}");
+        assert!(
+            warnings.is_empty(),
+            "`{name}` is admitted by the type checker's prefix arm and by \
+             attribute validation; the expression judge must agree. Got: {warnings:?}"
+        );
+    }
+}
+
+#[test]
+fn a_name_outside_the_namespace_is_still_reported() {
+    // The control. If this goes quiet the prefix rule has been widened past
+    // its namespace and the warning no longer finds anything.
+    for name in ["@totally_made_up(7)", "@integrate(f)", "@frame_address(0)"] {
+        let (ok, warnings) = parse_expr_with_warnings(name);
+        assert!(ok, "Should parse {name}");
+        assert_eq!(
+            warnings.len(),
+            1,
+            "`{name}` is known to no judge and must still be reported"
+        );
+    }
+}
+
+#[test]
+fn the_namespace_is_a_prefix_not_a_substring() {
+    // `builtin_` has to be at the START. A name that merely contains it is
+    // outside the namespace and must still be reported.
+    for name in ["@not_builtin_refl(x)", "@my_builtin_thing(x)"] {
+        let (ok, warnings) = parse_expr_with_warnings(name);
+        assert!(ok, "Should parse {name}");
+        assert_eq!(
+            warnings.len(),
+            1,
+            "`{name}` does not begin with `builtin_` and must still be reported"
+        );
+    }
+}
