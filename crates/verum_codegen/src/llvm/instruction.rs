@@ -5692,6 +5692,16 @@ pub fn lower_instruction<'ctx>(
         // ====================================================================
         // Pattern Matching Operations (0x90-0x95)
         // ====================================================================
+        // `x is Type` — a RUNTIME TYPE test, not a variant-tag test. Tier 0
+        // implements it (T1425); this backend does not yet, and says so rather
+        // than lowering it to something that answers the wrong question. The
+        // AOT value model does not carry the NaN-box tag the interpreter reads,
+        // so the lowering needs its own design — tracked as its own task.
+        Instruction::IsType { .. } => Err(LlvmLoweringError::unsupported(
+            "`x is Type` (IsType) is implemented for the interpreter only; \
+             AOT lowering is not written yet",
+        )),
+
         Instruction::IsVar { dst, value, tag } => {
             let val = ctx.get_register(value.0)?;
             // T0241: remember which arm this IsVar tested on the variant register

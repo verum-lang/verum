@@ -1,0 +1,58 @@
+// @test: run
+// @level: L1
+// @tier: 0
+// @tags: patterns, type-test, is, runtime
+// @timeout: 20000
+// @expected-stdout: Int Text Float Bool | correct correct | Point | short long
+// @expected-exit: 0
+// @description: `x is Type` answers about the value's runtime type — both
+//   when it holds and when it does not.
+//
+// THIS SPEC RUNS THE MATCH AND READS ITS RESULT, which is the whole point.
+// Before T1425 the type test compiled to a comparison between an index into
+// the string table and a VARIANT DISCRIMINANT: codegen took the type's name as
+// `format!("{:?}", …)` of an AST node, interned it, and passed the string's
+// index to `IsVar` — the instruction that asks "does this variant carry tag
+// N". Every type test was therefore false unless a variant happened to hold
+// that accidental tag.
+//
+// 130 uses of `x is Type` across vcs/specs did not catch it, and could not:
+// every one of them is in a parse-only or typecheck-only spec, and the defect
+// lives below both — the program compiles, it just answers wrongly.
+//
+// The three lines below are the three questions worth asking. The middle one
+// is the control: a test against the WRONG type must be false, or a test that
+// is simply always true would pass the first line.
+
+type Point is { x: Int, y: Int };
+
+fn main() {
+    let i: Int = 7;
+    let t: Text = "hi";
+    let f: Float = 1.5;
+    let b: Bool = true;
+
+    let a1 = match i { v is Int => "Int", _ => "other" };
+    let a2 = match t { v is Text => "Text", _ => "other" };
+    let a3 = match f { v is Float => "Float", _ => "other" };
+    let a4 = match b { v is Bool => "Bool", _ => "other" };
+
+    // The control: each value against a type it is NOT.
+    let n1 = match i { v is Text => "WRONG", _ => "correct" };
+    let n2 = match t { v is Int => "WRONG", _ => "correct" };
+
+    let p = Point { x: 1, y: 2 };
+    let u = match p { v is Point => "Point", _ => "other" };
+
+    // BOTH SIDES OF THE SMALL-STRING BOUNDARY. A Text of seven bytes or fewer
+    // lives in the NaN-box and never gets an object header; a longer one is
+    // allocated. The first version of this fix read the header only, so
+    // `"hi" is Text` was false while a longer literal was true — a boundary no
+    // single-literal spec would have found.
+    let short_t: Text = "hi";
+    let long_t: Text = "this is definitely longer than seven bytes";
+    let s1 = match short_t { v is Text => "short", _ => "short:WRONG" };
+    let s2 = match long_t { v is Text => "long", _ => "long:WRONG" };
+
+    print(f"{a1} {a2} {a3} {a4} | {n1} {n2} | {u} | {s1} {s2}");
+}

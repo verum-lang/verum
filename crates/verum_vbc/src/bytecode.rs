@@ -540,6 +540,17 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
             encode_varint(*tag as u64, output);
         }
 
+        Instruction::IsType {
+            dst,
+            value,
+            type_id,
+        } => {
+            output.push(Opcode::IsType.to_byte());
+            encode_reg(*dst, output);
+            encode_reg(*value, output);
+            encode_varint(*type_id as u64, output);
+        }
+
         Instruction::AsVar { dst, value, tag } => {
             output.push(Opcode::AsVar.to_byte());
             encode_reg(*dst, output);
@@ -3921,6 +3932,17 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
             let value = decode_reg(data, offset)?;
             let tag = decode_varint(data, offset)? as u32;
             Ok(Instruction::IsVar { dst, value, tag })
+        }
+
+        Opcode::IsType => {
+            let dst = decode_reg(data, offset)?;
+            let value = decode_reg(data, offset)?;
+            let type_id = decode_varint(data, offset)? as u32;
+            Ok(Instruction::IsType {
+                dst,
+                value,
+                type_id,
+            })
         }
 
         Opcode::AsVar => {

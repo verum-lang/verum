@@ -532,6 +532,74 @@ pub(in super::super) fn handle_get_variant_data_ref(
     Ok(DispatchResult::Continue)
 }
 
+/// IsType (0x9A) - Check a value's RUNTIME TYPE against a `TypeId`.
+///
+/// Encoding: opcode + dst:reg + value:reg + type_id:varint
+/// Effect: sets `dst` to `true` when the value's runtime type is `type_id`.
+///
+/// This is `x is Type` in pattern position, and it is NOT `IsVar`. A variant
+/// tag is an index within one sum type; a `TypeId` names the type. Codegen
+/// emitted `IsVar` for both until T1425, passing an interned string id where a
+/// tag was expected — so the test compared a string-table index against a
+/// discriminant and answered false for every value that was not a variant
+/// carrying that accidental tag. Measured then: `match v { x is Int => …,
+/// _ => … }` on an `Int` took the fallback.
+///
+/// A primitive answers from its NaN-box; a heap value answers from its object
+/// header. `nil` has no type and answers false for every `type_id`.
+pub(in super::super) fn handle_is_type(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
+    let dst = read_reg(state)?;
+    let value_reg = read_reg(state)?;
+    let expected = TypeId(read_varint(state)? as u32);
+
+    let mut value = state.get_reg(value_reg);
+
+    // Same auto-deref as `handle_match_tag`: a register-based CBGR reference
+    // stands for the value it points at, and a type test through a reference
+    // asks about the referent.
+    let mut deref_depth = 0;
+    while is_cbgr_ref(&value) && deref_depth < 8 {
+        let (abs_index, _generation) = decode_cbgr_ref(value);
+        let dereffed = state.registers.get_absolute(abs_index);
+        if dereffed.to_bits() == value.to_bits() {
+            break;
+        }
+        value = dereffed;
+        deref_depth += 1;
+    }
+
+    // ORDER MATTERS. In this NaN-boxing, ints and bools are boxed patterns
+    // while a float is an unboxed double, so `is_float` is true for shapes the
+    // boxed predicates claim first — it has to be asked LAST.
+    let actual = if value.is_nil() {
+        None
+    } else if value.is_bool() {
+        Some(TypeId::BOOL)
+    } else if value.is_int() {
+        Some(TypeId::INT)
+    } else if value.is_small_string() {
+        // A Text of seven bytes or fewer lives IN the NaN-box and never gets
+        // an object header, so the pointer branch below cannot see it.
+        // Measured 2026-09-11: `"hi" is Text` answered false while
+        // `"this is definitely longer than seven bytes" is Text` answered
+        // true — the two differ only in whether the value was allocated.
+        Some(TypeId::TEXT)
+    } else if value.is_ptr() {
+        // SAFETY: `try_type_id` discharges null and misalignment itself and
+        // returns None rather than reading a bad header.
+        unsafe { heap::ObjectHeader::try_type_id(value.as_ptr::<u8>()) }
+    } else if value.is_float() {
+        Some(TypeId::FLOAT)
+    } else {
+        None
+    };
+
+    state.set_reg(dst, Value::from_bool(actual == Some(expected)));
+    Ok(DispatchResult::Continue)
+}
+
 /// IsVar (0x90) - Check if variant has a specific tag.
 ///
 /// Encoding: opcode + dst:reg + value:reg + tag:varint

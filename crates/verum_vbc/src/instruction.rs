@@ -544,8 +544,15 @@ pub enum Opcode {
     Xor = 0x98,
     /// Boolean not: `dst = !src`
     Not = 0x99,
-    /// Reserved pattern/logic.
-    Pattern9A = 0x9A,
+    /// Runtime type test: `dst = (typeof(value) == type_id)`.
+    ///
+    /// The check `x is Type` in pattern position.  Distinct from `IsVar`,
+    /// which compares a VARIANT TAG: a tag is an index within one sum type,
+    /// a `TypeId` names the type itself.  Codegen used `IsVar` for both until
+    /// T1425, passing a string-table index where a tag was expected, so the
+    /// test compared an interned string id against a discriminant and was
+    /// false for every value that was not a variant with that accidental tag.
+    IsType = 0x9A,
     /// Reserved pattern/logic.
     Pattern9B = 0x9B,
     /// Reserved pattern/logic.
@@ -10343,6 +10350,7 @@ impl Opcode {
             Opcode::Or => "OR",
             Opcode::Xor => "XOR",
             Opcode::Not => "NOT",
+            Opcode::IsType => "IS_TYPE",
             // Async + Nursery (0xA0-0xAF)
             Opcode::Spawn => "SPAWN",
             Opcode::Await => "AWAIT",
@@ -11162,6 +11170,19 @@ pub enum Instruction {
         value: Reg,
         /// Variant tag to match against.
         tag: u32,
+    },
+    /// Check if a value's RUNTIME TYPE is the given one — `x is Type`.
+    ///
+    /// `IsVar` above answers "is this variant tag N"; this answers "is this
+    /// value a Type".  Two different questions, and conflating them is what
+    /// T1425 fixed.
+    IsType {
+        /// Destination register (boolean result).
+        dst: Reg,
+        /// Value register to check.
+        value: Reg,
+        /// Expected type id, resolved by codegen from the written type name.
+        type_id: u32,
     },
     /// Extract variant payload.
     AsVar {

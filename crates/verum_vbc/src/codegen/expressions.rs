@@ -19907,13 +19907,39 @@ impl VbcCodegen {
 
                 // This is essential for working with `unknown` type safely - it allows
                 // narrowing the type at runtime and safely accessing type-specific operations.
-                let type_name = format!("{:?}", test_type.kind);
-                let type_id = self.intern_string(&type_name);
-                self.ctx.emit(Instruction::IsVar {
-                    dst: result,
-                    value: scrutinee,
-                    tag: type_id,
-                });
+                // WHAT THIS REPLACED, because the shape is worth naming: the
+                // type's name was taken as `format!("{:?}", test_type.kind)` —
+                // the DEBUG rendering of an AST node — interned into the string
+                // table, and the string's INDEX passed to `IsVar` as a variant
+                // TAG. `IsVar` compares that number against a variant's
+                // discriminant, so the test asked "is this variant number 37"
+                // where 37 was an index into a table of strings. Measured
+                // 2026-09-11 (T1425): `x is Int` on an `Int` was false, and so
+                // was every other type test, unless a variant happened to carry
+                // the matching tag.
+                //
+                // `get_well_known_type_id` is the single point of truth for
+                // name -> TypeId and knows canonical names, aliases, and the
+                // user types registered during declaration collection.
+                let simple = self.type_to_simple_name(test_type);
+                match self.get_well_known_type_id(&simple) {
+                    Some(type_id) => {
+                        self.ctx.emit(Instruction::IsType {
+                            dst: result,
+                            value: scrutinee,
+                            type_id: type_id.0,
+                        });
+                    }
+                    None => {
+                        // A name no type table knows can never be true, and
+                        // saying so loudly beats emitting a test that is
+                        // quietly false forever.
+                        return Err(CodegenError::unsupported_expr(format!(
+                            "`is {simple}` names a type the runtime does not \
+                             register, so the test could never be true"
+                        )));
+                    }
+                }
             }
 
             PatternKind::Stream {

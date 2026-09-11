@@ -101,7 +101,7 @@ use handlers::memory_collections::{
 use handlers::pattern_matching::{
     handle_align_of, handle_as_var, handle_get_tag, handle_get_variant_data,
     handle_get_variant_data_ref, handle_make_pi, handle_make_sigma, handle_make_variant,
-    handle_make_witness, handle_match_guard, handle_match_tag, handle_pack,
+    handle_is_type, handle_make_witness, handle_match_guard, handle_match_tag, handle_pack,
     handle_set_variant_data, handle_size_of, handle_specialize, handle_switch, handle_type_of,
     handle_unpack,
 };
@@ -398,7 +398,8 @@ const fn build_dispatch_table() -> [Handler; 256] {
     table[0x96] = handle_land; // And = 0x96 (logical AND)
     table[0x97] = handle_lor; // Or = 0x97 (logical OR)
     table[0x98] = handle_lxor; // Xor = 0x98 (logical XOR)
-    table[0x99] = handle_lnot; // Not = 0x99 (boolean not)
+    table[0x99] = handle_lnot;
+    table[0x9A] = handle_is_type; // IsType = 0x9A (runtime type test, T1425) // Not = 0x99 (boolean not)
     // 0x9A-0x9F: Reserved pattern/logic
 
     // ========================================================================
