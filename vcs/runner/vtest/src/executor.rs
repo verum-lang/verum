@@ -4131,7 +4131,7 @@ test.vr:15:10: warning[W101]: Unused variable
 
         // Matching expected error
         let expected = ExpectedError {
-            code: "E302".to_string().into(),
+            code: Some("E302".to_string().into()),
             message: Some("Use after move".to_string().into()),
             line: Some(10),
             column: Some(5),
@@ -4143,7 +4143,7 @@ test.vr:15:10: warning[W101]: Unused variable
 
         // Wrong code
         let wrong_code = ExpectedError {
-            code: "E303".to_string().into(),
+            code: Some("E303".to_string().into()),
             ..expected.clone()
         };
         assert!(!actual.matches(&wrong_code));

@@ -375,7 +375,7 @@ fn test_error_categories() {
 #[test]
 fn test_expected_error_matching() {
     let expected = ExpectedError {
-        code: "E302".to_string().into(),
+        code: Some("E302".to_string().into()),
         message: Some("Use after move".to_string().into()),
         line: Some(10),
         column: Some(5),
@@ -406,7 +406,7 @@ fn test_expected_error_matching() {
 #[test]
 fn test_expected_error_column_range() {
     let expected = ExpectedError {
-        code: "E302".to_string().into(),
+        code: Some("E302".to_string().into()),
         message: None,
         line: Some(10),
         column: Some(5),
@@ -429,7 +429,7 @@ fn test_expected_error_column_range() {
 #[test]
 fn test_expected_error_stderr_matching() {
     let expected = ExpectedError {
-        code: "E302".to_string().into(),
+        code: Some("E302".to_string().into()),
         message: Some("Use after move".to_string().into()),
         line: Some(10),
         column: None,

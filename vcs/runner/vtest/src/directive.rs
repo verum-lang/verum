@@ -1789,7 +1789,7 @@ mod tests {
         let source = "// @test: parse-fail\n\
                       // @expected-error: E0E2\n\
                       // @expected-error-count: 3\n";
-        let d = TestDirectives::parse(source, "macros.vr".into()).unwrap();
+        let d = TestDirectives::parse(source, "macros.vr".to_string().into()).unwrap();
         assert_eq!(d.expected_errors.len(), 1);
         assert_eq!(d.expected_error_count, Some(3));
     }
@@ -1802,7 +1802,7 @@ mod tests {
                       // @expected-error: E0E2\n\
                       // @expected-error: E018\n\
                       // @expected-error-count: 1\n";
-        let err = TestDirectives::parse(source, "macros.vr".into()).unwrap_err();
+        let err = TestDirectives::parse(source, "macros.vr".to_string().into()).unwrap_err();
         assert!(
             matches!(err, DirectiveError::ConflictingDirectives(_)),
             "{err}"
@@ -1815,7 +1815,7 @@ mod tests {
     #[test]
     fn an_unreadable_expectation_fails_the_spec_rather_than_warning() {
         let source = "// @test: typecheck-fail\n// @expected-error: Sandbox violation\n";
-        let err = TestDirectives::parse(source, "sandbox.vr".into()).unwrap_err();
+        let err = TestDirectives::parse(source, "sandbox.vr".to_string().into()).unwrap_err();
         let text = err.to_string();
         assert!(text.contains("line 2"), "{text}");
         assert!(text.contains("Sandbox violation"), "{text}");
@@ -1893,7 +1893,7 @@ mod tests {
     #[test]
     fn test_expected_error_matches() {
         let err = ExpectedError {
-            code: "E302".to_string().into(),
+            code: Some("E302".to_string().into()),
             message: Some("Use after move".to_string().into()),
             line: Some(10),
             column: Some(5),
@@ -1926,7 +1926,7 @@ mod tests {
     #[test]
     fn test_expected_error_matches_column_range() {
         let err = ExpectedError {
-            code: "E302".to_string().into(),
+            code: Some("E302".to_string().into()),
             message: None,
             line: Some(10),
             column: Some(5),
@@ -1948,7 +1948,7 @@ mod tests {
     #[test]
     fn test_expected_error_matches_stderr() {
         let err = ExpectedError {
-            code: "E302".to_string().into(),
+            code: Some("E302".to_string().into()),
             message: Some("Use after move".to_string().into()),
             line: Some(10),
             column: None,
