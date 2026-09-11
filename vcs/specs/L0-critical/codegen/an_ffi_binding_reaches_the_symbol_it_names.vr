@@ -1,0 +1,77 @@
+// @test: run
+// @tier: 0,1
+// @level: L0
+// @tags: ffi, codegen, aot, linkage, regression
+// @timeout: 120000
+// @expected-exit: 0
+//
+// AN FFI BINDING REACHES THE SYMBOL IT NAMES (T1413).
+//
+// A bodiless LLVM function used to be given a `skipped_entry { ret 0 }`
+// body by the AOT safety net — a guard against calling a null function
+// pointer at dyld init. It had one escape, and the escape was a
+// HARDCODED LIST of 169 libc names (`vbc_lowering.rs`, `is_libc_extern`).
+//
+// That list is the roster of what `core/` itself happens to call. A user
+// may bind ANY C symbol with `@ffi`, so it cannot be complete — and a
+// name absent from it got a Verum-generated `ret 0` body, `internal`,
+// shadowing the real dylib symbol. The program compiled, linked, ran,
+// and returned zero.
+//
+// MEASURED before the fix, this exact program:
+//
+//     tier 0   abs=137  labs=999  toupper=65  close=-1  getpid>0
+//     tier 1   abs=0    labs=0    toupper=0   close=-1  getpid>0
+//
+// `close` and `getpid` are ON the list; `abs`, `labs` and `toupper` are
+// not. Nothing else separates them — in particular they are NOT
+// distinguished by whether the optimiser can model them, which is the
+// explanation the numbers first suggested and which turned out to be a
+// coincidence of who wrote the roster.
+//
+// WHY THESE THREE NAMES. They are ordinary C library functions a user
+// binding a C API would reach for, they take arguments, and their
+// answers are known without an oracle: abs(-137)=137, labs(-999)=999,
+// toupper('a')=65. `close(-1)` returning -1 (EBADF) and `getpid()`
+// being positive are the CONTROLS — both were correct throughout, so a
+// failure in them means something other than this defect and the log
+// says which.
+//
+// The stronger check cannot be written in a .vr file and is recorded
+// here for whoever revisits: `nm -u <binary>` must list `_abs`, `_labs`
+// and `_toupper` among the UNDEFINED symbols. Absent means the call
+// never reached the linker, which is the shape this defect had.
+
+mount core.io.println;
+
+@ffi("libSystem.B.dylib")
+extern {
+    @ffi_name("abs")     public fn spec_abs(j: Int32) -> Int32;
+    @ffi_name("labs")    public fn spec_labs(j: Int) -> Int;
+    @ffi_name("toupper") public fn spec_toupper(c: Int32) -> Int32;
+
+    // Controls: on the list, correct before and after.
+    @ffi_name("close")   public fn spec_close(fd: Int32) -> Int32;
+    @ffi_name("getpid")  public fn spec_getpid() -> Int32;
+}
+
+fn main() {
+    let a  = spec_abs(0 - 137);
+    let l  = spec_labs(0 - 999);
+    let t  = spec_toupper(97);
+    let cl = spec_close(0 - 1);
+    let g  = spec_getpid();
+
+    // PRINT BEFORE ASSERTING. "every binding is zero" and "one binding is
+    // zero" are different failures: the first says the FFI path is gone,
+    // the second says a name slipped past the check. They must not look
+    // alike in the log.
+    println(f"abs={a} labs={l} toupper={t} close={cl} getpid_pos={g > 0}");
+
+    assert_eq(a, 137);
+    assert_eq(l, 999);
+    assert_eq(t, 65);
+
+    assert_eq(cl, 0 - 1);
+    assert(g > 0);
+}

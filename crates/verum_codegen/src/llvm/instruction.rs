@@ -22235,6 +22235,61 @@ fn op_reg(operands: &[u8], idx: usize) -> u16 {
     0
 }
 
+/// T1413 — an `@ffi` binding means "call THIS symbol", not "here is a
+/// function whose meaning you may assume".
+///
+/// LLVM's TargetLibraryInfo recognises the C library's names, and an
+/// `declare i32 @abs(i32)` with no `nobuiltin` is an invitation to rewrite
+/// the call using assumed semantics. Measured 2026-09-11: `spec_abs(-137)`
+/// bound to C `abs` via `@ffi_name` returned 137 at Tier 0 and 0 at
+/// Tier 1, while `getpid` in the same program and binary was correct. The
+/// emitted IR was RIGHT before the cleanup passes (`trunc`, `call i32
+/// @abs`, `sext`); `nm -u` on the built binary then listed `_getpid` as
+/// undefined and NOT `_abs` — the call had not survived to the linker.
+///
+/// The names most exposed are exactly the ones a user binds: `abs`,
+/// `memcpy`, `strlen`, `malloc`, `printf`. `sqrt` and `floor` happened to
+/// be correct at both tiers, so the effect is per-name, which makes it
+/// harder to find rather than rarer.
+///
+/// `nobuiltin` on the DECLARATION is the narrow statement of the fact:
+/// this symbol's body is not known here.
+fn mark_ffi_declaration_nobuiltin<'ctx>(
+    ctx: &FunctionContext<'ctx, '_>,
+    f: verum_llvm::values::FunctionValue<'ctx>,
+) {
+    use verum_llvm::attributes::{Attribute, AttributeLoc};
+    let kind = Attribute::get_named_enum_kind_id("nobuiltin");
+    if kind != 0 {
+        let attr = ctx.llvm_context().create_enum_attribute(kind, 0);
+        f.add_attribute(AttributeLoc::Function, attr);
+    }
+}
+
+/// T1413, second half — the CALL SITE carries its own attribute set, and
+/// that is where `-fno-builtin` puts `nobuiltin`.
+///
+/// Marking only the declaration was MEASURED insufficient: the attribute
+/// reached the IR (`declare i32 @abs(i32) #6`, `attributes #6 =
+/// { nobuiltin }`) and the calls were still replaced by the constant 0.
+/// Measured blast radius, one program, five bindings:
+///     abs(-137) 137 -> 0, labs(-999) 999 -> 0, toupper(97) 65 -> 0
+///     close(-1) -1 -> -1, getpid() correct
+/// — the three that fail are the ones whose semantics LLVM can model;
+/// the two that survive are opaque syscalls. None of the three reached
+/// the linker (`nm -u` lists `_close` and `_getpid` only).
+fn mark_ffi_call_nobuiltin<'ctx>(
+    ctx: &FunctionContext<'ctx, '_>,
+    call: verum_llvm::values::CallSiteValue<'ctx>,
+) {
+    use verum_llvm::attributes::{Attribute, AttributeLoc};
+    let kind = Attribute::get_named_enum_kind_id("nobuiltin");
+    if kind != 0 {
+        let attr = ctx.llvm_context().create_enum_attribute(kind, 0);
+        call.add_attribute(AttributeLoc::Function, attr);
+    }
+}
+
 /// Read the `width` (bits) and `signed` immediates that follow `num_regs`
 /// register operands in an ArithExtended operand stream
 /// (`[reg…][width:1b][signed:1b]`). Width-aware wrapping / saturating / checked
@@ -34833,6 +34888,7 @@ fn lower_ffi_extended<'ctx>(
                 } else {
                     let f = llvm_module.add_function(symbol_name, ft, None);
                     f.set_call_conventions(calling_convention);
+                    mark_ffi_declaration_nobuiltin(ctx, f);
                     f
                 };
                 (ft, f)
@@ -34923,6 +34979,7 @@ fn lower_ffi_extended<'ctx>(
 
             // Set calling convention on call site
             call_site.set_call_convention(calling_convention);
+            mark_ffi_call_nobuiltin(ctx, call_site);
 
             // Post-call: error protocol checking
             emit_ffi_error_protocol_check(ctx, &call_site, ffi_symbol, ret_reg)?;
@@ -35003,6 +35060,7 @@ fn lower_ffi_extended<'ctx>(
             } else {
                 let func = llvm_module.add_function(symbol_name, fn_type, None);
                 func.set_call_conventions(ffi_subop_to_calling_convention(SystemSubOpcode::CallFfiC));
+                mark_ffi_declaration_nobuiltin(ctx, func);
                 func
             };
 

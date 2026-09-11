@@ -1718,11 +1718,48 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
             let mut patched = 0usize;
             let mut skipped_libc = 0usize;
             let mut skipped_intrinsic = 0usize;
+            // T1413 — the structural answer to "is this name foreign?".
+            // Built once; `@ffi_name`/`@link_name` overrides are already
+            // resolved into the symbol's interned name by `build_module`'s
+            // finalize, so this set holds the DLSYM keys, which is exactly
+            // what the LLVM function is named.
+            let ffi_symbol_names: std::collections::HashSet<&str> = vbc_module
+                .ffi_symbols
+                .iter()
+                .filter_map(|sym| vbc_module.strings.get(sym.name))
+                .collect();
             let mut func = self.module.get_first_function();
             while let Some(f) = func {
                 let next = f.get_next_function();
                 if f.get_first_basic_block().is_none() {
                     let name = f.get_name().to_string_lossy().to_string();
+                    // T1413 — ASK THE MODULE, NOT A LIST.
+                    //
+                    // `is_libc_extern` below is 169 literal names, and it is
+                    // the roster of what `core/` itself happens to call. A
+                    // user may bind ANY C symbol with `@ffi`, so the list
+                    // cannot be complete by construction — and a name that is
+                    // not on it got a `skipped_entry { ret 0 }` body HERE,
+                    // `internal`, shadowing the real dylib symbol.
+                    //
+                    // Measured before this check, one program, five bindings:
+                    //     abs(-137) 137 -> 0     labs(-999) 999 -> 0
+                    //     toupper(97) 65 -> 0    close(-1) -1 -> -1
+                    //     getpid() correct
+                    // The three that failed are absent from the list; the two
+                    // that worked are on it. Their resemblance to "names LLVM
+                    // can model" was a coincidence of who wrote the roster.
+                    //
+                    // The module already KNOWS which names are foreign: every
+                    // `@ffi` declaration is an entry in `vbc_module
+                    // .ffi_symbols`, named through the string table. Asking
+                    // that cannot rot, because it is the same table the call
+                    // site resolved against.
+                    if ffi_symbol_names.contains(name.as_str()) {
+                        skipped_libc += 1;
+                        func = next;
+                        continue;
+                    }
                     if is_libc_extern(&name) {
                         // Leave libc decls alone — linker resolves at link time.
                         skipped_libc += 1;
