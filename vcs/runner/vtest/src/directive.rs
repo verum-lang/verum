@@ -1259,7 +1259,26 @@ impl TestDirectives {
             } else if let Some(rest) = comment.strip_prefix("@teardown:") {
                 directives.teardown_fn = Some(rest.trim().to_string().into());
             } else if let Some(rest) = comment.strip_prefix("@isolation:") {
-                directives.isolation = Some(rest.trim().to_string().into());
+                // A LEVEL THE RUNNER CANNOT HONOUR IS REFUSED, NOT STORED.
+                //
+                // `IsolationLevel` has four variants and no consumer outside
+                // its own file: specs run IN-PROCESS through direct library
+                // integration, sharing every process-global the compiler owns.
+                // A spec asking for `process` used to get `none` in silence —
+                // and the one spec that asked documented, in a tracked file,
+                // that the runner "forks a fresh process for each top-level
+                // function call in `main()`". It does not.
+                let level = rest.trim();
+                if level != "none" {
+                    return Err(DirectiveError::ParseError {
+                        line: line_num + 1,
+                        message: format!(
+                            "@isolation: {level} — the runner executes specs                              in-process and implements no isolation level.                              Only `none` is honest; a spec that needs real                              isolation cannot be expressed yet."
+                        )
+                        .into(),
+                    });
+                }
+                directives.isolation = Some(level.to_string().into());
             } else if let Some(rest) = comment.strip_prefix("@snapshot:") {
                 directives.snapshot = Some(rest.trim().to_string().into());
             } else if let Some(rest) = comment.strip_prefix("@mock:") {
@@ -2360,6 +2379,36 @@ fn main() { panic("oops"); }
             path.to_string().into(),
         )
         .expect("header parses")
+    }
+
+    /// A spec cannot ask for isolation the runner does not implement.
+    ///
+    /// `IsolationLevel` declares four variants and defaults to `Process`
+    /// ("each test runs in a separate process"); measured 2026-09-12 it has
+    /// no consumer outside its own file, and every spec runs in-process.
+    /// Storing the request silently is what let one spec document, in a
+    /// tracked file, that the runner forks per test.
+    #[test]
+    fn an_isolation_level_the_runner_cannot_honour_is_refused() {
+        let header =
+            |lvl: &str| format!("// @test: typecheck-pass\n// @level: L1\n// @isolation: {lvl}\n");
+        for lvl in ["process", "directory", "container", "sandbox"] {
+            let err = TestDirectives::parse(&header(lvl), "x.vr".to_string().into())
+                .expect_err(&format!("@isolation: {lvl} must be refused"));
+            let text = format!("{err:?}");
+            assert!(text.contains("in-process"), "the refusal says why: {text}");
+        }
+        // `none` is the truth, and stays accepted.
+        let ok = TestDirectives::parse(&header("none"), "x.vr".to_string().into())
+            .expect("@isolation: none is what actually happens");
+        assert_eq!(ok.isolation.as_deref(), Some("none"));
+        // And a spec that says nothing about isolation is untouched.
+        let quiet = TestDirectives::parse(
+            "// @test: typecheck-pass\n// @level: L1\n",
+            "x.vr".to_string().into(),
+        )
+        .expect("no directive, no opinion");
+        assert_eq!(quiet.isolation, None);
     }
 
     #[test]

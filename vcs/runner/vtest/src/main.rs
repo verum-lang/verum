@@ -249,8 +249,10 @@ enum Commands {
         #[arg(long, default_value = "true")]
         show_diff: bool,
 
-        /// Isolation level (none, process, directory, container)
-        #[arg(long, default_value = "process")]
+        /// Isolation level. Only `none` is implemented: the runner executes
+        /// specs in-process, so any other value is refused rather than
+        /// silently ignored.
+        #[arg(long, default_value = "none")]
         isolation: Text,
 
         /// Compile-time only mode: Run/RunPanic tests verify only typecheck
@@ -959,6 +961,30 @@ async fn run_tests(
     use_colors: bool,
     toml_config: VTestToml,
 ) -> Result<i32, RunnerError> {
+    // AN ISOLATION LEVEL THE RUNNER CANNOT HONOUR IS REFUSED, NOT IGNORED.
+    //
+    // `IsolationLevel` is declared in `isolation.rs` with four variants and a
+    // default of `Process` whose docstring reads "each test runs in a separate
+    // process". Measured 2026-09-12: the type has no consumer outside its own
+    // file — neither the CLI flag nor the `@isolation:` directive reaches
+    // anything, and every spec runs IN-PROCESS through direct integration.
+    //
+    // Silently accepting `--isolation process` is the worst of the three
+    // options: it tells the caller the tests were isolated when they shared
+    // every process-global the compiler owns, which is the state this task
+    // spent a night measuring. Refusing says the true thing in one line.
+    match opts.isolation.as_str() {
+        "none" => {}
+        other => {
+            return Err(RunnerError::ConfigError(
+                format!(
+                    "--isolation {other}: the runner executes specs IN-PROCESS                      (direct library integration) and implements no isolation                      level. Only `none` is honest. Specs therefore share every                      process-global the compiler owns; `--parallel 1` bounds                      the interleaving but not the sharing."
+                )
+                .into(),
+            ));
+        }
+    }
+
     let mut config = toml_config.to_runner_config();
 
     // Override with CLI arguments

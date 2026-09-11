@@ -1,24 +1,28 @@
 // @test: typecheck-pass
 // @tier: 0
 // @level: L2
-// @tags: testing, isolation, subprocess, stateful, process-isolation
+// @tags: testing, stateful, singleton, signal-handler
 // @timeout: 10000
-// @isolation: process
-// @description: Pins the @isolation directive for subprocess-per-test execution (#59).
+// @description: Type shapes for the patterns that WOULD need per-test isolation.
 //
-// `@isolation: <level>` requests a specific isolation level for this spec:
+// THIS SPEC NO LONGER CARRIES `@isolation: process`, and the prose it used to
+// carry was false. Measured 2026-09-12: `IsolationLevel` is declared with four
+// variants and a default of `Process` whose docstring promises a process per
+// test, and it has no consumer anywhere outside its own file. The runner
+// executes every spec IN-PROCESS through direct library integration. The
+// sentence this file used to state — "the vtest runner forks a fresh process
+// for each top-level function call in `main()`" — described nothing that
+// happens.
 //
-//   none      — tests share the same process environment (fastest; no isolation).
-//   process   — each test function runs in a fresh subprocess (DEFAULT for
-//                stateful tests — filesystem writes, global state, singletons).
-//   directory — each test gets a unique temp directory (implies process).
-//   container — tests run in an isolated container (most isolation; slowest).
+// The directive now refuses any level but `none`, so a spec cannot silently
+// ask for isolation it will not get; the refusal itself is pinned by a unit
+// test in the runner, where it belongs, because a spec cannot assert about
+// the parsing of its own header.
 //
-// When `@isolation: process` is set, the vtest runner forks a fresh process for
-// each top-level function call in `main()`.  Panics in the subprocess do not
-// crash the parent runner.  Exit-code 0 = pass, non-zero = fail.
-//
-// This spec verifies the type-shapes for patterns that REQUIRE process isolation:
+// What remains here is what the file actually checks: the type-shapes of the
+// patterns that would REQUIRE isolation if it existed. They are worth keeping
+// — they are the reason the capability is wanted — but they prove nothing
+// about isolation, and this header no longer pretends otherwise:
 //   1. Global mutable state (static / module-level variables) reset per-test.
 //   2. Filesystem writes that must not bleed across test functions.
 //   3. Process-exit behavior (verum's `process.exit()` in a subprocess context).
@@ -31,8 +35,10 @@ mount core.collections.list.{List};
 
 // ── 1. Stateful singleton shape ───────────────────────────────────────────────
 //
-// `OnceCell<T>` is initialized at most once per process.
-// When @isolation: process is set, each test fn gets a fresh OnceCell.
+// `OnceCell<T>` is initialized at most once per process. WERE there a
+// per-test process, each test fn would get a fresh one; today they would
+// share it, which is why the shape is worth pinning and the isolation is
+// worth wanting.
 
 type OnceCell<T> is { value: Maybe<T> };
 
@@ -61,8 +67,8 @@ fn test_once_cell_initializes_exactly_once() {
 
 // ── 2. Filesystem write pattern ───────────────────────────────────────────────
 //
-// Each subprocess test gets its own temp directory (when @isolation: directory).
-// Shape-only: the actual tmpdir injection is the runner's concern.
+// A per-test temp directory is what `directory` isolation would give.
+// Shape-only: nothing injects a tmpdir today.
 
 fn test_temp_path_shape_typechecks() {
     // In a real isolated test the runner injects the temp path.
@@ -78,17 +84,22 @@ fn write_to_path(path: &Text, content: &Text) -> Result<(), Text> {
 
 // ── 3. Process-exit in subprocess context ────────────────────────────────────
 //
-// Calling process.exit() in a subprocess should not crash the parent runner.
-// Shape: the exit function has type fn(Int) -> !
+// Calling process.exit() would not crash the parent runner IF the test ran
+// in a subprocess. It does not. Shape: the exit function has type
+// fn(Int) -> !
 
 fn exit_shape_typechecks(code: Int) -> ! {
-    core.sys.process.exit(code)
+    // `core.sys.process.exit` does not exist and never did — this line was
+    // `unbound variable` at HEAD, so the file failed its own
+    // `@test: typecheck-pass` before any of today's edits. The portable exit
+    // is `core.shell.script.exit`.
+    core.shell.script.exit(code)
 }
 
 // ── 4. Signal handler registration shape ─────────────────────────────────────
 //
-// Signal handlers are per-process. Under @isolation: process each test fn
-// registers its own handlers without interfering with other tests.
+// Signal handlers are per-process, so without per-test processes every
+// spec in one run shares them. Shape-only.
 
 type SignalHandler is fn(Int) -> ();
 
@@ -102,35 +113,9 @@ fn test_signal_handler_shape() {
     assert(r.is_ok());
 }
 
-// ── 5. Isolation level parsing: valid values ─────────────────────────────────
-//
-// The @isolation directive accepts: none | process | directory | container.
-// This function models the runner's parse logic shape.
-
-fn isolation_level_from_text(s: &Text) -> Maybe<Text> {
-    if *s == Text.from("none")
-        || *s == Text.from("process")
-        || *s == Text.from("directory")
-        || *s == Text.from("container")
-    {
-        Some(s.clone())
-    } else {
-        None
-    }
-}
-
-fn test_isolation_level_parse() {
-    assert(isolation_level_from_text(&Text.from("process")).is_some());
-    assert(isolation_level_from_text(&Text.from("none")).is_some());
-    assert(isolation_level_from_text(&Text.from("directory")).is_some());
-    assert(isolation_level_from_text(&Text.from("container")).is_some());
-    assert(isolation_level_from_text(&Text.from("unknown")).is_none());
-}
-
 fn main() {
     test_once_cell_initializes_exactly_once();
     test_temp_path_shape_typechecks();
     test_signal_handler_shape();
-    test_isolation_level_parse();
-    print("@isolation subprocess-per-test typecheck ok");
+    print("stateful-pattern type shapes typecheck ok");
 }
