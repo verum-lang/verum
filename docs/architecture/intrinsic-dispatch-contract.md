@@ -322,6 +322,10 @@ newtypes: **a parent whose construction the pass cannot observe at all.**
   candidate closure — a structural impl target is never excluded by the
   "record never constructed" rule, because its descriptor is synthesised
   and its instances never pass through `New`/`NewG`.
+- Cost of that inclusion, measured on one probe back-to-back with the
+  pre-fix binary: **87s → 75s**. Un-pruning `Slice`/`Array`/`Tuple`
+  methods did not cost AOT compile time here; the difference is load
+  noise, and it runs in the favourable direction.
 - Spec: `vcs/specs/L0-critical/stdlib-runtime/`
   `a_method_on_a_slice_dispatches_at_both_tiers.vr` — eight rungs at both
   tiers; rungs 5 and 6 are the `?` shape, the only pair that fails
