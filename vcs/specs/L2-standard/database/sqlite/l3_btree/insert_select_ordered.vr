@@ -27,14 +27,14 @@ public async fn main() -> Result<(), Error> {
     ).await?;
 
     // Scrambled insert order:
-    let keys: List<Int64> = list![42, 7, 99, 1, 23, 56, 11, 3, 88, 64, 77, 12];
+    let keys: List<Int64> = [42, 7, 99, 1, 23, 56, 11, 3, 88, 64, 77, 12];
     for k in keys.iter() {
-        tree.insert(*k, list![0xAB; 16]).await?;
+        tree.insert(*k, [0xAB; 16]).await?;
     }
 
     // Cursor scan — should see sorted keys.
     let mut cursor = tree.seek_first().await?;
-    let mut seen: List<Int64> = list![];
+    let mut seen: List<Int64> = [];
     while !cursor.is_at_end() {
         seen.push(cursor.current_key().await?);
         cursor.next().await?;
@@ -45,6 +45,6 @@ public async fn main() -> Result<(), Error> {
     assert_eq(seen, expected);
 
     // Invariant check — integrity_check should report no issues.
-    assert!(tree.integrity_check().await?.is_ok());
+    assert(tree.integrity_check().await?.is_ok());
     Ok(())
 }

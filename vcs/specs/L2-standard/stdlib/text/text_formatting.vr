@@ -349,7 +349,7 @@ fn test_debug_formatting() {
     let list: List<Int> = [1, 2, 3];
     assert(format("{:?}", list) == "[1, 2, 3]");
 
-    let map: Map<Text, Int> = map!{"a" => 1, "b" => 2};
+    let map: Map<Text, Int> = Map.from([("a", 1), ("b", 2)]);
     let map_debug: Text = format("{:?}", map);
     assert(map_debug.contains("\"a\""));
     assert(map_debug.contains("1"));

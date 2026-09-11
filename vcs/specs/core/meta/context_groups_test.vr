@@ -234,7 +234,7 @@ meta fn my_debug_derive(input: Ast) -> Ast using [MetaDerive] {
     quote {
         implement Debug for lift(struct_name) {
             fn debug(&self) -> Text {
-                stringify!(lift(struct_name))
+                @stringify(lift(struct_name))
             }
         }
     }
@@ -248,9 +248,9 @@ meta fn trace_calls(input: Ast) -> Ast using [MetaAttr] {
 
     quote {
         fn lift(fn_name)() {
-            print(f"Entering {stringify!(lift(fn_name))}");
+            print(f"Entering {@stringify(lift(fn_name))}");
             // Original function body would be inserted here
-            print(f"Exiting {stringify!(lift(fn_name))}");
+            print(f"Exiting {@stringify(lift(fn_name))}");
         }
     }
 }

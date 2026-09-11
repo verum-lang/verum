@@ -30,7 +30,7 @@ public async fn main() -> Result<(), Error> {
     // Manual checkpoint:
     let stats: Text = conn.query_scalar(sql#"PRAGMA wal_checkpoint(FULL)"#).await?;
     // Expected format: "0|N|M" (busy|log_size|checkpointed)
-    assert!(stats.starts_with("0|"));
+    assert(stats.starts_with("0|"));
 
     conn.close().await?;
     delete_file("/tmp/loom-wal-test.db").await?;

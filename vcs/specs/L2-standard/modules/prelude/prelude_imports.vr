@@ -73,7 +73,7 @@ fn test_prelude_macros() {
     // Common macros from prelude
     let v = [1, 2, 3];
     let s = {1, 2, 3};
-    let m = map!{"a" => 1, "b" => 2};
+    let m = Map.from([("a", 1), ("b", 2)]);
 
     // Format string
     let text = f"Value: {42}";

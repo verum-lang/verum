@@ -30,11 +30,11 @@ fn test_map_creation() {
     assert(empty.len() == 0);
 
     // Map literal macro
-    let from_literal: Map<Text, Int> = map!{
-        "one" => 1,
-        "two" => 2,
-        "three" => 3,
-    };
+    let from_literal: Map<Text, Int> = Map.from([
+        ("one", 1),
+        ("two", 2),
+        ("three", 3),
+    ]);
     assert(from_literal.len() == 3);
 
     // Map with capacity hint
@@ -53,16 +53,16 @@ fn test_map_creation() {
     // assert(custom_hash.is_empty());
 
     // Clone a map
-    let original: Map<Text, Int> = map!{"key" => 42};
+    let original: Map<Text, Int> = Map.from([("key", 42)]);
     let cloned: Map<Text, Int> = original.clone();
     assert(cloned == original);
     assert(cloned["key"] == 42);
 
     // Nested maps
-    let nested: Map<Text, Map<Text, Int>> = map!{
-        "outer1" => map!{"inner1" => 1, "inner2" => 2},
-        "outer2" => map!{"inner3" => 3},
-    };
+    let nested: Map<Text, Map<Text, Int>> = Map.from([
+        ("outer1", Map.from([("inner1", 1), ("inner2", 2)])),
+        ("outer2", Map.from([("inner3", 3)])),
+    ]);
     assert(nested.len() == 2);
     assert(nested["outer1"]["inner1"] == 1);
 }
@@ -98,12 +98,12 @@ fn test_map_insertion() {
     assert(complex["numbers"] == [1, 2, 3]);
 
     // Bulk insert with extend
-    let mut extended: Map<Text, Int> = map!{"a" => 1};
+    let mut extended: Map<Text, Int> = Map.from([("a", 1)]);
     extended.extend([("b", 2), ("c", 3)]);
     assert(extended.len() == 3);
 
     // Commented out: OccupiedError type not found
-    // let mut try_map: Map<Text, Int> = map!{"exists" => 1};
+    // let mut try_map: Map<Text, Int> = Map.from([("exists", 1)]);
     // let result1: Result<&mut Int, OccupiedError<Text, Int>> = try_map.try_insert("exists", 2);
     // assert(result1.is_err());
     // let result2: Result<&mut Int, OccupiedError<Text, Int>> = try_map.try_insert("new", 2);
@@ -112,11 +112,11 @@ fn test_map_insertion() {
 
 /// Test map retrieval operations
 fn test_map_retrieval() {
-    let map: Map<Text, Int> = map!{
-        "alice" => 100,
-        "bob" => 85,
-        "charlie" => 92,
-    };
+    let map: Map<Text, Int> = Map.from([
+        ("alice", 100),
+        ("bob", 85),
+        ("charlie", 92),
+    ]);
 
     // Direct indexing (panics if key not found)
     let alice_score: Int = map["alice"];
@@ -173,12 +173,12 @@ fn test_map_retrieval() {
 
 /// Test map removal operations
 fn test_map_removal() {
-    let mut map: Map<Text, Int> = map!{
-        "one" => 1,
-        "two" => 2,
-        "three" => 3,
-        "four" => 4,
-    };
+    let mut map: Map<Text, Int> = Map.from([
+        ("one", 1),
+        ("two", 2),
+        ("three", 3),
+        ("four", 4),
+    ]);
 
     // Basic remove - returns Maybe<V>
     let removed: Maybe<Int> = map.remove("two");
@@ -203,18 +203,18 @@ fn test_map_removal() {
     assert(map.len() == 2);
 
     // Clear - remove all entries
-    let mut to_clear: Map<Text, Int> = map!{"a" => 1, "b" => 2};
+    let mut to_clear: Map<Text, Int> = Map.from([("a", 1), ("b", 2)]);
     to_clear.clear();
     assert(to_clear.is_empty());
     assert(to_clear.len() == 0);
 
     // Retain - keep entries matching predicate
-    let mut to_retain: Map<Text, Int> = map!{
-        "a" => 1,
-        "b" => 2,
-        "c" => 3,
-        "d" => 4,
-    };
+    let mut to_retain: Map<Text, Int> = Map.from([
+        ("a", 1),
+        ("b", 2),
+        ("c", 3),
+        ("d", 4),
+    ]);
     to_retain.retain(|_, v| *v % 2 == 0);
     assert(to_retain.len() == 2);
     assert(to_retain.contains_key("b"));
@@ -222,7 +222,7 @@ fn test_map_removal() {
     assert(!to_retain.contains_key("a"));
 
     // drain - remove and iterate all entries
-    let mut to_drain: Map<Text, Int> = map!{"x" => 10, "y" => 20};
+    let mut to_drain: Map<Text, Int> = Map.from([("x", 10), ("y", 20)]);
     let drained: List<(Text, Int)> = to_drain.drain().collect();
     assert(to_drain.is_empty());
     assert(drained.len() == 2);
@@ -230,11 +230,11 @@ fn test_map_removal() {
 
 /// Test map iteration patterns
 fn test_map_iteration() {
-    let map: Map<Text, Int> = map!{
-        "alice" => 100,
-        "bob" => 85,
-        "charlie" => 92,
-    };
+    let map: Map<Text, Int> = Map.from([
+        ("alice", 100),
+        ("bob", 85),
+        ("charlie", 92),
+    ]);
 
     // Iterate over key-value pairs
     let mut pair_count: Int = 0;
@@ -275,7 +275,7 @@ fn test_map_iteration() {
     assert(mutable_map["alice"] == 100);
 
     // Consuming iteration with into_iter
-    let to_consume: Map<Text, Int> = map!{"a" => 1, "b" => 2};
+    let to_consume: Map<Text, Int> = Map.from([("a", 1), ("b", 2)]);
     let collected: List<(Text, Int)> = to_consume.into_iter().collect();
     assert(collected.len() == 2);
     // Note: to_consume is moved
@@ -324,7 +324,7 @@ fn test_map_entry_api() {
     assert(default_map["value"] == 42);
 
     // and_modify - modify existing entry
-    let mut modify_map: Map<Text, Int> = map!{"existing" => 10};
+    let mut modify_map: Map<Text, Int> = Map.from([("existing", 10)]);
     modify_map.entry("existing").and_modify(|v| *v += 5);
     assert(modify_map["existing"] == 15);
 
@@ -360,12 +360,12 @@ fn test_map_entry_api() {
 
 /// Test functional/iterator operations on maps
 fn test_map_functional_operations() {
-    let map: Map<Text, Int> = map!{
-        "alice" => 100,
-        "bob" => 85,
-        "charlie" => 92,
-        "david" => 78,
-    };
+    let map: Map<Text, Int> = Map.from([
+        ("alice", 100),
+        ("bob", 85),
+        ("charlie", 92),
+        ("david", 78),
+    ]);
 
     // filter - keep entries matching predicate
     let high_scores: Map<Text, Int> = map.iter()
@@ -432,14 +432,15 @@ fn test_map_functional_operations() {
 
 /// Test map merging and combining operations
 fn test_map_merge_operations() {
-    let map_a: Map<Text, Int> = map!{
-        "one" => 1,
-        "two" => 2,
-    };
-    let map_b: Map<Text, Int> = map!{
-        "two" => 20,  // Conflict with map_a
-        "three" => 3,
-    };
+    let map_a: Map<Text, Int> = Map.from([
+        ("one", 1),
+        ("two", 2),
+    ]);
+    let map_b: Map<Text, Int> = Map.from([
+        ("two", 20),
+        (// Conflict with map_a
+        "three", 3),
+    ]);
 
     // extend - later values overwrite
     let mut extended: Map<Text, Int> = map_a.clone();
@@ -515,21 +516,21 @@ fn test_map_capacity_management() {
 
 /// Test map comparisons
 fn test_map_comparison() {
-    let map_a: Map<Text, Int> = map!{
-        "one" => 1,
-        "two" => 2,
-    };
-    let map_b: Map<Text, Int> = map!{
-        "two" => 2,
-        "one" => 1,
-    };
-    let map_c: Map<Text, Int> = map!{
-        "one" => 1,
-        "two" => 3,  // Different value
-    };
-    let map_d: Map<Text, Int> = map!{
-        "one" => 1,
-    };
+    let map_a: Map<Text, Int> = Map.from([
+        ("one", 1),
+        ("two", 2),
+    ]);
+    let map_b: Map<Text, Int> = Map.from([
+        ("two", 2),
+        ("one", 1),
+    ]);
+    let map_c: Map<Text, Int> = Map.from([
+        ("one", 1),
+        ("two", 3),
+    ]);
+    let map_d: Map<Text, Int> = Map.from([
+        ("one", 1),
+    ]);
 
     // Equality (order doesn't matter for HashMap)
     assert(map_a == map_b);

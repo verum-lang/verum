@@ -34,7 +34,7 @@ public async fn main() using [MockVfs] -> Result<(), Error> {
 
     // Attempt third insert — commit will fsync and then crash.
     let result = conn.execute(sql#"INSERT INTO t VALUES (3)"#).await;
-    assert!(result.is_err());
+    assert(result.is_err());
 
     MockVfs.power_cycle();
 
@@ -46,6 +46,6 @@ public async fn main() using [MockVfs] -> Result<(), Error> {
         .await?;
 
     // Rows 1 and 2 must survive; row 3 must not (inject crashed its commit).
-    assert_eq(rows, list![1, 2]);
+    assert_eq(rows, [1, 2]);
     Ok(())
 }

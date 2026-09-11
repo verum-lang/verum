@@ -34,7 +34,7 @@ public async fn main() -> Result<(), Error> {
 
     // file_b tries to escalate to RESERVED — blocked (EBUSY).
     let err = file_b.lock(LockKind.Reserved).await;
-    assert!(err.is_err());
+    assert(err.is_err());
 
     // Release everything.
     file_a.unlock(LockKind.Unlocked).await?;

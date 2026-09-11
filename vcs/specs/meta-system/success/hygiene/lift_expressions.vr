@@ -133,11 +133,11 @@ meta fn lift_list_elements() -> TokenStream {
 }
 
 meta fn lift_map_result() -> TokenStream {
-    let data = map!{
-        "a" => 1,
-        "b" => 2,
-        "c" => 3,
-    };
+    let data = Map.from([
+        ("a", 1),
+        ("b", 2),
+        ("c", 3),
+    ]);
     let count = data.len();
 
     quote {

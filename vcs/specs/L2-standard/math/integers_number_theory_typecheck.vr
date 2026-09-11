@@ -62,16 +62,16 @@ fn exercise_euler_phi_multiplicative_for_coprime() {
 
 fn exercise_prev_prime_basic() {
     // No prime below 2.
-    assert(matches!(prev_prime(0), None));
-    assert(matches!(prev_prime(1), None));
+    assert(prev_prime(0) is Maybe.None);
+    assert(prev_prime(1) is Maybe.None);
     // prev_prime(2) = 2 (2 is the first prime).
-    assert(matches!(prev_prime(2), Some(2)));
+    assert(prev_prime(2) is Maybe.Some(2));
     // prev_prime(3) = 3.
-    assert(matches!(prev_prime(3), Some(3)));
+    assert(prev_prime(3) is Maybe.Some(3));
     // prev_prime(10) = 7.
-    assert(matches!(prev_prime(10), Some(7)));
+    assert(prev_prime(10) is Maybe.Some(7));
     // prev_prime(20) = 19.
-    assert(matches!(prev_prime(20), Some(19)));
+    assert(prev_prime(20) is Maybe.Some(19));
 }
 
 fn exercise_prev_prime_inverse_of_next_prime() {
@@ -81,7 +81,10 @@ fn exercise_prev_prime_inverse_of_next_prime() {
     while i < primes.len() {
         let p = primes[i];
         assert(next_prime(p - 1) == p);
-        assert(matches!(prev_prime(p + 1), Some(q) if q == p));
+        assert(match prev_prime(p + 1) {
+                Maybe.Some(q) => q == p,
+                Maybe.None    => false,
+            });
         i = i + 1;
     }
 }
