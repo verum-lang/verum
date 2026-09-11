@@ -2644,6 +2644,45 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
         self.maybe_inner_types.remove(&reg);
         self.tuple_element_types.remove(&reg);
         self.closure_return_types.remove(&reg);
+        // **T1441 — `obj_register_types` was in none of the categories
+        // above.** Not cleared, not listed as deliberately held back, not
+        // named as latent. It simply survived a store, so a register
+        // reused for a new value kept the PREVIOUS value's type name.
+        //
+        // What that cost, measured end to end on a five-line programme
+        // (Tier 0 right, Tier 1 wrong):
+        //
+        //  1. `mark_call_result_from_retname` early-returns when the
+        //     destination already carries a mark — `[retmark] in=main
+        //     fn=File.create dst=r0 SKIPPED: already obj_type`. The guard
+        //     exists to protect a fresher fact and it read a STALE one;
+        //  2. so `mark_register_from_return_type` never ran, and
+        //     `result_arm_types` was never recorded for the
+        //     `Result<File, StreamError>`;
+        //  3. `GetVariantData` stamps the extracted payload only from
+        //     those, so the payload register got NO name;
+        //  4. `lower_ref`'s `is_heap_type` has the term
+        //     `get_obj_register_type(src).is_some()` — now false:
+        //     `[refmark] main Ref r7<-r5 heap=false obj=None`;
+        //  5. so `&f` took the PRIMITIVE recipe — `alloca i64`, store the
+        //     object pointer into it, pass the SLOT's address;
+        //  6. and the callee, whose IR is correct, did `inttoptr` + `+24`
+        //     + load on that slot address and returned garbage.
+        //
+        // It also explains why the defect looked programme-dependent and
+        // defeated a dozen controls: whether step 1 happens depends on
+        // whether the allocator reused a register that already carried a
+        // named object, which is a property of the surrounding code.
+        //
+        // THE OBLIGATION THIS LIST STATES IS MET, checked per site rather
+        // than by a line window: 58 `set_obj_register_type` call sites,
+        // every one of them after a store of that register. The six that a
+        // textual matcher flagged are the parameter-marking loop in
+        // `lower_vbc_function` (vbc_lowering.rs:3541), whose registers are
+        // stored by `ctx.set_register(i as u16, param)` at :3351 — the same
+        // registers, the same function, 190 lines earlier. The matcher
+        // compared the EXPRESSION (`i as u16` vs `reg`), not the register.
+        self.obj_register_types.remove(&reg);
         // **T1194, the last two** — held back from 80cc648ec because
         // `Instruction::RefChecked` and `RefUnsafe` marked them BEFORE
         // their stores. Both arms now mark at their single exit (four
