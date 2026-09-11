@@ -636,6 +636,21 @@ pub struct CodegenContext {
     /// `GetF`, since the value IS the single field (no heap indirection).
     pub newtype_names: HashSet<String>,
 
+    /// Names of THIS function's bindings whose declared type is a
+    /// REFERENCE (`&T`, `&checked T`, `&unsafe T`, `&gen T`, `*T`).
+    ///
+    /// Exists for one question: `p.0` on a transparent wrapper compiles
+    /// to an identity `Mov`, because the wrapper's register holds the
+    /// inner value and the unwrap is genuinely free. When the register
+    /// holds a REFERENCE to the wrapper instead, that same `Mov` hands
+    /// back the ADDRESS — and `infer_expr_type_name` erases the `&`, so
+    /// the two cases are indistinguishable at the decision point
+    /// (T1438: `fn f(p: &NT) -> Int { p.0 }` answered 6134571104 at
+    /// Tier 1 and 42 at Tier 0, with 493 such parameters in core/).
+    ///
+    /// Per-function, cleared with `variable_type_names`.
+    pub reference_bound_vars: HashSet<String>,
+
     /// Maps newtype name to its inner type name (e.g., "Meters" -> "Float").
     /// Used to propagate float tracking through newtype `.0` access.
     pub newtype_inner_type: HashMap<String, String>,
@@ -1636,6 +1651,7 @@ impl CodegenContext {
             const_generic_params: HashSet::new(),
             pending_static_call_type_args: None,
             newtype_names: HashSet::new(),
+            reference_bound_vars: HashSet::new(),
             newtype_inner_type: HashMap::new(),
             user_defined_types: HashSet::new(),
             mounted_types: HashMap::new(),
@@ -2545,6 +2561,7 @@ impl CodegenContext {
             self.last_function_variable_types = self.variable_type_names.clone();
         }
         self.variable_type_names.clear();
+        self.reference_bound_vars.clear();
         self.array_element_type_names.clear();
         // Pillar 1: register-keyed — must not leak across functions (and
         // closures re-use low register indices for their own params).
@@ -4587,6 +4604,7 @@ impl CodegenContext {
             self.last_function_variable_types = self.variable_type_names.clone();
         }
         self.variable_type_names.clear();
+        self.reference_bound_vars.clear();
         self.generic_type_params.clear();
         self.generic_type_params_ordered.clear();
         self.const_generic_params.clear();

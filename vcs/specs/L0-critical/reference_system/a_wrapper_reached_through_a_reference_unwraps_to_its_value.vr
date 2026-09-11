@@ -1,0 +1,80 @@
+// @test: run
+// @tier: 0,1
+// @level: L0
+// @tags: newtype, reference, cbgr, differential, regression
+// @timeout: 60000
+// @expected-exit: 0
+//
+// A TRANSPARENT WRAPPER REACHED THROUGH A REFERENCE UNWRAPS TO ITS VALUE
+// (T1438).
+//
+// A transparent wrapper has no runtime identity: its register holds the
+// inner value, so `x.0` is genuinely free and the codegen emits an
+// identity `Mov` for it. That is right, and it stops being right the
+// moment the register holds a REFERENCE to the wrapper instead — the
+// same `Mov` then hands back the ADDRESS.
+//
+// The two cases were indistinguishable at the decision point because
+// `infer_expr_type_name` erases the `&`: both `NT` and `&NT` answer "NT",
+// so both took the branch. Measured before the fix:
+//
+//     fn unwrap_by_ref(p: &NT) -> Int { p.0 }
+//     unwrap_by_ref(&NT(42))     Tier 0: 42      Tier 1: 6134571104
+//
+// The number is a stack address, which is why this is a spec and not a
+// crash report: nothing refuses, nothing warns, and the programme
+// continues with a plausible-looking integer. Downstream that became
+// `File.write` returning Err at Tier 1 — `write()` was handed a file
+// descriptor in the billions and answered EBADF.
+//
+// RUN AT BOTH TIERS, because the interpreter was already right and a
+// regression that breaks it instead would otherwise read as success.
+// Tier 0 encodes a reference as a register reference and Tier 1 as the
+// address of an alloca; the fix reads through either.
+//
+// THE VALUE FORMS ARE HERE TOO, and they are the load-bearing half: a
+// fix that simply stopped treating wrappers as transparent would pass
+// every reference case above and quietly make `NT(42).0` cost a heap
+// read. A named-field record sits beside them for the same reason — it
+// never took the transparent path and must not start.
+
+type NT is (Int);
+type Rec is { a: Int };
+
+fn unwrap_by_ref(p: &NT) -> Int { p.0 }
+fn unwrap_by_mut(p: &mut NT) -> Int { p.0 }
+fn unwrap_by_value(p: NT) -> Int { p.0 }
+fn record_by_ref(p: &Rec) -> Int { p.a }
+
+fn main() {
+    let mut n = NT(42);
+    let r = Rec { a: 77 };
+
+    // PRINT BEFORE ASSERTING: `assert_eq` says two values differ and
+    // never says what they were, and "returned the address" and
+    // "returned the wrong field" are different defects.
+    let direct = n.0;
+    print(f"direct={direct}");
+    assert(direct == 42);
+
+    let by_value = unwrap_by_value(n);
+    print(f"by_value={by_value}");
+    assert(by_value == 42);
+
+    // THE SUBJECT — both reference forms.
+    let by_ref = unwrap_by_ref(&n);
+    print(f"by_ref={by_ref}");
+    assert(by_ref == 42);
+
+    let by_mut = unwrap_by_mut(&mut n);
+    print(f"by_mut={by_mut}");
+    assert(by_mut == 42);
+
+    // A named-field record through a reference never used the
+    // transparent path and must still not.
+    let rec = record_by_ref(&r);
+    print(f"record={rec}");
+    assert(rec == 77);
+
+    print("a wrapper through a reference unwraps to its value");
+}

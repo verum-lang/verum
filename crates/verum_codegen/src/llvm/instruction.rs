@@ -43288,7 +43288,29 @@ fn lower_get_field<'ctx>(
                         vbc_mod.types.iter().any(|td| {
                             let tname = vbc_mod.get_string(td.name).unwrap_or("");
                             tname == type_name
-                                && (td.kind == verum_vbc::types::TypeKind::Newtype
+                                // `is_transparent_wrapper` is the SOURCE OF
+                                // TRUTH for newtype-ness — the field's own
+                                // docstring says so, and names
+                                // `CodegenContext::newtype_names` as its
+                                // redundant cache (verum_vbc/src/types.rs:1022).
+                                //
+                                // The two kind tests below it were the whole
+                                // guard, and they can never fire for a newtype
+                                // DECLARED IN VERUM: both `type X is T;` and
+                                // `type X is (T);` compile to
+                                // `kind: TypeKind::Record` with
+                                // `is_transparent_wrapper: true` and one field
+                                // `_0` (codegen/mod.rs:15664 and :15813).
+                                // `TypeKind::Newtype` is produced by NOTHING in
+                                // the compile path — only by tests and
+                                // `TypeKind::try_from` — so this branch had
+                                // never run for a real newtype (T1263).
+                                //
+                                // Kept alongside rather than replaced: a
+                                // descriptor arriving from elsewhere with the
+                                // old kinds still means the same thing.
+                                && (td.is_transparent_wrapper && td.fields.len() == 1
+                                    || td.kind == verum_vbc::types::TypeKind::Newtype
                                     || (td.kind == verum_vbc::types::TypeKind::Tuple
                                         && td.fields.len() == 1))
                         })

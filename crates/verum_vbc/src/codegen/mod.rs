@@ -18999,6 +18999,22 @@ impl VbcCodegen {
 
         for ((param_name, _), param) in params_with_mutability.iter().zip(func.params.iter()) {
             if let verum_ast::FunctionParamKind::Regular { ty, .. } = &param.kind {
+                // A parameter declared with a REFERENCE type holds a
+                // reference, not the referent — recorded because the type
+                // NAME loses that (`&NT` and `NT` both infer as "NT"), and
+                // the transparent-wrapper unwrap has to tell them apart
+                // (T1438). Same match as `by_value_record` above, which
+                // asks the same question for the opposite reason.
+                if matches!(
+                    ty.kind,
+                    verum_ast::ty::TypeKind::Reference { .. }
+                        | verum_ast::ty::TypeKind::CheckedReference { .. }
+                        | verum_ast::ty::TypeKind::UnsafeReference { .. }
+                        | verum_ast::ty::TypeKind::GenRef { .. }
+                        | verum_ast::ty::TypeKind::Pointer { .. }
+                ) {
+                    self.ctx.reference_bound_vars.insert(param_name.clone());
+                }
                 let var_type = self.type_kind_to_var_type(&ty.kind);
                 self.ctx.register_variable_type(param_name, var_type);
                 // Track type name for field index resolution

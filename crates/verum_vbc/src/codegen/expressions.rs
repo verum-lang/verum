@@ -12602,11 +12602,24 @@ impl VbcCodegen {
             && let Some(receiver_type_name) = self.infer_expr_type_name(receiver)
             && self.ctx.newtype_names.contains(&receiver_type_name)
         {
+            // Same reference blindness as `.0` above (T1438): the
+            // identity `Mov` is right for a register holding the carrier
+            // and wrong for one holding a REFERENCE to it, and the
+            // inferred name cannot tell them apart.
+            let receiver_is_ref = Self::expr_ident_name(receiver)
+                .is_some_and(|n| self.ctx.reference_bound_vars.contains(&n));
             let base_reg = self
                 .compile_expr(receiver)?
                 .or_internal("q.rep receiver has no value")?;
             let dst = self.ctx.alloc_temp();
-            self.ctx.emit(Instruction::Mov { dst, src: base_reg });
+            if receiver_is_ref {
+                self.ctx.emit(Instruction::Deref {
+                    dst,
+                    ref_reg: base_reg,
+                });
+            } else {
+                self.ctx.emit(Instruction::Mov { dst, src: base_reg });
+            }
             self.ctx.free_temp(base_reg);
             if let Some(inner) = self
                 .ctx
@@ -23695,18 +23708,43 @@ impl VbcCodegen {
         }
         // Newtype .0 access: the value IS the single field, emit Mov.
         // e.g. `let fd = FileDesc(42); fd.0` → just copy the register.
+        //
+        // UNLESS THE BASE IS A REFERENCE (T1438). The identity `Mov` is
+        // right because a transparent wrapper's register holds the inner
+        // value; a `&NT` register holds a reference to it, and the same
+        // `Mov` then hands back the ADDRESS. `infer_expr_type_name`
+        // erases the `&`, so both spellings answer "NT" and took this
+        // branch: measured, `fn f(p: &NT) -> Int { p.0 }` returned
+        // 6134571104 at Tier 1 where Tier 0 returned 42, and core/ has
+        // 493 parameters spelled `&<wrapper>` across 77 files.
+        //
+        // A reference gets a `Deref` first, which is right at BOTH tiers
+        // for the same reason the `Mov` was right for the value: Tier 0's
+        // `Ref` encodes a register reference (`encode_cbgr_ref`) and Tier
+        // 1's emits an alloca and its address, and `Deref` reads through
+        // either. Anything that is not a simple named binding keeps the
+        // old behaviour — this narrows the branch, it does not widen it.
         if index == 0
             && let Some(type_name) = self.infer_expr_type_name(base)
             && self.ctx.newtype_names.contains(&type_name)
         {
+            let base_is_ref = Self::expr_ident_name(base)
+                .is_some_and(|n| self.ctx.reference_bound_vars.contains(&n));
             let base_reg = self
                 .compile_expr(base)?
                 .or_internal("tuple base has no value")?;
             let result = self.ctx.alloc_temp();
-            self.ctx.emit(Instruction::Mov {
-                dst: result,
-                src: base_reg,
-            });
+            if base_is_ref {
+                self.ctx.emit(Instruction::Deref {
+                    dst: result,
+                    ref_reg: base_reg,
+                });
+            } else {
+                self.ctx.emit(Instruction::Mov {
+                    dst: result,
+                    src: base_reg,
+                });
+            }
             self.ctx.free_temp(base_reg);
             return Ok(Some(result));
         }

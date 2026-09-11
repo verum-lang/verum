@@ -339,5 +339,33 @@ Regression guard:
   `CallM.method_id` inside a body, which a call site gets for free and a
   body walk does not.
 
+* **A transparent wrapper reached THROUGH a reference.** This document
+  is about a boundary erasing WHICH KIND of reference you hold; this is
+  the boundary erasing THAT you hold one. A transparent wrapper has no
+  runtime identity, so its register holds the inner value and `x.0` is an
+  identity `Mov` — correct, and wrong the moment the register holds a
+  reference to the wrapper instead, because the same `Mov` hands back the
+  address. The two are indistinguishable where the decision is made:
+  `infer_expr_type_name` erases the `&`, so `NT` and `&NT` both answer
+  `"NT"`.
+
+  Measured 2026-09-11, five lines of Verum with no stdlib in sight:
+
+  | | Tier 0 | Tier 1 |
+  |---|---|---|
+  | `NT(42).0` | 42 | 42 |
+  | `fn f(p: NT) -> Int { p.0 }` | 42 | 42 |
+  | `fn f(p: &NT) -> Int { p.0 }` | 42 | 6134571104 |
+  | `fn f(p: &Rec) -> Int { p.a }` | 77 | 77 |
+
+  A named-field record is unaffected because it never took the
+  transparent path. The population is not small: `core/` declares 179
+  transparent wrappers and spells 493 parameters `&<wrapper>` across 77
+  files. Tracked as T1438; the pinning spec is
+  `vcs/specs/L0-critical/reference_system/a_wrapper_reached_through_a_reference_unwraps_to_its_value.vr`,
+  which runs at both tiers and keeps the VALUE forms beside the reference
+  ones — a fix that stopped treating wrappers as transparent would pass
+  every reference case and quietly make `NT(42).0` a heap read.
+
 These are omissions of coverage, not of correctness: in each case the
 compiler does what it did before this contract existed.
