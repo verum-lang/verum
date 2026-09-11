@@ -170,7 +170,6 @@ public mount runtime.async_ops.{
     supervisor_log_escalation,
     supervisor_set_parent,
     exec_with_recovery,
-    inline_cb_as_ref,
     global_allocator,
     default_io_driver,
     shared_registry_global,

@@ -134,7 +134,8 @@ The intrinsics test suite is organized into 24 test modules covering 200+ intrin
 
 ### Runtime/Supervisor (~12 intrinsics)
 - `spawn_supervised`, `supervisor_log_escalation`, `supervisor_set_parent`
-- `exec_with_recovery`, `inline_cb_as_ref`
+- `exec_with_recovery` (`inline_cb_as_ref` was removed in T1416: it
+  bitcast between two unrelated layouts)
 - `global_allocator`, `default_executor`, `default_io_driver`
 - `shared_registry_global`, `middleware_chain_empty`, `single_thread_block_on`
 

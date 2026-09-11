@@ -4,7 +4,7 @@
 // @tags: runtime, circuit-breaker, layout, regression
 // @timeout: 60000
 // @expected-exit: 0
-// @skip: the overflow Map is initialised with `&Map.new()` — a reference to a temporary (env.vr:734, same shape as the known defect at :411)
+// @skip: T1430 — the overflow Map is initialised with `&Map.new()` at env.vr:768, a reference to a temporary that dies at the end of the expression; five sibling fields carry the same shape and one of them already panics with a CBGR use-after-free
 //
 // A CIRCUIT BREAKER READS BACK WHAT WAS REGISTERED — OVERFLOW (T1416).
 //

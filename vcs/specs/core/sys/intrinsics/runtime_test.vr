@@ -102,7 +102,6 @@ fn test_basic_handle_types() {
 //
 // 4. Recovery intrinsics:
 //    - exec_with_recovery(ctx, factory) -> Result<*const Byte, RecoveryError>
-//    - inline_cb_as_ref(storage) -> RawCircuitBreakerOpaque
 //
 // 5. Global resource intrinsics:
 //    - global_allocator() -> AllocHandle

@@ -233,7 +233,6 @@ infinity/0	intrinsics/float.vr,math/ieee754.vr
 info/1	base/log.vr,math/simple.vr
 init_main_thread_tls/0	sys/darwin/tls.vr,sys/linux/tls.vr,sys/windows/tls.vr
 init_process_args/2	base/env.vr,sys/common.vr
-inline_cb_as_ref/1	intrinsics/runtime/async_ops.vr,runtime/async_ops.vr
 input/1	shell/interactive.vr,term/app/prompt.vr
 input_default/2	security/x509/path_validation.vr,shell/interactive.vr
 int64_max/0	database/sqlite/native/integer_overflow_api/policy.vr,database/sqlite/native/limit_clause_validator/clause.vr,database/sqlite/native/text_to_int_strict_api/parse_.vr

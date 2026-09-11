@@ -54,7 +54,6 @@
 module core.runtime.recovery;
 
 mount sys.{monotonic_nanos};
-mount core.intrinsics.{inline_cb_as_ref};
 mount core.{Result, Text, Maybe, TypeId, Display};
 mount time.Duration;
 mount sync.{AtomicU8, AtomicU16, AtomicU32, AtomicU64, MemoryOrdering};
@@ -788,11 +787,19 @@ implement InlineCircuitBreaker {
         true
     }
 
-    /// Convert to full RecoveryCircuitBreaker reference interface
-    public fn as_ref(&self) -> &RecoveryCircuitBreaker {
-        // SAFETY: InlineCircuitBreaker has same memory layout for state access
-        inline_cb_as_ref(self)
-    }
+    // THERE IS NO `as_ref`, AND THAT IS DELIBERATE (T1416).
+    //
+    // A method converting this type to `&RecoveryCircuitBreaker` used to
+    // live here, implemented by an intrinsic whose codegen strategy was
+    // `llvm.bitcast`. The two layouts do not correspond: offset 0 is
+    // `name: [Byte; 24]` here and `config: RecoveryCircuitBreakerConfig`
+    // there, so reading `state` through the converted reference read bytes
+    // out of the service NAME. `RecoveryCircuitBreaker` carries no `@repr`
+    // at all, so its layout is not even promised to be stable.
+    //
+    // A caller that needs the full interface must CONSTRUCT one from these
+    // fields — the same shape `to_circuit_breaker` takes in
+    // `core/runtime/env.vr` — never reinterpret the storage.
 }
 
 /// Inline retry policy fitting in 32 bytes

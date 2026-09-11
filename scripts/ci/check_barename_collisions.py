@@ -54,7 +54,14 @@ PRELUDE_SOURCE = CORE / "mod.vr"
 # are never called by bare name (common.vr calls them qualified, `super.darwin.tls.…`)
 # and they sit behind mutually exclusive @cfg arms, so bare-name resolution is never
 # asked to CHOOSE between them.
-BASELINE_ALL = 617
+# 616 since T1416: `inline_cb_as_ref` was declared TWICE — `core/runtime/async_ops.vr`
+# as `(CircuitBreakerOpaque) -> &CircuitBreakerOpaque` and
+# `core/intrinsics/runtime/async_ops.vr` as `(*const Byte) -> RawCircuitBreakerOpaque` —
+# and re-exported from two modules besides. Both declarations are gone with the
+# intrinsic itself, whose codegen strategy was an `llvm.bitcast` between two record
+# layouts that do not correspond. One collision removed by deleting the thing, which is
+# the only way this number goes down that also removes a hazard.
+BASELINE_ALL = 616
 BASELINE_SQLITE = 84
 # The PRELUDE scope — the subset a user meets without importing anything.
 # This is not a stylistic count: for these names the ambiguity DECIDES which

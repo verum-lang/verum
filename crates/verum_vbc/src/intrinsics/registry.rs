@@ -6061,16 +6061,6 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         mlir_op: Some("verum.recovery.exec"),
         doc: "Execute with recovery strategy",
     },
-    Intrinsic {
-        name: "inline_cb_as_ref",
-        category: IntrinsicCategory::Context,
-        hints: &[IntrinsicHint::Generic, IntrinsicHint::Inline],
-        param_count: 1,  // inline_storage
-        return_count: 1, // &CircuitBreaker
-        strategy: CodegenStrategy::DirectOpcode(Opcode::Ref),
-        mlir_op: Some("llvm.bitcast"),
-        doc: "Get circuit breaker reference",
-    },
     // =========================================================================
     // Registry Intrinsics (Library-level)
     // =========================================================================

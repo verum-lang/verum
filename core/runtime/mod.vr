@@ -205,7 +205,6 @@ public mount core.intrinsics.{
     supervisor_log_escalation,
     supervisor_set_parent,
     exec_with_recovery,
-    inline_cb_as_ref,
     global_allocator,
     default_executor,
     default_io_driver,

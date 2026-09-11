@@ -114,10 +114,6 @@ public fn supervisor_set_parent(child: SupervisorHandleOpaque, parent: Superviso
 @intrinsic("exec_with_recovery")
 public fn exec_with_recovery(ctx: RecoveryContextOpaque, f: fn() -> ()) -> Int;
 
-/// Inline circuit breaker as reference.
-@intrinsic("inline_cb_as_ref")
-public fn inline_cb_as_ref(cb: CircuitBreakerOpaque) -> &CircuitBreakerOpaque;
-
 /// Get the global allocator.
 @intrinsic("global_allocator")
 public fn global_allocator() -> AllocHandle;

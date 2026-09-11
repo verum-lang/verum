@@ -207,10 +207,6 @@ public async fn exec_with_recovery(
     future_factory: fn() -> RawFutureHandle,
 ) -> Result<*const Byte, RawRecoveryError>;
 
-/// Get reference to inline circuit breaker.
-@intrinsic("inline_cb_as_ref")
-public fn inline_cb_as_ref(inline_storage: *const Byte) -> RawCircuitBreakerOpaque;
-
 // =============================================================================
 // SECTION 5: Global Resources
 // =============================================================================
