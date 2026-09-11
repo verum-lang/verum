@@ -208,8 +208,15 @@ impl TestFilter {
     fn matches_internal(&self, directives: &TestDirectives) -> bool {
         // Check name patterns
         if !self.name_patterns.is_empty() {
+            // The display name now carries directories, so a pattern
+            // written as a bare file name (`basic.vr`) must still be
+            // able to match. Both spellings are offered to the glob.
             let name = directives.display_name();
-            let matches_name = self.name_patterns.iter().any(|p| p.matches(&name));
+            let file_name = directives.file_name();
+            let matches_name = self
+                .name_patterns
+                .iter()
+                .any(|p| p.matches(&name) || p.matches(&file_name));
             if !matches_name {
                 return false;
             }

@@ -619,6 +619,26 @@ impl TypeChecker {
             }
             TypeDeclBody::Variant(_) => self.register_variant_type_body(type_decl, &type_name, &type_param_vars, &type_param_names)?,
             TypeDeclBody::Record(_) => self.register_record_type_body(type_decl, &type_name)?,
+            // ── DECLARED-NAME REGISTRATION GOES THROUGH THE MODULE PATH ──
+            // Every arm that registers the declared type under its own
+            // name does so via `define_type_in_current_module`, never
+            // `ctx.define_type` directly — the `Variant` and `Record`
+            // arms above through the helpers they delegate to, the
+            // tuple / newtype / alias arms below in place. That helper is what evicts the
+            // same-named AMBIENT variant-constructor shadow (T0591) and
+            // what records the name in `current_module_declared_types` for
+            // the E430 horizon; a branch that writes the flat map directly
+            // leaves a foreign stdlib variant free to answer for the name.
+            //
+            // Measured: only the 0- and 1-element tuple branches routed
+            // correctly, so a local `type Pair is (Int, Int)` lost `Pair(3, 4)`
+            // to `CoreTerm.Pair { fst: Heap<CoreTerm>, snd: Heap<CoreTerm> }`
+            // from core/verify/kernel_soundness/ — `expected 'Heap<CoreTerm>',
+            // found 'Int'` on a file that declares the type three lines above
+            // the call. The collision needed the arities to MATCH, which is
+            // why it looked like a spec-ordering problem rather than a
+            // resolution one: `type Fst is (Int, Int)` was fine, because the
+            // stdlib's `Fst` carries one field.
             TypeDeclBody::Tuple(types) => {
                 // Tuple type declaration: type Point is (Float, Float);
                 // Single-element tuples are newtypes: type UserId is (Int);
@@ -678,8 +698,7 @@ impl TypeChecker {
                         path: Path::single(type_decl.name.clone()),
                         args: List::new(),
                     };
-                    self.ctx
-                        .define_type(type_name.clone(), named_tuple_ty.clone());
+                    self.define_type_in_current_module(type_name.clone(), named_tuple_ty.clone());
 
                     // Store tuple fields for field access (.0, .1, .2)
                     let tuple_fields_key = format!("__tuple_fields_{}", type_name);
@@ -702,7 +721,7 @@ impl TypeChecker {
                     path: Path::single(type_decl.name.clone()),
                     args: List::new(),
                 };
-                self.ctx.define_type(type_name.clone(), newtype_ty.clone());
+                self.define_type_in_current_module(type_name.clone(), newtype_ty.clone());
 
                 // Store the inner type for field access (.0)
                 let inner_key = format!("__newtype_inner_{}", type_name);
@@ -722,7 +741,7 @@ impl TypeChecker {
                     path: Path::single(type_decl.name.clone()),
                     args: List::new(),
                 };
-                self.ctx.define_type(type_name.clone(), ty.clone());
+                self.define_type_in_current_module(type_name.clone(), ty.clone());
 
                 // Store inner type as Unit for newtype coercion checks
                 // This allows `let s: Signal = ();` without explicit wrapping
@@ -772,7 +791,7 @@ impl TypeChecker {
                     path: Path::single(type_decl.name.clone()),
                     args: List::new(),
                 };
-                self.ctx.define_type(type_name.clone(), ty);
+                self.define_type_in_current_module(type_name.clone(), ty);
             }
             TypeDeclBody::Coinductive(protocol_body) => {
                 // Coinductive type — register named type and validate that the
@@ -781,7 +800,7 @@ impl TypeChecker {
                     path: Path::single(type_decl.name.clone()),
                     args: List::new(),
                 };
-                self.ctx.define_type(type_name.clone(), ty);
+                self.define_type_in_current_module(type_name.clone(), ty);
 
                 // Verify that every protocol item that is a function has an explicit
                 // return type declared (destructors must be typed observations).
@@ -813,7 +832,7 @@ impl TypeChecker {
                     path: Path::single(type_decl.name.clone()),
                     args: List::new(),
                 };
-                self.ctx.define_type(type_name.clone(), ty.clone());
+                self.define_type_in_current_module(type_name.clone(), ty.clone());
 
                 // Store element types for tuple-like access
                 let inner_key = format!("__tuple_elements_{}", type_name);
@@ -883,7 +902,7 @@ impl TypeChecker {
                     path: Path::single(type_decl.name.clone()),
                     args: List::new(),
                 };
-                self.ctx.define_type(type_name.clone(), ty);
+                self.define_type_in_current_module(type_name.clone(), ty);
             }
         }
 
@@ -1607,8 +1626,7 @@ impl TypeChecker {
                 // Example: type Node is { next: Maybe<Node> }
                 // Without this placeholder, resolving Maybe<Node> would try to resolve Node again.
                 let placeholder_var = TypeVar::fresh();
-                self.ctx
-                    .define_type(type_name.clone(), Type::Var(placeholder_var));
+                self.define_type_in_current_module(type_name.clone(), Type::Var(placeholder_var));
 
                 // Convert record declarations to Type::Record for field type info
                 // CRITICAL FIX: Use ast_to_type with fallback to ast_to_type_lenient.
@@ -1700,7 +1718,7 @@ impl TypeChecker {
                             .collect(),
                     };
                     // Store ONLY the named type, no __struct_fields_ entry
-                    self.ctx.define_type(type_name.clone(), named_type);
+                    self.define_type_in_current_module(type_name.clone(), named_type);
 
                     // Skip field structure registration for empty records
                     // This prevents `{ }` from being used as the type in error messages
@@ -1732,7 +1750,7 @@ impl TypeChecker {
                     };
 
                     // Store the named type for protocol method dispatch
-                    self.ctx.define_type(type_name.clone(), named_type.clone());
+                    self.define_type_in_current_module(type_name.clone(), named_type.clone());
 
                     // CRITICAL FIX: Resolve placeholder TypeApp references in record field types.
                     // During recursive type registration, self-references like Node<T> in
@@ -1908,7 +1926,7 @@ impl TypeChecker {
                     path: Path::single(type_decl.name.clone()),
                     args: List::new(),
                 };
-                self.ctx.define_type(type_name.clone(), ty);
+                self.define_type_in_current_module(type_name.clone(), ty);
 
                 // CRITICAL FIX: Register protocol with its methods in protocol_checker
                 // This enables method lookup for bounded generic types like `fn foo<T: Display>(item: T)`
@@ -2837,6 +2855,10 @@ impl TypeChecker {
             }
             TypeDeclBody::Variant(_) => self.resolve_variant_type_body(type_decl, type_name)?,
             TypeDeclBody::Record(_) => self.resolve_record_type_body(type_decl, type_name)?,
+            // Same invariant as `register_type_declaration_body`: the
+            // declared name is registered through
+            // `define_type_in_current_module`, so the ambient
+            // variant-constructor shadow is evicted on this pass too.
             TypeDeclBody::Tuple(types) => {
                 // Tuple type declaration: type Point is (Float, Float);
                 // Single-element tuples are newtypes: type UserId is (Int);
@@ -2873,8 +2895,7 @@ impl TypeChecker {
                         path: Path::single(type_decl.name.clone()),
                         args: List::new(),
                     };
-                    self.ctx
-                        .define_type(type_name.clone(), named_tuple_ty.clone());
+                    self.define_type_in_current_module(type_name.clone(), named_tuple_ty.clone());
 
                     // Store tuple fields for field access (.0, .1, .2)
                     let tuple_fields_key = format!("__tuple_fields_{}", type_name);
@@ -2896,7 +2917,7 @@ impl TypeChecker {
                     path: Path::single(type_decl.name.clone()),
                     args: List::new(),
                 };
-                self.ctx.define_type(type_name.clone(), newtype_ty.clone());
+                self.define_type_in_current_module(type_name.clone(), newtype_ty.clone());
 
                 // Store the inner type for field access (.0)
                 let inner_key = format!("__newtype_inner_{}", type_name);
@@ -2914,7 +2935,7 @@ impl TypeChecker {
                     path: Path::single(type_decl.name.clone()),
                     args: List::new(),
                 };
-                self.ctx.define_type(type_name.clone(), ty);
+                self.define_type_in_current_module(type_name.clone(), ty);
 
                 // Store inner type as Unit for newtype coercion checks
                 let inner_key = format!("__newtype_inner_{}", type_name);
@@ -2931,7 +2952,7 @@ impl TypeChecker {
                     path: Path::single(type_decl.name.clone()),
                     args: List::new(),
                 };
-                self.ctx.define_type(type_name.clone(), ty);
+                self.define_type_in_current_module(type_name.clone(), ty);
 
                 let inner_key = format!("__tuple_elements_{}", type_name);
                 self.ctx.define_type(inner_key, Type::Tuple(element_types));
@@ -2963,7 +2984,7 @@ impl TypeChecker {
                     path: Path::single(type_decl.name.clone()),
                     args: List::new(),
                 };
-                self.ctx.define_type(type_name.clone(), ty);
+                self.define_type_in_current_module(type_name.clone(), ty);
             }
             TypeDeclBody::Coinductive(protocol_body) => {
                 // Coinductive type (Pass 2) — resolve destructor return types and
@@ -2972,7 +2993,7 @@ impl TypeChecker {
                     path: Path::single(type_decl.name.clone()),
                     args: List::new(),
                 };
-                self.ctx.define_type(type_name.clone(), ty);
+                self.define_type_in_current_module(type_name.clone(), ty);
 
                 // Verify that all destructors have explicit, resolvable return types.
                 for item in &protocol_body.items {
@@ -3016,7 +3037,7 @@ impl TypeChecker {
                     path: Path::single(type_decl.name.clone()),
                     args: List::new(),
                 };
-                self.ctx.define_type(type_name.clone(), named_type.clone());
+                self.define_type_in_current_module(type_name.clone(), named_type.clone());
 
                 // Register the `of` static constructor and `rep`
                 // instance accessor in the protocol checker's method
@@ -3673,7 +3694,7 @@ impl TypeChecker {
                     path: Path::single(type_decl.name.clone()),
                     args: List::new(),
                 };
-                self.ctx.define_type(type_name.clone(), ty);
+                self.define_type_in_current_module(type_name.clone(), ty);
 
                 // CRITICAL FIX: Register protocol with its methods in protocol_checker
                 // This enables method lookup for bounded generic types like `fn foo<T: Display>(item: T)`

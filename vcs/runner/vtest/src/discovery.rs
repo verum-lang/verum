@@ -479,8 +479,11 @@ impl TestDiscovery {
 
         // Name pattern filter
         if let Some(ref pattern) = self.name_pattern {
+            // Both the qualified display name and the bare file name,
+            // so a pattern written as `basic.vr` keeps matching.
             let name = test.display_name();
-            if !pattern.matches(&name) {
+            let file_name = test.file_name();
+            if !pattern.matches(&name) && !pattern.matches(&file_name) {
                 return false;
             }
         }

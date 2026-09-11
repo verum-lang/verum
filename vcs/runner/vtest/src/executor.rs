@@ -404,6 +404,32 @@ impl Default for ExecutorConfig {
             available_features.insert(Text::from(*feature));
         }
 
+        // THE WRAPPER MUST SPAWN THE BINARY THIS RUNNER WAS BUILT WITH.
+        // `vcs/bin/verum-interpreter` and `verum-aot` resolve their CLI as
+        //
+        //     VERUM_CLI="${VERUM_CLI:-$SCRIPT_DIR/../../target/release/verum}"
+        //
+        // i.e. the SHARED repo target, which the session rules forbid
+        // trusting and which a runner built into a private
+        // CARGO_TARGET_DIR never writes to. Measured 2026-09-11 during an
+        // L0-critical sweep: every child process was the shared
+        // `target/release/verum` dated ten days earlier, while the runner
+        // spawning it had been linked minutes before — so every
+        // `@test: run` verdict was a measurement of that stale artefact
+        // rather than of the tree under test.
+        //
+        // The wrappers already prefer `VERUM_CLI` when it is set, so the
+        // fix is to set it. Same class as the `find_verum_cli` fall-through
+        // (T1429), one layer out: there the SEARCH reached an installed
+        // binary, here the script never consults the search at all.
+        let mut env: Map<Text, Text> = Map::new();
+        if let Some(ref cli) = verum_cli_path {
+            env.insert(
+                Text::from("VERUM_CLI"),
+                Text::from(cli.to_string_lossy().to_string()),
+            );
+        }
+
         Self {
             interpreter_path: bin_dir.join("verum-interpreter"),
             jit_base_path: bin_dir.join("verum-jit"),
@@ -411,7 +437,7 @@ impl Default for ExecutorConfig {
             aot_path: bin_dir.join("verum-aot"),
             work_dir: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
             default_timeout_ms: 30_000,
-            env: Map::new(),
+            env,
             // Default to direct integration (faster and no external dependencies)
             use_direct_integration: true,
             verum_cli_path,
@@ -4034,6 +4060,29 @@ pub fn compare_differential_results(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The wrapper scripts pick `$SCRIPT_DIR/../../target/release/verum`
+    /// unless `VERUM_CLI` says otherwise, so a runner built into a private
+    /// target directory must hand them its own binary. Measured 2026-09-11:
+    /// without this, every `@test: run` above Tier 0 was judged by the
+    /// shared repo binary, ten days older than the tree.
+    #[test]
+    fn the_default_config_hands_the_wrappers_its_own_cli() {
+        let cfg = ExecutorConfig::default();
+        match cfg.verum_cli_path {
+            Some(ref cli) => {
+                let passed = cfg
+                    .env
+                    .get(&Text::from("VERUM_CLI"))
+                    .expect("VERUM_CLI is exported when a CLI was found");
+                assert_eq!(passed.as_str(), cli.to_string_lossy());
+            }
+            // No binary beside the runner and none installed: nothing to
+            // hand over, and the wrapper's own fallback is then the only
+            // answer available. Exporting an empty value would be worse.
+            None => assert!(cfg.env.get(&Text::from("VERUM_CLI")).is_none()),
+        }
+    }
 
     #[test]
     fn test_parse_performance_threshold() {

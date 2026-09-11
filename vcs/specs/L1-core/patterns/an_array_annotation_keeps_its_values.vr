@@ -2,7 +2,7 @@
 // @tier: 0
 // @level: L1
 // @tags: fixed-size-array, annotation, silent-wrong-value
-// @expected-stdout: 1
+// @expected-stdout: 1\n2\n3\n1\n2\n3
 // @description: A fixed-size array annotation on a `let` must not change the values bound.
 
 // =============================================================================
@@ -35,8 +35,15 @@
 // are correct too. This file keeps the destructuring form because that
 // is how it was found, and asserts the plain form beside it.
 //
-// A type annotation is a claim about a type. Here it silently replaces
+// A type annotation is a claim about a type. Here it silently replaced
 // the VALUES.
+//
+// RE-MEASURED 2026-09-11 — the zeroing no longer reproduces. Both forms
+// bind 1 2 3, and this file now asserts all six values rather than the
+// first of each: it previously claimed a single line of stdout while its
+// `main` printed two, so it failed against its own correct output and
+// said nothing about elements 1 and 2. The tag below records what the
+// file was written to catch, not what it currently observes.
 
 fn three() -> [Int; 3] {
     [1, 2, 3]
@@ -45,8 +52,12 @@ fn three() -> [Int; 3] {
 fn main() {
     let [x, y, z]: [Int; 3] = three();
     print(x);
+    print(y);
+    print(z);
 
     // The same defect without any pattern at all.
     let a: [Int; 3] = three();
     print(a[0]);
+    print(a[1]);
+    print(a[2]);
 }

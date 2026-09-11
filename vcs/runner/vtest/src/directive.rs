@@ -1449,7 +1449,65 @@ impl TestDirectives {
     }
 
     /// Get a display name for this test.
+    ///
+    /// The name IDENTIFIES the spec: it is the path below the suite's
+    /// `specs/` root, so no two specs in the suite can share it.
+    ///
+    /// It used to be the bare file name, and that is ambiguous for a
+    /// large part of the suite: 735 of 7177 specs share a base name
+    /// with at least one other, over 303 duplicated names (`basic.vr`
+    /// alone names 26 distinct specs). A failure line naming only the
+    /// base name therefore points at a file the reader cannot locate,
+    /// and a reader who picks the wrong one measures the wrong file —
+    /// `struct_patterns.vr` exists both at `patterns/` and at
+    /// `patterns/composite_patterns/`, and only the second one failed.
+    ///
+    /// With no `specs/` ancestor — an ad-hoc directory passed on the
+    /// command line — it falls back to the last two components. The
+    /// bare name was tried there first and reintroduced the very
+    /// ambiguity this exists to remove: a probe directory holding both
+    /// `struct_patterns.vr` and `composite_patterns/struct_patterns.vr`
+    /// printed the same line twice.
     pub fn display_name(&self) -> Text {
+        let path = Path::new(self.source_path.as_str());
+        let mut after_specs: Option<std::path::PathBuf> = None;
+        let mut tail: Vec<&std::ffi::OsStr> = Vec::new();
+        for component in path.components().rev() {
+            let raw = component.as_os_str();
+            if raw == std::ffi::OsStr::new("specs") {
+                let mut rebuilt = std::path::PathBuf::new();
+                for segment in tail.iter().rev() {
+                    rebuilt.push(segment);
+                }
+                after_specs = Some(rebuilt);
+                break;
+            }
+            tail.push(raw);
+        }
+        match after_specs {
+            Some(rel) if !rel.as_os_str().is_empty() => rel.to_string_lossy().to_string().into(),
+            _ => {
+                let mut last_two: Vec<&std::ffi::OsStr> = tail.into_iter().take(2).collect();
+                last_two.reverse();
+                let mut rebuilt = std::path::PathBuf::new();
+                for segment in last_two {
+                    rebuilt.push(segment);
+                }
+                if rebuilt.as_os_str().is_empty() {
+                    self.file_name()
+                } else {
+                    rebuilt.to_string_lossy().to_string().into()
+                }
+            }
+        }
+    }
+
+    /// The spec's bare file name, without any directory part.
+    ///
+    /// Kept separate from [`Self::display_name`] because a name filter
+    /// written as `basic.vr` must keep matching once the display name
+    /// carries directories.
+    pub fn file_name(&self) -> Text {
         Path::new(self.source_path.as_str())
             .file_name()
             .map(|s| s.to_string_lossy().to_string().into())
@@ -2293,5 +2351,84 @@ fn main() { panic("oops"); }
 
         let result = TestDirectives::parse(content, "test.vr".to_string().into());
         assert!(matches!(result, Err(DirectiveError::ValidationError(_))));
+    }
+
+    /// The header every name test below shares.
+    fn named(path: &str) -> TestDirectives {
+        TestDirectives::parse(
+            "// @test: typecheck-pass\n// @level: L1\n",
+            path.to_string().into(),
+        )
+        .expect("header parses")
+    }
+
+    #[test]
+    fn display_name_separates_two_specs_sharing_a_file_name() {
+        // The pair that made this necessary: both are `struct_patterns.vr`,
+        // and only the second one fails to type-check.
+        let outer = named("vcs/specs/L1-core/patterns/struct_patterns.vr");
+        let inner = named("vcs/specs/L1-core/patterns/composite_patterns/struct_patterns.vr");
+
+        assert_eq!(
+            outer.display_name().as_str(),
+            "L1-core/patterns/struct_patterns.vr"
+        );
+        assert_eq!(
+            inner.display_name().as_str(),
+            "L1-core/patterns/composite_patterns/struct_patterns.vr"
+        );
+        assert_ne!(outer.display_name(), inner.display_name());
+
+        // The bare name stays available, and stays ambiguous — which is
+        // exactly why it is no longer what the report prints.
+        assert_eq!(outer.file_name(), inner.file_name());
+        assert_eq!(outer.file_name().as_str(), "struct_patterns.vr");
+    }
+
+    #[test]
+    fn display_name_is_relative_to_the_specs_root_not_the_cwd() {
+        // An absolute path names the same spec as a repo-relative one.
+        let absolute = named("/home/x/verum/vcs/specs/L0-critical/basics/basic.vr");
+        let relative = named("vcs/specs/L0-critical/basics/basic.vr");
+        assert_eq!(absolute.display_name(), relative.display_name());
+        assert_eq!(
+            absolute.display_name().as_str(),
+            "L0-critical/basics/basic.vr"
+        );
+    }
+
+    #[test]
+    fn display_name_keeps_one_directory_without_a_specs_ancestor() {
+        // Ad-hoc directories passed on the command line have no `specs/`
+        // component. The last two components still separate the pair
+        // that motivated all of this.
+        let ad_hoc = named("/tmp/probe/collide.vr");
+        assert_eq!(ad_hoc.display_name().as_str(), "probe/collide.vr");
+
+        let flat = named("/tmp/probe/struct_patterns.vr");
+        let nested = named("/tmp/probe/composite_patterns/struct_patterns.vr");
+        assert_ne!(flat.display_name(), nested.display_name());
+        assert_eq!(
+            nested.display_name().as_str(),
+            "composite_patterns/struct_patterns.vr"
+        );
+
+        // A bare file name with no directory at all stays itself.
+        let alone = named("solo.vr");
+        assert_eq!(alone.display_name().as_str(), "solo.vr");
+    }
+
+    #[test]
+    fn display_name_does_not_swallow_a_directory_merely_containing_specs() {
+        // Only a whole path component counts: `myspecs` is not `specs`,
+        // so this takes the no-ancestor path — the last two components.
+        let d = named("bench/myspecs/L1/a.vr");
+        assert_eq!(d.display_name().as_str(), "L1/a.vr");
+    }
+
+    #[test]
+    fn display_name_handles_a_spec_directly_under_the_specs_root() {
+        let d = named("vcs/specs/loose.vr");
+        assert_eq!(d.display_name().as_str(), "loose.vr");
     }
 }
