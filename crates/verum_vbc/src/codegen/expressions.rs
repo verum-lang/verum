@@ -25593,6 +25593,43 @@ impl VbcCodegen {
             value: inner_reg,
             tag: 0,
         });
+        // NAME THE Ok PAYLOAD FOR THE AOT (T1441). `AsVar`'s lowering can
+        // name an extracted payload only from a `Maybe`'s inner type; a
+        // `Result` reached through `?` is left UNNAMED, while the same
+        // payload reached through a `match` is named by
+        // `GetVariantData`'s `result_arm_types` branch. An unnamed
+        // register then fails `lower_ref`'s `is_heap_type` test, `&x`
+        // takes the recipe for a primitive — alloca, store the object
+        // pointer into it, pass the SLOT's address — and the callee reads
+        // `[slot + 24]`.
+        //
+        // Measured: `core.io.write(path, contents)` is
+        // `File.create(path)?` then `file.write_all(…)`, and that call's
+        // implicit `&mut self` was the reference. Tier 1 answered
+        // `free ERR 4428070912` where the `match` form answered
+        // `method ok n=3`, in one programme.
+        //
+        // THE HINT GOES HERE AND NOT IN THE LOWERING, because only this
+        // side knows WHICH variant is being extracted. `compile_try`
+        // emits three `AsVar`s — two for `Err` payloads and this one for
+        // `Ok` — and all three pass `tag: 0`, which is a FIELD INDEX
+        // despite the field's doc comment (T1445). Selecting a `Result`
+        // arm by that tag in the lowering would mark an `Err` payload
+        // with the `Ok` type, which is the crash `GetVariantData`'s own
+        // comment refuses to risk.
+        //
+        // Same channel and same reason as the tuple-index hint above:
+        // "The typechecker DOES know the element type here — ship it
+        // through the sticky register_type_hints channel so
+        // `is_heap_type` passes the pointer through."
+        if let Some(outer_ty) = self.extract_expr_type_name(inner) {
+            let inner_types = self.extract_inner_types(&outer_ty);
+            if let Some(ok_ty) = inner_types.first()
+                && !ok_ty.is_empty()
+            {
+                self.ctx.add_register_type_hint(result.0, ok_ty.clone());
+            }
+        }
 
         self.ctx.free_temp(inner_reg);
         Ok(Some(result))
