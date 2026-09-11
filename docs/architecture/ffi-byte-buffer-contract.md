@@ -148,6 +148,40 @@ what `.as_ptr()` on the array variable produces. Annotating remains correct
 hygiene (it avoids a per-call pack/unpack) and is required for the AOT path,
 which does **not** carry this writeback and is not measured here.
 
+**MEASURED 2026-09-11 (T1403) — "not measured here" is no longer the
+state of knowledge, and what it hid is worse than a gap in scope.** The
+AOT's missing write-back is not benign. A scalar `&mut` argument is
+STRIPPED by the emitter (`codegen/expressions.rs:7856`, so Tier 0's
+marshaller can allocate storage for the value) and Tier 1 then
+`inttoptr`s that value into a pointer. What the callee receives is
+whatever the caller's variable held:
+
+| caller's slot | what C gets | what happens |
+|---|---|---|
+| `0` | `NULL` | legal for `time(NULL)` — writes nothing, silently |
+| `123456` | address `123456` | SIGSEGV (measured, exit 139) |
+
+and a `&mut <record>` hands over the object BASE, so the callee writes
+over the 24-byte header while the caller reads fields at `+24`.
+
+Ordinary stdlib surfaces are affected, not corner cases:
+`core.io.fs.metadata` and `exists` SIGSEGV under `verum build` while
+correct under `verum run`; `safe_clock_gettime` returns `Ok` with
+`tv_sec = 0`.
+
+**This also re-reads the gate history in the paragraph below.** The first
+edition's `&mut name` findings — "33 findings, 30+ of them healthy code"
+— were healthy AT TIER 0 and wrong at Tier 1. They were not false
+positives; they were TIER-CONDITIONAL ones, and the reason that could not
+be seen is that the Tier-1 half of the measurement did not exist. A gate
+phrased "correct under the interpreter, returns zeros when built" would
+have been right.
+
+The gate is deliberately NOT re-widened yet: `core/` itself holds six
+such sites (`libsystem.vr:1382,1498,1532,1570`, `io/fs.vr:684,699`), so
+widening it today reports the stdlib rather than protecting it. The fix
+comes first; T1403 carries the six-shape acceptance table.
+
 Gate: `scripts/ci/check_a_byte_buffer_crosses_ffi_packed_and_sliced.sh`
 reports rule 3 only. Its first edition also reported `&mut name` on the
 strength of the paragraph above and produced 33 findings, 30+ of them
