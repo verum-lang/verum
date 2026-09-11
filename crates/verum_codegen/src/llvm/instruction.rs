@@ -5830,6 +5830,28 @@ pub fn lower_instruction<'ctx>(
                 }
                 ctx.set_obj_register_type(dst.0, inner_type);
             }
+            // A `Result` PAYLOAD REACHED THROUGH `?` IS STILL UNNAMED, and
+            // the obvious fix is wrong (T1441). The branch above is the
+            // `Maybe` channel and it is the only one this arm has, so a
+            // `Result` extracted here gets no name — while the same payload
+            // extracted by a `match` IS named, because `GetVariantData`
+            // carries a `result_arm_types` fallback (instruction.rs:5544).
+            //
+            // Selecting the arm by this instruction's `tag` does NOT work.
+            // The field is declared "Variant tag to extract" and every
+            // emission in `compile_try` uses it as a FIELD INDEX — all three
+            // pass `tag: 0`, including the two that extract an `Err`
+            // payload. Arm 0 is the Ok type, so that reading would mark an
+            // Err payload with the Ok arm: exactly the crash
+            // `GetVariantData`'s comment refuses to risk. And
+            // `set_variant_match_tag` cannot separate them either — it
+            // records the tag a dominating `IsVar` TESTED, and all three
+            // extractions hang off the same tested register.
+            //
+            // The channel that can carry this is the VBC-authored type hint
+            // (`sticky_type_hint`, named in `lower_ref`'s comment): the VBC
+            // side emits three different AsVars for three different reasons
+            // and therefore knows which variant each one takes.
             // Propagate generic_type_args for nested types (e.g., Maybe<List<List<Int>>>)
             if let Some(type_args) = ctx.get_generic_type_args(value.0).cloned() {
                 ctx.set_generic_type_args(dst.0, type_args);
