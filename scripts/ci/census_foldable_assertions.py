@@ -15,7 +15,15 @@ NOT counted, because there is nothing for the fold to get wrong:
   * `let x = 42; assert(x == 42)` — the initialiser IS the literal;
   * an initialiser containing a call — measured not to fold;
   * a binding mutated between definition and assertion (`let mut sum = 0`
-    then a loop) — the initialiser does not determine the value.
+    then a loop) — the initialiser does not determine the value;
+  * a spec that never RUNS. This one deflated the count by a factor of
+    forty and is the reason the filter exists: the first version reported
+    124 hits in 47 files with a striking distribution (45 in
+    `reference_system`), and then only THREE of those 47 files carry
+    `@test: run`. The rest are `typecheck-pass` / `typecheck-fail`, whose
+    assertions are never executed, so no fold can hide anything. A census
+    that counts unexecuted assertions is measuring the corpus's shape,
+    not its risk.
 """
 import re, pathlib, sys
 
@@ -26,10 +34,15 @@ LET = re.compile(r'\blet\s+(mut\s+)?([a-z_]\w*)\s*(?::[^=]+)?=\s*([^;]+);')
 # a mechanism the compiler can follow: field/tuple access or a deref
 MECHANISM = re.compile(r'(\.\w+|\.\d+|^\s*\*)')
 
-def census(root: pathlib.Path):
+RUNS = re.compile(r'^//\s*@test:\s*run\b', re.M)
+
+
+def census(root: pathlib.Path, executed_only: bool = True):
     out = []
     for p in sorted(root.rglob("*.vr")):
         t = p.read_text(errors="replace")
+        if executed_only and not RUNS.search(t):
+            continue            # its assertions never execute
         asserted = {m.group(1) for m in ASSERT_LIT.finditer(t)}
         if not asserted:
             continue
@@ -48,11 +61,17 @@ def self_test() -> int:
     """Poles: the shape must be caught, and three look-alikes must not."""
     import tempfile, os
     bad = 0
+    RUN = "// @test: run\n"
     cases = [
-        ("let v = bound.0;\nassert(v == 42);\n", 1, "the shape"),
-        ("let x = 42;\nassert(x == 42);\n", 0, "initialiser IS the literal"),
-        ("let v = f(bound);\nassert(v == 42);\n", 0, "a call is not folded"),
-        ("let mut sum = 0;\nassert(sum == 42);\n", 0, "mutated between"),
+        (RUN + "let v = bound.0;\nassert(v == 42);\n", 1, "the shape"),
+        (RUN + "let x = 42;\nassert(x == 42);\n", 0, "initialiser IS the literal"),
+        (RUN + "let v = f(bound);\nassert(v == 42);\n", 0, "a call is not folded"),
+        (RUN + "let mut sum = 0;\nassert(sum == 42);\n", 0, "mutated between"),
+        # AND THE POLE THAT DEFLATED THE COUNT BY FORTY: the same shape in
+        # a spec that never runs. Without this the census reports 124
+        # where the executed population is 14.
+        ("// @test: typecheck-pass\nlet v = bound.0;\nassert(v == 42);\n",
+         0, "a spec that never runs"),
     ]
     d = pathlib.Path(tempfile.mkdtemp())
     for i, (src, want, why) in enumerate(cases):
@@ -72,7 +91,10 @@ if __name__ == "__main__":
     if "--self-test" in sys.argv:
         sys.exit(self_test())
     hits = census(SPECS)
+    shape = census(SPECS, executed_only=False)
     print(f"assertions a compiler can answer: {len(hits)} in "
-          f"{len({h[0] for h in hits})} file(s)")
+          f"{len({h[0] for h in hits})} EXECUTED spec(s) "
+          f"(the same shape appears {len(shape)} times overall, but a spec "
+          f"that never runs cannot have an assertion folded out from under it)")
     for h in hits[:20]:
         print(f"    {h[1]:16} = {h[2]:50} {h[0]}")
