@@ -1,10 +1,9 @@
-// @test: check
+// @test: typecheck-fail
+// @expected-error: "no method named `default` found for type `NoDef`"
 // @level: L0
 // @tier: 0
 // @tags: derive, meta, diagnostics
 // @timeout: 20000
-// @expected-exit: 101
-// @expected-stderr: no method named `default` found for type `NoDef`
 // @description: A derived `Default` whose field type has none blames the
 //   FIELD TYPE, not the derive.
 

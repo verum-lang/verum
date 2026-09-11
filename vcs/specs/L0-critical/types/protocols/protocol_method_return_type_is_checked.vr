@@ -1,10 +1,9 @@
-// @test: check
+// @test: typecheck-fail
+// @expected-error: "does not match the signature"
 // @level: L0
 // @tier: 0
 // @tags: protocols, signatures, diagnostics
 // @timeout: 20000
-// @expected-exit: 101
-// @expected-stderr: does not match the signature
 // @description: An implementation whose return type contradicts the
 //   protocol's is refused — including when the protocol comes from the
 //   standard library.

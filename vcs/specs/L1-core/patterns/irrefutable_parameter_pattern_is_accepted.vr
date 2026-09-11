@@ -1,9 +1,8 @@
-// @test: check
+// @test: typecheck-pass
 // @level: L1
 // @tier: 0
 // @tags: patterns, parameters, refutable
 // @timeout: 20000
-// @expected-exit: 0
 // @description: An irrefutable parameter pattern — a tuple of bindings,
 //   and a newtype unwrap — stays accepted.
 

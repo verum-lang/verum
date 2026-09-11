@@ -1,9 +1,8 @@
-// @test: check
+// @test: typecheck-pass
 // @level: L1
 // @tier: 0
 // @tags: capabilities, attenuation
 // @timeout: 20000
-// @expected-exit: 0
 // @description: A value carrying more capabilities than required is
 //   accepted — giving a capability away is the whole point.
 

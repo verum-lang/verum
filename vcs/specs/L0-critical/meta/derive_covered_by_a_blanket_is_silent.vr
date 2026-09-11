@@ -1,9 +1,8 @@
-// @test: check
+// @test: typecheck-pass
 // @level: L0
 // @tier: 0
 // @tags: derive, meta, diagnostics, blanket-impls
 // @timeout: 20000
-// @expected-exit: 0
 // @description: A derive whose protocol a stdlib blanket already supplies
 //   produces no warning — the behaviour is there.
 

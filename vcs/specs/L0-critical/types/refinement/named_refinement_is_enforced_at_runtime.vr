@@ -2,7 +2,7 @@
 // @level: L0
 // @tier: 0
 // @tags: refinement, gradual-verification, naming
-// @expect: pass
+// @expected-panic: refinement violation
 // @description: A refinement behind a NAMED type is enforced at runtime,
 //   exactly as the inline spelling is.
 

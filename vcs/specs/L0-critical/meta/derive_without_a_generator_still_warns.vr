@@ -1,10 +1,9 @@
-// @test: check
+// @test: typecheck-pass
+// @expected-warning: "was not applied"
 // @level: L0
 // @tier: 0
 // @tags: derive, meta, diagnostics
 // @timeout: 20000
-// @expected-exit: 0
-// @expected-stderr: was not applied
 // @description: A derive with neither a generator nor a blanket still
 //   warns.
 

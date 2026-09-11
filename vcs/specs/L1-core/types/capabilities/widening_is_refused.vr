@@ -1,10 +1,9 @@
-// @test: check
+// @test: typecheck-fail
+// @expected-error: "capability cannot be widened"
 // @level: L1
 // @tier: 0
 // @tags: capabilities, attenuation
 // @timeout: 20000
-// @expected-exit: 101
-// @expected-stderr: capability cannot be widened
 // @description: A value carrying fewer capabilities than required is
 //   refused — a capability may be given away, never acquired.
 

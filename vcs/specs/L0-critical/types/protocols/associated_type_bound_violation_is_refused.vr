@@ -1,10 +1,9 @@
-// @test: check
+// @test: typecheck-fail
+// @expected-error: "does not satisfy the bound"
 // @level: L0
 // @tier: 0
 // @tags: protocols, associated-types, bounds
 // @timeout: 20000
-// @expected-exit: 101
-// @expected-stderr: does not satisfy the bound
 // @description: An associated type that does NOT satisfy its protocol's
 //   bound is refused.
 

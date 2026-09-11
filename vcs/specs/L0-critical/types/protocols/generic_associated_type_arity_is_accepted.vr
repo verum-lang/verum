@@ -1,9 +1,8 @@
-// @test: check
+// @test: typecheck-pass
 // @level: L0
 // @tier: 0
 // @tags: protocols, associated-types, gat
 // @timeout: 20000
-// @expected-exit: 0
 // @description: An impl that binds a GAT with the RIGHT number of type
 //   parameters is accepted.
 

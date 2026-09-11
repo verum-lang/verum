@@ -1,10 +1,9 @@
-// @test: check
+// @test: typecheck-fail
+// @expected-error: "type parameter(s) here, but"
 // @level: L0
 // @tier: 0
 // @tags: protocols, associated-types, gat
 // @timeout: 20000
-// @expected-exit: 101
-// @expected-stderr: type parameter(s) here, but
 // @description: An impl that binds a GAT with the wrong number of type
 //   parameters is refused.
 

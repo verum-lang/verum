@@ -1,9 +1,8 @@
-// @test: check
+// @test: typecheck-pass
 // @level: L0
 // @tier: 0
 // @tags: parser, select, async, blocks
 // @timeout: 20000
-// @expected-exit: 0
 // @description: A select whose arms MIX an empty block with a non-empty
 //   one type-checks — `{}` in an arm is a block, not an empty map.
 

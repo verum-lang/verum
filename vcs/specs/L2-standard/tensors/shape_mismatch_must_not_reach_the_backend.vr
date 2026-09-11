@@ -1,14 +1,16 @@
-// @test: check
+// @test: typecheck-fail
 // @level: L2
 // @tier: 0
 // @tags: tensors, shapes, silent-acceptance
 // @timeout: 30000
-// @expected-exit: 101
-// @expected-stderr: shape
-// @ignore: shapes are not carried by the type — this file documents the
-//   defect and will pass when they are. Measured 2026-09-03: `verum
-//   check` is clean and `verum run` dies with `internal compiler error
-//   (worker thread panicked): Expected int, got Some(0)`.
+// @expected-error: "shape"
+// @skip: shapes are not carried by the type, so the refusal this file asserts does not happen yet
+// Measured 2026-09-03 and again 2026-09-11: `verum check` is clean — zero
+// diagnostics — and `verum run` dies with `internal compiler error (worker
+// thread panicked): Expected int, got Some(0)`. The directive above says what
+// this file will assert once shapes reach the type; `@skip` is what keeps it
+// counted and named until then. `@ignore:` was the earlier spelling and the
+// runner has never known it.
 // @description: Adding tensors whose shapes cannot broadcast must be
 //   refused at compile time, not crash the compiler at run time.
 

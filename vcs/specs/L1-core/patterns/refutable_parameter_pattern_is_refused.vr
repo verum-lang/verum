@@ -1,10 +1,9 @@
-// @test: check
+// @test: typecheck-fail
+// @expected-error: "cannot be a parameter pattern"
 // @level: L1
 // @tier: 0
 // @tags: patterns, parameters, refutable
 // @timeout: 20000
-// @expected-exit: 101
-// @expected-stderr: cannot be a parameter pattern
 // @description: A qualified variant pattern in parameter position is
 //   refused — a parameter is matched against whatever the caller passes.
 
