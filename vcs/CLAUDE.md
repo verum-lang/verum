@@ -114,6 +114,43 @@ cargo run -p vtest -- run --level L0 --verbose
 cargo run -p vtest -- list --level L0
 ```
 
+#### READ THE COVERAGE LINE BEFORE THE PASS RATE
+
+A run can stop before it reaches every spec. The runner carries a memory
+watchdog that ends the run above 8 GiB RSS, and in-process execution
+accumulates, so a large level can hit it partway through. When that
+happens the summary says so:
+
+```
+  Total:     383 of 702 tests — 319 NEVER RAN
+  STOPPED EARLY:  the memory watchdog stopped the run at RSS 8291 MB …
+  Every rate below is over the 383 that ran, not over the level.
+```
+
+and the run exits non-zero even if nothing failed.
+
+**A pass rate from such a run is a rate over an unnamed subset, and the
+subset is not random — it is the discovery-order TAIL.** Directories run
+in order and everything after the cut is absent, the same directories
+every time. Measured 2026-09-11 on L1-core: `types/` — 228 specs, the
+level's largest directory — was missing from five runs of eight because
+it sorts last.
+
+Before comparing two runs, compare their denominators. Two numbers from
+runs of different sizes say nothing about the change between them; that
+mistake cost a retracted conclusion the day this was found.
+
+When a level truncates, the cause is usually a handful of specs, not the
+level's size. The way to find them is peak RSS per directory, then per
+file, each run alone:
+
+```bash
+vtest run --parallel 1 vcs/specs/L1-core/<dir>   # sample RSS alongside
+```
+
+On L1-core that pointed at two files in `refinement/` — one costing
+5.8 GiB, one 3.3 GiB, the other twenty-six under a megabyte.
+
 ### Error Codes
 
 | Code | Category | Example |
