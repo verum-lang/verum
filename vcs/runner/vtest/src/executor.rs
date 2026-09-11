@@ -905,6 +905,10 @@ impl Executor {
     ///
     /// Uses FastParser (the main parser) which supports the full Verum grammar
     /// including tactic declarations, meta expressions, and proof constructs.
+    // NOT RESET HERE, and that is the one deliberate exception:
+    // `reset_test_isolation()` clears the VBC value tables and the
+    // exhaustiveness cache, and a parse-only path populates neither. Every
+    // other direct path compiles and does.
     fn execute_parse_pass_direct(
         &self,
         directives: &TestDirectives,
@@ -1294,6 +1298,24 @@ impl Executor {
             .stack_size(512 * 1024 * 1024)
             .spawn(move || {
                 let check_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    // ISOLATION-1: the same reset the `run` paths already do.
+                    // `reset_test_isolation()` clears the VBC global value
+                    // tables and the exhaustiveness cache, both process-wide,
+                    // and the typecheck paths were the ones NOT doing it while
+                    // carrying most of the suite (2179 `typecheck-pass` specs).
+                    //
+                    // Measured 2026-09-11 on L1-core with one binary:
+                    // `--parallel 1` gives 46 failures twice over, the same SET
+                    // both times; the default runner gives 98, 100 and 64 in
+                    // three runs, and every serial failure is among them — 54
+                    // failures that only concurrency produces, 33 of them
+                    // "Typecheck unexpectedly failed" rather than a timeout.
+                    // One spec (refinement/subtyping/negative_refinements.vr)
+                    // fails alone, fails in its own directory, and PASSES in
+                    // the whole level: something earlier in the order leaves
+                    // state that changes its answer.
+                    verum_compiler::reset_test_isolation();
+
                     let mut session = if let Some(cached_registry) = get_cached_stdlib_registry() {
                         Session::with_registry(options, cached_registry)
                     } else {
@@ -1562,6 +1584,10 @@ impl Executor {
             .stack_size(512 * 1024 * 1024)
             .spawn(move || {
                 let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    // ISOLATION-1: same reset as the typecheck-pass path;
+                    // see the note there.
+                    verum_compiler::reset_test_isolation();
+
                     let mut session = if let Some(cached_registry) = get_cached_stdlib_registry() {
                         Session::with_registry(options, cached_registry)
                     } else {
@@ -1717,6 +1743,10 @@ impl Executor {
             .stack_size(512 * 1024 * 1024)
             .spawn(move || {
                 let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    // ISOLATION-1: same reset as the typecheck-pass path;
+                    // see the note there.
+                    verum_compiler::reset_test_isolation();
+
                     let mut session = if let Some(cached_registry) = get_cached_stdlib_registry() {
                         Session::with_registry(options, cached_registry)
                     } else {
@@ -2569,6 +2599,10 @@ impl Executor {
             .stack_size(512 * 1024 * 1024)
             .spawn(move || {
                 let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    // ISOLATION-1: same reset as the typecheck-pass path; see
+                    // the note there.
+                    verum_compiler::reset_test_isolation();
+
                     let mut session = if let Some(cached_registry) = get_cached_stdlib_registry() {
                         Session::with_registry(options, cached_registry)
                     } else {
@@ -3463,6 +3497,10 @@ impl Executor {
         &self,
         directives: &TestDirectives,
     ) -> Result<(), ExecutorError> {
+        // ISOLATION-1: same reset as the typecheck-pass path; see
+        // the note there.
+        verum_compiler::reset_test_isolation();
+
         use verum_compiler::api::{CommonPipelineConfig, SourceFile, run_common_pipeline};
 
         let source = directives.source_content.as_str();
@@ -3532,6 +3570,10 @@ impl Executor {
         &self,
         directives: &TestDirectives,
     ) -> Result<(), ExecutorError> {
+        // ISOLATION-1: same reset as the typecheck-pass path; see
+        // the note there.
+        verum_compiler::reset_test_isolation();
+
         use verum_compiler::api::{CommonPipelineConfig, SourceFile, run_common_pipeline};
 
         let source = directives.source_content.as_str();
@@ -3638,6 +3680,10 @@ impl Executor {
     fn execute_vbc_codegen_direct(&self, directives: &TestDirectives) -> Result<(), ExecutorError> {
         use verum_compiler::api::compile_to_vbc;
 
+        // ISOLATION-1: same reset as the typecheck-pass path; see the
+        // note there.
+        verum_compiler::reset_test_isolation();
+
         let source = directives.source_content.as_str();
 
         compile_to_vbc(source).map_err(|e| ExecutorError::ProcessError(e.to_string().into()))?;
@@ -3681,6 +3727,10 @@ impl Executor {
         &self,
         directives: &TestDirectives,
     ) -> Result<(), ExecutorError> {
+        // ISOLATION-1: same reset as the typecheck-pass path; see
+        // the note there.
+        verum_compiler::reset_test_isolation();
+
         use verum_compiler::api::compile_to_vbc;
 
         let source = directives.source_content.as_str();
@@ -3742,6 +3792,10 @@ impl Executor {
             .stack_size(512 * 1024 * 1024)
             .spawn(move || {
                 let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    // ISOLATION-1: same reset as the typecheck-pass path;
+                    // see the note there.
+                    verum_compiler::reset_test_isolation();
+
                     let mut session = Session::new(options);
                     let mut pipeline = CompilationPipeline::new_check(&mut session);
                     let result = pipeline.run_check_only();
@@ -3828,6 +3882,10 @@ impl Executor {
             .stack_size(512 * 1024 * 1024)
             .spawn(move || {
                 let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    // ISOLATION-1: same reset as the typecheck-pass path;
+                    // see the note there.
+                    verum_compiler::reset_test_isolation();
+
                     let mut session = Session::new(options);
                     let mut pipeline = CompilationPipeline::new_check(&mut session);
                     let result = pipeline.run_check_only();
@@ -3936,6 +3994,10 @@ impl Executor {
             .stack_size(512 * 1024 * 1024)
             .spawn(move || {
                 let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    // ISOLATION-1: same reset as the typecheck-pass path;
+                    // see the note there.
+                    verum_compiler::reset_test_isolation();
+
                     let mut session = Session::new(options);
                     let mut pipeline = CompilationPipeline::new_check(&mut session);
                     let result = pipeline.run_check_only();
