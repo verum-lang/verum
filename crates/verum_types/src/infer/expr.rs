@@ -13339,10 +13339,32 @@ impl TypeChecker {
             // misspelled or unimplemented `@meta` reads as a working call
             // returning nothing.  43 sites in `core/` land here.
             //
-            // It is not fixed by simply raising an error: 25 of those
-            // sites are in `core/math` and need a design decision
-            // (protocol-typed functor composition), so making this loud
-            // unconditionally would stop the stdlib baking.  What was
+            // "43 sites" and the follow-on "25 of those are in
+            // `core/math`, so making this loud would stop the stdlib
+            // baking" were BOTH measured on the wrong route, and the
+            // second is false as stated.
+            //
+            // MEASURED 2026-09-11: `VERUM_STRICT_META_FN=1` on a FULL
+            // BAKE passes and refreshes the archive. Not one unknown
+            // meta-function is reported, and the lever is not broken —
+            // it fires on an anchor (a two-line user file with
+            // `@definitely_not_a_real_meta_function`) and it does reach
+            // the nested process (`build.rs` has no `env_clear()`).
+            //
+            // The reason is structural: `pipeline/stdlib_bootstrap.rs`
+            // registers TYPES and SIGNATURES and never infers a function
+            // BODY — no `synth_expr` / `check_function` call anywhere in
+            // it. This arm lives in body inference, so the bake cannot
+            // reach it for any name in any file. `StackTrace.capture`,
+            // which contains `@frame_address(0)`, is IN the strict
+            // archive: compiled, with its types never inferred.
+            //
+            // So the counts came from `verum check` on individual `core/`
+            // files, which runs `stdlib_single_file_mode` — a route that
+            // cannot see sibling declarations and DOES infer bodies.
+            // That is the route this arm actually guards, and the route
+            // any decision about making it loud has to be measured on.
+            // What was
             // missing is the ability to MEASURE that claim instead of
             // repeating it, so this arm now has two levers and neither
             // changes the default:

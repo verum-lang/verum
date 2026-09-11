@@ -87,11 +87,20 @@ impl std::error::Error for MarshalError {}
 // why the mistake is easy to make in this file specifically.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum RefArgKind {
+    /// The slot holds a Verum `Int` — re-boxed with `Value::from_i64`,
+    /// which is what every kind used to get.
     Int,
+    /// The slot holds IEEE-754 bits written by the callee. Re-boxing them
+    /// as an integer is T1410: the value arrives correct and reads as
+    /// 4613937818241073152 instead of 3.0.
     Float,
+    /// The slot holds 0 or 1. Kept distinct from `Int` because a C
+    /// `_Bool` out-parameter writes one byte and the boxed form is a
+    /// different `Value` tag, not a narrower integer.
     Bool,
 }
 
+/// Temporary storage backing one `&`/`&mut` FFI argument.
 pub struct RefArgStorage {
     /// The allocated storage for the value.
     /// Using Box to get a stable address on the heap.
