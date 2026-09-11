@@ -85,6 +85,7 @@ mount sys.darwin.libsystem.{
 @cfg(target_os = "macos")
 mount sys.common.{FileDesc, OSError};
 mount core.io.{IoError, IoErrorKind};
+mount core.random.secure.{fill_secure_array};
 
 // Windows: Use GetNetworkParams from iphlpapi.dll to read system DNS servers.
 // No file-based resolv.conf on Windows — DNS config is in the registry,
@@ -1107,13 +1108,38 @@ fn lookup_static_hosts(hostname: &Text) -> List<IpAddr> {
     out
 }
 
-/// Generate a random-ish query ID.
+/// Generate an unpredictable DNS transaction ID.
+///
+/// THIS IS THE ONLY THING THAT MAKES AN OFF-PATH ANSWER HARD TO FORGE.
+/// `parse_response` checks `header.id != expected_id` (:684), and that
+/// check is worth exactly as much as the id is unguessable.
+///
+/// It used to be the ADDRESS OF A LOCAL:
+///
+///     let x: Int = 0;
+///     let addr = &x as *const Int as Int;
+///     (addr ^ (addr >> 16)) as UInt16
+///
+/// which is not weak entropy — it is a CONSTANT. Measured 2026-09-11
+/// (T1435), the same shape called 65 times in one process:
+///
+///     tier 0    first = 0       identical_of_64 = 64
+///     tier 1    first = 35715   identical_of_64 = 64
+///
+/// Every query in a process carried the same id, and under the
+/// interpreter that id was ZERO — `&x` on a scalar local is the address
+/// of a NaN-boxed register slot, and the cast produces 0 rather than
+/// failing. So the check at :684 admitted anything, without guessing.
+///
+/// `fill_secure_array` draws from the platform CSPRNG. It is measured
+/// rather than assumed: the array form wrote NOTHING until T1267, so
+/// "the stdlib has a CSPRNG" and "this call works" are different claims.
+/// 32 draws, no repeats, at both tiers, on the binary this change was
+/// written against.
 fn generate_query_id() -> UInt16 {
-    // Use address of a stack variable as entropy source.
-    // In production, this should use a proper PRNG.
-    let x: Int = 0;
-    let addr = &x as *const Int as Int;
-    (addr ^ (addr >> 16)) as UInt16
+    let mut b: [Byte; 2] = [0; 2];
+    fill_secure_array(&mut b);
+    ((b[0] as UInt16) << 8) | (b[1] as UInt16)
 }
 
 // =============================================================================

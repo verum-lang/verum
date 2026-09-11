@@ -1,0 +1,72 @@
+// @test: run
+// @tier: 0,1
+// @level: L0
+// @tags: random, csprng, security, regression
+// @timeout: 60000
+// @expected-exit: 0
+// @expected-stdout: secure draws vary
+//
+// A SECURE DRAW IS NOT THE SAME NUMBER TWICE (T1435).
+//
+// This spec exists because something depends on it that cannot be tested
+// directly: `core/net/dns.vr` derives the DNS transaction id from
+// `fill_secure_array`, and that id is the ONLY field making an off-path
+// answer hard to forge — `parse_response` checks it and nothing else.
+// `generate_query_id` is private and the resolver path needs a network,
+// so the property is pinned HERE, at the dependency the fix rests on.
+//
+// WHAT IT REPLACED, measured 2026-09-11 on the same shape the resolver
+// used to carry:
+//
+//     let x: Int = 0;
+//     let addr = &x as *const Int as Int;
+//     (addr ^ (addr >> 16)) as UInt16
+//
+//     tier 0    first = 0       identical_of_64 = 64
+//     tier 1    first = 35715   identical_of_64 = 64
+//
+// Not weak entropy — a CONSTANT, and zero under the interpreter, because
+// `&x` on a scalar local is the address of a NaN-boxed register slot and
+// the cast yields 0 instead of failing.
+//
+// AND WHY THE REPLACEMENT IS MEASURED RATHER THAN TRUSTED: this very
+// function wrote NOTHING until T1267 — a `[Byte; 12]` preset to sevens
+// came back all sevens — because a const-generic length read as zero
+// across a module boundary. "The stdlib has a CSPRNG" and "this call
+// works" are different claims, and a security fix may only rest on the
+// second.
+//
+// BOTH TIERS, deliberately: the interpreter and the AOT reach the
+// platform CSPRNG by different routes, and a draw that varies under one
+// says nothing about the other.
+
+mount core.random.secure.{fill_secure_array};
+
+fn draw() -> Int {
+    let mut b: [Byte; 2] = [0; 2];
+    fill_secure_array(&mut b);
+    ((b[0] as Int) << 8) | (b[1] as Int)
+}
+
+fn main() {
+    let first = draw();
+    let mut identical = 0;
+    let mut i = 0;
+    while i < 32 {
+        if draw() == first { identical = identical + 1; }
+        i = i + 1;
+    }
+
+    // PRINT BEFORE ASSERTING: "all 32 identical" and "3 of 32 identical"
+    // are different defects — a dead generator versus a narrow one — and
+    // an assertion alone cannot tell them apart in a log.
+    print(f"identical_of_32={identical}");
+
+    // 32 draws from a 16-bit space: the chance of even one collision is
+    // about 0.8%, so a handful is not a failure. A generator that is
+    // STUCK gives 32. The bound is deliberately loose on the side that
+    // chance can reach and tight on the side only a defect can.
+    assert(identical < 8);
+
+    print("secure draws vary");
+}
