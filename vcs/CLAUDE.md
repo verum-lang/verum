@@ -278,6 +278,49 @@ fn main() {
 
 5. **Execution Order**: Parse → Typecheck → Verify → Compile → Execute
 
+6. **An assertion the compiler can answer tests nothing.** Measured
+   2026-09-11 (T1443), six observables on ONE value at Tier 1:
+
+   ```
+   print(v)          6137634896     the ADDRESS
+   v + 0             6137634896     the ADDRESS
+   v == 42           true           <- FOLDED
+   v == w            true           <- FOLDED, w being the correct control
+   v > 1000          false          <- FOLDED
+   assert(1 == 2)    FIRES, rc=255  <- the mechanism is alive
+   ```
+
+   `assert(v == 42)` PASSED while the register carried an address. The
+   front end knows what the source means, folds the comparison on that
+   model, and the model is what a spec exists to test — so the assertion
+   verified that the compiler agrees with itself.
+
+   **Rule**: when a value reaches an assertion through the MECHANISM
+   under test — a dereference, a field read, a tuple index — guard the
+   comparison with arithmetic the fold cannot precede:
+
+   ```verum
+   assert(v == 42);       // may be answered without running the code
+   assert(v + 0 == 42);   // reads the register the back end emitted
+   ```
+
+   All the guarded forms read `true` at Tier 0, so the guard does not
+   break the correct case. A value arriving through a FUNCTION CALL is
+   not folded and needs no guard — which is why one spec caught this
+   defect in its parameter rungs and missed it in its local-binding
+   rungs, with nothing in its text or its green verdict to tell them
+   apart.
+
+   **And print before asserting.** `assert_eq` says two values differ and
+   never says what they were; here the print was the only reason the
+   wrong value was visible at all, because the assertion reported
+   success.
+
+   Census: `python3 scripts/ci/census_foldable_assertions.py` (reports,
+   does not gate). 14 such assertions in 10 EXECUTED specs; the same
+   shape appears 124 times overall, but a `typecheck-pass` spec never
+   runs its assertions and cannot have one folded out from under it.
+
 ### Makefile Targets
 
 ```bash
