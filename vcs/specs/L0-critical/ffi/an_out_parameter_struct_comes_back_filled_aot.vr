@@ -4,19 +4,20 @@
 // @tags: ffi, out-param, struct, abi, differential, regression
 // @timeout: 60000
 // @expected-exit: 0
-// @skip: T1403 — a &mut struct out-parameter of an FFI call is not written back at Tier 1
 //
-// AN OUT-PARAMETER STRUCT COMES BACK FILLED — TIER 1 (T1403). SKIPPED.
+// AN OUT-PARAMETER STRUCT COMES BACK FILLED — TIER 1 (T1404). LIVE.
 //
-// This is the half that FAILS today, and the `@skip` above is the whole
-// reason the file is separate from its tier-0 twin: `make test-l0`
-// requires 100%, so a live red row here would block every unrelated
-// change. The spec is written, committed and skipped rather than
-// withheld, because a defect with no test is a defect that gets fixed by
-// accident and regresses unnoticed.
+// This file carried `@skip` from the day it was written until T1404
+// landed on 2026-09-11, and it is kept separate from its tier-0 twin for
+// that reason: `make test-l0` requires 100%, so a live red row would have
+// blocked every unrelated change. It was written, committed and skipped
+// rather than withheld, because a defect with no test is one that gets
+// fixed by accident and regresses unnoticed — and the `@skip` came off in
+// the commit that made it pass, which is the only honest moment for it.
 //
-// REMOVE THE @skip when T1403 lands. The expected reading is identical
-// to the tier-0 twin's — that is the point of a differential pair.
+// The expected reading is identical to the tier-0 twin's. That is the
+// point of a differential pair: a regression that breaks tier 0 instead
+// would otherwise read as success.
 //
 // A C function that reports through a pointer parameter — `clock_gettime`,
 // `stat`, `getsockname`, `waitpid`, every `*_r` variant — writes into the
@@ -29,6 +30,11 @@
 //     tier 1    a=0           b=0       c=0  tv_sec=0  tv_usec=0
 //
 // and `a` matched `int(time.time())` exactly on the same second.
+//
+// MEASURED AGAIN 2026-09-11, after T1404:
+//
+//     tier 0    a=1789128866  b=466012  c=0  tv_sec=0  tv_usec=0
+//     tier 1    a=1789128862  b=958871  c=0  tv_sec=0  tv_usec=0
 //
 // Tier 0 is CORRECT there and Tier 1 is silently empty. The call returns
 // `rc=0` at both tiers, and nothing is printed, logged or raised — the
