@@ -99,8 +99,31 @@ def compare(found: set, roster: set) -> tuple[list, list]:
 SHA = re.compile(r"\b(?![0-9]+\b)([0-9a-f]{7,40})\b")
 
 
+# A citation that names ANOTHER repository before the sha. The register
+# cites the website repo this way — "…which is pure Verum and runs —
+# website b742125" — and that commit is real, with a title matching the
+# claim, in the sibling checkout. It is simply not an object HERE.
+#
+# Before this, such a citation reached the dangling branch and the gate
+# refused to report at all, which is the right refusal for the wrong
+# reason: a foreign sha is not evidence that this checkout is shallow.
+# Measured 2026-09-11: one citation, `website b742125`, and the gate had
+# never run in CI to say so (the target is in no aggregate — T1439).
+#
+# Deliberately NOT resolved against the sibling checkout: a fresh clone
+# does not have one, and a gate whose answer depends on what else is on
+# the disk is the kind this file already refuses to be.
+FOREIGN = re.compile(r"\b(?:website|site|registry)\s+([0-9a-f]{7,40})\b")
+
+
+def foreign_shas(text: str) -> set:
+    """Shas the register explicitly attributes to another repository."""
+    return {m.group(1) for m in FOREIGN.finditer(text)}
+
+
 def cited_shas(text: str) -> list[str]:
-    return sorted({m.group(1) for m in SHA.finditer(text)})
+    foreign = foreign_shas(text)
+    return sorted({m.group(1) for m in SHA.finditer(text)} - foreign)
 
 
 def is_commit(sha: str) -> bool:
@@ -123,6 +146,12 @@ SELF_TEST = [
     ("the nil sentinel 0x7ff9000000000000", 0),
     ("commits 072fafab4 and 1aad1409a", 2),
     ("no shas here at all", 0),
+    # A sha attributed to another repository is not this repository's to
+    # resolve, and must not reach the dangling branch.
+    ("pure Verum and runs — website b742125", 0),
+    # …but only when the attribution is actually there. The same sha with
+    # no repository named in front of it is this repository's problem.
+    ("pure Verum and runs — b742125", 1),
 ]
 
 
