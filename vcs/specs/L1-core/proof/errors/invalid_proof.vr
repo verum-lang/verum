@@ -2,7 +2,8 @@
 // @level: L1
 // @tags: proofs, verification, errors
 // @timeout: 30000
-// @expected-error: proof-failed
+// @expected-error: "proof-failed"
+// @expected-error: "did not discharge"
 
 /// Tests that invalid proofs are rejected.
 ///

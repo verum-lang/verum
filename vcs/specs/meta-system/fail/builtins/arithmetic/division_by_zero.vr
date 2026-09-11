@@ -3,7 +3,7 @@
 // @tier: 0
 // @tags: meta, builtins, arithmetic, division, error
 // @description: Test that division by zero is caught at compile time in meta evaluation
-// @expected-error: Division by zero
+// @expected-error: "Division by zero"
 
 // =============================================================================
 // DIVISION BY ZERO TESTS

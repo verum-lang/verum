@@ -1,7 +1,7 @@
 // @test: typecheck-fail
 // @level: L1
 // @tags: exhaustiveness, stream-pattern, error
-// @expected-error: non-exhaustive
+// @expected-error: E0601 "non-exhaustive patterns"
 // @description: Non-exhaustive stream pattern matching should fail
 
 type Stream<T> is Nil | Cons(T, Heap<Stream<T>>);

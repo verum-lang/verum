@@ -1,5 +1,5 @@
 // @test: typecheck-fail
-// @expected-error: undefined context
+// @expected-error: E605 "undefined context"
 // @tier: 0
 // @level: L2
 // @tags: contexts, groups, invalid, error

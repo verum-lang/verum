@@ -3,7 +3,7 @@
 // @tier: 0
 // @tags: meta, const_eval, patterns
 // @description: Tests pattern match failure at compile time - no matching arm
-// @expected-error: match
+// @expected-error: E0601 "non-exhaustive patterns"
 
 // Non-exhaustive match - provides Blue but no arm for it
 type Color is Red | Green | Blue;

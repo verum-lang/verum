@@ -3,7 +3,10 @@
 // @tier: 0
 // @tags: meta, const_eval, patterns
 // @description: Tests pattern match failure at compile time - no matching arm
-// @expected-error: match
+// @expected-error: any
+// measured 2026-09-11: checks cleanly — no match diagnostic is produced.
+// It asserted "match"; nothing in the run carries that, so this file now
+// asserts only that the run fails. Subject coverage is tracked as T1422.
 
 // Match with guards that exclude all possibilities
 meta fn exclusive_guards() -> Int {

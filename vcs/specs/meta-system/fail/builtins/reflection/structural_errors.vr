@@ -1,6 +1,6 @@
 // @test: meta-fail
 // @level: L1
-// @expected-error: expected Type
+// @expected-error: "Type mismatch: expected Type, found Int"
 // @description: Tests error handling for structural reflection builtins
 // @tags: meta-system, builtins, reflection, errors
 // @contexts: MetaTypes

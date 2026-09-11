@@ -3,7 +3,7 @@
 // @tier: 0
 // @tags: meta, const_eval, validation
 // @description: Tests detection of undefined variables in const context
-// @expected-error: undefined
+// @expected-error: E100 "unbound variable"
 
 // Using undefined variable
 meta fn test_undefined_var() -> Int {

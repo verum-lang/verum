@@ -2,7 +2,7 @@
 // @tier: 0
 // @level: L1
 // @tags: patterns, errors, invalid
-// @expected-error: Pattern length mismatch
+// @expected-error: "Pattern length mismatch: expected 2 elements, found 3"
 
 /// Test for invalid pattern errors.
 /// These patterns are syntactically or semantically invalid.

@@ -3,7 +3,7 @@
 // @tier: 0
 // @tags: meta, context, wrong, error
 // @description: Test that MetaTypes context doesn't satisfy MetaRuntime requirement
-// @expected-error: requires
+// @expected-error: "requires `using [MetaRuntime]`"
 
 // =============================================================================
 // WRONG CONTEXT TESTS - MetaTypes doesn't provide MetaRuntime

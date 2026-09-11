@@ -23,7 +23,8 @@
 
 /// Blast may timeout on undecidable problems
 // @test: verify-fail
-// @expected-error: timeout
+// @expected-error: "proof-failed"
+// @expected-error: "did not discharge"
 theorem blast_undecidable(f: fn(Nat) -> Nat):
     (forall n: Nat. f(n) > n) implies (forall n: Nat. f(f(n)) > n)
 {

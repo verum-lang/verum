@@ -3,7 +3,7 @@
 // @tier: 0
 // @tags: meta, builtins, code_gen, compile_error, halt, error
 // @description: Test that compile_error halts compilation with specified message
-// @expected-error: requires
+// @expected-error: "requires `using [CompileDiag]`"
 
 // =============================================================================
 // COMPILE_ERROR REQUIRES CONTEXT

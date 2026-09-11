@@ -3,7 +3,7 @@
 // @tier: 0
 // @tags: meta, builtins, reflection, generics, introspection, error
 // @description: Error tests for generic type introspection builtins - missing context
-// @expected-error: requires
+// @expected-error: "requires `using [MetaTypes]`"
 
 // =============================================================================
 // MISSING CONTEXT ERRORS

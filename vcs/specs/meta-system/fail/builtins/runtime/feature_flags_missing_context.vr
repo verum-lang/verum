@@ -3,7 +3,7 @@
 // @tier: 0
 // @tags: meta, builtins, runtime, context, error
 // @description: Test that feature flag functions require MetaRuntime context
-// @expected-error: requires
+// @expected-error: "requires `using [MetaRuntime]`"
 
 // =============================================================================
 // FEATURE FLAGS MISSING CONTEXT TESTS

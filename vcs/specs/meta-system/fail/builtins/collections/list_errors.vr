@@ -3,7 +3,7 @@
 // @tier: 0
 // @tags: meta, builtins, collections, list, error
 // @description: Test list builtin error handling
-// @expected-error: None
+// @expected-error: "called `maybe_unwrap` on a `None` value"
 
 // =============================================================================
 // INDEX OUT OF BOUNDS

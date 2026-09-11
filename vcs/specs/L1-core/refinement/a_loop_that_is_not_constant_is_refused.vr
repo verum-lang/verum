@@ -3,7 +3,11 @@
 // @level: L1
 // @tags: refinement, smt, loops, unrolling, negative-test, soundness
 // @timeout: 30000
-// @expected-error: proof-failed
+// @expected-error: "proof-failed"
+// @expected-error: "did not discharge"
+// Measured 2026-09-11 THROUGH THE RUNNER: the verify-fail executor prints
+// `error<proof-failed>: `<name>` did not discharge`. `verum check` prints
+// `error<E0319>` for the same file — a different pipeline, a different code.
 
 /// CONTROL for `a_constant_loop_is_unrolled.vr`.
 ///

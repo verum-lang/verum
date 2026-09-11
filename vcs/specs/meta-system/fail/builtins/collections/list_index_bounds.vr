@@ -3,7 +3,7 @@
 // @tier: 0
 // @tags: meta, builtins, collections, list, bounds, error
 // @description: Test that list index out of bounds is caught at compile time
-// @expected-error: None
+// @expected-error: "called `maybe_unwrap` on a `None` value"
 
 // =============================================================================
 // LIST INDEX OUT OF BOUNDS TESTS

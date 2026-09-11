@@ -3,7 +3,7 @@
 // @tier: 0
 // @tags: meta, builtins, arithmetic, overflow, error
 // @description: Test that arithmetic overflow is caught at compile time
-// @expected-error: Shift amount
+// @expected-error: "Shift amount must be 0..127"
 
 // =============================================================================
 // ARITHMETIC OVERFLOW TESTS

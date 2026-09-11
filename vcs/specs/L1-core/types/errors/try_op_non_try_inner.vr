@@ -2,7 +2,7 @@
 // @level: L1
 // @tags: types, try-operator, maybe, error-diagnostic
 // @timeout: 5000
-// @expected-error: NotResultOrMaybe
+// @expected-error: E0205 "cannot use `?` on a value of type"
 
 /// The `?` operator must produce a clear error when applied to a value
 /// whose type does not implement Try (Result/Maybe/etc). Before the fix

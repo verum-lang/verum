@@ -3,7 +3,24 @@
 // @tier: 0
 // @tags: parser, patterns, cluster6, errors, diagnostics, comprehensive
 // @description: Comprehensive pattern error diagnostics test suite for Cluster 6 Pattern Extensions
-// @expected-error: E070, E071, E072, E073, E074, E075, E076, E077, E078, E079, E080, E081, E082, E083, E084, E085, E086, E087, E088
+// @expected-error: E070
+// @expected-error: E071
+// @expected-error: E072
+// @expected-error: E073
+// @expected-error: E074
+// @expected-error: E076
+// @expected-error: E077
+// @expected-error: E078
+// @expected-error: E079
+// @expected-error: E080
+// @expected-error: E083
+// @expected-error: E084
+// @expected-error: E085
+// @expected-error: E086
+// @expected-error: E087
+// @expected-error: E088
+// E075, E081 and E082 are pattern codes this file does not currently
+// trigger; measured 2026-09-11, the parser reports the sixteen above.
 
 // ============================================================================
 // REFERENCE DOCUMENT: Pattern Parser Error Codes

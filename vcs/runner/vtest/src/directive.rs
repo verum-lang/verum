@@ -105,6 +105,12 @@ pub enum DirectiveError {
     #[error("Invalid error code format: {0} (expected E0XX through E9XX)")]
     InvalidErrorCode(Text),
 
+    #[error("Error code {0} is in no registry: verum_error knows no such code, \
+             so no run can ever produce it. Name a code the compiler emits, or \
+             assert the message with `@expected-error: \"...\"`, or say \
+             `@expected-error: any`.")]
+    UnregisteredErrorCode(Text),
+
     #[error("Conflicting directives: {0}")]
     ConflictingDirectives(Text),
 
@@ -578,11 +584,23 @@ impl ErrorCategory {
     }
 }
 
+/// The directive value that asserts only that the run fails.
+///
+/// Spelled out rather than left implicit: an absent `@expected-error:` and an
+/// `@expected-error:` the runner could not read are indistinguishable once
+/// parsed, and the whole point of this module refusing the second is that a
+/// spec must SAY which of the two it means.
+pub const ANY_FAILURE: &str = "any";
+
 /// Expected error specification.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ExpectedError {
-    /// Error code (e.g., "E302")
-    pub code: Text,
+    /// Error code (e.g., "E302").
+    ///
+    /// `None` when the directive asserts no code — either `@expected-error:
+    /// any`, or a quoted message for a failure the compiler reports without a
+    /// registered code.
+    pub code: Option<Text>,
     /// Error message pattern (optional)
     pub message: Option<Text>,
     /// Expected line number (optional)
@@ -600,54 +618,98 @@ pub struct ExpectedError {
 impl ExpectedError {
     /// Parse an expected error from a directive string.
     ///
-    /// Formats supported:
-    /// - `E302 "Use after move" at line 8, col 10`
-    /// - `E302 "Use after move" at line 8, col 10-15`
-    /// - `E302 at line 8`
-    /// - `E302`
-    /// - `[error] E302 "message"`
-    /// - `E302 at 8:10` (compact line:column format)
-    /// - `E302 at 8:10-15` (compact with column range)
-    /// - `M201 "Context not enabled"` (meta-system error)
+    /// Three forms are accepted and nothing else:
+    ///
+    /// - **a code**, optionally with a message, a line and a column:
+    ///   `E302`, `E302 "Use after move"`, `E302 at line 8`,
+    ///   `E302 "Use after move" at line 8, col 10`, `E302 at 8:10-15`,
+    ///   `[error] E302 "message"`, `M201 "Context not enabled"`.
+    /// - **a quoted message alone**: `"cannot prove denominator nonzero"`,
+    ///   for a failure the compiler reports without a registered code.
+    /// - **`any`**: the spec asserts only that the run fails, and says so
+    ///   in the open rather than by leaving the directive off.
+    ///
+    /// Anything else is an error, never a warning: a directive that cannot be
+    /// honoured must refuse rather than be dropped.  An `@expected-error:` the
+    /// runner discards leaves `expected_errors` empty, and an empty
+    /// `expected_errors` means "expect any failure" — so a dropped directive
+    /// converts a specific assertion into a vacuous one without saying so.
+    ///
+    /// The code is checked against `verum_error`'s registry, not against a
+    /// shape.  A shape cannot tell `E0601` (real) from `E060` (real, and a
+    /// DIFFERENT error), and the unanchored `[EWM]\d{3}` this replaced matched
+    /// the first four characters of `E0601` and silently asserted `E060`.
+    /// `M###` is exempt: the meta-system error space lives in
+    /// `verum_compiler::meta::error` and has no registry entry.
     pub fn parse(s: &str) -> Result<Self, DirectiveError> {
-        // Pattern for parsing error specifications with optional severity
-        // Supports both "at line X, col Y" and compact "at X:Y" formats
-        // Supports E/W (compiler errors/warnings) and M (meta-system errors) prefixes
-        static ERROR_RE: Lazy<Regex> = Lazy::new(|| {
+        // Anchored at BOTH ends.  The right anchor is what stops a longer code
+        // from being accepted as its own four-character prefix.
+        static CODED_RE: Lazy<Regex> = Lazy::new(|| {
             Regex::new(
-                r#"^(?:\[(\w+)\]\s*)?([EWM]\d{3})\s*(?:"([^"]+)")?\s*(?:at\s+(?:line\s+)?(\d+))?(?:(?:,\s*col\s+|:)(\d+)(?:-(\d+))?)?"#,
+                r#"^(?:\[(\w+)\]\s*)?([EWM][0-9][0-9A-Z]{2,3})\s*(?:"([^"]+)")?\s*(?:at\s+(?:line\s+)?(\d+))?(?:(?:,\s*col\s+|:)(\d+)(?:-(\d+))?)?\s*$"#,
             )
             .unwrap()
         });
+        // A quoted message with no code in front of it.
+        static MESSAGE_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r#"^"([^"]+)"\s*$"#).unwrap());
 
         let s = s.trim();
 
-        if let Some(caps) = ERROR_RE.captures(s) {
-            let severity: Option<Text> = caps.get(1).map(|m| m.as_str().to_string().into());
-            let code: Text = caps.get(2).map(|m| m.as_str().to_string().into()).unwrap();
-            let message: Option<Text> = caps.get(3).map(|m| m.as_str().to_string().into());
-            let line = caps.get(4).and_then(|m| m.as_str().parse().ok());
-            let column = caps.get(5).and_then(|m| m.as_str().parse().ok());
-            let end_column = caps.get(6).and_then(|m| m.as_str().parse().ok());
-
-            // Validate error code format
-            let category = ErrorCategory::from_code(&code);
-            if category.is_none() {
-                return Err(DirectiveError::InvalidErrorCode(code));
-            }
-
-            Ok(Self {
-                code,
-                message,
-                line,
-                column,
-                end_column,
-                severity,
-                category,
-            })
-        } else {
-            Err(DirectiveError::InvalidErrorSpec(s.to_string().into()))
+        if s == ANY_FAILURE {
+            return Ok(Self::any_failure());
         }
+
+        if let Some(caps) = MESSAGE_RE.captures(s) {
+            return Ok(Self {
+                message: Some(caps[1].to_string().into()),
+                ..Self::any_failure()
+            });
+        }
+
+        let caps = CODED_RE
+            .captures(s)
+            .ok_or_else(|| DirectiveError::InvalidErrorSpec(s.to_string().into()))?;
+
+        let code: Text = caps[2].to_string().into();
+
+        let category = ErrorCategory::from_code(&code);
+        if category.is_none() {
+            return Err(DirectiveError::InvalidErrorCode(code));
+        }
+
+        if !code.starts_with("M") && !verum_error::registry::is_known(code.as_str()) {
+            return Err(DirectiveError::UnregisteredErrorCode(code));
+        }
+
+        Ok(Self {
+            code: Some(code),
+            message: caps.get(3).map(|m| m.as_str().to_string().into()),
+            line: caps.get(4).and_then(|m| m.as_str().parse().ok()),
+            column: caps.get(5).and_then(|m| m.as_str().parse().ok()),
+            end_column: caps.get(6).and_then(|m| m.as_str().parse().ok()),
+            severity: caps.get(1).map(|m| m.as_str().to_string().into()),
+            category,
+        })
+    }
+
+    /// An expectation that asserts only that the run fails.
+    pub fn any_failure() -> Self {
+        Self {
+            code: None,
+            message: None,
+            line: None,
+            column: None,
+            end_column: None,
+            severity: None,
+            category: None,
+        }
+    }
+
+    /// The code this expectation asserts, or `"any"` when it asserts none.
+    ///
+    /// For messages a reader sees; never for matching.
+    pub fn code_or_any(&self) -> &str {
+        self.code.as_deref().unwrap_or(ANY_FAILURE)
     }
 
     /// Create a new ExpectedError with the given code.
@@ -655,7 +717,7 @@ impl ExpectedError {
         let code = code.into();
         let category = ErrorCategory::from_code(&code);
         Self {
-            code,
+            code: Some(code),
             message: None,
             line: None,
             column: None,
@@ -693,9 +755,11 @@ impl ExpectedError {
         line: Option<usize>,
         column: Option<usize>,
     ) -> bool {
-        // Code must match exactly
-        if self.code != code {
-            return false;
+        // Code must match exactly — when one is asserted at all.
+        if let Some(ref expected_code) = self.code {
+            if expected_code != code {
+                return false;
+            }
         }
 
         // Message pattern match (substring)
@@ -742,9 +806,11 @@ impl ExpectedError {
     ///
     /// Parses stderr for error patterns and checks for matches.
     pub fn matches_stderr(&self, stderr: &str) -> bool {
-        // Look for error code in stderr
-        if !stderr.contains(self.code.as_str()) {
-            return false;
+        // Look for error code in stderr — when one is asserted at all.
+        if let Some(ref code) = self.code {
+            if !stderr.contains(code.as_str()) {
+                return false;
+            }
         }
 
         // Check message if specified
@@ -1060,19 +1126,22 @@ impl TestDirectives {
             } else if let Some(rest) = comment.strip_prefix("@timeout:") {
                 directives.timeout_ms = Some(parse_timeout(rest.trim())?);
             } else if let Some(rest) = comment.strip_prefix("@expected-error:") {
-                match ExpectedError::parse(rest.trim()) {
-                    Ok(err) => directives.expected_errors.push(err),
-                    Err(e) => directives
-                        .parse_warnings
-                        .push(format!("Line {}: {}", line_num + 1, e).into()),
-                }
+                // NOT a warning: see `ExpectedError::parse`.  A dropped
+                // expectation turns a specific assertion into a vacuous one,
+                // and does it silently.
+                directives.expected_errors.push(
+                    ExpectedError::parse(rest.trim()).map_err(|e| DirectiveError::ParseError {
+                        line: line_num + 1,
+                        message: e.to_string().into(),
+                    })?,
+                );
             } else if let Some(rest) = comment.strip_prefix("@expected-warning:") {
-                match ExpectedError::parse(rest.trim()) {
-                    Ok(err) => directives.expected_warnings.push(err),
-                    Err(e) => directives
-                        .parse_warnings
-                        .push(format!("Line {}: {}", line_num + 1, e).into()),
-                }
+                directives.expected_warnings.push(
+                    ExpectedError::parse(rest.trim()).map_err(|e| DirectiveError::ParseError {
+                        line: line_num + 1,
+                        message: e.to_string().into(),
+                    })?,
+                );
             } else if let Some(rest) = comment.strip_prefix("@expected-error-count:") {
                 directives.expected_error_count =
                     Some(
@@ -1257,13 +1326,32 @@ impl TestDirectives {
             ));
         }
 
-        // Validate error count matches error list if both specified
-        if let (Some(count), errors) = (self.expected_error_count, &self.expected_errors) {
-            if !errors.is_empty() && errors.len() != count {
+        // `@expected-error-count` and `@expected-error` measure DIFFERENT
+        // things, and requiring them to be equal forbade a coherent spec.
+        // The executor compares the count against the number of DIAGNOSTICS
+        // the run produced (`result.error_count()`); a directive is one
+        // ASSERTION, and one assertion can be satisfied by several
+        // diagnostics.  `L0-critical/parser/rust_macro_recovery.vr` is the
+        // case: `@expected-error: E0E2` once, `@expected-error-count: 3`,
+        // and the compiler emits E0E2 exactly three times.  The equality
+        // rule called that a conflict — and only became reachable at all
+        // once `E0E2` started parsing, since a dropped directive left the
+        // list empty and the check skipped itself.
+        //
+        // What IS contradictory is asserting more DISTINCT codes than the
+        // run is allowed to produce errors.
+        if let Some(count) = self.expected_error_count {
+            let distinct: Set<&str> = self
+                .expected_errors
+                .iter()
+                .filter_map(|e| e.code.as_deref())
+                .collect();
+            if distinct.len() > count {
                 return Err(DirectiveError::ConflictingDirectives(format!(
-                    "@expected-error-count ({}) does not match number of @expected-error directives ({})",
+                    "@expected-error-count ({}) is smaller than the number of \
+                     distinct codes asserted by @expected-error ({})",
                     count,
-                    errors.len()
+                    distinct.len()
                 ).into()));
             }
         }
@@ -1591,10 +1679,152 @@ mod tests {
         assert_eq!(ErrorCategory::from_code("invalid"), None);
     }
 
+    /// `E0601` and `E060` are BOTH real codes, and they are different errors:
+    /// "non-exhaustive patterns" (a type error) against "invalid context
+    /// method" (a parse error).  The pattern this test guards replaced an
+    /// unanchored `[EWM]\d{3}`, which matched the first four
+    /// characters of `E0601` and silently asserted `E060`.  Measured over the
+    /// 790 header directives: 28 were truncated this way, and in 24 of them
+    /// the truncated code is itself a registered one — so the spec asserted a
+    /// REAL error that was not the one it named.
+    #[test]
+    fn a_five_character_code_is_not_truncated_to_a_four_character_one() {
+        let err = ExpectedError::parse("E0601").unwrap();
+        assert_eq!(err.code.as_deref(), Some("E0601"));
+        assert!(verum_error::registry::is_known("E060"), "the truncation target is real");
+    }
+
+    /// 48 of the registry's codes carry a letter after the category digit
+    /// (`E0A0`..`E0E2`, the extended parse family).  `[EWM]\d{3}` could not
+    /// express any of them, so `@expected-error: E0E2` — "rust macro syntax",
+    /// asserted by a spec whose whole subject is that diagnostic — was dropped.
+    #[test]
+    fn a_code_with_a_letter_in_it_parses() {
+        let err = ExpectedError::parse("E0E2").unwrap();
+        assert_eq!(err.code.as_deref(), Some("E0E2"));
+        assert_eq!(err.category, Some(ErrorCategory::Parse));
+    }
+
+    /// A failure the compiler reports without a registered code is asserted by
+    /// its message.  The directive still says something; it just does not say
+    /// a code.
+    #[test]
+    fn a_quoted_message_alone_asserts_the_message() {
+        let err = ExpectedError::parse(r#""cannot prove denominator nonzero""#).unwrap();
+        assert_eq!(err.code, None);
+        assert_eq!(
+            err.message.as_ref().map(|t| t.as_str()),
+            Some("cannot prove denominator nonzero")
+        );
+        assert!(err.matches_stderr("error: cannot prove denominator nonzero here"));
+        assert!(!err.matches_stderr("error<E400>: type mismatch"));
+    }
+
+    /// `any` is the only way to say "this must fail, and I assert nothing about
+    /// how" — and it has to be SAID.  Leaving the directive off says the same
+    /// thing to the executor, which is exactly why a dropped directive was
+    /// invisible.
+    #[test]
+    fn any_asserts_only_that_the_run_fails() {
+        let err = ExpectedError::parse("any").unwrap();
+        assert_eq!(err.code, None);
+        assert_eq!(err.message, None);
+        assert!(err.matches_stderr("anything at all"));
+        assert_eq!(err.code_or_any(), "any");
+    }
+
+    /// Prose is refused.  Before this, `@expected-error: proof-failed` left
+    /// `expected_errors` empty, and an empty `expected_errors` means "expect any
+    /// failure" — so the spec passed on a failure of any kind, including a parse
+    /// error in itself.
+    #[test]
+    fn prose_is_refused_rather_than_dropped() {
+        for prose in ["proof-failed", "Sandbox violation", "Type mismatch", "requires"] {
+            assert!(
+                matches!(
+                    ExpectedError::parse(prose),
+                    Err(DirectiveError::InvalidErrorSpec(_))
+                ),
+                "{prose:?} must be refused"
+            );
+        }
+    }
+
+    /// A comma-separated list asserted only its first element.  Refused now:
+    /// one directive, one expectation.
+    #[test]
+    fn a_list_of_codes_is_refused() {
+        assert!(ExpectedError::parse("E070, E071, E072").is_err());
+    }
+
+    /// The registry is the authority, not the shape.  `E999` is shaped like a
+    /// code and is in no registry, so no run can produce it.
+    #[test]
+    fn a_code_that_is_in_no_registry_is_refused() {
+        assert!(!verum_error::registry::is_known("E999"));
+        assert!(matches!(
+            ExpectedError::parse("E999"),
+            Err(DirectiveError::UnregisteredErrorCode(_))
+        ));
+    }
+
+    /// The meta-system error space is defined in `verum_compiler::meta::error`
+    /// and has no registry entry, so `M###` is checked on shape alone.  24
+    /// directives use it.
+    #[test]
+    fn a_meta_code_is_exempt_from_the_registry_check() {
+        assert!(!verum_error::registry::is_known("M301"));
+        let err = ExpectedError::parse(r#"M301 "Operation not allowed in sandbox""#).unwrap();
+        assert_eq!(err.code.as_deref(), Some("M301"));
+    }
+
+    /// One assertion, several diagnostics.  `@expected-error-count` counts
+    /// what the RUN produced; `@expected-error` is one assertion, and the
+    /// same assertion can be met by three diagnostics.  Requiring the two
+    /// numbers to be equal refused
+    /// `L0-critical/parser/rust_macro_recovery.vr`, whose subject is that
+    /// three `E0E2`s appear and not more.
+    #[test]
+    fn one_directive_may_expect_several_diagnostics() {
+        let source = "// @test: parse-fail\n\
+                      // @expected-error: E0E2\n\
+                      // @expected-error-count: 3\n";
+        let d = TestDirectives::parse(source, "macros.vr".into()).unwrap();
+        assert_eq!(d.expected_errors.len(), 1);
+        assert_eq!(d.expected_error_count, Some(3));
+    }
+
+    /// What IS contradictory: more distinct codes asserted than the run is
+    /// allowed to produce errors.
+    #[test]
+    fn more_distinct_codes_than_the_count_allows_is_refused() {
+        let source = "// @test: parse-fail\n\
+                      // @expected-error: E0E2\n\
+                      // @expected-error: E018\n\
+                      // @expected-error-count: 1\n";
+        let err = TestDirectives::parse(source, "macros.vr".into()).unwrap_err();
+        assert!(
+            matches!(err, DirectiveError::ConflictingDirectives(_)),
+            "{err}"
+        );
+    }
+
+    /// The whole point: a directive the runner cannot honour fails the SPEC,
+    /// and the file is named.  It used to become a `parse_warning`, printed
+    /// only under `--verbose`.
+    #[test]
+    fn an_unreadable_expectation_fails_the_spec_rather_than_warning() {
+        let source = "// @test: typecheck-fail\n// @expected-error: Sandbox violation\n";
+        let err = TestDirectives::parse(source, "sandbox.vr".into()).unwrap_err();
+        let text = err.to_string();
+        assert!(text.contains("line 2"), "{text}");
+        assert!(text.contains("Sandbox violation"), "{text}");
+    }
+
     #[test]
     fn test_parse_expected_error() {
         let err = ExpectedError::parse(r#"E302 "Use after move" at line 8"#).unwrap();
-        assert_eq!(err.code.as_str(), "E302");
+        assert_eq!(err.code.as_deref(), Some("E302"));
         assert_eq!(
             err.message.as_ref().map(|t| t.as_str()),
             Some("Use after move")
@@ -1604,7 +1834,7 @@ mod tests {
         assert_eq!(err.category, Some(ErrorCategory::Borrow));
 
         let err = ExpectedError::parse(r#"E401 "Type mismatch" at line 15, col 10"#).unwrap();
-        assert_eq!(err.code.as_str(), "E401");
+        assert_eq!(err.code.as_deref(), Some("E401"));
         assert_eq!(err.line, Some(15));
         assert_eq!(err.column, Some(10));
     }
@@ -1613,13 +1843,13 @@ mod tests {
     fn test_parse_expected_error_compact_format() {
         // Compact line:column format
         let err = ExpectedError::parse(r#"E302 at 8:10"#).unwrap();
-        assert_eq!(err.code.as_str(), "E302");
+        assert_eq!(err.code.as_deref(), Some("E302"));
         assert_eq!(err.line, Some(8));
         assert_eq!(err.column, Some(10));
 
         // Compact with column range
         let err = ExpectedError::parse(r#"E302 at 8:10-15"#).unwrap();
-        assert_eq!(err.code.as_str(), "E302");
+        assert_eq!(err.code.as_deref(), Some("E302"));
         assert_eq!(err.line, Some(8));
         assert_eq!(err.column, Some(10));
         assert_eq!(err.end_column, Some(15));
@@ -1628,7 +1858,7 @@ mod tests {
     #[test]
     fn test_parse_expected_error_with_column_range() {
         let err = ExpectedError::parse(r#"E302 "error" at line 5, col 10-15"#).unwrap();
-        assert_eq!(err.code.as_str(), "E302");
+        assert_eq!(err.code.as_deref(), Some("E302"));
         assert_eq!(err.line, Some(5));
         assert_eq!(err.column, Some(10));
         assert_eq!(err.end_column, Some(15));
@@ -1637,7 +1867,7 @@ mod tests {
     #[test]
     fn test_parse_expected_error_with_severity() {
         let err = ExpectedError::parse(r#"[error] E302 "Use after move""#).unwrap();
-        assert_eq!(err.code.as_str(), "E302");
+        assert_eq!(err.code.as_deref(), Some("E302"));
         assert_eq!(err.severity.as_ref().map(|t| t.as_str()), Some("error"));
         assert_eq!(
             err.message.as_ref().map(|t| t.as_str()),
@@ -1651,7 +1881,7 @@ mod tests {
             .with_message("Use after move")
             .at_position(10, Some(5));
 
-        assert_eq!(err.code.as_str(), "E302");
+        assert_eq!(err.code.as_deref(), Some("E302"));
         assert_eq!(
             err.message.as_ref().map(|t| t.as_str()),
             Some("Use after move")
@@ -1757,7 +1987,7 @@ fn main() {
         assert!(directives.tags.contains(&"ownership".to_string().into()));
         assert!(directives.tags.contains(&"cbgr".to_string().into()));
         assert_eq!(directives.expected_errors.len(), 1);
-        assert_eq!(directives.expected_errors[0].code.as_str(), "E302");
+        assert_eq!(directives.expected_errors[0].code.as_deref(), Some("E302"));
     }
 
     #[test]

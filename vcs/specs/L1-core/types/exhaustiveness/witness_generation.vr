@@ -1,7 +1,7 @@
 // @test: typecheck-fail
 // @level: L1
 // @tags: exhaustiveness, witness, diagnostics
-// @expected-error: non-exhaustive
+// @expected-error: E0601 "non-exhaustive patterns"
 // @description: Witness generation for various non-exhaustive patterns
 
 type Maybe<T> is None | Some(T);

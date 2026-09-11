@@ -2,7 +2,7 @@
 // @level: L1
 // @tier: 0
 // @tags: meta, hygiene, token, tree, error
-// @expected-error: parse
+// @expected-error: E019 "unexpected end of file"
 // @description: Malformed token tree in quote should cause parse error
 
 // Unbalanced delimiters in quote cause parse errors

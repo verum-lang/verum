@@ -1,7 +1,7 @@
 // @test: typecheck-fail
 // @level: L1
 // @tags: context, protocol, object_safety, error
-// @expected-error: not object-safe
+// @expected-error: "is not object-safe"
 // @description: A context protocol with a method returning Self is not object-safe.
 //   Context protocols are used via dynamic dispatch at ~5-30ns overhead, so they
 //   must be object-safe (no Self in return position, no generic methods).

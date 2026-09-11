@@ -68,7 +68,7 @@ fn main() {
     assert_eq!(directives.expected_errors.len(), 1);
 
     let err = &directives.expected_errors[0];
-    assert_eq!(err.code, "E201");
+    assert_eq!(err.code.as_deref(), Some("E201"));
     assert_eq!(err.message, Some("Type mismatch".to_string().into()));
     assert_eq!(err.line, Some(8));
 }
@@ -300,18 +300,18 @@ fn main() { panic("oops"); }
 fn test_expected_error_formats() {
     // Simple format
     let err = ExpectedError::parse("E302").unwrap();
-    assert_eq!(err.code, "E302");
+    assert_eq!(err.code.as_deref(), Some("E302"));
     assert_eq!(err.message, None);
     assert_eq!(err.line, None);
 
     // With message
     let err = ExpectedError::parse(r#"E302 "Use after move""#).unwrap();
-    assert_eq!(err.code, "E302");
+    assert_eq!(err.code.as_deref(), Some("E302"));
     assert_eq!(err.message, Some("Use after move".to_string().into()));
 
     // With message and line
     let err = ExpectedError::parse(r#"E302 "Use after move" at line 8"#).unwrap();
-    assert_eq!(err.code, "E302");
+    assert_eq!(err.code.as_deref(), Some("E302"));
     assert_eq!(err.message, Some("Use after move".to_string().into()));
     assert_eq!(err.line, Some(8));
 
@@ -1034,8 +1034,8 @@ fn main() {
 
     assert_eq!(directives.expected_errors.len(), 2);
     assert_eq!(directives.expected_error_count, Some(2));
-    assert_eq!(directives.expected_errors[0].code, "E201");
-    assert_eq!(directives.expected_errors[1].code, "E302");
+    assert_eq!(directives.expected_errors[0].code.as_deref(), Some("E201"));
+    assert_eq!(directives.expected_errors[1].code.as_deref(), Some("E302"));
 }
 
 // ============================================================================

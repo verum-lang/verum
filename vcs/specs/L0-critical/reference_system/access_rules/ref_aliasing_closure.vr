@@ -1,5 +1,5 @@
 // @test: typecheck-fail
-// @expected-error: closure
+// @expected-error: "as mutable because it is captured by a closure"
 // @tier: 0
 // @level: L0
 // @tags: reference_system, cbgr, access_rules, aliasing, closures, negative-test

@@ -1,5 +1,5 @@
 // @test: typecheck-fail
-// @expected-error: E0506
+// @expected-error: E400 "expected 'StrictUser', found 'LooseUser'"
 // @tier: 0
 // @level: L1
 // @tags: refinement, errors, subsumption, subtyping

@@ -3,7 +3,7 @@
 // @tier: 0
 // @tags: meta, builtins, build_assets, security, symlink, error
 // @description: Tests that build asset functions require context
-// @expected-error: requires
+// @expected-error: "requires `using [BuildAssets]`"
 
 // =============================================================================
 // BUILD ASSETS REQUIRE CONTEXT

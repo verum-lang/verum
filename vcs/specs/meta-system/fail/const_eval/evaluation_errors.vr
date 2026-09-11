@@ -3,7 +3,7 @@
 // @tier: 0
 // @tags: meta, const_eval, error, evaluation
 // @description: Test const evaluation error handling - division by zero
-// @expected-error: division by zero
+// @expected-error: "Division by zero"
 
 // ERROR: Integer division by zero
 meta fn test_div_by_zero_int() -> Int {

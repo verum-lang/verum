@@ -3,7 +3,7 @@
 // @level: L1
 // @tags: refinement, smt, timeout
 // @timeout: 30000
-// @expected-error: verification-timeout
+// @expected-error: "does not satisfy refinement constraint"
 //
 // `@timeout:` is the RUNNER's budget for the whole spec, not the solver's:
 // no path has ever passed it to Z3. At 100 it could not even load the

@@ -48,6 +48,10 @@ anyhow = { workspace = true }
 tokio = { workspace = true, features = ["full", "rt-multi-thread", "process", "time", "fs", "io-util"] }
 futures = { workspace = true }
 
+# The authority on which error codes exist.  `@expected-error:` validates
+# against this registry rather than against a hand-written code shape.
+verum_error = { workspace = true }
+
 # Regex for directive parsing
 regex = { workspace = true }
 once_cell = { workspace = true }

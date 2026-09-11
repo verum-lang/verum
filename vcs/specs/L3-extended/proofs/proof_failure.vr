@@ -3,7 +3,8 @@
 // @level: L3
 // @tags: proofs, failure, negative-test
 // @timeout: 10000
-// @expected-error: proof-failed
+// @expected-error: "proof-failed"
+// @expected-error: "did not discharge"
 
 /// Proof failure demonstration
 /// These theorems have incorrect proofs that should fail verification

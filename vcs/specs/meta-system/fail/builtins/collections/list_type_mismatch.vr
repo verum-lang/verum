@@ -3,7 +3,7 @@
 // @tier: 0
 // @tags: meta, builtins, collections, list, type, error
 // @description: Test that list operations require correct types
-// @expected-error: type
+// @expected-error: "Type mismatch: expected Int, found Text"
 
 // Test list_get with wrong type argument
 meta fn test_list_get_wrong_type() -> Int {

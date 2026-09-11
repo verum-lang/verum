@@ -2,7 +2,8 @@
 // @tier: 0
 // @level: L1
 // @tags: refinement, smt, counterexample
-// @expected-error: verification-failed
+// @expected-error: "proof-failed"
+// @expected-error: "did not discharge"
 // @expect-counterexample: true
 
 /// Counterexample generation tests.

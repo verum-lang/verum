@@ -3,7 +3,7 @@
 // @tier: 0
 // @tags: meta, builtins, build_assets, error, file_not_found
 // @description: Test that build assets properly reports file not found errors
-// @expected-error: requires
+// @expected-error: "requires `using [BuildAssets]`"
 
 // =============================================================================
 // BUILD ASSETS REQUIRE CONTEXT

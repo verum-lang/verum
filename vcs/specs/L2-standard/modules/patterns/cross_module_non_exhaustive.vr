@@ -2,7 +2,7 @@
 // @tier: 0
 // @level: L2
 // @tags: modules, patterns, exhaustiveness, non-exhaustive
-// @expected-error: non-exhaustive
+// @expected-error: E0601 "non-exhaustive patterns"
 // @description: Non-exhaustive pattern errors with imported types
 
 // Module defining types

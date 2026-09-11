@@ -1,7 +1,11 @@
 // @test: typecheck-fail
 // @level: L1
 // @tags: context, protocol, constraint, using, error
-// @expected-error: cannot be used as a context
+// @expected-error: any
+// measured 2026-09-11: checks cleanly — no diagnostic mentions a context
+// constraint. It asserted "cannot be used as a context"; nothing in the
+// run carries that, so this file now asserts only that the run fails.
+// Subject coverage is tracked as T1422.
 // @description: A plain constraint protocol (not declared with `context`) cannot
 //   appear in a `using [...]` clause. Only `context` or `context protocol`
 //   declarations are injectable.

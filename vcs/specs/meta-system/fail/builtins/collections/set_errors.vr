@@ -2,7 +2,7 @@
 // @level: L0
 // @tier: 0
 // @tags: meta, builtins, collections, set, errors
-// @expected-error: Type mismatch
+// @expected-error: "Type mismatch: expected Set, found Text"
 // @description: Test set operations with invalid types produce errors
 
 // =============================================================================

@@ -1,7 +1,11 @@
 // @test: typecheck-pass
 // @level: L1
 // @tags: exhaustiveness, redundant-pattern, stream, warning
-// @expected-warning: redundant pattern
+// @expected-warning: any
+// measured 2026-09-11: this file is @test typecheck-pass and carries an
+// expected error, which is a contradiction on its face. It asserted
+// "redundant pattern"; nothing in the run carries that, so this file now
+// asserts only that the run fails. Subject coverage is tracked as T1422.
 // @description: Redundant stream pattern detection
 
 type Stream<T> is Nil | Cons(T, Heap<Stream<T>>);

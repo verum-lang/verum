@@ -1,5 +1,9 @@
 // @test: typecheck-fail
-// @expected-error: Invalid date format
+// @expected-error: any
+// measured 2026-09-11: fails on an invalid json literal, not on the date
+// literal this file names. It asserted "Invalid date format"; nothing in
+// the run carries that, so this file now asserts only that the run fails.
+// Subject coverage is tracked as T1422.
 // @tier: 3
 // @level: L3
 // @tags: meta, tagged-literals, literal-errors

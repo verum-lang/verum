@@ -3,7 +3,7 @@
 // @tier: 0
 // @tags: meta, builtins, arithmetic, type, error
 // @description: Test that arithmetic builtins fail with wrong argument types
-// @expected-error: type
+// @expected-error: "Type mismatch: expected Int or Float, found Text"
 
 // =============================================================================
 // TYPE MISMATCH TESTS

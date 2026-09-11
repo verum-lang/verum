@@ -3,7 +3,7 @@
 // @tier: 0
 // @tags: meta, builtins, text, bounds, error
 // @description: Test that text indexing out of bounds is caught
-// @expected-error: bounds
+// @expected-error: "out of bounds (length:"
 
 // Test char_at with index >= length - should fail with bounds error
 meta fn test_char_at_too_large() -> Char {

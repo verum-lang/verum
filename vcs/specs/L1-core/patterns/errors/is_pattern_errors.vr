@@ -2,7 +2,7 @@
 // @tier: 0
 // @level: L1
 // @tags: patterns, errors, is, negative
-// @expected-error: not a defined constant
+// @expected-error: "is not a defined constant"
 
 /// Test for is pattern expression errors.
 /// The `is` keyword is used for pattern testing (replaces Rust's matches! macro).

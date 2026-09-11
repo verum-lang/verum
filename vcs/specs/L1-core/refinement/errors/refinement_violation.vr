@@ -1,5 +1,5 @@
 // @test: typecheck-fail
-// @expected-error: E0503
+// @expected-error: E500 "refinement constraint failed"
 // @tier: 0
 // @level: L1
 // @tags: refinement, errors, violation

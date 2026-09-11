@@ -1,5 +1,5 @@
 // @test: typecheck-fail
-// @expected-error: E0200
+// @expected-error: E310 "cannot borrow"
 // @tier: 0
 // @level: L2
 // @tags: errors, diagnostics, borrow

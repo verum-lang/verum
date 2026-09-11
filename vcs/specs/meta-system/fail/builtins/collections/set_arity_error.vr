@@ -2,7 +2,7 @@
 // @level: L0
 // @tier: 0
 // @tags: meta, builtins, collections, set, errors, arity
-// @expected-error: Expected 0 arguments
+// @expected-error: E102 "Function accepts at most 0 arguments"
 // @description: Test set_new with arguments produces arity error
 
 // set_new should take no arguments

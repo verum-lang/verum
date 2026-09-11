@@ -3,7 +3,7 @@
 // @tier: 0
 // @tags: meta, builtins, arithmetic, bitwise, type, error
 // @description: Test that bitwise operations require integer arguments
-// @expected-error: type
+// @expected-error: "Type mismatch: expected Int or UInt"
 
 // =============================================================================
 // BITWISE TYPE ERROR TESTS

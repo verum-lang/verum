@@ -23,7 +23,8 @@
 
 /// Field cannot prove without nonzero condition
 // @test: verify-fail
-// @expected-error: cannot prove denominator nonzero
+// @expected-error: "proof-failed"
+// @expected-error: "did not discharge"
 theorem field_missing_nonzero_fail(a: Rational, b: Rational):
     a / b == a * (1/b)
 {

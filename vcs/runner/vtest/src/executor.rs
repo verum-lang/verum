@@ -126,7 +126,8 @@ impl ParsedError {
         // Note: Supports both [Exxx] and <Exxx> formats for error codes
         // Note: Also supports M codes for meta errors (M400-M999)
         static RUST_ERROR_RE: Lazy<Regex> = Lazy::new(|| {
-            Regex::new(r"(?m)^(error|warning|note)[\[<]([EWM]\d{3,4})[\]>]:\s*(.+)$").unwrap()
+            Regex::new(r"(?m)^(error|warning|note)[\[<]([EWM][0-9][0-9A-Z]{2,3})[\]>]:\s*(.+)$")
+                .unwrap()
         });
 
         // Location pattern: --> file:line:column
@@ -137,7 +138,7 @@ impl ParsedError {
         // Note: Also supports M codes for meta errors (M400-M999)
         static GCC_ERROR_RE: Lazy<Regex> = Lazy::new(|| {
             Regex::new(
-                r"^([^:]+):(\d+):(\d+):\s*(error|warning|note)(?:\[([EWM]\d{3,4})\])?:\s*(.+)$",
+                r"^([^:]+):(\d+):(\d+):\s*(error|warning|note)(?:\[([EWM][0-9][0-9A-Z]{2,3})\])?:\s*(.+)$",
             )
             .unwrap()
         });
@@ -237,9 +238,11 @@ impl ParsedError {
 
     /// Check if this error matches an expected error specification.
     pub fn matches(&self, expected: &ExpectedError) -> bool {
-        // Code must match
-        if self.code != expected.code {
-            return false;
+        // Code must match — when the expectation asserts one at all.
+        if let Some(ref expected_code) = expected.code {
+            if &self.code != expected_code {
+                return false;
+            }
         }
 
         // Message must contain expected substring (if specified)
@@ -315,7 +318,7 @@ impl std::fmt::Display for ErrorMatchResult {
             Self::MissingErrors { missing, actual } => {
                 writeln!(f, "Missing expected errors:")?;
                 for err in missing {
-                    writeln!(f, "  - {} at line {:?}", err.code, err.line)?;
+                    writeln!(f, "  - {} at line {:?}", err.code_or_any(), err.line)?;
                 }
                 writeln!(f, "Actual errors found:")?;
                 for err in actual {
@@ -3520,12 +3523,30 @@ impl Executor {
 
             // Check each expected error is present
             for expected in &directives.expected_errors {
-                let found = actual_errors
-                    .iter()
-                    .any(|e| e.code.as_str() == expected.code.as_str());
+                let found = match (&expected.code, &expected.message) {
+                    // A code, with or without a message beside it.
+                    (Some(code), msg) => actual_errors.iter().any(|e| {
+                        e.code.as_str() == code.as_str()
+                            && msg.as_ref().is_none_or(|m| e.message.contains(m.as_str()))
+                    }),
+                    // A message alone: the failure has no registered code.
+                    (None, Some(msg)) => {
+                        actual_errors.iter().any(|e| e.message.contains(msg.as_str()))
+                    }
+                    // `any`: the pipeline already reported at least one error.
+                    (None, None) => true,
+                };
                 if !found {
                     return Err(ExecutorError::MissingExpectedError(
-                        format!("Expected error {} not found", expected.code).into(),
+                        format!(
+                            "Expected error {} not found",
+                            expected
+                                .message
+                                .as_deref()
+                                .map_or_else(|| expected.code_or_any().to_string(),
+                                             |m| format!("{} {:?}", expected.code_or_any(), m))
+                        )
+                        .into(),
                     ));
                 }
             }
@@ -4028,6 +4049,26 @@ mod tests {
             duration: Duration::from_millis(100),
         };
         assert!(!fail.is_pass());
+    }
+
+    /// The OTHER half of the code-shape fix.  A directive naming `E0E2` was
+    /// useless while `ParsedError::parse_stderr` could not lift that code out
+    /// of the compiler's own output: its pattern was `[EWM]\d{3,4}`, and a
+    /// letter is not a digit.  Five-character codes it did read — that half of
+    /// the trouble belonged to the DIRECTIVE pattern, `[EWM]\d{3}`, which
+    /// matched `E0601`'s first four characters and asserted `E060` instead.
+    ///
+    /// The three lines below are verbatim `verum check` output, shortened.
+    #[test]
+    fn parse_stderr_lifts_letter_and_five_character_codes() {
+        let stderr = "\
+error<E0E2>: Parse error: 'assert!' is Rust macro syntax, not valid in Verum
+error<E0601>: non-exhaustive patterns: `Nil` not covered
+error<E400>: Type mismatch: expected 'Int', found 'Text'
+";
+        let errors = ParsedError::parse_stderr(stderr);
+        let codes: Vec<&str> = errors.iter().map(|e| e.code.as_str()).collect();
+        assert_eq!(codes, vec!["E0E2", "E0601", "E400"], "got {errors:?}");
     }
 
     #[test]

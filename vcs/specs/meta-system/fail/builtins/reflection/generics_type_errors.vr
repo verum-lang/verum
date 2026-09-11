@@ -3,7 +3,7 @@
 // @tier: 0
 // @tags: meta, builtins, reflection, generics, type_error
 // @description: Type mismatch and arity errors for generic introspection
-// @expected-error: Type mismatch
+// @expected-error: "Type mismatch: expected Type"
 // @contexts: MetaTypes
 
 // =============================================================================

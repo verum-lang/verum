@@ -23,7 +23,8 @@
 
 /// Ring cannot prove inequalities
 // @test: verify-fail
-// @expected-error: ring cannot prove inequalities
+// @expected-error: "proof-failed"
+// @expected-error: "did not discharge"
 theorem ring_inequality_fail(a: Int, b: Int)
     requires a > 0
     requires b > 0

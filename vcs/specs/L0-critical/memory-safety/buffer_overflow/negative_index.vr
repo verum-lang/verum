@@ -1,5 +1,5 @@
 // @test: typecheck-fail
-// @expected-error: Invalid index: negative indices not allowed
+// @expected-error: E310 "negative index"
 // @tier: 0
 // @level: L0
 // @tags: memory-safety, bounds-check, negative-index

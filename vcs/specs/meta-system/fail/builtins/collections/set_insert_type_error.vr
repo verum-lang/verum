@@ -2,7 +2,7 @@
 // @level: L0
 // @tier: 0
 // @tags: meta, builtins, collections, set, errors
-// @expected-error: Type mismatch
+// @expected-error: "Type mismatch: expected Text (set element), found Int"
 // @description: Test set_insert with non-text element produces type error
 
 // set_insert with non-text element

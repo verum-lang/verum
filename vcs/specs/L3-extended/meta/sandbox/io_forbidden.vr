@@ -1,5 +1,5 @@
 // @test: typecheck-fail
-// @expected-error: IO operations are not allowed in meta context
+// @expected-error: E501 "must be pure but has side effects"
 // @tier: 3
 // @level: L3
 // @tags: meta, sandbox, io, forbidden

@@ -2,7 +2,7 @@
 // @level: L1
 // @tier: 0
 // @tags: meta, hygiene, quote, syntax, error
-// @expected-error: parse
+// @expected-error: E0410 "unknown meta-function"
 // @description: Malformed quote expression should cause parse error
 
 // Quote with unclosed brace

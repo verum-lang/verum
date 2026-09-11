@@ -3,7 +3,7 @@
 // @tier: 0
 // @tags: meta, builtins, collections, edge_cases, error
 // @description: Error tests for collection edge cases
-// @expected-error: None
+// @expected-error: "called `maybe_unwrap` on a `None` value"
 
 // =============================================================================
 // OUT OF BOUNDS ERRORS

@@ -3,7 +3,7 @@
 // @tier: 0
 // @tags: meta, builtins, arithmetic, arity, error
 // @description: Test that arithmetic builtins fail with wrong argument count
-// @expected-error: arguments
+// @expected-error: E102 "Function accepts at most"
 
 // =============================================================================
 // ARITY MISMATCH TESTS

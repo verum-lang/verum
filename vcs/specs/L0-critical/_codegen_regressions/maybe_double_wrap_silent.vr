@@ -1,5 +1,5 @@
 // @test: typecheck-fail
-// @expected-error: Type mismatch: expected 'Int', found 'Maybe<Int>'
+// @expected-error: E400 "Type mismatch: expected 'Int', found 'Maybe<Int>'"
 // @level: L0
 // @tier: 0
 // @tags: types, coercion, maybe, soundness, silent-wrong-value

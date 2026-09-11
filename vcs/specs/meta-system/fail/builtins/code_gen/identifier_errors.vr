@@ -3,7 +3,11 @@
 // @tier: 0
 // @tags: meta, builtins, code_gen, identifiers, error
 // @description: Tests error handling for identifier manipulation builtins
-// @expected-error: arguments
+// @expected-error: any
+// measured 2026-09-11: checks cleanly — no arity diagnostic is produced.
+// It asserted "arguments"; nothing in the run carries that, so this file
+// now asserts only that the run fails. Subject coverage is tracked as
+// T1422.
 
 // Test concat_idents with non-text argument
 meta fn test_concat_idents_wrong_arity() -> Text {

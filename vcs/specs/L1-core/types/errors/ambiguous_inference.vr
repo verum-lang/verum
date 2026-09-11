@@ -2,7 +2,7 @@
 // @tier: 1
 // @level: L1
 // @tags: types, errors, ambiguous
-// @expected-error: expects 0 argument
+// @expected-error: E102 "expects 0 argument"
 
 /// Test for ambiguous type inference errors.
 /// These examples have multiple valid type solutions or insufficient constraints.

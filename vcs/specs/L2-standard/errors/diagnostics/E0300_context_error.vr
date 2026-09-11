@@ -1,5 +1,5 @@
 // @test: typecheck-fail
-// @expected-error: E0300
+// @expected-error: E613 "used but not declared in function signature"
 // @tier: 0
 // @level: L2
 // @tags: errors, diagnostics, context

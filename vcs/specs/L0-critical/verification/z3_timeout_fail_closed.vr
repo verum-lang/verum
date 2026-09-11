@@ -3,41 +3,11 @@
 // @level: L0
 // @tags: verification, smt, timeout, soundness, red-team-1.5
 // @timeout: 30000
-// @expected-error: proof-failed
-//
-// MEASURED 2026-08-29, and two directives corrected with it.
-//
-// `@timeout:` is the RUNNER's wall-clock budget for the whole spec — the
-// process has to load the standard library inside it. It was 50 here,
-// meaning "give Z3 50ms", but no path has ever passed it to the solver:
-// the subprocess path hands it to the process, and the in-process path
-// hands it to the thread. 50ms was therefore never a solver budget and
-// always an impossible spec budget — which nothing noticed, because
-// `verify-fail` returned Pass unconditionally until T0957.
-//
-// The invariant this file pins is unchanged and is the `verify-fail` line
-// itself: the obligation MUST NOT be accepted. Measured, it is not —
-// `z3_unknown_witness` is REJECTED in 0.08s. What changed is only the
-// mechanism named: the solver answers rather than running out of time, so
-// the verdict is `proof-failed`, not `verification-timeout`. Pinning the
-// mechanism instead of the invariant is what made this line stale;
-// `proof-failed` still separates "rejected" from "accepted", which is the
-// whole soundness question.
-//
-// Red-team round 1 vector 5.1/5.2 — fail-closed guardrail (L0-critical).
-//
-// Invariant being pinned: when Z3 cannot decide a refinement obligation
-// within the configured timeout (here 50ms), the verifier MUST reject
-// the program. Acceptance under SMT-Unknown verdict would be unsound
-// (silently lifts a refinement obligation the solver could not discharge).
-//
-// Audit trail: vcs/red-team/round-1-architecture.md §5.1 documents
-// the 9 SatResult.Unknown consumer sites; this guardrail pins the
-// surface-level invariant they jointly enforce.
-//
-// Companion tests:
-//   - L1-core/refinement/smt/proof_timeout.vr           (broader L1 surface)
-//   - crates/verum_smt/tests/timeout_fail_closed_invariant.rs (Rust-level)
+// @expected-error: "proof-failed"
+// @expected-error: "did not discharge"
+// Measured 2026-09-11 THROUGH THE RUNNER: the verify-fail executor prints
+// `error<proof-failed>: `<name>` did not discharge`. `verum check` prints
+// `error<E0319>` for the same file — a different pipeline, a different code.
 
 // A predicate Z3 cannot decide in 50ms: nonlinear arithmetic over
 // arbitrary integers with deeply nested arithmetic. Z3's default

@@ -2,7 +2,7 @@
 // @level: L0
 // @tier: 0
 // @tags: meta, builtins, collections, map, errors
-// @expected-error: Type mismatch
+// @expected-error: "Type mismatch: expected Map, found Int"
 // @description: Test map operations with invalid types produce errors
 
 // =============================================================================

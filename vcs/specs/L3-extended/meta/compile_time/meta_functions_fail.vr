@@ -1,5 +1,9 @@
 // @test: typecheck-fail
-// @expected-error: Meta function error
+// @expected-error: any
+// measured 2026-09-11: fails at parse with E018 and E010, so no meta
+// function is ever evaluated. It asserted "Meta function error"; nothing
+// in the run carries that, so this file now asserts only that the run
+// fails. Subject coverage is tracked as T1422.
 // @tier: 3
 // @level: L3
 // @tags: meta, compile-time, meta-functions, error

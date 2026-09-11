@@ -1,5 +1,5 @@
 // @test: typecheck-fail
-// @expected-error: Const evaluation error
+// @expected-error: "Iteration limit exceeded"
 // @tier: 3
 // @level: L3
 // @tags: meta, compile-time, const-evaluation, error

@@ -3,7 +3,7 @@
 // @level: L2
 // @tags: smt, datatypes, error
 // @timeout: 5000
-// @expected-error: Variant
+// @expected-error: "Variant 'Node' expects 2 fields"
 
 /// SMT verification failures for algebraic datatypes
 /// Tests error detection in ADT reasoning

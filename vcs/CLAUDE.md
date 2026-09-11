@@ -149,7 +149,66 @@ fn main() {
 
 **`compile-fail` vs `typecheck-fail`.** `typecheck-fail` observes only what the TYPE CHECKER raises. Diagnostics from later phases — module resolution, const evaluation, codegen — never reach it, and a spec pinning one of those reports "typecheck unexpectedly succeeded", which reads as a MISSING COMPILER CHECK rather than a directive that cannot see the phase. `compile-fail` runs the full `verum build` and expects a non-zero exit, so `@expected-error: E204` (circular constant dependency) and its kin are pinnable. Use `typecheck-fail` when the diagnostic IS a type error — it is faster and runs in-process.
 
-**Which code to pin.** `crates/verum_error/src/registry.rs` is the code table, and it is now gated: a code the compiler emits but the registry does not list fails `cargo test -p verum_error`. Read the code off the registry, not off another spec — this line said E600 for a circular constant dependency for a while, which is the context system's "context not provided", and no spec caught it because nothing emitted either one. Note also that vtest matches the code EXACTLY (`directive.rs`, `ExpectedError::matches`), so a diagnostic that carries no code at all cannot be pinned by any spec, and a spec naming its concept will report "typecheck unexpectedly succeeded" — reading as a missing compiler check when the check is present and merely uncoded.
+**Which code to pin.** `crates/verum_error/src/registry.rs` is the code table, and it is now gated: a code the compiler emits but the registry does not list fails `cargo test -p verum_error`. Read the code off the registry, not off another spec — this line said E600 for a circular constant dependency for a while, which is the context system's "context not provided", and no spec caught it because nothing emitted either one. Note also that vtest matches the code EXACTLY (`directive.rs`, `ExpectedError::matches`). A diagnostic that carries no code is pinned by the message-alone form below, never by naming the concept in prose — prose is refused.
+
+**The three forms of `@expected-error:`, and nothing else.** The directive is
+parsed by `ExpectedError::parse` (`vcs/runner/vtest/src/directive.rs`), which
+accepts exactly:
+
+```verum
+// @expected-error: E400                                  a code
+// @expected-error: E400 "expected 'Int', found 'Text'"    a code and a message
+// @expected-error: E400 "…" at line 8, col 10             …and a position
+// @expected-error: [error] E400 "…"                       …with an explicit severity
+// @expected-error: "cannot prove denominator nonzero"     a MESSAGE alone
+// @expected-error: any                                    only "this must fail"
+```
+
+The message-alone form exists because a diagnostic that carries no code cannot
+otherwise be pinned; `any` exists so that a spec asserting nothing specific has
+to SAY so. Anything else — prose, a comma-separated list of codes, a code in no
+registry — is a hard failure of the spec, reported by file and line. It is not a
+warning: an `@expected-error:` the runner drops leaves the expectation set
+empty, and an empty expectation set means "expect any failure", so a dropped
+directive turns a specific assertion into a vacuous one and says nothing.
+Measured 2026-09-11: 102 header directives were being dropped that way, and one
+of them was a spec that passed on a parse error in itself while claiming to
+exercise the meta sandbox.
+
+The code is checked against the registry, not against a shape. A shape cannot
+tell `E0601` (non-exhaustive patterns) from `E060` (invalid context method) —
+both are real — and the pattern that preceded this matched the first four
+characters of a five-character code. Measured 2026-09-11: 28 directives
+asserted a different code than the one they named, and in 24 of the 28 the
+truncated code is itself registered, so the spec asserted a REAL error that
+was not its own. `M###` is the one exemption: the meta-system error space
+lives in `crates/verum_compiler/src/meta/error.rs` and has no registry entry.
+
+A few diagnostics carry a SYMBOLIC code rather than a numeric one, and no
+directive can name those as codes. The one a spec author meets constantly is
+`proof-failed`: the verify path prints `error<proof-failed>: \`theorem X\` did
+not discharge`, and there is no such registry entry. Pin it with the
+message-alone form — `@expected-error: "proof-failed"` — which is what the
+original authors wrote before it had a form that worked. `W_NOEFFECT` and
+`E_MODULE_HEADER_FORWARD_DECL_NO_SOURCE` are the same shape.
+
+**AND MEASURE ON THE ROUTE THE RUNNER TAKES.** `verum check` and the runner's
+`verify-fail` executor are different pipelines and print different things for
+the same file: the CLI says `error<E0319>: theorem 'false_claim' proof failed
+verification`, the runner says `error<proof-failed>: … did not discharge`. A
+directive written from the first is refused by the second. Seven specs were
+given an `E0319` assertion off the CLI and failed under the runner until they
+were re-measured through it.
+
+**`@expected-error-count` counts DIAGNOSTICS, not directives.** The executor
+compares it against the number of errors the run produced; an
+`@expected-error` is one ASSERTION, and one assertion can be satisfied by
+several diagnostics. `L0-critical/parser/rust_macro_recovery.vr` is the
+shape: one `@expected-error: E0E2` and `@expected-error-count: 3`, because
+the compiler emits that diagnostic three times and the spec's whole subject
+is that it emits three and not more. What the validator refuses is the
+combination that cannot hold — more DISTINCT codes asserted than the count
+allows.
 
 **Run with Expected Output**:
 ```verum

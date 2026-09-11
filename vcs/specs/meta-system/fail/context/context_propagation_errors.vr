@@ -3,7 +3,7 @@
 // @tier: 0
 // @tags: meta, context, propagation, error
 // @description: Test context propagation errors - calling context-requiring function without context
-// @expected-error: requires
+// @expected-error: "requires `using [MetaTypes]`"
 
 // =============================================================================
 // CONTEXT NOT DECLARED

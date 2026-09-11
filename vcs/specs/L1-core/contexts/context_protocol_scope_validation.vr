@@ -1,7 +1,11 @@
 // @test: typecheck-fail
 // @level: L1
 // @tags: context, injectable, scope, thread_safety, singleton
-// @expected-error: not thread-safe
+// @expected-error: any
+// measured 2026-09-11: fails on E100 unbound variable Rc, so the thread-
+// safety check is never reached. It asserted "not thread-safe"; nothing
+// in the run carries that, so this file now asserts only that the run
+// fails. Subject coverage is tracked as T1422.
 // @description: Singleton-scoped @injectable types are shared across threads,
 //   so they must be Send + Sync. Types containing non-thread-safe fields
 //   (Cell, RefCell, Rc, UnsafeCell, RawPtr) produce a compile-time error

@@ -3,7 +3,7 @@
 // @tier: 0
 // @tags: meta, builtins, runtime, context, error
 // @description: Test that target info functions require MetaRuntime context
-// @expected-error: requires
+// @expected-error: "requires `using [MetaRuntime]`"
 
 // =============================================================================
 // TARGET INFO MISSING CONTEXT TESTS

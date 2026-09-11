@@ -1,5 +1,5 @@
 // @test: typecheck-fail
-// @expected-error: E0100
+// @expected-error: E400 "Type mismatch"
 // @tier: 0
 // @level: L2
 // @tags: errors, diagnostics, type-mismatch

@@ -3,28 +3,11 @@
 // @level: L0
 // @tags: verification, contracts, precondition, call-site, soundness
 // @timeout: 30000
-// @expected-error: precondition
-//
-// T0657 — soundness guardrail (L0-critical).
-//
-// Invariant being pinned: `verum verify` MUST reject a call site
-// whose literal argument unconditionally violates the callee's
-// `requires` clause. Pre-fix the pipeline generated ZERO
-// obligations from function bodies — `caller() { divide(10, 0) }`
-// against `requires b != 0` reported Proved on both the callee and
-// the caller, inverting the tool's core promise (a false `Proved`,
-// not a missing feature).
-//
-// The fix wove call-site precondition obligations into the wp
-// formula (verum_verification.vcgen, discharged by
-// verify_cmd Step 3), so this file MUST fail verification with a
-// counterexample naming the divide precondition.
-//
-// Companion pins:
-//   - crates/verum_verification/tests/vcgen_call_site_obligations.rs
-//     (semantic core: guard flow, let flow, requires flow, blame)
-//   - L1-core/verification_phase/call_site_precondition_flow.vr
-//     (the GREEN half: satisfiable call sites must keep verifying)
+// @expected-error: "proof-failed"
+// @expected-error: "did not discharge"
+// Measured 2026-09-11 THROUGH THE RUNNER: the verify-fail executor prints
+// `error<proof-failed>: `<name>` did not discharge`. `verum check` prints
+// `error<E0319>` for the same file — a different pipeline, a different code.
 
 module test_call_site_precondition_violation;
 
