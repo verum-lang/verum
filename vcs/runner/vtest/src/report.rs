@@ -499,7 +499,11 @@ impl Reporter {
                     // Show failure details in verbose mode or if show_diff is enabled
                     if self.verbose || self.show_diff {
                         for outcome in &result_data.outcomes {
-                            if outcome.status == "fail" {
+                            // `error` carries its text in the same field and
+                            // was never printed, so a spec that could not run
+                            // at all reported a bare failure with no reason —
+                            // measured on a missing verum CLI (T1429).
+                            if outcome.status == "fail" || outcome.status == "error" {
                                 if let Some(ref reason) = outcome.reason {
                                     writeln!(writer, "      {} {}", "Reason:".red(), reason)?;
                                 }

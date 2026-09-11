@@ -508,20 +508,29 @@ impl ExecutorConfig {
             }
         }
 
-        // Check for cargo build output in workspace root
-        // The vtest runner is in vcs/runner/vtest, so workspace root is ../../..
-        let workspace_paths = [
-            // Relative from vcs/runner/vtest
-            "../../../target/release/verum",
-            "../../../target/debug/verum",
-            // Standard PATH locations
-            "verum",
-        ];
-
-        for path_str in workspace_paths {
-            let path = PathBuf::from(path_str);
-            if path.exists() {
-                return Some(path);
+        // THE BINARY BESIDE THIS ONE.  `vtest` and `verum` are built into the
+        // same target directory, whichever that is — a shared `target/` or a
+        // private `CARGO_TARGET_DIR` — so the sibling of the RUNNING
+        // EXECUTABLE is the verum built from the tree under test.
+        //
+        // What this replaced were four CWD-relative entries, commented
+        // "Relative from vcs/runner/vtest".  They are resolved against the
+        // PROCESS's working directory, and the runner is never launched from
+        // there: from the repo root `../../../target/release/verum` leaves the
+        // repository, and from `vcs/` — where the Makefile runs it — it lands
+        // one level short.  Neither ever existed, so the search fell through
+        // to `which verum` every time, silently.  Measured 2026-09-11 (T1429):
+        // that was a binary 17 days older than the tree which printed a
+        // diagnostic the tree no longer emits, and a spec's verdict was a
+        // measurement of that installed artefact rather than of this source.
+        if let Ok(exe) = std::env::current_exe()
+            && let Some(dir) = exe.parent()
+        {
+            for name in ["verum", "verum.exe"] {
+                let sibling = dir.join(name);
+                if sibling.exists() {
+                    return Some(sibling);
+                }
             }
         }
 
@@ -2998,10 +3007,20 @@ impl Executor {
                 if let Some(found) = ExecutorConfig::find_verum_cli() {
                     found
                 } else {
+                    // Name where it looked.  A spec that fails because the
+                    // compiler is missing must not read like a spec that
+                    // failed on its own subject.
+                    let beside = std::env::current_exe()
+                        .ok()
+                        .and_then(|e| e.parent().map(|p| p.display().to_string()))
+                        .unwrap_or_else(|| "<unknown>".to_string());
                     return Err(ExecutorError::CommandNotFound(
-                        "verum CLI not found. Run 'cargo build --release -p verum_cli'"
-                            .to_string()
-                            .into(),
+                        format!(
+                            "verum CLI not found: no `verum` beside the runner \
+                             ({beside}), no $VERUM_CLI, none on PATH. \
+                             Run `cargo build --release -p verum_cli`."
+                        )
+                        .into(),
                     ));
                 }
             }
