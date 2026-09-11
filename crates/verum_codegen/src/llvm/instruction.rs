@@ -43173,6 +43173,72 @@ fn lower_get_field<'ctx>(
 ) -> Result<()> {
     let field_idx = field_idx;
     let obj_val = ctx.get_register(obj.0)?;
+
+    // `VERUM_TRACE_GETFIELD=<fn-name substring>` (or `=1`) — this function
+    // has several exits and more than one of them answers with a value that
+    // is not a load, so "the field read gave the wrong number" is not one
+    // symptom but several, and only the predicate set says which.
+    //
+    // Measured need (T1441): `fn f(p: &File) -> Int { p.fd }` answers a
+    // stack address at Tier 1, while the SAME shape over `Duration` — also
+    // an archive-declared single-field record — answers correctly, and a
+    // locally declared one does too. Both are `public type X is { f: Int };`
+    // and neither takes the by-name path (VERUM_TRACE_BYNAME prints nothing
+    // for these functions), so the two part company inside here.
+    if let Some(want) = std::env::var_os("VERUM_TRACE_GETFIELD") {
+        let fname = ctx
+            .builder()
+            .get_insert_block()
+            .and_then(|b| b.get_parent())
+            .map(|f| f.get_name().to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let want = want.to_string_lossy().into_owned();
+        if want.is_empty() || want == "1" || fname.contains(&want) {
+            eprintln!(
+                "[getfield] {fname}: r{} -> r{} idx={} objty={:?} genptr={} passthru={} inline={} struct={} list={} text={} val={}",
+                obj.0,
+                dst.0,
+                field_idx,
+                ctx.get_obj_register_type(obj.0),
+                ctx.is_generic_ptr_register(obj.0),
+                ctx.is_pass_through_ref(obj.0),
+                ctx.is_inline_struct_register(obj.0),
+                ctx.is_struct_register(obj.0),
+                ctx.is_list_register(obj.0),
+                ctx.is_text_register(obj.0),
+                if obj_val.is_struct_value() {
+                    "struct"
+                } else if obj_val.is_pointer_value() {
+                    "ptr"
+                } else {
+                    "int"
+                },
+            );
+            // AND THE DESCRIPTOR THE NAME RESOLVES TO, which is the only
+            // thing that differs between three registers whose predicate
+            // sets are identical. Measured (T1441): `Loc`, `Duration` and
+            // `File` all arrive here as idx=0, objty=Some(name), every
+            // predicate false, val=int — and answer 1, 2 and a stack
+            // address. The single-field branch below is the sole
+            // name-keyed decision in this function, so its inputs are
+            // what part them.
+            if let Some(vbc_mod) = ctx.vbc_module()
+                && let Some(tn) = ctx.get_obj_register_type(obj.0).map(|s| s.to_string())
+            {
+                for td in vbc_mod.types.iter() {
+                    if vbc_mod.get_string(td.name).is_some_and(|n| n == tn) {
+                        eprintln!(
+                            "[getfield-desc]   {tn}: kind={:?} fields={} transparent={} size={}",
+                            td.kind,
+                            td.fields.len(),
+                            td.is_transparent_wrapper,
+                            td.size,
+                        );
+                    }
+                }
+            }
+        }
+    }
     // Coherent reference model: if the base is a tagged reference, load its slot
     // to reach the object before GEP-ing the field. A stack struct is never a
     // reference, so it bypasses.
@@ -44626,6 +44692,45 @@ fn lower_ref<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, dst: Reg, src: Reg) -> R
     } else {
         ReferenceInfo::unknown()
     };
+
+    // `VERUM_TRACE_REF=<fn-name substring>` (or `=1`) — which of the two
+    // shapes `&x` takes, and on what evidence.
+    //
+    // Measured need (T1441): `fn f(p: &File) -> Int { p.fd }` answers a
+    // stack address at Tier 1, and EVERY fact read on the callee side is
+    // identical to the two records that answer correctly — same index,
+    // same predicate set, same descriptor (`kind=Record fields=1
+    // transparent=false size=8` for all three). So the registers differ
+    // in their CONTENTS, which is decided here, and this arm had no
+    // diagnostic at all.
+    //
+    // The controls that place it: a `Duration` out of a LOCAL function's
+    // Result payload is correct, a `SemVer` out of an ARCHIVE function's
+    // Result payload is correct, and a `File` out of `File.create` is
+    // not — so what is printed below is exactly the question left.
+    if let Some(want) = std::env::var_os("VERUM_TRACE_REF") {
+        let fname = ctx
+            .builder()
+            .get_insert_block()
+            .and_then(|b| b.get_parent())
+            .map(|f| f.get_name().to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let want = want.to_string_lossy().into_owned();
+        if want.is_empty() || want == "1" || fname.contains(&want) {
+            eprintln!(
+                "[ref] {fname}: &r{} -> r{} has_slot={} has_alloca={} alloca_mode={} objty={:?} struct={} inline={} genptr={}",
+                src.0,
+                dst.0,
+                has_slot,
+                has_alloca,
+                ctx.is_alloca_mode(),
+                ctx.get_obj_register_type(src.0),
+                ctx.is_struct_register(src.0),
+                ctx.is_inline_struct_register(src.0),
+                ctx.is_generic_ptr_register(src.0),
+            );
+        }
+    }
 
     // Register the reference and determine its tier
     ctx.register_reference(dst.0, ref_info);
