@@ -5484,9 +5484,18 @@ pub fn lower_instruction<'ctx>(
             // see the SECOND field of a tuple variant. Both mistakes were
             // made here in turn.
             if std::env::var_os("VERUM_TRACE_T1206").is_some() {
+                // THE FUNCTION NAME IS PART OF THE READING. Without it this
+                // trace emits ~4000 lines from every function in the stdlib
+                // and register numbers repeat across them, so `from=r0`
+                // matches dozens of unrelated extractions and the case under
+                // test cannot be isolated (T1441). A diagnostic that cannot be
+                // scoped to one function reports the population, not the case
+                // — the same thing the `[deref]` arm's own comment says three
+                // thousand lines up.
                 eprintln!(
-                    "[t1206] getvd dst=r{} from=r{} field={} obj_type={:?} \
+                    "[t1206] {} getvd dst=r{} from=r{} field={} obj_type={:?} \
                      arm_types={} maybe_inner={:?} tag={:?}",
+                    ctx.function_name(),
                     dst.0,
                     variant.0,
                     *field,
@@ -40088,7 +40097,45 @@ fn mark_register_from_return_type<'ctx>(
             // Maybe<T> arm above).  Without this the Tier-1 side-table register
             // model leaves the payload UNMARKED and a Text error message built by
             // `ok_or_else(|| f"…")` prints as its raw pointer under AOT.
-            if *base == TypeId::RESULT && !args.is_empty() {
+            // AN ALIAS OF `Result` IS STILL A `Result` (T1441). The test
+            // below compares the instantiation's BASE against
+            // `TypeId::RESULT`, and `type IoResult<T> is Result<T,
+            // StreamError>;` instantiates under the ALIAS's own TypeId —
+            // so `IoResult<File>` never recorded its arm types, the
+            // payload `GetVariantData` extracted got no name, and
+            // `lower_ref`'s `is_heap_type` term
+            // `get_obj_register_type(src).is_some()` went false. `&f` then
+            // took the recipe for a primitive — alloca, store the object
+            // pointer into it, pass the SLOT's address — and the callee,
+            // whose IR is correct, read `[slot + 24]`.
+            //
+            // Measured with File and SemVer side by side in one function:
+            //
+            //   getvd from=r0 obj_type=Some("Result")   arm_types=TRUE
+            //   getvd from=r0 obj_type=Some("IoResult") arm_types=FALSE
+            //   Ref r7<-r5   heap=true  obj=Some("SemVer")
+            //   Ref r13<-r12 heap=false obj=None
+            //
+            // ONE HOP, deliberately. A chain of aliases is not a shape this
+            // tree has, and following one is what separates "the base IS
+            // Result" from "the base is spelled differently and means
+            // Result". The instantiation's OWN args are recorded, not the
+            // alias target's: for `IoResult<File>` the Ok arm is `File`,
+            // which is what the payload needs, and the alias's fixed Err
+            // arm is not something `GetVariantData`'s `field == 0` path
+            // reads.
+            let base_is_result = *base == TypeId::RESULT
+                || ctx.vbc_module().is_some_and(|m| {
+                    m.types.iter().any(|td| {
+                        td.id == *base
+                            && matches!(
+                                td.alias_target.as_ref(),
+                                Some(TypeRef::Instantiated { base: ab, .. })
+                                    if *ab == TypeId::RESULT
+                            )
+                    })
+                });
+            if base_is_result && !args.is_empty() {
                 ctx.set_result_arm_types(reg, args.clone());
             }
         }
