@@ -1,0 +1,93 @@
+// @test: run
+// @tier: 0
+// @level: L2
+// @tags: math, elementary, atan, atan2, argument-reduction, range
+// @timeout: 60000
+// @expected-stdout: sign=ok join=ok range=ok
+// @expected-exit: 0
+//
+// ARCTANGENT: THE SIGN WRAPS THE WHOLE IDENTITY, AND THE SERIES IS NEVER
+// ASKED FOR A VALUE IT CANNOT DELIVER.
+//
+// Two defects, one function, and the larger one was invisible because the
+// obvious spot-checks pass. `atan(0.5)` and `atan(2.0)` were plausible to
+// six decimals throughout.
+//
+// ONE — THE RANGE VIOLATION. For |x| > 1 the reduction read
+//
+//     sign * FRAC_PI_2 - atan_series(1.0 / x.abs())
+//
+// and precedence makes that (-π/2) - atan(1/|x|) for negative x rather
+// than -(π/2 - atan(1/|x|)). Measured: atan(-2.0) answered -2.0344456,
+// which is outside the range `(-π/2, π/2)` stated two lines above the
+// function. Every x < -1 was wrong by up to a radian. The correct
+// parenthesised idiom was already six lines up the same file, in `acos`.
+//
+// TWO — THE SERIES AT THE TOP OF ITS RANGE. `atan_series` is a
+// seven-term polynomial applied over the whole of |x| <= 1, and the
+// Taylor series for arctangent converges like 1/n at |x| = 1, so no
+// practical term count rescues it. Measured error against the true
+// value:
+//
+//     0.2679   1.6e-10        0.8      1.5e-03
+//     0.5      1.7e-06        0.9      8.0e-03
+//     0.5774   1.4e-05        1.0      3.6e-02
+//
+// The error also FLIPPED SIGN across |x| = 1, because the other branch
+// approached from the far side, so the function stepped by about 0.07
+// between 0.999 and 1.001 where the true one moves by 0.001. That step
+// is what separates a precision complaint from a defect, and it is what
+// this spec pins.
+//
+// WHAT IS CHECKED, and why each of the three is here rather than a
+// single tolerance sweep:
+//
+//   sign    atan(-x) == -atan(x) at |x| = 2, where the range violation
+//           lived. A tolerance test alone would report it as "slightly
+//           off" rather than as a function leaving its own range.
+//   join    |atan(1.001) - atan(0.999)| is small. The old code stepped
+//           0.07 here. This is the pair that tells a branch disagreement
+//           from rounding, and it is the reason the spec straddles the
+//           boundary rather than sampling near it.
+//   range   |atan(x)| < π/2 for a large |x| on both sides.
+//
+// `atan2` inherits `atan` and is checked at (1, 1), which is the shape
+// most likely to reach a reader: any angle near 45 degrees.
+
+mount core.math.elementary.{atan, atan2};
+mount core.math.constants.{FRAC_PI_2, FRAC_PI_4};
+mount core.io.println;
+
+fn close(a: Float, b: Float, tol: Float) -> Bool {
+    let d = a - b;
+    let m = if d < 0.0 { -d } else { d };
+    m < tol
+}
+
+fn main() {
+    // ONE: the sign wraps the identity. atan(-2) was -2.0344456.
+    let sign_ok = close(atan(-2.0), -atan(2.0), 1.0e-9)
+        && close(atan(-2.0), -1.1071487177940906, 1.0e-8);
+
+    // TWO: no step across the reduction boundary. The old code jumped
+    // 0.07 between these two neighbours.
+    let lo = atan(0.999);
+    let hi = atan(1.001);
+    let join_ok = close(hi - lo, 0.001, 1.0e-5)
+        && close(atan(1.0), FRAC_PI_4, 1.0e-8)
+        && close(atan2(1.0, 1.0), FRAC_PI_4, 1.0e-8);
+
+    // THREE: the stated range holds on both sides.
+    let range_ok = atan(1000.0) < FRAC_PI_2
+        && atan(-1000.0) > -FRAC_PI_2
+        && atan(-2.0) > -FRAC_PI_2;
+
+    // ASSERT BEFORE PRINTING. A branch that prints "BAD" and returns
+    // leaves the exit code at 0, and `@expected-exit: 0` would then pass
+    // a run that measured nothing. The line below is reachable only when
+    // all three hold, which is what makes it a verdict.
+    assert(sign_ok);
+    assert(join_ok);
+    assert(range_ok);
+    println(&"sign=ok join=ok range=ok");
+}
