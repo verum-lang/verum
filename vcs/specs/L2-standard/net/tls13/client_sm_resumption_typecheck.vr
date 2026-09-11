@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: tls13, rfc8446, client-sm, post-handshake, nst, resumption, typecheck
 // @timeout: 10000
-// @expect: pass
 //
 // Smoke test that pins the existence of the RFC 8446 §4.6.1
 // session-resumption surface added on the client side:

@@ -2,7 +2,6 @@
 // @tier: 0
 // @level: L1
 // @tags: context, DI, negative-contexts, violation
-// @expect: errors
 // @description: A function that forbids a context must not be able to call one that requires it.
 // @spec: 16-context-system.md Section 1.4 - Negative Contexts
 

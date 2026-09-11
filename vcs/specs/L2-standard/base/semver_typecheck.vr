@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: base, semver, version, typecheck
 // @timeout: 10000
-// @expect: pass
 
 mount core.base.semver.{
     SemVer, SemVerError,

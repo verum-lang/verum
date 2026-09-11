@@ -3,7 +3,6 @@
 // @tier: 0
 // @tags: net, weft, bufpool, connection
 // @timeout: 10000
-// @expect: pass
 //
 // Pin (#315) — `ConnectionConfig.with_pool(Shared<BufferPool>)`
 // surface contract.  The bufpool→connection wiring closes the

@@ -1,5 +1,5 @@
 // @test: run
-// @expected-exit-code: 1
+// @expected-exit: 1
 // @expected-stderr: panic: Unreachable code reached
 // @tier: 0
 // @level: L2

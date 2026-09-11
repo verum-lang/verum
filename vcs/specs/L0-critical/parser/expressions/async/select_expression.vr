@@ -3,7 +3,6 @@
 // @level: L0
 // @tags: parser, expressions, async, select, concurrency
 // @timeout: 5000
-// @expect: pass
 //
 // Comprehensive tests for the select expression syntax.
 // Select expressions race multiple async branches and execute

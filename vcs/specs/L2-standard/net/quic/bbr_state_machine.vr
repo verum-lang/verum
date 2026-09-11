@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: quic, bbr, draft-ietf-ccwg-bbr, state_machine, kat
 // @timeout: 10000
-// @expect: pass
 
 // BBRv2 congestion-control state machine (draft-ietf-ccwg-bbr).
 //

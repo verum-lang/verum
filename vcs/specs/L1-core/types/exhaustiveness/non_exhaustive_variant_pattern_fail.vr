@@ -3,7 +3,7 @@
 // @tags: exhaustiveness, active-pattern, variant-returning, error
 // @description: Non-exhaustive variant-returning pattern match should fail
 // @expected-error: E0601
-// @expected-error-message: non-exhaustive patterns
+// @expected-error: "non-exhaustive patterns"
 
 // ============================================================
 // NON-EXHAUSTIVE VARIANT PATTERN DETECTION

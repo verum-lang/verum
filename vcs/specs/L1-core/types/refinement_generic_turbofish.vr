@@ -2,7 +2,6 @@
 // @tier: 0
 // @level: L1
 // @tags: refinement, generic, turbofish, check_phase, language
-// @expect: errors
 
 // Regression: when a generic function is instantiated with a refined
 // type via turbofish syntax (`identity<Positive>(0)`), the value `0`

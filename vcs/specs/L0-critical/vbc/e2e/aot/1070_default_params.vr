@@ -2,7 +2,6 @@
 // @tier: 0
 // @level: L0
 // @tags: default_params, function
-// @expect: pass
 
 // Test default function parameters.
 

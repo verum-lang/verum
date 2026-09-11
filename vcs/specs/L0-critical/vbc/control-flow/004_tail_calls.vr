@@ -3,7 +3,6 @@
 // @level: L0
 // @tags: vbc, control-flow, tail-call, tco, recursion
 // @timeout: 5000
-// @expect: pass
 //
 // Test: TAIL_CALL opcode
 // Verifies tail call optimization prevents stack overflow

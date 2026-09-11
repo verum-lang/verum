@@ -2,7 +2,6 @@
 // @tier: 1
 // @level: L1
 // @tags: existential, types, opaque, advanced-type-syntax
-// @expect: pass
 // @description: Existential type syntax tests
 // @spec: 03-type-system.md Section 13. 3.7
 

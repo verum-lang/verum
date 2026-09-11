@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: shell, glob, fs, typecheck
 // @timeout: 30000
-// @expect: pass
 
 mount core.shell.glob.{glob, glob_with_hidden, glob_in, glob_files, glob_dirs};
 mount core.shell.context.{ShellContext};

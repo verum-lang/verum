@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: quic, congestion_control, new_reno, v5, rfc9002_7_2
 // @timeout: 5000
-// @expect: pass
 
 // V5 theorem: NewReno.cwnd >= MIN_WINDOW_BYTES = 2 * MAX_DATAGRAM_SIZE
 // at all times.

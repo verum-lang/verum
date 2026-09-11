@@ -3,7 +3,6 @@
 // @level: L1
 // @tags: action, epsilon, adjunction, auto-induced, coord, dual-stdlib
 // @timeout: 5000
-// @expect: pass
 //
 // V8 (#234) — VVA §11.3 Phase 5 E2 round-trip witnesses for the
 // auto-induced ε(α) construction.

@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: metrics, prometheus, counter, gauge, histogram, registry
 // @timeout: 10000
-// @expect: pass
 
 // Prometheus-compatible metrics registry API surface.
 

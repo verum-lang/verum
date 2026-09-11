@@ -3,7 +3,6 @@
 // @level: L1
 // @tags: higher-order, closures, map, filter, fold, composition
 // @timeout: 10000
-// @expect: pass
 
 fn map_list(xs: List<Int>, f: fn(Int) -> Int) -> List<Int> {
     let mut result: List<Int> = [];

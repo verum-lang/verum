@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: shell, result, error, types, typecheck
 // @timeout: 30000
-// @expect: pass
 
 mount core.shell.result.{ShellResult, ShellError, ExitStatus};
 mount core.time.duration.{Duration};

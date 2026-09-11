@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: simd, bytes, find, search, utf8, crc32
 // @timeout: 10000
-// @expect: pass
 
 // SIMD byte-scan primitives — type-level shape tests for the helpers in
 // core/simd/bytes.vr. Runtime perf characteristics are tested by benchmarks,

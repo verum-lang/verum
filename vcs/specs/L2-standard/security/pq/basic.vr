@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: security, post-quantum, ml-kem, ml-dsa, kyber, dilithium, fips203, fips204
 // @timeout: 10000
-// @expect: pass
 
 // Post-quantum crypto API surface — FIPS 203 ML-KEM + FIPS 204 ML-DSA.
 

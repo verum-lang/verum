@@ -3,7 +3,6 @@
 // @level: L1
 // @tags: references, mutable, cbgr
 // @timeout: 10000
-// @expect: pass
 
 fn increment_at(xs: &mut List<Int>, idx: Int) {
     xs[idx] = xs[idx] + 1;

@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: async, structured-concurrency, cancellation, scope
 // @timeout: 10000
-// @expect: pass
 // @description: Cancellation scopes via core.async.cancellation.CancelScope
 
 // Reshaped 2026-04-20 to use the stdlib CancelScope / CancellationToken

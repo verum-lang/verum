@@ -3,7 +3,6 @@
 // @level: L0
 // @tags: vbc, integration, algorithms, sorting, searching
 // @timeout: 5000
-// @expect: pass
 //
 // Test: Classic algorithms exercising multiple VBC features
 // Verifies arithmetic, control flow, memory, and recursion

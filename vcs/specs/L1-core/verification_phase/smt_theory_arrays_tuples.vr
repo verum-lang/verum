@@ -2,7 +2,6 @@
 // @tier: 0
 // @level: L1
 // @tags: verify, smt, array, map, tuple, read-through
-// @expect: pass
 //
 // Locks in the translator-level support for:
 //   * TupleIndex (`p.0`, `p.1`, `tup.2`),

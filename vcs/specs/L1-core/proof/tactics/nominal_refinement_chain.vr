@@ -2,7 +2,6 @@
 // @tier: 0
 // @level: L1
 // @tags: proof, refinement, nominal-type, alias-chain, auto
-// @expect: pass
 //
 // Nominal refinement-type aliases — `type X is Y { self op K }` — must
 // flow their flattened predicate chain into the proof goal as

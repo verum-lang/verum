@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: async, cancellation, tree, parent-child, propagation
 // @timeout: 10000
-// @expect: pass
 
 // Parent-child cancellation propagation. When parent fires, child fires
 // with CancelReason.ParentCancelled. Cancelling child does NOT cancel parent.

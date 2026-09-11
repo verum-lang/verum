@@ -2,7 +2,6 @@
 // @tier: 0
 // @level: L1
 // @tags: refinement, check_phase, lambda_body, language
-// @expect: errors
 
 // Regression for the Block-unwrap gap in `try_syntactic_eval`.
 //

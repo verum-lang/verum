@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: h3, qpack, rfc9114, rfc9204, typecheck
 // @timeout: 10000
-// @expect: pass
 
 // Explicit imports — avoid the glob-import collision where `stat`
 // module alias resolves to `core.sys.Stat` struct via a transitively

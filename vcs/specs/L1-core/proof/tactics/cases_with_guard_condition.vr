@@ -2,7 +2,6 @@
 // @tier: 0
 // @level: L1
 // @tags: proof, cases, guard, hypothesis, max
-// @expect: pass
 //
 // `proof by cases` with guard-shape case patterns like
 // `case a >= b =>` must thread the expression `a >= b` as a

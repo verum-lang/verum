@@ -2,7 +2,7 @@
 // @tier: 1
 // @level: L1
 // @tags: error, existential, bound, advanced-type-syntax
-// @expect: error(BoundNotSatisfied)
+// @note: an earlier `@expect: error(BoundNotSatisfied)` marker said this should fail, and `@test: unit` says the opposite; the runner honours @test — T1422
 // @description: Error test for existential type bound violation
 // @spec: 03-type-system.md Section 13. 3.7
 

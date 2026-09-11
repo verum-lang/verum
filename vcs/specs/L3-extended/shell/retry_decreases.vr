@@ -3,7 +3,6 @@
 // @level: L3
 // @tags: shell, verify, decreases, termination
 // @timeout: 30000
-// @expect: pass
 
 // Retry loop with explicit `decreases` clause: SMT proves the recursion
 // terminates because `attempt` strictly decreases on every recursive call

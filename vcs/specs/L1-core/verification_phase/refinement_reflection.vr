@@ -2,7 +2,6 @@
 // @tier: 0
 // @level: L1
 // @tags: verify, reflection, pure-function, axiom
-// @expect: pass
 //
 // Pure user-defined functions must be reflected into the SMT solver
 // via their defining equation so that theorems referencing them can

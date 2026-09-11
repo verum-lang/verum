@@ -4,7 +4,6 @@
 // @was-skip: FIXED
 // @tags: vbc, pattern-matching, cross-module
 // @timeout: 5000
-// @expect: pass
 // @expected-exit: 0
 //
 // Test: Cross-module-style pattern matching at VBC interpreter level

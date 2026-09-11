@@ -3,7 +3,6 @@
 // @level: L1
 // @tags: security, crypto, x25519, curve25519, ecdh, rfc7748, tls13
 // @timeout: 10000
-// @expect: pass
 
 // RFC 7748 X25519 surface + clamping + all-zero-output rejection.
 

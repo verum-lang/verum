@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: tls13, rfc8446, resumption, psk, early-data, typecheck
 // @timeout: 10000
-// @expect: pass
 
 mount core.net.tls13.handshake.{
     PskIdentity, OfferedPsks, BinderFlavor,

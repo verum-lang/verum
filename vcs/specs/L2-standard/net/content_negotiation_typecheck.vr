@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: http, content-negotiation, accept, rfc9110, typecheck
 // @timeout: 10000
-// @expect: pass
 
 mount core.net.content_negotiation.{
     MediaRangeSpec, CodedPreference,

@@ -3,7 +3,6 @@
 // @level: L0
 // @tags: vbc, comparison, reference, eq_ref, identity
 // @timeout: 5000
-// @expect: pass
 //
 // Test: Reference comparison basics
 // Tests basic reference/pointer identity semantics

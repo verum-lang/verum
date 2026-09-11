@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: action, effects, vva-section-17, theorem-17-T1, oc-dc
 // @timeout: 10000
-// @expect: pass
 //
 // VVA §17 (#244) — effect-classifier surface.
 //

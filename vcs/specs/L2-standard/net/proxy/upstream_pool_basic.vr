@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: net, proxy, upstream, pool, connection-reuse
 // @timeout: 10000
-// @expect: pass
 
 // §9.3 / §8.9 — Upstream + UpstreamPool shape. No actual TCP connect
 // at typecheck time.

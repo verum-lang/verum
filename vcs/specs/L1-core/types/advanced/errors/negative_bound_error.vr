@@ -2,7 +2,7 @@
 // @tier: 1
 // @level: L1
 // @tags: error, negative-bound, advanced-type-syntax
-// @expect: error(NegativeBoundViolation)
+// @note: an earlier `@expect: error(NegativeBoundViolation)` marker said this should fail, and `@test: unit` says the opposite; the runner honours @test — T1422
 // @description: Error test for negative bound violation
 // @spec: 03-type-system.md Section 13. 3.5
 

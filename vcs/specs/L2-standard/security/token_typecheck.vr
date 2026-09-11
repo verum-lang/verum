@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: security, token, csrf, session, typecheck
 // @timeout: 10000
-// @expect: pass
 
 mount core.security.token.{
     generate_bytes, generate_urlsafe, generate_hex, generate_numeric,

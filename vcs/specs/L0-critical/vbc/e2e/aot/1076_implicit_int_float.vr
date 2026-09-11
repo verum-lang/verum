@@ -2,7 +2,6 @@
 // @tier: 0
 // @level: L0
 // @tags: coercion, implicit, int_to_float
-// @expect: pass
 
 // Test implicit Int→Float coercion in function calls.
 

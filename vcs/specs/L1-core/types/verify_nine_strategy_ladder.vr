@@ -12,7 +12,6 @@
 // @test: typecheck-pass
 // @level: L1
 // @tags: types, verify, ladder, vva-2-3
-// @expect: pass
 
 mount core.verify.level.{
     VerificationLevel,

@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: net, http3, rfc9114, rfc9204, qpack
 // @timeout: 10000
-// @expect: pass
 
 // HTTP/3 + QPACK API surface.
 

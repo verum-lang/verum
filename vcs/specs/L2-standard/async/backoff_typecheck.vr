@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: async, backoff, retry, jitter, typecheck
 // @timeout: 10000
-// @expect: pass
 
 mount core.async.backoff.{Backoff, BackoffStrategy};
 mount core.time.duration.{Duration};

@@ -3,7 +3,6 @@
 // @level: L1
 // @tags: security, crypto, hmac, hkdf, sha2, rfc2104, rfc5869
 // @timeout: 10000
-// @expect: pass
 
 // RFC 2104 (HMAC) + RFC 5869 (HKDF) surface coverage across the three
 // SHA-2 variants. Byte-exact vectors discharged in run/hmac_rfc4231.vr

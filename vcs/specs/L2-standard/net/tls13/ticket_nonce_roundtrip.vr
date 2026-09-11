@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: tls13, resumption, ticket_nonce, rfc8446_4_6_1
 // @timeout: 5000
-// @expect: pass
 
 // Regression for RFC 8446 §4.6.1 ticket_nonce correctness.
 //

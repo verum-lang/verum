@@ -3,7 +3,7 @@
 // @level: L1
 // @tags: refinement, record-fields, runtime-assert, red-team
 // @timeout: 30000
-// @expect: fail
+// @note: an earlier `@expect: fail` marker said this should fail, and `@test: unit` says the opposite; the runner honours @test — T1422
 //
 // REFINE-FIELD-DYNAMIC-BYPASS-1: dynamic out-of-range Int into a
 // refined field traps at runtime (assignment shape).

@@ -2,7 +2,6 @@
 // @tier: 0
 // @level: L1
 // @tags: proof, refinement, hypothesis, sigma, auto
-// @expect: pass
 //
 // Inline refinement-type predicates on theorem parameters must flow into
 // the SMT goal as hypotheses, with the implicit `self` / `it` binder (or

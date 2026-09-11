@@ -2,7 +2,6 @@
 // @tier: 0
 // @level: L1
 // @tags: proof, induction, IH, admit, have, soundness
-// @expect: pass
 //
 // Inside `proof by induction { case succ(k) => { have ih: P(k); ... } }`
 // the un-justified `have ih: …;` is the induction hypothesis — the

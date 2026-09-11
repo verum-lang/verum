@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: mesh, k8s, kubernetes, gateway-api, crd, watch
 // @timeout: 10000
-// @expect: pass
 
 // Kubernetes API client + Gateway API v1 CRD surface.
 

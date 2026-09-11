@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: security, hash, crc32c, castagnoli, typecheck
 // @timeout: 10000
-// @expect: pass
 
 mount core.hash.checksum.crc32c.{Crc32c, crc32c, CRC32C_POLYNOMIAL};
 

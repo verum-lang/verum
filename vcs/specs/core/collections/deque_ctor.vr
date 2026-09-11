@@ -3,7 +3,6 @@
 // @level: L1
 // @tags: deque, constructor, builtin, layout
 // @timeout: 5000
-// @expect: pass
 //
 // Regression: `Deque.new()` went through stdlib `core.collections.deque`
 // (user-defined record `{ data: &unsafe T, head, len, cap }`) instead

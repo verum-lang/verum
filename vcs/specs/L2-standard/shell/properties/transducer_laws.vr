@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: shell, transducer, laws, properties, typecheck
 // @timeout: 30000
-// @expect: pass
 
 // Equational laws that the Transducer compose / identity API must satisfy.
 // These are property tests — driven against curated input lists; the same

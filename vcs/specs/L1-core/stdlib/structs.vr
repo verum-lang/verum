@@ -3,7 +3,6 @@
 // @level: L1
 // @tags: structs, fields, methods, mutation
 // @timeout: 10000
-// @expect: pass
 
 type Point is { x: Int, y: Int };
 

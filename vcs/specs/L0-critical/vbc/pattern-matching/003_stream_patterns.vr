@@ -3,7 +3,6 @@
 // @level: L0
 // @tags: vbc, pattern-matching, stream, iterator, exhaustiveness
 // @timeout: 5000
-// @expect: pass
 // @expected-exit: 0
 //
 // Test: Stream pattern matching at VBC interpreter level

@@ -3,7 +3,6 @@
 // @level: L1
 // @tags: owl2, owl2_fs, framework_axioms, vuva, phase-3, c7
 // @timeout: 8000
-// @expect: pass
 //
 // VVA §21.5 Phase 3 C7 — owl2_fs framework axiom package skeleton.
 //

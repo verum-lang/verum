@@ -584,6 +584,31 @@ impl ErrorCategory {
     }
 }
 
+/// `@name:` written as a directive, or `None` for a comment that merely
+/// MENTIONS one.
+///
+/// The name must be followed immediately by a colon and be spelled the way
+/// directives are — lowercase, digits, hyphens.  Measured 2026-09-11 across
+/// vcs/specs: 162 header lines begin with `@`, of which 124 are the
+/// `@expected-std*-begin/end` block markers and 38 are prose about an
+/// attribute — `@repr(C) struct — validated as FFI-safe`, `@derive(Builder)
+/// for builder pattern generation`, `@cfg(target_arch = "x86_64") { … }`.
+/// Treating those as directives would refuse the files that explain the
+/// language, which is the opposite of what the strictness is for.
+fn unknown_directive_name(comment: &str) -> Option<&str> {
+    let rest = comment.strip_prefix('@')?;
+    let end = rest.find(':')?;
+    let name = &rest[..end];
+    if name.is_empty()
+        || !name
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+    {
+        return None;
+    }
+    Some(&comment[..=end])
+}
+
 /// The directive value that asserts only that the run fails.
 ///
 /// Spelled out rather than left implicit: an absent `@expected-error:` and an
@@ -1247,26 +1272,43 @@ impl TestDirectives {
                 if !clock_impl.is_empty() {
                     directives.inject_clock = Some(clock_impl.into());
                 }
-            } else if comment.starts_with('@')
-                && let Some(directive_name) = comment.split(':').next()
-                && !directive_name.is_empty()
-            {
-                // Unknown `@foo:` directive — surface as a parse warning
-                // so test-file bugs (e.g. `@expect: error(...)` instead of
-                // `@expected-error: ...`) don't silently get ignored.
+            } else if let Some(directive_name) = unknown_directive_name(comment) {
+                // An unknown `@foo:` is a HARD FAILURE of the spec, not a
+                // warning printed only under --verbose.  The comment this
+                // replaced named the exact mistake it meant to catch —
+                // `@expect: error(...)` instead of `@expected-error: ...` —
+                // and that mistake was present 583 times, ignored every time.
+                // Measured 2026-09-11: 1028 header directives across 1008
+                // files used a name the runner does not know.
                 //
-                // Allow `@spec:` / `@description:` / `@author:` style
-                // documentation-only directives to pass without warning.
-                const DOC_ONLY: &[&str] = &["@spec", "@author", "@note", "@reference", "@see"];
+                // A DOCUMENTATION-ONLY NAME IS KNOWN BY BEING LISTED. These
+                // carry information for a reader and nothing for the runner;
+                // leaving them unlisted is what let a misspelt assertion hide
+                // among them.
+                const DOC_ONLY: &[&str] = &[
+                    "@spec", "@author", "@note", "@reference", "@see",
+                    // Classification and provenance, in use across vcs/specs.
+                    "@category", "@contexts", "@properties", "@tags-extra",
+                    "@baseline-comparison", "@active",
+                    // History of a skip: which specs were disabled, and which
+                    // stopped being.  Deliberately kept — deleting them loses
+                    // the only record that a spec was ever off.
+                    "@skip-disabled", "@was-skip",
+                ];
                 if !DOC_ONLY.contains(&directive_name) {
-                    directives.parse_warnings.push(
-                        format!(
-                            "Line {}: unknown directive `{}:` — did you mean `@expected-error:`? Unknown directives are ignored; rename or remove to silence this warning.",
-                            line_num + 1,
-                            directive_name
+                    return Err(DirectiveError::ParseError {
+                        line: line_num + 1,
+                        message: format!(
+                            "unknown directive `{}:` — the runner has no such \
+                             directive, so everything it asserts is ignored. \
+                             Use one the runner reads (`@expected-error:`, \
+                             `@expected-stdout:`, `@expected-exit:`, …), or a \
+                             documentation-only name ({}).",
+                            directive_name,
+                            DOC_ONLY.join(", ")
                         )
                         .into(),
-                    );
+                    });
                 }
             }
         }
@@ -1776,6 +1818,45 @@ mod tests {
         assert!(!verum_error::registry::is_known("M301"));
         let err = ExpectedError::parse(r#"M301 "Operation not allowed in sandbox""#).unwrap();
         assert_eq!(err.code.as_deref(), Some("M301"));
+    }
+
+    /// A name the runner does not know asserts nothing, and used to say so
+    /// only under `--verbose`.  Measured 2026-09-11: `@expect: pass` appeared
+    /// 583 times — a whole parallel assertion vocabulary the runner has never
+    /// read a word of — beside thirteen one-character misspellings of real
+    /// directives.
+    #[test]
+    fn an_unknown_directive_name_fails_the_spec() {
+        let source = "// @test: typecheck-pass\n// @expect: pass\n";
+        let err = TestDirectives::parse(source, "x.vr".to_string().into()).unwrap_err();
+        let text = err.to_string();
+        assert!(text.contains("line 2"), "{text}");
+        assert!(text.contains("@expect"), "{text}");
+    }
+
+    /// A comment that MENTIONS an attribute is prose, not a directive. These
+    /// three shapes are verbatim from vcs/specs; refusing them would refuse
+    /// the files that explain the language.
+    #[test]
+    fn a_comment_mentioning_an_attribute_is_not_a_directive() {
+        let source = "// @test: typecheck-pass\n\
+                      // @repr(C) struct — validated as FFI-safe\n\
+                      // @derive(Builder) for builder pattern generation.\n\
+                      // @cfg(target_arch = \"x86_64\") { let _ = f(); }\n";
+        let d = TestDirectives::parse(source, "x.vr".to_string().into()).unwrap();
+        assert_eq!(d.test_type, TestType::TypecheckPass);
+    }
+
+    /// A documentation-only name is known BY BEING LISTED, which is what lets
+    /// the rule above be strict without deleting a reader's metadata.
+    #[test]
+    fn a_documentation_only_directive_is_accepted() {
+        let source = "// @test: typecheck-pass\n\
+                      // @category: patterns\n\
+                      // @was-skip: re-enabled 2026-08-01\n\
+                      // @note: prose for a reader\n";
+        let d = TestDirectives::parse(source, "x.vr".to_string().into()).unwrap();
+        assert_eq!(d.test_type, TestType::TypecheckPass);
     }
 
     /// One assertion, several diagnostics.  `@expected-error-count` counts

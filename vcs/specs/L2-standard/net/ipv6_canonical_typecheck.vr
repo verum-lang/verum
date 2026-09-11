@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: net, ipv6, rfc5952, canonical, typecheck
 // @timeout: 10000
-// @expect: pass
 
 mount core.net.ipv6_canonical.{
     Ipv6CanonicalError, format_ipv6, parse, canonicalize, equal_addresses,

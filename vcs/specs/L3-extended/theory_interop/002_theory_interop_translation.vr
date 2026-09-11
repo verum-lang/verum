@@ -2,7 +2,6 @@
 // @tier: 0
 // @level: L3
 // @tags: theory_interop, translation, kan-extension
-// @expect: pass
 //
 // Test: theory-interop translation between theories via Kan extensions.
 

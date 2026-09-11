@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: quic, tls, rfc9001, handshake-driver, typecheck
 // @timeout: 10000
-// @expect: pass
 
 mount core.net.quic.connection_sm.handshake_driver.{
     HandshakeDriver, HandshakeRole, HandshakeOutput,

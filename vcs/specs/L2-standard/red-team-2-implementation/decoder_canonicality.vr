@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: red-team, decoder-canonicality, base64, base32, forgery
 // @timeout: 10000
-// @expect: pass
 // @description: Round-2 red-team guardrails (#173, decoder-canonicality
 // recipe class).
 //

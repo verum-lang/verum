@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: collections, reservoir, sampling, streaming, typecheck
 // @timeout: 10000
-// @expect: pass
 
 mount core.collections.reservoir.{Reservoir};
 mount core.collections.List;

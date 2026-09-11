@@ -3,7 +3,6 @@
 // @level: L0
 // @tags: vbc, comparison, integer, eq, ne, lt, le, gt, ge
 // @timeout: 5000
-// @expect: pass
 //
 // Test: EQ_I, NE_I, LT_I, LE_I, GT_I, GE_I
 // Verifies integer comparison operations

@@ -2,7 +2,6 @@
 // @tier: 0
 // @level: L1
 // @tags: proof, tactic, apply, lemma, module
-// @expect: pass
 //
 // `apply <name>` must dispatch to sibling theorems / lemmas / corollaries
 // / axioms declared in the same module. Without module-scoped registration

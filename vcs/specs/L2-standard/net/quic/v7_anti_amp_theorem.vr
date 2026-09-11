@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: quic, path, v7, smt, theorem, rfc9000_21_1_1_3
 // @timeout: 15000
-// @expect: pass
 
 // V7 theorem (tls-quic.md §9): anti-amplification budget.
 //

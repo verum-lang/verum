@@ -2,7 +2,6 @@
 // @tier: 1
 // @level: L1
 // @tags: associated-types, bounds, where-clause, advanced-type-syntax
-// @expect: pass
 // @description: Associated type bounds syntax tests
 // @spec: 03-type-system.md Section 13. 3.3
 

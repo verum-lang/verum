@@ -3,7 +3,6 @@
 // @level: L0
 // @tags: vbc, async, spawn, await, futures
 // @timeout: 5000
-// @expect: pass
 //
 // Test: SPAWN, AWAIT, FUTURE_READY, FUTURE_GET
 // Verifies async task spawning and awaiting

@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: http, uri-template, rfc6570, openapi, typecheck
 // @timeout: 10000
-// @expect: pass
 
 mount core.net.uri_template.{
     UriTemplate, UriTemplateError, TemplateValue,

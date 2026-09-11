@@ -3,7 +3,6 @@
 // @level: L1
 // @tags: maybe, result, methods, unwrap, variant-dispatch
 // @timeout: 10000
-// @expect: pass
 
 mount core.prelude.*;
 

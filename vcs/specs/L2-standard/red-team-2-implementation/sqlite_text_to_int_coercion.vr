@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: red-team, dishonest-comment, sqlite, type-coercion
 // @timeout: 10000
-// @expect: pass
 // @description: Round-2 red-team guardrail (#173) for the
 // dishonest-comment-class fix in
 // core/database/sqlite/native/l2_record/type_coercion.vr (commit ac6b6a5d).

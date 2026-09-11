@@ -2,7 +2,6 @@
 // @tier: 0
 // @level: L2
 // @tags: async, generators, for-await
-// @expect: pass
 // @timeout: 30000
 
 // Stub types for testing

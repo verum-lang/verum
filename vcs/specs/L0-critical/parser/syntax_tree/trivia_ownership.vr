@@ -3,7 +3,6 @@
 // @level: L0
 // @tags: lexer, trivia, ownership, lossless, whitespace, comments
 // @description: Test trivia ownership rules including leading/trailing assignment and newline boundaries
-// @expect: pass
 
 // ============================================================================
 // SECTION 1: Leading Trivia Assignment

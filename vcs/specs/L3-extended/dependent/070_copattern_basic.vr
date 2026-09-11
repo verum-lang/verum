@@ -2,7 +2,6 @@
 // @tier: 0
 // @level: L3
 // @tags: coinductive, copattern, stream
-// @expect: pass
 //
 // Test: Copattern syntax for coinductive types.
 // Verifies that cofix functions with .observation => expr syntax

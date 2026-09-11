@@ -2,7 +2,6 @@
 // @tier: 0
 // @level: L0
 // @tags: arena, allocator, generational, memory, cbgr
-// @expect: pass
 // @description: Generational arena allocator — O(1) mass invalidation via shared generation counter
 
 // ============================================================================

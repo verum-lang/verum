@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: async, semaphore, concurrency-limit, typecheck
 // @timeout: 10000
-// @expect: pass
 
 mount core.async.semaphore.{
     AsyncSemaphore, SemaphorePermit, SemaphoreFuture, SemaphoreError,

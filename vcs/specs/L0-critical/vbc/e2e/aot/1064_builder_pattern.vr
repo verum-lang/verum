@@ -2,7 +2,6 @@
 // @tier: 0
 // @level: L0
 // @tags: builder, pattern, production
-// @expect: pass
 
 // Production pattern: builder for HTTP-like request.
 

@@ -3,7 +3,6 @@
 // @level: L0
 // @tags: vbc, tensor, dtype, cast, type, f32, f64, i32, i64
 // @timeout: 3000
-// @expect: pass
 // @skip-disabled: Tensor const generic syntax and named arguments now supported by parser
 //
 // Test: Tensor data type queries and conversions

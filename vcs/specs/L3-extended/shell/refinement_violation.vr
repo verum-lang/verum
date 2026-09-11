@@ -3,7 +3,6 @@
 // @level: L3
 // @tags: shell, refinement, verify, runtime-check
 // @timeout: 30000
-// @expect: pass
 
 // DeployConfig.parse refines `version` to a SemVer string at construction.
 // This test exercises the runtime refinement check: a malformed version

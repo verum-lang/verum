@@ -3,7 +3,6 @@
 // @level: L1
 // @tags: security, crypto, rsa, pss, pkcs1, verify, legacy, pki
 // @timeout: 10000
-// @expect: pass
 
 // RSA verify surface — PSS and PKCS#1 v1.5 over SHA-2 family.
 

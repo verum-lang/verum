@@ -3,7 +3,6 @@
 // @level: L1
 // @tags: security, crypto, ed25519, signatures, rfc8032, eddsa
 // @timeout: 10000
-// @expect: pass
 
 // RFC 8032 Ed25519 surface — keygen, public_key, sign, verify, strict
 // rejection semantics.

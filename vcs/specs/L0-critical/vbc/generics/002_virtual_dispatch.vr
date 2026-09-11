@@ -3,7 +3,6 @@
 // @level: L0
 // @tags: vbc, generics, call_v, call_c, protocol, dynamic
 // @timeout: 5000
-// @expect: pass
 //
 // Test: CALL_V (virtual dispatch), CALL_C (inline cached)
 // Verifies protocol-based dynamic dispatch

@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: h3, qpack, rfc9204, encoder, decoder, roundtrip
 // @timeout: 8000
-// @expect: pass
 
 // RFC 9204 encoder + decoder round-trip — exercises the three
 // representation variants used when QPACK_MAX_TABLE_CAPACITY = 0:

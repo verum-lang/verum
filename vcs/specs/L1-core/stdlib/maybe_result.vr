@@ -3,7 +3,6 @@
 // @level: L1
 // @tags: maybe, result, option, error-types
 // @timeout: 10000
-// @expect: pass
 
 fn find_first_positive(xs: List<Int>) -> Maybe<Int> {
     let mut i = 0;

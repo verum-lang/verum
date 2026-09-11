@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: quic, ack_ranges, v3, refinement, rfc9000
 // @timeout: 5000
-// @expect: pass
 
 // Empirical check of the V3 invariant on `core.net.quic.ack_ranges.AckRanges`.
 // We run a mixed sequence of inserts and assert the structural

@@ -2,7 +2,6 @@
 // @tier: 0
 // @level: L0
 // @tags: waitgroup, sync, concurrency
-// @expect: pass
 
 // WaitGroup: wait for N tasks to complete.
 

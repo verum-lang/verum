@@ -2,7 +2,6 @@
 // @tier: 0
 // @level: L1
 // @tags: protocols, conformance, signatures, E427, T1073
-// @expect: error(E427)
 // @expected-error: E427 "does not match the signature"
 // @description: An implementation's parameter type must not contradict the protocol's.
 // @spec: 09-protocols.md - Conformance

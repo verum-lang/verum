@@ -2,7 +2,6 @@
 // @tier: 1
 // @level: L1
 // @tags: negative-bounds, violation, errors, advanced-type-syntax
-// @expect: error(E0403)
 // @expected-error: E0403 "Type implements forbidden protocol"
 // @description: Tests for negative bound violations - type implements protocol it shouldn't
 // @spec: 03-type-system.md Section 13. 3.5.3

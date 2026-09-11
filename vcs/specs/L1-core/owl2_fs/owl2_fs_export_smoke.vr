@@ -3,7 +3,6 @@
 // @level: L1
 // @tags: owl2, owl2-fs, export, vuva, phase-3, b5
 // @timeout: 5000
-// @expect: pass
 //
 // VVA §21.8 Phase 3 B5 — verum export --to owl2-fs smoke.
 //

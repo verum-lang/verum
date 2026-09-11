@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: base, nanoid, id, typecheck
 // @timeout: 10000
-// @expect: pass
 
 mount core.id.nanoid.{
     generate, generate_len, generate_with_alphabet,

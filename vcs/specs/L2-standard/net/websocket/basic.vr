@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: net, websocket, rfc6455, handshake, framing
 // @timeout: 10000
-// @expect: pass
 
 // RFC 6455 WebSocket API surface.
 

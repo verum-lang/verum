@@ -3,7 +3,6 @@
 // @level: L0
 // @tags: vbc, e2e, error-handling, result, try-recover, pipeline
 // @timeout: 5000
-// @expect: pass
 //
 // End-to-end pipeline test: .vr source -> parse -> typecheck -> VBC codegen -> interpreter
 // Verifies Result types, ? operator, and try/recover blocks through the full pipeline

@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: h3, qpack, session, dynamic-table, typecheck
 // @timeout: 10000
-// @expect: pass
 
 mount core.net.h3.qpack.{
     QpackSession, QpackSessionError,

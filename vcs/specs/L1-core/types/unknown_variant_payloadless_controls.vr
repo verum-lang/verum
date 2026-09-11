@@ -2,7 +2,6 @@
 // @tier: 0
 // @level: L1
 // @tags: types, variants, name-resolution, qualified-access, regression
-// @expect: pass
 // @expected-exit: 0
 
 /// T0545 positive controls — the strict-qualified-access diagnostic

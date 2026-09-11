@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: quic, migration, path_validation, rfc9000_8, rfc9000_9
 // @timeout: 5000
-// @expect: pass
 
 // QUIC connection migration (RFC 9000 §8 — path validation, §9 — migration).
 //

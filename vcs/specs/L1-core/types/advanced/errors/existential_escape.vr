@@ -2,7 +2,6 @@
 // @tier: 1
 // @level: L1
 // @tags: existential, escape, skolem, errors, advanced-type-syntax
-// @expect: error(E0401)
 // @expected-error: E0401 "Existential type escapes its scope"
 // @description: Tests for existential (skolem) type escaping its defining scope
 // @spec: 03-type-system.md Section 13. 3.7.3

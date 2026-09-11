@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: time, duration-parser, iso8601, typecheck
 // @timeout: 10000
-// @expect: pass
 
 mount core.time.duration_parse.{DurationParseError, parse};
 mount core.time.duration.{Duration};

@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: red-team, hostile-input, http, range, cve-2011-3192
 // @timeout: 10000
-// @expect: pass
 // @description: Round-2 red-team guardrail (#173 vector A — closed
 // soundness defect). RFC 7233 byte-offset values from hostile Range
 // headers ran `v * 10 + d` over UInt64 with no overflow protection;

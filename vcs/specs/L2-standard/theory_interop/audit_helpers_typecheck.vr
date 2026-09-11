@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: theory_interop, vva-section-10, audit-helpers, msfs-coord
 // @timeout: 10000
-// @expect: pass
 //
 // VVA §10 (#242) — exercise the audit-helper layer:
 //   • translation_verdict / translation_admits

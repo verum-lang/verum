@@ -3,7 +3,6 @@
 // @level: L1
 // @tags: pattern-matching, sum-types, variants
 // @timeout: 10000
-// @expect: pass
 
 type Shape is Circle(Float) | Rectangle(Float, Float);
 

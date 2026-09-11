@@ -3,7 +3,6 @@
 // @level: L0
 // @tags: vbc, control-flow, fused, jmp_eq, jmp_ne, jmp_lt, jmp_le, jmp_gt, jmp_ge
 // @timeout: 5000
-// @expect: pass
 //
 // Test: JMP_EQ, JMP_NE, JMP_LT, JMP_LE, JMP_GT, JMP_GE
 // Verifies fused compare-and-jump operations for optimization

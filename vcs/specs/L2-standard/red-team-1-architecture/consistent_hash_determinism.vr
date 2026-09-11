@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: red-team, architecture, determinism, consistent-hash
 // @timeout: 10000
-// @expect: pass
 // @description: Round-1 architectural guardrail — extends the
 // hash-iter full audit (#207 sub-deliverable 8) to
 // `ConsistentHashRing` (Ketama-compatible).

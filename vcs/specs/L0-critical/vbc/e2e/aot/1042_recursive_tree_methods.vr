@@ -2,7 +2,6 @@
 // @tier: 0
 // @level: L0
 // @tags: heap, deref, method, tree, recursive
-// @expect: pass
 
 // Tests recursive tree with multiple methods using (*node).method() pattern
 

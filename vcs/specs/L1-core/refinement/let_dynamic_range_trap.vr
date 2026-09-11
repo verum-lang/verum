@@ -3,7 +3,7 @@
 // @level: L1
 // @tags: refinement, let-binding, runtime-assert, red-team
 // @timeout: 30000
-// @expect: fail
+// @note: an earlier `@expect: fail` marker said this should fail, and `@test: unit` says the opposite; the runner honours @test — T1422
 //
 // T0262 red-team pin: an out-of-range value smuggled through a function
 // return into a `let n: Int{it >= 0, it <= 10}` MUST trap at runtime

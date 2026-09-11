@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: collections, consistent-hash, ketama, ring, typecheck
 // @timeout: 10000
-// @expect: pass
 
 mount core.collections.{ConsistentHashRing, DEFAULT_VIRTUAL_NODES};
 

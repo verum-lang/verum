@@ -3,7 +3,6 @@
 // @level: L0
 // @tags: vbc, arithmetic, integer, basic
 // @timeout: 5000
-// @expect: pass
 //
 // Test: ADD_I, SUB_I, MUL_I, DIV_I, MOD_I
 // Verifies basic integer arithmetic operations

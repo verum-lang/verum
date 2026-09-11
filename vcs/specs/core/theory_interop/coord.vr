@@ -3,7 +3,6 @@
 // @level: L1
 // @tags: theory_interop, coord, msfs, obstruction, verdict, vuva, ordinal
 // @timeout: 5000
-// @expect: pass
 //
 // VVA §10.2 + §10.4 Phase 5 E4 — translation verdict + MSFS coordinate.
 //

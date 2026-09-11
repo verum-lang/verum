@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: otp, hotp, totp, rfc4226, rfc6238, base32, typecheck
 // @timeout: 10000
-// @expect: pass
 
 mount core.security.otp.{
     OtpHash, OtpError,

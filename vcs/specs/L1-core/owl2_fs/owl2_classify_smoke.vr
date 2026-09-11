@@ -3,7 +3,6 @@
 // @level: L1
 // @tags: owl2, owl2_classify, audit, vuva, phase-6, f5
 // @timeout: 5000
-// @expect: pass
 //
 // VVA §21.10 Phase 6 F5 — verum audit --owl2-classify smoke.
 //

@@ -3,7 +3,6 @@
 // @level: L0
 // @tags: vbc, async, nursery, structured-concurrency
 // @timeout: 5000
-// @expect: pass
 //
 // Test: NURSERY_INIT, NURSERY_SPAWN, NURSERY_AWAIT, NURSERY_CANCEL, NURSERY_CONFIG
 // Verifies structured concurrency with nursery pattern

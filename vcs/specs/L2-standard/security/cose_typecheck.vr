@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: security, cose, rfc9052, webauthn, cwt, typecheck
 // @timeout: 10000
-// @expect: pass
 
 mount core.security.cose.{
     CoseAlg, CoseKey, CoseError, CoseHeaders,

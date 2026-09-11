@@ -3,7 +3,6 @@
 // @level: L1
 // @tags: security, crypto, hash, sha2, sha256, sha384, sha512, nist-kat
 // @timeout: 10000
-// @expect: pass
 
 // FIPS 180-4 SHA-256 / SHA-384 / SHA-512 surface + streaming API.
 // Full NIST KAT discharge runs in `run` tests under L1-core/security/run/;

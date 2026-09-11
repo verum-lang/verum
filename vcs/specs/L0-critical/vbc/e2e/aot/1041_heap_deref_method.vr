@@ -2,7 +2,6 @@
 // @tier: 0
 // @level: L0
 // @tags: heap, deref, method, recursive, sum_type
-// @expect: pass
 
 // Tests (*l).method() dispatch on Heap<T> wrapped recursive sum types
 // Verifies type inference through Paren(Deref(x)) receiver expressions

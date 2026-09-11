@@ -6,7 +6,6 @@
 // @level: L4
 // @tags: red-team, perf, modules, module-resolver, red-team-3.5.1
 // @timeout: 60000
-// @expect: pass
 // =============================================================================
 //
 // Pins module-resolver scaling at 256 modules — 16x the existing module_fanout_bounded.vr

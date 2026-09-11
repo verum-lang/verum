@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: security, hash, fnv, non-crypto, typecheck
 // @timeout: 10000
-// @expect: pass
 
 mount core.hash.fast.fnv.{
     fnv1_32, fnv1a_32, fnv1_64, fnv1a_64,

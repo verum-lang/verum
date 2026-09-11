@@ -3,7 +3,6 @@
 // @level: L1
 // @tags: security, crypto, aes, aes-gcm, aead, nist, fips-197
 // @timeout: 10000
-// @expect: pass
 
 // FIPS 197 AES + NIST SP 800-38D GCM surface.
 

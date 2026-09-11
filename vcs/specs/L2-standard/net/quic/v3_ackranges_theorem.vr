@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: quic, ack_ranges, v3, smt, theorem, rfc9000
 // @timeout: 15000
-// @expect: pass
 
 // V3 theorem (tls-quic.md §9): ACK ranges invariant
 //

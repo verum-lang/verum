@@ -3,7 +3,6 @@
 // @level: L1
 // @tags: ott, observational-equality, type-directed-equality
 // @timeout: 10000
-// @expect: pass
 //
 // Pre-#245 ott_decide always returned OttStuck for products
 // because OttProduct / OttPair were declared but never matched.

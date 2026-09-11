@@ -3,7 +3,6 @@
 // @level: L0
 // @tags: vbc, e2e, closures, higher-order, pipeline
 // @timeout: 5000
-// @expect: pass
 //
 // End-to-end pipeline test: .vr source -> parse -> typecheck -> VBC codegen -> interpreter
 // Verifies closure capture, higher-order functions, and closure composition

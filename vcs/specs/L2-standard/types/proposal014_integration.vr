@@ -2,7 +2,6 @@
 // @tier: 0
 // @level: L2
 // @tags: advanced-type-syntax, hkt, existential, negative-bounds, integration
-// @expect: pass
 // @description: Complex integration tests combining multiple advanced type syntax features
 // @spec: 03-type-system.md Section 13
 

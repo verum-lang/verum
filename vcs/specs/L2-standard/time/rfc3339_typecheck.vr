@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: time, rfc3339, iso8601, typecheck
 // @timeout: 10000
-// @expect: pass
 
 mount core.time.rfc3339.{
     Rfc3339Time, Rfc3339Error,

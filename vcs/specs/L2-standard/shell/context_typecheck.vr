@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: shell, context, di, mock, permissions, typecheck
 // @timeout: 30000
-// @expect: pass
 
 mount core.shell.context.{
     ShellContext, PermissionSet, PermissionKind,

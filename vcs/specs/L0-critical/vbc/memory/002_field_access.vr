@@ -4,7 +4,6 @@
 // @was-skip: type system limitations (field access compilation errors) - fixed by adding List/Map indexing
 // @tags: vbc, memory, field, get_f, set_f, get_e, set_e
 // @timeout: 5000
-// @expect: pass
 //
 // Test: GET_F, SET_F, GET_E, SET_E, LEN
 // Verifies field and element access operations

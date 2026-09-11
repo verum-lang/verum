@@ -3,7 +3,6 @@
 // @level: L0
 // @tags: vbc, async, select, concurrency
 // @timeout: 5000
-// @expect: pass
 //
 // Test: SELECT opcode
 // Verifies concurrent future coordination with select expression

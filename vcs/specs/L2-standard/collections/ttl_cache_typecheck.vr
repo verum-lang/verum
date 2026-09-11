@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: collections, cache, ttl, lru, typecheck
 // @timeout: 10000
-// @expect: pass
 
 mount core.collections.{TtlCache, TtlCacheConfig, TtlCacheStats};
 mount core.time.duration.{Duration};

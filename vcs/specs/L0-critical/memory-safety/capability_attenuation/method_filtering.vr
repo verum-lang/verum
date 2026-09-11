@@ -3,7 +3,6 @@
 // @level: L0
 // @tags: capability, method-filtering, types
 // @timeout: 5000
-// @expect: pass
 //
 // Capability-Based Method Filtering Tests
 // =======================================

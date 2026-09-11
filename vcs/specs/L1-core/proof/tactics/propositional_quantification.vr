@@ -2,7 +2,6 @@
 // @tier: 0
 // @level: L1
 // @tags: proof, prop, quantified, tautology
-// @expect: pass
 //
 // Propositional operators with type-variable operands (`P && Q` where
 // P and Q are `: Prop`) must translate to Z3 as Bool-kinded constants,

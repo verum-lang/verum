@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: encoding, cbor, rfc8949, typecheck
 // @timeout: 10000
-// @expect: pass
 
 mount core.encoding.cbor.{
     CborValue, CborError,

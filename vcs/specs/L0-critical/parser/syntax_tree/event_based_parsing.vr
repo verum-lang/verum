@@ -2,7 +2,6 @@
 // @tier: 0
 // @level: L0
 // @tags: parser, events, lossless, markers, event-builder
-// @expect: pass
 // @description: Test event-based parser infrastructure including markers, precede pattern, and error handling
 // Note: This is a parse-only test - it exercises parser event emission, not type checking
 

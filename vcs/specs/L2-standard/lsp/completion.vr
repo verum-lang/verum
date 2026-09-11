@@ -2,7 +2,7 @@
 // @tier: 0
 // @level: L2
 // @tags: lsp, completion, autocomplete, intellisense
-// @expect: pass
+// @note: an earlier `@expect: pass` marker said this should pass, and `@test: parse-fail` says the opposite; the runner honours @test — T1422
 // @description: Tests code completion/autocomplete for various contexts.
 //              Verifies correct suggestions, ordering, and filtering.
 

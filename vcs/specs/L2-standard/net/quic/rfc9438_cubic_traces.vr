@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: quic, cubic, rfc9438, congestion_control, kat
 // @timeout: 10000
-// @expect: pass
 
 // RFC 9438 CUBIC congestion-control validation traces.
 //

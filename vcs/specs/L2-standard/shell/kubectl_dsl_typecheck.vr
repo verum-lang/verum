@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: shell, dsl, kubectl, typecheck
 // @timeout: 30000
-// @expect: pass
 
 mount core.shell.dsl.kubectl.{
     KubectlCmd, KubeName, KubeNamespace, KubeOutput, KubeResource,

@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: shell, builtins, fs, cross-platform, typecheck
 // @timeout: 30000
-// @expect: pass
 
 mount core.shell.builtins.{
     cp, mv, rm, rm_rf,

@@ -2,7 +2,6 @@
 // @tier: 0
 // @level: L1
 // @tags: refinement, arithmetic, const-fold, check_phase, language
-// @expect: errors
 
 // Regression for the const-fold gap in try_extract_int_value.  Before
 // the fix, refinement predicates containing arithmetic over constant

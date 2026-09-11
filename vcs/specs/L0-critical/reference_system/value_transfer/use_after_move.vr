@@ -1,8 +1,10 @@
 // @test: typecheck-fail
+// @expected-error: E302
+// The deleted `@expect: error(MovedValueUsed)` marker said this, in a
+// vocabulary the runner never read; E302 is the code it means, measured.
 // @tier: all
 // @level: L0
 // @tags: reference_system, cbgr, affine, move-semantics, negative-test
-// @expect: error(MovedValueUsed)
 
 /// Test that detects use after move for AFFINE types at compile time.
 /// This is critical for memory safety - the type checker catches

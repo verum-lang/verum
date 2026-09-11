@@ -3,7 +3,6 @@
 // @level: L0
 // @tags: vbc, pattern-matching, unpack, pack, tuples, destructuring
 // @timeout: 5000
-// @expect: pass
 //
 // Test: UNPACK, PACK operations
 // Verifies tuple packing/unpacking and destructuring

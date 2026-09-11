@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: async, cancellation, cooperative, basic
 // @timeout: 10000
-// @expect: pass
 
 // Extended basic smoke test for core.async.cancellation — exercises
 // cancel_with, reason, idempotency, clones share state.

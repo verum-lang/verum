@@ -3,7 +3,6 @@
 // @level: L4
 // @tags: red-team, perf, algorithmic-cliff, jcs, signing
 // @timeout: 30000
-// @expect: pass
 // @description: Round-3 red-team perf-class guardrail (#174 audit
 // section B — algorithmic cliff closed).
 //

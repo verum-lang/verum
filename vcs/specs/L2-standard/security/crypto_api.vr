@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: security, crypto, sha256, hmac, hkdf, constant-time
 // @timeout: 10000
-// @expect: pass
 
 // Crypto primitive API surface — SHA-256, HMAC-SHA-256, HKDF-SHA-256,
 // and constant-time comparison.

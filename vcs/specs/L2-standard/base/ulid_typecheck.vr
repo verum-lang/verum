@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: base, ulid, id, crockford, typecheck
 // @timeout: 10000
-// @expect: pass
 
 mount core.id.ulid.{Ulid, UlidError, parse, ULID_ALPHABET};
 

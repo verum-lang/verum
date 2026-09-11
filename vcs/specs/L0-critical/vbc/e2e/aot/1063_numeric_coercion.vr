@@ -2,7 +2,6 @@
 // @tier: 0
 // @level: L0
 // @tags: numeric, coercion, float, int
-// @expect: pass
 
 // Test numeric operations and coercions.
 

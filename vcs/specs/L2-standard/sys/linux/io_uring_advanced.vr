@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: sys, linux, io_uring, multi-shot, send-zc, registered-buffers, pbuf-ring
 // @timeout: 10000
-// @expect: pass
 
 // Advanced io_uring features added to core.sys.linux.io:
 // multi-shot accept / recv, zero-copy send (SEND_ZC / SENDMSG_ZC),

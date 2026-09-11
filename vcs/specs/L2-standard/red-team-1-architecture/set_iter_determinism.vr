@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: red-team, architecture, determinism, collections, set
 // @timeout: 10000
-// @expect: pass
 // @description: Round-1 architectural guardrail — extends
 // `hash_iter_determinism.vr` to `Set<T>` (vector 7.2 full audit
 // from #207's hash-iter full audit sub-deliverable).

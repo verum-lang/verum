@@ -3,7 +3,6 @@
 // @level: L4
 // @tags: red-team, perf, allocator, case-fold, cached
 // @timeout: 10000
-// @expect: pass
 // @description: Round-3 red-team perf-class guardrail (#174 audit
 // Section C — hot-path case-fold caching).
 //

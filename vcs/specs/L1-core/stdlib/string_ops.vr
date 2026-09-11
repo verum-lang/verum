@@ -3,7 +3,6 @@
 // @level: L1
 // @tags: stdlib, text, string
 // @timeout: 10000
-// @expect: pass
 
 mount core.prelude.*;
 

@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: tracing, opentelemetry, span, trace-context, w3c, sampler
 // @timeout: 15000
-// @expect: pass
 
 // OpenTelemetry-compatible tracing API surface.
 

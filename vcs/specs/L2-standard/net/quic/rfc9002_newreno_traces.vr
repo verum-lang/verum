@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: quic, newreno, rfc9002, traces, kat
 // @timeout: 10000
-// @expect: pass
 
 // RFC 9002 Appendix A — NewReno + loss-detection canonical traces.
 //

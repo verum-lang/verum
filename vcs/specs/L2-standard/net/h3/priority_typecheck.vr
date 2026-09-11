@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: h3, rfc9218, priority, typecheck
 // @timeout: 10000
-// @expect: pass
 
 mount core.net.h3.priority.{
     H3Priority, PriorityParseError,

@@ -2,7 +2,6 @@
 // @tier: 0
 // @level: L1
 // @tags: name-resolution, shadowing, silent-wrong-value
-// @expect: pass
 // @expected-stdout: 999
 // @description: A function declared in the compilation unit is the one that runs, even when a builtin shares its name.
 

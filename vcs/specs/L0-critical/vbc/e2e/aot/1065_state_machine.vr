@@ -2,7 +2,6 @@
 // @tier: 0
 // @level: L0
 // @tags: state_machine, enum, match, production
-// @expect: pass
 
 // Production pattern: TCP connection state machine.
 

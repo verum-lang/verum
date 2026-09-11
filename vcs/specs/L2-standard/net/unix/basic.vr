@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: net, unix, af_unix, async, ipc
 // @timeout: 10000
-// @expect: pass
 
 // AF_UNIX stream socket — shape + async I/O + peer cred.
 

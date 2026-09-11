@@ -2,7 +2,6 @@
 // @tier: 0
 // @level: L0
 // @tags: barrier, sync, concurrency
-// @expect: pass
 
 // Barrier-like synchronization: threads coordinate via channels + mutex.
 

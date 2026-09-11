@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: quic, rfc9000, idle-timeout, typecheck
 // @timeout: 10000
-// @expect: pass
 
 mount core.net.quic.idle_timeout.{
     IdleTimeoutTracker, TickResult, IdleTimeoutError,

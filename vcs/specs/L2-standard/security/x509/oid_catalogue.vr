@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: x509, oid, pkix, rfc5280
 // @timeout: 5000
-// @expect: pass
 //
 // Type-check the PKIX OID catalogue. Walks the most-used OID constructors,
 // verifies structural equality on ed25519 + sha256_with_rsa against the

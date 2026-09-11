@@ -3,7 +3,6 @@
 // @level: L1
 // @tags: generics, parametric-polymorphism, type-parameters
 // @timeout: 10000
-// @expect: pass
 
 fn identity<T>(x: T) -> T {
     x

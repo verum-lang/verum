@@ -2,7 +2,6 @@
 // @tier: 0
 // @level: L0
 // @tags: optimization, float, alloca, mem2reg
-// @expect: pass
 
 // Test: Float operations survive LLVM optimization passes.
 // This test specifically targets the f64 alloca fix that prevents

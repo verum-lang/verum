@@ -3,7 +3,6 @@
 // @level: L1
 // @tags: action, actic, epsilon, classify, owl2, vuva
 // @timeout: 5000
-// @expect: pass
 //
 // VVA §11.2 + §21 — ε_classify primitive (Diakrisis Actic catalogue
 // extension for ontology-classification work). The new primitive

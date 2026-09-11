@@ -3,7 +3,6 @@
 // @level: L1
 // @tags: closures, lambda, higher-order
 // @timeout: 10000
-// @expect: pass
 
 fn apply_twice(f: fn(Int) -> Int, x: Int) -> Int {
     f(f(x))

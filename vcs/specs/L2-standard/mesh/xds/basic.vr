@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: mesh, xds, envoy, ads, discovery, grpc
 // @timeout: 10000
-// @expect: pass
 
 // Envoy xDS v3 (ADS) client API surface.
 

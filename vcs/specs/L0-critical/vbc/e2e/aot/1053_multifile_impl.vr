@@ -2,7 +2,6 @@
 // @tier: 0
 // @level: L0
 // @tags: module, multi_file, impl, methods
-// @expect: pass
 
 // Multi-file: import type with implement block and call methods.
 // Simplified to isolate the bug.

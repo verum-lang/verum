@@ -2,7 +2,6 @@
 // @tier: 0
 // @level: L0
 // @tags: impl, list, methods
-// @expect: pass
 
 // Stack pattern with proper Maybe<Int> handling for pop().
 

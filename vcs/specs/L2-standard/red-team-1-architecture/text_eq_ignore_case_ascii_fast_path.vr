@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: red-team, architecture, case-fold, allocator-pressure
 // @timeout: 10000
-// @expect: pass
 // @description: Round-1 red-team architectural guardrail (#172
 // audit Section C — hot-path case-fold caching).
 //

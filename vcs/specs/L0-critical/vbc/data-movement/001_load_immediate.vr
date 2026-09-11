@@ -3,7 +3,6 @@
 // @level: L0
 // @tags: vbc, data-movement, load, immediate
 // @timeout: 5000
-// @expect: pass
 //
 // Test: LOAD_I, LOAD_F, LOAD_TRUE, LOAD_FALSE, LOAD_UNIT, LOAD_SMALL_I, LOAD_NIL
 // Verifies correct NaN-boxing encoding for all immediate value types

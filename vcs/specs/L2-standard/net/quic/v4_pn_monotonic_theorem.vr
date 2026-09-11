@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: quic, pn_space, v4, smt, theorem, rfc9000_12_3
 // @timeout: 15000
-// @expect: pass
 
 // V4 theorem (tls-quic.md §9): PN space monotonicity.
 //

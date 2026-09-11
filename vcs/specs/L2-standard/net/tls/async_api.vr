@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: net, tls, async, cancellation
 // @timeout: 10000
-// @expect: pass
 
 // TLS async-I/O shape tests — AsyncRead/AsyncWrite, cancellable, channel-binding.
 // Note: `TlsError` identifier clashes with `core.sys.{linux,darwin,windows}.tls.TlsError`

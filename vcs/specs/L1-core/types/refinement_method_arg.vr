@@ -2,7 +2,6 @@
 // @tier: 0
 // @level: L1
 // @tags: refinement, method-call, check_phase, language
-// @expect: errors
 
 // Regression: method-receiver-based argument refinement. `Counter.inc_by`
 // takes `Positive` (refined Int > 0); passing `0` at the call site must

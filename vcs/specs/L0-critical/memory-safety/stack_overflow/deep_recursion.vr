@@ -1,5 +1,5 @@
 // @test: run-interpreter
-// @expected-output: "55"
+// @expected-stdout: 55
 // @tier: 0
 // @level: L0
 // @tags: memory-safety, stack-overflow, recursion, safe

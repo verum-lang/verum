@@ -3,7 +3,6 @@
 // @level: L1
 // @tags: protocols, dispatch, implement
 // @timeout: 10000
-// @expect: pass
 
 type Describable is protocol {
     fn describe(&self) -> Text;

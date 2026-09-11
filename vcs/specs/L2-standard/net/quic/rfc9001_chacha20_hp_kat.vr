@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: quic, rfc9001, chacha20, header-protection, kat, crypto
 // @timeout: 10000
-// @expect: pass
 //
 // RFC 9001 Appendix A.5 — ChaCha20-Poly1305 short-header packet.
 //

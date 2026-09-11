@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: net, cidr, rfc4632, firewall, typecheck
 // @timeout: 10000
-// @expect: pass
 
 mount core.net.cidr.{Cidr, CidrSet, CidrError, parse};
 mount core.net.addr.{IpAddr, Ipv4Addr, Ipv6Addr};

@@ -3,7 +3,6 @@
 // @level: L1
 // @tags: maybe, variant, unwrap, dispatch
 // @timeout: 5000
-// @expect: pass
 //
 // Regression: the interpreter's variant `unwrap` intrinsic checked
 // `tag == 0 && fc > 0`, designed from a stale "empirical" comment

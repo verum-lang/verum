@@ -2,7 +2,6 @@
 // @tier: 0
 // @level: L0
 // @tags: concurrency, spawn, multi_task
-// @expect: pass
 
 // Multiple concurrent spawn+await tasks with different computations.
 

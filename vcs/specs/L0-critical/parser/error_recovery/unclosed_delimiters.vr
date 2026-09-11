@@ -2,7 +2,6 @@
 // @tier: 0
 // @level: L0
 // @tags: parser, error-recovery, delimiters, braces, parens, brackets
-// @expect: errors
 // @description: Tests error recovery for unclosed delimiters (braces, parens, brackets).
 //              Parser should insert synthetic closing tokens and create ERROR nodes.
 

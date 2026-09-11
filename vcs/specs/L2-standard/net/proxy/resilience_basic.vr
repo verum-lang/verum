@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: net, proxy, circuit-breaker, retry, loadbalancer, health-check
 // @timeout: 10000
-// @expect: pass
 
 // §9.3 — CircuitBreakerLayer + RetryLayer + LbPool + HealthCheck shape.
 

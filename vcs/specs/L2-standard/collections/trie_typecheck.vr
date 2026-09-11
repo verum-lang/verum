@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: collections, trie, prefix-tree, router, typecheck
 // @timeout: 10000
-// @expect: pass
 
 mount core.collections.trie.{Trie};
 mount core.collections.List;

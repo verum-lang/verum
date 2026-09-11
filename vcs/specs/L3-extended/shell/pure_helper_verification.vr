@@ -3,7 +3,6 @@
 // @level: L3
 // @tags: shell, verify, formal, ensures
 // @timeout: 30000
-// @expect: pass
 
 // Pure helper used to build deploy paths. The post-condition is structural:
 // every successful return ends with `.yaml` and contains both the service

@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: protobuf, wire-format, varint, zigzag, grpc
 // @timeout: 10000
-// @expect: pass
 
 // Protocol Buffers wire-codec API surface.
 

@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: h3, qpack, rfc9204, dynamic_table
 // @timeout: 5000
-// @expect: pass
 
 // RFC 9204 §4.3 QPACK dynamic table — API-level validation.
 // The encoder-stream/decoder-stream wire protocol layer will plug

@@ -2,7 +2,6 @@
 // @tier: 0
 // @level: L0
 // @tags: coercion, int_float, implicit
-// @expect: pass
 
 // Test implicit Int→Float coercion.
 

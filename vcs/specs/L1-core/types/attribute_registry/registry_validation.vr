@@ -2,7 +2,6 @@
 // @tier: 0
 // @level: L1
 // @tags: types, attributes, registry, validation, errors
-// @expect: pass
 // @description: Attribute registry validation tests
 // @spec: docs/detailed/31-attribute-registry.md
 

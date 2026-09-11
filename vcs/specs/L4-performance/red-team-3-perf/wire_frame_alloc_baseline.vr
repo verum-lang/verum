@@ -3,7 +3,6 @@
 // @level: L4
 // @tags: red-team, perf, allocator, wire-frame
 // @timeout: 30000
-// @expect: pass
 // @description: Round-3 red-team perf-baseline (#174 vector 2.1).
 //
 // Pins the alloc-pressure ceiling on wire-frame layers after the

@@ -2,7 +2,6 @@
 // @tier: 0
 // @level: L0
 // @tags: generics, container, implement, production
-// @expect: pass
 
 // Production pattern: generic container with methods.
 

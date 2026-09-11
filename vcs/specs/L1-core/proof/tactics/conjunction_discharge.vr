@@ -2,7 +2,6 @@
 // @tier: 0
 // @level: L1
 // @tags: proof, tactic, auto, split, conjunction
-// @expect: pass
 //
 // `ensures A && B && C` with refinement / `requires` hypotheses must
 // be fully dischargeable via `proof by auto`. The Auto tactic's Split

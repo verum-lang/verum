@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: quic, rfc9000, connection, state-machine, typecheck
 // @timeout: 10000
-// @expect: pass
 
 mount core.net.quic.connection_sm.*;
 mount core.net.quic.connection_id.{ConnectionId};

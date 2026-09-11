@@ -2,7 +2,6 @@
 // @tier: 0
 // @level: L1
 // @tags: types, attributes, targets, grammar-v2.7
-// @expect: pass
 // @description: AttributeTarget bitflags validation tests
 // @spec: docs/detailed/31-attribute-registry.md Section 3
 

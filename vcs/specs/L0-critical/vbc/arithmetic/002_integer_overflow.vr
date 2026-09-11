@@ -3,7 +3,6 @@
 // @level: L0
 // @tags: vbc, arithmetic, integer, overflow, boundary
 // @timeout: 5000
-// @expect: pass
 //
 // Test: Integer overflow boundary behavior
 // VBC uses 48-bit signed integers in NaN-boxing

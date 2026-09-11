@@ -2,7 +2,6 @@
 // @tier: 0
 // @level: L0
 // @tags: error_handling, result, try_recover, question_mark
-// @expect: pass
 
 // Comprehensive error handling patterns.
 

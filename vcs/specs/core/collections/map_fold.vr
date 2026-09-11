@@ -3,7 +3,6 @@
 // @level: L1
 // @tags: map, higher_order, closure, fold
 // @timeout: 5000
-// @expect: pass
 //
 // Regression: `Map.fold(init, fn(U, &K, &V) -> U)` had no interpreter
 // builtin handler and the `is_builtin_collection` guard blocked

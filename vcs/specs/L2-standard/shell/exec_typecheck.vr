@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: shell, exec, executor, retry, typecheck
 // @timeout: 30000
-// @expect: pass
 
 mount core.shell.exec.{run, sh, sh_check};
 mount core.shell.executor.{Executor, RetryPolicy};

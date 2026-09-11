@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: jwt, rfc7519, rfc7515, auth, hs256, eddsa, typecheck
 // @timeout: 10000
-// @expect: pass
 
 mount core.security.jwt.{
     JwtAlgorithm, JwtKey, JwtError, JwtHeader, VerifyOptions, JwtPayload,

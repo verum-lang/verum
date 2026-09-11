@@ -1,6 +1,5 @@
 // @test: typecheck-pass
 // @level: L0
-// @expect: pass
 fn foo() -> Int { 42 }
 mount core.prelude.*;
 

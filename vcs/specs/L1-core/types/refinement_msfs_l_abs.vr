@@ -17,7 +17,6 @@
 // @test: typecheck-pass
 // @level: L1
 // @tags: types, refinement, msfs, k-refine
-// @expect: pass
 
 mount core.math.absolute_layer.{
     CategoricalLevel,

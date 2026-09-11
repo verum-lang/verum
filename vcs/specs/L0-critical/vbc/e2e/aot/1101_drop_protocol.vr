@@ -2,7 +2,6 @@
 // @tier: 0
 // @level: L0
 // @tags: drop, protocol, destructor, resource-cleanup
-// @expect: pass
 
 // Test: Drop protocol - basic API definition and manual invocation.
 //

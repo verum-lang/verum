@@ -3,7 +3,6 @@
 // @level: L0
 // @tags: parser, patterns, and-patterns, pattern-combination
 // @timeout: 10000
-// @expect: pass
 //
 // And Pattern Tests - Section 11 of docs/improvements.md
 //

@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: async, channels, watch, broadcast, pattern
 // @timeout: 10000
-// @expect: pass
 // @description: Watch channel pattern — use broadcast_channel as substrate
 
 // Reshaped 2026-04-20 from a legacy `runtime.create_watch` stub. A true

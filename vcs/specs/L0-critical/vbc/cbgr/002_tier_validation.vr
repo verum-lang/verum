@@ -3,7 +3,6 @@
 // @level: L0
 // @tags: vbc, cbgr, tier0, tier1, tier2, chk_ref, validation
 // @timeout: 5000
-// @expect: pass
 //
 // Test: CHK_REF, REF_CHECKED, REF_UNSAFE
 // Verifies three-tier CBGR reference validation system

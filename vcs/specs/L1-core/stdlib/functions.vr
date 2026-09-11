@@ -3,7 +3,6 @@
 // @level: L1
 // @tags: functions, closures, higher-order
 // @timeout: 10000
-// @expect: pass
 
 /// Function definitions, calls, higher-order functions.
 

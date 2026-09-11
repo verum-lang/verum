@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: async, channel, recv_many, batch
 // @timeout: 10000
-// @expect: pass
 
 // recv_many — batch-drain up to N items in one lock acquisition.
 

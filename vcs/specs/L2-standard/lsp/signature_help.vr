@@ -2,7 +2,7 @@
 // @tier: 0
 // @level: L2
 // @tags: lsp, signature-help, function-hints, parameter-info
-// @expect: pass
+// @note: an earlier `@expect: pass` marker said this should pass, and `@test: parse-fail` says the opposite; the runner honours @test — T1422
 // @description: Tests signature help/parameter hints for function calls.
 //              Verifies correct signature display, active parameter, and overloads.
 

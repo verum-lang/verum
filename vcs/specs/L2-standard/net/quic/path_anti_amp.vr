@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: quic, path, v7, anti_amplification, rfc9000_21_1_1_3
 // @timeout: 5000
-// @expect: pass
 
 // V7 theorem: sent_bytes <= 3 * received_bytes while path is Unvalidated.
 

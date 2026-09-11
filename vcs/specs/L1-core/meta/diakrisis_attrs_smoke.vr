@@ -3,7 +3,6 @@
 // @level: L1
 // @tags: meta, diakrisis_attrs, vva-part-b, v8.1, meta1
 // @timeout: 5000
-// @expect: pass
 //
 // VVA Part B §§4/5/9/10 — Smoke test for the meta-system
 // reorganisation of advisory attributes (META1 follow-up to V21–V24).

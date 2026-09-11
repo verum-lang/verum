@@ -3,7 +3,6 @@
 // @level: L0
 // @tags: vbc, arithmetic, unary, neg, not
 // @timeout: 5000
-// @expect: pass
 //
 // Test: NEG_I, NEG_F, NOT
 // Verifies unary arithmetic operations

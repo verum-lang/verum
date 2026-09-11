@@ -2,7 +2,7 @@
 // @tier: 0
 // @level: L2
 // @tags: lsp, document-symbols, outline, navigation
-// @expect: pass
+// @note: an earlier `@expect: pass` marker said this should pass, and `@test: parse-fail` says the opposite; the runner honours @test — T1422
 // @description: Tests document symbol extraction for outline view and navigation.
 //              Verifies correct symbol hierarchy, kinds, and ranges.
 

@@ -3,7 +3,6 @@
 // @level: L3
 // @tags: proofs, calc, chain, calculational
 // @description: Tests calculational proof chains (calc blocks)
-// @expect: pass
 
 // =============================================================================
 // CALCULATIONAL PROOF CHAINS

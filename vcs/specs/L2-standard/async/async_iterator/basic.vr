@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: async, iterator, for-await, stream
 // @timeout: 10000
-// @expect: pass
 
 // AsyncIterator protocol — core shape + blanket impl over Stream.
 

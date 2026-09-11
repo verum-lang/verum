@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: x509, facade, pkix, rfc5280, typecheck
 // @timeout: 10000
-// @expect: pass
 //
 // Typecheck-level verification that the X.509 facade re-exports
 // compose together — every module (oid / time / algorithm / name /

@@ -3,7 +3,6 @@
 // @level: L0
 // @tags: vbc, cbgr, clone, drop, drop_ref, memory
 // @timeout: 5000
-// @expect: pass
 //
 // Test: CLONE, DROP_REF operations
 // Verifies cloning and dropping semantics

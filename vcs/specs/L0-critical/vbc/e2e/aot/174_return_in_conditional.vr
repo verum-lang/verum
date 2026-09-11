@@ -2,7 +2,6 @@
 // @tier: 0
 // @level: L0
 // @tags: aot, codegen, return, conditional, regression
-// @expect: pass
 // Bug 3 reproducer: return inside if/else should not produce invalid LLVM IR.
 
 fn abs_val(x: Int) -> Int {

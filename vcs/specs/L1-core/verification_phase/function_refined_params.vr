@@ -2,7 +2,6 @@
 // @tier: 0
 // @level: L1
 // @tags: verify, function, refinement, inline, self, ensures
-// @expect: pass
 //
 // User `fn` declarations with inline refinement predicates on
 // parameters (`Int { self > 0 }`) must flow those predicates as

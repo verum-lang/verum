@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: async, cancellation, register, callback, RAII
 // @timeout: 10000
-// @expect: pass
 
 // Callback registration — sync-callback bridge to non-async cleanup.
 // Dropping a Registration deregisters the callback before cancel fires.

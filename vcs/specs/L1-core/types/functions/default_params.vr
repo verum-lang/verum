@@ -3,7 +3,6 @@
 // @level: L1
 // @tags: default, parameters, functions, arguments
 // @timeout: 5000
-// @expect: pass
 
 // Default Parameter Values Test Suite
 // Tests the complete implementation of default parameter values for functions.

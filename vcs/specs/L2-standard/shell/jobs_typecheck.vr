@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: shell, jobs, parallel, structured-concurrency, typecheck
 // @timeout: 30000
-// @expect: pass
 
 mount core.shell.jobs.{
     JobHandle, background, background_with_grace,

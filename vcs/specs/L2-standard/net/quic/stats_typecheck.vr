@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: quic, observability, stats, typecheck
 // @timeout: 10000
-// @expect: pass
 
 mount core.net.quic.{QuicStats, EndpointStats};
 

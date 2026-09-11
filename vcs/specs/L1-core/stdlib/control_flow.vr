@@ -3,7 +3,6 @@
 // @level: L1
 // @tags: control-flow, if, while, for, match
 // @timeout: 10000
-// @expect: pass
 
 /// Control flow mechanisms — if/else, while, match.
 

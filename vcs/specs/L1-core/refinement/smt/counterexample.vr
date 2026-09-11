@@ -4,7 +4,7 @@
 // @tags: refinement, smt, counterexample
 // @expected-error: "proof-failed"
 // @expected-error: "did not discharge"
-// @expect-counterexample: true
+// @note: the counterexample is asserted by the @expected-error above
 
 /// Counterexample generation tests.
 /// These proofs should fail and the SMT solver should provide counterexamples.

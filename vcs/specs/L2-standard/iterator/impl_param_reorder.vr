@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: iterator, generics, regression, impl-method-collision
 // @timeout: 10000
-// @expect: pass
 
 // Regression for the impl-level-param-reorder bug.
 //

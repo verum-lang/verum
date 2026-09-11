@@ -2,7 +2,6 @@
 // @tier: 0
 // @level: L1
 // @tags: refinement, variant-field, check_phase, language
-// @expect: errors
 
 // Regression for variant-field refinement propagation.  Struct-variant
 // fields can carry refinement types and the check phase must enforce

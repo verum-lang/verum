@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: quic, rfc9438, cubic, cc, typecheck
 // @timeout: 10000
-// @expect: pass
 
 mount core.net.quic.recovery.cc.cubic.{
     Cubic, CUBIC_C, CUBIC_BETA, CUBIC_FAST_CONV_FACTOR,

@@ -2,7 +2,6 @@
 // @tier: 0
 // @level: L0
 // @tags: condvar, sync, producer_consumer
-// @expect: pass
 
 // Condvar-based producer/consumer with bounded buffer.
 

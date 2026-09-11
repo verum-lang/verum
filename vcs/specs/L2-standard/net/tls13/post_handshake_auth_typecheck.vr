@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: tls13, rfc8446, post-handshake-auth, extension, typecheck
 // @timeout: 10000
-// @expect: pass
 //
 // RFC 8446 §4.6.2 — Post-Handshake Authentication.
 //

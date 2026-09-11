@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: quic, transport_params, v9, smt, theorem, rfc9000_18_2
 // @timeout: 15000
-// @expect: pass
 
 // V9 theorem (tls-quic.md §9): RFC 9000 §18.2 transport-parameter
 // bounds. The peer-advertised values MUST respect:

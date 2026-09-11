@@ -3,7 +3,6 @@
 // @level: L0
 // @tags: capability, types, comprehensive, attenuation
 // @timeout: 10000
-// @expect: pass
 //
 // Comprehensive Capability Attenuation Tests
 // ==========================================

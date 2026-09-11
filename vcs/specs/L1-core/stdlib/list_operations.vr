@@ -3,7 +3,6 @@
 // @level: L1
 // @tags: list, collections, push, indexing, length
 // @timeout: 10000
-// @expect: pass
 
 mount core.prelude.*;
 

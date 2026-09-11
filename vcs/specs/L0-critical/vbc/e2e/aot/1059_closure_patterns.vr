@@ -2,7 +2,6 @@
 // @tier: 0
 // @level: L0
 // @tags: closures, hof, functional, patterns
-// @expect: pass
 
 // Real-world closure patterns: map, filter, reduce, compose.
 

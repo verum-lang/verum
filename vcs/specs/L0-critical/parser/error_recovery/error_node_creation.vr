@@ -2,7 +2,6 @@
 // @tier: 0
 // @level: L0
 // @tags: parser, error-recovery, error-nodes, ast
-// @expect: errors
 // @description: Tests that ERROR nodes are correctly created in the AST for invalid syntax.
 //              Verifies ERROR nodes wrap unparseable tokens while preserving surrounding valid AST.
 

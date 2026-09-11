@@ -3,7 +3,6 @@
 // @level: L1
 // @tags: error-handling, maybe, result
 // @timeout: 10000
-// @expect: pass
 
 fn safe_divide(a: Int, b: Int) -> Maybe<Int> {
     if b == 0 {

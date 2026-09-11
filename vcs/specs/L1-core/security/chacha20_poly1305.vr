@@ -3,7 +3,6 @@
 // @level: L1
 // @tags: security, crypto, chacha20, poly1305, aead, rfc8439, tls13
 // @timeout: 10000
-// @expect: pass
 
 // RFC 8439 ChaCha20 / Poly1305 / ChaCha20-Poly1305 AEAD surface.
 

@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: action, gauge, vva-section-11, oc-dc
 // @timeout: 10000
-// @expect: pass
 //
 // VVA §11.4 (#243) — gauge invariants + streaming CoherenceMonitor.
 //

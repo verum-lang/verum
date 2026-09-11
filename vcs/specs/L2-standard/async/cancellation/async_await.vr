@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: async, cancellation, cancelled, future, await
 // @timeout: 10000
-// @expect: pass
 
 // Async `cancelled()` future — the core composability primitive for
 // structured concurrency (select { work vs cancel }). Typecheck-level test.

@@ -3,7 +3,6 @@
 // @level: L1
 // @tags: security, crypto, p256, ecdsa, ecdh, nist, fips186
 // @timeout: 10000
-// @expect: pass
 
 // NIST P-256 (secp256r1) ECDSA + ECDHE surface verification.
 

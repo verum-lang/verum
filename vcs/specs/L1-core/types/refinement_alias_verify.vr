@@ -3,7 +3,6 @@
 // @level: L1
 // @tags: refinement, type_alias, language, verify
 // @timeout: 10000
-// @expect: pass
 
 // Regression for the alias-wrapped refinement gap flagged from pager.vr
 // comment + tls-quic.md §4.6.  Before the fix, `verify` returned

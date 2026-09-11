@@ -2,7 +2,6 @@
 // @tier: 0
 // @level: L0
 // @tags: module, multi_file, types, mount
-// @expect: pass
 
 // Multi-file project: import types and functions from helper module.
 

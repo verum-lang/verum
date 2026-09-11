@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: quic, newreno, v5, smt, theorem
 // @timeout: 15000
-// @expect: pass
 
 // V5 theorem (tls-quic.md §9): NewReno congestion window never drops
 // below 2 × MAX_DATAGRAM_SIZE (MIN_WINDOW_BYTES).

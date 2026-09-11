@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: quic, pn_space, v4, monotonicity
 // @timeout: 5000
-// @expect: pass
 
 // V4 theorem: `next_pn > largest_acked_sent` after every emit.
 

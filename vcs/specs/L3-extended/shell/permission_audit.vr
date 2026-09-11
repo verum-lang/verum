@@ -3,7 +3,6 @@
 // @level: L3
 // @tags: shell, permission, capability-audit, runtime-check
 // @timeout: 30000
-// @expect: pass
 
 // Runtime permission gate: PermissionSet.check_run rejects programs not
 // in the allow-list.  A static `@permission(run: [...])` audit pass that

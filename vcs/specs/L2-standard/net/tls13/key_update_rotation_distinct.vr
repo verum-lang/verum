@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: tls13, keyschedule, v2, rfc8446_4_6_3, key_update
 // @timeout: 5000
-// @expect: pass
 
 // V2 theorem (spec §9): each KeyUpdate rotation produces a STRICTLY NEW
 // traffic secret. Successive applications of

@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: shell, permissions, security, frontmatter, typecheck
 // @timeout: 30000
-// @expect: pass
 
 mount core.shell.context.{PermissionSet};
 mount core.shell.permissions.{parse_frontmatter};

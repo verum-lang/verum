@@ -7,7 +7,6 @@
 // @level: L2
 // @tags: tls13, session, typed-state, phase-2
 // @timeout: 5000
-// @expect: pass
 
 // Smoke-checks the new `core.net.tls13.session.*` typed session layer.
 // We only prove the phases compose and the phase-gated methods exist —

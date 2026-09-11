@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: async, structured-concurrency, nursery
 // @timeout: 10000
-// @expect: pass
 // @description: Nursery pattern — uses stdlib core.async.nursery types directly
 
 // Reshaped 2026-04-20. Previous version reimplemented nursery from scratch

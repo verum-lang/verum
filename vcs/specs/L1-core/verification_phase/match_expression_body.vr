@@ -2,7 +2,6 @@
 // @tier: 0
 // @level: L1
 // @tags: verify, match, expression, ite, discriminator
-// @expect: pass
 //
 // `match` expressions in postcondition / body positions must
 // translate to an `ite`-chain so the SMT can reason about the

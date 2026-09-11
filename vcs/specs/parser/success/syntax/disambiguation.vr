@@ -2,7 +2,6 @@
 // @tier: 0
 // @level: L0
 // @tags: syntax, disambiguation, ambiguity, self-hosting-critical
-// @expect: pass
 // Test: Ambiguous syntax disambiguation for self-hosting verification
 
 // =============================================================================

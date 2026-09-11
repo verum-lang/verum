@@ -2,7 +2,6 @@
 // @tier: 0
 // @level: L0
 // @tags: contracts, requires, ensures, verification
-// @expect: pass
 
 // Test @requires/@ensures contract annotations.
 

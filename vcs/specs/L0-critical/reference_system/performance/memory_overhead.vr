@@ -1,5 +1,5 @@
 // @test: compile-only
-// @expected-memory: < 5%
+// @note: the target is under 5% memory overhead; no directive measures it
 // @tier: 0
 // @level: L0
 // @tags: reference_system, cbgr, performance, memory, benchmark

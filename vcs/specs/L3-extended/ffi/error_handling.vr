@@ -2,7 +2,7 @@
 // @tier: 3
 // @level: L3
 // @tags: ffi, error-handling
-// @expected-output: All FFI error handling tests passed
+// @expected-stdout: All FFI error handling tests passed
 
 /// FFI error handling patterns
 /// Demonstrates safe error handling across FFI boundary

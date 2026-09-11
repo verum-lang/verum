@@ -2,7 +2,6 @@
 // @tier: 0
 // @level: L0
 // @tags: aot, codegen, list, memory, regression
-// @expect: pass
 // Bug 4 reproducer: List backing arrays should be zero-initialized.
 // This test creates lists of various sizes (including ones that trigger growth)
 // and verifies that list operations work correctly.

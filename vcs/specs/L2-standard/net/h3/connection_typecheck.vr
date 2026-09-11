@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: h3, rfc9114, connection, driver, typecheck
 // @timeout: 10000
-// @expect: pass
 
 // Explicit submodule mounts — `mount core.net.h3.*;` here would
 // collide with the subsequent nested mounts (known latent bug in

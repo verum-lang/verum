@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: math, complex, trig, hyperbolic, csin, ccos, csinh, ccosh
 // @timeout: 10000
-// @expect: pass
 //
 // V8 (#250) — Complex<Float> trig + hyperbolic.
 //

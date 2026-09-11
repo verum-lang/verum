@@ -3,7 +3,6 @@
 // @level: L0
 // @tags: vbc, data-movement, load, constant, pool
 // @timeout: 5000
-// @expect: pass
 //
 // Test: LOAD_K opcode - loading from constant pool
 // Verifies constant pool indexing and value retrieval

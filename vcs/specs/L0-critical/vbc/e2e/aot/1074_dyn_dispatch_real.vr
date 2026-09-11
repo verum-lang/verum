@@ -2,7 +2,6 @@
 // @tier: 0
 // @level: L0
 // @tags: protocol, dyn, dispatch, vtable
-// @expect: pass
 
 // Test real dynamic dispatch with &dyn Protocol.
 

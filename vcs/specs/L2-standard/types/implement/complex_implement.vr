@@ -2,7 +2,6 @@
 // @tier: 0
 // @level: L2
 // @tags: implement, generic, specialization
-// @expect: pass
 // @description: Complex implement block scenarios
 // @spec: 03-type-system.md Section 14 - Implement block support
 

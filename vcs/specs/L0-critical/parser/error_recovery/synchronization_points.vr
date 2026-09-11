@@ -2,7 +2,6 @@
 // @tier: 0
 // @level: L0
 // @tags: parser, error-recovery, synchronization, item-boundary
-// @expect: errors
 // @description: Tests parser synchronization at item boundaries (fn, type, impl, etc.).
 //              Parser should skip invalid tokens until reaching a valid sync point.
 

@@ -2,7 +2,6 @@
 // @tier: 0
 // @level: L1
 // @tags: proof, structured, have, show, implicit-closer
-// @expect: pass
 //
 // Structured proof bodies (`proof { have …; show …; … }`) must:
 //   (1) verify each `have`/`show` step against its justification, and

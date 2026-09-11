@@ -3,7 +3,6 @@
 // @level: L0
 // @tags: vbc, context, provide, using, dependency-injection
 // @timeout: 5000
-// @expect: pass
 //
 // Test: CTX_GET, CTX_PROVIDE, CTX_END, PUSH_CONTEXT, POP_CONTEXT
 // Verifies context-based dependency injection system

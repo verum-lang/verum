@@ -3,7 +3,6 @@
 // @level: L0
 // @tags: vbc, stress, computation, arithmetic, performance
 // @timeout: 30000
-// @expect: pass
 //
 // Test: Computational stress testing for VBC interpreter
 // Verifies arithmetic correctness under heavy load, floating point stability

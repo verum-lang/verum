@@ -2,7 +2,6 @@
 // @tier: 0
 // @level: L0
 // @tags: gpu, metal, compute, benchmark, vector_add
-// @expect: pass
 
 // Metal GPU compute: vector addition benchmark on M3 Max.
 // Tests real GPU shader compilation, buffer allocation, and dispatch.

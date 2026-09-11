@@ -3,7 +3,6 @@
 // @level: L1
 // @tags: set, higher_order, iterator, closure
 // @timeout: 30000
-// @expect: pass
 //
 // The budget is 30s for a 58-line program over a four-element set, and
 // that is not a typo (T1012).  Measured 2026-08-31: this file takes 11.6s

@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: quic, rfc9001, key-update, phase, typecheck
 // @timeout: 10000
-// @expect: pass
 
 mount core.net.quic.{
     KeyUpdateSm, KeyUpdateError, KeyPhaseUsage, InboundPhaseAction,

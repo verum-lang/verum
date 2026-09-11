@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: shell, verify, refinement, typecheck
 // @timeout: 30000
-// @expect: pass
 
 mount core.shell.verify.{
     NonEmpty, BoundedText, EnvName, EnvValue, SemVerRef,

@@ -3,7 +3,6 @@
 // @level: L0
 // @tags: parser, declarations, context-negation, context-groups, context-system
 // @timeout: 10000
-// @expect: pass
 //
 // Context Negation, Groups, and Transform Tests
 //

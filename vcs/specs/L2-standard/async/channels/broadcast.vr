@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: async, channels, broadcast
 // @timeout: 10000
-// @expect: pass
 // @description: Broadcast channel pub/sub shape — uses stdlib core.async.broadcast
 
 // Reshaped 2026-04-20. Previous version declared its own BroadcastSender/

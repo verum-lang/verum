@@ -3,7 +3,6 @@
 // @level: L0
 // @tags: vbc, pattern-matching, is_var, as_var, make_variant, get_tag
 // @timeout: 5000
-// @expect: pass
 //
 // Test: IS_VAR, AS_VAR, MAKE_VARIANT, GET_VARIANT_DATA, GET_TAG
 // Verifies variant type handling and pattern matching

@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: async, runtime, worker-pool, phase-4, chase-lev, lock-free
 // @timeout: 10000
-// @expect: pass
 //
 // Phase 4 (#280) — Chase-Lev lock-free deque surface contract pin.
 // Type-checks the public ChaseLevDeque API + verifies the

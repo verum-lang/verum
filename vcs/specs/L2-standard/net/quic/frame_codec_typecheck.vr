@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: quic, rfc9000, frame, codec, typecheck
 // @timeout: 10000
-// @expect: pass
 //
 // Typecheck-level verification that every Frame variant + the
 // packet-header parsers + transport_params serialise/deserialise via

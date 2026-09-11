@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: encoding, jcs, rfc8785, canonical-json, typecheck
 // @timeout: 10000
-// @expect: pass
 
 mount core.encoding.jcs.{
     JcsError,

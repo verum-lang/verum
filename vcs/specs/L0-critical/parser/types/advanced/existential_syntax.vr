@@ -2,7 +2,6 @@
 // @tier: 0
 // @level: L0
 // @tags: parser, existential, syntax, advanced-type-syntax
-// @expect: pass
 // @description: Parser tests for existential type syntax
 // @spec: 03-type-system.md Section 13 grammar extensions
 

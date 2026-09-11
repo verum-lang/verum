@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: audit, regression-pin, foundation-profiles, framework-citation, task-163
 // @timeout: 10000
-// @expect: pass
 //
 // VCS pin for `verum audit --foundation-profiles` (task #163).
 //

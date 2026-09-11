@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: async, runtime, worker-pool, phase-1b
 // @timeout: 10000
-// @expect: pass
 //
 // Phase 1B (#325) — surface contract pin. Type-checks that the
 // public WorkerPool / AsyncRuntime methods Phase 1B introduces

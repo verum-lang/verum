@@ -2,7 +2,6 @@
 // @tier: 0
 // @level: L0
 // @tags: select, timeout, channels
-// @expect: pass
 
 // Select on channels with timeout simulation.
 

@@ -3,7 +3,6 @@
 // @level: L0
 // @tags: vbc, arithmetic, bitwise, band, bor, bxor, bnot, shl, shr
 // @timeout: 5000
-// @expect: pass
 //
 // Test: BAND, BOR, BXOR, BNOT, SHL, SHR
 // Verifies bitwise operations on integers

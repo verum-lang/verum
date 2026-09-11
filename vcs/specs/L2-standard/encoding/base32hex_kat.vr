@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: encoding, base32, base32hex, rfc-4648
 // @timeout: 10000
-// @expect: pass
 //
 // V8 (#252) — RFC 4648 §10 known-answer vectors for the
 // Extended Hex (base32hex) alphabet.

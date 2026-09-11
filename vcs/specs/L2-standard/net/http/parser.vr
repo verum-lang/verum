@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: net, http, parser, rfc7230, zero-copy, simd
 // @timeout: 10000
-// @expect: pass
 
 // HTTP/1.1 wire-parser shape + API surface.
 

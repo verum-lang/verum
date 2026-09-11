@@ -2,7 +2,6 @@
 // @tier: 0
 // @level: L0
 // @tags: map, iteration, keys, values
-// @expect: pass
 
 // Map iteration: insert, get, len, keys, values.
 

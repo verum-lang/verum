@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: base, string, distance, levenshtein, jaro, typecheck
 // @timeout: 10000
-// @expect: pass
 
 mount core.base.string_distance.{
     levenshtein, levenshtein_bounded,

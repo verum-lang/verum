@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: net, weft, refinement, routes, predicate, phase5
 // @timeout: 10000
-// @expect: pass
 
 // §5.9 / §8.1 — PathRefinement + refined_path_int / refined_path_text.
 // Runtime-checked predicates; compile-time route-meta-fn lives in the

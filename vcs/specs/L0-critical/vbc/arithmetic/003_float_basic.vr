@@ -3,7 +3,6 @@
 // @level: L0
 // @tags: vbc, arithmetic, float, basic, ieee754
 // @timeout: 5000
-// @expect: pass
 //
 // Test: Basic floating-point arithmetic
 // Verifies IEEE 754 compliant floating-point arithmetic

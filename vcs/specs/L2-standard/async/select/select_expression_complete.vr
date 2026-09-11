@@ -2,7 +2,6 @@
 // @tier: 0
 // @level: L2
 // @tags: async, select, concurrency
-// @expect: pass
 // @timeout: 30000
 
 /// Comprehensive test for select expressions

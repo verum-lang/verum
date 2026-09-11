@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: collections, union-find, dsu, typecheck
 // @timeout: 10000
-// @expect: pass
 
 mount core.collections.union_find.{UnionFindInt, UnionFind};
 

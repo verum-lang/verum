@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: async, cancellation, combine, any-of
 // @timeout: 10000
-// @expect: pass
 
 // Combine — produces a token that fires when any of the input tokens fires.
 // Enables patterns like "cancel when either shutdown-signal OR request-timeout".

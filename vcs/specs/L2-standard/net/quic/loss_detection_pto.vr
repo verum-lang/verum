@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: quic, loss_detection, pto, rfc9002_6_2
 // @timeout: 5000
-// @expect: pass
 
 // RFC 9002 §6.2 PTO (Probe Timeout) behaviour.
 //

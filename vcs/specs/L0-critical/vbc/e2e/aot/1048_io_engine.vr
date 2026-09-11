@@ -2,7 +2,6 @@
 // @tier: 0
 // @level: L0
 // @tags: io_engine, async_io, kqueue, epoll
-// @expect: pass
 
 // IO Engine: create, poll, destroy lifecycle test.
 

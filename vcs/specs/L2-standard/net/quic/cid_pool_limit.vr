@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: quic, cid_pool, v6, limit
 // @timeout: 5000
-// @expect: pass
 
 // V6 theorem: active_count() <= active_connection_id_limit.
 

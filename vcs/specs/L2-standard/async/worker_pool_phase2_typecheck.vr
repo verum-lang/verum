@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: async, runtime, worker-pool, phase-2, work-stealing
 // @timeout: 10000
-// @expect: pass
 //
 // Phase 2 (#278) — work-stealing surface contract pin. Type-checks
 // the public WorkerSlot / WorkerPool / current_worker_id surface

@@ -3,7 +3,6 @@
 // @level: L0
 // @tags: vbc, pattern-matching, complex, guards, and-patterns, or-patterns, active-patterns
 // @timeout: 5000
-// @expect: pass
 // @expected-exit: 0
 //
 // Test: Complex pattern combinations at VBC interpreter level

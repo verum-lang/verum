@@ -210,6 +210,36 @@ is that it emits three and not more. What the validator refuses is the
 combination that cannot hold — more DISTINCT codes asserted than the count
 allows.
 
+**Every `@name:` in a header is known, or the spec fails.** A name the runner
+does not read asserts nothing, and saying so only under `--verbose` is how
+`@expect: pass` came to appear 583 times without once being read — beside
+thirteen one-character misspellings of directives that do exist
+(`@expected-exit-code`, `@expected-output`, `@expect-error`). Measured
+2026-09-11: 1028 header directives in 1008 files used a name the runner does
+not know.
+
+The 37 names the runner READS, from `TestDirectives::parse`:
+
+`@contract-tests`, `@deprecated`, `@description`, `@expected-error`, `@expected-error-count`
+`@expected-exit`, `@expected-panic`, `@expected-performance`, `@expected-stderr`, `@expected-stderr-begin`
+`@expected-stderr-end`, `@expected-stdout`, `@expected-stdout-begin`, `@expected-stdout-end`, `@expected-stdout-file`
+`@expected-warning`, `@expected-warning-count`, `@flaky`, `@fuzz`, `@hardware`
+`@inject-clock`, `@isolation`, `@level`, `@mock`, `@project`
+`@requires`, `@setup`, `@skip`, `@slow`, `@snapshot`
+`@solver`, `@solver-version`, `@tags`, `@teardown`, `@test`
+`@tier`, `@timeout`
+
+and the 13 it accepts as DOCUMENTATION ONLY — known by being
+listed, which is what lets the rule be strict without deleting a reader's
+metadata:
+
+`@active`, `@author`, `@baseline-comparison`, `@category`, `@contexts`
+`@note`, `@properties`, `@reference`, `@see`, `@skip-disabled`
+`@spec`, `@tags-extra`, `@was-skip`
+
+Both lists are derived from `vcs/runner/vtest/src/directive.rs`; a name outside
+them is a hard failure naming its line.
+
 **Run with Expected Output**:
 ```verum
 // @test: run

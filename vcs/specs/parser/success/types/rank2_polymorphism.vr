@@ -2,7 +2,6 @@
 // @tier: 0
 // @level: L1
 // @tags: types, rank2, polymorphism, higher-order, self-hosting-critical
-// @expect: pass
 // Test: Rank-2 polymorphic function types for self-hosting verification
 
 // =============================================================================

@@ -3,7 +3,6 @@
 // @level: L0
 // @tags: vbc, generics, call_g, instantiate, monomorphization
 // @timeout: 5000
-// @expect: pass
 //
 // Test: CALL_G, INSTANTIATE, SIZE_OF_G, ALIGN_OF_G
 // Verifies generic function instantiation and calls

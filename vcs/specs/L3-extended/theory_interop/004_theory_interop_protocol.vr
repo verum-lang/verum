@@ -2,7 +2,6 @@
 // @tier: 0
 // @level: L3
 // @tags: theory_interop, protocol, mcp, json-rpc
-// @expect: pass
 //
 // Test: theory-interop JSON-RPC protocol — all 6 methods.
 

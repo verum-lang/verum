@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: metrics, ewma, rate, load-average, typecheck
 // @timeout: 10000
-// @expect: pass
 
 mount core.metrics.ewma.{
     Ewma, TimeDecayingEwma, RateMeter,

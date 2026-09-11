@@ -3,7 +3,6 @@
 // @level: L1
 // @tags: structs, nested, fields, methods
 // @timeout: 10000
-// @expect: pass
 
 type Vec2 is { x: Float, y: Float };
 

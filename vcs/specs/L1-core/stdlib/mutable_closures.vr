@@ -3,7 +3,6 @@
 // @level: L1
 // @tags: closures, mutable-capture, counter
 // @timeout: 10000
-// @expect: pass
 
 fn make_counter(start: Int) -> fn() -> Int {
     let mut count = start;

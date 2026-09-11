@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: http, link-header, rfc8288, pagination, typecheck
 // @timeout: 10000
-// @expect: pass
 
 mount core.net.link_header.{
     LinkEntry, LinkHeaderError,

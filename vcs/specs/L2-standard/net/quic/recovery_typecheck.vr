@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: quic, rfc9002, recovery, loss-detection, cc, newreno, typecheck
 // @timeout: 10000
-// @expect: pass
 //
 // Typecheck-level validation of the QUIC recovery facade: RTT
 // estimator, PnSpace bookkeeping, NewReno congestion controller, and

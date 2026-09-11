@@ -3,7 +3,6 @@
 // @level: L1
 // @tags: owl2, owl2_fs, bridge, lurie_htt, theory_interop, vva, phase-3, c7b
 // @timeout: 5000
-// @expect: pass
 //
 // VVA §21.7 Phase 3 C7b — owl2_fs → lurie_htt canonical bridge smoke.
 //

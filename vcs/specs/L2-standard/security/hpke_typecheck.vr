@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: hpke, rfc9180, ech, typecheck
 // @timeout: 10000
-// @expect: pass
 
 mount core.security.hpke.{
     setup_base_s, setup_base_r,

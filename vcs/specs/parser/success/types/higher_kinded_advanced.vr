@@ -2,7 +2,6 @@
 // @tier: 0
 // @level: L1
 // @tags: types, higher-kinded, hkt, type-constructors, self-hosting-critical
-// @expect: pass
 // Test: Advanced higher-kinded type features for self-hosting verification
 
 // =============================================================================

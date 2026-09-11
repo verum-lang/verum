@@ -2,7 +2,6 @@
 // @tier: 0
 // @level: L0
 // @tags: iterator, lazy, map, filter, functional
-// @expect: pass
 
 // Lazy iterator chains: zero intermediate allocations.
 

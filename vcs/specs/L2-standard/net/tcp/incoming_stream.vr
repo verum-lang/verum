@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: net, tcp, listener, incoming, stream, for-await
 // @timeout: 10000
-// @expect: pass
 
 // AsyncIncoming — Stream<Item = Result<TcpStream, IoError>> from a listener.
 

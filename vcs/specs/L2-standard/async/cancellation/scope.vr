@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: async, cancellation, scope, RAII, structured
 // @timeout: 10000
-// @expect: pass
 
 // CancelScope — RAII wrapper that auto-cancels its token when the scope
 // drops, unless dismiss() is called first. Trio-inspired.

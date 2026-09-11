@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: math, integers, number-theory, euler-totient, divisors, prev-prime
 // @timeout: 10000
-// @expect: pass
 //
 // V8 (#251) — Euler totient + prev_prime + divisors / sigma / tau.
 //

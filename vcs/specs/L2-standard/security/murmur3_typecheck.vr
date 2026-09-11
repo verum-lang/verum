@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: security, hash, murmur3, non-crypto, typecheck
 // @timeout: 10000
-// @expect: pass
 
 mount core.hash.fast.murmur3.{
     Murmur3Hash128, murmur3_32, murmur3_128,

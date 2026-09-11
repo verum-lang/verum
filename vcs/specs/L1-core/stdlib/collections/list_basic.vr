@@ -3,7 +3,6 @@
 // @level: L1
 // @tags: stdlib, collections, list, basic
 // @timeout: 10000
-// @expect: pass
 
 /// Basic List<T> operations — exercises the core stdlib collection API.
 

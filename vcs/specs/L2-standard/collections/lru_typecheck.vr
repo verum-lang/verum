@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: collections, lru, cache, typecheck
 // @timeout: 10000
-// @expect: pass
 
 mount core.collections.lru.{LruCache, LruStats};
 

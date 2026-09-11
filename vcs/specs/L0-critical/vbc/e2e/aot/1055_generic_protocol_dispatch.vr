@@ -2,7 +2,6 @@
 // @tier: 0
 // @level: L0
 // @tags: nested_struct, impl, fstring
-// @expect: pass
 
 // Test: nested struct field access in impl method f-strings.
 

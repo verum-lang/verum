@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: context, provide, using, dependency-injection
 // @timeout: 10000
-// @expect: pass
 
 type Logger is {
     prefix: Text,

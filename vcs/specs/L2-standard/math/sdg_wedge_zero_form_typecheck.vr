@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: math, sdg, differential-forms, wedge, vva-section-stdlib
 // @timeout: 10000
-// @expect: pass
 //
 // V8 (#246) — wedge_product 0-form ∧ k-form correctness.
 //

@@ -3,7 +3,6 @@
 // @level: L1
 // @tags: recursion, algorithms
 // @timeout: 15000
-// @expect: pass
 
 fn gcd(a: Int, b: Int) -> Int {
     if b == 0 { a } else { gcd(b, a % b) }

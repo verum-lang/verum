@@ -3,7 +3,6 @@
 // @level: L0
 // @tags: vbc, control-flow, jmp, jmp_if, jmp_not
 // @timeout: 5000
-// @expect: pass
 //
 // Test: JMP, JMP_IF, JMP_NOT
 // Verifies unconditional and conditional jump operations

@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: collections, sampler, walker, weighted, typecheck
 // @timeout: 10000
-// @expect: pass
 
 mount core.collections.alias_sampler.{AliasSampler, AliasError};
 

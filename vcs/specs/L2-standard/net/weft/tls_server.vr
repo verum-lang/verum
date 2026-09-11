@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: net, weft, tls, terminator, alpn, transport, connection-runner
 // @timeout: 10000
-// @expect: pass
 
 // §6.7 — Unified Server<H> handles both plain TCP (.serve) and TLS
 // (.serve_tls); TLS lifecycle is implemented as a ConnectionRunner

@@ -2,7 +2,6 @@
 // @tier: 0
 // @level: L1
 // @tags: verify, variant, adt, exhaustiveness, hypothesis
-// @expect: pass
 //
 // Parameters typed as a declared variant type `T is A | B | C`
 // must carry the implicit exhaustiveness hypothesis

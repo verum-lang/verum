@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: red-team, architecture, determinism, collections
 // @timeout: 10000
-// @expect: pass
 // @description: Round-1 red-team guardrail (#172 vector 7.2).
 //
 // Pins hash-table iteration determinism. Prior #143 fix landed

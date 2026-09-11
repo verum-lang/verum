@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: net, quic, rfc9000, rfc9001, transport
 // @timeout: 10000
-// @expect: pass
 
 // QUIC transport API surface.
 

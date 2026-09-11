@@ -1,6 +1,5 @@
 // @test: typecheck-pass
 // @level: L0
-// @expect: pass
 fn add(a: Int, b: Int) -> Int { a + b }
 mount core.prelude.*;
 

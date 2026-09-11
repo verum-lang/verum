@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: async, channel, send_async, backpressure, future
 // @timeout: 10000
-// @expect: pass
 
 // Async-backpressure send: SendFut<T> + Sender.send_async
 

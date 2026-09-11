@@ -3,7 +3,6 @@
 // @level: L0
 // @tags: vbc, control-flow, if-let, pattern-matching
 // @timeout: 5000
-// @expect: pass
 //
 // Test: IF-LET basic pattern matching
 // Tests single if-let patterns (chains with && let not supported)

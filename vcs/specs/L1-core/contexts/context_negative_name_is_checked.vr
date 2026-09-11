@@ -3,7 +3,6 @@
 // @level: L1
 // @tags: context, DI, negative-contexts, typo
 // @contexts: strict
-// @expect: error(E605)
 // @expected-error: E605 "undefined context"
 // @description: A forbidden context names a context; a misspelled one is an error, not a silent no-op.
 // @spec: 16-context-system.md Section 1.4 - Negative Contexts

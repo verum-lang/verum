@@ -2,7 +2,6 @@
 // @tier: 0
 // @level: L0
 // @tags: async, executor, cooperative, future, poll
-// @expect: pass
 
 // Test cooperative async executor behavior using explicit state machines.
 // Each "task" is a future that yields a fixed number of times before completing.

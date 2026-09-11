@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: signal, async, shutdown, graceful
 // @timeout: 10000
-// @expect: pass
 
 // Async signal subscription — ctrl_c / terminate / hup / shutdown_signals.
 

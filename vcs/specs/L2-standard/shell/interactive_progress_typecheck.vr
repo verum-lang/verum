@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: shell, interactive, progress, spinner, typecheck
 // @timeout: 30000
-// @expect: pass
 
 mount core.shell.interactive.{
     input, input_opt, input_default, input_required, input_validated,

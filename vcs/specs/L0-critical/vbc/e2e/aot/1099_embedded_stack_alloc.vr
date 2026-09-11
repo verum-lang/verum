@@ -2,7 +2,6 @@
 // @tier: 0
 // @level: L0
 // @tags: embedded, stack-allocator, no-heap
-// @expect: pass
 
 // Stack allocator for embedded/bare-metal targets.
 // Uses a fixed buffer — no heap allocation needed.

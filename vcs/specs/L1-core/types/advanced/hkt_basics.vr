@@ -2,7 +2,6 @@
 // @tier: 1
 // @level: L1
 // @tags: hkt, higher-kinded, types, advanced-type-syntax
-// @expect: pass
 // @description: Basic Higher-Kinded Type (HKT) syntax tests
 // @spec: 03-type-system.md Section 13. 3.1
 

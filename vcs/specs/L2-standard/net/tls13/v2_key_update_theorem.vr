@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: tls13, key_update, v2, smt, theorem, rfc8446_4_6_3
 // @timeout: 15000
-// @expect: pass
 
 // V2 theorem (tls-quic.md §9): KeyUpdate rotation correctness.
 //

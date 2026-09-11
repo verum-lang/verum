@@ -2,7 +2,6 @@
 // @tier: 0
 // @level: L1
 // @tags: verify, function, bool, ensures, propositional
-// @expect: pass
 //
 // User functions returning Bool with propositional ensures must verify
 // through the body→result binding. `translate_bool_binop` + Bool-Eq

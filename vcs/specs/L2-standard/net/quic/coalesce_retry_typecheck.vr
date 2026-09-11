@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: quic, coalesce, retry, rfc9000, typecheck
 // @timeout: 10000
-// @expect: pass
 
 mount core.net.quic.connection_sm.coalesce.{
     CoalescePlan, CoalescedPacket, CoalesceError,

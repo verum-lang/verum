@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: security, merkle, rfc6962, integrity, typecheck
 // @timeout: 10000
-// @expect: pass
 
 mount core.security.merkle.{
     MerkleTree, MerkleError, InclusionProof,

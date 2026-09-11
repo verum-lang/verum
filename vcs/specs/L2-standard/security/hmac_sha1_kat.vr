@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: security, hmac, sha1, rfc-2202, otp, totp
 // @timeout: 10000
-// @expect: pass
 //
 // V8 (#247) — HMAC-SHA-1 known-answer test vectors from RFC 2202.
 //

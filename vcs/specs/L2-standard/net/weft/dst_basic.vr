@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: net, weft, dst, tigerbeetle, simulation, phase6
 // @timeout: 10000
-// @expect: pass
 
 // §8.15 — Deterministic Simulation Testing primitives: seeded clock,
 // RNG, simulated network with chaos injection, task scheduler,

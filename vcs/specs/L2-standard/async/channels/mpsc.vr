@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: async, channels, mpsc
 // @timeout: 10000
-// @expect: pass
 // @description: MPSC channel — uses stdlib core.async.channel
 
 // Reshaped 2026-04-20 from a legacy `@test: run` with `runtime.create_channel`

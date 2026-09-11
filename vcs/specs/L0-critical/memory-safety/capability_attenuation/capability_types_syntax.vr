@@ -3,7 +3,6 @@
 // @level: L0
 // @tags: capability, types, syntax, parser
 // @timeout: 5000
-// @expect: pass
 //
 // Capability Type Syntax Tests
 // =============================

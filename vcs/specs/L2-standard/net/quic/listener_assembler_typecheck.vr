@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: quic, listener, stream-assembler, typecheck
 // @timeout: 10000
-// @expect: pass
 
 mount core.net.quic.transport.{
     ServerListener, AcceptedConnection, ListenerError,

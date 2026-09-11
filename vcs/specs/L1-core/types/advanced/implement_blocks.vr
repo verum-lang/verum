@@ -2,7 +2,6 @@
 // @tier: 1
 // @level: L1
 // @tags: implement, methods, protocols
-// @expect: pass
 // @description: Implement block support tests
 // @spec: 03-type-system.md Section 14
 

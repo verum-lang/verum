@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: red-team, overflow, hostile-input, semver, http
 // @timeout: 10000
-// @expect: pass
 // @description: Round-2 red-team guardrails (#173).
 //
 // Pins the 3-layer overflow defense across the hostile-input parsers

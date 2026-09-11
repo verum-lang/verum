@@ -3,7 +3,6 @@
 // @level: L0
 // @tags: vbc, tensor, linalg, decomposition, svd, eig, schur, lu, qr
 // @timeout: 5000
-// @expect: pass
 //
 // Test: TensorExtended sub-opcodes for linear algebra decompositions
 // Verifies SVD, Eig, Schur, LU, QR, and other matrix factorizations

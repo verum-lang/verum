@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: quic, simnet, dst, deterministic, testing
 // @timeout: 5000
-// @expect: pass
 
 // Deterministic-simulation test (spec tls-quic.md §4.10).  SimNetwork
 // uses an xorshift64 PRNG so the same `(seed, loss_rate, sequence of

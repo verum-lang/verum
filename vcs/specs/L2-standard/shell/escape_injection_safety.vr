@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: shell, escape, injection, security
 // @timeout: 30000
-// @expect: pass
 
 // The escape strategy is *unforgeable*: for any byte sequence, the produced
 // quoted token cannot break out of its quoting context.  We assert four

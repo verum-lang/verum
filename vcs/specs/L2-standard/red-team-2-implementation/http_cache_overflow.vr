@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: red-team, hostile-input, http, cache-control
 // @timeout: 10000
-// @expect: pass
 // @description: Round-2 red-team guardrail (#173 Section A — closed
 // soundness defect). Cache-Control directive integers came from
 // untrusted origin/intermediary and ran `v * 10 + d` over UInt64

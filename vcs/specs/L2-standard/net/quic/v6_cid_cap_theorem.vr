@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: quic, cid_pool, v6, smt, theorem, rfc9000_5_1
 // @timeout: 15000
-// @expect: pass
 
 // V6 theorem (tls-quic.md §9): active_count() ≤ active_connection_id_limit.
 //

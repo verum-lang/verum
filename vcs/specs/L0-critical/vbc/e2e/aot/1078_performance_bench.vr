@@ -2,7 +2,6 @@
 // @tier: 0
 // @level: L0
 // @tags: benchmark, performance, optimization
-// @expect: pass
 
 // Performance benchmarks — verify Verum generates high-performance code.
 // Targets: 0.85-0.95x native C performance.

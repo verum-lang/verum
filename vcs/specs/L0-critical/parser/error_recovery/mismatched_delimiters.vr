@@ -2,7 +2,6 @@
 // @tier: 0
 // @level: L0
 // @tags: parser, error-recovery, delimiters, mismatch
-// @expect: errors
 // @description: Tests error recovery for mismatched delimiters (e.g., opening with '(' but closing with ']').
 //              Parser should report the mismatch and recover.
 

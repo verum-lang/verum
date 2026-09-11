@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: shell, escape, posix, windows, typecheck
 // @timeout: 30000
-// @expect: pass
 
 // Verifies that Escaper / ShellEscape protocol typecheck across the
 // supported shell flavours and basic atoms (Text, Int, Bool, List, Maybe).

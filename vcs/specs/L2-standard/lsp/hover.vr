@@ -2,7 +2,7 @@
 // @tier: 0
 // @level: L2
 // @tags: lsp, hover, tooltips, documentation
-// @expect: pass
+// @note: an earlier `@expect: pass` marker said this should pass, and `@test: parse-fail` says the opposite; the runner honours @test — T1422
 // @description: Tests hover information/tooltips for various language constructs.
 //              Verifies correct type information, documentation, and signatures.
 

@@ -2,7 +2,6 @@
 // @tier: 0
 // @level: L1
 // @tags: fixed-size-array, annotation, silent-wrong-value
-// @expect: pass
 // @expected-stdout: 1
 // @description: A fixed-size array annotation on a `let` must not change the values bound.
 

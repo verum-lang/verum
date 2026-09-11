@@ -2,7 +2,7 @@
 // @tier: 3
 // @level: L3
 // @tags: ffi, string, conversion
-// @expected-output: All string conversion tests passed
+// @expected-stdout: All string conversion tests passed
 
 /// Text conversion between Verum and C
 /// Demonstrates safe string handling across FFI boundary

@@ -2,7 +2,7 @@
 // @tier: 1
 // @level: L1
 // @tags: error, hkt, arity, advanced-type-syntax
-// @expect: error(ArityMismatch)
+// @note: an earlier `@expect: error(ArityMismatch)` marker said this should fail, and `@test: unit` says the opposite; the runner honours @test — T1422
 // @description: Error test for HKT arity mismatch
 // @spec: 03-type-system.md Section 13. 3.1
 

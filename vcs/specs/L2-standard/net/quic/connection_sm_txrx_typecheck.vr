@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: quic, rfc9000, tx, rx, dispatch, typecheck
 // @timeout: 10000
-// @expect: pass
 
 mount core.net.quic.connection_sm.{QuicSpaceKeys};
 mount core.net.quic.connection_sm.aead.{seal, open, build_nonce, QuicAeadError};

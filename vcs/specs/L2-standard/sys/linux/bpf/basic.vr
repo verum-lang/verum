@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: sys, linux, bpf, ebpf, xdp, tc, cgroup
 // @timeout: 10000
-// @expect: pass
 
 // eBPF program-loading + map API surface.
 

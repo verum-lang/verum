@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: math, elementary, hyperbolic, sinh, cosh, tanh
 // @timeout: 10000
-// @expect: pass
 //
 // V8 (#249) — hyperbolic family (sinh / cosh / tanh + inverses).
 //

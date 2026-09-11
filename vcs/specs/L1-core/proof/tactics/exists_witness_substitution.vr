@@ -2,7 +2,6 @@
 // @tier: 0
 // @level: L1
 // @tags: proof, exists, witness, substitution, soundness
-// @expect: pass
 //
 // `proof { witness E; }` instantiates an existential goal `exists x: T. P(x)`
 // by substituting `E` for `x` in `P`. Before the fix, `try_exists` ignored

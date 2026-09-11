@@ -2,7 +2,7 @@
 // @tier: 0
 // @level: L0
 // @tags: modules, visibility, errors, negative
-// @expect-error: E202
+// @expected-error: E202
 // @description: Test that private items cannot be accessed from outside
 
 /// Visibility violation tests.

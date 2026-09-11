@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: x509, rfc6125, hostname, ip-literal, typecheck
 // @timeout: 10000
-// @expect: pass
 
 mount core.security.x509.{
     ServerIdentityError, verify_server_identity,

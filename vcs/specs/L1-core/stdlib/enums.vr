@@ -3,7 +3,6 @@
 // @level: L1
 // @tags: enums, sum-types, variants, match
 // @timeout: 10000
-// @expect: pass
 
 type Color is Red | Green | Blue;
 

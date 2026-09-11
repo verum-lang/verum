@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: tls13, rfc8446, zero-rtt, antireplay, bloom, typecheck
 // @timeout: 10000
-// @expect: pass
 
 mount core.net.tls13.handshake.{
     ReplayCache, ReplayConfig, ReplayStats,

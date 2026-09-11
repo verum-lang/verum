@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: x509, pkix, v10, smt, theorem, rfc5280_6
 // @timeout: 15000
-// @expect: pass
 
 // V10 theorem (tls-quic.md §9): X.509 chain validation invariants.
 //

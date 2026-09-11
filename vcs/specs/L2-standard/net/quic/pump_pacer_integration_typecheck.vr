@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: quic, pacer, pump, idle-timeout, rfc9000, rfc9002, typecheck
 // @timeout: 10000
-// @expect: pass
 
 mount core.net.quic.{Pacer, PacerDecision};
 mount core.net.quic.idle_timeout.{IdleTimeoutTracker, TickResult as IdleTickResult};

@@ -3,7 +3,6 @@
 // @level: L0
 // @tags: vbc, async, generators, yield, gen_create, gen_next
 // @timeout: 5000
-// @expect: pass
 //
 // Test: GEN_CREATE, GEN_NEXT, GEN_HAS_NEXT, YIELD
 // Verifies generator/coroutine functionality

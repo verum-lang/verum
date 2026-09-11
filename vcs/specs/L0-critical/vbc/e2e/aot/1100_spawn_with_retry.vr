@@ -2,7 +2,6 @@
 // @tier: 0
 // @level: L0
 // @tags: spawn, retry, parallel, circuit-breaker
-// @expect: pass
 
 // Test execute_with_retry and parallel_map logic
 

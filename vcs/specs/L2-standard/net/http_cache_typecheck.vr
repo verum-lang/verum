@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: http, cache, rfc9111, typecheck
 // @timeout: 10000
-// @expect: pass
 
 mount core.net.http_cache.{
     CacheControl, CacheDecision, AgeInputs, DecisionInputs,

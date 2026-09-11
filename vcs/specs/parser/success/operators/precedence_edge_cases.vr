@@ -2,7 +2,6 @@
 // @tier: 0
 // @level: L0
 // @tags: operators, precedence, associativity, self-hosting-critical
-// @expect: pass
 // Test: Operator precedence and associativity edge cases for self-hosting verification
 
 // =============================================================================

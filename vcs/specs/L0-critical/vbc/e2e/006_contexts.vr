@@ -3,7 +3,6 @@
 // @level: L0
 // @tags: vbc, e2e, contexts, provide, using, pipeline
 // @timeout: 5000
-// @expect: pass
 //
 // End-to-end pipeline test: .vr source -> parse -> typecheck -> VBC codegen -> interpreter
 // Verifies context-based dependency injection through the full pipeline

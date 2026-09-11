@@ -6,7 +6,6 @@
 // @level: L4
 // @tags: red-team, perf, generics, monomorphization, red-team-3.1.1
 // @timeout: 30000
-// @expect: pass
 // =============================================================================
 //
 // Pins the compile-time scaling for nested generic instantiation against

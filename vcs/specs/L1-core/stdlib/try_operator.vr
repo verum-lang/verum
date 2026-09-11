@@ -3,7 +3,6 @@
 // @level: L1
 // @tags: try-operator, result, error-propagation
 // @timeout: 10000
-// @expect: pass
 
 fn safe_div(a: Int, b: Int) -> Result<Int, Text> {
     if b == 0 { Err("div by zero") } else { Ok(a / b) }

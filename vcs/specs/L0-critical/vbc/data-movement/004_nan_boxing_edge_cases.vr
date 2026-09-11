@@ -3,7 +3,6 @@
 // @level: L0
 // @tags: vbc, data-movement, nan-boxing, edge-cases
 // @timeout: 5000
-// @expect: pass
 //
 // Test: NaN-boxing encoding edge cases
 // Verifies correct handling of values near tag boundaries

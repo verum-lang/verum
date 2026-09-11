@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: net, tcp, async, read, write
 // @timeout: 10000
-// @expect: pass
 
 // AsyncRead / AsyncWrite impl for TcpStream — enables async I/O with
 // waker-based readiness waits.

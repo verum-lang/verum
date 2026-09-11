@@ -3,7 +3,6 @@
 // @level: L0
 // @tags: vbc, integration, data-structures, algorithms
 // @timeout: 5000
-// @expect: pass
 // @skip-disabled: Lifetime generics in implement blocks now supported by parser
 //
 // Test: Integration of multiple VBC features through data structure implementations

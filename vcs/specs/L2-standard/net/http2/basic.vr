@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: net, http2, rfc7540, hpack, rfc7541, framing, stream-fsm
 // @timeout: 10000
-// @expect: pass
 
 // RFC 7540 HTTP/2 + RFC 7541 HPACK API surface.
 

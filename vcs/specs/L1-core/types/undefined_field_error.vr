@@ -2,7 +2,6 @@
 // @tier: 0
 // @level: L1
 // @tags: types, diagnostics, totality, T0563
-// @expect: error(E404)
 // @expected-error: E404 "not found on type 'Point'"
 //
 // T0563 / G1 (docs/architecture/diagnostic-totality.md §3): undefined

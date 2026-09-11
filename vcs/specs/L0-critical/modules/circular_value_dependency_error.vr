@@ -1,11 +1,21 @@
 // @test: compile-fail
-// E600 is raised AFTER the type-check phase, so `typecheck-fail` could not
+// E204 is raised AFTER the type-check phase, so `typecheck-fail` could not
 // observe it: the file type-checks clean and the runner reported "typecheck
 // unexpectedly succeeded" — indistinguishable from a missing compiler check.
 // @tier: 0
 // @level: L0
 // @tags: modules, circular, constants, error
-// @expect-error: E600
+// @expected-error: E204
+// The code moved on 2026-09-10 (d34547fcc): this diagnostic carries E204,
+// and its text no longer opens with a second, foreign `E600:` — which is the
+// context system's "context not provided".
+//
+// A `verum` older than that still prints the old pair, and `compile-fail` is
+// the one test type that always spawns an EXTERNAL verum rather than the
+// in-process compiler. Until T1429 the runner picked that binary off `PATH`,
+// so this spec was measuring whatever was installed — locally a build 17 days
+// older than the tree. It now uses the `verum` built beside the runner.
+
 
 /// Circular VALUE dependencies are FORBIDDEN.
 /// Constants cannot depend on each other circularly.

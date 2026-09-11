@@ -6,7 +6,6 @@
 // @level: L4
 // @tags: red-team, perf, cfg, attributes, red-team-3.5.2
 // @timeout: 30000
-// @expect: pass
 // =============================================================================
 //
 // Pins the @cfg-overlap walker scaling against deeply nested conditionals.

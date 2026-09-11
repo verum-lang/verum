@@ -3,7 +3,6 @@
 // @level: L0
 // @tags: vbc, stress, memory, allocation, gc
 // @timeout: 30000
-// @expect: pass
 //
 // Test: Memory stress testing for VBC interpreter
 // Verifies stability under heavy allocation, no memory leaks, CBGR correctness

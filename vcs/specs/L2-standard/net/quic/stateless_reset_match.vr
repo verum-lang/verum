@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: quic, stateless_reset, rfc9000_10_3, kat
 // @timeout: 5000
-// @expect: pass
 
 // RFC 9000 §10.3 — Stateless Reset token generation + detection.
 //

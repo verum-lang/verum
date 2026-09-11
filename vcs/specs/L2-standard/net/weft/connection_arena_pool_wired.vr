@@ -3,7 +3,6 @@
 // @tier: 0
 // @tags: net, weft, arena_pool, connection
 // @timeout: 10000
-// @expect: pass
 //
 // Pin (#336) — `ConnectionConfig.with_arena_pool(Shared<ArenaPool>)`
 // surface contract.  Mirrors #315's BufferPool wiring pattern: the

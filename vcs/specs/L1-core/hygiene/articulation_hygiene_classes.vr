@@ -3,7 +3,6 @@
 // @level: L1
 // @tags: hygiene, articulation, factorisation, vuva, phase-6, f3
 // @timeout: 5000
-// @expect: pass
 //
 // VVA §13 Phase 6 F3 — Articulation Hygiene factorisation classes.
 //

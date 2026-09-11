@@ -2,7 +2,6 @@
 // @tier: 0
 // @level: L0
 // @tags: theorem, verification, formal
-// @expect: pass
 
 // Test theorem declarations (verified by compiler, not executed).
 

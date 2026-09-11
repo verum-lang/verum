@@ -2,7 +2,6 @@
 // @tier: 0
 // @level: L1
 // @tags: verify, variant, adt, forall, exists, quantifier, exhaustiveness
-// @expect: pass
 //
 // The translator's quantifier path (`forall x: T. P(x)` / `exists
 // x: T. P(x)`) must inject the variant-exhaustiveness constraint

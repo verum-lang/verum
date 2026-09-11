@@ -2,7 +2,6 @@
 // @tier: 0
 // @level: L2
 // @tags: advanced-type-syntax, realworld, patterns, integration
-// @expect: pass
 // @description: Real-world use cases combining advanced type syntax features
 // @spec: 03-type-system.md Section 13
 

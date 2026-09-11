@@ -3,7 +3,6 @@
 // @level: L0
 // @tags: vbc, cbgr, references, ref, ref_mut, deref
 // @timeout: 5000
-// @expect: pass
 //
 // Test: REF, REF_MUT, DEREF, DEREF_MUT
 // Verifies reference creation and dereferencing

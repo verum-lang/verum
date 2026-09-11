@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: encoding, base58, base58check, bitcoin, typecheck
 // @timeout: 10000
-// @expect: pass
 
 mount core.encoding.base58.{
     Base58Error,

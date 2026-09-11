@@ -2,7 +2,6 @@
 // @tier: 0
 // @level: L0
 // @tags: parser, associated-types, bounds, syntax, advanced-type-syntax
-// @expect: pass
 // @description: Parser tests for associated type bounds syntax
 // @spec: 03-type-system.md Section 13 grammar extensions
 

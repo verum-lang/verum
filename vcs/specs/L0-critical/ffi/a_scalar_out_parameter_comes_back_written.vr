@@ -1,0 +1,83 @@
+// @test: run
+// @tier: 0,1
+// @level: L0
+// @tags: ffi, out-param, scalar, abi, differential, regression
+// @timeout: 60000
+// @expected-exit: 0
+//
+// A SCALAR OUT-PARAMETER COMES BACK WRITTEN (T1403).
+//
+// `time_t time(time_t *tloc)` writes the current time through its pointer
+// AND returns it, which makes one call carry its own control: the value
+// written and the value returned must agree. Nothing in the spec has to
+// know what the clock says.
+//
+// WHAT WAS WRONG AT TIER 1. The AOT emitter coerced a `&mut Int`
+// argument with `inttoptr` — correct when the register holds an ADDRESS,
+// catastrophic when it holds a VALUE, which is exactly what a `&mut`
+// scalar register holds. So the callee received the variable's CONTENTS
+// as its destination pointer:
+//
+//     let mut t = 0;       -> inttoptr 0     -> NULL, and `time(NULL)`
+//                             is legal C: it returns the time and writes
+//                             nothing. `t` stayed 0 and NOTHING SAID SO.
+//     let mut t = 123456;  -> inttoptr 123456 -> a write to address
+//                             0x1E240 — a SIGSEGV on a good day.
+//
+// Both shapes are below, because they fail differently: the first is
+// silent and the second is loud, and a fix that only stops the crash
+// would leave the silent one in place.
+//
+// TIER 0 ALREADY PASSED THIS. The interpreter honours the write-back
+// trailer that the VBC emitter appends after the argument registers;
+// Tier 1 had never decoded it. Running at BOTH tiers is the point: the
+// spec is a differential, and a regression that breaks Tier 0 instead
+// would otherwise look like success.
+
+mount core.io.println;
+
+@ffi("libSystem.B.dylib")
+extern {
+    // `time_t time(time_t *tloc)`.
+    //
+    // NOT `clock_gettime`: `syscall_registry.rs:859` redirects that name
+    // to `__verum_clock_gettime` at Tier 1 only, so a spec written on it
+    // compares libSystem against a Verum wrapper and calls the difference
+    // a tier divergence. `time` is in neither redirect table, so both
+    // tiers call the same symbol.
+    //
+    // The Verum name is prefixed so it cannot collide with anything
+    // mounted; `@ffi_name` gives dlsym the C symbol. Without it the run
+    // dies with `symbol 'spec_time' not found`, which is at least LOUD.
+    @ffi_name("time")
+    public fn spec_time(tloc: &mut Int) -> Int;
+}
+
+fn main() {
+    // CASE 1 — the silent one. A zero-seeded out-parameter.
+    let mut t = 0;
+    let rc = unsafe { spec_time(&mut t) };
+
+    // PRINT BEFORE ASSERTING: `assert_eq` says two values differ and
+    // never says what they were, and "the out-param stayed 0" and "the
+    // out-param got a different time" are different defects.
+    println(f"case1 rc={rc} out={t}");
+    assert(rc > 0);
+    assert(t == rc);
+
+    // CASE 2 — the loud one. A non-zero seed used to become the
+    // destination ADDRESS; with a real stack slot it is simply the
+    // value the callee overwrites.
+    let mut t2 = 123456;
+    let rc2 = unsafe { spec_time(&mut t2) };
+    println(f"case2 rc={rc2} out={t2}");
+    assert(rc2 > 0);
+    assert(t2 == rc2);
+
+    // And the seed must be GONE: an implementation that allocated a slot
+    // but never copied back would leave 123456 here and pass every check
+    // above except this one.
+    assert(t2 != 123456);
+
+    println("scalar out-parameter written back");
+}

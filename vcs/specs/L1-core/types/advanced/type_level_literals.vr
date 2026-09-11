@@ -2,7 +2,6 @@
 // @tier: 1
 // @level: L1
 // @tags: type-level, literals, meta, compile-time, advanced-type-syntax
-// @expect: pass
 // @description: Type-level literal and arithmetic tests
 // @spec: 03-type-system.md Section 13. 3.8
 

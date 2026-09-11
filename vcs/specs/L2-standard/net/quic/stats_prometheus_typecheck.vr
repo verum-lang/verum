@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: quic, observability, prometheus, typecheck
 // @timeout: 10000
-// @expect: pass
 
 mount core.net.quic.{QuicStats, EndpointStats};
 mount core.net.quic.stats_prometheus.{render_connection, render_endpoint};

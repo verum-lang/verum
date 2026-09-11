@@ -3,7 +3,6 @@
 // @level: L1
 // @tags: quantity, qtt, atkey, linearity, vuva, phase-3, c5
 // @timeout: 5000
-// @expect: pass
 //
 // VVA §7.6 Phase 3 C5 V1 — Atkey Quantitative Type Theory annotations.
 //

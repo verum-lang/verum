@@ -2,7 +2,6 @@
 // @tier: 0
 // @level: L1
 // @tags: verify, function, ensures, result, body, postcondition
-// @expect: pass
 //
 // `fn foo(..) -> T ensures result == <expr> { body }` must verify by
 // checking `ensures` against the actual body-returned value — not

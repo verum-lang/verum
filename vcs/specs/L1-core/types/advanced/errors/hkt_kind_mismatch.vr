@@ -2,7 +2,6 @@
 // @tier: 1
 // @level: L1
 // @tags: hkt, kind, mismatch, errors, advanced-type-syntax
-// @expect: error(E0402)
 // @expected-error: E0402 "Kind mismatch in higher-kinded type"
 // @description: Tests for kind mismatches in HKT usage
 // @spec: 03-type-system.md Section 13. 3.1.4

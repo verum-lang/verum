@@ -3,7 +3,6 @@
 // @level: L0
 // @tags: vbc, comparison, float, ieee754, nan
 // @timeout: 5000
-// @expect: pass
 //
 // Test: EQ_F, NE_F, LT_F, LE_F, GT_F, GE_F
 // Verifies IEEE 754 compliant floating-point comparisons

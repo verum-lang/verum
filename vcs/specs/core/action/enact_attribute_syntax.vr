@@ -3,7 +3,6 @@
 // @level: L1
 // @tags: action, actic, epsilon, enact, attribute
 // @timeout: 5000
-// @expect: pass
 //
 // VVA §11.2 Phase 5 E3 — @enact(epsilon …) attribute parses in both the
 // colon- and equals-separated forms, plus the bare-positional fallback.

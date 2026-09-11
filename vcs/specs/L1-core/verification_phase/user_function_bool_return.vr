@@ -2,7 +2,6 @@
 // @tier: 0
 // @level: L1
 // @tags: verify, user-function, bool, reflection, quantifier, exists
-// @expect: pass
 //
 // Bool-returning user functions — whether reflected (body present) or
 // merely declared (body-less) — must translate with the correct Z3

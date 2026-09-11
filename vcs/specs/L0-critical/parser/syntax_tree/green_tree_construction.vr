@@ -2,7 +2,6 @@
 // @tier: 0
 // @level: L0
 // @tags: parser, green-tree, events, tree-sink, lossless
-// @expect: pass
 // @description: Test GreenTreeSink builds correct tree from events including child ordering, widths, and trivia
 // Note: This is a parse-only test - it exercises tree construction, not type checking
 

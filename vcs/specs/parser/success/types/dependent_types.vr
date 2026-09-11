@@ -2,7 +2,6 @@
 // @tier: 0
 // @level: L1
 // @tags: types, dependent, sigma, refinement, self-hosting-critical
-// @expect: pass
 // Test: Dependent types and sigma types for self-hosting verification
 
 // =============================================================================

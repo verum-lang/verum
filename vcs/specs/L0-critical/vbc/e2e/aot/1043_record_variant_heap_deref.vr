@@ -2,7 +2,6 @@
 // @tier: 0
 // @level: L0
 // @tags: record_variant, heap, deref, method, recursive
-// @expect: pass
 
 // Tests (*node).method() with record variant payloads in Heap<T>
 

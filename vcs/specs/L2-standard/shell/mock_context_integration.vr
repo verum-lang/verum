@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: shell, mock, ci, testability, integration, typecheck
 // @timeout: 30000
-// @expect: pass
 
 // Demonstrates the mock layer: a test can swap in a deterministic
 // ShellContext that returns canned responses for `sh()` calls. The

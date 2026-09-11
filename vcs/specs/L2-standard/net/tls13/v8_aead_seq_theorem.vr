@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: tls13, aead, v8, smt, theorem, rfc8446_5_3
 // @timeout: 15000
-// @expect: pass
 
 // V8 theorem (tls-quic.md §9): AEAD sequence counter is strictly
 // monotonic per direction.

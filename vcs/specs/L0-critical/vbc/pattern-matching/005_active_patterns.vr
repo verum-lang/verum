@@ -3,7 +3,6 @@
 // @level: L0
 // @tags: vbc, pattern-matching, active-patterns, variant-returning, total, partial
 // @timeout: 5000
-// @expect: pass
 // @expected-exit: 0
 //
 // Test: Active pattern matching at VBC interpreter level

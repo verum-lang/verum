@@ -3,7 +3,6 @@
 // @level: L2
 // @tags: quic, rfc9000, packet-number, encoding, kat
 // @timeout: 10000
-// @expect: pass
 //
 // RFC 9000 §17.1 — Packet number encoding / decoding.
 //

@@ -3,7 +3,6 @@
 // @level: L1
 // @tags: uuid, rfc4122, rfc9562, random, time-ordered
 // @timeout: 10000
-// @expect: pass
 
 mount core.id.uuid.{Uuid, UuidError};
 

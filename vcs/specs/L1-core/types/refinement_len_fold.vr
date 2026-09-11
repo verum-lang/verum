@@ -2,7 +2,6 @@
 // @tier: 0
 // @level: L1
 // @tags: refinement, len, list, const-fold, check_phase, language
-// @expect: errors
 
 // Regression: refinement predicates that mention `.len()` on a
 // receiver which substitutes to a concrete literal (list, text, byte

@@ -2,7 +2,6 @@
 // @tier: 0
 // @level: L0
 // @tags: aot, codegen, intrinsic, regression
-// @expect: pass
 // Bug 1 reproducer: User-defined functions with names matching intrinsics
 // should NOT be hijacked by intrinsic opcodes.
 

@@ -2,7 +2,7 @@
 // @tier: 0
 // @level: L1
 // @tags: types, attributes, registry, errors, diagnostics
-// @expect: error
+// @note: an earlier `@expect: error` marker said this should fail, and `@test: unit` says the opposite; the runner honours @test — T1422
 // @description: Attribute registry error detection tests
 // @spec: docs/detailed/31-attribute-registry.md Section 8
 

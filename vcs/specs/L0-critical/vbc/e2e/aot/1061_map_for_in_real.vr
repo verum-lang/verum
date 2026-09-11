@@ -2,7 +2,6 @@
 // @tier: 0
 // @level: L0
 // @tags: map, for_in, iteration
-// @expect: pass
 
 // Test actual for-in iteration on Map — returns (key, value) tuples.
 
