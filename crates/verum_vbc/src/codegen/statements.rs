@@ -426,6 +426,60 @@ impl VbcCodegen {
         ty: Option<&verum_ast::Type>,
         value: Option<&verum_ast::Expr>,
     ) -> CodegenResult<Option<Reg>> {
+        // A LOCAL BINDING CAN HOLD A REFERENCE TOO (T1442).
+        //
+        // T1438 taught `.0` and `q.rep()` to dereference when their base
+        // is a reference, and recorded that fact where PARAMETERS are
+        // bound. A `let` is the same shape one binder over, and was not
+        // recorded — measured on the binary carrying that fix:
+        //
+        //     via_param(&n) { p.0 }     42          (fixed)
+        //     let r = &n;      r.0      6089728080  (this)
+        //     let rr: &NT = &n; rr.0    6089728064  (this)
+        //
+        // TWO SIGNALS, and both are needed. An annotation gives a declared
+        // type to match on, exactly as the parameter site does. A binding
+        // with no annotation has none, so the INITIALISER has to be read —
+        // and that is the common spelling.
+        if let verum_ast::PatternKind::Ident { name, .. } = &pattern.kind {
+            use verum_ast::expr::{ExprKind, UnOp};
+            let annotated_ref = ty.is_some_and(|t| {
+                matches!(
+                    t.kind,
+                    verum_ast::ty::TypeKind::Reference { .. }
+                        | verum_ast::ty::TypeKind::CheckedReference { .. }
+                        | verum_ast::ty::TypeKind::UnsafeReference { .. }
+                        | verum_ast::ty::TypeKind::GenRef { .. }
+                        | verum_ast::ty::TypeKind::Pointer { .. }
+                )
+            });
+            // `Own`/`OwnMut` are deliberately NOT here: they move rather
+            // than borrow, so the register holds the value and the
+            // identity `Mov` is right for them.
+            let init_is_ref = value.is_some_and(|v| {
+                matches!(
+                    v.kind,
+                    ExprKind::Unary {
+                        op: UnOp::Ref
+                            | UnOp::RefMut
+                            | UnOp::RefChecked
+                            | UnOp::RefCheckedMut
+                            | UnOp::RefUnsafe
+                            | UnOp::RefUnsafeMut,
+                        ..
+                    }
+                )
+            });
+            if annotated_ref || init_is_ref {
+                self.ctx.reference_bound_vars.insert(name.to_string());
+            } else {
+                // A REBINDING MUST CLEAR THE MARK. `let r = &n;` then
+                // `let r = n;` in the same function would otherwise leave
+                // `r` reference-marked and make the second `r.0` emit a
+                // Deref on a value — the exact defect, inverted.
+                self.ctx.reference_bound_vars.remove(&name.to_string());
+            }
+        }
         // `let (a, b, …) = <expr>` — record the destructured elements'
         // types so downstream method dispatch on the bound names
         // (`a.as_bytes()`) resolves a receiver type. `compile_match` only

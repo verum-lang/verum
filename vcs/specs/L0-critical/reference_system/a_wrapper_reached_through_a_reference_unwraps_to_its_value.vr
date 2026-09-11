@@ -70,6 +70,56 @@ fn main() {
     print(f"by_mut={by_mut}");
     assert(by_mut == 42);
 
+    // A LOCAL BINDING HOLDS A REFERENCE TOO (T1442), and the first fix
+    // covered only parameters — because the reproduction that drove it
+    // was `File.write(&mut self, buf)`, and a spec written from the
+    // reproduction inherits its shape. These two rungs are written from
+    // the MECHANISM: "a register holding a reference to a wrapper" says
+    // nothing about which binder put it there.
+    //
+    // Measured on the binary that fixed the parameter form:
+    //     let r = &n;        r.0   Tier 0: 42   Tier 1: 6089728080
+    //     let rr: &NT = &n;  rr.0  Tier 0: 42   Tier 1: 6089728064
+    //
+    // Both spellings are here because they reach the recording by
+    // different routes: the annotated one has a declared type to match
+    // on, the bare one has only its initialiser.
+    // THE `+ 0` IS NOT DECORATION. `assert(via_binding == 42)` PASSES at
+    // Tier 1 while `via_binding` prints 6137634896 — the comparison is
+    // folded on the front end's model of what `.0` means, which is the
+    // very thing under test, so it verifies the compiler agrees with
+    // itself. Measured on one value, one run, one binary:
+    //
+    //     print(v)         6137634896   the ADDRESS
+    //     v + 0            6137634896   the ADDRESS
+    //     v == 42          true         <- folded
+    //     v == w           true         <- folded
+    //     v + 0 == 42      false        <- sees the register
+    //     v - w == 0       false        <- sees the register
+    //
+    // Any arithmetic defeats the fold. The rungs ABOVE do not need it
+    // because their value comes through a function call, which is not
+    // folded — which is also why the parameter form was caught the first
+    // time and the local form was not.
+    let bound = &n;
+    let via_binding = bound.0;
+    print(f"via_binding={via_binding}");
+    assert(via_binding + 0 == 42);
+
+    let annotated: &NT = &n;
+    let via_annotation = annotated.0;
+    print(f"via_annotation={via_annotation}");
+    assert(via_annotation + 0 == 42);
+
+    // AND A REBINDING MUST DROP THE MARK. `let same = n;` after the two
+    // above holds the VALUE, so its `.0` must stay the free identity —
+    // a fix that marked names and never unmarked them would pass every
+    // rung above and turn this one into a dereference of 42.
+    let same = n;
+    let after_rebind = same.0;
+    print(f"after_rebind={after_rebind}");
+    assert(after_rebind + 0 == 42);
+
     // A named-field record through a reference never used the
     // transparent path and must still not.
     let rec = record_by_ref(&r);
