@@ -263,7 +263,39 @@ pub fn analyze_with_roots(module: &VbcModule, extra_roots: &[u32]) -> Reachabili
                 out.reachable_type_ids.contains(&tid.0)
                     || match type_by_id.get(&tid.0) {
                         Some(td) => {
-                            td.kind != crate::types::TypeKind::Record
+                            // A STRUCTURAL impl target is a Record only by
+                            // synthesis. `implement<T> [T]` and
+                            // `implement<T; N> [T; N]` have no named type
+                            // decl, so codegen materialises a descriptor for
+                            // them (`ensure_structural_impl_target_type`,
+                            // which hard-codes `kind = Record`). Their
+                            // instances are never built by `New`/`NewG` — a
+                            // slice materialises via `RefSlice`, an array via
+                            // a pack — so "no construction in reachable code"
+                            // proves NOTHING about them, and the Record arm
+                            // below prunes every one of their methods.
+                            //
+                            // Measured (T1447): `@Slice.len`, `@Slice.iter`,
+                            // `@Slice.is_empty` reached the module as bodyless
+                            // `declare`s with 268 dead calls to `@Slice.len`
+                            // beside them — dead only because their callers
+                            // were pruned too. The first LIVE call would not
+                            // have linked, and the dispatch that should have
+                            // made one instead aborted at runtime:
+                            //
+                            //   PANIC: AOT dispatch fault: no runtime
+                            //   candidate for method '&[Byte].is_empty'
+                            //
+                            // These belong in the same conservatively-included
+                            // class the comment above names for variants and
+                            // newtypes: a parent whose construction this pass
+                            // cannot observe at all.
+                            let structural = matches!(
+                                module.strings.get(td.name),
+                                Some("Slice") | Some("Array") | Some("Tuple")
+                            );
+                            structural
+                                || td.kind != crate::types::TypeKind::Record
                                 || module
                                     .strings
                                     .get(td.name)

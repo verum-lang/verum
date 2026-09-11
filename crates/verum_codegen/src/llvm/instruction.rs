@@ -15522,6 +15522,41 @@ fn lower_call_method<'ctx>(
         .unwrap_or("")
         .to_string();
 
+    // SLICE-PREFIX-NORMALISE (T1447) — the AOT mirror of
+    // `crates/verum_vbc/src/interpreter/dispatch_table/handlers/
+    //  method_dispatch.rs`, which normalises here for exactly this reason
+    // and whose comment names this defect verbatim: "Every line-oriented
+    // read went down with it, since `BufRead.read_until` iterates the
+    // subslice `fill_buf` returns."
+    //
+    // `implement<T> [T]` registers under the prefix `Slice`
+    // (`extract_impl_type_name_from_type`), so `Slice.len`, `Slice.iter`,
+    // `Slice.is_empty` … are the names that exist. What arrives here for a
+    // receiver whose declared type is spelled `&[Byte]` is
+    // `&[Byte].is_empty` — a name NO layer has ever defined. VBC codegen
+    // rewrites `[T].m` (expressions.rs), but only when the name STARTS
+    // with the bracket, so the reference spelling survives.
+    //
+    // Nothing downstream can recover from it: the unresolved-CallM
+    // fallback builds its switch by walking `vbc.types` for named
+    // `Type.method` bodies, and a slice has no descriptor there — measured
+    // over one whole-stdlib compile, 4801 defines, 273 with quoted names,
+    // ZERO with a bracket. The receiver matched no arm at any type id and
+    // took the default arm, which aborts:
+    //
+    //     PANIC: AOT dispatch fault: no runtime candidate for method
+    //     '&[Byte].is_empty'
+    //
+    // Normalise at the ONE point where the name is read from the string
+    // table, where every producer of a qualified name converges, rather
+    // than in each strategy below.
+    let method_name_str = match method_name_str.rfind('.') {
+        Some(dot) if type_name_is_slice(&method_name_str[..dot]) => {
+            format!("Slice{}", &method_name_str[dot..])
+        }
+        _ => method_name_str,
+    };
+
     // #44-B: erased-T identity const-fold. The receiver register holds
     // a `LoadT { Generic(_) }` result — at AOT there is no generic
     // witness (frames are native), the register is a null pointer, and
@@ -17728,6 +17763,15 @@ fn lower_call_method<'ctx>(
             .or(from_prefix)
             .or(from_scalar)
     };
+    // A slice spelling is not a name any layer knows: the module has no
+    // `&[Byte].is_empty`, and `vbc.types` holds no `[Byte]`. The canonical
+    // key is `Slice` — `implement<T> [T]` registers under that prefix
+    // (`extract_impl_type_name_from_type`), and BOTH tier-0 layers
+    // normalise to it before they resolve. Do the same here so every
+    // strategy below that builds `format!("{type}.{method}")` asks a
+    // question the module can answer.
+    let receiver_type_name = receiver_type_name
+        .map(|t| if type_name_is_slice(t) { "Slice" } else { t });
     if std::env::var("VERUM_TRACE_NEXT_DISPATCH").is_ok() && method_name_str == "next" {
         eprintln!(
             "[next-dispatch] recv_reg={} recv_type={:?} prefix={:?}",
@@ -25091,6 +25135,38 @@ fn emit_slice_cell_elem_store<'ctx>(
 
 /// #48 — thin wrapper over the ONE 3-arm classifier
 /// (`slice_cell::CellEnv::view`); see that module for the shape table.
+/// Does this static type NAME spell a slice — `[T]`, or a reference to one?
+///
+/// A slice has NO nominal type descriptor: measured over one whole-stdlib
+/// compile (T1447), not a single function in the emitted module carries a
+/// `[` in its name, and `vbc.types` holds no entry spelled `[Byte]`.  Every
+/// name-keyed dispatch route therefore misses a slice receiver by
+/// construction, including the runtime type-id switch, whose default arm
+/// ABORTS.
+///
+/// The three CBGR tiers spell their references `&mut`, `&checked` and
+/// `&unsafe`, so stripping `&` alone leaves `mut [Byte]` — the trap
+/// vbc_lowering.rs:3640 records, where more than half of one arm's input was
+/// unreachable for exactly this reason.
+///
+/// A FIXED array (`[Byte; 32]`) is deliberately excluded: it is a different
+/// value shape with its own length authority (the arr_len/pack_len select in
+/// `lower_len`), and `;` is the only thing in the spelling that separates
+/// them.
+fn type_name_is_slice(name: &str) -> bool {
+    let mut s = name.trim();
+    while let Some(rest) = s.strip_prefix('&') {
+        s = rest.trim_start();
+        for kw in ["mut ", "checked ", "unsafe "] {
+            if let Some(r) = s.strip_prefix(kw) {
+                s = r.trim_start();
+                break;
+            }
+        }
+    }
+    s.starts_with('[') && s.ends_with(']') && !s.contains(';')
+}
+
 fn emit_container_view<'ctx>(
     ctx: &mut FunctionContext<'_, 'ctx>,
     base_ptr: PointerValue<'ctx>,

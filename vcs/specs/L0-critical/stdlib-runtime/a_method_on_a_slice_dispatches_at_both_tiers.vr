@@ -1,0 +1,124 @@
+// @test: run
+// @tier: 0,1
+// @level: L0
+// @tags: slice, dispatch, aot, differential, regression
+// @timeout: 60000
+// @expected-exit: 0
+//
+// A METHOD ON A SLICE DISPATCHES AT BOTH TIERS (T1447).
+//
+// `core/collections/slice.vr` declares `implement<T> [T] { fn len,
+// fn is_empty, ... }`, so the method exists. What does not exist is a
+// NOMINAL DESCRIPTOR for `[T]`: measured over one whole-stdlib compile,
+// not a single function in the emitted module carries a `[` in its name,
+// and `vbc.types` holds no entry spelled `[Byte]`.
+//
+// The AOT's unresolved-CallM fallback builds a runtime type-id switch by
+// walking `vbc.types` for a named `Type.method` body. A slice receiver
+// matches no arm at ANY type id, takes the default arm, and the default
+// arm aborts:
+//
+//     PANIC: AOT dispatch fault: no runtime candidate for method
+//     '&[Byte].is_empty'
+//
+// That is not a missing arm, it is a missing ROUTE — the switch was
+// asked a question no arm set could answer.
+//
+// Measured before the fix, inside `BufRead.read_until`'s protocol-default
+// body (`available` is the `&[Byte]` that `self.fill_buf()?` produced):
+//
+//     tier 0:  ... 4 BufReader ok  5 [1] a  5 [2] b  6 total 2  rc=0
+//     tier 1:  ... 4 BufReader ok                                rc=134
+//
+// rc=134 is SIGABRT. Three compiled copies reach it (BufReader,
+// EmptyReader, StdinLock) and `&[Byte].len` sits one call away with the
+// same shape.
+//
+// Every assertion below adds `+ 0` (or compares a computed value) so the
+// front end's constant model cannot answer it: `assert(n == 2)` is
+// discharged at compile time and would pass on a binary that never ran
+// the dispatch at all.
+
+fn take_slice(b: &[Int]) -> Int {
+    if b.is_empty() { 0 } else { b.len() }
+}
+
+fn first_or_zero(b: &[Int]) -> Int {
+    if b.is_empty() { return 0; }
+    return b[0];
+}
+
+fn give(src: &List<Int>) -> Result<&[Int], Text> {
+    return Result.Ok(&src[..]);
+}
+
+// The `read_until` shape: the receiver is the slice a `?` unwrapped out
+// of a Result, so nothing marks its register a slice — only the static
+// type name says so.
+fn through_try(src: &List<Int>) -> Result<Int, Text> {
+    let win = give(src)?;
+    if win.is_empty() { return Result.Ok(0); }
+    return Result.Ok(win.len());
+}
+
+fn main() -> Int {
+    print("0 begin");
+
+    let mut xs: List<Int> = List.new();
+    xs.push(10);
+    xs.push(20);
+    xs.push(30);
+
+    // 1. len() through a `&[Int]` parameter.
+    let n1 = take_slice(&xs[..]);
+    print(f"1 len via param     = {n1} (want 3)");
+    assert(n1 + 0 == 3);
+
+    // 2. is_empty() on a slice that is NOT empty.
+    let empty: List<Int> = List.new();
+    let n2 = take_slice(&empty[..]);
+    print(f"2 len of empty      = {n2} (want 0)");
+    assert(n2 + 0 == 0);
+
+    // 3. a sub-range, so the length is not the container's.
+    let n3 = take_slice(&xs[1..3]);
+    print(f"3 len of sub-range  = {n3} (want 2)");
+    assert(n3 + 0 == 2);
+
+    // 4. an element read after the emptiness test — the guard and the
+    //    read must agree about the same value.
+    let n4 = first_or_zero(&xs[1..3]);
+    print(f"4 first of 1..3     = {n4} (want 20)");
+    assert(n4 + 0 == 20);
+
+    // 5. the `?` shape: the slice arrives as a Result payload.
+    let n5 = match through_try(&xs) {
+        Result.Ok(v) => v,
+        Result.Err(_) => -1,
+    };
+    print(f"5 len through ?     = {n5} (want 3)");
+    assert(n5 + 0 == 3);
+
+    // 6. the `?` shape on an EMPTY slice — the branch the abort took.
+    let n6 = match through_try(&empty) {
+        Result.Ok(v) => v,
+        Result.Err(_) => -1,
+    };
+    print(f"6 empty through ?   = {n6} (want 0)");
+    assert(n6 + 0 == 0);
+
+    // 7. a slice bound to a local, then measured.
+    let win: &[Int] = &xs[..];
+    let n7 = win.len();
+    print(f"7 len of local win = {n7} (want 3)");
+    assert(n7 + 0 == 3);
+
+    // 8. emptiness as a Bool that survives being stored.
+    let e8 = win.is_empty();
+    let n8 = if e8 { 1 } else { 0 };
+    print(f"8 is_empty stored   = {n8} (want 0)");
+    assert(n8 + 0 == 0);
+
+    print("9 end");
+    return 0;
+}

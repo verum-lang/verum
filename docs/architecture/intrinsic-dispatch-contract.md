@@ -195,6 +195,141 @@ Inheritance from CBGR architecture docs:
 - `dispatch_method_call`, `handle_get_index`, `handle_set_index` —
   each has three parallel arms for the three shapes (Task #24 fix).
 
+## 7. A slice's canonical dispatch key is `Slice`, not its spelling
+
+> **`implement<T> [T]` registers under the prefix `Slice`.** Every layer
+> that resolves a method name MUST normalise a slice spelling — `[T]`,
+> `&[T]`, `&mut [T]`, `&checked [T]`, `&unsafe [T]` — to that key before
+> it resolves. A layer that skips the normalisation asks for a name no
+> layer has ever defined.
+
+### What is true
+
+`core/collections/slice.vr` declares 27 methods in `implement<T> [T]`,
+and `extract_impl_type_name_from_type` registers them under `Slice`. The
+emitted module has the bodies — `@Slice.len`, `@Slice.get`,
+`@Slice.is_empty`, `@Slice.iter`, `@Slice.fmt_debug`, … — and has
+**nothing** under the bracket spelling: measured over one whole-stdlib
+compile, 4801 `define`s, 273 of them with quoted names (so a quoted name
+is visible to the search), and **zero** with a `[` in the name.
+`vbc.types` likewise holds no descriptor spelled `[Byte]`.
+
+Two tier-0 layers do the normalisation:
+
+| layer | file | accepts |
+|---|---|---|
+| VBC codegen | `codegen/expressions.rs` | `[T].m` only — a name STARTING with the bracket |
+| interpreter | `interpreter/dispatch_table/handlers/method_dispatch.rs` | `[T].m` **and** the reference spellings |
+
+The interpreter's site carries the reason verbatim: *"Every line-oriented
+read went down with it, since `BufRead.read_until` iterates the subslice
+`fill_buf` returns."*
+
+### The defect this pins (T1447)
+
+The AOT had no mirror. A receiver whose declared type is spelled
+`&[Byte]` keeps that spelling all the way into `lower_call_method`,
+where:
+
+- `method_type_prefix` requires the prefix's first character to be
+  UPPERCASE, so `&[Byte]` is refused and the receiver's type reads as
+  `None`;
+- the unresolved-`CallM` fallback builds a runtime type-id switch by
+  walking `vbc.types` for named `Type.method` bodies, and a slice has no
+  descriptor there, so the receiver matches **no arm at any type id**;
+- the default arm aborts by design:
+
+```
+PANIC: AOT dispatch fault: no runtime candidate for method
+'&[Byte].is_empty' — the receiver's runtime type id matched none of
+the arms built from declared implementations.
+```
+
+That abort is correct behaviour for the switch. The defect is upstream:
+the switch was asked a question no arm set could answer.
+
+### Why it hid for so long
+
+A slice taken from a `List` is ALSO marked a list register, so the
+List/Channel/Map intercept answers `len`/`is_empty` for the common
+spelling — sub-ranges included, whose length it gets right. Measured at
+Tier 1 on a pre-fix binary, `&xs[..]` and `&xs[1..3]` passed to a
+`&[Int]` parameter all answer correctly.
+
+Only a slice arriving WITHOUT that mark falls through, and the canonical
+such shape is the payload a `?` unwrapped out of a `Result`:
+
+```verum
+let available = self.fill_buf()?;   // IoResult<&[Byte]>
+if available.is_empty() { … }       // aborted at Tier 1, read at Tier 0
+for (i, b) in available.iter().enumerate() { … }   // the next one along
+```
+
+A census of one whole-stdlib compile finds exactly three method names
+called on a slice receiver — `iter` (7), `is_empty` (7), `len` (4) — and
+`read_until` calls two of them one line apart, so a fix that routes some
+of them only moves the abort.
+
+### The second leg: the body has to exist
+
+Resolving the name correctly is not enough, and the measurement says so
+plainly. With the normalisation alone:
+
+```
+tier 0:          1 3  2 0  3 2  4 20  5 3  6 0  7 3  8 0   rc=0
+tier 1 (leg 1):  1 3  2 0  3 2  4 20  5 0  …               rc=255
+```
+
+The abort is gone — the name resolved and the programme linked — and
+rung 5 answers **0** where it must answer 3. A silent zero, because the
+call reached a function that has no body.
+
+Body lowering is scoped to the reachable set (`scoped_lowering_enabled`,
+the 82GB → 5GB saving), and the by-name closure in
+`crates/verum_vbc/src/reachability.rs` drops a candidate whose parent
+type is a `Record` that reachable code never constructs. `Slice`'s
+descriptor IS a `Record` — but only by synthesis:
+`ensure_structural_impl_target_type` materialises it for
+`implement<T> [T]`, which has no named type decl, and hard-codes the
+kind. A slice is never built by `New`/`NewG` (it comes from `RefSlice`),
+so "no construction found" proves nothing about it, and every `Slice.*`
+method was pruned.
+
+The IR says it before the programme runs: `@Slice.len`, `@Slice.iter`
+and `@Slice.is_empty` are `declare`s, and 268 calls to `@Slice.len` sit
+in the module — dead only because their callers were pruned too. The
+linked binary carries no `Slice` symbol at all.
+
+So a structural impl target (`Slice`, `Array`, `Tuple`) belongs in the
+conservatively-included class that pass already names for variants and
+newtypes: **a parent whose construction the pass cannot observe at all.**
+
+### Pin
+
+- Normalisation: `lower_call_method`, immediately after `method_name_str`
+  is read from the string table — the one point where every producer of a
+  qualified name converges, which is where the interpreter does it too.
+  `type_name_is_slice` strips all three CBGR reference spellings (`&mut`,
+  `&checked`, `&unsafe`; stripping `&` alone leaves `mut [Byte]`, which
+  names nothing) and excludes `[T; N]`, a different value shape with its
+  own length authority.
+- `receiver_type_name` is normalised the same way, so every strategy
+  that builds `format!("{type}.{method}")` asks a question the module can
+  answer.
+- Consequence: all 27 declared slice methods dispatch, not the three that
+  happen to be called today.
+- Reachability: `crates/verum_vbc/src/reachability.rs`, the by-name
+  candidate closure — a structural impl target is never excluded by the
+  "record never constructed" rule, because its descriptor is synthesised
+  and its instances never pass through `New`/`NewG`.
+- Spec: `vcs/specs/L0-critical/stdlib-runtime/`
+  `a_method_on_a_slice_dispatches_at_both_tiers.vr` — eight rungs at both
+  tiers; rungs 5 and 6 are the `?` shape, the only pair that fails
+  pre-fix. Every assertion adds `+ 0` so the front end's constant model
+  cannot answer it.
+- Trace: `VERUM_AOT_TRACE_CALLM=1` prints the dispatch decision per
+  `CallM`, including the resolved target.
+
 ## Generic-arithmetic object arm (T0499)
 
 The integer arithmetic opcodes (`AddI`/`SubI`/`MulI`/`DivI`/`ModI`/
