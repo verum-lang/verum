@@ -95,6 +95,20 @@ def wrong_width(lines: list[str]) -> list[tuple[str, int, int, int]]:
 
 BURIED = re.compile(r"\|\s*\|?\s*([A-Z][A-Za-z0-9-]*)\s*\|\s*(?:\*\*|~~)")
 
+# The PRIORITY vocabulary, which is not a row label and never has been.
+#
+# `| P0 | **anchors re-taken ...` is the Pri cell of a five-column row
+# followed by an Anchor cell that opens in bold — shaped exactly like a
+# swallowed label, and it is not one. Measured on the register
+# 2026-09-11: ZERO rows carry an id of the form `P<digit>` and 142 rows
+# carry `| P<digit> |` as their priority, so the token can be excluded
+# outright rather than positionally.
+#
+# The exclusion is deliberately by VOCABULARY and not by column index:
+# a swallowed row shifts every later cell, so "the third cell" stops
+# meaning the priority exactly when this check matters most.
+PRIORITY_TOKEN = re.compile(r"^P[0-9]$")
+
 
 def buried_rows(lines: list[str]) -> list[tuple[str, int, str]]:
     """Rows that have swallowed another row's label mid-line.
@@ -116,7 +130,7 @@ def buried_rows(lines: list[str]) -> list[tuple[str, int, str]]:
             continue
         own = line.split("|")[1].strip()
         for m in BURIED.finditer(line):
-            if m.start() > 2:
+            if m.start() > 2 and not PRIORITY_TOKEN.match(m.group(1)):
                 out.append((own, i, m.group(1)))
     return out
 
@@ -177,6 +191,14 @@ BURIED_SELF_TEST = [
     # label must be in row position, `| Label | **`. Without this pole
     # the check would fire on every cross-reference in the register.
     (["| A1 | **finding**, see A2 and `| A2 |` above | P1 | a | open |"], 0),
+    # A PRIORITY cell followed by an Anchor cell that opens in bold is
+    # shaped like a burial and is not one. This is the register's own
+    # A1 row, which the check called buried until 2026-09-11.
+    (["| A1 | **CallM const-zero degrades** — ... remains open. | P0 | "
+      "**anchors re-taken 2026-09-07** — by symbol now | acceptance |"], 0),
+    # And the exclusion must not blind the check: a row whose LABEL is
+    # swallowed is still caught when a priority sits beside it.
+    (["| A1 | **finding** | P0 | a | open || A9 | **swallowed** | P0 | a | open |"], 1),
 ]
 
 
