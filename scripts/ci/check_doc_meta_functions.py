@@ -95,10 +95,12 @@ KNOWN: dict[str, list[str]] = {
     "verification/cubical-hott.md": [
         "builtin_sym", "builtin_trans", "builtin_transport",
     ],
-    # `@llm_oracle` — called at core/math/tactics.vr:663 and declared
-    # nowhere. Two pages teach it.
-    "language/proof-dsl.md": ["llm_oracle"],
-    "reference/tactics.md": ["llm_oracle"],
+    # SHRANK 2026-09-11: `@llm_oracle` left this roster on both pages by
+    # being DISCLOSED. It is called at core/math/tactics.vr:663 and declared
+    # nowhere in the compiler, behind a `@cfg(feature = "llm_oracle")` gate
+    # that is off; each page now quotes the E0410 warning beside its block and
+    # says the example stops at the type check, `Unit` not unifying with
+    # `Giry<Prop>`.
     # A PLACEHOLDER, not a promise, and there is no mechanical way to tell
     # the two apart: the surrounding prose is "the brace forms `@name[…]`
     # and `@name{…}` exist for DSLs that prefer square brackets", so
