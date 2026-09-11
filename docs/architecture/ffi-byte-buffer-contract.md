@@ -43,7 +43,16 @@ patterns below → `sent=4`, `recv=4`, payload bytes `112,105,110,103`
    `CreateThread`'s parameter), the object address is exactly right and
    the round trip works — those sites are correct and must not be
    "fixed". Ask what the callee DOES with the pointer, not what its
-   type says.
+   type says. **And when C WRITES through the pointer — a scalar
+   out-parameter — `&mut <scalar>` is now the right spelling at both
+   tiers** (T1403): the emitter gives such an argument a real stack slot,
+   seeded with the current value so an in-out parameter sees what it was
+   given, and copies the callee's write back afterwards. Before that fix
+   Tier 1 passed the VALUE as the destination address, so `time(&mut t)`
+   with `t = 0` wrote through NULL — which `time` accepts silently — and
+   with `t = 123456` wrote to 0x1E240. The RECORD half of this rule is
+   unchanged: `&mut <record>` still hands over the `ObjectHeader`
+   address (T1404).
 7. **An FFI wrapper takes `&[Byte]` / `&mut [Byte]`, never `&unsafe
    Byte`.** Taking the raw pointer forces every CALLER to produce it,
    and the call site is the one position where `.as_ptr()` returns the

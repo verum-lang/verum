@@ -34948,6 +34948,8 @@ fn lower_ffi_extended<'ctx>(
             // Gather arguments from registers, coercing VBC i64 values to match
             // the declared FFI function parameter types (ptr, i8, i16, i32, etc.)
             let mut args: Vec<BasicMetadataValueEnum> = Vec::with_capacity(arg_count);
+            // (register to copy into, stack slot the callee was given)
+            let mut pending_writebacks = Vec::new();
             let expected_param_types: Vec<_> = llvm_fn.get_type().get_param_types();
             for i in 0..arg_count {
                 let arg_reg = arg_regs[i];
@@ -35002,7 +35004,110 @@ fn lower_ffi_extended<'ctx>(
                 } else {
                     arg_val
                 };
-                args.push(coerced.into());
+                // T1403 — A `&mut <scalar>` ARGUMENT NEEDS A REAL ADDRESS.
+                //
+                // The coercion above turns an i64 register into a pointer
+                // with `inttoptr`, which is right when the register HOLDS an
+                // address and catastrophic when it holds a VALUE. For
+                // `time(&mut t)` the register holds `t` itself: 0 becomes a
+                // null pointer (the callee writes nothing and the program
+                // reads its own stale variable), and 123456 becomes an
+                // address the callee writes to — a SIGSEGV, or worse, not
+                // one.
+                //
+                // The write-back trailer decoded above says exactly which
+                // arguments are `&mut` and which register each one's writes
+                // belong to. For those, allocate a slot, seed it with the
+                // current value (the parameter may be in-out, not just out),
+                // and pass the slot's address. The copy-back is after the
+                // call.
+                //
+                // STRUCTS ARE NOT HANDLED HERE and are left exactly as they
+                // were: `param_layout_indices[i]` is `Some` for a struct
+                // parameter, and that route needs the C layout copied field
+                // by field rather than a slot — a Verum object's payload is
+                // 8-byte slots, a C struct's is not. Doing half of that
+                // silently is what this guard exists to prevent; the struct
+                // row of the acceptance table stays visibly unfixed.
+                let is_struct_param = ffi_symbol
+                    .signature
+                    .param_layout_indices
+                    .get(i)
+                    .copied()
+                    .flatten()
+                    .is_some();
+                // THE TRAILER IS WIDER THAN THIS FIX, and confusing the two
+                // would break the case that already works. The VBC emitter
+                // records `&mut <simple variable>` for ANY variable
+                // (expressions.rs:7847), so an object passed as `&mut obj`
+                // is in the trailer beside `&mut t` — and its register holds
+                // an ADDRESS, which `inttoptr` handles correctly today.
+                // Boxing it into a stack slot would hand the callee a
+                // pointer to a pointer.
+                //
+                // THE DISCRIMINATOR IS `arg_val.is_int_value()` BELOW, and
+                // it is true by construction rather than by bookkeeping: an
+                // object reaches a register as an LLVM POINTER —
+                // `ctx.set_register(dst.0, list_ptr.into())` at the `New` /
+                // `NewList` lowering — so for an object that predicate is
+                // already false. Paired with `coerced.is_pointer_value()` it
+                // reads exactly as "the callee wants a pointer and this
+                // register holds a VALUE".
+                //
+                // The register-type map is NOT used for this, and the reason
+                // is worth keeping: `ctx.set_register` CLEARS a register's
+                // marks (context.rs:2587) and the live marks are re-added by
+                // each lowering site right after (`mark_float_register`), so
+                // anything a pre-pass writes there is gone by the time this
+                // call is lowered. Three builds were spent learning that,
+                // each one reported by the decline trace below.
+                //
+                // A variable that holds a raw pointer (`let p =
+                // buf.as_mut_ptr(); f(&mut p)`) IS boxed by this rule, and
+                // should be: the callee writes a new pointer into `p`.
+                let writeback_reg = mut_ref_pairs
+                    .iter()
+                    .find(|(idx, _)| *idx as usize == i)
+                    .map(|(_, src)| *src);
+                if let Some(src_reg) = writeback_reg
+                    && !is_struct_param
+                    && coerced.is_pointer_value()
+                    && arg_val.is_int_value()
+                {
+                    let i64_ty = ctx.llvm_context().i64_type();
+                    let slot = ctx
+                        .builder()
+                        .build_alloca(i64_ty, "ffi_outparam")
+                        .or_llvm_err()?;
+                    // Seed it: an in-out parameter must see the value it was
+                    // given, and a pure out-parameter is unharmed by it.
+                    ctx.builder()
+                        .build_store(slot, arg_val.into_int_value())
+                        .or_llvm_err()?;
+                    pending_writebacks.push((src_reg, slot));
+                    args.push(BasicValueEnum::from(slot).into());
+                } else {
+                    // A DECLINE MUST SAY WHICH CONDITION REFUSED. Four
+                    // conditions gate the slot, and three of them are
+                    // legitimate reasons to leave the argument alone — so a
+                    // run where the out-parameter is still zero must not
+                    // leave the reader guessing which one fired.
+                    if writeback_reg.is_some()
+                        && let Ok(f) = std::env::var("VERUM_TRACE_FFI_WRITEBACK")
+                        && (f.is_empty() || f == "1" || symbol_idx.to_string() == f)
+                    {
+                        eprintln!(
+                            "[ffi-writeback] arg {} of symbol_idx={} is in the trailer but got NO slot: struct_param={} coerced_is_ptr={} arg_is_int={} (map says {:?}, not consulted)",
+                            i,
+                            symbol_idx,
+                            is_struct_param,
+                            coerced.is_pointer_value(),
+                            arg_val.is_int_value(),
+                            ctx.reg_types().get(arg_reg),
+                        );
+                    }
+                    args.push(coerced.into());
+                }
             }
 
             // Apply LLVM attributes based on memory effects
@@ -35030,6 +35135,18 @@ fn lower_ffi_extended<'ctx>(
             // Set calling convention on call site
             call_site.set_call_convention(calling_convention);
             mark_ffi_call_nobuiltin(ctx, call_site);
+
+            // T1403 — copy back what the callee wrote into the slots.
+            // Reading happens before the ownership pass below, so a
+            // `TransferTo` argument's writes are collected before its
+            // register is marked consumed.
+            for (dst_reg, slot) in pending_writebacks {
+                let loaded = ctx
+                    .builder()
+                    .build_load(ctx.llvm_context().i64_type(), slot, "ffi_outparam_read")
+                    .or_llvm_err()?;
+                ctx.set_register(dst_reg, loaded);
+            }
 
             // Post-call: error protocol checking
             emit_ffi_error_protocol_check(ctx, &call_site, ffi_symbol, ret_reg)?;
