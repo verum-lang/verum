@@ -105,12 +105,14 @@ KNOWN: dict[str, list[str]] = {
     # `@matrix[...]` stands for any such DSL. Listed rather than silently
     # excluded — a roster's job is to say what its count stands for.
     "language/meta/macro-kinds.md": ["matrix"],
-    # A different namespace with the same spelling: the page calls
-    # `@quantity(...)` a "typed attribute" (§2.1), and it is absent from
-    # the 177-name attribute registry, not from the meta-function ones.
-    # Real either way — a documented attribute the compiler does not
-    # register — but the fix belongs to the attribute surface.
-    "verification/quantitative-types.md": ["quantity"],
+    # SHRANK 2026-09-11: `verification/quantitative-types.md: quantity` left
+    # this roster by being DISCLOSED rather than by being fixed. The page now
+    # carries a status box quoting the diagnostic the reader will actually
+    # see — `warning<W0400>: unknown attribute` — because `@quantity(...)` is
+    # written in ATTRIBUTE position, where the compiler answers W0400 rather
+    # than the E0410 it gives a call. Widening DISCLOSED_MARK to accept both
+    # is what let an honest box count; before it, the only way to satisfy
+    # this gate was to print a code the page's reader never sees.
 
 }
 # Derived from the data, never written beside it — a literal here is a
@@ -165,10 +167,24 @@ def accepted_names() -> set[str]:
 # else. A prose test ("not implemented", "caution") would drift with
 # whoever writes the next banner.
 #
+# W0400 COUNTS TOO, and leaving it out was pushing pages toward a WRONG
+# disclosure. `@name(...)` is one syntax in two positions, and the compiler
+# answers with a different code in each. Measured 2026-09-11:
+#
+#     let r = @quantity(1);                    warning<E0410>: unknown meta-function
+#     fn f(@quantity(1) h: Int) -> Int { h }   warning<W0400>: unknown attribute
+#
+# This gate reads blocks, not positions, so it reports a name used as an
+# attribute alongside one used as a call. A page that discloses such a name
+# HONESTLY quotes W0400 — and with only E0410 accepted here, that page got no
+# credit, and the way to satisfy the gate was to print a code the reader will
+# never see. Both codes say the same thing: the compiler does not recognise
+# this `@name`.
+#
 # THE DISCLOSED SET IS STILL PRINTED. A disclaimer beside a block does not
 # unteach the block, so these rows are reported — under their own heading,
 # without failing — and re-read when the roster moves.
-DISCLOSED_MARK = re.compile(r"\bE0410\b")
+DISCLOSED_MARK = re.compile(r"\b(?:E0410|W0400)\b")
 # HOW CLOSE COUNTS. A page-level rule ("this page mentions E0410, so
 # every name on it is disclosed") was the first version, and writing the
 # tour's banner showed what it costs: one box disclosing ONE name would
@@ -263,22 +279,32 @@ def self_test() -> int:
         *[""] * 40,
         "the compiler warns E0410 on @beta and evaluates it to Unit",
     ])
-    d = disclosed_names(page)
-    if "beta" not in d:
-        print("self-test: a name beside an E0410 mention is not disclosed")
-        bad += 1
-    if "alpha" in d:
-        print("self-test: a name 40 lines from the only E0410 mention was "
-              "disclosed — the rule went back to page-level")
-        bad += 1
-    if disclosed_names("no diagnostic named here, just @gamma"):
-        print("self-test: a page with no E0410 mention disclosed something")
-        bad += 1
+    # A TABLE, so the count in the verdict below is the number of cases that
+    # actually ran rather than a literal beside them.
+    #
+    # W0400 discloses as well as E0410: `@name(...)` is one syntax in two
+    # positions and the compiler answers with a different code in each —
+    # measured, `fn f(@quantity(1) h: Int)` warns W0400, `let r = @quantity(1)`
+    # warns E0410. This gate reads blocks, not positions.
+    disclosure_cases = [
+        # (text, name, must be disclosed?)
+        (page, "beta", True),          # beside the E0410 mention
+        (page, "alpha", False),        # forty lines away from it
+        ("the compiler warns W0400 on @gamma and ignores the attribute",
+         "gamma", True),
+        ("no diagnostic named here, just @gamma", "gamma", False),
+    ]
+    for text, name, want in disclosure_cases:
+        if (name in disclosed_names(text)) is not want:
+            print(f"self-test: disclosure case @{name} expected "
+                  f"{'disclosed' if want else 'NOT disclosed'}")
+            bad += 1
 
     if bad:
         print(f"self-test: {bad} FAILED")
         return 1
-    print(f"[ok] self-test: 3 detector cases + 3 roster loads "
+    print(f"[ok] self-test: 3 detector cases + {len(disclosure_cases)} "
+          f"disclosure cases + 3 roster loads "
           f"({len(accepted)} accepted names)")
     return 0
 
@@ -350,7 +376,7 @@ def main() -> int:
     for p, ns in sorted(have.items()):
         print(f"    {p}: {', '.join(sorted(ns))}")
     if shown:
-        print(f"  DISCLOSED — the page names E0410 itself; reported, not failed:")
+        print("  DISCLOSED — the page quotes E0410 or W0400 itself; reported, not failed:")
         for p, ns in sorted(shown.items()):
             print(f"    = {p}: {', '.join(sorted(ns))}")
 
