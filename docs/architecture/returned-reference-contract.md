@@ -276,6 +276,37 @@ Regression guard:
 `vcs/specs/L0-critical/vbc/returned-reference-is-a-slot-address.vr`
 (differential, tiers 0 and 1).
 
+### The three arms that decide what `&x` becomes
+
+Added 2026-09-11 while chasing T1441, where every fact readable on the
+CALLEE side was identical for three records that answered 1, 2 and a
+stack address. The decision is on the CALLER side and two of these arms
+had no diagnostic at all.
+
+| lever | arm | what it prints |
+|---|---|---|
+| `VERUM_TRACE_REF` | `lower_ref` | which shape `&x` takes, and on what: `has_slot`, `has_alloca`, alloca mode, the source register's marks |
+| `VERUM_TRACE_GETFIELD` | `lower_get_field` | the predicate set the exits are chosen by, plus the DESCRIPTOR the type name resolves to (kind, field count, transparent flag, size) |
+| `VERUM_TRACE_DEREF` | the `Deref` arm | which of its six exits is taken — five are value-identity, so "the deref did nothing" is five symptoms, not one |
+
+Run them with `VERUM_NO_OBJECT_CACHE=1`. A trace emitted DURING lowering
+cannot appear when the object cache serves the binary without re-running
+it, and the log says `replayed` when that happens — which cost one whole
+measurement the night these were written.
+
+`VERUM_TRACE_REF` is the one that ended it. `is_heap_type` carries the
+term `get_obj_register_type(src).is_some()`, and
+
+```text
+[refmark] main Ref r0<-r2 heap=true  obj=None        (a Text argument)
+[refmark] main Ref r7<-r5 heap=false obj=None        <- the File
+[retmark] in=main fn=File.create dst=r0 SKIPPED: already obj_type
+```
+
+says in three lines what a dozen black-box controls could not: the value
+moved registers and its type name did not, so a heap pointer was handled
+by the recipe for `42`.
+
 ---
 
 ## 6. What this contract does NOT cover
