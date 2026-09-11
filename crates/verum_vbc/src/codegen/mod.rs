@@ -26737,11 +26737,38 @@ impl VbcCodegen {
                 let codegen_sid = self.ctx.intern_string_raw(name_text);
                 new_desc.name = StringId(codegen_sid);
             }
-            // Param names → re-intern; param type refs → remap.
+            // Param names → re-intern; param type refs → remap; and the
+            // PARAMNAME-CARRY spelling → re-intern too (T1263).
+            //
+            // That last one was missing while its siblings in this very
+            // loop had it: the register-type hints below say "unremapped
+            // ids resolved to None and the hint was silently dead for
+            // every archive-loaded fn", and RETNAME-CARRY below that says
+            // "an in-range stale id resolved to an unrelated string
+            // (`Chars.next` carrying "RenderCell")". The param carry had
+            // exactly the second symptom, measured 2026-09-11:
+            //
+            //     safe_write p0  fd: FileDesc  spelling="core.term.widget.barchart"
+            //     safe_open  p1  flags: Int    spelling="processor"
+            //
+            // It matters because `type_ref` is LOSSY for a nominal type
+            // reached across modules — `FileDesc` arrives as
+            // `Concrete(TypeId::PTR)` while its `Int`/slice/reference
+            // neighbours keep theirs — and the carry is the only thing
+            // that can name it afterwards. With the carry unreadable,
+            // `lower_get_field`'s newtype branch cannot fire and `fd.0`
+            // lowers as an object field read at +24: for `FileDesc(3)`,
+            // address 27. That is the one constant-address load in the
+            // module, and it is why `File.write` fails at Tier 1 while
+            // every ingredient works from user code.
             for param in new_desc.params.iter_mut() {
                 if let Some(pname_text) = archive_module.strings.get(param.name) {
                     let pname_id = self.ctx.intern_string_raw(pname_text);
                     param.name = StringId(pname_id);
+                }
+                if let Some(tname_text) = archive_module.strings.get(param.type_name) {
+                    let tname_id = self.ctx.intern_string_raw(tname_text);
+                    param.type_name = StringId(tname_id);
                 }
                 param.type_ref = remap_type_ref_archive(&param.type_ref, &type_id_remap);
             }
