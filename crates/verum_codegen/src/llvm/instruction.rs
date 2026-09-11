@@ -34827,6 +34827,56 @@ fn lower_ffi_extended<'ctx>(
                 }
                 v
             };
+            // T1403 — the WRITE-BACK TRAILER, decoded here and (for now)
+            // only reported.
+            //
+            // `expressions.rs:8124` appends, after the argument registers,
+            // `mut_ref_count:u8` then that many `(arg_idx:u8, source_reg)`
+            // pairs: every `&mut <var>` argument records where the callee's
+            // writes must be copied back to. Tier 0 uses it. Tier 1 has
+            // never decoded it, and the arm's own layout comment stopped at
+            // the argument list, which is how that stayed invisible.
+            //
+            // Decoding it WITHOUT acting on it is deliberate: the copy-back
+            // itself needs the struct-layout half as well (the `StructPtr`
+            // route, `ffi_symbol.signature.param_layout_indices`), and
+            // landing one half alone would make the scalar case work while
+            // the struct case still returns garbage — two shapes, one
+            // observable, and no way to tell from a green run which was
+            // repaired. The trace below makes the trailer OBSERVABLE, which
+            // is what the next session needs and what no lever offers today.
+            let mut_ref_pairs: Vec<(u8, u16)> = {
+                let mut v = Vec::new();
+                if op_pos < operands.len() {
+                    let count = operands[op_pos] as usize;
+                    op_pos += 1;
+                    for _ in 0..count {
+                        if op_pos >= operands.len() {
+                            break;
+                        }
+                        let arg_idx = operands[op_pos];
+                        op_pos += 1;
+                        match read_reg_varlen(operands, &mut op_pos) {
+                            Ok(src) => v.push((arg_idx, src)),
+                            Err(_) => break,
+                        }
+                    }
+                }
+                v
+            };
+            if !mut_ref_pairs.is_empty()
+                && let Ok(f) = std::env::var("VERUM_TRACE_FFI_WRITEBACK")
+                && (f.is_empty() || f == "1" || symbol_idx.to_string() == f)
+            {
+                eprintln!(
+                    "[ffi-writeback] symbol_idx={} arity={} needs {} copy-back(s): {:?} \
+— Tier 1 performs NONE of them (T1403)",
+                    symbol_idx,
+                    arg_count,
+                    mut_ref_pairs.len(),
+                    mut_ref_pairs,
+                );
+            }
 
             // Look up FFI symbol
             let ffi_symbol = vbc_module

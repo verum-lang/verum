@@ -51,6 +51,7 @@ no output as a way to lose an afternoon.
 | `VERUM_TRACE_CONST_RESOLVE` | substring | `` (empty) or `*` | function name |
 | `VERUM_TRACE_DEFTYPE` | **exact** | `1` | type key being defined |
 | `VERUM_TRACE_DEREF` | substring | `` (empty) or `1` | value/type shape |
+| `VERUM_TRACE_FFI_WRITEBACK` | **exact** | `` (empty) or `1` | FFI symbol index |
 | `VERUM_TRACE_FNREG` | substring | `` (empty) | function name |
 | `VERUM_TRACE_FNTABLE` | substring | `` (empty) | function name |
 | `VERUM_TRACE_FN_RESOLVE` | substring | `` (empty) or `1` | function name |

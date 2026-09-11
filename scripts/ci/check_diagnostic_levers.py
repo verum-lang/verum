@@ -127,8 +127,18 @@ def _pattern_use(window: str, var: str) -> bool:
     # switch; BOTH spellings of it are in use in this tree, `"*"` and
     # `"1"`, and reading only the first reported `0 undocumented` over
     # levers it could not see.
-    named = re.search(rf"{v}{acc}\s*==\s*[a-z_][a-z0-9_.()]*\b(?!\")", window)
-    wild = re.search(rf"{v}{acc}\s*==\s*\"(?:\*|1)\"", window)
+    # The SIXTH form, and it was found the way every earlier one was —
+    # by a lever whose answer was already known reading as not-filter-
+    # shaped. `VERUM_TRACE_FFI_WRITEBACK` compares
+    # `symbol_idx.to_string() == f`: the lever's value on the RIGHT.
+    # Reading only `f == name` missed it while reporting a clean count,
+    # which is this detector's own failure mode stated in its docstring.
+    named = re.search(
+        rf"{v}{acc}\s*==\s*[a-z_][a-z0-9_.()]*\b(?!\")"
+        rf"|[a-z_][a-z0-9_.()]*{acc}\s*==\s*{v}\b",
+        window,
+    )
+    wild = re.search(rf"{v}{acc}\s*==\s*\"(?:\*|1)\"|\"(?:\*|1)\"\s*==\s*{v}\b", window)
     return bool(named and wild)
 
 
