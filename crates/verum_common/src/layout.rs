@@ -307,11 +307,33 @@ pub const OBJECT_HEADER_SIZE: u64 = 24;
 
 /// Width of a single object-field slot in bytes.
 ///
-/// Verum heap objects pack one NaN-boxed `Value` per field; the
-/// runtime tag bits are fitted into 64-bit words. Codegen emits
-/// `GEP(obj_ptr, OBJECT_HEADER_SIZE + field_idx * VALUE_SLOT_SIZE)`
-/// for every field access, and the interpreter mirrors the same
-/// stride.
+/// **The STRIDE is universal.** Codegen emits
+/// `GEP(obj_ptr, OBJECT_HEADER_SIZE + field_idx * VALUE_SLOT_SIZE)` for
+/// every field access, the interpreter mirrors it, and it does not
+/// depend on the field's declared type: an `Int32`, a `Bool` and a
+/// `Float` each occupy a full slot. Measured 2026-09-11 on
+/// `type Narrow is { a: Int32, b: Int32, c: Bool, d: Int }` — fields at
+/// +24, +32, +40, +48, every one a `store i64`.
+///
+/// **The slot's CONTENT is TIER-DEPENDENT, and this comment used to say
+/// otherwise.** It read "Verum heap objects pack one NaN-boxed `Value`
+/// per field", which is the interpreter's truth stated as if it were
+/// universal. In AOT a field holds the value's RAW BITS:
+///
+/// ```llvm
+/// %setf_val = bitcast double %r1 to i64
+/// store i64 %setf_val, ptr %field_0_ptr      ; base + 24
+/// ```
+///
+/// WHY THE DIFFERENCE MATTERS, since almost everyone reaching for this
+/// constant is really asking "is `base + OBJECT_HEADER_SIZE` a C struct?":
+/// at Tier 1 it IS one, byte for byte, for a record whose every field is
+/// 64 bits wide — `type Mixed is { x: Float, n: Int }` is C's
+/// `struct { double; int64_t; }`. It is NOT one as soon as a field is
+/// narrower, because C packs `Int32` at +4 while a slot puts it at +8.
+/// Reading the old wording, one concludes a Float record is unsafe to
+/// hand to C and a narrow-Int record is fine; both conclusions are
+/// backwards (T1414, found while specifying T1403).
 pub const VALUE_SLOT_SIZE: u64 = 8;
 
 /// Compute the byte offset of the *N*-th data field within a heap
