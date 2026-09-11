@@ -87,13 +87,28 @@ SURFACES: dict[str, tuple[str, list[tuple[str, str]], str]] = {
 
 # Ratchet baselines: measured 2026-08-02 (git 1a21fdbfd), pinned EXACTLY. A category
 # growing past its baseline fails --check. Update DOWNWARD as stages land.
+#
+# TIGHTENED 2026-09-11 for the two categories that had SHRUNK. A ratchet
+# only ratchets if something turns it, and this one had not been turned
+# because nothing invoked it: `check-name-census` is in no gate aggregate
+# and named by no workflow (T1439), so six months of movement in BOTH
+# directions sat in one number each.
+#
+#   type-name-keys        237 -> 217   twenty retired, unrecorded
+#   loader-name-indexes    20 ->   0   the surface is GONE, and the gate
+#                                      still permitted twenty of it
+#
+# Only the downward halves are taken here. Five categories have grown past
+# their baselines and stay failing on purpose (T1440): raising those five
+# to meet the code would turn the one instrument that can see the drift
+# into a record of it.
 RATCHET: dict[str, int] = {
     "fn-registry-writes": 108,
     "fn-registry-lookups": 223,
     "suffix-probes": 48,
     "arity-composite-keys": 11,
-    "type-name-keys": 237,
-    "loader-name-indexes": 20,
+    "type-name-keys": 217,
+    "loader-name-indexes": 0,
     "runtime-byname-resolution": 24,
     "id-name-carries": 8,
 }
