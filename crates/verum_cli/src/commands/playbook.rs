@@ -248,7 +248,7 @@ pub fn import_from_script(input: &str, output: Option<&str>) -> Result<()> {
     Ok(())
 }
 
-/// Headless replay of a .vrbook (T0858 slice 4): the verdict logic
+/// Headless replay of a .vrbook: the verdict logic
 /// lives in `persistence::replay_book` (one carrier); this command
 /// renders it and picks the exit code (2: chain out of step, 3:
 /// divergence or failed run). With `freeze_to`, additionally writes

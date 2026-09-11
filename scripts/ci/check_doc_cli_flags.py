@@ -167,6 +167,22 @@ def parse_line(line: str) -> tuple[str, list[str], bool] | None:
 Where = list[tuple[str, int]]
 
 
+# THE MARKETING HOMEPAGE IS A PAGE. It is `.tsx`, not `.md`, so every
+# gate that globs `*.md` silently omits the first page a reader sees —
+# the shape `check_doc_names_exist` names in its own census, where
+# covering it added a fictional type nobody had counted. Measured
+# 2026-09-11: `src/pages/index.tsx` shows `verum test --interp`,
+# `verum test --aot`, `verum analyze --escape`, `verum run` and
+# `verum build`, none of which this gate had ever read. All five hold
+# today; the point is that nothing was checking.
+def _pages(docs: Path) -> list[tuple[Path, str]]:
+    out = [(p, p.relative_to(docs).as_posix()) for p in sorted(docs.rglob("*.md"))]
+    home = docs.parent / "src" / "pages" / "index.tsx"
+    if home.is_file():
+        out.append((home, "src/pages/index.tsx"))
+    return out
+
+
 def shown(docs: Path) -> tuple[dict[str, dict[str, Where]],
                               list[tuple[str, int, str, list[str]]],
                               dict[str, Where]]:
@@ -184,12 +200,11 @@ def shown(docs: Path) -> tuple[dict[str, dict[str, Where]],
     # real `--release` is.
     absent: list[tuple[str, int, str, list[str]]] = []
     cmd_where: dict[str, Where] = {}
-    for md in sorted(docs.rglob("*.md")):
+    for md, rel in _pages(docs):
         try:
             text = md.read_text(errors="ignore")
         except OSError:
             continue
-        rel = md.relative_to(docs).as_posix()
         rows = logical_lines(text)
         for lineno, line in rows:
             parsed = parse_line(line)
@@ -315,6 +330,168 @@ JOIN_TEST = [
 ]
 
 
+# ── OPTION TABLES ─────────────────────────────────────────────────
+# A reference page does not only SHOW invocations; it tabulates a
+# command's options under a heading that names the command. Those rows
+# are claims of exactly the same kind, and until 2026-09-11 no gate read
+# one. Measured that day on `verification/cli-workflow.md` alone: 44
+# distinct flags documented, 12 of them accepted by no command at all
+# (`--strategy` in six rows, `--counterexample`, `--budget-policy`,
+# `--minimize-timeout`, `--show-costs` for the real `--show-cost`,
+# `--admits`, `--cone`, `--since`, `--top`, `--by-theory`, `--lifetime`,
+# a bare `--json` where `audit` takes `--format json`). The
+# troubleshooting table handed out four of them as the FIRST THING TO
+# TRY. Four more pages carried the same shape, including one whose
+# admonition correctly denied `--pgo` while listing `--opt-level` beside
+# it as real — it is not.
+#
+# NARROW ON PURPOSE. The docstring above records that inferring claims
+# from free prose was tried and abandoned; this is not that. A row
+# counts only when BOTH hold: the section heading names exactly one
+# `verum <cmd>`, and the row's first cell begins with a `--flag`. That
+# is a structured claim with a named subject, not a sentence.
+# A command PATH, not just a leading token: the options a page
+# tabulates often belong to a sub-subcommand (`verum llm-tactic
+# propose --theorem`), and attributing them to the parent — which
+# carries only `--color/--quiet/--verbose` — reported twelve real
+# flags as rejected. `real_flags` already accepts a path.
+SECTION_CMD = re.compile(
+    r"^#{2,4}\s.*?`verum\s+([a-z][a-z0-9-]*(?:\s+[a-z][a-z0-9-]*){0,2})`")
+TABLE_FLAG = re.compile(r"^\|\s*`(--[a-z][a-z0-9-]*)")
+# A row, or an admonition standing over the rest of the section, may
+# declare the gap. Kept separate from the shared UNSHIPPED vocabulary in
+# `check_doc_names_exist`: widening that one changes what several other
+# gates skip.
+TABLE_EXCUSED = re.compile(
+    r"not accepted|does not exist|do not exist|not implemented|"
+    r"is not a flag|not shipped|rejects it|is rejected|NOT IMPLEMENTED",
+    re.I)
+ADMONITION = re.compile(r"^:::[a-z]+(.*)$")
+HEADING = re.compile(r"^#{1,6}\s")
+
+
+def option_table_claims(docs: Path) -> dict[str, dict[str, Where]]:
+    """{command: {flag: [(file, line), …]}} read from option tables."""
+    claims: dict[str, dict[str, Where]] = {}
+    for md, rel in _pages(docs):
+        try:
+            text = md.read_text(errors="ignore")
+        except OSError:
+            continue
+        cmd, cmd_level = None, 0
+        section_excused = False
+        for lineno, line in enumerate(text.split("\n"), 1):
+            h = HEADING.match(line)
+            if h:
+                # An admonition's scope ends at the NEXT heading of any
+                # level — the same rule `drop_unshipped` uses site-wide.
+                # Carrying it into deeper subsections silenced every
+                # later table in the section: one `--strategy` caution
+                # hid `--solver`, `--timeout` and `--budget` too.
+                section_excused = False
+                level = len(line) - len(line.lstrip("#"))
+                m = SECTION_CMD.match(line)
+                # A heading naming two commands is ambiguous about who
+                # owns the rows; such a section is skipped, not guessed.
+                named = m.group(1) if m and line.count("`verum ") == 1 else None
+                if named:
+                    cmd, cmd_level = named, level
+                elif level <= cmd_level:
+                    # A sibling or shallower heading ENDS the section.
+                    # A DEEPER one does not: `### Mode flags` under
+                    # `## 3. verum verify` still tabulates verify's
+                    # options, and treating it as a reset is what made
+                    # this read 10 rows where the corpus has ~180.
+                    cmd, cmd_level = None, 0
+                continue
+            adm = ADMONITION.match(line)
+            if adm and TABLE_EXCUSED.search(adm.group(1)):
+                section_excused = True
+                continue
+            if cmd is None or section_excused:
+                continue
+            m = TABLE_FLAG.match(line)
+            if not m or TABLE_EXCUSED.search(line):
+                continue
+            flag = m.group(1)
+            if flag in UNIVERSAL:
+                continue
+            claims.setdefault(cmd, {}).setdefault(flag, []).append((rel, lineno))
+    return claims
+
+
+OPTION_TABLE_TEST = [
+    # (markdown, expected {cmd: [flags]})
+    ("## 3. `verum verify` — flagship\n"
+     "| `--timeout 60` | Per-obligation timeout. |\n",
+     {"verify": ["--timeout"]}),
+    # a row that declares its own gap is a claim of ABSENCE, not presence
+    ("## 3. `verum verify`\n"
+     "| `--strategy fast` | **Not accepted (measured 2026-09-11).** |\n",
+     {}),
+    # an admonition covers the rest of its section
+    ("## 3. `verum verify`\n"
+     ":::caution `--strategy` is not accepted\n"
+     "text\n"
+     ":::\n"
+     "| `--strategy fast` | Static encoding only. |\n",
+     {}),
+    # …but not the NEXT section
+    ("## 3. `verum verify`\n"
+     ":::caution `--strategy` is not accepted\n:::\n"
+     "## 5. `verum analyze`\n"
+     "| `--escape` | Escape analysis. |\n",
+     {"analyze": ["--escape"]}),
+    # a heading naming two commands owns nothing
+    ("## `verum check` vs `verum verify`\n"
+     "| `--whatever` | … |\n",
+     {}),
+    # prose mentioning a flag is NOT a claim — only table rows are
+    ("## 3. `verum verify`\n"
+     "Pass `--strategy fast` for a quick pass.\n",
+     {}),
+    # a table outside any command section is not attributed
+    ("## Exit codes\n"
+     "| `--timeout` | … |\n",
+     {}),
+    # A DEEPER SUBHEADING KEEPS THE COMMAND.
+    ("## 3. `verum verify`\n"
+     "### Mode flags\n"
+     "| `--mode static` | SMT. |\n",
+     {"verify": ["--mode"]}),
+    # A SIBLING HEADING ENDS IT.
+    ("## 3. `verum verify`\n"
+     "## 4. Exit codes\n"
+     "| `--mode static` | SMT. |\n",
+     {}),
+    # AN ADMONITION ENDS AT THE NEXT HEADING, deeper ones included.
+    ("## 3. `verum verify`\n"
+     ":::caution `--strategy` is not accepted\n:::\n"
+     "### Solver selection\n"
+     "| `--solver auto` | Router decides. |\n",
+     {"verify": ["--solver"]}),
+    # A SUB-SUBCOMMAND PATH IS THE SUBJECT, not its parent.
+    ("## `verum llm-tactic propose`\n"
+     "| `--theorem NAME` | The theorem to attack. |\n",
+     {"llm-tactic propose": ["--theorem"]}),
+]
+
+
+def option_table_self_test() -> int:
+    import tempfile
+    bad = 0
+    for md, want in OPTION_TABLE_TEST:
+        with tempfile.TemporaryDirectory() as d:
+            Path(d, "p.md").write_text(md)
+            got = option_table_claims(Path(d))
+        flat = {c: sorted(f) for c, f in got.items()}
+        if flat != {c: sorted(f) for c, f in want.items()}:
+            bad += 1
+            print(f"FAIL option-table {md!r} -> {flat}, expected {want}",
+                  file=sys.stderr)
+    return bad
+
+
 def self_test() -> int:
     bad = 0
     for line, want in SELF_TEST:
@@ -329,10 +506,12 @@ def self_test() -> int:
         if got != want:
             bad += 1
             print(f"FAIL join {text!r} -> {got}, expected {want}", file=sys.stderr)
+    bad += option_table_self_test()
     if bad:
         print(f"self-test: {bad} case(s) FAILED", file=sys.stderr)
         return 1
-    print(f"self-test: {len(SELF_TEST)} parse + {len(JOIN_TEST)} join case(s) OK")
+    print(f"self-test: {len(SELF_TEST)} parse + {len(JOIN_TEST)} join + "
+          f"{len(OPTION_TABLE_TEST)} option-table case(s) OK")
     return 0
 
 
@@ -381,6 +560,15 @@ def main() -> int:
         return _skip_or_fail(sys.argv, f"check-doc-cli-flags: no docs directory at {DOCS}")
 
     present, absent, cmd_where = shown(DOCS)
+    # Option-table rows are the same kind of claim as an invocation, and
+    # are folded into the same population so one verdict covers both.
+    tabled = option_table_claims(DOCS)
+    table_claims = 0
+    for cmd, flags in tabled.items():
+        for fl, where in flags.items():
+            table_claims += 1
+            present.setdefault(cmd, {}).setdefault(fl, []).extend(where)
+        cmd_where.setdefault(cmd, []).extend(next(iter(flags.values()), []))
     missing: list[tuple[str, str, list[str]]] = []
     stale: list[tuple[str, str | None, list[str]]] = []
     unreadable: list[str] = []
@@ -446,6 +634,7 @@ def main() -> int:
         return 1
 
     print(f"check-doc-cli-flags: {len(help_of)} command(s), {checked} claim(s) "
+          f"({table_claims} from option tables) "
           f"({sum(len(v) for v in present.values())} shown, "
           f"{len(absent)} documented gaps), 0 unknown")
     return 0

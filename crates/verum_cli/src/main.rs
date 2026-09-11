@@ -315,14 +315,15 @@ enum Commands {
         )]
         strict_codegen: bool,
 
-        /// T0693: the process-wide escape hatch from strict-by-default.
+        // Tracking: T0693.
+        /// The process-wide escape hatch from strict-by-default.
         /// Silent degradations (monomorphisation fallback, signature
         /// drift, skipped bodies, const-zero call stubs) are build
         /// errors unless this is set; per-site `VERUM_STRICT_<SITE>=1`
         /// still forces one site strict for A/B measurement.
         #[clap(
             long,
-            help = "Allow degraded builds: silent fallbacks warn instead of failing (T0693)"
+            help = "Allow degraded builds: silent fallbacks warn instead of failing"
         )]
         lenient: bool,
 
@@ -413,8 +414,7 @@ enum Commands {
  ///
  /// All six are implemented by `TestFormat::parse` and emit real
  /// output — the help listed the first three only, so the CI
- /// formats existed and were discoverable nowhere but the website
- /// (T1339).
+ /// formats existed and were discoverable nowhere but the website.
         #[clap(long, value_name = "FMT", default_value = "pretty")]
         format: Text,
  /// Print discovered tests and exit without running them.
@@ -790,7 +790,7 @@ enum Commands {
     },
 
     /// Start interactive notebook (Playbook). `verum play` is the
-    /// same door with the newcomer's name (T0858: one entry command).
+    /// same door with the newcomer's name — one entry command.
     #[command(display_order = 701, visible_alias = "play")]
     Playbook {
  /// Optional .vrbook file to open
@@ -1297,7 +1297,7 @@ enum Commands {
         #[clap(long)]
         kernel_recheck: bool,
 
- /// Run the kernel-soundness corpus check (task #80 / VERUM-TRUST-1).
+ /// Run the kernel-soundness corpus check.
  /// Verifies the Rust-side rule list matches the .vr corpus's
  /// declared rule count, enumerates per-rule proved / admitted
  /// status, and emits parallel Coq + Lean theory files into
@@ -1307,10 +1307,10 @@ enum Commands {
         #[clap(long = "kernel-soundness")]
         kernel_soundness: bool,
 
- /// Render the trust-extension report (FV-18). Walks the
+ /// Render the trust-extension report. Walks the
  /// kernel-soundness corpus and emits a per-rule snapshot
  /// classifying every rule as `proved`, `discharged-by-framework`
- /// or `admitted`.  Post-FV-17 the `admitted` bucket is empty;
+ /// or `admitted`.  The `admitted` bucket is empty today;
  /// non-zero count signals a regression that re-introduced an
  /// open meta-theory dependency.  Output: console summary +
  /// `target/audit-reports/trust-extension/report.json` (always
@@ -1353,7 +1353,7 @@ enum Commands {
         #[clap(long = "strict", requires = "external_prover_replay")]
         external_prover_strict: bool,
 
- /// Run the **differential Lean-checker** replay (FV-3).  Generates
+ /// Run the **differential Lean-checker** replay.  Generates
  /// a battery of certificates, runs each through the Rust kernel
  /// (`Certificate::verify`) and the Lean ReferenceChecker
  /// (`VerumKernel.verifyCertificate`), compares verdicts cert-by-
@@ -1364,7 +1364,7 @@ enum Commands {
         #[clap(long = "differential-lean-checker")]
         differential_lean_checker: bool,
 
- /// kernel_v0 roster audit (task #154 / Phase 3).
+ /// kernel_v0 roster audit.
  /// Walks the canonical 10-rule kernel_v0 manifest and the
  /// `core/verify/kernel_v0/rules/` directory on disk.
  /// Reports per-rule (Proved / Admitted with IOU) and the
@@ -1375,7 +1375,7 @@ enum Commands {
         #[clap(long = "kernel-v0-roster")]
         kernel_v0_roster: bool,
 
- /// dependent-theorems query (task #188). Given an axiom
+ /// dependent-theorems query. Given an axiom
  /// name, walks the workspace apply-graph and lists every
  /// theorem whose transitive proof depends on the axiom.
  /// Mathematician-facing utility — when an axiom rejects or
@@ -1387,7 +1387,7 @@ enum Commands {
         dependent_theorems: Option<String>,
 
  /// Codegen-pass kernel-discharge attestation audit
- /// (task #162 / CompCert-style verified compilation).
+ /// (CompCert-style verified compilation).
  /// Walks the canonical 6-pass codegen manifest from
  /// `verum_kernel::codegen_attestation` and reports per-pass
  /// status (Discharged / AdmittedWithIOU / NotYetAttested).
@@ -1400,7 +1400,7 @@ enum Commands {
         codegen_attestation: bool,
 
  /// Differential-kernel cross-implementation audit
- /// (task #159 / Rust↔Verum self-hosted kernel agreement).
+ /// (Rust↔Verum self-hosted kernel agreement).
  /// Runs every kernel_v0 rule's canonical certificate through
  /// the Rust trusted base (`verum_kernel::proof_checker`) AND
  /// the Verum-self-hosted kernel (`core/verify/kernel_v0/`).
@@ -1508,7 +1508,7 @@ enum Commands {
         #[clap(long = "arch-corpus")]
         arch_corpus: bool,
 
- /// Run the bridge-discharge audit (task #134 / MSFS-L4.1).
+ /// Run the bridge-discharge audit.
  /// Walks every `apply kernel_*_strict(args)` invocation in the
  /// corpus's proof bodies and replays each literal-arg call
  /// through `verum_kernel::dispatch_intrinsic`. Reports
@@ -1518,7 +1518,7 @@ enum Commands {
  /// non-zero on any false discharge or on bridges cited
  /// without a dispatcher entry. This is the observability
  /// layer for L4 promotion; the elaborator-time wiring that
- /// makes the verdict load-bearing at compile time is task #135.
+ /// makes the verdict load-bearing at compile time is separate.
         #[clap(long = "bridge-discharge")]
         bridge_discharge: bool,
 
@@ -1548,7 +1548,7 @@ enum Commands {
         #[clap(long = "proof-archive")]
         proof_archive: bool,
 
- /// Run the runtime ν-monotonicity drive (task #139 / MSFS-L4.6).
+ /// Run the runtime ν-monotonicity drive.
  /// For every theorem-shaped item with a `@verify(<strategy>)`
  /// annotation, dispatches the obligation at every backbone
  /// strategy from `Runtime` up to and including the declared
@@ -1562,7 +1562,7 @@ enum Commands {
         #[clap(long = "ladder-monotonicity")]
         ladder_monotonicity: bool,
 
- /// Run the cross-format roundtrip audit (task #138 / MSFS-L4.5).
+ /// Run the cross-format roundtrip audit.
  /// Walks every `@theorem`/`@lemma`/`@corollary` in the
  /// project, emits per-theorem `.v` (Coq) and `.lean` (Lean 4)
  /// files into `target/audit-reports/cross-format-roundtrip/`,
@@ -1575,7 +1575,7 @@ enum Commands {
         #[clap(long = "cross-format-roundtrip")]
         cross_format_roundtrip: bool,
 
- /// Force docker backend for the cross-format gate (#149 / MSFS-L4.15).
+ /// Force docker backend for the cross-format gate.
  /// Without this flag the gate uses host PATH-resolved coqc/lean,
  /// surfacing `tool_missing` if absent. With `--docker`, foreign
  /// tools run inside their canonical container images
@@ -1639,8 +1639,8 @@ enum Commands {
         #[clap(long = "bundle")]
         bundle: bool,
 
- /// Run the apply-graph transitive bridge-discharge audit
- /// (task #150 / MSFS-L4.13). Walks every theorem in the
+ /// Run the apply-graph transitive bridge-discharge audit.
+ /// Walks every theorem in the
  /// project and classifies its TRANSITIVE apply-chain leaves
  /// — each `apply <symbol>(args)` resolves through the
  /// workspace symbol table to its body; the recursion
@@ -1673,7 +1673,7 @@ enum Commands {
  /// the per-theorem coord audit is
  /// **default-on**; the behaviour is stated in full below rather than
  /// cited, because the document that citation named is not in this
- /// repository (T1350).
+ /// repository.
  /// Bare `verum audit` runs dependency-audit + coord-audit
  /// together; pass `--no-coord` to skip the coord pass.
  /// `--coord` (this flag) keeps its legacy meaning of
@@ -2066,7 +2066,7 @@ enum ArchCommands {
     /// Answer "what may the code at this path do?" — the inferred
     /// capability surface (row-solved, transitive), the
     /// `@arch_module` pin, and the two-direction judgment between
-    /// them (T0848). `--json` is the append-only machine contract
+    /// them. `--json` is the append-only machine contract
     /// for coding agents (the ask → patch → diff cycle).
     Query {
         /// Path to a `.vr` file to query.
