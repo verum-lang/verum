@@ -34,7 +34,9 @@ theorem field_missing_nonzero_fail(a: Rational, b: Rational):
 
 /// Field cannot prove ordering
 // @test: verify-fail
-// @expected-error: field cannot prove inequalities
+// @note: the per-theorem annotation said "field cannot prove inequalities" — a leftover from
+//   when these lived in `<tactic>_tactic.vr` with one pair each. The
+//   header above asserts what the runner checks for every theorem here.
 theorem field_ordering_fail(a: Rational)
     requires a > 0
     ensures 1/a > 0

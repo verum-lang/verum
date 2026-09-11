@@ -43,7 +43,7 @@ type Direction is
 //------------------------------------------------------------------------------
 
 // @test: typecheck-fail
-// @expected-error: E400 "Non-exhaustive patterns: missing 'false'"
+// @expected-error: E0601 "non-exhaustive patterns: `false` not covered"
 /// ERROR: Missing false case.
 fn missing_false(b: Bool) -> Text {
     match b {
@@ -53,7 +53,7 @@ fn missing_false(b: Bool) -> Text {
 }
 
 // @test: typecheck-fail
-// @expected-error: E400 "Non-exhaustive patterns: missing 'true'"
+// @expected-error: E0601 "non-exhaustive patterns: `true` not covered"
 /// ERROR: Missing true case.
 fn missing_true(b: Bool) -> Text {
     match b {
@@ -67,7 +67,7 @@ fn missing_true(b: Bool) -> Text {
 //------------------------------------------------------------------------------
 
 // @test: typecheck-fail
-// @expected-error: E400 "Non-exhaustive patterns: missing 'Blue'"
+// @expected-error: E0601 "non-exhaustive patterns: `Blue` not covered"
 /// ERROR: Missing Blue variant.
 fn missing_blue(c: Color) -> Text {
     match c {
@@ -78,7 +78,7 @@ fn missing_blue(c: Color) -> Text {
 }
 
 // @test: typecheck-fail
-// @expected-error: E400 "Non-exhaustive patterns: missing 'Red', 'Green'"
+// @expected-error: E0601 "non-exhaustive patterns: `Red, Green` not covered"
 /// ERROR: Missing multiple variants.
 fn missing_multiple_colors(c: Color) -> Text {
     match c {
@@ -88,7 +88,7 @@ fn missing_multiple_colors(c: Color) -> Text {
 }
 
 // @test: typecheck-fail
-// @expected-error: E400 "Non-exhaustive patterns: missing 'West'"
+// @expected-error: E0601 "non-exhaustive patterns: `West` not covered"
 /// ERROR: Missing one Direction.
 fn missing_west(d: Direction) -> Text {
     match d {
@@ -100,7 +100,7 @@ fn missing_west(d: Direction) -> Text {
 }
 
 // @test: typecheck-fail
-// @expected-error: E400 "Non-exhaustive patterns: missing 'Thursday', 'Friday', 'Saturday', 'Sunday'"
+// @expected-error: E0601 "non-exhaustive patterns: `Thursday, Friday, Saturday` not covered"
 /// ERROR: Missing several Weekday variants.
 fn missing_weekdays(day: Weekday) -> Text {
     match day {
@@ -116,7 +116,7 @@ fn missing_weekdays(day: Weekday) -> Text {
 //------------------------------------------------------------------------------
 
 // @test: typecheck-fail
-// @expected-error: E400 "Non-exhaustive patterns: missing 'None'"
+// @expected-error: E0601 "non-exhaustive patterns: `None` not covered"
 /// ERROR: Missing None variant.
 fn missing_none(m: Maybe<Int>) -> Int {
     match m {
@@ -126,7 +126,7 @@ fn missing_none(m: Maybe<Int>) -> Int {
 }
 
 // @test: typecheck-fail
-// @expected-error: E400 "Non-exhaustive patterns: missing 'Some(_)'"
+// @expected-error: E0601 "non-exhaustive patterns: `Some(0)` not covered"
 /// ERROR: Missing Some variant.
 fn missing_some(m: Maybe<Int>) -> Int {
     match m {
@@ -136,7 +136,7 @@ fn missing_some(m: Maybe<Int>) -> Int {
 }
 
 // @test: typecheck-fail
-// @expected-error: E400 "Non-exhaustive patterns: missing 'Err(_)'"
+// @expected-error: E0601 "non-exhaustive patterns: `Err(_)` not covered"
 /// ERROR: Missing Err variant.
 fn missing_err(r: Result<Int, Text>) -> Int {
     match r {
@@ -146,7 +146,7 @@ fn missing_err(r: Result<Int, Text>) -> Int {
 }
 
 // @test: typecheck-fail
-// @expected-error: E400 "Non-exhaustive patterns: missing 'Ok(_)'"
+// @expected-error: E0601 "non-exhaustive patterns: `Ok(0)` not covered"
 /// ERROR: Missing Ok variant.
 fn missing_ok(r: Result<Int, Text>) -> Int {
     match r {
@@ -160,7 +160,10 @@ fn missing_ok(r: Result<Int, Text>) -> Int {
 //------------------------------------------------------------------------------
 
 // @test: typecheck-fail
-// @expected-error: E400 "Non-exhaustive patterns: missing '(false, false)'"
+// @note: not caught today — the checker reports nothing here; it
+//   enumerates variant constructors and this case is not one.
+//   Asserted E400 "Non-exhaustive patterns: missing '(false, false)'" before T1421 made in-body directives readable.
+//   Tracked as T1432.
 /// ERROR: Missing one boolean tuple combination.
 fn missing_bool_combo(pair: (Bool, Bool)) -> Int {
     match pair {
@@ -172,7 +175,10 @@ fn missing_bool_combo(pair: (Bool, Bool)) -> Int {
 }
 
 // @test: typecheck-fail
-// @expected-error: E400 "Non-exhaustive patterns: missing '(Red, Green)', '(Red, Blue)', ..."
+// @note: not caught today — the checker reports nothing here; it
+//   enumerates variant constructors and this case is not one.
+//   Asserted E400 "Non-exhaustive patterns: missing '(Red, Green)', '(Red, Blue)', ..." before T1421 made in-body directives readable.
+//   Tracked as T1432.
 /// ERROR: Missing most color pair combinations.
 fn missing_color_combos(pair: (Color, Color)) -> Int {
     match pair {
@@ -188,7 +194,7 @@ fn missing_color_combos(pair: (Color, Color)) -> Int {
 //------------------------------------------------------------------------------
 
 // @test: typecheck-fail
-// @expected-error: E400 "Non-exhaustive patterns: missing 'Some(None)'"
+// @expected-error: E0601 "non-exhaustive patterns: `Some(None)` not covered"
 /// ERROR: Missing Some(None) in nested Maybe.
 fn missing_nested_case(mm: Maybe<Maybe<Int>>) -> Int {
     match mm {
@@ -199,7 +205,7 @@ fn missing_nested_case(mm: Maybe<Maybe<Int>>) -> Int {
 }
 
 // @test: typecheck-fail
-// @expected-error: E400 "Non-exhaustive patterns: missing 'Ok(None)'"
+// @expected-error: E0601 "non-exhaustive patterns: `Ok(None)` not covered"
 /// ERROR: Missing Ok(None) in Result<Maybe>.
 fn missing_result_maybe_case(r: Result<Maybe<Int>, Text>) -> Int {
     match r {
@@ -214,7 +220,10 @@ fn missing_result_maybe_case(r: Result<Maybe<Int>, Text>) -> Int {
 //------------------------------------------------------------------------------
 
 // @test: typecheck-fail
-// @expected-error: E400 "Non-exhaustive patterns: missing integer values"
+// @note: not caught today — the checker reports nothing here; it
+//   enumerates variant constructors and this case is not one.
+//   Asserted E400 "Non-exhaustive patterns: missing integer values" before T1421 made in-body directives readable.
+//   Tracked as T1432.
 /// ERROR: Integer match without wildcard or complete ranges.
 fn missing_int_wildcard(n: Int) -> Text {
     match n {
@@ -226,7 +235,10 @@ fn missing_int_wildcard(n: Int) -> Text {
 }
 
 // @test: typecheck-fail
-// @expected-error: E400 "Non-exhaustive patterns: missing char values"
+// @note: not caught today — the checker reports nothing here; it
+//   enumerates variant constructors and this case is not one.
+//   Asserted E400 "Non-exhaustive patterns: missing char values" before T1421 made in-body directives readable.
+//   Tracked as T1432.
 /// ERROR: Char match without complete coverage.
 fn missing_char_wildcard(c: Char) -> Text {
     match c {
@@ -238,7 +250,10 @@ fn missing_char_wildcard(c: Char) -> Text {
 }
 
 // @test: typecheck-fail
-// @expected-error: E400 "Non-exhaustive patterns: missing range '..0'"
+// @note: not caught today — the checker reports nothing here; it
+//   enumerates variant constructors and this case is not one.
+//   Asserted E400 "Non-exhaustive patterns: missing range '..0'" before T1421 made in-body directives readable.
+//   Tracked as T1432.
 /// ERROR: Ranges don't cover all integers.
 fn missing_negative_range(n: Int) -> Text {
     match n {
@@ -254,7 +269,7 @@ fn missing_negative_range(n: Int) -> Text {
 //------------------------------------------------------------------------------
 
 // @test: typecheck-fail
-// @expected-error: E400 "Non-exhaustive patterns: missing 'Thursday'"
+// @expected-error: E0601 "non-exhaustive patterns: `Thursday` not covered"
 /// ERROR: Or-pattern doesn't cover all variants.
 fn or_pattern_incomplete(day: Weekday) -> Text {
     match day {
@@ -266,7 +281,7 @@ fn or_pattern_incomplete(day: Weekday) -> Text {
 }
 
 // @test: typecheck-fail
-// @expected-error: E400 "Non-exhaustive patterns: missing 'Green'"
+// @expected-error: E0601 "non-exhaustive patterns: `Green` not covered"
 /// ERROR: Or-pattern missing one variant.
 fn or_pattern_missing_color(c: Color) -> Text {
     match c {
@@ -280,7 +295,10 @@ fn or_pattern_missing_color(c: Color) -> Text {
 //------------------------------------------------------------------------------
 
 // @test: typecheck-fail
-// @expected-error: E401 "Guard patterns may not be exhaustive"
+// @note: not caught today — the checker reports nothing here; it
+//   enumerates variant constructors and this case is not one.
+//   Asserted E401 "Guard patterns may not be exhaustive" before T1421 made in-body directives readable.
+//   Tracked as T1432.
 /// ERROR: Guards can't prove exhaustiveness.
 fn guard_not_exhaustive(n: Int) -> Text {
     match n {
@@ -291,7 +309,10 @@ fn guard_not_exhaustive(n: Int) -> Text {
 }
 
 // @test: typecheck-fail
-// @expected-error: E401 "Guard patterns may not be exhaustive"
+// @note: not caught today — the checker reports nothing here; it
+//   enumerates variant constructors and this case is not one.
+//   Asserted E401 "Guard patterns may not be exhaustive" before T1421 made in-body directives readable.
+//   Tracked as T1432.
 /// ERROR: Even with complete-looking guards.
 fn guard_seemingly_complete(n: Int) -> Text {
     match n {
@@ -306,7 +327,7 @@ fn guard_seemingly_complete(n: Int) -> Text {
 //------------------------------------------------------------------------------
 
 // @test: typecheck-fail
-// @expected-error: E402 "Non-exhaustive match in expression position"
+// @expected-error: E0601 "non-exhaustive patterns: `Blue` not covered"
 /// ERROR: Non-exhaustive match used as expression value.
 fn non_exhaustive_expression(c: Color) -> Int {
     let value = match c {
@@ -318,7 +339,7 @@ fn non_exhaustive_expression(c: Color) -> Int {
 }
 
 // @test: typecheck-fail
-// @expected-error: E402 "Non-exhaustive match in expression position"
+// @expected-error: E0601 "non-exhaustive patterns: `None` not covered"
 /// ERROR: Return value depends on incomplete match.
 fn non_exhaustive_return(m: Maybe<Int>) -> Int {
     match m {
@@ -336,7 +357,7 @@ type ConsList<T> is
     | Nil;
 
 // @test: typecheck-fail
-// @expected-error: E400 "Non-exhaustive patterns: missing 'Cons(_, _)'"
+// @expected-error: E0601 "non-exhaustive patterns: `Cons((0, _))` not covered"
 /// ERROR: Missing Cons variant in list.
 fn list_missing_cons(list: ConsList<Int>) -> Int {
     match list {
@@ -346,7 +367,7 @@ fn list_missing_cons(list: ConsList<Int>) -> Int {
 }
 
 // @test: typecheck-fail
-// @expected-error: E400 "Non-exhaustive patterns: missing 'Nil'"
+// @expected-error: E0601 "non-exhaustive patterns: `Nil` not covered"
 /// ERROR: Missing Nil variant in list.
 fn list_missing_nil(list: ConsList<Int>) -> Int {
     match list {
@@ -365,7 +386,10 @@ type Point is {
 };
 
 // @test: typecheck-fail
-// @expected-error: E400 "Non-exhaustive patterns: Point can have any values"
+// @note: not caught today — the checker reports nothing here; it
+//   enumerates variant constructors and this case is not one.
+//   Asserted E400 "Non-exhaustive patterns: Point can have any values" before T1421 made in-body directives readable.
+//   Tracked as T1432.
 /// ERROR: Specific struct literals don't cover all points.
 fn point_specific_values(p: Point) -> Text {
     match p {

@@ -36,7 +36,9 @@ theorem ring_inequality_fail(a: Int, b: Int)
 
 /// Ring cannot prove divisibility without field
 // @test: verify-fail
-// @expected-error: requires field tactic
+// @note: the per-theorem annotation said "requires field tactic" — a leftover from
+//   when these lived in `<tactic>_tactic.vr` with one pair each. The
+//   header above asserts what the runner checks for every theorem here.
 theorem ring_division_fail(a: Int)
     requires a != 0
     ensures a / a == 1

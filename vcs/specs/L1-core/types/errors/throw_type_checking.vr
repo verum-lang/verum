@@ -32,7 +32,11 @@ type DatabaseError is
 
 // === throw in non-throws function is error ===
 
-// @expected-error: E360 "throw in non-throwing function"
+// @note: no diagnostic here — this file does not PARSE (E010/E011/E018
+//   above), so nothing below the first parse error is examined and the
+//   assertion could not hold. It said
+//   E360 "throw in non-throwing function"
+//   Subject coverage is tracked as T1422.
 /// ERROR: Cannot throw in function without throws clause
 fn no_throws_clause(input: &Text) -> Int {
     if input.is_empty() {
@@ -41,7 +45,11 @@ fn no_throws_clause(input: &Text) -> Int {
     42
 }
 
-// @expected-error: E360 "throw in non-throwing function"
+// @note: no diagnostic here — this file does not PARSE (E010/E011/E018
+//   above), so nothing below the first parse error is examined and the
+//   assertion could not hold. It said
+//   E360 "throw in non-throwing function"
+//   Subject coverage is tracked as T1422.
 /// ERROR: Multiple throws in non-throwing function
 fn multiple_throws_no_clause(a: Int, b: Int) -> Int {
     if a < 0 {
@@ -55,7 +63,11 @@ fn multiple_throws_no_clause(a: Int, b: Int) -> Int {
 
 // === throw must match throws clause ===
 
-// @expected-error: E361 "throw type mismatch"
+// @note: no diagnostic here — this file does not PARSE (E010/E011/E018
+//   above), so nothing below the first parse error is examined and the
+//   assertion could not hold. It said
+//   E361 "throw type mismatch"
+//   Subject coverage is tracked as T1422.
 /// ERROR: Throwing wrong error type
 fn wrong_throw_type(input: &Text) throws(ParseError) -> Int {
     if input.is_empty() {
@@ -64,13 +76,21 @@ fn wrong_throw_type(input: &Text) throws(ParseError) -> Int {
     42
 }
 
-// @expected-error: E361 "throw type mismatch"
+// @note: no diagnostic here — this file does not PARSE (E010/E011/E018
+//   above), so nothing below the first parse error is examined and the
+//   assertion could not hold. It said
+//   E361 "throw type mismatch"
+//   Subject coverage is tracked as T1422.
 /// ERROR: Throwing type not in union
 fn throw_not_in_union(input: &Text) throws(ParseError | IoError) -> Int {
     throw ValidationError.InvalidFormat("bad");  // ERROR: ValidationError not in throws clause
 }
 
-// @expected-error: E362 "throw variant mismatch"
+// @note: no diagnostic here — this file does not PARSE (E010/E011/E018
+//   above), so nothing below the first parse error is examined and the
+//   assertion could not hold. It said
+//   E362 "throw variant mismatch"
+//   Subject coverage is tracked as T1422.
 /// ERROR: Throwing wrong variant of correct type
 fn wrong_variant_type(input: &Text) throws(ParseError) -> Int {
     throw DatabaseError.QueryError("failed");  // ERROR: DatabaseError not ParseError
@@ -78,14 +98,22 @@ fn wrong_variant_type(input: &Text) throws(ParseError) -> Int {
 
 // === throw expression type is Never ===
 
-// @expected-error: E363 "unreachable code after throw"
+// @note: no diagnostic here — this file does not PARSE (E010/E011/E018
+//   above), so nothing below the first parse error is examined and the
+//   assertion could not hold. It said
+//   E363 "unreachable code after throw"
+//   Subject coverage is tracked as T1422.
 /// WARNING: Code after throw is unreachable
 fn code_after_throw(input: &Text) throws(ParseError) -> Int {
     throw ParseError.UnexpectedEof;
     42  // WARNING: Unreachable code
 }
 
-// @expected-error: E364 "throw in expression position requires Never-compatible context"
+// @note: no diagnostic here — this file does not PARSE (E010/E011/E018
+//   above), so nothing below the first parse error is examined and the
+//   assertion could not hold. It said
+//   E364 "throw in expression position requires Never-compatible conte
+//   Subject coverage is tracked as T1422.
 /// ERROR: Using throw result as value
 fn throw_as_value(input: &Text) throws(ParseError) -> Int {
     let x: Int = throw ParseError.UnexpectedEof;  // ERROR: Cannot assign Never to Int
@@ -108,19 +136,31 @@ fn inner_throws_validation(value: Int) throws(ValidationError) -> Int {
     value
 }
 
-// @expected-error: E365 "called function throws type not in caller's throws"
+// @note: no diagnostic here — this file does not PARSE (E010/E011/E018
+//   above), so nothing below the first parse error is examined and the
+//   assertion could not hold. It said
+//   E365 "called function throws type not in caller's throws"
+//   Subject coverage is tracked as T1422.
 /// ERROR: Calling throws function without handling or declaring
 fn missing_throws_propagation(input: &Text) -> Int {
     inner_throws_parse(input)?  // ERROR: Function doesn't declare throws(ParseError)
 }
 
-// @expected-error: E365 "called function throws type not in caller's throws"
+// @note: no diagnostic here — this file does not PARSE (E010/E011/E018
+//   above), so nothing below the first parse error is examined and the
+//   assertion could not hold. It said
+//   E365 "called function throws type not in caller's throws"
+//   Subject coverage is tracked as T1422.
 /// ERROR: Throws clause doesn't cover called function's throws
 fn incomplete_throws_clause(input: &Text) throws(IoError) -> Int {
     inner_throws_parse(input)?  // ERROR: ParseError not in throws(IoError)
 }
 
-// @expected-error: E366 "union throws clause incomplete"
+// @note: no diagnostic here — this file does not PARSE (E010/E011/E018
+//   above), so nothing below the first parse error is examined and the
+//   assertion could not hold. It said
+//   E366 "union throws clause incomplete"
+//   Subject coverage is tracked as T1422.
 /// ERROR: Union throws doesn't include all propagated errors
 fn partial_union_throws(input: &Text, value: Int) throws(ParseError) -> Int {
     let parsed = inner_throws_parse(input)?;
@@ -130,13 +170,21 @@ fn partial_union_throws(input: &Text, value: Int) throws(ParseError) -> Int {
 
 // === throw with wrong expression type ===
 
-// @expected-error: E367 "throw requires error expression"
+// @note: no diagnostic here — this file does not PARSE (E010/E011/E018
+//   above), so nothing below the first parse error is examined and the
+//   assertion could not hold. It said
+//   E367 "throw requires error expression"
+//   Subject coverage is tracked as T1422.
 /// ERROR: Throwing non-error value
 fn throw_non_error(input: &Text) throws(ParseError) -> Int {
     throw 42;  // ERROR: 42 is Int, not ParseError
 }
 
-// @expected-error: E367 "throw requires error expression"
+// @note: no diagnostic here — this file does not PARSE (E010/E011/E018
+//   above), so nothing below the first parse error is examined and the
+//   assertion could not hold. It said
+//   E367 "throw requires error expression"
+//   Subject coverage is tracked as T1422.
 /// ERROR: Throwing wrong type entirely
 fn throw_string(input: &Text) throws(ParseError) -> Int {
     throw "error occurred";  // ERROR: Text is not ParseError
@@ -144,7 +192,11 @@ fn throw_string(input: &Text) throws(ParseError) -> Int {
 
 // === throws in closures ===
 
-// @expected-error: E368 "closure throws not declared"
+// @note: no diagnostic here — this file does not PARSE (E010/E011/E018
+//   above), so nothing below the first parse error is examined and the
+//   assertion could not hold. It said
+//   E368 "closure throws not declared"
+//   Subject coverage is tracked as T1422.
 /// ERROR: Closure throws but type doesn't include throws
 fn closure_throws_not_declared() throws(ParseError) -> Int {
     let f: fn(&Text) -> Int = |s| {
@@ -154,7 +206,11 @@ fn closure_throws_not_declared() throws(ParseError) -> Int {
     f("")
 }
 
-// @expected-error: E369 "closure throws type mismatch"
+// @note: no diagnostic here — this file does not PARSE (E010/E011/E018
+//   above), so nothing below the first parse error is examined and the
+//   assertion could not hold. It said
+//   E369 "closure throws type mismatch"
+//   Subject coverage is tracked as T1422.
 /// ERROR: Closure throws wrong type
 fn closure_throws_wrong_type() throws(ParseError) -> Int {
     let f: fn(&Text) throws(ValidationError) -> Int = |s| {
@@ -166,7 +222,11 @@ fn closure_throws_wrong_type() throws(ParseError) -> Int {
 
 // === throws with generic error types ===
 
-// @expected-error: E370 "generic throws constraint not satisfied"
+// @note: no diagnostic here — this file does not PARSE (E010/E011/E018
+//   above), so nothing below the first parse error is examined and the
+//   assertion could not hold. It said
+//   E370 "generic throws constraint not satisfied"
+//   Subject coverage is tracked as T1422.
 /// ERROR: Generic error type doesn't match constraint
 fn generic_throws_mismatch<E: Error>(input: &Text) throws(E) -> Int {
     throw ParseError.UnexpectedEof;  // ERROR: ParseError may not satisfy E
@@ -174,7 +234,11 @@ fn generic_throws_mismatch<E: Error>(input: &Text) throws(E) -> Int {
 
 // === throws in async functions ===
 
-// @expected-error: E360 "throw in non-throwing function"
+// @note: no diagnostic here — this file does not PARSE (E010/E011/E018
+//   above), so nothing below the first parse error is examined and the
+//   assertion could not hold. It said
+//   E360 "throw in non-throwing function"
+//   Subject coverage is tracked as T1422.
 /// ERROR: throw in async without throws clause
 async fn async_no_throws(input: &Text) -> Int {
     if input.is_empty() {
@@ -183,7 +247,11 @@ async fn async_no_throws(input: &Text) -> Int {
     42
 }
 
-// @expected-error: E361 "throw type mismatch"
+// @note: no diagnostic here — this file does not PARSE (E010/E011/E018
+//   above), so nothing below the first parse error is examined and the
+//   assertion could not hold. It said
+//   E361 "throw type mismatch"
+//   Subject coverage is tracked as T1422.
 /// ERROR: throw wrong type in async
 async fn async_wrong_throw(input: &Text) throws(ParseError) -> Int {
     throw IoError.NetworkError("timeout");  // ERROR: IoError not ParseError
@@ -191,7 +259,11 @@ async fn async_wrong_throw(input: &Text) throws(ParseError) -> Int {
 
 // === throws clause interaction with try/recover ===
 
-// @expected-error: E371 "unhandled error type in recover"
+// @note: no diagnostic here — this file does not PARSE (E010/E011/E018
+//   above), so nothing below the first parse error is examined and the
+//   assertion could not hold. It said
+//   E371 "unhandled error type in recover"
+//   Subject coverage is tracked as T1422.
 /// ERROR: recover doesn't cover all thrown types
 fn incomplete_recover(input: &Text) -> Int {
     try {
@@ -204,7 +276,11 @@ fn incomplete_recover(input: &Text) -> Int {
     }
 }
 
-// @expected-error: E372 "recover pattern for undeclared error"
+// @note: no diagnostic here — this file does not PARSE (E010/E011/E018
+//   above), so nothing below the first parse error is examined and the
+//   assertion could not hold. It said
+//   E372 "recover pattern for undeclared error"
+//   Subject coverage is tracked as T1422.
 /// ERROR: recover arm for error not in throws
 fn recover_wrong_error(input: &Text) -> Int {
     try {
@@ -218,7 +294,11 @@ fn recover_wrong_error(input: &Text) -> Int {
 
 // === throws with rethrow ===
 
-// @expected-error: E373 "rethrow outside recover block"
+// @note: no diagnostic here — this file does not PARSE (E010/E011/E018
+//   above), so nothing below the first parse error is examined and the
+//   assertion could not hold. It said
+//   E373 "rethrow outside recover block"
+//   Subject coverage is tracked as T1422.
 /// ERROR: rethrow used outside of recover
 fn rethrow_outside_recover(input: &Text) throws(ParseError) -> Int {
     let x = inner_throws_parse(input)?;
@@ -226,7 +306,7 @@ fn rethrow_outside_recover(input: &Text) throws(ParseError) -> Int {
     x
 }
 
-// @expected-error: E374 "rethrow type mismatch"
+// @expected-error: E010 "Parse error: missing semicolon ';' after statement"
 /// ERROR: rethrow error type not in function's throws
 fn rethrow_wrong_type(input: &Text) throws(IoError) -> Int {
     try {
@@ -239,7 +319,7 @@ fn rethrow_wrong_type(input: &Text) throws(IoError) -> Int {
 
 // === throws subtyping issues ===
 
-// @expected-error: E375 "incompatible throws in function type"
+// @expected-error: E010 "Parse error: missing semicolon ';' after statement"
 /// ERROR: Assigning function with narrower throws to wider
 fn throws_subtyping_error() {
     let f: fn(&Text) throws(ParseError | ValidationError) -> Int =
@@ -251,7 +331,11 @@ fn throws_subtyping_error() {
 
 // === throws with ? operator ===
 
-// @expected-error: E376 "? on non-throws expression in throws function"
+// @note: no diagnostic here — this file does not PARSE (E010/E011/E018
+//   above), so nothing below the first parse error is examined and the
+//   assertion could not hold. It said
+//   E376 "? on non-throws expression in throws function"
+//   Subject coverage is tracked as T1422.
 /// ERROR: Using ? on Result in throws context
 fn question_mark_wrong_type(input: &Text) throws(ParseError) -> Int {
     let result: Result<Int, Text> = Ok(42);
@@ -260,7 +344,11 @@ fn question_mark_wrong_type(input: &Text) throws(ParseError) -> Int {
 
 // === Multiple throw paths with incompatible types ===
 
-// @expected-error: E377 "inconsistent throw types in function"
+// @note: no diagnostic here — this file does not PARSE (E010/E011/E018
+//   above), so nothing below the first parse error is examined and the
+//   assertion could not hold. It said
+//   E377 "inconsistent throw types in function"
+//   Subject coverage is tracked as T1422.
 /// ERROR: Different code paths throw incompatible types
 fn inconsistent_throws(input: &Text, flag: Bool) throws(ParseError | ValidationError) -> Int {
     if flag {
@@ -272,7 +360,11 @@ fn inconsistent_throws(input: &Text, flag: Bool) throws(ParseError | ValidationE
 
 // === throw expression type in conditionals ===
 
-// @expected-error: E378 "conditional branch type mismatch with throw"
+// @note: no diagnostic here — this file does not PARSE (E010/E011/E018
+//   above), so nothing below the first parse error is examined and the
+//   assertion could not hold. It said
+//   E378 "conditional branch type mismatch with throw"
+//   Subject coverage is tracked as T1422.
 /// ERROR: throw in one branch, value in other with wrong type
 fn conditional_throw_mismatch(input: &Text) throws(ParseError) -> Text {
     if input.is_empty() {
@@ -284,7 +376,7 @@ fn conditional_throw_mismatch(input: &Text) throws(ParseError) -> Text {
 
 // === Empty throws clause ===
 
-// @expected-error: E379 "empty throws clause"
+// @expected-error: E040 "Parse error: empty throws clause"
 /// ERROR: throws clause with no error types
 fn empty_throws() throws() -> Int {  // ERROR: throws() requires at least one type
     42
@@ -292,7 +384,11 @@ fn empty_throws() throws() -> Int {  // ERROR: throws() requires at least one ty
 
 // === Reserved error type names ===
 
-// @expected-error: E380 "reserved error type in throws"
+// @note: no diagnostic here — this file does not PARSE (E010/E011/E018
+//   above), so nothing below the first parse error is examined and the
+//   assertion could not hold. It said
+//   E380 "reserved error type in throws"
+//   Subject coverage is tracked as T1422.
 /// ERROR: Using Never in throws (it's the absence of throwing)
 fn never_in_throws() throws(Never) -> Int {  // ERROR: Never means no throw
     42

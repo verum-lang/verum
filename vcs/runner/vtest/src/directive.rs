@@ -1092,13 +1092,30 @@ impl TestDirectives {
                 continue;
             }
 
-            // Skip directives after we've passed the header
-            // (but still process multi-line blocks that were started in the header)
-            if past_header && current_block.is_none() {
+            let comment = line.trim_start_matches("//").trim();
+
+            // BELOW THE HEADER, ONLY AN EXPECTATION IS READ.
+            //
+            // The skip this narrows exists for a good reason, stated where it
+            // was written: a `@skip:` inside a function body must not be taken
+            // as the file's skip directive.  That reason covers the directives
+            // that describe the FILE — `@test:`, `@level:`, `@tier:`, `@skip:`
+            // — and not the ones that assert a DIAGNOSTIC.
+            //
+            // Measured 2026-09-11 (T1421): 145 `@expected-error:` /
+            // `@expected-warning:` lines sit below the header across ten files,
+            // written one per case on the line above the construct they are
+            // about.  Not one was read.  In three of those files EVERY
+            // assertion is in the body, so the file asserted nothing at all
+            // and passed on any failure — and all three are L1, the level CI
+            // holds to 100%.
+            if past_header
+                && current_block.is_none()
+                && !comment.starts_with("@expected-error:")
+                && !comment.starts_with("@expected-warning:")
+            {
                 continue;
             }
-
-            let comment = line.trim_start_matches("//").trim();
 
             // Check for block end markers first
             if comment == "@expected-stdout-end" {
@@ -1832,6 +1849,38 @@ mod tests {
         let text = err.to_string();
         assert!(text.contains("line 2"), "{text}");
         assert!(text.contains("@expect"), "{text}");
+    }
+
+    /// An `@expected-error:` written beside the case it is about — the layout
+    /// ten specs use, one assertion per construct — is read. It was not, and
+    /// in three of those files EVERY assertion sat there, so the file asserted
+    /// nothing (T1421).
+    #[test]
+    fn an_expectation_below_the_header_is_read() {
+        let source = "// @test: typecheck-fail\n\
+                      // @level: L0\n\
+                      fn a() {\n\
+                      // @expected-error: E400\n\
+                      let x: Int = \"s\";\n\
+                      }\n";
+        let d = TestDirectives::parse(source, "x.vr".to_string().into()).unwrap();
+        assert_eq!(d.expected_errors.len(), 1, "{:?}", d.expected_errors);
+        assert_eq!(d.expected_errors[0].code.as_deref(), Some("E400"));
+    }
+
+    /// …and the skip that narrowing preserves: a directive DESCRIBING THE FILE
+    /// is still header-only, which is why `@skip:` inside a function body does
+    /// not skip the spec.
+    #[test]
+    fn a_file_level_directive_below_the_header_is_still_ignored() {
+        let source = "// @test: typecheck-pass\n\
+                      fn a() {\n\
+                      // @skip: not the file's skip\n\
+                      // @tier: 3\n\
+                      let x = 1;\n\
+                      }\n";
+        let d = TestDirectives::parse(source, "x.vr".to_string().into()).unwrap();
+        assert!(d.skip.is_none(), "{:?}", d.skip);
     }
 
     /// A comment that MENTIONS an attribute is prose, not a directive. These

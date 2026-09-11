@@ -34,7 +34,9 @@ theorem blast_undecidable(f: fn(Nat) -> Nat):
 }
 /// Blast cannot do induction
 // @test: verify-fail
-// @expected-error: requires induction
+// @note: the per-theorem annotation said "requires induction" — a leftover from
+//   when these lived in `<tactic>_tactic.vr` with one pair each. The
+//   header above asserts what the runner checks for every theorem here.
 theorem blast_needs_induction(n: Nat): n + 0 == n {
     // Needs structural induction on Nat
     proof by blast  // FAILS
