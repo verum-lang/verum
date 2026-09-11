@@ -65,12 +65,12 @@
 pub mod benchmark;
 pub mod cache;
 pub mod config;
+pub mod contract_gen;
 pub mod differential;
 pub mod directive;
 pub mod discovery;
 pub mod executor;
 pub mod filter;
-pub mod contract_gen;
 pub mod fuzz;
 pub mod isolation;
 pub mod mock;
@@ -121,10 +121,12 @@ pub enum RunnerError {
     /// Forty-four specs were in this state when it was first measured, and
     /// that number was a LOWER BOUND: only the first error per file is
     /// reported, so each repair uncovered the next (T1049).
-    #[error("{0} spec(s) could not be read, so they were neither run nor counted:\n{1}\n  \
+    #[error(
+        "{0} spec(s) could not be read, so they were neither run nor counted:\n{1}\n  \
              A spec that fails to parse its directives is not a skipped test — it is an \
              absent one, and a level cannot claim a percentage of a set it did not read. \
-             Fix the directive, or mark the spec `@skip: <reason>` so it is counted and named.")]
+             Fix the directive, or mark the spec `@skip: <reason>` so it is counted and named."
+    )]
     UnreadableSpecs(usize, Text),
 }
 
@@ -255,6 +257,13 @@ pub struct LiveStats {
     pub skipped: AtomicUsize,
     /// Flag to stop execution (for fail-fast)
     pub should_stop: AtomicBool,
+    /// WHY execution stopped, when it did.
+    ///
+    /// The flag alone reaches the report as silence: the futures that
+    /// see it return without a result, the reporter counts results, and
+    /// the run states a pass rate over the part it finished. The reason
+    /// has to travel with the flag so the report can name it.
+    pub stop_reason: std::sync::Mutex<Option<Text>>,
     /// Start time
     pub start_time: Instant,
 }
@@ -269,6 +278,7 @@ impl LiveStats {
             failed: AtomicUsize::new(0),
             skipped: AtomicUsize::new(0),
             should_stop: AtomicBool::new(false),
+            stop_reason: std::sync::Mutex::new(None),
             start_time: Instant::now(),
         }
     }
@@ -292,6 +302,21 @@ impl LiveStats {
     }
 
     /// Signal to stop execution.
+    /// Stop, and record why so the report can say it.
+    pub fn stop_with(&self, reason: impl Into<Text>) {
+        if let Ok(mut slot) = self.stop_reason.lock() {
+            if slot.is_none() {
+                *slot = Some(reason.into());
+            }
+        }
+        self.stop();
+    }
+
+    /// The reason execution stopped, if it was stopped with one.
+    pub fn stop_reason(&self) -> Option<Text> {
+        self.stop_reason.lock().ok().and_then(|g| g.clone())
+    }
+
     pub fn stop(&self) {
         self.should_stop.store(true, Ordering::SeqCst);
     }
@@ -346,6 +371,8 @@ pub struct RunSummary {
     pub by_level: Map<Level, LevelStats>,
     /// Results by tier
     pub by_tier: Map<Tier, TierStats>,
+    /// Why the run stopped before reaching every discovered spec.
+    pub stopped_early: Option<Text>,
 }
 
 /// Statistics for a level.
@@ -506,7 +533,12 @@ impl VTestRunner {
                             rss / (1024 * 1024),
                             MAX_RSS_BYTES / (1024 * 1024),
                         );
-                        watchdog_stats.stop();
+                        watchdog_stats.stop_with(format!(
+                            "the memory watchdog stopped the run at RSS {} MB (limit {} MB); \
+                             the specs it never reached are the tail of the discovery order",
+                            rss / (1024 * 1024),
+                            MAX_RSS_BYTES / (1024 * 1024),
+                        ));
                         break;
                     }
                 }
@@ -658,6 +690,7 @@ impl VTestRunner {
         let mut summary = RunSummary {
             total,
             duration: start.elapsed(),
+            stopped_early: stats.stop_reason(),
             ..Default::default()
         };
 
@@ -850,7 +883,14 @@ impl VTestRunner {
             .with_colors(self.config.use_colors)
             .with_verbose(self.config.verbose);
 
+        // THE REPORTER COUNTS RESULTS; DISCOVERY COUNTED SPECS. Hand it
+        // both, so a run that stopped early cannot state a pass rate over
+        // the part it finished.
+        let ran = results.len();
         reporter.add_results(results);
+        if summary.total > ran || summary.stopped_early.is_some() {
+            reporter = reporter.with_coverage(summary.total, summary.stopped_early.clone());
+        }
 
         if let Some(ref path) = self.config.output_path {
             reporter.generate_to_file(path, self.config.output_format)?;

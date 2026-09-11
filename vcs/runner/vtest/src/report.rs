@@ -108,6 +108,18 @@ pub struct TestSummary {
     pub by_level: Map<Text, LevelSummary>,
     /// Summary by tier
     pub by_tier: Map<Text, TierSummary>,
+    /// How many specs DISCOVERY found, when that is known and larger
+    /// than the number of results.
+    ///
+    /// The reporter's totals are computed from the results it is handed,
+    /// so a run that stopped early shrinks its numerator and denominator
+    /// together and reads as complete: 334 passed + 49 failed = "383
+    /// tests", with 321 specs absent and nothing saying so. Measured
+    /// 2026-09-11 on L1-core, where the memory watchdog cut three runs
+    /// of the same command at 383, 410 and 702 of 704.
+    pub discovered: Option<usize>,
+    /// Why the run stopped before reaching every spec, when it did.
+    pub stopped_early: Option<Text>,
 }
 
 /// Summary for a specific level.
@@ -192,6 +204,10 @@ pub struct Reporter {
     compiler_version: Text,
     /// Collected test results
     results: List<TestResult>,
+    /// How many specs discovery found, when the caller knows.
+    discovered: Option<usize>,
+    /// Why the run stopped before reaching every spec, when it did.
+    stopped_early: Option<Text>,
     /// Whether to show colors in console output
     use_colors: bool,
     /// Whether to show verbose output
@@ -208,11 +224,27 @@ impl Reporter {
         Self {
             compiler_version,
             results: List::new(),
+            discovered: None,
+            stopped_early: None,
             use_colors: true,
             verbose: false,
             show_diff: true,
             diff_context_lines: 3,
         }
+    }
+
+    /// Tell the reporter how many specs discovery found, and why the run
+    /// stopped if it did not reach them all.
+    ///
+    /// Without this the report's denominator is the number of RESULTS,
+    /// which is the number of specs that finished — so an aborted run
+    /// states a pass rate over the part it completed and no reader can
+    /// tell. Same discipline as `RunnerError::UnreadableSpecs`: a level
+    /// cannot claim a percentage of a set it did not cover.
+    pub fn with_coverage(mut self, discovered: usize, stopped_early: Option<Text>) -> Self {
+        self.discovered = Some(discovered);
+        self.stopped_early = stopped_early;
+        self
     }
 
     /// Set whether to use colors.
@@ -261,6 +293,8 @@ impl Reporter {
             pass_rate: 0.0,
             by_level: Map::new(),
             by_tier: Map::new(),
+            discovered: self.discovered,
+            stopped_early: self.stopped_early.clone(),
         };
 
         let mut results_data = List::new();
@@ -586,7 +620,31 @@ impl Reporter {
             "{}",
             "───────────────────────────────────────────────────────────".dimmed()
         )?;
-        writeln!(writer, "  Total:     {} tests", report.summary.total)?;
+        // THE DENOMINATOR MUST NAME THE SET IT COVERS.
+        match (report.summary.discovered, &report.summary.stopped_early) {
+            (Some(found), _) if found > report.summary.total => {
+                writeln!(
+                    writer,
+                    "  Total:     {} of {} tests — {} NEVER RAN",
+                    report.summary.total,
+                    found,
+                    found - report.summary.total
+                )?;
+                let why = report
+                    .summary
+                    .stopped_early
+                    .as_ref()
+                    .map(|t| t.as_str().to_string())
+                    .unwrap_or_else(|| "the run ended before reaching them".to_string());
+                writeln!(writer, "  {}  {}", "STOPPED EARLY:".red().bold(), why)?;
+                writeln!(
+                    writer,
+                    "  Every rate below is over the {} that ran, not over the level.",
+                    report.summary.total
+                )?;
+            }
+            _ => writeln!(writer, "  Total:     {} tests", report.summary.total)?,
+        }
         writeln!(
             writer,
             "  Passed:    {} ({:.1}%)",
@@ -1263,7 +1321,14 @@ impl Reporter {
     /// Get the overall exit code (0 = all pass, 1 = failures).
     pub fn exit_code(&self) -> i32 {
         let report = self.build_report();
-        if report.summary.failed > 0 || report.summary.errored > 0 {
+        // A RUN THAT DID NOT FINISH IS NOT A PASS. Without this, a sweep
+        // the memory watchdog cut short exits 0 whenever the part it
+        // reached happened to be green — the strongest possible false
+        // green, because the specs it never reached are the tail of the
+        // discovery order and always the same ones.
+        let incomplete =
+            matches!(report.summary.discovered, Some(found) if found > report.summary.total);
+        if report.summary.failed > 0 || report.summary.errored > 0 || incomplete {
             1
         } else {
             0
@@ -1640,5 +1705,49 @@ mod tests {
         // Should use unified diff for multi-line strings
         assert!(diff.contains("---"));
         assert!(diff.contains("+++"));
+    }
+
+    /// A run the watchdog cut short must not read as a complete one.
+    ///
+    /// The reporter's totals come from the results it is handed, so
+    /// before this the numerator and denominator shrank together and the
+    /// arithmetic stayed self-consistent: 334 passed + 49 failed = "383
+    /// tests", with 321 specs absent and no line saying so.
+    #[test]
+    fn an_incomplete_run_names_the_specs_it_never_reached() {
+        let complete = Reporter::new("test".into());
+        assert_eq!(complete.build_report().summary.discovered, None);
+        assert_eq!(
+            complete.exit_code(),
+            0,
+            "an empty complete run is not a failure"
+        );
+
+        let cut = Reporter::new("test".into())
+            .with_coverage(702, Some("the memory watchdog stopped the run".into()));
+        let report = cut.build_report();
+        assert_eq!(report.summary.total, 0, "no results were handed over");
+        assert_eq!(report.summary.discovered, Some(702));
+        assert!(report.summary.stopped_early.is_some());
+
+        // AND IT MUST NOT EXIT ZERO. Nothing failed — nothing ran.
+        assert_eq!(
+            cut.exit_code(),
+            1,
+            "a run that did not reach every spec cannot report success"
+        );
+
+        let mut out: Vec<u8> = Vec::new();
+        cut.generate_console(&mut out).unwrap();
+        let text = String::from_utf8_lossy(&out);
+        assert!(
+            text.contains("0 of 702"),
+            "the denominator names the whole set: {text}"
+        );
+        assert!(text.contains("NEVER RAN"), "the gap is stated: {text}");
+        assert!(
+            text.contains("memory watchdog"),
+            "the reason travels: {text}"
+        );
     }
 }
