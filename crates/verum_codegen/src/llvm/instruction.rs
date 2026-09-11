@@ -35069,7 +35069,92 @@ fn lower_ffi_extended<'ctx>(
                     .iter()
                     .find(|(idx, _)| *idx as usize == i)
                     .map(|(_, src)| *src);
-                if let Some(src_reg) = writeback_reg
+                // T1404 — A `&mut <struct>` ARGUMENT POINTS AT THE HEADER.
+                //
+                // The register holds a pointer to a Verum OBJECT: 24 bytes of
+                // header (generation, size, type id) and then the payload.
+                // Passing it to C hands the callee the HEADER as its
+                // destination, so `gettimeofday(&mut tv, 0)` overwrites
+                // bookkeeping and the struct's own fields stay whatever they
+                // were — which is why the caller sees zeros and a success
+                // return at the same time.
+                //
+                // The destination is the payload, and the object IS the
+                // destination, so nothing is copied back afterwards.
+                //
+                // GATED ON THE LAYOUTS COINCIDING. A Verum payload is 8-byte
+                // slots; a C struct is packed to its own rules. Handing over
+                // the payload is correct only when every C field is 8 bytes
+                // wide at an 8-byte stride. `struct timeval` does NOT satisfy
+                // that on macOS (`suseconds_t` is 32-bit) — a layout that
+                // fails the gate needs a bounce buffer with per-field
+                // conversion, which is a different change and must not be
+                // smuggled in under this one. Failing the gate leaves the
+                // argument exactly as it was.
+                //
+                // WHAT THE GATE COMPARES, stated so it is not read as more:
+                // `ffi_layouts` is a real C-ABI computation over the
+                // DECLARED Verum field types (`verum_type_to_ctype` then
+                // `ffi_field_size_align`, with each offset aligned up —
+                // codegen/mod.rs:13650+). So this checks the declaration
+                // against the payload stride. A declaration that lies about
+                // the C struct — `tv_usec: Int` for a 32-bit
+                // `suseconds_t` — is wrong before this code sees it, and
+                // passing its payload through does not make it wronger.
+                let struct_payload_ptr = if writeback_reg.is_some()
+                    && is_struct_param
+                    && coerced.is_pointer_value()
+                {
+                    let layout_idx = ffi_symbol
+                        .signature
+                        .param_layout_indices
+                        .get(i)
+                        .copied()
+                        .flatten();
+                    let all_eight_byte_slots = layout_idx
+                        .and_then(|idx| vbc_module.ffi_layouts.get(idx as usize))
+                        .map(|layout| {
+                            !layout.fields.is_empty()
+                                && layout.fields.iter().enumerate().all(|(k, f)| {
+                                    f.offset as usize == k * 8 && f.size == 8
+                                })
+                        })
+                        .unwrap_or(false);
+                    if all_eight_byte_slots {
+                        let i8_ty = ctx.llvm_context().i8_type();
+                        let i64_ty = ctx.llvm_context().i64_type();
+                        let base = coerced.into_pointer_value();
+                        let payload = unsafe {
+                            ctx.builder().build_gep(
+                                i8_ty,
+                                base,
+                                &[i64_ty.const_int(
+                                    RuntimeLowering::OBJECT_HEADER_SIZE,
+                                    false,
+                                )],
+                                "ffi_struct_payload",
+                            )
+                        }
+                        .or_llvm_err()?;
+                        Some(payload)
+                    } else {
+                        if let Ok(f) = std::env::var("VERUM_TRACE_FFI_WRITEBACK")
+                            && (f.is_empty() || f == "1" || symbol_idx.to_string() == f)
+                        {
+                            eprintln!(
+                                "[ffi-writeback] arg {} of symbol_idx={} is a &mut struct whose C \
+layout is not all-8-byte slots — passed unchanged, still writes the object header (T1404)",
+                                i, symbol_idx,
+                            );
+                        }
+                        None
+                    }
+                } else {
+                    None
+                };
+                if let Some(payload) = struct_payload_ptr {
+                    args.push(BasicValueEnum::from(payload).into());
+                } else if let Some(src_reg) = writeback_reg
                     && !is_struct_param
                     && coerced.is_pointer_value()
                     && arg_val.is_int_value()
