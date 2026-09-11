@@ -1,0 +1,77 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: runtime, circuit-breaker, layout, regression
+// @timeout: 60000
+// @expected-exit: 0
+//
+// A CIRCUIT BREAKER READS BACK WHAT WAS REGISTERED — INLINE (T1416).
+//
+// `RecoveryContext.get_circuit_breaker` has TWO branches behind ONE
+// return type: the first eight breakers live in a fixed inline array of
+// `EnvInlineCircuitBreaker` (a `@repr(C)` shape whose offset 0 is a
+// 24-byte name array), the ninth onward in a heap `Map` of real
+// `CircuitBreaker`s.
+//
+// The inline branch used to REINTERPRET rather than convert:
+// `cb.as_ref()` resolved — by accident, because a field-identical twin
+// type lives in `runtime/recovery.vr` — to that twin's method, whose
+// body is an `llvm.bitcast` to `RecoveryCircuitBreaker` (8 fields, no
+// `@repr`), returned under a signature naming `CircuitBreaker` (4
+// fields). Reading `config.failure_threshold` off the result therefore
+// read bytes out of the SERVICE NAME on the inline path and a real
+// config on the overflow path, with nothing to tell a caller which.
+//
+// ONLY THE INLINE BRANCH, and the twin file beside this one says why.
+// Eight is the inline capacity (`env.vr`: `if self.circuit_breaker_count
+// < 8`); the ninth registration overflows to a heap `Map` whose read
+// dies today with
+//     Panic: method 'get' not found on receiver of runtime kind
+//            `<unknown-tag>` (raw bits 0x7ffb800012000027)
+// because `circuit_breakers_overflow` is initialised at `env.vr:734`
+// with `Some(&Map.new())` — a reference to a TEMPORARY. That file's own
+// comment at `:411` calls the same shape a known defect for three other
+// fields; this is the fourth. It is not this spec's subject and
+// `make test-l0` requires 100%, so the overflow half lives in
+// `..._overflow.vr` with `@skip` naming it.
+//
+// The assertion is on the VALUES that were registered, because the
+// defect delivered plausible garbage rather than an obvious zero: a
+// service name's first bytes read as an `Int` are a large positive
+// number, which `!= 0` and looks like a threshold.
+
+mount core.runtime.env.{RecoveryContext};
+mount core.async.spawn_config.{CircuitBreakerConfig};
+mount core.io.println;
+
+fn main() {
+    let mut ctx = RecoveryContext.new();
+
+    // Eight breakers — exactly the inline capacity, no overflow.
+    let mut i = 0;
+    while i < 8 {
+        let cfg = CircuitBreakerConfig {
+            failure_threshold: 10 + i,
+            reset_timeout_ms: 1000 + i,
+            half_open_max_calls: 1 + i,
+        };
+        ctx.register_circuit_breaker(f"svc{i}", cfg);
+        i = i + 1;
+    }
+
+    // svc0 is inline, slot 0.
+    match ctx.get_circuit_breaker(&"svc0") {
+        Some(cb) => {
+            println(f"inline   threshold={cb.config.failure_threshold} reset={cb.config.reset_timeout_ms}");
+            assert_eq(cb.config.failure_threshold, 10);
+            assert_eq(cb.config.reset_timeout_ms, 1000);
+        }
+        None => { println("inline   NOT FOUND"); assert(false); }
+    }
+
+    // A name nobody registered must miss both branches.
+    match ctx.get_circuit_breaker(&"absent") {
+        Some(cb) => { println("absent FOUND (wrong)"); assert(false); }
+        None => println("absent  none, as expected"),
+    }
+}
