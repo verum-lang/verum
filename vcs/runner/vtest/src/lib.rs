@@ -398,6 +398,47 @@ pub struct VTestRunner {
     executor: Executor,
 }
 
+/// Path of the in-flight log: the specs a run has STARTED but not finished.
+///
+/// The breadcrumb below is off by default for a good reason — at parallel 4
+/// it is one line per spec and drowns the run — and the cost of that was
+/// paid twice on 2026-09-12, when `vtest run vcs/specs/L0-critical`
+/// segfaulted after an hour with no summary, no exit line and no spec path,
+/// exactly the case T0829 wrote the breadcrumb for. Both times the
+/// breadcrumb was absent because nobody had set the variable IN ADVANCE of a
+/// crash nobody expected.
+///
+/// A file costs no log noise and needs no foresight. It is truncated at the
+/// start of a run, appended to before each spec, and REMOVED when the run
+/// finishes normally — so its existence afterwards is itself the signal, and
+/// its last lines name the specs that were in flight when the process died.
+fn inflight_path() -> std::path::PathBuf {
+    std::env::var_os("VTEST_INFLIGHT")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::env::temp_dir().join("vtest-inflight.log"))
+}
+
+fn inflight_begin() -> std::path::PathBuf {
+    let p = inflight_path();
+    let _ = std::fs::write(&p, b"");
+    p
+}
+
+fn inflight_note(path: &str) {
+    use std::io::Write;
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(inflight_path())
+    {
+        let _ = writeln!(f, "{path}");
+    }
+}
+
+fn inflight_end() {
+    let _ = std::fs::remove_file(inflight_path());
+}
+
 impl VTestRunner {
     /// Create a new test runner with the given configuration.
     pub fn new(config: RunnerConfig) -> Self {
@@ -503,6 +544,10 @@ impl VTestRunner {
 
         let start = Instant::now();
         let total = tests.len();
+        let inflight = inflight_begin();
+        if self.config.verbose {
+            println!("  in-flight log: {}", inflight.display());
+        }
 
         // Handle test shuffling if enabled
         let tests = if self.config.shuffle {
@@ -612,6 +657,8 @@ impl VTestRunner {
                     if std::env::var_os("VTEST_TRACE_SPEC").is_some() {
                         eprintln!("[vtest] START {}", directives.source_path);
                     }
+                    // The file costs nothing to read and survives a SIGSEGV.
+                    inflight_note(&directives.source_path);
 
                     // Execute the test with optional retries
                     let mut result = match executor.execute(directives.clone()).await {
@@ -675,6 +722,10 @@ impl VTestRunner {
 
         // Execute all futures concurrently
         futures::future::join_all(futures).await;
+
+        // REACHED ONLY ON A NORMAL FINISH. If the process dies before this,
+        // the file stays behind and its tail names the specs in flight.
+        inflight_end();
 
         // Finish progress bar
         if let Some(pb) = progress_bar {
@@ -1224,5 +1275,47 @@ mod tests {
         let config = VTestToml::default();
         assert!(!config.discovery.paths.is_empty());
         assert_eq!(config.execution.parallel, default_parallel());
+    }
+
+    /// The in-flight log exists only while a run is unfinished.
+    ///
+    /// That is the whole design: a crash cannot delete it, so its presence
+    /// afterwards says the run died and its last lines say where. Measured
+    /// 2026-09-12 — `vtest run vcs/specs/L0-critical` segfaulted twice after
+    /// an hour with no summary and no spec path, which is exactly what the
+    /// `VTEST_TRACE_SPEC` breadcrumb was written for and exactly what being
+    /// off by default denied.
+    #[test]
+    fn the_in_flight_log_survives_an_unfinished_run_and_not_a_finished_one() {
+        let dir = std::env::temp_dir().join(format!("vtest-inflight-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("inflight.log");
+        // SAFETY: the test owns this variable for the duration of the test.
+        unsafe { std::env::set_var("VTEST_INFLIGHT", &path) };
+
+        let started = inflight_begin();
+        assert_eq!(started, path);
+        assert!(path.exists(), "a run in progress leaves the file behind");
+
+        inflight_note("vcs/specs/L0-critical/a.vr");
+        inflight_note("vcs/specs/L0-critical/b.vr");
+        let body = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            body.contains("a.vr") && body.contains("b.vr"),
+            "both are recorded: {body}"
+        );
+        assert!(
+            body.trim_end().ends_with("b.vr"),
+            "the LAST line is the last spec started: {body}"
+        );
+
+        inflight_end();
+        assert!(
+            !path.exists(),
+            "a finished run removes it — presence is the signal"
+        );
+
+        unsafe { std::env::remove_var("VTEST_INFLIGHT") };
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
