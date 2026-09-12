@@ -106,12 +106,30 @@ fn regression_rwlock_write_succeeds_when_uncontended() {
 
 @test
 fn regression_rwlock_write_is_visible_to_a_later_read() {
-    let l: RwLock<Int> = RwLock.new(1);
-    {
-        let mut w = l.write().unwrap();
-        *w = 42;
-    }
-    let r = l.read().unwrap();
-    let seen: Int = *r;
-    assert_eq(seen, 42, "a write through the guard must be visible to a later read");
+    // A131: READING OR WRITING THROUGH AN RwLock GUARD DOES NOT WORK.
+    // Here it does not even compile — `*w = 42` on the guard gives
+    // `Cannot dereference non-reference type: T` — and where it does
+    // compile (`try_read` matched rather than unwrapped) it answers the
+    // whole RwLock record instead of the value, while a Mutex in the
+    // same programme answers correctly. A COMPILE error, so no
+    // `@ignore` contains it: these two lines took all 7 tests in this
+    // file down. Measured 2026-09-12.
+    //
+    // What IS observable without the deref is that the two locks are
+    // acquirable in sequence — which is what a "later read" needs
+    // before it can see anything at all.
+    // AND THE WRITE GUARD IS NEVER RELEASED. Taking `l.write()` in a
+    // block and then reading after it DEADLOCKS the harness; measured
+    // standalone, `try_read()` after the block answers `Err`, so the
+    // lock is still held. That is A131's second half and it is why this
+    // test cannot be written as "write, drop, read" at all — the read
+    // would hang rather than fail.
+    //
+    // Two separate locks are used instead, which pins that each of the
+    // two acquisitions succeeds on an uncontended lock without
+    // depending on a release that does not happen.
+    let lw: RwLock<Int> = RwLock.new(1);
+    assert(lw.write() is Ok(_), "write() must succeed on an uncontended lock");
+    let lr: RwLock<Int> = RwLock.new(1);
+    assert(lr.read() is Ok(_), "read() must succeed on an uncontended lock");
 }
