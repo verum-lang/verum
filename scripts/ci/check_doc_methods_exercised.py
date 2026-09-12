@@ -93,8 +93,25 @@ DOCS = Path(os.environ.get("VERUM_STDLIB_DOCS")
             or (Path(_DOCS_ROOT) / "stdlib" if _DOCS_ROOT
                 else REPO.parent / "website" / "docs" / "stdlib"))
 RUN_DIRECTIVES = {"run", "run-interpreter"}
-BASELINE = 261  # Lowered by COVERAGE, never by argument — the only way
+BASELINE = 254  # Lowered by COVERAGE, never by argument — the only way
                 # this number is meant to move.
+                #   261 -> 254  NOT coverage: the DENOMINATOR was wrong
+                #               the same way the corpus was. A comment
+                #               inside a ```verum block is PROSE —
+                #               `check_doc_names_exist` has always held
+                #               that, and the two gates disagreeing
+                #               about what a block says WAS the defect.
+                #               17 of 1402 documented methods lived only
+                #               in a comment; five of those are the page
+                #               DENYING the method ("there is no
+                #               `.primary()`", "not a `.widths(…)`", "no
+                #               `env.argv()`"), and all five were on the
+                #               roster, so the gate was demanding
+                #               coverage of methods the page says are
+                #               absent. cog.md leaves the census
+                #               entirely: its one "call" was
+                #               `module_data[i].len()` describing a
+                #               field.
                 #   279 -> 261  NOT coverage, and not an argument
                 #               either: the INSTRUMENT was corrected,
                 #               in both directions at once. Per-test
@@ -337,9 +354,32 @@ def executed_corpus() -> list[tuple[Path, str]]:
 
 
 def documented_methods(page: Path) -> set[str]:
+    """The methods a page's examples CALL — in code, not in prose.
+
+    A COMMENT INSIDE A BLOCK IS PROSE, which is what
+    `check_doc_names_exist` has always held (see its LINE_COMMENT), and
+    the two gates disagreeing about what a block says was itself the
+    defect: this census demanded coverage for names that gate never
+    checked exist. Measured 2026-09-12, 17 of 1402 documented methods
+    live only in a comment, and FIVE of them are the page DENYING the
+    method:
+
+        term.md:427  // ... are a CONSTRUCTOR argument, not a `.widths(…)`
+        term.md:515  // There is no `.primary()` on a ...
+        cli.md:211   // ... no `env.argv()` and no `env.is_json_mode()`.
+        async.md:567 // `Http.get_streaming` and `body.next_chunk()` do
+                     //  not exist
+
+    All five sat on the roster, so the gate was asking for coverage of
+    four methods the page says are absent — work that cannot be done and
+    would be wrong if it could. The remaining twelve are real claims
+    written in prose; they lose their census row, and the answer to that
+    is to put the call in code, where a claim belongs and where every
+    other gate can see it.
+    """
     names: set[str] = set()
     for m in BLOCK.finditer(page.read_text(errors="ignore")):
-        names |= set(CALL.findall(m.group(1)))
+        names |= set(CALL.findall(strip_comments(m.group(1))))
     return names
 
 
@@ -413,6 +453,18 @@ def self_test() -> int:
     if ".b(" not in strip_ignored_tests(strip_comments(only_a_mention)):
         print("self-test: a file merely MENTIONING @ignore lost its "
               "coverage"); bad += 1
+    # THE DOC SIDE OF THE SAME RULE. A page that DENIES a method was
+    # putting it in the census and demanding coverage for it.
+    denial = "```verum\n// There is no `.primary()` on a Dialog.\nd.body(x);\n```"
+    got = set()
+    for b in BLOCK.finditer(denial):
+        got |= set(CALL.findall(strip_comments(b.group(1))))
+    if "primary" in got:
+        print("self-test: a method the page says does NOT exist is still "
+              "counted as documented"); bad += 1
+    if "body" not in got:
+        print("self-test: comment-stripping ate the block's real call"); bad += 1
+
     # A method named only in prose is not a method anything runs.
     if ".observe(" in strip_comments("// Histogram.observe(5.0) answered 0\n"):
         print("self-test: a call written in a comment counts as evidence")

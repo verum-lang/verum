@@ -19,7 +19,6 @@ async.md	is_disconnected
 async.md	is_finished
 async.md	linked_to
 async.md	never
-async.md	next_chunk
 async.md	receiver_count
 async.md	record_failure
 async.md	record_success
@@ -64,10 +63,8 @@ base.md	or_insert_with
 base.md	take_if
 base.md	to_mut
 base.md	try_borrow_mut
-cli.md	argv
 cli.md	flag
 cli.md	from_spec
-cli.md	is_json_mode
 cli.md	render
 cli.md	run_or_exit
 cli.md	short
@@ -214,8 +211,6 @@ sync.md	fetch_max
 sync.md	terminate
 sync.md	try_write
 sync.md	wait_while
-sys.md	recv_with_timeout
-sys.md	watch
 term.md	backend_mut
 term.md	begin_sync
 term.md	capabilities
@@ -229,7 +224,6 @@ term.md	enter_alternate_screen
 term.md	is_tty
 term.md	leave_alternate_screen
 term.md	move_to
-term.md	primary
 term.md	render
 term.md	render_widget
 term.md	role
@@ -242,7 +236,6 @@ term.md	set_mouse_capture
 term.md	set_style
 term.md	to_lab
 term.md	to_lines
-term.md	widths
 term.md	write_csi
 term.md	write_dcs
 term.md	write_osc
