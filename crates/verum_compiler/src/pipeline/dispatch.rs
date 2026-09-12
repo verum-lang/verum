@@ -109,10 +109,38 @@ impl<'s> CompilationPipeline<'s> {
         Ok(())
     }
 
-    /// Is there a `verum.toml` at or above the input?
+    /// Does a `verum.toml` NEAR the input claim it as its cog?
+    ///
+    /// "Near" is the same distance rule `phase_load_source` applies when
+    /// it decides whether to enumerate sibling modules
+    /// (`pipeline/loading.rs`): the manifest counts at the entry's own
+    /// directory, or one level above it — the `src/` layout. That rule
+    /// carries its own measurement, and it is this exact cost: with a
+    /// manifest merely somewhere above, "checking a single spec file
+    /// went from 2.03s to 245s, and conformance specs began loading
+    /// their neighbours as sibling modules".
+    ///
+    /// This guard was the half that never learned it. An eight-level
+    /// walk accepts the repository's OWN root manifest for any file
+    /// five directories down, so `verum run <spec>.vr` type-checked the
+    /// spec's whole subtree before running it. Measured on
+    /// `vcs/specs/L0-critical/vbc/e2e/349_interp_csp_sim.vr`, and
+    /// reproduced in a scratch tree that carries its own input — 2021
+    /// `.vr` files beside the entry, one variable changed:
+    ///
+    ///     no manifest above the entry        3 s, exit 0
+    ///     the same tree + root verum.toml    over 200 s, killed
+    ///
+    /// Byte-identical entry, byte-identical siblings. The profile is
+    /// the lexer and the parser, which is what walking 2021 files looks
+    /// like, and the frames name this pre-pass:
+    /// `dispatch.rs` -> `check_project` -> `compile_orchestration.rs`.
+    ///
+    /// Two guards for one question answered differently is the shape
+    /// this repository keeps paying for; they now answer the same.
     pub(super) fn input_belongs_to_a_cog(&self) -> bool {
         let input = &self.session.options().input;
-        let mut dir = if input.is_dir() {
+        let dir = if input.is_dir() {
             input.clone()
         } else {
             match input.parent() {
@@ -120,19 +148,16 @@ impl<'s> CompilationPipeline<'s> {
                 None => return false,
             }
         };
-        // Bounded walk: a cog root within eight levels of its sources is
-        // every layout this toolchain produces, and an unbounded loop on
-        // a path that never terminates is worse than a missed check.
-        for _ in 0..8 {
-            if dir.join("verum.toml").exists() {
-                return true;
-            }
-            match dir.parent() {
-                Some(p) => dir = p.to_path_buf(),
-                None => return false,
-            }
+        // At the entry's own directory, or exactly one level above it.
+        // Anything further away is not this file's project — it is
+        // whatever repository the file happens to live in.
+        if dir.join("verum.toml").exists() {
+            return true;
         }
-        false
+        match dir.parent() {
+            Some(p) => p.join("verum.toml").exists(),
+            None => false,
+        }
     }
 
     /// Unified dispatch entry-point: routes to the appropriate
