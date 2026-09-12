@@ -444,3 +444,32 @@ fn test_provider_force_flush_and_shutdown_succeed() {
 }
 
 fn main() {}
+
+// =============================================================================
+// Section 9: cross-handle observation
+// =============================================================================
+
+/// A CLONE OF AN EXPORTER OBSERVES THE BUFFER THE ORIGINAL WROTE TO.
+///
+/// This was the stated reason the nine delivery pins above were
+/// `@ignore`d, and the documentation said so too: "cloning an
+/// `InMemoryExporter` currently yields an independent copy rather than
+/// a second handle onto the same buffer". The pins themselves never
+/// tested it — they route through a FILE — so the claim outlived any
+/// measurement of it.
+///
+/// It holds now, and this is the test that says so: the provider gets
+/// one clone, the span is ended through it, and the text is read back
+/// through a DIFFERENT clone. A per-handle copy returns empty here.
+@test
+fn test_clone_of_exporter_sees_the_same_buffer() {
+    let sink = InMemoryExporter.new();
+    let other = sink.clone();
+    let provider = make_provider(ExporterHandle.EhInMemory(sink.clone()));
+    let span = start_simple_span(&provider, &"crosshandle".into());
+    span.end();
+    let via_other = other.take_text();
+    assert(via_other.len() > 0);
+    assert(via_other.contains(&"crosshandle".into()));
+}
+
