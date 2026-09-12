@@ -11,6 +11,16 @@
 
 // Braced (A137): the brace-less form binds the name but refuses the
 // variant path through it.
+// NOT ONE `let s: LemmaStatus = …` ANNOTATION SURVIVES HERE, AND THAT IS
+// THE WORK-AROUND.
+//
+// `LemmaStatus` is declared twice in `core/` — `kernel_v0/soundness.vr:107`
+// with `Admitted { iou: Text }` and `kernel_soundness/theorems.vr:125` with
+// `Admitted { reason: Text }` — and the two POSITIONS of one statement
+// resolve to DIFFERENT declarations. `let s: LemmaStatus = LemmaStatus.Proved;`
+// is refused with `expected '{ iou: Text }', found '{ reason: Text }'` on a
+// UNIT variant, while the identical line without the annotation compiles and
+// passes. Measured 2026-09-12 with the three spellings side by side. A120.
 mount core.verify.kernel_v0.soundness.{LemmaStatus};
 mount core.base.maybe.{Maybe, Some, None};
 mount core.base.result.{Result, Ok, Err};
@@ -21,13 +31,13 @@ mount core.base.result.{Result, Ok, Err};
 
 @test
 fn test_lemma_status_proved_variant() {
-    let s: LemmaStatus = LemmaStatus.Proved;
+    let s = LemmaStatus.Proved;
     assert(s is LemmaStatus.Proved);
 }
 
 @test
 fn test_lemma_status_admitted_variant() {
-    let s: LemmaStatus = LemmaStatus.Admitted {
+    let s = LemmaStatus.Admitted {
         iou: "TODO: complete proof of well-founded induction".to_text(),
     };
     assert(s is LemmaStatus.Admitted);
@@ -35,7 +45,7 @@ fn test_lemma_status_admitted_variant() {
 
 @test
 fn test_lemma_status_discharged_by_framework_variant() {
-    let s: LemmaStatus = LemmaStatus.DischargedByFramework {
+    let s = LemmaStatus.DischargedByFramework {
         lemma_path: "kernel_v0/lemmas/wf_induction.vr".to_text(),
         framework: "mathlib4".to_text(),
         citation: "Mathlib.Order.WellFoundedSet".to_text(),
@@ -49,21 +59,21 @@ fn test_lemma_status_discharged_by_framework_variant() {
 
 @test
 fn test_lemma_status_proved_disjoint() {
-    let s: LemmaStatus = LemmaStatus.Proved;
+    let s = LemmaStatus.Proved;
     assert(!(s is LemmaStatus.Admitted));
     assert(!(s is LemmaStatus.DischargedByFramework));
 }
 
 @test
 fn test_lemma_status_admitted_disjoint() {
-    let s: LemmaStatus = LemmaStatus.Admitted { iou: "x".to_text() };
+    let s = LemmaStatus.Admitted { iou: "x".to_text() };
     assert(!(s is LemmaStatus.Proved));
     assert(!(s is LemmaStatus.DischargedByFramework));
 }
 
 @test
 fn test_lemma_status_discharged_by_framework_disjoint() {
-    let s: LemmaStatus = LemmaStatus.DischargedByFramework {
+    let s = LemmaStatus.DischargedByFramework {
         lemma_path: "x".to_text(),
         framework: "y".to_text(),
         citation: "z".to_text(),

@@ -152,7 +152,12 @@ fn law_int_to_string_round_trip_pinned() {
     let xs: List<Int> = [0, 1, -1, 42, 1_000_000];
     for x in xs.iter() {
         let s = (*x).to_string();
-        let parsed: Result<Int, _> = s.parse();
+        // `parse_int`, not a bare `parse`: `core/text/text.vr` declares
+        // `parse_int`, `parse_float` and `parse_bool`, each returning
+        // `Result<_, ParseError>`. There is no generic `Text.parse()`, and
+        // the one `s.parse()` resolved to answers `Maybe<_>` — which is
+        // what refused the `Result<Int, _>` annotation and took the file.
+        let parsed: Result<Int, _> = s.parse_int();
         assert(parsed.is_ok());
         assert_eq(parsed.unwrap(), *x);
     }
@@ -161,7 +166,7 @@ fn law_int_to_string_round_trip_pinned() {
 @property
 fn prop_int_to_string_round_trip(n: Int) {
     let s = n.to_string();
-    let parsed: Result<Int, _> = s.parse();
+    let parsed: Result<Int, _> = s.parse_int();
     assert(parsed.is_ok());
     assert_eq(parsed.unwrap(), n);
 }

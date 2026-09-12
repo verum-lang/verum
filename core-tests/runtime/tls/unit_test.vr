@@ -193,25 +193,32 @@ fn test_tls_frame_nested_push_pop_lifo() {
 
 @test
 fn test_tls_read_ptr_symbol_exists() {
-    let _: fn(Int) -> Int = tls_read_ptr;
+    // `core/intrinsics/runtime/tls.vr:107` declares
+    // `unsafe fn tls_read_ptr<T>(offset: Int) -> *const T`, so the pin is
+    // the pointer return at `T = Byte` — NOT `Int`. The wrong annotation
+    // unified the symbol's type with `fn(Int) -> Int` and the corruption
+    // travelled: `tls_slot_set(slot, 100 as *const Byte)` eighty lines
+    // ABOVE was then refused with `expected 'Int', found '*const _'`,
+    // and the whole file was a compile error.
+    let _: fn(Int) -> *const Byte = tls_read_ptr;
     assert(true);
 }
 
 @test
 fn test_tls_write_ptr_symbol_exists() {
-    let _: fn(Int, Int) -> () = tls_write_ptr;
+    let _: fn(Int, *const Byte) -> () = tls_write_ptr;
     assert(true);
 }
 
 @test
 fn test_tls_read_i32_symbol_exists() {
-    let _: fn(Int) -> Int = tls_read_i32;
+    let _: fn(Int) -> Int32 = tls_read_i32;
     assert(true);
 }
 
 @test
 fn test_tls_write_i32_symbol_exists() {
-    let _: fn(Int, Int) -> () = tls_write_i32;
+    let _: fn(Int, Int32) -> () = tls_write_i32;
     assert(true);
 }
 

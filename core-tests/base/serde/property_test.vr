@@ -86,7 +86,11 @@ fn test_serde_protocol_names_are_valid_identifiers(name: Text) {
     // Verify we can refer to these names as strings; real typecheck
     // is done in unit_test.vr
     assert(!name.is_empty());
-    assert(name.chars().first().map(|c| c >= 'A' && c <= 'Z').unwrap_or(false));
+    // `Chars` implements `Iterator` (core/text/text.vr:4214) and nothing
+    // else — there is no `.first()`, and naming one was a COMPILE error
+    // that took all six tests in this file.
+    let mut cs = name.chars();
+    assert(cs.next().map(|c| c >= 'A' && c <= 'Z').unwrap_or(false));
 }
 
 fn main() {}
