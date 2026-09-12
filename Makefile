@@ -72,6 +72,10 @@ check-barename-collisions: ## Gate (T0538): free-fn (name,arity) collisions acro
 	python3 scripts/ci/check_barename_collisions.py --check --scope prelude
 	python3 scripts/ci/check_barename_collisions.py --check --kind types
 
+check-implement-generics: ## Gate (A145): `implement <Generic> {` must carry its type parameter
+	python3 scripts/ci/check_implement_generics.py
+
+
 check-arch-attestation: ## Gate (T0712): every core/ module declares @arch_module — list ratchet
 	python3 scripts/ci/check_arch_attestation.py
 
@@ -285,7 +289,7 @@ check-grammar-docs-match: ## Gate: EBNF shown in the documentation must match gr
 check-barename-census: ## Report every colliding (name,arity) pair with its modules (never fails)
 	python3 scripts/ci/check_barename_collisions.py
 
-gates-source: check-private-types-off-public-surface check-error-code-namespaces check-guard-in-argument-position check-grammar-covers-keywords check-known-tables check-parser-attrs check-gate-tables check-markers check-vr-syntax check-str-alias check-op-bytes check-internal-refs check-rings check-arch-attestation check-type-name-collisions check-barename-collisions check-panic-surface check-per-register-privacy check-early-return-tenants check-dup-emitters check-bake-prepass-parity check-protocol-form check-dead-module-path-calls check-platform-call-parity check-protocol-conformance check-cfg-block-tail check-meta-function-names check-ffi-reference-tiers check-intrinsic-keys-implemented check-diagnostic-levers check-constant-time-duplication check-type-param-name-rule \
+gates-source: check-private-types-off-public-surface check-error-code-namespaces check-guard-in-argument-position check-grammar-covers-keywords check-known-tables check-parser-attrs check-gate-tables check-markers check-vr-syntax check-str-alias check-op-bytes check-internal-refs check-rings check-arch-attestation check-type-name-collisions check-barename-collisions check-panic-surface check-per-register-privacy check-early-return-tenants check-dup-emitters check-bake-prepass-parity check-protocol-form check-dead-module-path-calls check-platform-call-parity check-protocol-conformance check-cfg-block-tail check-meta-function-names check-ffi-reference-tiers check-intrinsic-keys-implemented check-diagnostic-levers check-constant-time-duplication check-type-param-name-rule check-implement-generics \
             check-gate-aggregates-invoked check-register-rows check-test-mounts \
             check-verdict-phases check-live-task-citations ## Every gate that needs only the SOURCE TREE — no build, no artefacts
 # THREE TARGETS JOINED THAT LIST 2026-09-11 (T1439) after a census of
