@@ -138,18 +138,32 @@ def inventory_status(text: str) -> tuple[dict[str, str], dict[str, str]]:
     return known, unknown
 
 
-def doc_rows(text: str) -> tuple[list[tuple[int, str, str]], int]:
+def doc_rows(
+    text: str, page_name: str = "?", unlinked_claims: list[str] | None = None
+) -> tuple[list[tuple[int, str, str]], int]:
     """(line, module, token) per checkable row, plus the UNCHECKABLE count.
 
     A row that carries a status token but no `core-tests/` link has no
     module key, so this gate cannot compare it with anything. Those are
-    counted and printed rather than dropped: `docs/stdlib/text.md` alone
-    carries ten `**complete**` claims in that shape, and a denominator
-    that quietly excludes them would make the gate's coverage look
-    larger than it is.
+    counted rather than dropped, because a denominator that quietly
+    excludes them would make the gate's coverage look larger than it is.
+
+    THE EXAMPLE THIS DOCSTRING USED TO GIVE IS SPENT, and saying so is
+    cheaper than letting the next reader chase it: it cited ten
+    `**complete**` claims in that shape in `docs/stdlib/text.md`. Measured
+    2026-09-12, that page now has ZERO status rows without a link, and one
+    `**complete**` row, which is linked.
+
+    The 24 unlinked rows that remain are all `undocumented` — the weakest
+    token, claiming nothing — so the unlinked count is currently benign.
+    It is the SHAPE that needs watching, not the number: an unlinked
+    `**complete**` is the strongest claim on the site with the least
+    behind it, and nothing here would refuse one.
     """
     out = []
     unlinked = 0
+    if unlinked_claims is None:
+        unlinked_claims = []
     for i, line in enumerate(text.split("\n"), 1):
         if not line.startswith("|"):
             continue
@@ -159,6 +173,18 @@ def doc_rows(text: str) -> tuple[list[tuple[int, str, str]], int]:
             # the legend table itself leads with the token and is not a claim
             if not line.startswith("| **"):
                 unlinked += 1
+                # AN UNLINKED ROW MAY ONLY SAY "NOTHING WAS MEASURED".
+                #
+                # Rank 0 — `unverified` / `undocumented` — claims nothing,
+                # so it needs nothing behind it. Anything above rank 0 is a
+                # claim about conformance made with no conformance folder
+                # to check it against, which is the strongest statement on
+                # the site with the least support. Measured 2026-09-12: all
+                # 24 unlinked rows are rank 0, so this starts at zero.
+                if RANK[tok.group(1)] > 0:
+                    unlinked_claims.append(
+                        f"{page_name}:{i}  {line.split('|')[1].strip()[:40]} "
+                        f"— {tok.group(1)} with no conformance link")
             continue
         if link and tok:
             out.append((i, link.group(1), tok.group(1)))
@@ -206,6 +232,22 @@ def self_test() -> int:
               f"{unlinked}", file=sys.stderr)
         bad += 1
 
+    # THE UNLINKED ROW ABOVE SAYS `**stable**`, WHICH IS A CLAIM. Rank 0
+    # needs no link; anything above it does, or nothing on the site can
+    # refuse it. Both polarities, because a rule that fires on everything
+    # unlinked would make all 24 benign `undocumented` rows into failures.
+    claims: list[str] = []
+    doc_rows(
+        "| `no.vr`   | **stable**       | no link on this row |\n"
+        "| `nix.vr`  | **undocumented** | no link, and no claim either |\n",
+        "probe.md",
+        claims,
+    )
+    if len(claims) != 1 or "no.vr" not in claims[0]:
+        print(f"self-test: the unlinked CLAIM was not isolated from the "
+              f"unlinked non-claim: {claims}", file=sys.stderr)
+        bad += 1
+
     # POLARITY.  Same two rows, same inventory: one is conservative
     # (partial under stable — allowed), one is greener (partial over
     # unverified — refused).  A rule of EQUALITY would flag both, which
@@ -235,7 +277,7 @@ def self_test() -> int:
     print(f"[ok] self-test: {len(RANK)} ranks, 2 parsers, "
           f"3 polarity cases (1 over, 1 under, 1 absent), "
           f"1 unknown-word case, 1 superseded-token row, "
-          f"1 unlinked claim vs 1 legend row, 1 link through audit.md")
+          f"1 unlinked claim vs 1 legend row, 1 unlinked CLAIM vs 1 unlinked non-claim, 1 link through audit.md")
     return 0
 
 
@@ -279,9 +321,12 @@ def main() -> int:
     over: list[str] = []
     under_rows: list[str] = []
     absent: list[str] = []
-    under = agree = total = unlinked = 0
+    unlinked_claims: list[str] = []
+    agree = total = unlinked = 0
     for page in pages:
-        rows, n = doc_rows(page.read_text(errors="replace"))
+        rows, n = doc_rows(
+            page.read_text(errors="replace"), page.name, unlinked_claims
+        )
         unlinked += n
         for i, mod, tok in rows:
             total += 1
@@ -325,6 +370,12 @@ def main() -> int:
         print("  a page a reader would trust less than the measurement:")
         for s in under_rows:
             print(f"    - {s}")
+    if unlinked_claims:
+        print("  A CONFORMANCE CLAIM WITH NOTHING TO CHECK IT — the row")
+        print("  carries a status above `unverified` / `undocumented` and")
+        print("  links no core-tests/ folder, so nothing can contradict it:")
+        for s in unlinked_claims:
+            print(f"    ! {s}")
     if over:
         print("  GREENER THAN THE TREE — the page tells a reader more than")
         print("  core-tests/INVENTORY.md records for that module:")
@@ -336,9 +387,10 @@ def main() -> int:
         print("  `unverified`; nothing measured supports it:")
         for s in absent:
             print(f"    ? {s}")
-    if over or absent:
+    if over or absent or unlinked_claims:
         print("  Lower the page's token, or add the module to the inventory")
-        print("  with a status somebody measured.")
+        print("  with a status somebody measured — and link the folder, so")
+        print("  the claim has something that can refuse it.")
         return 1
     return 0
 
