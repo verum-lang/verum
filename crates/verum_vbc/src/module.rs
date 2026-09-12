@@ -450,6 +450,27 @@ pub struct VbcModule {
     #[serde(skip, default)]
     pub(crate) fn_idx_by_name:
         std::sync::OnceLock<std::collections::HashMap<String, smallvec::SmallVec<[u32; 2]>>>,
+
+    /// Indices of every function whose name's LAST SEGMENT is the key,
+    /// in table order. Serves the `.name` SUFFIX arm of
+    /// [`Self::find_function_by_name`], which was the one half of that
+    /// lookup still walking every descriptor — `fn_idx_by_name` had
+    /// already replaced the exact arm's scan.
+    ///
+    /// Why the last segment is the right key: a candidate matches iff
+    /// `fname.ends_with(".{name}")`, and `name`'s own last segment
+    /// carries no dot, so any such `fname` ends with that same segment
+    /// preceded by a dot. Keying on it yields a SUPERSET of the
+    /// matches; the arm then applies the identical `ends_with` test
+    /// over those candidates in ascending index order, so the sequence
+    /// of matches — and therefore the body-ranked tie-break — is the
+    /// one the full scan produced.
+    ///
+    /// `OnceLock` and `#[serde(skip)]` for the same reasons as
+    /// `fn_idx_by_name`.
+    #[serde(skip, default)]
+    pub(crate) fn_idx_by_last_segment:
+        std::sync::OnceLock<std::collections::HashMap<String, smallvec::SmallVec<[u32; 2]>>>,
 }
 
 impl Default for VbcModule {
@@ -570,6 +591,7 @@ impl VbcModule {
             mount_aliases: Vec::new(),
             type_idx_by_id: std::sync::OnceLock::new(),
             fn_idx_by_name: std::sync::OnceLock::new(),
+            fn_idx_by_last_segment: std::sync::OnceLock::new(),
         }
     }
 
@@ -880,6 +902,18 @@ impl VbcModule {
         {
             m.entry(n.to_string()).or_default().push(id.0);
         }
+        // The same coherence obligation for the last-segment index. A
+        // materialised index that a later `add_function` does not
+        // update answers a subset, which is the silent half of a wrong
+        // answer — the exact-name index above carries this line for the
+        // same reason.
+        if let Some(m) = self.fn_idx_by_last_segment.get_mut()
+            && let Some(n) = self.strings.get(desc.name)
+        {
+            m.entry(Self::last_segment(n).to_string())
+                .or_default()
+                .push(id.0);
+        }
         self.functions.push(desc);
         id
     }
@@ -901,6 +935,36 @@ impl VbcModule {
             m
         });
         map.get(name).map(|v| v.as_slice()).unwrap_or(&[])
+    }
+
+    /// The part of a dotted name after its final `.` — the whole string
+    /// when there is none.
+    #[inline]
+    pub(crate) fn last_segment(name: &str) -> &str {
+        match name.rfind('.') {
+            Some(i) => &name[i + 1..],
+            None => name,
+        }
+    }
+
+    /// Indices of every function whose name's last segment is `seg`, in
+    /// table order. The candidate set for the `.name` suffix arm of
+    /// [`Self::find_function_by_name`]; see `fn_idx_by_last_segment`
+    /// for why this superset is the right one to filter.
+    pub(crate) fn function_indices_by_last_segment(&self, seg: &str) -> &[u32] {
+        let map = self.fn_idx_by_last_segment.get_or_init(|| {
+            let mut m: std::collections::HashMap<String, smallvec::SmallVec<[u32; 2]>> =
+                std::collections::HashMap::with_capacity(self.functions.len());
+            for (idx, desc) in self.functions.iter().enumerate() {
+                if let Some(n) = self.get_string(desc.name) {
+                    m.entry(Self::last_segment(n).to_string())
+                        .or_default()
+                        .push(idx as u32);
+                }
+            }
+            m
+        });
+        map.get(seg).map(|v| v.as_slice()).unwrap_or(&[])
     }
 
     /// Gets a function descriptor by ID.
@@ -1779,19 +1843,46 @@ impl VbcModule {
         if let Some((_, idx)) = exact {
             return Some(FunctionId(idx));
         }
-        // Suffix match: ".name" against fully-qualified registrations
+        // Suffix match: ".name" against fully-qualified registrations.
+        //
+        // Candidates come from the last-segment index, in table order,
+        // so this walks the handful of functions that could end with
+        // `.name` instead of every function in the module. Same order,
+        // same tie-break, same answer — see `fn_idx_by_last_segment`
+        // for why keying on the last segment yields a superset of the
+        // matches, and `VERUM_NO_FN_INDEX=1` below for the control.
+        //
+        // This was the half the exact arm's index had left behind, and
+        // it is quadratic where it matters: `resolve_external_bands`
+        // calls this once per external band entry, and each call was a
+        // full descriptor walk with a `get_string` hash lookup per
+        // descriptor. Measured on `1049_barrier_sync.vr`, a 30 s
+        // sample of the compile lands here — `module.rs` suffix scan →
+        // `get_string` → `StringTable::get` → SipHash — and the spec
+        // does not finish inside 200 s.
         if name.contains('.') {
             let suffix = format!(".{}", name);
             let mut sfx: Option<(bool, u32)> = None;
-            for (idx, desc) in self.functions.iter().enumerate() {
+            let candidates: smallvec::SmallVec<[u32; 8]> = if scan_all {
+                (0..self.functions.len() as u32).collect()
+            } else {
+                self.function_indices_by_last_segment(Self::last_segment(name))
+                    .iter()
+                    .copied()
+                    .collect()
+            };
+            for idx in candidates {
+                let Some(desc) = self.functions.get(idx as usize) else {
+                    continue;
+                };
                 if let Some(fname) = self.get_string(desc.name)
                     && fname.ends_with(&suffix)
                 {
                     let bodied = has_body(desc);
                     match sfx {
-                        None => sfx = Some((bodied, idx as u32)),
+                        None => sfx = Some((bodied, idx)),
                         Some((false, _)) if bodied => {
-                            sfx = Some((true, idx as u32))
+                            sfx = Some((true, idx))
                         }
                         _ => {}
                     }

@@ -521,6 +521,7 @@ impl<'a> Deserializer<'a> {
  // Runtime-only reverse cache — never serialized.
  type_idx_by_id: std::sync::OnceLock::new(),
         fn_idx_by_name: std::sync::OnceLock::new(),
+        fn_idx_by_last_segment: std::sync::OnceLock::new(),
  })
  }
 
