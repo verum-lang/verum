@@ -152,3 +152,33 @@ fn test_two_rwlocks_independent_poison_state() {
     assert(!a.is_poisoned());
     assert(b.is_poisoned());
 }
+
+// =============================================================================
+// try_write — documented and run by nothing (census 2026-09-12).
+// =============================================================================
+
+@test
+@ignore("Reading through an RwLock guard answers the whole RwLock record, not the value: `let v: Int = *guard` after try_read() on RwLock.new(7) gives {{{1}, {0}, 7, {0}}}. The identical shape on a Mutex in the SAME programme answers 7, so Deref works and this one does not. Making RwLockReadGuard.deref call a `data()` helper, exactly as MutexGuard.deref does, was tried and changed NOTHING — measured on a rebuilt binary, so the extra hop is not the difference. Cause unknown; recorded as A131.")
+fn test_try_write_succeeds_on_an_uncontended_lock() {
+    let l: RwLock<Int> = RwLock.new(7);
+    match l.try_write() {
+        Result.Ok(mut g) => { *g = 9; },
+        Result.Err(_) => panic("try_write on an uncontended lock must succeed"),
+    };
+    // The write went through the guard and survives it.
+    match l.try_read() {
+        Result.Ok(g) => assert_eq(*g, 9),
+        Result.Err(_) => panic("try_read after the writer dropped"),
+    };
+}
+
+@test
+@ignore("Reading through an RwLock guard answers the whole RwLock record, not the value: `let v: Int = *guard` after try_read() on RwLock.new(7) gives {{{1}, {0}, 7, {0}}}. The identical shape on a Mutex in the SAME programme answers 7, so Deref works and this one does not. Making RwLockReadGuard.deref call a `data()` helper, exactly as MutexGuard.deref does, was tried and changed NOTHING — measured on a rebuilt binary, so the extra hop is not the difference. Cause unknown; recorded as A131.")
+fn test_try_write_is_repeatable() {
+    // Two successive writers: a guard that never released would make
+    // the second attempt fail, which the single-shot test cannot see.
+    let l: RwLock<Int> = RwLock.new(0);
+    match l.try_write() { Result.Ok(mut g) => { *g = 1; }, Result.Err(_) => panic("first") };
+    match l.try_write() { Result.Ok(mut g) => { *g = 2; }, Result.Err(_) => panic("second") };
+    match l.try_read() { Result.Ok(g) => assert_eq(*g, 2), Result.Err(_) => panic("read") };
+}

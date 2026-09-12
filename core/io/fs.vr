@@ -57,7 +57,7 @@
 )
 module core.io.fs;
 mount collections.*;
-mount io.path.{Path, PathBuf};
+mount io.path.{Path, PathBuf, Component};
 mount io.protocols.{StreamError, StreamError as IoError, IoErrorKind, IoResult, io_error_kind_from_os_code};
 mount core.base.env.{var as env_var};
 mount io.file.{File, read_to_string as file_read_to_string, read as file_read, write as file_write};
@@ -1094,26 +1094,42 @@ public fn canonicalize(path: &Path) -> IoResult<PathBuf> {
     // Resolve symlinks by following them
     let mut components = List.new();
     for component in result.components() {
-        // `Component` declares `as_text` (a `Maybe<&Text>`, None for the
-        // non-Normal variants) and `to_text`. It does NOT declare
-        // `as_str`, and calling it panicked every `canonicalize` at
-        // Tier 0:
-        //   method 'as_str' not found on receiver of runtime kind
-        //   `Component`
-        // `to_text` is the right one and `as_text` is not: this match
-        // needs "." and ".." to compare equal, and `as_text` answers
-        // None for CurDir and ParentDir.
-        match component.to_text() {
-            "." => {
+        // DESTRUCTURE THE VARIANT; DO NOT RENDER IT. This loop used to
+        // call `component.as_str()`, a method `Component` does not
+        // declare, and every `canonicalize` panicked at Tier 0. The
+        // obvious repair — `to_text()`, which `Component` does declare
+        // and which renders `.` for CurDir and `..` for ParentDir — is
+        // NOT safe here: measured 2026-09-12, `to_text()` answers
+        // correctly when called from a user programme and answers the
+        // VARIANT NAME (`Normal(tmp)`, `CurDir`) when called from
+        // inside the standard library, so the arms below never fired
+        // and canonicalize returned paths like
+        // `/RootDir/Normal(tmp)/Normal(a)`. A loud panic had become a
+        // silent wrong path.
+        //
+        // Matching the variants directly needs no rendering at all, so
+        // it is correct either way, and it also fixes a second latent
+        // error: `to_text()` renders RootDir as the separator, which
+        // the old `!= "/"` tests below were comparing against by hand.
+        match component {
+            Component.CurDir => {
                 // Skip current dir
             }
-            ".." => {
+            Component.ParentDir => {
                 // Go up one level
                 if !components.is_empty() {
                     components.pop();
                 }
             }
-            name => {
+            Component.RootDir => {
+                // The leading root is supplied by `PathBuf.from_str("/")`
+                // when the result is rebuilt below; carrying it as a
+                // component would double it.
+            }
+            Component.Prefix(name) => {
+                components.push(name.clone());
+            }
+            Component.Normal(name) => {
                 components.push(name.clone());
 
                 // Check if this path so far is a symlink
@@ -1130,19 +1146,23 @@ public fn canonicalize(path: &Path) -> IoResult<PathBuf> {
                         // Start over from the symlink target
                         components.clear();
                         for c in target.components() {
-                            if c.to_text() != "/" {
-                                components.push(c.to_text());
+                            match c {
+                                Component.Normal(n) => components.push(n.clone()),
+                                Component.Prefix(n) => components.push(n.clone()),
+                                _ => {},
                             }
                         }
                     } else {
                         // Relative symlink - replace last component
                         components.pop();
                         for c in target.components() {
-                            let s = c.to_text();
-                            if s == ".." && !components.is_empty() {
-                                components.pop();
-                            } else if s != "." && s != "/" {
-                                components.push(c.to_text());
+                            match c {
+                                Component.ParentDir => {
+                                    if !components.is_empty() { components.pop(); }
+                                },
+                                Component.Normal(n) => components.push(n.clone()),
+                                Component.Prefix(n) => components.push(n.clone()),
+                                _ => {},
                             }
                         }
                     }
