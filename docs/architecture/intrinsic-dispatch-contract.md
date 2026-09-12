@@ -480,28 +480,54 @@ That number therefore says nothing about this defect, and it is kept
 here because it is the kind of number that reads like evidence and is
 not. What those specs die of is elsewhere:
 
-* **A `spawn` that captures a channel spins.** Bisected, each step one
-  `verum run` in a one-file directory: `spawn` alone runs; a channel
-  alone runs; `spawn` capturing a channel hangs — and `main`'s FIRST
-  `print` never appears, so this is not the program deadlocking, it is
-  never reaching the program. `verum check` on the same file passes in
-  2.1 s. Sampled at 12 s and 22 s: 99% CPU, RSS flat at 1.5 GiB, state
-  R — a tight loop, not a wait. The run's own warning names the frame:
-  `[field-guess] 'cap' has 21 position-disagreeing candidates; guessed
-  Channel.cap idx 1 (most fields) in fn `main$spawn$0` —
-  FIELD-ACCESS-BYNAME-1`.
-  CONTROLS, all in one-file directories: capturing a LOCAL record with
-  the same shape runs; capturing an `Int` runs; capturing an archive
-  `Mutex` runs. So it is neither "any capture" nor "any archive type".
+* **A `spawn` that captures a channel falls off a COMPILE-TIME cliff.**
+  Bisected, each step one `verum run` in a one-file directory, wall
+  clock:
+
+      spawn alone, no channel        0 s
+      channel alone, no spawn        6 s
+      spawn CAPTURING a channel     37 s   <- same program, exit 0
+
+  It is not a deadlock (the program does run, and prints) and not an
+  infinite loop (it terminates). `verum check` on that file passes in
+  2.1 s, so the cost is after type-checking. Sampled at 12 s and 22 s:
+  99% CPU, RSS FLAT at 1.5 GiB, state R. The stack names the frame —
+  `phase_interpret` → `compile_ast_to_vbc` →
+  `ArchiveCtxCache::apply_lazy_supplemental` →
+  `register_module_filtered`, inside the per-(wanted × descriptor)
+  prefix comparison that allocates two `format!` strings per pair
+  (`archive_ctx_loader.rs:6352-6353`).
+  CONTROLS, all one-file directories: capturing a LOCAL record with the
+  same shape is instant; capturing an `Int` is instant; capturing an
+  archive `Mutex` is instant. So it is neither "any capture" nor "any
+  archive type".
+* **The real specs are worse than that, and the sweep's budget is not
+  what failed them.** Ten of the 65 were re-run with a 200 s budget
+  instead of 20 s: nine finished measuring, and all nine still hit
+  200 s — `348_interp_channel_sim`, `349_interp_csp_sim`,
+  `606_interp_channel_ops`, `1001_nursery_structured_concurrency`,
+  `1049_barrier_sync`, `1050_condvar_producer_consumer`,
+  `1051_waitgroup`, `1057_select_timeout`, `1102_nursery_basic`. So
+  "TIMEOUT" is a statement about those specs, not only about the
+  20 s. Whether they are unbounded or merely past 200 s is NOT
+  established here, and the difference does not matter to a suite.
 * The exit-1 group includes type errors that never reach the runtime,
   e.g. `let ch = Channel.new(16)` with no element type in sight —
   `error<E404>: Ambiguous type for 'ch'`, which the 31 August binary
   reports identically.
 
-An earlier draft of this section said the specs deadlocked because
-Tier-0 `spawn` is deferred. That was refuted by the probe above: a
-deadlocked program has already printed its first line, and these have
-not.
+This paragraph was wrong twice before it was right, and both errors
+came from the same place — reading a TIMEOUT as if it described the
+program. The first draft said the specs deadlock on deferred `spawn`;
+refuted, because `main`'s first `print` never appeared. The second said
+they spin in an infinite loop; refuted by giving the same program 600 s,
+after which it finished in 31 s with exit 0.
+
+    A TIMEOUT VERDICT IS A STATEMENT ABOUT THE TIMEOUT UNTIL THE
+    BUDGET IS RAISED AND THE VERDICT SURVIVES.
+
+Here it did survive, at ten times the budget — which is why the row
+above can say "these do not finish" and not merely "these were cut off".
 
 The evidence for the representation defect is the direct one: the
 program above, and the panic backtrace naming
