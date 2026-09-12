@@ -950,6 +950,43 @@ impl VTestRunner {
             reporter.generate(&mut stdout, self.config.output_format)?;
         }
 
+        // T1452 — A RUN THAT WAS ASKED FOR TESTS AND FOUND NONE IS NOT A PASS.
+        //
+        // The verdict line is the one field a reader checks, and it is the one
+        // that cannot tell "every test passed" from "there were no tests":
+        // both leave `failed` at zero. Everything that WOULD tell them apart —
+        // the total, the elapsed time — is exactly what a reader skips once
+        // the last line says PASSED.
+        //
+        // Measured 2026-09-12: `vtest run <path matching nothing>` printed
+        // `Total: 0 tests` / `RESULT: PASSED` and exited 0, in seconds, over a
+        // tree holding 3160 specs. A mistyped path, or a `cd` that makes a
+        // repo-relative one resolve elsewhere, turns the suite green.
+        //
+        // DELIBERATELY HERE AND NOT IN `Reporter::exit_code`: an empty
+        // Reporter is legitimately not a failure — `report.rs`'s own test
+        // says so ("an empty complete run is not a failure") — and this is
+        // the site that knows the difference, because it knows the run was
+        // ASKED to discover and came back with nothing. The paths are named
+        // so the reader can see what was searched rather than guess.
+        if summary.total == 0 {
+            let searched: Vec<String> = self
+                .config
+                .test_paths
+                .iter()
+                .map(|p| p.display().to_string())
+                .collect();
+            eprintln!(
+                "  NO TESTS DISCOVERED — nothing matched under: {}",
+                if searched.is_empty() {
+                    "<no paths configured>".to_string()
+                } else {
+                    searched.join(", ")
+                }
+            );
+            return Ok(1);
+        }
+
         Ok(reporter.exit_code())
     }
 }

@@ -697,7 +697,27 @@ impl Reporter {
         )?;
 
         // Final result
-        if report.summary.failed > 0 || report.summary.errored > 0 {
+        //
+        // T1452 — ZERO TESTS IS NOT "PASSED". The verdict line is the one
+        // field a reader checks, and it is the one that cannot tell "every
+        // test passed" from "there were no tests": both leave `failed` at
+        // zero, and the total and the elapsed time — which WOULD tell them
+        // apart — are exactly what a reader skips once the last line is
+        // green. Measured: `vtest run <path matching nothing>` printed
+        // `Total: 0 tests` / `RESULT: PASSED` over a tree holding 3160 specs.
+        //
+        // The EXIT CODE is decided in `run_and_report`, not here, because an
+        // empty Reporter is legitimately not a failure (this file's own test
+        // says so) and only the caller knows the run was ASKED to discover.
+        // This line is about what the reader is told, which is the half that
+        // a correct exit code does not fix.
+        if report.summary.total == 0 && report.summary.discovered.is_none() {
+            writeln!(
+                writer,
+                "  RESULT: {} — nothing matched the paths searched",
+                "NO TESTS DISCOVERED".red().bold()
+            )?;
+        } else if report.summary.failed > 0 || report.summary.errored > 0 {
             writeln!(
                 writer,
                 "  RESULT: {} ({} failures)",
@@ -1713,6 +1733,49 @@ mod tests {
     /// before this the numerator and denominator shrank together and the
     /// arithmetic stayed self-consistent: 334 passed + 49 failed = "383
     /// tests", with 321 specs absent and no line saying so.
+    #[test]
+    fn a_run_that_discovered_nothing_does_not_say_passed() {
+        // T1452 — the verdict is the one field a reader checks, and it cannot
+        // tell "every test passed" from "there were no tests": both leave
+        // `failed` at zero. Measured before the fix: `vtest run <path matching
+        // nothing>` printed `RESULT: PASSED` over a tree holding 3160 specs.
+        let empty = Reporter::new("test".into());
+        let mut out = Vec::new();
+        empty
+            .generate(&mut out, ReportFormat::Console)
+            .expect("report renders");
+        let text = String::from_utf8(out).expect("utf8");
+        assert!(
+            text.contains("NO TESTS DISCOVERED"),
+            "a zero-test run must say so: {text}"
+        );
+        assert!(
+            !text.contains("RESULT: PASSED"),
+            "and must not claim a pass: {text}"
+        );
+
+        // THE OTHER POLARITY, and it is not hypothetical: a run the watchdog
+        // cut short ALSO reports zero results, and saying "nothing was
+        // discovered" there would be false — 702 were, and none ran. The
+        // coverage claim is what separates the two, so the verdict asks for
+        // it. Without this pole the condition above could be widened to any
+        // empty report and nothing would notice.
+        let cut = Reporter::new("test".into())
+            .with_coverage(702, Some("the memory watchdog stopped the run".into()));
+        let mut out2 = Vec::new();
+        cut.generate(&mut out2, ReportFormat::Console)
+            .expect("report renders");
+        let text2 = String::from_utf8(out2).expect("utf8");
+        assert!(
+            !text2.contains("NO TESTS DISCOVERED"),
+            "a cut-short run discovered plenty: {text2}"
+        );
+        assert!(
+            text2.contains("NEVER RAN"),
+            "it says what it missed instead: {text2}"
+        );
+    }
+
     #[test]
     fn an_incomplete_run_names_the_specs_it_never_reached() {
         let complete = Reporter::new("test".into());
