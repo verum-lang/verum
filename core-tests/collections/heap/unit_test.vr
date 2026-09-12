@@ -450,4 +450,46 @@ fn test_heap_16_elements_drain_descending() {
     assert(h.is_empty());
 }
 
+// =============================================================================
+// drain_sorted — documented, and nothing ran it (2026-09-12 census).
+// =============================================================================
+
+@test
+fn test_drain_sorted_yields_descending_and_empties_the_heap() {
+    let mut h: BinaryHeap<Int> = BinaryHeap.new();
+    h.push(3);
+    h.push(1);
+    h.push(4);
+    h.push(1);
+    h.push(5);
+
+    let mut out: List<Int> = List.new();
+    for x in h.drain_sorted() {
+        out.push(x);
+    }
+
+    // Descending order is the documented contract, not merely "sorted".
+    assert_eq(out.len(), 5);
+    assert_eq(out[0], 5);
+    assert_eq(out[1], 4);
+    assert_eq(out[2], 3);
+    assert_eq(out[3], 1);
+    assert_eq(out[4], 1);
+
+    // DRAIN, not iterate: the heap must be empty afterwards. An
+    // implementation that yielded the right order without consuming
+    // would pass every assertion above.
+    assert(h.is_empty());
+}
+
+@test
+fn test_drain_sorted_on_an_empty_heap_yields_nothing() {
+    let mut h: BinaryHeap<Int> = BinaryHeap.new();
+    let mut n = 0;
+    for _x in h.drain_sorted() {
+        n = n + 1;
+    }
+    assert_eq(n, 0);
+}
+
 fn main() {}

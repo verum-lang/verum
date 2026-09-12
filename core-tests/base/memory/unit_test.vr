@@ -126,6 +126,45 @@ fn test_maybe_uninit_new_uninit() {
 // Entry point
 // =============================================================================
 
+// =============================================================================
+// Heap.leak — documented on two stdlib pages, run by nothing (census
+// 2026-09-12). It CONSUMES the Heap, returns a raw `&mut T` and does
+// not deallocate; the caller owns the memory from then on.
+// =============================================================================
+
+type LeakedPair is { x: Int, y: Int };
+
+
+@test
+@ignore("Heap.leak refuses by design until T1189: the interpreter substitutes its own CBGR cell for Heap.new while the stdlib body expects the declared record Heap<T> { ptr, generation, epoch }, so reading its fields off the cell is out of bounds. The panic says exactly that and names the task -- a loud refusal, which is the honest behaviour. These three are the acceptance for it.")
+fn test_heap_leak_returns_a_reference_to_the_same_value() {
+    let h = Heap.new(1234);
+    let r = h.leak();
+    assert_eq(*r, 1234);
+}
+
+@test
+@ignore("Heap.leak refuses by design until T1189: the interpreter substitutes its own CBGR cell for Heap.new while the stdlib body expects the declared record Heap<T> { ptr, generation, epoch }, so reading its fields off the cell is out of bounds. The panic says exactly that and names the task -- a loud refusal, which is the honest behaviour. These three are the acceptance for it.")
+fn test_heap_leak_yields_a_writable_reference() {
+    // `&mut T`, not `&T`: a version that handed back a read-only view
+    // would still satisfy the read above.
+    let h = Heap.new(7);
+    let r = h.leak();
+    *r = 9;
+    assert_eq(*r, 9);
+}
+
+@test
+@ignore("Heap.leak refuses by design until T1189: the interpreter substitutes its own CBGR cell for Heap.new while the stdlib body expects the declared record Heap<T> { ptr, generation, epoch }, so reading its fields off the cell is out of bounds. The panic says exactly that and names the task -- a loud refusal, which is the honest behaviour. These three are the acceptance for it.")
+fn test_heap_leak_preserves_a_record_field_by_field() {
+    // A scalar can survive a pointer that is off by a header; a record
+    // read field by field cannot.
+    let h = Heap.new(LeakedPair { x: 10, y: 20 });
+    let r = h.leak();
+    assert_eq(r.x, 10);
+    assert_eq(r.y, 20);
+}
+
 fn main() {
     // `verum test` synthesises a per-test main.
 }

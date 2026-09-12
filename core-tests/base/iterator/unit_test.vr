@@ -2152,6 +2152,51 @@ fn test_pattern_flatten() {
 // Entry point
 // =============================================================================
 
+// =============================================================================
+// find_map — documented, and nothing ran it (2026-09-12 census).
+// "Find and transform in one step": the FIRST element for which the
+// closure answers Some, already transformed.
+// =============================================================================
+
+@test
+fn test_find_map_returns_the_first_transformed_hit() {
+    let xs: List<Int> = [1, 2, 3, 4];
+    let got = xs.iter().find_map(|x| {
+        if *x % 2 == 0 { Maybe.Some(*x * 10) } else { Maybe.None }
+    });
+    // 2 is the first even, and the result is the TRANSFORM of it, not
+    // the element: a find() that forgot to apply the closure answers 2.
+    assert(got.is_some());
+    assert_eq(got.unwrap(), 20);
+}
+
+@test
+fn test_find_map_returns_none_when_nothing_matches() {
+    let xs: List<Int> = [1, 3, 5];
+    let got = xs.iter().find_map(|x| {
+        if *x % 2 == 0 { Maybe.Some(*x) } else { Maybe.None }
+    });
+    assert(got.is_none());
+}
+
+@test
+fn test_find_map_stops_at_the_first_hit() {
+    // Two candidates; the contract is the FIRST. A version that ran to
+    // the end and kept the last answer passes the two tests above.
+    let xs: List<Int> = [1, 2, 4];
+    let got = xs.iter().find_map(|x| {
+        if *x % 2 == 0 { Maybe.Some(*x) } else { Maybe.None }
+    });
+    assert_eq(got.unwrap(), 2);
+}
+
+@test
+fn test_find_map_on_an_empty_iterator_is_none() {
+    let xs: List<Int> = [];
+    let got = xs.iter().find_map(|x| Maybe.Some(*x));
+    assert(got.is_none());
+}
+
 fn main() {
     // Tests run via @test annotations
 }

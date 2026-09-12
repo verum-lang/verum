@@ -538,4 +538,55 @@ fn test_map_capacity_grows_with_inserts() {
     assert(m.capacity() >= 64);
 }
 
+// =============================================================================
+// values_mut — documented, and nothing ran it (2026-09-12 census).
+// =============================================================================
+
+@test
+@ignore("Map.values_mut() dies with `Null pointer dereference: op=opcode 0x62 at MapValuesMut.next`. Measured 2026-09-12 at Tier 0 with a two-entry map; the empty-map case passes, so the iterator is constructed and fails on its first step. Same shape as Map.entry / get_key_value / remove_entry, the three methods this repo already pins as null-deref. Recorded as A125.")
+fn test_values_mut_visits_every_value() {
+    let mut m: Map<Int, Int> = Map.new();
+    m.insert(1, 10);
+    m.insert(2, 20);
+    m.insert(3, 30);
+
+    let mut seen = 0;
+    let mut total = 0;
+    for v in m.values_mut() {
+        seen = seen + 1;
+        total = total + *v;
+    }
+    assert_eq(seen, 3);
+    assert_eq(total, 60);
+}
+
+@test
+@ignore("Map.values_mut() dies with `Null pointer dereference: op=opcode 0x62 at MapValuesMut.next`. Measured 2026-09-12 at Tier 0 with a two-entry map; the empty-map case passes, so the iterator is constructed and fails on its first step. Same shape as Map.entry / get_key_value / remove_entry, the three methods this repo already pins as null-deref. Recorded as A125.")
+fn test_values_mut_writes_through_to_the_map() {
+    // MUT is the whole point. An iterator that handed out copies would
+    // pass the visit-count test above and change nothing here.
+    let mut m: Map<Int, Int> = Map.new();
+    m.insert(1, 10);
+    m.insert(2, 20);
+
+    for v in m.values_mut() {
+        *v = *v + 1;
+    }
+
+    assert_eq(*m.get(&1).unwrap(), 11);
+    assert_eq(*m.get(&2).unwrap(), 21);
+    // The keys and the length are untouched.
+    assert_eq(m.len(), 2);
+}
+
+@test
+fn test_values_mut_on_an_empty_map_visits_nothing() {
+    let mut m: Map<Int, Int> = Map.new();
+    let mut seen = 0;
+    for _v in m.values_mut() {
+        seen = seen + 1;
+    }
+    assert_eq(seen, 0);
+}
+
 fn main() {}

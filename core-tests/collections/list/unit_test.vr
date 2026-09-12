@@ -1292,4 +1292,53 @@ fn test_list_partition_by_all_false_right_full() {
     assert_eq(r.len(), 3);
 }
 
+// =============================================================================
+// intersperse — the stdlib reference documents it and NOTHING RAN IT.
+// Found 2026-09-12 by the exercised-methods census once comments stopped
+// counting as execution evidence.
+// =============================================================================
+
+@test
+@ignore("List.intersperse returns HEAP ADDRESSES, not elements: [1,2,3].intersperse(0) answers [39989593984, 0, 39989593992, 0, 39989594000] — right length, right separators, pointers where the elements belong. Measured 2026-09-12 at Tier 0. The cause is not this method: the stdlib body reads self.ptr, and the interpreter comment on the Map-style get_or intercept states that the .vr record does not match the runtime layout, where len sits at slot 0. Methods that look correct are correct because the interpreter INTERCEPTS them — take, skip, filter and find all have intercepts; tail, intersperse, chunks_exact, rchunks, reduce, take_while, unique and split_first have none and all eight are wrong. Recorded as A126.")
+fn test_intersperse_puts_the_separator_between_pairs() {
+    let xs: List<Int> = [1, 2, 3];
+    let ys = xs.intersperse(0);
+    // The doc comment's own example: [1,2,3].intersperse(0) -> [1,0,2,0,3].
+    assert_eq(ys.len(), 5);
+    assert_eq(ys[0], 1);
+    assert_eq(ys[1], 0);
+    assert_eq(ys[2], 2);
+    assert_eq(ys[3], 0);
+    assert_eq(ys[4], 3);
+}
+
+@test
+@ignore("List.intersperse returns HEAP ADDRESSES, not elements: [1,2,3].intersperse(0) answers [39989593984, 0, 39989593992, 0, 39989594000] — right length, right separators, pointers where the elements belong. Measured 2026-09-12 at Tier 0. The cause is not this method: the stdlib body reads self.ptr, and the interpreter comment on the Map-style get_or intercept states that the .vr record does not match the runtime layout, where len sits at slot 0. Methods that look correct are correct because the interpreter INTERCEPTS them — take, skip, filter and find all have intercepts; tail, intersperse, chunks_exact, rchunks, reduce, take_while, unique and split_first have none and all eight are wrong. Recorded as A126.")
+fn test_intersperse_of_one_element_adds_nothing() {
+    // n*2-1 is 1 here, so an off-by-one in the length computation shows
+    // up as a trailing separator. The three-element case above cannot
+    // see that.
+    let xs: List<Int> = [7];
+    let ys = xs.intersperse(0);
+    assert_eq(ys.len(), 1);
+    assert_eq(ys[0], 7);
+}
+
+@test
+fn test_intersperse_of_empty_is_empty() {
+    let xs: List<Int> = [];
+    let ys = xs.intersperse(0);
+    assert_eq(ys.len(), 0);
+}
+
+@test
+fn test_intersperse_leaves_the_receiver_alone() {
+    // It takes `&self` and returns a new list; a version that built the
+    // result in place would pass every assertion above.
+    let xs: List<Int> = [1, 2];
+    let ys = xs.intersperse(9);
+    assert_eq(xs.len(), 2);
+    assert_eq(ys.len(), 3);
+}
+
 fn main() {}

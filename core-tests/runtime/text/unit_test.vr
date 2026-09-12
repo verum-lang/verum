@@ -252,3 +252,64 @@ fn test_char_general_category_uppercase_neq_lowercase() {
     let lower = char_general_category('a');
     assert(upper != lower, "Lu and Ll should be distinct categories");
 }
+
+// =============================================================================
+// Section 8: Char.encode_utf8 — the method form, not the intrinsic
+//
+// `text.md` documents `c.encode_utf8(buf: &mut [Byte]) -> Int` and pins
+// an architectural rule to it: a primitive whose runtime kind is a
+// FOREIGN kind (Char boxes to Int) needs a `CallM`-path intercept for
+// every `&mut`-arg method, because `ch.encode_utf8(...)` written by a
+// user lowers to CallM and is keyed on the receiver's runtime kind.
+// Without the intercept the call panics with "method '…' not found on
+// receiver of runtime kind 'Int'".
+//
+// That rule was pinned by a §B close and this folder's audit lists
+// `char_encode_utf8` coverage as outstanding. Measured 2026-09-12: the
+// exercised-methods census says nothing anywhere calls `.encode_utf8(`
+// — so the rule protecting the method form had no test in the method
+// form. These four are it.
+// =============================================================================
+
+@test
+fn test_char_encode_utf8_ascii_is_one_byte() {
+    let mut buf = [0_u8; 4];
+    let n = 'A'.encode_utf8(&mut buf);
+    assert_eq(n, 1);
+    assert_eq(buf[0], 65_u8);
+}
+
+@test
+fn test_char_encode_utf8_two_byte_sequence() {
+    // U+00E9 LATIN SMALL LETTER E WITH ACUTE -> C3 A9.
+    let mut buf = [0_u8; 4];
+    let n = 'é'.encode_utf8(&mut buf);
+    assert_eq(n, 2);
+    assert_eq(buf[0], 195_u8);
+    assert_eq(buf[1], 169_u8);
+}
+
+@test
+fn test_char_encode_utf8_three_byte_sequence() {
+    // U+20AC EURO SIGN -> E2 82 AC. A length that came from a lookup
+    // table but bytes that did not would pass the ASCII test alone.
+    let mut buf = [0_u8; 4];
+    let n = '€'.encode_utf8(&mut buf);
+    assert_eq(n, 3);
+    assert_eq(buf[0], 226_u8);
+    assert_eq(buf[1], 130_u8);
+    assert_eq(buf[2], 172_u8);
+}
+
+@test
+fn test_char_encode_utf8_writes_through_the_reference() {
+    // THE POINT OF THE PINNED RULE. The buffer is a `&mut` argument; a
+    // call that returned the right length and dropped the output — the
+    // exact failure the CharSubOpcode intercept was added for — passes
+    // any test that only checks the return value.
+    let mut buf = [9_u8; 4];
+    let n = 'Z'.encode_utf8(&mut buf);
+    assert_eq(n, 1);
+    assert(buf[0] != 9_u8);
+    assert_eq(buf[0], 90_u8);
+}
