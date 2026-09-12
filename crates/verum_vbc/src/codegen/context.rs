@@ -363,9 +363,6 @@ pub struct CodegenContext {
     /// unambiguously.
     pub pending_mount_aliases: HashMap<String, String>,
 
-    /// Descending allocation counter for stage-5 stub ids
-    /// (`stub_ranges::STAGE5_BASE - counter`).
-    pub stage5_stub_counter: u32,
 
     /// Dotted module path for functions currently being collected/compiled.
     ///
@@ -1623,7 +1620,6 @@ impl CodegenContext {
             prefer_existing_functions: false,
             stage3_stub_names: HashMap::new(),
             pending_mount_aliases: HashMap::new(),
-            stage5_stub_counter: 0,
             current_source_module: None,
             stats: CodegenStats::default(),
             tier_context: TierContext::new(),

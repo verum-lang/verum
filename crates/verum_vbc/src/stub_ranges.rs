@@ -60,6 +60,38 @@ const fn in_band(id: u32, base: u32) -> bool {
     id <= base && id >= base - STUB_RANGE_WIDTH
 }
 
+/// **T1456** — mint the next stage-5 stub id, unique across the WHOLE
+/// compilation.
+///
+/// The counter used to live on the `CodegenContext` and start at 0, so every
+/// module counted down from `STAGE5_BASE` through the same numbers and the
+/// merge aliased distinct callees onto one id. Measured 2026-09-12 by dumping
+/// every function of one merged module: 61 distinct stage-5 ids over 196 call
+/// sites, five of them carrying MULTIPLE ARITIES — `STAGE5_BASE` itself
+/// appeared with 0, 1, 2, 3 and 8 arguments across 28 sites, in
+/// `core.sys.num_cpus`, `DarwinCondvar.wait_timeout`,
+/// `core.base.primitives.intrinsic_clamp` and `core.runtime.config.alloc_array`.
+/// An id called with zero arguments and with eight cannot denote one function:
+/// resolution by id binds at most one of them and the first of the others
+/// reached panics `[lenient] stage-5 … stub never resolved`, with nothing able
+/// to NAME the callee because the id denotes 28 places.
+///
+/// EXHAUSTION IS A REFUSAL, not a wrap. Running past the band would alias ids
+/// again — silently, and in exactly the way this function exists to end — so
+/// it panics instead. The band holds 0x10_0000 ids and a whole-stdlib compile
+/// mints tens per module, so the refusal is a guard rather than a limit.
+pub fn next_stage5_id() -> u32 {
+    use std::sync::atomic::{AtomicU32, Ordering};
+    static NEXT: AtomicU32 = AtomicU32::new(0);
+    let c = NEXT.fetch_add(1, Ordering::Relaxed);
+    assert!(
+        c < STUB_RANGE_WIDTH,
+        "stage-5 stub ids exhausted: {c} minted, band holds {STUB_RANGE_WIDTH}. \
+         Wrapping would alias distinct callees onto one id again (T1456)."
+    );
+    STAGE5_BASE - c
+}
+
 /// Stage-1 band membership.
 #[inline]
 pub const fn in_stage1(id: u32) -> bool {

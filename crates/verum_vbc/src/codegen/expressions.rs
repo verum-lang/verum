@@ -6685,11 +6685,7 @@ impl VbcCodegen {
             None
         };
         if let Some(qualified) = stage5_pending {
-            let stub_id = {
-                let c = self.ctx.stage5_stub_counter;
-                self.ctx.stage5_stub_counter += 1;
-                crate::module::FunctionId(crate::stub_ranges::STAGE5_BASE - c)
-            };
+            let stub_id = crate::module::FunctionId(crate::stub_ranges::next_stage5_id());
             // The sibling mint site (`synthesize_qualified_call_stub`)
             // has carried this trace since it was written; this one did
             // not, so a stub minted HERE surfaced at run time as a bare
@@ -6768,9 +6764,11 @@ impl VbcCodegen {
             // ids; two ids carry more than one name; worst is five names
             // on id 4269801471 (`InvalidInput`, `NotFound`, `access_name`,
             // `flags_default`, `open_readonly`).  That id-sharing is a
-            // SEPARATE defect — `stage5_stub_counter` restarts at 0 per
-            // `CodegenContext` (`context.rs:1585`) — and this line does
-            // not touch it; the ratchet
+            // SEPARATE defect, FIXED 2026-09-12 (T1331): the counter used
+            // to restart at 0 per `CodegenContext`, so every unit minted
+            // `STAGE5_BASE - 0` first and the merge aliased unrelated
+            // callees onto it. Ids now come from `next_stage5_id()`, one
+            // counter for the whole compilation. The ratchet
             // `scripts/ci/check_stage5_stub_sharing.py` measures that one.
             //
             // Genuine mounts are unaffected: they register through
@@ -16791,11 +16789,7 @@ impl VbcCodegen {
         {
             return existing.clone();
         }
-        let stub_id = {
-            let c = self.ctx.stage5_stub_counter;
-            self.ctx.stage5_stub_counter += 1;
-            crate::module::FunctionId(crate::stub_ranges::STAGE5_BASE - c)
-        };
+        let stub_id = crate::module::FunctionId(crate::stub_ranges::next_stage5_id());
         if std::env::var_os("VERUM_TRACE_QCALL").is_some() {
             eprintln!(
                 "[qcall] stage-5 stub '{}' (arity={}) id={} in {}",

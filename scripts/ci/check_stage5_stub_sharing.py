@@ -83,7 +83,20 @@ STUB = re.compile(
 
 # Set from the measurement above.  Lowered by FIXING — a root removed —
 # never by argument, and never raised to match a drift.
-BASELINE_SHARED_IDS = 2
+# LOWERED 2 -> 0 on 2026-09-12 (T1331). The cause is gone rather than the
+# population: stage-5 ids were `STAGE5_BASE - counter` with the counter on the
+# `CodegenContext`, so every unit minted `STAGE5_BASE - 0` first and the merge
+# aliased unrelated callees onto it. `next_stage5_id()` now mints from one
+# counter for the whole compilation, and exhaustion REFUSES rather than wraps,
+# because wrapping would recreate exactly this defect silently.
+#
+# Measured on the bake this baseline was lowered against: 0 of 11 ids carry
+# more than one name, worst 1. And on a merged module, by arity rather than by
+# name — the sharper reading, since an id called with 0 arguments and with 8
+# cannot denote one function under any rule: 74 ids over 182 sites, NONE with
+# two arities, where the same count before the fix was 61 ids over 196 sites
+# with FIVE sharing and a worst case of arities [0, 1, 2, 3, 8] across 28 sites.
+BASELINE_SHARED_IDS = 0
 
 # THE COUNT BECAME A ROSTER (T1330). `2 of 6` says how many ids stand for
 # several names and never WHICH, so the one shape it cannot report is the
@@ -99,20 +112,33 @@ BASELINE_SHARED_IDS = 2
 #
 # Measured 2026-09-10 from a full instrumented bake: 599 [qcall] lines,
 # 75 stubs, 6 ids, 2 of them shared.
-KNOWN_SHARED: set[tuple[str, ...]] = {
-    ("InvalidInput", "NotFound", "access_name", "flags_default", "open_readonly"),
-    ("BcTerminated", "open_admin"),
-}
+# EMPTIED 2026-09-12 (T1331), and the two groups that left are named here
+# rather than deleted silently, because this file's own rule is that a group
+# leaves KNOWN_SHARED "in the commit that earned it":
+#
+#     InvalidInput, NotFound, access_name, flags_default, open_readonly
+#     BcTerminated, open_admin
+#
+# Neither was a name collision in any meaningful sense — they were unrelated
+# callees that happened to receive the same id, because the mint counter
+# restarted at 0 in every `CodegenContext` and the merge aliased them. With
+# one counter for the whole compilation they no longer meet.
+KNOWN_SHARED: set[tuple[str, ...]] = set()
 
 
-def compare_membership(shared: dict) -> int:
-    """Report a swap. Equal counts with different name sets must NOT pass."""
+def compare_membership(shared: dict, roster: set | None = None) -> int:
+    """Report a swap. Equal counts with different name sets must NOT pass.
+
+    `roster` defaults to `KNOWN_SHARED`; the self-test passes its OWN so that
+    emptying the roster cannot disarm the check (T1331).
+    """
+    roster = KNOWN_SHARED if roster is None else roster
     have = {tuple(sorted(names)) for names in shared.values()}
-    if have == KNOWN_SHARED:
+    if have == roster:
         print(f"  membership matches the roster ({len(have)} group(s)).")
         return 0
-    new_groups = sorted(have - KNOWN_SHARED)
-    gone = sorted(KNOWN_SHARED - have)
+    new_groups = sorted(have - roster)
+    gone = sorted(roster - have)
     if new_groups:
         print(f"  MEMBERSHIP MOVED: {len(new_groups)} name-set(s) not on the roster:")
         for g in new_groups:
@@ -166,15 +192,29 @@ def self_test() -> int:
     # THE MEMBERSHIP HALF, proved by FAILING. A compare that looked only at
     # the COUNT passes every assertion above and dies here — which is the
     # defect this gate carried until T1330.
+    # THE SELF-TEST OWNS ITS DATA, and must not read it from the roster.
+    # It used to build the swap case from `sorted(KNOWN_SHARED)[0]`, so
+    # emptying the roster — which is what fixing the defect DOES — killed the
+    # membership half with an IndexError instead of leaving it standing
+    # (measured 2026-09-12, T1331). A self-test that dies when the thing it
+    # guards reaches zero is a self-test that stops guarding at exactly the
+    # moment the ground needs holding.
+    roster = {("a_name", "b_name"), ("c_name",)}
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
-        swapped = compare_membership({1: {"BcTerminated", "open_SWAPPED"},
-                                      2: set(sorted(KNOWN_SHARED)[0])})
-        identical = compare_membership({i: set(g) for i, g in enumerate(KNOWN_SHARED)})
+        swapped = compare_membership(
+            {1: {"a_name", "SWAPPED"}, 2: {"c_name"}}, roster
+        )
+        identical = compare_membership(
+            {i: set(g) for i, g in enumerate(roster)}, roster
+        )
+        empty_ok = compare_membership({}, set())
     if swapped == 0:
         print("self-test: compare_membership PASSED a same-size swap"); bad += 1
     if identical != 0:
         print("self-test: compare_membership rejected the roster itself"); bad += 1
+    if empty_ok != 0:
+        print("self-test: compare_membership rejected an empty roster"); bad += 1
 
     print("self-test: OK" if not bad else f"self-test: {bad} FAILED")
     return bad
