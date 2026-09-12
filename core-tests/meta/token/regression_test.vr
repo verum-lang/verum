@@ -51,17 +51,19 @@ fn empty_stream() -> TokenStream {
 // for these types.
 //
 // The DEEPER root — a layout registry that is first-wins on the simple name —
-// is NOT closed by the renames; it is tracked as T0408
+// is NOT closed by the renames; it is tracked as T0458
+// (STDLIB-DUPLICATE-TYPENAMES), which absorbed T0408
 // (SIMPLE-KEY-LAYOUT-SQUAT-CONSUMER-1: `type_field_layouts` simple-key is a
-// first-wins global namespace).  T0408's charter is the module-qualified /
-// mount-aware re-key that lets same-simple-name types coexist safely; a
-// genuine cross-module same-simple-name collision regression belongs there.
+// first-wins global namespace) in the 2026-07-31 consolidation.  The charter
+// is the same — a module-qualified / mount-aware re-key that lets
+// same-simple-name types coexist safely; a genuine cross-module
+// same-simple-name collision regression belongs there.
 //
 // The four tests below now construct `TokenGroup` and guard its 3-field
 // layout + `.delimiter()` / `.tokens()` read-back (field 0 and field 1 reads
 // plus the trailing `span` field-2 write that historically overran).  They no
 // longer exercise the collision itself (TokenGroup's name is unique) — that
-// guard moves to T0408.
+// guard moves to T0458.
 // =============================================================================
 
 @test

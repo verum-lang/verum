@@ -25,7 +25,8 @@
 //       `Token.ident_spanned` (cross-module static ctor) corrupts object
 //       layout. The historical direct-record-literal collision
 //       (Group-vs-Probability TypeId, META-GROUP-XMODULE-1) is resolved
-//       via the unique `TokenGroup` rename (deeper root T0408).
+//       via the unique `TokenGroup` rename (deeper root T0458, which absorbed
+//       T0408 in the 2026-07-31 consolidation).
 // =============================================================================
 
 mount core.meta.quote.{QuoteBuilder, GroupBuilder, parens, braces, brackets};
@@ -54,7 +55,7 @@ fn empty_ts() -> TokenStream {
 // `--aot`. The cause originally blamed (the meta.token group record
 // sharing a colliding simple-name TypeId with `Probability`, 1240) is
 // resolved: the record is now the uniquely-named `TokenGroup` (deeper
-// first-wins layout-registry root tracked as T0408). Remains @ignore'd
+// first-wins layout-registry root tracked as T0458, ex-T0408). Remains @ignore'd
 // pending an `--aot` re-check of builder-path parity.
 @ignore
 @test
@@ -67,7 +68,7 @@ fn regression_aot_flaky_builder_group() {
 // REGRESSION (META-AOT-PARITY-1): `.paren()/.brace()/.bracket()`
 // (the `wrap`-style group helpers) shared the same historical AOT
 // flakiness. The Group/Probability simple-name collision it was blamed
-// on is resolved via the `TokenGroup` rename (root T0408); interp is
+// on is resolved via the `TokenGroup` rename (root T0458, ex-T0408); interp is
 // fine. Remains @ignore'd pending an `--aot` re-check.
 @ignore
 @test
@@ -79,7 +80,8 @@ fn regression_aot_flaky_builder_paren_wrapper() {
 
 // REGRESSION (META-AOT-PARITY-1): `paren_open()` returns a
 // `GroupBuilder`; reading its `.delimiter` was AOT-flaky. The collision
-// it was blamed on is resolved via the `TokenGroup` rename (root T0408);
+// it was blamed on is resolved via the `TokenGroup` rename (root T0458,
+// ex-T0408);
 // interp is fine. Remains @ignore'd pending an `--aot` re-check.
 @ignore
 @test
@@ -182,7 +184,7 @@ fn regression_builder_ident_static_ctor_layout() {
 // past the object's data size ("field write out of bounds ... type='Group'").
 // The record has since been renamed to the unique `TokenGroup`, dodging the
 // simple-name collision; the deeper first-wins layout-registry root is tracked
-// as T0408. Remains @ignore'd only for the shared builder AOT-parity issue
+// as T0458 (ex-T0408). Remains @ignore'd only for the shared builder AOT-parity issue
 // (META-AOT-PARITY-1) — the collision itself is resolved.
 @ignore
 @test
