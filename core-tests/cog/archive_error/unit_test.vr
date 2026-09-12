@@ -6,7 +6,14 @@
 // the `[Byte; 4]` fixed-array payload.
 // =============================================================================
 
-mount core.cog.archive.ArchiveError;
+// THE BRACES ARE LOAD-BEARING (A137): `mount core.a.b.Type;` binds
+// the type but refuses `Type.Variant(x)` — here `unbound`/`no method
+// named 'InvalidIndexEncoding'` — while the braced form constructs.
+// A COMPILE error, whole file down. Behind it sat a SECOND one
+// (A132): `ArchiveError.InvalidIndexEncoding(x)` is read as a method
+// call even with the braced mount, while the bare constructor works.
+// One field, so arity is not the rule — see A132's own controls.
+mount core.cog.archive.{ArchiveError};
 mount core.base.maybe.{Maybe, Some, None};
 mount core.base.result.{Result, Ok, Err};
 
@@ -52,7 +59,7 @@ fn test_archive_error_truncated_module_variant() {
 
 @test
 fn test_archive_error_invalid_index_encoding_variant() {
-    let e: ArchiveError = ArchiveError.InvalidIndexEncoding(
+    let e: ArchiveError = InvalidIndexEncoding(
         "bad varint at offset 17".to_text(),
     );
     assert(e is ArchiveError.InvalidIndexEncoding);
@@ -60,7 +67,7 @@ fn test_archive_error_invalid_index_encoding_variant() {
 
 @test
 fn test_archive_error_kernel_bridge_variant() {
-    let e: ArchiveError = ArchiveError.KernelBridge(
+    let e: ArchiveError = KernelBridge(
         "intrinsic signature mismatch".to_text(),
     );
     assert(e is ArchiveError.KernelBridge);
@@ -68,7 +75,7 @@ fn test_archive_error_kernel_bridge_variant() {
 
 @test
 fn test_archive_error_io_error_variant() {
-    let e: ArchiveError = ArchiveError.IoFailure(
+    let e: ArchiveError = IoFailure(
         "permission denied".to_text(),
     );
     assert(e is ArchiveError.IoFailure);
@@ -88,7 +95,7 @@ fn test_archive_error_unsupported_version_disjoint() {
 
 @test
 fn test_archive_error_io_error_disjoint() {
-    let e: ArchiveError = ArchiveError.IoFailure("x".to_text());
+    let e: ArchiveError = IoFailure("x".to_text());
     assert(!(e is ArchiveError.UnsupportedVersion));
     assert(!(e is ArchiveError.TruncatedHeader));
     assert(!(e is ArchiveError.KernelBridge));
@@ -101,9 +108,9 @@ fn test_archive_error_io_error_disjoint() {
 
 @test
 fn test_archive_error_kernel_bridge_payload_round_trip() {
-    let e: ArchiveError = ArchiveError.KernelBridge("axiom not registered".to_text());
+    let e: ArchiveError = KernelBridge("axiom not registered".to_text());
     match e {
-        ArchiveError.KernelBridge(reason) =>
+        KernelBridge(reason) =>
             assert_eq(reason, "axiom not registered"),
         _ => panic("expected KernelBridge"),
     }
@@ -111,9 +118,9 @@ fn test_archive_error_kernel_bridge_payload_round_trip() {
 
 @test
 fn test_archive_error_io_error_payload_round_trip() {
-    let e: ArchiveError = ArchiveError.IoFailure("ENOENT".to_text());
+    let e: ArchiveError = IoFailure("ENOENT".to_text());
     match e {
-        ArchiveError.IoFailure(reason) =>
+        IoFailure(reason) =>
             assert_eq(reason, "ENOENT"),
         _ => panic("expected ArchiveError.IoFailure"),
     }
