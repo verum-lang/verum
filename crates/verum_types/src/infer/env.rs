@@ -7071,17 +7071,36 @@ impl TypeChecker {
             self.ctx.env.insert_mono(prop_name, prop_ty);
         }
 
-        // unreachable() -> Never
-        let unreachable_ty = Type::function(List::new(), Type::never());
-        self.ctx.env.insert_mono("unreachable", unreachable_ty);
-
-        // unimplemented() -> Never
-        let unimplemented_ty = Type::function(List::new(), Type::never());
-        self.ctx.env.insert_mono("unimplemented", unimplemented_ty);
-
-        // todo() -> Never
-        let todo_ty = Type::function(List::new(), Type::never());
-        self.ctx.env.insert_mono("todo", todo_ty);
+        // unreachable(&Text = …) -> Never
+        // unimplemented(&Text = …) -> Never
+        // todo(&Text = …) -> Never
+        //
+        // All three are declared in `core/base/panic.vr` with ONE parameter
+        // carrying a default — `unreachable(msg: Text = "entered unreachable
+        // code")` and its two siblings — and all three are documented that
+        // way. These entries said `fn()`, so `todo("not yet")` was refused
+        // with `error<E102>: Function accepts at most 0 arguments, got 1`,
+        // and since a builtin SHADOWS a mounted library function of the same
+        // name, no `mount` could reach the real one: the only escape was a
+        // rename (`mount core.base.panic.{todo as t}`), which is not an
+        // escape a reader would find. Measured against `panic`, which is
+        // registered right above with its `&Text` and works.
+        //
+        // One TOTAL parameter and ZERO REQUIRED is exactly the shape the
+        // arity check already uses for a defaulted parameter — see
+        // `required_params` in `infer/expr.rs`, which caps the registry's
+        // answer at `params.len()`.
+        for name in ["unreachable", "unimplemented", "todo"] {
+            let params = List::from_iter([Type::Reference {
+                inner: Box::new(Type::text()),
+                mutable: false,
+            }]);
+            self.ctx
+                .env
+                .insert_mono(name, Type::function(params, Type::never()));
+            self.function_required_params
+                .insert(verum_common::Text::from(name), 0);
+        }
 
         // type_name<T>() -> Text
         let type_name_t = TypeVar::fresh();

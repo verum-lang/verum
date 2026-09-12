@@ -3231,20 +3231,60 @@ fn test_source_dirs(project_dir: &Path) -> List<PathBuf> {
     dirs
 }
 
+/// The `core/` tree a test directory's files are written against, if one
+/// sits beside it. `core-tests/sys/no_runtime/` tests `core/sys/no_runtime.vr`,
+/// so the runtime gate on the LIBRARY module has to reach the tests.
+fn core_root_beside(test_dir: &Path) -> Option<PathBuf> {
+    let core = test_dir.parent()?.join("core");
+    if core.is_dir() { Some(core) } else { None }
+}
+
 fn find_test_files(project_dir: &Path) -> Result<List<PathBuf>> {
     let dirs = test_source_dirs(project_dir);
     if dirs.is_empty() {
         return Ok(List::new());
     }
     let mut files = List::new();
+    let mut gated: Vec<String> = Vec::new();
     for dir in dirs.iter() {
+        // A MODULE THE DEFAULT BAKE DROPS CANNOT BE TESTED BY THE DEFAULT
+        // RUN, AND SAYING SO IS CHEAPER THAN 39 UNEXPLAINED FAILURES.
+        //
+        // `core/sys/mod.vr` gates `no_runtime` and `embedded` with
+        // `@cfg(runtime = "none" | "embedded")`, and `verum_compiler`'s
+        // build script drops their files from the default archive —
+        // "excluded 2 runtime-gated file(s)". Their tests kept being
+        // discovered, so every one of them failed on `unbound variable:
+        // SyncChannel` / `BumpAllocator`, which is a COMPILE error that no
+        // `@ignore` can contain and which reads exactly like a defect.
+        // The same authority that filters the bake filters the run.
+        let excluded = core_root_beside(dir)
+            .map(|core| verum_compiler::module_utils::runtime_gated_modules(&core));
         for entry in walkdir::WalkDir::new(dir).follow_links(false) {
             let entry = entry?;
             let path = entry.path();
-            if path.extension().and_then(|s| s.to_str()) == Some("vr") {
-                files.push(path.to_path_buf());
+            if path.extension().and_then(|s| s.to_str()) != Some("vr") {
+                continue;
             }
+            if let Some(ex) = &excluded
+                && let Ok(rel) = path.strip_prefix(dir)
+            {
+                let rel = rel.to_string_lossy().replace('\\', "/");
+                if ex.excludes(&rel) {
+                    gated.push(rel);
+                    continue;
+                }
+            }
+            files.push(path.to_path_buf());
         }
+    }
+    if !gated.is_empty() {
+        gated.sort();
+        ui::warn(&format!(
+            "{} test file(s) skipped: they test runtime-gated modules the default bake excludes ({})",
+            gated.len(),
+            gated.join(", "),
+        ));
     }
     files.sort();
     Ok(files)

@@ -9148,6 +9148,76 @@ impl VbcCodegen {
     }
 
     /// Tries to compile a builtin function.
+    /// The message id for a `panic`-family builtin.
+    ///
+    /// `panic`, `todo`, `unimplemented` and `unreachable` all end in
+    /// `Instruction::Panic`, whose operand is a STRING TABLE index —
+    /// `handle_panic` reads it with `state.module.get_string(StringId(id))`.
+    /// `add_const_string` returns a CONST POOL index, and the two spaces are
+    /// unrelated: `todo()` panicked with `DataBuilder` and `unimplemented()`
+    /// with `pos`, names that happened to sit at those indices in the string
+    /// table. `intern_string` is the string table, and is what every other
+    /// `Panic` emitter in this file already used.
+    ///
+    /// The argument handling is `panic`'s, verbatim, because all four take
+    /// the SAME optional `Text`: `core/base/panic.vr` declares
+    /// `unreachable(msg: Text = "entered unreachable code")`,
+    /// `unimplemented(msg: Text = "not implemented")` and
+    /// `todo(msg: Text = "not yet implemented")`. Sharing one path is what
+    /// keeps the dynamic case — `f"..."` rendered to stderr — from being
+    /// implemented once and forgotten three times.
+    fn panic_family_message_id(
+        &mut self,
+        args: &verum_common::List<Expr>,
+        default_message: &str,
+    ) -> CodegenResult<u32> {
+        let static_text: Option<&str> = if args.is_empty() {
+            Some(default_message)
+        } else if let ExprKind::Literal(lit) = &args[0].kind
+            && let LiteralKind::Text(text) = &lit.kind
+        {
+            Some(text.as_str())
+        } else if let ExprKind::Unary {
+            op: UnOp::Ref,
+            expr,
+            ..
+        } = &args[0].kind
+            && let ExprKind::Literal(lit) = &expr.kind
+            && let LiteralKind::Text(text) = &lit.kind
+        {
+            Some(text.as_str())
+        } else {
+            None
+        };
+
+        match static_text {
+            Some(s) => Ok(self.intern_string(s)),
+            None => {
+                // Dynamic-message path: render the argument to stderr — the
+                // same stream the Tier-0 panic render writes to — and leave a
+                // sentinel in the Panic itself so a reader grepping `Panic:`
+                // is pointed at the line above rather than handed "explicit
+                // panic".
+                let prefix = self.ctx.alloc_temp();
+                let prefix_id = self.ctx.add_const_string("panic: ");
+                self.ctx.emit(Instruction::LoadK {
+                    dst: prefix,
+                    const_id: prefix_id.0,
+                });
+                self.ctx.emit(Instruction::DebugPrint { value: prefix });
+                self.ctx.free_temp(prefix);
+
+                let msg_reg = self
+                    .compile_expr(&args[0])?
+                    .or_internal("panic arg has no value")?;
+                self.ctx.emit(Instruction::DebugPrint { value: msg_reg });
+                self.ctx.free_temp(msg_reg);
+
+                Ok(self.intern_string("<dynamic panic — see message above>"))
+            }
+        }
+    }
+
     fn try_compile_builtin(
         &mut self,
         name: &str,
@@ -9275,47 +9345,7 @@ impl VbcCodegen {
                 // became unreadable "explicit panic", a class of
                 // diagnostic loss that blocked union_find /
                 // toposort suite triage.
-                let static_text: Option<&str> = if args.is_empty() {
-                    Some("panic!")
-                } else if let ExprKind::Literal(lit) = &args[0].kind
-                    && let LiteralKind::Text(text) = &lit.kind
-                {
-                    Some(text.as_str())
-                } else if let ExprKind::Unary {
-                    op: UnOp::Ref,
-                    expr,
-                    ..
-                } = &args[0].kind
-                    && let ExprKind::Literal(lit) = &expr.kind
-                    && let LiteralKind::Text(text) = &lit.kind
-                {
-                    Some(text.as_str())
-                } else {
-                    None
-                };
-
-                let message_id = match static_text {
-                    Some(s) => self.intern_string(s),
-                    None => {
-                        // Dynamic-message path.
-                        let prefix = self.ctx.alloc_temp();
-                        let prefix_id = self.ctx.add_const_string("panic: ");
-                        self.ctx.emit(Instruction::LoadK {
-                            dst: prefix,
-                            const_id: prefix_id.0,
-                        });
-                        self.ctx.emit(Instruction::DebugPrint { value: prefix });
-                        self.ctx.free_temp(prefix);
-
-                        let msg_reg = self
-                            .compile_expr(&args[0])?
-                            .or_internal("panic arg has no value")?;
-                        self.ctx.emit(Instruction::DebugPrint { value: msg_reg });
-                        self.ctx.free_temp(msg_reg);
-
-                        self.intern_string("<dynamic panic — see message above>")
-                    }
-                };
+                let message_id = self.panic_family_message_id(args, "panic!")?;
                 self.ctx.emit(Instruction::Panic { message_id });
                 Ok(Some(None))
             }
@@ -9342,7 +9372,21 @@ impl VbcCodegen {
             }
 
             "unreachable" => {
-                self.ctx.emit(Instruction::Unreachable);
+                // `unreachable()` keeps the bare marker — `Instruction::
+                // Unreachable` carries no operand and reports its pc, which
+                // is the right thing for a compiler-inserted arm.
+                //
+                // `unreachable("why")` is a DIFFERENT statement: the
+                // programmer wrote a reason and expects to read it.
+                // `core/base/panic.vr:323` spells that out — its body is
+                // `panic(msg)` — so a message routes to Panic here too.
+                if args.is_empty() {
+                    self.ctx.emit(Instruction::Unreachable);
+                } else {
+                    let message_id =
+                        self.panic_family_message_id(args, "entered unreachable code")?;
+                    self.ctx.emit(Instruction::Panic { message_id });
+                }
                 Ok(Some(None))
             }
 
@@ -9787,15 +9831,17 @@ impl VbcCodegen {
             }
 
             "todo" => {
-                // Mark as not yet implemented - panics at runtime
-                let message_id = self.ctx.add_const_string("not yet implemented").0;
+                // Mark as not yet implemented — panics at runtime, with the
+                // caller's message when one is given. The defaults mirror
+                // `core/base/panic.vr`, which is where a reader looks them up.
+                let message_id = self.panic_family_message_id(args, "not yet implemented")?;
                 self.ctx.emit(Instruction::Panic { message_id });
                 Ok(Some(None))
             }
 
             "unimplemented" => {
-                // Alias for todo
-                let message_id = self.ctx.add_const_string("not implemented").0;
+                // Alias for todo, with its own default message.
+                let message_id = self.panic_family_message_id(args, "not implemented")?;
                 self.ctx.emit(Instruction::Panic { message_id });
                 Ok(Some(None))
             }
