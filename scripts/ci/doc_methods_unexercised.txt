@@ -183,12 +183,8 @@ mesh.md	with_use_delta
 mesh.md	with_user_agent
 metrics.md	counter
 metrics.md	encode_into
-metrics.md	fifteen_minute_rate
-metrics.md	five_minute_rate
 metrics.md	histogram
-metrics.md	mark
 metrics.md	observe
-metrics.md	one_minute_rate
 proxy.md	layer
 proxy.md	stream_mut
 proxy.md	with_backoff

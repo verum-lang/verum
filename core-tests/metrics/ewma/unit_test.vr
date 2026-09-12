@@ -5,7 +5,7 @@
 // `core/metrics/ewma.vr` — Exponentially Weighted Moving Average.
 // =============================================================================
 
-mount core.metrics.ewma.{LOAD_AVG_1, LOAD_AVG_5, LOAD_AVG_15};
+mount core.metrics.ewma.{LOAD_AVG_1, LOAD_AVG_5, LOAD_AVG_15, RateMeter};
 mount core.base.maybe.{Maybe, Some, None};
 mount core.base.result.{Result, Ok, Err};
 
@@ -69,6 +69,47 @@ fn test_load_avg_15_closest_to_one() {
     let to_one_1 = 1.0 - LOAD_AVG_1;
     let to_one_15 = 1.0 - LOAD_AVG_15;
     assert(to_one_15 < to_one_1);
+}
+
+// =============================================================================
+// RateMeter — the surface that COUNTS, not just the constants
+// =============================================================================
+//
+// The tests above pin the decay constants. Nothing in this folder called
+// `mark` or read a rate, so the meter's behaviour was untested while its
+// arithmetic was pinned — and `check-doc-methods-exercised` listed
+// `mark`, `one_minute_rate`, `five_minute_rate` and
+// `fifteen_minute_rate` as called by nothing that runs.
+//
+// The rates stay at zero here ON PURPOSE, and that is the assertion.
+// `mark` ticks only once the sample period has elapsed, and the period
+// defaults to five seconds (the Dropwizard default), so a test that runs
+// in milliseconds must see zero. A non-zero rate here would mean the
+// meter had invented a sample it never took.
+
+@test
+fn test_rate_meter_counts_every_marked_event() {
+    let mut m = RateMeter.new();
+    assert(m.count() == 0_u64);
+    m.mark(5_u64);
+    assert(m.count() == 5_u64);
+    m.mark(3_u64);
+    assert(m.count() == 8_u64);
+}
+
+@test
+fn test_rate_meter_reports_zero_before_the_first_tick() {
+    // Five seconds have not passed, so no sample exists yet. Zero is the
+    // right answer; anything else is a rate over a period that never ran.
+    let mut m = RateMeter.new();
+    assert(m.one_minute_rate() == 0.0);
+    m.mark(100_u64);
+    assert(m.one_minute_rate() == 0.0);
+    assert(m.five_minute_rate() == 0.0);
+    assert(m.fifteen_minute_rate() == 0.0);
+    // …and the count still moved, which separates "the meter is inert"
+    // from "the meter has not sampled yet".
+    assert(m.count() == 100_u64);
 }
 
 fn main() {}
