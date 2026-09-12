@@ -5,7 +5,13 @@
 // Unit tests for `core.io.fs`.
 // =============================================================================
 
-mount core.io.fs.{FileType, Permissions};
+mount core.io.fs.{
+    FileType, Permissions,
+    create_dir_all, remove_dir_all, temp_dir, metadata, symlink_metadata,
+    symlink, hard_link, exists, is_symlink, read_link,
+};
+mount core.io.path.{Path, PathBuf};
+mount core.io.file.{write_bytes};
 mount core.base.maybe.{Maybe, Some, None};
 
 // =============================================================================
@@ -142,6 +148,139 @@ fn test_permissions_set_readonly_makes_readonly() {
     let mut p = Permissions.from_mode(0o755);
     p.set_readonly(true);
     assert(p.readonly());
+}
+
+// =============================================================================
+// The filesystem surface the stdlib reference documents and nothing ran
+// (census 2026-09-12). Every test builds its own directory under the
+// system temp dir and removes it, so nothing depends on what is already
+// on disk.
+// =============================================================================
+
+fn scratch(name: &Text) -> PathBuf {
+    let mut p = temp_dir();
+    p.push(&Path.new(&Text.from("verum-core-tests-io-fs")));
+    p.push(&Path.new(name));
+    p
+}
+
+@test
+fn test_temp_dir_is_non_empty_and_absolute() {
+    let t = temp_dir();
+    assert(t.to_text().len() > 0);
+    assert(t.as_path().is_absolute());
+}
+
+@test
+fn test_create_dir_all_makes_the_whole_chain_and_remove_dir_all_unmakes_it() {
+    let root = scratch(&Text.from("chain"));
+    let mut deep = root.clone();
+    deep.push(&Path.new(&Text.from("a")));
+    deep.push(&Path.new(&Text.from("b")));
+
+    match create_dir_all(&deep.as_path()) {
+        Result.Ok(_) => assert(exists(&deep.as_path())),
+        Result.Err(_) => panic("create_dir_all on a fresh two-level chain"),
+    };
+    // The INTERMEDIATE level exists too — "all" is the contract, and a
+    // version that made only the leaf would still pass the check above.
+    let mut mid = root.clone();
+    mid.push(&Path.new(&Text.from("a")));
+    assert(exists(&mid.as_path()));
+
+    match remove_dir_all(&root.as_path()) {
+        Result.Ok(_) => assert(!exists(&deep.as_path())),
+        Result.Err(_) => panic("remove_dir_all on a two-level chain"),
+    };
+    // Recursive on the way out as well: the root is gone, not just the
+    // leaf.
+    assert(!exists(&root.as_path()));
+}
+
+@test
+fn test_metadata_reports_times_and_writability_for_a_file_we_just_wrote() {
+    let root = scratch(&Text.from("meta"));
+    let _ = create_dir_all(&root.as_path());
+    let mut f = root.clone();
+    f.push(&Path.new(&Text.from("f.bin")));
+    let body: [Byte; 2] = [7_u8, 8_u8];
+    match write_bytes(&f.to_text(), &body[..]) {
+        Result.Ok(_) => assert(true),
+        Result.Err(_) => panic("write_bytes into a directory we just created"),
+    };
+
+    match metadata(&f.as_path()) {
+        Result.Ok(m) => {
+            // A file written seconds ago has a non-zero mtime; zero
+            // would mean the stat fields were never populated.
+            assert(m.modified_secs() > 0);
+            assert(m.accessed_secs() > 0);
+            assert(!m.is_readonly());
+            let _ = m.file_type();
+        },
+        Result.Err(_) => panic("metadata on a file we just wrote"),
+    };
+    // symlink_metadata on a REGULAR file answers about that file.
+    match symlink_metadata(&f.as_path()) {
+        Result.Ok(_) => assert(true),
+        Result.Err(_) => panic("symlink_metadata on a regular file"),
+    };
+    let _ = remove_dir_all(&root.as_path());
+}
+
+@test
+@ignore("fs.symlink answers Err and creates nothing — verified against the shell, which sees no new name. The sibling hard_link answers Ok on the same target in the same programme and the shell sees the link count rise to 2, so it is not permissions or paths. Three causes tested and falsified: the raw-array-vs-subslice spelling (a non-issue since T1276), the forbidden transmute of the slice value (safe_rename uses it too and WORKS), and an interpreter intercept (hard_link has none and works). Measured 2026-09-12; recorded as A127.")
+fn test_symlink_and_hard_link_both_create_something_that_exists() {
+    let root = scratch(&Text.from("links"));
+    let _ = create_dir_all(&root.as_path());
+    let mut target = root.clone();
+    target.push(&Path.new(&Text.from("t.bin")));
+    let body: [Byte; 1] = [1_u8];
+    let _ = write_bytes(&target.to_text(), &body[..]);
+
+    let mut sl = root.clone();
+    sl.push(&Path.new(&Text.from("s")));
+    match symlink(&target.as_path(), &sl.as_path()) {
+        Result.Ok(_) => {
+            assert(exists(&sl.as_path()));
+            // It is a SYMLINK, not a copy — the distinction is the
+            // whole method.
+            assert(is_symlink(&sl.as_path()));
+        },
+        Result.Err(_) => panic("symlink into a directory we just created"),
+    };
+
+    let mut hl = root.clone();
+    hl.push(&Path.new(&Text.from("h")));
+    match hard_link(&target.as_path(), &hl.as_path()) {
+        Result.Ok(_) => {
+            assert(exists(&hl.as_path()));
+            // A hard link is NOT a symlink.
+            assert(!is_symlink(&hl.as_path()));
+        },
+        Result.Err(_) => panic("hard_link into a directory we just created"),
+    };
+    let _ = remove_dir_all(&root.as_path());
+}
+
+@test
+@ignore("read_link answers Err for EVERY input — a real symlink (is_symlink answers true on the same path), a plain file and a missing path all give the same Err, so it never discriminates and never succeeds. Measured 2026-09-12 at Tier 0; recorded as A127.")
+fn test_read_link_returns_the_target() {
+    let root = scratch(&Text.from("readlink"));
+    let _ = create_dir_all(&root.as_path());
+    let mut target = root.clone();
+    target.push(&Path.new(&Text.from("t.bin")));
+    let body: [Byte; 1] = [1_u8];
+    let _ = write_bytes(&target.to_text(), &body[..]);
+    let mut sl = root.clone();
+    sl.push(&Path.new(&Text.from("s")));
+    let _ = symlink(&target.as_path(), &sl.as_path());
+
+    match read_link(&sl.as_path()) {
+        Result.Ok(t) => assert(t.to_text().contains("t.bin")),
+        Result.Err(_) => panic("read_link on a symlink we just created"),
+    };
+    let _ = remove_dir_all(&root.as_path());
 }
 
 fn main() {}
