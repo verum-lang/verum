@@ -112,6 +112,13 @@ fn regression_atomic_bool_store_then_load_round_trip() {
 // at or above 2^47, because `load` reads the RAW eight bytes of the field
 // and a value that no longer fits the NaN-box payload is stored as a box:
 //
+// THE BOUNDARY IS BY CONSTRUCTION, not an oversight: the interpreter's
+// `handle_atomic_load` ends in `nan_box_payload_to_i64`, whose comment
+// reads "PAYLOAD_MASK = bits 0..47 (48 bits). Sign-extend at bit 47".
+// The representable range is −2^47..2^47−1 exactly. The handler names
+// the long-term path too — a raw-storage marker. What was missing is
+// not the limit but its price, below.
+//
 //     AtomicU64.new(140737488355327).load()  ->  140737488355327
 //     AtomicU64.new(140737488355328).load()  ->  18446673704965373955
 //                                                = 0xffffc00000000003
