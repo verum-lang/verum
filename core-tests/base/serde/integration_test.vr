@@ -53,9 +53,22 @@ type Point is { x: Float, y: Float };
 
 implement Serialize for Point {
     fn serialize<S: Serializer>(&self, serializer: S) -> SerdeResult<S.Output> {
-        let mut map = serializer.serialize_map(Maybe.Some(2))?;
-        map.serialize_entry("x", self.x)?;
-        map.serialize_entry("y", self.y)?;
+        // TWO ERRORS IN ONE LINE, and both are COMPILE errors, so no
+        // `@ignore` contains them: this took all 8 tests in the file
+        // down. Measured 2026-09-12.
+        //   * `serialize_map(&mut self, len: Int)` takes a plain `Int`,
+        //     not a `Maybe<Int>`;
+        //   * and the binding needs its type written out — without it,
+        //     `Ambiguous type for 'map': the inferred type '_' is not
+        //     fully determined by this function`.
+        let mut map: MapSerializer<S> = serializer.serialize_map(2)?;
+        // `MapSerializer` has NO `serialize_entry` — its surface is
+        // `serialize_key`, `serialize_value` and `end`, so an entry is
+        // the two calls in sequence.
+        map.serialize_key(&"x")?;
+        map.serialize_value(&self.x)?;
+        map.serialize_key(&"y")?;
+        map.serialize_value(&self.y)?;
         map.end()
     }
 }

@@ -14,7 +14,12 @@
 // =============================================================================
 
 mount core.prelude.*;
-mount core.base.semver.{SemVer, SemVerError, cmp};
+// `cmp` is a METHOD on SemVer (`implement Ord`), not a free function:
+// core/base/semver.vr has a PRIVATE `compare` and no public free
+// `cmp`, so mounting the name gave `cannot find cmp in module
+// core.base.semver` — a COMPILE error, which took all 6 tests in this
+// file down. Measured 2026-09-12.
+mount core.base.semver.{SemVer, SemVerError};
 mount core.collections.list.List;
 
 fn mk_semver(major: UInt64, minor: UInt64, patch: UInt64) -> SemVer {
@@ -46,7 +51,7 @@ fn integration_full_rfc_precedence_chain() {
     while i + 1 < versions.len() {
         let a = versions[i].clone();
         let b = versions[i + 1].clone();
-        match cmp(&a, &b) {
+        match a.cmp(&b) {
             Ordering.Less => {},
             _ => panic("RFC §11 precedence chain broken at position"),
         }
@@ -79,7 +84,7 @@ fn integration_sort_versions_ascending() {
         while j + 1 < n - i {
             let a = sorted[j].clone();
             let b = sorted[j + 1].clone();
-            match cmp(&a, &b) {
+            match a.cmp(&b) {
                 Ordering.Greater => {
                     sorted.set(j,     b);
                     sorted.set(j + 1, a);
@@ -108,10 +113,10 @@ fn integration_cmp_chain_strict_less() {
     let b = mk_semver(1_u64, 0_u64, 1_u64);
     let c = mk_semver(1_u64, 1_u64, 0_u64);
     let d = mk_semver(2_u64, 0_u64, 0_u64);
-    let ab = match cmp(&a, &b) { Ordering.Less => true, _ => false };
-    let bc = match cmp(&b, &c) { Ordering.Less => true, _ => false };
-    let cd = match cmp(&c, &d) { Ordering.Less => true, _ => false };
-    let ad = match cmp(&a, &d) { Ordering.Less => true, _ => false };
+    let ab = match a.cmp(&b) { Ordering.Less => true, _ => false };
+    let bc = match b.cmp(&c) { Ordering.Less => true, _ => false };
+    let cd = match c.cmp(&d) { Ordering.Less => true, _ => false };
+    let ad = match a.cmp(&d) { Ordering.Less => true, _ => false };
     assert(ab);
     assert(bc);
     assert(cd);

@@ -69,7 +69,13 @@ fn test_checked_add_chain_three_durations() {
     let a = Duration.secs(10);
     let b = Duration.secs(20);
     let c = Duration.secs(30);
-    let result = a.checked_add(b)
+    // THE ANNOTATION IS REQUIRED, not stylistic: without it the checker
+    // reports `Ambiguous type for 'result': the inferred type
+    // 'None(Unit) | Some(_)' is not fully determined` — it gets the
+    // Maybe shape from `and_then` but not its payload. A COMPILE error,
+    // so no `@ignore` contains it: this one line took all 11 tests in
+    // this file down. Measured 2026-09-12.
+    let result: Maybe<Duration> = a.checked_add(b)
         .and_then(|ab| ab.checked_add(c));
     assert(result.is_some());
     assert_eq(result.unwrap().as_secs(), 60);
