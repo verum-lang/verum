@@ -321,6 +321,8 @@ the checker, and the projection is then formed on that default.
 The same expression RUNS correctly (`print(f"{it.next()}")` answers `Some(0)`); only
 unification against a concrete type refuses, which is why the defect is invisible outside
 `assert_eq`, and why the 215 tests cannot be revived by editing the test file.
+
+**THE SAME REDUCER BLOCKS THE ASYNC CORPUS, measured 2026-09-12**: `ready(42).block()` is typed `Output<ReadyFuture<Int>>` and refuses every comparison — `assert_eq(r.block(), 42)`, `let v: Int = r.block()` and `let v = r.block()` alike — while `print(f"{r.block()}")` answers `42`. Printing needs no unification; everything else does. That is `async/future/regression_test` (10), `async/intrinsics/{unit,property,integration}_test` (19) and `async/panic_fence/{unit,property,integration}_test` (12), all dead, none revivable test-side. With `base/iterator/unit_test`'s 215 that is **256 tests on one reducer**, and the 119 of `text/text/protocol_test` came back only because `from_str`'s annotation could be dropped — the async ones have no such escape.
 Mount-scope candidate discipline for multi-source names T0710
 (T0525/T0704 disarm on >1 source). Match-guard exhaustiveness gate
 T0649. Sized-int value semantics T0611 — **CLOSED 2026-08-08** (c185b51c6 + 9c73789f5): casts mask, `+`/`-`/`*`/`<<` wrap at the declared width, and sized-int METHOD dispatch honours the receiver's width. Seven roots in one chain, each hidden behind the one before it; SHA-256 and HMAC-SHA256 are byte-exact against FIPS 180-4 / RFC 4231 (0 mismatched bytes of 32).
