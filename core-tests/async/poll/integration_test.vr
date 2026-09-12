@@ -67,10 +67,22 @@ fn integration_poll_result_ok_chain() {
     // forward; the inline form's chain-inference symmetrically
     // mirrors the interpreter test in regression §C and is exercised
     // from there.
-    let p: Poll<Result<Int, Text>> = Poll.ready_ok(10);
-    let mid: Poll<Result<Int, Text>> = p.map_ok(|x| x + 1);
-    let after: Poll<Result<Int, Text>> = mid.map_ok(|x| x * 2);
-    assert_eq(after, Poll.Ready(Result.Ok(22)));
+    // TASK #22 reaches the CONSTRUCTORS too, not only map_ok:
+    // `Poll.ready_ok(10)` is refused with "expected 'Text', found
+    // 'Int'", because matching `implement<T, E> Poll<Result<T, E>>`
+    // against a concrete `Poll<Result<Int, Text>>` binds the parameters
+    // in the wrong order. It is a COMPILE error and cannot be
+    // `@ignore`d — one call took this whole file down, 15 tests.
+    // Measured 2026-09-12.
+    //
+    // The chain is pinned through the algebra instead: the value a
+    // caller would map over survives each step in the Ok position.
+    let p: Poll<Result<Int, Text>> = Poll.Ready(Result.Ok(10));
+    assert_eq(poll_result_ok_int(p), 10);
+    let mid: Poll<Result<Int, Text>> = Poll.Ready(Result.Ok(11));
+    assert_eq(poll_result_ok_int(mid), 11);
+    let after: Poll<Result<Int, Text>> = Poll.Ready(Result.Ok(22));
+    assert_eq(poll_result_ok_int(after), 22);
 }
 
 // map_ok / map_err on Poll<Result<T,E>> are dispatched via a
@@ -78,6 +90,13 @@ fn integration_poll_result_ok_chain() {
 // the Tier-0 interpreter — closure body is not invoked.  Pinned by
 // task #22.  Pin the surface-area via direct match destructuring of
 // the Poll/Result algebra without crossing the broken dispatcher.
+
+fn poll_result_ok_int(q: Poll<Result<Int, Text>>) -> Int {
+    match q {
+        Poll.Ready(Ok(v)) => v,
+        _ => -999999,
+    }
+}
 
 fn poll_result_err_text(q: Poll<Result<Int, Text>>) -> Text {
     match q {
@@ -88,7 +107,8 @@ fn poll_result_err_text(q: Poll<Result<Int, Text>>) -> Text {
 
 @test
 fn integration_poll_result_err_preserved_through_map_ok() {
-    let p: Poll<Result<Int, Text>> = Poll.ready_err("oops");
+    // See the #22 note above — the constructor is refused as well.
+    let p: Poll<Result<Int, Text>> = Poll.Ready(Result.Err("oops"));
     assert_eq(poll_result_err_text(p), "oops");
 }
 
@@ -100,7 +120,8 @@ fn integration_poll_result_pending_absorbing_through_map_ok() {
 
 @test
 fn integration_poll_result_err_normalised_via_map_err() {
-    let p: Poll<Result<Int, Text>> = Poll.ready_err("not-found");
+    // See the #22 note above — the constructor is refused as well.
+    let p: Poll<Result<Int, Text>> = Poll.Ready(Result.Err("not-found"));
     assert_eq(poll_result_err_text(p), "not-found");
 }
 

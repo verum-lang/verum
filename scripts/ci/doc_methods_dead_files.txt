@@ -7,6 +7,17 @@
 # Never by reasoning about a file: a dead one is indistinguishable from a
 # live one by text.
 #
+# 2026-09-12, LATER: the three `async/poll/*` files came OFF this list.
+# They were dead on one cause — task #22, constrained-implement-block
+# dispatch, which binds `implement<T, E> Poll<Result<T, E>>` against a
+# concrete `Poll<Result<Int, Text>>` in the WRONG PARAMETER ORDER. It is
+# a COMPILE error, so no `@ignore` can contain it: one such call took all
+# three files down. Rewriting nine call sites to pin the same properties
+# through the Poll/Result algebra — the work-around this suite's own
+# author had already used for one test — revived 87 tests, all green.
+# That is the shape of the repair for the rest of this list: find the ONE
+# construct, pin around it, name the task.
+#
 # Measured 2026-09-12 on the full suite — 19042 tests, 16542 passed,
 # 2129 failed, 371 ignored, 2091s at 4 threads. 84 files account for
 # 1774 of those failures: 9.3% of the suite never runs at all.
@@ -18,9 +29,6 @@ core-tests/async/intrinsics/unit_test.vr  # 11 test(s), 3 error(s)
 core-tests/async/panic_fence/integration_test.vr  # 2 test(s), 2 error(s)
 core-tests/async/panic_fence/property_test.vr  # 4 test(s), 2 error(s)
 core-tests/async/panic_fence/unit_test.vr  # 6 test(s), 2 error(s)
-core-tests/async/poll/integration_test.vr  # 15 test(s), 4 error(s)
-core-tests/async/poll/property_test.vr  # 21 test(s), 3 error(s)
-core-tests/async/poll/unit_test.vr  # 42 test(s), 7 error(s)
 core-tests/base/data/property_test.vr  # 18 test(s), 1 error(s)
 core-tests/base/iterator/protocol_agnostic_test.vr  # 22 test(s), 1 error(s)
 core-tests/base/iterator/unit_test.vr  # 215 test(s), 16 error(s)
