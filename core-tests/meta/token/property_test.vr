@@ -32,6 +32,11 @@ mount core.meta.token.{
 mount core.meta.span.{MetaSpan, SpanFlags};
 mount core.base.maybe.{Maybe};
 
+// A qualified variant constructor on an archive-resident type is
+// sometimes read as a method call — `TokenKind.Punct(ch, sp)` gives
+// `no method named 'Punct' found for type 'TokenKind'`, while the
+// BARE form constructs. A COMPILE error, whole file down. See A132.
+
 fn syn() -> MetaSpan {
     MetaSpan { id: 0, hygiene: 0, flags: SpanFlags { is_expansion: false, is_synthetic: true, is_hidden: false } }
 }
@@ -241,7 +246,7 @@ fn law_token_literal_exactly_one_predicate() {
 
 @test
 fn law_token_punct_exactly_one_predicate() {
-    let t = Token { kind: TokenKind.Punct('+', Spacing.Alone), span: syn() };
+    let t = Token { kind: Punct('+', Spacing.Alone), span: syn() };
     assert_eq(count_token_predicates(&t), 1);
     assert(t.is_punct());
     assert(t.as_punct() is Some);
@@ -295,7 +300,7 @@ fn law_token_kind_partition_lit() {
 
 @test
 fn law_token_kind_partition_punct() {
-    assert_eq(count_token_kind(TokenKind.Punct('+', Spacing.Alone)), 1);
+    assert_eq(count_token_kind(Punct('+', Spacing.Alone)), 1);
 }
 
 @test
