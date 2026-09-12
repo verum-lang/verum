@@ -1715,6 +1715,47 @@ pub(in super::super) fn handle_set_index(
 }
 
 /// Len (0x66) - Get array/list length: dst = arr.len()
+/// How many times the peel loop in `handle_array_len` may go round.
+/// Four covers every shape the tree produces — a `Shared` carrier
+/// holding a guard holding a reference is three — and a bound is
+/// cheaper than trusting that no wrapper ever wraps a wrapper.
+const PEEL_PASSES: usize = 4;
+
+/// One `Deref` hop for the `Len` opcode: when `val` is a heap object
+/// whose type declares `<Type>.deref`, call it and return what it
+/// yields. Returns `val` unchanged otherwise, and when the hop does not
+/// move the value.
+fn deref_wrapper_once(state: &mut InterpreterState, val: Value) -> InterpreterResult<Value> {
+    if !val.is_regular_ptr() || val.is_nil() {
+        return Ok(val);
+    }
+    let ptr = val.as_ptr::<u8>();
+    if ptr.is_null() {
+        return Ok(val);
+    }
+    let Some(tid) = (unsafe { heap::ObjectHeader::try_type_id(ptr) }) else {
+        return Ok(val);
+    };
+    // A builtin container is never a wrapper; skip the registry work on
+    // the hot path.
+    if tid.is_semantic_type() {
+        return Ok(val);
+    }
+    let Some(name) = state
+        .module
+        .get_type(tid)
+        .and_then(|td| state.module.strings.get(td.name))
+        .map(|n| n.rsplit('.').next().unwrap_or(n).to_string())
+    else {
+        return Ok(val);
+    };
+    let Some(fid) = state.module.find_function_by_name(&format!("{name}.deref")) else {
+        return Ok(val);
+    };
+    let inner = super::super::call_function_sync(state, fid, &[val])?;
+    Ok(if inner == val { val } else { inner })
+}
+
 pub(in super::super) fn handle_array_len(
     state: &mut InterpreterState,
 ) -> InterpreterResult<DispatchResult> {
@@ -1725,36 +1766,72 @@ pub(in super::super) fn handle_array_len(
 
     let mut val = state.get_reg(arr);
 
-    // Handle CBGR register-based reference: decode and dereference
-    if is_cbgr_ref(&val) {
-        let (abs_index, _generation) = decode_cbgr_ref(val);
-        val = state.registers.get_absolute(abs_index);
-    }
+    // PEEL TO THE THING BEING MEASURED, as a loop rather than a
+    // sequence of one-shot steps.
+    //
+    // The steps were sequential — cbgr-ref, then ThinRef, then tracked
+    // interior pointer, then `Shared` carrier — and each ran once, in
+    // that order. That is enough while every wrapper sits outside every
+    // reference, and a DEREF WRAPPER breaks the assumption from both
+    // sides: `MutexGuard<T>.deref` hands back `&self.mutex.data`, a
+    // REFERENCE, so peeling the wrapper produces a value that needs the
+    // earlier steps again.
+    //
+    // Why the wrapper has to be peeled here at all: measured as itself
+    // it answers its own field count, and that number is PLAUSIBLE.
+    // `Mutex<Deque<Int>>` holding three elements, reached through a
+    // `Shared` field, answered `len() = 1` — the guard declares one
+    // field (`mutex`), the fall-through arm below divides its 8-byte
+    // payload by `sizeof(Value)`, and 1 is a length a caller believes.
+    // The same program WITHOUT the `Shared` hop answers 3, because
+    // there the receiver arriving here is already the deque. The opcode
+    // cannot tell those apart by inspecting the number it produced.
+    //
+    // The wrapper question is the registry's, not a list of type names
+    // — "does this type declare `deref`?" — the same question the
+    // method dispatcher's one-hop Deref walk asks. The loop is bounded
+    // and stops as soon as a pass changes nothing, so a `deref` that
+    // answers itself costs one extra pass and nothing else.
+    for _ in 0..PEEL_PASSES {
+        let before = val;
 
-    // Handle ThinRef: dereference to get the actual value
-    if val.is_thin_ref() {
-        let thin_ref = val.as_thin_ref();
-        if thin_ref.ptr.is_null() {
-            return Err(InterpreterError::NullPointer);
+        // CBGR register-based reference: decode and dereference.
+        if is_cbgr_ref(&val) {
+            let (abs_index, _generation) = decode_cbgr_ref(val);
+            val = state.registers.get_absolute(abs_index);
         }
-        // ThinRef points to a Value in memory (e.g., variant field)
-        val = unsafe { *(thin_ref.ptr as *const Value) };
-    }
 
-    // Check if this pointer is to a CBGR-tracked variant field pointer (from ref binding).
-    // These point to Value data, not ObjectHeaders. We need to dereference to get the actual value.
-    if val.is_ptr() && !val.is_nil() {
-        let ptr_addr = val.as_ptr::<u8>() as usize;
-        if state.cbgr_mutable_ptrs.contains(&ptr_addr) {
-            // This is a pointer to a Value (from GetVariantDataRef)
-            val = unsafe { *(ptr_addr as *const Value) };
+        // ThinRef points to a Value in memory (e.g. a variant field).
+        if val.is_thin_ref() {
+            let thin_ref = val.as_thin_ref();
+            if thin_ref.ptr.is_null() {
+                return Err(InterpreterError::NullPointer);
+            }
+            val = unsafe { *(thin_ref.ptr as *const Value) };
+        }
+
+        // A CBGR-tracked interior pointer addresses a Value, not an
+        // ObjectHeader (the `GetVariantDataRef` shape).
+        if val.is_ptr() && !val.is_nil() {
+            let ptr_addr = val.as_ptr::<u8>() as usize;
+            if state.cbgr_mutable_ptrs.contains(&ptr_addr) {
+                val = unsafe { *(ptr_addr as *const Value) };
+            }
+        }
+
+        // `Shared<T>` carriers, at the VALUE level — see
+        // `peel_shared_value` for what the pointer-level peel further
+        // down could not reach.
+        val = peel_shared_value(val);
+
+        // And one `Deref` hop, last, because it is the step that can
+        // hand back something the steps above still have to peel.
+        val = deref_wrapper_once(state, val)?;
+
+        if val == before {
+            break;
         }
     }
-
-    // Peel `Shared<T>` carriers HERE, at the VALUE level, before any of
-    // the value-shaped branches below — see `peel_shared_value` for what
-    // the pointer-level peel further down could not reach.
-    val = peel_shared_value(val);
 
     // Handle small strings: return byte length directly from NaN-boxed value
     if val.is_small_string() {

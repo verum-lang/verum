@@ -1,0 +1,93 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: deref, mutex, guard, dispatch, regression
+// @timeout: 60000
+// @expected-exit: 0
+//
+// A DEREF WRAPPER FORWARDS TO WHAT IT WRAPS — INCLUDING WHEN THE
+// METHOD NAME IS UNIQUE IN THE MODULE.
+//
+// `MutexGuard<T>` implements `Deref`, so `guard.method()` is the
+// wrapped `T`'s method. The interpreter has a one-hop `Deref` walk for
+// exactly that, but it ran only after every lookup had MISSED — and a
+// lookup that HITS the wrong body never reached it.
+//
+// Two routes hit the wrong body, and they fail differently, which is
+// why both rungs are here:
+//
+//   * The unique-bare-suffix strategy binds on the METHOD NAME alone
+//     and never asks what the receiver is. `Deque.front` is the only
+//     `.front` in the module, so a guard got the deque's body as
+//     `self`. Measured before: `field access out of bounds: field
+//     index 2 (offset 16+8 = 24) exceeds object data size 8
+//     type_id=1466 type='MutexGuard' — declared fields (1): [mutex]`.
+//
+//   * The `Len` opcode measured the guard AS ITSELF. A guard declares
+//     one field, so the fall-through arm divided its 8-byte payload by
+//     `sizeof(Value)` and answered **1** — for a deque holding three.
+//     That number is plausible, which is what made it worse than a
+//     stop, and it was silent.
+//
+// The values are 11/22/33 so that every wrong reading is a different
+// recognisable number: a field-count answer is 1, an address is huge,
+// an empty read is 0, and none of them is 3.
+
+mount core.sync.{Mutex};
+mount core.collections.deque.{Deque};
+
+type Holder is { queue: Mutex<Deque<Int>> };
+
+fn main() -> Int {
+    // 0. Through a plain `Mutex<Deque<Int>>`.
+    let m: Mutex<Deque<Int>> = Mutex.new(Deque.new());
+    let mut g = m.lock().unwrap();
+    g.push_back(11);
+    g.push_back(22);
+    g.push_back(33);
+
+    // The builtin-served half: these answered correctly even before,
+    // so a regression here means the peel loop broke what worked.
+    print(f"0 len={g.len() + 0} empty={g.is_empty()}");
+    assert(g.len() + 0 == 3);
+    assert(g.is_empty() == false);
+
+    // The compiled-body half: `Deque.front` / `Deque.back` used to run
+    // with the guard as `self` and read past its single field.
+    let f = match g.front() { Maybe.Some(v) => v, Maybe.None => -1 };
+    let b = match g.back()  { Maybe.Some(v) => v, Maybe.None => -1 };
+    print(f"1 front={f + 0} back={b + 0}");
+    assert(f + 0 == 11);
+    assert(b + 0 == 33);
+
+    let p = match g.pop_front() { Maybe.Some(v) => v, Maybe.None => -1 };
+    print(f"2 pop_front={p + 0} len={g.len() + 0}");
+    assert(p + 0 == 11);
+    assert(g.len() + 0 == 2);
+
+    // 3. The same wrapper reached through a `Shared` field — the shape
+    //    the standard library's own channel uses, and the one where
+    //    `len()` answered 1 instead of 3.
+    let s = Shared.new(Holder { queue: Mutex.new(Deque.new()) });
+    let mut h = s.queue.lock().unwrap();
+    h.push_back(11);
+    h.push_back(22);
+    h.push_back(33);
+    let hf = match h.front() { Maybe.Some(v) => v, Maybe.None => -1 };
+    print(f"3 shared len={h.len() + 0} front={hf + 0}");
+    assert(h.len() + 0 == 3);
+    assert(hf + 0 == 11);
+
+    // 4. The standard library's own spelling of the lock, which takes a
+    //    closure and used to end in a stack overflow rather than an
+    //    answer.
+    let m2: Mutex<Deque<Int>> = Mutex.new(Deque.new());
+    let mut g2 = m2.lock().unwrap_or_else(|p| p.into_inner());
+    g2.push_back(44);
+    g2.push_back(55);
+    print(f"4 unwrap_or_else len={g2.len() + 0}");
+    assert(g2.len() + 0 == 2);
+
+    print("9 end");
+    return 0;
+}

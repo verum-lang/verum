@@ -351,6 +351,55 @@ fn tape_float_method(
     );
 }
 
+/// Would the unique-bare-suffix strategy hand `fid`'s body to a value
+/// it was not written for, when a `Deref` hop is available instead?
+///
+/// True only when all three hold:
+///   * the receiver's runtime type declares `<Type>.deref` — it IS a
+///     wrapper, by the registry rather than by a list of names;
+///   * the candidate body belongs to some OTHER type;
+///   * that other type is not the receiver's type under a different
+///     spelling (a qualified `mod.path.Type.method` name has the same
+///     leaf as the bare `Type.method` one).
+///
+/// The caller declines the strategy on true, so control reaches the
+/// one-hop `Deref` walk that exists for exactly this shape.
+fn receiver_is_a_deref_wrapper_for_another_type(
+    state: &InterpreterState,
+    recv_type_id: crate::types::TypeId,
+    fid: crate::module::FunctionId,
+    bare_method_name: &str,
+) -> bool {
+    let Some(recv_name) = state
+        .module
+        .get_type(recv_type_id)
+        .and_then(|td| state.module.strings.get(td.name))
+    else {
+        return false;
+    };
+    let recv_leaf = recv_name.rsplit('.').next().unwrap_or(recv_name);
+    // A wrapper is a type that declares `deref`. Asking the registry
+    // keeps this from becoming a hardcoded list of stdlib names — the
+    // `Deref` hop below reads the same key.
+    if state
+        .module
+        .find_function_by_name(&format!("{recv_leaf}.deref"))
+        .is_none()
+    {
+        return false;
+    }
+    let Some(owner) = state
+        .module
+        .get_function(fid)
+        .and_then(|f| state.module.strings.get(f.name))
+        .and_then(|n| n.strip_suffix(&format!(".{bare_method_name}")))
+    else {
+        return false;
+    };
+    let owner_leaf = owner.rsplit('.').next().unwrap_or(owner);
+    owner_leaf != recv_leaf
+}
+
 pub(in super::super) fn handle_call_method(
     state: &mut InterpreterState,
 ) -> InterpreterResult<DispatchResult> {
@@ -4223,10 +4272,55 @@ pub(in super::super) fn handle_call_method(
                 }
             }
             // Strategy 2: unique bare-suffix match.
+            //
+            // This one binds on the METHOD NAME alone and never asks
+            // what the receiver is, so it will hand a body to a value
+            // of an unrelated type whenever the name happens to be
+            // unique in the module. A DEREF WRAPPER is exactly where
+            // that goes wrong, and the repair is not to weaken the
+            // strategy but to let the mechanism written for wrappers
+            // run first — the one-hop `Deref` walk further down, which
+            // `push_back` already takes and `front` never reached
+            // because this fired first.
+            //
+            // Measured on `Mutex<Deque<Int>>`, deque `[11, 22, 33]`:
+            //
+            //     g.push_back(x)   deref hop fires    correct
+            //     g.len()          builtin opcode     3, correct
+            //     g.pop_front()    builtin intercept  11, correct
+            //     g.front()        THIS strategy      panic:
+            //         field index 2 (offset 16+8 = 24) exceeds object
+            //         data size 8 type_id=1466 type='MutexGuard'
+            //         backtrace=[Deque.front@pc=4] — declared fields
+            //         (1): [mutex]
+            //
+            // `Deque.front` is the unique `.front` in the module, so
+            // the name matched; the guard has ONE field and the deque
+            // body reads its third. The trace names the two routes
+            // apart: `Y-deref-hop MutexGuard.deref -> inner, retrying
+            // 'push_back'` against `F-safety-net method=MutexGuard.front`.
+            //
+            // So: decline when the body belongs to a DIFFERENT type
+            // than the receiver and the receiver's own type declares
+            // `deref`. Nothing that resolves today changes route —
+            // a receiver with no `deref` still takes the strategy, and
+            // a body whose owner IS the receiver's type is untouched.
             if found.is_none() {
-                found = state
+                let candidate = state
                     .module
                     .find_function_by_unique_bare_suffix(&bare_method_name);
+                found = match candidate {
+                    Some(fid) if receiver_is_a_deref_wrapper_for_another_type(
+                        state,
+                        recv_type_id,
+                        fid,
+                        &bare_method_name,
+                    ) =>
+                    {
+                        None
+                    }
+                    other => other,
+                };
             }
             if let Some(func_id) = found {
                 let caller_base = state.reg_base();
