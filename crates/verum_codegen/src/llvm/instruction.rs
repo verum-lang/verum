@@ -11509,6 +11509,64 @@ fn lower_call<'ctx>(
                             }
                         }
                         let cur_fn = ctx.function().get_name().to_string_lossy().to_string();
+                        // `VERUM_AOT_TRACE_EXTNAMES` — census of the name
+                        // table the chase reads, printed ONCE per lowering.
+                        //
+                        // It exists because the per-site note cannot answer the
+                        // question the per-site note raises. "no
+                        // external_function_names entry for this id" is true of
+                        // a table that never had the row AND of a table that
+                        // lost it, and those have different fixes. The census
+                        // says which: it prints the table's size, its split by
+                        // band, and every stub row with its name.
+                        //
+                        // Earned its place on 2026-09-12 (T1172): before the
+                        // merge carried stub names the census read
+                        // `total=… stub=0` and 27 sites blamed a missing row;
+                        // after, `total=249 xmod=187 stub=62` with
+                        // `4269801458 -> core.sys.darwin.libsystem.open` — the
+                        // exact id two sessions had chased by hand as a bare
+                        // number.
+                        if std::env::var_os("VERUM_AOT_TRACE_EXTNAMES").is_some() {
+                            static ONCE: std::sync::Once = std::sync::Once::new();
+                            ONCE.call_once(|| {
+                                let tbl = &vbc_mod.external_function_names;
+                                let mut xmod = 0usize;
+                                let mut stub = 0usize;
+                                let mut other = 0usize;
+                                let mut s5: Vec<(u32, String)> = Vec::new();
+                                for (fid, sid) in tbl.iter() {
+                                    let i = fid.0;
+                                    if verum_vbc::stub_ranges::is_stub_id(i) {
+                                        stub += 1;
+                                        if verum_vbc::stub_ranges::in_stage5(i) {
+                                            s5.push((
+                                                i,
+                                                vbc_mod
+                                                    .get_string(*sid)
+                                                    .unwrap_or("<no string>")
+                                                    .to_string(),
+                                            ));
+                                        }
+                                    } else if verum_vbc::stub_ranges::is_xmod_name_reference(i) {
+                                        xmod += 1;
+                                    } else {
+                                        other += 1;
+                                    }
+                                }
+                                eprintln!(
+                                    "[extnames] total={} xmod={} stub={} other={}",
+                                    tbl.len(),
+                                    xmod,
+                                    stub,
+                                    other
+                                );
+                                s5.sort();
+                                for (i, n) in s5.iter() {
+                                    eprintln!("[extnames] stage5 {} -> '{}'", i, n);
+                                }
+                            });
+                        }
                         // Classification note for the strict-mono campaign
                         // (T0103): say WHY the name chase failed, not just
                         // that the table lookup missed — the three causes

@@ -27599,6 +27599,57 @@ impl crate::bytecode_remap::IdRemap for ArchiveBodyRemap<'_> {
             || crate::stub_ranges::is_stub_id(src.0)
             || crate::stub_ranges::is_xmod_name_reference(src.0)
         {
+            // **STAGE5-NAME-SURVIVES-ITS-MISS-1 (T1172)** — a stub/band id
+            // that reaches here HAD a name: the tiers above read it out of
+            // `archive_external_id_to_name` and then failed to find a body
+            // for it. They `note()` only on success, so the name is dropped
+            // on the floor and the id rides into the user module anonymous.
+            //
+            // The comment above says the stub ranges are ones "the tiers
+            // above already own by name". That ownership holds while the
+            // name FINDS a body and ends the moment it does not — which is
+            // exactly when the name is the only thing left worth keeping.
+            //
+            // Downstream, `build_module` already looks this carry up for
+            // any `external_seen` id its tables cannot name, so noting the
+            // pair here is the whole delivery: the emitted module gains an
+            // `external_function_names` row for the stub, and three readers
+            // that are blind without one gain their input — the AOT chase
+            // (`verum_codegen/src/llvm/instruction.rs`, which feeds the
+            // recorded name to `resolve_function_by_name_ranked`), the
+            // reachability walk (`crate::reachability`, which cannot keep a
+            // nameless callee alive), and the runtime's lenient stub panic,
+            // which could not name the callee at all.
+            //
+            // MEASURED before this line (2026-09-12, AOT compile of
+            // `docs/by-example/19-file-io`, `VERUM_UNRESOLVED_SHOW=0`):
+            // 27 of 27 stage-5 sites reported `name-chase: no
+            // external_function_names entry for this id`, over 20 distinct
+            // ids, every one of them inside a BAKED body — so the id came
+            // from the archive and the name was lost in the merge, not at
+            // the mint site.
+            //
+            // This does NOT find a body. A call whose name matches nothing
+            // stays unresolved — but unresolved WITH A NAME, which is the
+            // difference between a silent const-zero and a defect anyone
+            // can chase.
+            if crate::stub_ranges::is_stub_id(src.0)
+                || crate::stub_ranges::is_xmod_name_reference(src.0)
+            {
+                if let Some(name) = self
+                    .archive_external_id_to_name
+                    .get(&src.0)
+                    .or_else(|| self.archive_id_to_name.get(&src.0))
+                {
+                    if std::env::var_os("VERUM_TRACE_STUBNAME").is_some() {
+                        eprintln!(
+                            "[stubname] unresolved {} keeps its name '{}'",
+                            src.0, name
+                        );
+                    }
+                    self.note(src, name);
+                }
+            }
             return src;
         }
         if std::env::var("VERUM_TRACE_REMAP_FALLBACK").is_ok() {

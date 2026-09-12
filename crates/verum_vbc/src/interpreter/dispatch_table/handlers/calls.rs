@@ -147,10 +147,25 @@ pub(in super::super) fn handle_call(
         None => {
             if let Some(stage) = stub_stage {
                 let stub_class = crate::stub_ranges::stub_class(func_id.0).unwrap_or("stub");
+                // **T1172** — NAME the callee. The module records the
+                // qualified name of every band/stub reference in
+                // `external_function_names`, and `band_reference_name`
+                // already reads it for the XMOD branch a few lines
+                // below; the stage-N branch printed a bare sentinel
+                // number instead, and the advice it gave in its place
+                // ("check for `[lenient] SKIP` warnings") sends the
+                // reader to a log that, for this class, has nothing in
+                // it. An id with no recorded name still prints as
+                // before — the absence is then itself the finding.
+                let callee = state
+                    .module
+                    .band_reference_name(func_id.0)
+                    .map(|n| format!(" to '{}'", n))
+                    .unwrap_or_default();
                 return Err(InterpreterError::Panic {
                     message: format!(
-                        "[lenient] stage-{} {} stub never resolved (func_id={}); the producing stdlib module failed precompile OR the body lives in an archive that wasn't loaded — check stderr for `[lenient] SKIP <Type>.<method>` warnings during the build",
-                        stage, stub_class, func_id.0
+                        "[lenient] stage-{} {} stub{} never resolved (func_id={}); the producing stdlib module failed precompile OR the body lives in an archive that wasn't loaded — check stderr for `[lenient] SKIP <Type>.<method>` warnings during the build",
+                        stage, stub_class, callee, func_id.0
                     ),
                 });
             }
@@ -195,10 +210,16 @@ pub(in super::super) fn handle_call(
         && func.bytecode_length == 0
     {
         let stub_class = crate::stub_ranges::stub_class(func_id.0).unwrap_or("stub");
+        // T1172: same naming as the never-resolved branch above.
+        let callee = state
+            .module
+            .band_reference_name(func_id.0)
+            .map(|n| format!(" to '{}'", n))
+            .unwrap_or_default();
         return Err(InterpreterError::Panic {
             message: format!(
-                "[lenient] stage-{} {} stub never overlaid (func_id={}); descriptor present but bytecode_length=0 — the producing stdlib module failed to emit a body. Check stderr for `[lenient] SKIP <Type>.<method>` warnings during the build",
-                stage, stub_class, func_id.0
+                "[lenient] stage-{} {} stub{} never overlaid (func_id={}); descriptor present but bytecode_length=0 — the producing stdlib module failed to emit a body. Check stderr for `[lenient] SKIP <Type>.<method>` warnings during the build",
+                stage, stub_class, callee, func_id.0
             ),
         });
     }
@@ -740,10 +761,25 @@ pub(in super::super) fn handle_call_generic(
         None => {
             if let Some(stage) = stub_stage {
                 let stub_class = crate::stub_ranges::stub_class(func_id.0).unwrap_or("stub");
+                // **T1172** — NAME the callee. The module records the
+                // qualified name of every band/stub reference in
+                // `external_function_names`, and `band_reference_name`
+                // already reads it for the XMOD branch a few lines
+                // below; the stage-N branch printed a bare sentinel
+                // number instead, and the advice it gave in its place
+                // ("check for `[lenient] SKIP` warnings") sends the
+                // reader to a log that, for this class, has nothing in
+                // it. An id with no recorded name still prints as
+                // before — the absence is then itself the finding.
+                let callee = state
+                    .module
+                    .band_reference_name(func_id.0)
+                    .map(|n| format!(" to '{}'", n))
+                    .unwrap_or_default();
                 return Err(InterpreterError::Panic {
                     message: format!(
-                        "[lenient] stage-{} {} stub never resolved (func_id={}); the producing stdlib module failed precompile OR the body lives in an archive that wasn't loaded — check stderr for `[lenient] SKIP <Type>.<method>` warnings during the build",
-                        stage, stub_class, func_id.0
+                        "[lenient] stage-{} {} stub{} never resolved (func_id={}); the producing stdlib module failed precompile OR the body lives in an archive that wasn't loaded — check stderr for `[lenient] SKIP <Type>.<method>` warnings during the build",
+                        stage, stub_class, callee, func_id.0
                     ),
                 });
             }

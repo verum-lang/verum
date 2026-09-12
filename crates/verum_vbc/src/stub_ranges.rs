@@ -21,6 +21,18 @@
 //! consumers resolve the id to the real body BY NAME (descriptor /
 //! archive-wide index), or degrade to a lenient named panic.
 //!
+//! **THE NAME IS THE ID'S ONLY MEANING, SO A CONSUMER THAT FAILS TO
+//! RESOLVE MUST STILL CARRY IT (T1172).**  The sentence above ends in
+//! "named panic", and that word was aspirational for stage 5: the
+//! merge's last tier returned the id bare, so the emitted module had no
+//! `external_function_names` row for it, and every later reader — the
+//! AOT name chase, the reachability walk, the runtime panic — had
+//! nothing to work with.  Measured 2026-09-12 on one AOT compile: 27 of
+//! 27 stage-5 sites reported `no external_function_names entry for this
+//! id`.  A tier that reads a name out of the archive table and then
+//! fails to find a body owes that `(id → name)` pair forward; dropping
+//! it converts a diagnosable miss into a silent const-zero.
+//!
 //! This module is the single source of truth.  Every consumer that
 //! previously mirrored these constants locally (interpreter ctor
 //! skip, calls dispatch, archive remap tiers, stub-descriptor
@@ -60,8 +72,10 @@ const fn in_band(id: u32, base: u32) -> bool {
     id <= base && id >= base - STUB_RANGE_WIDTH
 }
 
-/// **T1456** — mint the next stage-5 stub id, unique across the WHOLE
-/// compilation.
+/// **T1331** — mint the next stage-5 stub id, unique across the WHOLE
+/// compilation.  (Filed twice: T1456 was killed as a duplicate of the
+/// older row the day both were written, so the work landed under T1331.
+/// A pointer at the dead id sent the next reader to the pool's `dead/`.)
 ///
 /// The counter used to live on the `CodegenContext` and start at 0, so every
 /// module counted down from `STAGE5_BASE` through the same numbers and the
@@ -87,7 +101,7 @@ pub fn next_stage5_id() -> u32 {
     assert!(
         c < STUB_RANGE_WIDTH,
         "stage-5 stub ids exhausted: {c} minted, band holds {STUB_RANGE_WIDTH}. \
-         Wrapping would alias distinct callees onto one id again (T1456)."
+         Wrapping would alias distinct callees onto one id again (T1331)."
     );
     STAGE5_BASE - c
 }
