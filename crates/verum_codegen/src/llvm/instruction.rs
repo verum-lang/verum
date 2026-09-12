@@ -25518,52 +25518,111 @@ fn lower_cbgr_extended<'ctx>(
             let index = as_i64(ctx, ctx.get_register(index_reg)?, "rle_idx")?;
             let i64_type = ctx.types().i64_type();
             let ptr_type = ctx.types().ptr_type();
-            let i8_type = ctx.types().i8_type();
 
-            // List layout matches SetE (lower_set_element): the backing
-            // data pointer lives at LIST_PTR_OFFSET into the List object.
-            let backing_slot = unsafe {
-                ctx.builder()
-                    .build_in_bounds_gep(
-                        i8_type,
-                        list_ptr,
-                        &[i64_type.const_int(super::runtime::LIST_PTR_OFFSET, false)],
-                        "rle_backing_slot",
-                    )
-                    .or_llvm_err()?
-            };
-            let backing_int = ctx
+            // RLE-CLASSIFY-1 (T1192) — ask the ONE classifier which container
+            // this is, instead of asserting a List.
+            //
+            // The arm's own former comment said "List layout matches SetE: the
+            // backing data pointer lives at LIST_PTR_OFFSET" — and that premise
+            // is false for the value `&self.slice[i]` hands it. `SliceIter.next`
+            // does exactly that on its `slice: &[T]` field, which holds a
+            // canonical 24-byte cell, so reading +40 went past the allocation and
+            // the dereference faulted.
+            //
+            // Measured (arm64 disassembly of the faulting binary):
+            //     ldr x8, [x8, #0x18]   ; the slice field — correct
+            //     ldr x8, [x8, #0x28]   ; data pointer at +40 — LIST layout
+            //     mov x10, #8 ; madd    ; stride 8 — LIST stride
+            //     ldr x8, [x8]          ; SIGSEGV, x8 = 0
+            // while `SliceIter.new` stores the slice at +24 and `front` at +32
+            // correctly. Nothing was lost on the way in; only this read assumed.
+            //
+            // `emit_container_view` answers {cell | stamped pack | unstamped
+            // list} with the right data offset AND the right stride for each,
+            // and its list arm reproduces the old behaviour exactly, so a genuine
+            // `&list[i]` keeps the answer it had.
+            let (rle_data, _rle_len, rle_elem) = emit_container_view(ctx, list_ptr, "rle")?;
+            let rle_off = ctx
                 .builder()
-                .build_load(i64_type, backing_slot, "rle_backing_int")
-                .or_llvm_err()?
-                .into_int_value();
-            let backing_ptr = ctx
-                .builder()
-                .build_int_to_ptr(backing_int, ptr_type, "rle_backing_ptr")
+                .build_int_mul(index, rle_elem, "rle_off")
                 .or_llvm_err()?;
-
-            let elem_ptr = unsafe {
-                ctx.builder()
-                    .build_in_bounds_gep(i64_type, backing_ptr, &[index], "rle_elem_ptr")
-                    .or_llvm_err()?
-            };
-
-            // Load the stored Value directly — for struct elements the
-            // slot holds a heap pointer, for primitive elements it holds
-            // the scalar. Passing the LOADED value (rather than the slot
-            // pointer) makes `r.field` and `r.method(...)` resolve
-            // through the element's real address without a second hop,
-            // which is the common case. Matches the VBC interpreter's
-            // handle_get_field auto-deref for interior refs
-            // (cbgr_mutable_ptrs). Note: pure `*r = v` structure
-            // replacement still writes to the slot pointer via
-            // DerefMut, which is a separate opcode path and is
-            // unaffected by this load.
-            let loaded = ctx
+            let rle_addr = ctx
                 .builder()
-                .build_load(i64_type, elem_ptr, "rle_elem_loaded")
+                .build_int_add(rle_data, rle_off, "rle_addr")
                 .or_llvm_err()?;
-            ctx.set_register(dst, loaded);
+            let elem_ptr = ctx
+                .builder()
+                .build_int_to_ptr(rle_addr, ptr_type, "rle_elem_ptr")
+                .or_llvm_err()?;
+            
+            // Width-switched load, the mirror of SliceGet (0x06): raw widths
+            // ZERO-extend, 8 is Value-wide. A plain `load i64` here read eight
+            // bytes out of a one-byte element for every byte-backed slice.
+            //
+            // The arm still hands back the LOADED value rather than the slot
+            // pointer, and still marks the register an interior list ref — both
+            // are the contract DEREF-INTERIOR-1 depends on and neither changes.
+            let current_fn = ctx.function();
+            let llvm_cx = ctx.llvm_context();
+            let rw1 = llvm_cx.append_basic_block(current_fn, "rle_w1");
+            let rw2 = llvm_cx.append_basic_block(current_fn, "rle_w2");
+            let rw4 = llvm_cx.append_basic_block(current_fn, "rle_w4");
+            let rw8 = llvm_cx.append_basic_block(current_fn, "rle_w8");
+            let rle_merge = llvm_cx.append_basic_block(current_fn, "rle_merge");
+            ctx.builder()
+                .build_switch(
+                    rle_elem,
+                    rw8,
+                    &[
+                        (i64_type.const_int(1, false), rw1),
+                        (i64_type.const_int(2, false), rw2),
+                        (i64_type.const_int(4, false), rw4),
+                    ],
+                )
+                .or_llvm_err()?;
+            let mut rle_loads: Vec<(BasicValueEnum, _)> = Vec::new();
+            for (bb, bits, tag) in [(rw1, 8u32, "rle_v1"), (rw2, 16, "rle_v2"), (rw4, 32, "rle_v4")] {
+                ctx.builder().position_at_end(bb);
+                let ity = llvm_cx.custom_width_int_type(bits);
+                let v = ctx
+                    .builder()
+                    .build_load(ity, elem_ptr, tag)
+                    .or_llvm_err()?
+                    .into_int_value();
+                let z = ctx
+                    .builder()
+                    .build_int_z_extend(v, i64_type, "rle_zx")
+                    .or_llvm_err()?;
+                ctx.builder()
+                    .build_unconditional_branch(rle_merge)
+                    .or_llvm_err()?;
+                rle_loads.push((
+                    z.into(),
+                    ctx.builder()
+                        .get_insert_block()
+                        .or_internal("RefListElement: no insert block")?,
+                ));
+            }
+            ctx.builder().position_at_end(rw8);
+            let rle_v8 = ctx
+                .builder()
+                .build_load(i64_type, elem_ptr, "rle_v8")
+                .or_llvm_err()?;
+            ctx.builder()
+                .build_unconditional_branch(rle_merge)
+                .or_llvm_err()?;
+            rle_loads.push((
+                rle_v8,
+                ctx.builder()
+                    .get_insert_block()
+                    .or_internal("RefListElement: no insert block")?,
+            ));
+            ctx.builder().position_at_end(rle_merge);
+            let rle_phi = ctx.builder().build_phi(i64_type, "rle_elem").or_llvm_err()?;
+            for (val, bb) in &rle_loads {
+                rle_phi.add_incoming(&[(&(*val), *bb)]);
+            }
+            ctx.set_register(dst, rle_phi.as_basic_value());
             // Track that this register originated from an interior list
             // ref so downstream passes can special-case if needed.
             ctx.mark_interior_list_ref(dst);
