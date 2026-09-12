@@ -1809,9 +1809,33 @@ public fn safe_rename(oldpath: &[Byte], newpath: &[Byte]) -> Result<(), OSError>
 
 /// Create a symbolic link
 public fn safe_symlink(src: &[Byte], dst: &[Byte]) -> Result<(), OSError> {
-    let src_p: &Byte = transmute(src);
-    let dst_p: &Byte = transmute(dst);
-    let result = unsafe { symlink_ffi(src_p, dst_p) };
+    // `transmute(slice)` HANDS THE FAT-REF STRUCT BITS TO C AS A
+    // `char*`, which the FFI byte-buffer contract forbids by name in
+    // its §4 — and this was the one wrapper still doing it on a live
+    // path. Measured 2026-09-12: `symlink("target/t.bin",
+    // "target/link")` answered **Ok**, `exists("target/link")` was
+    // false, and a dangling symlink with a two-byte CONTROL-CHARACTER
+    // name appeared in the process's CURRENT DIRECTORY — whatever
+    // those struct bits happened to spell. Later calls then answered
+    // Err because that garbage name already existed.
+    //
+    // Sixteen wrappers in this file copy through `copy_path_nul`,
+    // which also supplies the terminating NUL a C string needs; this
+    // one now does the same. `safe_rename` still uses the old form and
+    // is harmless only because `rename` is intercepted before its body
+    // runs — it is NOT evidence that the form is safe.
+    let mut src_buf: [Byte; 4096] = [0 as Byte; 4096];
+    let _ = copy_path_nul(&mut src_buf, src);
+
+    let mut dst_buf: [Byte; 4096] = [0 as Byte; 4096];
+    let _ = copy_path_nul(&mut dst_buf, dst);
+
+    let result = unsafe {
+        symlink_ffi(
+            (&src_buf[..]).as_ptr() as &Byte,
+            (&dst_buf[..]).as_ptr() as &Byte,
+        )
+    };
     if result < 0 {
         let err = errno();
         Result.Err(OSError.new(err, errno_to_message(err)))

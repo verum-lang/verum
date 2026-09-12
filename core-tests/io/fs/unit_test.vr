@@ -229,7 +229,6 @@ fn test_metadata_reports_times_and_writability_for_a_file_we_just_wrote() {
 }
 
 @test
-@ignore("fs.symlink answers Err and creates nothing — verified against the shell, which sees no new name. The sibling hard_link answers Ok on the same target in the same programme and the shell sees the link count rise to 2, so it is not permissions or paths. Three causes tested and falsified: the raw-array-vs-subslice spelling (a non-issue since T1276), the forbidden transmute of the slice value (safe_rename uses it too and WORKS), and an interpreter intercept (hard_link has none and works). Measured 2026-09-12; recorded as A127.")
 fn test_symlink_and_hard_link_both_create_something_that_exists() {
     let root = scratch(&Text.from("links"));
     let _ = create_dir_all(&root.as_path());
