@@ -30,6 +30,7 @@ mount core.sys.{
     FileDesc,
     MemProt,
     MapFlags,
+    // (see the note below the mount block)
     // `core/sys/mod.vr:115` re-exports `MemoryOrdering` from `.common`,
     // and `.common` declares `SysMemoryOrdering` — the only one of the
     // 27 re-exported names that is not there. The compiler says so
@@ -38,7 +39,6 @@ mount core.sys.{
     // which is umbrella resolution, and the broken re-export is
     // recorded as A135. Measured 2026-09-12; a COMPILE error, so it
     // took all 17 tests here down.
-    SysMemoryOrdering,
     SysContextError,
     // Constants
     PAGE_SIZE,
@@ -56,6 +56,7 @@ mount core.sys.{
     // init re-exports
     InitError,
 };
+mount core.sys.common.{SysMemoryOrdering};
 
 // =============================================================================
 // Section 1: Constants re-exported at the umbrella level
