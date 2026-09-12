@@ -31,6 +31,7 @@ mount core.protobuf.wire.{WireType, MAX_LENGTH_DELIM, tag_value,
                         write_varint, read_varint, write_tag,
                         write_fixed32, write_fixed64,
                         write_float32, write_float64,
+                        write_string, write_fixed64 as wf64,
                         ProtobufCursor};
 mount core.protobuf.error.{ProtobufError};
 
@@ -491,4 +492,59 @@ fn test_cursor_on_an_empty_buffer_refuses() {
         Result.Ok(_) => { assert(false); }
         Result.Err(_) => { assert(true); }
     }
+}
+
+// =============================================================================
+// Section 11: a whole message through the cursor (audit §3.3, second half)
+// =============================================================================
+//
+// The single-tag reads above prove the cursor starts correctly. This walks
+// three fields of three different wire types to the end and asks `at_end`
+// at both ends of the walk — the shape `stdlib/protobuf` documents, and
+// the four methods `check-doc-methods-exercised` recorded as called by
+// nothing that runs: `at_end`, `read_varint`, `read_string`,
+// `read_fixed64`.
+
+@test
+fn test_cursor_walks_three_fields_to_the_end() {
+    let mut b: List<Byte> = List.new();
+    write_tag(&mut b, 1, WireType.Varint);
+    write_varint(&mut b, 300_u64);
+    write_tag(&mut b, 2, WireType.LengthDelim);
+    write_string(&mut b, &"hi");
+    write_tag(&mut b, 3, WireType.Fixed64);
+    wf64(&mut b, 7_u64);
+
+    let mut c = ProtobufCursor.new(&b);
+    assert(!c.at_end());
+
+    match c.read_tag() {
+        Result.Ok(p) => { assert(p.0 == 1_u32); }
+        Result.Err(_) => { assert(false); }
+    }
+    match c.read_varint() {
+        Result.Ok(v) => { assert(v == 300_u64); }
+        Result.Err(_) => { assert(false); }
+    }
+    match c.read_tag() {
+        Result.Ok(p) => { assert(p.0 == 2_u32); }
+        Result.Err(_) => { assert(false); }
+    }
+    match c.read_string() {
+        Result.Ok(s) => { assert(s == "hi"); }
+        Result.Err(_) => { assert(false); }
+    }
+    match c.read_tag() {
+        Result.Ok(p) => { assert(p.0 == 3_u32); }
+        Result.Err(_) => { assert(false); }
+    }
+    match c.read_fixed64() {
+        Result.Ok(v) => { assert(v == 7_u64); }
+        Result.Err(_) => { assert(false); }
+    }
+
+    // THE END CONDITION IS THE POINT. A cursor that reads the right values
+    // and never reports the end would loop forever in the `while
+    // !cursor.at_end()` form the reference documents.
+    assert(c.at_end());
 }

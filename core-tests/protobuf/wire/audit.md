@@ -4,7 +4,7 @@ Module: `core/protobuf/wire.vr` (~394 LOC) — Protocol Buffers wire
 format. proto3 v3 canonical encoding: tags + varints + length-delim
 records + ProtobufCursor reader state machine.
 
-Tests: 41 unit tests over WireType 4-variant + .to_u8 canonical
+Tests: 42 unit tests over WireType 4-variant + .to_u8 canonical
 proto3 spec table + tag_value bit-packing + MAX_LENGTH_DELIM DoS-guard
 constant + varint write/read round-trip + fixed32/64 endianness +
 float32/64 wire bytes + WireType.from_u8 Result chain + ProtobufCursor
@@ -80,15 +80,22 @@ Still open, and genuinely so: the 10-byte `UInt64.MAX` length and the
 non-canonical-10th-byte rejection. Those need a decoder-refusal path
 this module does not yet expose to a caller.
 
-### §3.3 ProtobufCursor state machine — CLOSED (section 10)
+### §3.3 ProtobufCursor state machine — CLOSED (sections 10 and 11)
 
 Reads back a tag this module wrote, at field 1 and at field 16 (the
-first two-byte tag), and refuses on an empty buffer. `.skip_field` and
-multi-field walks remain untested.
+first two-byte tag), and refuses on an empty buffer. Section 11 then
+walks a whole message — three fields of three wire types — and asks
+`at_end` before the first read and after the last, which is the
+condition the `while !cursor.at_end()` form in the reference depends on.
+`.skip_field` remains untested.
+
+That walk also took `protobuf.md` to zero unexercised documented
+methods: `at_end`, `read_varint`, `read_string` and `read_fixed64` were
+all on the repository's exercised-methods roster and are not any more.
 
 ## Action items landed in this branch
 
-* `core-tests/protobuf/wire/unit_test.vr` — 41 unit tests:
+* `core-tests/protobuf/wire/unit_test.vr` — 42 unit tests:
   - WireType 4-variant + 4-way disjointness
   - .to_u8 canonical proto3 wire-tag table (Varint=0, Fixed64=1,
     LengthDelim=2, Fixed32=5; explicit absence of deprecated SGROUP=3
@@ -106,6 +113,6 @@ multi-field walks remain untested.
 | Item | Scope | Estimated effort |
 |---|---|---|
 | Varint 10-byte `UInt64.MAX` length + non-canonical 10th-byte rejection | this folder | 1 h — needs a caller-visible refusal path |
-| `ProtobufCursor.skip_field` + a multi-field walk | this folder | 1 h |
+| `ProtobufCursor.skip_field` | this folder | 30 min — the multi-field walk landed with section 11 |
 | Property test: tag_value invertible — extract field_number / wire_type from packed tag | this folder | 30 min |
 | Drift-pinning Rust unit test for WireType wire-tag codes | crates/verum_runtime/src/proto/wire_type.rs | 30 min |

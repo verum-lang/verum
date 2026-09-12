@@ -189,10 +189,6 @@ metrics.md	histogram
 metrics.md	mark
 metrics.md	observe
 metrics.md	one_minute_rate
-protobuf.md	at_end
-protobuf.md	read_fixed64
-protobuf.md	read_string
-protobuf.md	read_varint
 proxy.md	layer
 proxy.md	stream_mut
 proxy.md	with_backoff
