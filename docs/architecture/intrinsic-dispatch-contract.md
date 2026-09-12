@@ -503,8 +503,7 @@ not. What those specs die of is elsewhere:
   archive type".
 * **The real specs are worse than that, and the sweep's budget is not
   what failed them.** Ten of the 65 were re-run with a 200 s budget
-  instead of 20 s: nine finished measuring, and all nine still hit
-  200 s — `348_interp_channel_sim`, `349_interp_csp_sim`,
+  instead of 20 s, and ALL TEN still hit 200 s — `348_interp_channel_sim`, `349_interp_csp_sim`,
   `606_interp_channel_ops`, `1001_nursery_structured_concurrency`,
   `1049_barrier_sync`, `1050_condvar_producer_consumer`,
   `1051_waitgroup`, `1057_select_timeout`, `1102_nursery_basic`,
