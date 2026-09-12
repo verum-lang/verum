@@ -5,7 +5,8 @@
 // `core/tracing/span.vr` — OTel SpanKind + SpanStatusCode ADTs.
 // =============================================================================
 
-mount core.tracing.data.{SpanKind, SpanStatusCode};
+mount core.tracing.data.{SpanKind, SpanStatusCode, Span, SpanStatus};
+mount core.tracing.attribute.{AttributeValue};
 mount core.base.maybe.{Maybe, Some, None};
 mount core.base.result.{Result, Ok, Err};
 
@@ -111,6 +112,58 @@ fn test_span_status_code_ok_error_distinct() {
     let e: SpanStatusCode = SpanStatusCode.Error;
     assert(!(o is SpanStatusCode.Error));
     assert(!(e is SpanStatusCode.Ok));
+}
+
+// =============================================================================
+// The mutating Span surface — set_attribute / update_name /
+// record_exception / end. All four are documented on the stdlib
+// reference and were run by nothing (census 2026-09-12).
+//
+// WHAT THESE CAN AND CANNOT PIN. `Span.noop()` is the only Span a test
+// can construct without a pipeline, and on it every mutator is a
+// deliberate no-op. So these assert the two things that ARE observable:
+// the call completes rather than panicking, and the noop contract holds
+// across it — `is_recording()` stays false, which is what makes the
+// no-op a no-op rather than an unnoticed write.
+// =============================================================================
+
+@test
+fn test_noop_span_is_not_recording() {
+    assert(!Span.noop().is_recording());
+}
+
+@test
+fn test_set_attribute_on_a_noop_span_is_callable_and_changes_nothing() {
+    let s = Span.noop();
+    s.set_attribute("k".to_text(), AttributeValue.Text("v".to_text()));
+    assert(!s.is_recording());
+}
+
+@test
+fn test_update_name_on_a_noop_span_is_callable() {
+    let s = Span.noop();
+    s.update_name("renamed".to_text());
+    assert(!s.is_recording());
+}
+
+@test
+fn test_record_exception_takes_a_type_and_a_message() {
+    // Two arguments, in that order — the signature is
+    // `record_exception(&self, type_name: &Text, message: &Text)`, and
+    // a one-argument call is what the stdlib reference used to imply.
+    let s = Span.noop();
+    s.record_exception(&"Err".to_text(), &"boom".to_text());
+    assert(!s.is_recording());
+}
+
+@test
+fn test_end_is_callable_and_idempotent_on_a_noop_span() {
+    let s = Span.noop();
+    s.end();
+    // Twice: an `end` that flipped state without guarding would be fine
+    // once and wrong the second time.
+    s.end();
+    assert(!s.is_recording());
 }
 
 fn main() {}
