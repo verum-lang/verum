@@ -480,16 +480,28 @@ That number therefore says nothing about this defect, and it is kept
 here because it is the kind of number that reads like evidence and is
 not. What those specs die of is elsewhere:
 
-* Tier-0 `spawn` is DEFERRED, not concurrent — `handle_spawn` queues
-  the task, and `Await` / `Join` / `Select` / `NurseryAwait` are what
-  pump it. A spec that spawns a producer and then blocks in
-  `Channel.recv` deadlocks: the producer cannot run until someone
-  awaits, and nobody does. 66 of the 88 do await or join somewhere; the
-  deadlock needs only one blocking `recv` on the path before it.
-* The exit-1 group is mostly type errors that never reach the runtime,
+* **A `spawn` that captures a channel spins.** Bisected, each step one
+  `verum run` in a one-file directory: `spawn` alone runs; a channel
+  alone runs; `spawn` capturing a channel hangs — and `main`'s FIRST
+  `print` never appears, so this is not the program deadlocking, it is
+  never reaching the program. `verum check` on the same file passes in
+  2.1 s. Sampled at 12 s and 22 s: 99% CPU, RSS flat at 1.5 GiB, state
+  R — a tight loop, not a wait. The run's own warning names the frame:
+  `[field-guess] 'cap' has 21 position-disagreeing candidates; guessed
+  Channel.cap idx 1 (most fields) in fn `main$spawn$0` —
+  FIELD-ACCESS-BYNAME-1`.
+  CONTROLS, all in one-file directories: capturing a LOCAL record with
+  the same shape runs; capturing an `Int` runs; capturing an archive
+  `Mutex` runs. So it is neither "any capture" nor "any archive type".
+* The exit-1 group includes type errors that never reach the runtime,
   e.g. `let ch = Channel.new(16)` with no element type in sight —
   `error<E404>: Ambiguous type for 'ch'`, which the 31 August binary
   reports identically.
+
+An earlier draft of this section said the specs deadlocked because
+Tier-0 `spawn` is deferred. That was refuted by the probe above: a
+deadlocked program has already printed its first line, and these have
+not.
 
 The evidence for the representation defect is the direct one: the
 program above, and the panic backtrace naming
