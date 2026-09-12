@@ -1,0 +1,36 @@
+# Source sites that hand debt to a DEAD task (T1460).
+#
+# ONE ENTRY HERE IS ALREADY JUDGED CORRECT AND NEEDS NO REPAIR:
+#   scripts/ci/check_panic_surface_ratchet.py -> T0131
+# It reads "the T0131 sweeps re-rot without this gate" — history,
+# not a handover, and the live owner (T0424) IS named, seven lines
+# up in the same docstring. The rule looks four lines out, so it
+# reports this one. Widening the window to reach it would accept a
+# live id from an unrelated neighbouring comment, which is the
+# wrong trade; the entry stays and this note is the verdict.
+# A RATCHET, not a zero: removing a line is a repair,
+# ADDING one is a decision to point a reader at a
+# graveyard. Regenerate with --write-baseline.
+core/base/iterator.vr	T0327
+core/math/distributed.vr	T0455
+core/net/weft/h3.vr	T0327
+crates/verum_compiler/src/phases/proof_verification.rs	T0480
+crates/verum_compiler/src/typed_export.rs	T0677
+crates/verum_compiler/tests/typed_export_contract.rs	T0676
+crates/verum_compiler/tests/typed_export_contract.rs	T0677
+crates/verum_types/src/infer/env.rs	T0124
+crates/verum_types/src/infer/env.rs	T0662
+crates/verum_types/src/infer/expr.rs	T0124
+crates/verum_types/src/infer/mod.rs	T0662
+crates/verum_types/src/infer/modules.rs	T0662
+crates/verum_vbc/src/codegen/expressions.rs	T0124
+crates/verum_vbc/src/codegen/mod.rs	T0378
+crates/verum_vbc/src/interpreter/dispatch_table/handlers/calls.rs	T0377
+crates/verum_vbc/src/interpreter/dispatch_table/handlers/process_runtime.rs	T0376
+crates/verum_vbc/src/interpreter/heap.rs	T0293
+crates/verum_vbc/src/intrinsics/mod.rs	T0686
+crates/verum_vbc/tests/list_slot2_named_offset_pin.rs	T0293
+crates/verum_vbc/tests/stdlib_duplicate_typenames_pin.rs	T0327
+crates/verum_vbc/tests/stdlib_mounts_resolve.rs	T0186
+scripts/ci/check_panic_surface_ratchet.py	T0131
+vcs/runner/vtest/src/executor.rs	T0648

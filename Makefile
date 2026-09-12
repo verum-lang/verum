@@ -262,6 +262,10 @@ check-register-rows: ## Gate: every tech-debt register row is one markdown line
 	python3 scripts/ci/check_register_rows_are_rows.py --self-test
 	python3 scripts/ci/check_register_rows_are_rows.py
 
+check-live-task-citations: ## Gate (T1460): a source comment must not hand its debt to a DEAD task
+	python3 scripts/ci/check_a_comment_names_a_live_task.py --selftest
+	python3 scripts/ci/check_a_comment_names_a_live_task.py
+
 check-gate-tables: ## Gate: a table inside a gate must not have the same key twice
 	python3 scripts/ci/check_gate_tables_have_no_duplicate_keys.py --self-test
 	python3 scripts/ci/check_gate_tables_have_no_duplicate_keys.py --check
@@ -283,7 +287,7 @@ check-barename-census: ## Report every colliding (name,arity) pair with its modu
 
 gates-source: check-private-types-off-public-surface check-error-code-namespaces check-guard-in-argument-position check-grammar-covers-keywords check-known-tables check-parser-attrs check-gate-tables check-markers check-vr-syntax check-str-alias check-op-bytes check-internal-refs check-rings check-arch-attestation check-type-name-collisions check-barename-collisions check-panic-surface check-per-register-privacy check-early-return-tenants check-dup-emitters check-bake-prepass-parity check-protocol-form check-dead-module-path-calls check-platform-call-parity check-protocol-conformance check-cfg-block-tail check-meta-function-names check-ffi-reference-tiers check-intrinsic-keys-implemented check-diagnostic-levers check-constant-time-duplication check-type-param-name-rule \
             check-gate-aggregates-invoked check-register-rows check-test-mounts \
-            check-verdict-phases ## Every gate that needs only the SOURCE TREE — no build, no artefacts
+            check-verdict-phases check-live-task-citations ## Every gate that needs only the SOURCE TREE — no build, no artefacts
 # THREE TARGETS JOINED THAT LIST 2026-09-11 (T1439) after a census of
 # which `check-*` targets any workflow actually invokes: 89 declared, 66
 # in an aggregate, and SEVENTEEN in none and named by nothing.  Two of the
