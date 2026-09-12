@@ -95,4 +95,39 @@ fn dump_adapter_descriptors() {
         }
     }
     println!("== {} descriptors matched '{}'", shown, filter);
+
+    // `VERUM_DUMP_TABLES=1` — the NAME TABLES beside the descriptors.
+    //
+    // A descriptor dump answers "is there a body called X". It cannot
+    // answer "who recorded the name X", and those are different
+    // questions the moment a name has no body: a string in a `.vbca`
+    // is equally consistent with a pruned function and with a name
+    // table pointing at one. Measured 2026-09-12 (T1461) on a
+    // three-file stdlib: `the_leaf` has exactly ONE descriptor,
+    // `core.probe_decl.the_leaf`, while the archive also carries the
+    // string `core.probe_user.the_leaf` — the CONSUMER's path. Which
+    // table holds it decides where the defect is, and nothing here
+    // could say.
+    if std::env::var_os("VERUM_DUMP_TABLES").is_some() {
+        for raw in archive.module_data.iter() {
+            let Ok(m) = verum_vbc::deserialize::deserialize_module(raw) else {
+                continue;
+            };
+            let hit = |n: &str| needles.iter().any(|x| n.contains(x));
+            for (fid, sid) in m.external_function_names.iter() {
+                if let Some(n) = m.strings.get(*sid)
+                    && hit(n)
+                {
+                    println!("external_function_names[{}] = '{}'  (module '{}')", fid.0, n, m.name);
+                }
+            }
+            for (alias_sid, fid, canon_sid) in m.mount_aliases.iter() {
+                let a = m.strings.get(*alias_sid).unwrap_or("<?>");
+                let c = m.strings.get(*canon_sid).unwrap_or("<none>");
+                if hit(a) || hit(c) {
+                    println!("mount_aliases: '{}' -> fid {} (canonical '{}')  (module '{}')", a, fid.0, c, m.name);
+                }
+            }
+        }
+    }
 }
