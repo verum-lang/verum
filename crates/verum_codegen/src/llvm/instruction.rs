@@ -11573,10 +11573,41 @@ fn lower_call<'ctx>(
                         // have three different fixes (name-table gap vs
                         // absent target vs non-band id).
                         let chase_note = match xmod_name {
-                            Some(n) => format!(
-                                "name-chase: '{}' named but absent from the module",
-                                n
-                            ),
+                            // T1461: "absent" covered THREE outcomes with three
+                            // different roots, and one message for all of them
+                            // is why the population read as homogeneous. Say
+                            // which: whether the exact name is in the table at
+                            // all, whether the ranked chase reaches anything,
+                            // and how many BODIED functions end with `.<name>`
+                            // — the last one separates "the producing module is
+                            // outside the merge set" from "the body is right
+                            // there under a qualified key the chase cannot
+                            // reach from a bare spelling" (`resolve_function_
+                            // by_name_ranked` returns None for a dotless name
+                            // the moment the exact lookup misses).
+                            Some(n) => {
+                                let exact = vbc_mod.find_function_by_name(n).is_some();
+                                let ranked =
+                                    vbc_mod.resolve_function_by_name_ranked(n).is_some();
+                                let suffix = format!(".{}", n);
+                                let mut suffix_hits = 0usize;
+                                let mut suffix_bodied = 0usize;
+                                for d in vbc_mod.functions.iter() {
+                                    if let Some(dn) = vbc_mod.get_string(d.name)
+                                        && dn.ends_with(&suffix)
+                                    {
+                                        suffix_hits += 1;
+                                        if d.bytecode_length > 0 {
+                                            suffix_bodied += 1;
+                                        }
+                                    }
+                                }
+                                format!(
+                                    "name-chase: '{}' named but absent from the module \
+                                     (exact={} ranked={} suffix={} bodied={})",
+                                    n, exact, ranked, suffix_hits, suffix_bodied
+                                )
+                            }
                             None if verum_vbc::stub_ranges::is_xmod_name_reference(func_id)
                                 || verum_vbc::stub_ranges::is_stub_id(func_id) =>
                             {
