@@ -150,6 +150,37 @@ fn a_method_call_is_not_opaque() {
 }
 
 #[test]
+fn a_bare_name_as_the_whole_predicate_is_opaque() {
+    // `Int{is_positive}` and `Int where is_positive` both parse to a lone
+    // `Path`. They refused a SATISFYING value until 2026-09-12 for exactly
+    // the reason the call form did, and the call walk could not see them.
+    let s = Span::dummy();
+    let pred = Expr::ident(Ident::new("is_positive", s));
+    assert!(RefinementChecker::predicate_calls_an_opaque_function(&pred));
+}
+
+#[test]
+fn a_bare_name_in_parentheses_is_still_opaque() {
+    let s = Span::dummy();
+    let pred = Expr::new(
+        ExprKind::Paren(Box::new(Expr::ident(Ident::new("is_positive", s)))),
+        s,
+    );
+    assert!(RefinementChecker::predicate_calls_an_opaque_function(&pred));
+}
+
+#[test]
+fn a_name_INSIDE_a_comparison_is_not_opaque() {
+    // THE CONTROL FOR THE POSITIONAL RULE. `it` is a name, and it appears
+    // in every predicate; a test on "does a name occur" rather than "is
+    // the ROOT a name" would make `it >= 10` undecidable and undo the
+    // decided cases entirely.
+    let s = Span::dummy();
+    let pred = binary(BinOp::Ge, it_ident(s), int_lit(10, s), s);
+    assert!(!RefinementChecker::predicate_calls_an_opaque_function(&pred));
+}
+
+#[test]
 fn a_bare_comparison_is_not_opaque() {
     let s = Span::dummy();
     let pred = binary(BinOp::Ge, it_ident(s), int_lit(10, s), s);

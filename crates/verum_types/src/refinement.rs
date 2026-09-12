@@ -3288,6 +3288,29 @@ impl RefinementChecker {
     /// `Text{it.len() > 0}` is clean on "abc" and refuses on "" — because
     /// the evaluator folds it and the solver never gets the last word.
     pub fn predicate_calls_an_opaque_function(expr: &Expr) -> bool {
+        // A BARE NAME AS THE WHOLE PREDICATE IS A FUNCTION REFERENCE, and
+        // it is opaque for the same reason a call is. `Int{is_positive}` and
+        // `Int where is_positive` both parse to a lone `Path`, never to a
+        // `Call`, so the walk below could not see them — and they refused a
+        // SATISFYING value exactly as the call form used to:
+        //
+        //     Int{is_positive}      x = 5   E500   (satisfied, and refused)
+        //     Int{is_positive}      x = 0   E500
+        //     Int{is_positive(it)}  x = 5   W0500  (the call form, fixed)
+        //
+        // Measured 2026-09-12. The test is POSITIONAL on purpose: `it` and
+        // every other name appear inside ordinary predicates like
+        // `it >= 10`, and treating any identifier as opaque would make the
+        // decided cases undecidable. Only the predicate's own root counts.
+        {
+            let mut root: &Expr = expr;
+            while let ExprKind::Paren(inner) = &root.kind {
+                root = &**inner;
+            }
+            if matches!(root.kind, ExprKind::Path(_)) {
+                return true;
+            }
+        }
         struct FindCall(bool);
         impl verum_ast::visitor::Visitor for FindCall {
             fn visit_expr(&mut self, expr: &Expr) {

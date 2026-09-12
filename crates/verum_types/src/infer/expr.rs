@@ -2336,6 +2336,39 @@ impl TypeChecker {
         })
     }
 
+    /// Is this expression a value the compiler is HOLDING — a literal,
+    /// possibly negated or parenthesised?
+    ///
+    /// **Measured 2026-09-12, and it is not a nicety.** The three
+    /// refinement arms below gate on "the checked expression is a
+    /// literal", and `-5` does not parse as one: it is a `Unary { Neg,
+    /// Literal }`. So did `(5)`. Both silently lost the `W0500` that says
+    /// the constraint is not enforced, and the E500 that a confirmed
+    /// violation over a literal earns:
+    ///
+    ///     Int{tw(it) >= 10}     x = 5    W0500
+    ///     Int{tw(it) >= 10}     x = -5   nothing at all
+    ///     Int{[it][0] >= 10}    x = 5    W0500
+    ///     Int{[it][0] >= 10}    x = -5   nothing at all
+    ///
+    /// A predicate the solver cannot decide is unenforced whichever sign
+    /// the value carries, and the reader is owed the same warning.
+    fn is_compile_time_literal(expr: &Expr) -> bool {
+        match &expr.kind {
+            ExprKind::Literal(_) => true,
+            ExprKind::Paren(inner) => Self::is_compile_time_literal(inner),
+            ExprKind::Unary { op, expr: inner }
+                if matches!(
+                    op,
+                    verum_ast::expr::UnOp::Neg | verum_ast::expr::UnOp::Not
+                ) =>
+            {
+                Self::is_compile_time_literal(inner)
+            }
+            _ => false,
+        }
+    }
+
     fn synth_and_check(&mut self, expr: &Expr, expected: &Type) -> Result<InferResult> {
         // A LITERAL MUST FIT THE SIZED TYPE IT IS CHECKED AGAINST, and this
         // has to be asked BEFORE synthesis.
@@ -2477,7 +2510,7 @@ impl TypeChecker {
                                 // violate. T0967's case — a quantifier false
                                 // for every value — contains no call and still
                                 // refuses, which is what this branch is for.
-                                if matches!(expr.kind, ExprKind::Literal(_))
+                                if Self::is_compile_time_literal(expr)
                                     && predicate.provenance
                                         == crate::refinement::PredicateProvenance::Declared
                                     && !crate::refinement::RefinementChecker
@@ -2503,7 +2536,7 @@ impl TypeChecker {
                                 // `Unknown` arm below gives it. Before the
                                 // regression this case DID warn — measured on
                                 // the docs' own table, 2026-08-17.
-                                if matches!(expr.kind, ExprKind::Literal(_))
+                                if Self::is_compile_time_literal(expr)
                                     && predicate.provenance
                                         == crate::refinement::PredicateProvenance::Declared
                                 {
@@ -2557,7 +2590,7 @@ impl TypeChecker {
                             // than being handed a type that advertises a check
                             // nobody performs.
                             Ok(crate::refinement::VerificationResult::Unknown { ref reason })
-                                if matches!(expr.kind, ExprKind::Literal(_))
+                                if Self::is_compile_time_literal(expr)
                                     && predicate.provenance
                                         == crate::refinement::PredicateProvenance::Declared =>
                             {
