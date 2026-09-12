@@ -84,19 +84,32 @@ RULES = (
 )
 
 
-def scan(root: pathlib.Path) -> list[tuple[str, int, str, str]]:
+def scan(root: pathlib.Path) -> tuple[list[tuple[str, int, str, str]], int]:
+    """Hits, and how many files were READ to find them.
+
+    The second number is not decoration. This gate's healthy output is a
+    zero, and a zero from a search is indistinguishable from a zero from a
+    search that ran over nothing — the summary line used to say "0
+    artefact(s) across 0 file(s)", where the second zero counted files WITH
+    hits and therefore also read as zero on a clean tree. A reader checking
+    whether the gate still had its corpus could not tell from the line, and
+    one did stop to check. Reporting the denominator makes the healthy line
+    self-evidently healthy.
+    """
     hits: list[tuple[str, int, str, str]] = []
+    read = 0
     for p in sorted(root.rglob("*")):
         if p.suffix not in (".md", ".mdx", ".ts", ".tsx", ".js", ".jsx"):
             continue
         if "node_modules" in p.parts:
             continue
+        read += 1
         for n, line in enumerate(p.read_text(errors="replace").split("\n"), 1):
             for what, pat, _ in RULES:
                 m = pat.search(line)
                 if m:
                     hits.append((str(p), n, what, m.group(0)[:60]))
-    return hits
+    return hits, read
 
 
 def self_test() -> int:
@@ -172,10 +185,17 @@ def main() -> int:
     src = DOCS.parent / "src"
     if src.is_dir():
         roots.append(src)
-    hits = [h for r in roots for h in scan(r)]
+    scanned = [scan(r) for r in roots]
+    hits = [h for part, _ in scanned for h in part]
+    read = sum(n for _, n in scanned)
     files = len({h[0] for h in hits})
+    if not read:
+        print(f"check-doc-no-internal-artefacts: {len(roots)} tree(s) held no "
+              f"readable page — REFUSING to report OK over an empty corpus.",
+              file=sys.stderr)
+        return 2
     print(f"check-doc-no-internal-artefacts: {len(hits)} internal artefact(s) "
-          f"across {files} file(s) in {len(roots)} tree(s)")
+          f"in {files} of {read} file(s) read across {len(roots)} tree(s)")
 
     if hits:
         why = {w: r for w, _, r in RULES}

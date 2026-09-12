@@ -257,7 +257,19 @@ def collect(text: str) -> dict[str, tuple[str, frozenset[str]]]:
     out: dict[str, tuple[str, frozenset[str]]] = {}
     for name, body in declarations(text):
         kind, names = shape(body)
-        if kind == "other" or not names:
+        # AN EMPTY BODY USED TO BE DROPPED HERE, AND THAT WAS THE HOLE.
+        #
+        # `type SystemTimeError is { /* negative duration */ };` yields
+        # kind="record" and NO field names, so `not names` dropped the whole
+        # declaration — the page taught a RECORD for a type core/ declares as
+        # a two-variant SUM, and this gate reported nothing because it never
+        # saw the declaration at all. Measured 2026-09-12: `collect` returned
+        # `{}` for that line while the corrected form returned the sum.
+        #
+        # An empty record/sum body is kept and judged below. A `("other", …)`
+        # shape is still dropped: a unit type `()` and a newtype `(Int)` have
+        # no names by NATURE, and reporting those would be noise.
+        if kind == "other":
             continue
         out.setdefault(name, (kind, names))
     return out
@@ -309,6 +321,22 @@ def self_test() -> int:
         bad += 1
         print(f"self-test: a semicolon in a COMMENT ends the declaration — "
               f"got {d.get('A')}")
+    # The measured hole: an empty body must reach the comparison, not be
+    # dropped before it. This is the exact line that hid a record-vs-sum
+    # disagreement on a shipped page.
+    d = collect("type SystemTimeError is { /* negative duration */ };\n")
+    if "SystemTimeError" not in d:
+        bad += 1
+        print("self-test: a declaration with an EMPTY body is dropped — "
+              "the shape that hid a record documented for a sum")
+    elif d["SystemTimeError"][1]:
+        bad += 1
+        print(f"self-test: an empty body invented names — "
+              f"got {d['SystemTimeError']}")
+    # …and a unit type / newtype must STILL be dropped: they have no names
+    # by nature, and reporting them would be noise.
+    if collect("type Marker is ();\n") or collect("type UserId is (Int);\n"):
+        bad += 1; print("self-test: a unit type or newtype is no longer skipped")
     k, n = shape(" { cols: Int, rows: Int }")
     if n != frozenset({"cols", "rows"}):
         bad += 1; print(f"self-test: fields on ONE line are missed — got {n}")
@@ -371,6 +399,33 @@ def main() -> int:
                     continue           # reader-owned example type: the floor
                 candidates = core_shapes[name]
                 compared += 1
+                if not names:
+                    # AN OPAQUE BODY IS A LEGITIMATE CHOICE, WITH ONE
+                    # EXCEPTION, AND THIS BRANCH IS ONLY THE EXCEPTION.
+                    #
+                    # `type Task is { … };` on a page that means "an opaque
+                    # handle, do not reach inside" is honest, and 58 of the
+                    # site's empty bodies are exactly that — Task, Waker,
+                    # JoinHandle, Command. Reporting those would be noise.
+                    #
+                    # What is NOT survivable is an empty RECORD body standing
+                    # for a type core/ declares as a SUM. The brace tells the
+                    # reader to reach for a field or to build one with
+                    # `X { … }`; the truth is that they must MATCH it, and
+                    # every line they write against the page fails to compile.
+                    # Measured 2026-09-12 on `SystemTimeError`, documented as
+                    # `type SystemTimeError is { /* negative duration */ };`
+                    # against a two-variant sum — and the empty body kept this
+                    # gate from ever seeing the declaration.
+                    if kind == "record" and all(ck == "sum"
+                                                for ck, _ in candidates):
+                        n = max(len(cn) for _, cn in candidates)
+                        mismatches.append(
+                            f"{rel}: `{name}` is documented as a record with an "
+                            f"empty body, but core/ declares a sum of {n} "
+                            f"variant(s) — a reader will reach for a field "
+                            f"instead of matching")
+                    continue
                 # A page matching ANY declaration of that name is right;
                 # a module may hold two types under one name on purpose.
                 if any(kind == ck and not (names - cn) for ck, cn in candidates):

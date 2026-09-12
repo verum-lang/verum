@@ -77,8 +77,24 @@ DOCS = pathlib.Path(_DOCS_ROOT) if _DOCS_ROOT else REPO.parent / "website" / "do
 MOUNT_LIST = re.compile(
     r"mount\s+((?:core|cog)(?:\.[a-z_][a-z0-9_]*)+)\s*\.\s*\{([^}]{0,400})\}"
 )
+# THE MODIFIER SET IS THE GRAMMAR'S, NOT A GUESS.  `verum.ebnf` gives
+#
+#     function_modifiers = [ 'pure' ] , [ meta_modifier ] , [ 'async' ] ,
+#                          [ 'cofix' ] , [ 'unsafe' ] | epsilon ;
+#
+# and this pattern used to accept `unsafe` alone.  `async` sits BEFORE
+# `unsafe` in that order, so `public async fn ctrl_c()` matched nothing and
+# `core.signal` looked like a module with no `ctrl_c` — a page citing it
+# correctly was reported unresolved and went onto the roster as accepted
+# debt.  Measured 2026-09-12: `core/` holds 500 `public async fn`
+# declarations, every one of them invisible here.
+#
+# `fn*` and `async fn*` are the generator spellings (`verum.ebnf` §
+# "Generator function marker"), so the `\*?` is not optional decoration.
 DECL = re.compile(
-    r"^\s*(?:public\s+|pub\s+)?(?:unsafe\s+)?(?:fn|type|const|context)\s+"
+    r"^\s*(?:public\s+|pub\s+)?"
+    r"(?:pure\s+)?(?:meta\s+)?(?:async\s+)?(?:cofix\s+)?(?:unsafe\s+)?"
+    r"(?:fn\*?|type|const|context)\s+"
     r"(?:(?:affine|linear|unique|shared|mut)\s+)*([A-Za-z_][A-Za-z0-9_]*)",
     re.M,
 )
@@ -127,9 +143,13 @@ KNOWN: dict[str, list[str]] = {
     # `core/security/x509/` has neither a `parse` nor a `sign` submodule.
     "core.security.x509.parse": ["parse_cert_chain_pem"],
     "core.security.x509.sign": ["FileSigner"],
-    # `core/signal/mod.vr` shows `ctrl_c()` in its own doc comment and
-    # declares no such function.
-    "core.signal": ["ctrl_c"],
+    # `core.signal.ctrl_c` LEFT this roster on 2026-09-12, and it was never
+    # a real row: `core/signal.vr` declares `public async fn ctrl_c()` at
+    # line 103, and this gate could not see it because `DECL` accepted
+    # `unsafe` but not `async`. The row's own note — "declares no such
+    # function" — was that blindness written down as a fact. Worth keeping
+    # as a warning: a roster entry inherits whatever the detector believed,
+    # so a wrong detector produces accepted debt that reads like a finding.
     # The tour's framework-axiom example. `Site` is real; the axiom is not.
     "core.math.frameworks.lurie_htt": ["sheafification_is_infinity_topos"],
 }
@@ -204,6 +224,13 @@ def self_test() -> int:
         ("plain declarations",
          "public fn open(p: Text) -> Int { 0 }\nconst LIMIT = 4;\n",
          {"open", "LIMIT"}),
+        # The measured hole: `async` sits before `unsafe` in the grammar's
+        # modifier order, and this pattern knew only `unsafe`.
+        ("async and the rest of the modifier order",
+         "public async fn ctrl_c() { }\n"
+         "public pure async unsafe fn raw() -> Int { 0 }\n"
+         "public async fn* ticks() { }\n",
+         {"ctrl_c", "raw", "ticks"}),
     ]
     for label, src, want in cases:
         got = set(DECL.findall(src))

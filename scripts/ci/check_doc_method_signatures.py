@@ -65,8 +65,23 @@ OWNER = re.compile(
     r"|implement(?:\s*<[^>]*>)?\s+(?:([A-Z][A-Za-z0-9_]*)\s+for\s+([A-Z][A-Za-z0-9_]*)"
     r"|([A-Z][A-Za-z0-9_]*)))"
 )
+# THE MODIFIERS COME FROM `verum.ebnf`, NOT FROM WHAT TURNED UP FIRST:
+#
+#     function_modifiers = [ 'pure' ] , [ meta_modifier ] , [ 'async' ] ,
+#                          [ 'cofix' ] , [ 'unsafe' ] | epsilon ;
+#
+# This pattern accepted a bare `public fn`, so every `public async fn`
+# method in `core/` was invisible and its documented signature went
+# UNCOMPARED — the quiet failure, because the summary line reports how
+# many pairs were comparable and a shrunken denominator still reads as a
+# pass. Measured 2026-09-12: `core/` holds 500 `public async fn`
+# declarations, and the sibling gate `check_doc_mounts_resolve` had the
+# same gap, where it turned a correctly-documented `core.signal.ctrl_c`
+# into a roster row that read "declares no such function".
 METH = re.compile(
-    r"^\s*(?:public\s+)?fn\s+([a-z_][a-z0-9_]*)\s*(?:<[^(>]*>)?\s*\(\s*"
+    r"^\s*(?:public\s+|pub\s+)?"
+    r"(?:pure\s+)?(?:meta\s+)?(?:async\s+)?(?:cofix\s+)?(?:unsafe\s+)?"
+    r"fn\s+([a-z_][a-z0-9_]*)\s*(?:<[^(>]*>)?\s*\(\s*"
     r"(&(?:mut\s+|checked\s+|unsafe\s+)?self|mut\s+self|self)\s*"
     r"(?:,([^)]{0,200}))?\)"
     r"\s*(?:->\s*([^{;\n]+))?"

@@ -111,6 +111,21 @@ def write_roster(keys: set[str]) -> None:
         "# A key LEAVES this list when something in crates/ implements it — that is\n"
         "# progress, and deleting the line is the deliberate act that records it.\n"
         "# A key JOINS it when core/ declares a new @intrinsic nothing backs.\n"
+        "#\n"
+        "# THERE IS A SECOND EXIT, and it was taken on 2026-09-12 (A111): the\n"
+        "# declaration was MISNAMED and got corrected.  `core/protobuf/wire.vr`\n"
+        "# called `verum.float.f32_to_bits` / `verum.float.f64_to_bits`; the\n"
+        "# registry carries the same two operations under their BARE names, which\n"
+        "# core.metrics and core.database.mysql were already calling.  Nothing was\n"
+        "# implemented — a working intrinsic was simply reached by its real name,\n"
+        "# and protobuf went from aborting on every float to encoding one.\n"
+        "#\n"
+        "# Before reaching for that exit, check that the bare twin MEANS the same\n"
+        "# thing.  Measured the same day: 35 of these keys have a bare name in the\n"
+        "# registry, and all but those two are false friends — `verum.quic.connect`\n"
+        "# against a socket `connect`, `verum.libm_deterministic.sin` against the\n"
+        "# platform `sin` whose whole point is that it is NOT reproducible.  A\n"
+        "# reroute there would trade an honest abort for a silently wrong answer.\n"
     )
     ROSTER.write_text(header + "\n".join(sorted(keys)) + "\n", encoding="utf-8")
 

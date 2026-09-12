@@ -3,6 +3,21 @@
 # A key LEAVES this list when something in crates/ implements it — that is
 # progress, and deleting the line is the deliberate act that records it.
 # A key JOINS it when core/ declares a new @intrinsic nothing backs.
+#
+# THERE IS A SECOND EXIT, and it was taken on 2026-09-12 (A111): the
+# declaration was MISNAMED and got corrected.  `core/protobuf/wire.vr`
+# called `verum.float.f32_to_bits` / `verum.float.f64_to_bits`; the
+# registry carries the same two operations under their BARE names, which
+# core.metrics and core.database.mysql were already calling.  Nothing was
+# implemented — a working intrinsic was simply reached by its real name,
+# and protobuf went from aborting on every float to encoding one.
+#
+# Before reaching for that exit, check that the bare twin MEANS the same
+# thing.  Measured the same day: 35 of these keys have a bare name in the
+# registry, and all but those two are false friends — `verum.quic.connect`
+# against a socket `connect`, `verum.libm_deterministic.sin` against the
+# platform `sin` whose whole point is that it is NOT reproducible.  A
+# reroute there would trade an honest abort for a silently wrong answer.
 verum.aws.secretsmanager_close
 verum.aws.secretsmanager_connect
 verum.aws.secretsmanager_delete
@@ -100,8 +115,6 @@ verum.crypto.stark_verify_batch
 verum.ed25519.keygen
 verum.ed25519.sign
 verum.ed25519.verify
-verum.float.f32_to_bits
-verum.float.f64_to_bits
 verum.gcp.secret_manager_access
 verum.gcp.secret_manager_add
 verum.gcp.secret_manager_close
