@@ -1,0 +1,53 @@
+// @test: run
+// @tier: 0,1
+// @level: L0
+// @tags: sys, intrinsic, ffi, libsystem, regression
+// @timeout: 60000
+// @expected-exit: 0
+//
+// THE CPU COUNT IS THE MACHINE'S OWN (T1459).
+//
+// `core.sys.num_cpus()` forwards to the `num_cpus` intrinsic, which the AOT
+// answers through a platform helper calling the system's own
+// `sysconf(_SC_NPROCESSORS_ONLN)`. That helper DECLARED `sysconf` without
+// defining it — and a lowering pass that hands a body to every bodyless
+// function then gave it `skipped_entry { ret 0 }`, INTERNAL, shadowing the
+// real dylib symbol.
+//
+// Measured on a 16-core machine before the fix:
+//
+//     via the sys wrapper     tier 0: 16     tier 1: 1
+//     nm on the binary        t _sysconf beside libsystem_c's
+//     its whole body          mov x0, #0 ; ret
+//
+// The 1 is a clamp lifting 0, so nothing looked wrong: no crash, no error,
+// a plausible number. `core/runtime/config.vr` sizes its worker pool from
+// this call, so an AOT binary ran ONE worker on sixteen cores.
+//
+// WHAT THIS SPEC CAN AND CANNOT ASSERT. The true count differs per machine,
+// so a constant would pin the wrong thing. What holds everywhere is that the
+// two tiers AGREE and that the count is plausible — at least one, and not
+// the clamp's floor masquerading as an answer on a machine that has more.
+// The second rung is the one that fails when the symbol is shadowed again:
+// a shadowed `sysconf` answers 0 for every caller, so the two routes to the
+// same number stop agreeing.
+//
+// The `+ 0` on the assertions is deliberate: a bare `assert(n >= 1)` can be
+// folded by the frontend's own model.
+
+mount core.sys.num_cpus;
+
+fn main() {
+    print("0 begin");
+
+    let via_wrapper = num_cpus();
+    let via_intrinsic = core.intrinsics.num_cpus();
+
+    print(f"1 wrapper   = {via_wrapper + 0} (want >= 1)");
+    assert(via_wrapper + 0 >= 1);
+
+    print(f"2 agree     = {(via_wrapper == via_intrinsic)} (want true)");
+    assert(via_wrapper == via_intrinsic);
+
+    print("3 end");
+}

@@ -1647,6 +1647,29 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                     name,
                     // process control
                     "exit" | "_exit" | "_Exit" | "abort" | "_abort"
+                    // T1459 — `sysconf` is declared by the PLATFORM LAYER
+                    // (`emit_num_cpus`), not by `core/`, so it was in neither
+                    // this roster nor `ffi_symbols`, and this loop gave it
+                    // `skipped_entry { ret 0 }` INTERNAL — shadowing
+                    // libSystem's. Measured on a 16-core machine: the helper
+                    // returned 1 (the clamp lifting 0) and
+                    // `core/runtime/config.vr` sized its worker pool at ONE;
+                    // `nm` showed `t _sysconf` beside libsystem_c's, body
+                    // `mov x0, #0; ret`.
+                    //
+                    // THE ROSTER IS STILL THE WRONG SHAPE — its own comment
+                    // below says so, and T1413 already moved `@ffi` bindings
+                    // off it — but the wider rule this case first suggested
+                    // ("a name with no VBC descriptor was never a Verum
+                    // function, so never stub it") is WRONG, and measured so:
+                    // it left names that are NOT dylib symbols bodyless too,
+                    // and the binary died calling a null pointer from
+                    // `verum_text_free`. A bodyless non-Verum name is either
+                    // a real dylib symbol or an AOT-internal one that nothing
+                    // defines; only a roster of the former can tell them
+                    // apart, until the platform layer records what it
+                    // declares.
+                    | "sysconf"
                     // memory
                     | "malloc" | "calloc" | "realloc" | "free"
                     | "posix_memalign" | "aligned_alloc"
