@@ -9,7 +9,9 @@
 //     | DischargedByFramework { lemma_path, framework, citation }
 // =============================================================================
 
-mount core.verify.kernel_v0.soundness.LemmaStatus;
+// Braced (A137): the brace-less form binds the name but refuses the
+// variant path through it.
+mount core.verify.kernel_v0.soundness.{LemmaStatus};
 mount core.base.maybe.{Maybe, Some, None};
 mount core.base.result.{Result, Ok, Err};
 
