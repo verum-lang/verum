@@ -1932,8 +1932,10 @@ pub fn verify_proof_body_with_aliases_and_graph(
     // (`theorem t(result: TranslationResult) ensures
     // result.quality >= 0`), and substituting the literal `true`
     // over it rewrote the goal into nonsense
-    // (`true.quality >= 0`) — the T0480 binder-capture. A declared
-    // parameter always wins over the elaboration convention.
+    // (`true.quality >= 0`) — a binder capture: the convention's
+    // substitution walked into a scope where the name was already
+    // bound. A declared parameter always wins over the elaboration
+    // convention.
     let result_is_a_parameter = theorem.params.iter().any(|p| {
         matches!(
             &p.kind,

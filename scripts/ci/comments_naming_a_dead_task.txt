@@ -5,7 +5,6 @@
 core/base/iterator.vr	T0327
 core/math/distributed.vr	T0455
 core/net/weft/h3.vr	T0327
-crates/verum_compiler/src/phases/proof_verification.rs	T0480
 crates/verum_compiler/src/typed_export.rs	T0677
 crates/verum_types/src/infer/env.rs	T0124
 crates/verum_types/src/infer/env.rs	T0662
