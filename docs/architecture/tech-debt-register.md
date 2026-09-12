@@ -310,9 +310,17 @@ nine more). `map` pins the choice because its bound MENTIONS `Self.Item`
 eleven is picked. That puts this in the same family as R3's own next line — candidate
 discipline for multi-source names — rather than in projection chaining.
 
+**`ISize` is a DEFAULT, not an inference, and that rules out the obvious fixes.** Four
+test-side hints were tried and all four keep `Item<ISize>` on the expected side unchanged:
+annotating the source `let r: Range<Int> = range(0, 3)`, suffixing the literals
+(`range(0_i64, 3_i64)` shifts only the FOUND side, to `Int64`), binding through
+`let v: Maybe<Int> = it.next()`, and the bare form. So no amount of information at the call
+site pins it — the unresolved receiver variable is being defaulted to `ISize` somewhere in
+the checker, and the projection is then formed on that default.
+
 The same expression RUNS correctly (`print(f"{it.next()}")` answers `Some(0)`); only
 unification against a concrete type refuses, which is why the defect is invisible outside
-`assert_eq`.
+`assert_eq`, and why the 215 tests cannot be revived by editing the test file.
 Mount-scope candidate discipline for multi-source names T0710
 (T0525/T0704 disarm on >1 source). Match-guard exhaustiveness gate
 T0649. Sized-int value semantics T0611 — **CLOSED 2026-08-08** (c185b51c6 + 9c73789f5): casts mask, `+`/`-`/`*`/`<<` wrap at the declared width, and sized-int METHOD dispatch honours the receiver's width. Seven roots in one chain, each hidden behind the one before it; SHA-256 and HMAC-SHA256 are byte-exact against FIPS 180-4 / RFC 4231 (0 mismatched bytes of 32).
