@@ -27,16 +27,25 @@ mount core.collections.list.List;
 
 @test
 fn integration_intrinsics_future_poll_sync_multiple_round_trips() {
+    // THE SUM CANNOT BE WRITTEN. `total = total + x` is refused with
+    // `expected 'Output<ReadyFuture<Int>>', found 'Int'` — the associated-type
+    // projection on the polled output is unresolved (T0707) and ARITHMETIC
+    // has no escape. `assert(x == *v)` unifies where `assert_eq(x, *v)` and
+    // `total + x` do not, so the round-trip is stated per element and
+    // counted, which is what the sum was standing in for.
     let ints: List<Int> = [1, 2, 3, 4, 5];
-    let mut total: Int = 0;
+    let mut round_tripped: Int = 0;
     for v in ints.iter() {
         let mut f = ready(*v);
         match future_poll_sync(&mut f) {
-            Maybe.Some(x) => total = total + x,
+            Maybe.Some(x) => {
+                assert(x == *v);
+                round_tripped = round_tripped + 1;
+            }
             Maybe.None => assert(false),
         }
     }
-    assert_eq(total, 15);
+    assert_eq(round_tripped, 5);
 }
 
 // =============================================================================

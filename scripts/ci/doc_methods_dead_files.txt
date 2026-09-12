@@ -33,12 +33,6 @@
 # so the default run no longer reports 39 failures for a module it does not
 # contain.
 
-core-tests/async/intrinsics/integration_test.vr  # 3 test(s), 1 error(s)
-core-tests/async/intrinsics/property_test.vr  # 5 test(s), 2 error(s)
-core-tests/async/intrinsics/unit_test.vr  # 11 test(s), 3 error(s)
-core-tests/async/panic_fence/integration_test.vr  # 2 test(s), 2 error(s)
-core-tests/async/panic_fence/property_test.vr  # 4 test(s), 2 error(s)
-core-tests/async/panic_fence/unit_test.vr  # 6 test(s), 2 error(s)
 core-tests/base/iterator/unit_test.vr  # 215 test(s), 16 error(s)
 core-tests/base/refinement/let_binding_test.vr  # 10 test(s), 1 error(s)
 core-tests/mem/capability/regression_test.vr  # 6 test(s), 8 error(s)

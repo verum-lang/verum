@@ -27,17 +27,21 @@ mount core.collections.list.List;
 
 @test
 fn integration_panic_fence_outcome_to_tag_ready_ok() {
-    fn outcome_tag<F: Future>(mut fence: PanicFence<F>) -> Text {
-        let waker = noop_waker();
-        let mut cx = Context.from_waker(&waker);
-        match fence.poll(&mut cx) {
-            Poll.Ready(Ok(_)) => "ok",
-            Poll.Ready(Err(_)) => "panicked",
-            Poll.Pending => "pending",
-        }
-    }
-    let fence = panic_safe(ready(42));
-    assert_eq(outcome_tag(fence), "ok");
+    // THE GENERIC HELPER IS INLINED, AND THAT IS NOT A SIMPLIFICATION.
+    // `fn outcome_tag<F: Future>(fence: PanicFence<F>)` is refused with
+    // `error<E405>: type 'ReadyFuture<Int>' does not implement 'Future',
+    // required by this call's bound` — the protocol implementation is not
+    // found for the archive-resident generic, while the SAME `fence.poll`
+    // called directly below type-checks. Measured 2026-09-12.
+    let mut fence = panic_safe(ready(42));
+    let waker = noop_waker();
+    let mut cx = Context.from_waker(&waker);
+    let tag = match fence.poll(&mut cx) {
+        Poll.Ready(Ok(_)) => "ok",
+        Poll.Ready(Err(_)) => "panicked",
+        Poll.Pending => "pending",
+    };
+    assert(tag == "ok");
 }
 
 // =============================================================================
@@ -45,20 +49,30 @@ fn integration_panic_fence_outcome_to_tag_ready_ok() {
 // =============================================================================
 
 @test
-fn integration_panic_fence_list_of_fenced_ready_futures_sums_values() {
+fn integration_panic_fence_list_of_fenced_ready_futures_yield_their_values() {
+    // THE SUM CANNOT BE WRITTEN. `total = total + x` is refused with
+    // `expected 'Output<ReadyFuture<Int>>', found 'Int'`: the associated-type
+    // projection on the polled output is left unresolved (T0707), and
+    // ARITHMETIC has no escape — `assert(x == *v)` unifies where
+    // `assert_eq(x, *v)` and `total + x` do not. So the law is stated as
+    // "every fenced ready future yields ITS OWN value", counted, which is
+    // what the sum was standing in for.
     let values: List<Int> = [1, 2, 3, 4, 5];
-    let mut total: Int = 0;
+    let mut matched: Int = 0;
     for v in values.iter() {
         let mut fence = panic_safe(ready(*v));
         let waker = noop_waker();
         let mut cx = Context.from_waker(&waker);
         match fence.poll(&mut cx) {
-            Poll.Ready(Ok(x)) => total = total + x,
+            Poll.Ready(Ok(x)) => {
+                assert(x == *v);
+                matched = matched + 1;
+            }
             Poll.Ready(Err(_)) => assert(false),
             Poll.Pending => assert(false),
         }
     }
-    assert_eq(total, 15);
+    assert_eq(matched, 5);
 }
 
 fn main() {}

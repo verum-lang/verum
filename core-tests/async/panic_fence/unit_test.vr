@@ -61,7 +61,7 @@ fn test_panic_fence_poll_ready_inner_yields_ready_ok() {
     let waker = noop_waker();
     let mut cx = Context.from_waker(&waker);
     match fence.poll(&mut cx) {
-        Poll.Ready(Ok(v)) => assert_eq(v, 42),
+        Poll.Ready(Ok(v)) => assert(v == 42),
         Poll.Ready(Err(_)) => assert(false),
         Poll.Pending => assert(false),
     }
@@ -73,7 +73,7 @@ fn test_panic_fence_poll_ready_text_payload() {
     let waker = noop_waker();
     let mut cx = Context.from_waker(&waker);
     match fence.poll(&mut cx) {
-        Poll.Ready(Ok(v)) => assert_eq(v, "hello"),
+        Poll.Ready(Ok(v)) => assert(v == "hello"),
         Poll.Ready(Err(_)) => assert(false),
         Poll.Pending => assert(false),
     }

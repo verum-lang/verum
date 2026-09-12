@@ -46,7 +46,7 @@ fn property_intrinsics_future_poll_sync_ready_int_round_trip_exhaustive() {
     for v in payloads.iter() {
         let mut f = ready(*v);
         match future_poll_sync(&mut f) {
-            Maybe.Some(x) => assert_eq(x, *v),
+            Maybe.Some(x) => assert(x == *v),
             Maybe.None => assert(false),
         }
     }
@@ -58,7 +58,7 @@ fn property_intrinsics_future_poll_sync_ready_text_round_trip_exhaustive() {
     for v in payloads.iter() {
         let mut f: ReadyFuture<Text> = ready((*v).clone());
         match future_poll_sync(&mut f) {
-            Maybe.Some(x) => assert_eq(x, *v),
+            Maybe.Some(x) => assert(x == *v),
             Maybe.None => assert(false),
         }
     }
