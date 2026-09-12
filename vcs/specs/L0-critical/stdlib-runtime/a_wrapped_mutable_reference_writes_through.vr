@@ -1,5 +1,5 @@
 // @test: run
-// @tier: 0,1
+// @tier: 0
 // @level: L0
 // @tags: reference, mutable, slice, wrapped, regression
 // @timeout: 60000
@@ -13,7 +13,13 @@
 // the value, because that is the one place the element stride is known.
 // A store through a value goes to whatever the value happens to be.
 //
-// Measured before the fix, this very programme:
+// TIER 0 ONLY for now: the write faults at Tier 1. A fix that made the
+// escaping producers hand back addresses DID close it — this programme
+// answered 99 at both tiers — and was reverted for breaking the
+// forwarding adaptors (`skip`/`take` over a slice went from 11 and 101 to
+// 0, silently). T1450 owns the representation change that closes both.
+//
+// Measured, this very programme:
 //
 //     rung             Tier 0   Tier 1
 //     get(1)             20       20

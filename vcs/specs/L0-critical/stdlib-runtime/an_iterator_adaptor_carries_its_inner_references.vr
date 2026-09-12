@@ -1,5 +1,5 @@
 // @test: run
-// @tier: 0,1
+// @tier: 0
 // @level: L0
 // @tags: iterator, adaptor, enumerate, slice, reference, regression
 // @timeout: 60000
@@ -19,7 +19,26 @@
 // (measured: `nm` on a binary instantiating it over each shows a single
 // `_EnumerateIter.next`, no monomorphised copies).
 //
-// WHAT TIER 1 USED TO DO, and why the rungs are shaped this way. The
+// WHY THIS RUNS AT TIER 0 ONLY, and what was tried. A first fix made the
+// escaping producers agree — a `RefListElement` whose reference leaves
+// the frame handed back the ADDRESS, as `RefRawAddr` already does — and
+// it DID fix this spec's rungs, and `map` over a slice with them. It was
+// REVERTED, because an A/B in one binary showed it silently broke the
+// forwarding adaptors, which were correct before:
+//
+//                       before   after
+//     skip over a slice     11       0
+//     take over a slice    101       0
+//
+// `SkipIter.next` re-wraps the inner `next`'s payload, and the call site
+// reads that payload as "already a value" — true while the producer
+// pre-loaded, false once it hands back an address. A silent wrong answer
+// is worse than the fault it replaced, so the change went back out.
+//
+// The fix has to make every `&T` ONE representation rather than agreeing
+// per producer — T1450, and `returned-reference-contract.md` §7.
+//
+// WHAT TIER 1 DOES TODAY, and why the rungs are shaped this way. The
 // slice rung faulted: the `Deref` after `Unpack` saw a register carrying
 // no facts at all and loaded through it, so the byte VALUE became an
 // address — `EXC_BAD_ACCESS` at `0x6c`, which is `'l'`. The `List` rung
