@@ -85,6 +85,50 @@ runs, OR (b) `args_count` reading from a different source than
 > `test_args_first_matches_arg_zero`) against a binary carrying the §2.3
 > fix and un-ignore them if green.
 
+> **Diagnosis SUPERSEDED AGAIN 2026-09-12, and the re-verification the
+> note above asked for is what found it.** The §2.3 resolution fix
+> landed and the pins stayed red, so the call does reach the intercept
+> now — and the intercept answers `None` on purpose.
+>
+> Two namespaces share all three bare names. `core.shell.script.*`
+> wants the SCRIPT's arguments (argv[0] and the `verum run <path>`
+> chain stripped); `core.base.env.*` wants the full host argv. Three
+> intercepts pick between them through one helper, `script_argv(strip)`,
+> whose docstring is headed "ONE RULE, THREE CALLERS" — and the rule was
+> applied three different ways: `args` tested the qualified name for
+> `script.args` or `shell.script`, `args_count` for a bare `script`, and
+> `intercept_arg` did not test at all. It passed `true`
+> unconditionally, so a `base.env` call got the SCRIPT vector, which is
+> EMPTY when the programme runs without `--` arguments, and every index
+> was out of bounds.
+>
+> That also explains why the 2026-07-19 standalone measurement saw
+> `Some(argv0)`: at that time `intercept_arg` did no stripping at all.
+> The extraction of `script_argv` (T0916) fixed `args` and broke `arg`
+> in the same commit, and the pins could not report it because they were
+> already `@ignore`'d for the earlier cause.
+>
+> **The discriminator, measured in ONE programme under a plain
+> `verum run` — not the harness, which this section blamed for four
+> months:**
+>
+> ```text
+> args_count()  -> 3
+> args()        -> ["…/verum", "run", "…/p.vr"]     the REAL argv
+> arg(0)        -> Maybe.None      (arg(1), arg(2) likewise)
+> ```
+>
+> `args()` is `arg(i)` in a loop INSIDE `core.base.env`, so it never
+> reaches the intercept and sees the real values. Both outside
+> spellings fail alike — the mounted bare name and the dotted
+> `core.base.env.arg(0)` — so it is the module boundary, not the
+> spelling.
+>
+> Fixed by giving all three intercepts one `strips_argv0(func_name)`.
+> Recorded as A121 in the tech-debt register. `regression_test.vr §A1`
+> pins the discriminator and passes, so a future fix to `arg` cannot
+> quietly break the route that works.
+
 ### 2.3 MOUNT-FN-AUTHORITY-1: `arg` unresolvable → whole file down (2026-07-19)
 
 Measured `verum test --interp --filter base/env`: **94 failed / 3
