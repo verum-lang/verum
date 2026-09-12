@@ -192,6 +192,10 @@ fn test_peer_cred_negative_pid_sentinel() {
 
 @test
 fn test_fd_passing_error_not_implemented_construction() {
-    let e: FdPassingError = FdPassingError.NotImplemented;
+    // `NotImplemented` CARRIES A PAYLOAD — `NotImplemented(Text)` at
+    // `core/net/unix.vr:1000` — so naming it bare gives a FUNCTION,
+    // `fn(Text) -> FdPassingError`, and assigning that to the type is
+    // refused. A COMPILE error, whole file down. Measured 2026-09-12.
+    let e: FdPassingError = FdPassingError.NotImplemented("fd passing".to_text());
     assert(e is FdPassingError.NotImplemented);
 }

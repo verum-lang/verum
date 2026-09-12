@@ -101,8 +101,14 @@ fn test_tls_error_variants_pairwise_distinct() {
     assert(TlsError.DecryptError != TlsError.RecordOverflow);
     assert(TlsError.RecordOverflow != TlsError.DecodeError);
     assert(TlsError.DecodeError != TlsError.UnknownPskIdentity);
-    assert(TlsError.UnknownPskIdentity != TlsError.InternalError);
-    assert(TlsError.InternalError != TlsError.BadCertificate);
+    // `InternalError` CARRIES A PAYLOAD — `InternalError(Text)` — so
+    // naming it bare gives a FUNCTION, `fn(Text) -> TlsError`, not a
+    // value, and comparing that to a unit variant is a type error:
+    //   expected 'fn(Text) -> …', found '…'
+    // A COMPILE error, whole file down. Applying the payload makes it
+    // a value. Measured 2026-09-12.
+    assert(TlsError.UnknownPskIdentity != TlsError.InternalError("x".to_text()));
+    assert(TlsError.InternalError("x".to_text()) != TlsError.BadCertificate);
     assert(TlsError.BadCertificate != TlsError.CertificateExpired);
     assert(TlsError.CertificateExpired != TlsError.HandshakeFailure);
 }
