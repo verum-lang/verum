@@ -4982,7 +4982,15 @@ pub fn lower_instruction<'ctx>(
             // — and the tier silently disagrees with the interpreter.
             if std::env::var_os("VERUM_TRACE_CLONE").is_some() {
                 eprintln!(
-                    "[clone-aot] src=r{} dst=r{} static_type={:?} alloc_size={:?} struct={}",
+                    // THE FUNCTION NAME IS PART OF THE READING — register
+                    // numbers repeat across functions, and a whole-stdlib
+                    // compile emits ~780 of these lines, so `src=r5` matches
+                    // a dozen unrelated clones. Measured need (T1441): the one
+                    // clone under test could not be found in its own trace.
+                    // The `[deref]` and `[t1206]` arms in this file already
+                    // carry the name for the same reason.
+                    "[clone-aot] {} src=r{} dst=r{} static_type={:?} alloc_size={:?} struct={}",
+                    ctx.function_name(),
                     src.0,
                     dst.0,
                     ctx.get_obj_register_type(src.0),
@@ -5104,7 +5112,46 @@ pub fn lower_instruction<'ctx>(
                 return Ok(());
             }
             // For primitives, just copy
+            // **T1441 CLONE-PASSTHROUGH-KEEPS-ITS-TYPE-1** — the two paths
+            // above set `obj_register_type` on the destination and this one,
+            // the historic pass-through for primitives and unknown-size
+            // objects, set nothing at all.
+            //
+            // An ARCHIVE-declared record reaches here (its allocation size is
+            // not statically known in this function — it arrived from a Call,
+            // not a `New`), so after `let g = f` the destination carried no
+            // type, and `lower_ref`'s `is_heap_type` — which ends in
+            // `get_obj_register_type(src).is_some()` — answered false. `&g`
+            // then took the recipe for a PRIMITIVE: alloca, store the object
+            // pointer, pass the SLOT's address, and the callee read
+            // `[slot + 24]`.
+            //
+            // Measured on `File` from the baked stdlib, the rungs differing by
+            // one step each:
+            //
+            //     f.fd                       3      correct
+            //     by_ref(&f)                 3      correct
+            //     let g = f; g.fd            3      correct  <- Clone keeps
+            //                                                  enough for GetF
+            //     by_ref(&g)        4455661568      WRONG    <- not for `&`
+            //
+            // A pass-through is an IDENTITY: the destination holds exactly what
+            // the source held, so it must describe it exactly the same way.
+            // Set only when the source HAS a type — `obj_register_types` is
+            // deliberately sticky, and overwriting with "none" would be a new
+            // erasure rather than a propagation.
+            // AFTER the store, never before: `set_register` clears every
+            // per-register fact for `dst`, including this one. The first
+            // revision of this hunk set the type first and measured INERT —
+            // `[clone-aot] main src=r5 dst=r11 static_type=Some("File")` showed
+            // the arm running and the source typed, while `&g` two
+            // instructions later still reported `objty=None`. That is T1194's
+            // lesson, which this file carries in three other arms and which I
+            // walked into anyway.
             ctx.set_register(dst.0, value);
+            if let Some(ty) = ctx.get_obj_register_type(src.0).map(|s| s.to_string()) {
+                ctx.set_obj_register_type(dst.0, ty);
+            }
             Ok(())
         }
 

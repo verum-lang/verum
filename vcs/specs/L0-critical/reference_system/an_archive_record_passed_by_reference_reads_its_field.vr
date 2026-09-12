@@ -1,0 +1,78 @@
+// @test: run
+// @tier: 0,1
+// @level: L0
+// @tags: reference, record, archive, stdlib, regression
+// @timeout: 60000
+// @expected-exit: 0
+//
+// AN ARCHIVE-DECLARED RECORD PASSED BY REFERENCE READS ITS FIELD (T1441).
+//
+// `File` is declared in the BAKED stdlib, not in the programme. Passed by
+// `&` into a function that reads `f.fd`, Tier 1 answered the ADDRESS:
+//
+//                        tier 0    tier 1
+//     f.fd in main          3         3
+//     by_ref(&f)            3      4423073792
+//     by_mut(&mut f)        3      4423073792
+//     let g = f; g.fd       3         3
+//
+// A NAMED-FIELD record, so it never took the transparent-wrapper path
+// (T1438); the register simply carried no type, `lower_ref`'s `is_heap_type`
+// test failed, and `&x` took the recipe for a primitive — alloca, store the
+// object pointer, pass the SLOT's address — after which the callee read
+// `[slot + 24]`.
+//
+// THE LOCAL RECORD IS THE CONTROL, and it is the whole point of the pairing:
+// it has the same shape, the same field, the same call, and it was green
+// throughout. A rung that passes for a locally declared record and fails for
+// an archive-declared one says the defect is in where the TYPE comes from,
+// not in references or records.
+//
+// The `+ 0` on every assertion is deliberate: a bare `assert(n == 7)` can be
+// folded by the frontend's own model and would test nothing.
+
+mount core.io.File;
+
+type LocalRec is { fd: Int };
+
+fn local_by_ref(r: &LocalRec) -> Int { r.fd }
+fn local_by_mut(r: &mut LocalRec) -> Int { r.fd }
+fn arch_by_ref(f: &File) -> Int { f.fd }
+fn arch_by_mut(f: &mut File) -> Int { f.fd }
+
+fn main() {
+    print("0 begin");
+
+    let mut lr = LocalRec { fd: 7 };
+    print(f"1 local direct = {lr.fd + 0} (want 7)");
+    assert(lr.fd + 0 == 7);
+    print(f"2 local by ref = {local_by_ref(&lr) + 0} (want 7)");
+    assert(local_by_ref(&lr) + 0 == 7);
+    print(f"3 local by mut = {local_by_mut(&mut lr) + 0} (want 7)");
+    assert(local_by_mut(&mut lr) + 0 == 7);
+
+    match File.open(&"/etc/hosts".to_text()) {
+        Result.Ok(f) => {
+            // The fd is whatever the OS handed out, so the rungs compare the
+            // three readings against EACH OTHER rather than against a
+            // constant: that is the thing under test, and it does not depend
+            // on which descriptor number this run happened to get.
+            let direct = f.fd;
+            let mut g = f;
+            let viaref = arch_by_ref(&g);
+            let viamut = arch_by_mut(&mut g);
+            print(f"4 arch ref == direct = {(viaref == direct)} (want true)");
+            assert(viaref == direct);
+            print(f"5 arch mut == direct = {(viamut == direct)} (want true)");
+            assert(viamut == direct);
+            print(f"6 fd is small        = {(direct < 1024)} (want true)");
+            assert(direct < 1024);
+        }
+        Result.Err(_) => {
+            print("4 open failed");
+            assert(false);
+        }
+    }
+
+    print("7 end");
+}
