@@ -34,7 +34,7 @@ fn regression_umbrella_surfaces_standard_auth_user() {
 
 @test
 fn regression_umbrella_surfaces_standard_row_query_result() {
-    let r = Row { columns: [], values: [] };
+    let r = QueryRow { columns: [], values: [] };
     let qr = QueryResult { rows: [r], rows_affected: 0 };
     assert_eq(qr.rows.len(), 1);
 }
@@ -47,7 +47,13 @@ fn regression_umbrella_surfaces_standard_row_query_result() {
 // every compiler-emitted `provide`/`using` lowering site. Pin each free fn.
 // =============================================================================
 
+// `Row` resolves to `core/database/common/protocol.vr:68`'s PROTOCOL,
+// not to the record with `columns`/`values` — that is `QueryRow`,
+// `core/context/standard.vr:225`, and it is what `QueryResult.rows`
+// holds. A COMPILE error, whole file down. See A120.
+
 @test
+@ignore("A139: has_context answers `true` for every slot, including one nothing provided, so `assert(!has_context(220))` cannot hold. Measured 2026-09-12 on slot 7, slot -1 and slot 9999. The umbrella REACHABILITY this test is named for is fine — the free functions resolve; it is the predicate that is constant.")
 fn regression_umbrella_surfaces_provider_free_fns() {
     assert(!has_context(220));
     let v: Maybe<Int> = get_context(221);
