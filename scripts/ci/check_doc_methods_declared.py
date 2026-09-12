@@ -56,7 +56,14 @@ DOCS = Path(os.environ.get("VERUM_STDLIB_DOCS")
             or os.environ.get("VERUM_DOCS_DIR")
             or (REPO.parent / "website" / "docs"))
 CORE = REPO / "core"
-BASELINE = 44  # Lowered by FIXING, never by argument.
+BASELINE = 43  # Lowered by FIXING, never by argument.
+#
+# 44 -> 43 on 2026-09-12: `to_cache_key` left because the section that
+# called it on `language/meta/token-api.md` is now correctly excluded as a
+# design. Its box had been retitled with a phrasing the unshipped-marker
+# pattern did not know, so the whole section was being read as shipped
+# documentation. Ground gained by a marker, not by a rewrite — which is
+# still ground, and is why the roster records names rather than a count.
                 #    45 ->  44  cookbook/h3-client.md stopped calling
                 #               `.header(...)` on an `H3Request` — the
                 #               builder is `.with_header(...)`, and the
@@ -200,7 +207,7 @@ KNOWN = {
     "inv", "is_config_error", "is_infinity_topos", "is_user_error", "lookup_lemma",
     "meta", "node_iter", "on_get", "par_map", "param_names",
     "pretty", "read_record", "replace_all_with", "seeded_with", "span_within",
-    "take_request_info", "to_cache_key", "to_canonical", "to_canonical_sql", "to_scalar",
+    "take_request_info", "to_canonical", "to_canonical_sql", "to_scalar",
     "unchecked", "verifies", "widget", "with_dir",
 }
 assert BASELINE == len(KNOWN), (
