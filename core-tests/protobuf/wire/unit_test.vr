@@ -12,12 +12,27 @@
 //   * tag_value (field_number << 3 | wire_type)
 //   * MAX_LENGTH_DELIM constant (32 MiB DoS guard)
 //
-// from_u8 / write_varint / read_varint / write_tag tests would require
+// THE DEFERRAL ABOVE WAS RE-MEASURED 2026-09-12 AND LIFTED.  This header
+// used to read "write_varint / read_varint / write_tag tests would require
 // either a Result chain or a List<Byte> buffer round-trip — both hit
-// cross-module record-return defects. Integration tests deferred.
+// cross-module record-return defects. Integration tests deferred."  Both
+// work now, at Tier 0, across the module boundary: `write_varint(&mut b,
+// 300)` gives [172, 2], `read_varint(&b, 0)` returns `Result.Ok((300, 2))`
+// with tuple-field access, and `write_tag(1, Varint)` gives [8].
+//
+// The deferral had a cost.  While the buffer surface went untested,
+// `write_float32` and `write_float64` called an `@intrinsic` key the
+// registry never carried, so encoding ANY float or double aborted the
+// process — and no test in this file could see it.  Sections 5-7 below
+// exist so that cannot recur silently.
 // =============================================================================
 
-mount core.protobuf.wire.{WireType, MAX_LENGTH_DELIM, tag_value};
+mount core.protobuf.wire.{WireType, MAX_LENGTH_DELIM, tag_value,
+                        write_varint, read_varint, write_tag,
+                        write_fixed32, write_fixed64,
+                        write_float32, write_float64,
+                        ProtobufCursor};
+mount core.protobuf.error.{ProtobufError};
 
 // =============================================================================
 // Section 1: WireType 4-variant
@@ -209,4 +224,271 @@ fn test_max_length_delim_positive() {
 fn test_max_length_delim_under_int_max() {
     // Sanity: 32 MiB is well under Int32 max (2 GiB) — no overflow risk.
     assert(MAX_LENGTH_DELIM < 2147483647);
+}
+
+// =============================================================================
+// Section 5: varint — the base 128 encoding every proto3 scalar rides on
+// =============================================================================
+
+@test
+fn test_write_varint_single_byte() {
+    // Anything under 128 is one byte, unchanged.
+    let mut b: List<Byte> = List.new();
+    write_varint(&mut b, 1_u64);
+    assert(b.len() == 1);
+    assert(b[0] == 1);
+}
+
+@test
+fn test_write_varint_two_bytes() {
+    // 300 = 0b1_0010_1100 -> low 7 bits with the continuation bit set,
+    // then the remaining 2 bits: [0xAC, 0x02]. The canonical example
+    // from the proto3 encoding document.
+    let mut b: List<Byte> = List.new();
+    write_varint(&mut b, 300_u64);
+    assert(b.len() == 2);
+    assert(b[0] == 172);
+    assert(b[1] == 2);
+}
+
+@test
+fn test_varint_round_trip() {
+    // A round trip through the module boundary, which the header of this
+    // file once said was impossible.
+    let mut b: List<Byte> = List.new();
+    write_varint(&mut b, 300_u64);
+    match read_varint(&b, 0) {
+        Result.Ok(pair) => {
+            assert(pair.0 == 300_u64);
+            assert(pair.1 == 2);
+        }
+        Result.Err(_) => { assert(false); }
+    }
+}
+
+@test
+fn test_write_tag_field_one_varint() {
+    // (1 << 3) | 0 = 8 — field 1, wire type Varint.
+    let mut b: List<Byte> = List.new();
+    write_tag(&mut b, 1, WireType.Varint);
+    assert(b.len() == 1);
+    assert(b[0] == 8);
+}
+
+// =============================================================================
+// Section 6: fixed-width — little-endian, the control for section 7
+// =============================================================================
+
+@test
+fn test_write_fixed32_is_little_endian() {
+    // 0x3F800000 written low byte first.
+    let mut b: List<Byte> = List.new();
+    write_fixed32(&mut b, 1065353216_u32);
+    assert(b.len() == 4);
+    assert(b[0] == 0);
+    assert(b[1] == 0);
+    assert(b[2] == 128);
+    assert(b[3] == 63);
+}
+
+@test
+fn test_write_fixed64_is_eight_bytes() {
+    let mut b: List<Byte> = List.new();
+    write_fixed64(&mut b, 1_u64);
+    assert(b.len() == 8);
+    assert(b[0] == 1);
+    assert(b[7] == 0);
+}
+
+// =============================================================================
+// Section 7: float — the regression pin
+// =============================================================================
+//
+// These two aborted the process until 2026-09-12: both called
+// `@intrinsic("verum.float.f32_to_bits" / "...f64_to_bits")`, keys the
+// registry has never carried, and an unregistered `@intrinsic` lowers to a
+// Panic. The registered names are the bare `f32_to_bits` / `f64_to_bits`.
+// A byte assertion, not a "does not panic" assertion: a wrong-width or
+// wrong-endian reinterpretation would also not panic.
+
+@test
+fn test_write_float32_one_point_zero() {
+    // IEEE-754 binary32 for 1.0 is 0x3F800000; proto3 fixed32 is
+    // little-endian, so the wire bytes are 00 00 80 3F.
+    let mut b: List<Byte> = List.new();
+    write_float32(&mut b, 1.0);
+    assert(b.len() == 4);
+    assert(b[0] == 0);
+    assert(b[1] == 0);
+    assert(b[2] == 128);
+    assert(b[3] == 63);
+}
+
+@test
+fn test_write_float32_zero() {
+    // Positive zero is all-bits-zero in binary32 — the control that
+    // separates "reinterpreted correctly" from "returned nothing".
+    let mut b: List<Byte> = List.new();
+    write_float32(&mut b, 0.0);
+    assert(b.len() == 4);
+    assert(b[0] == 0);
+    assert(b[1] == 0);
+    assert(b[2] == 0);
+    assert(b[3] == 0);
+}
+
+@test
+fn test_write_float64_one_point_zero() {
+    // IEEE-754 binary64 for 1.0 is 0x3FF0000000000000, little-endian on
+    // the wire: the top two bytes are F0 3F and the rest are zero.
+    let mut b: List<Byte> = List.new();
+    write_float64(&mut b, 1.0);
+    assert(b.len() == 8);
+    assert(b[0] == 0);
+    assert(b[6] == 240);
+    assert(b[7] == 63);
+}
+
+@test
+fn test_write_float64_zero() {
+    let mut b: List<Byte> = List.new();
+    write_float64(&mut b, 0.0);
+    assert(b.len() == 8);
+    assert(b[0] == 0);
+    assert(b[7] == 0);
+}
+
+// =============================================================================
+// Section 8: WireType.from_u8 — the Result chain (audit §3.1)
+// =============================================================================
+//
+// Deferred in the audit as "30 min after cross-module fix". Re-measured
+// 2026-09-12: the Result chain crosses the module boundary intact, so the
+// deferral is spent rather than carried.
+
+@test
+fn test_from_u8_accepts_the_four_live_codes() {
+    // proto3 keeps 0 / 1 / 2 / 5; 3 and 4 were the proto2 groups.
+    match WireType.from_u8(0_u8) {
+        Result.Ok(w) => { assert(w is WireType.Varint); }
+        Result.Err(_) => { assert(false); }
+    }
+    match WireType.from_u8(1_u8) {
+        Result.Ok(w) => { assert(w is WireType.Fixed64); }
+        Result.Err(_) => { assert(false); }
+    }
+    match WireType.from_u8(2_u8) {
+        Result.Ok(w) => { assert(w is WireType.LengthDelim); }
+        Result.Err(_) => { assert(false); }
+    }
+    match WireType.from_u8(5_u8) {
+        Result.Ok(w) => { assert(w is WireType.Fixed32); }
+        Result.Err(_) => { assert(false); }
+    }
+}
+
+@test
+fn test_from_u8_refuses_the_proto2_groups() {
+    // Wire types 3 and 4 are SGROUP / EGROUP, removed in proto3. They get
+    // their OWN error, not the catch-all — a decoder needs to tell "this is
+    // old proto2" from "this is not protobuf at all".
+    match WireType.from_u8(3_u8) {
+        Result.Ok(_) => { assert(false); }
+        Result.Err(e) => { assert(e is ProtobufError.UnsupportedGroup); }
+    }
+    match WireType.from_u8(4_u8) {
+        Result.Ok(_) => { assert(false); }
+        Result.Err(e) => { assert(e is ProtobufError.UnsupportedGroup); }
+    }
+}
+
+@test
+fn test_from_u8_refuses_codes_above_the_table() {
+    // 6 and 7 fit in the three tag bits and mean nothing; 255 does not.
+    match WireType.from_u8(6_u8) {
+        Result.Ok(_) => { assert(false); }
+        Result.Err(_) => { assert(true); }
+    }
+    match WireType.from_u8(7_u8) {
+        Result.Ok(_) => { assert(false); }
+        Result.Err(_) => { assert(true); }
+    }
+    match WireType.from_u8(255_u8) {
+        Result.Ok(_) => { assert(false); }
+        Result.Err(_) => { assert(true); }
+    }
+}
+
+// =============================================================================
+// Section 9: varint length boundaries (audit §3.2)
+// =============================================================================
+
+@test
+fn test_varint_length_at_127_and_128() {
+    // 127 is the largest one-byte varint; 128 is the first two-byte one.
+    let mut a: List<Byte> = List.new();
+    write_varint(&mut a, 127_u64);
+    assert(a.len() == 1);
+    let mut b: List<Byte> = List.new();
+    write_varint(&mut b, 128_u64);
+    assert(b.len() == 2);
+}
+
+@test
+fn test_varint_zero_is_one_byte() {
+    // Zero does NOT encode as the empty string — a decoder that reads a
+    // zero-length field would desynchronise the whole stream.
+    let mut b: List<Byte> = List.new();
+    write_varint(&mut b, 0_u64);
+    assert(b.len() == 1);
+    assert(b[0] == 0);
+}
+
+// =============================================================================
+// Section 10: ProtobufCursor — the reader state machine (audit §3.3)
+// =============================================================================
+//
+// Deferred in the audit as "2 h, same defect class". The defect class is
+// gone; the cursor reads a tag written by this same module below.
+
+@test
+fn test_cursor_reads_back_a_written_tag() {
+    let mut b: List<Byte> = List.new();
+    write_tag(&mut b, 1, WireType.Varint);
+    write_varint(&mut b, 300_u64);
+    let mut c = ProtobufCursor.new(&b);
+    match c.read_tag() {
+        Result.Ok(pair) => {
+            assert(pair.0 == 1_u32);
+            assert(pair.1 is WireType.Varint);
+        }
+        Result.Err(_) => { assert(false); }
+    }
+}
+
+@test
+fn test_cursor_reads_a_high_field_number() {
+    // Field 16 is the first that needs two bytes of tag — the boundary a
+    // hand-rolled cursor gets wrong.
+    let mut b: List<Byte> = List.new();
+    write_tag(&mut b, 16, WireType.Fixed32);
+    let mut c = ProtobufCursor.new(&b);
+    match c.read_tag() {
+        Result.Ok(pair) => {
+            assert(pair.0 == 16_u32);
+            assert(pair.1 is WireType.Fixed32);
+        }
+        Result.Err(_) => { assert(false); }
+    }
+}
+
+@test
+fn test_cursor_on_an_empty_buffer_refuses() {
+    // A cursor over nothing must report, not read past the end.
+    let b: List<Byte> = List.new();
+    let mut c = ProtobufCursor.new(&b);
+    match c.read_tag() {
+        Result.Ok(_) => { assert(false); }
+        Result.Err(_) => { assert(true); }
+    }
 }

@@ -321,4 +321,52 @@ fn test_overflow_error_display_renders() {
     assert_eq(rendered, "system time overflow (secs out of Int64 nanosecond range)".to_text());
 }
 
+// =============================================================================
+// The year-2262 boundary — the guard's BEHAVIOUR, not just its variant
+// =============================================================================
+//
+// Two tests above pin how `SystemTimeError.Overflow` RENDERS. Neither
+// reaches the guard that produces it, so the variant could have been an
+// orphan and both would still pass. `duration_since` composes
+// `secs * NANOS_PER_SEC + nanos`, and Int64.MAX / 1e9 is 9_223_372_036
+// seconds — about the year 2262. Past that the multiply wraps, and a
+// wrapped duration is worse than a refused one: it is a plausible-looking
+// negative number.
+
+@test
+fn test_duration_since_refuses_past_the_int64_nanosecond_range() {
+    let epoch = SystemTime.from_timestamp(0);
+    let past_the_end = SystemTime.from_timestamp(9223372037);
+    match past_the_end.duration_since(&epoch) {
+        Result.Ok(_) => { assert(false); }
+        Result.Err(e) => { assert(e is SystemTimeError.Overflow); }
+    }
+}
+
+@test
+fn test_duration_since_answers_AT_the_boundary() {
+    // The guard's threshold is Int64.MAX / NANOS_PER_SEC exactly —
+    // 9_223_372_036 seconds. That second must still ANSWER; the one
+    // after it must not. Without both halves the pin says only that a
+    // guard exists somewhere, not that it stands in the right place.
+    let epoch = SystemTime.from_timestamp(0);
+    let last_good = SystemTime.from_timestamp(9223372036);
+    match last_good.duration_since(&epoch) {
+        Result.Ok(d) => { assert(d.as_nanos() == 9223372036000000000); }
+        Result.Err(_) => { assert(false); }
+    }
+}
+
+@test
+fn test_duration_since_still_answers_below_the_boundary() {
+    // The control that separates "the guard fires correctly" from "the
+    // guard fires always". A million seconds after the epoch is 1970-01-12.
+    let epoch = SystemTime.from_timestamp(0);
+    let ordinary = SystemTime.from_timestamp(1000000);
+    match ordinary.duration_since(&epoch) {
+        Result.Ok(d) => { assert(d.as_nanos() == 1000000000000000); }
+        Result.Err(_) => { assert(false); }
+    }
+}
+
 fn main() {}

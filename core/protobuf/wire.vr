@@ -206,12 +206,29 @@ public fn read_fixed64(buf: &[Byte], pos: Int) -> Result<(UInt64, Int), Protobuf
     Result.Ok((v, pos + 8))
 }
 
+// THE NAME IS `f32_to_bits`, NOT `verum.float.f32_to_bits`.
+//
+// Both of these called a `verum.float.*` key that the intrinsic registry
+// has never carried, and an unregistered `@intrinsic` lowers to a Panic —
+// so encoding ANY float or double aborted the process. Measured 2026-09-12
+// at Tier 0, with `write_fixed32` as the control on the same route:
+//
+//     write_fixed32(&mut a, 1065353216_u32)   len=4          works
+//     write_float32(&mut b, 1.0)              Panic: @intrinsic(
+//                                             "verum.float.f32_to_bits")
+//                                             is not implemented
+//
+// The registry declares the BARE names — `f32_to_bits` ("Reinterpret f32
+// bits as u32", one parameter, Pure) and `f64_to_bits` — and `core.metrics`
+// and `core.database.mysql` have been calling them all along. Measured on
+// the same binary: `f32_to_bits(1.0)` = 1065353216, `f64_to_bits(1.0)` =
+// 4607182418800017408, and `f32_to_bits(0.0)` = 0 as the control.
 public fn write_float32(out: &mut List<Byte>, value: Float) {
-    write_fixed32(out, @intrinsic("verum.float.f32_to_bits", value) as UInt32);
+    write_fixed32(out, @intrinsic("f32_to_bits", value) as UInt32);
 }
 
 public fn write_float64(out: &mut List<Byte>, value: Float) {
-    write_fixed64(out, @intrinsic("verum.float.f64_to_bits", value) as UInt64);
+    write_fixed64(out, @intrinsic("f64_to_bits", value) as UInt64);
 }
 
 // =============================================================================
