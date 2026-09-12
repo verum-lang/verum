@@ -2285,6 +2285,22 @@ let_stmt        = 'let' , pattern , [ ':' , type_expr ] , [ '=' , expression ] ,
 
 let_else_stmt   = 'let' , pattern , [ ':' , type_expr ] , '=' , expression , 'else' , block_expr ;
 
+(* IRREFUTABLE-BINDING (language law, 2026-09-12):
+   the pattern of a let_stmt is matched against exactly one value and
+   must therefore ALWAYS match.  A refutable pattern there is not
+   well-formed; the refutable case has its own production above,
+   let_else_stmt, whose else-block is what runs when the match fails.
+   The same rule governs the two other positions that bind once against
+   one value: a function parameter (matched against whatever the caller
+   passes) and a comprehension's `let` clause (bound once per row).
+   Diagnostic: E429 in all three positions.
+   ENFORCED TODAY for a literal, range, or-pattern or view pattern —
+   the shapes a check can decide from syntax alone.  NOT yet for a
+   VARIANT pattern: `let UserId(n) = id;` on a single-variant newtype
+   always matches and must stay legal, so deciding refutability there
+   needs the resolved type.  Until that lands, `let Maybe.Some(x) = v;`
+   is accepted and binds an unchecked payload. *)
+
 (* Provide statement for context injection *)
 (* Supports optional alias for multiple instances of same context type *)
 (* Spec: docs/detailed/16-context-system.md Section 2.11.2 - Aliased Contexts *)
