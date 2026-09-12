@@ -2020,6 +2020,71 @@ fn cbgr_extended_body(
                 None => return Err(InterpreterError::NullPointer),
             };
 
+            // **T1449 RLE-KNOWS-THE-PACK-1** — a stamped BYTE_SLICE is neither
+            // a LIST nor an inline array, and this arm listed only those two.
+            //
+            // The `else` leg below computes `header.size / size_of::<Value>()`
+            // and walks elements straight after the header — true of an inline
+            // array, false of a pack, whose bytes live BEHIND a data pointer at
+            // +24 and are one byte apiece. For `"abc".as_bytes()` that arithmetic
+            // answered 2, so `&self.slice[2]` inside `SliceIter.next` refused
+            // with "index 2 for list of length 2" — while `bs.len()` said 3 and
+            // an INDEXED walk over all three elements summed correctly.
+            //
+            // Measured 2026-09-12, three readings of one pack at Tier 0:
+            //
+            //     bs.len()                3   correct
+            //     indexed sum over 3      294 correct
+            //     for b in bs.iter()      refused at index 2
+            //
+            // `byte_slice_payload` is the tree's own answer — "the single
+            // inspection API all typed BYTE_SLICE consumer arms use — no site
+            // re-implements the header probe" — and this site was
+            // re-implementing it by omission.
+            if header.type_id == TypeId::BYTE_SLICE {
+                let (_, len) = unsafe { heap::byte_slice_payload(ptr) };
+                let len = len as i64;
+                if index < 0 || index >= len {
+                    return Err(InterpreterError::IndexOutOfBounds {
+                        index,
+                        length: len as usize,
+                    });
+                }
+                // IN BOUNDS AND STILL NOT REPRESENTABLE, which is the honest
+                // answer and not a stopgap: a pack's elements are ONE BYTE
+                // apiece, and every consumer of what this arm returns — the
+                // generic `Deref`, the dispatch paths, `GetVariantData` —
+                // reads a whole `Value` from the address. Handing back a raw
+                // byte pointer makes them read seven neighbouring bytes as
+                // part of the number.
+                //
+                // MEASURED, by doing exactly that first: the refusal below
+                // replaced a silent `9223372036854775807`, a denormal float
+                // and a zero, from three programmes that had been refused
+                // outright a moment earlier.
+                //
+                // This is the same position the FatRef arm above already
+                // takes for a raw-stride slice, in the same words. The
+                // difference is only that a stamped pack never reached it:
+                // it fell through to the inline-array leg, whose
+                // `header.size / size_of::<Value>()` answered 2 for a
+                // three-byte pack, so the refusal that DID come out named the
+                // wrong reason ("index 2 for list of length 2") while
+                // `bs.len()` said 3.
+                //
+                // Representing this properly needs the element STRIDE to
+                // travel with the reference — T1450's campaign — not another
+                // arm here.
+                return Err(InterpreterError::Panic {
+                    message: format!(
+                        "interior reference into a packed byte slice (index {index} of {len}) \
+                         is not representable — a pack's elements are one byte and every \
+                         consumer of an interior reference reads a whole Value from it. \
+                         Index the slice by value instead (T1449 / FATREF-INTERIOR-REF-1)"
+                    ),
+                });
+            }
+
             let elem_ptr = if header.type_id == TypeId::LIST {
                 let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                 let len = unsafe { (*data_ptr).as_i64() } as usize;
