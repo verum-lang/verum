@@ -233,7 +233,17 @@ fn prop_http3_frame_data_stream_id_preserved() {
     let body: List<Byte> = [];
     let f = Http3Frame.DataFrame { stream_id: 0x42_u64, data: body };
     match f {
-        Http3Frame.DataFrame { stream_id, data: _ } => assert_eq(stream_id, 0x42_u64),
+        // THE `..` IS LOAD-BEARING. Without it the PATTERN resolves to
+        // HTTP/2's `DataFrame` — `core/net/http2/frame.vr:154`, which
+        // has `pad_length` and `end_stream` — and the checker demands
+        // those fields of an HTTP/3 frame:
+        //   Missing field 'pad_length' in pattern for variant
+        //   'DataFrame'. Use '..' to ignore extra fields.
+        // The qualification `Http3Frame.` does not disambiguate (A120),
+        // and the CONSTRUCTOR two lines up resolves correctly, so it is
+        // pattern resolution specifically. A COMPILE error, so no
+        // `@ignore` contains it: all 38 tests in this file were down.
+        Http3Frame.DataFrame { stream_id, .. } => assert_eq(stream_id, 0x42_u64),
         _ => panic("expected DataFrame"),
     }
 }
