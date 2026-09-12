@@ -44867,7 +44867,50 @@ fn lower_iter_next<'ctx>(
             // so it misses ListIter etc. `payload_is_ref` recovers the fact from
             // the iterator type's `Item = &T` binding — OR them so either source
             // triggers the slot-load.
-            let payload_out = if next_yields_ref || payload_is_ref {
+            // ITER-BODY-DECIDES-1 (T1192) — both sources above are TYPE-level, and
+            // two producers that differ can share them. Ask the body as well.
+            //
+            //     ListIter.next    -> Maybe<&T>, yields &*self.ptr      -> ADDRESS
+            //     SliceIter.next   -> Maybe<&T>, yields &self.slice[i]  -> VALUE
+            //
+            // Both declare `Maybe<&T>` and both have `Item = &T`, so `next_yields_ref`
+            // and `payload_is_ref` cannot separate them. Loading through SliceIter's
+            // payload dereferences the ELEMENT: measured at Tier 1 on a List<Int>
+            // holding 10, EXC_BAD_ACCESS at address 0xa, faulting instruction
+            // `ldr x9, [x9]` right after the tag==1 branch this gate emits.
+            //
+            // `wrapped_payload_is_slot_address` is the tree's existing answer and
+            // already separates them: it walks the callee back from its
+            // SetVariantData and says ADDRESS only for a GetF-produced payload
+            // (ListIter), while RefListElement (SliceIter) is not one of its arms.
+            // `callee_yields_ref_payload` has combined name and body since T1260;
+            // this arm had only the names.
+            //
+            // Same lookup as `next_yields_ref` above — an EXACT name match on
+            // `next_name`, deliberately not a rsplit: an earlier attempt compared
+            // the last dotted segment against "Type.next" and could never match, so
+            // it silently kept the old answer everywhere.
+            //
+            // Conservative: it can only turn the load OFF, and only when the body is
+            // readable AND does not end in a slot-address producer. An unreadable
+            // body keeps the old answer, which is what this arm did before.
+            let body_says_slot = ctx
+                .vbc_module()
+                .and_then(|m| {
+                    m.functions.iter().find(|f| {
+                        m.get_string(f.name).map(|n| n == next_name).unwrap_or(false)
+                    })
+                })
+                .and_then(|f| f.instructions.as_ref())
+                .map(|ins| wrapped_payload_is_slot_address(ins))
+                .unwrap_or(true);
+            if std::env::var("VERUM_TRACE_ITERSLOT").is_ok() {
+                eprintln!(
+                    "[iterslot] next={next_name} next_yields_ref={next_yields_ref} \
+                     payload_is_ref={payload_is_ref} body_says_slot={body_says_slot}"
+                );
+            }
+            let payload_out = if (next_yields_ref || payload_is_ref) && body_says_slot {
                 // Guard on tag==1: at exhaustion (None) the payload word
                 // is absent/garbage — the load must not execute (REAL
                 // branch, the recurring select-is-not-a-guard lesson).
