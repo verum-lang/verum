@@ -24,8 +24,29 @@
 // example-based coverage.
 // =============================================================================
 
+// EVERY "THIS PANICS" LAW HERE GOES THROUGH `catch_unwind`, NOT
+// `assert_panics`, AND THE CLOSURE BODIES END IN AN EXPLICIT `()`.
+//
+// Two separate defects forced both halves, measured 2026-09-12:
+//
+//   * `assert_panics` NEVER PASSES. `assert_panics(|| panic("x"))` fails
+//     with the panic escaping, and `assert_panics(|| {})` fails as it
+//     should — so no body makes it pass. A local function with the stdlib
+//     body copied verbatim CATCHES, so the defect is in the baked copy,
+//     not the shape (A152). `catch_unwind` itself is correct at both
+//     polarities.
+//
+//   * A GENERIC `F: fn() -> T` CANNOT INFER `T = Unit` FROM A CLOSURE
+//     LITERAL. `catch_unwind(|| { let _x = 1; })` is refused with
+//     `expected '_', found 'Unit'`, while `|| { 7 }` and `|| { panic("x") }`
+//     — Int and Never — both work, and an already-typed
+//     `let f: fn() -> Unit` works. The trailing `()` is the cheaper of the
+//     two escapes (A153).
+//
+// A COMPILE error, so no `@ignore` contained it: all 31 tests were dead.
+
 mount core.prelude.*;
-mount core.base.panic.{assert_panics, catch_unwind};
+mount core.base.panic.{assert_panics, catch_unwind, PanicInfo};
 mount core.collections.list.List;
 
 // -----------------------------------------------------------------------------
@@ -40,9 +61,11 @@ fn law_assert_true_is_no_op() {
 
 @test
 fn law_assert_false_panics() {
-    assert_panics(|| {
+    let r: Result<Unit, PanicInfo> = catch_unwind(|| {
         assert(false, "intentional");
+        ()
     });
+    assert(r.is_err());
 }
 
 // -----------------------------------------------------------------------------
@@ -58,9 +81,11 @@ fn law_assert_eq_reflexive_int() {
 
 @test
 fn law_assert_eq_panics_on_inequality() {
-    assert_panics(|| {
+    let r: Result<Unit, PanicInfo> = catch_unwind(|| {
         assert_eq(1, 2);
+        ()
     });
+    assert(r.is_err());
 }
 
 // -----------------------------------------------------------------------------
@@ -69,9 +94,11 @@ fn law_assert_eq_panics_on_inequality() {
 
 @test
 fn law_assert_ne_panics_on_equality() {
-    assert_panics(|| {
+    let r: Result<Unit, PanicInfo> = catch_unwind(|| {
         assert_ne(7, 7);
+        ()
     });
+    assert(r.is_err());
 }
 
 @test
@@ -92,9 +119,11 @@ fn law_assert_some_returns_inner_value() {
 
 @test
 fn law_assert_some_panics_on_none() {
-    assert_panics(|| {
+    let r: Result<Unit, PanicInfo> = catch_unwind(|| {
         let _: Int = assert_some(Maybe.None);
+        ()
     });
+    assert(r.is_err());
 }
 
 @test
@@ -105,10 +134,12 @@ fn law_assert_none_passes_on_none() {
 
 @test
 fn law_assert_none_panics_on_some() {
-    assert_panics(|| {
+    let r: Result<Unit, PanicInfo> = catch_unwind(|| {
         let m: Maybe<Int> = Maybe.Some(1);
         assert_none(m);
+        ()
     });
+    assert(r.is_err());
 }
 
 // -----------------------------------------------------------------------------
@@ -124,10 +155,12 @@ fn law_assert_ok_returns_inner_value() {
 
 @test
 fn law_assert_ok_panics_on_err() {
-    assert_panics(|| {
+    let r: Result<Unit, PanicInfo> = catch_unwind(|| {
         let r: Result<Int, Text> = Result.Err("x");
         let _ = assert_ok(r);
+        ()
     });
+    assert(r.is_err());
 }
 
 @test
@@ -139,10 +172,12 @@ fn law_assert_err_returns_inner_error() {
 
 @test
 fn law_assert_err_panics_on_ok() {
-    assert_panics(|| {
+    let r: Result<Unit, PanicInfo> = catch_unwind(|| {
         let r: Result<Int, Text> = Result.Ok(1);
         let _ = assert_err(r);
+        ()
     });
+    assert(r.is_err());
 }
 
 // -----------------------------------------------------------------------------
@@ -166,12 +201,14 @@ fn law_assert_between_accepts_interior() {
 
 @test
 fn law_assert_between_panics_below_lower() {
-    assert_panics(|| { assert_between(-1, 0, 10); });
+    let r: Result<Unit, PanicInfo> = catch_unwind(|| { assert_between(-1, 0, 10); () });
+    assert(r.is_err());
 }
 
 @test
 fn law_assert_between_panics_above_upper() {
-    assert_panics(|| { assert_between(11, 0, 10); });
+    let r: Result<Unit, PanicInfo> = catch_unwind(|| { assert_between(11, 0, 10); () });
+    assert(r.is_err());
 }
 
 // -----------------------------------------------------------------------------
@@ -204,10 +241,12 @@ fn law_assert_sorted_with_duplicates() {
 
 @test
 fn law_assert_sorted_panics_on_inversion() {
-    assert_panics(|| {
+    let r: Result<Unit, PanicInfo> = catch_unwind(|| {
         let xs: List<Int> = [1, 3, 2];
         assert_is_sorted(&xs);
+        ()
     });
+    assert(r.is_err());
 }
 
 // -----------------------------------------------------------------------------
@@ -222,10 +261,12 @@ fn law_assert_contains_accepts_present() {
 
 @test
 fn law_assert_contains_panics_on_absent() {
-    assert_panics(|| {
+    let r: Result<Unit, PanicInfo> = catch_unwind(|| {
         let xs: List<Int> = [1, 2, 3];
         assert_contains(&xs, &99);
+        ()
     });
+    assert(r.is_err());
 }
 
 // -----------------------------------------------------------------------------
@@ -241,7 +282,11 @@ fn law_catch_unwind_returns_ok_when_no_panic() {
 
 @test
 fn law_catch_unwind_returns_err_when_panic() {
-    let r: Result<Int, Text> = catch_unwind(|| {
+    // `core/base/panic.vr:487` declares
+    // `catch_unwind<T, F>(f: F) -> Result<T, PanicInfo>`, so the error arm
+    // is `PanicInfo`, never `Text`. The wrong annotation was a COMPILE
+    // error and took the whole file.
+    let r: Result<Int, PanicInfo> = catch_unwind(|| {
         panic("intentional");
     });
     assert(r.is_err());
@@ -285,7 +330,7 @@ fn prop_assert_between_singleton(n: Int) {
 @test_case(-1, 0, 10, false)       // below
 @test_case(11, 0, 10, false)       // above
 fn parametrised_assert_between_truth_table(v: Int, lo: Int, hi: Int, ok: Bool) {
-    let r = catch_unwind(|| { assert_between(v, lo, hi); });
+    let r: Result<Unit, PanicInfo> = catch_unwind(|| { assert_between(v, lo, hi); () });
     assert_eq(r.is_ok(), ok);
 }
 

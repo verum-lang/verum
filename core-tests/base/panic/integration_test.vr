@@ -16,7 +16,7 @@ mount core.collections.list.List;
 
 @test
 fn integration_catch_unwind_cycle_no_panic() {
-    let r: Result<Int, Text> = catch_unwind(|| { 42 });
+    let r: Result<Int, PanicInfo> = catch_unwind(|| { 42 });
     assert(r.is_ok());
     assert_eq(r.unwrap(), 42);
 }
@@ -27,7 +27,7 @@ fn integration_catch_unwind_cycle_no_panic() {
 
 @test
 fn integration_catch_unwind_cycle_with_panic() {
-    let r: Result<Int, Text> = catch_unwind(|| -> Int {
+    let r: Result<Int, PanicInfo> = catch_unwind(|| -> Int {
         panic("expected");
     });
     assert(r.is_err());
@@ -41,7 +41,7 @@ fn integration_catch_unwind_cycle_with_panic() {
 fn integration_catch_unwind_isolates_panic() {
     let mut after_panic_executed = false;
 
-    let r: Result<Int, Text> = catch_unwind(|| -> Int {
+    let r: Result<Int, PanicInfo> = catch_unwind(|| -> Int {
         panic("pre-execution panic");
     });
     assert(r.is_err());
@@ -57,7 +57,7 @@ fn integration_catch_unwind_isolates_panic() {
 @test
 fn integration_catch_unwind_payload_passthrough() {
     let n: Int = 12345;
-    let r: Result<Int, Text> = catch_unwind(|| { n });
+    let r: Result<Int, PanicInfo> = catch_unwind(|| { n });
     assert_eq(r.unwrap(), n);
 }
 
@@ -67,8 +67,8 @@ fn integration_catch_unwind_payload_passthrough() {
 
 @test
 fn integration_nested_catch_unwind_inner_catches() {
-    let r: Result<Int, Text> = catch_unwind(|| {
-        let inner: Result<Int, Text> = catch_unwind(|| -> Int {
+    let r: Result<Int, PanicInfo> = catch_unwind(|| {
+        let inner: Result<Int, PanicInfo> = catch_unwind(|| -> Int {
             panic("inner");
         });
         if inner.is_err() { 99 } else { 0 }
@@ -84,10 +84,12 @@ fn integration_nested_catch_unwind_inner_catches() {
 fn integration_assert_panics_drives_catch_unwind() {
     let mut closure_called = false;
 
-    assert_panics(|| {
+    let r: Result<Unit, PanicInfo> = catch_unwind(|| {
         closure_called = true;
         panic("expected");
+        ()
     });
+    assert(r.is_err());
 
     assert(closure_called);
 }
@@ -104,7 +106,7 @@ fn integration_assert_panics_drives_catch_unwind() {
 
 @test
 fn integration_panic_at_records_location_indirectly() {
-    let r: Result<Int, Text> = catch_unwind(|| -> Int {
+    let r: Result<Int, PanicInfo> = catch_unwind(|| -> Int {
         panic_at("from_test", "panic_test.vr", 42, 7);
     });
     assert(r.is_err());
@@ -128,9 +130,11 @@ fn integration_nested_assert_propagates_panic() {
 
     // Sad path: assert_eq panic propagates through both callers,
     // caught by the assert_panics frame here.
-    assert_panics(|| {
+    let r: Result<Unit, PanicInfo> = catch_unwind(|| {
         outer(0);
+        ()
     });
+    assert(r.is_err());
 }
 
 // -----------------------------------------------------------------------------
@@ -139,9 +143,11 @@ fn integration_nested_assert_propagates_panic() {
 
 @test
 fn integration_unreachable_panics() {
-    assert_panics(|| {
+    let r: Result<Unit, PanicInfo> = catch_unwind(|| {
         unreachable("verifying unreachable surface");
+        ()
     });
+    assert(r.is_err());
 }
 
 // -----------------------------------------------------------------------------
@@ -151,16 +157,20 @@ fn integration_unreachable_panics() {
 
 @test
 fn integration_todo_panics() {
-    assert_panics(|| {
+    let r: Result<Unit, PanicInfo> = catch_unwind(|| {
         let _: Int = todo("not yet implemented");
+        ()
     });
+    assert(r.is_err());
 }
 
 @test
 fn integration_unimplemented_panics() {
-    assert_panics(|| {
+    let r: Result<Unit, PanicInfo> = catch_unwind(|| {
         let _: Int = unimplemented("placeholder");
+        ()
     });
+    assert(r.is_err());
 }
 
 // =============================================================================
