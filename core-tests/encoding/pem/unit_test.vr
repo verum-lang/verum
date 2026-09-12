@@ -14,14 +14,26 @@
 //       - TooLarge(Int)
 //   * Variant disjointness via `is`-pattern testing
 //
-// The encode_block / decode_one / decode_all surfaces require
-// Text.from_utf8_unchecked dispatch which still trips the lenient-
-// stub cascade under `--interp` — those are pinned at the regression-
-// only level pending the multi-day VBC codegen fix that lands
-// from_utf8_unchecked at the visible mount scope.
+// THE DEFERRAL THAT USED TO STAND HERE WAS STALE. It read: "the
+// encode_block / decode_one / decode_all surfaces require
+// Text.from_utf8_unchecked dispatch which still trips the lenient-stub
+// cascade under `--interp` — pinned at the regression-only level
+// pending the multi-day VBC codegen fix". Re-run 2026-09-12, all three
+// work:
+//
+//     encode_block("TEST", [1,2,3])  ->  -----BEGIN TEST-----
+//                                        AQID
+//                                        -----END TEST-----
+//     decode_one(that)               ->  Ok, label "TEST"
+//     decode_all(that)               ->  Ok, 1 block
+//
+// The blocker was fixed somewhere else, under some other task, and the
+// sentence stayed. Section 6 below is the coverage it was holding back;
+// `encode_block` and `decode_all` had reached the point of being
+// documented on the stdlib reference and called by NOTHING that runs.
 // =============================================================================
 
-mount core.encoding.pem.{PemBlock, PemError};
+mount core.encoding.pem.{PemBlock, PemError, encode_block, decode_one, decode_all};
 mount core.base.maybe.{Maybe, Some, None};
 mount core.base.result.{Result, Ok, Err};
 
@@ -238,6 +250,65 @@ fn test_pem_error_too_large_payload_round_trip() {
         PemError.TooLarge(n) => assert_eq(n, 4194304),
         _ => panic("expected TooLarge"),
     }
+}
+
+// =============================================================================
+// Section 6: the RFC 7468 round trip — what the deferral above was hiding
+// =============================================================================
+
+@test
+fn test_encode_block_is_the_rfc_7468_canonical_form() {
+    let body: [Byte; 3] = [1_u8, 2_u8, 3_u8];
+    let pem = encode_block(&Text.from("TEST"), &body[..]);
+    // Base64 of 01 02 03 is AQID — a value worth spelling out, because
+    // an encoder that produced well-formed markers around the WRONG
+    // payload passes every structural check.
+    assert(pem.contains("-----BEGIN TEST-----"));
+    assert(pem.contains("AQID"));
+    assert(pem.contains("-----END TEST-----"));
+}
+
+@test
+fn test_decode_one_recovers_the_label_and_the_bytes() {
+    let body: [Byte; 3] = [1_u8, 2_u8, 3_u8];
+    let pem = encode_block(&Text.from("TEST"), &body[..]);
+    match decode_one(&pem) {
+        Result.Ok(b) => {
+            assert_eq(b.label, "TEST");
+            assert_eq(b.contents.len(), 3);
+            assert_eq(b.contents[0], 1_u8);
+            assert_eq(b.contents[2], 3_u8);
+        },
+        Result.Err(_) => panic("decode_one on our own encode_block output"),
+    };
+}
+
+@test
+fn test_decode_all_finds_every_block_in_order() {
+    let a: [Byte; 1] = [65_u8];
+    let b: [Byte; 1] = [66_u8];
+    let bundle = encode_block(&Text.from("FIRST"), &a[..])
+        + encode_block(&Text.from("SECOND"), &b[..]);
+    match decode_all(&bundle) {
+        Result.Ok(bs) => {
+            assert_eq(bs.len(), 2);
+            // ORDER is part of the contract ("in order", RFC 7468 §2).
+            assert_eq(bs[0].label, "FIRST");
+            assert_eq(bs[1].label, "SECOND");
+        },
+        Result.Err(_) => panic("decode_all on a two-block bundle"),
+    };
+}
+
+@test
+fn test_decode_all_on_input_with_no_marker_is_an_empty_list() {
+    // Documented explicitly: "Returns an empty list when no -----BEGIN
+    // marker is found (no error)". A version that errored here would
+    // break every caller that treats an empty bundle as legitimate.
+    match decode_all(&Text.from("just some preamble text")) {
+        Result.Ok(bs) => assert_eq(bs.len(), 0),
+        Result.Err(_) => panic("no marker must not be an error"),
+    };
 }
 
 fn main() {}

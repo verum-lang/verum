@@ -271,3 +271,52 @@ fn test_from_tokens_multi() {
     assert_eq(p.tokens[0], "x");
     assert_eq(p.tokens[2], "z");
 }
+
+
+// =============================================================================
+// format_json_pointer — MOUNTED by this file and called by nothing
+// (census 2026-09-12). RFC 6901 §3: `~` escapes to `~0`, `/` to `~1`,
+// and the whole-document pointer is the empty string.
+// =============================================================================
+
+@test
+fn test_format_json_pointer_empty_is_the_whole_document() {
+    match parse("") {
+        Result.Ok(p) => assert_eq(format_json_pointer(&p), ""),
+        Result.Err(_) => panic("parse(\"\") should succeed"),
+    };
+}
+
+@test
+fn test_format_json_pointer_round_trips_a_plain_path() {
+    match parse("/a/b/c") {
+        Result.Ok(p) => assert_eq(format_json_pointer(&p), "/a/b/c"),
+        Result.Err(_) => panic("parse(\"/a/b/c\") should succeed"),
+    };
+}
+
+@test
+fn test_format_json_pointer_escapes_tilde_and_slash() {
+    // RFC 6901's own example pair. `~1` decodes to `/` and `~0` to `~`,
+    // and the ORDER matters when re-encoding: escaping `~` after `/`
+    // would turn `~1` into `~01`.
+    match parse("/m~0n") {
+        Result.Ok(p) => assert_eq(format_json_pointer(&p), "/m~0n"),
+        Result.Err(_) => panic("parse(\"/m~0n\") should succeed"),
+    };
+    match parse("/a~1b") {
+        Result.Ok(p) => assert_eq(format_json_pointer(&p), "/a~1b"),
+        Result.Err(_) => panic("parse(\"/a~1b\") should succeed"),
+    };
+}
+
+@test
+fn test_format_json_pointer_keeps_an_empty_token() {
+    // "/" is ONE token and that token is empty — distinct from "".
+    match parse("/") {
+        Result.Ok(p) => assert_eq(format_json_pointer(&p), "/"),
+        Result.Err(_) => panic("parse(\"/\") should succeed"),
+    };
+}
+
+fn main() {}
