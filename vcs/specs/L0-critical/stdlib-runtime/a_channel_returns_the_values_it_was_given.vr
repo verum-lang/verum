@@ -1,0 +1,112 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: channel, stdlib, representation, regression
+// @timeout: 60000
+// @expected-exit: 0
+//
+// A CHANNEL IS READ THROUGH THE REPRESENTATION IT WAS BUILT WITH.
+//
+// `core/async/channel.vr` declares `Channel<T>` with eight fields —
+// `{len, cap, head, tail, data, closed, notify_seq, lock}` — and the
+// compiler stamps that NAME with the well-known `Channel` type id. The
+// interpreter used to carry its OWN channel behind the same id: a
+// five-slot `[len, cap, head, buffer_ptr, closed]` object, with the
+// METHOD calls keyed on the type id and the CONSTRUCTOR keyed on a
+// receiver-name string. Only one of the two keys ever matched, so every
+// channel was built by the stdlib and read by the builtin:
+//
+//     send  read slot 4 — the stdlib's `data` — as `closed`
+//     recv  read slot 3 — the stdlib's `tail`, an Int — as the
+//           buffer pointer
+//
+// Whether that surfaced as a wrong answer, an interpreter panic or a
+// SIGSEGV depended only on what the misread slot happened to hold. A
+// bare `let ch = Channel.new(1); ch.send(7)` was enough: `send` refused
+// on a FRESH channel because it was reading `data` for `closed`.
+//
+// Every rung below fails against that builtin and passes against the
+// stdlib body. The capacity (3) is deliberately different from every
+// value sent, so reading `cap` where a value belongs — or the reverse —
+// changes the printed line rather than hiding in it.
+//
+// NOT ASSERTED HERE, AND IT IS A DIFFERENT DEFECT: the values come back
+// as the ADDRESS of their slot rather than their contents. Measured on
+// this very program — `got=31893080352,31893080360,31893080368`, eight
+// apart, which is `Int.size`. The same body pasted into a probe under a
+// LOCAL type name returns `41,42,43`, so this is not the channel: it is
+// a field of an ARCHIVE-declared record read as its own address, the
+// shape `docs/architecture/tech-debt-register.md` records as A102. The
+// rungs below therefore pin the bookkeeping — which slot each field is,
+// who accepts and who refuses — and `print` the payloads so the day the
+// archive defect closes, the line changes visibly.
+
+mount core.async.channel.{Channel};
+
+fn main() -> Int {
+    let mut ch = Channel<Int>.new(3);
+
+    // 0. A fresh bounded channel is open, empty, and knows its size.
+    //    `+ 0` keeps the comparison out of the constant folder.
+    print(f"0 cap={ch.capacity() + 0} len={ch.len() + 0} closed={ch.is_closed()}");
+    assert(ch.capacity() + 0 == 3);
+    assert(ch.len() + 0 == 0);
+    assert(ch.is_closed() == false);
+    assert(ch.is_empty() == true);
+
+    // 1. `send` accepts until the ring is full, then refuses. Against
+    //    the builtin the FIRST send refused, because `data` was read
+    //    for `closed` and a live buffer pointer is not zero.
+    let s41 = ch.send(41);
+    let s42 = ch.send(42);
+    let s43 = ch.send(43);
+    let s44 = ch.send(44);
+    print(f"1 s41={s41} s42={s42} s43={s43} s44={s44} len={ch.len() + 0}");
+    assert(s41 == true);
+    assert(s42 == true);
+    assert(s43 == true);
+    assert(s44 == false);           // capacity is 3
+    assert(ch.len() + 0 == 3);
+    assert(ch.is_full() == true);
+
+    // 2. Three values in, three out: the ring's own bookkeeping. The
+    //    payloads are printed, not asserted — see the header.
+    let a = match ch.try_recv() { Maybe.Some(x) => x, Maybe.None => -1 };
+    let b = match ch.try_recv() { Maybe.Some(x) => x, Maybe.None => -1 };
+    let c = match ch.try_recv() { Maybe.Some(x) => x, Maybe.None => -1 };
+    print(f"2 got={a + 0},{b + 0},{c + 0} len={ch.len() + 0}");
+    assert(ch.len() + 0 == 0);
+    assert(ch.is_empty() == true);
+    assert(ch.is_full() == false);
+
+    // 3. `try_recv` on an empty channel answers None without blocking.
+    let d = match ch.try_recv() { Maybe.Some(x) => x, Maybe.None => -1 };
+    print(f"3 drained={d + 0}");
+    assert(d + 0 == -1);
+
+    // 4. The ring wraps: `head` and `tail` are separate fields, and the
+    //    retired builtin had no `tail` at all — it derived one from
+    //    `(head + len) % cap`. Two more in, two more out, after a full
+    //    cycle.
+    assert(ch.send(51) == true);
+    assert(ch.send(52) == true);
+    assert(ch.len() + 0 == 2);
+    let e = match ch.try_recv() { Maybe.Some(x) => x, Maybe.None => -1 };
+    let f = match ch.try_recv() { Maybe.Some(x) => x, Maybe.None => -1 };
+    print(f"4 wrapped={e + 0},{f + 0} len={ch.len() + 0}");
+    assert(ch.len() + 0 == 0);
+
+    // 5. `close` is observable, a closed channel refuses `send`, and a
+    //    closed empty channel ends a blocking `recv` instead of parking
+    //    on the futex for ever.
+    ch.close();
+    print(f"5 closed={ch.is_closed()}");
+    assert(ch.is_closed() == true);
+    assert(ch.send(61) == false);
+    let g = match ch.recv() { Maybe.Some(x) => x, Maybe.None => -1 };
+    print(f"5 after_close={g + 0}");
+    assert(g + 0 == -1);
+
+    print("9 end");
+    return 0;
+}

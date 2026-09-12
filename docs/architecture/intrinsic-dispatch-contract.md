@@ -401,6 +401,157 @@ bytes were written**; measure the artefact.
   the frontend knew the width, and is why a packed `[Byte; N]` local —
   whose `src` IS the data pointer — never reaches the classifier.
 
+## 9. A representation intercept owns the CONSTRUCTOR and the METHODS, or neither
+
+An interpreter intercept that substitutes its own heap layout for a
+stdlib type is a REPRESENTATION, not a shortcut. A representation has
+two halves — where the object is built, and where it is read — and the
+two halves have to be keyed on the same thing. When they are keyed on
+different things, one half can miss while the other still fires, and
+the surviving half then reads a shape it was not written for.
+
+### What is true
+
+`TypeId::CHANNEL`, like `LIST` / `MAP` / `SET` / `DEQUE`, is stamped by
+NAME: `codegen/mod.rs` inserts `"Channel" -> TypeId::CHANNEL`, so the
+stdlib's own `Channel<T>` record carries a well-known type id purely
+by being called `Channel`. The id therefore does NOT mean "this object
+has the builtin layout". It means "this object's type is spelled
+`Channel`".
+
+Everything that keys on such an id has to prove the shape some other
+way — by the constructor it came from, or by measuring the object.
+
+### The defect this pins
+
+`core/async/channel.vr` declares eight fields:
+
+    { len, cap, head, tail, data, closed, notify_seq, lock }
+
+The interpreter carried a five-slot channel behind the same id:
+
+    [ len, cap, head, buffer_ptr, closed ]
+
+The two halves were keyed differently:
+
+| half        | key                                    | fired? |
+|-------------|----------------------------------------|--------|
+| constructor | receiver-NAME string `"Channel"`       | no     |
+| methods     | `header.type_id == TypeId::CHANNEL`    | yes    |
+
+So every channel in a Tier-0 program was built by the stdlib and read
+by the builtin. The overlap in the first three slots (`len`, `cap`,
+`head`) is what made it look plausible; the divergence began at slot 3:
+
+    send  read slot 4 — the stdlib's `data`  — as `closed`
+    recv  read slot 3 — the stdlib's `tail`  — as the buffer pointer
+
+`send` therefore refused on a fresh channel whenever `data` happened to
+be non-zero, and `recv` dereferenced an Int as a pointer. Which of the
+three outcomes a program got — a wrong answer, an interpreter panic in
+`Value::as_i64`, or a SIGSEGV — depended only on what the misread slot
+held: `ch.send(7)` on a fresh channel gave the first two, and
+`1049_barrier_sync.vr`, whose spawned tasks call `recv`, gave exit 139
+and no report for the whole L0-critical level.
+
+### Measured
+
+The control that settled it: the same stdlib body, pasted into a probe
+under a different TYPE NAME so no well-known id is stamped and no
+intercept fires. Nothing else changed.
+
+    MyChan<Int>.new(3)   data=36740031712  cap=3 len=0
+                         s41=true s42=true s43=true s44=false
+                         got=41,42,43 drained=-1 len=0
+
+    Channel<Int>.new(1)  send -> interpreter panic,
+                         "Expected int, got Some(0)"
+                         — `as_i64` on slot 4, which held a `Maybe`
+                         and not the `0` the builtin writes there
+
+### What this does NOT fix, measured
+
+The 88 specs in the tree that use a channel were swept at Tier 0 before
+and after, same binary shape, same 20 s timeout: **65 TIMEOUT, 21 exit
+1, 2 ok — and the two sweeps are identical, file for file, zero
+differences.** The fix moves none of them.
+
+That number therefore says nothing about this defect, and it is kept
+here because it is the kind of number that reads like evidence and is
+not. What those specs die of is elsewhere:
+
+* Tier-0 `spawn` is DEFERRED, not concurrent — `handle_spawn` queues
+  the task, and `Await` / `Join` / `Select` / `NurseryAwait` are what
+  pump it. A spec that spawns a producer and then blocks in
+  `Channel.recv` deadlocks: the producer cannot run until someone
+  awaits, and nobody does. 66 of the 88 do await or join somewhere; the
+  deadlock needs only one blocking `recv` on the path before it.
+* The exit-1 group is mostly type errors that never reach the runtime,
+  e.g. `let ch = Channel.new(16)` with no element type in sight —
+  `error<E404>: Ambiguous type for 'ch'`, which the 31 August binary
+  reports identically.
+
+The evidence for the representation defect is the direct one: the
+program above, and the panic backtrace naming
+`method_dispatch.rs:9487` — the `(*header_ptr.add(4)).as_i64()` that
+read `data` as `closed`.
+
+The stdlib body is correct; being read through the wrong representation
+is what broke it. Note which direction the evidence runs: the probe
+carries its own program, so it can be re-run. "Channel is broken at
+Tier 0" without that probe is a claim about a moving tree.
+
+### Pin
+
+- Tier 0 has NO builtin channel. `core/async/channel.vr` owns
+  `Channel` end to end — a real `tail`, a lock around the ring,
+  futex-blocking `recv`, and a `close` that wakes waiters, none of
+  which the five-slot object had.
+- `WellKnownType::has_builtin_constructor_intercept` no longer lists
+  `Channel`. That predicate is the single source of truth for the
+  codegen side, so the two halves cannot drift apart again by an edit
+  to one of them.
+- TWO MORE name-keyed predicates said "builtin" for `Channel` and had
+  to move with it, and they are the reason the fix is not one line:
+  `len_type_hint` answered 6, and `is_builtin_method_type` answered
+  true. Between them they made `ch.len()` and `ch.is_empty()` lower to
+  the `Len` opcode instead of the declared body — against a record
+  whose slot 0 is an `AtomicInt`, not an i64. The 6 was read by nobody:
+  Tier 1's `lower_len` carries arms for 1..=5 only. A hint no consumer
+  uses is not inert; it still decides which body gets the call.
+- The set is pinned by
+  `crates/verum_common/tests/builtin_constructor_intercept_pin.rs`,
+  which asserts all three predicates together, with the reason each
+  type is in or out. That test is the "ONE predicate" the closing
+  question asks for.
+- `Opcode::NewChannel` (0xDD) has no emission site anywhere in
+  `codegen/` or `verum_codegen/`. The opcode byte stays reserved — the
+  wire format is not changed — but the handler now refuses with a
+  message naming the cause instead of returning a five-slot object no
+  reader recognises. Same for `Len` reaching a channel: a plausible
+  wrong number is worse than a stop.
+- Tier 1 is unchanged and remains internally consistent: it routes
+  `Channel.new` to `verum_chan_new` AND the methods to `verum_chan_*`,
+  at the LLVM layer, for both the `Call` and the `CallM` emission
+  shapes. That pairing is the property Tier 0 lacked.
+- Spec: `vcs/specs/L0-critical/stdlib-runtime/`
+  `a_channel_returns_the_values_it_was_given.vr` — capacity 3 against
+  values 41/42/43, chosen so that reading `cap` where a value belongs,
+  or a value where `cap` belongs, or a null buffer, each prints a
+  DIFFERENT recognisable number.
+
+### The question to ask of the next one
+
+The other four ids in that family (`LIST`, `MAP`, `SET`, `DEQUE`) do
+have both halves, and `has_builtin_constructor_intercept` is what keeps
+them paired. The check that generalises is not "is this type
+intercepted?" but:
+
+    for this type id, does the CONSTRUCTOR that produced the object and
+    the METHOD that reads it agree on the layout — and is that
+    agreement enforced by ONE predicate, or by two lists that happen to
+    match today?
+
 ## Generic-arithmetic object arm (T0499)
 
 The integer arithmetic opcodes (`AddI`/`SubI`/`MulI`/`DivI`/`ModI`/

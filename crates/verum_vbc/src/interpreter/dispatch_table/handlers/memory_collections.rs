@@ -1868,9 +1868,20 @@ pub(in super::super) fn handle_array_len(
             None => 0,
         }
     } else if header.type_id == TypeId::CHANNEL {
-        // Channel layout: [len, cap, head, buffer_ptr, closed] — read len (field 0)
-        let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
-        (unsafe { (*data_ptr).as_i64() }) as usize
+        // A channel has no builtin length here. `TypeId::CHANNEL` tags
+        // the stdlib's own `Channel<T>` record, whose slot 0 is an
+        // `AtomicInt` — reading it as an i64 is what the retired 5-slot
+        // intrinsic did. `ch.len()` must lower to the stdlib
+        // `Channel.len` body (`WellKnownType::requires_builtin_len`
+        // deliberately excludes Channel, so it does); reaching `Len`
+        // with a channel means some other emission site forced the
+        // opcode, and a plausible wrong number is worse than a stop.
+        return Err(InterpreterError::Panic {
+            message: "`Len` reached a Channel: Tier 0 has no builtin \
+                      channel layout — `ch.len()` must compile to the \
+                      stdlib `Channel.len` body, not to the `Len` opcode"
+                .to_string(),
+        });
     } else if header.type_id == TypeId::DEQUE {
         // Deque layout: [data, head, len, cap] — read len (field 2)
         let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
@@ -3216,46 +3227,36 @@ pub(in super::super) fn handle_new_deque(
     Ok(DispatchResult::Continue)
 }
 
-/// NewChannel (0xDD) - Create new bounded channel.
+/// NewChannel (0xDD) — retired producer, refused on sight.
 ///
 /// Format: `NewChannel dst, capacity`
+///
+/// Nothing emits this opcode: `grep -rn 'Instruction::NewChannel'`
+/// over `codegen/` and `verum_codegen/` finds no construction site,
+/// only this handler and the dispatch-table entry that reaches it.
+/// The body it used to have built the 5-slot
+/// `[len, cap, head, buffer_ptr, closed]` object that Tier 0 no longer
+/// recognises — `core/async/channel.vr` owns `Channel` at Tier 0 now,
+/// and its record has eight fields under the same `TypeId::CHANNEL`.
+/// Handing that shape back to a caller would recreate exactly the
+/// mismatch that made `send` read `data` as `closed`.
+///
+/// The opcode byte stays reserved (removing it is a wire-format
+/// change); the behaviour does not. If this ever fires, an emission
+/// site was added without a representation to go with it, and the
+/// message says so rather than returning a plausible object.
 pub(in super::super) fn handle_new_channel(
     state: &mut InterpreterState,
 ) -> InterpreterResult<DispatchResult> {
-    let dst = read_reg(state)?;
-    let cap_reg = read_reg(state)?;
-    let cap = state.get_reg(cap_reg).as_i64().max(1) as usize;
-
-    // Channel header: [len, cap, head, buffer_ptr, closed]
-    let obj = state
-        .heap
-        .alloc(TypeId::CHANNEL, 5 * std::mem::size_of::<Value>())?;
-    state.record_allocation();
-
-    let header_ptr =
-        unsafe { (obj.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE) as *mut Value };
-
-    let buffer = state.heap.alloc_array(TypeId::UNIT, cap)?;
-    state.record_allocation();
-    let buffer_ptr = buffer.as_ptr() as *mut u8;
-
-    let buf_data = unsafe { buffer_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
-    for i in 0..cap {
-        unsafe {
-            *buf_data.add(i) = Value::unit();
-        }
-    }
-
-    unsafe {
-        *header_ptr = Value::from_i64(0); // len
-        *header_ptr.add(1) = Value::from_i64(cap as i64); // cap
-        *header_ptr.add(2) = Value::from_i64(0); // head
-        *header_ptr.add(3) = Value::from_ptr(buffer_ptr); // buffer_ptr
-        *header_ptr.add(4) = Value::from_i64(0); // closed (0=open)
-    }
-
-    state.set_reg(dst, Value::from_ptr(obj.as_ptr() as *mut u8));
-    Ok(DispatchResult::Continue)
+    let _dst = read_reg(state)?;
+    let _cap_reg = read_reg(state)?;
+    Err(InterpreterError::Panic {
+        message: "`NewChannel` (0xDD) has no Tier-0 representation: the \
+                  builtin 5-slot channel was retired and \
+                  `core/async/channel.vr` builds `Channel` through its \
+                  own constructor. Nothing should emit this opcode."
+            .to_string(),
+    })
 }
 
 /// Push (0xCE) - Push value to argument stack.

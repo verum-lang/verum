@@ -230,7 +230,13 @@ impl WellKnownType {
             Self::Set => 3,
             Self::Deque => 4,
             Self::Text => 5,
-            Self::Channel => 6,
+            // Channel had hint 6 and nothing consumed it: `lower_len`
+            // carries arms for 1..=5 only, and Tier 0 no longer has a
+            // builtin channel to measure. A non-zero hint is not inert
+            // though — it is what forced `ch.len()` and `ch.is_empty()`
+            // into the `Len` opcode instead of the stdlib body, which
+            // is the same constructor/method split that retired the
+            // builtin channel. Zero routes both to `Channel.len`.
             _ => 0,
         }
     }
@@ -260,11 +266,20 @@ impl WellKnownType {
     /// duplicate at `verum_vbc/src/codegen/mod.rs::CodegenContext::new`
     /// was a CLAUDE.md violation (hardcoded stdlib type list inside
     /// the compiler).
+    ///
+    /// `Channel` is NOT in this set. Tier 0 has no builtin channel: the
+    /// interpreter's 5-slot `[len, cap, head, buffer_ptr, closed]`
+    /// object was retired because the stdlib's own eight-field
+    /// `Channel<T>` carries the same `TypeId::CHANNEL`, so the METHOD
+    /// intercept fired on stdlib-shaped receivers while the
+    /// CONSTRUCTOR intercept did not — `send` read `data` as `closed`,
+    /// `recv` read `tail` as the buffer pointer. `core/async/channel.vr`
+    /// is now the whole Tier-0 implementation. (Tier 1 keeps its own
+    /// `verum_chan_*` runtime and intercepts the constructor and the
+    /// methods together, at the LLVM layer, for both the `Call` and the
+    /// `CallM` emission shapes.)
     pub const fn has_builtin_constructor_intercept(self) -> bool {
-        matches!(
-            self,
-            Self::List | Self::Map | Self::Set | Self::Deque | Self::Channel
-        )
+        matches!(self, Self::List | Self::Map | Self::Set | Self::Deque)
     }
 
     /// Name-form helper for `has_builtin_constructor_intercept` — `true`
@@ -1932,6 +1947,12 @@ pub mod type_names {
 
     /// Returns true if `name` is a type that supports built-in method dispatch
     /// (collections, wrappers, Text, etc.).
+    ///
+    /// `Channel` is absent: the interpreter's builtin channel was
+    /// retired, so `core/async/channel.vr` answers `len` / `is_empty` /
+    /// `is_full` like any other stdlib body. Listing it here made
+    /// codegen skip the `Channel.is_empty` lookup and emit `Len`
+    /// against a record whose slot 0 is an `AtomicInt`.
     pub fn is_builtin_method_type(name: &str) -> bool {
         matches!(
             name,
@@ -1939,7 +1960,6 @@ pub mod type_names {
                 | "Map"
                 | "Set"
                 | "Deque"
-                | "Channel"
                 | "Text"
                 | "Maybe"
                 | "Result"

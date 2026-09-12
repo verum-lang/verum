@@ -64,8 +64,15 @@ mount sys.windows.thread.{
 //
 
 // Simple bounded channel with ring buffer storage.
-// In the interpreter/AOT, Channel.new(cap) is intercepted by the C runtime
-// (verum_chan_new), and send/recv dispatch through CallM to C builtins.
+//
+// Tier 1 intercepts BOTH `Channel.new(cap)` and the methods at the LLVM
+// layer, routing them to its own C runtime (`verum_chan_new`,
+// `verum_chan_send`, ...). Tier 0 intercepts NEITHER: the interpreter
+// once carried a five-slot channel of its own behind the same type id
+// and read this record through it — `send` took `data` for `closed`,
+// `recv` took `tail` for the buffer pointer — so the builtin was
+// retired and this body is the whole Tier-0 implementation. See
+// `docs/architecture/intrinsic-dispatch-contract.md` section 9.
 //
 
 // This implementation provides correct behavior when the stdlib is compiled

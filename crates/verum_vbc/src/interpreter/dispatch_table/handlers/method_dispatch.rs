@@ -707,7 +707,6 @@ pub(in super::super) fn handle_call_method(
                             | TypeId::LIST
                             | TypeId::BYTE_LIST
                             | TypeId::DEQUE
-                            | TypeId::CHANNEL
                     )
                 );
             if is_collection { referent } else { slot_val }
@@ -2154,14 +2153,21 @@ pub(in super::super) fn handle_call_method(
     // ALWAYS use builtin handlers for collection types. The stdlib user-defined
     // constructors (e.g., core.collections.map.Map.new) create plain struct records,
     // but ALL builtin instance methods (insert, get, len, etc.) expect the specific
-    // memory layout with the correct TypeId (LIST, MAP, SET, CHANNEL, DEQUE).
-    // This is the same reasoning as Channel (see original note below).
+    // memory layout with the correct TypeId (LIST, MAP, SET, DEQUE).
+    //
+    // `Channel` is deliberately NOT in that list, and adding it back
+    // would re-open the defect this arm used to carry: the arm never
+    // ran (every channel reaching a method call was measurably the
+    // stdlib record, not the 5-slot builtin), while the METHOD
+    // intercept keyed on `TypeId::CHANNEL` fired on all of them and
+    // misread their slots. Tier 0 now runs `core/async/channel.vr`
+    // for the constructor AND the methods; see the note where the
+    // method intercept used to be.
     if bare_method_name == "new" {
         let is_list = receiver_type_name.as_deref() == Some("List");
         let is_set = receiver_type_name.as_deref() == Some("Set");
         let is_map = receiver_type_name.as_deref() == Some("Map");
         let is_deque = receiver_type_name.as_deref() == Some("Deque");
-        let is_channel = receiver_type_name.as_deref() == Some("Channel");
 
         if is_list {
             // Create empty List: [len, cap, backing_ptr] with TypeId::LIST
@@ -2244,42 +2250,6 @@ pub(in super::super) fn handle_call_method(
                 *header_ptr.add(1) = Value::from_i64(0); // head (index 1)
                 *header_ptr.add(2) = Value::from_i64(0); // len (index 2)
                 *header_ptr.add(3) = Value::from_i64(DEFAULT_CAP as i64); // cap (index 3)
-            }
-            state.set_reg(dst, Value::from_ptr(obj.as_ptr() as *mut u8));
-            return Ok(DispatchResult::Continue);
-        } else if is_channel {
-            // Create bounded Channel: [len, cap, head, buffer_ptr, closed]
-            let caller_base = state.reg_base();
-            let cap = if args.count > 0 {
-                state
-                    .registers
-                    .get(caller_base, Reg(args.start.0))
-                    .as_i64()
-                    .max(1) as usize
-            } else {
-                16
-            };
-            let obj = state
-                .heap
-                .alloc(TypeId::CHANNEL, 5 * std::mem::size_of::<Value>())?;
-            state.record_allocation();
-            let header_ptr =
-                unsafe { (obj.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE) as *mut Value };
-            let buffer = state.heap.alloc_array(TypeId::UNIT, cap)?;
-            state.record_allocation();
-            let buffer_ptr = buffer.as_ptr() as *mut u8;
-            let buf_data = unsafe { buffer_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
-            for i in 0..cap {
-                unsafe {
-                    *buf_data.add(i) = Value::unit();
-                }
-            }
-            unsafe {
-                *header_ptr = Value::from_i64(0);
-                *header_ptr.add(1) = Value::from_i64(cap as i64);
-                *header_ptr.add(2) = Value::from_i64(0);
-                *header_ptr.add(3) = Value::from_ptr(buffer_ptr);
-                *header_ptr.add(4) = Value::from_i64(0);
             }
             state.set_reg(dst, Value::from_ptr(obj.as_ptr() as *mut u8));
             return Ok(DispatchResult::Continue);
@@ -2904,7 +2874,6 @@ pub(in super::super) fn handle_call_method(
                             | TypeId::LIST
                             | TypeId::BYTE_LIST
                             | TypeId::DEQUE
-                            | TypeId::CHANNEL
                     )
                     && let Some(fid) = state
                         .module
@@ -5230,11 +5199,13 @@ pub(super) fn dispatch_primitive_method(
         if !ptr.is_null() {
             let header = unsafe { heap::ObjectHeader::ref_or_stub(ptr) };
             // Builtin collection types always use builtin dispatch regardless of static prefix.
+            // `TypeId::CHANNEL` is absent on purpose: it tags the
+            // stdlib's own `Channel<T>` record, not a builtin layout,
+            // so its methods must take ordinary user dispatch.
             let is_builtin_collection = header.type_id == TypeId::MAP
                 || header.type_id == TypeId::SET
                 || header.type_id == TypeId::LIST
-                || header.type_id == TypeId::DEQUE
-                || header.type_id == TypeId::CHANNEL;
+                || header.type_id == TypeId::DEQUE;
             // Iterator objects (UNIT type_id, 4-value layout) have builtin iterator methods
             // (next, fold, map, filter, collect, etc.) that must be dispatched even when
             // the static type prefix is a user-defined iterator type like "ListIter".
@@ -9474,87 +9445,39 @@ pub(super) fn dispatch_primitive_method(
         }
 
         // ============================================================
-        // Channel methods (bounded queue: [len, cap, head, buffer_ptr, closed])
+        // Channel: there is NO interpreter intrinsic here.
+        // `core/async/channel.vr` is the only Tier-0 implementation.
+        //
+        // A 5-slot builtin `[len, cap, head, buffer_ptr, closed]` used
+        // to answer `send`/`recv`/`close`/`len`/… on this key. The
+        // stdlib declares eight fields —
+        // `{len, cap, head, tail, data, closed, notify_seq, lock}` —
+        // and codegen maps that NAME onto `TypeId::CHANNEL`, so every
+        // stdlib-built channel answered the key while carrying a
+        // different shape. The two sides of the table never agreed:
+        // the METHOD intercept keyed on the TYPE ID and fired on every
+        // channel; the CONSTRUCTOR intercept keyed on a receiver-NAME
+        // string and did not, so the 5-slot object was never built.
+        // Measured on `let ch = Channel.new(1); ch.send(7)`: slot 4
+        // came back holding a `Maybe`, not the `0` the builtin writes
+        // there, and `ch.tail` read `0` rather than a buffer pointer —
+        // both say the receiver was the stdlib record. `send` then read
+        // slot 4 (`data`) as `closed` and `recv` read slot 3 (`tail`,
+        // an Int) as the buffer pointer: a panic or a SIGSEGV
+        // depending on what the misread slot happened to hold. Tier 0
+        // could not run a channel at all.
+        //
+        // The stdlib body carries what the builtin never did: a real
+        // `tail`, futex-blocking `recv`, a `close` that wakes waiters,
+        // and a lock around the ring. Tier 1 routes the same methods
+        // to its own `verum_chan_*` runtime AND intercepts
+        // `Channel.new` together with them (see
+        // `verum_codegen/src/llvm/instruction.rs`) — that pairing is
+        // exactly what Tier 0 lacked, and the rule it teaches is the
+        // one in `docs/architecture/intrinsic-dispatch-contract.md`:
+        // a representation intercept owns the CONSTRUCTOR and the
+        // METHODS together, or it owns neither.
         // ============================================================
-        let is_channel = header.type_id == TypeId::CHANNEL;
-        if is_channel {
-            let header_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
-            match method {
-                "send" => {
-                    // Channel.send(val) -> Bool (true if sent, false if closed/full)
-                    let caller_base = state.reg_base();
-                    let val = state.registers.get(caller_base, Reg(args.start.0));
-                    let closed = unsafe { (*header_ptr.add(4)).as_i64() };
-                    if closed != 0 {
-                        return Ok(Some(Value::from_bool(false)));
-                    }
-                    let len = unsafe { (*header_ptr).as_i64() } as usize;
-                    let cap = unsafe { (*header_ptr.add(1)).as_i64() } as usize;
-                    if len >= cap {
-                        return Ok(Some(Value::from_bool(false))); // full
-                    }
-                    let head = unsafe { (*header_ptr.add(2)).as_i64() } as usize;
-                    let buf_ptr = unsafe { (*header_ptr.add(3)).as_ptr::<u8>() };
-                    let buf_data = unsafe { buf_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
-                    let tail = (head + len) % cap;
-                    unsafe {
-                        *buf_data.add(tail) = val;
-                        *header_ptr = Value::from_i64((len + 1) as i64);
-                    }
-                    return Ok(Some(Value::from_bool(true)));
-                }
-                "recv" | "receive" => {
-                    // Channel.recv() -> Maybe<T>
-                    let len = unsafe { (*header_ptr).as_i64() } as usize;
-                    if len == 0 {
-                        let result = make_none_value(state)?;
-                        return Ok(Some(result));
-                    }
-                    let cap = unsafe { (*header_ptr.add(1)).as_i64() } as usize;
-                    let head = unsafe { (*header_ptr.add(2)).as_i64() } as usize;
-                    let buf_ptr = unsafe { (*header_ptr.add(3)).as_ptr::<u8>() };
-                    let buf_data = unsafe { buf_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
-                    let val = unsafe { *buf_data.add(head) };
-                    let new_head = (head + 1) % cap;
-                    unsafe {
-                        *buf_data.add(head) = Value::unit();
-                        *header_ptr = Value::from_i64((len - 1) as i64);
-                        *header_ptr.add(2) = Value::from_i64(new_head as i64);
-                    }
-                    let result = make_some_value(state, val)?;
-                    return Ok(Some(result));
-                }
-                "close" => {
-                    // Channel.close() - mark channel as closed
-                    unsafe {
-                        *header_ptr.add(4) = Value::from_i64(1);
-                    }
-                    return Ok(Some(Value::unit()));
-                }
-                "is_closed" => {
-                    let closed = unsafe { (*header_ptr.add(4)).as_i64() };
-                    return Ok(Some(Value::from_bool(closed != 0)));
-                }
-                "len" | "count" => {
-                    let len = unsafe { (*header_ptr).as_i64() };
-                    return Ok(Some(Value::from_i64(len)));
-                }
-                "is_empty" => {
-                    let len = unsafe { (*header_ptr).as_i64() };
-                    return Ok(Some(Value::from_bool(len == 0)));
-                }
-                "is_full" => {
-                    let len = unsafe { (*header_ptr).as_i64() } as usize;
-                    let cap = unsafe { (*header_ptr.add(1)).as_i64() } as usize;
-                    return Ok(Some(Value::from_bool(len >= cap)));
-                }
-                "capacity" => {
-                    let cap = unsafe { (*header_ptr.add(1)).as_i64() };
-                    return Ok(Some(Value::from_i64(cap)));
-                }
-                _ => {} // fall through
-            }
-        }
 
         // Stopwatch methods (struct: field 0=start, field 1=running, field 2=accumulated)
         // DeadlineTimer methods (struct: field 0=deadline, field 1=has_deadline)

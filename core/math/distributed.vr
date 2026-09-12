@@ -897,7 +897,11 @@ implement<A: Actor, DIMS: meta MeshDims> ActorMesh<A, DIMS> {
                 id: ActorId.new(),
                 rank,
                 device,
-                mailbox: Channel.new(),
+                // 16 was the retired interpreter builtin's default
+                // capacity; `Channel.new` has always DECLARED a required
+                // `capacity`, and the zero-argument spelling only worked
+                // because the constructor never reached this body.
+                mailbox: Channel.new(16),
             })
         }).collect();
 

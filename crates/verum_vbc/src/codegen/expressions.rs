@@ -14113,7 +14113,8 @@ impl VbcCodegen {
                         // VBC-internal: derive Len opcode type_hint from WKT registry.
                         // The interpreter's Len handler uses this hint byte to dispatch
                         // to the correct runtime length implementation (List=1, Map=2,
-                        // Set=3, Deque=4, Text=5, Channel=6). See WKT::len_type_hint().
+                        // Set=3, Deque=4, Text=5). Channel is 0 on purpose — it has
+                        // no builtin length at either tier. See WKT::len_type_hint().
                         hint = WKT::from_name(base_type)
                             .map(|wkt| wkt.len_type_hint())
                             .unwrap_or(0);
