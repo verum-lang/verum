@@ -167,11 +167,17 @@ fn law_signal_error_eq_reflexive_per_variant() {
     for v in variants.iter() {
         // Use a fresh-construction copy to drive the structural
         // equality check (not just identity).
+        // A PATTERN BINDS BY VALUE HERE, even when the scrutinee is a
+        // reference from `.iter()`: `*s` on a binding of variant payload
+        // type `Signal` is refused with `Cannot dereference
+        // non-reference type: Signal`. A COMPILE error, so no `@ignore`
+        // contains it — four lines took all 14 tests in this file down.
+        // Measured 2026-09-12.
         let copy = match v {
-            SignalError.Uncatchable(s) => SignalError.Uncatchable(*s),
-            SignalError.InvalidSignal(n) => SignalError.InvalidSignal(*n),
-            SignalError.RegistrationFailed(n) => SignalError.RegistrationFailed(*n),
-            SignalError.RaiseFailed(s) => SignalError.RaiseFailed(*s),
+            SignalError.Uncatchable(s) => SignalError.Uncatchable(s),
+            SignalError.InvalidSignal(n) => SignalError.InvalidSignal(n),
+            SignalError.RegistrationFailed(n) => SignalError.RegistrationFailed(n),
+            SignalError.RaiseFailed(s) => SignalError.RaiseFailed(s),
         };
         assert((*v).eq(&copy));
     }
