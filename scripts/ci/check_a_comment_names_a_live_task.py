@@ -168,6 +168,16 @@ def scan(pool):
     for f in files:
         if not f.endswith(SRC_EXT):
             continue
+        # THIS GATE AND ITS BASELINE ARE EXEMPT, and the exemption is
+        # narrow on purpose. A gate that describes a pattern has to
+        # QUOTE it: the docstring above names T0408, T0376, T0455,
+        # T0131, T0323 and T0392 to show what a handover and a correct
+        # history look like. Scanning itself would report every example
+        # it teaches from, which is a gate arguing with its own manual.
+        # Only these two paths are skipped — never a directory, never a
+        # pattern.
+        if f in (os.path.relpath(__file__, os.getcwd()), BASELINE):
+            continue
         try:
             with open(f, encoding="utf-8", errors="replace") as fh:
                 lines = fh.read().splitlines()
