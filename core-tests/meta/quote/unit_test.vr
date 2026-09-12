@@ -45,6 +45,11 @@ mount core.meta.token.{TokenStream, TokenTree, Token, TokenKind, Delimiter, Spac
 mount core.meta.span.{MetaSpan, Span, SpanFlags};
 mount core.base.maybe.{Maybe};
 
+// A two-field qualified variant constructor on an archive-resident
+// type is read as a method call — `TokenKind.Punct(ch, sp)` gives
+// `no method named 'Punct' found for type 'TokenKind'` while the BARE
+// form constructs. A COMPILE error, whole file down. See A132.
+
 fn synthetic_span() -> Span {
     MetaSpan {
         id: 0,
@@ -221,7 +226,7 @@ fn test_token_record_is_ident() {
 
 @test
 fn test_token_record_is_punct() {
-    let t = Token { kind: TokenKind.Punct('=', Spacing.Alone), span: synthetic_span() };
+    let t = Token { kind: Punct('=', Spacing.Alone), span: synthetic_span() };
     assert(t.is_punct());
 }
 
