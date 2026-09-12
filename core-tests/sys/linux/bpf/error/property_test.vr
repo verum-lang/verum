@@ -17,7 +17,11 @@
 // =============================================================================
 
 mount core.prelude.*;
-mount core.sys.linux.bpf.error.BpfError;
+// THE BRACES ARE LOAD-BEARING: `mount core.a.b.Type;` binds the name
+// but refuses `Type.Variant(x)` — `unbound variable:
+// core.a.b.Type.Variant` — while `mount core.a.b.{Type};` works.
+// A COMPILE error, whole file down. Recorded as A137.
+mount core.sys.linux.bpf.error.{BpfError};
 
 // =============================================================================
 // Property 1 — Eq reflexivity

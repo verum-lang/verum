@@ -16,7 +16,16 @@
 // =============================================================================
 
 mount core.prelude.*;
-mount core.sys.linux.bpf.error.BpfError;
+// THE BRACES ARE LOAD-BEARING. `mount core.a.b.Type;` and
+// `mount core.a.b.{Type};` bind the same name, and only the SECOND
+// lets a variant be constructed through it: with the brace-less form
+// `BpfError.FeatureNotSupported(x)` is refused with
+//   error<E100>: unbound variable:
+//   core.sys.linux.bpf.error.BpfError.FeatureNotSupported
+// A COMPILE error, so no `@ignore` contains it — it took all 20 tests
+// in this file down. Measured 2026-09-12; recorded as A137. 359 such
+// mounts exist across 331 core-tests files.
+mount core.sys.linux.bpf.error.{BpfError};
 
 // =============================================================================
 // Section 1 — Variant construction + payload round-trip
