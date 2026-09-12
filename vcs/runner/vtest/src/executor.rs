@@ -1364,9 +1364,12 @@ impl Executor {
 
         match result {
             Ok(()) => {
-                // T0648: a passing typecheck must still honour its
-                // warning assertions — pre-fix these directives were
-                // parsed and silently ignored.
+                // A passing typecheck must still honour its warning
+                // assertions — before this check existed these
+                // directives were parsed and silently ignored.
+                // (Filed as T0648, whose ID was folded into T0394 by a
+                // 2026-07-31 pool consolidation; the work landed HERE,
+                // so the id is history rather than an owner.)
                 if let Err(reason) = self.check_expected_warnings(
                     &diagnostics_str,
                     &directives.expected_warnings,
@@ -3266,7 +3269,7 @@ impl Executor {
     }
 
     /// Check if actual errors match expected errors.
-    /// T0648: warning twin of `check_expected_errors` — `@expected-warning`
+    /// Warning twin of `check_expected_errors` — `@expected-warning`
     /// / `@expected-warning-count` were parsed and never compared, so the
     /// five .vr tests carrying them could not fail on their warning
     /// assertions. Same matching ladder (structured parse first,

@@ -23,4 +23,3 @@ crates/verum_vbc/src/intrinsics/mod.rs	T0686
 crates/verum_vbc/tests/list_slot2_named_offset_pin.rs	T0293
 crates/verum_vbc/tests/stdlib_mounts_resolve.rs	T0186
 scripts/ci/check_panic_surface_ratchet.py	T0131
-vcs/runner/vtest/src/executor.rs	T0648
