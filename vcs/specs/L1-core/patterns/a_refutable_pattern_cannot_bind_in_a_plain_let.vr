@@ -1,0 +1,46 @@
+// @test: typecheck-fail
+// @expected-error: "cannot bind in a plain `let`"
+// @level: L1
+// @tier: 0
+// @tags: patterns, let, refutable
+// @timeout: 20000
+// @description: A literal, range or or-pattern in a plain `let` is refused —
+//   a `let` matches ONE value and the pattern must always match.
+
+// Measured 2026-09-12, before the check existed:
+//
+//     let n = 5;
+//     let 7 = n;        verum check   clean
+//     print("bound")    interpreted   prints "bound"
+//
+// Nothing matched and nothing said so. E429 — "a refutable pattern in a
+// position that must always match" — already existed and already had the
+// predicate; it had exactly ONE emit site, function parameters, pinned by
+// `refutable_parameter_pattern_is_refused.vr` beside this file. The `let`
+// position is the sibling case the same reasoning covers.
+//
+// Radius measured before landing: `core/` carries zero such patterns, and
+// every occurrence in the spec corpus is in a parse-fail or parse-only
+// spec that never reaches the type checker.
+//
+// NOT COVERED HERE, and deliberately: a VARIANT pattern.
+// `let Maybe.Some(x) = v;` is still accepted and still binds an unchecked
+// payload. Refutability for a variant needs the RESOLVED type — a
+// single-variant newtype destructured by name is irrefutable and must stay
+// legal — and the predicate behind this check reads syntax alone. That
+// half is open.
+
+fn main() {
+    let n = 5;
+
+    // A literal matches one value out of many.
+    let 7 = n;
+
+    // A range is the same objection over more values.
+    let 1..=9 = n;
+
+    // An or-pattern offers alternatives, so an alternative can fail.
+    let 1 | 2 = n;
+
+    print(n);
+}

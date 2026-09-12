@@ -9495,6 +9495,48 @@ impl TypeChecker {
     fn check_stmt_inner(&mut self, stmt: &Stmt) -> Result<bool> {
         match &stmt.kind {
             StmtKind::Let { pattern, ty, value } => {
+                // A REFUTABLE PATTERN IN A PLAIN `let` MUST ALWAYS MATCH.
+                //
+                // E429 exists and says exactly this — "a refutable pattern in
+                // a position that must always match" — and had ONE emit site:
+                // function parameters, added 2026-09-03 after a refutable
+                // parameter pattern returned a raw variant handle from a
+                // function declared to return Int. The `let` position is the
+                // sibling case the same reasoning covers, and it was open:
+                //
+                //     let n = 5;
+                //     let 7 = n;          // verum check: clean
+                //
+                // The language has `let … else` for the refutable case
+                // (`let_else_stmt` in the grammar), and that is a DIFFERENT
+                // AST node, so this check cannot reach it.
+                //
+                // Radius measured 2026-09-12 before landing: core/ has zero
+                // such patterns, and every occurrence in the spec corpus is
+                // in a parse-fail or parse-only spec that never reaches the
+                // type checker. `VERUM_NO_LET_PATTERN_CHECK=1` switches it
+                // off, so the radius stays an A/B inside one binary.
+                //
+                // `refutable_pattern_kind` deliberately does NOT classify a
+                // variant pattern: refutability there needs the RESOLVED
+                // type, which the predicate does not have. So `let
+                // Maybe.Some(x) = v;` is still accepted and still binds an
+                // unchecked payload — that half needs type information and
+                // is not closed here.
+                if std::env::var_os("VERUM_NO_LET_PATTERN_CHECK").is_none()
+                    && let Some(what) = crate::infer::modules::refutable_pattern_kind(pattern)
+                {
+                    self.push_diagnostic_for(TypeError::OtherWithCodeSpanned {
+                        code: verum_common::Text::from("E429"),
+                        msg: verum_common::Text::from(format!(
+                            "{what} cannot bind in a plain `let` — a `let` matches ONE \
+                             value, so its pattern must always match\n  \
+                             help: use `let … else {{ … }}` for the refutable case, \
+                             or `match` on the value"
+                        )),
+                        span: stmt.span,
+                    });
+                }
                 #[cfg(debug_assertions)]
                 {
                     // #[cfg(debug_assertions)]

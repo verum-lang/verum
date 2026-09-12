@@ -28641,7 +28641,9 @@ bake to have this verified.",
 /// record-VARIANT pattern needs the resolved type, and a false positive
 /// here would refuse working code; that case is listed in the register
 /// rather than guessed at.
-fn refutable_pattern_kind(pattern: &verum_ast::pattern::Pattern) -> Option<&'static str> {
+pub(super) fn refutable_pattern_kind(
+    pattern: &verum_ast::pattern::Pattern,
+) -> Option<&'static str> {
     use verum_ast::pattern::PatternKind as P;
     match &pattern.kind {
         P::Wildcard | P::Rest => None,
