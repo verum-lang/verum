@@ -16,17 +16,43 @@ mount core.{Maybe, Result, Text};
 mount core.collections.list.List;
 
 // =============================================================================
-// REGRESSION §A (@ignore'd): argv plumbing inconsistency under
-// `--interp` harness. `args_count()` returns > 0 but `arg(0)` returns
-// Maybe.None. The two accessors should be consistent — either both
-// indicate "no argv" (count=0, arg(i)=Maybe.None) or both indicate "argv
-// present" (count>0, arg(0)=Maybe.Some(program_name)).
+// REGRESSION §A: `args_count()` returns > 0 and `arg(0)` returns
+// Maybe.None. The two accessors must be consistent — either both say
+// "no argv" (count=0, arg(i)=Maybe.None) or both say "argv present"
+// (count>0, arg(0)=Maybe.Some(program_name)).
 //
-// Workaround in tests: avoid asserting on arg(i) when running under
-// `--interp` without explicit argv setup. Pin here.
+// THE STATED CAUSE WAS WRONG AND IT MATTERED. This section used to
+// blame the `--interp` harness and prescribe a workaround: "avoid
+// asserting on arg(i) when running under `--interp` without explicit
+// argv setup". Re-measured 2026-09-12 under a plain `verum run`, where
+// argv is unambiguously present, the failure is identical — so the
+// harness had nothing to do with it, and the workaround taught every
+// later test to stop asking.
+//
+// WHAT THE RE-MEASUREMENT FOUND, and it is the whole shape of the
+// defect. In ONE programme, across a mount of `core.base.env`:
+//
+//     args_count()   ->  3
+//     args().len()   ->  3, and the three entries are the REAL argv
+//                        ("…/verum", "run", "…/main.vr")
+//     arg(0)         ->  Maybe.None        (and arg(1), arg(2) too)
+//
+// `args()` is implemented as `arg(i)` in a loop inside `core.base.env`
+// and breaks on the first Maybe.None. It returns three values, so
+// `arg(i)` ANSWERS CORRECTLY when called from inside the module and
+// answers None when entered directly from outside it. Both outside
+// spellings fail alike — the mounted bare name and the dotted
+// `core.base.env.arg(0)` — so it is the module boundary, not the
+// spelling.
+//
+// That rules out the plumbing: argv is present, initialised and
+// readable. `args_count()` reads `PROCESS_ARGC` across the same
+// boundary and is right. Only the direct cross-module entry into `arg`,
+// which reads the POINTER static `PROCESS_ARGV`, comes back empty.
 // =============================================================================
 
 @test
+@ignore("arg(i) answers Maybe.None for every index when entered across the module boundary, while args() — the same arg(i) in a loop inside core.base.env — returns the real argv in the same programme. Measured 2026-09-12 under a plain `verum run`, not a harness artefact. See §A1, which pins the discriminator and passes.")
 fn regression_pin_arg_zero_consistent_with_args_count() {
     let count = args_count();
     let first = arg(0);
@@ -35,6 +61,29 @@ fn regression_pin_arg_zero_consistent_with_args_count() {
     } else {
         assert(first.is_none());
     }
+}
+
+// =============================================================================
+// REGRESSION §A1: THE DISCRIMINATOR, and it passes today.
+//
+// §A is red and `@ignore`d, which means it protects nothing. This one
+// pins what the re-measurement established, so a fix that repairs
+// `arg` cannot quietly break the route that works, and a regression in
+// `args()` cannot hide behind `arg`'s known failure.
+// =============================================================================
+
+@test
+fn regression_args_sees_argv_even_where_arg_does_not() {
+    // args() walks arg(i) INSIDE the module. Whatever ails the direct
+    // cross-module call, this route reaches the real argv.
+    let all = args();
+    let count = args_count();
+    assert(count >= 1);
+    assert(all.len() >= 1);
+    // The two module-internal readers agree with each other. They did
+    // NOT agree with arg(i) when this was written, and that gap is the
+    // defect; if a fix closes it, §A goes green and this stays green.
+    assert_eq(all.len(), count);
 }
 
 // =============================================================================
