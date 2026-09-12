@@ -3788,6 +3788,42 @@ pub(in super::super) fn handle_call_method(
                         if !parent_compatible {
                             continue;
                         }
+                        // A FREE FUNCTION IS NOT A METHOD, however its
+                        // registered name ends.
+                        //
+                        // `parent_type: None` reaches the compatibility
+                        // check above as `true` — historic permissive
+                        // behaviour for synthetic types — and a free
+                        // function has no parent type at all, so it
+                        // passes. `core/base/protocols.vr` declares the
+                        // universal
+                        //
+                        //     public fn len<T: Length>(c: &T) -> Int { c.len() }
+                        //
+                        // whose registered name is
+                        // `core.base.protocols.len`; it ENDS with
+                        // `.len`, so this scan accepts it, calls it with
+                        // the receiver in `c`, and its body calls
+                        // `.len()` on that same value — which arrives
+                        // here again. Measured on
+                        // `Shared<T>` + `lock().unwrap_or_else(…).len()`:
+                        // 98305 dispatches of `len`, every one entering
+                        // `core.base.protocols.len`, ending in
+                        // `Stack overflow: depth 16384`. Its siblings in
+                        // that file (`is_empty` next) are the same shape.
+                        //
+                        // The discriminator is the one the static-method
+                        // arm near the top of this function already
+                        // uses: a method's first parameter is `self`.
+                        let takes_self = func
+                            .params
+                            .first()
+                            .and_then(|prm| state.module.strings.get(prm.name))
+                            .map(|n| n == "self")
+                            .unwrap_or(false);
+                        if !takes_self {
+                            continue;
+                        }
                         // Prefer exact parameter count match
                         if func.params.len() == expected_param_count || func.register_count > 0 {
                             found_func_id = Some(func.id);

@@ -35,6 +35,7 @@
 
 mount core.sync.{Mutex};
 mount core.collections.deque.{Deque};
+mount core.async.channel.{bounded};
 
 type Holder is { queue: Mutex<Deque<Int>> };
 
@@ -87,6 +88,34 @@ fn main() -> Int {
     g2.push_back(55);
     print(f"4 unwrap_or_else len={g2.len() + 0}");
     assert(g2.len() + 0 == 2);
+
+    // 5. A FREE FUNCTION is not a method, however its registered name
+    //    ends. `core/base/protocols.vr` declares the universal
+    //    `len<T: Length>(c: &T) -> Int { c.len() }`, registered as
+    //    `core.base.protocols.len` — a name ending in `.len`, which the
+    //    bare-suffix scan accepted as a method. Bound that way it got
+    //    the receiver in `c`, its body called `.len()` on that same
+    //    value, and the scan bound it again: 98305 dispatches and
+    //    `Stack overflow: depth 16384`.
+    //
+    //    The rung reaches it the way the standard library does — a
+    //    `Shared` field, a `Mutex` guard, and the closure-taking
+    //    `unwrap_or_else` that `core/async/channel.vr` writes.
+    let s2 = Shared.new(Holder { queue: Mutex.new(Deque.new()) });
+    let mut h2 = s2.queue.lock().unwrap();
+    h2.push_back(11);
+    h2.push_back(22);
+    h2.push_back(33);
+    let via_closure = s2.queue.lock().unwrap_or_else(|p| p.into_inner()).len();
+    print(f"5 free_fn_not_a_method len={via_closure + 0}");
+    assert(via_closure + 0 == 3);
+
+    // 6. And the same call through the standard library's own channel,
+    //    which is written in exactly that shape.
+    let (tx, _rx) = bounded<Int>(4);
+    print(f"6 channel len={tx.len() + 0} empty={tx.is_empty()}");
+    assert(tx.len() + 0 == 0);
+    assert(tx.is_empty() == true);
 
     print("9 end");
     return 0;
