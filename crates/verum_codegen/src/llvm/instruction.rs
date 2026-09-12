@@ -5506,8 +5506,8 @@ pub fn lower_instruction<'ctx>(
                 );
             }
             if *field == 0 {
-                if let Some(inner_type) = ctx.get_maybe_inner_type(variant.0).map(|s| s.to_string())
-                {
+                let peeled_inner_name = ctx.get_maybe_inner_type(variant.0).map(|s| s.to_string());
+                if let Some(inner_type) = peeled_inner_name.clone() {
                     // Mark collection registers for correct dispatch (GetE, push, len, etc.)
                     if let Some(wkt) = WKT::from_name(&inner_type) {
                         wkt.mark_register(ctx, dst.0);
@@ -5525,6 +5525,45 @@ pub fn lower_instruction<'ctx>(
                     // emitter integer-formats a correct pointer (`alpha` came
                     // out as 4301226128). Scoped to the peeled case on purpose:
                     // every other extraction keeps exactly the marks it had.
+                    // **T1192 NESTED-RESULT-ARMS-1** — a payload that is itself
+                    // a `Result` needs its ARM TYPES, not just its name.
+                    //
+                    // Measured on `Maybe<Result<Text, Int>>`, the shape every
+                    // `lines()`-style iterator yields, with `VERUM_TRACE_T1206`:
+                    //
+                    //   getvd dst=r3 from=r0  maybe_inner=Some("Result")  <- name ok
+                    //   getvd dst=r5 from=r4  obj_type=Some("Result")
+                    //                         arm_types=FALSE             <- the gap
+                    //
+                    // The NAME reaches the Result register and the ARGS do not,
+                    // so the second hop has nothing to classify the `Text` from,
+                    // and `ToString` renders a correct Text pointer as an integer
+                    // — by-example chapter 19 printing `[1] 4437442560` where
+                    // Tier 0 prints `[1] line one`. `Len` on the very same
+                    // register answers 4, which is what says the object is fine
+                    // and only this classification was missing.
+                    //
+                    // DELIBERATELY NARROW. The arm below it is scoped to the
+                    // peeled-reference case on purpose ("every other extraction
+                    // keeps exactly the marks it had"), and this does not widen
+                    // that: it fires only when the extracted payload IS a
+                    // `Result` instantiation, where `mark_register_from_return_type`
+                    // does one thing — record the arm types the next
+                    // `GetVariantData` reads.
+                    // THE ARGS ON A `Maybe` REGISTER ARE THE INNER TYPE'S OWN.
+                    // `mark_register_from_return_type`'s Maybe arm stores
+                    // `inner_args` — for `Maybe<Result<Text, Int>>` that is
+                    // `[Text, Int]`, the RESULT's arms, not `[Result<…>]`. A
+                    // first draft of this fix tested `type_args.first()` for a
+                    // `Result` instantiation and therefore never fired: what it
+                    // found there was `Text`. Measured by the trace below, which
+                    // kept printing `arm_types=false` after the change.
+                    //
+                    // So the arms are already in hand and only need recording
+                    // under the key the next `GetVariantData` reads.
+                    if peeled_inner_name.as_deref() == Some("Result") && !type_args.is_empty() {
+                        ctx.set_result_arm_types(dst.0, type_args.clone());
+                    }
                     if payload_is_ref {
                         if let Some(elem) = type_args.first().cloned() {
                             mark_register_from_return_type(ctx, dst.0, &elem);
@@ -42744,6 +42783,28 @@ fn propagate_value_type_facts<'ctx>(
     if ctx.is_maybe_ref_payload(src.0) {
         ctx.mark_maybe_ref_payload(dst.0);
     }
+    // **T1192 MOV-CARRIES-RESULT-ARMS-1** — and so is a `Result` that travels
+    // through a MOV before ITS `match`.
+    //
+    // This arm carried eleven facts and not this one, and `Result`'s payload
+    // classifier (T0241 RESULT-PAYLOAD-CLASSIFY) reads exactly this key off
+    // the variant register — so a single `Mov` between the extraction and the
+    // match erased it silently.
+    //
+    // Measured (`VERUM_TRACE_T1206`) on `Maybe<Result<Text, Int>>`, the shape
+    // every `lines()`-style iterator yields:
+    //
+    //   getvd dst=r3 from=r0   maybe_inner=Some("Result")   arms recorded here
+    //   Mov   dst=r4 src=r3                                 <- dropped them
+    //   getvd dst=r5 from=r4   obj_type=Some("Result")  arm_types=FALSE
+    //
+    // The second hop then had nothing to classify the `Text` from, and
+    // `ToString` rendered a correct Text pointer as an integer — by-example
+    // chapter 19 printing `[1] 4437442560` where Tier 0 prints `[1] line one`,
+    // while `Len` on the very same register answered 4.
+    if let Some(arms) = ctx.get_result_arm_types(src.0).cloned() {
+        ctx.set_result_arm_types(dst.0, arms);
+    }
     if ctx.is_generic_ptr_register(src.0) {
         ctx.mark_generic_ptr_register(dst.0);
     }
@@ -44994,6 +45055,7 @@ fn lower_iter_next<'ctx>(
             mark_register_from_return_type(ctx, dst.0, elem_type);
         }
     }
+
     Ok(())
 }
 

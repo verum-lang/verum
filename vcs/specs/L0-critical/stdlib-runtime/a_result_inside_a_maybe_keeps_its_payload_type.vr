@@ -1,0 +1,101 @@
+// @test: run
+// @tier: 0,1
+// @level: L0
+// @tags: variant, result, maybe, mov, text, regression
+// @timeout: 60000
+// @expected-exit: 0
+//
+// A RESULT INSIDE A MAYBE KEEPS ITS PAYLOAD TYPE (T1192).
+//
+// `Maybe<Result<Text, Int>>` is what every `lines()`-style iterator
+// yields, and reaching the Text takes two `GetVariantData` hops with a
+// `Mov` between them. `Mov` carried eleven per-register facts and not the
+// Result's ARM TYPES — the one key the payload classifier reads — so the
+// `Text` inside `Ok` was never classified and `ToString` rendered a
+// correct Text pointer as an integer.
+//
+// Measured at Tier 1 before the fix:
+//
+//     text=[4380033024]     where Tier 0 prints  text=[conc]
+//     len=4                 on the SAME register — which is what says the
+//                           object was fine and only the classification
+//                           was missing
+//
+// `len()` is printed beside each text on purpose. It answers through
+// method dispatch, not through the f-string's type decision, so a right
+// length beside a wrong rendering separates "the object is broken" from
+// "only the rendering is" — and that separation is what found this.
+//
+// The `+ 0` on the numeric assertions is deliberate: a bare
+// `assert(n == 4)` can be folded by the frontend's own model.
+
+type ConcreteIter is { left: Int };
+
+implement Iterator for ConcreteIter {
+    type Item = Result<Text, Int>;
+    fn next(&mut self) -> Maybe<Result<Text, Int>> {
+        if self.left <= 0 { return Maybe.None; }
+        let mut t = Text.new();
+        t.push_str("conc");
+        self.left = self.left - 1;
+        Maybe.Some(Result.Ok(t))
+    }
+}
+
+// A GENERIC iterator with the same Item: the parameter is NOT the element,
+// which is the shape `LinesIter<BufReader<File>>` has.
+type GenIter<R> is { left: Int, seed: R };
+
+implement<R> Iterator for GenIter<R> {
+    type Item = Result<Text, Int>;
+    fn next(&mut self) -> Maybe<Result<Text, Int>> {
+        if self.left <= 0 { return Maybe.None; }
+        let mut t = Text.new();
+        t.push_str("genr");
+        self.left = self.left - 1;
+        Maybe.Some(Result.Ok(t))
+    }
+}
+
+// The same payload shape WITHOUT an iterator — it rendered correctly all
+// along, so it is the control that says a failure is about the variant
+// hops and not about Text itself.
+fn via_call() -> Result<Text, Int> {
+    let mut t = Text.new();
+    t.push_str("call");
+    Result.Ok(t)
+}
+
+fn main() {
+    print("0 begin");
+
+    match via_call() {
+        Result.Ok(t) => {
+            print(f"1 via call = [{t}] len={t.len() + 0} (want [call] 4)");
+            assert(t.len() + 0 == 4);
+        }
+        Result.Err(_) => { print("1 via call = err"); assert(false); }
+    }
+
+    for r in (ConcreteIter { left: 1 }) {
+        match r {
+            Result.Ok(t) => {
+                print(f"2 concrete = [{t}] len={t.len() + 0} (want [conc] 4)");
+                assert(t.len() + 0 == 4);
+            }
+            Result.Err(_) => { print("2 concrete = err"); assert(false); }
+        }
+    }
+
+    for r in (GenIter { left: 1, seed: 7 }) {
+        match r {
+            Result.Ok(t) => {
+                print(f"3 generic  = [{t}] len={t.len() + 0} (want [genr] 4)");
+                assert(t.len() + 0 == 4);
+            }
+            Result.Err(_) => { print("3 generic  = err"); assert(false); }
+        }
+    }
+
+    print("4 end");
+}
