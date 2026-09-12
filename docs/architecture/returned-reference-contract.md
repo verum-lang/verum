@@ -400,3 +400,107 @@ by the recipe for `42`.
 
 These are omissions of coverage, not of correctness: in each case the
 compiler does what it did before this contract existed.
+
+## 7. The limit: a generic adaptor erases the question itself
+
+Sections 3 and 4 answer "what does the caller owe?" by asking the
+CALLEE'S BODY — `wrapped_payload_is_slot_address` walks back from
+`SetVariantData` and answers ADDRESS only for a `GetF`-produced payload.
+That works because the call site knows which body it is calling.
+
+It stops working the moment the callee is a generic adaptor, and the
+stop is not an omission that a better walker would fix.
+
+Measured 2026-09-12, two rungs that differ in one word:
+
+```verum
+fn enum_over_list(xs: &List<Int>) -> Int {
+    let mut total = 0;
+    for (i, x) in xs.iter().enumerate() { total = total + i + *x; }
+    total
+}
+
+fn enum_over_slice(bs: &[Byte]) -> Int {
+    let mut total = 0;
+    for (i, b) in bs.iter().enumerate() {
+        total = total + i;
+        if *b == 108 { total = total + 1000; }
+    }
+    total
+}
+```
+
+| | Tier 0 | Tier 1 |
+|---|---|---|
+| `enumerate` over `List<Int>` | 63 | 63 |
+| `enumerate` over `&[Byte]` | 1003 | `EXC_BAD_ACCESS` at `0x6c` |
+
+`0x6c` is the byte `'l'` — the element VALUE used as an address.
+
+Both iterators declare `-> Maybe<&T>` and bind `Item = &T`, and they
+disagree about what the payload word holds:
+
+| producer | body | payload word |
+|---|---|---|
+| `ListIter.next` | `&*self.ptr` (`RefRawAddr`, 0x0D) | ADDRESS |
+| `SliceIter.next` | `&self.slice[i]` (`RefListElement`, 0x0B) | pre-loaded VALUE |
+
+Read in `lower_cbgr_extended`, the two arms are starker than the table:
+0x0B computes `elem_ptr`, LOADS through it with a width switch, stores
+the VALUE and calls `mark_interior_list_ref`; 0x0D stores the ADDRESS
+unchanged and calls `mark_interior_list_ref`. **Both producers set the
+same mark on opposite representations** — 0x0D's own comment says it does
+so "for DEREF-INTERIOR-1 parity, mirroring RefListElement", and the
+parity is syntactic. The mark says "do not deref HERE"; what it implies
+one frame later is exactly the question this section is about.
+
+Between them stands `EnumerateIter.next`, which returns
+`Maybe<(Int, I.Item)>`. It is ONE function — `nm` on a binary that
+instantiates it over BOTH iterators shows a single `_EnumerateIter.next`
+and no monomorphised copies. Inside that body `self.iter.next()` is a
+dynamic dispatch, so the convention of the inner producer is not a
+static fact there; and the reference then leaves inside a TUPLE, which
+the caller opens with `Unpack`. At the `Deref` that follows, the
+register carries no facts at all — `VERUM_TRACE_DEREF` prints
+`shared=false passthru=false genptr=false inline=false struct=false
+objty=None list=false text=false` — while the same loop written without
+`.enumerate()` reaches the same `Deref` with `passthru=true`.
+
+Neither default is right. `Deref` currently loads, which is correct for
+the `List` rung and faults on the slice rung; inverting it to identity
+would swap exactly which rung fails. **The fact has to travel, and
+through a generic adaptor it cannot travel statically.**
+
+Nor can the producers simply be made to agree by inverting 0x0B. It
+loads AT THE PRODUCER because only the producer knows the element
+width: `emit_container_view` classifies the receiver into {cell,
+stamped pack (elem 1), unstamped list (elem 8)} at runtime, and a
+reference to a packed one-byte element is not an 8-byte-loadable
+address. A scratch slot holding the widened value cannot live in the
+producer's frame either — it would dangle the moment `SliceIter.next`
+returns, which is the same alloca-escape hazard `lower_ref` documents
+in place.
+
+And the reason neither convention simply wins is ONE missing fact on
+both sides. Loading at the PRODUCER needs the pointee width: 0x0B has it
+from `emit_container_view`, 0x0D does not — `&*self.ptr` on a
+`&unsafe T` inside a single generic `ListIter<T>` body has no `T`.
+Loading at the CONSUMER needs the same width, and `Deref` does not have
+it either. So the root is not "two conventions"; it is that **the AOT
+erases the pointee width at a reference**, and each convention hides that
+erasure somewhere different. That also predicts which half works today:
+an eight-byte element needs no width at all, which is every `List<T>`
+slot — hence the `List` rung surviving `.enumerate()` while the byte rung
+faults.
+
+So making every `&T` one representation requires a stable home for the
+widened copy of a narrow packed element, and the only home that outlives
+the return is the receiver — i.e. a change to what an iterator IS, not
+to how a call site reads one. That is the campaign; until it lands, a
+reference produced by 0x0B is correct only while it stays inside the
+frame that produced it or crosses a boundary whose callee body the call
+site can read.
+
+Reproduction: the two rungs above, `verum run --tier aot`. The chapter
+that first showed it is `docs/by-example/19-file-io/main.vr`, whose
+`BufRead.read_until` walks `available.iter().enumerate()`.

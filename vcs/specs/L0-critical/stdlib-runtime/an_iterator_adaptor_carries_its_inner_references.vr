@@ -1,0 +1,90 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: iterator, adaptor, enumerate, slice, reference, regression
+// @timeout: 60000
+// @expected-exit: 0
+//
+// AN ITERATOR ADAPTOR CARRIES ITS INNER REFERENCES (T1450).
+//
+// `.enumerate()` wraps an iterator in `EnumerateIter<I>`, whose `next`
+// returns `Maybe<(Int, I.Item)>` — the inner element travels inside a
+// TUPLE. Two stdlib iterators fill that slot with opposite things:
+//
+//     ListIter.next    &*self.ptr          (RefRawAddr, 0x0D)  ADDRESS
+//     SliceIter.next   &self.slice[i]      (RefListElement, 0x0B)  VALUE
+//
+// Both declare `-> Maybe<&T>` and bind `Item = &T`, so the declaration
+// separates neither, and `EnumerateIter.next` is ONE function over both
+// (measured: `nm` on a binary instantiating it over each shows a single
+// `_EnumerateIter.next`, no monomorphised copies).
+//
+// WHY THIS SPEC RUNS AT TIER 0 ONLY. Tier 1 currently faults on the
+// slice rung: the `Deref` after `Unpack` sees a register carrying no
+// facts at all and loads through it, so the byte VALUE becomes an
+// address — `EXC_BAD_ACCESS` at `0x6c`, which is `'l'`. The `List` rung
+// passes there, because loading an address is right for ListIter.
+// Neither `Deref` default serves both, and the fact cannot travel
+// statically through a generic adaptor body; that is T1450 and
+// `docs/architecture/returned-reference-contract.md` §7. Turn the tier
+// list into `0,1` when it lands — the rungs below need no change.
+//
+// The `+ 0` on every assertion is deliberate: a bare `assert(v == 63)`
+// can be folded by the frontend's own model and would test nothing.
+
+fn enum_over_list(xs: &List<Int>) -> Int {
+    let mut total = 0;
+    for (i, x) in xs.iter().enumerate() {
+        total = total + i + *x;
+    }
+    total
+}
+
+fn enum_over_slice(bs: &[Byte]) -> Int {
+    let mut total = 0;
+    for (i, b) in bs.iter().enumerate() {
+        total = total + i;
+        if *b == 108 {
+            total = total + 1000;
+        }
+    }
+    total
+}
+
+// The same walk WITHOUT the adaptor. It reaches the element through
+// `IterNext`, where the call site can read the callee's body, and it is
+// the control that says whether a failure above is about the adaptor or
+// about the iterator underneath it.
+fn plain_over_slice(bs: &[Byte]) -> Int {
+    let mut total = 0;
+    for b in bs.iter() {
+        if *b == 108 {
+            total = total + 1000;
+        }
+    }
+    total
+}
+
+fn main() {
+    print("0 begin");
+
+    let xs: List<Int> = [10, 20, 30];
+    let over_list = enum_over_list(&xs);
+    print(f"1 enumerate over List  = {over_list + 0} (want 63)");
+    assert(over_list + 0 == 63);
+
+    let mut l: List<Byte> = [];
+    l.push(108);
+    l.push(105);
+    l.push(110);
+
+    let plain = plain_over_slice(l.as_slice());
+    print(f"2 plain over slice     = {plain + 0} (want 1000)");
+    assert(plain + 0 == 1000);
+
+    let over_slice = enum_over_slice(l.as_slice());
+    print(f"3 enumerate over slice = {over_slice + 0} (want 1003)");
+    assert(over_slice + 0 == 1003);
+
+    print("4 end");
+}

@@ -145,6 +145,44 @@ def broken_rows(lines: list[str]) -> list[tuple[str, int]]:
     return out
 
 
+def duplicate_labels(lines: list[str]) -> list[tuple[str, list[int]]]:
+    """Two rows carrying the SAME id.
+
+    An id is how every other document cites a row — a task note, a
+    commit message, a contract section.  When two rows share one, a
+    citation names both and resolves to neither, and nothing else in
+    this file can see it: both rows are one line, both end in `|`, both
+    have their family's cell count, and neither buries the other.
+
+    Measured 2026-09-12: two sessions writing the register 36 minutes
+    apart both allocated A104 — one for a byte-view defect, one for a
+    suite that ran half a level.  Both rows were committed, both looked
+    correct in their own diff, and the gate was green.  Ids here are
+    allocated by reading the file, so a concurrent writer is not an edge
+    case; it is the normal way this collides.
+    """
+    from collections import defaultdict
+
+    seen: dict[str, list[int]] = defaultdict(list)
+    for i, line in enumerate(lines, 1):
+        if ROW.match(line):
+            seen[line.split("|")[1].strip()].append(i)
+    return [(label, at) for label, at in seen.items() if len(at) > 1]
+
+
+DUPLICATE_SELF_TEST = [
+    # Distinct ids across two families are not duplicates.
+    (["| A1 | a |", "| A2 | a |", "| B1 | a |"], 0),
+    # The real case: one id, two rows, both well-formed.
+    (["| A104 | byte view |", "| A104 | suite coverage |"], 1),
+    # A row that merely CITES another id is not a duplicate — the label
+    # must be in row position, which is what ROW anchors.
+    (["| A1 | see A1 and `| A1 |` above |", "| A2 | a |"], 0),
+    # Two separate collisions are two findings, not one.
+    (["| A1 | a |", "| A1 | b |", "| A2 | c |", "| A2 | d |"], 2),
+]
+
+
 SELF_TEST = [
     # (lines, expected number of broken rows)
     (["| A1 | text |", "| A2 | more |"], 0),
@@ -204,6 +242,11 @@ BURIED_SELF_TEST = [
 
 def self_test() -> int:
     bad = 0
+    for lines, want in DUPLICATE_SELF_TEST:
+        got = len(duplicate_labels(lines))
+        if got != want:
+            bad += 1
+            print(f"FAIL duplicate {lines!r} -> {got}, expected {want}", file=sys.stderr)
     for lines, want in BURIED_SELF_TEST:
         got = len(buried_rows(lines))
         if got != want:
@@ -222,7 +265,7 @@ def self_test() -> int:
     if bad:
         print(f"self-test: {bad} of {len(SELF_TEST)} case(s) FAILED", file=sys.stderr)
         return 1
-    print(f"[ok] self-test: {len(SELF_TEST) + len(WIDTH_SELF_TEST)} case(s) hold")
+    print(f"[ok] self-test: {len(SELF_TEST) + len(WIDTH_SELF_TEST) + len(BURIED_SELF_TEST) + len(DUPLICATE_SELF_TEST)} case(s) hold")
     return 0
 
 
@@ -233,6 +276,18 @@ def main() -> int:
     bad = broken_rows(lines)
     total = sum(1 for l in lines if ROW.match(l))
     widths = wrong_width(lines)
+    buried = buried_rows(lines)
+    dupes = duplicate_labels(lines)
+    if dupes:
+        print(f"[fail] {len(dupes)} register id(s) are carried by more than one row:")
+        for label, at in dupes:
+            print(f"    {label}  at lines {', '.join(str(n) for n in at)}")
+        print(
+            "\nAn id is how a task note, a commit or a contract section cites a\n"
+            "row.  Two rows sharing one make every citation ambiguous, and no\n"
+            "other check here can see it.  Give the LATER row the next free id."
+        )
+        return 1
     buried = buried_rows(lines)
     if buried:
         print(f"[fail] {len(buried)} register row(s) are buried inside another row:")
