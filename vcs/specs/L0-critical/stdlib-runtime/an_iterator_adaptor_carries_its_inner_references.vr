@@ -1,5 +1,5 @@
 // @test: run
-// @tier: 0
+// @tier: 0,1
 // @level: L0
 // @tags: iterator, adaptor, enumerate, slice, reference, regression
 // @timeout: 60000
@@ -19,15 +19,21 @@
 // (measured: `nm` on a binary instantiating it over each shows a single
 // `_EnumerateIter.next`, no monomorphised copies).
 //
-// WHY THIS SPEC RUNS AT TIER 0 ONLY. Tier 1 currently faults on the
-// slice rung: the `Deref` after `Unpack` sees a register carrying no
-// facts at all and loads through it, so the byte VALUE becomes an
+// WHAT TIER 1 USED TO DO, and why the rungs are shaped this way. The
+// slice rung faulted: the `Deref` after `Unpack` saw a register carrying
+// no facts at all and loaded through it, so the byte VALUE became an
 // address — `EXC_BAD_ACCESS` at `0x6c`, which is `'l'`. The `List` rung
-// passes there, because loading an address is right for ListIter.
-// Neither `Deref` default serves both, and the fact cannot travel
-// statically through a generic adaptor body; that is T1450 and
-// `docs/architecture/returned-reference-contract.md` §7. Turn the tier
-// list into `0,1` when it lands — the rungs below need no change.
+// passed, because loading an address is right for `ListIter`. Neither
+// `Deref` default serves both, so the producers had to agree: a 0x0B
+// whose reference LEAVES the frame now hands back the address, exactly
+// as 0x0D does, while in-frame sites keep the pre-load that only the
+// producer's element stride can justify. T1450, and
+// `docs/architecture/returned-reference-contract.md` §7.
+//
+// Keep rung 2 beside the other two. It is the control that says whether
+// a failure is about the ADAPTOR or about the iterator underneath it —
+// without it, a regression in `SliceIter` itself would read as a
+// regression in `enumerate`.
 //
 // The `+ 0` on every assertion is deliberate: a bare `assert(v == 63)`
 // can be folded by the frontend's own model and would test nothing.

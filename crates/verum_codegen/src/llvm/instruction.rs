@@ -25514,6 +25514,51 @@ fn lower_cbgr_extended<'ctx>(
             let list_reg = op_reg(operands, 1);
             let index_reg = op_reg(operands, 2);
 
+            // T1450 — does THIS site's reference leave the frame? The answer
+            // decides which representation 0x0B must emit, and it is read from
+            // the same instruction list `wrapped_payload_is_slot_address`
+            // reads, through the same helper, so the two cannot disagree.
+            let ctx_instr_idx = ctx.current_vbc_instr_idx();
+            let rle_fn_name = ctx.function_name().to_string();
+            let rle_body_found_and_escapes = ctx
+                .vbc_module()
+                .and_then(|m| {
+                    m.functions
+                        .iter()
+                        .find(|f| {
+                            m.get_string(f.name)
+                                .map(|n| n == rle_fn_name)
+                                .unwrap_or(false)
+                        })
+                        .map(|f| (m, f))
+                })
+                .and_then(|(_, f)| f.instructions.as_ref())
+                .map(|ins| {
+                    // SELF-CHECKING. `current_vbc_instr_idx` is written by one
+                    // lowering path; a site reached by another would carry a
+                    // stale index and select a DIFFERENT instruction. So the
+                    // index is believed only when the instruction it names is
+                    // this very 0x0B writing this very `dst`. A stale index
+                    // fails that test and the arm keeps its old behaviour
+                    // rather than guessing.
+                    let at = ctx_instr_idx;
+                    let names_this_site = matches!(
+                        ins.get(at),
+                        Some(verum_vbc::Instruction::CbgrExtended { sub_op, operands })
+                            if *sub_op == CBGR_SUB_REF_LIST_ELEMENT
+                                && operands.len() >= 3
+                                && op_reg(operands, 0) == dst
+                    );
+                    names_this_site && escaping_interior_ref_sites(ins).contains(&at)
+                });
+            if std::env::var_os("VERUM_TRACE_RLE").is_some() {
+                eprintln!(
+                    "[rle] fn={rle_fn_name} dst=r{dst} at={ctx_instr_idx} body={} escapes={}",
+                    rle_body_found_and_escapes.is_some(),
+                    rle_body_found_and_escapes.unwrap_or(false),
+                );
+            }
+
             let list_ptr = as_ptr(ctx, ctx.get_register(list_reg)?, "rle_list_ptr")?;
             let index = as_i64(ctx, ctx.get_register(index_reg)?, "rle_idx")?;
             let i64_type = ctx.types().i64_type();
@@ -25559,9 +25604,71 @@ fn lower_cbgr_extended<'ctx>(
             // ZERO-extend, 8 is Value-wide. A plain `load i64` here read eight
             // bytes out of a one-byte element for every byte-backed slice.
             //
-            // The arm still hands back the LOADED value rather than the slot
-            // pointer, and still marks the register an interior list ref — both
-            // are the contract DEREF-INTERIOR-1 depends on and neither changes.
+            // The IN-FRAME arm hands back the LOADED value rather than the
+            // slot pointer, and marks the register an interior list ref — both
+            // are the contract DEREF-INTERIOR-1 depends on. That is now the
+            // arm BELOW: sites whose reference leaves the frame take the
+            // branch that follows and do neither.
+            //
+            // T1450 — THE ESCAPING BRANCH. When this reference leaves the
+            // frame, the pre-load below is the wrong representation: the
+            // caller cannot tell a pre-loaded VALUE from the ADDRESS that
+            // `RefRawAddr` (0x0D) hands back, and a generic adaptor over both
+            // producers is ONE function, so no walker can recover it.
+            // Measured: `.enumerate()` over a `&[Byte]` faults at Tier 1 with
+            // EXC_BAD_ACCESS at 0x6c — the byte 'l' used as an address —
+            // while the same loop over a `List<Int>` is correct.
+            //
+            // So an escaping site behaves EXACTLY like 0x0D: hand back the
+            // address, let the consumer load. In-frame sites keep the
+            // pre-load, which is what makes `&text.as_bytes()[1]` read 66 at
+            // Tier 1 where Tier 0 answers 0 (T1451).
+            //
+            // NOT marked `interior_list_ref`: that mark makes `Deref` pass
+            // through, which is right for a pre-loaded value and wrong for an
+            // address. 0x0D marks it and is worked around at `IterNext`
+            // instead; this arm does not inherit that.
+            //
+            // A stride the address CANNOT represent is refused, loudly. That
+            // mirrors the interpreter's own FATREF-INTERIOR-REF-1 arm, which
+            // panics with "interior reference into a raw-element slice (stride
+            // N) is not representable"; the shape that reaches it here is
+            // `SliceIter.next` over a stamped byte pack, which is broken at
+            // Tier 0 today (T1449) and would otherwise become SILENTLY wrong
+            // at Tier 1 instead of merely broken.
+            if rle_body_found_and_escapes == Some(true) {
+                let esc_fn = ctx.function();
+                let esc_cx = ctx.llvm_context();
+                let esc_ok = esc_cx.append_basic_block(esc_fn, "rle_esc_ok");
+                let esc_bad = esc_cx.append_basic_block(esc_fn, "rle_esc_bad");
+                let is_value_stride = ctx
+                    .builder()
+                    .build_int_compare(
+                        IntPredicate::EQ,
+                        rle_elem,
+                        i64_type.const_int(8, false),
+                        "rle_esc_w8",
+                    )
+                    .or_llvm_err()?;
+                ctx.builder()
+                    .build_conditional_branch(is_value_stride, esc_ok, esc_bad)
+                    .or_llvm_err()?;
+                ctx.builder().position_at_end(esc_bad);
+                emit_runtime_abort(
+                    ctx,
+                    "interior reference into a raw-element slice is not \
+                     representable across a return - index the slice by value \
+                     instead (T1450 / FATREF-INTERIOR-REF-1)",
+                    "rle_esc_msg",
+                )?;
+                ctx.builder()
+                    .build_unconditional_branch(esc_ok)
+                    .or_llvm_err()?;
+                ctx.builder().position_at_end(esc_ok);
+                ctx.set_register(dst, rle_addr.into());
+                return Ok(());
+            }
+
             let current_fn = ctx.function();
             let llvm_cx = ctx.llvm_context();
             let rw1 = llvm_cx.append_basic_block(current_fn, "rle_w1");
@@ -39795,32 +39902,64 @@ fn mark_call_result_from_retname<'ctx>(
     ctx.set_obj_register_type(dst, base.to_string());
 }
 
-/// **T1260** — the callee wrapped a reference into a variant payload; does the
-/// caller owe a LOAD on it, or is it already the value?
+/// **T1450** — which `RefListElement` (0x0B) results does this function wrap
+/// into a variant payload and hand back?
 ///
-/// The return type says `Maybe<&T>` either way, so the name cannot answer.
-/// The BODY can, and the two shapes are unmistakable when dumped:
+/// 0x0B is the one producer that LOADS at the producer, because it is the one
+/// place the element stride is known (`emit_container_view`). That is right
+/// while the reference stays in the frame and wrong the moment it leaves one:
+/// `SliceIter.next` wraps it into `Maybe.Some(...)` and returns it, where
+/// `ListIter.next` wraps an ADDRESS, and a generic adaptor over both
+/// (`EnumerateIter.next` is ONE function, measured with `nm`) cannot tell them
+/// apart. Measured: `.enumerate()` over a `&[Byte]` faults at Tier 1 with
+/// `EXC_BAD_ACCESS` at `0x6c`, the byte `'l'` used as an address, while the
+/// same loop over a `List<Int>` is correct.
 ///
-/// ```text
-/// fn 'ListIter.next'                       fn 'Maybe.as_ref'
-///  11: GetF { dst: r4, obj: r0, f: 0 }      2: GetVariantDataRef { dst: r2, … }
-///  12: Mov  { dst: r5, src: r4 }            3: Mov { dst: r3, src: r2 }
-///  19: MakeVariantTyped { tag: 1, … }       4: MakeVariantTyped { tag: 1, … }
-///  20: SetVariantData { field: 0, val: r5 } 5: SetVariantData { field: 0, val: r3 }
-/// ```
+/// So the ESCAPING sites must behave exactly like 0x0D — hand back the
+/// address, let the consumer load — and the in-frame sites must keep the
+/// pre-load, which is what makes `&text.as_bytes()[1]` read 66 at Tier 1
+/// where Tier 0 answers 0 (T1451).
 ///
-/// `ListIter.next` wraps `self.ptr` — a `&unsafe T` field read with `GetF`,
-/// i.e. a SLOT ADDRESS one load away from the element. `Maybe.as_ref` wraps
-/// what `GetVariantDataRef` handed it, which under Tier 1 IS the value. Peel
-/// the first, never the second: measured, peeling `Maybe<Point>.as_ref()`
-/// loads the object's header word and the program SIGSEGVs.
+/// ONE RULE, READ IN TWO DIRECTIONS. This set is consulted by the 0x0B arm
+/// (which representation to emit) and by `wrapped_payload_is_slot_address`
+/// (whether the caller owes a load). Both call THIS function on the same
+/// instruction list, so they cannot disagree — a disagreement would be a
+/// double load or none, and neither is recoverable at runtime.
 ///
-/// This is the contract's rule 1 arriving at the wrapped case — two producers
-/// yield an address, one yields the already-loaded value — and its rule 4:
-/// anything the walk cannot read answers "already a value", which is what
-/// every caller did before this existed.
-fn wrapped_payload_is_slot_address(instrs: &[verum_vbc::Instruction]) -> bool {
-    let mut saw_site = false;
+/// The backward walk is deliberately the same arm set as
+/// `wrapped_payload_is_slot_address`: an instruction the list does not know is
+/// a barrier, so incomplete coverage yields the OLD answer rather than a wrong
+/// one.
+/// What produced the payload a field-0 `SetVariantData` stores.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum WrappedPayload {
+    /// A `GetF`-read slot address — `ListIter.next`'s `&*self.ptr`.
+    SlotAddress,
+    /// A `RefListElement` (0x0B) whose result therefore LEAVES the frame,
+    /// carrying the INSTRUCTION INDEX of that 0x0B.
+    ///
+    /// The index and not the register: register numbers are reused inside a
+    /// function, so a body with two `&xs[i]` sites — one escaping, one not —
+    /// would see the second wrongly classified and hand back an address where
+    /// a value is owed. A site is unique; a register is not.
+    EscapingInteriorRef(usize),
+    /// Anything else, including anything the walk cannot read: already the
+    /// value, which is what every caller assumed before T1260.
+    Value,
+}
+
+/// ONE backward walk, two views (T1450).
+///
+/// `escaping_interior_ref_regs` and `wrapped_payload_is_slot_address` are the
+/// two sides of a single decision — which representation 0x0B emits, and
+/// whether the caller owes a load on it — so they read the same instruction
+/// list through this one classifier. Two walks with drifting arm sets is the
+/// exact shape of the defect being fixed; it must not reappear inside the fix.
+///
+/// An instruction this list does not know is a BARRIER: incomplete coverage
+/// yields `Value`, which is the pre-T1260 answer, never a wrong one.
+fn classify_wrapped_payloads(instrs: &[verum_vbc::Instruction]) -> Vec<WrappedPayload> {
+    let mut out = Vec::new();
     for (i, ins) in instrs.iter().enumerate() {
         let verum_vbc::Instruction::SetVariantData { field, value, .. } = ins else {
             continue;
@@ -39828,27 +39967,22 @@ fn wrapped_payload_is_slot_address(instrs: &[verum_vbc::Instruction]) -> bool {
         if *field != 0 {
             continue;
         }
-        saw_site = true;
         let mut r = value.0;
-        let mut from_getf = false;
-        for prev in instrs[..i].iter().rev() {
+        let mut verdict = WrappedPayload::Value;
+        for (at, prev) in instrs[..i].iter().enumerate().rev() {
             use verum_vbc::Instruction as I;
-            // The payload register is set SEVERAL instructions before the
-            // `SetVariantData` that consumes it — `ListIter.next` puts the
-            // whole pointer bump in between — so a walk that treats every
-            // unrecognised instruction as a barrier stops immediately and
-            // answers "no". (It did: the first version of this walk turned
-            // the fix off entirely, measured, and the tell was that BOTH
-            // polarities of the kill switch printed the same address.)
-            //
-            // So the arms below say, for each instruction, whether it can
-            // define `r`. An instruction this list does not know is still a
-            // barrier — the coverage is allowed to be incomplete, the answer
-            // is not allowed to be wrong.
             match prev {
                 I::Mov { dst, src } if dst.0 == r => r = src.0,
                 I::GetF { dst, .. } if dst.0 == r => {
-                    from_getf = true;
+                    verdict = WrappedPayload::SlotAddress;
+                    break;
+                }
+                I::CbgrExtended { sub_op, operands }
+                    if *sub_op == CBGR_SUB_REF_LIST_ELEMENT
+                        && operands.len() >= 3
+                        && op_reg(operands, 0) == r =>
+                {
+                    verdict = WrappedPayload::EscapingInteriorRef(at);
                     break;
                 }
                 // Known definers that are NOT a slot-address read: reaching
@@ -39873,11 +40007,64 @@ fn wrapped_payload_is_slot_address(instrs: &[verum_vbc::Instruction]) -> bool {
                 _ => break,
             }
         }
-        if !from_getf {
-            return false;
-        }
+        out.push(verdict);
     }
-    saw_site
+    out
+}
+
+fn escaping_interior_ref_sites(
+    instrs: &[verum_vbc::Instruction],
+) -> std::collections::BTreeSet<usize> {
+    classify_wrapped_payloads(instrs)
+        .into_iter()
+        .filter_map(|p| match p {
+            WrappedPayload::EscapingInteriorRef(at) => Some(at),
+            _ => None,
+        })
+        .collect()
+}
+
+/// **T1260** — the callee wrapped a reference into a variant payload; does the
+/// caller owe a LOAD on it, or is it already the value?
+///
+/// The return type says `Maybe<&T>` either way, so the name cannot answer.
+/// The BODY can, and the two shapes are unmistakable when dumped:
+///
+/// ```text
+/// fn 'ListIter.next'                       fn 'Maybe.as_ref'
+///  11: GetF { dst: r4, obj: r0, f: 0 }      2: GetVariantDataRef { dst: r2, … }
+///  12: Mov  { dst: r5, src: r4 }            3: Mov { dst: r3, src: r2 }
+///  19: MakeVariantTyped { tag: 1, … }       4: MakeVariantTyped { tag: 1, … }
+///  20: SetVariantData { field: 0, val: r5 } 5: SetVariantData { field: 0, val: r3 }
+/// ```
+///
+/// `ListIter.next` wraps `self.ptr` — a `&unsafe T` field read with `GetF`,
+/// i.e. a SLOT ADDRESS one load away from the element. `Maybe.as_ref` wraps
+/// what `GetVariantDataRef` handed it, which under Tier 1 IS the value. Peel
+/// the first, never the second: measured, peeling `Maybe<Point>.as_ref()`
+/// loads the object's header word and the program SIGSEGVs.
+///
+/// **T1450 adds a third shape.** A `RefListElement` (0x0B) reached from the
+/// same `SetVariantData` is an ESCAPING interior reference, and the 0x0B arm
+/// emits the ADDRESS for exactly those sites — `SliceIter.next`'s
+/// `&self.slice[i]` is the case that matters, because a generic adaptor over
+/// it and `ListIter.next` is ONE function and cannot tell two conventions
+/// apart. So this answer and that arm read the same instruction list through
+/// one classifier (`classify_wrapped_payloads`); they are two views, not two
+/// walks, because two walks with drifting arm sets is the defect being fixed.
+///
+/// This is the contract's rule 1 arriving at the wrapped case — some producers
+/// yield an address, others the already-loaded value — and its rule 4:
+/// anything the walk cannot read answers "already a value", which is what
+/// every caller did before this existed.
+fn wrapped_payload_is_slot_address(instrs: &[verum_vbc::Instruction]) -> bool {
+    let sites = classify_wrapped_payloads(instrs);
+    // **T1450** — an `EscapingInteriorRef` counts as an address, because the
+    // 0x0B arm emits the address for exactly the sites this classifier names.
+    !sites.is_empty()
+        && sites
+            .iter()
+            .all(|p| !matches!(p, WrappedPayload::Value))
 }
 
 /// **T1260** — does this method hand back a `Maybe<&T>`, whose payload word

@@ -1,0 +1,76 @@
+// @test: run
+// @tier: 0,1
+// @level: L0
+// @tags: reference, mutable, slice, wrapped, regression
+// @timeout: 60000
+// @expected-exit: 0
+//
+// A WRAPPED MUTABLE REFERENCE WRITES THROUGH (T1450).
+//
+// `Slice.get_mut` hands back `Maybe<&mut T>`. A store through that
+// reference needs the element's ADDRESS, and the producer it comes from
+// — `RefListElement` (0x0B) — used to LOAD at the producer and hand back
+// the value, because that is the one place the element stride is known.
+// A store through a value goes to whatever the value happens to be.
+//
+// Measured before the fix, this very programme:
+//
+//     rung             Tier 0   Tier 1
+//     get(1)             20       20
+//     last()             30       30
+//     write via get_mut  99     SIGSEGV
+//
+// The read rungs are kept beside the write one deliberately. They passed
+// at both tiers before AND after, so they are the cells that say a fix
+// of the write did not cost the reads — the caller-side peel that makes
+// `*v` correct for `Maybe<&T>` is the same machinery the `&mut` path must
+// NOT apply, and a change that confused the two would show up here.
+//
+// The `+ 0` on every assertion is deliberate: a bare `assert(v == 20)`
+// can be folded by the frontend's own model and would test nothing.
+
+fn main() {
+    print("0 begin");
+
+    let mut xs: List<Int> = [10, 20, 30];
+
+    match xs.as_slice().get(1) {
+        Maybe.Some(v) => {
+            print(f"1 get(1)  = {*v + 0} (want 20)");
+            assert(*v + 0 == 20);
+        }
+        Maybe.None => {
+            print("1 get(1)  = None");
+            assert(false);
+        }
+    }
+
+    match xs.as_slice().last() {
+        Maybe.Some(v) => {
+            print(f"2 last()  = {*v + 0} (want 30)");
+            assert(*v + 0 == 30);
+        }
+        Maybe.None => {
+            print("2 last()  = None");
+            assert(false);
+        }
+    }
+
+    match xs.as_mut_slice().get_mut(1) {
+        Maybe.Some(v) => { *v = 99; }
+        Maybe.None => {
+            print("3 get_mut = None");
+            assert(false);
+        }
+    }
+    print(f"3 xs[1] after the write = {xs[1] + 0} (want 99)");
+    assert(xs[1] + 0 == 99);
+
+    // The neighbours must be untouched: a store through the WRONG address
+    // that happened to land inside the same list would pass the rung above.
+    print(f"4 neighbours = {xs[0] + 0} {xs[2] + 0} (want 10 30)");
+    assert(xs[0] + 0 == 10);
+    assert(xs[2] + 0 == 30);
+
+    print("5 end");
+}
