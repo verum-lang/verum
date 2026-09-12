@@ -79,7 +79,14 @@ fn law_map_continue_composition() {
     // (f . g)(x) = f(g(x)) on Continue payloads
     let cf: ControlFlow<Text, Int> = Continue(5);
     let lhs = cf.map_continue(|x| x + 1).map_continue(|x| x * 2);
-    let rhs = Continue(5).map_continue(|x| (x + 1) * 2);
+    // `Continue` IS A VARIANT OF TWO TYPES — `ControlFlow` and
+    // `ReduceResult` — so a bare `Continue(5)` with nothing to fix it
+    // inferred `ReduceResult<Int>`, which has no `map_continue`:
+    //   no method named `map_continue` found for type `ReduceResult<Int>`
+    // A COMPILE error, so the whole file was down. The annotation names
+    // the intended type. Measured 2026-09-12 (A120 family).
+    let rhs_src: ControlFlow<Text, Int> = Continue(5);
+    let rhs = rhs_src.map_continue(|x| (x + 1) * 2);
     assert_eq(lhs.continue_value(), rhs.continue_value());
     assert_eq(lhs.continue_value(), 12);
 }
