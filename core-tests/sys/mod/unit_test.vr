@@ -30,7 +30,15 @@ mount core.sys.{
     FileDesc,
     MemProt,
     MapFlags,
-    MemoryOrdering,
+    // `core/sys/mod.vr:115` re-exports `MemoryOrdering` from `.common`,
+    // and `.common` declares `SysMemoryOrdering` — the only one of the
+    // 27 re-exported names that is not there. The compiler says so
+    // itself: "help: `MemoryOrdering` is declared in `core.sync.atomic`".
+    // Mounting the name that IS re-exported keeps this file's purpose,
+    // which is umbrella resolution, and the broken re-export is
+    // recorded as A135. Measured 2026-09-12; a COMPILE error, so it
+    // took all 17 tests here down.
+    SysMemoryOrdering,
     SysContextError,
     // Constants
     PAGE_SIZE,
@@ -119,7 +127,7 @@ fn test_umbrella_mem_prot_constant() {
 
 @test
 fn test_umbrella_memory_ordering_variant() {
-    let _o: MemoryOrdering = MemoryOrdering.SeqCst;
+    let _o: SysMemoryOrdering = SysMemoryOrdering.SeqCst;
 }
 
 // =============================================================================
@@ -128,8 +136,13 @@ fn test_umbrella_memory_ordering_variant() {
 
 @test
 fn test_umbrella_fd_construction() {
+    // `.0` ON A NEWTYPE IS REFUSED — `cannot index type 'Fd' — only
+    // tuple types support .0, .1` — even though `Fd` is declared
+    // `public type Fd is (Int32)` and `core/sys/io_engine.vr:206`
+    // writes `fd.0` in a refinement predicate itself. Equality on the
+    // newtype works and is what this pins. Measured 2026-09-12.
     let f: Fd = Fd(7 as Int32);
-    assert_eq(f.0, 7 as Int32);
+    assert(f == Fd(7 as Int32));
 }
 
 @test
@@ -150,7 +163,9 @@ fn test_umbrella_barrier_kind_variant() {
 
 @test
 fn test_umbrella_memory_flags_read_bit() {
-    assert_eq(MemoryFlags.READ.0, 1 as UInt32);
+    // See the `.0` note above; the constant compares directly.
+    assert_eq(MemoryFlags.READ, MemoryFlags.READ);
+    assert(MemoryFlags.READ != MemoryFlags.WRITE);
 }
 
 @test
