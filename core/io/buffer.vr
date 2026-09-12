@@ -476,10 +476,36 @@ implement<W: Write> BufWriter<W> {
             return Result.Ok(());
         }
 
-        // Write all buffered data
+        // Write through a PACKED staging buffer.
+        //
+        // `self.buf` is a `List<Byte>`: tagged slots, eight bytes apiece,
+        // not contiguous bytes. `safe_write` hands the syscall
+        // `buf.as_ptr()` and `buf.len()` — a pointer to those slots and a
+        // count of ELEMENTS — and the kernel reads that many BYTES from
+        // there, so a four-byte write took the first four bytes of the
+        // FIRST SLOT. Measured at Tier 0: "abcd" reached the file as
+        // `61 00 00 00`, with the byte COUNT reported correctly as 4, so
+        // nothing upstream could notice.
+        //
+        // `BufReader.fill_buf_internal` above already stages its reads
+        // through a packed `[Byte; N]` and says why; this is the same
+        // requirement on the way out, and the FFI byte-buffer contract
+        // states it as a rule: a buffer destined for a C `void*` must be
+        // a packed `[Byte; N]`, handed over as a subslice.
+        //
+        // Fixed-size staging, so a flush writes at most STAGE bytes per
+        // pass and the loop runs again for the rest.
         let mut written = 0;
         while written < self.buf.len() {
-            let n = self.inner.write(&self.buf[written..])?;
+            let mut stage: [Byte; 8192] = [0 as Byte; 8192];
+            let remaining = self.buf.len() - written;
+            let chunk = if remaining < 8192 { remaining } else { 8192 };
+            let mut i = 0;
+            while i < chunk {
+                stage[i] = self.buf[written + i];
+                i = i + 1;
+            }
+            let n = self.inner.write(&stage[0..chunk])?;
             if n == 0 {
                 return Result.Err(IoError.new(IoErrorKind.WriteZero));
             }

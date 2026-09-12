@@ -1,0 +1,102 @@
+// @test: run
+// @tier: 0,1
+// @level: L0
+// @tags: io, bufwriter, bytes, ffi, packed, regression
+// @timeout: 60000
+// @expected-exit: 0
+//
+// A BUFFERED WRITE PUTS ITS BYTES ON DISK (T1453).
+//
+// `BufWriter` buffers into a `List<Byte>` — eight-byte NaN-boxed slots,
+// not contiguous bytes — and `flush_buf` handed `&self.buf[written..]`
+// straight to the write path. `safe_write` passes the kernel
+// `buf.as_ptr()` and `buf.len()`: a pointer to those SLOTS and a count of
+// ELEMENTS, where `nbyte` is a count of BYTES. For a packed `[Byte; N]`
+// the two coincide; for a list-backed slice they do not, and a four-byte
+// write handed the kernel the first four bytes of the FIRST SLOT.
+//
+// Measured before the fix, both tiers:
+//
+//     "abcd" through BufWriter   ->  61 00 00 00   on disk
+//     the call reported n = 4                      so nothing noticed
+//
+// THE BYTE COUNT IS NOT EVIDENCE THAT THOSE BYTES WERE WRITTEN, which is
+// why every rung below reads the file back rather than trusting the
+// return value.
+//
+// The reader half of the same file already staged through a packed
+// buffer and its comment said why; the writer did not. The FFI
+// byte-buffer contract states it as a rule: a buffer destined for a C
+// `void*` must be a packed `[Byte; N]`.
+//
+// The three write forms are kept together deliberately. One-shot `write`
+// and a direct `File.write` of a packed slice were CORRECT throughout, so
+// a failure of the buffered rung beside two passing ones says the defect
+// is in the buffering, not in writing.
+//
+// The `+ 0` on the numeric assertions is deliberate: a bare
+// `assert(n == 4)` can be folded by the frontend's own model.
+
+mount core.io.{write, read_to_string, File, BufWriter};
+
+fn main() {
+    print("0 begin");
+
+    let body = "abcd".to_text();
+
+    let p1 = "/tmp/verum-spec-bufwrite-oneshot.txt";
+    match write(&p1.to_text(), &body) {
+        Result.Ok(()) => {}
+        Result.Err(_) => { print("1 one-shot failed"); assert(false); }
+    }
+    match read_to_string(&p1.to_text()) {
+        Result.Ok(t) => {
+            print(f"1 one-shot  len={t.len() + 0} (want 4)");
+            assert(t.len() + 0 == 4);
+        }
+        Result.Err(_) => { print("1 one-shot read failed"); assert(false); }
+    }
+
+    let p2 = "/tmp/verum-spec-bufwrite-direct.txt";
+    match File.create(&p2.to_text()) {
+        Result.Ok(mut f) => {
+            match f.write(body.as_bytes()) {
+                Result.Ok(_)  => {}
+                Result.Err(_) => { print("2 direct failed"); assert(false); }
+            }
+        }
+        Result.Err(_) => { print("2 create failed"); assert(false); }
+    }
+    match read_to_string(&p2.to_text()) {
+        Result.Ok(t) => {
+            print(f"2 direct    len={t.len() + 0} (want 4)");
+            assert(t.len() + 0 == 4);
+        }
+        Result.Err(_) => { print("2 direct read failed"); assert(false); }
+    }
+
+    let p3 = "/tmp/verum-spec-bufwrite-buffered.txt";
+    match File.create(&p3.to_text()) {
+        Result.Ok(f) => {
+            let mut w = BufWriter.new(f);
+            match w.write_all(body.as_bytes()) {
+                Result.Ok(())  => {}
+                Result.Err(_)  => { print("3 write_all failed"); assert(false); }
+            }
+            match w.flush() {
+                Result.Ok(())  => {}
+                Result.Err(_)  => { print("3 flush failed"); assert(false); }
+            }
+        }
+        Result.Err(_) => { print("3 create failed"); assert(false); }
+    }
+    match read_to_string(&p3.to_text()) {
+        Result.Ok(t) => {
+            print(f"3 buffered  len={t.len() + 0} (want 4)");
+            assert(t.len() + 0 == 4);
+        }
+        Result.Err(_) => { print("3 buffered read failed"); assert(false); }
+    }
+
+    print("4 end");
+}
