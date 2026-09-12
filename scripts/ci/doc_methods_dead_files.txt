@@ -68,4 +68,3 @@ core-tests/sys/process_ops/unit_test.vr  # 8 test(s), 1 error(s)
 # SIGSEGV before the first test. Measured twice on 2026-09-12, once on
 # HEAD's version of the file and once with four tests added, so the crash
 # is not the additions.
-core-tests/base/data/unit_test.vr  # 164 test(s), runner SIGSEGV before test 1

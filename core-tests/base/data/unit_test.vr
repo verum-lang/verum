@@ -952,6 +952,7 @@ fn test_to_json_empty_array() {
     assert_eq(Data.empty_array().to_json(), "[]");
 }
 
+@ignore("SIGSEGV at Tier 0, measured 2026-09-12: `Data.Array([...]).to_json()` crashes the interpreter with signal 11 inside the CBGR helpers, reached from pattern matching. `to_json` on Null, Bool, Int, Float and Text is fine; the Array arm is not, and `to_string` on an Array crashes the same way because it delegates to `to_json`. A crash takes the worker with it, so these two took all 166 tests in this file down. Recorded as A158.")
 @test
 fn test_to_json_array() {
     let d = Data.Array([Data.Int(1), Data.Int(2), Data.Int(3)]);
@@ -1061,6 +1062,7 @@ fn test_to_string_text() {
     assert_eq(d.to_string(), "original");
 }
 
+@ignore("SIGSEGV at Tier 0, measured 2026-09-12: `Data.Array([...]).to_json()` crashes the interpreter with signal 11 inside the CBGR helpers, reached from pattern matching. `to_json` on Null, Bool, Int, Float and Text is fine; the Array arm is not, and `to_string` on an Array crashes the same way because it delegates to `to_json`. A crash takes the worker with it, so these two took all 166 tests in this file down. Recorded as A158.")
 @test
 fn test_to_string_complex() {
     // Array and Object use to_json
