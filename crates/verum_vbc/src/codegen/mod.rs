@@ -14745,10 +14745,46 @@ impl VbcCodegen {
                             let count = types.len();
                             let names: Vec<String> =
                                 (0..count).map(|i| format!("_{}", i)).collect();
-                            // Extract type names from each type in the tuple
+                            // A PAYLOAD TYPE IS THE TYPE OF A VALUE, not a
+                            // dispatch key, so the carrier stays on it.
+                            //
+                            // `type_to_simple_name` unwraps `Shared<T>` and
+                            // `Heap<T>` to `T` on purpose — a method call on a
+                            // carrier should resolve against the inner type,
+                            // and the interpreter peels the carrier when it
+                            // dispatches. But these strings become the TYPE OF
+                            // THE VARIABLE a pattern binds, and the
+                            // pre-resolved static-call route hands that
+                            // variable on as an ordinary first argument
+                            // without peeling anything.
+                            //
+                            // Measured on a twenty-line program — a variant
+                            // carrying `Shared<Inner>`, matched, then a method
+                            // called on the binding:
+                            //
+                            //     t.pick()                       PANIC
+                            //     (*t).pick()                    55
+                            //     let s: Shared<Inner> = t;
+                            //     s.pick()                       55
+                            //
+                            //     field access out of bounds: field index 4
+                            //     (offset 32+8 = 40) exceeds object data size
+                            //     24 type_id=520 type='Shared'
+                            //
+                            // Both working spellings say the same thing: given
+                            // the carrier in the type, the existing machinery
+                            // peels it. The trace named the loss —
+                            // `[pat-trace] variant='Handle::HSdk' ->
+                            // payload_types=Some(["Inner"])` for a payload
+                            // declared `Shared<Inner>`, and then
+                            // `[scrut-bind] var='t' field_type=Some("Inner")`.
+                            //
+                            // `extract_type_name_from_ast` keeps the generic
+                            // spelling; the dispatch-key stripping stays where
+                            // it belongs, at the dispatch sites.
                             let type_names: Vec<String> = types
                                 .iter()
-                                .map(|ty| self.type_to_simple_name(ty))
+                                .map(Self::extract_type_name_from_ast)
                                 .collect();
                             (count, names, type_names)
                         }
