@@ -22,7 +22,6 @@
 # 2129 failed, 371 ignored, 2091s at 4 threads. 84 files account for
 # 1774 of those failures: 9.3% of the suite never runs at all.
 
-core-tests/async/future/regression_test.vr  # 10 test(s), 5 error(s)
 core-tests/async/intrinsics/integration_test.vr  # 3 test(s), 1 error(s)
 core-tests/async/intrinsics/property_test.vr  # 5 test(s), 2 error(s)
 core-tests/async/intrinsics/unit_test.vr  # 11 test(s), 3 error(s)
