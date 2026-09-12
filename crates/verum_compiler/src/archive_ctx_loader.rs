@@ -2002,10 +2002,40 @@ fn scan_module_symbols(module: &VbcModule) -> ModuleSymbolView {
         .collect();
     for (fid, sid) in module.external_function_names.iter() {
         id_to_name.entry(fid.0).or_insert_with(|| {
-            name_by_id
-                .get(sid)
-                .cloned()
-                .unwrap_or_default()
+            let recorded = name_by_id.get(sid).cloned().unwrap_or_default();
+            // **T1461 — THE GRAPH MUST NAME THE CALLEE, NOT THE CALLER'S
+            // SPELLING OF IT.** `external_function_names` records a
+            // cross-module call under the spelling the CONSUMING module
+            // used; for a mounted function that is
+            // `<consumer module>.<leaf>`, which no descriptor carries.
+            //
+            // The walk that reads these names then cannot follow the
+            // edge: `function_index` misses (no such descriptor), and
+            // both leaf probes miss too, because `leaf_matches` keys on
+            // LAST segments and the probes pass dotted strings. What
+            // fires instead is `home_module_of`, whose longest existing
+            // prefix is the CONSUMER's module — so the merge pulls in
+            // the module that made the call and not the one that owns
+            // the body.
+            //
+            // Measured on the shipped archive, and it is the shape of
+            // the whole defect: the assembled module carries all 39
+            // `core.security.aead.aes_gcm` functions and ZERO
+            // occurrences of `aes128_encrypt_block`, declared in
+            // `core/security/cipher/aes.vr` and mounted into aes_gcm.
+            // Eight merged bodies call a primitive the merge never
+            // brought.
+            //
+            // `mount_aliases` holds the canonical spelling under that
+            // exact alias, in THIS module, right here. Translating at
+            // the graph's source makes the edge exact — no fanout, no
+            // cap interaction, and no closure growth beyond what is
+            // genuinely called.
+            module
+                .mount_alias_target(&recorded)
+                .map(|(_id, canon)| canon.to_string())
+                .filter(|c| !c.is_empty())
+                .unwrap_or(recorded)
         });
     }
     let mut functions = Vec::with_capacity(module.functions.len());
