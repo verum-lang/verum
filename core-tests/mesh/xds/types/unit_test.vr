@@ -73,15 +73,33 @@ fn test_type_url_constants_all_pairwise_distinct() {
 @test
 fn test_type_url_all_use_envoy_namespace() {
     // Every canonical xDS TypeUrl must begin with the Envoy v3 prefix.
+    //
+    // EACH CONSTANT IS BOUND TO A `let` FIRST, AND THAT IS THE WORK-AROUND.
+    // `TypeUrl.LISTENER.starts_with(prefix)` — a method call directly on an
+    // ARCHIVE-RESIDENT associated constant — fails in VBC codegen with
+    // `UndefinedVariable("TypeUrl")`, AFTER the type-checker accepted it.
+    // Measured 2026-09-12: reading the constant (`TypeUrl.LISTENER ==
+    // TypeUrl.CLUSTER`) is fine, the identical shape on a LOCALLY declared
+    // type is fine, and binding to a `let` first is fine. It is a compile
+    // error, so no `@ignore` contains it: one line took all 14 tests in this
+    // file down. Recorded as A150.
     let prefix = "type.googleapis.com/envoy.";
-    assert(TypeUrl.LISTENER.starts_with(prefix));
-    assert(TypeUrl.CLUSTER.starts_with(prefix));
-    assert(TypeUrl.ROUTE_CONFIGURATION.starts_with(prefix));
-    assert(TypeUrl.CLUSTER_LOAD_ASSIGNMENT.starts_with(prefix));
-    assert(TypeUrl.SECRET.starts_with(prefix));
-    assert(TypeUrl.SCOPED_ROUTE_CONFIGURATION.starts_with(prefix));
-    assert(TypeUrl.VIRTUAL_HOST.starts_with(prefix));
-    assert(TypeUrl.RUNTIME.starts_with(prefix));
+    let listener = TypeUrl.LISTENER;
+    assert(listener.starts_with(prefix));
+    let cluster = TypeUrl.CLUSTER;
+    assert(cluster.starts_with(prefix));
+    let route_configuration = TypeUrl.ROUTE_CONFIGURATION;
+    assert(route_configuration.starts_with(prefix));
+    let cluster_load_assignment = TypeUrl.CLUSTER_LOAD_ASSIGNMENT;
+    assert(cluster_load_assignment.starts_with(prefix));
+    let secret = TypeUrl.SECRET;
+    assert(secret.starts_with(prefix));
+    let scoped_route_configuration = TypeUrl.SCOPED_ROUTE_CONFIGURATION;
+    assert(scoped_route_configuration.starts_with(prefix));
+    let virtual_host = TypeUrl.VIRTUAL_HOST;
+    assert(virtual_host.starts_with(prefix));
+    let runtime = TypeUrl.RUNTIME;
+    assert(runtime.starts_with(prefix));
 }
 
 // =============================================================================

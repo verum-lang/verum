@@ -37,7 +37,6 @@ core-tests/base/refinement/let_binding_test.vr  # 10 test(s), 1 error(s)
 core-tests/mem/allocator/integration_test.vr  # 17 test(s); was 2 compile errors (a renamed CONSTANT in a mount, and `Shared(x)` for `Shared.new(x)`), both fixed 2026-09-12 — the file now SIGSEGVs before its first test instead
 core-tests/mem/capability/regression_test.vr  # 6 test(s), 8 error(s)
 core-tests/mem/capability/unit_test.vr  # 62 test(s), 16 error(s)
-core-tests/mesh/xds/types/unit_test.vr  # 14 test(s)
 core-tests/meta/contexts/property_test.vr  # 36 test(s), 17 error(s)
 core-tests/meta/contexts/unit_test.vr  # 102 test(s), 14 error(s)
 core-tests/meta/quote/unit_test.vr  # 22 test(s), 5 error(s)
