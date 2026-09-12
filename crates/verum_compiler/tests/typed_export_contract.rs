@@ -1,6 +1,7 @@
 //! Contract tests for the typed-IR export seam (T0675, with the
 //! reproducibility and capability-visibility acceptance folded in from
-//! T0677 / T0676 — see `docs/architecture/deterministic-profile-and-typed-export.md`).
+//! T0675, which absorbed T0677 / T0676 — see
+//! `docs/architecture/deterministic-profile-and-typed-export.md`).
 //!
 //! NOTE: CI currently runs `cargo test --workspace --lib --bins`, which
 //! excludes integration tests — this gate is inert on PRs until CI adds
@@ -42,7 +43,7 @@ fn count_down(n: Int) -> Int {
 }
 "#;
 
-/// §5 (T0677 fold): two independent parse+convert+serialize runs over the
+/// §5 (T0675 fold, ex-T0677): two independent parse+convert+serialize runs over the
 /// same source produce byte-identical artefacts. Any map-iteration-order,
 /// environment or timestamp leakage breaks this equality.
 #[test]
@@ -96,7 +97,7 @@ fn items_sorted_canonically() {
     assert_eq!(ty_names, ty_sorted, "types must be name-sorted");
 }
 
-/// §4 + §6 (T0676 fold): declared DI contexts (`using [...]`), refinement
+/// §4 + §6 (T0675 fold, ex-T0676): declared DI contexts (`using [...]`), refinement
 /// predicates and `decreases` loop metadata are all visible to a §4
 /// consumer — the capability/effect surface a downstream backend keys on.
 #[test]

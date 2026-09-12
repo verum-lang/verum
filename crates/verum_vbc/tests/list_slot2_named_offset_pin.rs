@@ -14,7 +14,7 @@
 //!   * `data_ptr.add(2)` on a `*const Value` — width-safe (scales by element).
 //!
 //! This pin covers the dangerous one. It deliberately does NOT forbid the
-//! width-safe spellings: they are invisible to a layout realign (T0293) and so
+//! width-safe spellings: they are invisible to a layout realign and so
 //! still want converting eventually, but they are not defects, and a blanket
 //! ban would fire on every third-element access of any Value array — the same
 //! over-match that nearly saw Stopwatch's `accumulated` field converted to a
@@ -69,7 +69,7 @@ fn no_hardcoded_list_slot2_byte_offset_in_interpreter() {
         offenders.is_empty(),
         "hardcoded byte offset for a heap object's slot 2 reintroduced at:\n  {}\n\n\
          If this addresses a List backing pointer, use `heap::LIST_PTR_OFFSET` \
-         so a layout realign reaches it (T0293).\n\
+         so a layout realign reaches it.\n\
          If it addresses the third field of some OTHER record type, do NOT use \
          the List constant — derive from size_of::<Value>() instead, or the \
          next List realign will silently move your field too.",
@@ -86,6 +86,6 @@ fn list_ptr_offset_is_reachable_from_the_interpreter_heap_module() {
     assert!(
         heap.contains("pub const LIST_PTR_OFFSET"),
         "interpreter::heap no longer re-exports LIST_PTR_OFFSET; the List \
-         slot-2 sites depend on it (T0293)"
+         slot-2 sites depend on it"
     );
 }

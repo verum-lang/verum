@@ -20,7 +20,8 @@
 //!   * it exists in a different sibling — move it to the right block
 //!     (`Dim`, eb49c1925);
 //!   * it is a deliberate forward declaration of another task's surface —
-//!     leave it and say so (`StaticShape`/`DynShape`, handed to T0186).
+//!     leave it and say so (`StaticShape`/`DynShape`, part of the
+//!     GPU/tensor campaign T0179, which absorbed T0186).
 //!
 //! So a mechanical pass would be wrong in three of four cases.  This gate
 //! only stops the set growing.
