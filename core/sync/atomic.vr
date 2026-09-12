@@ -266,6 +266,22 @@ implement AtomicInt {
         }
     }
 
+    /// Weak compare-and-exchange — same contract as `compare_exchange`,
+    /// and permitted to fail spuriously. Delegates, because the strong
+    /// operation satisfies a retry loop exactly. See `AtomicU64`'s copy
+    /// for why this spelling has to exist (A118).
+    @inline(always)
+    public fn compare_exchange_weak(
+        &self,
+        current: Int,
+        new: Int,
+        success: MemoryOrdering,
+        failure: MemoryOrdering
+    ) -> Result<Int, Int> {
+        self.compare_exchange(current, new, success, failure)
+    }
+
+
     // Atomic fetch-add, returns old value.
     // Uses typed atomic_fetch_add_u64 intrinsic.
     @inline(always)
@@ -438,6 +454,22 @@ implement AtomicU8 {
         }
     }
 
+    /// Weak compare-and-exchange — same contract as `compare_exchange`,
+    /// and permitted to fail spuriously. Delegates, because the strong
+    /// operation satisfies a retry loop exactly. See `AtomicU64`'s copy
+    /// for why this spelling has to exist (A118).
+    @inline(always)
+    public fn compare_exchange_weak(
+        &self,
+        current: Byte,
+        new: Byte,
+        success: MemoryOrdering,
+        failure: MemoryOrdering
+    ) -> Result<Byte, Byte> {
+        self.compare_exchange(current, new, success, failure)
+    }
+
+
     // Atomic fetch-add, returns old value.
     //
 
@@ -604,6 +636,22 @@ implement AtomicU16 {
             }
         }
     }
+
+    /// Weak compare-and-exchange — same contract as `compare_exchange`,
+    /// and permitted to fail spuriously. Delegates, because the strong
+    /// operation satisfies a retry loop exactly. See `AtomicU64`'s copy
+    /// for why this spelling has to exist (A118).
+    @inline(always)
+    public fn compare_exchange_weak(
+        &self,
+        current: UInt16,
+        new: UInt16,
+        success: MemoryOrdering,
+        failure: MemoryOrdering
+    ) -> Result<UInt16, UInt16> {
+        self.compare_exchange(current, new, success, failure)
+    }
+
 
     // Atomic fetch-add, returns old value.
     // Uses u32-aligned CAS loop for true atomicity.
@@ -779,6 +827,22 @@ implement AtomicU32 {
         }
     }
 
+    /// Weak compare-and-exchange — same contract as `compare_exchange`,
+    /// and permitted to fail spuriously. Delegates, because the strong
+    /// operation satisfies a retry loop exactly. See `AtomicU64`'s copy
+    /// for why this spelling has to exist (A118).
+    @inline(always)
+    public fn compare_exchange_weak(
+        &self,
+        current: UInt32,
+        new: UInt32,
+        success: MemoryOrdering,
+        failure: MemoryOrdering
+    ) -> Result<UInt32, UInt32> {
+        self.compare_exchange(current, new, success, failure)
+    }
+
+
     // Atomic fetch-add, returns old value.
     // Uses typed atomic_fetch_add_u32 intrinsic.
     public fn fetch_add(&self, val: UInt32, order: MemoryOrdering) -> UInt32 {
@@ -913,6 +977,35 @@ implement AtomicU64 {
         }
     }
 
+    /// Weak compare-and-exchange — same contract as `compare_exchange`,
+    /// and permitted to fail spuriously.
+    ///
+    /// **A118.** This spelling was CALLED and never DECLARED.
+    /// `core/metrics/value.vr`'s `AtomicF64.fetch_add` drives a CAS retry
+    /// loop through it, and every float-accumulating metric goes through
+    /// that loop, so `Counter.inc()` and `Histogram.observe(5.0)` both
+    /// ended with `Panic: method 'AtomicU64.compare_exchange_weak' not
+    /// found`. Measured 2026-09-12 at Tier 0; the reads were fine, which
+    /// is why the surface looked alive.
+    ///
+    /// The strong operation satisfies a retry loop exactly — it differs
+    /// only in never failing spuriously — so this delegates rather than
+    /// re-implementing the CAS. A caller that loops on `Err` is correct
+    /// either way; a caller that treats a single `Err` as final would be
+    /// wrong with the weak form on any platform, which is why no such
+    /// caller exists.
+    @inline(always)
+    public fn compare_exchange_weak(
+        &self,
+        current: UInt64,
+        new: UInt64,
+        success: MemoryOrdering,
+        failure: MemoryOrdering
+    ) -> Result<UInt64, UInt64> {
+        self.compare_exchange(current, new, success, failure)
+    }
+
+
     // Atomic fetch-add, returns old value.
     // Uses typed atomic_fetch_add_u64 intrinsic.
     public fn fetch_add(&self, val: UInt64, order: MemoryOrdering) -> UInt64 {
@@ -1046,6 +1139,22 @@ implement AtomicBool {
             Result.Err(actual != 0)
         }
     }
+
+    /// Weak compare-and-exchange — same contract as `compare_exchange`,
+    /// and permitted to fail spuriously. Delegates, because the strong
+    /// operation satisfies a retry loop exactly. See `AtomicU64`'s copy
+    /// for why this spelling has to exist (A118).
+    @inline(always)
+    public fn compare_exchange_weak(
+        &self,
+        current: Bool,
+        new: Bool,
+        success: MemoryOrdering,
+        failure: MemoryOrdering
+    ) -> Result<Bool, Bool> {
+        self.compare_exchange(current, new, success, failure)
+    }
+
 
     // Get mutable reference to underlying value.
     public fn get_mut(&mut self) -> &mut Bool {

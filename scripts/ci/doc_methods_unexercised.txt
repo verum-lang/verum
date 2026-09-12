@@ -135,10 +135,8 @@ hash.md	finalize_xof
 http2.md	decode_payload
 http2.md	encode_never_indexed
 io.md	accessed_secs
-io.md	ancestors
 io.md	canonicalize
 io.md	close_stdin
-io.md	components
 io.md	create_dir_all
 io.md	created_secs
 io.md	deregister
@@ -153,7 +151,6 @@ io.md	path
 io.md	read_link
 io.md	remove_dir_all
 io.md	set_current_dir
-io.md	set_file_name
 io.md	set_limit
 io.md	set_permissions
 io.md	symlink
@@ -184,7 +181,6 @@ mesh.md	with_user_agent
 metrics.md	counter
 metrics.md	encode_into
 metrics.md	histogram
-metrics.md	observe
 proxy.md	layer
 proxy.md	stream_mut
 proxy.md	with_backoff

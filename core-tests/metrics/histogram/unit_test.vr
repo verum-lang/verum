@@ -5,7 +5,7 @@
 // `core/metrics/histogram.vr` — Prometheus-style histograms.
 // =============================================================================
 
-mount core.metrics.histogram.{HistogramBuckets};
+mount core.metrics.histogram.{HistogramBuckets, Histogram};
 mount core.base.maybe.{Maybe, Some, None};
 mount core.base.result.{Result, Ok, Err};
 
@@ -60,6 +60,40 @@ fn test_histogram_buckets_field_independence() {
     let b: HistogramBuckets = HistogramBuckets { bounds: nonempty };
     assert_eq(a.bounds.len(), 0);
     assert_eq(b.bounds.len(), 2);
+}
+
+// =============================================================================
+// observe — the operation the histogram exists for (A118)
+// =============================================================================
+//
+// Everything above pins bucket LAYOUT. Nothing recorded a sample, so
+// `observe` was on the repository's unexercised-methods roster — and it
+// was broken: it ends in `AtomicF64.fetch_add`, whose CAS retry loop
+// called `AtomicU64.compare_exchange_weak`, a spelling `core/sync/atomic.vr`
+// did not declare. Measured 2026-09-12: `Histogram.observe(5.0)` answered
+// `Panic: method 'AtomicU64.compare_exchange_weak' not found`.
+//
+// The reads were fine throughout, which is why nothing noticed: a fresh
+// histogram's snapshot answers 0 whether or not `observe` works.
+
+@test
+fn test_histogram_counts_and_sums_what_it_observes() {
+    let b = HistogramBuckets.linear(0.0, 10.0, 5);
+    let h = Histogram.new(b);
+
+    let empty = h.snapshot();
+    assert(empty.count() == 0_u64);
+
+    h.observe(5.0);
+    h.observe(15.0);
+    h.observe(25.0);
+
+    let s = h.snapshot();
+    // BOTH numbers, not just the count: a sum that stayed at zero while
+    // the count moved would mean the float accumulator silently dropped
+    // every sample, which is exactly the failure mode this pins.
+    assert(s.count() == 3_u64);
+    assert(s.sum() == 45.0);
 }
 
 fn main() {}

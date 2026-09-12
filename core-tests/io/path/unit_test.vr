@@ -562,4 +562,97 @@ fn test_main_separator_is_slash_on_unix() {
     assert(MAIN_SEPARATOR == '/' || MAIN_SEPARATOR == '\\');
 }
 
+// =============================================================================
+// The three iterators / mutators the docs show and nothing ran
+// =============================================================================
+//
+// `ancestors`, `components` and `set_file_name` are documented on the io
+// reference and were on the repository's unexercised-methods roster —
+// declared, shown to readers, and called by nothing that runs. Measured
+// 2026-09-12; every number below came from running it.
+
+@test
+fn test_components_counts_the_root_as_one() {
+    // "/a/b/c.txt" is root + three names.
+    let p = Path.new("/a/b/c.txt");
+    let mut n = 0;
+    for c in p.components() { n = n + 1; }
+    assert(n == 4);
+}
+
+@test
+fn test_components_on_a_relative_path_has_no_root() {
+    let p = Path.new("a/b");
+    let mut n = 0;
+    for c in p.components() { n = n + 1; }
+    assert(n == 2);
+}
+
+@test
+fn test_components_of_root_is_one_and_of_empty_is_none() {
+    // The two degenerate inputs, which is where an off-by-one lives.
+    let r = Path.new("/");
+    let mut n = 0;
+    for c in r.components() { n = n + 1; }
+    assert(n == 1);
+
+    let e = Path.new("");
+    let mut m = 0;
+    for c in e.components() { m = m + 1; }
+    assert(m == 0);
+}
+
+@test
+fn test_components_ignores_a_trailing_separator() {
+    // "/a/b/" must count the same as "/a/b" — root + two names.
+    let p = Path.new("/a/b/");
+    let mut n = 0;
+    for c in p.components() { n = n + 1; }
+    assert(n == 3);
+}
+
+@test
+fn test_ancestors_walks_up_to_the_root() {
+    // "/a/b/c.txt", "/a/b", "/a", "/" — four, and the last is the root.
+    let p = Path.new("/a/b/c.txt");
+    let mut n = 0;
+    for a in p.ancestors() { n = n + 1; }
+    assert(n == 4);
+}
+
+@test
+fn test_ancestors_of_a_bare_relative_name_is_just_itself() {
+    // `parent("a")` is `None` in this library — a bare relative name has
+    // no parent — so the walk stops immediately. Pinned because the
+    // neighbouring convention (yielding an empty path as the parent)
+    // would give two, and the difference is invisible until asked.
+    let p = Path.new("a");
+    let mut n = 0;
+    for a in p.ancestors() { n = n + 1; }
+    assert(n == 1);
+}
+
+@test
+fn test_set_file_name_replaces_the_last_component() {
+    let mut pb = PathBuf.from("/a/b/c.txt");
+    pb.set_file_name(&"d.md");
+    assert(pb.to_text() == "/a/b/d.md");
+}
+
+@test
+fn test_set_file_name_on_a_directory_path_replaces_its_last_name() {
+    // "/a/b" has a file name — `b` — so this replaces rather than appends.
+    let mut pb = PathBuf.from("/a/b");
+    pb.set_file_name(&"c");
+    assert(pb.to_text() == "/a/c");
+}
+
+@test
+fn test_set_file_name_on_root_appends() {
+    // The root has no last component to replace, so the name is added.
+    let mut pb = PathBuf.from("/");
+    pb.set_file_name(&"x");
+    assert(pb.to_text() == "/x");
+}
+
 fn main() {}
