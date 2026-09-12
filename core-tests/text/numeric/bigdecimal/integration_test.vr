@@ -9,7 +9,7 @@
 
 mount core.text.numeric.bigdecimal.{BigDecimal, parse_bigdecimal};
 mount core.text.numeric.bigint.{BigInt};
-mount core.text.numeric.decimal.{Decimal};
+mount core.text.numeric.decimal.{Decimal, RoundingMode};
 mount core.base.maybe.{Maybe, Some, None};
 mount core.base.result.{Result, Ok, Err};
 
@@ -34,7 +34,12 @@ fn integration_from_bigint() {
 fn integration_div_by_zero_returns_err() {
     let a = BigDecimal.from_int(10);
     let zero = BigDecimal.zero();
-    match a.div(&zero, 10) {
+    // `div` TAKES FOUR PARAMETERS. `core/text/numeric/bigdecimal.vr:212`
+    // declares `div(&self, other, precision, mode: RoundingMode)`, and
+    // the rounding mode was missing here — `method `div` expects 3
+    // argument(s), but 2 were provided`, a COMPILE error that took
+    // the whole file down. Measured 2026-09-12.
+    match a.div(&zero, 10, RoundingMode.HalfEven) {
         Ok(_) => panic("div by zero must Err"),
         Err(_) => (),
     };
