@@ -11441,7 +11441,49 @@ fn lower_call<'ctx>(
                 // `core.sync.mutex.Mutex.new` resolves instead of
                 // degrading to a const-zero stub.
                 let xmod_recovered = xmod_name
-                    .and_then(|name| vbc_mod.resolve_function_by_name_ranked(name))
+                    .and_then(|name| {
+                        vbc_mod.resolve_function_by_name_ranked(name).or_else(|| {
+                            // **T1461 — ASK THE MOUNT-ALIAS TABLE BEFORE
+                            // GIVING UP.** `external_function_names`
+                            // records a cross-module call under the
+                            // spelling the CONSUMING module used, and for
+                            // a MOUNTED function that is
+                            // `<consumer module>.<leaf>` — a name no
+                            // descriptor carries, because the body lives
+                            // under the declaring path. The ranked chase
+                            // therefore answers None, correctly and
+                            // uselessly.
+                            //
+                            // `mount_aliases` holds, under that exact
+                            // alias, both the real id and the canonical
+                            // spelling. Measured on the shipped archive:
+                            // three consumers of `aes128_encrypt_block`
+                            // record three alias spellings and all three
+                            // point at fid 27860, canonical
+                            // `core.security.cipher.aes.aes128_encrypt_block`.
+                            // Nothing was lost; one of the two readers was
+                            // looking in the wrong table.
+                            //
+                            // THE CANONICAL NAME, NEVER THE RECORDED ID.
+                            // The alias entry carries a FunctionId, and
+                            // using it here would be the misroute class
+                            // this file has fought before
+                            // (`Deque.reallocate`'s `realloc` landing on
+                            // `AdjacencyList.add_edge`): that id is the
+                            // producing archive module's own numbering,
+                            // the assembled module renumbers, and an id
+                            // that merely EXISTS after renumbering names
+                            // an unrelated function. A wrong body binds
+                            // silently; an unresolved call at least says
+                            // so. The name is renumber-proof, so the name
+                            // is what we chase.
+                            vbc_mod
+                                .mount_alias_target(name)
+                                .and_then(|(_id, canon)| {
+                                    vbc_mod.resolve_function_by_name_ranked(canon)
+                                })
+                        })
+                    })
                     .and_then(|fid| vbc_mod.get_function(fid));
                 match xmod_recovered {
                     Some(d) => d,

@@ -1130,6 +1130,39 @@ impl VbcModule {
     /// so the diagnostic that reports it must NAME the callee instead
     /// of printing a raw sentinel number the reader has to reverse by
     /// hand.
+    /// **T1461** — the canonical target a MOUNT ALIAS points at.
+    ///
+    /// `external_function_names` records a cross-module call under the
+    /// spelling the CONSUMING module used. For a mounted function that
+    /// spelling is `<consumer module>.<leaf>` — a name no descriptor
+    /// carries, because the body lives under the DECLARING module's
+    /// path. Measured on the shipped archive:
+    ///
+    /// ```text
+    /// external_function_names[536870915] =
+    ///     'core.security.aead.aes_gcm.aes128_encrypt_block'
+    /// mount_aliases: same spelling -> fid 27860
+    ///     (canonical 'core.security.cipher.aes.aes128_encrypt_block')
+    /// ```
+    ///
+    /// Three consumers of that one function record three alias
+    /// spellings and all three point at fid 27860. So nothing is lost
+    /// and no name is corrupted: the truth sits one table over, and a
+    /// chase that reads only the first table asks for a body that was
+    /// never supposed to exist under that name.
+    ///
+    /// Returns `(real id, canonical spelling)`.
+    #[inline]
+    pub fn mount_alias_target(&self, alias: &str) -> Option<(FunctionId, &str)> {
+        self.mount_aliases.iter().find_map(|(a, fid, canon)| {
+            if self.get_string(*a) == Some(alias) {
+                Some((*fid, self.get_string(*canon).unwrap_or("")))
+            } else {
+                None
+            }
+        })
+    }
+
     #[inline]
     pub fn band_reference_name(&self, id: u32) -> Option<&str> {
         self.external_function_names
