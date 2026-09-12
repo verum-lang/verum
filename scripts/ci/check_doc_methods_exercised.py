@@ -37,8 +37,26 @@ it made a known-broken method look covered. Only these are executed:
 
     vcs/specs   @test: run  or  run-interpreter   (not typecheck-pass,
                                                    not parse-pass)
-    core-tests  files without @ignore             (180 of 1263 carry it)
+    core-tests  every file, minus the BODY of each `@ignore`d test
     docs/by-example                               (the 22 showcase programmes)
+
+...and, everywhere, minus COMMENTS. Both of those clauses were wrong
+until 2026-09-12 and wrong in OPPOSITE directions, which is why the
+count looked stable while neither half of it was right:
+
+  * core-tests was filtered by FILE — any file containing the string
+    `@ignore` was dropped whole. That discarded 183 of 1263 files. 69 of
+    the 183 have no `@ignore` ATTRIBUTE at all (the word appears in a
+    comment saying why something is hard); `core-tests/base/data` has
+    161 tests and one ignored. Per-test granularity returns 38 rows'
+    worth of real evidence: 279 -> 241.
+  * comments counted as evidence. A page's method NAMED in prose —
+    `// Histogram.observe(5.0) answered 0` sits four lines above the
+    only `observe` call, which is `@ignore`d — read as a call. Removing
+    them exposes 20 rows that nothing ever ran: 241 -> 261.
+
+The two corrections are independent and both are pinned by `--self-test`,
+which names each failure in the words above when either is reverted.
 
 KNOWN WEAKNESS, stated rather than hidden. The match is on the METHOD
 NAME, not on the receiver's type: `.get_mut(` in a List test counts as
@@ -75,8 +93,26 @@ DOCS = Path(os.environ.get("VERUM_STDLIB_DOCS")
             or (Path(_DOCS_ROOT) / "stdlib" if _DOCS_ROOT
                 else REPO.parent / "website" / "docs" / "stdlib"))
 RUN_DIRECTIVES = {"run", "run-interpreter"}
-BASELINE = 278  # Lowered by COVERAGE, never by argument — the only way
+BASELINE = 261  # Lowered by COVERAGE, never by argument — the only way
                 # this number is meant to move.
+                #   279 -> 261  NOT coverage, and not an argument
+                #               either: the INSTRUMENT was corrected,
+                #               in both directions at once. Per-test
+                #               granularity gave back 38 (279 -> 241);
+                #               removing comments from the corpus took
+                #               away 20 that were never real (241 ->
+                #               261). 16 pages' methods joined the
+                #               roster whose only evidence had been
+                #               prose, and 33 left it having been
+                #               exercised all along by tests thrown out
+                #               with the file that held them. Both
+                #               halves measured separately before this
+                #               line was written; see the docstring.
+                #   278 -> 279  metrics.md `observe`. Its one call moved
+                #               under `@ignore` when A118 showed the
+                #               histogram cannot sum — a TRUE plus, and
+                #               it is what sent me into the corpus
+                #               filter above.
                 #   293 -> 292  NOT coverage: one method left the
                 #               census between two runs, and the
                 #               denominator rose 1381 -> 1401 in the
@@ -176,22 +212,127 @@ def compare(current: list[str], roster: list[str]) -> int:
     return 1
 
 
-def executed_corpus_files() -> list[Path]:
-    """Only the files something actually runs."""
-    out: list[Path] = []
+IGNORE_ATTR = re.compile(r"^[ \t]*@ignore\b", re.M)
+FN_HEADER = re.compile(r"^[ \t]*(?:pub(?:lic)?[ \t]+)?(?:async[ \t]+)?fn\b", re.M)
+
+
+def strip_comments(text: str) -> str:
+    """A method NAMED in a comment is not a method something RUNS.
+
+    Measured 2026-09-12 on `core-tests/metrics/histogram/unit_test.vr`,
+    whose header explains the defect it pins with the words
+    `Histogram.observe(5.0)` — prose, in a `//` line, four lines above
+    the only test that calls `observe`, which is `@ignore`d. Without
+    this the sentence describing the hole counts as evidence the hole
+    is covered.
+
+    STRING LITERALS ARE LEFT ALONE, deliberately: `f"{x.len()}"` runs
+    `len`, so stripping strings would delete real evidence to remove
+    imaginary evidence. Newlines survive comment removal so the
+    line-anchored patterns below still see the file's line structure.
+    """
+    out: list[str] = []
+    i, n = 0, len(text)
+    while i < n:
+        if text[i] == '"':
+            j = i + 1
+            while j < n and text[j] != '"':
+                j += 2 if text[j] == "\\" else 1
+            out.append(text[i:j + 1])
+            i = j + 1
+        elif text.startswith("//", i):
+            j = text.find("\n", i)
+            i = n if j == -1 else j
+        elif text.startswith("/*", i):
+            j = text.find("*/", i + 2)
+            i = n if j == -1 else j + 2
+        else:
+            out.append(text[i])
+            i += 1
+    return "".join(out)
+
+
+def _body_end(text: str, open_brace: int) -> int:
+    """Index just past the `}` matching the `{` at `open_brace`."""
+    depth, i, n = 0, open_brace, len(text)
+    while i < n:
+        c = text[i]
+        if c == '"':
+            i += 1
+            while i < n and text[i] != '"':
+                i += 2 if text[i] == "\\" else 1
+        elif c == "{":
+            depth += 1
+        elif c == "}":
+            depth -= 1
+            if depth == 0:
+                return i + 1
+        i += 1
+    return n
+
+
+def strip_ignored_tests(text: str) -> str:
+    """Drop the BODY of every `@ignore`d test, KEEPING its neighbours.
+
+    THE GRANULE OF IGNORING IS A TEST, and this used to be a file: any
+    core-tests file containing the string `@ignore` was dropped whole.
+    Measured 2026-09-12 that discarded 183 of 1263 files, and the two
+    ways it was wrong compound:
+
+      * 69 of those 183 carry no `@ignore` ATTRIBUTE at all — the word
+        appears in a comment saying why something is hard.
+        `core-tests/base/env/unit_test.vr` has 76 running tests and was
+        excluded by the phrase `// @ignore: arg(0) returns Maybe.None`.
+      * of the rest, `core-tests/base/data/unit_test.vr` has 161 tests
+        and ONE ignored; 160 tests' worth of evidence went out with it.
+
+    Expects comment-stripped input, so a commented `@ignore` cannot
+    reach the attribute pattern.
+    """
+    spans: list[tuple[int, int]] = []
+    for m in IGNORE_ATTR.finditer(text):
+        fn = FN_HEADER.search(text, m.end())
+        if not fn:
+            continue
+        brace = text.find("{", fn.end())
+        if brace == -1:
+            continue
+        spans.append((m.start(), _body_end(text, brace)))
+    if not spans:
+        return text
+    merged: list[list[int]] = []
+    for a, b in sorted(spans):
+        if merged and a <= merged[-1][1]:
+            merged[-1][1] = max(merged[-1][1], b)
+        else:
+            merged.append([a, b])
+    out, prev = [], 0
+    for a, b in merged:
+        out.append(text[prev:a])
+        prev = b
+    out.append(text[prev:])
+    return "".join(out)
+
+
+def executed_corpus() -> list[tuple[Path, str]]:
+    """Only what actually runs, as (path, the text that runs)."""
+    out: list[tuple[Path, str]] = []
     specs = REPO / "vcs" / "specs"
     if specs.is_dir():
         for f in specs.rglob("*.vr"):
-            m = DIRECTIVE.search(f.read_text(errors="ignore")[:2000])
+            text = f.read_text(errors="ignore")
+            m = DIRECTIVE.search(text[:2000])
             if m and m.group(1) in RUN_DIRECTIVES:
-                out.append(f)
+                out.append((f, strip_comments(text)))
     ct = REPO / "core-tests"
     if ct.is_dir():
-        out += [f for f in ct.rglob("*.vr")
-                if "@ignore" not in f.read_text(errors="ignore")]
+        for f in ct.rglob("*.vr"):
+            out.append((f, strip_ignored_tests(
+                strip_comments(f.read_text(errors="ignore")))))
     bx = REPO / "docs" / "by-example"
     if bx.is_dir():
-        out += list(bx.rglob("*.vr"))
+        out += [(f, strip_comments(f.read_text(errors="ignore")))
+                for f in bx.rglob("*.vr")]
     return out
 
 
@@ -235,6 +376,53 @@ def self_test() -> int:
         bad += 1
     if membership([("p.md", 3, ["z", "a"])]) != ["p.md\ta", "p.md\tz"]:
         print("self-test: membership() is not the sorted (page, name) key"); bad += 1
+
+    # THE CORPUS HALF. Both of these were live defects on 2026-09-12 and
+    # both are silent: they change what counts as evidence, and the count
+    # they produce looks exactly as plausible as the right one.
+    two_tests = (
+        "// a header mentioning @ignore: arg(0) is broken\n"
+        "@test\n"
+        "fn lives() {\n"
+        "    x.alive();\n"
+        "}\n"
+        "\n"
+        "@test\n"
+        '@ignore("2^47")\n'
+        "fn skipped() {\n"
+        "    if true { y.dead(); }\n"
+        "}\n"
+        "\n"
+        "@test\n"
+        "fn also_lives() {\n"
+        "    z.also_alive();\n"
+        "}\n"
+    )
+    kept = strip_ignored_tests(strip_comments(two_tests))
+    if ".alive(" not in kept or ".also_alive(" not in kept:
+        print("self-test: stripping an @ignore'd test took its NEIGHBOURS "
+              "with it — the file-level filter is back"); bad += 1
+    if ".dead(" in kept:
+        print("self-test: an @ignore'd test's calls still count as "
+              "execution evidence"); bad += 1
+    if "@ignore: arg(0)" in kept:
+        print("self-test: a COMMENT survived comment-stripping"); bad += 1
+    # A commented mention must not disqualify the file: the old filter
+    # dropped 69 files that contain no @ignore attribute at all.
+    only_a_mention = "// see @ignore below\n@test\nfn t() { a.b(); }\n"
+    if ".b(" not in strip_ignored_tests(strip_comments(only_a_mention)):
+        print("self-test: a file merely MENTIONING @ignore lost its "
+              "coverage"); bad += 1
+    # A method named only in prose is not a method anything runs.
+    if ".observe(" in strip_comments("// Histogram.observe(5.0) answered 0\n"):
+        print("self-test: a call written in a comment counts as evidence")
+        bad += 1
+    # ... but a call inside a format literal DOES run, and must survive.
+    if ".len(" not in strip_comments('print(f"{s.len()}");\n'):
+        print("self-test: stripping comments ate a string literal"); bad += 1
+    # A `//` inside a string is not a comment.
+    if "http" not in strip_comments('let u = "http://x";\n'):
+        print("self-test: a URL in a string was read as a comment"); bad += 1
     print("self-test: OK" if not bad else f"self-test: {bad} FAILED")
     return bad
 
@@ -248,8 +436,8 @@ def main() -> int:
               "reporting UNMEASURED rather than passing on an absent input.")
         return 0
 
-    files = executed_corpus_files()
-    blob = "\n".join(f.read_text(errors="ignore") for f in files)
+    corpus = executed_corpus()
+    blob = "\n".join(text for _f, text in corpus)
 
     rows = []
     for page in sorted(DOCS.glob("*.md")):
@@ -286,7 +474,7 @@ def main() -> int:
               f"{floor_pages} — the corpus is missing or the pattern stopped "
               "matching. A census of nothing is not a clean census.")
         return 1
-    if not files:
+    if not corpus:
         print("check-doc-methods-exercised: the EXECUTED corpus is empty — "
               "no spec, core-test or by-example programme was found, so every "
               "method would report unexercised. Refusing to report a count.")
