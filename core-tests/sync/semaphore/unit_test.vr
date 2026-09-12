@@ -159,3 +159,27 @@ fn test_two_semaphores_independent() {
     assert_eq(a.available_permits(), 1);
     assert_eq(b.available_permits(), 3);
 }
+
+// =============================================================================
+// acquire_guard — documented and run by nothing (census 2026-09-12).
+// The RAII form: the permit is released when the guard drops.
+// =============================================================================
+
+@test
+fn test_acquire_guard_takes_a_permit() {
+    let s = Semaphore.new(2);
+    let _g = s.acquire_guard();
+    assert(s.available_permits() < 2);
+}
+
+@test
+fn test_acquire_guard_releases_on_scope_exit() {
+    // THE POINT OF THE GUARD. A version that acquired without arming
+    // the release passes the test above and leaks a permit here.
+    let s = Semaphore.new(1);
+    {
+        let _g = s.acquire_guard();
+        assert_eq(s.available_permits(), 0);
+    }
+    assert_eq(s.available_permits(), 1);
+}

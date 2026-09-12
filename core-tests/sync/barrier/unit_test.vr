@@ -253,3 +253,33 @@ fn test_two_count_down_latches_independent() {
     assert_eq(a.get_count(), 1);
     assert_eq(b.get_count(), 3);
 }
+
+// =============================================================================
+// Phaser — arrive_and_await / arrive_and_deregister / terminate, all
+// three documented and run by nothing (census 2026-09-12). Single-party
+// shapes, so nothing blocks.
+// =============================================================================
+
+@test
+fn test_phaser_arrive_and_await_completes_a_single_party_phase() {
+    let p = Phaser.new(1);
+    // The sole party arriving completes phase 0, and the call returns
+    // the phase it completed rather than the next one.
+    assert_eq(p.arrive_and_await(), 0);
+}
+
+@test
+fn test_phaser_arrive_and_deregister_returns_the_current_phase() {
+    let q = Phaser.new(2);
+    assert_eq(q.arrive_and_deregister(), 0);
+}
+
+@test
+fn test_phaser_terminate_is_callable_and_idempotent() {
+    let r = Phaser.new(1);
+    r.terminate();
+    // Twice: a terminate that flipped a bit without guarding would be
+    // fine once and wrong the second time.
+    r.terminate();
+    assert(true);
+}

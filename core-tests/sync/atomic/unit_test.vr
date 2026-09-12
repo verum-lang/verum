@@ -91,3 +91,43 @@ fn test_atomic_ordering_alias_seq_cst() {
     let o: AtomicOrdering = MemoryOrdering.SeqCst;
     assert(o is MemoryOrdering.SeqCst);
 }
+
+// =============================================================================
+// fetch_max — documented on the stdlib reference and run by nothing
+// (census 2026-09-12). BOTH polarities, because a `fetch_max` that
+// always stored would pass the rising case alone.
+// =============================================================================
+
+@test
+fn test_fetch_max_raises_and_returns_the_previous() {
+    let a = AtomicInt.new(5);
+    let prev = a.fetch_max(9, MemoryOrdering.Relaxed);
+    assert_eq(prev, 5);
+    assert_eq(a.load(MemoryOrdering.Relaxed), 9);
+}
+
+@test
+fn test_fetch_max_leaves_a_larger_value_alone() {
+    let a = AtomicInt.new(20);
+    let prev = a.fetch_max(9, MemoryOrdering.Relaxed);
+    assert_eq(prev, 20);
+    assert_eq(a.load(MemoryOrdering.Relaxed), 20);
+}
+
+@test
+fn test_fetch_max_with_an_equal_value_is_a_no_op() {
+    let a = AtomicInt.new(7);
+    assert_eq(a.fetch_max(7, MemoryOrdering.Relaxed), 7);
+    assert_eq(a.load(MemoryOrdering.Relaxed), 7);
+}
+
+@test
+fn test_fetch_max_is_repeatable() {
+    // Three calls, one rising, one flat, one rising again: a version
+    // that swallowed its second call passes the single-call tests.
+    let a = AtomicInt.new(0);
+    let _ = a.fetch_max(3, MemoryOrdering.Relaxed);
+    let _ = a.fetch_max(1, MemoryOrdering.Relaxed);
+    let _ = a.fetch_max(8, MemoryOrdering.Relaxed);
+    assert_eq(a.load(MemoryOrdering.Relaxed), 8);
+}

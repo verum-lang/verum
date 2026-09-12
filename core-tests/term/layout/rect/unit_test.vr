@@ -11,6 +11,7 @@
 // =============================================================================
 
 mount core.term.layout.rect.{Rect, Margin, Position};
+mount core.term.layout.shortcuts.{centered};
 mount core.base.maybe.{Maybe, Some, None};
 mount core.base.result.{Result, Ok, Err};
 
@@ -198,6 +199,41 @@ fn test_position_distance_manhattan() {
 fn test_position_distance_self_zero() {
     let p: Position = Position.new(5, 5);
     assert_eq(p.distance(&p), 0);
+}
+
+// =============================================================================
+// layout.shortcuts.centered — documented and run by nothing (census
+// 2026-09-12). It lives in `term.layout.shortcuts`, which has no folder
+// of its own; it takes a `Rect` and returns a `Rect`, so it is covered
+// here rather than in a directory created for one function.
+// =============================================================================
+
+@test
+fn test_centered_gives_the_requested_size() {
+    let area = Rect.new(0, 0, 100, 40);
+    let c = centered(area, 20, 10);
+    assert_eq(c.width, 20);
+    assert_eq(c.height, 10);
+}
+
+@test
+fn test_centered_is_actually_centred() {
+    // The size test alone passes for a box pinned at the origin.
+    // (100-20)/2 = 40 and (40-10)/2 = 15.
+    let area = Rect.new(0, 0, 100, 40);
+    let c = centered(area, 20, 10);
+    assert_eq(c.x, 40);
+    assert_eq(c.y, 15);
+}
+
+@test
+fn test_centered_respects_a_non_zero_origin() {
+    // An implementation that centred within (0,0,w,h) instead of the
+    // given area passes both tests above.
+    let area = Rect.new(10, 5, 100, 40);
+    let c = centered(area, 20, 10);
+    assert_eq(c.x, 50);
+    assert_eq(c.y, 20);
 }
 
 fn main() {}

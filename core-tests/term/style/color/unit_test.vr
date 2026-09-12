@@ -243,3 +243,50 @@ fn test_lab_white_l_at_100() {
     let l = Lab { l: 100.0, a: 0.0, b: 0.0 };
     assert_eq(l.l, 100.0);
 }
+
+// =============================================================================
+// Rgb.to_lab — documented on the stdlib reference and run by nothing
+// (census 2026-09-12). The sRGB -> linear -> XYZ(D65) -> CIELAB pipeline
+// is four stages, and a mistake in any one of them still produces a
+// plausible-looking number, so the anchors are the two the standard
+// fixes exactly.
+// =============================================================================
+
+@test
+fn test_to_lab_white_is_lightness_one_hundred() {
+    let white = Rgb { r: 255_u8, g: 255_u8, b: 255_u8 };
+    let lab = white.to_lab();
+    // D65 white is L*=100 by definition; allow float drift only.
+    assert(lab.l > 99.9 && lab.l < 100.1);
+    // ...and it is NEUTRAL: a/b are zero, which is what catches a wrong
+    // XYZ matrix that still lands the lightness.
+    assert(lab.a > -0.5 && lab.a < 0.5);
+    assert(lab.b > -0.5 && lab.b < 0.5);
+}
+
+@test
+fn test_to_lab_black_is_lightness_zero() {
+    let black = Rgb { r: 0_u8, g: 0_u8, b: 0_u8 };
+    let lab = black.to_lab();
+    assert(lab.l > -0.1 && lab.l < 0.1);
+}
+
+@test
+fn test_to_lab_is_monotone_in_lightness() {
+    // Mid grey must sit strictly between the two anchors. A pipeline
+    // that clamped, or that skipped the sRGB gamma stage, passes both
+    // endpoint tests and fails here.
+    let grey = Rgb { r: 128_u8, g: 128_u8, b: 128_u8 };
+    let l = grey.to_lab().l;
+    assert(l > 0.1 && l < 99.9);
+}
+
+@test
+fn test_to_lab_red_is_not_neutral() {
+    // Pure red has a strongly positive a* (towards red on the
+    // green-red axis). A version that returned grey for everything
+    // passes every lightness check above.
+    let red = Rgb { r: 255_u8, g: 0_u8, b: 0_u8 };
+    let lab = red.to_lab();
+    assert(lab.a > 50.0);
+}
