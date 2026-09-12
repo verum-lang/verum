@@ -56,7 +56,14 @@ public fn spawn_sync<T>(task: fn() -> T) -> T {
 
 public type SyncChannel<T> is Empty | Full(T);
 
-implement SyncChannel {
+// THE TYPE PARAMETER IS LOAD-BEARING ON THE `implement` HEADER.
+// Written `implement SyncChannel {`, the block's STATIC methods still
+// resolve — `SyncChannel.new()` constructs — while every `&self` method
+// is lost: `c.send(7)` panics with `method 'SyncChannel.send' not found
+// on receiver`. Measured 2026-09-12 on this type and on `NoOpMutex`
+// below, both in this file and both the only two `implement <Generic> {`
+// headers in core/ that name a genuinely generic type.
+implement<T> SyncChannel<T> {
     public fn new() -> SyncChannel<T> {
         Empty
     }
@@ -100,7 +107,8 @@ public type NoOpMutex<T> is {
     value: T,
 };
 
-implement NoOpMutex {
+// See the note on `SyncChannel` above.
+implement<T> NoOpMutex<T> {
     public fn new(value: T) -> NoOpMutex<T> {
         NoOpMutex { value: value }
     }
