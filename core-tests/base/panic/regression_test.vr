@@ -94,8 +94,15 @@ fn regression_location_new_preserves_field_order() {
 
 // =============================================================================
 // REGRESSION §D: PanicInfo carries (message: Text, location: Maybe<Location>).
-// Both fields accessible via the canonical accessor methods
-// `.message() -> &Text` / `.location() -> &Maybe<Location>`.
+//
+// READ AS FIELDS, NOT THROUGH THE ACCESSORS. `core/base/panic.vr:394`
+// declares the two fields and `:428` adds `message(&self)` and
+// `location(&self)` over the same two names; the FIELD wins, and
+// `info.message()` is refused with `no method named 'message' found for
+// type 'core.base.panic.PanicInfo'`. A COMPILE error, so no `@ignore`
+// contains it — it took all six tests in this file. The accessors are
+// unreachable API (A130) and the sibling unit_test reads the fields for
+// the same reason.
 // =============================================================================
 
 @test
@@ -105,8 +112,8 @@ fn regression_panic_info_with_location_round_trip() {
         message: "something went wrong".to_text(),
         location: Maybe.Some(loc),
     };
-    assert_eq(info.message(), &"something went wrong".to_text());
-    assert(info.location().is_some());
+    assert_eq(info.message, "something went wrong");
+    assert(info.location.is_some());
 }
 
 @test
@@ -115,8 +122,8 @@ fn regression_panic_info_without_location_round_trip() {
         message: "no location captured".to_text(),
         location: Maybe.None,
     };
-    assert_eq(info.message(), &"no location captured".to_text());
-    assert(info.location().is_none());
+    assert_eq(info.message, "no location captured");
+    assert(info.location.is_none());
 }
 
 // =============================================================================

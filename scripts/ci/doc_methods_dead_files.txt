@@ -32,7 +32,6 @@ core-tests/base/iterator/protocol_agnostic_test.vr  # 22 test(s), 1 error(s)
 core-tests/base/iterator/unit_test.vr  # 215 test(s), 16 error(s)
 core-tests/base/panic/integration_test.vr  # 11 test(s), 11 error(s)
 core-tests/base/panic/property_test.vr  # 31 test(s), 13 error(s)
-core-tests/base/panic/regression_test.vr  # 6 test(s), 4 error(s)
 core-tests/base/refinement/let_binding_test.vr  # 10 test(s), 1 error(s)
 core-tests/mem/allocator/integration_test.vr  # 17 test(s); was 2 compile errors (a renamed CONSTANT in a mount, and `Shared(x)` for `Shared.new(x)`), both fixed 2026-09-12 — the file now SIGSEGVs before its first test instead
 core-tests/mem/capability/regression_test.vr  # 6 test(s), 8 error(s)
