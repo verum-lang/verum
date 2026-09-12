@@ -507,7 +507,8 @@ not. What those specs die of is elsewhere:
   200 s — `348_interp_channel_sim`, `349_interp_csp_sim`,
   `606_interp_channel_ops`, `1001_nursery_structured_concurrency`,
   `1049_barrier_sync`, `1050_condvar_producer_consumer`,
-  `1051_waitgroup`, `1057_select_timeout`, `1102_nursery_basic`. So
+  `1051_waitgroup`, `1057_select_timeout`, `1102_nursery_basic`,
+  `1103_nursery_error`. So
   "TIMEOUT" is a statement about those specs, not only about the
   20 s. Whether they are unbounded or merely past 200 s is NOT
   established here, and the difference does not matter to a suite.
