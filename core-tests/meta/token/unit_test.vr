@@ -34,6 +34,22 @@ mount core.meta.token.{
 mount core.meta.span.{MetaSpan, Span, SpanFlags};
 mount core.base.maybe.{Maybe};
 
+// A QUALIFIED VARIANT CONSTRUCTOR WITH TWO PAYLOAD FIELDS IS READ AS A
+// METHOD CALL, when the type comes from the baked standard library:
+//
+//     let k: TokenKind = TokenKind.Punct(ch, Spacing.Alone);
+//     error<E400>: no method named `Punct` found for type `TokenKind`
+//
+// while `TokenKind.Ident(text)` — ONE field, same type, same file —
+// resolves, and a locally declared sum type resolves at one, two and
+// three fields alike. So it is neither arity alone nor qualification
+// alone; measured 2026-09-12 and recorded with that open question.
+//
+// A COMPILE error, so no `@ignore` contains it: three call sites took
+// all 86 tests in this file down, and a fourth error (`Ambiguous type
+// for r`) was a consequence of the third. The BARE form works and is
+// what these use.
+
 fn synthetic_span() -> Span {
     MetaSpan {
         id: 0,
@@ -406,7 +422,7 @@ fn test_token_kind_lit_variant() {
 
 @test
 fn test_token_kind_punct_variant() {
-    let k: TokenKind = TokenKind.Punct('+', Spacing.Alone);
+    let k: TokenKind = Punct('+', Spacing.Alone);
     assert(k is TokenKind.Punct);
 }
 
@@ -484,7 +500,7 @@ fn test_token_is_literal_true() {
 
 @test
 fn test_token_is_punct_true() {
-    let t = Token { kind: TokenKind.Punct(',', Spacing.Alone), span: synthetic_span() };
+    let t = Token { kind: Punct(',', Spacing.Alone), span: synthetic_span() };
     assert(t.is_punct());
 }
 
@@ -496,7 +512,7 @@ fn test_token_is_punct_false_for_ident() {
 
 @test
 fn test_token_as_punct_some_for_punct() {
-    let t = Token { kind: TokenKind.Punct(';', Spacing.Joint), span: synthetic_span() };
+    let t = Token { kind: Punct(';', Spacing.Joint), span: synthetic_span() };
     let r = t.as_punct();
     assert(r is Some);
 }
