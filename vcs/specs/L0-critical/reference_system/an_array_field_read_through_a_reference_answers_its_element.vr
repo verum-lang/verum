@@ -1,0 +1,104 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: reference, array, field, record, regression, aot-divergence
+// @timeout: 60000
+// @expected-exit: 0
+//
+// AN ARRAY FIELD READ THROUGH A STRUCT REFERENCE ANSWERS ITS ELEMENT (A147).
+//
+// TIER 1 IS THE DEFECT AND THIS SPEC IS PINNED AT TIER 0 UNTIL IT CLOSES.
+// When A147 lands, change `@tier: 0` to `@tier: 0,1` — the assertions below
+// are already the acceptance, and nothing else needs editing.
+//
+// Measured 2026-09-12 across five shapes, which is how the variable was
+// isolated. Same read, same reference, only the field's SHAPE differs:
+//
+//     type                          read       tier 0   tier 1
+//     { a,b,c,d: UInt32 }  (16 B)   w.a        ok       ok
+//     { n: UInt32, w: [..;4] }      k.n        ok       ok
+//     { w: [UInt32; 4] }   (16 B)   k.w[0]     ok       SIGSEGV
+//     { w: [UInt32; 44] } (176 B)   k.w[0]     ok       SIGSEGV
+//
+// So the reference is fine and an array field is fine — their COMBINATION
+// is not. The 16-byte array case refutes size on its own: it is exactly the
+// size of the working scalar struct. The two array sizes were chosen so that
+// one MATCHES the working case, because 16 against 176 would have answered
+// two questions at once and neither.
+//
+// The AOT fault address is the array's own data: for `w[0] = 0x2b7e1516`
+// and `w[1] = 0x2b7e1517` it is `0x2b7e15172b7e1516`, i.e.
+// `w[0] | (w[1] << 32)`. The address computed for the element is the array's
+// CONTENT rather than its address. AES was the first caller to notice —
+// `RoundKeys128 is { w: [UInt32; 44] }` — and its fault address is the
+// expanded key by the same arithmetic.
+
+type Scalars is { a: UInt32, b: UInt32, c: UInt32, d: UInt32 };
+type Small is { w: [UInt32; 4] };
+type Mixed is { n: UInt32, w: [UInt32; 4] };
+type Large is { w: [UInt32; 44] };
+
+fn make_scalars(seed: UInt32) -> Scalars {
+    Scalars {
+        a: seed,
+        b: seed + (1 as UInt32),
+        c: seed + (2 as UInt32),
+        d: seed + (3 as UInt32),
+    }
+}
+
+fn make_small(seed: UInt32) -> Small {
+    let mut w: [UInt32; 4] = [0; 4];
+    let mut i = 0;
+    while i < 4 {
+        w[i] = seed + (i as UInt32);
+        i = i + 1;
+    }
+    Small { w: w }
+}
+
+fn make_mixed(seed: UInt32) -> Mixed {
+    let mut w: [UInt32; 4] = [0; 4];
+    let mut i = 0;
+    while i < 4 {
+        w[i] = seed + (i as UInt32);
+        i = i + 1;
+    }
+    Mixed { n: seed, w: w }
+}
+
+fn make_large(seed: UInt32) -> Large {
+    let mut w: [UInt32; 44] = [0; 44];
+    let mut i = 0;
+    while i < 44 {
+        w[i] = seed + (i as UInt32);
+        i = i + 1;
+    }
+    Large { w: w }
+}
+
+// The three CONTROLS: a scalar field through a reference, and a scalar
+// field of a struct that also HOLDS an array. If either of these ever
+// fails, the defect moved rather than closed.
+fn scalar_field(s: &Scalars) -> UInt32 { s.a }
+fn mixed_scalar(m: &Mixed) -> UInt32 { m.n }
+
+// The SUBJECT: an element of an array field, read through the reference.
+fn small_element(s: &Small) -> UInt32 { s.w[0] }
+fn large_element(l: &Large) -> UInt32 { l.w[0] }
+
+fn main() {
+    let seed: UInt32 = 0x2b7e1516 as UInt32;
+
+    let s = make_scalars(seed);
+    assert_eq(scalar_field(&s), seed);
+
+    let m = make_mixed(seed);
+    assert_eq(mixed_scalar(&m), seed);
+
+    let small = make_small(seed);
+    assert_eq(small_element(&small), seed);
+
+    let large = make_large(seed);
+    assert_eq(large_element(&large), seed);
+}
