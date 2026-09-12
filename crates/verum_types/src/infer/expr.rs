@@ -5524,6 +5524,7 @@ impl TypeChecker {
                                     .unify(&cond_result.ty, &Type::Bool, condition.span)?;
                             }
                             ComprehensionClauseKind::Let { pattern, ty, value } => {
+                                self.reject_refutable_comprehension_binding(pattern, value.span);
                                 let value_result = self.synth_expr(value)?;
                                 let binding_ty = if let Some(ty_ast) = ty {
                                     let annotated_ty = self.ast_to_type(ty_ast)?;
@@ -5554,6 +5555,44 @@ impl TypeChecker {
                     };
 
                     Ok(InferResult::new(result_ty))
+    }
+
+    /// A comprehension's `let` clause binds once per row and must always
+    /// match — the same rule as a plain `let` statement, which E429 now
+    /// enforces, and the same predicate.
+    ///
+    /// The clause is a DIFFERENT AST node (`ComprehensionClauseKind::Let`,
+    /// not `StmtKind::Let`), so the statement-level check cannot see it.
+    /// Measured 2026-09-12 before landing: the tree holds 2924 comprehension
+    /// `let` clauses across `core/` and the spec corpus and NOT ONE carries a
+    /// literal, range or or-pattern — so this refuses nothing that exists.
+    ///
+    /// Why it matters that it refuses: the VBC lowering for this clause is an
+    /// unconditional `compile_pattern_bind`, with no match test, so a pattern
+    /// that fails leaves the binding holding an unchecked payload slot and the
+    /// first field access on it dereferences null (opcode 0x62).
+    ///
+    /// The variant case is NOT covered, here or at the statement: refutability
+    /// for a variant needs the RESOLVED type, and this predicate reads syntax.
+    fn reject_refutable_comprehension_binding(
+        &mut self,
+        pattern: &verum_ast::pattern::Pattern,
+        span: verum_common::Span,
+    ) {
+        if std::env::var_os("VERUM_NO_LET_PATTERN_CHECK").is_some() {
+            return;
+        }
+        if let Some(what) = crate::infer::modules::refutable_pattern_kind(pattern) {
+            self.push_diagnostic_for(TypeError::OtherWithCodeSpanned {
+                code: verum_common::Text::from("E429"),
+                msg: verum_common::Text::from(format!(
+                    "{what} cannot bind in a comprehension's `let` clause — the \
+                     clause binds once per row and must always match\n  \
+                     help: filter with an `if` clause first, then bind"
+                )),
+                span,
+            });
+        }
     }
 
     /// Type-check a `try { ... } finally { ... }` expression.
@@ -12190,6 +12229,7 @@ impl TypeChecker {
                         .unify(&cond_result.ty, &Type::Bool, condition.span)?;
                 }
                 ComprehensionClauseKind::Let { pattern, ty, value } => {
+                    self.reject_refutable_comprehension_binding(pattern, value.span);
                     // Type check the value
                     let value_result = self.synth_expr(value)?;
 
@@ -12306,6 +12346,7 @@ impl TypeChecker {
                         .unify(&cond_result.ty, &Type::Bool, condition.span)?;
                 }
                 ComprehensionClauseKind::Let { pattern, ty, value } => {
+                    self.reject_refutable_comprehension_binding(pattern, value.span);
                     let value_result = self.synth_expr(value)?;
                     let binding_ty = if let Some(ty_ast) = ty {
                         let annotated_ty = self.ast_to_type(ty_ast)?;
@@ -12402,6 +12443,7 @@ impl TypeChecker {
                         .unify(&cond_result.ty, &Type::Bool, condition.span)?;
                 }
                 ComprehensionClauseKind::Let { pattern, ty, value } => {
+                    self.reject_refutable_comprehension_binding(pattern, value.span);
                     let value_result = self.synth_expr(value)?;
                     let binding_ty = if let Some(ty_ast) = ty {
                         let annotated_ty = self.ast_to_type(ty_ast)?;
@@ -12482,6 +12524,7 @@ impl TypeChecker {
                         .unify(&cond_result.ty, &Type::Bool, condition.span)?;
                 }
                 ComprehensionClauseKind::Let { pattern, ty, value } => {
+                    self.reject_refutable_comprehension_binding(pattern, value.span);
                     let value_result = self.synth_expr(value)?;
                     let binding_ty = if let Some(ty_ast) = ty {
                         let annotated_ty = self.ast_to_type(ty_ast)?;

@@ -1,5 +1,6 @@
 // @test: typecheck-fail
 // @expected-error: "cannot bind in a plain `let`"
+// @expected-error: "cannot bind in a comprehension's `let` clause"
 // @level: L1
 // @tier: 0
 // @tags: patterns, let, refutable
@@ -42,5 +43,12 @@ fn main() {
     // An or-pattern offers alternatives, so an alternative can fail.
     let 1 | 2 = n;
 
-    print(n);
+    // A comprehension's `let` clause is a DIFFERENT AST node, so it needs
+    // its own check and gets its own wording. It binds once per row, and
+    // the lowering is an unconditional bind with no match test — a pattern
+    // that fails leaves the binding holding an unchecked slot.
+    let xs = [1, 2, 3];
+    let out = set{ y for x in xs let 7 = x };
+
+    print(n + out.len());
 }

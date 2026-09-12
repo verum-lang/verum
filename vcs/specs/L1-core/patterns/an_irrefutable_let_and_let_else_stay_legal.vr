@@ -30,5 +30,11 @@ fn main() {
     let v: Maybe<Int> = Maybe.Some(7);
     let Maybe.Some(got) = v else { return; };
 
-    print(n + a + b + x + y + p + q + got);
+    // A comprehension binds once per row under the same rule. A name always
+    // matches, and the documented shape — filter with `if`, then bind — must
+    // stay legal.
+    let xs = [1, 2, 3];
+    let plus = set{ y for v in xs let y = v + 1 };
+
+    print(n + a + b + x + y + p + q + got + plus.len());
 }
