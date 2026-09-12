@@ -501,6 +501,40 @@ reference produced by 0x0B is correct only while it stays inside the
 frame that produced it or crosses a boundary whose callee body the call
 site can read.
 
+### An attempt, and what it measured
+
+Making the producers agree was tried and reverted (2026-09-12). A
+`RefListElement` whose reference LEAVES the frame handed back the address,
+exactly as `RefRawAddr` does, while in-frame sites kept the pre-load only
+the producer's stride can justify. It closed three cells — `.enumerate()`
+over a slice, `map` over a slice, and a write through `Slice.get_mut` —
+and broke two:
+
+| | before | after |
+|---|---|---|
+| `skip` over a slice | 11 | 0 |
+| `take` over a slice | 101 | 0 |
+
+Silently. `SkipIter.next` FORWARDS — it lifts the inner `next`'s payload
+out of its `Maybe` and re-wraps it — so the call site asks
+`wrapped_payload_is_slot_address` about `SkipIter.next`, whose payload is
+produced by `GetVariantData`, and that answers "already a value": true
+while the producer pre-loaded, false once it hands back an address.
+`enumerate` survived only because it wraps the reference in a TUPLE the
+caller `Unpack`s and `Deref`s.
+
+**The forwarding case is the same wall one level up.** `SkipIter<I>` is
+ONE function over every inner iterator, so "is the forwarded payload a
+reference?" has no static answer there either, and marking every forwarded
+`next` payload as an address breaks `SkipIter<Range>`, whose payload is an
+`Int`. Agreeing per producer moves the disagreement; it does not remove
+it.
+
+So the conclusion above is stronger than it first read: not merely that
+the fact cannot travel through an adaptor, but that **no call-site rule
+can recover it at any depth**. The representation has to carry it —
+`FatRef` already reserves `metadata:8` for exactly this kind of fact.
+
 Reproduction: the two rungs above, `verum run --tier aot`. The chapter
 that first showed it is `docs/by-example/19-file-io/main.vr`, whose
 `BufRead.read_until` walks `available.iter().enumerate()`.
