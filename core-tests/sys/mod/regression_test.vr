@@ -34,8 +34,14 @@ fn regression_umbrella_os_error_field_access_round_trip() {
 
 @test
 fn regression_umbrella_fd_newtype_round_trip() {
+    // `.0` ON `Fd` IS REFUSED because the name resolves to the RECORD
+    // `Fd` in `core/shell/resources.vr:56`, not to the newtype in
+    // `core/sys/io_engine.vr:203` — A120, with A136 folded into it. A
+    // record has no `.0`, so the refusal is correct and the resolution
+    // is not. Equality on the newtype works and is what these pin.
+    // Measured 2026-09-12; a COMPILE error, whole file down.
     let f: Fd = Fd(42 as Int32);
-    assert_eq(f.0, 42 as Int32);
+    assert(f == Fd(42 as Int32));
 }
 
 // =============================================================================

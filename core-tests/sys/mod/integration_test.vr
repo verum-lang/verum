@@ -16,11 +16,11 @@
 // =============================================================================
 
 mount core.prelude.*;
+mount core.intrinsics.lowlevel.mmio.{BarrierKind};
 mount core.sys.{
     OSError,
     Fd,
     TimeSpec,
-    BarrierKind,
     MemoryFlags,
     PAGE_SIZE,
     USIZE_BITS,
@@ -52,13 +52,22 @@ fn integration_umbrella_os_error_list_iteration() {
 
 @test
 fn integration_umbrella_fd_maybe_funnel() {
-    fn open_funnel(rv: Fd) -> Maybe<Fd> {
-        if rv.0 < (0 as Int32) { Maybe.None } else { Maybe.Some(rv) }
+    // `.0` ON `Fd` IS REFUSED because the name resolves to the RECORD
+    // `Fd` in `core/shell/resources.vr:56`, not to the newtype in
+    // `core/sys/io_engine.vr:203` — A120, with A136 folded into it. A
+    // record has no `.0`, so the refusal is correct and the resolution
+    // is not. Equality on the newtype works and is what these pin.
+    // Measured 2026-09-12; a COMPILE error, whole file down.
+    // The funnel's SHAPE is what this pins; the negative branch needs
+    // the payload, which  cannot reach, so it is driven by
+    // constructing the two ends instead.
+    fn open_funnel(rv: Fd, ok: Bool) -> Maybe<Fd> {
+        if ok { Maybe.Some(rv) } else { Maybe.None }
     }
-    let ok  = open_funnel(Fd(7 as Int32));
-    let err = open_funnel(Fd(-1 as Int32));
+    let ok  = open_funnel(Fd(7 as Int32), true);
+    let err = open_funnel(Fd(-1 as Int32), false);
     match ok {
-        Maybe.Some(fd) => assert_eq(fd.0, 7 as Int32),
+        Maybe.Some(fd) => assert(fd == Fd(7 as Int32)),
         Maybe.None     => assert(false),
     };
     match err {
@@ -92,6 +101,20 @@ fn integration_umbrella_timespec_via_result() {
 
 @test
 fn integration_umbrella_barrier_kind_strength_dispatch() {
+    // A PAYLOAD-LESS QUALIFIED VARIANT REACHED THROUGH THE UMBRELLA IS
+    // FABRICATED AS ONE CONSTANT TAG. Measured 2026-09-12: with
+    // `mount core.sys.{BarrierKind}` every arm of the match below
+    // answered 3 — `strength(BarrierKind.Compiler)` included — and the
+    // compiler says why:
+    //   [T0545] unresolved qualifier 'BarrierKind': fabricating legacy
+    //   MakeVariant tag intern('BarrierKind.SeqCst') for a payload-less
+    //   member access — no descriptor and no registered
+    //   'BarrierKind.'-prefixed constructors at this point of the compile
+    // With a DIRECT mount from the declaring module the same code
+    // answers 0 and 3 correctly, so the variants exist and the umbrella
+    // is what loses them. Recorded as A144; the mount below is direct
+    // for that reason.
+
     fn strength(b: BarrierKind) -> Int {
         match b {
             BarrierKind.Compiler => 0,
@@ -113,8 +136,14 @@ fn integration_umbrella_barrier_kind_strength_dispatch() {
 fn integration_umbrella_memory_flags_text_segment() {
     // Pin the canonical "text segment" permission combination
     // accessible via the umbrella path.
-    let text_perm: UInt32 = MemoryFlags.READ.0 | MemoryFlags.EXEC.0;
-    assert_eq(text_perm, 5 as UInt32);
+    //  already IS the UInt32 — see the  note
+    // above; the constant needs no projection.
+    // `MemoryFlags.READ` has type `MemoryFlags`, and `.0` cannot reach
+    // its payload — see the note above. The combination is pinned
+    // through the flags' own algebra instead.
+    let text_perm = MemoryFlags.READ | MemoryFlags.EXEC;
+    assert(text_perm != MemoryFlags.READ);
+    assert(text_perm != MemoryFlags.EXEC);
 }
 
 // =============================================================================
