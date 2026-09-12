@@ -1,0 +1,8 @@
+# Files that are in core-tests, carry `@test` functions and no `@ignore`,
+# and DO NOT COMPILE — so their calls are not execution evidence.
+# One repo-relative path per line. Written from a real suite run; a `#`
+# comment after the path records what was measured.
+#
+# Regenerate by running `verum test --interp` and listing every file
+# whose tests all fail with "compilation failed: typecheck".
+core-tests/base/iterator/unit_test.vr  # 2026-09-12: 215 tests, 215 failures, 16 typecheck errors (peekable()/peek() unify Item<ISize> against Int), all in pre-existing content
