@@ -4,7 +4,7 @@
 //
 // Algebraic-law and contract verification for `core/base/panic.vr`. Most
 // of this surface is side-effecting (panics terminate the process), so
-// the laws are stated indirectly via `assert_panics` or `catch_unwind`
+// the laws are stated indirectly via `catch_unwind` (see the note below)
 // or via the non-panicking happy paths.
 //
 // Laws verified:
@@ -46,7 +46,7 @@
 // A COMPILE error, so no `@ignore` contained it: all 31 tests were dead.
 
 mount core.prelude.*;
-mount core.base.panic.{assert_panics, catch_unwind, PanicInfo};
+mount core.base.panic.{catch_unwind, PanicInfo};
 mount core.collections.list.List;
 
 // -----------------------------------------------------------------------------
