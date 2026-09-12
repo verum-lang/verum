@@ -277,6 +277,7 @@ def main() -> int:
 
     pages = sorted((DOCS / "stdlib").glob("*.md")) if (DOCS / "stdlib").is_dir() else []
     over: list[str] = []
+    under_rows: list[str] = []
     absent: list[str] = []
     under = agree = total = unlinked = 0
     for page in pages:
@@ -299,17 +300,31 @@ def main() -> int:
             if RANK[tok] > RANK[inv[mod]]:
                 over.append(f"{page.name}:{i}  {mod}: page {tok} > tree {inv[mod]}")
             elif RANK[tok] < RANK[inv[mod]]:
-                under += 1
+                # NAMED, NOT JUST COUNTED. A page quieter than the tree does
+                # not fail this gate and should not — but "16 more
+                # conservative" is a number nobody can act on, and the rows
+                # behind it are the site UNDERSTATING what was measured.
+                # That is the same shape as a roster row that records only
+                # a count: the population can turn over completely and the
+                # number never moves.
+                under_rows.append(
+                    f"{page.name}:{i}  {mod}: page {tok} < tree {inv[mod]}")
             else:
                 agree += 1
 
     print(f"check-doc-status-matches-inventory: {total} checkable row(s) "
           f"across {len(pages)} page(s) against {len(inv)} inventory "
-          f"module(s) — {agree} equal, {under} more conservative than the "
+          f"module(s) — {agree} equal, {len(under_rows)} more conservative than the "
           f"tree, {len(over)} greener, {len(absent)} citing no inventory row; "
           f"{unlinked} further row(s) carry a status with no conformance "
           f"link and cannot be checked by anything")
 
+    if under_rows and "--list-conservative" in sys.argv:
+        print("  MORE CONSERVATIVE THAN THE TREE — the page says less than")
+        print("  core-tests/INVENTORY.md records; not a failure, but each is")
+        print("  a page a reader would trust less than the measurement:")
+        for s in under_rows:
+            print(f"    - {s}")
     if over:
         print("  GREENER THAN THE TREE — the page tells a reader more than")
         print("  core-tests/INVENTORY.md records for that module:")
