@@ -578,12 +578,39 @@ Tier 0" without that probe is a claim about a moving tree.
   or a value where `cap` belongs, or a null buffer, each prints a
   DIFFERENT recognisable number.
 
+### The other four are not clean either — measured
+
+`LIST` / `MAP` / `SET` / `DEQUE` keep both halves for the methods they
+intercept, and `has_builtin_constructor_intercept` is what pairs those.
+It does NOT follow that every method is covered, and `Map` is the
+counter-example:
+
+    let mut counts: Map<Text, Int> = Map.new();
+    let e = counts.entry("k").or_insert_with(|| 5);
+
+    field access out of bounds: field index 2 (offset 16+8 = 24)
+    exceeds object data size 0 type_id=0 type='?'
+    backtrace=[Map.entry@pc=84 <- main@pc=45]
+    — NO type descriptor for that id, so this object was never CONSTRUCTED
+
+`Map.new` is intercepted and builds `[count, capacity, entries_ptr,
+tombstones]`; `insert` / `get` / `len` / `iter` are intercepted and read
+it. `entry` is NOT, so it falls through to the compiled stdlib body,
+which does `&*self.entries.offset(idx)` and then `slot.hash` — the
+builtin's `entries` addresses an array of `Value`, not of `Slot<K,V>`,
+so the read lands on something that was never constructed. Filed as
+T1196, whose original symptom was a null dereference at the same opcode.
+
+The Channel resolution — retire the builtin — does not transfer: the
+stdlib channel body was complete, while `Map`'s builtin carries
+insert/get/len/iter on hot paths across the tree. So the repair is
+either to intercept `entry` and the `MapEntry` methods against the
+builtin layout, or to refuse where the two representations meet. What
+is NOT available is leaving it as an out-of-bounds read.
+
 ### The question to ask of the next one
 
-The other four ids in that family (`LIST`, `MAP`, `SET`, `DEQUE`) do
-have both halves, and `has_builtin_constructor_intercept` is what keeps
-them paired. The check that generalises is not "is this type
-intercepted?" but:
+The check that generalises is not "is this type intercepted?" but:
 
     for this type id, does the CONSTRUCTOR that produced the object and
     the METHOD that reads it agree on the layout — and is that
