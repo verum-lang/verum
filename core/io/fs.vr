@@ -1094,7 +1094,16 @@ public fn canonicalize(path: &Path) -> IoResult<PathBuf> {
     // Resolve symlinks by following them
     let mut components = List.new();
     for component in result.components() {
-        match component.as_str() {
+        // `Component` declares `as_text` (a `Maybe<&Text>`, None for the
+        // non-Normal variants) and `to_text`. It does NOT declare
+        // `as_str`, and calling it panicked every `canonicalize` at
+        // Tier 0:
+        //   method 'as_str' not found on receiver of runtime kind
+        //   `Component`
+        // `to_text` is the right one and `as_text` is not: this match
+        // needs "." and ".." to compare equal, and `as_text` answers
+        // None for CurDir and ParentDir.
+        match component.to_text() {
             "." => {
                 // Skip current dir
             }
@@ -1121,7 +1130,7 @@ public fn canonicalize(path: &Path) -> IoResult<PathBuf> {
                         // Start over from the symlink target
                         components.clear();
                         for c in target.components() {
-                            if c.as_str() != "/" {
+                            if c.to_text() != "/" {
                                 components.push(c.to_text());
                             }
                         }
@@ -1129,7 +1138,7 @@ public fn canonicalize(path: &Path) -> IoResult<PathBuf> {
                         // Relative symlink - replace last component
                         components.pop();
                         for c in target.components() {
-                            let s = c.as_str();
+                            let s = c.to_text();
                             if s == ".." && !components.is_empty() {
                                 components.pop();
                             } else if s != "." && s != "/" {
