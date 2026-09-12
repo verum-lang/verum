@@ -1,5 +1,5 @@
 // @test: run
-// @tier: 0
+// @tier: 0,1
 // @level: L0
 // @tags: reference, array, field, record, regression, aot-divergence
 // @timeout: 60000
@@ -7,9 +7,9 @@
 //
 // AN ARRAY FIELD READ THROUGH A STRUCT REFERENCE ANSWERS ITS ELEMENT (A147).
 //
-// TIER 1 IS THE DEFECT AND THIS SPEC IS PINNED AT TIER 0 UNTIL IT CLOSES.
-// When A147 lands, change `@tier: 0` to `@tier: 0,1` — the assertions below
-// are already the acceptance, and nothing else needs editing.
+// TIER 1 WAS THE DEFECT; THE SPEC NOW RUNS AT BOTH TIERS (2026-09-13).
+// The Tier-0 arm stays the control: a regression that makes both tiers fail
+// equally is not a pass, which is why neither arm may be dropped.
 //
 // Measured 2026-09-12 across five shapes, which is how the variable was
 // isolated. Same read, same reference, only the field's SHAPE differs:

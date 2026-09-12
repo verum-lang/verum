@@ -11,10 +11,7 @@ crates/verum_types/src/infer/env.rs	T0662
 crates/verum_types/src/infer/expr.rs	T0124
 crates/verum_types/src/infer/mod.rs	T0662
 crates/verum_types/src/infer/modules.rs	T0662
-crates/verum_vbc/src/codegen/expressions.rs	T0124
-crates/verum_vbc/src/codegen/mod.rs	T0378
 crates/verum_vbc/src/interpreter/dispatch_table/handlers/calls.rs	T0377
 crates/verum_vbc/src/interpreter/dispatch_table/handlers/process_runtime.rs	T0376
 crates/verum_vbc/src/interpreter/heap.rs	T0293
-crates/verum_vbc/src/intrinsics/mod.rs	T0686
 scripts/ci/check_panic_surface_ratchet.py	T0131

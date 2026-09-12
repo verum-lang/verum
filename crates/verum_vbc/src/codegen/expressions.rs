@@ -23211,8 +23211,9 @@ impl VbcCodegen {
                 // 58770 }`; Display fell out of its last arm; a match
                 // over every real variant hit the wildcard.  This is
                 // the ONLY diagnostic surface for stdlib bodies —
-                // `core/` function bodies are typechecked on no path
-                // (T0124), so the typechecker twin
+                // `core/` function bodies are typechecked on no path (the
+                // bake is their only validator — there is no
+                // `verum check --stdlib`), so the typechecker twin
                 // (`TypeError::UnknownVariantConstructor`) never sees
                 // them.
                 //
@@ -24106,6 +24107,157 @@ impl VbcCodegen {
         self.ctx.pop_disambig_context(saved);
     }
 
+    /// PACKED-FIELD-ONE-REPRESENTATION-1 (T1463): a value whose declared type
+    /// is `[T; N]` with primitive `T` has TWO representations in VBC, and the
+    /// choice is made by the SYNTAX of its birthplace, not by the type:
+    ///
+    /// ```text
+    /// let mut w: [UInt32; 44] = [0; 44];   packed buffer (NewTypedArray)
+    /// K { w: [22, 0, 0, 0] }               heap List (NewList + ListPush)
+    /// let w = [33, 0, 0, 0]; K { w: w }    heap List
+    /// ```
+    ///
+    /// The READ is one shape for all three — `GetF` then `GetE` — and `GetE`
+    /// carries no static element geometry, so at Tier 1 it lands in
+    /// `emit_container_view`, whose arms are {cell | stamped Pack | unstamped
+    /// List} and do NOT include "bare packed buffer".  The buffer's first
+    /// eight DATA bytes are then read as a header word: above the heap floor
+    /// they are taken for a cell and DEREFERENCED (`rk.w[0]` on AES round
+    /// keys → `EXC_BAD_ACCESS` at `0x2b7e151702b7e1516`, the key material
+    /// itself); at or below it they select the unstamped-List arm and return
+    /// element 0 from offset 40 — garbage, SILENTLY.
+    ///
+    /// A fourth classifier arm cannot fix this: a packed buffer is unstamped
+    /// BY DESIGN, because the FFI byte-buffer contract requires `[Byte; N]`
+    /// to reach C as a bare data pointer.  So the representation must become
+    /// single-valued instead.  For `elem_size != 1` the target is the heap
+    /// List: every reader already reads it correctly on both tiers, most
+    /// producers already build one, and no consumer changes.  (`[Byte; N]`
+    /// fields stay packed — PACKED-FIELD-INIT-DYNCOUNT-1 (#37) needs
+    /// `&mut self.buf[i] as *mut Byte` to be a real byte pointer — so their
+    /// readers need static strides instead, which is a separate change.)
+    ///
+    /// This is the one divergent producer: a TRACKED packed local stored into
+    /// such a field (`RoundKeys128 { w: w }`, `Blake3 { key: key_words }`).
+    /// Returns the spec to unpack with, or `None` to leave the value alone.
+    fn packed_local_field_unpack_spec(
+        &self,
+        owner_type: &str,
+        field_name: &str,
+        src_name: &str,
+    ) -> Option<(usize, bool, u64)> {
+        let (elem_size, is_float, declared_len) =
+            self.field_array_spec(owner_type, field_name)?;
+        // Byte fields keep the packed representation (#37).
+        if elem_size == 1 {
+            return None;
+        }
+        // Only a local the frontend actually TRACKS as packed — anything else
+        // already holds a List and must not be unpacked twice.
+        let tracked = self.ctx.get_typed_array_elem_size(src_name)?;
+        if tracked != elem_size {
+            return None;
+        }
+        // The declared length answers for a literal size (measured: a
+        // `[UInt32; 44]` field arrives as 44). A CONST-GENERIC size arrives
+        // as 0 — the established "statically unknown" carrier — and there the
+        // packed SOURCE local still knows its own count, set beside the packed
+        // mark by `set_fixed_array_count`; the type checker has already proved
+        // the two agree. With neither there is nothing to size the loop with,
+        // and the value is left alone.
+        let len = if declared_len > 0 {
+            declared_len
+        } else {
+            self.ctx.fixed_array_count(src_name)? as u64
+        };
+        if len == 0 {
+            return None;
+        }
+        Some((elem_size, is_float, len))
+    }
+
+    /// Emit `NewList` + a `TypedArrayLoad`/`ListPush` loop that copies
+    /// `len` elements out of the PACKED register `src` into a fresh heap
+    /// List.  Backs [`packed_local_field_unpack_spec`]; the element width is
+    /// the field DECLARATION's, so the read side of the copy is the static
+    /// one (never `GetE`, which is the classifier this exists to avoid).
+    fn emit_unpack_packed_into_list(
+        &mut self,
+        src: Reg,
+        elem_size: usize,
+        is_float: bool,
+        len: u64,
+    ) -> CodegenResult<Reg> {
+        let result = self.ctx.alloc_temp();
+        let cap_hint = len.min(u16::MAX as u64) as u16;
+        self.ctx.emit(Instruction::NewList {
+            dst: result,
+            capacity_hint: cap_hint,
+        });
+
+        let count_reg = self.ctx.alloc_temp();
+        self.ctx.emit(Instruction::LoadI {
+            dst: count_reg,
+            value: len as i64,
+        });
+        let idx_reg = self.ctx.alloc_temp();
+        self.ctx.emit(Instruction::LoadI {
+            dst: idx_reg,
+            value: 0,
+        });
+
+        let loop_start = self.ctx.new_label("unpack_start");
+        let loop_end = self.ctx.new_label("unpack_end");
+        self.ctx.define_label(&loop_start);
+
+        let cmp_reg = self.ctx.alloc_temp();
+        self.ctx.emit(Instruction::CmpI {
+            op: CompareOp::Lt,
+            dst: cmp_reg,
+            a: idx_reg,
+            b: count_reg,
+        });
+        self.ctx
+            .emit_forward_jump(&loop_end, |offset| Instruction::JmpNot {
+                cond: cmp_reg,
+                offset,
+            });
+        self.ctx.free_temp(cmp_reg);
+
+        let elem_reg = self.ctx.alloc_temp();
+        let mut operands = Vec::<u8>::new();
+        Self::write_reg(&mut operands, elem_reg.0);
+        Self::write_reg(&mut operands, src.0);
+        Self::write_reg(&mut operands, idx_reg.0);
+        operands.push(if is_float {
+            (elem_size as u8) | 0x80
+        } else {
+            elem_size as u8
+        });
+        self.ctx.emit(Instruction::MemExtended {
+            sub_op: crate::instruction::MemSubOpcode::TypedArrayLoad.to_byte(),
+            operands,
+        });
+        self.ctx.emit(Instruction::ListPush {
+            list: result,
+            val: elem_reg,
+        });
+        self.ctx.free_temp(elem_reg);
+
+        self.ctx.emit(Instruction::UnaryI {
+            op: UnaryIntOp::Inc,
+            dst: idx_reg,
+            src: idx_reg,
+        });
+        self.ctx
+            .emit_backward_jump(&loop_start, |offset| Instruction::Jmp { offset })?;
+        self.ctx.define_label(&loop_end);
+
+        self.ctx.free_temp(idx_reg);
+        self.ctx.free_temp(count_reg);
+        Ok(result)
+    }
+
     /// PACKED-FIELD-INIT-DYNCOUNT-1 (#37): route a record field-init whose
     /// DECLARED type is a fixed-size primitive array (`buffer: [Byte; SIZE]`)
     /// to the packed `NewByteArray` / `NewTypedArray` allocation instead of
@@ -24126,10 +24278,11 @@ impl VbcCodegen {
     ) -> CodegenResult<Option<Reg>> {
         use verum_ast::ArrayExpr;
 
-        let (elem_size, is_float) = match self.field_array_spec(owner_type, field_name) {
-            Some(spec) => spec,
-            None => return Ok(None),
-        };
+        let (elem_size, is_float, _declared_len) =
+            match self.field_array_spec(owner_type, field_name) {
+                Some(spec) => spec,
+                None => return Ok(None),
+            };
         // Scope to BYTE arrays (`[Byte; N]`) — the task surface (#37) and
         // the only shape whose element address (`&mut self.buffer[i] as
         // *mut Byte`) is exercised by the packed path. Wider typed-array
@@ -24874,10 +25027,34 @@ impl VbcCodegen {
                         self.try_compile_packed_array_field_value(&type_name, &field.name.name, v)?
                     {
                         reg
+                    } else if let Some((esz, isf, len)) = Self::expr_ident_name(v)
+                        .and_then(|n| {
+                            self.packed_local_field_unpack_spec(&type_name, &field.name.name, &n)
+                        })
+                    {
+                        // PACKED-FIELD-ONE-REPRESENTATION-1 (T1463): a TRACKED
+                        // packed local stored into a non-byte primitive-array
+                        // field is the one producer that disagrees with every
+                        // other; unpack it so the field's representation is
+                        // single-valued and `GetE` never meets a bare buffer.
+                        let src = self
+                            .compile_expr(v)?
+                            .or_internal("field value has no value")?;
+                        let list = self.emit_unpack_packed_into_list(src, esz, isf, len)?;
+                        self.ctx.free_temp(src);
+                        list
                     } else {
                         self.compile_expr(v)?
                             .or_internal("field value has no value")?
                     }
+                } else if let Some((esz, isf, len)) = self.packed_local_field_unpack_spec(
+                    &type_name,
+                    &field.name.name,
+                    &field.name.name,
+                ) {
+                    // Field shorthand `K { w }` — same producer as `K { w: w }`.
+                    let src = self.ctx.get_var_reg(&field.name.name)?;
+                    self.emit_unpack_packed_into_list(src, esz, isf, len)?
                 } else {
                     self.ctx.get_var_reg(&field.name.name)?
                 };
@@ -26760,8 +26937,8 @@ impl VbcCodegen {
                 // heap-List, so a `TypedArrayElementAddr` on them would
                 // mismatch the runtime object type).
                 self.field_array_spec(&owner, field.name.as_str())
-                    .filter(|(sz, _)| *sz == 1)
-                    .map(|(sz, _)| sz)
+                    .filter(|(sz, _, _)| *sz == 1)
+                    .map(|(sz, _, _)| sz)
             })
         } else {
             None

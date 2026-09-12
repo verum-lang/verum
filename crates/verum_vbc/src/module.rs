@@ -1163,6 +1163,12 @@ impl VbcModule {
         })
     }
 
+    /// The spelling this module recorded for a cross-module / stub-band
+    /// callee id, if it recorded one.
+    ///
+    /// `external_function_names` holds the name the CONSUMING module used at
+    /// the call site, so this is the only way a lenient-dispatch panic can
+    /// say WHICH callee went missing instead of printing a bare band id.
     #[inline]
     pub fn band_reference_name(&self, id: u32) -> Option<&str> {
         self.external_function_names

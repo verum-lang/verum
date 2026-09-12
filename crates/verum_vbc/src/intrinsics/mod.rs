@@ -116,7 +116,7 @@ pub fn lookup_intrinsic(name: &str) -> Option<IntrinsicInfo> {
     // Try direct lookup first, then resolve LLVM-style aliases from @intrinsic declarations
     let resolved = INTRINSIC_REGISTRY.lookup(name).or_else(|| {
         let alias = match name {
-            // T0686 — SIGNED checked arithmetic written as its raw LLVM
+            // SIGNED checked arithmetic written as its raw LLVM
             // name. `core/math/checked.vr` declares checked_add/sub/mul
             // as `@intrinsic("llvm.sadd.with.overflow.i64", a, b)`, a
             // name verum_codegen knows at Tier-1 but the interpreter had
@@ -136,7 +136,8 @@ pub fn lookup_intrinsic(name: &str) -> Option<IntrinsicInfo> {
             // quiet wrong answer at the unsigned boundary; the i32 forms
             // have no width-correct entry at all. Both stay unmapped
             // until the interpreter grows genuinely unsigned / width-aware
-            // checked ops — measured and recorded on T0686.
+            // checked ops — the measurement that says so is the paragraph
+            // above, not a ticket.
             "llvm.sadd.with.overflow.i64" => "checked_add_i64",
             "llvm.ssub.with.overflow.i64" => "checked_sub_i64",
             "llvm.smul.with.overflow.i64" => "checked_mul_i64",

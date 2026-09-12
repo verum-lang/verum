@@ -21911,7 +21911,12 @@ impl VbcCodegen {
     ///
     /// Nested arrays (`[[Byte; N]; M]`) and compound / non-primitive
     /// elements return `None` — the caller keeps the generic heap path.
-    fn field_array_spec(&self, type_name: &str, field_name: &str) -> Option<(usize, bool)> {
+    ///
+    /// The third tuple element is the DECLARED length, `0` when it is not a
+    /// plain integer literal (the const-generic carrier described above).
+    /// `PACKED-FIELD-ONE-REPRESENTATION-1` (T1463) needs it to size the
+    /// normalising unpack loop, and treats `0` as "not normalisable".
+    fn field_array_spec(&self, type_name: &str, field_name: &str) -> Option<(usize, bool, u64)> {
         use crate::types::TypeRef;
         // Mirror resolve_field_index_impl's key discipline: strip generic
         // args, and re-key a non-authoritative simple name to its
@@ -21938,7 +21943,9 @@ impl VbcCodegen {
                 .is_some_and(|s| s == field_name)
         })?;
         match &fd.type_ref {
-            TypeRef::Array { element, .. } => self.primitive_array_element_spec(element),
+            TypeRef::Array { element, length } => self
+                .primitive_array_element_spec(element)
+                .map(|(sz, is_float)| (sz, is_float, *length)),
             _ => None,
         }
     }
@@ -21952,6 +21959,35 @@ impl VbcCodegen {
         &self,
         element: &crate::types::TypeRef,
     ) -> Option<(usize, bool)> {
+        use crate::types::{TypeId, TypeRef};
+        // THE NAME TABLE HAS HOLES AND THEY ARE NOT COSMETIC (T1463).
+        // `primitive_type_id_to_name` lists UNIT/BOOL/INT/FLOAT/TEXT/CHAR/
+        // U8/I32/U64 and nothing else, so a `Concrete(U32)` element falls
+        // through to `type_by_id`, which answers only where a descriptor for
+        // the builtin happens to be registered. Where it is not — a codegen
+        // built without the archive, which is the shape the stdlib bake and
+        // the unit tests use — the whole spec came back `None`, and every
+        // caller read that as "not a primitive array". `[UInt32; N]` is the
+        // AES / SHA-1 / BLAKE3 key-schedule shape, so the miss was aimed
+        // squarely at the crypto stack.
+        //
+        // Answer from the ID first for exactly the widths the name table
+        // omits: the same fact, one indirection earlier, and it cannot go
+        // missing. Ids the table already covers keep their existing path
+        // verbatim, so this adds answers and changes none.
+        if let TypeRef::Concrete(tid) = element {
+            let by_id = match *tid {
+                TypeId::U16 => Some((2usize, false)),
+                TypeId::U32 => Some((4, false)),
+                TypeId::I8 => Some((1, false)),
+                TypeId::I16 => Some((2, false)),
+                TypeId::F32 => Some((4, true)),
+                _ => None,
+            };
+            if by_id.is_some() {
+                return by_id;
+            }
+        }
         let name = self.type_ref_to_field_name(element)?;
         let sz = verum_common::layout::primitive_size_by_name(&name)? as usize;
         let is_float = matches!(
@@ -26440,7 +26476,7 @@ impl VbcCodegen {
         // space — cross-module impl methods are foreign ids at bake).
         // A sound producer-side fix needs PER-SLOT provenance (which
         // module owns each method id) threaded from the importer — the
-        // deeper surgery the T0378 dossier names. Until then the
+        // deeper surgery, not attempted here. Until then the
         // consumer-side guard (dyn-switch name-prefix check, 9ef39351f)
         // plus the by-name probe fallback remain the working defense.
 
