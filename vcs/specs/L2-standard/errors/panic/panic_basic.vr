@@ -22,7 +22,7 @@ fn demonstrate_panic_with_message() {
 /// Panic in assert-like scenarios
 fn assert_positive(value: Int) {
     if value <= 0 {
-        panic("Value must be positive, got: {}", value);
+        panic(f"Value must be positive, got: {value}");
     }
 }
 
@@ -57,10 +57,10 @@ type BoundedInt is {
 
 fn create_bounded_int(value: Int, min: Int, max: Int) -> BoundedInt {
     if min > max {
-        panic("Invalid bounds: min ({}) > max ({})", min, max);
+        panic(f"Invalid bounds: min ({min}) > max ({max})");
     }
     if value < min || value > max {
-        panic("Value {} out of bounds [{}, {}]", value, min, max);
+        panic(f"Value {value} out of bounds [{min}, {max}]");
     }
     BoundedInt { value, min, max }
 }
@@ -69,7 +69,7 @@ fn create_bounded_int(value: Int, min: Int, max: Int) -> BoundedInt {
 fn divide(x: Int, y: Int) -> Int {
     // Precondition check - panic if violated
     if y == 0 {
-        panic("Division by zero: cannot divide {} by 0", x);
+        panic(f"Division by zero: cannot divide {x} by 0");
     }
     x / y
 }
@@ -77,7 +77,7 @@ fn divide(x: Int, y: Int) -> Int {
 /// Panic in array access (bounds checking)
 fn safe_array_access(arr: &List<Int>, index: Int) -> Int {
     if index < 0 || index >= arr.len() as Int {
-        panic("Index {} out of bounds for array of length {}", index, arr.len());
+        panic(f"Index {index} out of bounds for array of length {arr.len()}");
     }
     arr[index as usize]
 }
@@ -98,7 +98,7 @@ fn create_non_empty_list<T>(items: List<T>) -> NonEmptyList<T> {
 fn debug_assert(condition: Bool, message: &Text) {
     @cfg(debug)
     if !condition {
-        panic("Debug assertion failed: {}", message);
+        panic(f"Debug assertion failed: {message}");
     }
     // In release mode, this is a no-op
 }

@@ -73,7 +73,7 @@ fn panic_with_custom_location(file: &Text, line: Int, function: &Text) {
 /// Panic with error chain
 fn panic_with_chain(errors: &List<Text>) {
     let chain = errors.join("\n  caused by: ");
-    panic("Error chain:\n  {}", chain);
+    panic(f"Error chain:\n  {chain}");
 }
 
 /// Panic with suggestions
@@ -112,7 +112,7 @@ fn panic_with_state(state: &SystemState) {
 /// Assertion with custom message
 fn assert_with_message(condition: Bool, message: fn() -> Text) {
     if !condition {
-        panic("Assertion failed: {}", message());
+        panic(f"Assertion failed: {message()}");
     }
 }
 
@@ -171,7 +171,7 @@ fn panic_with_debug_info<T: Debug>(
         output.push_str("  <backtrace unavailable>\n");
     }
 
-    panic("{}", output);
+    panic(f"{output}");
 }
 
 /// Conditional panic message (different in debug/release)
