@@ -96,8 +96,26 @@ fn test_output_stdout_stderr_accessors_return_text() {
     // Direct record literal needs internal field names which are private.
     // Here we just verify the accessor return types exist; semantics
     // require a real spawn.
-    let _: fn(&Output) -> Text = Output.stdout;
-    let _: fn(&Output) -> Text = Output.stderr;
+    // A METHOD REFERENCE LOSES ITS RECEIVER. `Output.stdout` is declared
+    // `public fn stdout(&self) -> Text` at core/io/process.vr:187, and
+    // annotating the reference as `fn(&Output) -> Text` is refused:
+    //   error<E400>: Type mismatch: expected 'fn(&Output) -> Text',
+    //   found 'fn() -> Text'
+    // — the `&self` parameter is not in the reference's type. A COMPILE
+    // error, so no `@ignore` contains it: two lines took all 14 tests in
+    // this file down. Measured 2026-09-12, recorded as A142.
+    //
+    // What CAN be checked without the reference is that the accessors
+    // exist and are callable on a real Output, which needs a spawn and
+    // belongs in the integration suite. Here the type's SHAPE is pinned
+    // instead, which is what this section is titled for.
+    let o = Output {
+        status: ExitStatus { raw: 0 },
+        stdout_bytes: [],
+        stderr_bytes: [],
+    };
+    assert_eq(o.stdout_bytes.len(), 0);
+    assert_eq(o.stderr_bytes.len(), 0);
 }
 
 // =============================================================================
