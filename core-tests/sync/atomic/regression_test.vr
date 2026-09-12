@@ -102,3 +102,42 @@ fn regression_atomic_bool_store_then_load_round_trip() {
     a.store(false, MemoryOrdering.Release);
     assert_eq(a.load(MemoryOrdering.Acquire), false);
 }
+
+// =============================================================================
+// THE MAGNITUDE BOUNDARY — 2^47 (A118, fifth leg of the address-taking task)
+// =============================================================================
+//
+// Every value this file used before was tiny — 42, 99, 5, 15, 7 — so the
+// suite was green and could not have seen this. An atomic loses any value
+// at or above 2^47, because `load` reads the RAW eight bytes of the field
+// and a value that no longer fits the NaN-box payload is stored as a box:
+//
+//     AtomicU64.new(140737488355327).load()  ->  140737488355327
+//     AtomicU64.new(140737488355328).load()  ->  18446673704965373955
+//                                                = 0xffffc00000000003
+//     AtomicInt.new(140737488355328).load()  ->  -70368744177661
+//                                                the same bits, signed
+//
+// Four controls on the same value rule out the integer types themselves:
+// as a literal, through a function, through a record field and through a
+// list, 2^47 survives. Only the atomic corrupts it.
+//
+// It is not academic. `AtomicF64` stores a double as its bit pattern and
+// every normal double is above the boundary — 1.5 is 0x3ff8000000000000 —
+// so `Counter.inc()` and `Histogram.observe()` accumulate nothing.
+
+@test
+fn regression_atomic_int_holds_the_largest_value_below_the_boundary() {
+    // The side that works, and the control for the pin below: without it
+    // a failure here would not distinguish "the boundary moved" from
+    // "atomics broke entirely".
+    let a = AtomicInt.new(140737488355327);
+    assert_eq(a.load(MemoryOrdering.Acquire), 140737488355327);
+}
+
+@test
+@ignore("An atomic loses any value at or above 2^47: load reads the raw eight bytes of the field, so a NaN-boxed value comes back as its box. Measured 2026-09-12 either side of the boundary (A118).")
+fn regression_atomic_int_holds_a_value_at_the_boundary() {
+    let a = AtomicInt.new(140737488355328);
+    assert_eq(a.load(MemoryOrdering.Acquire), 140737488355328);
+}
