@@ -532,8 +532,26 @@ it.
 
 So the conclusion above is stronger than it first read: not merely that
 the fact cannot travel through an adaptor, but that **no call-site rule
-can recover it at any depth**. The representation has to carry it —
-`FatRef` already reserves `metadata:8` for exactly this kind of fact.
+can recover it at any depth**. The representation has to carry it.
+
+**And that costs more than it first looks.** `FatRef` does reserve
+`metadata:8` for facts of this kind, and slices do travel as `FatRef` —
+but an ordinary `&T` does not. `lower_ref` has two arms, and the one that
+builds a CBGR ref struct is DEAD: `enable_alloca_mode()` is called
+unconditionally ("Fix: always enable alloca mode"), and that arm's own
+comment says it *skips CBGR struct creation — store the raw pointer as
+i64*. So at Tier 1 a reference is a bare i64, and there is no metadata
+field to fill.
+
+Making every `&T` a `FatRef` changes the calling convention for every
+reference in the language — `lower_ref`, `Deref`, `DerefMut`, `ChkRef`,
+`DropRef`, every FFI boundary that hands a reference to C, and the
+alloca fast path whose whole purpose is that mem2reg/SROA promote it back
+to SSA at no runtime cost (dropping that once forced the LLVM pipeline
+down from `default<O2>`). Tagging the pointer instead is three bits for a
+1/2/4/8 stride, but an interior pointer into a packed slice is not
+8-byte aligned, so those bits are not free either. Both are campaigns,
+not patches.
 
 Reproduction: the two rungs above, `verum run --tier aot`. The chapter
 that first showed it is `docs/by-example/19-file-io/main.vr`, whose
