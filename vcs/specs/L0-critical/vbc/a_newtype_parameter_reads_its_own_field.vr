@@ -1,0 +1,77 @@
+// @test: run
+// @tier: 0,1
+// @level: L0
+// @tags: newtype, parameter, descriptor, archive, regression
+// @timeout: 60000
+// @expected-exit: 0
+//
+// A NEWTYPE PARAMETER READS ITS OWN FIELD (T1263).
+//
+// `type FileDesc is (Int);` is a newtype, and a parameter declared with it
+// was recorded as `PTR` in the baked descriptor — `TypeId(14)`, a builtin,
+// which `vbc_lowering` does not stamp with a nominal type. `lower_get_field`'s
+// newtype branch looks its type up BY NAME, so with no stamp it could not
+// fire and `fd.0` lowered as an object field read at +24. With `FileDesc(1)`
+// that is address 25, which LLVM constant-folded:
+//
+//     %field_0.i = load i64, ptr inttoptr (i64 25 to ptr), align 8
+//
+// The descriptor still says PTR — measured 2026-09-12, 845 such parameters
+// in one whole-stdlib compile — and the name is now recovered from the
+// parameter's SPELLING instead (`VERUM_TRACE_PARAMMARK` prints
+// `PTR recovered as newtype 'FileDesc' via carry`). Of the 31 distinct
+// spellings that reach PTR, `FileDesc` is the only one that names a newtype;
+// the rest are `&mut Formatter`, `&Self`, `Self`, `&T` and their kin, which
+// have no `.0` to misread.
+//
+// THIS SPEC PINS THE BEHAVIOUR, NOT THE MECHANISM. It passes whether the
+// name arrives from the descriptor or from the carry, and it fails the day
+// neither does — which is what a regression here would look like.
+//
+// The archive rungs go through the real write path, where `FileDesc` is a
+// parameter of `safe_write`; the local rungs are the control that was green
+// throughout, so a failure of one beside a pass of the other says the defect
+// is in where the TYPE comes from.
+//
+// The `+ 0` on every assertion is deliberate: a bare `assert(n == 7)` can be
+// folded by the frontend's own model.
+
+mount core.io.{write, read_to_string};
+
+type LocalFd is (Int);
+
+fn local_by_val(d: LocalFd) -> Int { d.0 }
+fn local_by_ref(d: &LocalFd) -> Int { d.0 }
+
+fn main() {
+    print("0 begin");
+
+    let d = LocalFd(7);
+    print(f"1 local same fn = {d.0 + 0} (want 7)");
+    assert(d.0 + 0 == 7);
+    print(f"2 local by val  = {local_by_val(d) + 0} (want 7)");
+    assert(local_by_val(d) + 0 == 7);
+
+    let d2 = LocalFd(9);
+    print(f"3 local by ref  = {local_by_ref(&d2) + 0} (want 9)");
+    assert(local_by_ref(&d2) + 0 == 9);
+
+    // The ARCHIVE rung: `write` reaches `safe_write(fd: FileDesc, …)`, whose
+    // body reads `fd.0`. A misread there does not fail loudly — it hands the
+    // syscall a wrong descriptor — so the file's CONTENT is the evidence,
+    // not the call's return.
+    let p = "/tmp/verum-spec-newtype-param.txt";
+    match write(&p.to_text(), &"abcd".to_text()) {
+        Result.Ok(()) => print("4 archive write ok"),
+        Result.Err(_) => { print("4 archive write failed"); assert(false); }
+    }
+    match read_to_string(&p.to_text()) {
+        Result.Ok(t) => {
+            print(f"5 read back len = {t.len() + 0} (want 4)");
+            assert(t.len() + 0 == 4);
+        }
+        Result.Err(_) => { print("5 read back failed"); assert(false); }
+    }
+
+    print("6 end");
+}
