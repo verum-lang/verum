@@ -57,6 +57,11 @@ import sys
 
 SRC_EXT = (".rs", ".vr", ".py", ".yml", ".sh")
 BASELINE = "scripts/ci/comments_naming_a_dead_task.txt"
+# Repo-relative, spelled out rather than derived from `__file__`:
+# `main` chdirs to the repo root first, so a relative `__file__`
+# would be resolved against the WRONG directory and the exemption
+# would silently stop matching.
+SELF = "scripts/ci/check_a_comment_names_a_live_task.py"
 # How far from the dead id to accept a live id as "the owner is named
 # here too".  Measured on the repaired sites: the successor lands on the
 # same line or the next one, and a comment paragraph in this tree runs
@@ -176,7 +181,7 @@ def scan(pool):
         # it teaches from, which is a gate arguing with its own manual.
         # Only these two paths are skipped — never a directory, never a
         # pattern.
-        if f in (os.path.relpath(__file__, os.getcwd()), BASELINE):
+        if f in (SELF, BASELINE):
             continue
         try:
             with open(f, encoding="utf-8", errors="replace") as fh:
