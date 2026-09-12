@@ -92,6 +92,17 @@ BASELINE_ALL_TYPED = 297
 # SQLite type was renamed `DateModifier`. Every remaining pair is the same
 # shape, waiting for a resolution order to shift under it.
 BASELINE_TYPES = 132
+# The subset of BASELINE_TYPES whose declarations disagree about the type's
+# SHAPE — record vs newtype vs sum vs unit vs protocol. Measured 2026-09-12.
+# This is the ratchet that matters: a shape disagreement is what makes
+# `Fd(7).0` refuse and `match h { ExecutorHandle(v) => v }` refuse, because
+# the resolver answers with the RECORD twin. Five of A120's instances live
+# here. Lowered only by renaming one side.
+#
+# 43, not the 25 a first hand-grep reported: that grep read only
+# `public type` and the gate's own extractor counts private ones too.
+# The instrument was already in the tree and disagreed with the probe.
+BASELINE_TYPES_SHAPE = 43
 BASELINE_SQLITE_TYPED = 15
 
 # `public fn name(args)` at column 0 — the free-function surface. Methods
@@ -293,6 +304,21 @@ def self_test() -> int:
     behind it ships with its cases.
     """
     bad = 0
+    # THE SHAPE CLASSIFIER, pinned on one line of each form. A classifier
+    # that answered `sum` for everything would make the shape ratchet
+    # report zero and look green for ever.
+    for line, want in [
+        ("public type Fd is (Int32);", "newtype"),
+        ("public type Point is { x: Int };", "record"),
+        ("public type Marker is ();", "unit"),
+        ("public type It is protocol { };", "protocol"),
+        ("public type Opt is A | B;", "sum"),
+        ("let x = 1;", None),
+    ]:
+        if type_shape(line) != want:
+            print(f"self-test: type_shape({line!r}) answered "
+                  f"{type_shape(line)!r}, expected {want!r}")
+            bad += 1
     for src, want in SELF_TEST_ARITY:
         got = arity(param_list(src) or "")
         if got != want:
@@ -398,6 +424,54 @@ def collect_types() -> dict[tuple, set[str]]:
             if name:
                 found[(name,)].add(rel)
     return found
+
+
+# THE SHAPE A COLLIDING NAME IS DECLARED WITH, because two modules both
+# spelling `Column` as a sum is a nuisance and one spelling it a record
+# while the other spells it a newtype is a DEFECT: the resolver picking
+# the wrong declaration changes which operations are legal, silently.
+#
+# Measured 2026-09-12, this separated A120's five instances from the rest
+# of the roster. `Fd` is a record in `shell/resources.vr` and a newtype
+# in `sys/io_engine.vr`, so `Fd(7).0` is refused — correctly, for a
+# record. `ExecutorHandle` the same. `Capability` appears four times
+# including once as a protocol, and its 62-test suite is dead.
+SHAPE = re.compile(r"^(?:public\s+)?type\s+[A-Z][A-Za-z0-9]*(?:<[^>]*>)?\s+is\s*(.{0,12})")
+
+
+def type_shape(line: str) -> str | None:
+    """`record` / `newtype` / `unit` / `protocol` / `sum` for a declaration."""
+    m = SHAPE.match(line)
+    if not m:
+        return None
+    tail = m.group(1).strip()
+    if tail.startswith("{"):
+        return "record"
+    if tail.startswith("()"):
+        return "unit"
+    if tail.startswith("("):
+        return "newtype"
+    if tail.startswith("protocol"):
+        return "protocol"
+    return "sum"
+
+
+def collect_type_shapes() -> dict[str, set[str]]:
+    """type name -> the set of SHAPES it is declared with across core/."""
+    shapes: dict[str, set[str]] = collections.defaultdict(set)
+    for path in CORE.rglob("*.vr"):
+        try:
+            text = path.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+        for line in text.splitlines():
+            name = declares_a_type(line)
+            if not name:
+                continue
+            shape = type_shape(line)
+            if shape:
+                shapes[name].add(shape)
+    return shapes
 
 
 def collect(typed: bool = False) -> dict[tuple, set[str]]:
@@ -719,6 +793,32 @@ def main() -> int:
         for (name,), mods in sorted(coll.items()):
             print(f"{name:28s} {', '.join(sorted(mods))}")
         print(f"\n{len(coll)} colliding type names, public or private [types]")
+
+        # The dangerous subset, reported separately because it is the one
+        # that changes what compiles rather than merely what reads well.
+        shapes = collect_type_shapes()
+        disagree = sorted(
+            (name, sorted(shapes.get(name, ())))
+            for (name,) in coll
+            if len(shapes.get(name, ())) > 1
+        )
+        print(f"{len(disagree)} of them DISAGREE ABOUT THE TYPE'S SHAPE "
+              f"(baseline {BASELINE_TYPES_SHAPE}) — resolving one of these to "
+              f"the wrong declaration changes which operations are legal:")
+        for name, kinds in disagree[:12]:
+            print(f"    {name:24s} {' / '.join(kinds)}")
+        if len(disagree) > 12:
+            print(f"    … and {len(disagree) - 12} more")
+        if args.check and len(disagree) > BASELINE_TYPES_SHAPE:
+            print(
+                f"RATCHET: shape-disagreeing type collisions rose above the "
+                f"baseline ({len(disagree)} vs {BASELINE_TYPES_SHAPE}). A name "
+                f"declared as a record in one module and a newtype in another "
+                f"is A120 waiting to happen — see the register.",
+                file=sys.stderr,
+            )
+            return 1
+
         if args.check and len(coll) != BASELINE_TYPES:
             direction = "rose above" if len(coll) > BASELINE_TYPES else "dropped below"
             print(
