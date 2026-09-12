@@ -170,8 +170,10 @@ fn a_bare_name_in_parentheses_is_still_opaque() {
 }
 
 #[test]
-fn a_name_INSIDE_a_comparison_is_not_opaque() {
-    // THE CONTROL FOR THE POSITIONAL RULE. `it` is a name, and it appears
+fn a_name_inside_a_comparison_is_not_opaque() {
+    // THE CONTROL FOR THE POSITIONAL RULE — the name carried the
+    // emphasis in capitals until rustc pointed out that a test
+    // function is not the place for it. `it` is a name, and it appears
     // in every predicate; a test on "does a name occur" rather than "is
     // the ROOT a name" would make `it >= 10` undecidable and undo the
     // decided cases entirely.
