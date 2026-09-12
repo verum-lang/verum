@@ -116,8 +116,19 @@ DOCS = Path(os.environ.get("VERUM_STDLIB_DOCS")
             or (Path(_DOCS_ROOT) / "stdlib" if _DOCS_ROOT
                 else REPO.parent / "website" / "docs" / "stdlib"))
 RUN_DIRECTIVES = {"run", "run-interpreter"}
-BASELINE = 275  # Lowered by COVERAGE, never by argument — the only way
+BASELINE = 260  # Lowered by COVERAGE, never by argument — the only way
                 # this number is meant to move.
+                #   275 -> 260  COVERAGE, and of the cheapest kind:
+                #               twenty-two dead files came back.
+                #               `doc_methods_dead_files.txt` went 85 ->
+                #               62 in one evening, and each file was one
+                #               COMPILE error away from running — a
+                #               brace-less mount, a `Heap(x)` for
+                #               `Heap.new(x)`, a relative tolerance
+                #               against zero, a renamed constant. ~690
+                #               tests that had not executed now do, and
+                #               fifteen documented methods are exercised
+                #               as a side effect.
                 #   247 -> 275  THE DEAD-FILE LIST, measured properly.
                 #               The seeded version held ONE file; the
                 #               full suite named 84 more. Run
