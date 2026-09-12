@@ -289,10 +289,30 @@ assert_eq(it.next(), Maybe.Some(0));   // error<E400>: expected 'Item<ISize>', f
 | `.peekable()` | `= I.Item` | E400 |
 | `.take(2)` | `= I.Item` | E400 |
 
-**A FORWARDING projection fails and a concrete one does not** — an adapter that republishes
-`I.Item` is the case the reducer cannot chain. The same expression RUNS correctly
-(`print(f"{it.next()}")` answers `Some(0)`); only unification against a concrete type
-refuses, which is why the defect is invisible outside `assert_eq`.
+**The forwarding/concrete split above is a SYMPTOM, not the variable** — `xs.iter().take(2)` uses
+the same `take` and typechecks. The tree's own tracer (`VERUM_TRACE_ASSOC=1`, in
+`protocol.rs::try_find_associated_type`) names the difference in one line each:
+
+```text
+range(0,3).map(|x| x)   ::Item of Range<Int>    -> Int        typechecks
+xs.iter().take(2)       ::Item of ListIter<Int> -> &Int       typechecks
+range(0,3).take(2)      ::Item of ISize         -> <none>     E400, six times
+range(0,3)  (bare)      no query at all                       typechecks
+```
+
+The failing query asks for `Item` of **`ISize`** — the ELEMENT type — not of the range or the
+adapter. So the receiver was resolved to the element before the projection was formed.
+**`Range` carries ELEVEN `Iterator` impls, one per integer width** (`Range<Int>` with
+`type Item = Int` at `iterator.vr:2767`, `Range<ISize>` with `type Item = ISize` at 3230, and
+nine more). `map` pins the choice because its bound MENTIONS `Self.Item`
+(`F: fn(Self.Item) -> B`); `take(self, n: Int) -> TakeIter<Self>` and
+`peekable(self) -> PeekableIter<Self>` mention it nowhere, so nothing constrains which of the
+eleven is picked. That puts this in the same family as R3's own next line — candidate
+discipline for multi-source names — rather than in projection chaining.
+
+The same expression RUNS correctly (`print(f"{it.next()}")` answers `Some(0)`); only
+unification against a concrete type refuses, which is why the defect is invisible outside
+`assert_eq`.
 Mount-scope candidate discipline for multi-source names T0710
 (T0525/T0704 disarm on >1 source). Match-guard exhaustiveness gate
 T0649. Sized-int value semantics T0611 — **CLOSED 2026-08-08** (c185b51c6 + 9c73789f5): casts mask, `+`/`-`/`*`/`<<` wrap at the declared width, and sized-int METHOD dispatch honours the receiver's width. Seven roots in one chain, each hidden behind the one before it; SHA-256 and HMAC-SHA256 are byte-exact against FIPS 180-4 / RFC 4231 (0 mismatched bytes of 32).
