@@ -1,8 +1,103 @@
 # Files that are in core-tests, carry `@test` functions and no `@ignore`,
 # and DO NOT COMPILE — so their calls are not execution evidence.
-# One repo-relative path per line. Written from a real suite run; a `#`
-# comment after the path records what was measured.
+# One repo-relative path per line; a `#` comment records what was measured.
 #
-# Regenerate by running `verum test --interp` and listing every file
-# whose tests all fail with "compilation failed: typecheck".
-core-tests/base/iterator/unit_test.vr  # 2026-09-12: 215 tests, 215 failures, 16 typecheck errors (peekable()/peek() unify Item<ISize> against Int), all in pre-existing content
+# Regenerate by running `verum test --interp` over the whole suite and
+# listing every file whose tests ALL fail with "compilation failed".
+# Never by reasoning about a file: a dead one is indistinguishable from a
+# live one by text.
+#
+# Measured 2026-09-12 on the full suite — 19042 tests, 16542 passed,
+# 2129 failed, 371 ignored, 2091s at 4 threads. 84 files account for
+# 1774 of those failures: 9.3% of the suite never runs at all.
+
+core-tests/async/future/regression_test.vr  # 10 test(s), 5 error(s)
+core-tests/async/intrinsics/integration_test.vr  # 3 test(s), 1 error(s)
+core-tests/async/intrinsics/property_test.vr  # 5 test(s), 2 error(s)
+core-tests/async/intrinsics/unit_test.vr  # 11 test(s), 3 error(s)
+core-tests/async/panic_fence/integration_test.vr  # 2 test(s), 2 error(s)
+core-tests/async/panic_fence/property_test.vr  # 4 test(s), 2 error(s)
+core-tests/async/panic_fence/unit_test.vr  # 6 test(s), 2 error(s)
+core-tests/async/poll/integration_test.vr  # 15 test(s), 4 error(s)
+core-tests/async/poll/property_test.vr  # 21 test(s), 3 error(s)
+core-tests/async/poll/unit_test.vr  # 42 test(s), 7 error(s)
+core-tests/base/data/property_test.vr  # 18 test(s), 1 error(s)
+core-tests/base/iterator/protocol_agnostic_test.vr  # 22 test(s), 1 error(s)
+core-tests/base/iterator/unit_test.vr  # 215 test(s), 16 error(s)
+core-tests/base/ops/property_test.vr  # 19 test(s), 1 error(s)
+core-tests/base/ordering/integration_test.vr  # 22 test(s), 3 error(s)
+core-tests/base/panic/integration_test.vr  # 11 test(s), 11 error(s)
+core-tests/base/panic/property_test.vr  # 31 test(s), 13 error(s)
+core-tests/base/panic/regression_test.vr  # 6 test(s), 4 error(s)
+core-tests/base/panic/unit_test.vr  # 93 test(s), 11 error(s)
+core-tests/base/primitives/float_test.vr  # 68 test(s), 2 error(s)
+core-tests/base/primitives/property_test.vr  # 16 test(s), 2 error(s)
+core-tests/base/refinement/let_binding_test.vr  # 10 test(s), 1 error(s)
+core-tests/base/semver/integration_test.vr  # 6 test(s), 7 error(s)
+core-tests/base/serde/integration_test.vr  # 8 test(s), 1 error(s)
+core-tests/base/serde/property_test.vr  # 6 test(s), 1 error(s)
+core-tests/cli/spec/unit_test.vr  # 22 test(s), 2 error(s)
+core-tests/cog/archive/unit_test.vr  # 12 test(s), 2 error(s)
+core-tests/cog/archive_error/unit_test.vr  # 11 test(s), 6 error(s)
+core-tests/context/mod/regression_test.vr  # 6 test(s), 1 error(s)
+core-tests/context/mod/unit_test.vr  # 14 test(s), 1 error(s)
+core-tests/context/provider/integration_test.vr  # 14 test(s), 8 error(s)
+core-tests/context/provider/unit_test.vr  # 24 test(s), 2 error(s)
+core-tests/encoding/cbor/unit_test.vr  # 40 test(s), 1 error(s)
+core-tests/intrinsics/atomic/regression_test.vr  # 3 test(s), 5 error(s)
+core-tests/io/buffer/regression_test.vr  # 7 test(s), 2 error(s)
+core-tests/io/process/unit_test.vr  # 14 test(s), 2 error(s)
+core-tests/mem/allocator/integration_test.vr  # 17 test(s), 5 error(s)
+core-tests/mem/capability/regression_test.vr  # 6 test(s), 8 error(s)
+core-tests/mem/capability/unit_test.vr  # 62 test(s), 16 error(s)
+core-tests/mem/epoch/unit_test.vr  # 20 test(s), 1 error(s)
+core-tests/mesh/xds/types/unit_test.vr  # 14 test(s)
+core-tests/meta/attribute/unit_test.vr  # 39 test(s), 2 error(s)
+core-tests/meta/contexts/property_test.vr  # 36 test(s), 17 error(s)
+core-tests/meta/contexts/unit_test.vr  # 102 test(s), 14 error(s)
+core-tests/meta/quote/unit_test.vr  # 22 test(s), 5 error(s)
+core-tests/meta/span/integration_test.vr  # 12 test(s), 4 error(s)
+core-tests/meta/token/property_test.vr  # 25 test(s), 2 error(s)
+core-tests/meta/token/regression_test.vr  # 4 test(s), 1 error(s)
+core-tests/meta/token/unit_test.vr  # 86 test(s), 22 error(s)
+core-tests/net/http3/property_test.vr  # 38 test(s), 1 error(s)
+core-tests/net/quic/idle_timeout/unit_test.vr  # 4 test(s), 2 error(s)
+core-tests/net/tls13/error/unit_test.vr  # 15 test(s), 2 error(s)
+core-tests/net/unix/unit_test.vr  # 22 test(s), 1 error(s)
+core-tests/runtime/async_ops/property_test.vr  # 9 test(s), 1 error(s)
+core-tests/runtime/supervisor/property_test.vr  # 14 test(s), 3 error(s)
+core-tests/runtime/tls/unit_test.vr  # 16 test(s), 2 error(s)
+core-tests/sync/rwlock/regression_test.vr  # 7 test(s), 2 error(s)
+core-tests/sys/darwin/mod/property_test.vr  # 11 test(s), 15 error(s)
+core-tests/sys/init/integration_test.vr  # 2 test(s), 2 error(s)
+core-tests/sys/init/property_test.vr  # 5 test(s), 3 error(s)
+core-tests/sys/init/regression_test.vr  # 3 test(s), 5 error(s)
+core-tests/sys/init/unit_test.vr  # 11 test(s), 11 error(s)
+core-tests/sys/io_engine/integration_test.vr  # 12 test(s), 2 error(s)
+core-tests/sys/linux/bpf/error/property_test.vr  # 22 test(s), 11 error(s)
+core-tests/sys/linux/bpf/error/unit_test.vr  # 20 test(s), 6 error(s)
+core-tests/sys/linux/mod/unit_test.vr  # 7 test(s), 5 error(s)
+core-tests/sys/mod/integration_test.vr  # 8 test(s), 2 error(s)
+core-tests/sys/mod/property_test.vr  # 10 test(s), 6 error(s)
+core-tests/sys/mod/regression_test.vr  # 4 test(s), 1 error(s)
+core-tests/sys/mod/unit_test.vr  # 17 test(s), 2 error(s)
+core-tests/sys/no_runtime/integration_test.vr  # 8 test(s), 5 error(s)
+core-tests/sys/no_runtime/property_test.vr  # 13 test(s), 4 error(s)
+core-tests/sys/no_runtime/regression_test.vr  # 4 test(s), 1 error(s)
+core-tests/sys/no_runtime/unit_test.vr  # 18 test(s), 6 error(s)
+core-tests/sys/process_ops/integration_test.vr  # 6 test(s), 1 error(s)
+core-tests/sys/process_ops/property_test.vr  # 6 test(s), 1 error(s)
+core-tests/sys/process_ops/regression_test.vr  # 6 test(s), 1 error(s)
+core-tests/sys/process_ops/unit_test.vr  # 8 test(s), 1 error(s)
+core-tests/sys/signal/property_test.vr  # 14 test(s), 1 error(s)
+core-tests/sys/windows/tls/integration_test.vr  # 13 test(s), 3 error(s)
+core-tests/text/numeric/bigdecimal/integration_test.vr  # 3 test(s), 1 error(s)
+core-tests/text/text/protocol_test.vr  # 119 test(s), 7 error(s)
+core-tests/time/duration/integration_test.vr  # 11 test(s), 1 error(s)
+core-tests/verify/kernel_v0/soundness/unit_test.vr  # 6 test(s), 4 error(s)
+
+# NOT a typecheck failure, but it never runs either: the runner dies with
+# SIGSEGV before the first test. Measured twice on 2026-09-12, once on
+# HEAD's version of the file and once with four tests added, so the crash
+# is not the additions.
+core-tests/base/data/unit_test.vr  # 164 test(s), runner SIGSEGV before test 1

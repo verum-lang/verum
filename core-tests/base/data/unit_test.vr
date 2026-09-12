@@ -1711,4 +1711,70 @@ fn test_typical_json_response_pattern() {
     assert_eq(name, "John");
 }
 
+// =============================================================================
+// is_number / to_json_pretty / deep_merge — all three documented on the
+// stdlib reference and run by nothing (census 2026-09-12).
+// =============================================================================
+
+@test
+fn test_is_number_covers_both_numeric_variants() {
+    // `Data` splits numbers into Int and Float; a predicate that knew
+    // only one of them looks right on half the corpus.
+    assert(Data.Int(3).is_number());
+    assert(Data.Float(3.5).is_number());
+}
+
+@test
+fn test_is_number_rejects_the_non_numeric_variants() {
+    assert(!Data.Text("x".to_text()).is_number());
+    assert(!Data.Null.is_number());
+    assert(!Data.Bool(true).is_number());
+}
+
+@test
+fn test_to_json_pretty_indents_and_stays_parseable() {
+    match parse_json("{\"a\":1}".to_text()) {
+        Result.Ok(d) => {
+            let pretty = d.to_json_pretty();
+            // Indentation is the point: the compact form has no newline.
+            assert(pretty.contains("\n"));
+            assert(pretty.contains("\"a\""));
+            // And it must survive a round trip, which a pretty-printer
+            // that emitted stray commas would fail.
+            match parse_json(pretty) {
+                Result.Ok(_) => assert(true),
+                Result.Err(_) => panic("to_json_pretty produced unparseable JSON"),
+            };
+        },
+        Result.Err(_) => panic("parse_json on a one-key object"),
+    };
+}
+
+@test
+fn test_to_json_pretty_on_a_scalar_has_no_indentation_to_add() {
+    assert_eq(Data.Int(7).to_json_pretty(), "7");
+}
+
+@test
+@ignore("Data.deep_merge dies with `Null pointer dereference: op=opcode 0x62 at Map.clone`. Measured 2026-09-12 at Tier 0 merging {\"a\":1,\"b\":[2,3]} with {\"b\":9,\"c\":4}. The body's first act on two Objects is `a.clone()`, and Map.clone is the same null-deref family as Map.entry / Map.values_mut / MapIter.next (A125).")
+fn test_deep_merge_combines_two_objects() {
+    match parse_json("{\"a\":1,\"b\":2}".to_text()) {
+        Result.Ok(left) => {
+            match parse_json("{\"b\":9,\"c\":4}".to_text()) {
+                Result.Ok(right) => {
+                    let merged = left.deep_merge(&right);
+                    // RIGHT wins on the overlap, and both sides' unique
+                    // keys survive.
+                    let out = merged.to_json();
+                    assert(out.contains("\"a\""));
+                    assert(out.contains("\"c\""));
+                    assert(out.contains("9"));
+                },
+                Result.Err(_) => panic("right parse"),
+            };
+        },
+        Result.Err(_) => panic("left parse"),
+    };
+}
+
 fn main() {}

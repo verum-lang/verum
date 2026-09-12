@@ -116,8 +116,28 @@ DOCS = Path(os.environ.get("VERUM_STDLIB_DOCS")
             or (Path(_DOCS_ROOT) / "stdlib" if _DOCS_ROOT
                 else REPO.parent / "website" / "docs" / "stdlib"))
 RUN_DIRECTIVES = {"run", "run-interpreter"}
-BASELINE = 255  # Lowered by COVERAGE, never by argument — the only way
+BASELINE = 275  # Lowered by COVERAGE, never by argument — the only way
                 # this number is meant to move.
+                #   247 -> 275  THE DEAD-FILE LIST, measured properly.
+                #               The seeded version held ONE file; the
+                #               full suite named 84 more. Run
+                #               2026-09-12: 19042 tests, 16542 passed,
+                #               2129 failed, 371 ignored, 2091s at 4
+                #               threads. 84 files fail to COMPILE
+                #               entirely — 1774 tests, 9.3% of the
+                #               suite — and a 85th (base/data/unit_test)
+                #               takes the runner down with SIGSEGV
+                #               before its first test. Excluding them
+                #               withdraws credit from 28 documented
+                #               methods that nothing was running.
+                #               THE COUNT GOING UP IS THE POINT: a
+                #               false minus — a method reported covered
+                #               that nothing runs — is the failure this
+                #               gate exists to prevent, and it had 28
+                #               of them.
+                #               (Between 255 and 247, sixteen methods
+                #               were genuinely covered by new tests;
+                #               that lowering is real and stands.)
                 #   254 -> 255  NOT a regression and not coverage: a
                 #               THIRD instrument correction, and the
                 #               only one that moves the count UP.

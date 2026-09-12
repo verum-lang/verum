@@ -1402,3 +1402,38 @@ fn test_option_chaining() {
 fn main() {
     // Tests run via @test annotations
 }
+
+// =============================================================================
+// take_if — documented and run by nothing (census 2026-09-12). It takes
+// the value out ONLY when the predicate holds, and leaves it in place
+// otherwise, which is the half a one-sided test misses.
+// =============================================================================
+
+@test
+fn test_take_if_takes_when_the_predicate_holds() {
+    let mut a: Maybe<Int> = Maybe.Some(5);
+    let taken = a.take_if(|x| *x > 3);
+    assert(taken.is_some());
+    assert_eq(taken.unwrap(), 5);
+    // TAKEN means removed: the original is now None.
+    assert(a.is_none());
+}
+
+@test
+fn test_take_if_leaves_the_value_when_the_predicate_fails() {
+    let mut b: Maybe<Int> = Maybe.Some(1);
+    let taken = b.take_if(|x| *x > 3);
+    assert(taken.is_none());
+    // ...and the receiver still holds it. A version that took
+    // unconditionally and put it back only on success would pass the
+    // first assertion and fail this one.
+    assert(b.is_some());
+    assert_eq(b.unwrap(), 1);
+}
+
+@test
+fn test_take_if_on_none_is_none() {
+    let mut c: Maybe<Int> = Maybe.None;
+    assert(c.take_if(|x| *x > 0).is_none());
+    assert(c.is_none());
+}
