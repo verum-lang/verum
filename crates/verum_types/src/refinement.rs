@@ -3265,6 +3265,45 @@ impl RefinementChecker {
     /// Syntactic-only refinement check (no SMT).
     /// Returns Some(result) if the syntactic evaluator can determine the outcome,
     /// None if it cannot (complex predicates like modulo, string ops, etc.).
+    /// Does this predicate reach for a function the syntactic evaluator
+    /// cannot fold?
+    ///
+    /// **A113.** The evaluator has arms for literals, `!`, comparison,
+    /// arithmetic over constants and a short list of METHODS (`len`, the
+    /// boolean text predicates). It has no `ExprKind::Call` arm at all, and
+    /// the SMT layer sees such a call as an UNINTERPRETED symbol — it
+    /// cannot unfold `twice`, cannot prove the verification condition, and
+    /// answers `Invalid`.
+    ///
+    /// `Invalid` from an uninterpreted symbol means "not proven". `Invalid`
+    /// over fully interpreted content means "false". Nothing downstream can
+    /// tell them apart, so the caller that hard-errors on a literal has to
+    /// ask this question first. Measured 2026-09-12, with the same
+    /// arithmetic written both ways:
+    ///
+    ///     Int{it * 2 >= 10}      v: 20  clean     v: 1  E500
+    ///     Int{twice(it) >= 10}   v: 20  E500      v: 1  E500
+    ///
+    /// The second row refuses `40 >= 10`. A METHOD call is unaffected —
+    /// `Text{it.len() > 0}` is clean on "abc" and refuses on "" — because
+    /// the evaluator folds it and the solver never gets the last word.
+    pub fn predicate_calls_an_opaque_function(expr: &Expr) -> bool {
+        struct FindCall(bool);
+        impl verum_ast::visitor::Visitor for FindCall {
+            fn visit_expr(&mut self, expr: &Expr) {
+                if matches!(expr.kind, ExprKind::Call { .. }) {
+                    self.0 = true;
+                }
+                if !self.0 {
+                    verum_ast::visitor::walk_expr(self, expr);
+                }
+            }
+        }
+        let mut find = FindCall(false);
+        verum_ast::visitor::Visitor::visit_expr(&mut find, expr);
+        find.0
+    }
+
     pub fn syntactic_check_only(
         &self,
         value: &Expr,

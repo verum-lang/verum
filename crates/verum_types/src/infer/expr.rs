@@ -2457,15 +2457,71 @@ impl TypeChecker {
                                 // syntactic evaluator does not do
                                 // quantifiers and so could not confirm what
                                 // the solver had already decided (T0967).
+                                // …UNLESS THE PREDICATE CALLS A FUNCTION (A113).
+                                //
+                                // "A literal has no such doubt" holds only
+                                // while the predicate is fully interpreted. A
+                                // free call is an uninterpreted symbol: the
+                                // solver cannot unfold it, cannot prove the VC,
+                                // and answers `Invalid` — which this branch
+                                // then read as "violated".
+                                //
+                                // Measured 2026-09-12, both polarities, same
+                                // arithmetic written two ways:
+                                //
+                                //   Int{it * 2 >= 10}    v:20 clean  v:1 E500
+                                //   Int{twice(it) >= 10} v:20 E500   v:1 E500
+                                //
+                                // The second row refused `40 >= 10`, and so did
+                                // `Int{twice(it) >= -1000}`, which no value can
+                                // violate. T0967's case — a quantifier false
+                                // for every value — contains no call and still
+                                // refuses, which is what this branch is for.
                                 if matches!(expr.kind, ExprKind::Literal(_))
                                     && predicate.provenance
                                         == crate::refinement::PredicateProvenance::Declared
+                                    && !crate::refinement::RefinementChecker
+                                        ::predicate_calls_an_opaque_function(
+                                            &predicate.predicate,
+                                        )
                                 {
                                     let pred_text = format!("{}", predicate);
                                     return Err(TypeError::RefinementFailed {
                                         predicate: verum_common::Text::from(pred_text),
                                         span: expr.span,
                                     });
+                                }
+                                // AND IF THE GUARD ABOVE IS WHAT STOPPED US,
+                                // SAY SO — silence is its own defect (A113).
+                                //
+                                // Lifting the false rejection must not leave a
+                                // reader believing the predicate was checked.
+                                // The shipped rule is "compiles clean means
+                                // CHECKED; compiles with W0500 means PARSED",
+                                // so a predicate the solver could not decide
+                                // owes the reader the warning, exactly as the
+                                // `Unknown` arm below gives it. Before the
+                                // regression this case DID warn — measured on
+                                // the docs' own table, 2026-08-17.
+                                if matches!(expr.kind, ExprKind::Literal(_))
+                                    && predicate.provenance
+                                        == crate::refinement::PredicateProvenance::Declared
+                                {
+                                    let msg = format!(
+                                        "refinement {} was NOT verified against a value \
+                                         known at compile time (the predicate calls a \
+                                         function the solver cannot unfold), so the \
+                                         constraint is not enforced here — express the \
+                                         predicate in terms the solver decides \
+                                         (comparisons, arithmetic, `&&`/`||`/`!`), or \
+                                         check it explicitly in code",
+                                        predicate
+                                    );
+                                    self.diagnostics.push(Diagnostic::new_warning(
+                                        msg,
+                                        span_to_line_col(expr.span),
+                                        "W0500",
+                                    ));
                                 }
                                 // Syntactic can't confirm → gradual verification
                             }
