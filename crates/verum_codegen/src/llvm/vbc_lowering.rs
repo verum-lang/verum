@@ -3573,8 +3573,15 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                     );
                 }
                 match &p.type_ref {
-                    TypeRef::Slice(_) => {
+                    TypeRef::Slice(elem) => {
                         ctx.mark_slice_register(reg);
+                        // **T1458 SLICE-CARRIES-ITS-ELEMENT-1** — a PARAMETER
+                        // spelled `&[T]` must carry `T` for the same reason the
+                        // return-type classifier must, and this is a SECOND
+                        // COPY of that decision: fixing the other one alone
+                        // changed nothing for a slice that arrives as a
+                        // parameter, which is how the probe below receives it.
+                        ctx.set_generic_type_args(reg, vec![(**elem).clone()]);
                     }
                     TypeRef::Instantiated { base, args } if *base == TypeId::LIST => {
                         // A `List<T>` parameter is a LIST OBJECT (i64-strided),

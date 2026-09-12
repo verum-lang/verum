@@ -40384,8 +40384,26 @@ fn mark_register_from_return_type<'ctx>(
             // Tuple return type — store element types for Unpack to use later
             ctx.set_tuple_element_types(reg, elems.clone());
         }
-        TypeRef::Slice(_) => {
+        TypeRef::Slice(elem) => {
             ctx.mark_slice_register(reg);
+            // **T1458 SLICE-CARRIES-ITS-ELEMENT-1** — the element type was
+            // thrown away here, and it is the only thing that can type what a
+            // loop over this slice yields.
+            //
+            // `IterNew` hands `get_generic_type_args(iterable)` to the iterator
+            // and `IterNext`'s tail marks the yielded element from it. With
+            // nothing to propagate the element reaches its consumer unmarked.
+            //
+            // MEASURED by removing this line again after it was written —
+            // `for t in texts.iter() { print(f"{t}") }` over a `&[Text]`:
+            //
+            //     with    elem = alpha        elem = beta
+            //     without elem = 4393861136   elem = 4393861184
+            //
+            // The `Array` arm two cases up already does exactly this with its
+            // own element, and `Reference` below does it for `&[T]`; this arm
+            // was the one that dropped it.
+            ctx.set_generic_type_args(reg, vec![(**elem).clone()]);
         }
         TypeRef::Reference { inner, .. } => {
             // #48 REF-RETURN-TRANSPARENCY-1: Tier-1's value model makes a

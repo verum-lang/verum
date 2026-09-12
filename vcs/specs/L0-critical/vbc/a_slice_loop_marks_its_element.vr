@@ -1,0 +1,69 @@
+// @test: run
+// @tier: 0,1
+// @level: L0
+// @tags: slice, iterator, element, type, text, regression
+// @timeout: 60000
+// @expected-exit: 0
+//
+// A SLICE LOOP MARKS ITS ELEMENT (T1458).
+//
+// The classifier's slice arm discarded its element type in BOTH places that
+// classify a register — the return-type classifier and the parameter
+// stamping walk. `IterNew` hands `get_generic_type_args(iterable)` to the
+// iterator and `IterNext`'s tail marks the yielded element from those
+// args, so with nothing to propagate the element reached its consumer
+// unmarked and an f-string integer-formatted a correct Text pointer.
+//
+// Measured at Tier 1 by REMOVING the fix again after writing it, which is
+// the only reading that separates "this line matters" from "this line
+// agrees with its neighbours":
+//
+//     with     elem = alpha            elem = beta
+//     without  elem = 4393861136       elem = 4393861184
+//
+// Tier 0 was correct either way, which is why the pair below runs at both
+// and why the `List` rung sits beside the slice one: the same loop over a
+// `List<Text>` was correct throughout, so a slice failing beside a list
+// passing says the defect is in how the SLICE is classified, not in
+// iteration or in Text.
+//
+// FIXING ONE COPY CHANGED NOTHING. A slice that arrives as a PARAMETER is
+// stamped by the other walk, and this spec's subject is a parameter for
+// exactly that reason.
+//
+// The `+ 0` on the count is deliberate: a bare `assert(n == 2)` can be
+// folded by the frontend's own model.
+
+fn show_slice(xs: &[Text]) -> Int {
+    let mut n = 0;
+    for t in xs.iter() {
+        print(f"  slice elem = {t}");
+        n = n + 1;
+    }
+    n
+}
+
+fn show_list(xs: &List<Text>) -> Int {
+    let mut n = 0;
+    for t in xs.iter() {
+        print(f"  list  elem = {t}");
+        n = n + 1;
+    }
+    n
+}
+
+fn main() {
+    print("0 begin");
+
+    let l: List<Text> = ["alpha".to_text(), "beta".to_text()];
+
+    let a = show_list(&l);
+    print(f"1 list  count = {a + 0} (want 2)");
+    assert(a + 0 == 2);
+
+    let b = show_slice(l.as_slice());
+    print(f"2 slice count = {b + 0} (want 2)");
+    assert(b + 0 == 2);
+
+    print("3 end");
+}
