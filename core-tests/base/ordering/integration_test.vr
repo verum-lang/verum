@@ -38,11 +38,21 @@ fn integration_int_cmp_returns_ordering() {
 
 @test
 fn integration_float_cmp_returns_ordering() {
+    // `Float` IMPLEMENTS `PartialOrd`, NOT `Ord`, and that is the
+    // design rather than a gap: NaN compares false against every value
+    // including itself, so a total order cannot be answered. The
+    // runtime says so in as many words if `cmp` is called —
+    //   "Float has no total order: NaN compares false against every
+    //    value including itself, so `cmp` cannot answer. Use
+    //    `partial_cmp` … or `total_cmp` …"
+    // — but the CHECKER refuses first, with `no method named 'cmp'
+    // found for type 'Float'`, and that is a COMPILE error which took
+    // all 22 tests in this file down. Measured 2026-09-12.
     let a: Float = 1.5;
     let b: Float = 2.5;
-    assert_eq(a.cmp(&b), Less);
-    assert_eq(b.cmp(&a), Greater);
-    assert_eq(a.cmp(&a), Equal);
+    assert_eq(a.partial_cmp(&b), Maybe.Some(Less));
+    assert_eq(b.partial_cmp(&a), Maybe.Some(Greater));
+    assert_eq(a.partial_cmp(&a), Maybe.Some(Equal));
 }
 
 @test

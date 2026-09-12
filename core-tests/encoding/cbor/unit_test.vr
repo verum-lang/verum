@@ -69,7 +69,11 @@ fn test_cbor_value_map() {
 fn test_cbor_value_tag() {
     let v: CborValue = CborValue.CborTag {
         tag: 0_u64,
-        value: Heap(CborValue.CborText(Text.from("2026-05-24"))),
+        // `Heap(x)` is not a constructor — the grammar spells it
+        // `Heap.new(x)` (CLAUDE.md, semantic types). The bare form
+        // is refused with `error<E412>: not a function: Heap`, and
+        // that one line took all 40 tests in this file down.
+        value: Heap.new(CborValue.CborText(Text.from("2026-05-24"))),
     };
     assert(v is CborValue.CborTag);
 }

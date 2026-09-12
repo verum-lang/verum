@@ -19,12 +19,22 @@ mount core.base.result.{Result, Ok, Err};
 
 @test
 fn test_archive_version_major_canonical_value() {
-    assert_eq(ARCHIVE_VERSION_MAJOR, 1);
+    // A REFINED-TYPE CONSTANT CANNOT REACH `assert_eq`. These are
+    // declared `public const ARCHIVE_VERSION_MAJOR: Int { >= 0, <=
+    // 65535 } = 1`, and the refinement does not unify with `Int` in
+    // argument position: `assert_eq(ARCHIVE_VERSION_MAJOR, 1)` is
+    // refused with `expected 'Unit', found 'Int'`, and `let m: Int =
+    // ARCHIVE_VERSION_MAJOR` with the mirror of it. Printing and `==`
+    // both work, so the value is fine and the unification is not.
+    // A COMPILE error, so no `@ignore` contains it — two lines took all
+    // 12 tests in this file down. Measured 2026-09-12.
+    assert(ARCHIVE_VERSION_MAJOR == 1);
 }
 
 @test
 fn test_archive_version_minor_canonical_value() {
-    assert_eq(ARCHIVE_VERSION_MINOR, 0);
+    // See the note above.
+    assert(ARCHIVE_VERSION_MINOR == 0);
 }
 
 @test
