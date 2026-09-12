@@ -52,7 +52,6 @@ mount core.collections.list.List;
 // =============================================================================
 
 @test
-@ignore("arg(i) answers Maybe.None for every index when entered across the module boundary, while args() — the same arg(i) in a loop inside core.base.env — returns the real argv in the same programme. Measured 2026-09-12 under a plain `verum run`, not a harness artefact. See §A1, which pins the discriminator and passes.")
 fn regression_pin_arg_zero_consistent_with_args_count() {
     let count = args_count();
     let first = arg(0);
@@ -64,12 +63,13 @@ fn regression_pin_arg_zero_consistent_with_args_count() {
 }
 
 // =============================================================================
-// REGRESSION §A1: THE DISCRIMINATOR, and it passes today.
+// REGRESSION §A1: THE DISCRIMINATOR.
 //
-// §A is red and `@ignore`d, which means it protects nothing. This one
-// pins what the re-measurement established, so a fix that repairs
-// `arg` cannot quietly break the route that works, and a regression in
-// `args()` cannot hide behind `arg`'s known failure.
+// §A went green the same day the cause above was found, so this is no
+// longer standing in for a red test. It stays because it pins the
+// OTHER half: `args()` reaching argv through the module-internal route.
+// A future change to `arg` cannot quietly break that route, and a
+// regression in `args()` cannot hide behind `arg`.
 // =============================================================================
 
 @test
@@ -192,6 +192,57 @@ fn regression_args_returns_list_text() {
     let xs: List<Text> = args();
     let n = xs.len();
     assert(n >= 0);
+}
+
+// =============================================================================
+// REGRESSION §I: a value `set_var` cannot store must not KILL THE
+// PROCESS.
+//
+// An environment variable is a NUL-terminated C string, so a value
+// carrying an embedded NUL can never be stored. `core/base/env.vr`
+// declares `set_var` returning unit and its body says "ignore errors
+// (best-effort)", so the Verum surface has no way to express that
+// failure and no reason to expect a process death — but the call
+// bottomed out in the host's setter, which PANICS on a NUL rather than
+// failing.
+//
+// Measured 2026-09-12: the §F property law drew a NUL-bearing value and
+// the whole test RUNNER went down with SIGABRT, losing every remaining
+// test in the process. That is the worst shape a defect can take — the
+// report blames the test that happened to be running.
+//
+// This pin is the surviving evidence: reaching the next line at all is
+// the assertion.
+// =============================================================================
+
+@test
+fn regression_set_var_with_nul_value_does_not_abort() {
+    let key = "VERUM_TEST_REGRESSION_NUL";
+    remove_var(key);
+
+    set_var(key, "before\0after");
+
+    // Reaching here is the point. What the variable holds is the
+    // platform's business — a refused write leaves it unset, which is
+    // the honest outcome and the one to assert.
+    assert(var_opt(key).is_none());
+
+    remove_var(key);
+}
+
+// =============================================================================
+// REGRESSION §J: the same for a key the host cannot accept. An empty
+// key, and a key containing `=`, are refused by every platform setter,
+// and by panic rather than by an error on this one.
+// =============================================================================
+
+@test
+fn regression_set_var_with_unusable_key_does_not_abort() {
+    set_var("", "value");
+    set_var("HAS=EQUALS", "value");
+    // Both refused, neither fatal.
+    assert(var_opt("").is_none());
+    assert(var_opt("HAS=EQUALS").is_none());
 }
 
 fn main() {}

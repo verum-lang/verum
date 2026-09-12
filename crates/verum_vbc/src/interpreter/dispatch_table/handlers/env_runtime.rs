@@ -138,9 +138,7 @@ pub(in super::super) fn try_intercept_env_runtime(
             if arg_count != 0 {
                 return Ok(None);
             }
-            let strip_argv0 = func_name.contains("script.args")
-                || func_name.contains("shell.script");
-            intercept_args(state, strip_argv0)
+            intercept_args(state, strips_argv0(func_name))
         }
         "args_count" => {
             if arg_count != 0 {
@@ -149,8 +147,9 @@ pub(in super::super) fn try_intercept_env_runtime(
             // The same source and the same rule as `args`, because
             // this answers `args().len()` and the stdlib body says so
             // literally: `pure fn args_count() -> Int { args().len() }`.
-            let strip_argv0 = func_name.contains("script");
-            Ok(Some(Value::from_i64(script_argv(strip_argv0).len() as i64)))
+            Ok(Some(Value::from_i64(
+                script_argv(strips_argv0(func_name)).len() as i64,
+            )))
         }
         "arg" => {
             // Same reasoning as `args` — 1-arg variant. Collisions
@@ -165,10 +164,48 @@ pub(in super::super) fn try_intercept_env_runtime(
             if arg_count != 1 {
                 return Ok(None);
             }
-            intercept_arg(state, args_start_reg, caller_base)
+            intercept_arg(
+                state,
+                args_start_reg,
+                caller_base,
+                strips_argv0(func_name),
+            )
         }
         _ => Ok(None),
     }
+}
+
+/// Does this call site want the SCRIPT's arguments or the HOST's?
+///
+/// Two namespaces share all three bare names — `args`, `args_count`,
+/// `arg` — and the qualifier is the only signal there is:
+///
+///   * `core.shell.script.*` — the script's user-supplied args, argv[0]
+///     and the `verum run <path>` chain stripped.
+///   * `core.base.env.*` — the full host argv, program name included.
+///
+/// ONE RULE, THREE CALLERS. That sentence was already written above
+/// `script_argv`, and it was already false: `args` decided with
+/// `contains("script.args") || contains("shell.script")`, `args_count`
+/// with a bare `contains("script")`, and `intercept_arg` did not decide
+/// at all — it passed `true` unconditionally. So under `verum run p.vr`
+/// with no script arguments, ONE programme saw
+///
+/// ```text
+/// core.base.env.args_count()  -> 3
+/// core.base.env.args()        -> ["…/verum", "run", "…/p.vr"]
+/// core.base.env.arg(0)        -> Maybe.None
+/// ```
+///
+/// and `arg(i)` answered `None` for every index while `args()` — which
+/// is `arg(i)` in a loop INSIDE the module, so it never reaches this
+/// intercept — returned the real vector. Measured 2026-09-12; the
+/// deferral in `core-tests/base/env` had blamed the `--interp` harness
+/// since before that, and a plain `verum run` reproduces it exactly.
+fn strips_argv0(func_name: &str) -> bool {
+    func_name.contains("script.args")
+        || func_name.contains("script.arg")
+        || func_name.contains("shell.script")
 }
 
 fn is_env_qualified(func_name: &str) -> bool {
@@ -238,6 +275,24 @@ pub(super) fn env_set_raw(state: &mut InterpreterState, key: &str, value: &str) 
     if !env_mutation_allowed(state, key) {
         return false;
     }
+    // A VERUM PROGRAMME MUST NOT BE ABLE TO ABORT THE INTERPRETER, and
+    // `std::env::set_var` PANICS — it does not return an error — when
+    // the key is empty, when either side carries a NUL, or when the key
+    // carries `=`. `core/base/env.vr` declares `set_var` as returning
+    // unit and its body says "ignore errors (best-effort)", so the
+    // Verum surface has no way to express the failure and no reason to
+    // expect a process death.
+    //
+    // Measured 2026-09-12: `core-tests/base/env/property_test.vr`'s
+    // round-trip law generates arbitrary `Text`, drew a value with an
+    // embedded NUL, and took the whole test RUNNER down with
+    // SIGABRT — `failed to set environment variable … file name
+    // contained an unexpected NUL byte`. Every remaining test in the
+    // process was lost, and the report blamed the law rather than the
+    // call.
+    if !env_name_is_settable(key) || value.contains('\0') {
+        return false;
+    }
     // SAFETY: `set_var` is unsafe in newer Rust because concurrent readers in
     // other threads would race; the interpreter is single-threaded here.
     unsafe {
@@ -246,9 +301,24 @@ pub(super) fn env_set_raw(state: &mut InterpreterState, key: &str, value: &str) 
     true
 }
 
+/// The names `std::env::{set_var, remove_var}` accept without panicking.
+///
+/// Both refuse an empty key, a key containing `=`, and a NUL anywhere —
+/// by PANIC, which is why this is a precondition rather than a match on
+/// an error. Stated once because two callers need it.
+fn env_name_is_settable(key: &str) -> bool {
+    !key.is_empty() && !key.contains('=') && !key.contains('\0')
+}
+
 /// Remove an environment variable. Returns `false` when denied.
 pub(super) fn env_unset_raw(state: &mut InterpreterState, key: &str) -> bool {
     if !env_mutation_allowed(state, key) {
+        return false;
+    }
+    // `remove_var` panics on the same three shapes `set_var` does; see
+    // `env_name_is_settable`. A key that could never have been set
+    // cannot be set now, so refusing is also the right answer.
+    if !env_name_is_settable(key) {
         return false;
     }
     // SAFETY: see `env_set_raw`.
@@ -461,6 +531,7 @@ fn intercept_arg(
     state: &mut InterpreterState,
     args_start_reg: u16,
     caller_base: u32,
+    strip_argv0: bool,
 ) -> InterpreterResult<Option<Value>> {
     let idx_val = state
         .registers
@@ -471,9 +542,12 @@ fn intercept_arg(
     } else {
         idx_val.as_i64()
     };
-    // Indexes the SCRIPT's arguments, not the interpreter's. Reading
-    // the raw process argv here made `arg(0)` the path to `verum`.
-    let argv: Vec<String> = script_argv(true);
+    // Indexes the SAME vector `args()` returns, chosen by the caller's
+    // namespace. Hard-coding `true` here is what made
+    // `core.base.env.arg(0)` answer `Maybe.None` while
+    // `core.base.env.args()` answered the full host argv in the same
+    // programme.
+    let argv: Vec<String> = script_argv(strip_argv0);
     // `arg(idx) -> Maybe<Text>` per `core/base/env.vr:156` — out-of-bounds
     // returns `Maybe.None`, in-bounds returns `Maybe.Some(text)`. The
     // pre-fix interceptor returned a bare `Text` Value (empty string for

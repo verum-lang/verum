@@ -48,10 +48,16 @@
 
 | File | Tests | Status |
 |---|---|---|
-| `unit_test.vr` | 31 unit tests | green (2 `@ignore`'d for §2.1) |
-| `property_test.vr` | property tests | green |
+| `unit_test.vr` | 31 unit tests | green |
+| `property_test.vr` | 6 laws + 5 `@test_case` | green |
 | `integration_test.vr` | integration scenarios | green |
-| `regression_test.vr` | 7 active + 1 `@ignore`'d | 7 green; 1 pinned on §2.1 |
+| `regression_test.vr` | 12 pins | green |
+
+Re-measured 2026-09-12 under `--interp --test-threads 1`: **100 passed,
+0 failed, 0 ignored** across all four files. The three `@ignore`'d pins
+this table used to carry are gone — §2.1 is fixed, not deferred. Before
+that run the same filter reported 13 failures, 11 of them here; the
+table said green because it had not been re-run.
 
 ## §2 — Findings landed in this branch
 
@@ -125,9 +131,12 @@ runs, OR (b) `args_count` reading from a different source than
 > spelling.
 >
 > Fixed by giving all three intercepts one `strips_argv0(func_name)`.
-> Recorded as A121 in the tech-debt register. `regression_test.vr §A1`
-> pins the discriminator and passes, so a future fix to `arg` cannot
-> quietly break the route that works.
+> Recorded as A121 in the tech-debt register. **Both pins this
+> section `@ignore`'d are un-ignored and green**, which is what the
+> July note asked for: `base/env` is now **100 passed / 0 failed /
+> 0 ignored** under `--interp --test-threads 1`, against 13 failures
+> and 2 ignores before. `regression_test.vr §A1` stays as the pin on
+> the module-internal route `args()` takes.
 
 ### 2.3 MOUNT-FN-AUTHORITY-1: `arg` unresolvable → whole file down (2026-07-19)
 

@@ -73,7 +73,6 @@ fn test_args_count_consistency() {
 // =============================================================================
 
 @test
-@ignore("arg(0) answers Maybe.None even when args_count() is 3 and args() returns the real argv. The `--interp` harness is NOT the cause: re-measured 2026-09-12 under a plain `verum run`. It is the cross-module entry into arg — args(), which calls arg(i) inside core.base.env, works in the same programme. Discriminator pinned in regression_test.vr §A1.")
 fn test_arg_first() {
     let first = arg(0);
     assert(first.is_some(), "first argument should exist");

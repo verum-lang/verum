@@ -17,7 +17,20 @@
 // contamination.
 // =============================================================================
 
+// THE PRELUDE DOES NOT CARRY `env`, BY DESIGN, and this file assumed it
+// did. `core/mod.vr`'s prelude is curated — its inclusion law admits
+// only names "the LANGUAGE ITSELF requires in scope everywhere", and it
+// says why: a directory glob once published all 316 top-level names of
+// `base/`, so a bare `parse("1.2.3")` silently bound to the meta-term
+// parser. Every env name below is therefore mounted explicitly, exactly
+// as the sibling `regression_test.vr` mounts them.
+//
+// All six laws in this file had been failing to COMPILE — `set_var`,
+// `var`, `remove_var`, `var_opt` all unbound — which is why they took
+// an identical 504ms and reported as six separate failures rather than
+// one. Measured 2026-09-12.
 mount core.prelude.*;
+mount core.base.env.{args, args_count, var, var_opt, set_var, remove_var, exit};
 mount core.collections.list.List;
 
 // =============================================================================
@@ -54,7 +67,10 @@ fn law_remove_var_clears() {
 @test
 fn law_args_count_matches_args_len() {
     let n = args_count();
-    let xs: Args = args();
+    // `args()` returns `List<Text>`; `Args` is the ITERATOR type, which
+    // nothing here constructs. The annotation was the second reason
+    // this law could not compile.
+    let xs: List<Text> = args();
     assert_eq(xs.len(), n);
 }
 
@@ -94,6 +110,23 @@ fn law_set_var_last_write_wins() {
 fn prop_set_then_var_round_trip(value: Text) {
     // Use a fixed key to avoid namespace pollution; only the value varies.
     let key = "VERUM_TEST_PROP_F_ROUND_TRIP";
+
+    // THE LAW HAS A PRECONDITION AND IT WAS NOT STATED. An environment
+    // variable is a NUL-terminated C string: a value carrying an
+    // embedded NUL cannot be stored, on any platform, and no fix to
+    // `set_var` will change that. The generator draws arbitrary `Text`,
+    // so it finds one — measured 2026-09-12, the drawn value was
+    // "3@KmsaPT\u{301}].💩😀=sb?\0\u{301}r\u{301}a5<(" and it took the whole
+    // test RUNNER down with SIGABRT, losing every remaining test in the
+    // process. (The abort was a second, separate defect — `set_var`
+    // bottomed out in the host's setter, which PANICS rather than
+    // failing — and that is fixed where it belongs, in the
+    // interpreter. A law asserting something false would still be a
+    // false law.)
+    if value.contains("\0") {
+        return;
+    }
+
     set_var(key, value.clone());
     let recovered = var(key);
     assert(recovered.is_ok());
