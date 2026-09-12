@@ -150,7 +150,6 @@ io.md	kill
 io.md	modified_secs
 io.md	output
 io.md	path
-io.md	permissions
 io.md	read_link
 io.md	remove_dir_all
 io.md	set_current_dir
@@ -193,7 +192,6 @@ metrics.md	one_minute_rate
 protobuf.md	at_end
 protobuf.md	read_fixed64
 protobuf.md	read_string
-protobuf.md	read_tag
 protobuf.md	read_varint
 proxy.md	layer
 proxy.md	stream_mut
