@@ -1,7 +1,8 @@
 //! Pins how many stdlib type and protocol names are declared more than once.
 //!
 //! These duplicates are the FUEL for the metadata-merge shadowing tracked as
-//! T0327: `CoreMetadata.types` and `.protocols` are keyed by the SIMPLE name,
+//! T0458 (which absorbed T0327 in the 2026-07-31 consolidation):
+//! `CoreMetadata.types` and `.protocols` are keyed by the SIMPLE name,
 //! and archive descriptors carry no module qualification at all (measured:
 //! 61958 descriptor names, none containing a dot). Loading two same-named
 //! declarations therefore lets the later one displace the earlier.
@@ -14,8 +15,8 @@
 //! `<module>.<Name>` key (MOUNT-TYPE-AUTHORITY-1), and the protocol side is
 //! FIRST-wins (`meta.protocols.entry(..).or_insert_with(..)`), not the
 //! unconditional overwrite the old note claimed. Which declaration survives a
-//! duplicate is therefore still load-order dependent, which is what T0327
-//! tracks; the exact live policy is T0327's to characterise, not this pin's.
+//! duplicate is therefore still load-order dependent, which is what T0458
+//! tracks; the exact live policy is T0458's to characterise, not this pin's.
 //!
 //! This pin does not fix that. It bounds it: a new duplicate cannot be
 //! introduced without someone seeing this test fail and deciding whether the
@@ -98,7 +99,7 @@ fn duplicated_protocol_names_are_the_known_set() {
         expected,
         "the set of duplicated stdlib PROTOCOL names changed.\n\
          the protocol slot in archive_metadata.rs is first-wins, so each of \
-         these is resolved by load order (T0327).\n\
+         these is resolved by load order (T0458).\n\
          If you ADDED one, give it a distinct name or fix the merge first. \
          If you REMOVED one, shrink this list."
     );
@@ -116,6 +117,6 @@ fn duplicated_type_names_do_not_grow() {
         count <= KNOWN,
         "duplicated stdlib type names grew from {KNOWN} to {count}. \
          Each duplicate is a candidate for silent shadowing in \
-         CoreMetadata.types, which is keyed by simple name (T0327)."
+         CoreMetadata.types, which is keyed by simple name (T0458)."
     );
 }
