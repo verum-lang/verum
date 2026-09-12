@@ -8,6 +8,32 @@ The CI contract: every `@test` here passes under both `verum test --interp`
 tests pin known stdlib / language-level defects and are excluded from the
 default green-suite gate.
 
+## The whole suite, measured 2026-09-12
+
+    verum test --interp --test-threads 4     (all of core-tests, 2091 s)
+    19042 tests — 16542 passed, 2129 failed, 371 ignored
+
+**A ROW BELOW CAN BE GREEN WHILE ITS FILE DOES NOT COMPILE.** The rows
+are re-run per module, so a file that stopped compiling since its last
+run shows as an unchanged row — and 84 files fail to compile ENTIRELY,
+1774 tests, 9.3% of the suite, never executing a line. They are listed
+with their test counts in `scripts/ci/doc_methods_dead_files.txt`, which
+is regenerated from a run rather than reasoned about. An 85th,
+`base/data/unit_test.vr`, takes the runner down with SIGSEGV before its
+first test.
+
+The failures are concentrated rather than scattered: 90 files in which
+NOTHING passes account for 1893 of the 2129. The largest are
+`base/iterator/unit_test` (215), `text/text/protocol_test` (119),
+`meta/contexts/unit_test` (102), `base/panic/unit_test` (93) and
+`meta/token/unit_test` (86); every `sys/` mod, init, no_runtime,
+process_ops and embedded file is on the list, as are all four `meta/`
+corpora.
+
+So: **before trusting a row, check whether its file is on that list**,
+and re-run rather than reading. Recorded as A129 in the tech-debt
+register.
+
 | module | unit | property | integration | regression | open deferrals |
 |---|---:|---:|---:|---:|---|
 | `context/scope`          | 276 | 239 | 167 | 115 | 0. **partial** under `--interp --test-threads 1` (2026-06-01) — **62/62 GREEN** (unit + property + integration + regression). The bare-variant collision (§3.1, task #17/#39) and bare-variant method-dispatch corruption (§3.2) that gated this module are **RESOLVED** — `Scope.<Variant>` qualified-form discipline holds; `Scope.Singleton.name()`/`rank()`/`can_depend_on()` + ContextScope depth chain all correct. AOT cross-tier blocked stdlib-wide (parallel-codegen LLVM SIGSEGV + MakeVariantTyped ABI mismatch). |
