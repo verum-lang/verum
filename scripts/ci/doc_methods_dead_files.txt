@@ -36,8 +36,6 @@ core-tests/base/panic/regression_test.vr  # 6 test(s), 4 error(s)
 core-tests/base/primitives/property_test.vr  # 16 test(s), 2 error(s)
 core-tests/base/refinement/let_binding_test.vr  # 10 test(s), 1 error(s)
 core-tests/base/serde/property_test.vr  # 6 test(s), 1 error(s)
-core-tests/context/provider/integration_test.vr  # 14 test(s), 8 error(s)
-core-tests/io/buffer/regression_test.vr  # 7 test(s), 2 error(s)
 core-tests/mem/allocator/integration_test.vr  # 17 test(s); was 2 compile errors (a renamed CONSTANT in a mount, and `Shared(x)` for `Shared.new(x)`), both fixed 2026-09-12 — the file now SIGSEGVs before its first test instead
 core-tests/mem/capability/regression_test.vr  # 6 test(s), 8 error(s)
 core-tests/mem/capability/unit_test.vr  # 62 test(s), 16 error(s)
@@ -67,7 +65,6 @@ core-tests/sys/process_ops/integration_test.vr  # 6 test(s), 1 error(s)
 core-tests/sys/process_ops/property_test.vr  # 6 test(s), 1 error(s)
 core-tests/sys/process_ops/regression_test.vr  # 6 test(s), 1 error(s)
 core-tests/sys/process_ops/unit_test.vr  # 8 test(s), 1 error(s)
-core-tests/sys/windows/tls/integration_test.vr  # 13 test(s), 3 error(s)
 core-tests/verify/kernel_v0/soundness/unit_test.vr  # 6 test(s), 4 error(s)
 
 # NOT a typecheck failure, but it never runs either: the runner dies with
