@@ -221,7 +221,15 @@ UNSHIPPED = re.compile(
     r"(?:not shipped|not implemented|not available|"
     r"do(?:es)? not exist|does not compile|not in the standard library|"
     r"cannot be evaluated|cannot be written|none of these|not yet|"
-    r"no snapshot|no linter|planned|describes a design)[^\n]*$", re.I | re.M)
+    r"no snapshot|no linter|planned|"
+    # A MARKER'S WORDING IS LOAD-BEARING, AND THAT IS EASY TO FORGET WHEN
+    # RETITLING A BOX. `describes a design` was the only design phrasing
+    # here; a box reading "Half of this page is a design, not an API" said
+    # the same thing and matched nothing, so its section stayed in the
+    # census. Measured 2026-09-12 while retitling a box on the same page —
+    # the marker count on an otherwise unchanged file dropped from two to
+    # one, which is the only reason it was noticed.
+    r"describes a design|is a design|are a design|a design, not)[^\n]*$", re.I | re.M)
 # The marker scopes to the SECTION, not to the admonition.  Measured on
 # `testing-tui.md`: its ":::caution Not shipped / None of this section
 # exists" closes after the prose and the illustrative blocks follow it, so
@@ -421,6 +429,35 @@ def self_test():
     if compare(before, before) != ([], []):
         print("self-test: an unchanged population reported a difference")
         return 1
+
+    # THE MARKER'S WORDING, both polarities. A phrasing the pattern does
+    # not know silently returns the whole section to the census, and the
+    # only symptom is a number that moves on a page nobody changed.
+    must_drop = [
+        ":::caution `Ident` is not shipped",
+        ":::caution Half of this page is a design, not an API",
+        ":::caution The `*Ast` types below do not exist; the contexts do",
+    ]
+    must_keep = [
+        # "used to" is excluded ON PURPOSE: a box saying these names USED
+        # TO be listed is a CORRECTION, and its section is ordinary prose
+        # that must stay in the census. Keeping this case here is what
+        # stops the next widening from swallowing corrections along with
+        # markers — it caught exactly that mistake when it was written.
+        ":::note Three names this page used to list do not exist",
+        ":::info Which contexts already exist",
+        ":::caution The counters exist; nothing fills them for you",
+        ":::note Solver choice is an implementation detail",
+    ]
+    for line in must_drop:
+        if not UNSHIPPED.match(line):
+            print(f"self-test: an unshipped marker went unrecognised: {line}")
+            return 1
+    for line in must_keep:
+        if UNSHIPPED.match(line):
+            print(f"self-test: an ordinary admonition was read as a marker: "
+                  f"{line}")
+            return 1
     print(f"[ok] self-test: roster holds {len(KNOWN)} pair(s); "
           f"a same-size swap is reported")
     return 0
