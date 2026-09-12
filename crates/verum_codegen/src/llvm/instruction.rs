@@ -26092,6 +26092,8 @@ fn lower_cbgr_extended<'ctx>(
             let current_fn = ctx.function();
             let llvm_cx = ctx.llvm_context();
             let classify_bb = llvm_cx.append_basic_block(current_fn, "rs_classify");
+            let cell_bb = llvm_cx.append_basic_block(current_fn, "rs_cell");
+            let sw_bb = llvm_cx.append_basic_block(current_fn, "rs_switch");
             let list_bb = llvm_cx.append_basic_block(current_fn, "rs_list");
             let bytelist_bb = llvm_cx.append_basic_block(current_fn, "rs_bytelist");
             let typed_bb = llvm_cx.append_basic_block(current_fn, "rs_typed");
@@ -26147,6 +26149,40 @@ fn lower_cbgr_extended<'ctx>(
                 .builder()
                 .build_and(word0, i64_ty.const_int(0xFFFF_FFFF, false), "rs_tid")
                 .or_llvm_err()?;
+            // RS-CELL-SOURCE-1 (T1192) — the SOURCE may already be a canonical
+            // cell, and this switch could not see one.
+            //
+            // A sub-view is emitted as {data@0, len@8, elem@16}, so its word 0
+            // is a POINTER. The switch below keys on `word0 & 0xFFFFFFFF` as a
+            // type id, and the low half of a heap address matches no case — so a
+            // subslice OF A SUBSLICE took the unknown-header arm, whose contract
+            // is legacy identity (data = src, elem 8), and walked the cell's own
+            // three words.
+            //
+            // Measured at Tier 1 with the stamped-pack arms already routed, on
+            // rung 5 of the spec — `&(&b[16..32])[4..8]` — which read 0 where 85
+            // is meant while rungs 1-4 were already correct. The shape is not
+            // exotic: `write_all`'s loop reaches it on its second iteration, and
+            // `BufRead.read_until` slices `available` again.
+            //
+            // The ONE classifier (`emit_container_view`) probes for a cell FIRST,
+            // before it reads any stamp. Do the same here, with the same
+            // threshold and the same `elem_width` (offset 16, normalised to
+            // {1,2,4,8}), so the two agree by construction rather than by
+            // coincidence.
+            let rs_is_cell = ctx
+                .builder()
+                .build_int_compare(
+                    IntPredicate::UGE,
+                    word0,
+                    i64_ty.const_int(4_294_967_296, false),
+                    "rs_is_cell",
+                )
+                .or_llvm_err()?;
+            ctx.builder()
+                .build_conditional_branch(rs_is_cell, cell_bb, sw_bb)
+                .or_llvm_err()?;
+            ctx.builder().position_at_end(sw_bb);
             let t = |v: u32| i64_ty.const_int(v as u64, false);
             // RS-TYPED-SCALAR-WIDTH-1: the comment contract above
             // ("U8/16/32/64 → data = src+HDR, elem 1/2/4/8") was never
@@ -26168,6 +26204,40 @@ fn lower_cbgr_extended<'ctx>(
                     &[
                         (t(TypeId::LIST.0), list_bb),
                         (t(TypeId::BYTE_LIST.0), bytelist_bb),
+                        // RS-STAMPED-PACK-1 (T1192) — the two STAMPED PACK ids
+                        // belong here, and their absence was the whole remaining
+                        // tier divergence of docs/by-example/19-file-io.
+                        //
+                        // `Text.as_bytes()` produces the ARCH-P5 pack —
+                        // [24-byte header stamped BYTE_SLICE][ptr@24][len@32] —
+                        // the form introduced so that BOTH tiers stamp one
+                        // cross-tier byte view. This switch never learned it, so
+                        // every `&text_bytes[a..b]` fell through to the
+                        // unknown-header arm, whose contract is LEGACY IDENTITY:
+                        // data = src, elem 8.
+                        //
+                        // Measured at Tier 1 before this line, on a 32-byte text
+                        // where reading THROUGH the pack is already correct
+                        // (b[0]=65, b[16]=81):
+                        //
+                        //   (&b[0..16])[0]  = 528   — the stamp itself
+                        //   (&b[0..16])[1]  = 2^36  — header word at +8
+                        //   (&b[1..5])[0]   = 2^36  — stride 8, not 1
+                        //   (&b[16..32])[0] = 0     — 16*8 past a 32-byte text
+                        //
+                        // The sub-view walked the object's own header. Downstream
+                        // that is what reached `write`, so the written file carried
+                        // the DESCRIPTOR's bytes with the right LENGTH and the
+                        // wrong POINTER.
+                        //
+                        // `bytelist_bb` is already the right arm and needs no
+                        // change: it reads the data pointer at payload slot 0
+                        // (offset 24) — its own comment says it "now receives
+                        // STAMPED Pack shapes" — and yields elem 1, which is what
+                        // the ONE classifier (`emit_container_view`) answers for
+                        // both pack stamps.
+                        (t(TypeId::BYTE_SLICE.0), bytelist_bb),
+                        (t(TypeId::TUPLE.0), bytelist_bb),
                         (t(TypeId::U8.0), scalar1_bb),
                         (t(TypeId::I8.0), scalar1_bb),
                         (t(TypeId::BOOL.0), scalar1_bb),
@@ -26342,6 +26412,22 @@ fn lower_cbgr_extended<'ctx>(
                 .or_llvm_err()?;
             let legacy_end = ctx.builder().get_insert_block().unwrap();
 
+            // RS-CELL-SOURCE-1 arm: the canonical cell answers directly —
+            // word 0 IS the data pointer, and the stride lives at offset 16.
+            ctx.builder().position_at_end(cell_bb);
+            let cell_env = super::slice_cell::CellEnv {
+                llvm: ctx.llvm_context(),
+                heap_floor: heap_floor_val,
+            };
+            let rs_cell_elem = cell_env.elem_width(ctx.builder(), src_ptr_v, "rs_cell")?;
+            ctx.builder()
+                .build_unconditional_branch(merge_bb)
+                .or_llvm_err()?;
+            let cell_end = ctx
+                .builder()
+                .get_insert_block()
+                .or_internal("RefSlice cell arm: no insert block")?;
+
             // merge: phi(data), phi(elem)
             ctx.builder().position_at_end(merge_bb);
             let data_phi = ctx.builder().build_phi(i64_ty, "rs_data").or_llvm_err()?;
@@ -26358,6 +26444,7 @@ fn lower_cbgr_extended<'ctx>(
                 (&sc2_data, sc2_end),
                 (&sc4_data, sc4_end),
                 (&sc8_data, sc8_end),
+                (&word0, cell_end),
             ]);
             let elem_phi = ctx.builder().build_phi(i64_ty, "rs_elem").or_llvm_err()?;
             elem_phi.add_incoming(&[
@@ -26369,6 +26456,7 @@ fn lower_cbgr_extended<'ctx>(
                 (&e2, sc2_end),
                 (&e4, sc4_end),
                 (&e8, sc8_end),
+                (&rs_cell_elem, cell_end),
             ]);
             let data_v = data_phi.as_basic_value().into_int_value();
             let elem_v = elem_phi.as_basic_value().into_int_value();

@@ -334,6 +334,73 @@ newtypes: **a parent whose construction the pass cannot observe at all.**
 - Trace: `VERUM_AOT_TRACE_CALLM=1` prints the dispatch decision per
   `CallM`, including the resolved target.
 
+## 8. `RefSlice` must ask the same authority as its neighbours
+
+> **A sub-view producer that classifies its source with its OWN switch
+> will meet a shape the switch does not list.** `emit_container_view` is
+> the one classifier; `Unslice` (0x04), `SliceLen` (0x05), `Subslice`
+> (0x08) and `SplitAt` (0x09) all use it. `RefSlice` kept a bespoke
+> four-arm switch, and both of its gaps were live defects.
+
+### The arms it had, and the two shapes missing from them
+
+From its own comment:
+
+```
+header.type_id == LIST        -> data = *(src+24), elem 8
+header.type_id == BYTE_LIST   -> data = *(src+24), elem 1
+header.type_id == U8/16/32/64 -> data = src+HDR,   elem 1/2/4/8
+implausible ptr / other       -> LEGACY IDENTITY: data = src, elem 8
+```
+
+**Gap 1 — the stamped PACK.** `Text.as_bytes()` produces the ARCH-P5
+pack: a 24-byte header stamped `BYTE_SLICE`, the data pointer at +24,
+the length at +32. That form exists precisely so both tiers stamp one
+cross-tier byte view — and neither `BYTE_SLICE` (528) nor `TUPLE` (521)
+was a case here, so every `&text_bytes[a..b]` took the legacy arm.
+
+**Gap 2 — the canonical CELL.** A sub-view is emitted as
+`{data@0, len@8, elem@16}`, so its word 0 is a POINTER. This switch keys
+on `word0 & 0xFFFFFFFF` as a type id, and the low half of a heap address
+matches no case — so a subslice OF A SUBSLICE took the legacy arm too.
+`write_all`'s loop reaches that shape on its second iteration, and
+`BufRead.read_until` slices `available` again.
+
+### Measured
+
+On a 32-byte text where reading THROUGH the pack is already correct
+(`b[0]`=65, `b[16]`=81), at Tier 1:
+
+| read | before | after |
+|---|---|---|
+| `(&b[0..16])[0]` | **528** — the stamp itself | 65 |
+| `(&b[0..16])[1]` | **2³⁶** — the header word at +8 | 66 |
+| `(&b[1..5])[0]` | **2³⁶** — stride 8, not 1 | 66 |
+| `(&b[16..32])[0]` | **0** — 16·8 past a 32-byte text | 81 |
+| `(&(&b[16..32])[4..8])[0]` | **0** — gap 2 | 85 |
+
+Downstream, `write_all`'s inner `self.write(&buf[written..])` handed the
+syscall a descriptor whose data field was its own address, so the
+written file carried the RIGHT LENGTH and the WRONG BYTES — it began
+`10 02 00 00`, which is 528. **A byte COUNT is not evidence that those
+bytes were written**; measure the artefact.
+
+### Pin
+
+- `RefSlice` now probes for a cell FIRST (RS-CELL-SOURCE-1), with the
+  same threshold and the same `elem_width` (offset 16, normalised to
+  {1,2,4,8}) that `emit_container_view` uses, and routes both stamped
+  pack ids into the arm already written for them (RS-STAMPED-PACK-1).
+- Spec: `vcs/specs/L0-critical/stdlib-runtime/`
+  `a_subslice_of_a_texts_bytes_reads_its_own_elements.vr` — six rungs at
+  both tiers. Rungs 1-4 fail without the pack cases; rung 5 fails
+  without the cell probe. The letters are chosen so a stride error, an
+  offset error and a base error each give a DIFFERENT recognisable
+  number.
+- The static-stride early return (SLICE-STATIC-ELEM-1) still wins when
+  the frontend knew the width, and is why a packed `[Byte; N]` local —
+  whose `src` IS the data pointer — never reaches the classifier.
+
 ## Generic-arithmetic object arm (T0499)
 
 The integer arithmetic opcodes (`AddI`/`SubI`/`MulI`/`DivI`/`ModI`/

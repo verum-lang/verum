@@ -1,0 +1,83 @@
+// @test: run
+// @tier: 0,1
+// @level: L0
+// @tags: slice, subslice, text, bytes, differential, regression
+// @timeout: 60000
+// @expected-exit: 0
+//
+// A SUBSLICE OF A TEXT'S BYTES READS ITS OWN ELEMENTS (T1192).
+//
+// `Text.as_bytes()` produces the ARCH-P5 pack — a 24-byte header stamped
+// `BYTE_SLICE`, then the data pointer at +24 and the length at +32. That
+// form exists so that BOTH tiers stamp one cross-tier byte view.
+//
+// The AOT's `RefSlice` arm classifies its source with its own switch —
+// `LIST`, `BYTE_LIST`, the stamped scalar widths, and an unknown-header
+// default whose documented contract is LEGACY IDENTITY: `data = src`,
+// stride 8. The two stamped PACK ids were in none of its cases, so every
+// `&text_bytes[a..b]` walked the object's own header at stride 8.
+//
+// Measured at Tier 1 before the fix, on this very text, where reading
+// THROUGH the pack is already correct (`b[0]` is 65 and `b[16]` is 81):
+//
+//     (&b[0..16])[0]  = 528           — the BYTE_SLICE stamp itself
+//     (&b[0..16])[1]  = 68719476736   — the header word at +8 (2^36)
+//     (&b[1..5])[0]   = 68719476736   — stride 8, not 1
+//     (&b[16..32])[0] = 0             — 16*8 is past a 32-byte text
+//
+// Downstream that is what reached `write`: `write_all`'s inner
+// `self.write(&buf[written..])` handed the syscall a descriptor whose
+// data field was the descriptor's own address, so the written file
+// carried the RIGHT LENGTH and the WRONG BYTES — it began `10 02 00 00`,
+// which is 528. A byte COUNT is not evidence that those bytes were
+// written; this spec reads the ELEMENTS.
+//
+// The letters are chosen so that every wrong reading is a different,
+// recognisable number: a stride error, an offset error and a base error
+// all produce distinct answers rather than a shared zero.
+
+fn main() -> Int {
+    let t = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef";
+    let b = t.as_bytes();
+
+    // 0. Reading THROUGH the pack — correct at both tiers even before
+    //    the fix, so a failure here means something else broke.
+    print(f"0 len={b.len() + 0} b0={b[0] + 0} b1={b[1] + 0} b16={b[16] + 0}");
+    assert(b.len() + 0 == 32);
+    assert(b[0] + 0 == 65);
+    assert(b[16] + 0 == 81);
+
+    // 1. A sub-view from zero: base right, stride right.
+    let s0 = &b[0..16];
+    print(f"1 len={s0.len() + 0} s0={s0[0] + 0} s1={s0[1] + 0}");
+    assert(s0.len() + 0 == 16);
+    assert(s0[0] + 0 == 65);
+    assert(s0[1] + 0 == 66);
+
+    // 2. A sub-view from one — a stride of 8 answers the header word here.
+    let s1 = &b[1..5];
+    print(f"2 len={s1.len() + 0} s0={s1[0] + 0}");
+    assert(s1.len() + 0 == 4);
+    assert(s1[0] + 0 == 66);
+
+    // 3. A sub-view far enough in that a stride of 8 leaves the object.
+    let s2 = &b[16..32];
+    print(f"3 len={s2.len() + 0} s0={s2[0] + 0}");
+    assert(s2.len() + 0 == 16);
+    assert(s2[0] + 0 == 81);
+
+    // 4. The full range, which is the shape `write_all` produces.
+    let s3 = &b[..];
+    print(f"4 len={s3.len() + 0} s0={s3[0] + 0}");
+    assert(s3.len() + 0 == 32);
+    assert(s3[0] + 0 == 65);
+
+    // 5. A sub-view of a sub-view: the offsets must compose.
+    let s4 = &s2[4..8];
+    print(f"5 len={s4.len() + 0} s0={s4[0] + 0}");
+    assert(s4.len() + 0 == 4);
+    assert(s4[0] + 0 == 85);
+
+    print("9 end");
+    return 0;
+}
