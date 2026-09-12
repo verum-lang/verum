@@ -183,6 +183,57 @@ fn a_name_inside_a_comparison_is_not_opaque() {
 }
 
 #[test]
+fn an_outer_local_in_a_comparison_is_opaque() {
+    // `let limit = 10; let n: Int{it < limit} = dyn_small();` where
+    // `dyn_small()` answers 5 was refused with
+    // `error<E500>: refinement constraint failed: {it < limit}`. 5 < 10, and
+    // it was refused: the VC carries the checked value and nothing else, so
+    // `limit` is an uninterpreted symbol and the solver's `Invalid` means
+    // "not proven" rather than "violated". Measured 2026-09-12; it took all
+    // 10 tests in `core-tests/base/refinement/let_binding_test.vr` down.
+    let s = Span::dummy();
+    let pred = binary(
+        BinOp::Lt,
+        it_ident(s),
+        Expr::ident(Ident::new("limit", s)),
+        s,
+    );
+    assert!(RefinementChecker::predicate_calls_an_opaque_function(&pred));
+}
+
+#[test]
+fn a_named_constant_on_the_left_is_opaque_too() {
+    // The mirror image, because the walk must not stop at one operand —
+    // the same mistake `a_call_on_the_right_hand_side_is_opaque` pins for
+    // calls.
+    let s = Span::dummy();
+    let pred = binary(
+        BinOp::Le,
+        Expr::ident(Ident::new("MAX", s)),
+        it_ident(s),
+        s,
+    );
+    assert!(RefinementChecker::predicate_calls_an_opaque_function(&pred));
+}
+
+#[test]
+fn arithmetic_on_it_alone_is_still_not_opaque() {
+    // THE CONTROL FOR THE NEW RULE. `it` is a name and appears in every
+    // predicate; if the walk caught it, `it * 2 >= 10` would become
+    // undecidable and T0967's quantifier case would go silent. This is the
+    // same assertion `plain_arithmetic_is_not_opaque` makes, kept beside
+    // the two above so a reader sees both halves in one place.
+    let s = Span::dummy();
+    let pred = binary(
+        BinOp::Ge,
+        binary(BinOp::Mul, it_ident(s), int_lit(2, s), s),
+        int_lit(10, s),
+        s,
+    );
+    assert!(!RefinementChecker::predicate_calls_an_opaque_function(&pred));
+}
+
+#[test]
 fn a_bare_comparison_is_not_opaque() {
     let s = Span::dummy();
     let pred = binary(BinOp::Ge, it_ident(s), int_lit(10, s), s);

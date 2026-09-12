@@ -1172,6 +1172,56 @@ impl TypeChecker {
     /// the alias works in type position, static calls (`W.make(...)`)
     /// and unification; VALUES / functions re-bind the original's
     /// scheme under the alias name.
+    /// Is `item_name` declared as a type by MORE THAN ONE stdlib module,
+    /// one of them being `module_path`?
+    ///
+    /// A braced mount names the module it wants. When the bare name is
+    /// declared once, the flat `type_defs` entry IS that declaration and the
+    /// import's early return is right. When it is declared twice the flat
+    /// entry is whichever module registered last, and the mount silently
+    /// hands the caller the other module's type — `Child`, `FormatOptions`,
+    /// `Fd`, `ExecutorHandle`, `LemmaStatus`, `Capability` and `InitError`
+    /// were each measured doing that on 2026-09-12.
+    ///
+    /// Asked of `core_metadata.types`, whose keys are `module.Name`, because
+    /// that is the same surface `ensure_mounted_type_loaded_qualified`
+    /// probes — a name it cannot find qualified is one this repair cannot
+    /// help, so `seen_this_module` is part of the answer rather than an
+    /// optimisation.
+    fn mounted_type_name_is_contested(&self, item_name: &str, module_path: &str) -> bool {
+        let Maybe::Some(md) = &self.core_metadata else {
+            return false;
+        };
+        let suffix = format!(".{}", item_name);
+        // DUAL-KEYED, like every other metadata probe in this file: the
+        // archive carries some entries under the mount path and some with
+        // `core.` stripped, and a check that knew only one keying answered
+        // `false` for `core.sys.process_ops.Child` — measured 2026-09-12 with
+        // VERUM_TRACE_TASK21, which showed the gate reached and the repair
+        // declining to act.
+        let stripped = module_path.strip_prefix("core.").unwrap_or(module_path);
+        let this_key = format!("{}{}", module_path, suffix);
+        let this_key_stripped = format!("{}{}", stripped, suffix);
+        let mut count = 0usize;
+        let mut seen_this_module = false;
+        for key in md.types.keys() {
+            let k = key.as_str();
+            if k.ends_with(suffix.as_str()) {
+                count += 1;
+                if k == this_key.as_str() || k == this_key_stripped.as_str() {
+                    seen_this_module = true;
+                }
+            }
+        }
+        if std::env::var("VERUM_TRACE_TASK21").is_ok() {
+            eprintln!(
+                "[task21] contested: mod='{}' item='{}' keys_ending={} this_module_seen={}",
+                module_path, item_name, count, seen_this_module,
+            );
+        }
+        count > 1 && seen_this_module
+    }
+
     fn register_mount_item_alias(&mut self, item_name: &str, alias: &verum_ast::Ident) {
         let alias_text: Text = alias.name.clone();
         if alias_text.as_str() == item_name {
@@ -2755,6 +2805,44 @@ impl TypeChecker {
                         self.record_mount_binding(bind_name, &resolved_key);
                     }
 
+                    // A MOUNTED CONST IS BOUND BY ITS MOUNT, NOT BY AMBIENT
+                    // LUCK (A141).
+                    //
+                    // `resolve_function_via_metadata_reexports` above returns
+                    // None for a const by design, so nothing here bound one —
+                    // and `mount core.sys.darwin.io.{MAX_EVENTS};` still
+                    // printed 256, because the eager registration in
+                    // `infer/env.rs` publishes every public const under its
+                    // BARE name whether or not anybody mounts it. The mount
+                    // was decorative, and the proof is the renamed form:
+                    // `{MAX_EVENTS as M}` has no ambient `M` to fall back on,
+                    // so it reached the E401 below with
+                    // `cannot find MAX_EVENTS in module core.sys.darwin.io`
+                    // — and the error aborts the whole mount statement, which
+                    // is why A141 recorded the rename as breaking the plain
+                    // name too.
+                    //
+                    // Consts live in `metadata.functions` lowered to zero-arg
+                    // entries carrying `is_const` (see FunctionDescriptor), so
+                    // the binding is the static one's twin: qualified key,
+                    // descriptor type, bound under `bind_name`.
+                    if self.ctx.env.lookup(&Text::from(bind_name)).is_none()
+                        && let Maybe::Some(md) = &self.core_metadata.clone()
+                    {
+                        let ckey: Text =
+                            format!("{}.{}", module_path.as_str(), item_name).into();
+                        if let Some(fd) = md.functions.get(&ckey)
+                            && fd.is_const
+                        {
+                            let ty = crate::infer::helpers::parse_descriptor_type_string(
+                                fd.return_type.as_str(),
+                            );
+                            self.ctx
+                                .env
+                                .insert(bind_name, crate::context::TypeScheme::mono(ty));
+                        }
+                    }
+
                     // T0575 — the TYPE twin of the free-fn fallback
                     // above. The two paths were asymmetric: a public
                     // item absent from the module's ExportTable could
@@ -2783,10 +2871,29 @@ impl TypeChecker {
                     // archive-module key spaces. Like the free-fn
                     // probe it returns None for anything that is not a
                     // type, so non-types keep the normal early return.
+                    //
+                    // A120: AN ALREADY-BOUND BARE NAME IS NOT PROOF THAT THE
+                    // MOUNTED MODULE OWNS IT. `ctx.type_defs` has a flat entry
+                    // per simple name and a qualified one per `module.Name`;
+                    // when two modules declare the same name the flat entry is
+                    // whichever registered last. Measured 2026-09-12:
+                    // `mount core.sys.process_ops.{Child}` then reads
+                    // `core.io.process.Child`'s `stdout_fd: Maybe<Int>`, and
+                    // `mount core.meta.contexts.{FormatOptions}` reads
+                    // `core.configuration.format`'s. The rename arm below
+                    // already refuses to accept that (T1369, 2026-09-10); the
+                    // plain form accepted it because THIS gate returned early.
+                    // Contested names now fall through to the same qualified
+                    // publication. A name declared once is untouched.
+                    let contested = self.mounted_type_name_is_contested(
+                        item_name,
+                        module_path.as_str(),
+                    );
                     let type_bound_from_metadata = if self
                         .ctx
                         .lookup_type(bind_name)
                         .is_some()
+                        && !contested
                     {
                         true
                     } else {
@@ -2824,7 +2931,7 @@ impl TypeChecker {
                             let ty = match &ty {
                                 Type::Named { path, args }
                                     if args.is_empty()
-                                        && bind_name != item_name
+                                        && (bind_name != item_name || contested)
                                         && path.segments.len() == 1
                                         && matches!(path.segments.first(),
                                             Some(verum_ast::ty::PathSegment::Name(id))
@@ -3973,6 +4080,37 @@ impl TypeChecker {
                         let bind = local_name.unwrap_or(item_name);
                         self.ctx.define_type(bind, ty);
                         return Ok(());
+                    }
+                    // A MOUNTED CONST DIES HERE TOO (A141, second site).
+                    //
+                    // The loader above answers for TYPES only, so a module
+                    // reaching this arm with a const in its surface raised
+                    // E401 naming an item its own diagnostic then LISTED:
+                    // `cannot find EAGAIN in module core.sys.darwin.errno`
+                    // followed by `exports 116 item(s); showing 10: …,
+                    // EAGAIN, …`. Measured 2026-09-13 — and the sibling
+                    // `core.sys.darwin.io.MAX_EVENTS` bound fine, because
+                    // that mount takes the OTHER arm, which already has the
+                    // const fallback. Two arms, one missing it.
+                    //
+                    // Consts live in `metadata.functions` lowered to zero-arg
+                    // entries carrying `is_const`; `canonical` / `load_name`
+                    // are already resolved through `module_reexports` above,
+                    // so the key is the one the archive files it under.
+                    if let Maybe::Some(md) = &self.core_metadata.clone() {
+                        let ckey: Text = format!("{}.{}", canonical, load_name).into();
+                        if let Some(fd) = md.functions.get(&ckey)
+                            && fd.is_const
+                        {
+                            let bind = local_name.unwrap_or(item_name);
+                            let ty = crate::infer::helpers::parse_descriptor_type_string(
+                                fd.return_type.as_str(),
+                            );
+                            self.ctx
+                                .env
+                                .insert(bind, crate::context::TypeScheme::mono(ty));
+                            return Ok(());
+                        }
                     }
                     return Err(TypeError::ImportItemNotFound {
                         item_name: Text::from(item_name),

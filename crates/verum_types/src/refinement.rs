@@ -3311,18 +3311,51 @@ impl RefinementChecker {
                 return true;
             }
         }
-        struct FindCall(bool);
-        impl verum_ast::visitor::Visitor for FindCall {
+        // A NAME OTHER THAN `it` IS OPAQUE FOR THE SAME REASON A CALL IS:
+        // the verification condition carries the checked value and nothing
+        // else, so an outer local is an uninterpreted symbol and the solver
+        // answers `Invalid` meaning "not proven".
+        //
+        //     let limit = 10;
+        //     let n: Int{it < limit} = dyn_small();   // dyn_small() == 5
+        //     error<E500>: refinement constraint failed: {it < limit}
+        //
+        // 5 < 10, and it was refused. Measured 2026-09-12; a COMPILE error,
+        // so it took all 10 tests in
+        // `core-tests/base/refinement/let_binding_test.vr` down.
+        //
+        // The POSITIONAL rule above stays exactly as it was — it decides
+        // whether a lone name is the WHOLE predicate. This walk is about
+        // names appearing anywhere, and it must not catch `it`, which is in
+        // every ordinary predicate and whose value the VC does carry.
+        struct FindOpaque(bool);
+        impl verum_ast::visitor::Visitor for FindOpaque {
             fn visit_expr(&mut self, expr: &Expr) {
-                if matches!(expr.kind, ExprKind::Call { .. }) {
-                    self.0 = true;
+                if self.0 {
+                    return;
                 }
-                if !self.0 {
-                    verum_ast::visitor::walk_expr(self, expr);
+                match &expr.kind {
+                    ExprKind::Call { .. } => {
+                        self.0 = true;
+                        return;
+                    }
+                    ExprKind::Path(path) => {
+                        // A multi-segment path (`Maybe.Some`) is not a value
+                        // the VC carries either, so it is opaque too.
+                        match path.as_ident() {
+                            Some(id) if id.name.as_str() == "it" => {}
+                            _ => {
+                                self.0 = true;
+                                return;
+                            }
+                        }
+                    }
+                    _ => {}
                 }
+                verum_ast::visitor::walk_expr(self, expr);
             }
         }
-        let mut find = FindCall(false);
+        let mut find = FindOpaque(false);
         verum_ast::visitor::Visitor::visit_expr(&mut find, expr);
         find.0
     }
