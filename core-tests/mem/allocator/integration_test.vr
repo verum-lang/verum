@@ -19,7 +19,16 @@
 
 mount core.prelude.*;
 mount core.mem.allocator.{
-    SIZE_CLASSES as ALLOC_SIZE_CLASSES, PAGE_SIZE, CHUNK_SIZE, LARGE_THRESHOLD,
+    // RENAMING A CONSTANT IN A MOUNT IS BROKEN: `SIZE_CLASSES as
+    // SIZE_CLASSES` leaves the alias unbound AND poisons the
+    // plain lookup — `cannot find SIZE_CLASSES in module
+    // core.mem.allocator`. Functions and types rename fine; only
+    // constants do not. A COMPILE error, whole file down. Recorded as
+    // A141; measured 2026-09-12.
+    //
+    // Behind it: `Shared(x)` is not a constructor either — the grammar
+    // spells it `Shared.new(x)`, same as `Heap.new`. Three sites.
+    SIZE_CLASSES, PAGE_SIZE, CHUNK_SIZE, LARGE_THRESHOLD,
     align_up,
 };
 mount core.mem.size_class.{
@@ -41,7 +50,7 @@ fn integration_header_size_aligned_to_8() {
 fn integration_large_threshold_matches_top_class() {
     // The top basic size class (2048) IS the LARGE_THRESHOLD.
     assert_eq(LARGE_THRESHOLD, 2048);
-    assert_eq(ALLOC_SIZE_CLASSES[10], LARGE_THRESHOLD);
+    assert_eq(SIZE_CLASSES[10], LARGE_THRESHOLD);
 }
 
 @test
@@ -201,7 +210,7 @@ type T0107Holder is { cell: Shared<T0107Cfg> };
 
 @test
 fn integration_shared_write_through_reaches_inner() {
-    let s: Shared<T0107Cfg> = Shared(T0107Cfg { size: 10 });
+    let s: Shared<T0107Cfg> = Shared.new(T0107Cfg { size: 10 });
     // pre-fix: the write clobbered the refcount and `size` stayed 10.
     s.set_size(77);
     assert_eq(s.get_size(), 77);
@@ -209,7 +218,7 @@ fn integration_shared_write_through_reaches_inner() {
 
 @test
 fn integration_shared_field_clone_preserves_identity() {
-    let s: Shared<T0107Cfg> = Shared(T0107Cfg { size: 10 });
+    let s: Shared<T0107Cfg> = Shared.new(T0107Cfg { size: 10 });
     // Shared-typed struct field => codegen emits a value-semantic Clone on `s`;
     // the SHARED arm makes it a refcount-bump, so `h.cell` aliases `s`.
     let h = T0107Holder { cell: s };
@@ -271,7 +280,7 @@ type T0385Pt is { x: Int, y: Int };
 @test
 fn integration_shared_local_direct_field_transparent() {
     // transparent-wrapper ctor form: `s` holds the inner T directly.
-    let s: Shared<T0385Pt> = Shared(T0385Pt { x: 7, y: 9 });
+    let s: Shared<T0385Pt> = Shared.new(T0385Pt { x: 7, y: 9 });
     assert_eq(s.x, 7);
     assert_eq(s.y, 9);
 }
