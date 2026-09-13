@@ -8,17 +8,44 @@ The CI contract: every `@test` here passes under both `verum test --interp`
 tests pin known stdlib / language-level defects and are excluded from the
 default green-suite gate.
 
-## The whole suite, re-measured 2026-09-13 (evening)
+## The whole suite, re-measured 2026-09-13 (late evening)
 
-    verum test --interp --test-threads 4     (all of core-tests, 4684 s)
-    19012 tests — 18075 passed, 522 failed, 415 ignored
+    verum test --interp --test-threads 4     (all of core-tests, 1195 s)
+    19012 tests — 18085 passed, 512 failed, 415 ignored
 
-Against the same day's afternoon run — 17998 passed, 599 failed — that is
-**77 fewer failures**, and against the 2026-09-12 morning run (16542 passed,
-2129 failed) it is **1607 fewer**, a 75% reduction. The run took 78 minutes
-rather than the usual 26 because the machine carried a second session's
-builds for most of it; the counts are unaffected, the wall-clock is not
-comparable.
+Against the same evening's earlier run — 18075 passed, 522 failed — that is
+**10 fewer failures and no regressions**: the total, the ignored count and
+every larger bucket are unchanged, so the ten came out of the small ones.
+Against the same day's afternoon run (17998 passed, 599 failed) it is 87
+fewer, and against the 2026-09-12 morning run (16542 passed, 2129 failed)
+it is **1617 fewer**, a 76% reduction. This run took 20 minutes against the
+previous run's 78 because that one carried a second session's builds; the
+counts are comparable, the wall-clock is not.
+
+**Where the 512 sit** (by directory, from the run's own FAILED lines):
+
+    base/iterator          217    R3 — the forwarding-projection family
+    meta/contexts          138    A157
+    base/memory             34
+    base/uuid               21
+    tracing/pipeline        15
+    base/data               12
+    tracing/id              10
+    everything else         65    spread over ~30 directories, none above 5
+
+**What this round fixed** — each measured A/B on two binaries before the
+suite ran, and each with a pin that fails on the older one:
+
+    the width-8 raw read now answers the field, not the NaN box
+    the module-header validator stops answering about files it cannot see
+    a closure's captures keep their types, so a field access on a captured
+        `self` resolves against the right declaration rather than a global
+        name guess — this is what made `TransducedIter.next` read a fourth
+        field of a three-field object
+    a transparent carrier is no longer taken for a pointer to a record, so
+        `(*sh).v` and `(*h).v` read the payload
+    a `return` inside a closure is checked against the CLOSURE's return
+        type, not the enclosing function's
 
 **WHAT CLEARED, and by which fix** — every one of these went to zero:
 
