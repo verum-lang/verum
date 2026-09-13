@@ -480,6 +480,47 @@ impl VbcCodegen {
                 self.ctx.reference_bound_vars.remove(&name.to_string());
             }
         }
+        // PACKED-BYTE-LOCAL-FROM-FIELD-1 (T1463): `let mut buf = self.buf;`
+        // where the field is DECLARED `[Byte; N]`. The local carries the
+        // same packed buffer, but nothing marked it as one, so every
+        // `buf[i]` after it lowered to the generic `GetE`/`SetE` whose
+        // Tier-1 form classifies its receiver at run time and reads the
+        // buffer's own bytes as a header.
+        //
+        // This is where SHA-256 and SHA-512 land TODAY: with the field-index
+        // fix in place they run through `update` and die in `finalize`, at a
+        // small FIXED offset (`0x18`) rather than at data-as-a-pointer —
+        // a different signature, and this binding is its source.
+        //
+        // THE LOCAL REALLY IS THE SAME BUFFER, checked against the
+        // Value-Copy Contract before relying on it rather than after. The
+        // bytecode is `GetF` + `Mov`, no `Clone`, which looks like the
+        // contract's "Binding" row being skipped — and is not: a packed
+        // array is the contract's "untracked pointer" shape, whose copy IS
+        // itself, "because its bytes are not an ObjectHeader; reading one
+        // there fabricates an object out of the user's payload"
+        // (docs/architecture/value-copy-contract.md §2). So marking the
+        // local packed states a fact, it does not assume one.
+        //
+        // Byte elements only (`elem_size == 1`): a `[UInt32; N]` field holds
+        // a heap List with 8-byte Value slots after
+        // PACKED-FIELD-ONE-REPRESENTATION-1, and a byte stride there would
+        // read garbage SILENTLY — trading a crash for a wrong answer, which
+        // is the one move this task refuses.
+        if let verum_ast::PatternKind::Ident { name, .. } = &pattern.kind
+            && ty.is_none()
+            && let Some(v) = value
+            && let verum_ast::expr::ExprKind::Field { expr: recv, field } = &v.kind
+            && let Some(owner) = self.packed_field_receiver_type(recv)
+            && let Some((1, _, declared_len)) =
+                self.field_array_spec(&owner, field.name.as_str())
+            && declared_len > 0
+        {
+            self.ctx.mark_byte_array_var(&name.name);
+            self.ctx
+                .set_fixed_array_count(&name.name, declared_len as usize);
+        }
+
         // `let (a, b, …) = <expr>` — record the destructured elements'
         // types so downstream method dispatch on the bound names
         // (`a.as_bytes()`) resolves a receiver type. `compile_match` only

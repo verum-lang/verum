@@ -404,3 +404,80 @@ fn a_nested_non_byte_field_keeps_the_generic_index() {
         r
     );
 }
+
+/// PACKED-BYTE-LOCAL-FROM-FIELD-1 (T1463). `let mut buf = self.buf;` with no
+/// annotation binds a local to a packed byte buffer; nothing marked it, so
+/// every `buf[i]` after it took the generic path. This is where SHA-256 and
+/// SHA-512 die today — through `update`, into `finalize`.
+#[test]
+fn an_unannotated_local_bound_from_a_byte_field_is_packed() {
+    let vbc = compile(
+        "m",
+        "module m;\n\
+         public type S is { buf: [Byte; 64], n: Int };\n\
+         public fn pad(s: S) -> Byte {\n\
+             let mut buf = s.buf;\n\
+             buf[0] = 128 as Byte;\n\
+             buf[1]\n\
+         }\n",
+    );
+    let instrs = decoded_fn(&vbc, "pad");
+    assert_eq!(
+        count_sub_op(&instrs, MemSubOpcode::ByteArrayStore),
+        1,
+        "the write through the bound local must use the byte stride:\n{:#?}",
+        instrs
+    );
+    assert_eq!(
+        count_sub_op(&instrs, MemSubOpcode::ByteArrayLoad),
+        1,
+        "and so must the read:\n{:#?}",
+        instrs
+    );
+}
+
+/// CONTROL — a local bound from a NON-byte array field must NOT be marked.
+/// Such a field holds a heap List with 8-byte Value slots, so a byte stride
+/// would read garbage silently.
+#[test]
+fn an_unannotated_local_from_a_non_byte_field_is_not_packed() {
+    let vbc = compile(
+        "m",
+        "module m;\n\
+         public type K is { w: [UInt32; 8], n: Int };\n\
+         public fn first(k: K) -> UInt32 {\n\
+             let w = k.w;\n\
+             w[0]\n\
+         }\n",
+    );
+    let instrs = decoded_fn(&vbc, "first");
+    assert_eq!(
+        count_sub_op(&instrs, MemSubOpcode::ByteArrayLoad),
+        0,
+        "a `[UInt32; N]` field's local must not be read with a byte stride:\n{:#?}",
+        instrs
+    );
+}
+
+/// CONTROL — an ANNOTATED local keeps its existing route. The annotation path
+/// allocates its own packed array (`NewByteArray`); this branch must not
+/// double-mark or divert it.
+#[test]
+fn an_annotated_local_is_unaffected_by_the_field_binding_rule() {
+    let vbc = compile(
+        "m",
+        "module m;\n\
+         public fn mk(v: Byte) -> Byte {\n\
+             let mut w: [Byte; 4] = [0 as Byte; 4];\n\
+             w[0] = v;\n\
+             w[0]\n\
+         }\n",
+    );
+    let instrs = decoded_fn(&vbc, "mk");
+    assert_eq!(
+        count_sub_op(&instrs, MemSubOpcode::NewByteArray),
+        1,
+        "the annotated local still allocates its own packed array:\n{:#?}",
+        instrs
+    );
+}

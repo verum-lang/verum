@@ -24536,7 +24536,7 @@ impl VbcCodegen {
     /// enclosing impl type) plus a plain local binding
     /// (`local.<field>`).  `None` when the receiver type isn't tracked —
     /// the caller keeps its generic path.
-    fn packed_field_receiver_type(&self, recv: &Expr) -> Option<String> {
+    pub(crate) fn packed_field_receiver_type(&self, recv: &Expr) -> Option<String> {
         use verum_ast::ty::PathSegment;
         // NESTED RECEIVER (T1463): `self.chunk.block_buf[i]` — the receiver of
         // the indexed field is ITSELF a field access, not a path. BLAKE3 is
