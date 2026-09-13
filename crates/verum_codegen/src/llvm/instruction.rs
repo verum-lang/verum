@@ -44067,6 +44067,48 @@ fn lower_get_field<'ctx>(
                                 TypeRef::Concrete(tid) if *tid == TypeId::TEXT => {
                                     ctx.mark_text_register(dst.0);
                                 }
+                                // AN ARRAY FIELD IS AN OBJECT TOO (T1466). The
+                                // table above lists LIST/MAP/SET/TEXT and had no
+                                // arm for `[T; N]`, so a field declared as an
+                                // array produced an UNMARKED register — and an
+                                // unmarked register is what `lower_ref_mut`
+                                // calls "not a heap type", which makes it SPILL
+                                // the object pointer into a fresh stack cell and
+                                // hand the callee the CELL's address.
+                                //
+                                // The callee then classifies that address: it
+                                // loads word0 (which is the object pointer, not
+                                // a header), fails the heap-floor test, truncates
+                                // the ADDRESS to i32 and switches it against the
+                                // stamped ids 528/521. Nothing matches, the phi
+                                // yields a CONSTANT ZERO, and the program runs on
+                                // with a wrong number:
+                                //
+                                //     fn bump(h: &mut [UInt64; 8]) -> UInt64 {
+                                //         let a = h[0]; h[1] = a + 1; h[1] }
+                                //     let mut h = s.h;  bump(&mut h)
+                                //       tier 0 -> 2      tier 1 -> 1, rc=0
+                                //
+                                // rc=0 and no diagnostic anywhere — which is why
+                                // this outranks the crashes it sits next to:
+                                // `compress_block(&mut h, &buf)` in SHA-384/512,
+                                // HMAC and HKDF takes exactly this shape.
+                                //
+                                // Marking it a LIST is what the value already is
+                                // after PACKED-FIELD-ONE-REPRESENTATION-1
+                                // (T1463): a non-byte primitive array field holds
+                                // a heap List. Byte arrays stay packed and are
+                                // deliberately NOT marked here — a packed buffer
+                                // is not a List object, and claiming otherwise
+                                // would send its readers to the List layout.
+                                TypeRef::Array { element, .. }
+                                    if !matches!(
+                                        **element,
+                                        TypeRef::Concrete(TypeId::U8)
+                                    ) =>
+                                {
+                                    ctx.mark_list_register(dst.0);
+                                }
                                 TypeRef::Instantiated { base, .. }
                                     if *base == TypeId::LIST
                                         || vbc_mod
