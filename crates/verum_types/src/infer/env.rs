@@ -7626,7 +7626,7 @@ impl TypeChecker {
         // Use macros for ergonomic registration
         macro_rules! reg {
             ($name:expr, $params:expr, $ret:expr) => {
-                // T0662: record provenance as we register, so the rib
+                // Record provenance as we register, so the rib
                 // order can tell an ambient builtin from a real
                 // occupant without a second hardcoded name list.
                 self.meta_builtin_names
@@ -9878,7 +9878,7 @@ impl TypeChecker {
                 //
                 // Severity policy: a warning by default so it never breaks an
                 // existing build; the compiler's warnings-as-errors path
-                // (`--strict` / `deny_warnings`, and the stdlib gate G3/T0124)
+                // (`--strict` / `deny_warnings`, and the stdlib gate G3)
                 // promotes it to a hard error.  Fatality is therefore decided
                 // by the invocation, not hardcoded here.
                 //

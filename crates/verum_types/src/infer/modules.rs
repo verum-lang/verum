@@ -852,7 +852,7 @@ impl TypeChecker {
                         // binding (a same-named local var, function,
                         // or imported symbol takes precedence).
                         //
-                        // T0662 — but an AMBIENT compiler-provided
+                        // But an AMBIENT compiler-provided
                         // meta builtin is NOT such an occupant. The
                         // rib order of
                         // `docs/architecture/name-resolution.md` puts

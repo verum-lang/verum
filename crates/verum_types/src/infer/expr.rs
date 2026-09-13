@@ -9541,7 +9541,9 @@ impl TypeChecker {
             // its existing arms below; the VBC codegen twin guard
             // (codegen/expressions.rs `compile_field_access`) rejects
             // that shape at lowering, which also covers stdlib bodies
-            // that the typechecker never sees (T0124).
+            // that the typechecker never sees — `core/` function bodies
+            // are typechecked on no path, so the bake is their only
+            // validator.
             if let Some(available) = qualifier_sum_variants
                 && field_name
                     .chars()

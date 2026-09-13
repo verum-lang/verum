@@ -2803,8 +2803,9 @@ fn try_dispatch_intrinsic_named(
         "__process_exec_raw" | "__process_spawn_full_raw" => {
             // Tier-1-only entry points kept as failing stubs in the
             // interpreter for backward-compat with pre-fix callers.
-            // Their AOT emitter stubs are pooled separately (T0377) —
-            // do not grow implementations here without that twin.
+            // The AOT side has emitter stubs of its own: do not grow an
+            // implementation here without growing that twin, or the two
+            // tiers answer differently for the same call.
             Ok(Some(Value::from_i64(-1)))
         }
         "__process_wait_raw" => {

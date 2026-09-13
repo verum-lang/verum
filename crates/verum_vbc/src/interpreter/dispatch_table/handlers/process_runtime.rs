@@ -977,8 +977,9 @@ fn intercept_native_fd_read_chunk(
 /// `__fd_read_chunk_raw(fd, max) -> List<Byte>`.  Unlike
 /// `native_fd_read_chunk` (Result-wrapped), the buffer.vr contract is a
 /// BARE list — empty on EOF.  Read errors have no channel in that
-/// signature and surface as EOF (empty list).  AOT twin (the missing
-/// `verum_fd_read_chunk` emitter) is pooled separately as T0376.
+/// signature and surface as EOF (empty list).  The AOT twin — a
+/// `verum_fd_read_chunk` emitter — does not exist, so this path is
+/// interpreter-only until one is written.
 fn intercept_fd_read_chunk_bare(
     state: &mut InterpreterState,
     args_start_reg: u16,

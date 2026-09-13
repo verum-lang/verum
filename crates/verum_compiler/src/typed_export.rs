@@ -19,7 +19,7 @@
 //!   source order), pretty JSON with a trailing newline, **no
 //!   timestamps, no absolute paths, no environment leakage**.
 //!   Reproducibility is asserted by test: two runs over the same
-//!   source are byte-identical (T0677).
+//!   source are byte-identical.
 //! * Every expression position (`requires`, `ensures`, `decreases`,
 //!   attribute arguments, bodies) is exported STRUCTURED where the
 //!   v1 statement/expression set covers it, with a lossless
@@ -357,7 +357,8 @@ pub fn build_typed_ir(module: &Module) -> TypedIrArtifact {
 
 /// Canonical bytes: pretty JSON + trailing newline. All maps are
 /// `BTreeMap`s and all Vec orders are defined, so this is
-/// byte-deterministic across runs and machines (T0677).
+/// byte-deterministic across runs and machines; the double-run test in
+/// this crate's suite is what asserts it.
 pub fn to_canonical_bytes(artifact: &TypedIrArtifact) -> Vec<u8> {
     let mut bytes = serde_json::to_vec_pretty(artifact)
         .expect("typed-IR schema types serialize infallibly");

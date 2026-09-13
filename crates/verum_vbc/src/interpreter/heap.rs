@@ -68,8 +68,8 @@ pub const OBJECT_HEADER_SIZE: usize = verum_common::layout::OBJECT_HEADER_SIZE a
 /// `OBJECT_HEADER_SIZE + 2 * size_of::<Value>()` in others. Those disagree
 /// the moment `Value` changes width: the computed form adapts, the literal
 /// does not, and nothing would fail to compile. Reach slot 2 through this
-/// constant so a layout realign (T0293) is a one-line change rather than a
-/// census of hand-written offsets.
+/// constant so a layout realign is a one-line change rather than a census
+/// of hand-written offsets.
 pub const LIST_PTR_OFFSET: usize = verum_common::layout::LIST_PTR_OFFSET as usize;
 
 /// Default heap size (16 MB).

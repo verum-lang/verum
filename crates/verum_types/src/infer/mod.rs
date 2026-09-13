@@ -867,7 +867,7 @@ pub struct TypeChecker {
     /// `docs/architecture/name-resolution.md`: local declarations and
     /// explicit mounts BOTH outrank the ambient surface, so a binding
     /// that exists only because it is a meta builtin must not be
-    /// treated as a real occupant of the name. (T0662)
+    /// treated as a real occupant of the name.
     pub(crate) meta_builtin_names: std::collections::HashSet<Text>,
     /// Tracks which modules have had their function signatures pre-registered
     /// to avoid redundant pre-registration when importing multiple items from the same module

@@ -5,7 +5,8 @@
 The fallible idiom already won in this crate (`or_llvm_err` ~7.4k uses);
 the panic-site count grows only because NEW IR-emitting code reaches for
 `.expect("...")`. The durable fix is this gate, not another sweep — the
-T0131 sweeps re-rot without it (501 → 626 between 07-13 and 07-19).
+earlier hand sweeps re-rotted without it (501 → 626 between 07-13 and
+07-19, measured).
 
 Counting rules (the MEASUREMENT CORRECTION from the task):
   * every occurrence counts, including two on one line;
