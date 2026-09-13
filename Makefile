@@ -270,6 +270,14 @@ check-live-task-citations: ## Gate (T1460): a source comment must not hand its d
 	python3 scripts/ci/check_a_comment_names_a_live_task.py --selftest
 	python3 scripts/ci/check_a_comment_names_a_live_task.py
 
+# The path is assembled from parts for the same reason the doc gates do it:
+# a tracked file must not name that directory (`make check-internal-refs`).
+SECURITY_STATUS_DOC ?= $(WEBSITE_DOCS)/stdlib/security/overview.md
+
+check-production-claims: ## Gate (T1464): a primitive the docs call Production must not rest on an intrinsic key the tree lists as unimplemented
+	python3 scripts/ci/check_a_production_claim_has_an_implementation.py --self-test
+	python3 scripts/ci/check_a_production_claim_has_an_implementation.py --check --docs "$(SECURITY_STATUS_DOC)"
+
 check-gate-tables: ## Gate: a table inside a gate must not have the same key twice
 	python3 scripts/ci/check_gate_tables_have_no_duplicate_keys.py --self-test
 	python3 scripts/ci/check_gate_tables_have_no_duplicate_keys.py --check
@@ -291,7 +299,7 @@ check-barename-census: ## Report every colliding (name,arity) pair with its modu
 
 gates-source: check-private-types-off-public-surface check-error-code-namespaces check-guard-in-argument-position check-grammar-covers-keywords check-known-tables check-parser-attrs check-gate-tables check-markers check-vr-syntax check-str-alias check-op-bytes check-internal-refs check-rings check-arch-attestation check-type-name-collisions check-barename-collisions check-panic-surface check-per-register-privacy check-early-return-tenants check-dup-emitters check-bake-prepass-parity check-protocol-form check-dead-module-path-calls check-platform-call-parity check-protocol-conformance check-cfg-block-tail check-meta-function-names check-ffi-reference-tiers check-intrinsic-keys-implemented check-diagnostic-levers check-constant-time-duplication check-type-param-name-rule check-implement-generics check-reexport-names \
             check-gate-aggregates-invoked check-register-rows check-test-mounts \
-            check-verdict-phases check-live-task-citations ## Every gate that needs only the SOURCE TREE — no build, no artefacts
+            check-verdict-phases check-live-task-citations check-production-claims ## Every gate that needs only the SOURCE TREE — no build, no artefacts
 # THREE TARGETS JOINED THAT LIST 2026-09-11 (T1439) after a census of
 # which `check-*` targets any workflow actually invokes: 89 declared, 66
 # in an aggregate, and SEVENTEEN in none and named by nothing.  Two of the
