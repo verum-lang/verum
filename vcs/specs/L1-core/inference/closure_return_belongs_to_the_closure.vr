@@ -1,0 +1,82 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: types, inference, closures, return
+// @description: `return` inside a closure is checked against the CLOSURE's
+//               return type, not the enclosing function's (T1480).
+
+/// `infer_expr_return_expr` checks the returned value against
+/// `current_function_return_type`, and neither closure-inference path ever
+/// set that field — so a `return` inside a closure answered to whatever
+/// function happened to enclose it:
+///
+///     fn keep(pred: fn(Int) -> Bool) -> Int { return 1; }
+///     fn main() -> Int { let k = keep(|x: Int| -> Bool { return x > 1; }); … }
+///     error<E400>: Type mismatch: expected 'Int', found 'Bool'
+///
+/// Six probes fixed the axis and each refuted a plausible alternative: the
+/// message named `Text` when the enclosing function returned `Text`, the
+/// programme was clean when it returned `Bool`, the parameter type was
+/// irrelevant, an ordinary `fn(Int) -> Bool` parameter (no generic bound)
+/// behaved identically, and the tail-expression spelling was always clean.
+/// The common case — a closure returning what its caller returns — passed
+/// by coincidence, which is why this survived.
+
+fn takes_pred(pred: fn(Int) -> Bool) -> Int {
+    return 1;
+}
+
+fn takes_conv(f: fn(Int) -> Text) -> Int {
+    return 2;
+}
+
+// The shape that failed: a closure whose return type differs from the
+// enclosing function's.
+fn enclosing_returns_int() -> Int {
+    let a = takes_pred(|x: Int| -> Bool { return x > 1; });
+    let b = takes_conv(|x: Int| -> Text { return "hi"; });
+    return a + b;
+}
+
+// The same closure under a different enclosing signature. Before the fix
+// the diagnostic simply changed to name `Text` instead of `Int`.
+fn enclosing_returns_text() -> Text {
+    let a = takes_pred(|x: Int| -> Bool { return x > 1; });
+    return "done";
+}
+
+// The coincidence that hid it — must keep working.
+fn enclosing_returns_bool() -> Bool {
+    let a = takes_pred(|x: Int| -> Bool { return x > 1; });
+    return true;
+}
+
+// A closure in let position, not argument position.
+fn closure_in_a_let() -> Int {
+    let pred = |x: Int| -> Bool { return x > 1; };
+    if pred(3) { return 1; }
+    return 0;
+}
+
+// An UNANNOTATED closure still infers from its body, which is what
+// `Maybe::None` on the saved slot buys: `return` synthesises rather than
+// checking against a signature that is not there.
+fn unannotated_closure() -> Int {
+    let pred = |x: Int| { return x > 1; };
+    if pred(3) { return 1; }
+    return 0;
+}
+
+// Nested closures: the inner one's `return` answers to the inner one.
+fn nested_closures() -> Int {
+    let outer = |x: Int| -> Bool {
+        let inner = |y: Int| -> Text { return "t"; };
+        return inner(x).len() > 0;
+    };
+    if outer(1) { return 1; }
+    return 0;
+}
+
+fn main() {
+    // Tests are the declarations above; typecheck-pass is the assertion.
+}

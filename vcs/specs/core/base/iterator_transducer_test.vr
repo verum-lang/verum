@@ -6,11 +6,8 @@
 // @tier: 0
 // @tags: core, iterator, transducer, reduce-result, peek-mut
 // @description: Tests for ReduceResult sum type methods (unwrap, is_reduced, map),
-//               PeekableIter.peek_mut, and Transducer/StatefulTransducer type existence.
-//               Note: Transducer factory functions (Transducer.map, .filter, etc.)
-//               cannot be tested due to module namespace resolution limitation.
-//               Extension methods (reduce_with, transduce, transduce_stateful)
-//               cannot be tested due to extension method resolution limitation.
+//               PeekableIter.peek_mut, the Transducer/StatefulTransducer factory
+//               functions, and the iterator extension methods that consume them.
 // =============================================================================
 
 mount core.base.maybe.{Maybe, Some, None};
@@ -371,28 +368,106 @@ fn test_reduce_result_map_float_to_int() {
 }
 
 // =============================================================================
-// PART 10: Documented Limitations
+// PART 10: The factories and the extension methods
 // =============================================================================
-// The following features cannot be tested in typecheck-pass mode due to
-// type checker limitations:
+// This block used to be a list of seven "limitations", all attributed to
+// "module namespace resolution" or "extension method resolution". Measured
+// 2026-09-13 with `verum check`, six of the seven were wrong:
 //
-// 1. Transducer.map(), .filter(), .filter_map(), .take_while(), .identity(),
-//    .inspect(), .compose2(), .compose() — module namespace resolution
-//    (Transducer resolves as type, not as module)
+//   Transducer.map / .identity / .inspect          0 errors
+//   iter.transduce / .transduce_stateful           0 errors
+//   iter.reduce_with                               0 errors
+//   Extend.extend_one                              0 errors
 //
-// 2. Transducer.take(), .drop(), .drop_while(), .dedupe(), .enumerate()
-//    — same module namespace issue (StatefulTransducer factories)
+// so nothing about namespaces or extension methods was blocking them. Of
+// the two remaining:
 //
-// 3. iter.transduce(xform) — extension method on `implement<I: Iterator> I`
-//    not resolved for concrete types
+//   * `.filter`, `.filter_map` and `.take_while` reported "expected 'Int',
+//     found 'Bool'" — not a resolution failure at all, but T1480: a
+//     `return` inside a closure was checked against the ENCLOSING
+//     function's signature, so any closure whose return type differed from
+//     its caller's was rejected. `.map` passed only because a closure
+//     returning `Int` inside `fn main() -> Int` matches by coincidence.
 //
-// 4. iter.transduce_stateful(xform) — same extension method issue
+//   * `Transducer.take(n)` returns a `StatefulTransducer<A, A, Int>` —
+//     annotating the binding `Transducer<Int, Int>` is the caller's error,
+//     not a missing factory. `StatefulTransducer.take` does not exist;
+//     `take` is declared on `Transducer`.
 //
-// 5. iter.reduce_with(init, f) — same extension method issue
-//
-// 6. FromIterator.from_iter() — generic parameter resolution issue
-//
-// 7. Extend.extend_one() — protocol default method resolution
+// `FromIterator.from_iter` is the one genuine remaining failure, and it is
+// ARCHIVE residency rather than generic resolution: the identical protocol
+// shape declared LOCALLY (a `MakeFrom<T>` protocol with a static
+// `make_from<I: Iterator<Item = T>>` and an implementor) type-checks
+// clean, while `List.from_iter(xs.iter())` reports "expected
+// 'ListIter<Int>', found 'Int'". Same family as the other
+// archive-round-trip rows in the register.
+
+@test
+fn test_transducer_map_factory() {
+    let xf: Transducer<Int, Int> = Transducer.map(|x: Int| -> Int { return x * 2; });
+    assert(true);
+}
+
+@test
+fn test_transducer_filter_factory() {
+    let xf: Transducer<Int, Int> = Transducer.filter(|x: &Int| -> Bool { return *x > 1; });
+    assert(true);
+}
+
+@test
+fn test_transducer_filter_map_factory() {
+    let xf: Transducer<Int, Int> =
+        Transducer.filter_map(|x: Int| -> Maybe<Int> { return Maybe.Some(x); });
+    assert(true);
+}
+
+@test
+fn test_transducer_take_while_factory() {
+    let xf: Transducer<Int, Int> = Transducer.take_while(|x: &Int| -> Bool { return *x < 3; });
+    assert(true);
+}
+
+@test
+fn test_transducer_identity_factory() {
+    let xf: Transducer<Int, Int> = Transducer.identity();
+    assert(true);
+}
+
+@test
+fn test_transducer_inspect_factory() {
+    let xf: Transducer<Int, Int> = Transducer.inspect(|x: &Int| { });
+    assert(true);
+}
+
+@test
+fn test_transducer_take_returns_a_stateful_transducer() {
+    // The declared return type, which the old note mistook for a
+    // missing factory.
+    let xf: StatefulTransducer<Int, Int, Int> = Transducer.take(2);
+    assert(true);
+}
+
+@test
+fn test_iterator_transduce_extension() {
+    let xs: List<Int> = [1, 2, 3];
+    let xf: Transducer<Int, Int> = Transducer.map(|x: Int| -> Int { return x * 2; });
+    let it = xs.iter().transduce(xf);
+    assert(true);
+}
+
+@test
+fn test_iterator_reduce_with_extension() {
+    let xs: List<Int> = [1, 2, 3];
+    let total = xs.iter().reduce_with(0, |acc: Int, x: Int| -> Int { return acc + x; });
+    assert(true);
+}
+
+@test
+fn test_extend_one() {
+    let mut xs: List<Int> = [1, 2];
+    xs.extend_one(3);
+    assert_eq(xs.len(), 3);
+}
 
 // =============================================================================
 // Main

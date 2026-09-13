@@ -1588,7 +1588,19 @@ impl TypeChecker {
                         // blocks, if/else expressions, and variant constructors.
                         // Never-returning bodies (e.g., panic("...")) are handled correctly too:
                         // unify(Never, T) succeeds for all T (unify.rs bottom-type rule).
-                        self.check_expr(closure_body, &ret_ty)?;
+                        // CLOSURE-RETURN-SCOPE-1: `return` inside the body
+                        // returns from the CLOSURE, so the body is walked with
+                        // `current_function_return_type` set to the closure's
+                        // own return type. `infer_expr_return_expr` checks
+                        // against that field, and leaving the ENCLOSING
+                        // function's value in place made every `return` in a
+                        // closure answer to the wrong signature.
+                        let saved_return_type =
+                            std::mem::replace(&mut self.current_function_return_type,
+                                              verum_common::Maybe::Some(ret_ty.clone()));
+                        let body_check = self.check_expr(closure_body, &ret_ty);
+                        self.current_function_return_type = saved_return_type;
+                        body_check?;
 
                         // T0653: close capture tracking and enforce async
                         // Send-safety BEFORE leaving the closure scope, the
@@ -1671,7 +1683,19 @@ impl TypeChecker {
                         // blocks, if/else expressions, and variant constructors.
                         // Never-returning bodies (e.g., panic("...")) are handled correctly too:
                         // unify(Never, T) succeeds for all T (unify.rs bottom-type rule).
-                        self.check_expr(closure_body, &ret_ty)?;
+                        // CLOSURE-RETURN-SCOPE-1: `return` inside the body
+                        // returns from the CLOSURE, so the body is walked with
+                        // `current_function_return_type` set to the closure's
+                        // own return type. `infer_expr_return_expr` checks
+                        // against that field, and leaving the ENCLOSING
+                        // function's value in place made every `return` in a
+                        // closure answer to the wrong signature.
+                        let saved_return_type =
+                            std::mem::replace(&mut self.current_function_return_type,
+                                              verum_common::Maybe::Some(ret_ty.clone()));
+                        let body_check = self.check_expr(closure_body, &ret_ty);
+                        self.current_function_return_type = saved_return_type;
+                        body_check?;
 
                         // T0653: close capture tracking and enforce async
                         // Send-safety BEFORE leaving the closure scope.
@@ -6422,13 +6446,29 @@ impl TypeChecker {
                     }
 
                     // Synthesize or check body
+                    // CLOSURE-RETURN-SCOPE-1 (synth leg). Same rule as the
+                    // check legs: `return` belongs to the closure. When the
+                    // closure carries no annotation there is nothing to check
+                    // against, and `Maybe::None` is what makes
+                    // `infer_expr_return_expr` fall back to synthesis — which
+                    // is exactly what its own comment says it wants for "a
+                    // closure being inferred".
                     let ret_ty = if let Some(rt) = return_type {
                         let expected_ret = self.ast_to_type(rt)?;
-                        self.check_expr(body, &expected_ret)?;
+                        let saved_return_type =
+                            std::mem::replace(&mut self.current_function_return_type,
+                                              verum_common::Maybe::Some(expected_ret.clone()));
+                        let body_check = self.check_expr(body, &expected_ret);
+                        self.current_function_return_type = saved_return_type;
+                        body_check?;
                         expected_ret
                     } else {
-                        let body_result = self.synth_expr(body)?;
-                        body_result.ty
+                        let saved_return_type =
+                            std::mem::replace(&mut self.current_function_return_type,
+                                              verum_common::Maybe::None);
+                        let body_result = self.synth_expr(body);
+                        self.current_function_return_type = saved_return_type;
+                        body_result?.ty
                     };
 
                     // Exit async scope if this was an async closure
