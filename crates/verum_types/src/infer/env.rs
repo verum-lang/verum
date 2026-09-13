@@ -2246,7 +2246,35 @@ impl TypeChecker {
     /// cascade MUST NOT unwrap `Mutex<T>` to `T` when the user
     /// actually called `mutex.lock()`, so we stop the chain as soon
     /// as `ty` itself owns the method.
+    /// T1474 instrument, wrapping the predicate rather than one of its
+    /// branches. This is the HALT CONDITION of the smart-pointer
+    /// auto-deref loop in `infer_method_call_inner_impl`: the loop stops
+    /// unwrapping the moment it answers true. Measured,
+    /// `Shared<AtomicInt>` + `fetch_sub` behaves as though it answered
+    /// true — the loop never unwraps, codegen dispatches on the wrapper,
+    /// and the caller gets a heap address instead of a number — while
+    /// `Shared<Thing>` + a uniquely-named method resolves correctly. The
+    /// difference between the two is that `fetch_sub` is declared in TWO
+    /// `core/` files.
+    ///
+    /// The wrapper form is deliberate: the predicate has three early
+    /// `return true` paths (inherent, static-marker, dyn-protocol) and
+    /// instrumenting only the last one would report nothing for the case
+    /// that matters and look like a clean negative.
     pub(super) fn type_or_dyn_has_method(&self, ty: &Type, method_name: &Text) -> bool {
+        let answer = self.type_or_dyn_has_method_impl(ty, method_name);
+        if std::env::var_os("VERUM_TRACE_HASMETHOD").is_some() {
+            eprintln!(
+                "[hasmethod] ty={} method={} -> {}",
+                ty.to_text(),
+                method_name.as_str(),
+                answer
+            );
+        }
+        answer
+    }
+
+    fn type_or_dyn_has_method_impl(&self, ty: &Type, method_name: &Text) -> bool {
         // Peel a single reference layer so `&dyn Tracer` and `&T` are
         // treated as their underlying type for the purposes of method
         // lookup. This keeps the auto-deref cascade halt-condition in
