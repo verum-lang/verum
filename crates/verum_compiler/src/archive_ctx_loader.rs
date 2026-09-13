@@ -1278,6 +1278,105 @@ fn type_ref_full_name(ty: &TypeRef, module: &VbcModule) -> Option<String> {
 ///    against `core/`'s `module <path>;` declarations, so adding a
 ///    new well-known type or relocating an existing one updates this
 ///    loader automatically.
+/// RE-EXPORT-TYPE-DECODE-1 (T1468) — a wanted name that a module
+/// RE-EXPORTS must decode the module that DECLARES it.
+///
+/// `build_wanted_module_prefixes` derives prefixes from the SPELLING of
+/// each wanted name, so `core.sys.mmio.BarrierKind` yields
+/// `core.sys.mmio` and `core.sys` — never
+/// `core.intrinsics.lowlevel.mmio`, where the type is actually
+/// declared.  The one thing that widens the set afterwards is the
+/// symbol graph's BFS over `Call` / `TailCall` / `CallM` edges, and a
+/// TYPE name has no call edges: a mounted FUNCTION reaches its defining
+/// module, a mounted TYPE reaches nothing.
+///
+/// Measured before this expansion: from `mount core.sys.mmio.{BarrierKind}`
+/// the decode trace never lists `core.intrinsics.lowlevel`, no descriptor
+/// for `BarrierKind` is ever registered, codegen falls to the rung-4
+/// `[T0545]` fabrication, and every arm of a `match` over the value
+/// misses — an exhaustive five-arm match silently takes its LAST arm
+/// whatever the value.  Adding ONE function name from the same
+/// re-export (`{BarrierKind, barrier}`) decoded the entry and the same
+/// line answered correctly, which is what named the gap.
+///
+/// The missing fact is already in the dep graph: `core.sys.mmio` carries
+/// the mount edges `core.intrinsics.lowlevel.mmio.BarrierKind` and
+/// `core.intrinsics.lowlevel.mmio`.  This walks those edges for the
+/// wanted simple name and adds the declaring module (plus the same two
+/// ancestor hops `build_wanted_module_prefixes` adds) to the prefix set.
+///
+/// Deliberately narrow, so the cold-start decode set does not grow for
+/// programmes that mount no re-exported type:
+///
+///  * only names starting with an uppercase letter — types, protocols
+///    and constants, the ones with no call edges to travel;
+///  * only an edge whose LAST segment equals the wanted simple name, so
+///    a module that re-exports fifty names contributes only the one
+///    that was actually asked for;
+///  * a bounded fixpoint, because a re-export may itself be re-exported;
+///    the bound is a loop guard, not a semantic limit — stdlib chains
+///    are one or two hops.
+fn expand_prefixes_through_reexports(
+    wanted: &std::collections::HashSet<String>,
+    prefixes: &mut std::collections::HashSet<String>,
+) {
+    let Some(graph) = crate::stdlib_dep_graph::get_dep_graph() else {
+        return;
+    };
+    // (module, simple-name) pairs still to resolve.
+    let mut frontier: Vec<(String, String)> = Vec::new();
+    for name in wanted {
+        let Some(dot) = name.rfind('.') else { continue };
+        let simple = &name[dot + 1..];
+        if !simple.starts_with(|c: char| c.is_uppercase()) {
+            continue;
+        }
+        frontier.push((name[..dot].to_string(), simple.to_string()));
+    }
+    let mut seen: std::collections::HashSet<(String, String)> =
+        frontier.iter().cloned().collect();
+    let mut hops = 0;
+    while !frontier.is_empty() && hops < 8 {
+        hops += 1;
+        let mut next: Vec<(String, String)> = Vec::new();
+        for (module, simple) in frontier.drain(..) {
+            let Some(edges) = graph.edges_of(&module) else {
+                continue;
+            };
+            for edge in edges
+                .path
+                .iter()
+                .chain(edges.glob.iter())
+                .chain(edges.nested.iter())
+            {
+                let Some(edot) = edge.rfind('.') else { continue };
+                if &edge[edot + 1..] != simple.as_str() {
+                    continue;
+                }
+                let declaring = &edge[..edot];
+                if declaring == module {
+                    continue;
+                }
+                prefixes.insert(declaring.to_string());
+                // The same two ancestor hops the spelling-derived
+                // prefixes get — the archive entry that holds a module
+                // is usually one or two segments above it.
+                let mut cur = declaring;
+                for _ in 0..2 {
+                    let Some(idx) = cur.rfind('.') else { break };
+                    cur = &cur[..idx];
+                    prefixes.insert(cur.to_string());
+                }
+                let step = (declaring.to_string(), simple.clone());
+                if seen.insert(step.clone()) {
+                    next.push(step);
+                }
+            }
+        }
+        frontier = next;
+    }
+}
+
 fn build_wanted_module_prefixes(
     wanted: &std::collections::HashSet<String>,
 ) -> std::collections::HashSet<String> {
@@ -2322,7 +2421,11 @@ impl ArchiveCtxCache {
         // BOUNDED to two ancestors and extended with well-known
         // stdlib type module paths — see [`build_wanted_module_prefixes`]
         // for the rationale.
-        let wanted_module_prefixes = build_wanted_module_prefixes(&wanted);
+        let mut wanted_module_prefixes = build_wanted_module_prefixes(&wanted);
+        // T1468: a mounted TYPE has no call edges, so nothing
+        // downstream can reach the module that DECLARES it — walk
+        // the re-export edges the dep graph already records.
+        expand_prefixes_through_reexports(&wanted, &mut wanted_module_prefixes);
         for entry in &archive.index {
             // Skip decode unless this module name matches a
             // qualified-name prefix from the wanted set.  Bare
@@ -2433,7 +2536,11 @@ impl ArchiveCtxCache {
         // `module path;` and lands under archive entry `core.io`.
         // Well-known stdlib types (Text/List/Map/...) get explicit
         // module-path expansion via `build_wanted_module_prefixes`.
-        let wanted_module_prefixes = build_wanted_module_prefixes(&wanted);
+        let mut wanted_module_prefixes = build_wanted_module_prefixes(&wanted);
+        // T1468: a mounted TYPE has no call edges, so nothing
+        // downstream can reach the module that DECLARES it — walk
+        // the re-export edges the dep graph already records.
+        expand_prefixes_through_reexports(&wanted, &mut wanted_module_prefixes);
         let mut imported = 0usize;
         for entry in &archive.index {
             if !wanted_module_prefixes.contains(&entry.name) {
@@ -2723,6 +2830,10 @@ impl ArchiveCtxCache {
             return (0, 0);
         }
         let mut wanted_module_prefixes = build_wanted_module_prefixes(&wanted);
+        // T1468: a mounted TYPE has no call edges, so nothing
+        // downstream can reach the module that DECLARES it — walk
+        // the re-export edges the dep graph already records.
+        expand_prefixes_through_reexports(&wanted, &mut wanted_module_prefixes);
 
         // **Variant-tag-collision force-load** (load-bearing for
         // bare `Some(x)` / `None` / `Ok(x)` / `Err(e)` syntax — see
