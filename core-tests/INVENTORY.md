@@ -10,39 +10,38 @@ default green-suite gate.
 
 ## The whole suite, re-measured 2026-09-13
 
-    verum test --interp --test-threads 4     (all of core-tests, 858 s)
-    19010 tests — 17700 passed, 874 failed, 436 ignored
+    verum test --interp --test-threads 4     (all of core-tests, 1883 s)
+    19010 tests — 17937 passed, 637 failed, 436 ignored
 
 Against the 2026-09-12 morning run — 19042 tests, 16542 passed, 2129
-failed, 371 ignored, 2091 s — that is **1255 fewer failures and 1158 more
-passes**, and the run is 2.4x faster because a compile error costs the
-runner far more than a test does.
+failed, 371 ignored — that is **1492 fewer failures**, a 70% reduction,
+and 1395 more passes.
 
 **A ROW BELOW CAN BE GREEN WHILE ITS FILE DOES NOT COMPILE**, and that is
 still the reason to re-run rather than read. The dead-file list
 (`scripts/ci/doc_methods_dead_files.txt`, regenerated from a run rather
-than reasoned about) went 85 → 48 → 16 over the two days.
+than reasoned about) went 85 → 48 → 13 over the two days.
 
 Eight files are no longer run at all and are not failures: `sys/embedded`
 and `sys/no_runtime` test modules that `core/sys/mod.vr` gates with
 `@cfg(runtime = …)` and the default bake therefore excludes. The runner
 now consults the same authority the bake does and names them as skipped.
 
-The remaining failures are CONCENTRATED, which is what makes them worth
-naming rather than counting. Written as a list rather than a table on
-purpose — `check-inventory` reads a table row as a MODULE ROW and reported
-seven non-existent directories the first time this was written:
+The remaining failures are CONCENTRATED. Written as a list rather than a
+table on purpose — `check-inventory` reads a table row as a MODULE ROW and
+reported seven non-existent directories the first time this was written:
 
-    215  base/iterator/unit_test          associated-type projection (T0707)
-    102  meta/contexts/unit_test          colliding FormatOptions (A120) + archive generic alias (A157)
-     62  mem/capability/unit_test         Capability declared four times (A120)
-     61  base/primitives/comparison_test  NOT YET DIAGNOSED — the file COMPILES, so it never reached the dead list
-     36  meta/contexts/property_test      as meta/contexts/unit_test
-     26  text/format/unit_test            —
-     26  base/memory/cbgr_test            —
+    215  base/iterator/unit_test         associated-type projection (T0707)
+    102  meta/contexts/unit_test         colliding FormatOptions (A120) + archive generic alias (A157)
+     36  meta/contexts/property_test     as meta/contexts/unit_test
+     26  base/memory/cbgr_test           at least five distinct roots, undiagnosed
+     19  runtime/async_ops/unit_test     —
+     14  runtime/supervisor/property_test  colliding SupervisionStrategy (A120)
+     11  sys/init/unit_test              colliding InitError (A120)
 
-Those seven are 528 of the 874. **A120 alone accounts for at least 200**,
-across three of them.
+Those seven are 423 of the 637, and **the single biggest is one defect**:
+the `Item<ISize>` projection, which no `@ignore` can contain because it is
+a compile error.
 
 So: **before trusting a row, re-run it**; and before pricing a defect,
 check whether it is one of the seven above.
