@@ -9,7 +9,7 @@
 // executor / sleep_*).
 //
 // Strategy: this folder pins the **data-only subset** —
-//   * the 13 opaque-handle newtypes (JoinHandleOpaque, ExecutorHandle,
+//   * the 13 opaque-handle newtypes (JoinHandleOpaque, RuntimeExecutorHandle,
 //     FutureHandle, SupervisorHandleOpaque, ChildSpecOpaque,
 //     ExecutionEnvOpaque, RecoveryContextOpaque, CircuitBreakerOpaque,
 //     AllocHandle, IODriverHandle, SharedRegistryOpaque,
@@ -23,7 +23,7 @@
 // =============================================================================
 
 mount core.runtime.async_ops.{
-    JoinHandleOpaque, ExecutorHandle, FutureHandle, SupervisorHandleOpaque,
+    JoinHandleOpaque, RuntimeExecutorHandle, FutureHandle, SupervisorHandleOpaque,
     ChildSpecOpaque, ExecutionEnvOpaque, RecoveryContextOpaque,
     CircuitBreakerOpaque, AllocHandle, IODriverHandle, SharedRegistryOpaque,
     MiddlewareChainOpaque, SingleThreadExecutorOpaque,
@@ -43,7 +43,7 @@ fn test_join_handle_opaque_construction() {
 
 @test
 fn test_executor_handle_construction() {
-    let h: ExecutorHandle = ExecutorHandle(1);
+    let h: RuntimeExecutorHandle = RuntimeExecutorHandle(1);
     let _ = h;
     assert(true);
 }
@@ -145,7 +145,7 @@ fn test_opaque_handles_are_distinct_types() {
     // checker level.  This test compiles iff the typechecker keeps
     // them apart — that's the test.
     let a: JoinHandleOpaque = JoinHandleOpaque(1);
-    let b: ExecutorHandle = ExecutorHandle(1);
+    let b: RuntimeExecutorHandle = RuntimeExecutorHandle(1);
     let c: FutureHandle = FutureHandle(1);
     let d: SupervisorHandleOpaque = SupervisorHandleOpaque(1);
     let e: ChildSpecOpaque = ChildSpecOpaque(1);

@@ -86,8 +86,6 @@ Engine	core/database/sqlite/native/vacuum/engine.vr
 Engine	core/script/engine.vr
 ExecOutcome	core/database/sqlite/native/exec/engine.vr
 ExecOutcome	core/database/sqlite/native/l6_session/statement_lifecycle.vr
-ExecutorHandle	core/async/intrinsics.vr
-ExecutorHandle	core/runtime/async_ops.vr
 Expr	core/database/sqlite/native/l5_sql/ast.vr
 Expr	core/security/zk/stark/air.vr
 ExprOp	core/database/sqlite/native/expr_precedence_api/op.vr

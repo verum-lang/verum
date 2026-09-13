@@ -15,7 +15,7 @@ mount core.runtime.async_ops.{
     default_executor, global_allocator, default_io_driver,
     shared_registry_global, middleware_chain_empty,
     async_sleep_ms,
-    ExecutorHandle, AllocHandle, IODriverHandle,
+    RuntimeExecutorHandle, AllocHandle, IODriverHandle,
     SharedRegistryOpaque, MiddlewareChainOpaque,
 };
 mount sys.{monotonic_nanos};
@@ -26,7 +26,7 @@ mount sys.{monotonic_nanos};
 
 @test
 fn test_default_executor_callable() {
-    let e: ExecutorHandle = default_executor();
+    let e: RuntimeExecutorHandle = default_executor();
     let _ = e;
     assert(true);
 }

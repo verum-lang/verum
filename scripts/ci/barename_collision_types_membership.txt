@@ -42,7 +42,6 @@ Document	math/rag.vr,search/types.vr
 EffectKind	action/effects.vr,meta/diakrisis_attrs.vr
 Engine	database/sqlite/native/vacuum/engine.vr,script/engine.vr
 ExecOutcome	database/sqlite/native/exec/engine.vr,database/sqlite/native/l6_session/statement_lifecycle.vr
-ExecutorHandle	async/intrinsics.vr,runtime/async_ops.vr
 Expr	database/sqlite/native/l5_sql/ast.vr,security/zk/stark/air.vr
 ExprOp	database/sqlite/native/expr_precedence_api/op.vr,net/uri_template.vr
 Finding	cli/verify.vr,database/sqlite/native/integrity_walker_api/finding.vr

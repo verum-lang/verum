@@ -16,7 +16,7 @@
 mount core.prelude.*;
 mount core.runtime.async_ops.{
     AsyncRecoveryError,
-    JoinHandleOpaque, ExecutorHandle, FutureHandle,
+    JoinHandleOpaque, RuntimeExecutorHandle, FutureHandle,
 };
 
 // =============================================================================
@@ -92,8 +92,8 @@ fn ao_law_join_handle_inner_value() {
 
 @test
 fn ao_law_executor_handle_inner_value() {
-    let h = ExecutorHandle(7);
-    let inner = match h { ExecutorHandle(v) => v };
+    let h = RuntimeExecutorHandle(7);
+    let inner = match h { RuntimeExecutorHandle(v) => v };
     assert_eq(inner, 7);
 }
 

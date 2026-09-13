@@ -81,7 +81,7 @@ DECL = re.compile(r"^\s*(?:(?:public|pub)\s+)?type\s+(?:(?:affine|linear)\s+)?([
 
 
 # Colliding names that carry an `implement` block — measured 2026-09-04.
-RISKY_BASELINE = 61
+RISKY_BASELINE = 60
 
 
 def declares_a_type(line: str) -> str | None:

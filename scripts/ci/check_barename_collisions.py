@@ -91,7 +91,7 @@ BASELINE_ALL_TYPED = 297
 # `Modifier` sum — so `write_modifiers` shipped as a panic stub until the
 # SQLite type was renamed `DateModifier`. Every remaining pair is the same
 # shape, waiting for a resolution order to shift under it.
-BASELINE_TYPES = 126
+BASELINE_TYPES = 125
 # The subset of BASELINE_TYPES whose declarations disagree about the type's
 # SHAPE — record vs newtype vs sum vs unit vs protocol. Measured 2026-09-12.
 # This is the ratchet that matters: a shape disagreement is what makes
@@ -127,7 +127,7 @@ BASELINE_TYPES = 126
 # `Layout is TensorLayout`, `Tensor is SimpleTensor`, … Most are
 # `@cfg(target_os)` platform twins that never coexist in one build, which
 # is why they cost nothing measurable; the rest are one rename each.
-BASELINE_TYPES_SHAPE = 41
+BASELINE_TYPES_SHAPE = 40
 BASELINE_SQLITE_TYPED = 15
 
 # `public fn name(args)` at column 0 — the free-function surface. Methods

@@ -9,7 +9,18 @@ module core.runtime.async_ops;
 public type JoinHandleOpaque is (Int);
 
 /// Opaque handle for executor.
-public type ExecutorHandle is (Int);
+// `RuntimeExecutorHandle`, not the bare name. `core/async/intrinsics.vr:57`
+// declares a RECORD `ExecutorHandle` and this one is a NEWTYPE over Int, so
+// the two disagree about the type's SHAPE — and a colliding name resolves to
+// no declaration at all, which is why `match h { ExecutorHandle(v) => v }`
+// was refused with `Pattern expects a variant type` and why
+// `core.runtime.async_ops.ExecutorHandle` reads as `not a function`
+// (A120/A136).
+//
+// This side moves because it is the smaller: 15 uses here and in its tests
+// against 32 on the async side, which also re-exports the name from
+// `core/async/mod.vr:178`.
+public type RuntimeExecutorHandle is (Int);
 
 /// Opaque handle for futures.
 public type FutureHandle is (Int);
@@ -73,11 +84,11 @@ public fn spawn_with_env(env: ExecutionEnvOpaque, f: fn() -> ()) -> JoinHandleOp
 
 /// Spawn a task on the executor.
 @intrinsic("executor_spawn")
-public fn executor_spawn(executor: ExecutorHandle, f: fn() -> ()) -> JoinHandleOpaque;
+public fn executor_spawn(executor: RuntimeExecutorHandle, f: fn() -> ()) -> JoinHandleOpaque;
 
 /// Block on a future using the executor.
 @intrinsic("executor_block_on")
-public fn executor_block_on(executor: ExecutorHandle, f: FutureHandle) -> Int;
+public fn executor_block_on(executor: RuntimeExecutorHandle, f: FutureHandle) -> Int;
 
 /// Poll a future synchronously.
 @intrinsic("future_poll_sync")
@@ -85,7 +96,7 @@ public fn future_poll_sync(f: FutureHandle) -> Int;
 
 /// Get the default executor.
 @intrinsic("default_executor")
-public fn default_executor() -> ExecutorHandle;
+public fn default_executor() -> RuntimeExecutorHandle;
 
 /// Async sleep in milliseconds.
 @intrinsic("async_sleep_ms")
