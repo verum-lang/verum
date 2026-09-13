@@ -91,7 +91,7 @@ BASELINE_ALL_TYPED = 297
 # `Modifier` sum — so `write_modifiers` shipped as a panic stub until the
 # SQLite type was renamed `DateModifier`. Every remaining pair is the same
 # shape, waiting for a resolution order to shift under it.
-BASELINE_TYPES = 132
+BASELINE_TYPES = 131
 # The subset of BASELINE_TYPES whose declarations disagree about the type's
 # SHAPE — record vs newtype vs sum vs unit vs protocol. Measured 2026-09-12.
 # This is the ratchet that matters: a shape disagreement is what makes
@@ -102,7 +102,14 @@ BASELINE_TYPES = 132
 # 43, not the 25 a first hand-grep reported: that grep read only
 # `public type` and the gate's own extractor counts private ones too.
 # The instrument was already in the tree and disagreed with the probe.
-BASELINE_TYPES_SHAPE = 43
+#
+# 43 -> 42 on 2026-09-13: `core/shell/resources.vr`'s record `Fd` became
+# `ShellFd`, leaving `core/sys/io_engine.vr`'s newtype `Fd` alone. That is
+# the project's OWN method for this class — `RawSocketAddr`, `EngineDuration`,
+# `LinuxMutex` and `DarwinMutex` were all renamed for the same reason — and
+# it is the only lever that moves this number, since the compiler-side fix
+# (A120) resolves lookup rather than removing the collision.
+BASELINE_TYPES_SHAPE = 42
 BASELINE_SQLITE_TYPED = 15
 
 # `public fn name(args)` at column 0 — the free-function surface. Methods

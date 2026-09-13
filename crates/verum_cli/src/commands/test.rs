@@ -1577,9 +1577,129 @@ fn run_single_test(test: &Test, target_dir: &Path, cfg: &TestRunCfg) -> TestResu
     if cfg.differential {
         return run_test_differential(test, target_dir, cfg);
     }
-    match cfg.tier {
+    let outcome = match cfg.tier {
         Tier::Aot => run_test_aot(test, target_dir, cfg),
         Tier::Interpret => run_test_interpret(test, cfg),
+    };
+    apply_should_panic(test, outcome)
+}
+
+/// The `expected = "…"` argument of a `@should_panic`, if it carries one.
+///
+/// Reads the AST the way `ignore_reason` above does — a bare Text literal
+/// or a `NamedArg` — so the two testing attributes cannot drift apart in
+/// how they parse their own argument.
+fn should_panic_expected(attr: &verum_ast::Attribute) -> Option<Text> {
+    use verum_ast::{ExprKind, LiteralKind};
+    match &attr.args {
+        verum_common::Maybe::Some(args) => {
+            for e in args.iter() {
+                match &e.kind {
+                    ExprKind::Literal(lit) => {
+                        if let LiteralKind::Text(t) = &lit.kind {
+                            return Some(Text::from(t.as_str()));
+                        }
+                    }
+                    ExprKind::NamedArg { name, value }
+                        if name.name.as_str() == "expected" =>
+                    {
+                        if let ExprKind::Literal(lit) = &value.kind
+                            && let LiteralKind::Text(t) = &lit.kind
+                        {
+                            return Some(Text::from(t.as_str()));
+                        }
+                    }
+                    // `expected = "…"` — an EQUALS sign, which is what both
+                    // sites in the tree actually write and what
+                    // `verum_types::attr::standard` documents. The parser
+                    // lowers `name: value` to `NamedArg` and leaves `name =
+                    // value` as a plain assignment, so reading only the
+                    // first form silently ignored the argument: measured
+                    // 2026-09-13, `@should_panic(expected = "overdraft")`
+                    // over a body panicking `"insufficient funds"` PASSED,
+                    // while the bare-literal form failed it correctly.
+                    ExprKind::Binary { op, left, right }
+                        if matches!(op, verum_ast::BinOp::Assign) =>
+                    {
+                        let names_expected = match &left.kind {
+                            ExprKind::Path(path) => path
+                                .as_ident()
+                                .is_some_and(|id| id.name.as_str() == "expected"),
+                            _ => false,
+                        };
+                        if names_expected
+                            && let ExprKind::Literal(lit) = &right.kind
+                            && let LiteralKind::Text(t) = &lit.kind
+                        {
+                            return Some(Text::from(t.as_str()));
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            None
+        }
+        _ => None,
+    }
+}
+
+/// Invert the verdict of a `@should_panic` test.
+///
+/// A panic is the PASS and a clean return is the failure — the inverse of
+/// every other test — and `expected = "…"` additionally requires the
+/// rendered panic to contain that text, checked against both streams
+/// because the Tier-0 dynamic-panic render writes the reason to stdout
+/// while stderr carries the sentinel (A159).
+///
+/// A COMPILE error stays a compile error: a test that does not build has
+/// not demonstrated anything, least of all a panic.
+fn apply_should_panic(test: &Test, outcome: TestResult) -> TestResult {
+    let Some(expected) = test.should_panic.as_ref() else {
+        return outcome;
+    };
+    match outcome {
+        TestResult::CompileError { .. } => outcome,
+        TestResult::Fail {
+            duration,
+            stdout,
+            stderr,
+            exit_code,
+            error,
+        } => {
+            let rendered = format!("{}\n{}\n{}", error, stdout, stderr);
+            match expected {
+                Some(want) if !rendered.contains(want.as_str()) => TestResult::Fail {
+                    duration,
+                    stdout,
+                    stderr,
+                    exit_code,
+                    error: format!(
+                        "@should_panic(expected = \"{}\") — it panicked, but the message does \
+                         not contain that text. Got: {}",
+                        want.as_str(),
+                        error,
+                    ),
+                },
+                _ => TestResult::Pass {
+                    duration,
+                    stdout,
+                    stderr,
+                },
+            }
+        }
+        TestResult::Pass {
+            duration,
+            stdout,
+            stderr,
+        } => TestResult::Fail {
+            duration,
+            stdout,
+            stderr,
+            exit_code: None,
+            error: String::from(
+                "@should_panic — the test returned normally; it is marked as expecting a panic",
+            ),
+        },
     }
 }
 
@@ -2905,6 +3025,19 @@ struct Test {
     /// Underlying fn name (without `[N]` suffix) — needed for @test_case
     /// expansions to still find their target in the compiled VBC module.
     fn_name: Option<String>,
+    /// `@should_panic` — the test PASSES by panicking and FAILS by
+    /// returning. `Some(None)` is the bare form; `Some(Some(text))` is
+    /// `@should_panic(expected = "…")`, which additionally requires the
+    /// panic's rendered output to contain `text`.
+    ///
+    /// The attribute was registered in `verum_types::attr::standard` with
+    /// docs reading "Test expects a panic" and an `expected` argument, and
+    /// NOTHING read it: a test carrying it was judged exactly as if it were
+    /// not, so `@should_panic` tests failed by doing what they promised.
+    /// Measured 2026-09-13 — an INVENTED attribute draws
+    /// `warning<W0400>: unknown attribute`, and this one draws nothing,
+    /// which is why it read as working.
+    should_panic: Option<Option<Text>>,
 }
 
 /// Build the suite-relative module path used to qualify a test's name.
@@ -2984,6 +3117,11 @@ fn discover_tests(file: &Path) -> Result<List<Test>> {
                         .attributes
                         .iter()
                         .any(|a| a.name.as_str() == "ignore" || a.name.as_str() == "ignored");
+                    let should_panic = func
+                        .attributes
+                        .iter()
+                        .find(|a| a.name.as_str() == "should_panic")
+                        .map(|a| should_panic_expected(a));
                     let reason = if is_ignored {
                         ignore_reason(&func.attributes, &source)
                     } else {
@@ -3009,6 +3147,7 @@ fn discover_tests(file: &Path) -> Result<List<Test>> {
                                 property: property.clone(),
                                 case_args: Some(args),
                                 fn_name: Some(func.name.to_string()),
+                                should_panic: should_panic.clone(),
                             });
                         }
                     } else {
@@ -3020,6 +3159,7 @@ fn discover_tests(file: &Path) -> Result<List<Test>> {
                             property,
                             case_args: None,
                             fn_name: Some(func.name.to_string()),
+                            should_panic: should_panic.clone(),
                         });
                     }
                 }
@@ -3047,6 +3187,7 @@ fn discover_tests(file: &Path) -> Result<List<Test>> {
                     property: None,
                     case_args: None,
                     fn_name: None,
+                    should_panic: None,
                 });
             }
         }
@@ -3070,6 +3211,7 @@ fn discover_tests(file: &Path) -> Result<List<Test>> {
                         property: None,
                         case_args: None,
                         fn_name: None,
+                        should_panic: None,
                     });
                 }
             }
@@ -3089,6 +3231,7 @@ fn discover_tests(file: &Path) -> Result<List<Test>> {
                 property: None,
                 case_args: None,
                 fn_name: None,
+                should_panic: None,
             });
         }
     }
@@ -3937,6 +4080,7 @@ fn pinned_drop_me() {
             }),
             case_args: None,
             fn_name: Some("demo".to_string()),
+            should_panic: None,
         };
         let cfg = cfg_with_property(false, 256);
         let result = run_single_test(&test, std::path::Path::new("/tmp"), &cfg);
@@ -4137,6 +4281,7 @@ fn pinned_drop_me() {
             }),
             case_args: None,
             fn_name: Some("demo".to_string()),
+            should_panic: None,
         };
         let cfg = cfg_with_property(true, 256);
         let result = run_single_test(&test, std::path::Path::new("/tmp"), &cfg);

@@ -18,7 +18,7 @@
 //  * Generation-tagged refs — runtime use-after-free detection at ~15 ns
 //
 
-// This module wraps the platform-level handles (Fd, file paths, locks)
+// This module wraps the platform-level handles (ShellFd, file paths, locks)
 // in CBGR-friendly types with explicit Drop impls. Where possible, we
 // reuse `core.io.fs.File` and `core.io.process.Child` directly — this
 // module exists to add shell-specific niceties (TempFile auto-unlink,
@@ -44,7 +44,7 @@ mount core.shell.context.{ShellContext};
 mount core.shell.result.{ShellError};
 
 // =============================================================================
-// Fd — owned file descriptor
+// ShellFd — owned file descriptor
 // =============================================================================
 //
 
@@ -53,16 +53,16 @@ mount core.shell.result.{ShellError};
 // nulled out on close.
 
 @must_consume
-public type Fd is {
+public type ShellFd is {
     raw:     Int,
     closed:  Bool,
 }
 
-implement Fd {
+implement ShellFd {
     /// Take ownership of a raw fd that the caller obtained via low-level
-    /// syscall (open, dup, etc). The Fd is now responsible for closing it.
-    public fn from_raw(fd: Int) -> Fd {
-        Fd { raw: fd, closed: false }
+    /// syscall (open, dup, etc). The ShellFd is now responsible for closing it.
+    public fn from_raw(fd: Int) -> ShellFd {
+        ShellFd { raw: fd, closed: false }
     }
 
     /// Get the underlying raw fd. Use only for FFI; ownership stays with self.
@@ -83,7 +83,7 @@ implement Fd {
     public fn is_closed(&self) -> Bool { self.closed }
 }
 
-implement Drop for Fd {
+implement Drop for ShellFd {
     fn drop(&mut self) {
         if !self.closed {
             __platform_fd_close(self.raw);
@@ -92,9 +92,9 @@ implement Drop for Fd {
     }
 }
 
-implement Debug for Fd {
+implement Debug for ShellFd {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
-        f.write_str(f"Fd(raw={self.raw}, closed={self.closed})".as_str())
+        f.write_str(f"ShellFd(raw={self.raw}, closed={self.closed})".as_str())
     }
 }
 
@@ -194,7 +194,7 @@ fn generate_suffix() -> Text {
 // =============================================================================
 //
 
-// A `FileLock` wraps an open Fd plus a flag indicating advisory-vs-exclusive
+// A `FileLock` wraps an open ShellFd plus a flag indicating advisory-vs-exclusive
 // lock acquired via `flock(2)` (Unix) or `LockFileEx` (Windows). Drop
 // releases the lock automatically.
 
@@ -202,7 +202,7 @@ public type LockKind is Shared | Exclusive;
 
 @must_consume
 public type FileLock is {
-    fd:       Fd,
+    fd:       ShellFd,
     kind:     LockKind,
     released: Bool,
 }
@@ -250,7 +250,7 @@ implement FileLock {
             });
         }
         Result.Ok(FileLock {
-            fd: Fd.from_raw(raw_fd),
+            fd: ShellFd.from_raw(raw_fd),
             kind,
             released: false,
         })
@@ -310,20 +310,20 @@ fn __platform_flock(fd: Int, op: Int) -> Int {
 }
 
 // =============================================================================
-// SharedFd — multi-owner Fd with refcount-driven close
+// SharedFd — multi-owner ShellFd with refcount-driven close
 // =============================================================================
 //
 
-// When a `Fd` must be passed to multiple async tasks (e.g. fan-out reading
+// When a `ShellFd` must be passed to multiple async tasks (e.g. fan-out reading
 // from one process stdout), `SharedFd` provides reference-counted access.
 // The underlying close happens only when the last clone is dropped.
 
 public type SharedFd is {
-    inner: Shared<Fd>,
+    inner: Shared<ShellFd>,
 }
 
 implement SharedFd {
-    public fn new(fd: Fd) -> SharedFd {
+    public fn new(fd: ShellFd) -> SharedFd {
         SharedFd { inner: Shared.new(fd) }
     }
 

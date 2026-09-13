@@ -19,7 +19,7 @@
 //  * Transducer<A,B> — composable stream operators
 //  * GitCmd / DockerCmd — typed command DSLs
 //  * cp / mv / rm / mkdir_p / cat / write / which — built-ins
-//  * Fd / TempFile / FileLock — CBGR resources
+//  * ShellFd / TempFile / FileLock — CBGR resources
 //  * ShellContext / PermissionSet / MockLayer — DI primitives
 //  * Escaper / ShellEscape / ShellRaw — escape protocol
 //  * ShellResult / ShellError — return / error types
@@ -128,7 +128,7 @@ public mount .transducer.{
 
 public mount .pipeline.{ Pipeline, PipelineStage, pipeline };
 
-public mount .resources.{ Fd, TempFile, FileLock, LockKind, SharedFd };
+public mount .resources.{ ShellFd, TempFile, FileLock, LockKind, SharedFd };
 
 public mount .builtins.{
     cp, mv, rm, rm_rf,

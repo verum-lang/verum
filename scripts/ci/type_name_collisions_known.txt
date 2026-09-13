@@ -95,8 +95,6 @@ Expr	core/database/sqlite/native/l5_sql/ast.vr
 Expr	core/security/zk/stark/air.vr
 ExprOp	core/database/sqlite/native/expr_precedence_api/op.vr
 ExprOp	core/net/uri_template.vr
-Fd	core/shell/resources.vr
-Fd	core/sys/io_engine.vr
 Finding	core/cli/verify.vr
 Finding	core/database/sqlite/native/integrity_walker_api/finding.vr
 FormatOptions	core/configuration/format.vr
