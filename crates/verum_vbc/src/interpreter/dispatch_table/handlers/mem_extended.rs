@@ -424,12 +424,56 @@ fn mem_extended_body(
             // signed semantics for a raw read can truncate (`as i32` etc.)
             // at the use site — zero-extension is the invariant-preserving
             // default for unsigned raw I/O, which is the vastly common case.
+            //
+            // Width 8 is NOT the same question as widths 1/2/4, and
+            // treating it as one was A177/T1479. Verum stores every
+            // struct field as an 8-byte `Value` slot whatever the
+            // field's declared type (`compute_field_offset`), so
+            // `&self.value as *const Int` addresses the low byte of a
+            // NaN box. The sub-word reads land on the box's PAYLOAD
+            // bytes, which is why `AtomicU8`/`U16`/`U32` read a field
+            // correctly; an 8-byte read takes the payload AND the tag
+            // header, and handing those bits to `from_i64` answered
+            // `0x7FF9…002A` = 9221401712017801258 where the field held
+            // 42 — silently, since a large number looks like an answer.
+            //
+            // The WRITE side already decided this: `0x11` at width 8
+            // stores `val_value.bits()` — the full box — "so … writes
+            // survive round-trip through the raw-pointer storage". A
+            // round trip needs both halves, and only the write had one.
+            //
+            // So at width 8 the eight bytes are read as bits and asked
+            // whether they ARE a `Value`: `is_tagged()` is true exactly
+            // for the canonical quiet-NaN window `0x7FF8…`–`0x7FFF…`
+            // that every boxed Int, Bool, pointer and small string
+            // occupies, and false for a genuine C `int64_t`, which
+            // keeps the historical `from_i64` reading. A C value inside
+            // that window would be misread, but the window is the top
+            // 0.024 % of the positive range — and a `double` read
+            // through this opcode was already nonsense at width 8, so
+            // nothing that worked before stops working.
+            //
+            // Widths 1/2/4 are untouched: their whole purpose is to
+            // reach past the tag to the payload bytes.
+            if size == 8 {
+                // SAFETY: same contract as the sized reads below —
+                // `ptr` is non-null and the caller guarantees eight
+                // readable bytes. `read_unaligned` handles alignment.
+                let raw = unsafe { std::ptr::read_unaligned(ptr as *const u64) };
+                let boxed = Value::from_bits(raw);
+                let out = if boxed.is_tagged() {
+                    boxed
+                } else {
+                    Value::from_i64(raw as i64)
+                };
+                state.set_reg(dst, out);
+                return Ok(DispatchResult::Continue);
+            }
             let value = unsafe {
                 match size {
                     1 => *ptr as i64,                                        // u8 → i64 (zero-extend)
                     2 => std::ptr::read_unaligned(ptr as *const u16) as i64, // u16 → i64
                     4 => std::ptr::read_unaligned(ptr as *const u32) as i64, // u32 → i64
-                    8 => std::ptr::read_unaligned(ptr as *const i64), // 8 bytes fill the slot
                     _ => {
                         return Err(InterpreterError::InvalidOperand {
                             message: format!("invalid deref size: {}", size),
