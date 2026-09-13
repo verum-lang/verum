@@ -49,6 +49,20 @@ reading, and the honest statement is that neither survived isolation.
 "byte array (TypeId::U8)" … operation: "ByteArrayLoad" }` from another
 session's work. Reported to that task rather than worked around.
 
+**87% OF THE 522 IS ACCOUNTED FOR**, which is the number that says where to
+spend the next session:
+
+    217  R3 / T0707        base/iterator — sixteen compile errors, whole file inert
+    138  A157              meta/contexts, two files
+     34  base/memory       SIX roots, not one; three of them refused by name on T1189
+     25  another session   tracing, the ByteArrayLoad regression (T1463)
+     21  A164              base/uuid, the stage-3 safe_getentropy stub
+     12  A158              base/data, a list inside an archive-resident variant
+     11  another session   intrinsics, T1464
+     64  unattributed      spread thin over ~40 files
+
+Two rows are 355 of the 522 between them. Nothing else reaches 40.
+
 **THE TWO BIGGEST CONCENTRATIONS ARE ONE DEFECT EACH.**
 `base/iterator/unit_test` is 215 tests and SIXTEEN compile errors — R3,
 where an adapter's `Item` projection reduces against the wrong one of
