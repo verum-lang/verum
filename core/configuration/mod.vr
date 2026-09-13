@@ -89,7 +89,7 @@ public mount configuration.error.{
 
 public mount configuration.format.{
     ConfigFormat,
-    FormatOptions,
+    ConfigFormatOptions,
     FormatCapabilities,
     FormatRegistry,
     empty_options,

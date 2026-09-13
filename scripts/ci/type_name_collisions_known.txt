@@ -96,8 +96,6 @@ ExprOp	core/database/sqlite/native/expr_precedence_api/op.vr
 ExprOp	core/net/uri_template.vr
 Finding	core/cli/verify.vr
 Finding	core/database/sqlite/native/integrity_walker_api/finding.vr
-FormatOptions	core/configuration/format.vr
-FormatOptions	core/meta/contexts.vr
 Interval	core/async/interval.vr
 Interval	core/cog/resolve.vr
 IpMreq	core/sys/linux/syscall.vr

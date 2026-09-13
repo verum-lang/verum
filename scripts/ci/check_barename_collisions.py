@@ -91,7 +91,7 @@ BASELINE_ALL_TYPED = 297
 # `Modifier` sum — so `write_modifiers` shipped as a panic stub until the
 # SQLite type was renamed `DateModifier`. Every remaining pair is the same
 # shape, waiting for a resolution order to shift under it.
-BASELINE_TYPES = 128
+BASELINE_TYPES = 127
 # The subset of BASELINE_TYPES whose declarations disagree about the type's
 # SHAPE — record vs newtype vs sum vs unit vs protocol. Measured 2026-09-12.
 # This is the ratchet that matters: a shape disagreement is what makes

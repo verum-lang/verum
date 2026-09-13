@@ -18,7 +18,7 @@
 //
 // **Format-specific options.** Each format may carry options (e.g.,
 // TomlOptions, YamlOptions). The protocol's `parse_with_options` /
-// `stringify_with_options` accept an opaque `FormatOptions` type that
+// `stringify_with_options` accept an opaque `ConfigFormatOptions` type that
 // each format adapter down-casts.
 // =============================================================================
 
@@ -50,19 +50,30 @@ mount configuration.error.{ConfigError, FormatId};
 mount core.sync.{RwLock};
 
 // =============================================================================
-// FormatOptions — opaque format-specific options
+// ConfigFormatOptions — opaque format-specific options
 // =============================================================================
 //
 // Each format's adapter encodes its options as a tagged variant over
 // `ConfigValue` (typically a small ConfigTable with documented keys). This
 // avoids per-format generic parameter pollution while preserving a typed
 // surface at the call site (`TomlOptions.default().with_strict(true)`).
-public type FormatOptions is {
+// `ConfigFormatOptions`, not the bare name. `core/meta/contexts.vr:3648`
+// declares its own `FormatOptions` — with `indent_width`, `max_width`,
+// `use_tabs`, `trailing_commas` — and a colliding name resolves to no
+// declaration at all, so a meta caller reading `opts.indent_width` was told
+// `field 'indent_width' not found on type 'FormatOptions'. Available
+// members: [compact, default, payload]`: THIS type's single field, offered
+// under the other type's name. That is most of
+// `core-tests/meta/contexts/unit_test.vr`'s 102 failures (A120).
+//
+// This side moves because it is the smaller: 11 uses inside
+// `core/configuration`, none in any test, against 19 on the meta side.
+public type ConfigFormatOptions is {
     payload: ConfigValue,
 };
 
-public fn empty_options() -> FormatOptions {
-    FormatOptions { payload: ConfigValue.ConfigTable(Map.new()) }
+public fn empty_options() -> ConfigFormatOptions {
+    ConfigFormatOptions { payload: ConfigValue.ConfigTable(Map.new()) }
 }
 
 // =============================================================================
@@ -142,7 +153,7 @@ public type ConfigFormat is protocol {
     fn parse_with_options(
         &self,
         source: &Text,
-        options: &FormatOptions,
+        options: &ConfigFormatOptions,
     ) -> Result<ConfigValue, ConfigError>;
 
     /// Render a ConfigValue back to format-text.
@@ -152,7 +163,7 @@ public type ConfigFormat is protocol {
     fn stringify_with_options(
         &self,
         value: &ConfigValue,
-        options: &FormatOptions,
+        options: &ConfigFormatOptions,
     ) -> Result<Text, ConfigError>;
 }
 

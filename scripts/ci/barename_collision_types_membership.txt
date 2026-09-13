@@ -47,7 +47,6 @@ ExecutorHandle	async/intrinsics.vr,runtime/async_ops.vr
 Expr	database/sqlite/native/l5_sql/ast.vr,security/zk/stark/air.vr
 ExprOp	database/sqlite/native/expr_precedence_api/op.vr,net/uri_template.vr
 Finding	cli/verify.vr,database/sqlite/native/integrity_walker_api/finding.vr
-FormatOptions	configuration/format.vr,meta/contexts.vr
 Interval	async/interval.vr,cog/resolve.vr
 IpMreq	sys/linux/syscall.vr,sys/windows/winsock2.vr
 Judgment	verify/kernel_soundness/judgment.vr,verify/kernel_v0/judgment.vr

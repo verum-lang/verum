@@ -73,7 +73,7 @@ mount time.rfc3339.{parse as rfc3339_parse, format_with_offset as rfc3339_format
 mount configuration.value.{ConfigValue};
 mount configuration.error.{ConfigError, ConfigErrorKind, format_id_toml};
 mount configuration.format.{
-    ConfigFormat, FormatCapabilities, FormatOptions, FormatId,
+    ConfigFormat, FormatCapabilities, ConfigFormatOptions, FormatId,
     FormatRegistry, register_format, default_capabilities,
 };
 
@@ -1580,7 +1580,7 @@ implement ConfigFormat for TomlFormat {
     fn parse_with_options(
         &self,
         source: &Text,
-        _options: &FormatOptions,
+        _options: &ConfigFormatOptions,
     ) -> Result<ConfigValue, ConfigError> {
         // Phase 1: no options; ignore.
         self.parse(source)
@@ -1594,7 +1594,7 @@ implement ConfigFormat for TomlFormat {
     fn stringify_with_options(
         &self,
         value: &ConfigValue,
-        _options: &FormatOptions,
+        _options: &ConfigFormatOptions,
     ) -> Result<Text, ConfigError> {
         self.stringify(value)
     }
