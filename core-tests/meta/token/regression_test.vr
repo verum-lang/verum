@@ -76,7 +76,6 @@ fn empty_stream() -> TokenStream {
 // guard moves to T0458.
 // =============================================================================
 
-@ignore("TokenStream.empty() panics with `method 'Span.call_site' not found on receiver of runtime kind TypeRef … 1 candidate(s) end with .call_site: MetaSpan.call_site` — A120, the Span/MetaSpan collision. Measured 2026-09-13. The record literal that used to build an empty stream is refused by A140, so there is no spelling that works today; from_trees on a NON-empty list takes the other branch and passes, which is the fourth test in this file.")
 @test
 fn regression_meta_group_xmodule_parenthesis() {
     let g = TokenGroup { delimiter: Delimiter.Parenthesis, tokens: empty_stream(), span: syn() };
@@ -84,7 +83,6 @@ fn regression_meta_group_xmodule_parenthesis() {
     assert(g.tokens().is_empty());
 }
 
-@ignore("TokenStream.empty() panics with `method 'Span.call_site' not found on receiver of runtime kind TypeRef … 1 candidate(s) end with .call_site: MetaSpan.call_site` — A120, the Span/MetaSpan collision. Measured 2026-09-13. The record literal that used to build an empty stream is refused by A140, so there is no spelling that works today; from_trees on a NON-empty list takes the other branch and passes, which is the fourth test in this file.")
 @test
 fn regression_meta_group_xmodule_brace() {
     let g = TokenGroup { delimiter: Delimiter.Brace, tokens: empty_stream(), span: syn() };
@@ -92,7 +90,6 @@ fn regression_meta_group_xmodule_brace() {
     assert(g.tokens().is_empty());
 }
 
-@ignore("TokenStream.empty() panics with `method 'Span.call_site' not found on receiver of runtime kind TypeRef … 1 candidate(s) end with .call_site: MetaSpan.call_site` — A120, the Span/MetaSpan collision. Measured 2026-09-13. The record literal that used to build an empty stream is refused by A140, so there is no spelling that works today; from_trees on a NON-empty list takes the other branch and passes, which is the fourth test in this file.")
 @test
 fn regression_meta_group_xmodule_bracket() {
     let g = TokenGroup { delimiter: Delimiter.Bracket, tokens: empty_stream(), span: syn() };

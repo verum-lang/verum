@@ -91,7 +91,6 @@ fn test_token_stream_of_spanned_tokens() {
     assert(ts.last() is Some);
 }
 
-@ignore("Needs an EMPTY TokenStream: the record literal is refused by A140 and `TokenStream.empty()` panics on `Span.call_site` (A120). Measured 2026-09-13.")
 @test
 fn test_empty_token_stream_with_span() {
     let ts = TokenStream.empty();

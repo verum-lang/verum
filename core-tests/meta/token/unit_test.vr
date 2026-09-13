@@ -27,15 +27,16 @@
 //   * LexError record + .new + Eq derived
 // =============================================================================
 
-// EVERY `TokenStream` IS BUILT BY CONSTRUCTOR HERE, NOT BY RECORD LITERAL,
-// AND ELEVEN TESTS ARE PINNED BEHIND THE EMPTY CASE.
+// EVERY `TokenStream` IS BUILT BY CONSTRUCTOR HERE, NOT BY RECORD LITERAL.
 //
 // `TokenStream { tokens: …, span: … }` is refused with `Expected record
 // type, found: TokenStream` although `core/meta/token.vr:107` declares it a
 // record and the `Token { … }` literal beside it constructs (A140). A
 // COMPILE error, so no `@ignore` contained it and all 86 tests were dead.
-// `from_trees` on a non-empty list works; `TokenStream.empty()` compiles
-// and panics on `MetaSpan.call_site` (A120). 75 pass.
+// `from_trees` works, and so does `TokenStream.empty()` — until
+// 2026-09-13 it panicked on `Span.call_site` because `core/meta/span.vr`
+// published a short `Span` alias that collided with `core/tracing/data.vr`'s
+// own `Span`; the alias is gone and every one of the 86 passes.
 mount core.meta.token.{
     TokenStream, Token, TokenTree, TokenKind, Token as TokenStruct,
     Delimiter, Spacing, Keyword, Literal, StringKind, TokenGroup, LexError,
@@ -547,7 +548,6 @@ fn test_token_tree_leaf_variant() {
     assert(t is TokenTree.Leaf);
 }
 
-@ignore("Needs an EMPTY TokenStream, and no spelling works today: the record literal is refused by A140 (`Expected record type, found: TokenStream`) and `TokenStream.empty()` panics on `MetaSpan.call_site` (A120 — `MetaSpan` is declared twice in `core/` and the candidate list names `MetaSpan.call_site`). Measured 2026-09-13. The 75 tests that do not need an empty stream pass, and the non-empty path through `from_trees` works.")
 @test
 fn test_token_tree_grouped_variant() {
     let inner = TokenStream.empty();
@@ -556,7 +556,6 @@ fn test_token_tree_grouped_variant() {
     assert(t is TokenTree.Grouped);
 }
 
-@ignore("Needs an EMPTY TokenStream, and no spelling works today: the record literal is refused by A140 (`Expected record type, found: TokenStream`) and `TokenStream.empty()` panics on `MetaSpan.call_site` (A120 — `MetaSpan` is declared twice in `core/` and the candidate list names `MetaSpan.call_site`). Measured 2026-09-13. The 75 tests that do not need an empty stream pass, and the non-empty path through `from_trees` works.")
 @test
 fn test_token_tree_variants_disjoint() {
     let leaf: TokenTree = TokenTree.Leaf(sample_ident_token());
@@ -574,7 +573,6 @@ fn test_token_tree_is_token_for_leaf() {
     assert(!t.is_group());
 }
 
-@ignore("Needs an EMPTY TokenStream, and no spelling works today: the record literal is refused by A140 (`Expected record type, found: TokenStream`) and `TokenStream.empty()` panics on `MetaSpan.call_site` (A120 — `MetaSpan` is declared twice in `core/` and the candidate list names `MetaSpan.call_site`). Measured 2026-09-13. The 75 tests that do not need an empty stream pass, and the non-empty path through `from_trees` works.")
 @test
 fn test_token_tree_is_group_for_grouped() {
     let inner = TokenStream.empty();
@@ -591,7 +589,6 @@ fn test_token_tree_as_token_some_for_leaf() {
     assert(r is Some);
 }
 
-@ignore("Needs an EMPTY TokenStream, and no spelling works today: the record literal is refused by A140 (`Expected record type, found: TokenStream`) and `TokenStream.empty()` panics on `MetaSpan.call_site` (A120 — `MetaSpan` is declared twice in `core/` and the candidate list names `MetaSpan.call_site`). Measured 2026-09-13. The 75 tests that do not need an empty stream pass, and the non-empty path through `from_trees` works.")
 @test
 fn test_token_tree_as_group_some_for_grouped() {
     let inner = TokenStream.empty();
@@ -601,7 +598,6 @@ fn test_token_tree_as_group_some_for_grouped() {
     assert(r is Some);
 }
 
-@ignore("Needs an EMPTY TokenStream, and no spelling works today: the record literal is refused by A140 (`Expected record type, found: TokenStream`) and `TokenStream.empty()` panics on `MetaSpan.call_site` (A120 — `MetaSpan` is declared twice in `core/` and the candidate list names `MetaSpan.call_site`). Measured 2026-09-13. The 75 tests that do not need an empty stream pass, and the non-empty path through `from_trees` works.")
 @test
 fn test_token_tree_as_token_none_for_grouped() {
     let inner = TokenStream.empty();
@@ -622,7 +618,6 @@ fn test_token_tree_as_group_none_for_leaf() {
 // Section 11: TokenStream record direct construction
 // =============================================================================
 
-@ignore("Needs an EMPTY TokenStream, and no spelling works today: the record literal is refused by A140 (`Expected record type, found: TokenStream`) and `TokenStream.empty()` panics on `MetaSpan.call_site` (A120 — `MetaSpan` is declared twice in `core/` and the candidate list names `MetaSpan.call_site`). Measured 2026-09-13. The 75 tests that do not need an empty stream pass, and the non-empty path through `from_trees` works.")
 @test
 fn test_token_stream_empty_record() {
     let ts = TokenStream.empty();
@@ -646,7 +641,6 @@ fn test_token_stream_first_some_after_push() {
     assert(r is Some);
 }
 
-@ignore("Needs an EMPTY TokenStream, and no spelling works today: the record literal is refused by A140 (`Expected record type, found: TokenStream`) and `TokenStream.empty()` panics on `MetaSpan.call_site` (A120 — `MetaSpan` is declared twice in `core/` and the candidate list names `MetaSpan.call_site`). Measured 2026-09-13. The 75 tests that do not need an empty stream pass, and the non-empty path through `from_trees` works.")
 @test
 fn test_token_stream_first_none_when_empty() {
     let ts = TokenStream.empty();
@@ -662,7 +656,6 @@ fn test_token_stream_last_some_after_push() {
     assert(r is Some);
 }
 
-@ignore("Needs an EMPTY TokenStream, and no spelling works today: the record literal is refused by A140 (`Expected record type, found: TokenStream`) and `TokenStream.empty()` panics on `MetaSpan.call_site` (A120 — `MetaSpan` is declared twice in `core/` and the candidate list names `MetaSpan.call_site`). Measured 2026-09-13. The 75 tests that do not need an empty stream pass, and the non-empty path through `from_trees` works.")
 @test
 fn test_token_stream_last_none_when_empty() {
     let ts = TokenStream.empty();
@@ -674,7 +667,6 @@ fn test_token_stream_last_none_when_empty() {
 // Section 12: TokenGroup record + accessors
 // =============================================================================
 
-@ignore("Needs an EMPTY TokenStream, and no spelling works today: the record literal is refused by A140 (`Expected record type, found: TokenStream`) and `TokenStream.empty()` panics on `MetaSpan.call_site` (A120 — `MetaSpan` is declared twice in `core/` and the candidate list names `MetaSpan.call_site`). Measured 2026-09-13. The 75 tests that do not need an empty stream pass, and the non-empty path through `from_trees` works.")
 @test
 fn test_group_record_construction_parenthesis() {
     let inner = TokenStream.empty();
@@ -683,7 +675,6 @@ fn test_group_record_construction_parenthesis() {
     assert(d is Delimiter.Parenthesis);
 }
 
-@ignore("Needs an EMPTY TokenStream, and no spelling works today: the record literal is refused by A140 (`Expected record type, found: TokenStream`) and `TokenStream.empty()` panics on `MetaSpan.call_site` (A120 — `MetaSpan` is declared twice in `core/` and the candidate list names `MetaSpan.call_site`). Measured 2026-09-13. The 75 tests that do not need an empty stream pass, and the non-empty path through `from_trees` works.")
 @test
 fn test_group_record_construction_brace() {
     let inner = TokenStream.empty();
@@ -691,7 +682,6 @@ fn test_group_record_construction_brace() {
     assert(g.delimiter() is Delimiter.Brace);
 }
 
-@ignore("Needs an EMPTY TokenStream, and no spelling works today: the record literal is refused by A140 (`Expected record type, found: TokenStream`) and `TokenStream.empty()` panics on `MetaSpan.call_site` (A120 — `MetaSpan` is declared twice in `core/` and the candidate list names `MetaSpan.call_site`). Measured 2026-09-13. The 75 tests that do not need an empty stream pass, and the non-empty path through `from_trees` works.")
 @test
 fn test_group_record_construction_bracket() {
     let inner = TokenStream.empty();
