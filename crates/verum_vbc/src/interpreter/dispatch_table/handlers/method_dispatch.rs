@@ -1952,6 +1952,39 @@ pub(in super::super) fn handle_call_method(
                 // record is built and these bodies work. Until then, follow
                 // T1168's rule one layer down: never hand a body a
                 // representation it was not written for — fail, and say so.
+                // T1189 leg 1 — the DEREF FAMILY is answerable on the
+                // cell, and refusing it was costing more than the
+                // substitution does.
+                //
+                // `implement<T> Deref for Heap<T>` returns the pointee.
+                // The substituted cell holds exactly that: a 32-byte
+                // AllocationHeader followed by ONE 8-byte Value. So the
+                // declared body's answer and the cell's single slot are
+                // the same thing, and handing back the slot is not a
+                // workaround for the substitution — it is what the body
+                // computes, reached without reading `self.ptr` off a
+                // layout that is not there.
+                //
+                // Why this matters beyond the spelling: the TYPE CHECKER
+                // repairs smart-pointer method calls by materialising an
+                // explicit `.deref()` (infer/core.rs:424), so its own
+                // repair path emitted the one call this arm refused.
+                // Measured before: `(*a).fetch_sub(1, ord)` answered 5
+                // while `a.deref().fetch_sub(1, ord)` answered a heap
+                // address on `Shared` and PANICKED here on `Heap`.
+                //
+                // The other two methods this arm guards — `as_ref` and
+                // `==` — are left refusing: `as_ref` has the same shape
+                // but no measurement yet, and `Heap.eq` genuinely needs
+                // the declared record's `generation`/`epoch` fields,
+                // which the cell does not carry. Removing the
+                // substitution (T1189 leg 2) is still what makes those
+                // work.
+                if matches!(base_method.as_str(), "deref" | "deref_mut") {
+                    let inner = unsafe { *(ptr as *const Value) };
+                    state.set_reg(dst, inner);
+                    return Ok(DispatchResult::Continue);
+                }
                 return Err(InterpreterError::Panic {
                     message: format!(
                         "`Heap.{}` cannot run on this receiver: the interpreter \
