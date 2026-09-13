@@ -125,7 +125,13 @@ implement Component {
     public fn to_text(&self) -> Text {
         match self {
             Prefix(s) => s.clone(),
-            RootDir => Text.from(MAIN_SEPARATOR),
+            // `.to_text()`, not `Text.from(…)`. `Text.from(Char)` answers the
+            // EMPTY string — measured 2026-09-13 against three spellings that
+            // all answer `/`: `Text.from("/")`, `c.to_text()` and `f"{c}"`.
+            // So `Component.RootDir.to_text()` was "" where every other
+            // variant answered correctly, and a path rebuilt from its
+            // components silently lost its leading separator (A161).
+            RootDir => MAIN_SEPARATOR.to_text(),
             CurDir => Text.from("."),
             ParentDir => Text.from(".."),
             Normal(s) => s.clone(),
@@ -327,7 +333,10 @@ implement Path {
             if self.inner.len() == 1 {
                 return Maybe.None; // Path is just "/"
             }
-            return Maybe.Some(Path.new(&Text.from(MAIN_SEPARATOR)));
+            // Same as `Component.RootDir.to_text()` above: `Text.from(Char)`
+            // answers the empty string, so this returned the EMPTY path
+            // where it meant the root (A161).
+            return Maybe.Some(Path.new(&MAIN_SEPARATOR.to_text()));
         }
 
         Maybe.Some(Path.new(&self.inner.slice(0, last_sep)))
