@@ -352,6 +352,31 @@ implement<T: Display> Display for RefCell<T> {
     }
 }
 
+// LazyCell<T> dereferences to &T, forcing on the first read.
+//
+// This is the whole ergonomics of a lazy cell: `*cell` reads the value
+// and computes it if nobody has yet. Without it the only way in is
+// `force()`, which returns BY VALUE and therefore demands `T: Clone` —
+// a constraint the deref does not need, since it hands back a reference
+// into the cell's own storage.
+//
+// Forcing from `&self` uses the same `@vbc(LAZYCELL_FORCE, …)` store
+// `force` uses; the interior mutation is the point of the type.
+implement<T> Deref for LazyCell<T> {
+    type Target = T;
+
+    fn deref(&self) -> &T {
+        if self.value.is_none() {
+            let init_fn = self.init.clone()
+                .expect("LazyCell.deref: init is_some until LAZYCELL_FORCE clears it (constructor stored Some)");
+            let val = init_fn();
+            @vbc(LAZYCELL_FORCE, self, val);
+        }
+        self.value.as_ref()
+            .expect("LazyCell.deref: forced immediately above")
+    }
+}
+
 // Ref<T> dereferences to &T
 implement<T> Deref for Ref<T> {
     type Target = T;

@@ -248,15 +248,24 @@ public fn with_interrupts_disabled<R, F: Fn() -> R>(f: F) -> R {
 ///  }
 /// }
 /// ```
+// The field holds `T` directly. It used to be declared `UnsafeCell<T>`
+// — a type that is declared nowhere in `core/` and mounted nowhere, so
+// `new`'s body could not compile, the function became a lenient stub,
+// and every `InterruptCell.new(v)` call site degraded to a method call
+// on its own argument (`method 'new' not found on receiver of runtime
+// kind `Int``). What that wrapper was for is exactly what
+// `with_disabled` already provides: the interrupt-disabled window is
+// the mutual exclusion, and the raw pointer is taken the way the rest
+// of `core/` takes one — see `core/mem/cap_audit_ring.vr`.
 public type InterruptCell<T> is {
-    value: UnsafeCell<T>,
+    value: T,
 };
 
 implement<T> InterruptCell<T> {
     /// Create a new InterruptCell with the given value.
     @const
     public fn new(value: T) -> InterruptCell<T> {
-        InterruptCell { value: UnsafeCell.new(value) }
+        InterruptCell { value: value }
     }
 
     /// Access the value with interrupts disabled.
@@ -267,7 +276,7 @@ implement<T> InterruptCell<T> {
     @inline(always)
     public fn with_disabled<R, F: Fn(&mut T) -> R>(&self, f: F) -> R {
         let _guard = CriticalSection.enter();
-        let ptr = self.value.get();
+        let ptr = self.get_ptr();
         // SAFETY: Interrupts are disabled, so no concurrent access
         f(unsafe { &mut *ptr })
     }
@@ -279,7 +288,7 @@ implement<T> InterruptCell<T> {
     /// Caller must ensure no concurrent access (e.g., via critical section).
     @inline(always)
     public fn get_ptr(&self) -> *mut T {
-        self.value.get()
+        unsafe { &self.value as *mut T }
     }
 }
 
