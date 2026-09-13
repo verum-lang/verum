@@ -3,94 +3,101 @@
 // =============================================================================
 //
 // `core/term/layout/constraint.vr` —
-//   * Constraint 6-variant (Length/Min/Max/Percentage/Ratio/Fill)
+//   * LayoutConstraint 6-variant (Length/Min/Max/Percentage/Ratio/Fill)
 //   * Direction 2-variant (Horizontal/Vertical)
 //   * Flex 5-variant (Start/Center/End/SpaceBetween/SpaceAround)
 // =============================================================================
 
-// `Constraint` is `LayoutConstraint`'s public alias (see
+// `LayoutConstraint` is `LayoutConstraint`'s public alias (see
 // `core/term/layout/mod.vr`'s "public term surface" re-export comment
-// — the bare `Constraint` name collided across three domains, so
+// — the bare `LayoutConstraint` name collided across three domains, so
 // `constraint.vr` declares the type as `LayoutConstraint` and the
 // alias is only visible through the re-exporting parent module, not
 // through a direct file-level mount).
-mount core.term.layout.{Constraint, Direction, Flex};
+// `LayoutConstraint`, NOT the `LayoutConstraint` alias. `core/term/layout/mod.vr:31`
+// re-exports it as `LayoutConstraint as LayoutConstraint`, and a variant reached
+// through that RENAMED re-export is not a variant: `LayoutConstraint.Length(40)`
+// panics with `method 'Length' not found on receiver of runtime kind 'Int'`.
+// The same line against `LayoutConstraint` — through the same umbrella, or
+// from the declaring module — works. Measured 2026-09-13 with all three
+// spellings side by side. A163.
+mount core.term.layout.{LayoutConstraint, Direction, Flex};
 mount core.base.maybe.{Maybe, Some, None};
 mount core.base.result.{Result, Ok, Err};
 
 // =============================================================================
-// Section 1: Constraint 6-variant
+// Section 1: LayoutConstraint 6-variant
 // =============================================================================
 
 @test
 fn test_constraint_length_variant() {
-    let c: Constraint = Constraint.Length(40);
-    assert(c is Constraint.Length);
+    let c: LayoutConstraint = LayoutConstraint.Length(40);
+    assert(c is LayoutConstraint.Length);
 }
 
 @test
 fn test_constraint_min_variant() {
-    let c: Constraint = Constraint.Min(10);
-    assert(c is Constraint.Min);
+    let c: LayoutConstraint = LayoutConstraint.Min(10);
+    assert(c is LayoutConstraint.Min);
 }
 
 @test
 fn test_constraint_max_variant() {
-    let c: Constraint = Constraint.Max(80);
-    assert(c is Constraint.Max);
+    let c: LayoutConstraint = LayoutConstraint.Max(80);
+    assert(c is LayoutConstraint.Max);
 }
 
 @test
 fn test_constraint_percentage_variant() {
-    let c: Constraint = Constraint.Percentage(50);
-    assert(c is Constraint.Percentage);
+    let c: LayoutConstraint = LayoutConstraint.Percentage(50);
+    assert(c is LayoutConstraint.Percentage);
 }
 
 @test
 fn test_constraint_ratio_variant() {
-    let c: Constraint = Constraint.Ratio(2, 3);
-    assert(c is Constraint.Ratio);
+    let c: LayoutConstraint = LayoutConstraint.Ratio(2, 3);
+    assert(c is LayoutConstraint.Ratio);
 }
 
 @test
 fn test_constraint_fill_variant() {
-    let c: Constraint = Constraint.Fill(1);
-    assert(c is Constraint.Fill);
+    let c: LayoutConstraint = LayoutConstraint.Fill(1);
+    assert(c is LayoutConstraint.Fill);
 }
 
 @test
 fn test_constraint_length_disjoint() {
-    let c: Constraint = Constraint.Length(10);
-    assert(!(c is Constraint.Min));
-    assert(!(c is Constraint.Max));
-    assert(!(c is Constraint.Percentage));
-    assert(!(c is Constraint.Ratio));
-    assert(!(c is Constraint.Fill));
+    let c: LayoutConstraint = LayoutConstraint.Length(10);
+    assert(!(c is LayoutConstraint.Min));
+    assert(!(c is LayoutConstraint.Max));
+    assert(!(c is LayoutConstraint.Percentage));
+    assert(!(c is LayoutConstraint.Ratio));
+    assert(!(c is LayoutConstraint.Fill));
 }
 
 @test
 fn test_constraint_length_payload_round_trip() {
-    let c: Constraint = Constraint.Length(40);
+    let c: LayoutConstraint = LayoutConstraint.Length(40);
     match c {
-        Constraint.Length(n) => assert_eq(n, 40),
+        LayoutConstraint.Length(n) => assert_eq(n, 40),
         _ => panic("expected Length"),
     }
 }
 
 @test
 fn test_constraint_percentage_payload_round_trip() {
-    let c: Constraint = Constraint.Percentage(75);
+    let c: LayoutConstraint = LayoutConstraint.Percentage(75);
     match c {
-        Constraint.Percentage(n) => assert_eq(n, 75),
+        LayoutConstraint.Percentage(n) => assert_eq(n, 75),
         _ => panic("expected Percentage"),
     }
 }
 
 @test
 fn test_constraint_ratio_two_payload_round_trip() {
-    let c: Constraint = Constraint.Ratio(1, 4);
+    let c: LayoutConstraint = LayoutConstraint.Ratio(1, 4);
     match c {
-        Constraint.Ratio(num, denom) => {
+        LayoutConstraint.Ratio(num, denom) => {
             assert_eq(num, 1);
             assert_eq(denom, 4);
         }
