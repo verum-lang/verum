@@ -10,17 +10,25 @@ default green-suite gate.
 
 ## The whole suite, re-measured 2026-09-13
 
-    verum test --interp --test-threads 4     (all of core-tests, 1883 s)
-    19010 tests — 17937 passed, 637 failed, 436 ignored
+    verum test --interp --test-threads 4     (all of core-tests, 1333 s)
+    19012 tests — 17997 passed, 600 failed, 415 ignored
 
 Against the 2026-09-12 morning run — 19042 tests, 16542 passed, 2129
-failed, 371 ignored — that is **1492 fewer failures**, a 70% reduction,
-and 1395 more passes.
+failed, 371 ignored — that is **1529 fewer failures**, a 72% reduction.
+
+**TWENTY-FIVE OF THE 600 ARE NOT OURS**: `tracing/id/unit_test` (10) and
+`tracing/pipeline/unit_test` (15) fail with `TypeMismatch { expected:
+"byte array (TypeId::U8)" … operation: "ByteArrayLoad" }` from another
+session's uncommitted `verum_vbc` work, which this session's builds
+compile along with everything else. Bisected across four binary
+snapshots: green at 05:53 and 07:24, red at 10:30 and 11:30, and
+`tracing/id` names nothing that was renamed here. Reported to that task
+rather than worked around.
 
 **A ROW BELOW CAN BE GREEN WHILE ITS FILE DOES NOT COMPILE**, and that is
 still the reason to re-run rather than read. The dead-file list
 (`scripts/ci/doc_methods_dead_files.txt`, regenerated from a run rather
-than reasoned about) went 85 → 48 → 13 over the two days.
+than reasoned about) went 85 → 48 → 4 over the two days.
 
 Eight files are no longer run at all and are not failures: `sys/embedded`
 and `sys/no_runtime` test modules that `core/sys/mod.vr` gates with
@@ -32,16 +40,17 @@ table on purpose — `check-inventory` reads a table row as a MODULE ROW and
 reported seven non-existent directories the first time this was written:
 
     215  base/iterator/unit_test         associated-type projection (T0707)
-    102  meta/contexts/unit_test         colliding FormatOptions (A120) + archive generic alias (A157)
+    102  meta/contexts/unit_test         archive generic alias in return position (A157)
      36  meta/contexts/property_test     as meta/contexts/unit_test
      26  base/memory/cbgr_test           at least five distinct roots, undiagnosed
      19  runtime/async_ops/unit_test     —
-     14  runtime/supervisor/property_test  colliding SupervisionStrategy (A120)
-     11  sys/init/unit_test              colliding InitError (A120)
+     15  tracing/pipeline/unit_test      NOT OURS — see above
+     10  tracing/id/unit_test            NOT OURS — see above
+     10  base/data/unit_test             Data.Array payload seen from a baked method (A158)
 
-Those seven are 423 of the 637, and **the single biggest is one defect**:
-the `Item<ISize>` projection, which no `@ignore` can contain because it is
-a compile error.
+Those eight are 433 of the 600, and the single biggest is ONE defect: the
+`Item<ISize>` projection, which no `@ignore` can contain because it is a
+compile error.
 
 So: **before trusting a row, re-run it**; and before pricing a defect,
 check whether it is one of the seven above.
