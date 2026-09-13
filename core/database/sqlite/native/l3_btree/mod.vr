@@ -92,7 +92,7 @@ public mount .comparator.{
     KeyKind, KkRowId, KkRecord,
     SeekKey, SkRowId, SkRecord,
     CellKey, CkRowId, CkRecord,
-    seek_key_kind, ordering_name, reverse_ordering,
+    seek_key_kind,
     cmp_int64, cmp_bytes, cmp_keys,
     BinarySearchResult, binary_search_cells,
 };

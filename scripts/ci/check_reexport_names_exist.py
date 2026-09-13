@@ -56,7 +56,7 @@ ROOT = Path(__file__).resolve().parents[2]
 # method down: rename where a same-meaning replacement exists one spelling
 # away, DROP where nothing exists, and never leave a name that reads like a
 # real one.
-BASELINE = 195  # 196 before `core/mem/mod.vr` stopped re-exporting the renamed `Capability`
+BASELINE = 178  # 196 before `core/mem/mod.vr` stopped re-exporting the renamed `Capability`
 CORE = ROOT / "core"
 
 # `public mount .leaf.{A, B as C, D};` — possibly spanning many lines.

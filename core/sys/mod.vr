@@ -735,7 +735,6 @@ public mount .windows.{
     yield_now,
     current_thread_id,
     // Once Constants
-    ONCE_NOT_STARTED,
     ONCE_RUNNING,
     ONCE_COMPLETE,
 };

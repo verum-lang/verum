@@ -77,7 +77,7 @@ public mount .config.{
     PtmDisable, PtmAllow, PtmRequire, PtmVerifyCa, PtmVerifyFull,
 };
 public mount .connection.{
-    PgConnection, PgConnState, SimpleQueryResult,
+    PgConnection, PgConnState,
     PgSimpleQueryResult, PgSimpleQueryArenaResult,
     PgPreparedStatement, PgTypedQueryResult,
     PcsConnecting, PcsAuthenticating, PcsReady, PcsBusy, PcsClosed, PcsFailed,

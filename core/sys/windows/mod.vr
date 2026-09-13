@@ -129,7 +129,6 @@ public mount ntdll.{
 
     // Process/Thread functions
     NtQueryInformationProcess,
-    NtSetInformationThread,
     NtDelayExecution,
 
     // Synchronization functions
@@ -156,8 +155,6 @@ public mount kernel32.{
 
     // Console I/O
     GetStdHandle,
-    WriteConsoleA,
-    ReadConsoleA,
 
     // File I/O
     CreateFileA,
@@ -171,9 +168,6 @@ public mount kernel32.{
     VirtualAlloc,
     VirtualFree,
     VirtualProtect,
-    HeapAlloc,
-    HeapFree,
-    GetProcessHeap,
     mem_decommit,
     mem_reset,
     mem_recommit,
@@ -186,7 +180,6 @@ public mount kernel32.{
     TerminateThread,
     SuspendThread,
     ResumeThread,
-    SwitchToThread,
     Sleep,
     SleepEx,
 
@@ -388,17 +381,8 @@ public mount io.{
     // Types
     IocpDriver,
     OverlappedEntry,
-    IoOperation,
-    IoCompletionCallback,
-    FileReadOp,
-    FileWriteOp,
-    SocketAcceptOp,
-    SocketConnectOp,
-    SocketRecvOp,
-    SocketSendOp,
 
     // Constants
-    MAX_IOCP_ENTRIES,
 };
 
 // =============================================================================
@@ -471,7 +455,6 @@ public mount time.{
     sleep_ms,
     sleep_us,
     get_perf_freq,
-    perf_counter_to_nanos,
 };
 
 // =============================================================================
