@@ -2074,35 +2074,36 @@ impl TypeChecker {
         // `ParseResult<Int>` E103.)  The qualified machinery below
         // engages for genuine collisions only.
         // THE FAST PATH INFERS ctx CORRECTNESS FROM *METADATA* AGREEMENT,
-        // AND THE TWO TABLES CAN DISAGREE (A120).
+        // AND THE TWO TABLES CAN DISAGREE (A120) — BUT MAKING IT STEP ASIDE
+        // COSTS 1366 TESTS, MEASURED 2026-09-13 AND REVERTED.
         //
-        // Measured 2026-09-13 with `VERUM_TRACE_DEFTYPE`: for `Child` —
-        // declared at `core/sys/process_ops.vr:99` and again at
-        // `core/io/process.vr:310` — `core.sys.process_ops.Child` is NEVER
+        // The diagnosis stands: `VERUM_TRACE_DEFTYPE` shows that for `Child`
+        // — declared at `core/sys/process_ops.vr:99` and again at
+        // `core/io/process.vr:310` — `core.sys.process_ops.Child` is never
         // registered as a type, because this early return fires. The
-        // metadata simple slot agreed with the descriptor, so the branch
-        // concluded "the flat path already resolves the mounted name
-        // correctly" — while the ctx flat entry had last been written by
-        // the OTHER module, which is how a fully qualified
-        // `let c: core.sys.process_ops.Child = …` ends up refused with
-        // `expected 'Int', found 'Maybe<Int>'`.
+        // metadata simple slot agreed with the descriptor while the ctx flat
+        // entry had last been written by the OTHER module.
         //
-        // The premise holds only for a name NO OTHER MODULE declares. When
-        // the metadata itself files two types under this simple name, the
-        // qualified machinery below is exactly what is needed, so the
-        // shortcut steps aside. A unique name keeps the byte-identical
-        // pre-fix path the comment below describes.
-        let simple_name_is_contested = {
-            let suffix = format!(".{}", name);
-            metadata
-                .types
-                .keys()
-                .filter(|k| k.as_str().ends_with(suffix.as_str()))
-                .count()
-                > 1
-        };
+        // The obvious repair — skip the shortcut when `metadata.types` files
+        // more than one type under the simple name — was implemented and
+        // measured against the whole suite: **874 failures became 2240.**
+        // `base/result/unit_test` 0 -> 150, `base/maybe/unit_test` 0 -> 135,
+        // `text/text/protocol_test` 0 -> 119, and eleven more files went from
+        // clean to entirely red, with diagnostics like `no method named
+        // 'is_none' found for type 'T'` — the qualified registration changes
+        // what a GENERIC receiver resolves to. It also fixed nothing: the
+        // mount still bound the flat entry and `c.read_stdout()` was still
+        // refused.
+        //
+        // The comment below already warned of exactly this shape for
+        // `ParseResult<Int>`, and "contested names only" is not a narrow
+        // enough guard, because the contested set includes the generic
+        // vocabulary the whole corpus is written in.
+        //
+        // So the fix is NOT here. Registration is necessary and not
+        // sufficient; lookup is the other half, and until lookup prefers a
+        // qualified entry, publishing one does harm.
         if let Some(simple_desc) = metadata.types.get(&name_text)
-            && !simple_name_is_contested
             && simple_desc.module_path == desc.module_path
             && simple_desc.name == desc.name
             && std::mem::discriminant(&simple_desc.kind)
