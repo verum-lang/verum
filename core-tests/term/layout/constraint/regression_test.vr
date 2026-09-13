@@ -1,0 +1,38 @@
+// =============================================================================
+// core-tests/term/layout/constraint/regression_test.vr
+// =============================================================================
+//
+// Pinned regressions for `core/term/layout/constraint.vr`.
+// =============================================================================
+// =============================================================================
+// A163 — a variant reached through a RENAMED re-export
+// =============================================================================
+//
+// `core/term/layout/mod.vr:31` re-exports the type twice:
+//
+//     public mount .constraint.{LayoutConstraint, LayoutConstraint as Constraint, …};
+//
+// The alias exists so a reader can write `Constraint`, and until 2026-09-13
+// that was the spelling that did NOT work: `Constraint.Length(40)` panicked
+// at run time with `method 'Length' not found on receiver of runtime kind
+// 'Int'` — the constructor read as a method call on the payload — while
+// `LayoutConstraint.Length(40)` constructed. `register_mount_item_alias`
+// gave the alias its TYPE and its value scheme and none of the sum's
+// VARIANT keys, which live in the env under `Type.Variant`.
+//
+// BOTH spellings are pinned, because a fix that bound the alias and broke
+// the real name would pass a one-sided test.
+
+mount core.term.layout.{LayoutConstraint, Constraint};
+
+@test
+fn regression_a163_variant_through_the_real_name() {
+    let c: LayoutConstraint = LayoutConstraint.Length(40);
+    assert(c is LayoutConstraint.Length);
+}
+
+@test
+fn regression_a163_variant_through_the_renamed_reexport() {
+    let c: Constraint = Constraint.Length(40);
+    assert(c is Constraint.Length);
+}

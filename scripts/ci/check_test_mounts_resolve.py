@@ -52,7 +52,17 @@ DECL = re.compile(
 # census reported 455 files instead of 164.
 TYPEBODY = re.compile(r"^\s*(?:pub\s+|public\s+)?type\s+\w+(?:<[^>]*>)?\s+is\b(.*?);", re.M | re.S)
 CAPWORD = re.compile(r"\b([A-Z]\w*)\b")
-REEXPORT = re.compile(r"\bmount\b[^;]*?\b(\w+)\b", re.S)
+# A RE-EXPORT'S BRACE LIST IS ITS NAMES, and this pattern used to capture
+# only the FIRST word after `mount` — the SUBMODULE. Measured 2026-09-13 on
+# `core/term/layout/mod.vr`, whose
+# `public mount .constraint.{LayoutConstraint, LayoutConstraint as Constraint, …}`
+# yielded `constraint`, `flex`, `grid`, `rect`, `responsive`, `shortcuts`
+# and not one type name. Every type a module offers only by re-export read
+# as UNRESOLVED, which is a false positive that costs a whole test file
+# ("one unresolved name fails the WHOLE file", as this gate's own message
+# says) and which the known-unresolved baseline then froze in place.
+REEXPORT_PATH = re.compile(r"\bmount\b\s+([\w.]+)\s*;", re.M)
+REEXPORT_BRACE = re.compile(r"\bmount\b[^;{]*\{([^}]*)\}\s*;", re.S)
 # A `mount { … }` list may carry line comments between its entries.  The
 # first version split the brace body on commas and treated the prose as
 # names, so a comment about `memcpy_addr` produced entries like
@@ -78,7 +88,19 @@ def module_names(path: str) -> set[str] | None:
     for f in files:
         t = f.read_text(errors="replace")
         names |= set(DECL.findall(t))
-        names |= set(REEXPORT.findall(t))
+        names |= set(REEXPORT_PATH.findall(t))
+        for body in REEXPORT_BRACE.findall(t):
+            for raw in LINE_COMMENT.sub("", body).split(","):
+                item = raw.strip()
+                if " as " in item:
+                    # Both halves are reachable: the source name through a
+                    # plain re-export, the alias through the rename.
+                    for half in item.split(" as "):
+                        half = half.strip()
+                        if IDENT.match(half):
+                            names.add(half)
+                elif IDENT.match(item):
+                    names.add(item)
         for body in TYPEBODY.findall(t):
             names |= set(CAPWORD.findall(body))
     _cache[path] = names
