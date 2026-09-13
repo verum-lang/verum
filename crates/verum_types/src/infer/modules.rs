@@ -16476,6 +16476,76 @@ impl TypeChecker {
         }
     }
 
+    /// Resolve `type_name` through the alias registry and expand the
+    /// target, substituting `args` into the alias's own parameters.
+    ///
+    /// `None` means "no usable alias here" and the caller should fall
+    /// through to its constructor-driven path:
+    ///
+    ///  * the registry has no entry for the name; or
+    ///  * the entry's HEAD is the same name (#47 class B — metadata
+    ///    loading registers a variant type's self-referential
+    ///    placeholder, `ControlFlow` -> `ControlFlow`; recursing on it
+    ///    strips the instance's type args at depth-out and never reaches
+    ///    the constructor-driven build, so pattern payloads stay rigid
+    ///    `Named("C")`). A same-head alias is not an alias.
+    ///
+    /// ONE carrier, called from both arms that need it: the
+    /// self-referential-placeholder branch it was written for, and the
+    /// lookup-MISS branch, where an archive-declared method's return
+    /// type arrives (A157). Splitting it into two copies is what let
+    /// the second arm go without alias resolution at all.
+    fn try_expand_through_alias(
+        &self,
+        type_name: &str,
+        args: &[Type],
+        depth: usize,
+    ) -> Option<Type> {
+        let alias_ty = self.ctx.resolve_alias(type_name)?.clone();
+        let alias_head_same = match &alias_ty {
+            Type::Named { path: ap, .. } => ap
+                .segments
+                .last()
+                .map(|seg| match seg {
+                    verum_ast::ty::PathSegment::Name(id) => id.name.as_str() == type_name,
+                    _ => false,
+                })
+                .unwrap_or(false),
+            Type::Generic { name: an, .. } => an.as_str() == type_name,
+            _ => false,
+        };
+        if alias_head_same {
+            return None;
+        }
+        // Substitute the INSTANCE's type args into the alias target before
+        // recursing, so `MetaResult<Int>` reaches `Result<Int, MetaError>`
+        // rather than leaving the formal `T` behind.
+        let substituted_alias = if !args.is_empty() {
+            let type_params_key = format!("__type_params_{}", type_name);
+            if let Option::Some(Type::Record(params_map)) =
+                self.ctx.lookup_type(type_params_key.as_str())
+            {
+                let mut subst: indexmap::IndexMap<verum_common::Text, Type> =
+                    indexmap::IndexMap::new();
+                for (i, (param_name, param_type)) in params_map.iter().enumerate() {
+                    if let Some(arg) = args.get(i) {
+                        subst.insert(param_name.clone(), arg.clone());
+                        if let Type::Var(tv) = param_type {
+                            let var_key: verum_common::Text = format!("T{}", tv.id()).into();
+                            subst.insert(var_key, arg.clone());
+                        }
+                    }
+                }
+                self.substitute_type_params(&alias_ty, &subst)
+            } else {
+                alias_ty
+            }
+        } else {
+            alias_ty
+        };
+        Some(self.expand_generic_to_variant_impl(&substituted_alias, depth + 1))
+    }
+
     pub(crate) fn expand_generic_to_variant(&self, ty: &Type) -> Type {
         self.expand_generic_to_variant_impl(ty, 0)
     }
@@ -16486,6 +16556,21 @@ impl TypeChecker {
         }
         match ty {
             Type::Generic { name, args } => {
+                // INSTRUMENT (VERUM_TRACE_ALIASEXP): which arm this type
+                // takes, and whether either registry knows the name. A
+                // type that comes back unchanged from here reaches pattern
+                // binding as itself and is refused with "Pattern expects a
+                // variant type" — and the two registries disagreeing is
+                // the shape that produced A157.
+                if std::env::var("VERUM_TRACE_ALIASEXP").is_ok() {
+                    eprintln!(
+                        "[aliasexp] Generic name={} args={} lookup_type={} resolve_alias={}",
+                        name.as_str(),
+                        args.len(),
+                        self.ctx.lookup_type(name.as_str()).is_some(),
+                        self.ctx.resolve_alias(name.as_str()).is_some(),
+                    );
+                }
                 // STDLIB-AGNOSTIC: Look up all generic types from context
                 if let Option::Some(def_ty) = self.ctx.lookup_type(name.as_str()) {
                     if let Type::Variant(variants) = def_ty {
@@ -16493,13 +16578,34 @@ impl TypeChecker {
                             &variants, args, name.as_str(),
                         )
                     } else {
-                        // STDLIB-AGNOSTIC: Check inductive_constructors for variant types
-                        // stored as Type::Generic rather than Type::Variant
-                        self.try_build_variant_from_constructors(name, args, ty)
+                        // AN ALIAS LANDS HERE TOO (A157). This arm had no
+                        // alias handling at all — neither on a non-variant
+                        // definition nor on a miss — while the `Named` arm
+                        // below has had one since #47. A generic alias
+                        // materialised from an ARCHIVE DESCRIPTOR arrives
+                        // as `Generic { name: "MetaResult", args: [Int] }`,
+                        // and without this it went straight to
+                        // `try_build_variant_from_constructors`, which has
+                        // no constructors for an alias and hands the type
+                        // back unchanged.
+                        match self.try_expand_through_alias(name.as_str(), args, depth) {
+                            Option::Some(expanded) => expanded,
+                            Option::None => {
+                                // STDLIB-AGNOSTIC: Check inductive_constructors for variant types
+                                // stored as Type::Generic rather than Type::Variant
+                                self.try_build_variant_from_constructors(name, args, ty)
+                            }
+                        }
                     }
                 } else {
-                    // Type not found in lookup, try inductive_constructors
-                    self.try_build_variant_from_constructors(name, args, ty)
+                    // Same on the miss path, and for the same reason.
+                    match self.try_expand_through_alias(name.as_str(), args, depth) {
+                        Option::Some(expanded) => expanded,
+                        Option::None => {
+                            // Type not found in lookup, try inductive_constructors
+                            self.try_build_variant_from_constructors(name, args, ty)
+                        }
+                    }
                 }
             }
             // Handle Named types (stdlib-agnostic: looks up type definitions, no hardcoded names)
@@ -16515,6 +16621,15 @@ impl TypeChecker {
                     })
                     .unwrap_or("");
 
+                if std::env::var("VERUM_TRACE_ALIASEXP").is_ok() {
+                    eprintln!(
+                        "[aliasexp] Named name={} args={} lookup_type={} resolve_alias={}",
+                        type_name,
+                        args.len(),
+                        self.ctx.lookup_type(type_name).is_some(),
+                        self.ctx.resolve_alias(type_name).is_some(),
+                    );
+                }
                 // Look up type definitions to see if they are variants (stdlib-agnostic)
                 {
                     if let Option::Some(def_ty) = self.ctx.lookup_type(type_name) {
@@ -16541,82 +16656,16 @@ impl TypeChecker {
                                 false
                             };
                             if is_self_ref {
-                                // Try alias resolution directly
-                                if let Option::Some(alias_ty) = self.ctx.resolve_alias(type_name) {
-                                    let alias_ty = alias_ty.clone();
-                                    // #47 class B — SELF-ALIAS GUARD: metadata
-                                    // loading registers a variant type's
-                                    // self-referential placeholder in the alias
-                                    // registry (`ControlFlow` → `ControlFlow`).
-                                    // Recursing on it strips the instance's
-                                    // type args at depth-out (`ControlFlow<
-                                    // Result<!,Text>, Int>` → `ControlFlow`)
-                                    // and never reaches the constructor-driven
-                                    // build; pattern payloads then stay rigid
-                                    // `Named("C")`. A same-head alias is not an
-                                    // alias — build from constructors, which
-                                    // substitutes via __type_params_/metadata.
-                                    let alias_head_same = match &alias_ty {
-                                        Type::Named { path: ap, .. } => ap
-                                            .segments
-                                            .last()
-                                            .map(|seg| match seg {
-                                                verum_ast::ty::PathSegment::Name(id) => {
-                                                    id.name.as_str() == type_name
-                                                }
-                                                _ => false,
-                                            })
-                                            .unwrap_or(false),
-                                        Type::Generic { name: an, .. } => {
-                                            an.as_str() == type_name
-                                        }
-                                        _ => false,
-                                    };
-                                    if alias_head_same {
-                                        return self.try_build_variant_from_constructors(
+                                match self.try_expand_through_alias(type_name, args, depth) {
+                                    Option::Some(expanded) => expanded,
+                                    Option::None => {
+                                        // No usable alias - try inductive_constructors for
+                                        // self-ref types. This handles sum types like
+                                        // Maybe<T> that are defined as variants.
+                                        self.try_build_variant_from_constructors(
                                             type_name, args, ty,
-                                        );
+                                        )
                                     }
-                                    // For alias resolution, substitute actual type args into the alias target
-                                    // before recursing. This preserves the concrete args (e.g., Stream<T>)
-                                    // instead of leaving formal params (e.g., T).
-                                    let substituted_alias = if !args.is_empty() {
-                                        let type_params_key =
-                                            format!("__type_params_{}", type_name);
-                                        if let Option::Some(Type::Record(params_map)) =
-                                            self.ctx.lookup_type(type_params_key.as_str())
-                                        {
-                                            let mut subst: indexmap::IndexMap<
-                                                verum_common::Text,
-                                                Type,
-                                            > = indexmap::IndexMap::new();
-                                            for (i, (param_name, param_type)) in
-                                                params_map.iter().enumerate()
-                                            {
-                                                if let Some(arg) = args.get(i) {
-                                                    subst.insert(param_name.clone(), arg.clone());
-                                                    if let Type::Var(tv) = param_type {
-                                                        let var_key: verum_common::Text =
-                                                            format!("T{}", tv.id()).into();
-                                                        subst.insert(var_key, arg.clone());
-                                                    }
-                                                }
-                                            }
-                                            self.substitute_type_params(&alias_ty, &subst)
-                                        } else {
-                                            alias_ty
-                                        }
-                                    } else {
-                                        alias_ty
-                                    };
-                                    self.expand_generic_to_variant_impl(
-                                        &substituted_alias,
-                                        depth + 1,
-                                    )
-                                } else {
-                                    // No alias found - try inductive_constructors for self-ref types
-                                    // This handles sum types like Maybe<T> that are defined as variants
-                                    self.try_build_variant_from_constructors(type_name, args, ty)
                                 }
                             } else {
                                 // Non-variant, non-self-ref definition (e.g., opaque struct like Heap<T>).
@@ -16642,8 +16691,34 @@ impl TypeChecker {
                             }
                         }
                     } else {
-                        // Type not found via lookup - try inductive_constructors
-                        self.try_build_variant_from_constructors(type_name, args, ty)
+                        // TYPE NOT FOUND VIA LOOKUP — and an ALIAS is exactly the
+                        // shape that lands here (A157). `MetaResult<T>` is
+                        // `type MetaResult<T> is Result<T, MetaError>` in the
+                        // archive; a return type written in SOURCE goes through
+                        // `ast_to_type`, which resolves it, and one materialised
+                        // from an ARCHIVE DESCRIPTOR arrives as a bare `Named`
+                        // that `lookup_type` does not know. Falling straight to
+                        // `try_build_variant_from_constructors` then hands the
+                        // type back unchanged — an alias has no constructors of
+                        // its own — and the scrutinee reaches pattern binding as
+                        // `MetaResult<Int>`, which is refused with "Pattern
+                        // expects a variant type".
+                        //
+                        // Measured with three readings in ONE programme: an
+                        // annotated binding of the alias compiles, a LOCAL method
+                        // returning the SAME archive alias compiles, and only the
+                        // archive-DECLARED method is refused. So the variable is
+                        // the declaration's residency, not the alias.
+                        //
+                        // Same helper the `is_self_ref` branch above uses, so the
+                        // arg substitution through `__type_params_<name>` is the
+                        // one carrier rather than a second copy.
+                        match self.try_expand_through_alias(type_name, args, depth) {
+                            Option::Some(expanded) => expanded,
+                            Option::None => {
+                                self.try_build_variant_from_constructors(type_name, args, ty)
+                            }
+                        }
                     }
                 }
             }

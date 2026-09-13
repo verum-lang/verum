@@ -8,28 +8,35 @@ The CI contract: every `@test` here passes under both `verum test --interp`
 tests pin known stdlib / language-level defects and are excluded from the
 default green-suite gate.
 
-## The whole suite, re-measured 2026-09-13 (late evening)
+## The whole suite, re-measured 2026-09-14 (early hours)
 
-    verum test --interp --test-threads 4     (all of core-tests, 1251 s)
-    19012 tests — 18087 passed, 510 failed, 415 ignored
+    verum test --interp --test-threads 4     (all of core-tests, 1196 s)
+    19012 tests — 18223 passed, 374 failed, 415 ignored
 
-Against the same evening's earlier run — 18075 passed, 522 failed — that is
-**12 fewer failures and no regressions**: the total, the ignored count and
-every larger bucket are unchanged, so the twelve came out of the small ones.
-Two runs, not one: the first of them (512) measured the first four fixes
-below, the second (510) added the blanket-dispatch and `Heap.as_ref` pair.
+Against the previous evening's 522 that is **148 fewer failures**, in three
+measured steps: 512 after the first four fixes below, 510 after the
+blanket-dispatch and `Heap.as_ref` pair, and **374** once an archive-declared
+method's return type started resolving its alias — that one cleared
+`meta/contexts` from **138 to 0** in a single change.
+
+**No regressions, and the three that looked like regressions were measured
+not to be.** Three `net/proxy` tests flipped in the same run; the same
+binary flips them on its own. Five runs of one file with one binary give
+`false false` once and `true true` four times, and five runs of
+`--filter proxy_health_status` on the UNCHANGED binary give `3 passed` four
+times and `2 passed; 1 failed` once. They read a `Shared<AtomicBool>`
+through the auto-deref shape whose value is indeterminate; a change that
+perturbs layout re-throws the coin. Bisect such a pair against ITSELF before
+believing it.
 Against the same day's afternoon run (17998 passed, 599 failed) it is 87
-fewer, and against the 2026-09-12 morning run (16542 passed, 2129 failed)
-it is **1619 fewer**, a 76% reduction. This run took 20 minutes against the
-previous run's 78 because that one carried a second session's builds; the
-counts are comparable, the wall-clock is not.
+Against the 2026-09-12 morning run (16542 passed, 2129 failed) it is
+**1755 fewer**, an 82% reduction. This run took 20 minutes against the
+78 of the run two days earlier, which carried a second session's builds;
+the counts are comparable, the wall-clock is not.
 
-**Where the 510 sit** (by directory, from the run's own FAILED lines):
+**Where the 374 sit** (by directory, from the run's own FAILED lines):
 
     base/iterator          217    R3 — the forwarding-projection family
-    meta/contexts          138    A157 — an archive-DECLARED method's return
-                                  type never resolves its alias; the local
-                                  twin returning the same alias is clean
     base/memory             34
     base/uuid               21    ONE root — `safe_getentropy` is decoded
                                   and never registered, so the stage-3 stub
@@ -38,6 +45,8 @@ counts are comparable, the wall-clock is not.
     base/data               12
     tracing/id              10
     everything else         65    spread over ~30 directories, none above 5
+
+`base/iterator` is now 58% of everything left, and `meta/contexts` is gone.
 
 **What this round fixed** — each measured A/B on two binaries before the
 suite ran, and each with a pin that fails on the older one:
@@ -55,6 +64,9 @@ suite ran, and each with a pin that fails on the older one:
     a blanket `implement<T> P for T` answers a DIRECT call on a built-in
         receiver, which is also what made `Int.from(42)` and `.into()` work
     `Heap.as_ref` / `as_mut` answer like `deref`, which is the same body
+    an archive-DECLARED method's return type resolves its alias — the
+        `Type::Generic` arm of the expansion had no alias handling at all,
+        while the `Named` arm beside it has had one for months
 
 **WHAT CLEARED, and by which fix** — every one of these went to zero:
 

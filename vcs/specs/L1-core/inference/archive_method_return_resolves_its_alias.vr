@@ -1,0 +1,72 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: types, inference, alias, archive
+// @description: A method DECLARED IN THE ARCHIVE whose return type is a
+//               generic alias must resolve that alias, exactly as a local
+//               method returning the same alias does.
+
+/// `MetaResult<T>` is `type MetaResult<T> is Result<T, MetaError>`, declared
+/// in the archive. A return type written in SOURCE goes through
+/// `ast_to_type`, which resolves the alias; one materialised from an ARCHIVE
+/// DESCRIPTOR arrived as a bare `Named` that nothing resolved, and the
+/// scrutinee reached pattern binding as `MetaResult<Int>` — refused with
+/// "Pattern expects a variant type, but scrutinee has type MetaResult<Int>".
+///
+/// All three readings are here TOGETHER because only the set says which axis
+/// is broken. The row this came from named the axis as "an archive-resident
+/// generic alias as a method return type"; the second reading below refutes
+/// that — a LOCAL method returning the SAME archive alias was always clean,
+/// so the variable is the method DECLARATION's residency, not the alias's.
+///
+/// Two call sites in `core/meta/contexts.vr` took the whole of that module's
+/// conformance file with them.
+
+mount core.meta.{MetaResult};
+mount core.meta.contexts.{ParseResult, TokenStream, MetaSpan, SpanFlags};
+
+type Holder is { v: Int };
+
+implement Holder {
+    fn archive_alias(self) -> MetaResult<Int> { return Result.Ok(self.v); }
+}
+
+fn ssp() -> MetaSpan {
+    MetaSpan {
+        id: 0,
+        hygiene: 0,
+        flags: SpanFlags { is_expansion: false, is_synthetic: true, is_hidden: false },
+    }
+}
+
+fn ets() -> TokenStream { TokenStream { tokens: List.new(), span: ssp() } }
+
+// 1. An annotated binding of the archive alias — always worked.
+fn annotated_binding() -> Bool {
+    let a: MetaResult<Int> = Result.Ok(7);
+    return a is Ok;
+}
+
+// 2. A LOCAL method returning the ARCHIVE alias — also always worked, and
+//    this is the reading that moved the axis off the alias.
+fn local_method_returning_the_archive_alias() -> Bool {
+    let h = Holder { v: 3 };
+    let c = h.archive_alias();
+    return c is Ok;
+}
+
+// 3. The subject: an ARCHIVE-DECLARED method returning the same alias.
+fn archive_method_returning_the_archive_alias() -> Bool {
+    let r: ParseResult<Int> = ParseResult {
+        value: Maybe.Some(5),
+        errors: List.new(),
+        remaining: ets(),
+        success: true,
+    };
+    let d = r.to_result();
+    return d is Ok;
+}
+
+fn main() {
+    // Tests are the declarations above; typecheck-pass is the assertion.
+}
