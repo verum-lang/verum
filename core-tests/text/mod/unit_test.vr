@@ -78,8 +78,13 @@ fn test_umbrella_chars_iterator_reachable() {
 @test
 fn test_umbrella_lines_iterator_reachable() {
     let t: Text = "x\ny";
+    // `Lines` is a LAZY line iterator: it implements `Iterator` (and
+    // `IntoIterator`/`FusedIterator`) and nothing else, so the count of
+    // lines comes from consuming it. It has no `len` — `len` belongs to
+    // `ExactSizeIterator`, which `Lines` does not implement and could
+    // not implement without scanning the text up front.
     let ls = t.lines();
-    assert_eq(ls.len(), 2);
+    assert_eq(ls.count(), 2);
 }
 
 // =============================================================================
