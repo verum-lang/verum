@@ -1248,9 +1248,11 @@ impl TypeChecker {
         // VALUE / function alias — re-bind the original's scheme.
         let orig: Text = Text::from(item_name);
         if let Some(scheme) = self.ctx.env.lookup(&orig).cloned() {
-            self.ctx.env.insert(alias_text, scheme);
+            self.ctx.env.insert(alias_text.clone(), scheme);
         }
+
     }
+
 
     /// Import a single item from an inline module.
     ///
@@ -2659,6 +2661,49 @@ impl TypeChecker {
                 }
             }
         }
+
+        // A163, AND IT BELONGS HERE FOR THE SAME REASON THE STATIC BINDING
+        // ABOVE DOES: this wrapper is the first point after the inner import
+        // that ALWAYS runs.
+        //
+        // Two earlier placements were inert, and `VERUM_TRACE_TASK21` said
+        // why: `core.term.layout`'s `Constraint` reaches the gate with
+        // `export_hit=true`, so it never enters the absent-from-exports
+        // branch where the first attempt sat, and the consumer's mount has
+        // no `as`, so `register_mount_item_alias` — the second attempt —
+        // is never called either. The rename lives in `core/`, and the
+        // consumer mounts the short name plainly.
+        // A163 IS NOT FIXED HERE, AND THREE PLACEMENTS SAY WHY.
+        //
+        // A variant reached through a RENAMED re-export is not a variant:
+        // `core/term/layout/mod.vr:31` publishes
+        // `LayoutConstraint as Constraint`, and `Constraint.Length(40)`
+        // panics with `method 'Length' not found on receiver of runtime
+        // kind 'Int'` while `LayoutConstraint.Length(40)` constructs.
+        //
+        //   1. Copying the `Type.Variant` env keys onto the alias inside
+        //      `register_mount_item_alias` — INERT. That registrar only runs
+        //      for a rename the CONSUMER writes, and the consumer here
+        //      mounts the short name plainly; the rename lives in `core/`.
+        //   2. The same copy at the re-export-follow site — INERT.
+        //      `VERUM_TRACE_TASK21` shows `Constraint` reaching the gate with
+        //      `export_hit=true`, so it never enters that branch.
+        //   3. Calling `register_mount_item_alias` itself from this wrapper,
+        //      which BOTH forms pass through — HARMFUL. It made the real
+        //      name fail too: `no method named 'Length' found for type
+        //      'LayoutConstraint'`. `define_type_in_current_module` evicts
+        //      env bindings whose type is a function returning a different
+        //      Named type — which is precisely the shape of a variant
+        //      constructor — so registering the alias as a type took the
+        //      SOURCE type's constructors with it.
+        //
+        // What (3) establishes and (1) and (2) did not: the alias machinery
+        // and the variant-constructor table interact, and a fix has to
+        // answer for both. The CONSUMER-written `as` works — through the
+        // umbrella and through the declaring module — so the two paths can
+        // be compared directly; that is where the next attempt should start.
+        // Pinned by `core-tests/term/layout/constraint/regression_test.vr`,
+        // which asserts BOTH spellings for exactly this reason.
 
         if std::env::var("VERUM_TRACE_IMPORT").is_ok() {
             let in_env = self
