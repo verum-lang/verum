@@ -1,0 +1,59 @@
+// @test: run-interpreter
+// @level: L0
+// @tier: 0
+// @tags: stdlib-runtime, uuid, archive, wanted-set
+// @expected-stdout: version 4
+// @skip: T1481 — `safe_getentropy` is decoded but never REGISTERED, so it is
+//        in neither name index and the stage-3 stub has nothing to resolve to.
+//        Remove the skip when the loader registers the functions that merged
+//        bodies actually call.
+
+// `core/id/uuid.vr:109` calls `core.sys.common.random_bytes(buf)` by
+// ABSOLUTE PATH rather than through a mount, and that module calls
+// `super.darwin.libsystem.safe_getentropy` the same way. The dep graph
+// records such a call as the MODULE that owns the callee — no trailing
+// item name — so the archive-decode side, which matched an edge by its
+// last segment against a wanted simple name, could never see it, and
+// `v4()` died with "stage-3 uniquely-named public free fn stub to
+// 'safe_getentropy' never resolved".
+//
+// Adding EITHER `core.sys.common.{random_bytes}` or
+// `core.sys.darwin.libsystem.{safe_getentropy}` to the programme's own
+// mount list made it answer 4, so the bodies were in the archive all
+// along and only the decode set was short. Twenty-one tests in
+// core-tests/base/uuid sat on this one stub.
+//
+// The mount list here is deliberately the SHORT one: naming anything
+// further would repair the very input under test.
+//
+// TWO MECHANISMS WERE NAMED AND BOTH REFUTED WITH INSTRUMENTS, which is
+// why they are written down rather than re-tried:
+//
+//   * the DECODE set is not the gate. `core.sys.darwin` is already among
+//     the decoded entries in the failing run — archive entries are coarse
+//     and `libsystem` has none of its own. A change that widened the
+//     prefix set from 36 to 3964 through the dep graph's module edges
+//     moved the decoded entry count 24 -> 36 and did not fix this;
+//     it was reverted.
+//
+//   * the mount PRUNE is not the gate either: `VERUM_NO_MOUNT_PRUNE=1`
+//     reproduces the panic unchanged.
+//
+// What the tree's own tracer says is exact:
+//
+//     [remap-fallback] tier2 MISS archive_id=4278189098
+//     archive_name="safe_getentropy" not in ctx_func_by_name
+//     OR archive_func_by_name
+//
+// so the function was decoded and never REGISTERED — `register_module_filtered`
+// keeps only the wanted subset, and the archive-wide name index is built from
+// what registration kept. The name is wanted by a body that is MERGED, not by
+// the user's mount list, and nothing feeds that back.
+
+mount core.prelude.*;
+mount core.id.uuid.{Uuid, v4};
+
+fn main() {
+    let u = v4();
+    print(f"version {u.version()}");
+}
