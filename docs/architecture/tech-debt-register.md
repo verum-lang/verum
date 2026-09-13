@@ -290,7 +290,16 @@ was written here before measuring it. `range(0, 3).take(2)` then `.next()` fails
 `TakeIter<I> is { iter: I, remaining: Int }` has no projection in its fields at all — what both have
 is `implement<I: Iterator> Iterator for TakeIter<I> { type Item = I.Item; fn next(&mut self) ->
 Maybe<I.Item> }`. So the failure needs a CALL whose return mentions `I.Item`, and the defect is in
-instantiating that method: `I` comes out as the ELEMENT type where the receiver is `Range<Int>`. **AND THE MULTIPLICITY IS NOT THE AXIS EITHER, measured the same day**: a 44-line LOCAL twin carrying
+instantiating that method: `I` comes out as the ELEMENT type where the receiver is `Range<Int>`.
+**THE THREE-POINT CHARACTERISATION, all measured on the same binary**: archive receiver with ELEVEN
+impls (`range(0,3).take(2).next()`) FAILS; archive receiver with ONE impl
+(`xs.iter().take(2).next()`, `ListIter` having no per-width twins) is CLEAN; and a LOCAL receiver with
+TWO impls is CLEAN. So neither archive residency nor multiplicity alone is sufficient — it takes both,
+and the next experiment that would settle it is whether an archive receiver with TWO impls fails, i.e.
+whether the count matters or merely being greater than one. Collapsing `Range`'s eleven into one
+generic impl is both that experiment and a candidate fix, but the eleven bodies are not clones — the
+`Range<Int>` one carries a pinned codegen defect in its own comment — so that is a stdlib change with
+its own risk, not a sweep. **AND THE MULTIPLICITY IS NOT THE AXIS EITHER, measured the same day**: a 44-line LOCAL twin carrying
 the whole shape — `MyRange<T>` with TWO `MyIter` impls (`MyRange<Int>` and `MyRange<ISize>`), a
 `Boxed<I>` adapter whose `type Item = I.Item` and whose signature mentions `Item` nowhere, and a
 `my_range(…) -> MyRange<Int>` constructor as concrete as `range`'s — typechecks clean. So "one type
