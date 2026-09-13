@@ -15,7 +15,7 @@
 mount core.prelude.*;
 mount core.sys.process_ops.{
     ProcessExitStatus,
-    Child,
+    SysChild,
     arg_count,
     args,
 };
@@ -46,11 +46,11 @@ fn regression_args_does_not_panic_stub() {
 
 @test
 fn regression_child_invalid_fd_does_not_panic_stub() {
-    // Constructing a Child + calling read_stdout under invalid fd
+    // Constructing a SysChild + calling read_stdout under invalid fd
     // must short-circuit to "" — pre-fix the wrapper's defensive
     // `__fd_read_all_raw` / `__fd_close_raw` path also panic-stubbed
     // when reached. We pin the short-circuit path explicitly.
-    let c = Child { pid: 0, stdout_fd: -1, stderr_fd: -1 };
+    let c = SysChild { pid: 0, stdout_fd: -1, stderr_fd: -1 };
     let out = c.read_stdout();
     assert_eq(out, "");
 }

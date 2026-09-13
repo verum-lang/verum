@@ -12,8 +12,8 @@
 //   ProcessExitStatus              — newtype { code: Int }
 //   ProcessExitStatus.success      — code == 0
 //   ProcessExitStatus.code         — accessor
-//   Child                          — { pid, stdout_fd, stderr_fd }
-//   Child.wait / read_stdout       — process lifecycle
+//   SysChild                          — { pid, stdout_fd, stderr_fd }
+//   SysChild.wait / read_stdout       — process lifecycle
 //   spawn / run                    — top-level entry points
 //   args / arg_count / arg_unchecked  — process argv introspection
 // =============================================================================
@@ -21,7 +21,7 @@
 mount core.prelude.*;
 mount core.sys.process_ops.{
     ProcessExitStatus,
-    Child,
+    SysChild,
     arg_count,
     args,
 };
@@ -61,12 +61,12 @@ fn test_exit_status_arbitrary_code_round_trips() {
 }
 
 // =============================================================================
-// Section 2: Child record — field round-trip
+// Section 2: SysChild record — field round-trip
 // =============================================================================
 
 @test
 fn test_child_record_field_round_trip() {
-    let c = Child {
+    let c = SysChild {
         pid: 12345,
         stdout_fd: -1,
         stderr_fd: -1,
@@ -80,7 +80,7 @@ fn test_child_record_field_round_trip() {
 fn test_child_read_stdout_returns_empty_for_invalid_fd() {
     // stdout_fd == -1 means stdout wasn't captured. The wrapper
     // short-circuits to "" without touching the OS.
-    let c = Child {
+    let c = SysChild {
         pid: 0,
         stdout_fd: -1,
         stderr_fd: -1,

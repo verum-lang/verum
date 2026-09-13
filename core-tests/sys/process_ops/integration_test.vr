@@ -11,7 +11,7 @@ mount core.prelude.*;
 // mount.  `run` has no such collision.
 mount core.sys.process_ops.{
     ProcessExitStatus,
-    Child,
+    SysChild,
     spawn as spawn_proc,
     run,
     arg_count,
@@ -19,8 +19,8 @@ mount core.sys.process_ops.{
 };
 // Reap the spawn pin's child via the raw intrinsic: `child.wait()` is
 // blocked by the pre-existing bare-name method collision (the prelude's
-// `core.io.process.Child.wait -> Result<ExitStatus, Text>` shadows
-// `process_ops.Child.wait -> ProcessExitStatus` — T0146 dispatch
+// `core.io.process.SysChild.wait -> Result<ExitStatus, Text>` shadows
+// `process_ops.SysChild.wait -> ProcessExitStatus` — T0146 dispatch
 // class).  The wait_status decode path is covered by the `run` pins,
 // which stay inside process_ops.
 mount core.intrinsics.runtime.os.{__process_wait_raw};

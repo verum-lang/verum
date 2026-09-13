@@ -42,8 +42,6 @@ CheckpointMode	core/database/sqlite/native/l1_pager/wal_pager.vr
 CheckpointMode	core/database/sqlite/native/walblock/mode.vr
 CheckpointResult	core/database/sqlite/native/l1_pager/wal_pager.vr
 CheckpointResult	core/database/sqlite/native/walblock/result.vr
-Child	core/io/process.vr
-Child	core/sys/process_ops.vr
 ChunkState	core/hash/crypto/blake3.vr
 ChunkState	core/net/http_parser.vr
 Column	core/database/sqlite/native/carray_vtab_api/vtab.vr

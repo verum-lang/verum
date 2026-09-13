@@ -21,7 +21,6 @@ Cause	base/result.vr,cog/resolve.vr
 Cell	base/cell.vr,security/zk/halo2/circuit.vr
 CheckpointMode	database/sqlite/native/l1_pager/wal_pager.vr,database/sqlite/native/walblock/mode.vr
 CheckpointResult	database/sqlite/native/l1_pager/wal_pager.vr,database/sqlite/native/walblock/result.vr
-Child	io/process.vr,sys/process_ops.vr
 ChunkState	hash/crypto/blake3.vr,net/http_parser.vr
 Column	database/sqlite/native/carray_vtab_api/vtab.vr,security/zk/halo2/circuit.vr
 ColumnMeta	database/mysql/binlog_rows.vr,database/sqlite/native/l6_session/schema_cache.vr

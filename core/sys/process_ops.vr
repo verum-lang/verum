@@ -96,13 +96,25 @@ fn wait_status(pid: Int) -> ProcessExitStatus {
 }
 
 /// A child process handle.
-public type Child is {
+// `SysChild`, not the bare name. `core/io/process.vr:310` declares its own
+// `Child` — with `stdout_fd: Maybe<Int>` where this one has `stdout_fd: Int`
+// — and a colliding name resolves to no declaration at all. That produced
+// BOTH of A120's failure modes on one type: through a plain mount the
+// methods detached (`no method named 'read_stdout' found for type
+// '{ pid: Int, stdout_fd: Int, stderr_fd: Int }'`, the right shape with the
+// name gone), and through a renamed mount the checker took the OTHER
+// declaration's field types outright (`expected 'Int', found 'Maybe<Int>'`).
+//
+// This side moves because it is the smaller: five uses here against nine in
+// io/process, which also has three consumers in `core/shell` and a test
+// corpus of its own.
+public type SysChild is {
     pid: Int,
     stdout_fd: Int,
     stderr_fd: Int,
 };
 
-implement Child {
+implement SysChild {
     /// Wait for the child to exit. Returns the exit status.
     public fn wait(&self) -> ProcessExitStatus {
         wait_status(self.pid)
@@ -135,8 +147,8 @@ implement Child {
 }
 
 /// Spawn a child process with the given program and arguments.
-/// stdout/stderr are captured (piped); drain via `Child.read_stdout`.
-public fn spawn(program: Text, args: List<Text>) -> Maybe<Child> {
+/// stdout/stderr are captured (piped); drain via `SysChild.read_stdout`.
+public fn spawn(program: Text, args: List<Text>) -> Maybe<SysChild> {
     let triple = __process_spawn_raw(program, args, 1, 1);
     if triple == 0 {
         Maybe.None
@@ -148,7 +160,7 @@ public fn spawn(program: Text, args: List<Text>) -> Maybe<Child> {
         let stdout_fd = __ptr_read_i64(triple, 1);
         let stderr_fd = __ptr_read_i64(triple, 2);
         let _ = __ptr_free(triple);
-        Maybe.Some(Child {
+        Maybe.Some(SysChild {
             pid: pid,
             stdout_fd: stdout_fd,
             stderr_fd: stderr_fd,

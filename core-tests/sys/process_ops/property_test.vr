@@ -8,7 +8,7 @@
 mount core.prelude.*;
 mount core.sys.process_ops.{
     ProcessExitStatus,
-    Child,
+    SysChild,
     arg_count,
     args,
 };
@@ -77,14 +77,14 @@ fn law_arg_count_repeatable() {
 }
 
 // =============================================================================
-// Section 3: Child stdout_fd negative ⇒ read_stdout = ""
+// Section 3: SysChild stdout_fd negative ⇒ read_stdout = ""
 // =============================================================================
 
 @test
 fn law_child_invalid_fd_yields_empty_stdout() {
     let invalid_fds: List<Int> = [-1, -2, -100];
     for fd in invalid_fds.iter() {
-        let c = Child {
+        let c = SysChild {
             pid: 0,
             stdout_fd: *fd,
             stderr_fd: *fd,
