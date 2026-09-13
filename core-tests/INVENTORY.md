@@ -10,24 +10,30 @@ default green-suite gate.
 
 ## The whole suite, re-measured 2026-09-13 (late evening)
 
-    verum test --interp --test-threads 4     (all of core-tests, 1195 s)
-    19012 tests — 18085 passed, 512 failed, 415 ignored
+    verum test --interp --test-threads 4     (all of core-tests, 1251 s)
+    19012 tests — 18087 passed, 510 failed, 415 ignored
 
 Against the same evening's earlier run — 18075 passed, 522 failed — that is
-**10 fewer failures and no regressions**: the total, the ignored count and
-every larger bucket are unchanged, so the ten came out of the small ones.
+**12 fewer failures and no regressions**: the total, the ignored count and
+every larger bucket are unchanged, so the twelve came out of the small ones.
+Two runs, not one: the first of them (512) measured the first four fixes
+below, the second (510) added the blanket-dispatch and `Heap.as_ref` pair.
 Against the same day's afternoon run (17998 passed, 599 failed) it is 87
 fewer, and against the 2026-09-12 morning run (16542 passed, 2129 failed)
-it is **1617 fewer**, a 76% reduction. This run took 20 minutes against the
+it is **1619 fewer**, a 76% reduction. This run took 20 minutes against the
 previous run's 78 because that one carried a second session's builds; the
 counts are comparable, the wall-clock is not.
 
-**Where the 512 sit** (by directory, from the run's own FAILED lines):
+**Where the 510 sit** (by directory, from the run's own FAILED lines):
 
     base/iterator          217    R3 — the forwarding-projection family
-    meta/contexts          138    A157
+    meta/contexts          138    A157 — an archive-DECLARED method's return
+                                  type never resolves its alias; the local
+                                  twin returning the same alias is clean
     base/memory             34
-    base/uuid               21
+    base/uuid               21    ONE root — `safe_getentropy` is decoded
+                                  and never registered, so the stage-3 stub
+                                  has nothing to resolve to
     tracing/pipeline        15
     base/data               12
     tracing/id              10
@@ -46,6 +52,9 @@ suite ran, and each with a pin that fails on the older one:
         `(*sh).v` and `(*h).v` read the payload
     a `return` inside a closure is checked against the CLOSURE's return
         type, not the enclosing function's
+    a blanket `implement<T> P for T` answers a DIRECT call on a built-in
+        receiver, which is also what made `Int.from(42)` and `.into()` work
+    `Heap.as_ref` / `as_mut` answer like `deref`, which is the same body
 
 **WHAT CLEARED, and by which fix** — every one of these went to zero:
 
