@@ -289,7 +289,7 @@ check-grammar-docs-match: ## Gate: EBNF shown in the documentation must match gr
 check-barename-census: ## Report every colliding (name,arity) pair with its modules (never fails)
 	python3 scripts/ci/check_barename_collisions.py
 
-gates-source: check-private-types-off-public-surface check-error-code-namespaces check-guard-in-argument-position check-grammar-covers-keywords check-known-tables check-parser-attrs check-gate-tables check-markers check-vr-syntax check-str-alias check-op-bytes check-internal-refs check-rings check-arch-attestation check-type-name-collisions check-barename-collisions check-panic-surface check-per-register-privacy check-early-return-tenants check-dup-emitters check-bake-prepass-parity check-protocol-form check-dead-module-path-calls check-platform-call-parity check-protocol-conformance check-cfg-block-tail check-meta-function-names check-ffi-reference-tiers check-intrinsic-keys-implemented check-diagnostic-levers check-constant-time-duplication check-type-param-name-rule check-implement-generics \
+gates-source: check-private-types-off-public-surface check-error-code-namespaces check-guard-in-argument-position check-grammar-covers-keywords check-known-tables check-parser-attrs check-gate-tables check-markers check-vr-syntax check-str-alias check-op-bytes check-internal-refs check-rings check-arch-attestation check-type-name-collisions check-barename-collisions check-panic-surface check-per-register-privacy check-early-return-tenants check-dup-emitters check-bake-prepass-parity check-protocol-form check-dead-module-path-calls check-platform-call-parity check-protocol-conformance check-cfg-block-tail check-meta-function-names check-ffi-reference-tiers check-intrinsic-keys-implemented check-diagnostic-levers check-constant-time-duplication check-type-param-name-rule check-implement-generics check-reexport-names \
             check-gate-aggregates-invoked check-register-rows check-test-mounts \
             check-verdict-phases check-live-task-citations ## Every gate that needs only the SOURCE TREE — no build, no artefacts
 # THREE TARGETS JOINED THAT LIST 2026-09-11 (T1439) after a census of
@@ -447,6 +447,9 @@ check-dup-emitters: ## Gate (T0438): one definer per verum_* symbol + no libc-re
 
 check-bake-prepass-parity: ## Gate (T0640): every collect_all_declarations pre-pass is classified for the stdlib bake
 	python3 scripts/ci/check_bake_prepass_parity.py
+
+check-reexport-names: ## Gate (A135): a `public mount .leaf.{…}` may not name something the leaf does not declare
+	python3 scripts/ci/check_reexport_names_exist.py
 
 check-inventory: ## Gate (T0220): core-tests/INVENTORY.md structural integrity (rows unique, row<->dir bijection, status tokens)
 	python3 scripts/ci/check_inventory.py --structural-only

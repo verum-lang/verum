@@ -198,7 +198,7 @@ public mount .io.{
     EpollEvent,
 
     // Unified driver
-    IoDriver,
+    LinuxIoDriver,
     create_io_driver,
     is_io_uring_available,
 
@@ -239,9 +239,9 @@ public mount .thread.{
 
     // Synchronization primitives (T0435: Linux-prefixed declarations,
     // bare re-exports were dangling)
-    SpinLock,
-    Mutex,
-    Condvar,
+    LinuxSpinLock,
+    LinuxMutex,
+    LinuxCondvar,
 };
 
 // =============================================================================
@@ -300,10 +300,10 @@ public mount .mem.{
 
 public mount .time.{
     // Types
-    Timespec,
-    Timeval,
-    Duration,
-    Instant,
+    LinuxTimeTimespec,
+    LinuxTimeTimeval,
+    LinuxDuration,
+    LinuxInstant,
     // `LinuxStopwatch` is the concrete platform type; there is no bare
     // cross-platform `Stopwatch` declaration to re-export.
     LinuxStopwatch,

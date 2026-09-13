@@ -112,7 +112,15 @@ public mount .common.{
     IOVec,
     MemProt,
     MapFlags,
-    MemoryOrdering,
+    // `SysMemoryOrdering`, under its own name. `core/sys/common.vr:398`
+    // declares it so; this list said `MemoryOrdering` and nothing refused
+    // it at the producing end, so `mount core.sys.{MemoryOrdering}` failed
+    // at every CONSUMER with `cannot find MemoryOrdering in module
+    // core.sys` — and the diagnostic even named the real one
+    // (`core.sync.atomic`). Re-exporting it AS `MemoryOrdering` was the
+    // other option and is wrong: it would shadow the atomics' own
+    // `MemoryOrdering` for anyone mounting both (A135).
+    SysMemoryOrdering,
     // Page size constants
     PAGE_SIZE,
     PageSize,
@@ -146,11 +154,11 @@ public mount .io_engine.{
     EngineIoError,
     CompletionOp,
     CompletionResult,
-    Duration as IoDuration,
+    EngineDuration as IoDuration,
     TimeSpec,
     Fd,
     ValidFd,
-    SocketAddr,
+    RawSocketAddr,
     create_io_engine,
 };
 
@@ -198,7 +206,7 @@ public mount .bitfield.{
 public mount .mmio.{
     AccessMode,
     BarrierKind,
-    Register,
+    MmioRegister,
     MemoryRegion,
     MemoryFlags,
     volatile_load,
@@ -303,7 +311,7 @@ public mount .linux.tls.{
 public mount .linux.io.{
     IoUringDriver,
     EpollDriver,
-    IoDriver,
+    LinuxIoDriver,
     create_io_driver,
     is_io_uring_available,
 };
@@ -313,9 +321,9 @@ public mount .linux.io.{
 public mount .linux.thread.{
     Thread,
     spawn as spawn_thread,
-    Mutex,
-    Condvar,
-    SpinLock,
+    LinuxMutex,
+    LinuxCondvar,
+    LinuxSpinLock,
 };
 
 // Re-export Linux memory operations
@@ -331,8 +339,8 @@ public mount .linux.mem.{
 // Re-export Linux time operations
 @cfg(target_os = "linux")
 public mount .linux.time.{
-    Duration,
-    Instant,
+    LinuxDuration,
+    LinuxInstant,
     monotonic_nanos as linux_monotonic_nanos,
     sleep,
     sleep_ms,
@@ -471,13 +479,13 @@ public mount .darwin.{
 @cfg(target_os = "macos")
 public mount .darwin.{
     // I/O Types
-    IoOpKind,
-    IoToken,
-    IoOp,
-    IoCqe,
+    DarwinIoOpKind,
+    DarwinIoToken,
+    DarwinIoOp,
+    DarwinIoCqe,
     KqueueDriver,
     KqueueEventIter,
-    IoDriver,
+    DarwinIoDriver,
     // I/O Functions
     create_io_driver,
     is_kqueue_available,
@@ -496,10 +504,10 @@ public mount .darwin.{
     ThreadError,
     Thread,
     ThreadFn,
-    Mutex,
-    Condvar,
-    SpinLock,
-    Once,
+    DarwinMutex,
+    DarwinCondvar,
+    DarwinSpinLock,
+    DarwinOnce,
     // Thread Functions
     spawn,
     current_thread as darwin_current_thread,
@@ -518,8 +526,8 @@ public mount .darwin.{
 public mount .darwin.{
     // Time Types (Stopwatch/PerfCounter/DeadlineTimer are declared per-platform
     // as `DarwinStopwatch` etc.; no bare cross-platform declaration exists).
-    Duration,
-    Instant,
+    DarwinDuration,
+    DarwinInstant,
     DarwinStopwatch,
     DarwinPerfCounter,
     DarwinDeadlineTimer,

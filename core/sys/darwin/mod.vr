@@ -308,13 +308,13 @@ public mount .tls.{
 
 public mount .io.{
     // Types
-    IoOpKind,
-    IoToken,
-    IoOp,
-    IoCqe,
+    DarwinIoOpKind,
+    DarwinIoToken,
+    DarwinIoOp,
+    DarwinIoCqe,
     KqueueDriver,
     KqueueEventIter,
-    IoDriver,
+    DarwinIoDriver,
     // Functions
     create_io_driver,
     is_kqueue_available,
@@ -333,10 +333,10 @@ public mount .thread.{
     ThreadError,
     Thread,
     ThreadFn,
-    Mutex,
-    Condvar,
-    SpinLock,
-    Once,
+    DarwinMutex,
+    DarwinCondvar,
+    DarwinSpinLock,
+    DarwinOnce,
     // Functions
     spawn,
     current_thread,
@@ -356,8 +356,8 @@ public mount .time.{
     // per-platform (`DarwinStopwatch`, …) and have no bare cross-platform
     // declaration, so they are re-exported under their concrete names below
     // rather than as dangling bare items.
-    Duration,
-    Instant,
+    DarwinDuration,
+    DarwinInstant,
     DarwinStopwatch,
     DarwinPerfCounter,
     DarwinDeadlineTimer,
