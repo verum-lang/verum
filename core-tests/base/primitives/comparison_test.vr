@@ -226,7 +226,18 @@ fn test_comparison_in_for_with_break() {
 // Section 8: Generic Function with Comparison Constraint
 // -----------------------------------------------------------------------------
 
-fn min_value<T: Ord>(a: T, b: T) -> T {
+// BOUNDED ON `PartialOrd`, NOT `Ord`, AND THAT IS THE LIBRARY BEING RIGHT.
+//
+// `core/base/primitives.vr:708` declares `implement Ord for Int` and
+// `:1358` declares `implement PartialOrd for Float` — and no `Ord` for any
+// float type, which is the IEEE 754 answer: NaN is unordered, so a total
+// order cannot be honest. These helpers asked for `Ord` and were then
+// called with `Float` at `test_generic_min_max_with_float`, so the file
+// died on `error<E405>: type 'Float' does not implement 'Ord', required by
+// this call's bound` — a COMPILE error, taking all 61 tests with it.
+// Measured 2026-09-13; `PartialOrd` admits `Float` AND `Int`, verified
+// with both in one programme.
+fn min_value<T: PartialOrd>(a: T, b: T) -> T {
     // Comparison returns Bool, allowing use in if condition
     if a <= b {
         a
@@ -235,7 +246,7 @@ fn min_value<T: Ord>(a: T, b: T) -> T {
     }
 }
 
-fn max_value<T: Ord>(a: T, b: T) -> T {
+fn max_value<T: PartialOrd>(a: T, b: T) -> T {
     if a >= b {
         a
     } else {
