@@ -18709,6 +18709,23 @@ impl TypeChecker {
     ///
     /// `type_args` contains explicit type arguments for generic method calls like `obj.method<T>()`.
     #[allow(clippy::too_many_arguments)]
+    /// `Maybe` sits on the transparent-carrier list beside `Heap` and
+    /// `Shared`, and it is the one of the three that is NOT a pointer —
+    /// materialising a `.deref()` on it would be wrong whatever the
+    /// method-dispatch question turns out to be. T1474's A/B therefore
+    /// exempts it explicitly rather than by omission.
+    fn type_is_maybe_carrier(ty: &Type) -> bool {
+        let name = match ty {
+            Type::Generic { name, .. } => name.as_str(),
+            Type::Named { path, .. } => match path.as_ident() {
+                Some(id) => id.name.as_str(),
+                None => return false,
+            },
+            _ => return false,
+        };
+        name == "Maybe"
+    }
+
     fn infer_method_call_inner_impl_traced_entry(&self, receiver: &Expr, method: &Ident) {
         if crate::ctor_trace_enabled() {
             let recv = match &receiver.kind {
@@ -19306,8 +19323,27 @@ impl TypeChecker {
             // error.  Third of the three access paths; field access and
             // indexing record the same way.
             let mut materialised = 0usize;
+            // T1474 A/B, in ONE binary. The carrier exemption below says
+            // `Heap` / `Shared` / `Maybe` are peeled by the machine, so no
+            // explicit `.deref()` need reach the AST. Measured, that holds
+            // for a method name declared ONCE and fails for one declared
+            // twice: `Shared<AtomicInt>.fetch_sub` answers a heap address
+            // implicitly and `5` explicitly, while `Shared<Thing>` with a
+            // uniquely-named method answers correctly both ways and an
+            // archive `SystemTime.duration_since_epoch` — one declarer —
+            // does too. So the machine peels and then resolves by NAME.
+            //
+            // `VERUM_MATERIALISE_CARRIER_DEREF=1` drops the exemption for
+            // the smart pointers only (never `Maybe`, which is not a
+            // pointer), so the explicit spelling that measurably works is
+            // what reaches codegen. Off by default: the exemption exists
+            // for a reason the commit that added it did not record, and an
+            // A/B in one binary is how to find out what that was.
+            let force_materialise = std::env::var_os("VERUM_MATERIALISE_CARRIER_DEREF").is_some();
             while hops < 8 && !self.type_or_dyn_has_method(&current, &method_name_t) {
-                if !current.is_transparent_carrier() {
+                let carrier_exempt = current.is_transparent_carrier()
+                    && !(force_materialise && !Self::type_is_maybe_carrier(&current));
+                if !carrier_exempt {
                     materialised += 1;
                 }
                 let next = {
