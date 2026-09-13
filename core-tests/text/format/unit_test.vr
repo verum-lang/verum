@@ -18,9 +18,21 @@
 // =============================================================================
 
 mount core.text.{Text};
+// `TextFormatter` COMES FROM ITS DECLARING MODULE, NOT FROM THE UMBRELLA.
+//
+// `core/text/format.vr:40` re-exports it with
+// `public mount core.base.protocols.{Formatter, TextFormatter, …}`, and a
+// type reached THROUGH that re-export loses its static methods:
+// `TextFormatter.new(&mut buf)` panics with
+// `method 'TextFormatter.new' not found on receiver of runtime kind
+// TypeRef`, while the identical line against
+// `mount core.base.protocols.{TextFormatter}` works. Measured 2026-09-13
+// with the two mounts side by side; the name is declared exactly once in
+// `core/`, so this is not a collision. Recorded as A160.
+mount core.base.protocols.{TextFormatter};
 mount core.text.format.{
     WriteError, WriteErrorKind,
-    TextAlignment, Sign, FormatSpec, TextFormatter,
+    TextAlignment, Sign, FormatSpec,
     format_debug, format_display,
     format_hex, format_binary, format_octal,
     format_lower_exp, format_upper_exp,
