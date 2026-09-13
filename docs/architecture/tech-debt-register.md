@@ -281,10 +281,16 @@ compile — `resolve ::Item for type_key='ISize' — 53 impl(s) registered`, six
 53 has an `Item`. There is no query for `Range<Int>`, none for `PeekableIter<…>`, none for any
 iterator at all. So the projection is not mis-RESOLVED; it arrives at the resolver already carrying
 `ISize` as its base, which puts the defect in whatever SUBSTITUTES the adapter's type parameter, not
-in `try_find_associated_type`. Worth knowing where else that substitution can go wrong:
-`iterator.vr:57` declares `public type PeekableIter<I: Iterator> is { iter: I, peeked:
-Maybe<Maybe<I.Item>> }` — the FIELD type mentions `I.Item` too, so the impl's `type Item = I.Item` is
-not the only site. **AND THE MULTIPLICITY IS NOT THE AXIS EITHER, measured the same day**: a 44-line LOCAL twin carrying
+in `try_find_associated_type`. **AND THE SITE IS THE IMPL'S METHOD, NOT THE ADAPTER'S FIELDS** — two more readings, one of which
+corrects a guess made an hour earlier in this same row. `range(0, 3).peekable()` with NOTHING called
+on the result typechecks CLEAN, even though `iterator.vr:57` declares `PeekableIter<I: Iterator> is
+{ iter: I, peeked: Maybe<Maybe<I.Item>> }` and that field type carries the projection: so
+constructing the adapter is fine and the field is not the failing site, which is the opposite of what
+was written here before measuring it. `range(0, 3).take(2)` then `.next()` fails identically, and
+`TakeIter<I> is { iter: I, remaining: Int }` has no projection in its fields at all — what both have
+is `implement<I: Iterator> Iterator for TakeIter<I> { type Item = I.Item; fn next(&mut self) ->
+Maybe<I.Item> }`. So the failure needs a CALL whose return mentions `I.Item`, and the defect is in
+instantiating that method: `I` comes out as the ELEMENT type where the receiver is `Range<Int>`. **AND THE MULTIPLICITY IS NOT THE AXIS EITHER, measured the same day**: a 44-line LOCAL twin carrying
 the whole shape — `MyRange<T>` with TWO `MyIter` impls (`MyRange<Int>` and `MyRange<ISize>`), a
 `Boxed<I>` adapter whose `type Item = I.Item` and whose signature mentions `Item` nowhere, and a
 `my_range(…) -> MyRange<Int>` constructor as concrete as `range`'s — typechecks clean. So "one type
