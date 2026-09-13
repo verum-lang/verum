@@ -48,6 +48,28 @@ use crate::value::Value;
 /// `("CONTEXT_SLOT_COUNT", 256)` in `verum_vbc/src/codegen/mod.rs`).
 pub(in super::super) const CTX_SLOT_COUNT: i64 = 256;
 
+/// Stack depth an entry written through the FUNCTION surface is
+/// recorded at (T1467).
+///
+/// `tls_set` / `context_provide` / `ctx_set` are stdlib wrappers around
+/// bodiless `@intrinsic` declarations, so the frame the dispatcher can
+/// see belongs to the wrapper — one deeper than the scope the user
+/// wrote the call in, and two deeper when the user's own helper wraps
+/// it again (`counter_set` -> `tls_set`).  Recording at the observed
+/// depth meant the frame-return `end_scope` (T0317 leg 1) deleted the
+/// entry before the caller could read it back; measured, `tls_set(4,77)`
+/// then `tls_get(4)` answered 0 while the same pair of intrinsics
+/// inline in `main` answered 42.
+///
+/// Depth 0 is below every frame `end_scope` can depart, so an entry
+/// written here lives until it is explicitly ended (`__ctx_end_raw` /
+/// `__ctx_slot_clear_raw`) or overwritten — which IS this surface's
+/// contract, and matches the Tier-1 platform TLS table, where returning
+/// from a function does not clear a slot.  The LEXICAL surface (the
+/// `CtxProvide` / `CtxEnd` opcodes behind `provide` / `using`) keeps
+/// real frame depths and keeps its frame-return teardown.
+pub(in super::super) const EXPLICIT_LIFETIME_DEPTH: usize = 0;
+
 /// Validate a slot id and convert it to the u32 ctx_type key.
 /// Out-of-range slots (negative or >= CTX_SLOT_COUNT) yield `None`
 /// — defence in depth mirroring the `ctx_bridge.vr` guards.
@@ -202,6 +224,53 @@ mod ctx_slot_tests {
         ctx_slot_set(&mut stack, 42, 9, 3);
         assert_eq!(stack.get(42).map(|v| v.as_i64()), Some(9));
         assert_eq!(stack.len(), 1);
+    }
+
+    #[test]
+    fn a_function_surface_set_survives_every_frame_return() {
+        // T1467, polarity 1. `tls_set` / `ctx_set` are wrappers: the
+        // depth the dispatcher sees is the wrapper's, so the value must
+        // be recorded below every frame `end_scope` can depart, or the
+        // wrapper's own return deletes it before the caller reads back.
+        let mut stack = ContextStack::new();
+        ctx_slot_set(&mut stack, 4, 77, EXPLICIT_LIFETIME_DEPTH);
+
+        // The wrapper returns, then the user's helper that called it,
+        // then the helper's caller — the deepest observed shape is
+        // `test -> counter_set -> tls_set -> intrinsic`.
+        for departing in [3usize, 2, 1] {
+            stack.end_scope(departing);
+            assert_eq!(
+                ctx_slot_get(&stack, 4),
+                77,
+                "a set through the function surface must outlive frame {departing}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_slot_nothing_set_still_reads_empty() {
+        // T1467, polarity 2 — and the reason polarity 1 alone is not a
+        // reading: a store that answered every slot would pass it.
+        let mut stack = ContextStack::new();
+        ctx_slot_set(&mut stack, 4, 77, EXPLICIT_LIFETIME_DEPTH);
+        assert_eq!(ctx_slot_get(&stack, 5), 0, "an untouched slot is empty");
+        ctx_slot_clear(&mut stack, 4);
+        assert_eq!(ctx_slot_get(&stack, 4), 0, "an explicit clear still empties it");
+        assert!(stack.is_empty());
+    }
+
+    #[test]
+    fn repeated_function_surface_sets_stay_bounded() {
+        // The flat-slot half of the contract, restated at the depth the
+        // function surface now uses: a `ctx_set` in a loop is an
+        // overwrite, not a stack of scopes.
+        let mut stack = ContextStack::new();
+        for i in 0..64 {
+            ctx_slot_set(&mut stack, 10, i, EXPLICIT_LIFETIME_DEPTH);
+        }
+        assert_eq!(stack.len(), 1, "repeated set must not accumulate");
+        assert_eq!(ctx_slot_get(&stack, 10), 63);
     }
 
     #[test]

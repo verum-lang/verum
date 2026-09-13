@@ -8,6 +8,7 @@ use super::super::super::error::{InterpreterError, InterpreterResult};
 use super::super::super::state::InterpreterState;
 use super::super::DispatchResult;
 use super::bytecode_io::*;
+use super::ctx_runtime::EXPLICIT_LIFETIME_DEPTH;
 use crate::instruction::Reg;
 use crate::module::FunctionId;
 use crate::types::{StringId, TypeId};
@@ -2589,6 +2590,32 @@ fn try_dispatch_intrinsic_named(
         // advertises and that downstream consumers (the V-LLSI
         // bootstrap kernel, async runtime context propagation, etc.)
         // depend on.
+        //
+        // WHY `EXPLICIT_LIFETIME_DEPTH` AND NOT `call_stack.depth()`
+        // (T1467).  These intrinsics are bodiless declarations: the
+        // only way to reach one is from inside a stdlib WRAPPER —
+        // `core/sys/context_ops.vr`'s `tls_set` / `context_provide`,
+        // `core/sys/common.vr`'s `ctx_set`.  The frame the dispatcher
+        // sees is therefore the WRAPPER'S, never the scope the user
+        // wrote the call in, and the frame-return `end_scope`
+        // (T0317 leg 1, `dispatch_table/mod.rs`) dropped the entry the
+        // instant the wrapper returned.  Measured: in one programme
+        // `__ctx_provide_raw(3, 42)` then `__ctx_get_raw(3)` INLINE in
+        // `main` answers 42, while `tls_set(4, 77)` then `tls_get(4)`
+        // answers 0 — one wrapper frame is the whole difference.  Every
+        // wrapper in that module was a no-op for its callers.
+        //
+        // Recording at depth 0 is not a workaround for the wrapper, it
+        // is the surface's actual contract: this is the MANUAL-lifetime
+        // half of the store, ended by an explicit `__ctx_end_raw` /
+        // `__ctx_slot_clear_raw` call (or overwritten by the next set),
+        // exactly as a TLS slot table behaves at Tier 1 — where a
+        // function return does not clear a slot either.  The LEXICAL
+        // half — the `CtxProvide` / `CtxEnd` opcodes that `provide` /
+        // `using` emit — keeps frame-depth scoping in `context.rs`, so
+        // T0317 leg 1 still collects an opcode provide whose `CtxEnd` an
+        // early return skipped.  One store, two lifetimes, and the
+        // lifetime is chosen by the surface that writes the entry.
         "__ctx_get_raw" => {
             let type_id = get_i64_arg(state, 0);
             let ctx_type = (type_id as u32) & 0x7fff_ffff;
@@ -2603,10 +2630,11 @@ fn try_dispatch_intrinsic_named(
             let type_id = get_i64_arg(state, 0);
             let value = get_i64_arg(state, 1);
             let ctx_type = (type_id as u32) & 0x7fff_ffff;
-            let depth = state.call_stack.depth();
-            state
-                .context_stack
-                .provide(ctx_type, Value::from_i64(value), depth);
+            state.context_stack.provide(
+                ctx_type,
+                Value::from_i64(value),
+                EXPLICIT_LIFETIME_DEPTH,
+            );
             Ok(Some(Value::from_i64(0)))
         }
         "__ctx_end_raw" => {
@@ -2635,8 +2663,12 @@ fn try_dispatch_intrinsic_named(
         "__ctx_slot_set_raw" => {
             let slot = get_i64_arg(state, 0);
             let value = get_i64_arg(state, 1);
-            let depth = state.call_stack.depth();
-            super::ctx_runtime::ctx_slot_set(&mut state.context_stack, slot, value, depth);
+            super::ctx_runtime::ctx_slot_set(
+                &mut state.context_stack,
+                slot,
+                value,
+                EXPLICIT_LIFETIME_DEPTH,
+            );
             Ok(Some(Value::from_i64(0)))
         }
         "__ctx_slot_clear_raw" => {
