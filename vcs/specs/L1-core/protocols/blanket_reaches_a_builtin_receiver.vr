@@ -1,0 +1,40 @@
+// @test: run-interpreter
+// @level: L1
+// @tier: 0
+// @tags: types, protocols, blanket, dispatch
+// @expected-stdout: record 7 int 7 text 7 generic 7
+
+// A blanket `implement<T> P for T` compiles to ONE function whose
+// parent-type segment is the type parameter's own name — `T.show_b`,
+// not one entry per implementor — and a DIRECT call lowers to
+// `<TypeName>.<method>`, which for a built-in asks for `Int.show_b` and
+// finds nothing. The panic's own candidate list said so: "1 candidate(s)
+// end with `.show_b`: T.show_b (arity 1)".
+//
+// The axis is the CALL SITE, not the receiver: through a generic helper
+// the same `Int` reached the same blanket and answered 7, while
+// `i.show_b()` panicked. And the type checker was never involved —
+// `verum check` reported zero errors on this programme throughout.
+//
+// All four readings are here together because a fix that special-cased
+// `Int` would leave `Text` broken, and one that moved dispatch would
+// break the record case that already worked.
+
+type ShowB is protocol { fn show_b(&self) -> Int; };
+
+implement<T> ShowB for T {
+    fn show_b(&self) -> Int { return 7; }
+}
+
+type Rec is { x: Int };
+
+fn via_generic<X: ShowB>(v: &X) -> Int {
+    return v.show_b();
+}
+
+fn main() {
+    let r = Rec { x: 1 };
+    let i: Int = 5;
+    let t: Text = "hi".clone();
+    print(f"record {r.show_b()} int {i.show_b()} text {t.show_b()} generic {via_generic(&i)}");
+}

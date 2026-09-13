@@ -1,0 +1,25 @@
+// @test: run-interpreter
+// @level: L0
+// @tier: 0
+// @tags: stdlib-runtime, heap, deref, as_ref
+// @expected-stdout: deref 41 star 41 as_ref 41
+
+// `Heap.deref` and `Heap.as_ref` are the SAME BODY — core/base/memory.vr
+// reads `fn deref(&self) -> &T { self.as_ref() }`, and `as_ref` itself is
+// `unsafe { &*self.ptr }`. The interpreter substitutes its own CBGR cell
+// for `Heap.new` (a 32-byte AllocationHeader plus one 8-byte Value), so
+// the declared record's `{ ptr, generation, epoch }` layout is not there
+// and bodies that read `self.ptr` were refused. The deref family was
+// admitted first because the cell's single slot IS what the body
+// computes; `as_ref` and `as_mut` were left refusing for want of a
+// measurement, and `h.as_ref()` duly panicked on the very receiver where
+// `h.deref()` answered 41.
+//
+// `==` is NOT here and is expected to keep refusing: `Heap.eq` reads the
+// declared record's `generation` and `epoch`, which the cell does not
+// carry at all.
+
+fn main() {
+    let h = Heap.new(41);
+    print(f"deref {h.deref()} star {*h} as_ref {h.as_ref()}");
+}

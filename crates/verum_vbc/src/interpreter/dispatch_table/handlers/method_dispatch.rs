@@ -1944,6 +1944,8 @@ pub(in super::super) fn handle_call_method(
                 //     h.deref()       already broken
                 //     h.as_ref()      already broken
                 //     h == g          already broken
+                //     h.as_mut()      already broken (same body as
+                //                     deref_mut, see below)
                 //
                 // so only the three that are already wrong take this path.
                 //
@@ -1973,14 +1975,29 @@ pub(in super::super) fn handle_call_method(
                 // while `a.deref().fetch_sub(1, ord)` answered a heap
                 // address on `Shared` and PANICKED here on `Heap`.
                 //
-                // The other two methods this arm guards — `as_ref` and
-                // `==` — are left refusing: `as_ref` has the same shape
-                // but no measurement yet, and `Heap.eq` genuinely needs
-                // the declared record's `generation`/`epoch` fields,
-                // which the cell does not carry. Removing the
-                // substitution (T1189 leg 2) is still what makes those
-                // work.
-                if matches!(base_method.as_str(), "deref" | "deref_mut") {
+                // `as_ref` / `as_mut` JOIN THE FAMILY, and the reason is
+                // not analogy — it is that they are the SAME BODY.
+                // `core/base/memory.vr:459` reads
+                // `fn deref(&self) -> &T { self.as_ref() }` and `:465`
+                // `fn deref_mut(&mut self) -> &mut T { self.as_mut() }`,
+                // so the two pairs cannot differ in what they compute;
+                // `as_ref` itself is `unsafe { &*self.ptr }`, the same
+                // single slot the arm above hands back. Leg 1 left them
+                // refusing for want of a measurement and that is now
+                // taken: `h.as_ref()` panicked with this arm's own
+                // message while `h.deref()` answered 41 on the identical
+                // receiver.
+                //
+                // `==` is the one that stays refusing, and for a reason
+                // the cell cannot supply rather than for want of
+                // evidence: `Heap.eq` reads the declared record's
+                // `generation` and `epoch`, which the substituted cell
+                // does not carry at all. Removing the substitution
+                // (T1189 leg 2) is still what makes that one work.
+                if matches!(
+                    base_method.as_str(),
+                    "deref" | "deref_mut" | "as_ref" | "as_mut"
+                ) {
                     let inner = unsafe { *(ptr as *const Value) };
                     state.set_reg(dst, inner);
                     return Ok(DispatchResult::Continue);
@@ -4709,6 +4726,95 @@ pub(in super::super) fn handle_call_method(
             state.set_pc(0);
             state.record_call();
             return Ok(DispatchResult::Continue);
+        }
+    }
+
+    // **BLANKET-ON-A-BUILT-IN-RECEIVER (A172).** A blanket
+    // `implement<T> P for T` compiles to a function whose parent-type
+    // segment is the TYPE PARAMETER'S OWN NAME — `T.show_b`, not one
+    // entry per implementor — and a direct call on a built-in receiver
+    // asks for `Int.show_b`, which no one registered. Measured, one
+    // programme, three receivers:
+    //
+    //     r.show_b()            record   -> 7
+    //     via_generic(&r)       record   -> 7
+    //     via_generic(&i)       Int      -> 7
+    //     i.show_b()            Int      -> panic, and the panic's own
+    //                                      candidate list says
+    //                                      "T.show_b (arity 1)"
+    //
+    // so the axis is NOT the receiver being built in — through a
+    // generic helper an `Int` reaches the same blanket. It is the
+    // DIRECT call site, which lowers to `<TypeName>.<method>` and has
+    // no entry to find. The cost in `core/` is
+    // `core/base/protocols.vr:402`'s reflexive
+    // `implement<T> From<T> for T` and the `Into` blanket built on it:
+    // `Int.from(42)` and every `.into()` on a built-in died here.
+    //
+    // Resolve it the way the two-segment retry above resolves a
+    // module-qualified miss: on the FAILURE path only, so a dispatch
+    // that succeeds today cannot change. The entry is accepted only
+    // when its parent segment is a single uppercase letter — the shape
+    // `looks_like_type_param` accepts outright on the checker side, and
+    // the one that cannot collide with a declared type — and only when
+    // exactly one such entry exists, so an ambiguous blanket keeps the
+    // loud panic instead of picking arbitrarily.
+    {
+        let dotted_bare = format!(".{}", bare);
+        let blanket: Vec<crate::module::FunctionId> = state
+            .module
+            .functions
+            .iter()
+            .filter_map(|f| {
+                let name = state.module.strings.get(f.name).unwrap_or("");
+                let rest = name.strip_suffix(&dotted_bare)?;
+                let single_letter = rest.len() == 1
+                    && rest.chars().next().is_some_and(|c| c.is_ascii_uppercase());
+                if single_letter && f.bytecode_length > 0 {
+                    Some(f.id)
+                } else {
+                    None
+                }
+            })
+            .take(2)
+            .collect();
+        if blanket.len() == 1 {
+            let fid = blanket[0];
+            if let Some(func) = state.module.get_function(fid) {
+                let takes_self = func
+                    .params
+                    .first()
+                    .and_then(|p| state.module.strings.get(p.name))
+                    .map(|n| n == "self")
+                    .unwrap_or(false);
+                let reg_count = func.register_count;
+                let return_pc = state.pc();
+                let caller_base = state.reg_base();
+                let new_base = state
+                    .call_stack
+                    .push_frame(fid, reg_count, return_pc, dst)?;
+                state.registers.push_frame(reg_count);
+                if let Some(w) = call_witness_sidecar.take() {
+                    state.call_stack.set_generic_witnesses(w);
+                }
+                let arg_offset = if takes_self {
+                    state.registers.set(new_base, Reg(0), receiver);
+                    1u16
+                } else {
+                    0u16
+                };
+                for i in 0..args.count {
+                    let arg_value = state
+                        .registers
+                        .get(caller_base, Reg(args.start.0 + i as u16));
+                    state
+                        .registers
+                        .set(new_base, Reg(i as u16 + arg_offset), arg_value);
+                }
+                state.set_pc(0);
+                state.record_call();
+                return Ok(DispatchResult::Continue);
+            }
         }
     }
 
