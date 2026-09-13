@@ -271,7 +271,11 @@ the bytecode were inert. Seeded only for calls in FORMAT POSITION
 hello-world's archive load 1336 ms against 67 ms.
 
 **R3. Type-system authorities.** One projection reducer instead of
-three — T0707 (Item<Range>-argless residual). **Re-measured 2026-09-12**: 16 errors, not 54,
+three — T0707 (Item<Range>-argless residual). **Still reproduces 2026-09-13** on a binary carrying
+T1467, T1468 and T1470: the same 16 errors in the same file, `Item<ISize> <- Int` eleven times and
+`Int <- Item<ISize>` five, all of them on `peekable`, `fuse` and `.map(|x| …)` chains — so none of
+the wanted-set repairs of that day touch it, which is worth knowing before anyone tries them again.
+**Re-measured 2026-09-12**: 16 errors, not 54,
 and `core-tests/base/iterator/unit_test.vr` is **215 tests and 215 failures** — the whole file
 is inert, which no coverage instrument can see because it has `@test` functions, no `@ignore`,
 and calls that look executed. The residual now has a five-line repro and a clean split:
