@@ -142,6 +142,31 @@ pub fn validate_module_headers_against_filesystem(
 ) -> Vec<ModuleHeaderWarning> {
     let mut warnings = Vec::new();
 
+    // A validator that compares an AST against the FILESYSTEM can say
+    // nothing about a file that is not on the filesystem — and three of
+    // its five call sites hand it a LOGICAL path. `compile_orchestration`
+    // and `loading`'s multi-source registration both iterate a
+    // `(path, source)` map and pass `PathBuf::from(path.as_str())`,
+    // where the key can be a bare module name. `parent_dir` is then
+    // empty, every candidate resolves against the process CWD, and the
+    // answer is noise: a three-file cog drew
+    //
+    //     module 'thing' is forward-declared in 'minicog' but no source
+    //     file exists (looked at: thing.vr, thing/mod.vr, …)
+    //
+    // for `thing` and `main`, both of which exist as `src/thing.vr` and
+    // `src/main.vr` — the check was looking in the wrong directory
+    // entirely, and the give-away is in the message: the "file" it names
+    // is `minicog`, which is not a path (A175).
+    //
+    // The guard lives HERE rather than at the call sites because the
+    // same mistake is available to every future caller, and because a
+    // caller cannot be expected to know that this validator's verdicts
+    // are relative to `file_path.parent()`.
+    if !file_path.is_file() {
+        return warnings;
+    }
+
     // Determine the directory siblings of `file_path`. Submodules
     // live either as `<dir>/<name>.vr` or `<dir>/<name>/mod.vr`.
     // For `lib.vr` / `main.vr` (root files) the sibling dir is the
@@ -194,6 +219,44 @@ pub fn validate_module_headers_against_filesystem(
                     .file_name()
                     .and_then(|s| s.to_str())
                     .is_some_and(|name| name == submodule_name.as_str())
+            {
+                continue;
+            }
+
+            // Same rule one shape over: `<stem>.vr` declaring
+            // `module <stem>;` is that file's own short-form header, for
+            // exactly the reason `<dir>/mod.vr` declaring
+            // `module <dir>;` is. No `foo/foo.vr` is expected to exist.
+            if !is_mod_file && file_stem == submodule_name.as_str() {
+                continue;
+            }
+
+            // A COG ROOT names the COG, and the cog's name need not be
+            // its directory's name — the rule above only covers the case
+            // where they happen to coincide, which is why `core/mod.vr`
+            // writing `module core;` is silent while a user cog whose
+            // root is `src/mod.vr` writing `module minicog;` was not
+            // (A175).
+            //
+            // The discriminator is VISIBILITY, and it is measured rather
+            // than guessed: across all of `core/` there is exactly ONE
+            // simple-name module declaration with no visibility —
+            // `core/mod.vr:75`, `module core;`, the cog root's own
+            // header — while all 2307 others are `public module <name>;`
+            // and every one of them is a child promise. That is not a
+            // coincidence of style: a file's own header has no
+            // visibility to give, since the module's visibility was
+            // decided by whoever declared it in the PARENT. A child
+            // promise, by contrast, exists to be re-exported.
+            //
+            // Restricted to root-shaped files (`mod.vr` / `lib.vr` /
+            // `main.vr`) so that a private child promise in an ordinary
+            // file still gets its warning; and it only ever fires where
+            // no source exists, because a decl whose file IS on disk
+            // never reaches the check below.
+            let is_root_file = matches!(file_stem, "mod" | "lib" | "main");
+            if is_root_file
+                && matches!(module_decl.visibility, verum_ast::Visibility::Private)
             {
                 continue;
             }
