@@ -8414,8 +8414,35 @@ fn substitute_refinement_binder(
                 let adapter_name = name.as_str();
 
                 // Category 1: Item-transparent (Item = I.Item)
+                //
+                // THE NAMES HERE DID NOT MATCH THE STDLIB'S (R3/T0707).
+                // `core/base/iterator.vr` declares `FilterIter`,
+                // `InspectIter`, `PeekableIter`, `FuseIter`, `TakeIter`,
+                // `SkipIter`, `StepByIter`, `ChainIter`, `CycleIter`,
+                // `TakeWhileIter`, `SkipWhileIter`, `FlattenIter` — every
+                // one with the `Iter` suffix — and this list carried the
+                // bare stems, so the fallback never fired for a single real
+                // adapter. Measured 2026-09-13: of the fourteen names, the
+                // only one that matches a declaration is `Rev`
+                // (`:1141 public type Rev<I>`); the other thirteen match
+                // nothing.
+                //
+                // The cost is the suite's largest single defect. One
+                // projection resolves when its base is CONCRETE, so
+                // `range(0,5).inspect(f)` works; the second hop asks for
+                // `I.Item` of a type whose own `Item` is a projection,
+                // falls through this list, and is left unreduced as
+                // `Item<ISize>` — 215 tests in
+                // `core-tests/base/iterator/unit_test.vr`, and the control
+                // that proves the axis is `map`, whose `type Item = B` is a
+                // plain parameter and which chains fine either side.
+                //
+                // Matched on the STEM with an optional `Iter` suffix rather
+                // than by listing both spellings: a future adapter named
+                // `FooIter` is then covered by adding `Foo` once.
+                let stem = adapter_name.strip_suffix("Iter").unwrap_or(adapter_name);
                 let is_item_transparent = matches!(
-                    adapter_name,
+                    stem,
                     "Rev"
                         | "Filter"
                         | "Take"
@@ -8439,7 +8466,8 @@ fn substitute_refinement_binder(
                 }
 
                 // Category 2: Enumerate<I> → (Int, I.Item)
-                if adapter_name == "Enumerate" && !args.is_empty() {
+                // `EnumerateIter` in the stdlib — same suffix mismatch.
+                if stem == "Enumerate" && !args.is_empty() {
                     if let Some(inner_item) =
                         self.try_resolve_associated_type_projection(&args[0], assoc_name)
                     {
