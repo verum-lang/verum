@@ -249,3 +249,158 @@ fn an_untracked_local_is_not_unpacked() {
     );
 }
 
+/// PACKED-BYTE-FIELD-INDEX-1 (T1463). A `[Byte; N]` field indexed WHERE IT
+/// LIVES must use the byte-strided opcodes, not the generic `GetE`/`SetE`
+/// whose Tier-1 lowering classifies its receiver at runtime.
+///
+/// The boundary was measured, not assumed — three shapes of the same field,
+/// and only two of them are the defect:
+///
+/// ```text
+/// first(&s.b)   passed as a `&[Byte; 4]` parameter     rc=0
+/// k.b[0]        indexed through a `&Struct`            rc=139
+/// self.buf[i]   indexed in place inside a method       rc=139
+/// ```
+///
+/// So this is not "byte fields are broken"; it is "a byte field indexed in
+/// place is". The whole hash stack dies on the third line: SHA-1/256/512,
+/// BLAKE3 and Poly1305 all fault at `0x0` inside their own `update`.
+#[test]
+fn a_byte_field_indexed_in_place_uses_the_byte_opcodes() {
+    let vbc = compile(
+        "m",
+        "module m;\n\
+         public type S is { buf: [Byte; 8], n: Int };\n\
+         public fn put(s: &mut S, v: Byte) { s.buf[s.n] = v; }\n\
+         public fn get(s: &S) -> Byte { s.buf[s.n] }\n",
+    );
+
+    let w = decoded_fn(&vbc, "put");
+    assert_eq!(
+        count_sub_op(&w, MemSubOpcode::ByteArrayStore),
+        1,
+        "`s.buf[i] = v` on a declared `[Byte; N]` field must store with the \
+         byte stride:\n{:#?}",
+        w
+    );
+    assert!(
+        !w.iter().any(|i| matches!(i, Instruction::SetE { .. })),
+        "the generic SetE is the classifier path this exists to avoid:\n{:#?}",
+        w
+    );
+
+    let r = decoded_fn(&vbc, "get");
+    assert_eq!(
+        count_sub_op(&r, MemSubOpcode::ByteArrayLoad),
+        1,
+        "`s.buf[i]` on a declared `[Byte; N]` field must load with the byte \
+         stride:\n{:#?}",
+        r
+    );
+    assert!(
+        !r.iter().any(|i| matches!(i, Instruction::GetE { .. })),
+        "the generic GetE is the classifier path this exists to avoid:\n{:#?}",
+        r
+    );
+}
+
+/// CONTROL — a NON-byte primitive array field keeps the generic path. After
+/// PACKED-FIELD-ONE-REPRESENTATION-1 such a field holds a heap List with
+/// 8-byte Value slots while its DECLARED stride is 4, so a byte-style static
+/// stride there would read garbage silently — the exact trade this whole task
+/// refuses.
+#[test]
+fn a_non_byte_array_field_keeps_the_generic_index() {
+    let vbc = compile(
+        "m",
+        "module m;\n\
+         public type K is { w: [UInt32; 4], n: Int };\n\
+         public fn get(k: &K) -> UInt32 { k.w[k.n] }\n",
+    );
+    let r = decoded_fn(&vbc, "get");
+    assert_eq!(
+        count_sub_op(&r, MemSubOpcode::ByteArrayLoad),
+        0,
+        "a `[UInt32; N]` field must not be read with a byte stride:\n{:#?}",
+        r
+    );
+    assert!(
+        r.iter().any(|i| matches!(i, Instruction::GetE { .. })),
+        "it keeps the generic index:\n{:#?}",
+        r
+    );
+}
+
+/// CONTROL — a field that is NOT an array is untouched. `packed_field_receiver_type`
+/// plus `field_array_spec` must refuse it, or every `s.x[i]` on a List field
+/// would be rewritten into a byte load.
+#[test]
+fn a_list_field_is_not_treated_as_a_packed_array() {
+    let vbc = compile(
+        "m",
+        "module m;\n\
+         public type L is { xs: List<Byte>, n: Int };\n\
+         public fn get(l: &L) -> Byte { l.xs[l.n] }\n",
+    );
+    let r = decoded_fn(&vbc, "get");
+    assert_eq!(
+        count_sub_op(&r, MemSubOpcode::ByteArrayLoad),
+        0,
+        "a `List<Byte>` field is not a packed array:\n{:#?}",
+        r
+    );
+}
+
+/// A NESTED receiver reaches the same routing (T1463). BLAKE3 is the live
+/// instance: its byte buffer is `self.chunk.block_buf`, and while
+/// SHA-256/512/1 moved past their `update` on the first field-index fix,
+/// `Blake3.update` kept faulting at `0x0` because the receiver of the
+/// indexed field was itself a field access.
+#[test]
+fn a_nested_byte_field_reaches_the_byte_opcodes() {
+    let vbc = compile(
+        "m",
+        "module m;\n\
+         public type Inner is { block_buf: [Byte; 64], used: Int };\n\
+         public type Outer is { chunk: Inner, n: Int };\n\
+         public fn put(o: &mut Outer, v: Byte) { o.chunk.block_buf[o.n] = v; }\n\
+         public fn get(o: &Outer) -> Byte { o.chunk.block_buf[o.n] }\n",
+    );
+
+    let w = decoded_fn(&vbc, "put");
+    assert_eq!(
+        count_sub_op(&w, MemSubOpcode::ByteArrayStore),
+        1,
+        "`o.chunk.block_buf[i] = v` must store with the byte stride:\n{:#?}",
+        w
+    );
+    let r = decoded_fn(&vbc, "get");
+    assert_eq!(
+        count_sub_op(&r, MemSubOpcode::ByteArrayLoad),
+        1,
+        "`o.chunk.block_buf[i]` must load with the byte stride:\n{:#?}",
+        r
+    );
+}
+
+/// CONTROL for the nested arm — a nested NON-byte array field keeps the
+/// generic index. The recursion must carry the element-size filter down, or
+/// `self.chunk.cv[i]` (`[UInt32; 8]`, a List after
+/// PACKED-FIELD-ONE-REPRESENTATION-1) would be read with a byte stride.
+#[test]
+fn a_nested_non_byte_field_keeps_the_generic_index() {
+    let vbc = compile(
+        "m",
+        "module m;\n\
+         public type Inner is { cv: [UInt32; 8], used: Int };\n\
+         public type Outer is { chunk: Inner, n: Int };\n\
+         public fn get(o: &Outer) -> UInt32 { o.chunk.cv[o.n] }\n",
+    );
+    let r = decoded_fn(&vbc, "get");
+    assert_eq!(
+        count_sub_op(&r, MemSubOpcode::ByteArrayLoad),
+        0,
+        "a nested `[UInt32; N]` field must not be read with a byte stride:\n{:#?}",
+        r
+    );
+}

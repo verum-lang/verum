@@ -3935,6 +3935,37 @@ impl VbcCodegen {
                 // type_id dispatch in `typed_array_element_spec`).  Mirrors the
                 // array-literal fill and `&buf[i]` element-address paths, which
                 // already route packed arrays through the dedicated opcodes.
+                // PACKED-BYTE-FIELD-INDEX-1 (T1463): the write twin of the
+                // read-side field branch. `self.buf[i] = v` is where the
+                // whole hash stack dies at Tier 1 — SHA-1/256/512, BLAKE3
+                // and Poly1305 all fault at `0x0` inside their own
+                // `update` on exactly this line — because the guard below
+                // wants a bare variable and a field is not one.
+                if let ExprKind::Field { expr: recv, field } = &base.kind
+                    && let Some(owner) = self.packed_field_receiver_type(recv)
+                    && let Some((1, _, _)) =
+                        self.field_array_spec(&owner, field.name.as_str())
+                {
+                    let base_reg = self
+                        .compile_expr(base)?
+                        .or_internal("index base has no value")?;
+                    let index_reg = self
+                        .compile_expr(index)?
+                        .or_internal("index has no value")?;
+                    let mut operands = Vec::<u8>::new();
+                    Self::write_reg(&mut operands, base_reg.0);
+                    Self::write_reg(&mut operands, index_reg.0);
+                    Self::write_reg(&mut operands, value_reg.0);
+                    self.ctx.emit(Instruction::MemExtended {
+                        sub_op: crate::instruction::MemSubOpcode::ByteArrayStore.to_byte(),
+                        operands,
+                    });
+                    self.ctx.free_temp(base_reg);
+                    self.ctx.free_temp(index_reg);
+                    self.ctx.free_temp(value_reg);
+                    return Ok(None);
+                }
+
                 if let ExprKind::Path(path) = &base.kind
                     && path.segments.len() == 1
                     && let PathSegment::Name(ident) = &path.segments[0]
@@ -23989,6 +24020,57 @@ impl VbcCodegen {
         // wild pointer and a native SIGSEGV.  The interpreter survives via
         // runtime type_id dispatch; the AOT twin needs the compile-time-known
         // packed opcode.
+        // PACKED-BYTE-FIELD-INDEX-1 (T1463): the SAME opcode for the same
+        // buffer reached through a FIELD. The guard above wants a bare
+        // variable, so `self.buf[i]` — which is `ExprKind::Field` —
+        // missed it and fell to the generic `GetE`, whose Tier-1
+        // classifier then read the packed buffer's own DATA as a header.
+        //
+        // MEASURED 2026-09-13, three shapes of the same field, one line
+        // each, and only the middle one is the defect:
+        //
+        //     first(&s.b)  passed as a &[Byte; 4] parameter   rc=0
+        //     k.b[0]       indexed through a &Struct          rc=139
+        //     self.buf[i]  indexed in place inside a method   rc=139
+        //
+        // So the boundary is not "a byte field" but "a byte field indexed
+        // WHERE IT LIVES", which is why this belongs in the two index
+        // paths rather than in the reference lowering: an earlier attempt
+        // to make `&self.buf` hand back a cell was correct, fired, and
+        // changed nothing observable — `compress_block` reads its OTHER
+        // parameter first and dies there.
+        //
+        // A `[Byte; N]` field is packed by BOTH producers (the array
+        // literal in `compile_record` and a tracked packed local), which
+        // is what makes the static stride sound here; the field
+        // declaration is the authority, exactly as it is for
+        // `&mut self.buffer[i] as *mut Byte`
+        // (`try_compile_byte_array_element_addr`, #37), whose owner
+        // lookup this reuses.
+        if let ExprKind::Field { expr: recv, field } = &base.kind
+            && let Some(owner) = self.packed_field_receiver_type(recv)
+            && let Some((1, _, _)) = self.field_array_spec(&owner, field.name.as_str())
+        {
+            let base_reg = self
+                .compile_expr(base)?
+                .or_internal("index base has no value")?;
+            let idx_reg = self
+                .compile_expr(index)?
+                .or_internal("index has no value")?;
+            let result = self.ctx.alloc_temp();
+            let mut operands = Vec::<u8>::new();
+            Self::write_reg(&mut operands, result.0);
+            Self::write_reg(&mut operands, base_reg.0);
+            Self::write_reg(&mut operands, idx_reg.0);
+            self.ctx.emit(Instruction::MemExtended {
+                sub_op: crate::instruction::MemSubOpcode::ByteArrayLoad.to_byte(),
+                operands,
+            });
+            self.ctx.free_temp(base_reg);
+            self.ctx.free_temp(idx_reg);
+            return Ok(Some(result));
+        }
+
         if let ExprKind::Path(path) = &base.kind
             && path.segments.len() == 1
             && let PathSegment::Name(ident) = &path.segments[0]
@@ -24456,6 +24538,28 @@ impl VbcCodegen {
     /// the caller keeps its generic path.
     fn packed_field_receiver_type(&self, recv: &Expr) -> Option<String> {
         use verum_ast::ty::PathSegment;
+        // NESTED RECEIVER (T1463): `self.chunk.block_buf[i]` — the receiver of
+        // the indexed field is ITSELF a field access, not a path. BLAKE3 is
+        // the live instance and the reason this arm exists: its byte buffer
+        // is `self.chunk.block_buf` (`ChunkState.block_buf: [Byte; 64]`), so
+        // without this the packed routing missed it and `Blake3.update` kept
+        // faulting at `0x0` while SHA-256/512/1 moved on.
+        //
+        // Resolve the OUTER field's declared type name and recurse: the
+        // declaration is the authority at every level, and the recursion
+        // terminates at a path receiver. `field_type_name` is the same table
+        // `push_field_type_context` consults, so a name it cannot answer for
+        // simply falls through to the generic path as before.
+        if let ExprKind::Field {
+            expr: inner,
+            field,
+        } = &recv.kind
+        {
+            let owner = self.packed_field_receiver_type(inner)?;
+            return self
+                .field_type_name(&owner, field.name.as_str())
+                .map(|t| t.split('<').next().unwrap_or(t).to_string());
+        }
         let ExprKind::Path(p) = &recv.kind else {
             return None;
         };
