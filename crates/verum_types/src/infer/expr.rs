@@ -12059,13 +12059,46 @@ impl TypeChecker {
                 // (spawn { expr }).await. In async context, treat as identity
                 // (the value is already "ready"). Also handles user types
                 // that may implement Future but aren't registered yet.
-                if self.in_async_context {
+                // T1478 — the `main` exemption belongs to BOTH arms.
+                //
+                // Thirty lines above, the Future-resolved arm exempts
+                // `main` by name because the runtime wraps it in an
+                // implicit `block_on`, so `fn main() { run().await }` is
+                // a valid top-level entry point. This arm asked
+                // `in_async_context` alone and refused — so the very
+                // spelling the other arm documents as valid died here,
+                // with a message blaming the awaited TYPE.
+                //
+                // Under ASYNC-SEMANTICS-LAW (T0861,
+                // docs/architecture/async-semantics-law.md) the refusal
+                // was wrong on its own terms as well: candidate (A) is
+                // law, calling an async fn RUNS it and yields its value,
+                // and `await` is "a yield-point annotation, not a
+                // projection". A non-Future operand is therefore the
+                // NORMAL case for a local async call, and passing the
+                // type through is the correct answer — which is exactly
+                // what the async-context branch already does.
+                //
+                // Measured: `async fn add(a: Int, b: Int) -> Int` called
+                // as `add(5, 3).await` from a plain `fn main` was
+                // refused with "Cannot await non-future type: Int",
+                // taking nine of the eleven `language_features` failures
+                // with it.
+                let in_main_entry = matches!(
+                    self.current_function_name.as_ref(),
+                    Maybe::Some(n) if n.as_str() == "main"
+                );
+                if self.in_async_context || in_main_entry {
                     Ok(InferResult::new(inner_result.ty))
                 } else {
-                    Err(TypeError::Other(verum_common::Text::from(format!(
-                        "Cannot await non-future type: {}. Type must implement Future.",
-                        inner_result.ty
-                    ))))
+                    Err(TypeError::AsyncPropertyViolation {
+                        message: verum_common::Text::from(format!(
+                            "`.await` on `{}` can only be used inside an async context \
+                             (async fn, async block, or async closure) or in `main`",
+                            inner_result.ty
+                        )),
+                        span: inner_expr.span,
+                    })
                 }
             }
         }
