@@ -27789,16 +27789,99 @@ impl VbcCodegen {
             // Binary operations with operator overloading: a + b returns same type as a
             ExprKind::Binary { op, left, .. } => {
                 use verum_ast::expr::BinOp;
+                // THE BITWISE OPERATORS BELONG HERE TOO (T1465). The list
+                // used to stop at the five arithmetic ones, so `x << 3` lost
+                // its type while `x + 1` kept it — measured with the tree's
+                // own lever on one ten-line probe:
+                //
+                //     [lettype] y: derived -> Some("UInt64")   y = x + 1_u64
+                //     [lettype] z: derived -> None             z = x << 3_u64
+                //
+                // A local with no recorded type makes the next method call
+                // compile to a BARE name (`"to_be_bytes"`) instead of the
+                // typed one (`"uint64$to_be_bytes"`), and Tier 1 then has to
+                // read a type id out of an object header that a primitive
+                // never had. It refuses, loudly and correctly: "a value that
+                // never carried an object header. Refusing to fabricate a
+                // result." That abort is what stops SHA-384/512 under AOT,
+                // at `bits_hi.to_be_bytes()` in their `finalize`, where
+                // `bits_hi` comes from `<<`, `>>` and `|`.
+                //
+                // The operator impls these names resolve to already exist —
+                // checked before extending the list rather than after:
+                // `core/base/primitives.vr` gives UInt64 `Shl`, `Shr`,
+                // `BitAnd`, `BitOr` and `BitXor`, each with
+                // `type Output = UInt64`. So this adds answers where the
+                // lookup already had one to give, and a type without the
+                // impl still falls through to `None` exactly as before.
                 match op {
-                    BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Rem => {
+                    BinOp::Add
+                    | BinOp::Sub
+                    | BinOp::Mul
+                    | BinOp::Div
+                    | BinOp::Rem
+                    | BinOp::Shl
+                    | BinOp::Shr
+                    | BinOp::BitAnd
+                    | BinOp::BitOr
+                    | BinOp::BitXor => {
                         // For overloaded operators, result type = receiver type
                         if let Some(type_name) = self.extract_expr_type_name(left) {
+                            // A PRIMITIVE ANSWERS FROM THE LANGUAGE, NOT FROM A
+                            // TABLE (T1465). The lookup below asks whether the
+                            // operator's `implement` block is in THIS
+                            // compilation's closure, and for a primitive that
+                            // varies with the program rather than with the
+                            // type. Measured, same expression twice:
+                            //
+                            //   let s = S { lo: 3 };
+                            //   let q = s.lo << 3_u64;          -> None
+                            //
+                            //   let d: UInt64 = 1;
+                            //   let w = d << 1_u64;             -> UInt64
+                            //   let q = s.lo << 3_u64;          -> UInt64
+                            //
+                            // `UInt64.shl` IS in the archive (one hit in
+                            // `runtime.vbca`), but it only reaches the codegen
+                            // function table once something else drags it into
+                            // the closure — so the answer depended on what the
+                            // program happened to have written earlier. That
+                            // order-dependence is the defect, not merely the
+                            // missing operators.
+                            //
+                            // For an integer or float operand the result type
+                            // is fixed by the language: `UInt64 << n` is a
+                            // `UInt64`, whatever the closure holds.
+                            // `compile_binary` already relies on exactly this
+                            // when it truncates the result to the operand's
+                            // declared width. Every primitive operator impl in
+                            // `core/` returns the receiver's type — all 165
+                            // were read, and the only two that differ
+                            // (`Sub for Instant -> Duration`,
+                            // `Div for Complex -> Complex<Float>`) are not
+                            // primitives, so they keep the lookup path below
+                            // unchanged.
+                            use verum_common::well_known_types::type_names;
+                            let base = type_name
+                                .split('<')
+                                .next()
+                                .unwrap_or(&type_name);
+                            if type_names::is_signed_integer_type(base)
+                                || type_names::is_unsigned_integer_type(base)
+                            {
+                                return Some(base.to_string());
+                            }
                             let method = match op {
                                 BinOp::Add => "add",
                                 BinOp::Sub => "sub",
                                 BinOp::Mul => "mul",
                                 BinOp::Div => "div",
                                 BinOp::Rem => "rem",
+                                BinOp::Shl => "shl",
+                                BinOp::Shr => "shr",
+                                BinOp::BitAnd => "bitand",
+                                BinOp::BitOr => "bitor",
+                                BinOp::BitXor => "bitxor",
                                 _ => unreachable!(),
                             };
                             let qualified = format!("{}.{}", type_name, method);
