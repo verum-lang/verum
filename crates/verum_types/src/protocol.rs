@@ -8283,6 +8283,32 @@ impl ProtocolChecker {
                     .map(|a| self.apply_type_substitution_impl(a, subst, d))
                     .collect();
 
+                // R3 instrument. `[proj-site]` below prints only the
+                // projections whose head passed `type_head_is_unresolved`,
+                // and R3's failing case never reaches it — measured: three
+                // PROJSITE points silent, `VERUM_TRACE_PROJ` showing only
+                // `ISize::Item -> None`, and the base already `ISize` by the
+                // time anything looks. This one is unconditional over every
+                // `::`-named Generic and prints BEFORE and AFTER, which is
+                // the pair that says whether the substitution introduced the
+                // base or merely carried it.
+                if name.as_str().starts_with("::")
+                    && std::env::var("VERUM_TRACE_PROJSUBST").is_ok()
+                {
+                    let before: Vec<String> =
+                        args.iter().map(|a| a.to_text().to_string()).collect();
+                    let after: Vec<String> =
+                        new_args.iter().map(|a| a.to_text().to_string()).collect();
+                    if before != after || after.iter().any(|t| t.contains("Size")) {
+                        eprintln!(
+                            "[proj-subst] {} args {:?} -> {:?}",
+                            name.as_str(),
+                            before,
+                            after
+                        );
+                    }
+                }
+
                 // CRITICAL FIX: Check if this is a deferred projection (e.g., ::Item)
                 // After substitution, if the base type is now concrete, resolve the projection.
                 if name.as_str().starts_with("::") && !new_args.is_empty() {
