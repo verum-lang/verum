@@ -8,26 +8,53 @@ The CI contract: every `@test` here passes under both `verum test --interp`
 tests pin known stdlib / language-level defects and are excluded from the
 default green-suite gate.
 
-## The whole suite, re-measured 2026-09-13
+## The whole suite, re-measured 2026-09-13 (evening)
 
-    verum test --interp --test-threads 4     (all of core-tests, 2119 s)
-    19012 tests — 17998 passed, 599 failed, 415 ignored
+    verum test --interp --test-threads 4     (all of core-tests, 4684 s)
+    19012 tests — 18075 passed, 522 failed, 415 ignored
 
-Against the 2026-09-12 morning run — 19042 tests, 16542 passed, 2129
-failed, 371 ignored — that is **1529 fewer failures**, a 72% reduction.
+Against the same day's afternoon run — 17998 passed, 599 failed — that is
+**77 fewer failures**, and against the 2026-09-12 morning run (16542 passed,
+2129 failed) it is **1607 fewer**, a 75% reduction. The run took 78 minutes
+rather than the usual 26 because the machine carried a second session's
+builds for most of it; the counts are unaffected, the wall-clock is not
+comparable.
 
-**TWENTY-FIVE OF THE 600 ARE NOT OURS**: `tracing/id/unit_test` (10) and
+**WHAT CLEARED, and by which fix** — every one of these went to zero:
+
+    sys/context_ops        17   a context written through a stdlib wrapper
+                                died with the wrapper's frame
+    runtime/async_ops      28   the RuntimeExecutorHandle rename
+    sys/interrupt          12   InterruptCell's field named a type that
+                                core/ does not define
+    sys/mmio               10   a mount naming only a re-exported type
+                                never decoded the declaring module
+    base/cell               9   a deref site never spells `deref`, so the
+                                archive Deref impl was filtered out; and
+                                LazyCell had no Deref at all
+    text/mod                1   the test asked Lines for a `len` it does
+                                not have
+
+**TWO ROWS WENT THE OTHER WAY AND NEITHER REPRODUCES.**
+`net/proxy/loadbalancer/unit_test` reported one failure in the run and is
+21 passed / 0 failed when the file is run by itself;
+`cli_integration/single/collections/list_operations` reported `test's own
+process exited 70 without reporting stderr` with a rayon stack, which is a
+worker dying rather than an assertion. Both are recorded as not-reproduced
+rather than as passes: an intermittent failure under load is still a
+reading, and the honest statement is that neither survived isolation.
+
+**TWENTY-FIVE OF THE 522 ARE NOT OURS**: `tracing/id/unit_test` (10) and
 `tracing/pipeline/unit_test` (15) fail with `TypeMismatch { expected:
 "byte array (TypeId::U8)" … operation: "ByteArrayLoad" }` from another
-session's uncommitted `verum_vbc` work, which this session's builds
-compile along with everything else. Bisected across four binary
-snapshots: green at 05:53 and 07:24, red at 10:30 and 11:30, and
-`tracing/id` names nothing that was renamed here. Reported to that task
-rather than worked around; their fix (`733a73efd`) is IN this binary and
-the two files are unchanged at 10 and 15, which was reported back with
-the line that appears to break — `core/tracing/id.vr:52` indexes a
-`[UInt8; 16]` field straight through `&self`, where that fix addresses a
-local bound FROM such a field.
+session's work. Reported to that task rather than worked around.
+
+**THE TWO BIGGEST CONCENTRATIONS ARE ONE DEFECT EACH.**
+`base/iterator/unit_test` is 215 tests and SIXTEEN compile errors — R3,
+where an adapter's `Item` projection reduces against the wrong one of
+`Range`'s eleven per-width `Iterator` impls. `meta/contexts` is 138 across
+two files (A157). Between them they are 353 of the 522, so the file count
+that matters is small even where the test count is large.
 
 **A ROW BELOW CAN BE GREEN WHILE ITS FILE DOES NOT COMPILE**, and that is
 still the reason to re-run rather than read. The dead-file list
