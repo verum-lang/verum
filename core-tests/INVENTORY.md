@@ -23,7 +23,11 @@ session's uncommitted `verum_vbc` work, which this session's builds
 compile along with everything else. Bisected across four binary
 snapshots: green at 05:53 and 07:24, red at 10:30 and 11:30, and
 `tracing/id` names nothing that was renamed here. Reported to that task
-rather than worked around.
+rather than worked around; their fix (`733a73efd`) is IN this binary and
+the two files are unchanged at 10 and 15, which was reported back with
+the line that appears to break — `core/tracing/id.vr:52` indexes a
+`[UInt8; 16]` field straight through `&self`, where that fix addresses a
+local bound FROM such a field.
 
 **A ROW BELOW CAN BE GREEN WHILE ITS FILE DOES NOT COMPILE**, and that is
 still the reason to re-run rather than read. The dead-file list
