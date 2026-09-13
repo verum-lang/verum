@@ -5297,7 +5297,31 @@ fn harvest_names_in_expr(
             harvest_names_in_expr(left, out);
             harvest_names_in_expr(right, out);
         }
-        ExprKind::Unary { expr, .. } => harvest_names_in_expr(expr, out),
+        ExprKind::Unary { op, expr } => {
+            // T1470 — `*x` on a user type IS a `Deref::deref` call, and
+            // it is the one call the source never spells.  The
+            // per-function archive filter accepts `T.m` only when the
+            // programme names `T` or names `m`; a deref site names
+            // neither, so every archive `implement Deref for T` was
+            // dropped and `*guard` evaluated to the guard itself.
+            //
+            // Measured: `RefCell.new(42).borrow()` then `*r` printed
+            // `{42, {0}}` — the guard's own two fields — while a LOCAL
+            // `MyGuard<T>` with the byte-identical impl, declared in the
+            // file that reads it, answered `42`.
+            //
+            // Seeding the two method names is the narrowest thing that
+            // works: `deref` / `deref_mut` are protocol methods, so the
+            // filter's last-segment arm accepts `T.deref` for exactly
+            // the types whose module was going to be decoded anyway.
+            // The harvester's own contract says over-inclusion is
+            // harmless and under-inclusion fails the build.
+            if matches!(op, verum_ast::UnOp::Deref) {
+                out.insert_bare_method("deref".to_string());
+                out.insert_bare_method("deref_mut".to_string());
+            }
+            harvest_names_in_expr(expr, out)
+        }
         ExprKind::NamedArg { value, .. } => harvest_names_in_expr(value, out),
         ExprKind::Call { func, type_args, args } => {
             harvest_names_in_expr(func, out);
