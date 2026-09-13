@@ -10,8 +10,8 @@ default green-suite gate.
 
 ## The whole suite, re-measured 2026-09-13
 
-    verum test --interp --test-threads 4     (all of core-tests, 1333 s)
-    19012 tests — 17997 passed, 600 failed, 415 ignored
+    verum test --interp --test-threads 4     (all of core-tests, 2119 s)
+    19012 tests — 17998 passed, 599 failed, 415 ignored
 
 Against the 2026-09-12 morning run — 19042 tests, 16542 passed, 2129
 failed, 371 ignored — that is **1529 fewer failures**, a 72% reduction.
