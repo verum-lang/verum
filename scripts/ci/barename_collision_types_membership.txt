@@ -46,7 +46,6 @@ ExecOutcome	database/sqlite/native/exec/engine.vr,database/sqlite/native/l6_sess
 ExecutorHandle	async/intrinsics.vr,runtime/async_ops.vr
 Expr	database/sqlite/native/l5_sql/ast.vr,security/zk/stark/air.vr
 ExprOp	database/sqlite/native/expr_precedence_api/op.vr,net/uri_template.vr
-Fd	shell/resources.vr,sys/io_engine.vr
 Finding	cli/verify.vr,database/sqlite/native/integrity_walker_api/finding.vr
 FormatOptions	configuration/format.vr,meta/contexts.vr
 InitError	runtime/config.vr,sys/init.vr
