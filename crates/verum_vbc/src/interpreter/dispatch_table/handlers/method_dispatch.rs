@@ -5175,22 +5175,6 @@ fn func_id_parent_compatible_with_receiver(
     }
 }
 
-/// Read the capacity of a Text Value, dispatching by representation.
-/// Returns the byte budget the buffer can hold without reallocating.
-///
-///   * small-string (NaN-boxed inline): byte_len
-///   * BYTE_SLICE byte view (immutable, ARCH-P5): byte_len
-///   * canonical TEXT record `[hdr]{ptr,len,cap}[bytes…]`: `cap` when
-///     `cap > 0` (grow-capable — `with_capacity` / `reserve`),
-///     otherwise byte_len (`cap == 0` is text.vr's static/immutable
-///     marker; immutable representations report their length, matching
-///     the small-string / BYTE_SLICE convention above and the retired
-///     flat-layout fallback).
-///
-/// Shared between the `"capacity"` intercept arm (`dispatch_primitive_method`)
-/// and the `reserve` intercept (which needs the current capacity to
-/// decide whether the migration actually needs to grow the buffer).
-#[inline]
 /// The entries array of a `Map` / `Set` header, tolerating the
 /// never-allocated state.
 ///
@@ -5248,6 +5232,22 @@ fn map_entries_data(header_ptr: *const Value, capacity: usize) -> *mut Value {
     std::ptr::null_mut()
 }
 
+/// Read the capacity of a Text Value, dispatching by representation.
+/// Returns the byte budget the buffer can hold without reallocating.
+///
+///   * small-string (NaN-boxed inline): byte_len
+///   * BYTE_SLICE byte view (immutable, ARCH-P5): byte_len
+///   * canonical TEXT record `[hdr]{ptr,len,cap}[bytes…]`: `cap` when
+///     `cap > 0` (grow-capable — `with_capacity` / `reserve`),
+///     otherwise byte_len (`cap == 0` is text.vr's static/immutable
+///     marker; immutable representations report their length, matching
+///     the small-string / BYTE_SLICE convention above and the retired
+///     flat-layout fallback).
+///
+/// Shared between the `"capacity"` intercept arm (`dispatch_primitive_method`)
+/// and the `reserve` intercept (which needs the current capacity to
+/// decide whether the migration actually needs to grow the buffer).
+#[inline]
 fn text_capacity_of(v: &Value, byte_len_fallback: i64) -> i64 {
     if v.is_small_string() {
         return v.as_small_string().len() as i64;
