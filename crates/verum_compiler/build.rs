@@ -884,6 +884,82 @@ fn extract_mounts(src: &str, current_module: &str) -> Edges {
 /// (`public mount .submodule.{Item}` inside `core/foo/mod.vr` resolves
 /// to `core.foo.submodule.Item`). Without this, the relative form
 /// drops information and produces bogus root-level edges.
+/// Record an edge for every DOTTED cross-module CALL (A165, second gap).
+///
+/// The dep-graph was built from `mount` statements alone, and `core/` makes
+/// 185 calls that name their target inline instead:
+///
+///     super.darwin.libsystem.safe_getentropy(raw, chunk)?;   // sys/common.vr
+///     core.sys.common.random_bytes(buf)                      // id/uuid.vr
+///
+/// 83 of those name a module no `mount` in the same file covers, so the
+/// dependency existed in the code and not in the graph. The graph decides
+/// which modules the bake MERGES; an unmerged callee leaves its stage-3
+/// stub unresolved at run time, which is how `Uuid.new_v4()` came to panic
+/// with `stub to 'safe_getentropy' never resolved` (A164).
+///
+/// Deliberately conservative: only `super.` and `core.`-rooted paths with at
+/// least two segments before the function name, and the LAST segment (the
+/// function) is dropped — what is recorded is the module that owns it. A
+/// candidate that names no real module is discarded downstream, the same way
+/// `parse_mount_body`'s nested leaves are.
+fn extract_dotted_call_edges(src: &str, current_module: &str, edges: &mut Edges) {
+    let stripped = strip_comments(src);
+    let bytes = stripped.as_bytes();
+    let mut i = 0usize;
+    while i < bytes.len() {
+        // BYTE slices, not `&str[i..]`: `core/` is full of non-ASCII in
+        // comments and string literals, and slicing a str at a byte that
+        // is not a char boundary PANICS. The first version did exactly
+        // that and took the build script down at `'Â'`. `strip_comments`
+        // removes comment text but not literals.
+        let head_len = if bytes[i..].starts_with(b"super.") {
+            6
+        } else if bytes[i..].starts_with(b"core.") {
+            5
+        } else {
+            i += 1;
+            continue;
+        };
+        // Must start on a token boundary.
+        if i > 0 {
+            let prev = bytes[i - 1];
+            if prev.is_ascii_alphanumeric() || prev == b'_' || prev == b'.' {
+                i += 1;
+                continue;
+            }
+        }
+        // Walk the dotted path.
+        let start = i;
+        let mut j = i + head_len;
+        let mut segments = 1usize; // the head itself
+        let mut last_dot = 0usize;
+        while j < bytes.len() {
+            let c = bytes[j];
+            if c.is_ascii_alphanumeric() || c == b'_' {
+                j += 1;
+            } else if c == b'.' {
+                last_dot = j;
+                segments += 1;
+                j += 1;
+            } else {
+                break;
+            }
+        }
+        // A call: the path is immediately followed by `(`.
+        let is_call = bytes.get(j) == Some(&b'(');
+        if is_call
+            && segments >= 3
+            && last_dot > start
+            && let Ok(path) = std::str::from_utf8(&bytes[start..last_dot])
+        {
+            let resolved = resolve_path(path, current_module);
+            edges.path.push(resolved);
+        }
+        i = j.max(start + 1);
+    }
+}
+
 fn parse_mount_body(body: &str, current_module: &str, edges: &mut Edges) {
     // Drop any trailing `as Alias` clause — doesn't affect dep edges.
     let body = match body.find(" as ") {
@@ -975,16 +1051,43 @@ fn resolve_path(raw: &str, current_module: &str) -> String {
         }
         return format!("{}.{}", current_module, rest);
     }
-    // `super.X` from inside the crate root resolves to `core.X`.
+    // `super.X` IS THE PARENT MODULE, NOT THE CRATE ROOT (A165).
+    //
+    // This returned `core.<rest>` and said so in a comment --
+    // "`super` refers to the crate root in stdlib headers". The language
+    // means the enclosing module's parent, and the two agree only at depth
+    // one. Measured 2026-09-13 by resolving every `mount super.` in
+    // `core/` both ways and asking which target exists on disk: 23 of 594
+    // resolve under the root rule, 571 do not. `core/net/tcp.vr`'s
+    // `mount super.addr.{...}` is `core.net.addr`; `core/async/task.vr`'s
+    // `super.poll` / `super.waker` / `super.future` are all `core.async.*`.
+    //
+    // Those 571 edges named modules that do not exist, so the dependency
+    // they record was dropped -- and the dep-graph decides which modules
+    // the bake MERGES, which decides which archive names get indexed,
+    // which is why `Uuid.new_v4()` died on an unresolved `safe_getentropy`
+    // stub (A164).
+    //
+    // A module at depth one keeps its old answer: the parent of
+    // `core.foo` is `core`, which is what the root rule gave.
     if let Some(rest) = trimmed.strip_prefix("super.") {
-        // Pragmatically: `super` refers to the crate root in stdlib
-        // headers, where the current module's root segment is `core`.
-        let root = current_module.split('.').next().unwrap_or("core");
-        return format!("{}.{}", root, rest);
+        let parent = match current_module.rsplit_once('.') {
+            Some((head, _)) => head,
+            None => current_module,
+        };
+        let parent = if parent.is_empty() { "core" } else { parent };
+        return format!("{}.{}", parent, rest);
     }
     if trimmed == "super" {
-        let root = current_module.split('.').next().unwrap_or("core");
-        return root.to_string();
+        let parent = match current_module.rsplit_once('.') {
+            Some((head, _)) => head,
+            None => current_module,
+        };
+        return if parent.is_empty() {
+            "core".to_string()
+        } else {
+            parent.to_string()
+        };
     }
     trimmed.to_string()
 }
@@ -1030,7 +1133,8 @@ fn build_dep_graph(files: &[(String, Vec<u8>)]) -> Vec<u8> {
     for (rel, bytes) in files {
         let module = file_to_module(rel);
         let src = std::str::from_utf8(bytes).unwrap_or("");
-        let edges = extract_mounts(src, &module);
+        let mut edges = extract_mounts(src, &module);
+        extract_dotted_call_edges(src, &module, &mut edges);
         entries.push((module, edges));
     }
     // Sort for deterministic on-disk layout
@@ -1067,7 +1171,8 @@ fn dep_edge_count(files: &[(String, Vec<u8>)]) -> usize {
     for (rel, bytes) in files {
         let module = file_to_module(rel);
         let src = std::str::from_utf8(bytes).unwrap_or("");
-        let e = extract_mounts(src, &module);
+        let mut e = extract_mounts(src, &module);
+        extract_dotted_call_edges(src, &module, &mut e);
         total += e.path.len() + e.glob.len() + e.nested.len();
     }
     total
