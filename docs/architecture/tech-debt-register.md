@@ -275,6 +275,12 @@ three — T0707 (Item<Range>-argless residual). **Still reproduces 2026-09-13** 
 T1467, T1468 and T1470: the same 16 errors in the same file, `Item<ISize> <- Int` eleven times and
 `Int <- Item<ISize>` five, all of them on `peekable`, `fuse` and `.map(|x| …)` chains — so none of
 the wanted-set repairs of that day touch it, which is worth knowing before anyone tries them again.
+**AND THE MULTIPLICITY IS NOT THE AXIS EITHER, measured the same day**: a 44-line LOCAL twin carrying
+the whole shape — `MyRange<T>` with TWO `MyIter` impls (`MyRange<Int>` and `MyRange<ISize>`), a
+`Boxed<I>` adapter whose `type Item = I.Item` and whose signature mentions `Item` nowhere, and a
+`my_range(…) -> MyRange<Int>` constructor as concrete as `range`'s — typechecks clean. So "one type
+name, several impls, forwarding adapter" is reproducible locally and does NOT fail locally; archive
+residency remains necessary here as it is for A148/A150/A151/A157/A158.
 **Re-measured 2026-09-12**: 16 errors, not 54,
 and `core-tests/base/iterator/unit_test.vr` is **215 tests and 215 failures** — the whole file
 is inert, which no coverage instrument can see because it has `@test` functions, no `@ignore`,
