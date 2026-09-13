@@ -2073,7 +2073,36 @@ impl TypeChecker {
         // record-literal consumer can't use — meta/contexts
         // `ParseResult<Int>` E103.)  The qualified machinery below
         // engages for genuine collisions only.
+        // THE FAST PATH INFERS ctx CORRECTNESS FROM *METADATA* AGREEMENT,
+        // AND THE TWO TABLES CAN DISAGREE (A120).
+        //
+        // Measured 2026-09-13 with `VERUM_TRACE_DEFTYPE`: for `Child` —
+        // declared at `core/sys/process_ops.vr:99` and again at
+        // `core/io/process.vr:310` — `core.sys.process_ops.Child` is NEVER
+        // registered as a type, because this early return fires. The
+        // metadata simple slot agreed with the descriptor, so the branch
+        // concluded "the flat path already resolves the mounted name
+        // correctly" — while the ctx flat entry had last been written by
+        // the OTHER module, which is how a fully qualified
+        // `let c: core.sys.process_ops.Child = …` ends up refused with
+        // `expected 'Int', found 'Maybe<Int>'`.
+        //
+        // The premise holds only for a name NO OTHER MODULE declares. When
+        // the metadata itself files two types under this simple name, the
+        // qualified machinery below is exactly what is needed, so the
+        // shortcut steps aside. A unique name keeps the byte-identical
+        // pre-fix path the comment below describes.
+        let simple_name_is_contested = {
+            let suffix = format!(".{}", name);
+            metadata
+                .types
+                .keys()
+                .filter(|k| k.as_str().ends_with(suffix.as_str()))
+                .count()
+                > 1
+        };
         if let Some(simple_desc) = metadata.types.get(&name_text)
+            && !simple_name_is_contested
             && simple_desc.module_path == desc.module_path
             && simple_desc.name == desc.name
             && std::mem::discriminant(&simple_desc.kind)
