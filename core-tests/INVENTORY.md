@@ -8,45 +8,44 @@ The CI contract: every `@test` here passes under both `verum test --interp`
 tests pin known stdlib / language-level defects and are excluded from the
 default green-suite gate.
 
-## The whole suite, measured 2026-09-12
+## The whole suite, re-measured 2026-09-13
 
-    verum test --interp --test-threads 4     (all of core-tests, 2091 s)
-    19042 tests — 16542 passed, 2129 failed, 371 ignored
+    verum test --interp --test-threads 4     (all of core-tests, 858 s)
+    19010 tests — 17700 passed, 874 failed, 436 ignored
 
-**A ROW BELOW CAN BE GREEN WHILE ITS FILE DOES NOT COMPILE.** The rows
-are re-run per module, so a file that stopped compiling since its last
-run shows as an unchanged row — and 84 files fail to compile ENTIRELY,
-1774 tests, 9.3% of the suite, never executing a line. They are listed
-with their test counts in `scripts/ci/doc_methods_dead_files.txt`, which
-is regenerated from a run rather than reasoned about.
+Against the 2026-09-12 morning run — 19042 tests, 16542 passed, 2129
+failed, 371 ignored, 2091 s — that is **1255 fewer failures and 1158 more
+passes**, and the run is 2.4x faster because a compile error costs the
+runner far more than a test does.
 
-**THE NUMBERS ABOVE ARE THE 2026-09-12 MORNING RUN AND HAVE MOVED SINCE.**
-That list stood at 85 files, then 48, and is 30 as this is written — the
-difference is repaired files, not a re-measurement, so the suite totals
-have NOT been re-run and must not be quoted as current. Among the
-repairs: `base/data/unit_test` (184 tests; two `Data.Array` SIGSEGVs were
-taking the whole file with them), `base/iterator/protocol_agnostic_test`
-(22), `base/panic` property + integration + regression (48),
-`mem/allocator/integration_test` (which was never dead — it hangs only
-when probed WITHOUT its siblings), `mesh/xds/types` (14),
-`sys/windows/tls/integration_test` (13) and the four `sys/no_runtime`
-files, which are not repairable at all: they test a module the default
-bake excludes by `@cfg(runtime = …)`, and the runner now skips them by
-name instead of reporting 39 failures for a module it does not contain.
+**A ROW BELOW CAN BE GREEN WHILE ITS FILE DOES NOT COMPILE**, and that is
+still the reason to re-run rather than read. The dead-file list
+(`scripts/ci/doc_methods_dead_files.txt`, regenerated from a run rather
+than reasoned about) went 85 → 48 → 16 over the two days.
 
-Re-run before quoting; that is the rule this section exists to enforce.
+Eight files are no longer run at all and are not failures: `sys/embedded`
+and `sys/no_runtime` test modules that `core/sys/mod.vr` gates with
+`@cfg(runtime = …)` and the default bake therefore excludes. The runner
+now consults the same authority the bake does and names them as skipped.
 
-The failures are concentrated rather than scattered: 90 files in which
-NOTHING passes account for 1893 of the 2129. The largest are
-`base/iterator/unit_test` (215), `text/text/protocol_test` (119),
-`meta/contexts/unit_test` (102), `base/panic/unit_test` (93) and
-`meta/token/unit_test` (86); every `sys/` mod, init, no_runtime,
-process_ops and embedded file is on the list, as are all four `meta/`
-corpora.
+The remaining failures are CONCENTRATED, which is what makes them worth
+naming rather than counting. Written as a list rather than a table on
+purpose — `check-inventory` reads a table row as a MODULE ROW and reported
+seven non-existent directories the first time this was written:
 
-So: **before trusting a row, check whether its file is on that list**,
-and re-run rather than reading. Recorded as A129 in the tech-debt
-register.
+    215  base/iterator/unit_test          associated-type projection (T0707)
+    102  meta/contexts/unit_test          colliding FormatOptions (A120) + archive generic alias (A157)
+     62  mem/capability/unit_test         Capability declared four times (A120)
+     61  base/primitives/comparison_test  NOT YET DIAGNOSED — the file COMPILES, so it never reached the dead list
+     36  meta/contexts/property_test      as meta/contexts/unit_test
+     26  text/format/unit_test            —
+     26  base/memory/cbgr_test            —
+
+Those seven are 528 of the 874. **A120 alone accounts for at least 200**,
+across three of them.
+
+So: **before trusting a row, re-run it**; and before pricing a defect,
+check whether it is one of the seven above.
 
 | module | unit | property | integration | regression | open deferrals |
 |---|---:|---:|---:|---:|---|
