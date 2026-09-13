@@ -12396,7 +12396,29 @@ impl VbcCodegen {
                 // declarer).  Say so loudly; under VERUM_STRICT_MOUNTS=1
                 // skip the bind entirely so the call surfaces as a
                 // stage-5 stub (loud) instead of silent wrong data.
-                if full_path.len() >= 2 {
+                // T1477 — a mounted TYPE is not a degradation.
+                //
+                // The bare slot for a record type holds its CONSTRUCTOR,
+                // so a qualified type mount hitting the bare name is the
+                // correct outcome, not the first-wins accident this arm
+                // was written for.  Measured on a cog whose `thing.vr`
+                // and `other.vr` both declare `Thing` with `thing`
+                // listed FIRST: `mount minicog.other.{Thing}` answers
+                // `v=222 extra=999` through a function returning it AND
+                // `v=7 extra=8` from a literal built in the consuming
+                // module — the SECOND declarer, the one the path names,
+                // both ways.  A 6 200-line cog emitted fifty-six of
+                // these lines, twenty-six distinct names, every one of
+                // them a type.
+                //
+                // The guard asks "is this leaf a TYPE", never "is it
+                // uppercase": `mounted_types` takes every uppercase leaf
+                // with a two-segment path, CONSTANTS included, and the
+                // `ORDERING_ACQUIRE` case this arm cites is exactly an
+                // uppercase constant whose degradation IS real and must
+                // keep warning.
+                let leaf_is_type = self.get_well_known_type_id(&func_name).is_some();
+                if full_path.len() >= 2 && !leaf_is_type {
                     let written = full_path.join(".");
                     let owner_note = owning_module
                         .as_deref()
