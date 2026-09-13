@@ -26711,6 +26711,29 @@ impl VbcCodegen {
         if type_name.is_empty() || !self.type_field_layouts.contains_key(&type_name) {
             return None;
         }
+        // A TRANSPARENT CARRIER IS NOT A POINTER TO A RECORD.
+        //
+        // `strip_generic_args` above throws the payload away, so
+        // `Shared<Box>` arrives here as `"Shared"` and `Heap<Box>` as
+        // `"Heap"` — and both ARE registered record types (`Shared` is
+        // `{ ptr, generation, epoch }`), so the layout test above passes
+        // and the caller compiles the CARRIER as though it were the
+        // address of a `Box`. Measured: `(*sh).v` on a
+        // `Shared<Box{v:Int}>` panicked with "type 'Shared' (id=520) has
+        // no field named 'v'", and `(*h).v` on the `Heap` twin with "no
+        // TypeDescriptor for runtime type_id=3349209792" — a word read
+        // off the wrong object. Binding first (`let b = *sh; b.v`)
+        // answered 41 in both cases, which is the shape of a defect that
+        // lives in THIS fold and not in the deref itself.
+        //
+        // `*carrier` has its own lowering in `compile_unary`'s
+        // `UnOp::Deref` arm — `Instruction::Deref` for `Heap`,
+        // `CallM Shared.deref` + `Deref` for `Shared` — and the ordinary
+        // field machinery then reads the payload it produced. Refusing
+        // here is what lets the base take that route.
+        if self.is_allocating_wrapper(&type_name) {
+            return None;
+        }
         Some((raw_ptr.as_ref(), type_name))
     }
 
@@ -31227,6 +31250,55 @@ impl VbcCodegen {
         };
         self.ctx.register_function(closure_name.clone(), info);
 
+        // CLOSURE-CAPTURE-TYPE-1 (A174). A capture's TYPE has to be
+        // carried across `begin_function`, which clears
+        // `variable_type_names` (rightly -- types must not leak between
+        // sibling functions) and `current_impl_type_name` with it. A
+        // captured `self` therefore arrives in the body untyped, and
+        // every field access on it resolves through
+        // `resolve_field_index(None, ...)`: the global most-fields guess
+        // over every declaration of that field name in the programme.
+        //
+        // Measured, one local twin -- a three-field record whose method
+        // builds a closure pushing to its third field:
+        //
+        //     [field-guess] 'buffer' has 68 position-disagreeing
+        //     candidates; guessed BroadcastInner.buffer idx 0
+        //     (most fields) in fn `Small.fill$closure$0`
+        //
+        // That one survived because the guess was FLAGGED and
+        // `emit_field_read` fell back to the runtime-resolved
+        // `GetFieldNamed`. The stdlib's `TransducedIter.next` did not:
+        // its closure baked a positional index 3 into a three-field
+        // object and died with "field access out of bounds: field index
+        // 3 (offset 24+8 = 32) exceeds object data size 24
+        // type_id=1348 type='TransducedIter'" -- and 3 is exactly where
+        // `buffer` sits in `StatefulTransducedIter`, the five-field
+        // neighbour declared forty lines below it.
+        //
+        // Snapshot here, re-instate after `begin_function`. `self` has
+        // no `variable_type_names` entry in a method body -- its type is
+        // the impl header -- so it is read from `current_impl_type_name`,
+        // which the same call is about to clear.
+        let captured_type_names: Vec<(String, String, bool)> = captures
+            .iter()
+            .filter_map(|(cap_name, is_mutable)| {
+                let ty = self
+                    .ctx
+                    .variable_type_names
+                    .get(cap_name)
+                    .cloned()
+                    .or_else(|| {
+                        if cap_name == "self" {
+                            self.ctx.current_impl_type_name.clone()
+                        } else {
+                            None
+                        }
+                    })?;
+                Some((cap_name.clone(), ty, *is_mutable))
+            })
+            .collect();
+
         // Save current function context (critical: includes in_function flag)
         let saved_function = self.ctx.current_function.clone();
         let saved_instructions = std::mem::take(&mut self.ctx.instructions);
@@ -31238,6 +31310,25 @@ impl VbcCodegen {
 
         // Begin closure function compilation
         self.ctx.begin_function(&closure_name, &all_params, None);
+
+        // CLOSURE-CAPTURE-TYPE-1: re-instate the captures' types on the
+        // far side of the clear, so the body resolves field indices
+        // against the declaration the capture actually has.
+        // `variable_type_names` only — it is the channel field-index
+        // resolution reads. `variable_types` (the `VarTypeKind` used for
+        // numeric instruction selection) is set for IMMUTABLE captures
+        // only: a mutable capture is passed as a CELL pointer, so its
+        // register does not hold the value, and telling the selector it
+        // holds an `Int` would specialise arithmetic against the cell.
+        for (cap_name, type_name, is_mutable) in &captured_type_names {
+            self.ctx
+                .variable_type_names
+                .insert(cap_name.clone(), type_name.clone());
+            if !*is_mutable {
+                let var_type = self.type_name_to_var_type(type_name);
+                self.ctx.register_variable_type(cap_name, var_type);
+            }
+        }
 
         // Mark captured variables (they are the first parameters)
         for (i, (cap_name, is_mutable)) in captures.iter().enumerate() {

@@ -1,0 +1,35 @@
+// @test: run-interpreter
+// @level: L1
+// @tier: 0
+// @tags: core, iterator, transducer, closure, capture
+// @expected-stdout: 2 4 6
+
+// `TransducedIter.next` builds a collecting reducer that captures `self`
+// and pushes to `self.buffer`, the third of three fields. A closure's
+// captures used to arrive in the body UNTYPED — `begin_function` clears
+// `variable_type_names` and `current_impl_type_name`, and only the
+// closure's own params were re-instated — so `self.buffer` resolved
+// through the global most-fields guess over every `buffer` declared in
+// the programme. The baked answer was index 3: where `buffer` sits in
+// `StatefulTransducedIter`, the five-field neighbour declared forty
+// lines below. It died with "field access out of bounds: field index 3
+// (offset 24+8 = 32) exceeds object data size 24 type='TransducedIter'".
+//
+// ONE transducer is enough — no composition, no wrapping.
+
+mount core.prelude.*;
+mount core.base.iterator.{Transducer};
+
+fn main() {
+    let xs: List<Int> = [1, 2, 3];
+    let xf = Transducer.map(|x: Int| -> Int { return x * 2; });
+    let mut it = xs.iter().transduce(xf);
+    let mut out: List<Int> = List.new();
+    while true {
+        match it.next() {
+            Maybe.Some(v) => { out.push(v); }
+            Maybe.None => { break; }
+        }
+    }
+    print(f"{out[0]} {out[1]} {out[2]}");
+}

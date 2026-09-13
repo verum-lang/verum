@@ -1,0 +1,27 @@
+// @test: run-interpreter
+// @level: L0
+// @tier: 0
+// @tags: stdlib-runtime, shared, heap, deref, field
+// @expected-stdout: heap 11 shared 41 bound 41
+
+// `(*carrier).field` in VALUE position. The read-side fold that turns
+// `(*p).field` into a field read off a raw record pointer used to accept
+// a transparent carrier as that pointer, because stripping the generic
+// args off `Shared<Box>` leaves `Shared` — itself a registered record
+// `{ ptr, generation, epoch }`. The base was then compiled as the
+// CARRIER and the field looked up on it: `(*sh).v` panicked with
+// "type 'Shared' has no field named 'v'", and the `Heap` twin with "no
+// TypeDescriptor for runtime type_id=…", a word read off the wrong
+// object — while `let b = *sh; b.v` answered correctly, which is what
+// located the defect in the fold rather than in the deref.
+
+mount core.prelude.*;
+
+type Box is { v: Int };
+
+fn main() {
+    let h = Heap.new(Box { v: 11 });
+    let sh = Shared.new(Box { v: 41 });
+    let bound = *sh;
+    print(f"heap {(*h).v} shared {(*sh).v} bound {bound.v}");
+}
