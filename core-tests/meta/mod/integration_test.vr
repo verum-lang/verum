@@ -13,7 +13,7 @@
 //   * MetaResult<Int> is only ever named as a *function parameter /
 //     return type* — never as a `let x: MetaResult<Int> = …`
 //     annotation.  The alias-annotation form is defective (the
-//     `type Span is MetaSpan` alias-identity class, tracked as
+//     `type MetaSpan is MetaSpan` alias-identity class, tracked as
 //     META-SPAN-ALIAS); the signature form is exercised safely here
 //     and is the idiom stdlib callers actually use.
 // =============================================================================
@@ -23,10 +23,10 @@ mount core.meta.{
     DEFAULT_RECURSION_LIMIT, DEFAULT_ITERATION_LIMIT,
     DEFAULT_MEMORY_LIMIT, DEFAULT_TIMEOUT_MS,
 };
-mount core.meta.span.{MetaSpan, Span, SpanFlags};
+mount core.meta.span.{MetaSpan, SpanFlags};
 mount core.base.maybe.{Maybe};
 
-fn ssp() -> Span {
+fn ssp() -> MetaSpan {
     MetaSpan {
         id: 0,
         hygiene: 0,

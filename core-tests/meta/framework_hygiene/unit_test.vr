@@ -21,7 +21,7 @@
 // audit.md §3.1. Tests pin the current behaviour without claiming
 // it is correct.
 //
-// `run_all_hygiene_rules` requires a `Span` to be constructed at
+// `run_all_hygiene_rules` requires a `MetaSpan` to be constructed at
 // runtime; covered via SpanFlags-direct construction (mirroring
 // `core-tests/meta/span/`).
 // =============================================================================
@@ -35,10 +35,10 @@ mount core.meta.framework_hygiene.{
     validate_meta_classifier_uniqueness,
     meta_classifier_tally_new,
 };
-mount core.meta.span.{MetaSpan, Span, SpanFlags};
+mount core.meta.span.{MetaSpan, SpanFlags};
 mount core.base.maybe.{Maybe};
 
-fn synthetic_span() -> Span {
+fn synthetic_span() -> MetaSpan {
     MetaSpan {
         id: 0,
         hygiene: 0,

@@ -12,14 +12,14 @@
 //
 // DEFECT FAMILIES:
 //   (A) INTERP/AOT DIVERGENCE — `build()` computes its span through
-//       `TokenStream.from_trees` (`Span.join`/`call_site`); under AOT
+//       `TokenStream.from_trees` (`MetaSpan.join`/`call_site`); under AOT
 //       the resulting stream's internal `.trees()` reference and any
 //       `.flatten()` that descends a Group mis-lower, and `wrap`-built
 //       Groups (module `parens/braces/brackets`) mis-lower. Also,
 //       `Maybe`-returning token accessors that clone/borrow
 //       (`Token.as_ident`, `TokenTree.as_token`) return the wrong
 //       tag under AOT. (META-AOT-PARITY-1.)
-//   (B) BOTH-TIER INTRINSIC — `Span.call_site`/`Span.join`/
+//   (B) BOTH-TIER INTRINSIC — `MetaSpan.call_site`/`MetaSpan.join`/
 //       `keyword_from_str` are bodiless `@compiler_intrinsic`s that
 //       return nil at runtime (META-INTRINSIC-NILSTUB-1);
 //       `Token.ident_spanned` (cross-module static ctor) corrupts object
@@ -31,10 +31,10 @@
 
 mount core.meta.quote.{QuoteBuilder, GroupBuilder, parens, braces, brackets};
 mount core.meta.token.{TokenStream, TokenTree, Token, TokenKind, Delimiter, TokenGroup};
-mount core.meta.span.{MetaSpan, Span, SpanFlags};
+mount core.meta.span.{MetaSpan, SpanFlags};
 mount core.base.maybe.{Maybe};
 
-fn synthetic_span() -> Span {
+fn synthetic_span() -> MetaSpan {
     MetaSpan {
         id: 0,
         hygiene: 0,
@@ -153,8 +153,8 @@ fn regression_aot_module_parens_wrap() {
 // =============================================================================
 
 // REGRESSION: `GroupBuilder.close()` builds its Group via
-// `TokenStream.from_trees`, which reaches `Span.call_site()` (empty)
-// or `Span.join` (non-empty) — bodiless `@compiler_intrinsic`s that
+// `TokenStream.from_trees`, which reaches `MetaSpan.call_site()` (empty)
+// or `MetaSpan.join` (non-empty) — bodiless `@compiler_intrinsic`s that
 // return nil — degenerating the returned QuoteBuilder to `()`
 // (META-INTRINSIC-NILSTUB-1).
 @ignore

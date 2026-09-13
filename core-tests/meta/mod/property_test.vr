@@ -24,10 +24,10 @@
 // =============================================================================
 
 mount core.meta.{MetaError, DEFAULT_RECURSION_LIMIT, DEFAULT_ITERATION_LIMIT, DEFAULT_MEMORY_LIMIT, DEFAULT_TIMEOUT_MS, VERSION_INFO};
-mount core.meta.span.{MetaSpan, Span, SpanFlags};
+mount core.meta.span.{MetaSpan, SpanFlags};
 mount core.base.maybe.{Maybe};
 
-fn synthetic_span() -> Span {
+fn synthetic_span() -> MetaSpan {
     MetaSpan {
         id: 0,
         hygiene: 0,

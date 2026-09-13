@@ -25,7 +25,7 @@
 module core.meta.attribute;
 
 mount core.{Text, List, Maybe};
-mount meta.span.{Span};
+mount meta.span.{MetaSpan};
 mount meta.token.{TokenStream};
 
 // =============================================================================
@@ -68,7 +68,7 @@ public type Attribute is {
     tokens: TokenStream,
 
     /// Source span
-    span: Span,
+    span: MetaSpan,
 };
 
 implement Attribute {
@@ -83,7 +83,7 @@ implement Attribute {
             style: AttributeStyle.Word,
             args: List.new(),
             tokens: TokenStream.empty(),
-            span: Span.call_site(),
+            span: MetaSpan.call_site(),
         }
     }
 
@@ -95,10 +95,10 @@ implement Attribute {
             args: List.of(AttributeArg {
                 name: Maybe.None,
                 value,
-                span: Span.call_site(),
+                span: MetaSpan.call_site(),
             }),
             tokens: TokenStream.empty(),
-            span: Span.call_site(),
+            span: MetaSpan.call_site(),
         }
     }
 
@@ -109,7 +109,7 @@ implement Attribute {
             style: AttributeStyle.Call,
             args,
             tokens: TokenStream.empty(),
-            span: Span.call_site(),
+            span: MetaSpan.call_site(),
         }
     }
 
@@ -291,7 +291,7 @@ public type AttributeArg is {
     value: MetaAttributeValue,
 
     /// Source span
-    span: Span,
+    span: MetaSpan,
 };
 
 implement AttributeArg {
@@ -300,7 +300,7 @@ implement AttributeArg {
         Self {
             name: Maybe.None,
             value,
-            span: Span.call_site(),
+            span: MetaSpan.call_site(),
         }
     }
 
@@ -309,7 +309,7 @@ implement AttributeArg {
         Self {
             name: Maybe.Some(name),
             value,
-            span: Span.call_site(),
+            span: MetaSpan.call_site(),
         }
     }
 
@@ -527,7 +527,7 @@ public type DeriveInfo is {
     derives: List<Text>,
 
     /// Source span
-    span: Span,
+    span: MetaSpan,
 };
 
 implement DeriveInfo {
@@ -570,7 +570,7 @@ public type ReprInfo is {
     packed: Bool,
 
     /// Source span
-    span: Span,
+    span: MetaSpan,
 };
 
 /// Representation kind

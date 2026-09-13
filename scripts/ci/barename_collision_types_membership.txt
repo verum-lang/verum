@@ -48,7 +48,6 @@ Expr	database/sqlite/native/l5_sql/ast.vr,security/zk/stark/air.vr
 ExprOp	database/sqlite/native/expr_precedence_api/op.vr,net/uri_template.vr
 Finding	cli/verify.vr,database/sqlite/native/integrity_walker_api/finding.vr
 FormatOptions	configuration/format.vr,meta/contexts.vr
-InitError	runtime/config.vr,sys/init.vr
 Interval	async/interval.vr,cog/resolve.vr
 IpMreq	sys/linux/syscall.vr,sys/windows/winsock2.vr
 Judgment	verify/kernel_soundness/judgment.vr,verify/kernel_v0/judgment.vr
@@ -103,7 +102,6 @@ Snapshot	database/sqlite/native/concurrency/snapshot.vr,term/widget/input.vr,ter
 SockaddrIn	sys/darwin/libsystem.vr,sys/linux/syscall.vr
 SockaddrIn6	sys/darwin/libsystem.vr,sys/linux/syscall.vr
 SortDirection	database/sqlite/native/index_variants/descriptor.vr,search/types.vr
-Span	meta/span.vr,tracing/data.vr
 SpawnConfig	async/spawn_config.vr,runtime/spawn.vr
 Spinner	shell/progress.vr,term/widget/spinner.vr
 SqlValue	database/sqlite/native/export/value.vr,database/sqlite/native/l6_session/sql_value.vr
@@ -113,7 +111,6 @@ Statement	meta/contexts.vr,security/provenance.vr
 StatementCache	database/sqlite/native/l6_session/statement_cache.vr,database/sqlite/native/stmt_cache/cache.vr
 Stopwatch	sys/darwin/time.vr,sys/linux/time.vr,sys/windows/time.vr
 StreamHandle	math/gpu.vr,net/quic/stream.vr
-SupervisionStrategy	math/distributed.vr,runtime/supervisor.vr
 SyncMode	database/sqlite/native/l1_pager/pager.vr,database/sqlite/native/pragma_synchronous_mode/mode.vr
 Target	async/channel.vr,database/sqlite/native/order_by_term_api/term.vr,io/path.vr
 TaskState	async/executor.vr,async/task.vr

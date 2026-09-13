@@ -34,10 +34,10 @@ mount core.meta.diakrisis_attrs.{
     AutopoieticAttr, LudicDesignAttr, CutEliminationAttr,
     CUT_ELIMINATION_DEFAULT_BOUND,
 };
-mount core.meta.span.{MetaSpan, Span, SpanFlags};
+mount core.meta.span.{MetaSpan, SpanFlags};
 mount core.base.maybe.{Maybe};
 
-fn synthetic_span() -> Span {
+fn synthetic_span() -> MetaSpan {
     MetaSpan {
         id: 0,
         hygiene: 0,

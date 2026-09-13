@@ -21,7 +21,11 @@
 // =============================================================================
 
 mount core.runtime.config.{
-    RuntimeInitError, InitError, RuntimeIoError,
+    // `InitError` was a short alias for `RuntimeInitError` in the same
+    // file, and it collided with `core/sys/init.vr`'s own `InitError` —
+    // which is what made that name resolve to nothing for BOTH modules
+    // (A120). The alias is gone; the verbose name is the only one.
+    RuntimeInitError, RuntimeIoError,
     IoHandle, IoCompletion,
     NoopExecutor, NoopDriver,
 };
@@ -92,13 +96,16 @@ fn test_runtime_init_error_eq_cross_variant_disjoint() {
 }
 
 @test
-fn test_init_error_alias_resolves_to_runtime_init_error() {
-    // The `InitError` public alias resolves to `RuntimeInitError`.
-    // Compile-only check via cross-assignment.
+fn test_runtime_init_error_assigns_to_its_own_type() {
+    // WAS a test that the `InitError` public alias resolved to
+    // `RuntimeInitError`. The alias is gone: it collided with
+    // `core/sys/init.vr`'s `InitError`, and a colliding name resolves to
+    // no declaration at all, which cost that module's four test files 21
+    // tests (A120). What survives is the half that still means something —
+    // the type assigns to itself, so the variant is the type it claims.
     let a: RuntimeInitError = RuntimeInitError.TlsInitFailed;
-    let b: InitError = a;
+    let b: RuntimeInitError = a;
     let _ = b;
-    assert(true);
 }
 
 // =============================================================================

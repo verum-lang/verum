@@ -45,7 +45,7 @@ module core.meta.quote;
 
 mount core.{Text, List, Maybe};
 mount meta.token.{TokenStream, Token, TokenTree, TokenKind, Delimiter, TokenGroup};
-mount meta.span.{Span};
+mount meta.span.{MetaSpan};
 mount meta.contexts.{ToTokens};
 
 // =============================================================================
@@ -94,7 +94,7 @@ public type QuoteBuilder is {
     tokens: List<TokenTree>,
 
     /// Current span for new tokens
-    span: Span,
+    span: MetaSpan,
 };
 
 implement QuoteBuilder {
@@ -106,12 +106,12 @@ implement QuoteBuilder {
     public fn new() -> Self {
         Self {
             tokens: List.new(),
-            span: Span.call_site(),
+            span: MetaSpan.call_site(),
         }
     }
 
     /// Create quote builder with specific span
-    public fn with_span(span: Span) -> Self {
+    public fn with_span(span: MetaSpan) -> Self {
         Self {
             tokens: List.new(),
             span,
@@ -344,7 +344,7 @@ implement QuoteBuilder {
     }
 
     /// Set span for subsequent tokens
-    public fn with_span(mut self, span: Span) -> Self {
+    public fn with_span(mut self, span: MetaSpan) -> Self {
         self.span = span;
         self
     }
@@ -446,11 +446,11 @@ fn keyword_from_str(s: Text) -> Keyword;
 ///  QuotePart.Interpolate(value),
 ///  QuotePart.Literal(";"),
 ///  ),
-///  Span.call_site()
+///  MetaSpan.call_site()
 /// )
 /// ```
 @compiler_intrinsic
-public fn __quote_impl(parts: List<QuotePart>, span: Span) -> TokenStream;
+public fn __quote_impl(parts: List<QuotePart>, span: MetaSpan) -> TokenStream;
 
 /// Part of a quote expression
 @compiler_type

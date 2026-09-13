@@ -79,7 +79,7 @@ module core.mem;
 /// `capability.vr` declarations is pinned by
 /// `core-tests/mem/capability/`.
 public mount .capability.{
-    Capability,
+    MemCapability,
     // Single-bit flags (UInt16, bits 0-7)
     CAP_READ, CAP_WRITE, CAP_EXECUTE, CAP_DELEGATE, CAP_REVOKE,
     CAP_BORROWED, CAP_MUTABLE, CAP_NO_ESCAPE,

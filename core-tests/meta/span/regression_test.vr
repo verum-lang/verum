@@ -5,7 +5,7 @@
 // Pinned regression tests for `core/meta/span.vr`.
 // =============================================================================
 
-mount core.meta.span.{MetaSpan, Span, SourceLocation, SpanRange, MultiSpan, SpanFlags};
+mount core.meta.span.{MetaSpan, SourceLocation, SpanRange, MultiSpan, SpanFlags};
 mount core.base.maybe.{Maybe};
 
 // =============================================================================

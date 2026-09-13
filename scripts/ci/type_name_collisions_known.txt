@@ -98,8 +98,6 @@ Finding	core/cli/verify.vr
 Finding	core/database/sqlite/native/integrity_walker_api/finding.vr
 FormatOptions	core/configuration/format.vr
 FormatOptions	core/meta/contexts.vr
-InitError	core/runtime/config.vr
-InitError	core/sys/init.vr
 Interval	core/async/interval.vr
 Interval	core/cog/resolve.vr
 IpMreq	core/sys/linux/syscall.vr
@@ -213,8 +211,6 @@ SockaddrIn6	core/sys/darwin/libsystem.vr
 SockaddrIn6	core/sys/linux/syscall.vr
 SortDirection	core/database/sqlite/native/index_variants/descriptor.vr
 SortDirection	core/search/types.vr
-Span	core/meta/span.vr
-Span	core/tracing/data.vr
 SpawnConfig	core/async/spawn_config.vr
 SpawnConfig	core/runtime/spawn.vr
 Spinner	core/shell/progress.vr
@@ -235,8 +231,6 @@ Stopwatch	core/sys/linux/time.vr
 Stopwatch	core/sys/windows/time.vr
 StreamHandle	core/math/gpu.vr
 StreamHandle	core/net/quic/stream.vr
-SupervisionStrategy	core/math/distributed.vr
-SupervisionStrategy	core/runtime/supervisor.vr
 SyncMode	core/database/sqlite/native/l1_pager/pager.vr
 SyncMode	core/database/sqlite/native/pragma_synchronous_mode/mode.vr
 Target	core/async/channel.vr

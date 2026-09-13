@@ -113,7 +113,7 @@
 //
 
 //  if schema.is_empty() {
-//  CompileDiag.emit_warning("Empty API schema", Span.call_site());
+//  CompileDiag.emit_warning("Empty API schema", MetaSpan.call_site());
 //  }
 //
 
@@ -152,7 +152,7 @@ module core.meta;
 public module contexts;
 
 /// Source span and location tracking
-/// Provides: Span, SourceLocation, SpanRange
+/// Provides: MetaSpan, SourceLocation, SpanRange
 public module span;
 
 /// Token stream representation
@@ -293,7 +293,7 @@ public mount .contexts.ItemKind;
 /// Dependency information
 public mount .contexts.DependencyInfo;
 
-/// Span mapping for source maps
+/// MetaSpan mapping for source maps
 public mount .contexts.SpanMapping;
 
 /// Schema error information
@@ -334,7 +334,7 @@ public mount .token.TokenKind;
 public mount .token.TokenTree;
 
 // =============================================================================
-// Re-exports: Span & Location
+// Re-exports: MetaSpan & Location
 // =============================================================================
 
 // VVA-Quality — meta-programming layer for framework-axiom hygiene.
@@ -357,12 +357,12 @@ public mount .framework_hygiene.meta_classifier_tally_new;
 public mount .framework_hygiene.run_all_hygiene_rules;
 
 /// Source span
-public mount .span.Span;
+public mount .span.MetaSpan;
 
 /// Source file location
 public mount .span.SourceLocation;
 
-/// Span range with start/end
+/// MetaSpan range with start/end
 public mount .span.SpanRange;
 
 // =============================================================================
@@ -451,7 +451,7 @@ public type MetaError is
     /// Asset read error
     | AssetReadError { path: Text, reason: Text }
     /// Syntax error in AST manipulation
-    | SyntaxError { message: Text, span: Span }
+    | SyntaxError { message: Text, span: MetaSpan }
     /// Parse failed with multiple errors (from recovery parsing)
     | ParseFailed(List<ParseError>)
     /// Type error in reflection

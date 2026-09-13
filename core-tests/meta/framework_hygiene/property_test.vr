@@ -35,10 +35,10 @@ mount core.meta.framework_hygiene.{
     meta_classifier_tally_new,
     run_all_hygiene_rules,
 };
-mount core.meta.span.{MetaSpan, Span, SpanFlags};
+mount core.meta.span.{MetaSpan, SpanFlags};
 mount core.base.maybe.{Maybe};
 
-fn ssp() -> Span {
+fn ssp() -> MetaSpan {
     MetaSpan {
         id: 0,
         hygiene: 0,
@@ -259,8 +259,8 @@ fn property_r3_error_when_three_candidates() {
 
 @test
 fn property_run_all_clean_batch_is_empty() {
-    let decls: List<(Text, Span)> = [(Text.from("clean_axiom"), ssp())];
-    let eps: List<(Text, Span)> = [(Text.from("ε_math"), ssp())];
+    let decls: List<(Text, MetaSpan)> = [(Text.from("clean_axiom"), ssp())];
+    let eps: List<(Text, MetaSpan)> = [(Text.from("ε_math"), ssp())];
     let tally = MetaClassifierTally { candidates: [Text.from("Solo")] };
     let diags = run_all_hygiene_rules(decls, eps, tally, ssp());
     assert(diags.is_empty());
@@ -269,11 +269,11 @@ fn property_run_all_clean_batch_is_empty() {
 @test
 fn property_run_all_counts_each_violation_once() {
     // 1 branded decl (R1) + 1 garbage ε (R2) + 2 classifiers (R3) = 3.
-    let decls: List<(Text, Span)> = [
+    let decls: List<(Text, MetaSpan)> = [
         (Text.from("diakrisis_bad"), ssp()),
         (Text.from("clean_name"), ssp()),
     ];
-    let eps: List<(Text, Span)> = [
+    let eps: List<(Text, MetaSpan)> = [
         (Text.from("ε_math"), ssp()),
         (Text.from("garbage!"), ssp()),
     ];

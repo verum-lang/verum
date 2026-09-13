@@ -105,7 +105,7 @@
 module core.meta.contexts;
 
 mount core.{Result, Text, List, Maybe, Byte, Map};
-mount meta.span.{Span, SourceLocation};
+mount meta.span.{MetaSpan, SourceLocation};
 mount meta.token.{TokenStream};
 mount meta.reflection.{
     FieldInfo, VariantInfo, TypeKind, ProtocolInfo, GenericParam, FunctionInfo,
@@ -334,7 +334,7 @@ public type AssetMetadata is {
 ///  _ => {
 ///  CompileDiag.emit_error(
 ///  f"Cannot derive Clone for {kind}",
-///  Span.call_site()
+///  MetaSpan.call_site()
 ///  );
 ///  TokenStream.empty()
 ///  }
@@ -686,13 +686,13 @@ public context AstAccess {
     fn validate(tokens: TokenStream) -> MetaResult<()>;
 
     /// Get span of current macro invocation
-    fn call_site() -> Span;
+    fn call_site() -> MetaSpan;
 
     /// Get span of macro definition
-    fn def_site() -> Span;
+    fn def_site() -> MetaSpan;
 
     /// Create span mixing call and def site
-    fn mixed_site() -> Span;
+    fn mixed_site() -> MetaSpan;
 
     /// Get the input token stream to the current macro
     fn input() -> TokenStream;
@@ -836,13 +836,13 @@ public context AstAccess {
     ///
 
     /// Returns the original source code for a span.
-    fn span_source(span: Span) -> Text;
+    fn span_source(span: MetaSpan) -> Text;
 
     /// Join spans (from first.start to last.end)
-    fn span_join(first: Span, last: Span) -> Span;
+    fn span_join(first: MetaSpan, last: MetaSpan) -> MetaSpan;
 
     /// Check if two spans overlap
-    fn spans_overlap(a: Span, b: Span) -> Bool;
+    fn spans_overlap(a: MetaSpan, b: MetaSpan) -> Bool;
 }
 
 // =============================================================================
@@ -889,7 +889,7 @@ public context AstAccess {
 ///  );
 ///  CompileDiag.emit_help(
 ///  "Add @serialize_private attribute to include private fields",
-///  Span.call_site()
+///  MetaSpan.call_site()
 ///  );
 ///  }
 ///  }
@@ -909,7 +909,7 @@ public context CompileDiag {
     /// # Arguments
     /// - `message`: Error description
     /// - `span`: Location in source code
-    fn emit_error(message: Text, span: Span);
+    fn emit_error(message: Text, span: MetaSpan);
 
     /// Emit compilation warning
     ///
@@ -920,7 +920,7 @@ public context CompileDiag {
     /// # Arguments
     /// - `message`: Warning description
     /// - `span`: Location in source code
-    fn emit_warning(message: Text, span: Span);
+    fn emit_warning(message: Text, span: MetaSpan);
 
     /// Emit informational note
     ///
@@ -931,7 +931,7 @@ public context CompileDiag {
     /// # Arguments
     /// - `message`: Note content
     /// - `span`: Location in source code
-    fn emit_note(message: Text, span: Span);
+    fn emit_note(message: Text, span: MetaSpan);
 
     /// Emit help suggestion
     ///
@@ -942,7 +942,7 @@ public context CompileDiag {
     /// # Arguments
     /// - `message`: Suggestion content
     /// - `span`: Location in source code
-    fn emit_help(message: Text, span: Span);
+    fn emit_help(message: Text, span: MetaSpan);
 
     /// Emit error with code
     ///
@@ -951,10 +951,10 @@ public context CompileDiag {
     /// - `code`: Error code (e.g., "E0001")
     /// - `message`: Error description
     /// - `span`: Location in source code
-    fn emit_error_with_code(code: Text, message: Text, span: Span);
+    fn emit_error_with_code(code: Text, message: Text, span: MetaSpan);
 
     /// Emit warning with code
-    fn emit_warning_with_code(code: Text, message: Text, span: Span);
+    fn emit_warning_with_code(code: Text, message: Text, span: MetaSpan);
 
     /// Create structured diagnostic builder
     fn diagnostic() -> DiagnosticBuilder;
@@ -1017,7 +1017,7 @@ implement DiagnosticBuilder {
     }
 
     /// Add primary span with label
-    public fn primary_span(mut self, span: Span, label: Text) -> Self {
+    public fn primary_span(mut self, span: MetaSpan, label: Text) -> Self {
         self.spans.push(SpanLabel {
             span,
             label,
@@ -1027,7 +1027,7 @@ implement DiagnosticBuilder {
     }
 
     /// Add secondary span with label
-    public fn secondary_span(mut self, span: Span, label: Text) -> Self {
+    public fn secondary_span(mut self, span: MetaSpan, label: Text) -> Self {
         self.spans.push(SpanLabel {
             span,
             label,
@@ -1059,7 +1059,7 @@ implement DiagnosticBuilder {
     }
 
     /// Add suggestion with replacement code
-    public fn suggest(mut self, message: Text, span: Span, replacement: Text) -> Self {
+    public fn suggest(mut self, message: Text, span: MetaSpan, replacement: Text) -> Self {
         self.suggestions.push(Suggestion {
             kind: SuggestionKind.Fix,
             message,
@@ -1082,9 +1082,9 @@ public type DiagnosticSeverity is
     | Note
     | Help;
 
-/// Span with label for diagnostics
+/// MetaSpan with label for diagnostics
 public type SpanLabel is {
-    span: Span,
+    span: MetaSpan,
     label: Text,
     is_primary: Bool,
 };
@@ -1093,7 +1093,7 @@ public type SpanLabel is {
 public type Suggestion is {
     kind: SuggestionKind,
     message: Text,
-    span: Maybe<Span>,
+    span: Maybe<MetaSpan>,
     replacement: Maybe<Text>,
 };
 
@@ -1148,7 +1148,7 @@ public type SuggestionKind is
 ///  if MetaRuntime.recursion_limit() < 128 {
 ///  CompileDiag.emit_warning(
 ///  "Recursion limit is low, complex macros may fail",
-///  Span.call_site()
+///  MetaSpan.call_site()
 ///  );
 ///  }
 ///  // ...
@@ -1618,7 +1618,7 @@ public type FunctionSearchResult is {
     is_public: Bool,
 
     /// Source location
-    span: Span,
+    span: MetaSpan,
 
     /// Attributes on the function
     attributes: List<Attribute>,
@@ -1639,7 +1639,7 @@ public type TypeSearchResult is {
     is_public: Bool,
 
     /// Source location
-    span: Span,
+    span: MetaSpan,
 
     /// Attributes on the type
     attributes: List<Attribute>,
@@ -1651,7 +1651,7 @@ public type TypeSearchResult is {
 /// Information about a code usage
 public type UsageInfo is {
     /// Location of the usage
-    span: Span,
+    span: MetaSpan,
 
     /// Module containing the usage
     module: Text,
@@ -1675,7 +1675,7 @@ public type UsageContext is
 /// Result of pattern matching search
 public type PatternMatch is {
     /// Location of the match
-    span: Span,
+    span: MetaSpan,
 
     /// Captured variables
     captures: Map<Text, TokenStream>,
@@ -1693,7 +1693,7 @@ public type ItemInfo is {
     kind: ItemKind,
 
     /// Source location
-    span: Span,
+    span: MetaSpan,
 
     /// Documentation
     doc: Maybe<Text>,
@@ -1921,7 +1921,7 @@ public context SourceMap {
     fn scope_path() -> Text;
 
     // =========================================================================
-    // Span Mapping
+    // MetaSpan Mapping
     // =========================================================================
 
     /// Map a generated span back to its generator
@@ -1929,16 +1929,16 @@ public context SourceMap {
 
     /// Creates a mapping from the generated code span to the
     /// current location in the meta function.
-    fn map_span_to_generator(generated_span: Span);
+    fn map_span_to_generator(generated_span: MetaSpan);
 
     /// Map a generated span to a specific source span
-    fn map_span_to_source(generated_span: Span, source_span: Span);
+    fn map_span_to_source(generated_span: MetaSpan, source_span: MetaSpan);
 
     /// Get the source span for a generated span
-    fn get_source_span(generated_span: Span) -> Maybe<Span>;
+    fn get_source_span(generated_span: MetaSpan) -> Maybe<MetaSpan>;
 
     /// Create a synthetic span with a descriptive message
-    fn synthetic_span(message: Text) -> Span;
+    fn synthetic_span(message: Text) -> MetaSpan;
 
     // =========================================================================
     // Line Mapping
@@ -1956,11 +1956,11 @@ public context SourceMap {
 
 /// Mapping between generated and source spans
 public type SpanMapping is {
-    /// Span in generated code
-    generated: Span,
+    /// MetaSpan in generated code
+    generated: MetaSpan,
 
-    /// Span in source (meta function)
-    source: Span,
+    /// MetaSpan in source (meta function)
+    source: MetaSpan,
 
     /// Name of generator scope
     scope: Text,
@@ -2123,7 +2123,7 @@ public type SchemaError is {
     message: Text,
 
     /// Location of error
-    span: Span,
+    span: MetaSpan,
 
     /// Severity
     severity: SchemaErrorSeverity,
@@ -2213,7 +2213,7 @@ implement Eq for SchemaError {
 ///  for cycle in cycles {
 ///  CompileDiag.emit_warning(
 ///  f"Circular dependency detected: {cycle.join(" -> ")}",
-///  Span.call_site()
+///  MetaSpan.call_site()
 ///  );
 ///  }
 /// }
@@ -2441,7 +2441,7 @@ public type StageRecord is {
     stage_level: UInt32,
 
     /// Source location where generation occurred
-    source_span: Span,
+    source_span: MetaSpan,
 
     /// Name of the generating function
     generator_name: Text,
@@ -2573,7 +2573,7 @@ public type TraceMarker is {
 ///  if stage == StageInfo.max_stage() {
 ///  CompileDiag.emit_note(
 ///  f"Executing at maximum stage {stage}",
-///  Span.call_site()
+///  MetaSpan.call_site()
 ///  );
 ///  }
 ///
@@ -2635,7 +2635,7 @@ public context StageInfo {
     ///  if max < 3 {
     ///  CompileDiag.emit_warning(
     ///  "Stage 3 disabled, some features unavailable",
-    ///  Span.call_site()
+    ///  MetaSpan.call_site()
     ///  );
     ///  }
     /// }
@@ -2762,7 +2762,7 @@ public context StageInfo {
     ///  // Cannot call higher-stage function
     ///  CompileDiag.emit_error(
     ///  "Cannot call higher-stage function from lower stage",
-    ///  Span.call_site()
+    ///  MetaSpan.call_site()
     ///  );
     ///  }
     ///  }
@@ -2960,7 +2960,7 @@ public context StageInfo {
     /// When executing inside generated code, returns the span of the
     /// quote expression that generated this code. Returns Maybe.None if
     /// at the top-level of a meta function (not inside generated code).
-    fn generation_origin() -> Maybe<Span>;
+    fn generation_origin() -> Maybe<MetaSpan>;
 
     /// Get the name of the function that generated current code
     ///
@@ -2991,7 +2991,7 @@ public context StageInfo {
 ///
 
 /// - Unique identifier generation (`gensym`, `stage_unique_ident`)
-/// - Span management (`call_site`, `def_site`, `mixed_site`)
+/// - MetaSpan management (`call_site`, `def_site`, `mixed_site`)
 /// - Invocation tracking (`invocation_id`)
 ///
 
@@ -3079,7 +3079,7 @@ public context Hygiene {
     /// let span = Hygiene.call_site();
     /// CompileDiag.emit_error("Invalid usage", span); // Points to user's code
     /// ```
-    fn call_site() -> Span;
+    fn call_site() -> MetaSpan;
 
     /// Get span at macro definition site (macro's hygiene context)
     ///
@@ -3093,7 +3093,7 @@ public context Hygiene {
     /// let span = Hygiene.def_site();
     /// // Identifiers can reference items from macro's module
     /// ```
-    fn def_site() -> Span;
+    fn def_site() -> MetaSpan;
 
     /// Get mixed span: visibility from call_site, resolution from def_site
     ///
@@ -3105,7 +3105,7 @@ public context Hygiene {
 
     /// This is useful for creating identifiers that users can see and use
     /// but that reference internal macro implementation details.
-    fn mixed_site() -> Span;
+    fn mixed_site() -> MetaSpan;
 
     /// Get unique identifier for current macro invocation
     ///
@@ -3476,7 +3476,7 @@ public using MetaValidated = [Schema, TypeInfo, AstAccess, CompileDiag];
 ///  for cycle in cycles {
 ///  CompileDiag.emit_warning(
 ///  f"Circular dependency: {cycle}",
-///  Span.call_site()
+///  MetaSpan.call_site()
 ///  );
 ///  }
 /// }
@@ -3605,7 +3605,7 @@ public type MetaParseError is {
     code: Maybe<Text>,
 
     /// Location of error
-    span: Span,
+    span: MetaSpan,
 
     /// Expected tokens/constructs
     expected: List<Text>,

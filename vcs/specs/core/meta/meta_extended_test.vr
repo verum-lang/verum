@@ -8,7 +8,7 @@
 //        ownership, field-offset, method-resolution, trait-bound, lifetime
 // @description: Extended tests for reflection type methods (FieldInfo attributes,
 //               VariantInfo patterns, GenericParam constraints, ProtocolInfo,
-//               FunctionInfo signatures), TokenStream, Span, Attribute types,
+//               FunctionInfo signatures), TokenStream, MetaSpan, Attribute types,
 //               OwnershipInfo, FieldOffset, MethodResolution, PrimitiveType, Visibility.
 // =============================================================================
 
@@ -21,7 +21,7 @@ mount core.meta.reflection.{
     MethodResolution, FunctionInfo, ParamInfo, SelfKind,
     ProtocolInfo, AssociatedTypeInfo,
 };
-mount core.meta.span.{Span, SpanFlags};
+mount core.meta.span.{SpanFlags};
 mount core.meta.token.{TokenStream, TokenTree, TokenKind, Delimiter};
 mount core.meta.attribute.{Attribute, AttributeStyle, AttributeArg, AttributeValue};
 mount core.base.maybe.{Maybe, Some, None};
@@ -447,12 +447,12 @@ fn test_self_kind_ref_mut() {
 }
 
 // =============================================================================
-// Section 12: Span
+// Section 12: MetaSpan
 // =============================================================================
 
 @test
 fn test_span_type() {
-    let opt: Maybe<Span> = None;
+    let opt: Maybe<MetaSpan> = None;
     assert(opt.is_none());
 }
 

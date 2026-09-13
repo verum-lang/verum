@@ -5,7 +5,7 @@
 // Builder-algebra laws for `core/meta/quote.vr`.
 //
 // The runtime-safe frontier of `QuoteBuilder` is narrow: every path
-// reaching a `@compiler_intrinsic` span (`Span.call_site`, `Span.join`,
+// reaching a `@compiler_intrinsic` span (`MetaSpan.call_site`, `MetaSpan.join`,
 // `keyword_from_str`) degenerates to `()` or trips a layout mismatch,
 // and ANY `Group` construction flakes under `--aot` (the
 // Group-vs-Probability TypeId collision is non-deterministic per
@@ -28,10 +28,10 @@
 
 mount core.meta.quote.{QuotePart, QuoteBuilder};
 mount core.meta.token.{TokenStream, TokenTree, Token, TokenKind, Delimiter};
-mount core.meta.span.{MetaSpan, Span, SpanFlags};
+mount core.meta.span.{MetaSpan, SpanFlags};
 mount core.base.maybe.{Maybe};
 
-fn synthetic_span() -> Span {
+fn synthetic_span() -> MetaSpan {
     MetaSpan {
         id: 0,
         hygiene: 0,

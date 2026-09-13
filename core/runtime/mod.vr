@@ -131,7 +131,7 @@ public module task_queue;
 // RuntimeConfig protocol and implementations
 public mount .config.{
     RuntimeConfig,
-    InitError,
+    RuntimeInitError,
     // I/O types
     IoOp,
     IoHandle,

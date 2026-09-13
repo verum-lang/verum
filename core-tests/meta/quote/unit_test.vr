@@ -21,12 +21,12 @@
 //
 //   BLOCKED ON BOTH TIERS (documented, NOT called — audit §3.5):
 //     * `QuoteBuilder.new()` / `TokenStream.empty()` / `quote.empty()`
-//       — `Span.call_site()` intrinsic degenerates the stream.
+//       — `MetaSpan.call_site()` intrinsic degenerates the stream.
 //     * `.ident()` / `Token.ident_spanned()` — cross-module static
 //       ctor layout mismatch.
 //     * `.punct/.operator/.int_lit/.float_lit/...` —
 //       `Token.punct`/`Token.literal` reach `call_site()`.
-//     * `.append/.push`, `quote.join_with` — `Span.join` intrinsic.
+//     * `.append/.push`, `quote.join_with` — `MetaSpan.join` intrinsic.
 //     * `GroupBuilder.close` — `from_trees` reaches call_site/join.
 //     * direct `Group { ... }` record literal — Group-vs-Probability
 //       TypeId collision (META-GROUP-XMODULE-1), field-write OOB.
@@ -42,7 +42,7 @@
 
 mount core.meta.quote.{QuotePart, QuoteBuilder};
 mount core.meta.token.{TokenStream, TokenTree, Token, TokenKind, Delimiter, Spacing, Literal};
-mount core.meta.span.{MetaSpan, Span, SpanFlags};
+mount core.meta.span.{MetaSpan, SpanFlags};
 mount core.base.maybe.{Maybe};
 
 // A two-field qualified variant constructor on an archive-resident
@@ -50,7 +50,7 @@ mount core.base.maybe.{Maybe};
 // `no method named 'Punct' found for type 'TokenKind'` while the BARE
 // form constructs. A COMPILE error, whole file down. See A132.
 
-fn synthetic_span() -> Span {
+fn synthetic_span() -> MetaSpan {
     MetaSpan {
         id: 0,
         hygiene: 0,
@@ -63,8 +63,8 @@ fn synthetic_span() -> Span {
 // type, found: TokenStream` although `core/meta/token.vr:107` declares it a
 // record and the neighbouring `Token { … }` literal constructs (A140). A
 // COMPILE error, so no `@ignore` contained it and all 22 tests here were
-// dead. `TokenStream.empty()` compiles and then PANICS on `Span.call_site`
-// (A120 — `Span` is declared twice in `core/` and the candidate list names
+// dead. `TokenStream.empty()` compiles and then PANICS on `MetaSpan.call_site`
+// (A120 — `MetaSpan` is declared twice in `core/` and the candidate list names
 // `MetaSpan.call_site`), so the tests that need an empty stream are pinned;
 // `from_trees` on a non-empty list takes the other branch and works.
 fn empty_ts() -> TokenStream {
@@ -81,7 +81,7 @@ fn test_quote_part_literal_variant() {
     assert(p is QuotePart.Literal);
 }
 
-@ignore("Needs an EMPTY TokenStream, and there is no spelling that works today: the record literal is refused by A140 and `TokenStream.empty()` panics on `Span.call_site` (A120 — `Span` is declared twice in `core/` and the candidate list names `MetaSpan.call_site`). Measured 2026-09-13. The non-empty path through `from_trees` works and the other 17 tests in this file pass on it.")
+@ignore("Needs an EMPTY TokenStream, and there is no spelling that works today: the record literal is refused by A140 and `TokenStream.empty()` panics on `MetaSpan.call_site` (A120 — `MetaSpan` is declared twice in `core/` and the candidate list names `MetaSpan.call_site`). Measured 2026-09-13. The non-empty path through `from_trees` works and the other 17 tests in this file pass on it.")
 @test
 fn test_quote_part_interpolate_variant() {
     let ts = TokenStream.empty();
@@ -89,7 +89,7 @@ fn test_quote_part_interpolate_variant() {
     assert(p is QuotePart.Interpolate);
 }
 
-@ignore("Needs an EMPTY TokenStream, and there is no spelling that works today: the record literal is refused by A140 and `TokenStream.empty()` panics on `Span.call_site` (A120 — `Span` is declared twice in `core/` and the candidate list names `MetaSpan.call_site`). Measured 2026-09-13. The non-empty path through `from_trees` works and the other 17 tests in this file pass on it.")
+@ignore("Needs an EMPTY TokenStream, and there is no spelling that works today: the record literal is refused by A140 and `TokenStream.empty()` panics on `MetaSpan.call_site` (A120 — `MetaSpan` is declared twice in `core/` and the candidate list names `MetaSpan.call_site`). Measured 2026-09-13. The non-empty path through `from_trees` works and the other 17 tests in this file pass on it.")
 @test
 fn test_quote_part_repeat_variant() {
     let iter = TokenStream.empty();
@@ -102,7 +102,7 @@ fn test_quote_part_repeat_variant() {
     assert(p is QuotePart.Repeat);
 }
 
-@ignore("Needs an EMPTY TokenStream, and there is no spelling that works today: the record literal is refused by A140 and `TokenStream.empty()` panics on `Span.call_site` (A120 — `Span` is declared twice in `core/` and the candidate list names `MetaSpan.call_site`). Measured 2026-09-13. The non-empty path through `from_trees` works and the other 17 tests in this file pass on it.")
+@ignore("Needs an EMPTY TokenStream, and there is no spelling that works today: the record literal is refused by A140 and `TokenStream.empty()` panics on `MetaSpan.call_site` (A120 — `MetaSpan` is declared twice in `core/` and the candidate list names `MetaSpan.call_site`). Measured 2026-09-13. The non-empty path through `from_trees` works and the other 17 tests in this file pass on it.")
 @test
 fn test_quote_part_variants_pairwise_disjoint() {
     let ts = TokenStream.empty();
@@ -117,7 +117,7 @@ fn test_quote_part_variants_pairwise_disjoint() {
 // =============================================================================
 //
 // `QuoteBuilder.new()` is intentionally NOT tested — it calls
-// `Span.call_site()`. `with_span(<MetaSpan>)` is the intrinsic-free
+// `MetaSpan.call_site()`. `with_span(<MetaSpan>)` is the intrinsic-free
 // entry point; a record literal is the other.
 //
 
@@ -173,7 +173,7 @@ fn test_builder_two_keywords_len_two() {
 // Section 4: splice (over an empty stream)
 // =============================================================================
 
-@ignore("Needs an EMPTY TokenStream, and there is no spelling that works today: the record literal is refused by A140 and `TokenStream.empty()` panics on `Span.call_site` (A120 — `Span` is declared twice in `core/` and the candidate list names `MetaSpan.call_site`). Measured 2026-09-13. The non-empty path through `from_trees` works and the other 17 tests in this file pass on it.")
+@ignore("Needs an EMPTY TokenStream, and there is no spelling that works today: the record literal is refused by A140 and `TokenStream.empty()` panics on `MetaSpan.call_site` (A120 — `MetaSpan` is declared twice in `core/` and the candidate list names `MetaSpan.call_site`). Measured 2026-09-13. The non-empty path through `from_trees` works and the other 17 tests in this file pass on it.")
 @test
 fn test_builder_splice_empty_adds_zero() {
     let b = QuoteBuilder { tokens: List.new(), span: synthetic_span() }
@@ -187,12 +187,12 @@ fn test_builder_splice_empty_adds_zero() {
 // =============================================================================
 //
 // The resulting stream's `.span` is NOT read — `from_trees` computes
-// it via `Span.join` / `call_site`. Post-build `.trees()` access and
+// it via `MetaSpan.join` / `call_site`. Post-build `.trees()` access and
 // `.flatten()` over GROUPS mis-lower under `--aot` (regression_test);
 // `.len()` and leaf-flatten hold on both tiers.
 //
 
-@ignore("Needs an EMPTY TokenStream, and there is no spelling that works today: the record literal is refused by A140 and `TokenStream.empty()` panics on `Span.call_site` (A120 — `Span` is declared twice in `core/` and the candidate list names `MetaSpan.call_site`). Measured 2026-09-13. The non-empty path through `from_trees` works and the other 17 tests in this file pass on it.")
+@ignore("Needs an EMPTY TokenStream, and there is no spelling that works today: the record literal is refused by A140 and `TokenStream.empty()` panics on `MetaSpan.call_site` (A120 — `MetaSpan` is declared twice in `core/` and the candidate list names `MetaSpan.call_site`). Measured 2026-09-13. The non-empty path through `from_trees` works and the other 17 tests in this file pass on it.")
 @test
 fn test_builder_build_empty_len_zero() {
     let ts = QuoteBuilder { tokens: List.new(), span: synthetic_span() }.build();

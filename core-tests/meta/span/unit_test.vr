@@ -5,7 +5,7 @@
 // `core/meta/span.vr` — source span and location tracking types.
 //
 // **Construction discipline.**  Cross-module factory functions
-// (`Span.call_site`, `SourceLocation.new`, `SpanRange.new`,
+// (`MetaSpan.call_site`, `SourceLocation.new`, `SpanRange.new`,
 // `MultiSpan.empty`, etc.) currently trip the **cross-module record
 // return-value path** in VBC codegen (audit.md §3.1 / referenced in
 // `[[enactment_field_access_oob_2026-05-24]]`):
@@ -21,7 +21,7 @@
 //   * SpanFlags 3-Bool record + independent bits
 //   * MetaSpan direct-field construction + .is_expansion /
 //     .is_synthetic + Eq/Ord-by-(id, hygiene)
-//   * Span alias resolves to MetaSpan
+//   * MetaSpan alias resolves to MetaSpan
 //   * SourceLocation 4-field record (direct construction)
 //   * SpanRange 2-field record (direct construction)
 //   * MultiSpan record (direct construction) + .is_empty +
@@ -32,7 +32,7 @@
 // resolution variants) belong at the verum_compiler test layer.
 // =============================================================================
 
-mount core.meta.span.{MetaSpan, Span, SourceLocation, SpanRange, MultiSpan, SpanFlags};
+mount core.meta.span.{MetaSpan, SourceLocation, SpanRange, MultiSpan, SpanFlags};
 mount core.base.maybe.{Maybe};
 
 // =============================================================================
@@ -157,12 +157,12 @@ fn test_meta_span_neq_different_hygiene() {
 }
 
 // =============================================================================
-// Section 4: Span public alias is MetaSpan
+// Section 4: MetaSpan public alias is MetaSpan
 // =============================================================================
 
 @test
 fn test_span_alias_accepts_meta_span_value() {
-    let s: Span = MetaSpan {
+    let s: MetaSpan = MetaSpan {
         id: 0,
         hygiene: 0,
         flags: SpanFlags { is_expansion: false, is_synthetic: true, is_hidden: false },
@@ -299,7 +299,7 @@ fn test_multi_span_with_primary_and_labeled() {
 // distinct hygiene marks, `location()` is `Maybe.None`, offsets are 0,
 // and `join`/`subspan` return `self` (the documented different-file
 // fallback). Pre-fix every one of these returned nil and the whole
-// runtime TokenStream ctor surface cascaded off `Span.call_site()`.
+// runtime TokenStream ctor surface cascaded off `MetaSpan.call_site()`.
 
 @test
 fn test_intrinsic_call_site_returns_synthetic_span() {

@@ -32,7 +32,7 @@
 module core.meta.reflection;
 
 mount core.{Text, List, Maybe};
-mount meta.span.{Span};
+mount meta.span.{MetaSpan};
 mount meta.attribute.{Attribute};
 
 // =============================================================================
@@ -157,7 +157,7 @@ public type FieldInfo is {
     doc: Maybe<Text>,
 
     /// Source span of field declaration
-    span: Span,
+    span: MetaSpan,
 };
 
 implement FieldInfo {
@@ -221,7 +221,7 @@ public type VariantInfo is {
     doc: Maybe<Text>,
 
     /// Source span of variant declaration
-    span: Span,
+    span: MetaSpan,
 };
 
 implement VariantInfo {
@@ -317,7 +317,7 @@ public type GenericParam is {
     default: Maybe<Text>,
 
     /// Source span
-    span: Span,
+    span: MetaSpan,
 };
 
 implement GenericParam {
@@ -396,7 +396,7 @@ public type ProtocolInfo is {
     doc: Maybe<Text>,
 
     /// Source span
-    span: Span,
+    span: MetaSpan,
 };
 
 implement ProtocolInfo {
@@ -438,7 +438,7 @@ public type AssociatedTypeInfo is {
     doc: Maybe<Text>,
 
     /// Source span
-    span: Span,
+    span: MetaSpan,
 };
 
 // =============================================================================
@@ -493,7 +493,7 @@ public type FunctionInfo is {
     visibility: Visibility,
 
     /// Source span
-    span: Span,
+    span: MetaSpan,
 };
 
 implement FunctionInfo {
@@ -583,7 +583,7 @@ public type ParamInfo is {
     attributes: List<Attribute>,
 
     /// Source span
-    span: Span,
+    span: MetaSpan,
 };
 
 implement ParamInfo {
@@ -784,7 +784,7 @@ public type TraitBound is {
     is_maybe: Bool,
 
     /// Source span
-    span: Span,
+    span: MetaSpan,
 };
 
 implement TraitBound {
@@ -864,7 +864,7 @@ public type LifetimeParam is {
     is_anonymous: Bool,
 
     /// Source span
-    span: Span,
+    span: MetaSpan,
 };
 
 implement LifetimeParam {

@@ -998,7 +998,7 @@ public mount .distributed.{
     ActorMesh,
     Actor,
     // Supervision
-    SupervisionStrategy,
+    DistributedSupervisionStrategy,
     MeshFailure,
     SupervisionDecision,
     DefaultSupervision,

@@ -98,10 +98,17 @@ public type RuntimeInitError is
     /// Already initialized
     | AlreadyInitialized;
 
-/// Public alias — short canonical name; internal type uses
-/// the verbose `RuntimeInitError` to disambiguate from other
-/// init errors in unrelated modules.
-public type InitError is RuntimeInitError;
+// THE SHORT ALIAS IS GONE, AND IT WAS USED BY NOTHING.
+//
+// Its own docstring said it existed "to disambiguate from other init
+// errors in unrelated modules" — and publishing the SHORT name is what
+// created the ambiguity: `core/sys/init.vr:78` declares an `InitError`
+// too, a colliding name resolves to no declaration at all, and
+// `InitError.AlreadyInitialized.message()` was refused against the bare
+// structural form. Four `core-tests/sys/init` files, 21 tests (A120).
+//
+// Every use in this file already spells `RuntimeInitError`, and nothing
+// anywhere mounted the short name.
 
 implement RuntimeInitError {
     public fn message(&self) -> Text {

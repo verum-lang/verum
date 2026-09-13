@@ -8,7 +8,7 @@
 // record-form `AttributeArg`.
 //
 // Construction discipline: direct record literal at the test site for
-// `Attribute` / `AttributeArg` / `TokenStream` / `Span` — avoids the
+// `Attribute` / `AttributeArg` / `TokenStream` / `MetaSpan` — avoids the
 // cross-module record-return field-access OOB defect (see
 // meta/span audit §3.1).
 // =============================================================================
@@ -23,14 +23,14 @@ mount core.meta.diakrisis_attrs.{
 };
 mount core.meta.attribute.{Attribute, AttributeStyle, AttributeArg, MetaAttributeValue};
 mount core.meta.token.{TokenStream};
-mount core.meta.span.{MetaSpan, Span, SpanFlags};
+mount core.meta.span.{MetaSpan, SpanFlags};
 mount core.base.maybe.{Maybe};
 
 // =============================================================================
 // Helpers (direct record construction — sidesteps cross-module .new ctors)
 // =============================================================================
 
-fn syn_span() -> Span {
+fn syn_span() -> MetaSpan {
     MetaSpan {
         id: 0,
         hygiene: 0,

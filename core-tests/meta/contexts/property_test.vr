@@ -51,13 +51,13 @@ mount core.meta.contexts.{
     InvocationId,
     ParseResult, MetaParseError, FormatOptions,
 };
-mount core.meta.span.{MetaSpan, Span, SpanFlags};
+mount core.meta.span.{MetaSpan, SpanFlags};
 mount core.meta.token.{TokenStream};
 mount core.base.maybe.{Maybe};
 
 // ---- builders ---------------------------------------------------------------
 
-fn ssp() -> Span {
+fn ssp() -> MetaSpan {
     MetaSpan {
         id: 0,
         hygiene: 0,
@@ -65,7 +65,7 @@ fn ssp() -> Span {
     }
 }
 
-fn sp(id: UInt64) -> Span {
+fn sp(id: UInt64) -> MetaSpan {
     MetaSpan {
         id,
         hygiene: 0,

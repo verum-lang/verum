@@ -91,7 +91,7 @@ BASELINE_ALL_TYPED = 297
 # `Modifier` sum — so `write_modifiers` shipped as a panic stub until the
 # SQLite type was renamed `DateModifier`. Every remaining pair is the same
 # shape, waiting for a resolution order to shift under it.
-BASELINE_TYPES = 131
+BASELINE_TYPES = 128
 # The subset of BASELINE_TYPES whose declarations disagree about the type's
 # SHAPE — record vs newtype vs sum vs unit vs protocol. Measured 2026-09-12.
 # This is the ratchet that matters: a shape disagreement is what makes
@@ -103,13 +103,31 @@ BASELINE_TYPES = 131
 # `public type` and the gate's own extractor counts private ones too.
 # The instrument was already in the tree and disagreed with the probe.
 #
-# 43 -> 42 on 2026-09-13: `core/shell/resources.vr`'s record `Fd` became
+# 43 -> 41 and 132 -> 128 on 2026-09-13. `core/shell/resources.vr`'s record `Fd` became
 # `ShellFd`, leaving `core/sys/io_engine.vr`'s newtype `Fd` alone. That is
 # the project's OWN method for this class — `RawSocketAddr`, `EngineDuration`,
 # `LinuxMutex` and `DarwinMutex` were all renamed for the same reason — and
 # it is the only lever that moves this number, since the compiler-side fix
 # (A120) resolves lookup rather than removing the collision.
-BASELINE_TYPES_SHAPE = 42
+#
+# THE OTHER THREE WERE SHORT ALIASES THAT EXISTED ONLY TO COLLIDE.
+# `core/math/distributed.vr` declared `type SupervisionStrategy is
+# DistributedSupervisionStrategy;`, `core/runtime/config.vr` declared
+# `type InitError is RuntimeInitError;` — its docstring even said the
+# verbose name was there "to disambiguate from other init errors in
+# unrelated modules", and publishing the short one is what created the
+# ambiguity — and `core/meta/span.vr` declared `type Span is MetaSpan;`,
+# which is the wall behind every empty `TokenStream`. None of the three was
+# used by anything: every reference in their own files already spelled the
+# verbose name.
+#
+# THIRTY-ONE MORE OF THE SAME SHAPE REMAIN, found by asking which aliases
+# name a type the tree declares more than once: `Thread is DarwinThread`,
+# `Stopwatch is LinuxStopwatch`, `CpuFeatures is X86CpuFeatures`,
+# `Layout is TensorLayout`, `Tensor is SimpleTensor`, … Most are
+# `@cfg(target_os)` platform twins that never coexist in one build, which
+# is why they cost nothing measurable; the rest are one rename each.
+BASELINE_TYPES_SHAPE = 41
 BASELINE_SQLITE_TYPED = 15
 
 # `public fn name(args)` at column 0 — the free-function surface. Methods

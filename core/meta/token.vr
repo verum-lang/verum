@@ -51,7 +51,7 @@
 module core.meta.token;
 
 mount core.{Result, Maybe, Text, List, Iterator};
-mount meta.span.{Span};
+mount meta.span.{MetaSpan};
 
 // =============================================================================
 // TokenStream
@@ -108,8 +108,8 @@ public type TokenStream is {
     /// Internal token buffer
     tokens: List<TokenTree>,
 
-    /// Span covering entire stream
-    span: Span,
+    /// MetaSpan covering entire stream
+    span: MetaSpan,
 };
 
 implement TokenStream {
@@ -121,7 +121,7 @@ implement TokenStream {
     public fn empty() -> Self {
         Self {
             tokens: List.new(),
-            span: Span.call_site(),
+            span: MetaSpan.call_site(),
         }
     }
 
@@ -145,7 +145,7 @@ implement TokenStream {
     /// Create token stream from list of trees
     public fn from_trees(trees: List<TokenTree>) -> Self {
         let span = if trees.is_empty() {
-            Span.call_site()
+            MetaSpan.call_site()
         } else {
             trees.first().expect("from_trees: non-empty branch (else-branch above)").span()
                 .join(trees.last().expect("from_trees: non-empty branch — last is_some too").span())
@@ -197,7 +197,7 @@ implement TokenStream {
     }
 
     /// Get span covering entire stream
-    public fn span(&self) -> Span {
+    public fn span(&self) -> MetaSpan {
         self.span
     }
 
@@ -343,7 +343,7 @@ implement TokenStream {
     }
 
     /// Apply span to all tokens
-    public fn with_span(mut self, span: Span) -> Self {
+    public fn with_span(mut self, span: MetaSpan) -> Self {
         self.span = span;
         for tree in self.tokens.iter_mut() {
             tree.set_span(span);
@@ -357,7 +357,7 @@ implement TokenStream {
 
     fn recalculate_span(&mut self) {
         if self.tokens.is_empty() {
-            self.span = Span.call_site();
+            self.span = MetaSpan.call_site();
         } else {
             self.span = self.tokens.first()
                 .expect("recalculate_span: non-empty branch (else-branch above)")
@@ -420,7 +420,7 @@ public type Delimiter is
 public type TokenGroup is {
     delimiter: Delimiter,
     tokens: TokenStream,
-    span: Span,
+    span: MetaSpan,
 };
 
 // =============================================================================
@@ -441,7 +441,7 @@ public type TokenTree is
 
 implement TokenTree {
     /// Get span of this tree
-    public fn span(&self) -> Span {
+    public fn span(&self) -> MetaSpan {
         match self {
             Leaf(t) => t.span,
             Grouped(g) => g.span,
@@ -449,7 +449,7 @@ implement TokenTree {
     }
 
     /// Set span of this tree
-    public fn set_span(&mut self, span: Span) {
+    public fn set_span(&mut self, span: MetaSpan) {
         match self {
             Leaf(t) => t.span = span,
             Grouped(g) => g.span = span,
@@ -507,7 +507,7 @@ public type Token is {
     kind: TokenKind,
 
     /// Source span
-    span: Span,
+    span: MetaSpan,
 };
 
 implement Token {
@@ -519,12 +519,12 @@ implement Token {
     public fn ident(name: Text) -> Self {
         Self {
             kind: TokenKind.Ident(name),
-            span: Span.call_site(),
+            span: MetaSpan.call_site(),
         }
     }
 
     /// Create identifier token with span
-    public fn ident_spanned(name: Text, span: Span) -> Self {
+    public fn ident_spanned(name: Text, span: MetaSpan) -> Self {
         Self {
             kind: TokenKind.Ident(name),
             span,
@@ -535,7 +535,7 @@ implement Token {
     public fn keyword(kw: Keyword) -> Self {
         Self {
             kind: TokenKind.Kw(kw),
-            span: Span.call_site(),
+            span: MetaSpan.call_site(),
         }
     }
 
@@ -543,7 +543,7 @@ implement Token {
     public fn literal(value: Literal) -> Self {
         Self {
             kind: TokenKind.Lit(value),
-            span: Span.call_site(),
+            span: MetaSpan.call_site(),
         }
     }
 
@@ -551,7 +551,7 @@ implement Token {
     public fn punct(ch: Char, spacing: Spacing) -> Self {
         Self {
             kind: TokenKind.Punct(ch, spacing),
-            span: Span.call_site(),
+            span: MetaSpan.call_site(),
         }
     }
 
@@ -608,7 +608,7 @@ implement Token {
     }
 
     /// Set span
-    public fn with_span(mut self, span: Span) -> Self {
+    public fn with_span(mut self, span: MetaSpan) -> Self {
         self.span = span;
         self
     }
@@ -802,11 +802,11 @@ public type LexError is {
     message: Text,
 
     /// Location of error
-    span: Span,
+    span: MetaSpan,
 };
 
 implement LexError {
-    public fn new(message: Text, span: Span) -> Self {
+    public fn new(message: Text, span: MetaSpan) -> Self {
         Self { message, span }
     }
 }

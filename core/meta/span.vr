@@ -96,9 +96,20 @@ public type MetaSpan is {
     flags: SpanFlags,
 };
 
-/// Public alias — `Span` is the canonical short name expected by
-/// macro / quote-API users; `MetaSpan` is the internal verbose form.
-public type Span is MetaSpan;
+// THE SHORT ALIAS IS GONE. It read
+//
+//     public type Span is MetaSpan;
+//
+// and `Span` is declared again at `core/tracing/data.vr:1328`. A colliding
+// name resolves to no declaration at all, so `Span.call_site()` — called
+// from `TokenStream.empty()` in `core/meta/token.vr` — panicked with
+// `method 'Span.call_site' not found on receiver of runtime kind 'TypeRef';
+// 1 candidate: MetaSpan.call_site`. That is the wall behind every empty
+// `TokenStream`: 20 tests across four `core-tests/meta` files, pinned on
+// it (A120/A140).
+//
+// Every `core/meta` file now spells `MetaSpan` — 126 occurrences rewritten
+// together, because the alias was reachable from seven of them by mount.
 
 /// MetaSpan flags
 @repr(UInt8)

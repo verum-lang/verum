@@ -957,8 +957,16 @@ public type DistributedSupervisionStrategy is
     // Restart all children (for correlated failures)
     | RestartAll;
 
-/// Public alias — short canonical name.
-public type SupervisionStrategy is DistributedSupervisionStrategy;
+// THE SHORT ALIAS IS GONE, AND IT WAS USED BY NOTHING.
+// `public type SupervisionStrategy is DistributedSupervisionStrategy;`
+// collided with `core/runtime/supervisor.vr:139`'s real
+// `SupervisionStrategy`, and a colliding name resolves to no declaration
+// at all — `SupervisionStrategy.OneForOne.description()` was refused
+// against the bare structural form and all 14 tests in
+// `core-tests/runtime/supervisor/property_test.vr` were dead (A120).
+// Every use in THIS file already spells `DistributedSupervisionStrategy`
+// (lines 982, 990, 996), and nothing outside `core/math` mounted the
+// short name, so the alias existed only to generate the clash.
 
 // Mesh failure descriptor
 public type MeshFailure is {

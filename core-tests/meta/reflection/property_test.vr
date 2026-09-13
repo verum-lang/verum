@@ -28,14 +28,14 @@ mount core.meta.reflection.{
     TypeKind, VariantKind, VariantInfo, FieldInfo, Visibility, PrimitiveType,
     FunctionInfo, ParamInfo, SelfKind, GenericParam, GenericParamKind,
 };
-mount core.meta.span.{MetaSpan, Span, SpanFlags};
+mount core.meta.span.{MetaSpan, SpanFlags};
 mount core.base.maybe.{Maybe};
 
 // -----------------------------------------------------------------------------
 // Helpers
 // -----------------------------------------------------------------------------
 
-fn ssp() -> Span {
+fn ssp() -> MetaSpan {
     MetaSpan {
         id: 0,
         hygiene: 0,

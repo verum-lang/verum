@@ -62,7 +62,7 @@ module core.meta.diakrisis_attrs;
 
 mount core.{Text, List, Maybe, Result};
 mount meta.attribute.{Attribute, AttributeArg, MetaAttributeValue};
-mount meta.span.{Span};
+mount meta.span.{MetaSpan};
 
 // -----------------------------------------------------------------------------
 // 1. @effect(<kind>) — VVA Part B §9
@@ -119,7 +119,7 @@ implement DiakrisisEffectKind {
 /// Validated `@effect(<kind>)` annotation.
 public type EffectAttr is {
     kind: DiakrisisEffectKind,
-    span: Span,
+    span: MetaSpan,
 };
 
 /// Meta-fn: extract a validated `EffectAttr` from a generic
@@ -173,7 +173,7 @@ implement InfinityLevel {
 /// Validated `@infinity_category(<level>)` annotation.
 public type InfinityCategoryAttr is {
     level: InfinityLevel,
-    span: Span,
+    span: MetaSpan,
 };
 
 /// Meta-fn: extract `InfinityCategoryAttr` from generic attribute.
@@ -217,7 +217,7 @@ public fn parse_infinity_category(attr: &Attribute) -> Maybe<InfinityCategoryAtt
 public type AutopoieticAttr is {
     epsilon: Text,
     depth: Int,
-    span: Span,
+    span: MetaSpan,
 };
 
 /// Meta-fn: extract `AutopoieticAttr` from generic attribute.
@@ -260,7 +260,7 @@ public fn parse_autopoietic(attr: &Attribute) -> Maybe<AutopoieticAttr> {
 
 /// Validated `@ludic_design` annotation (zero-arg marker).
 public type LudicDesignAttr is {
-    span: Span,
+    span: MetaSpan,
 };
 
 /// Meta-fn: extract `LudicDesignAttr` from generic attribute.
@@ -282,7 +282,7 @@ public const CUT_ELIMINATION_DEFAULT_BOUND: Int = 1000;
 /// optional; default per `CUT_ELIMINATION_DEFAULT_BOUND`.
 public type CutEliminationAttr is {
     bound: Int,
-    span: Span,
+    span: MetaSpan,
 };
 
 /// Meta-fn: extract `CutEliminationAttr` from generic attribute.

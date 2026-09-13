@@ -67,7 +67,7 @@
 // =============================================================================
 
 mount core.meta.attribute.{Attribute, AttributeArg};
-mount core.meta.span.{Span};
+mount core.meta.span.{MetaSpan};
 
 // =============================================================================
 // Diagnostic types
@@ -92,14 +92,14 @@ public type HygieneDiagnostic is {
     rule:     Text,         // R1 / R2 / R3 / …
     severity: HygieneSeverity,
     message:  Text,
-    span:     Span,
+    span:     MetaSpan,
 };
 
 public fn hygiene_diagnostic(
     rule: Text,
     severity: HygieneSeverity,
     message: Text,
-    span: Span,
+    span: MetaSpan,
 ) -> HygieneDiagnostic {
     HygieneDiagnostic {
         rule:     rule,
@@ -143,7 +143,7 @@ public fn name_has_brand_prefix(name: Text) -> Bool {
 /// build can continue (R1 is about hygiene, not soundness).
 public fn validate_foundation_neutral_name(
     decl_name: Text,
-    decl_span: Span,
+    decl_span: MetaSpan,
 ) -> Maybe<HygieneDiagnostic> {
     if name_has_brand_prefix(decl_name.clone()) {
         let msg: Text = Text.from("axiom name '")
@@ -177,7 +177,7 @@ public fn validate_foundation_neutral_name(
 /// (e.g. via raw `Attribute.tokens` manipulation).
 public fn validate_epsilon_canonicalisable(
     epsilon_text: Text,
-    decl_span: Span,
+    decl_span: MetaSpan,
 ) -> Maybe<HygieneDiagnostic> {
     let s = epsilon_text.clone();
 
@@ -289,7 +289,7 @@ public fn meta_classifier_tally_new() -> MetaClassifierTally {
 
 public fn validate_meta_classifier_uniqueness(
     tally: MetaClassifierTally,
-    span: Span,
+    span: MetaSpan,
 ) -> Maybe<HygieneDiagnostic> {
     if (tally.candidates.len() as Int) <= 1 {
         return Maybe.None;
@@ -333,10 +333,10 @@ public fn validate_meta_classifier_uniqueness(
 /// and gate downstream phases on the (severity == Error)-free
 /// result.
 public fn run_all_hygiene_rules(
-    declarations: List<(Text, Span)>,    // (name, span) pairs
-    epsilon_uses: List<(Text, Span)>,    // (epsilon, span) pairs
+    declarations: List<(Text, MetaSpan)>,    // (name, span) pairs
+    epsilon_uses: List<(Text, MetaSpan)>,    // (epsilon, span) pairs
     meta_classifier_tally: MetaClassifierTally,
-    tally_span: Span,
+    tally_span: MetaSpan,
 ) -> List<HygieneDiagnostic> {
     let mut diagnostics: List<HygieneDiagnostic> = List.new();
 

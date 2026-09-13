@@ -41,14 +41,14 @@ mount core.meta.reflection.{
 };
 mount core.meta.attribute.{Attribute, AttributeStyle};
 mount core.meta.token.{TokenStream};
-mount core.meta.span.{MetaSpan, Span, SpanFlags};
+mount core.meta.span.{MetaSpan, SpanFlags};
 mount core.base.maybe.{Maybe};
 
 // -----------------------------------------------------------------------------
 // Builders
 // -----------------------------------------------------------------------------
 
-fn ssp() -> Span {
+fn ssp() -> MetaSpan {
     MetaSpan {
         id: 0,
         hygiene: 0,
