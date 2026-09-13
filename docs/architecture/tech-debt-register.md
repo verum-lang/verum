@@ -275,7 +275,16 @@ three — T0707 (Item<Range>-argless residual). **Still reproduces 2026-09-13** 
 T1467, T1468 and T1470: the same 16 errors in the same file, `Item<ISize> <- Int` eleven times and
 `Int <- Item<ISize>` five, all of them on `peekable`, `fuse` and `.map(|x| …)` chains — so none of
 the wanted-set repairs of that day touch it, which is worth knowing before anyone tries them again.
-**AND THE MULTIPLICITY IS NOT THE AXIS EITHER, measured the same day**: a 44-line LOCAL twin carrying
+**THE RESOLVER IS NEVER ASKED ABOUT THE RECEIVER, measured 2026-09-13 with the tree's own tracer**:
+`VERUM_TRACE_ASSOC=1` over the five-line repro prints exactly ONE distinct query for the whole
+compile — `resolve ::Item for type_key='ISize' — 53 impl(s) registered`, six times — and none of the
+53 has an `Item`. There is no query for `Range<Int>`, none for `PeekableIter<…>`, none for any
+iterator at all. So the projection is not mis-RESOLVED; it arrives at the resolver already carrying
+`ISize` as its base, which puts the defect in whatever SUBSTITUTES the adapter's type parameter, not
+in `try_find_associated_type`. Worth knowing where else that substitution can go wrong:
+`iterator.vr:57` declares `public type PeekableIter<I: Iterator> is { iter: I, peeked:
+Maybe<Maybe<I.Item>> }` — the FIELD type mentions `I.Item` too, so the impl's `type Item = I.Item` is
+not the only site. **AND THE MULTIPLICITY IS NOT THE AXIS EITHER, measured the same day**: a 44-line LOCAL twin carrying
 the whole shape — `MyRange<T>` with TWO `MyIter` impls (`MyRange<Int>` and `MyRange<ISize>`), a
 `Boxed<I>` adapter whose `type Item = I.Item` and whose signature mentions `Item` nowhere, and a
 `my_range(…) -> MyRange<Int>` constructor as concrete as `range`'s — typechecks clean. So "one type
