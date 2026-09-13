@@ -16,7 +16,7 @@ Bucket	database/sqlite/native/statistics/histogram.vr,net/tls13/handshake/zero_r
 Builder	database/sqlite/native/sqlite3_str_builder_api/builder.vr,security/provenance.vr
 CacheEntry	database/postgres/stmt_cache.vr,security/tuf/repository.vr,security/x509/crl_client.vr
 CacheError	cache/types.vr,database/sqlite/native/stmt_cache/cache.vr
-Capability	architecture/types.vr,database/common/capability.vr,logic/separation.vr,mem/capability.vr
+Capability	architecture/types.vr,database/common/capability.vr,logic/separation.vr
 Cause	base/result.vr,cog/resolve.vr
 Cell	base/cell.vr,security/zk/halo2/circuit.vr
 CheckpointMode	database/sqlite/native/l1_pager/wal_pager.vr,database/sqlite/native/walblock/mode.vr

@@ -15,7 +15,7 @@
 
 mount core.prelude.*;
 mount core.mem.capability.{
-    Capability,
+    MemCapability,
     Read, Write, Execute, Delegate, Revoke, Borrowed, Mutable, NoEscape,
     CAP_READ, CAP_WRITE, CAP_EXECUTE, CAP_DELEGATE, CAP_REVOKE,
     CAP_BORROWED, CAP_MUTABLE, CAP_NO_ESCAPE,
@@ -31,7 +31,7 @@ mount core.mem.capability.{
 };
 
 // =============================================================================
-// Section 1: Capability flag bit positions
+// Section 1: MemCapability flag bit positions
 // =============================================================================
 
 @test
@@ -93,7 +93,7 @@ fn test_all_caps_are_pairwise_distinct() {
 }
 
 // =============================================================================
-// Section 2: Capability presets
+// Section 2: MemCapability presets
 // =============================================================================
 
 @test
@@ -405,65 +405,65 @@ fn test_pack_distinct_epoch_and_caps_extract_distinctly() {
 }
 
 // =============================================================================
-// Section 11: Capability type — to_bit + is_present
+// Section 11: MemCapability type — to_bit + is_present
 // =============================================================================
 
 @test
 fn test_capability_to_bit_matches_constant_read() {
-    let c: Capability = Read;
+    let c: MemCapability = Read;
     assert_eq(c.to_bit(), CAP_READ);
 }
 
 @test
 fn test_capability_to_bit_matches_constant_write() {
-    let c: Capability = Write;
+    let c: MemCapability = Write;
     assert_eq(c.to_bit(), CAP_WRITE);
 }
 
 @test
 fn test_capability_to_bit_matches_constant_execute() {
-    let c: Capability = Execute;
+    let c: MemCapability = Execute;
     assert_eq(c.to_bit(), CAP_EXECUTE);
 }
 
 @test
 fn test_capability_to_bit_matches_constant_delegate() {
-    let c: Capability = Delegate;
+    let c: MemCapability = Delegate;
     assert_eq(c.to_bit(), CAP_DELEGATE);
 }
 
 @test
 fn test_capability_to_bit_matches_constant_revoke() {
-    let c: Capability = Revoke;
+    let c: MemCapability = Revoke;
     assert_eq(c.to_bit(), CAP_REVOKE);
 }
 
 @test
 fn test_capability_to_bit_matches_constant_borrowed() {
-    let c: Capability = Borrowed;
+    let c: MemCapability = Borrowed;
     assert_eq(c.to_bit(), CAP_BORROWED);
 }
 
 @test
 fn test_capability_to_bit_matches_constant_mutable() {
-    let c: Capability = Mutable;
+    let c: MemCapability = Mutable;
     assert_eq(c.to_bit(), CAP_MUTABLE);
 }
 
 @test
 fn test_capability_to_bit_matches_constant_no_escape() {
-    let c: Capability = NoEscape;
+    let c: MemCapability = NoEscape;
     assert_eq(c.to_bit(), CAP_NO_ESCAPE);
 }
 
 @test
 fn test_capability_is_present_in_owned_set() {
     let owned: UInt16 = CAP_OWNED;
-    let read: Capability = Read;
-    let write: Capability = Write;
-    let delegate: Capability = Delegate;
-    let revoke: Capability = Revoke;
-    let mutable: Capability = Mutable;
+    let read: MemCapability = Read;
+    let write: MemCapability = Write;
+    let delegate: MemCapability = Delegate;
+    let revoke: MemCapability = Revoke;
+    let mutable: MemCapability = Mutable;
     assert(read.is_present(owned));
     assert(write.is_present(owned));
     assert(delegate.is_present(owned));
@@ -474,9 +474,9 @@ fn test_capability_is_present_in_owned_set() {
 @test
 fn test_capability_is_present_absent_in_read_only() {
     let ro: UInt16 = CAP_READ_ONLY;
-    let read: Capability = Read;
-    let write: Capability = Write;
-    let delegate: Capability = Delegate;
+    let read: MemCapability = Read;
+    let write: MemCapability = Write;
+    let delegate: MemCapability = Delegate;
     assert(read.is_present(ro));
     assert(!write.is_present(ro));
     assert(!delegate.is_present(ro));

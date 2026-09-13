@@ -34,7 +34,6 @@ CacheError	core/database/sqlite/native/stmt_cache/cache.vr
 Capability	core/architecture/types.vr
 Capability	core/database/common/capability.vr
 Capability	core/logic/separation.vr
-Capability	core/mem/capability.vr
 Cause	core/base/result.vr
 Cause	core/cog/resolve.vr
 Cell	core/base/cell.vr

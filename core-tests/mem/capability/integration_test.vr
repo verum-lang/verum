@@ -41,7 +41,7 @@ fn integration_delegate_then_attenuate_chain() {
 }
 
 // -----------------------------------------------------------------------------
-// §2  Capability flow through pack/unpack — the round-trip survives a
+// §2  MemCapability flow through pack/unpack — the round-trip survives a
 //     full CBGR-reference field-write boundary.
 // -----------------------------------------------------------------------------
 
@@ -186,7 +186,7 @@ fn integration_revoke_increments_generation_independently_of_caps() {
 }
 
 // -----------------------------------------------------------------------------
-// §8  Capability lattice ordering: every preset is reachable from
+// §8  MemCapability lattice ordering: every preset is reachable from
 //     CAP_ALL via attenuation, never via promotion. The lattice's
 //     bottom is 0 (no capabilities); top is CAP_ALL.
 // -----------------------------------------------------------------------------

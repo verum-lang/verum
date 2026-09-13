@@ -29,7 +29,7 @@
 // =============================================================================
 
 // =============================================================================
-// Capability Flags (bit positions)
+// MemCapability Flags (bit positions)
 // =============================================================================
 
 /// Can read data through reference.
@@ -64,7 +64,7 @@ public const CAP_MUTABLE: UInt16 = 1 << 6;
 public const CAP_NO_ESCAPE: UInt16 = 1 << 7;
 
 // =============================================================================
-// Capability Presets
+// MemCapability Presets
 // =============================================================================
 
 /// All capabilities enabled.
@@ -89,11 +89,24 @@ public const CAP_BORROW_MUT: UInt16 = CAP_READ | CAP_WRITE | CAP_BORROWED | CAP_
 public const CAP_EXECUTABLE: UInt16 = CAP_READ | CAP_EXECUTE;
 
 // =============================================================================
-// Capability Type (for type-safe operations)
+// MemCapability Type (for type-safe operations)
 // =============================================================================
 
 /// Type-safe capability wrapper.
-public type Capability is
+// `MemCapability`, not `Capability`. FOUR modules declared a type called
+// `Capability` — `core/architecture/types.vr` (81 uses across 7 files),
+// `core/database/common/capability.vr` (a PROTOCOL, 54 uses across 17),
+// `core/logic/separation.vr` and this one — and a colliding name resolves
+// to no declaration at all, so `Capability.Read.to_bit()` was refused
+// against the bare structural form `Read(Unit) | Write(Unit) | …` and all
+// 62 tests in `core-tests/mem/capability/unit_test.vr` were dead (A120).
+//
+// This side is the one that moved because it is the smallest: nine uses in
+// this file and nothing else in `core/` — `core/mem/allocator.vr`'s
+// `Capability.Write(ResourceTag.Memory(…))` is the ARCHITECTURE one, in an
+// `@arch_module` attribute. The name is also more honest: these are MEMORY
+// capabilities, the way `ShellFd` and `RawSocketAddr` are named.
+public type MemCapability is
     | Read
     | Write
     | Execute
@@ -104,7 +117,7 @@ public type Capability is
     | NoEscape
     ;
 
-implement Capability {
+implement MemCapability {
     /// Get the bit value for this capability.
     public fn to_bit(&self) -> UInt16 {
         match self {
@@ -126,7 +139,7 @@ implement Capability {
 }
 
 // =============================================================================
-// Capability Operations
+// MemCapability Operations
 // =============================================================================
 
 /// Check if a capability is present in a flag set.
@@ -246,7 +259,7 @@ public fn mutable_borrow_capabilities() -> UInt16 {
 }
 
 // =============================================================================
-// Capability Validation
+// MemCapability Validation
 // =============================================================================
 
 /// Validate read access.

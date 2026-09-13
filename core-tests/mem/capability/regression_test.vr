@@ -20,11 +20,11 @@
 //       semantics that the canonical implementation now uses.
 //       audit.md §3.2.
 //   §C  Bare-name variant constructors (`Read`, `Write`, … instead of
-//       `Capability.Read`) — the qualified form `Capability.Read`
+//       `MemCapability.Read`) — the qualified form `MemCapability.Read`
 //       failed to resolve at compile-time because variant lookup on the
 //       sum type went through bidirectional Path dispatch which had no
 //       fallback to the parent enum.  Pin the workaround: every
-//       Capability-typed binding uses the bare-name form.  Tracked
+//       MemCapability-typed binding uses the bare-name form.  Tracked
 //       by MEMORY task #5 §3.1 (closed via commit 6cac007b1).
 //   §D  has_all_capabilities(x, 0) is `(x & 0) == 0` ⇒ true — the empty
 //       set is vacuously a subset of every flag-set.  Pin this corner
@@ -33,7 +33,7 @@
 
 mount core.prelude.*;
 mount core.mem.capability.{
-    Capability,
+    MemCapability,
     Read, Write, Execute, Delegate, Revoke, Borrowed, Mutable, NoEscape,
     CAP_READ, CAP_WRITE, CAP_DELEGATE, CAP_REVOKE, CAP_MUTABLE,
     CAP_ALL, CAP_OWNED, CAP_READ_ONLY,
@@ -99,14 +99,14 @@ fn regression_bare_variant_construction_resolves() {
     // Pre-task-#5-§3.1, bare-name `Read` could collide with another
     // stdlib enum's `Read` constructor.  Bidirectional Path-arm resolution
     // routes bare variants through the expected type context.
-    let read: Capability = Read;
-    let write: Capability = Write;
-    let execute: Capability = Execute;
-    let delegate: Capability = Delegate;
-    let revoke: Capability = Revoke;
-    let borrowed: Capability = Borrowed;
-    let mutable: Capability = Mutable;
-    let no_escape: Capability = NoEscape;
+    let read: MemCapability = Read;
+    let write: MemCapability = Write;
+    let execute: MemCapability = Execute;
+    let delegate: MemCapability = Delegate;
+    let revoke: MemCapability = Revoke;
+    let borrowed: MemCapability = Borrowed;
+    let mutable: MemCapability = Mutable;
+    let no_escape: MemCapability = NoEscape;
     assert_eq(read.to_bit(), CAP_READ);
     assert_eq(write.to_bit(), CAP_WRITE);
     assert_eq(execute.to_bit(), 4 as UInt16);
