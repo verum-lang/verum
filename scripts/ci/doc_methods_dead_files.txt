@@ -36,7 +36,6 @@
 core-tests/base/iterator/unit_test.vr  # 215 test(s), 16 error(s)
 core-tests/meta/contexts/property_test.vr  # 36 test(s), 17 error(s)
 core-tests/meta/contexts/unit_test.vr  # 102 test(s), 14 error(s)
-core-tests/runtime/async_ops/property_test.vr  # 9 test(s), 1 error(s)
 
 # NOT a typecheck failure, but it never runs either: the runner dies with
 # SIGSEGV before the first test. Measured twice on 2026-09-12, once on
