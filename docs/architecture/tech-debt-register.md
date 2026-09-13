@@ -275,7 +275,7 @@ three — T0707 (Item<Range>-argless residual). **Still reproduces 2026-09-13** 
 T1467, T1468 and T1470: the same 16 errors in the same file, `Item<ISize> <- Int` eleven times and
 `Int <- Item<ISize>` five, all of them on `peekable`, `fuse` and `.map(|x| …)` chains — so none of
 the wanted-set repairs of that day touch it, which is worth knowing before anyone tries them again.
-**THE RESOLVER IS NEVER ASKED ABOUT THE RECEIVER, measured 2026-09-13 with the tree's own tracer**:
+**AND `ISize` IS THE ALPHABETICALLY FIRST OF THE ELEVEN — a lead, not a conclusion.** Sorted, the eleven per-width `Range` impls order `ISize, Int, Int16, Int32, Int64, Int8, UInt16, UInt32, UInt64, UInt8, USize`, and as type keys `named:Range.[ISize]` is likewise first: `'S'` (0x53) beats `'n'` (0x6e) at the second character, so `ISize` wins over `Int`. In DECLARATION order `Range<Int>` is first and `Range<ISize>` is tenth. So if the unconstrained `Self` is being filled from a set iterated or keyed in SORTED order rather than declaration order, `ISize` is exactly what it would pick — which is exactly what it picks. `get_implementations` sorts its exact matches by impl index and would give `Int`, so the site that chooses is a different one. That is the next thing to instrument, and the prediction is falsifiable: make the chooser use declaration order and the answer becomes `Int`. **THE RESOLVER IS NEVER ASKED ABOUT THE RECEIVER, measured 2026-09-13 with the tree's own tracer**:
 `VERUM_TRACE_ASSOC=1` over the five-line repro prints exactly ONE distinct query for the whole
 compile — `resolve ::Item for type_key='ISize' — 53 impl(s) registered`, six times — and none of the
 53 has an `Item`. There is no query for `Range<Int>`, none for `PeekableIter<…>`, none for any
