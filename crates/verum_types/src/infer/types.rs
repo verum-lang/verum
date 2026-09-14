@@ -5268,6 +5268,26 @@ fn substitute_refinement_binder(
                 // Convert path to string for lookup (handles both simple and qualified paths)
                 let type_name = self.path_to_string(path);
 
+                // INSTRUMENT (VERUM_TRACE_NAMEDNORM=<substring>): the NAMED
+                // type whose definition is about to be walked, with its
+                // ARGS. R3's `::Item<ISize>` is reached from here through
+                // the record-field walk, so the question this answers is
+                // whether the receiver arrived as `PeekableIter<Range<Int>>`
+                // — in which case the base is lost inside the field
+                // substitution — or already as `PeekableIter<ISize>`, which
+                // would move the defect back to wherever the adapter's
+                // return type was instantiated.
+                if let Ok(want) = std::env::var("VERUM_TRACE_NAMEDNORM") {
+                    let rendered = args
+                        .iter()
+                        .map(|a| a.to_text().to_string())
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    if type_name.contains(want.as_str()) || rendered.contains(want.as_str()) {
+                        eprintln!("[namednorm] {}<{}> depth={}", type_name, rendered, depth);
+                    }
+                }
+
                 // CYCLE GUARD: Detect indirect circular type normalization.
                 // For types like A{b:B} -> B{c:C} -> C{a:A}, direct self-reference
                 // checks fail because A doesn't mention itself directly. The thread-local

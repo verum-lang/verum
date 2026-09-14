@@ -7857,6 +7857,25 @@ impl ProtocolChecker {
     /// measured SILENT on the T0997 repro while this function fired 46
     /// times, which is what forced the instrument down to here.
     pub fn try_find_associated_type(&self, ty: &Type, assoc_name: &Text) -> Option<Type> {
+        // INSTRUMENT (VERUM_TRACE_ASSOC_WHERE=<base>): print a native
+        // backtrace at the moment a projection over the NAMED base is
+        // resolved. `VERUM_TRACE_ASSOC` already says WHICH projection is
+        // asked and what comes back; what R3 needs is WHO ASKED — the
+        // base arrives here already carrying `ISize`, so the defect is
+        // upstream of every resolution site and none of the three
+        // substitution tracers built for it fire at all.
+        //
+        // Needs RUST_BACKTRACE=1 alongside, like any `force_capture`.
+        if let Ok(want) = std::env::var("VERUM_TRACE_ASSOC_WHERE")
+            && ty.to_text().contains(want.as_str())
+        {
+            eprintln!(
+                "[assoc-where] ::{} of {}\n{}",
+                assoc_name,
+                ty.to_text(),
+                std::backtrace::Backtrace::force_capture(),
+            );
+        }
         let out = self.try_find_associated_type_impl(ty, assoc_name);
         if std::env::var("VERUM_TRACE_ASSOC").is_ok() {
             eprintln!(

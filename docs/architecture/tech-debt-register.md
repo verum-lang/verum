@@ -271,7 +271,43 @@ the bytecode were inert. Seeded only for calls in FORMAT POSITION
 hello-world's archive load 1336 ms against 67 ms.
 
 **R3. Type-system authorities.** One projection reducer instead of
-three — T0707 (Item<Range>-argless residual). **Still reproduces 2026-09-13** on a binary carrying
+three — T0707 (Item<Range>-argless residual). **THE SITE IS THE ADAPTER CALL, NOT THE
+PROJECTION — measured 2026-09-14, and it moves the whole hunt.** Ask the checker what the adapter's
+OWN type is, by assigning it to a `Text`:
+
+    range(0, 3).peekable()                 PeekableIter<ISize>          WRONG
+    range(0, 3).take(2)                    TakeIter<ISize>              WRONG
+    xs.iter().peekable()                   PeekableIter<ListIter<Int>>  right
+    xs.iter().take(2)                      TakeIter<ListIter<Int>>      right
+    xs.iter().take(2).take(1)              TakeIter<ISize>              WRONG
+    xs.into_iter().take(2)                 TakeIter<IntoList<Int>>      right
+    d.iter().take(2)                       TakeIter<DequeIter<Int>>     right
+    "ab".chars().take(2)                   TakeIter<ISize>              WRONG
+    xs.iter().fuse().take(2)               TakeIter<ISize>              WRONG
+
+`peekable` is `fn peekable(self) -> PeekableIter<Self>`, so `Self` is being bound to **`ISize`**
+instead of to the receiver, and the `::Item<ISize>` this section is named for is merely what the
+later normalisation makes of that. The backtrace agrees: a new instrument
+(`VERUM_TRACE_ASSOC_WHERE=<base>`, a `force_capture` in `try_find_associated_type`) gives the chain
+`infer_expr_call -> check_expr -> synth_and_check -> normalize_type -> normalize_named_type ->`
+record-field walk `-> try_find_associated_type(::Item of ISize)`, and a second instrument
+(`VERUM_TRACE_NAMEDNORM=<substring>`) shows the only named types normalised there are `ISize<>` and
+`Maybe<Item<ISize>>` — `PeekableIter` never appears, because by then the receiver is already gone.
+**ONE TYPE CARRIES BOTH ANSWERS AT ONCE**, which rules out a global mis-binding of `Self`:
+`range(0,3).map(|v| v)` is `MappedIter<ISize, fn(Item<Range<Int>>) -> Int>` — `Self` in the RETURN
+position became `ISize` while `Self` inside the BOUND `fn(Self.Item) -> B` stayed `Range<Int>`.
+**AND THE PARTITION IS THE IMPL HEADER — not the module, not the impl count.** Every receiver that
+works has an UNBOUNDED impl parameter: `implement<T> Iterator for ListIter<T>`,
+`implement<T> Iterator for DequeIter<T>`, `IntoList` likewise. Every receiver that fails has either
+a CONCRETE impl (`implement Iterator for Range<Int>`, `implement Iterator for Chars`) or a BOUNDED
+one (`implement<I: Iterator> Iterator for TakeIter<I>`, and the same for `MappedIter`, `FuseIter`,
+`RevIter`). That is exactly the line A172 names structurally: `ProtocolImpl` records `where_clauses`
+but NOT the impl's declared generics, so blanket-ness is GUESSED from `looks_like_type_param(name)`
+AND a where clause mentioning it — an unbounded `<T>` has no clause and a bounded `<I: Iterator>`
+does, which is precisely the two sides of this partition. **The cross-module reading recorded below
+for `reduce_with` is a DIFFERENT split and does not apply here**: `Chars` lives in
+`core/text/text.vr` and fails anyway, while `DequeIter` lives in `core/collections/deque.vr` and
+works. Both readings stand; they are two splits, not one. **Still reproduces 2026-09-13** on a binary carrying
 T1467, T1468 and T1470: the same 16 errors in the same file, `Item<ISize> <- Int` eleven times and
 `Int <- Item<ISize>` five, all of them on `peekable`, `fuse` and `.map(|x| …)` chains — so none of
 the wanted-set repairs of that day touch it, which is worth knowing before anyone tries them again.
