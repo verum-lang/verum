@@ -3,10 +3,6 @@
 // @tier: 0
 // @tags: stdlib-runtime, uuid, archive, wanted-set
 // @expected-stdout: version 4
-// @skip: T1481 — `safe_getentropy` is decoded but never REGISTERED, so it is
-//        in neither name index and the stage-3 stub has nothing to resolve to.
-//        Remove the skip when the loader registers the functions that merged
-//        bodies actually call.
 
 // `core/id/uuid.vr:109` calls `core.sys.common.random_bytes(buf)` by
 // ABSOLUTE PATH rather than through a mount, and that module calls
@@ -25,6 +21,13 @@
 //
 // The mount list here is deliberately the SHORT one: naming anything
 // further would repair the very input under test.
+//
+// CLOSED 2026-09-14 (T1481). The decode set now widens along CALL edges,
+// and it names the FUNCTION rather than its module — a module in the
+// wanted set is a wholesale mount, and that version answered this file
+// correctly while taking `hello world` from 0.61 s of user time to 249 s.
+// Measured on the fix: this programme answers in 5.9 s of user time and
+// `hello world` is unchanged at 0.65 s.
 //
 // TWO MECHANISMS WERE NAMED AND BOTH REFUTED WITH INSTRUMENTS, which is
 // why they are written down rather than re-tried:
