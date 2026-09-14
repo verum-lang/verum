@@ -5154,6 +5154,24 @@ impl Unifier {
     ///
     /// Performs the occurs check to prevent infinite types.
     fn bind_var(&self, var: TypeVar, ty: &Type, span: Span) -> Result<Substitution> {
+        // INSTRUMENT (VERUM_TRACE_BINDTO=<substring>): who binds a type
+        // variable to the NAMED type. R3's `ISize` is a constant filler
+        // that appears in programmes never mentioning `Range`, and all
+        // five `Self`-substitution sites in `protocol.rs` are measured
+        // SILENT for an ordinary method call — so the question left is
+        // which unification puts `ISize` into an unbound var.
+        //
+        // Needs RUST_BACKTRACE=1 alongside, like any `force_capture`.
+        if let Ok(want) = std::env::var("VERUM_TRACE_BINDTO")
+            && format!("{}", ty) == want
+        {
+            eprintln!(
+                "[bindto] {:?} := {}\n{}",
+                var,
+                ty,
+                std::backtrace::Backtrace::force_capture(),
+            );
+        }
         // Don't bind to itself
         if let Type::Var(v) = ty
             && *v == var

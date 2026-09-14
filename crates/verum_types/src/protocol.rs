@@ -4880,6 +4880,13 @@ impl ProtocolChecker {
                 };
 
                 // Add Self mapping for Self references in method signatures
+                if std::env::var("VERUM_TRACE_SELFSUBST").is_ok() {
+                    // INSTRUMENT: which of the five `Self` bindings fires, and
+                    // with WHAT. R3 answers `PeekableIter<ISize>` where the
+                    // receiver is `Range<Int>`, so one of these maps `Self` to
+                    // something that is neither the receiver nor the impl target.
+                    eprintln!("[selfsubst] site-04883 self_ty self={} recv={}", self_ty.to_text(), "<n/a>");
+                }
                 subst_map.insert(Text::from("Self"), self_ty.clone());
 
                 // Add T0 mapping for TypeVar(0) which represents Self in protocol methods
@@ -10543,6 +10550,13 @@ impl ProtocolChecker {
 
                 // Step 2: Add Self -> impl_.for_type mapping
                 // This allows replacing Self in method signatures
+                if std::env::var("VERUM_TRACE_SELFSUBST").is_ok() {
+                    // INSTRUMENT: which of the five `Self` bindings fires, and
+                    // with WHAT. R3 answers `PeekableIter<ISize>` where the
+                    // receiver is `Range<Int>`, so one of these maps `Self` to
+                    // something that is neither the receiver nor the impl target.
+                    eprintln!("[selfsubst] site-10546 impl.for_type self={} recv={}", impl_.for_type.to_text(), ty.to_text());
+                }
                 subst_map.insert(Text::from("Self"), impl_.for_type.clone());
 
                 // Step 3: Apply substitution
@@ -10592,6 +10606,13 @@ impl ProtocolChecker {
                 // Build substitution map by unifying for_type with lookup type
                 let mut subst_map = Map::new();
                 let _ = self.unify_types(&impl_.for_type, ty, &mut subst_map);
+                if std::env::var("VERUM_TRACE_SELFSUBST").is_ok() {
+                    // INSTRUMENT: which of the five `Self` bindings fires, and
+                    // with WHAT. R3 answers `PeekableIter<ISize>` where the
+                    // receiver is `Range<Int>`, so one of these maps `Self` to
+                    // something that is neither the receiver nor the impl target.
+                    eprintln!("[selfsubst] site-10595 impl.for_type self={} recv={}", impl_.for_type.to_text(), ty.to_text());
+                }
                 subst_map.insert(Text::from("Self"), impl_.for_type.clone());
 
                 // Apply substitution
@@ -10687,6 +10708,13 @@ impl ProtocolChecker {
             // protocol method's `Self`/`Self.Item` references stay symbolic
             // and the call-site param-type unification fails.
             let mut self_subst: Map<Text, Type> = Map::new();
+                if std::env::var("VERUM_TRACE_SELFSUBST").is_ok() {
+                    // INSTRUMENT: which of the five `Self` bindings fires, and
+                    // with WHAT. R3 answers `PeekableIter<ISize>` where the
+                    // receiver is `Range<Int>`, so one of these maps `Self` to
+                    // something that is neither the receiver nor the impl target.
+                    eprintln!("[selfsubst] site-10690 ty self={} recv={}", ty.to_text(), "<same>");
+                }
             self_subst.insert(Text::from("Self"), ty.clone());
 
             // Direct: method declared on the receiver's own protocol.
@@ -10769,6 +10797,13 @@ impl ProtocolChecker {
                 }
 
                 // Add Self -> impl_.for_type mapping
+                if std::env::var("VERUM_TRACE_SELFSUBST").is_ok() {
+                    // INSTRUMENT: which of the five `Self` bindings fires, and
+                    // with WHAT. R3 answers `PeekableIter<ISize>` where the
+                    // receiver is `Range<Int>`, so one of these maps `Self` to
+                    // something that is neither the receiver nor the impl target.
+                    eprintln!("[selfsubst] site-10772 impl.for_type self={} recv={}", impl_.for_type.to_text(), ty.to_text());
+                }
                 subst_map.insert(Text::from("Self"), impl_.for_type.clone());
 
                 // Apply substitution
