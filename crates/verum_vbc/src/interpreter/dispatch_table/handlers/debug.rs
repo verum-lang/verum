@@ -22,6 +22,10 @@ use crate::value::Value;
 pub(in super::super) fn handle_assert(
     state: &mut InterpreterState,
 ) -> InterpreterResult<DispatchResult> {
+    // Where this instruction BEGAN: the dispatcher has consumed the
+    // opcode byte and nothing else. Used below to demand that the
+    // comparison whose values we quote is the one immediately above.
+    let assert_start = state.pc().saturating_sub(1);
     let cond_reg = read_reg(state)?;
     let message_id = read_varint(state)? as u32;
 
@@ -31,12 +35,33 @@ pub(in super::super) fn handle_assert(
 
     if !is_true {
         // Get message from string table
-        let message = if let Some(msg) = state.module.get_string(crate::types::StringId(message_id))
+        let mut message = if let Some(msg) =
+            state.module.get_string(crate::types::StringId(message_id))
         {
             msg.to_string()
         } else {
             format!("assertion failed (message_id: {})", message_id)
         };
+
+        // SAY WHAT DIFFERED. `assert_eq` / `assert_ne` intern their
+        // message at compile time, so every one of them failed with the
+        // same nine words and no values — 37 of the suite's 168 failures
+        // read `assertion failed: left != right` and nothing more.
+        //
+        // The comparison that produced this condition left its operands
+        // in `last_generic_eq`, addressed by the register it wrote.
+        // Matching on that register is what keeps an unrelated earlier
+        // comparison from lending its values to this assertion; a plain
+        // `assert(cond)` over a condition no `EqG` produced still prints
+        // exactly what it printed before.
+        if let Some((reg, left, right, after_cmp)) = state.last_generic_eq
+            && reg == cond_reg
+            && after_cmp == assert_start
+        {
+            let l = format_value_for_print(state, left);
+            let r = format_value_for_print(state, right);
+            message = format!("{message}\n  left:  {l}\n  right: {r}");
+        }
 
         return Err(InterpreterError::AssertionFailed {
             message,

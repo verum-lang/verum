@@ -40,6 +40,19 @@ pub(in super::super) fn handle_lnot(
     let dst = read_reg(state)?;
     let src = read_reg(state)?;
     let val = state.get_reg(src);
+    // `assert_ne` is `EqG` then `Not` then `Assert`, so the memo the
+    // comparison left behind is addressed to the register THIS
+    // instruction is about to overwrite. Forward it, or the negated
+    // form would be the one shape that still reports no values.
+    let after_not = state.pc();
+    if let Some((reg, _, _, _)) = state.last_generic_eq
+        && reg == src
+    {
+        if let Some(entry) = state.last_generic_eq.as_mut() {
+            entry.0 = dst;
+            entry.3 = after_not;
+        }
+    }
     // **Logical NOT** — always returns a Bool, never a bitwise complement.
     // Pre-fix the non-Bool branch fell through to integer bitwise NOT
     // (`!1i64 = -2`), which an `if` then evaluated as truthy and took

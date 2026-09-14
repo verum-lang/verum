@@ -243,6 +243,13 @@ pub(in super::super) fn handle_eqg(
     let va = state.get_reg(a);
     let vb = state.get_reg(b);
 
+    // Remember the operands for a failing `Assert` further down the
+    // block (see `InterpreterState::last_generic_eq`). Recorded HERE, at
+    // the single entry point, because this handler has a dozen exits —
+    // protocol dispatch, byte-slice fast path, deep compare — and the
+    // values are the same at all of them.
+    state.last_generic_eq = Some((dst, va, vb, state.pc()));
+
     if crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::TraceEqRuntime) {
         eprintln!(
             "[eqg-entry] protocol_id={} va.is_ptr={} vb.is_ptr={} va.bits=0x{:x} vb.bits=0x{:x}",

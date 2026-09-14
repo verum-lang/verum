@@ -390,6 +390,30 @@ pub struct InterpreterState {
     /// Loaded modules (for cross-module calls).
     pub modules: HashMap<String, Arc<VbcModule>>,
 
+    /// The operands of the most recent generic equality (`EqG`), kept so
+    /// a failing `Assert` can SAY WHAT DIFFERED.
+    ///
+    /// `assert_eq` lowers to `EqG` + `Assert` and `assert_ne` to
+    /// `EqG` + `Not` + `Assert`, with the message interned at compile
+    /// time — so the default text was `assertion failed: left != right`
+    /// and nothing else, for every one of them. Thirty-seven of the
+    /// suite's 168 failures reported exactly that and no values, which
+    /// is a failure you cannot begin to diagnose without re-running it
+    /// by hand.
+    ///
+    /// Holds `(register written, left, right, pc just after the
+    /// instruction)`. `Not` forwards it — with its own end-pc — so the
+    /// `assert_ne` shape is covered by the same memo.
+    ///
+    /// The read side demands BOTH that the register is the one the
+    /// assertion tests AND that the memo's end-pc is where the `Assert`
+    /// instruction begins. Register alone is not enough: temporaries are
+    /// recycled, so a later bare `assert(cond)` can land on the same
+    /// register number and would otherwise be handed a stale pair of
+    /// values — evidence that looks authoritative and is not. Adjacency
+    /// is exact and costs one `u32` compare.
+    pub last_generic_eq: Option<(crate::instruction::Reg, Value, Value, u32)>,
+
     /// Host-provided global values, keyed by name — the data-exchange channel
     /// for the embedded scripting engine (`core.script`).  The engine seeds
     /// these from the host before a script runs and reads back any the script
@@ -2606,6 +2630,7 @@ impl InterpreterState {
             config,
             context_stack: ContextStack::new(),
             ctx_dense_slot_map: None,
+            last_generic_eq: None,
             defer_stack: Vec::new(),
             open_files: std::collections::HashMap::new(),
             next_fd: 100,
