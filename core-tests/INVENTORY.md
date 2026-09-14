@@ -13,6 +13,12 @@ default green-suite gate.
     verum test --interp --test-threads 4     (all of core-tests, 1196 s)
     19012 tests — 18223 passed, 374 failed, 415 ignored
 
+and re-run once more on the instrumented binary: **371 failed**, the
+difference being EXACTLY the three flaky `net/proxy` tests below and
+nothing else — `comm` over the two FAILED sets shows three names removed
+and none added. Read the number as **371–374**, with the three-test spread
+belonging to the indeterminate read, not to any change.
+
 Against the previous evening's 522 that is **148 fewer failures**, in three
 measured steps: 512 after the first four fixes below, 510 after the
 blanket-dispatch and `Heap.as_ref` pair, and **374** once an archive-declared
