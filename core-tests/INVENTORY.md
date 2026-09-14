@@ -47,6 +47,21 @@ variants — the wrong body running on the same tag, tag for tag. The third
 is a `collect()` that concatenated instead of collecting. The fourth is
 heap addresses where values are owed.
 
+### The roots behind them, as far as the evidence now reaches
+
+Read off the value-carrying assertions plus one probe each. Named here
+because a directory count is not a work list and a root is.
+
+| Root | Failures | What the evidence is |
+|---|---|---|
+| A packed `[Byte; N]` that is not packed | 25 + 7 | `ByteArrayLoad` TypeMismatch in `tracing/*`; the 7 in `intrinsics/conversion` are another session's in-flight change. An array LITERAL passed to a `[UInt8; 16]` parameter and read back through `self.bytes[i]` |
+| The interpreter's CBGR cell substituted for `Heap.new` | ~8 | destructors never run (`0` where `1` is owed, four tests), and `Heap.eq` / `Heap.lt` / `validate_cbgr` refuse on the cell |
+| A raw read answers the NaN BOX | 4 | `9221401712017801258` is `0x7FF9…002A` — the boxed `42`. `MaybeUninit.assume_init` is `ptr_read(&self.value as &unsafe T)` |
+| Iterator adapters truncate or over-produce | 7 | `dedup` answers `[1]` for `[1,2,3,1]`; `cycle().take(10)` answers 6; `repeat().collect()` answers the Text `hellohellohello` where a List is owed |
+| An archive `Display` impl never registers | 5 | `f"{e}"` prints `NotInitialized`; an unrelated `fn fmt(x: Int) -> Int` in the same file makes it print the impl's text |
+| `Cow<T>` has no `Deref` impl at all | 4 | `*cow` answers `Borrowed(borrowed)`; the file implements Eq, Ord, Clone, Debug and Hash for it and no Deref |
+| A namesake wins the bare last-wins slot | 6 | `verdict_as_text` runs `core/theory_interop`'s, tag for tag; `is_null(ptr)` runs sqlite's `MemCell.is_null` |
+
 **Where the 155 sit** (by directory):
 
     base/memory             34
