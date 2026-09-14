@@ -8,32 +8,54 @@ The CI contract: every `@test` here passes under both `verum test --interp`
 tests pin known stdlib / language-level defects and are excluded from the
 default green-suite gate.
 
-## The whole suite, re-measured 2026-09-14 (morning)
+## The whole suite, re-measured 2026-09-14 (afternoon)
 
-    verum test --interp --test-threads 4     (all of core-tests, 1676 s)
-    19012 tests — 18429 passed, 168 failed, 415 ignored
+    verum test --interp --test-threads 4     (all of core-tests, 2878 s)
+    19012 tests — 18442 passed, 155 failed, 415 ignored
 
-**522 → 168 across the session, a 68% reduction**, the last and largest step
-being R3: one condition in the archive-metadata builder took `base/iterator`
-from **217 failures to 13** and the suite from 374 to 168. Exactly one new
-FAILED line appeared, and it is one of the three `net/proxy` tests already
-measured to be indeterminate.
+**522 → 155 across the session.** The step from 168 is one closure and one
+regression that is not this tree's:
 
-**Where the 168 sit** (by directory):
+* **`base/uuid` 21 → 2.** A dotted cross-module call now names a FUNCTION
+  in the archive decode set instead of a module, so `safe_getentropy` is
+  registered and `Uuid.v4()` answers. The two that remain are a different
+  defect entirely — v7 monotonicity, not entropy.
+* **`intrinsics/conversion` 0 → 7**, all `ByteArrayLoad` TypeMismatch, from
+  an IN-FLIGHT change by another session that this binary happened to
+  include (a call-bound `let` whose callee declares `-> [T; N]` is marked
+  as a packed buffer; at Tier 0 the value is not one). Not committed here,
+  measured and reported rather than reverted.
+
+The wall-clock figure is not comparable to earlier runs: the machine
+carried load averages of 40–100 throughout, and the same binary's `hello
+world` moved by a factor of five between two adjacent runs.
+
+### A failing `assert_eq` now names both values
+
+37 of the previous run's 168 failures read `assertion failed: left != right`
+and nothing else. They now carry the operands, and several name their own
+root on sight:
+
+    action/verify    left: morita      right: consistent
+    base/iterator    left: [1]         right: [1, 2, 3, 1]
+    base/iterator    left: hellohello… right: [hello, hello, hello]
+    base/iterator    left: [530529966080, …]   right: [20, 40]
+
+The first is a NAMESAKE: `core/theory_interop/coord.vr` declares a second
+`verdict_as_text`, and `Morita/Strong/Moderate/Weak` are its first four
+variants — the wrong body running on the same tag, tag for tag. The third
+is a `collect()` that concatenated instead of collecting. The fourth is
+heap addresses where values are owed.
+
+**Where the 155 sit** (by directory):
 
     base/memory             34
-    base/uuid               21    ONE root — `safe_getentropy` is decoded
-                                  and never registered
     tracing/pipeline        15
-    base/iterator           13    down from 217 — and these are a
-                                  DIFFERENT kind: the file used to fail
-                                  to typecheck wholesale, so nothing in
-                                  it ran; the 13 are AssertionFailed,
-                                  real behaviour newly visible rather
-                                  than a residue of the same root
+    base/iterator           13
     base/data               12
     tracing/id              10
-    everything else         63    spread thin, none above 5
+    intrinsics/conversion    7    not this tree's — see above
+    everything else         64    spread thin, none above 5
 
 ### The earlier readings of the same night
 
