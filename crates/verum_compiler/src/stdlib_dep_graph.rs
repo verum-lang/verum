@@ -48,6 +48,10 @@ static DEP_GRAPH: OnceLock<Option<DepGraph>> = OnceLock::new();
 const EDGE_PATH: u8 = 0;
 const EDGE_GLOB: u8 = 1;
 const EDGE_NESTED: u8 = 2;
+/// A dotted cross-module CALL. Written by `build.rs` in addition to the
+/// `EDGE_PATH` copy, so `reachable_through_calls` can walk what a body
+/// actually NAMES without dragging in what its mounts merely make visible.
+const EDGE_CALL: u8 = 3;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum EdgeKind {
@@ -57,6 +61,8 @@ pub enum EdgeKind {
     Glob,
     /// `mount prefix.{a, b}` — nested item / module reference.
     Nested,
+    /// `super.a.b.f(…)` / `core.a.b.f(…)` — a dotted cross-module call.
+    Call,
 }
 
 /// Direct mount edges from a single source module.
@@ -70,6 +76,12 @@ pub struct Edges {
     /// The graph stores both the leaf candidate and the prefix module
     /// itself — see `extract_mounts` in build.rs.
     pub nested: Vec<String>,
+    /// WHOLE dotted names called from this module's body —
+    /// `core.sys.darwin.libsystem.safe_getentropy`, function segment
+    /// included. `path` carries the same call under its MODULE; the two
+    /// exist separately because naming a module and naming a function
+    /// mean very different things to the archive loader's filter.
+    pub call: Vec<String>,
 }
 
 /// Pre-computed mount adjacency over the embedded stdlib.
@@ -109,6 +121,7 @@ impl DepGraph {
                 path: Vec::new(),
                 glob: Vec::new(),
                 nested: Vec::new(),
+                call: Vec::new(),
             };
             for _ in 0..edge_count {
                 if cursor >= data.len() {
@@ -121,6 +134,7 @@ impl DepGraph {
                     EDGE_PATH => e.path.push(target),
                     EDGE_GLOB => e.glob.push(target),
                     EDGE_NESTED => e.nested.push(target),
+                    EDGE_CALL => e.call.push(target),
                     _ => return None, // unknown kind → bail
                 }
             }
@@ -208,6 +222,58 @@ impl DepGraph {
 
         visited
     }
+
+    /// Transitive closure over DOTTED-CALL edges, returning the WHOLE
+    /// called names — `core.sys.darwin.libsystem.safe_getentropy`, not
+    /// its module.
+    ///
+    /// `reachable_from` answers "what may this module SEE" and walks
+    /// mount edges — `path` plus `nested`, each with its parent chain.
+    /// Seeded at a file that mounts `core.prelude.*` that closure is
+    /// most of the stdlib, which is right for a type-check closure and
+    /// ruinous for a decode set.
+    ///
+    /// This answers the narrower question the loader asks — "whose BODY
+    /// does a body of mine name" — and it answers it at FUNCTION
+    /// granularity, which is the part that took two measurements to get
+    /// right. Returning modules made the seven-line uuid programme
+    /// answer correctly and `hello world` take over six minutes: a
+    /// module in the wanted set is a WHOLESALE mount, and every function
+    /// it declares gets registered. A whole name is one function.
+    ///
+    /// The walk itself still proceeds by module — each target's own
+    /// edges are looked up under its module part — so a chain of two
+    /// hops (uuid -> sys.common -> darwin.libsystem) closes.
+    pub fn reachable_through_calls(&self, seeds: &[String]) -> HashSet<String> {
+        let mut queue: VecDeque<String> = VecDeque::new();
+        let mut seeded: HashSet<String> = HashSet::new();
+        for seed in seeds {
+            if seeded.insert(seed.clone()) {
+                queue.push_back(seed.clone());
+            }
+        }
+        let mut walked: HashSet<String> = HashSet::new();
+        let mut named: HashSet<String> = HashSet::new();
+        while let Some(current) = queue.pop_front() {
+            let Some(e) = self.edges.get(&current) else {
+                continue;
+            };
+            for target in &e.call {
+                if !named.insert(target.clone()) {
+                    continue;
+                }
+                // Continue the walk from the target's MODULE — the whole
+                // name is what the caller wants, the module is what has
+                // the next set of edges.
+                if let Some((module, _)) = target.rsplit_once('.')
+                    && walked.insert(module.to_string())
+                {
+                    queue.push_back(module.to_string());
+                }
+            }
+        }
+        named
+    }
 }
 
 fn read_str(data: &[u8], cursor: &mut usize) -> Option<String> {
@@ -250,6 +316,49 @@ mod tests {
         assert!(
             g.module_count() > 0,
             "embedded graph should contain >0 modules"
+        );
+    }
+
+    /// The call walk reaches `safe_getentropy` ITSELF — not its module —
+    /// and stays orders of magnitude smaller than the mount walk from
+    /// the same seeds (T1481).
+    ///
+    /// Three claims, and each one is a measurement that cost a build:
+    /// the chain `uuid -> sys.common -> darwin.libsystem` must close
+    /// (two hops, so a one-hop walk fails here); what comes back must be
+    /// the WHOLE name, because a module in the wanted set is a wholesale
+    /// mount and that version took `hello world` from 1.7 seconds to
+    /// over six minutes; and the result must stay far under the mount
+    /// walk, which returns ~3900 names from these same seeds.
+    #[test]
+    fn the_call_walk_reaches_the_entropy_function_not_its_module() {
+        let Some(g) = get_dep_graph() else {
+            return;
+        };
+        let seeds = vec!["core.prelude".to_string(), "core.id.uuid".to_string()];
+        let narrow = g.reachable_through_calls(&seeds);
+        let sorted = || {
+            let mut v: Vec<&str> = narrow.iter().map(String::as_str).collect();
+            v.sort_unstable();
+            v
+        };
+        assert!(
+            narrow.contains("core.sys.darwin.libsystem.safe_getentropy"),
+            "the call chain uuid -> sys.common -> darwin.libsystem must be walked \
+             to the FUNCTION; got {:?}",
+            sorted()
+        );
+        assert!(
+            !narrow.contains("core.sys.darwin.libsystem"),
+            "a bare module name would be a WHOLESALE mount downstream; got {:?}",
+            sorted()
+        );
+        let wide = g.reachable_from(&seeds, |_| Vec::new());
+        assert!(
+            narrow.len() * 10 < wide.len(),
+            "call walk {} must stay far under the mount walk {}",
+            narrow.len(),
+            wide.len()
         );
     }
 

@@ -1377,6 +1377,88 @@ fn expand_prefixes_through_reexports(
     }
 }
 
+/// Add every stdlib module the dep graph can reach from the wanted names'
+/// own modules to `wanted` ITSELF, so `register_module_filtered`'s
+/// `is_wholesale_module_mount` arm registers their functions.
+///
+/// `core/` makes 341 cross-module calls that name their target inline
+/// instead of mounting it — `core/id/uuid.vr:109` calls
+/// `core.sys.common.random_bytes(buf)`, and that module calls
+/// `super.darwin.libsystem.safe_getentropy` the same way.
+/// `extract_dotted_call_edges` has recorded those as graph edges since
+/// A165, and `stdlib_reachability` already walks them to decide the
+/// TYPE-CHECK closure — but the REGISTRATION side never consulted the
+/// graph, so the bodies were decoded and never registered, and the
+/// stage-3 stub had nothing to resolve to:
+///
+///     mount core.id.uuid.{Uuid, v4};  fn main() { v4() }
+///     Panic: [lenient] stage-3 uniquely-named public free fn stub to
+///            'safe_getentropy' never resolved
+///
+/// Measured: adding `mount core.sys.darwin.libsystem;` — the module,
+/// WHOLESALE — makes that programme answer 4, while
+/// `mount core.sys.common;` does not, because the missing link is one
+/// hop further along the same edges. Twenty-one tests in
+/// `core-tests/base/uuid` sat on that one stub.
+///
+/// Adding the names to `wanted` rather than to the decode prefixes is
+/// the whole point: an earlier attempt added them to the PREFIX set and
+/// measured INERT — the modules were already decoded (`core.sys.darwin`
+/// was among the 24 entries in the failing run), only unregistered.
+fn expand_wanted_through_module_edges(wanted: &mut std::collections::HashSet<String>) {
+    let Some(graph) = crate::stdlib_dep_graph::get_dep_graph() else {
+        return;
+    };
+    // Seed with BOTH spellings. `wanted` mixes item names
+    // (`core.id.uuid.v4`, whose module is everything before the last dot)
+    // with module names (`mount core.sys.bitfield;` contributes the
+    // dotted module itself); stripping a segment off the latter would
+    // seed `core.sys` and miss the module that actually makes the calls.
+    // A seed that names nothing has no edges and costs one failed lookup.
+    let mut seeds: Vec<String> = Vec::new();
+    for name in wanted.iter() {
+        if !name.starts_with("core") {
+            continue;
+        }
+        seeds.push(name.clone());
+        if let Some(dot) = name.rfind('.') {
+            seeds.push(name[..dot].to_string());
+        }
+    }
+    if seeds.is_empty() {
+        return;
+    }
+    // CALL edges only, and at FUNCTION granularity. Both halves were
+    // measured, and getting either one wrong is expensive in a different
+    // direction.
+    //
+    // `reachable_from` is the wrong RELATION: it answers "what may this
+    // module SEE" — mount edges, nested leaves, every parent chain — and
+    // seeded at a file that mounts `core.prelude.*` it returns 3944 of
+    // the 2560-module graph's reachable names. The seven-line uuid
+    // programme took over THIRTEEN MINUTES under it and was killed.
+    //
+    // Naming MODULES is the wrong GRANULARITY: a module in `wanted` is a
+    // wholesale mount (`is_wholesale_module_mount` below), so every
+    // function it declares registers. That version answered the uuid
+    // probe correctly — `version = 4` — and took `hello world` from 1.7
+    // seconds to over six minutes.
+    //
+    // A whole dotted name is one function, accepted by the
+    // fully-qualified arm of the filter below and touching nothing else.
+    // Both spellings go in: archive descriptors are `core.`-stripped in
+    // some entries (`sys.common.PAGE_SIZE`) and not in others, and the
+    // user-mount path already seeds `wanted` with both forms for the
+    // same reason.
+    for name in graph.reachable_through_calls(&seeds) {
+        if let Some(stripped) = name.strip_prefix("core.") {
+            wanted.insert(stripped.to_string());
+        }
+        wanted.insert(name);
+    }
+}
+
+
 fn build_wanted_module_prefixes(
     wanted: &std::collections::HashSet<String>,
 ) -> std::collections::HashSet<String> {
@@ -2421,6 +2503,7 @@ impl ArchiveCtxCache {
         // BOUNDED to two ancestors and extended with well-known
         // stdlib type module paths — see [`build_wanted_module_prefixes`]
         // for the rationale.
+        expand_wanted_through_module_edges(&mut wanted);
         let mut wanted_module_prefixes = build_wanted_module_prefixes(&wanted);
         // T1468: a mounted TYPE has no call edges, so nothing
         // downstream can reach the module that DECLARES it — walk
@@ -2526,7 +2609,7 @@ impl ArchiveCtxCache {
         for item in user_module.items.iter() {
             collect_referenced_function_names(item, &mut harvest);
         }
-        let wanted: std::collections::HashSet<String> =
+        let mut wanted: std::collections::HashSet<String> =
             std::mem::take(&mut harvest.names);
         if wanted.is_empty() {
             return 0;
@@ -2536,6 +2619,7 @@ impl ArchiveCtxCache {
         // `module path;` and lands under archive entry `core.io`.
         // Well-known stdlib types (Text/List/Map/...) get explicit
         // module-path expansion via `build_wanted_module_prefixes`.
+        expand_wanted_through_module_edges(&mut wanted);
         let mut wanted_module_prefixes = build_wanted_module_prefixes(&wanted);
         // T1468: a mounted TYPE has no call edges, so nothing
         // downstream can reach the module that DECLARES it — walk
@@ -2829,6 +2913,7 @@ impl ArchiveCtxCache {
             loadcost::report("apply_lazy_with_types (empty wanted)", t_load.elapsed());
             return (0, 0);
         }
+        expand_wanted_through_module_edges(&mut wanted);
         let mut wanted_module_prefixes = build_wanted_module_prefixes(&wanted);
         // T1468: a mounted TYPE has no call edges, so nothing
         // downstream can reach the module that DECLARES it — walk
