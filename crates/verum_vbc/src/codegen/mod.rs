@@ -11499,6 +11499,33 @@ impl VbcCodegen {
                 // qualified registration when the simple name lost the
                 // cross-module first-wins race. Unconditional insert:
                 // an explicit mount in THIS module owns its local alias.
+                // MOUNT-PATH-INTENT-1 (T1486): record the path the user
+                // WROTE for a function mount, before the ladder below
+                // starts guessing which registered key it means.
+                //
+                // The ladder's answer goes into `mounted_fns`, and when
+                // it reaches its bare-name last resort that answer IS the
+                // bare name — the last-wins slot, so the record protects
+                // nothing. Measured: `mount core.action.verify.
+                // {verdict_as_text}` then `verdict_as_text(
+                // AuditVerdict.Consistent)` answered `morita`, because
+                // `core/theory_interop/coord.vr` declares a second
+                // `verdict_as_text` whose first variant is `Morita`.
+                //
+                // The path cannot be resolved HERE for an ordinary
+                // reason: mounts are processed before the archive walk
+                // registers the qualified keys. So it is carried and
+                // resolved at the call site, where they exist.
+                if full_path.len() >= 2
+                    && func_name
+                        .chars()
+                        .next()
+                        .is_some_and(|c| !c.is_ascii_uppercase())
+                {
+                    self.ctx
+                        .mounted_fn_paths
+                        .insert(alias_name.clone(), full_path.join("."));
+                }
                 if full_path.len() >= 2
                     && func_name
                         .chars()

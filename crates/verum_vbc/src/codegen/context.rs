@@ -693,6 +693,27 @@ pub struct CodegenContext {
     /// `mounted_types` / the typechecker's MOUNT-TYPE-AUTHORITY step.
     /// Populated by `bind_mounted_function` (+ deferred twin).
     pub mounted_fns: HashMap<String, String>,
+
+    /// `alias` → the DOTTED PATH the user wrote, for an explicit
+    /// function mount. The symmetric twin of `mounted_types`, and the
+    /// thing `mounted_fns` is not: that one records the key the mount
+    /// ladder RESOLVED TO at mount-processing time, and when the ladder
+    /// reached its bare-name last resort it recorded the bare name —
+    /// which is the last-wins slot, so the record is immune to nothing.
+    ///
+    /// Measured (T1486): `mount core.action.verify.{verdict_as_text};`
+    /// followed by `verdict_as_text(AuditVerdict.Consistent)` answered
+    /// `morita` — `core/theory_interop/coord.vr` declares a second
+    /// `verdict_as_text`, `Morita` is its first variant, and the wrong
+    /// body ran on the same tag. `VERUM_TRACE_CALLBIND` showed
+    /// `ladder=Some("verdict_as_text")`, the bare key, bound through the
+    /// mount arm. The identical mount in a five-line file answers
+    /// `consistent`: the rival is not registered there.
+    ///
+    /// The path is recorded unconditionally and resolved at the CALL
+    /// SITE, where the qualified keys exist — mounts are processed
+    /// before the archive walk registers them.
+    pub mounted_fn_paths: HashMap<String, String>,
     /// MOUNT-BINDING-CARRY-1 (T0148): bare name -> qualified key, as
     /// resolved by the TYPE CHECKER and carried in through
     /// `import_mount_bindings`.
@@ -1652,6 +1673,7 @@ impl CodegenContext {
             user_defined_types: HashSet::new(),
             mounted_types: HashMap::new(),
             mounted_fns: HashMap::new(),
+            mounted_fn_paths: HashMap::new(),
             carried_mount_bindings: HashMap::new(),
             module_aliases: HashMap::new(),
             byte_array_vars: HashSet::new(),

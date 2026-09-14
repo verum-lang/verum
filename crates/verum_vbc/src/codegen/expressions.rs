@@ -7048,7 +7048,57 @@ impl VbcCodegen {
                         let (name, info) = non_method[0];
                         Some((name.clone(), info.clone()))
                     } else {
-                        None
+                        // MOUNTED-MODULE-PROXIMITY-1 (T1484). The file's
+                        // own `mount` list is a statement about VOCABULARY,
+                        // not only about the names inside the braces: a file
+                        // that writes `mount core.base.memory.{drop, take};`
+                        // is speaking core.base.memory, and a same-named
+                        // free fn from a module it never named is not a
+                        // candidate a reader would consider.
+                        //
+                        // Without this the bare slot decides, and the bare
+                        // slot is LAST-WINS across archive load order.
+                        // Measured: `core-tests/base/memory/cbgr_test.vr`
+                        // calls `is_null(ptr)` on a raw pointer and runs
+                        // `core.database.sqlite.native.vdbe_register_model
+                        // .cell.is_null` — eleven free `is_null`s are
+                        // registered, the arg type is unknown so the type
+                        // filter rejects none, and the sqlite one held the
+                        // slot. The panic reads `field index 0 … exceeds
+                        // object data size 0`, naming the sqlite module in
+                        // its own backtrace. The same call in a five-line
+                        // probe with the SAME mounts answers correctly —
+                        // the decode set was smaller and the loser never
+                        // registered, which is why this only ever bites in
+                        // a large file.
+                        //
+                        // Derived from `mounted_fns` / `mounted_types`
+                        // rather than a new field: both already carry the
+                        // RESOLVED qualified key of everything this file
+                        // mounted, and the owning module is its head.
+                        // Applies only where the ladder is already
+                        // undecided, so no binding that resolves today
+                        // changes.
+                        let mounted_modules: std::collections::HashSet<&str> = self
+                            .ctx
+                            .mounted_fns
+                            .values()
+                            .chain(self.ctx.mounted_types.values())
+                            .filter_map(|k| k.rsplit_once('.').map(|(head, _)| head))
+                            .collect();
+                        let in_mounted: Vec<&&(String, FunctionInfo)> = non_method
+                            .iter()
+                            .filter(|(key, _)| {
+                                key.rsplit_once('.')
+                                    .is_some_and(|(head, _)| mounted_modules.contains(head))
+                            })
+                            .collect();
+                        if in_mounted.len() == 1 {
+                            let (name, info) = in_mounted[0];
+                            Some((name.clone(), info.clone()))
+                        } else {
+                            None
+                        }
                     }
                 }
             }
@@ -7207,6 +7257,67 @@ impl VbcCodegen {
             // guessed by manipulating the mount path; `carried_mount_bindings`
             // holds what the type checker actually RESOLVED. When both name a
             // target, the resolution wins — a guess must not shadow an answer.
+            // MOUNT-PATH-INTENT-1 (T1486): the path the user WROTE is
+            // tried before either recorded key, because both records can
+            // be the bare name and the bare name is the last-wins slot.
+            //
+            // `mount core.action.verify.{verdict_as_text}` then
+            // `verdict_as_text(AuditVerdict.Consistent)` answered
+            // `morita`: a second `verdict_as_text` lives in
+            // `core/theory_interop/coord.vr`, `Morita` is its first
+            // variant, and the wrong body ran on the same tag. The trace
+            // said `ladder=Some("verdict_as_text")` — the mount arm read
+            // its own record back faithfully, and the record was the bare
+            // name, because when the mount was PROCESSED the qualified
+            // keys did not exist yet. They do by now.
+            //
+            // The arity must match: a spelling that resolves to a
+            // wrong-arity namesake is not the function the user meant,
+            // and falling through leaves today's behaviour untouched.
+            let path_intent: Option<(String, FunctionInfo)> = self
+                .ctx
+                .mounted_fn_paths
+                .get(&func_name)
+                .and_then(|written| {
+                    let segs: Vec<&str> = written.split('.').collect();
+                    let module = &segs[..segs.len().saturating_sub(1)];
+                    let leaf = segs[segs.len() - 1];
+                    // Every CONTIGUOUS RUN of the written module path, most
+                    // specific first. Both directions are needed and the
+                    // second one is the case that made this necessary:
+                    // archive entries are COARSE, so `core/action/verify.vr`
+                    // registers under the entry `core.action` and its
+                    // qualified key is `core.action.verdict_as_text` — the
+                    // `verify` segment is not in it. The ladder's own suffix
+                    // scan asks the opposite question (does the key START
+                    // WITH the written parent) and therefore cannot see a
+                    // key SHORTER than what the user wrote.
+                    //
+                    // Runs, not a scan of the function table: six lookups
+                    // here against tens of thousands of keys, and no cache
+                    // to keep coherent.
+                    let mut spellings: Vec<String> = Vec::new();
+                    for start in 0..module.len() {
+                        for end in ((start + 1)..=module.len()).rev() {
+                            spellings.push(format!(
+                                "{}.{}",
+                                module[start..end].join("."),
+                                leaf
+                            ));
+                        }
+                    }
+                    spellings.sort_by_key(|k| std::cmp::Reverse(k.matches('.').count()));
+                    spellings.into_iter().find_map(|key| {
+                        self.ctx
+                            .functions
+                            .get(&key)
+                            .filter(|info| {
+                                is_free_fn(info) && info.param_count == args.len()
+                            })
+                            .map(|info| (key.clone(), info.clone()))
+                    })
+                });
+            path_intent.or_else(|| {
             self.ctx
                 .carried_mount_bindings
                 .get(&func_name)
@@ -7229,6 +7340,7 @@ impl VbcCodegen {
                     }
                 };
                 picked.map(|info| (resolved_key.clone(), info.clone()))
+            })
             })
         } else {
             None
@@ -7367,9 +7479,10 @@ impl VbcCodegen {
                     && func_name.contains(&filter)
                 {
                     eprintln!(
-                        "[callbind] carried={:?} ladder={:?}",
+                        "[callbind] carried={:?} ladder={:?} written={:?}",
                         self.ctx.carried_mount_bindings.get(&func_name),
                         self.ctx.mounted_fns.get(&func_name),
+                        self.ctx.mounted_fn_paths.get(&func_name),
                     );
                     eprintln!(
                         "[callbind] call '{}' (argc={}) → bound '{}' id={} | arm={} scope={:?} \
