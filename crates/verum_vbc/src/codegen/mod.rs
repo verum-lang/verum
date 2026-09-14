@@ -3389,6 +3389,26 @@ impl VbcCodegen {
         for (default_func, type_name) in deferred {
             let full_method_name =
                 format!("{}.{}", type_name, default_func.name.name);
+            // INSTRUMENT (VERUM_TRACE_DEFREG=<substring>): whether a
+            // deferred default-method registration RUNS or is SKIPPED
+            // because the name is already held. R3's wrong return types
+            // are not produced by `register_impl_function` — two fixes to
+            // the mapper it calls measured inert — so the question is
+            // whether it is even reached for `Range.peekable`, and who
+            // registered the name first if it is not.
+            if let Ok(want) = std::env::var("VERUM_TRACE_DEFREG")
+                && full_method_name.contains(want.as_str())
+            {
+                eprintln!(
+                    "[defreg] {} -> {}",
+                    full_method_name,
+                    if self.ctx.lookup_function(&full_method_name).is_some() {
+                        "SKIP (already registered)"
+                    } else {
+                        "register_impl_function"
+                    },
+                );
+            }
             if self.ctx.lookup_function(&full_method_name).is_some() {
                 continue;
             }
