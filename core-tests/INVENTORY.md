@@ -25,7 +25,12 @@ measured to be indeterminate.
     base/uuid               21    ONE root — `safe_getentropy` is decoded
                                   and never registered
     tracing/pipeline        15
-    base/iterator           13    the R3 residue, down from 217
+    base/iterator           13    down from 217 — and these are a
+                                  DIFFERENT kind: the file used to fail
+                                  to typecheck wholesale, so nothing in
+                                  it ran; the 13 are AssertionFailed,
+                                  real behaviour newly visible rather
+                                  than a residue of the same root
     base/data               12
     tracing/id              10
     everything else         63    spread thin, none above 5
