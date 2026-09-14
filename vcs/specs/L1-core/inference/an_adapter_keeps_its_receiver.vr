@@ -1,0 +1,53 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: types, inference, iterator, archive, self
+// @description: An iterator adapter's type argument is the RECEIVER, not the
+//               unknown carrier (R3 / T0707).
+
+/// `fn peekable(self) -> PeekableIter<Self>` is the shape every adapter
+/// constructor has. When the bake failed to resolve that `Self` it stored
+/// `TypeRef::Concrete(TypeId::PTR)` — and `PTR`, `USize` and `ISize` are the
+/// same id, so the archive metadata rendered `PeekableIter<ISize>` and every
+/// call site inherited a projection over a base that was never bound:
+///
+///     let mut it = range(0, 3).peekable();
+///     assert_eq(it.next(), Maybe.Some(0));
+///     error<E400>: Type mismatch: expected 'Item<ISize>', found 'Int'
+///
+/// It took `core-tests/base/iterator` from green to 217 failures, and the
+/// `ISize` in the message was not about `ISize` at all: swapping which type
+/// declares an impl for id 14 swaps the printed name with it.
+///
+/// The four shapes below are the ones that were wrong, and they differ in
+/// what made them wrong — a concrete per-width impl (`Range<Int>`), an
+/// implementor from another module (`Chars`), a bounded-parameter adapter at
+/// depth two, and the one that always worked (`ListIter`, an unbounded impl
+/// parameter) as the control that must not regress.
+
+fn range_adapter() {
+    let mut it = range(0, 3).peekable();
+    assert_eq(it.next(), Maybe.Some(0));
+}
+
+fn chars_adapter() {
+    let t: Text = "ab".clone();
+    let mut it = t.chars().take(2);
+    assert_eq(it.next(), Maybe.Some('a'));
+}
+
+fn nested_adapter() {
+    let xs: List<Int> = [1, 2, 3];
+    let mut it = xs.iter().take(2).take(1);
+    assert_eq(it.next(), Maybe.Some(1));
+}
+
+fn list_adapter_control() {
+    let xs: List<Int> = [1, 2, 3];
+    let mut it = xs.iter().peekable();
+    assert_eq(it.next(), Maybe.Some(1));
+}
+
+fn main() {
+    // Tests are the declarations above; typecheck-pass is the assertion.
+}

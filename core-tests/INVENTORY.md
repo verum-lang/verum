@@ -8,10 +8,29 @@ The CI contract: every `@test` here passes under both `verum test --interp`
 tests pin known stdlib / language-level defects and are excluded from the
 default green-suite gate.
 
-## The whole suite, re-measured 2026-09-14 (early hours)
+## The whole suite, re-measured 2026-09-14 (morning)
 
-    verum test --interp --test-threads 4     (all of core-tests, 1196 s)
-    19012 tests — 18223 passed, 374 failed, 415 ignored
+    verum test --interp --test-threads 4     (all of core-tests, 1676 s)
+    19012 tests — 18429 passed, 168 failed, 415 ignored
+
+**522 → 168 across the session, a 68% reduction**, the last and largest step
+being R3: one condition in the archive-metadata builder took `base/iterator`
+from **217 failures to 13** and the suite from 374 to 168. Exactly one new
+FAILED line appeared, and it is one of the three `net/proxy` tests already
+measured to be indeterminate.
+
+**Where the 168 sit** (by directory):
+
+    base/memory             34
+    base/uuid               21    ONE root — `safe_getentropy` is decoded
+                                  and never registered
+    tracing/pipeline        15
+    base/iterator           13    the R3 residue, down from 217
+    base/data               12
+    tracing/id              10
+    everything else         63    spread thin, none above 5
+
+### The earlier readings of the same night
 
 and re-run once more on the instrumented binary: **371 failed**, the
 difference being EXACTLY the three flaky `net/proxy` tests below and

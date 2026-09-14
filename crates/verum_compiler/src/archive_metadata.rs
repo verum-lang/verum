@@ -1194,6 +1194,29 @@ fn register_module_metadata(
                     // a slot, and only the verbatim spelling still has
                     // it.
                     || (s.contains('&') && !rendered_return.contains('&'))
+                    // R3/T0707: THE PTR CARRIER IS THE SAME LOSSY CLASS,
+                    // and the guard above tested for the SPELLING of the
+                    // loss rather than the loss itself. `Self` that the
+                    // self-aware mapper failed to resolve becomes
+                    // `TypeRef::Concrete(TypeId::PTR)`, and `PTR`,
+                    // `USize` and `ISize` are the SAME id (14,
+                    // `types.rs:390`). When nothing NAMES 14 the render
+                    // says `__opaque_type_14` and the arm above already
+                    // prefers the verbatim — which is why a bake without
+                    // any id-14 impl looked correct. The moment
+                    // `core/base/primitives.vr` declares
+                    // `implement Eq for ISize` the id acquires a name,
+                    // the render says `PeekableIter<ISize>`, the
+                    // `__opaque_type_` test fails, and the WRONG half
+                    // wins: 56 adapter entries in the shipped archive.
+                    // Measured by swapping that one block — `USize` in
+                    // its place renders `PeekableIter<USize>`, `Int8`
+                    // (a different id) shows nothing.
+                    //
+                    // A genuine `-> USize` return is safe here: its
+                    // carried spelling is `USize` too, so preferring it
+                    // changes nothing.
+                    || type_ref_mentions_ptr_carrier(&fn_desc.return_type)
             });
         let return_type = match carried_return {
             Some(verbatim) => {
@@ -2024,6 +2047,35 @@ fn type_ref_to_text_with_params(
 /// reserved id is named once, for every consumer, at the point of
 /// declaration.  See that method for the ids that stay deliberately unnamed
 /// (`PTR` above all: it is the shared unknown-carrier sentinel).
+/// Does this TypeRef mention the PTR carrier (`TypeId::PTR`, which is the
+/// same id as `USize` and `ISize`) anywhere inside it?
+///
+/// `ast_type_to_type_ref`'s documented unknown-type fallback is
+/// `TypeRef::Concrete(TypeId::PTR)`, so a `Self` — or any other name — the
+/// mapper could not resolve arrives here wearing that id. Whether the
+/// metadata then PRINTS the loss (`__opaque_type_14`) or hides it behind a
+/// real name depends only on whether some type has claimed 14 in this
+/// build, which is not a property of the return type at all. This asks the
+/// structural question instead of the textual one.
+fn type_ref_mentions_ptr_carrier(tr: &verum_vbc::types::TypeRef) -> bool {
+    use verum_vbc::types::{TypeId, TypeRef};
+    match tr {
+        TypeRef::Concrete(tid) => *tid == TypeId::PTR,
+        TypeRef::Instantiated { base, args } => {
+            *base == TypeId::PTR || args.iter().any(type_ref_mentions_ptr_carrier)
+        }
+        TypeRef::Function {
+            params,
+            return_type,
+            ..
+        } => {
+            params.iter().any(type_ref_mentions_ptr_carrier)
+                || type_ref_mentions_ptr_carrier(return_type)
+        }
+        _ => false,
+    }
+}
+
 fn builtin_type_name(tid: &verum_vbc::types::TypeId) -> Option<&'static str> {
     tid.well_known_name()
 }
