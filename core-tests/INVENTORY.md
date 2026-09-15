@@ -8,27 +8,42 @@ The CI contract: every `@test` here passes under both `verum test --interp`
 tests pin known stdlib / language-level defects and are excluded from the
 default green-suite gate.
 
-## The whole suite, re-measured 2026-09-14 (afternoon)
+## The whole suite, re-measured 2026-09-15 (early morning)
 
-    verum test --interp --test-threads 4     (all of core-tests, 2878 s)
-    19012 tests — 18442 passed, 155 failed, 415 ignored
+    verum test --interp --test-threads 4     (all of core-tests, 1828 s)
+    19012 tests — 18448 passed, 149 failed, 415 ignored
 
-**522 → 155 across the session.** The step from 168 is one closure and one
-regression that is not this tree's:
+**522 → 149 across the campaign.** Against the previous full run's 155:
+eleven fixed, five opened, and the five are not this tree's.
 
-* **`base/uuid` 21 → 2.** A dotted cross-module call now names a FUNCTION
-  in the archive decode set instead of a module, so `safe_getentropy` is
-  registered and `Uuid.v4()` answers. The two that remain are a different
-  defect entirely — v7 monotonicity, not entropy.
-* **`intrinsics/conversion` 0 → 7**, all `ByteArrayLoad` TypeMismatch, from
-  an IN-FLIGHT change by another session that this binary happened to
-  include (a call-bound `let` whose callee declares `-> [T; N]` is marked
-  as a packed buffer; at Tier 0 the value is not one). Not committed here,
-  measured and reported rather than reverted.
+* **`action/verify` ×4 and `action/gauge` ×2.** An explicitly mounted
+  `verdict_as_text` was running the OTHER declaration of that name, tag
+  for tag — `Consistent` answered `morita`. The mount ladder recorded the
+  BARE name because the qualified keys do not exist yet when a mount is
+  processed; the path the user wrote is now carried and re-resolved at
+  the call site, where they do.
+* **`sys/windows/tls` ×4.** A format site names neither `Display` nor
+  `fmt`, so an archive `implement Display for X` never registered and
+  `f"{e}"` printed the variant name. An unrelated dummy `fn fmt` in the
+  same file used to fix it; now the format site says so itself.
+* **`base/uuid` v7 monotonicity**, one test, incidental.
+* **`net/addr` ×2, `tracing/id` ×2, `tracing/pipeline`** — all
+  `ByteArrayLoad` over a packed `[UInt8; N]`, and all appearing in the
+  first binary built after another session's in-flight codegen change
+  grew from 51 to 141 lines. Three eliminations were run against them —
+  both new compiler arms gated off by env, and a stdlib impl reverted —
+  and they stayed red through all three.
 
-The wall-clock figure is not comparable to earlier runs: the machine
-carried load averages of 40–100 throughout, and the same binary's `hello
-world` moved by a factor of five between two adjacent runs.
+**Two changes were built, measured and taken back out**, which is the
+other half of the work:
+
+* the mounted-module tie-break for unmounted bare names — five tests
+  closed, FOURTEEN opened, because `core/collections/list.vr` mounts
+  `core.base.memory` and writes `ptr.is_null()`, and that file is baked;
+* `Deref for Cow<T>` — four closed, seven opened, none of them
+  mentioning `Cow`. Its attribution is CONFOUNDED (the comparison binary
+  also predates the foreign codegen change), and the clean experiment is
+  named in the register: build at HEAD, where that change does not exist.
 
 ### A failing `assert_eq` now names both values
 
@@ -62,15 +77,15 @@ because a directory count is not a work list and a root is.
 | `Cow<T>` has no `Deref` impl at all | 4 | `*cow` answers `Borrowed(borrowed)`; the file implements Eq, Ord, Clone, Debug and Hash for it and no Deref |
 | A namesake wins the bare last-wins slot | 6 | `verdict_as_text` runs `core/theory_interop`'s, tag for tag; `is_null(ptr)` runs sqlite's `MemCell.is_null` |
 
-**Where the 155 sit** (by directory):
+**Where the 149 sit** (by directory):
 
     base/memory             34
-    tracing/pipeline        15
+    tracing/pipeline        16    packed `[UInt8; N]` — not this tree's
     base/iterator           13
+    tracing/id              12    same family
     base/data               12
-    tracing/id              10
-    intrinsics/conversion    7    not this tree's — see above
-    everything else         64    spread thin, none above 5
+    intrinsics/conversion    7    same family
+    everything else         55    spread thin, none above 5
 
 ### The earlier readings of the same night
 
