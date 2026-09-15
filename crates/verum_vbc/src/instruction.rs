@@ -5038,6 +5038,22 @@ pub enum MemSubOpcode {
     /// Width-aware pointer sub — `ptr - count × width` (T0108).
     /// Format: `dst:reg, ptr:reg, count:reg, width:imm-u8`
     PtrSubT = 0x1D,
+    /// Load the 8-byte `Value` a raw address names (dst, addr) — T1492.
+    ///
+    /// NOT `DerefRaw` at width 8.  That opcode answers the FFI
+    /// question ("what integer do these bytes spell?") and decides
+    /// between a NaN box and a C `int64_t` by inspecting the bits;
+    /// a `Float` element, whose slot holds a raw IEEE double with no
+    /// tag, comes back through it as an integer with the double's bit
+    /// pattern.  This opcode answers the LANGUAGE question: the
+    /// address names a `Value` slot — a List backing element, a record
+    /// field — so the eight bytes ARE a `Value` and are taken verbatim.
+    /// No exception for bridge memory: every pointer-tagged arm of
+    /// `handle_deref` — the CBGR one, the variant-field one and the
+    /// bridge one — already reads its target as a `Value`, and a second
+    /// reader of the same storage that disagreed would be the defect
+    /// this opcode exists to remove.
+    DerefValue = 0x1E,
     // -- Raw fixed-width leaves (0x20-0x2F), carried over from
     //    SystemSubOpcode 0x53-0x58.
     /// Load u8 (dst, addr).
@@ -5103,6 +5119,7 @@ impl MemSubOpcode {
             0x1B => Some(Self::PtrWrite),
             0x1C => Some(Self::PtrAddT),
             0x1D => Some(Self::PtrSubT),
+            0x1E => Some(Self::DerefValue),
             0x20 => Some(Self::RawLoadU8),
             0x21 => Some(Self::RawStoreU8),
             0x22 => Some(Self::RawLoadI32),

@@ -17,9 +17,9 @@ happened to be.
 
 ## 0. TL;DR — the five rules
 
-1. **A reference is produced by one of three opcodes, and they do not
-   agree about what the register holds.** Two yield an ADDRESS; one
-   yields the already-loaded VALUE.
+1. **A reference is produced by one of four opcodes, and they do not
+   agree about what the register holds.** Two yield an ADDRESS; two
+   yield the already-loaded VALUE.
 2. **The descriptor cannot tell you which.** An archive descriptor erases
    `&` from the return type exactly as it erases it from parameters. The
    callee's BODY is the only honest source.
@@ -40,13 +40,14 @@ happened to be.
 
 ---
 
-## 1. The three producers
+## 1. The four producers
 
 | Source spelling | Opcode | Register holds |
 |-----------------|--------|----------------|
 | `&self.field` | `CbgrExtended{RefField}` `0x0C` | the slot **ADDRESS** |
 | `unsafe { &(*ptr).field }` | `FfiExtended{StructFieldAddr}` `0x4F` | the slot **ADDRESS** |
 | `&self.items[i]` | `CbgrExtended{RefListElement}` `0x0B` | the element **VALUE** |
+| `unsafe { &*p.offset(i) }` | `MemExtended{DerefValue}` `0x1E` | the element **VALUE** (Tier 0) / the **ADDRESS** (Tier 1) |
 
 Dumped, because the source spelling does not predict the opcode and
 reading the source is how this was got wrong once already:
@@ -83,9 +84,109 @@ the `Deref` arm passes the value through instead of loading a second
 time (`DEREF-INTERIOR-1`). That is correct *within* a function and it is
 what makes the boundary dangerous.
 
-### A fourth path: the reference that arrives WRAPPED
+### The fourth producer: `&*p` over an array of `Value`
 
-The three producers above answer "what did this opcode put in my
+    let item: &T = unsafe { &*self.ptr.offset(i) };
+
+`core/collections/list.vr` is written in this idiom — `unique`, `iter`,
+`ListIter.next`, `fmt_debug` — and for a long time it produced neither
+convention: the register held a bare ADDRESS with nothing saying so.
+`&*p` folds to `p` (the identity `&*p ≡ p`, which exists so the
+reference cannot dangle when the producing frame pops), and a raw
+address is INT-tagged, so `*item` reached the generic `Deref`'s integer
+arm — identity — and handed the address straight back:
+
+```text
+let xs: List<Int> = [7, 7, 9];
+print(f"{*a} {*b} {*c}")   ->  48624037456 48624037464 48624037472
+```
+
+Teaching `*` to load would have fixed one consumer in four. `&T` is also
+`item.clone()`, `item.field`, and every method call on `item`; each of
+those reads the register on its own terms, and each read the address.
+So the producer takes the **pre-loaded VALUE** convention instead, the
+same one `RefListElement` takes for the same storage — and for the same
+reason, since `p.offset(i)` and `&self.items[i]` name the same slot.
+
+Two conditions, both checked in codegen and neither guessable at run
+time:
+
+* **The borrow is immutable.** `&mut *p` must stay an ADDRESS or the
+  write lands in a copy — that is the `RwLock`/`Mutex` guard idiom
+  (`&mut *(&self.f as *const T as *mut T)`), whose whole purpose is to
+  reach the storage.
+* **The pointee is ONE `Value` slot.** `&unsafe T` is spelled the same
+  for a run of 8-byte slots (a `List` backing) and for an INLINE record
+  array (`&unsafe Slot<K, V>` — Map's entry table, 32-byte stride),
+  where an address names the record and its first field is not the
+  answer. The record descriptor is the discriminator, and an UNKNOWN
+  pointee keeps the address it had — rule 4.
+
+#### The one producer whose convention is TIER-DEPENDENT, and why
+
+`DerefValue` performs the load at Tier 0 and NOTHING at Tier 1. That is
+not an oversight: the opcode states "this register is a reference to a
+`Value` slot", and the two tiers already disagree about where that load
+belongs. Tier 0's generic `Deref` answers identity for an int-tagged
+address — it cannot tell an address from a number — so the load must
+happen at the producer. Tier 1's `Deref` already loads through a raw
+address, measured on the pre-change binary: the six-line probe printed
+`7 7` and `eq true` at Tier 1 while the interpreter printed three
+addresses. Loading at the producer there too is a DOUBLE dereference —
+it reads the element `7` as an address and SIGSEGVs, which is exactly
+what the first landing of the AOT arm did.
+
+So Tier 1 keeps the ADDRESS convention it already had, and the arm
+propagates the marks a re-borrow must not lose (`pass_through_ref`,
+list/map/set, inline-struct, element stride, obj type) — the same set
+`DerefRaw`'s own pass-through arms carry.
+
+Tier 1 has its own gap here, stated because it is easy to mistake for
+this one: on the SAME pre-change binary `[1,1,2,3,3].unique()` and
+`xs.tail()` both print EMPTY at Tier 1, where Tier 0 now answers
+`[1, 2, 3]` and `[2, 3, 4]`. That is a separate defect in Tier-1 list
+returns and nothing here moves it in either direction — the Tier-1
+output is byte-identical before and after.
+
+`DerefValue` is not `DerefRaw` at width 8. That opcode answers the FFI
+question — "what integer do these bytes spell?" — and decides between a
+NaN box and a C `int64_t` by inspecting the bits (A177). A `Float`
+element holds a raw IEEE double with no tag, so it comes back through
+that reading as an integer of the double's bit pattern. `DerefValue`
+answers the language question: the address names a `Value` slot, so the
+eight bytes ARE a `Value` and are taken verbatim — with no exception for
+bridge memory, because every pointer-tagged arm of `handle_deref`
+already reads its target that way and its bridge arm says so outright
+("an address inside a live bridge block names a `Value` slot, so `*p`
+READS it", T0705/T0384). Two readers of one storage that disagree is
+the defect this producer exists to remove.
+
+#### The producer had a second fault underneath it
+
+`&*self.ptr.offset(i)` needs `self.ptr` to be the address of element 0,
+which is what `list.vr` declares (`ptr: &unsafe T`). The interpreter
+stored the backing ALLOCATION in that slot — an object whose first
+`OBJECT_HEADER_SIZE` bytes are an `ObjectHeader` — and every intercept
+that read the slot added the skip back by hand. So `offset(0)` addressed
+the header's `type_id` word and `offset(3)` addressed element 0, and the
+two facts composed into one wrong number.
+
+`Text` had the convention right the whole time (`alloc_text` stores the
+BYTES, not the object), which is what made the disagreement legible once
+the two were put side by side. `GetF`/`SetF` now translate the slot in
+both directions — the only two places compiled code sees it — so the
+interpreter keeps its internal convention and the language gets the one
+it declares.
+
+The size of this was hidden by INTERCEPTION. 41 of the 96 `List` methods
+that touch `self.ptr` are answered by the interpreter and never run
+their own body; `List.contains` is one of them and is correct, while
+`List.unique` — the same `*item == *value` spelling, three functions
+away — is not intercepted and compared addresses.
+
+### A fifth path: the reference that arrives WRAPPED
+
+The four producers above answer "what did this opcode put in my
 register". None of them covers a reference that crosses the boundary
 *inside* a value:
 

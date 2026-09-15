@@ -29059,6 +29059,66 @@ fn lower_mem_extended<'ctx>(
             Ok(())
         }
 
+        0x1E => {
+            // DerefValue — PASS THROUGH at Tier 1, and the asymmetry is
+            // the point (T1492).
+            //
+            // The opcode marks "this register is a reference to a
+            // `Value` slot". Tier 0 has to perform the load HERE,
+            // because its generic `Deref` answers identity for an
+            // int-tagged address and cannot tell one from a number.
+            // Tier 1's `Deref` already loads through a raw address —
+            // measured: on the pre-change binary the six-line probe
+            // printed `7 7` and `eq true` at Tier 1 while the
+            // interpreter printed three addresses — so loading here as
+            // well is a DOUBLE dereference: it reads the element 7 as
+            // an address and SIGSEGVs. That was this arm's first
+            // landing, and reverting it is what the measurement says.
+            //
+            // So Tier 1 keeps the ADDRESS convention for this producer,
+            // which is what it already had. The marks travel with it:
+            // a register that named a list, a map, an inline struct or
+            // a non-default element stride still does after the
+            // re-borrow, exactly as `DerefRaw`'s own pass-through arms
+            // propagate them.
+            //
+            // (Tier 1's own gap is separate and measured on the SAME
+            // pre-change binary: `[1,1,2,3,3].unique()` and `xs.tail()`
+            // both print EMPTY there, where Tier 0 now answers
+            // `[1, 2, 3]` and `[2, 3, 4]`. Nothing here changes that
+            // either way.)
+            if operands.len() < 2 {
+                return Ok(());
+            }
+            let dst_reg = op_reg(operands, 0);
+            let ptr_reg = op_reg(operands, 1);
+            let val = ctx.get_register(ptr_reg)?;
+            ctx.set_register(dst_reg, val);
+            if ctx.is_pass_through_ref(ptr_reg) {
+                ctx.mark_pass_through_ref(dst_reg);
+            }
+            if ctx.is_list_register(ptr_reg) {
+                ctx.mark_list_register(dst_reg);
+            }
+            if ctx.is_map_register(ptr_reg) {
+                ctx.mark_map_register(dst_reg);
+            }
+            if ctx.is_set_register(ptr_reg) {
+                ctx.mark_set_register(dst_reg);
+            }
+            if ctx.is_inline_struct_register(ptr_reg) {
+                ctx.mark_inline_struct_register(dst_reg);
+            }
+            let stride = ctx.get_element_stride(ptr_reg);
+            if stride != 8 {
+                ctx.set_element_stride(dst_reg, stride);
+            }
+            if let Some(tn) = ctx.get_obj_register_type(ptr_reg).map(|s| s.to_string()) {
+                ctx.set_obj_register_type(dst_reg, tn);
+            }
+            Ok(())
+        }
+
         0x20 | 0x22 | 0x24 => {
             // Raw fixed-width loads over an Int address (mem_raw's
             // load family): inttoptr + width-typed load.  u8 loads

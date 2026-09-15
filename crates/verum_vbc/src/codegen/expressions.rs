@@ -5044,6 +5044,53 @@ impl VbcCodegen {
                     .compile_expr(ptr_expr)?
                     .or_internal("&*p: pointer operand has no value")?;
                 if self.ctx.is_raw_pointer(ptr_reg) || is_static_raw_method || is_raw_cast {
+                    // `&*p` ON A VALUE-SLOT POINTER IS THE PRE-LOADED
+                    // VALUE, not the address (T1492).
+                    //
+                    // The identity fold below hands the surrounding code a
+                    // bare address and calls it a `&T`.  Nothing downstream
+                    // can tell: `*item` lowers to the generic `Deref`, whose
+                    // Int arm is identity — so `List.unique`'s
+                    // `if *existing == *item` compared two ADDRESSES and
+                    // kept every element of `[1, 1, 2, 3, 3]`, and the
+                    // six-line probe printed three consecutive addresses
+                    // where `7 7 9` was stored.  `item.clone()`,
+                    // `item.field` and every method call on `item` read the
+                    // same address for the same reason, so teaching `*` to
+                    // load would have fixed one consumer out of four.
+                    //
+                    // A `&T` that IS the loaded `Value` answers all of
+                    // them at once, and it is one of the two conventions
+                    // `docs/architecture/returned-reference-contract.md`
+                    // already documents.  It also satisfies the reason the
+                    // address fold exists better than the address does: a
+                    // loaded value cannot dangle when the producing frame
+                    // pops, which is the `ListIter::next` failure the fold
+                    // was written for.
+                    //
+                    // Only for an IMMUTABLE borrow, and only when the
+                    // pointee is one `Value` slot.  `&mut *p` must stay an
+                    // address or the write lands in a copy (the RwLock
+                    // guard idiom below), and an INLINE record array
+                    // (`&unsafe Slot<K, V>`) is named by its address, not
+                    // by its first field.
+                    let pointee_name = self
+                        .infer_expr_type_name(ptr_expr)
+                        .or_else(|| self.extract_expr_type_name(ptr_expr));
+                    if matches!(op, UnOp::Ref | UnOp::RefChecked | UnOp::RefUnsafe)
+                        && self.raw_pointer_addresses_a_value_slot(pointee_name.as_deref())
+                    {
+                        let loaded = self.ctx.alloc_temp();
+                        let mut operands = Vec::<u8>::with_capacity(4);
+                        Self::write_reg(&mut operands, loaded.0);
+                        Self::write_reg(&mut operands, ptr_reg.0);
+                        self.ctx.emit(Instruction::MemExtended {
+                            sub_op: crate::instruction::MemSubOpcode::DerefValue.to_byte(),
+                            operands,
+                        });
+                        self.ctx.free_temp(ptr_reg);
+                        return Ok(Some(loaded));
+                    }
                     // `&*p ≡ p` — `ptr_reg` already holds the heap-anchored
                     // pointer, which is the exact `&T` the surrounding code
                     // expects and which survives every frame boundary.
@@ -27506,6 +27553,50 @@ impl VbcCodegen {
         // stdlib and the fallback matches the pre-fix behaviour for
         // any not-yet-classified case.
         8
+    }
+
+    /// Does a raw pointer DECLARED with this type address a single
+    /// `Value` slot — a `List` backing element, a record field — rather
+    /// than an INLINE payload (T1492)?
+    ///
+    /// The two shapes are spelled the same (`&unsafe T`) and only the
+    /// pointee tells them apart.  `&unsafe Slot<K, V>` is Map's entry
+    /// TABLE: consecutive 32-byte records, where an address names the
+    /// record.  `&unsafe T` in `List<T>` is a run of 8-byte NaN-boxed
+    /// `Value`s, where an address names a slot and the thing the
+    /// language means by `&T` is what the slot HOLDS.
+    ///
+    /// An unknown name answers `false`: the caller keeps the address it
+    /// has today rather than guess, so nothing that works loses its
+    /// meaning to a missing inference.
+    pub fn raw_pointer_addresses_a_value_slot(&self, ptr_type_name: Option<&str>) -> bool {
+        let Some(name) = ptr_type_name.map(str::trim) else {
+            return false;
+        };
+        let inner = name
+            .strip_prefix("&unsafe mut ")
+            .or_else(|| name.strip_prefix("&unsafe "))
+            .or_else(|| name.strip_prefix("*const "))
+            .or_else(|| name.strip_prefix("*mut "))
+            .unwrap_or(name)
+            .trim();
+        let base = match inner.find('<') {
+            Some(lt) => &inner[..lt],
+            None => inner,
+        }
+        .trim();
+        if base.is_empty() {
+            return false;
+        }
+        // A record descriptor is the discriminator for the inline case —
+        // the same fact `compute_pointee_stride` turns into a stride.
+        if let Some(&type_id) = self.type_name_to_id.get(base)
+            && let Some(desc) = self.type_by_id(type_id)
+            && !desc.fields.is_empty()
+        {
+            return false;
+        }
+        self.compute_pointee_stride(Some(name)) == 8
     }
 
     /// Conservative variant of [`infer_expr_type_name`](Self::infer_expr_type_name)

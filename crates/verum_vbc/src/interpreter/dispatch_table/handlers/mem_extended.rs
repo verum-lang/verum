@@ -37,6 +37,37 @@ pub(in super::super) fn handle_mem_extended(
     dispatch_enveloped(state, mem_extended_body)
 }
 
+/// The interpreter-heap object a pointer the LANGUAGE handed out belongs
+/// to — accepting both the object's base and its DATA address (T1492).
+///
+/// `List.ptr` addresses element 0, which for an interpreter-allocated
+/// backing is `base + OBJECT_HEADER_SIZE`, and `core/collections/list.vr`
+/// hands that same field to `realloc`/`dealloc` as the allocation it
+/// believes it owns. Both verbs must recognise it or they pass a heap
+/// pointer to the system allocator: `resize`, `extend_from_slice` and
+/// `reserve` all aborted that way (`std::alloc::dealloc` on an address
+/// the system allocator never returned).
+///
+/// `heap::Heap::get_object` is the data-address side and validates the
+/// reconstructed header itself; `contains` is the base side. A raw
+/// `alloc()` block belongs to neither and is answered `None`, which
+/// leaves the system-allocator path exactly as it was.
+fn backing_object_base(
+    state: &InterpreterState,
+    ptr: *mut u8,
+) -> Option<*mut u8> {
+    if ptr.is_null() {
+        return None;
+    }
+    if state.heap.contains(ptr as *const heap::ObjectHeader) {
+        return Some(ptr);
+    }
+    state
+        .heap
+        .get_object(ptr)
+        .map(|obj| obj.as_ptr() as *mut u8)
+}
+
 /// `MemExtended` sub-op arms. Invoked through
 /// [`dispatch_enveloped`](super::envelope::dispatch_enveloped), which owns the
 /// sub-op byte, the operand-length envelope and the pc reposition.
@@ -149,6 +180,17 @@ fn mem_extended_body(
             let size = state.get_reg(size_reg).as_i64() as usize;
             let align = state.get_reg(align_reg).as_i64() as usize;
 
+            // LIST-DEALLOC-CANONICAL-1, the twin of the realloc guard
+            // below: `free_buffer`'s `dealloc(self.ptr …)` reaches a
+            // CANONICAL collection backing — a heap object the GC owns,
+            // whose address the system allocator never returned. Freeing
+            // it here is heap corruption (SIGABRT, measured on
+            // `xs.resize(5, 0)`). Leave it to the GC, exactly as the
+            // realloc arm leaves the OLD backing.
+            if backing_object_base(state, ptr).is_some() {
+                return Ok(DispatchResult::Continue);
+            }
+
             if !ptr.is_null() {
                 let layout = raw_mem_layout(size, align, "deallocation")?;
                 unsafe { std::alloc::dealloc(ptr, layout) };
@@ -183,7 +225,11 @@ fn mem_extended_body(
             // `state.heap` exactly like `handle_list_push`: allocate a new
             // backing, copy the data region at +OBJECT_HEADER_SIZE, and leave
             // the old backing for the GC (never std::alloc::dealloc it).
-            if !ptr.is_null() && state.heap.contains(ptr as *const heap::ObjectHeader) {
+            // The caller may spell the backing either way — `self.ptr` is
+            // the DATA address since T1492, and an intercept-built list
+            // still carries the base — so resolve through the one
+            // authority rather than testing a single spelling.
+            if let Some(ptr) = backing_object_base(state, ptr) {
                 let is_byte = {
                     let header = unsafe { heap::ObjectHeader::ref_or_stub(ptr) };
                     header.type_id == TypeId::BYTE_LIST
@@ -1143,6 +1189,43 @@ unsafe {
                 ptr.wrapping_sub(delta)
             };
             state.set_reg(dst, Value::from_i64(out));
+            Ok(DispatchResult::Continue)
+        }
+
+        0x1E => {
+            // DerefValue — load the `Value` a raw address NAMES (T1492).
+            // Format: dst:reg, addr:reg.
+            //
+            // The address came from a pointer the LANGUAGE handed out —
+            // `list.ptr.offset(i)`, `&self.field as *const T` — so the
+            // eight bytes at it are a `Value` slot, not an FFI integer.
+            // `DerefRaw` at width 8 answers the other question and
+            // decides by inspecting the bits (`is_tagged()`); a `Float`
+            // element is a raw IEEE double with no tag and comes back
+            // through it as an integer holding the double's bit
+            // pattern. Here the eight bytes are taken VERBATIM.
+            //
+            // NO EXCEPTIONS, and the sibling authority is why. Every
+            // pointer-tagged arm of `handle_deref` reads its target the
+            // same way — the CBGR-allocation arm, the variant-field-
+            // pointer arm, and the BRIDGE arm, whose comment states the
+            // rule outright: "an address inside a live bridge block
+            // names a `Value` slot, so `*p` READS it" (T0705/T0384).
+            // An extent test here would have made this opcode disagree
+            // with `*p` over the same address, which is the one thing a
+            // second reader of the same storage must not do.
+            let dst = read_reg(state)?;
+            let addr_reg = read_reg(state)?;
+            let addr = value_as_addr(state.get_reg(addr_reg));
+            if addr == 0 {
+                return Err(InterpreterError::NullPointer);
+            }
+            // SAFETY: the address names a live `Value` slot — a List
+            // backing element, a record field, a CBGR cell — which is
+            // eight readable bytes by the contract of whoever produced
+            // the pointer. `read_unaligned` handles alignment.
+            let raw = unsafe { std::ptr::read_unaligned(addr as *const u64) };
+            state.set_reg(dst, Value::from_bits(raw));
             Ok(DispatchResult::Continue)
         }
 

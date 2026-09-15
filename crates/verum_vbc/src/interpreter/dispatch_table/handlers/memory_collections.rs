@@ -79,6 +79,65 @@ pub(in super::super) fn handle_new_array(
     Ok(DispatchResult::Continue)
 }
 
+/// The `ptr` field of a `List` / packed `List<Byte>`, as COMPILED CODE
+/// must see it: the address of element 0 (T1492).
+///
+/// `core/collections/list.vr` declares slot 2 `ptr: &unsafe T` and every
+/// body it has reads it that way — `iter`'s `self.ptr.offset(self.len)`
+/// end sentinel, `unique`'s `&*self.ptr.offset(i)`, `ListIter.next`'s
+/// `&*self.ptr`.  The interpreter stores the backing ALLOCATION there,
+/// whose first `OBJECT_HEADER_SIZE` bytes are an `ObjectHeader`, and
+/// every intercept that reads the slot adds the skip back by hand
+/// (`handle_get_index`, `handle_list_push`, the range-slice arms).
+/// Nothing reconciled the two, so `offset(0)` addressed the header's
+/// `type_id` word and `offset(3)` addressed element 0.
+///
+/// `Text` had the convention right all along — `heap::alloc_text` stores
+/// `Value::from_ptr(bytes_dst)`, the BYTES, not the object — which is
+/// the precedent this follows.
+///
+/// ONE DIRECTION ONLY, and deliberately.  A symmetric `SetF` inverse was
+/// built and REVERTED: `resize_buffer` also hands `self.ptr` to
+/// `realloc`/`dealloc` as the allocation it owns, so the same field is
+/// read as an element address and as an allocation base by two callers
+/// of the same body.  Subtracting the header on the way IN made
+/// `realloc`'s own `LIST-REALLOC-CANONICAL-1` guard miss its object and
+/// free a heap pointer through `std::alloc` — SIGABRT on `resize`,
+/// `extend_from_slice` and `reserve`.  The allocator verbs learn the
+/// data-pointer spelling instead (`backing_object_base` in
+/// `mem_extended.rs`), which leaves exactly one rule here.
+///
+/// The address leaves INT-tagged, matching `PtrAdd`/`PtrSub`: a
+/// pointer-tagged interior address becomes a droppable-looking heap
+/// object and `DropRef` chases element bytes as a header.
+///
+/// A slot that does not hold a live heap object — null for a `cap == 0`
+/// list, or a raw `alloc()` block a `.vr` body stored itself — is
+/// returned untouched, because for such a block element 0 IS its base.
+fn is_container_backing_slot(type_id: TypeId, field_idx: usize) -> bool {
+    field_idx == 2 && (type_id == TypeId::LIST || type_id == TypeId::BYTE_LIST)
+}
+
+fn container_backing_out(
+    state: &InterpreterState,
+    type_id: TypeId,
+    field_idx: usize,
+    slot: Value,
+) -> Value {
+    if !is_container_backing_slot(type_id, field_idx) {
+        return slot;
+    }
+    let addr = if slot.is_ptr() && !slot.is_nil() {
+        slot.as_ptr::<u8>() as usize
+    } else {
+        return slot;
+    };
+    if addr == 0 || !state.heap.contains(addr as *const heap::ObjectHeader) {
+        return slot;
+    }
+    Value::from_i64((addr + heap::OBJECT_HEADER_SIZE) as i64)
+}
+
 /// GetF (0x62) - Get field: dst = obj.field
 pub(in super::super) fn handle_get_field(
     state: &mut InterpreterState,
@@ -625,6 +684,7 @@ pub(in super::super) fn handle_get_field(
     };
     let data_ptr = unsafe { ptr.add(header_skip + field_offset) as *const Value };
     let value = unsafe { *data_ptr };
+    let value = container_backing_out(state, header.type_id, field_idx, value);
     state.set_reg(dst, value);
     Ok(DispatchResult::Continue)
 }

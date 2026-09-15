@@ -1,0 +1,54 @@
+// @test: run-interpreter
+// @level: L0
+// @tier: 0
+// @tags: stdlib-runtime, list, references, value-slot
+// @expected-stdout-begin
+// 7 7 9
+// eq true
+// unique 3
+// @expected-stdout-end
+
+// `&*list.ptr.offset(i)` is a FOURTH producer of a returned `&T`, and it
+// had been given the ADDRESS convention where the element is owed.
+// docs/architecture/returned-reference-contract.md names the other three
+// and the two conventions.
+//
+// Six lines said it:
+//
+//     let xs: List<Int> = [7, 7, 9];
+//     print(f"{*a} {*b} {*c}")   ->  48624037456 48624037464 48624037472
+//
+// Three consecutive addresses, eight bytes apart, where 7 7 9 is stored.
+// Two separate faults compose into that number and BOTH are needed to
+// read it:
+//
+//   * `List.ptr` handed compiled code the backing ALLOCATION, whose
+//     first 24 bytes are an ObjectHeader — so `offset(0)` addressed the
+//     header's type_id word and `offset(3)` addressed element 0. Text
+//     had the convention right all along (`alloc_text` stores the BYTES),
+//     which is what made the disagreement visible.
+//   * `*item` on the resulting reference lowered to the generic `Deref`,
+//     whose Int arm is identity — so the address came straight back out.
+//
+// HOW IT WAS FOUND: `dedup()` kept only the first element of any Int
+// input while `List.unique([1, 1, 2, 3, 3])` kept all five — two archive
+// bodies disagreeing with each other AND with the truth. `List.contains`
+// has the same `*item == *value` spelling and is correct, because it is
+// one of the 41 of 96 `self.ptr` methods the interpreter INTERCEPTS, so
+// its body never runs. The interceptions were hiding the size of this.
+//
+// The third line is here because the first two could pass while the
+// stdlib caller still failed: `unique` is the caller that sits on this,
+// and it needs `item.clone()` to reach the element too — which is why
+// the reference carries the element rather than an address that `*`
+// alone knows how to read.
+
+fn main() {
+    let xs: List<Int> = [7, 7, 9];
+    let a: &Int = unsafe { &*xs.ptr.offset(0) };
+    let b: &Int = unsafe { &*xs.ptr.offset(1) };
+    let c: &Int = unsafe { &*xs.ptr.offset(2) };
+    print(f"{*a} {*b} {*c}");
+    print(f"eq {*a == *b}");
+    print(f"unique {[1, 1, 2, 3, 3].unique().len()}");
+}
