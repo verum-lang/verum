@@ -1793,6 +1793,32 @@ impl InferredProperties {
                             }
                         }
                     }
+                    // FALLIBILITY STOPS WHERE THE ERROR CANNOT ESCAPE (T1493).
+                    // The union above hands every callee's property to the
+                    // caller, which is right for IO, Mutates and Spawns — they
+                    // describe what the call DID. `Fallible` is different: it
+                    // means "this may hand an error to ITS caller", and a
+                    // function whose own return type is not `Result`/`Maybe`
+                    // has no channel to do that. An exhaustive `match` that
+                    // answers `Bool` is exactly where the property stops.
+                    //
+                    // Measured (T1493), twenty lines, no stdlib:
+                    //
+                    //     fn maker(x) -> Result<Int, Text> { inner(x)?; … }
+                    //     pure fn handled(x) -> Bool {
+                    //         match maker(x) { Err(_) => false, Ok(v) => v > 0 }
+                    //     }
+                    //   -> "declared `pure` but has impure properties: Fallible"
+                    //
+                    // `handled` cannot fail: it returns a Bool, and no caller
+                    // of it can observe an error. Four sibling probes stayed
+                    // clean only because `Fallible` is raised by the `?`
+                    // operator alone — a callee that builds `Result.Err`
+                    // directly never carried the property to begin with, so
+                    // those probes proved nothing about extinguishing.
+                    if !returns_fallible_shape(module, name) {
+                        combined = combined.without_fallible();
+                    }
                     props.insert(name.clone(), combined);
                 }
             }
@@ -1816,6 +1842,49 @@ impl InferredProperties {
 }
 
 /// Infer direct computational properties from a function's signature and body.
+/// Does `name`'s DECLARED return type give an error a way out?
+///
+/// `Result<_, _>` and `Maybe<_>` do; every other shape does not. Written
+/// against the declaration rather than the body because that is what a
+/// caller can see: the property is about what this function may hand back,
+/// not about how it computed it.
+///
+/// A name this cannot resolve (an impl method reached by a bare name, a
+/// callee from another module) answers `true` — the conservative direction,
+/// which keeps the property rather than dropping one that was real.
+fn returns_fallible_shape(module: &Module, name: &str) -> bool {
+    use verum_ast::ty::TypeKind;
+
+    fn is_fallible_ty(ty: &verum_ast::ty::Type) -> bool {
+        match &ty.kind {
+            TypeKind::Path(path) => path_head_is_fallible(path),
+            TypeKind::Generic { base, .. } => is_fallible_ty(base),
+            _ => false,
+        }
+    }
+
+    fn path_head_is_fallible(path: &verum_ast::ty::Path) -> bool {
+        use verum_ast::ty::PathSegment;
+        matches!(
+            path.segments.last(),
+            Some(PathSegment::Name(n))
+                if matches!(n.as_str(), "Result" | "Maybe" | "Option")
+        )
+    }
+
+    for item in module.items.iter() {
+        if let ItemKind::Function(func) = &item.kind
+            && func.name.to_string() == name
+        {
+            return match &func.return_type {
+                verum_common::Maybe::Some(ty) => is_fallible_ty(ty),
+                _ => false,
+            };
+        }
+    }
+    true
+}
+
 fn infer_direct_properties(func: &FunctionDecl) -> PropertySet {
     let mut props = Vec::new();
 

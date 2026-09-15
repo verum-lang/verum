@@ -630,6 +630,34 @@ impl PropertySet {
         }
     }
 
+    /// Drop `Fallible`, restoring `Pure` if nothing impure is left.
+    ///
+    /// A FUNCTION THAT CANNOT RETURN AN ERROR IS NOT FALLIBLE, whatever its
+    /// callees do (T1493). `Fallible` means "this may hand an error to its
+    /// caller"; a function whose own return type is not `Result`/`Maybe`
+    /// cannot, because there is no channel for one. Inheriting the property
+    /// from a callee is right only while the error can still escape — an
+    /// exhaustive `match` that answers `Bool` is exactly where it stops.
+    ///
+    /// Measured before this existed: `pure fn handled(x) -> Bool` matching
+    /// both arms of a callee's `Result` was rejected with "declared `pure`
+    /// but has impure properties: Fallible", and `verum check` on the
+    /// registry cog reported exactly two such errors.
+    ///
+    /// Only `Fallible` is dropped. `IO`, `Mutates`, `Spawns` and the rest
+    /// describe what the call DID on the way, and handling a result does
+    /// not undo any of it.
+    pub fn without_fallible(&self) -> PropertySet {
+        let mut properties = self.properties.clone();
+        if !properties.remove(&ComputationalProperty::Fallible) {
+            return self.clone();
+        }
+        if properties.is_empty() {
+            properties.insert(ComputationalProperty::Pure);
+        }
+        PropertySet { properties }
+    }
+
     /// Check if this property set is a subset of another (subsumption)
     /// Returns true if all properties in self are also in other
     pub fn is_subset_of(&self, other: &PropertySet) -> bool {

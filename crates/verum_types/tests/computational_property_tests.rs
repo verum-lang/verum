@@ -208,3 +208,79 @@ fn test_complex_property_combination() {
     assert!(!ps.contains(&ComputationalProperty::Pure));
     assert!(!ps.contains(&ComputationalProperty::Divergent));
 }
+
+// ---------------------------------------------------------------------------
+// T1493 — fallibility stops where the error cannot escape
+// ---------------------------------------------------------------------------
+
+/// `Fallible` means "this may hand an error to its caller". A function whose
+/// own return type is not `Result`/`Maybe` has no channel to do that, so the
+/// property must not survive an exhaustive `match`.
+///
+/// Found blocking `internal/registry-next`: `verum check` reported exactly two
+/// errors, both of this shape —
+///
+/// ```text
+/// error: Function 'round_trip_preserves' declared `pure`
+///        but has impure properties: Fallible
+/// ```
+///
+/// — on a function that decodes, matches both arms and answers `Bool`.
+#[test]
+fn without_fallible_drops_the_property_and_restores_purity() {
+    let props = PropertySet::single(ComputationalProperty::Fallible);
+    assert!(!props.is_pure(), "a Fallible set is not pure to begin with");
+
+    let handled = props.without_fallible();
+    assert!(
+        !handled.iter().any(|p| *p == ComputationalProperty::Fallible),
+        "the property must be gone: {:?}",
+        handled
+    );
+    assert!(
+        handled.is_pure(),
+        "nothing impure is left, so the set is pure again: {:?}",
+        handled
+    );
+}
+
+/// ONLY `Fallible` is dropped. `IO`, `Mutates` and `Spawns` describe what the
+/// call DID on the way to its result, and handling that result does not undo
+/// any of it — a control, because the cheap mistake here is to clear the whole
+/// set once the error is caught.
+#[test]
+fn without_fallible_leaves_every_other_property_alone() {
+    let props = PropertySet::from_properties(vec![
+        ComputationalProperty::Fallible,
+        ComputationalProperty::IO,
+        ComputationalProperty::Mutates,
+    ]);
+
+    let handled = props.without_fallible();
+    assert!(
+        handled.iter().any(|p| *p == ComputationalProperty::IO),
+        "IO happened and still did: {:?}",
+        handled
+    );
+    assert!(
+        handled.iter().any(|p| *p == ComputationalProperty::Mutates),
+        "the mutation happened and still did: {:?}",
+        handled
+    );
+    assert!(
+        !handled.is_pure(),
+        "a set with IO is not pure, caught error or not: {:?}",
+        handled
+    );
+}
+
+/// A set that never carried `Fallible` comes back unchanged — including a
+/// `Pure` one, which must not gain or lose anything.
+#[test]
+fn without_fallible_is_identity_when_there_was_none() {
+    let pure_set = PropertySet::pure();
+    assert_eq!(pure_set.without_fallible(), pure_set);
+
+    let io_set = PropertySet::single(ComputationalProperty::IO);
+    assert_eq!(io_set.without_fallible(), io_set);
+}
