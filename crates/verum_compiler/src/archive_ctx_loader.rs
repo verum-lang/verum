@@ -2504,6 +2504,49 @@ impl ArchiveCtxCache {
         // stdlib type module paths — see [`build_wanted_module_prefixes`]
         // for the rationale.
         expand_wanted_through_module_edges(&mut wanted);
+        // FORMAT-SITE-NAMES-FMT-1 (T1487). A format site names neither
+        // `Display` nor `fmt`, so an archive `implement Display for X` is
+        // rejected by every arm of the per-function filter and the
+        // f-string falls back to printing the variant name — silently.
+        //
+        // Six lines and two controls:
+        //
+        //     mount core.sys.windows.tls.{WindowsTlsError};
+        //     let e = WindowsTlsError.NotInitialized; print(f"[{e}]")
+        //       -> [NotInitialized]
+        //
+        // Add `fn fmt(x: Int) -> Int { x }` — a dummy, never called, the
+        // right NAME and nothing else — and the same programme prints
+        // `Windows TLS: not initialized`. So a name in the wanted set is
+        // the lever. WHICH name matters enormously, and the first answer
+        // was the wrong one:
+        //
+        //   `fmt`      the bare method name. Works, and the filter's
+        //              last-segment arm then accepts EVERY `<T>.fmt` in
+        //              every decoded module — `apply_lazy_with_types`
+        //              went from 71 ms to 1545 ms on a hello-world.
+        //   `Display`  the PROTOCOL. Also works — measured by naming it
+        //              in a probe's source on a binary without any of
+        //              this — and it is one type rather than every
+        //              implementor's method.
+        //
+        // So `Display` is seeded. Same effect, one name.
+        //
+        // The arm that OUGHT to fire does not. `is_method_of_wanted_type`
+        // accepts `<T>.<m>` when the TYPE is wanted, and the failing probe
+        // mounts `WindowsTlsError` by name — but `VERUM_TRACE_ACCEPT`
+        // reports `core.sys.windows simple=5 … method-of-type=0`, so the
+        // impl method's simple name carries no type to match on.
+        //
+        // Writing the name explicitly is what a format site MEANS. The
+        // gate is the format site itself: a programme that prints only
+        // literals sets no flag and pays nothing, the same discipline the
+        // result-type seeding downstream was narrowed to. And it must sit
+        // HERE, before the walk that registers — the first placement was
+        // a hundred lines later, past it, and measured INERT.
+        if formatted_call_names_and_flag(user_module).1 {
+            wanted.insert("Display".to_string());
+        }
         let mut wanted_module_prefixes = build_wanted_module_prefixes(&wanted);
         // T1468: a mounted TYPE has no call edges, so nothing
         // downstream can reach the module that DECLARES it — walk
@@ -2620,6 +2663,11 @@ impl ArchiveCtxCache {
         // Well-known stdlib types (Text/List/Map/...) get explicit
         // module-path expansion via `build_wanted_module_prefixes`.
         expand_wanted_through_module_edges(&mut wanted);
+        // FORMAT-SITE-NAMES-FMT-1 (T1487) — see `apply_lazy` for the
+        // measurement; every path that builds a wanted set needs it.
+        if formatted_call_names_and_flag(user_module).1 {
+            wanted.insert("Display".to_string());
+        }
         let mut wanted_module_prefixes = build_wanted_module_prefixes(&wanted);
         // T1468: a mounted TYPE has no call edges, so nothing
         // downstream can reach the module that DECLARES it — walk
@@ -2914,6 +2962,11 @@ impl ArchiveCtxCache {
             return (0, 0);
         }
         expand_wanted_through_module_edges(&mut wanted);
+        // FORMAT-SITE-NAMES-FMT-1 (T1487) — see `apply_lazy` for the
+        // measurement; every path that builds a wanted set needs it.
+        if formatted_call_names_and_flag(user_module).1 {
+            wanted.insert("Display".to_string());
+        }
         let mut wanted_module_prefixes = build_wanted_module_prefixes(&wanted);
         // T1468: a mounted TYPE has no call edges, so nothing
         // downstream can reach the module that DECLARES it — walk
@@ -7065,6 +7118,18 @@ struct FormattedCallHarvest {
     /// produced, so `let o = a.cmp(b); print(f"{o}")` must reach
     /// `Ordering` exactly as the inline spelling does.
     bindings: HashMap<String, (HashSet<String>, HashSet<String>)>,
+    /// Whether ANY expression was found in format position — a call, a
+    /// variable, a field read, anything that is not a literal.
+    ///
+    /// Separate from `names` because the question it answers is
+    /// different. `names` asks "which result types must be reached";
+    /// this asks "will something be Display-formatted at all", and a
+    /// variable bound to a variant constructor answers yes while
+    /// contributing no name at all. That is T1487's whole case:
+    /// `let e = WindowsTlsError.NotInitialized; print(f"{e}")` printed
+    /// `NotInitialized`, and an unrelated `fn fmt(x: Int) -> Int` in the
+    /// same file made it print the impl's text.
+    formats_something: bool,
 }
 
 impl FormattedCallHarvest {
@@ -7215,6 +7280,27 @@ impl verum_ast::visitor::Visitor for FormattedCallHarvest {
             },
             _ => false,
         };
+        // Something that is NOT A LITERAL is in format position, so a
+        // Display impl may be needed (T1487).
+        //
+        // The predicate has to be exactly this and not "any expression at
+        // depth": `print("hello")` puts a string LITERAL in format
+        // position, and the version that counted it took a hello-world
+        // from 0.65 s of user time to 2.34 — a programme that formats
+        // only literals must pay nothing, which is the same discipline
+        // the result-type seeding was narrowed to.
+        //
+        // And not "any of the three arms below" either: those harvest
+        // NAMES, and `f"{Type.Variant}"` written inline is a multi-segment
+        // path that matches none of them while still needing Display.
+        if self.depth > 0
+            && !matches!(
+                expr.kind,
+                ExprKind::Literal(_) | ExprKind::InterpolatedString { .. }
+            )
+        {
+            self.formats_something = true;
+        }
         if self.depth > 0 {
             match &expr.kind {
                 ExprKind::MethodCall { method, .. } => {
@@ -7250,16 +7336,27 @@ impl verum_ast::visitor::Visitor for FormattedCallHarvest {
 /// the point: such a program pays nothing for this.
 fn formatted_call_names(user_module: &verum_ast::Module) -> HashSet<String> {
     use verum_ast::visitor::Visitor;
+    formatted_call_names_and_flag(user_module).0
+}
+
+/// The same walk, also reporting whether the module formats ANYTHING
+/// that is not a literal (T1487).
+fn formatted_call_names_and_flag(
+    user_module: &verum_ast::Module,
+) -> (HashSet<String>, bool) {
+    use verum_ast::visitor::Visitor;
     let mut harvest = FormattedCallHarvest {
         depth: 0,
         names: HashSet::new(),
         formatted_vars: HashSet::new(),
         bindings: HashMap::new(),
+        formats_something: false,
     };
     for item in user_module.items.iter() {
         harvest.visit_item(item);
     }
-    harvest.into_names()
+    let flag = harvest.formats_something;
+    (harvest.into_names(), flag)
 }
 
 

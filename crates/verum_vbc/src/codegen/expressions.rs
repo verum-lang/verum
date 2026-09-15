@@ -7048,57 +7048,35 @@ impl VbcCodegen {
                         let (name, info) = non_method[0];
                         Some((name.clone(), info.clone()))
                     } else {
-                        // MOUNTED-MODULE-PROXIMITY-1 (T1484). The file's
-                        // own `mount` list is a statement about VOCABULARY,
-                        // not only about the names inside the braces: a file
-                        // that writes `mount core.base.memory.{drop, take};`
-                        // is speaking core.base.memory, and a same-named
-                        // free fn from a module it never named is not a
-                        // candidate a reader would consider.
+                        // MOUNTED-MODULE-PROXIMITY-1 WAS HERE AND IS
+                        // REVERTED (T1484). The idea reads well — a file
+                        // that writes `mount core.base.memory.{drop, take}`
+                        // is speaking that module, so a same-named free fn
+                        // from a module it never named should lose — and it
+                        // did close five tests. It also opened ten, and the
+                        // reason is the one this tree has been burned by
+                        // before: a guard over a COMMON VOCABULARY is not
+                        // narrow.
                         //
-                        // Without this the bare slot decides, and the bare
-                        // slot is LAST-WINS across archive load order.
-                        // Measured: `core-tests/base/memory/cbgr_test.vr`
-                        // calls `is_null(ptr)` on a raw pointer and runs
-                        // `core.database.sqlite.native.vdbe_register_model
-                        // .cell.is_null` — eleven free `is_null`s are
-                        // registered, the arg type is unknown so the type
-                        // filter rejects none, and the sqlite one held the
-                        // slot. The panic reads `field index 0 … exceeds
-                        // object data size 0`, naming the sqlite module in
-                        // its own backtrace. The same call in a five-line
-                        // probe with the SAME mounts answers correctly —
-                        // the decode set was smaller and the loser never
-                        // registered, which is why this only ever bites in
-                        // a large file.
+                        // `core/collections/list.vr` mounts
+                        // `core.base.memory.{try_alloc, try_realloc}` and
+                        // writes `ptr.is_null()` four times. With the
+                        // tie-break that resolved to the generic free
+                        // `is_null<T>(&unsafe T)`, and the call died as
+                        // `method '&unsafe T.is_null' not found on receiver
+                        // of runtime kind Int`. This file is BAKED, so the
+                        // damage was not to user code: `collections/list`,
+                        // `encoding/pem`, `net/addr` and `tracing/id` all
+                        // broke at once, 14 new failures against 15 fixed.
                         //
-                        // Derived from `mounted_fns` / `mounted_types`
-                        // rather than a new field: both already carry the
-                        // RESOLVED qualified key of everything this file
-                        // mounted, and the owning module is its head.
-                        // Applies only where the ladder is already
-                        // undecided, so no binding that resolves today
-                        // changes.
-                        let mounted_modules: std::collections::HashSet<&str> = self
-                            .ctx
-                            .mounted_fns
-                            .values()
-                            .chain(self.ctx.mounted_types.values())
-                            .filter_map(|k| k.rsplit_once('.').map(|(head, _)| head))
-                            .collect();
-                        let in_mounted: Vec<&&(String, FunctionInfo)> = non_method
-                            .iter()
-                            .filter(|(key, _)| {
-                                key.rsplit_once('.')
-                                    .is_some_and(|(head, _)| mounted_modules.contains(head))
-                            })
-                            .collect();
-                        if in_mounted.len() == 1 {
-                            let (name, info) = in_mounted[0];
-                            Some((name.clone(), info.clone()))
-                        } else {
-                            None
-                        }
+                        // A/B that settles it: the failing test is green on
+                        // the binary BEFORE this change and red on the one
+                        // after, same tree otherwise.
+                        //
+                        // What a real fix needs is a discriminator this one
+                        // never had — the RECEIVER, not just the module.
+                        // Left undone rather than left wrong.
+                        None
                     }
                 }
             }
