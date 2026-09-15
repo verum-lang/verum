@@ -7252,7 +7252,18 @@ impl VbcCodegen {
             // The arity must match: a spelling that resolves to a
             // wrong-arity namesake is not the function the user meant,
             // and falling through leaves today's behaviour untouched.
-            let path_intent: Option<(String, FunctionInfo)> = self
+            // `VERUM_NO_MOUNT_PATH_INTENT=1` turns this arm off in a
+            // SHIPPED binary. Three suspects for one regression cost
+            // three forty-minute builds to separate; two env gates turn
+            // that into one build and three runs.
+            let path_intent: Option<(String, FunctionInfo)> = if std::env::var_os(
+                "VERUM_NO_MOUNT_PATH_INTENT",
+            )
+            .is_some()
+            {
+                None
+            } else {
+                self
                 .ctx
                 .mounted_fn_paths
                 .get(&func_name)
@@ -7274,8 +7285,24 @@ impl VbcCodegen {
                     // Runs, not a scan of the function table: six lookups
                     // here against tens of thousands of keys, and no cache
                     // to keep coherent.
+                    // Runs ANCHORED AT THE HEAD, and at the `core.`-stripped
+                    // head — not every contiguous run.
+                    //
+                    // The wide version was measured and is the reason this
+                    // one is narrow: allowing a run to start anywhere lets
+                    // `verify.f` match a module called `verify` that the
+                    // user never named, and seven tests in `net/addr`,
+                    // `tracing/id`, `tracing/pipeline` and `base/cell` went
+                    // red against six fixed. A mount path is a statement
+                    // about a PREFIX; a suffix of it is somebody else's
+                    // name.
+                    //
+                    // Two starts, because archive descriptors carry both
+                    // spellings — `core.action.verdict_as_text` and
+                    // `sys.common.PAGE_SIZE` — and the second family is
+                    // exactly the `core.`-stripped one.
                     let mut spellings: Vec<String> = Vec::new();
-                    for start in 0..module.len() {
+                    for start in 0..module.len().min(2) {
                         for end in ((start + 1)..=module.len()).rev() {
                             spellings.push(format!(
                                 "{}.{}",
@@ -7294,7 +7321,8 @@ impl VbcCodegen {
                             })
                             .map(|info| (key.clone(), info.clone()))
                     })
-                });
+                })
+            };
             path_intent.or_else(|| {
             self.ctx
                 .carried_mount_bindings

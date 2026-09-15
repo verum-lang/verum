@@ -2521,16 +2521,19 @@ impl ArchiveCtxCache {
         // the lever. WHICH name matters enormously, and the first answer
         // was the wrong one:
         //
-        //   `fmt`      the bare method name. Works, and the filter's
-        //              last-segment arm then accepts EVERY `<T>.fmt` in
-        //              every decoded module — `apply_lazy_with_types`
-        //              went from 71 ms to 1545 ms on a hello-world.
-        //   `Display`  the PROTOCOL. Also works — measured by naming it
-        //              in a probe's source on a binary without any of
-        //              this — and it is one type rather than every
-        //              implementor's method.
+        // `fmt` — the bare method name — is what is seeded, and the
+        // 1545 ms it once cost on a hello-world was NOT this seed: it was
+        // the PREDICATE below firing on `print("hello")`, whose argument
+        // is a string LITERAL. The two were changed together and measured
+        // together, which is how a 21x load-time regression got blamed on
+        // the wrong half.
         //
-        // So `Display` is seeded. Same effect, one name.
+        // `Display` was tried as a narrower seed and does NOT work: the
+        // probe that appeared to prove it carried a LOCAL `implement
+        // Display` in the same file, and it was the local `fn fmt` doing
+        // the work. The descriptor's own name is `WindowsTlsError.fmt`
+        // (read out of `runtime.core_metadata`), so the arm that accepts
+        // it is the LAST-SEGMENT one and the leaf is what must be wanted.
         //
         // The arm that OUGHT to fire does not. `is_method_of_wanted_type`
         // accepts `<T>.<m>` when the TYPE is wanted, and the failing probe
@@ -2544,8 +2547,10 @@ impl ArchiveCtxCache {
         // result-type seeding downstream was narrowed to. And it must sit
         // HERE, before the walk that registers — the first placement was
         // a hundred lines later, past it, and measured INERT.
-        if formatted_call_names_and_flag(user_module).1 {
-            wanted.insert("Display".to_string());
+        if std::env::var_os("VERUM_NO_FMT_SEED").is_none()
+            && formatted_call_names_and_flag(user_module).1
+        {
+            wanted.insert("fmt".to_string());
         }
         let mut wanted_module_prefixes = build_wanted_module_prefixes(&wanted);
         // T1468: a mounted TYPE has no call edges, so nothing
@@ -2665,8 +2670,10 @@ impl ArchiveCtxCache {
         expand_wanted_through_module_edges(&mut wanted);
         // FORMAT-SITE-NAMES-FMT-1 (T1487) — see `apply_lazy` for the
         // measurement; every path that builds a wanted set needs it.
-        if formatted_call_names_and_flag(user_module).1 {
-            wanted.insert("Display".to_string());
+        if std::env::var_os("VERUM_NO_FMT_SEED").is_none()
+            && formatted_call_names_and_flag(user_module).1
+        {
+            wanted.insert("fmt".to_string());
         }
         let mut wanted_module_prefixes = build_wanted_module_prefixes(&wanted);
         // T1468: a mounted TYPE has no call edges, so nothing
@@ -2964,8 +2971,10 @@ impl ArchiveCtxCache {
         expand_wanted_through_module_edges(&mut wanted);
         // FORMAT-SITE-NAMES-FMT-1 (T1487) — see `apply_lazy` for the
         // measurement; every path that builds a wanted set needs it.
-        if formatted_call_names_and_flag(user_module).1 {
-            wanted.insert("Display".to_string());
+        if std::env::var_os("VERUM_NO_FMT_SEED").is_none()
+            && formatted_call_names_and_flag(user_module).1
+        {
+            wanted.insert("fmt".to_string());
         }
         let mut wanted_module_prefixes = build_wanted_module_prefixes(&wanted);
         // T1468: a mounted TYPE has no call edges, so nothing
@@ -7322,9 +7331,35 @@ impl verum_ast::visitor::Visitor for FormattedCallHarvest {
             }
         }
         if opens_format_position {
-            self.depth += 1;
-            verum_ast::visitor::walk_expr(self, expr);
-            self.depth -= 1;
+            // THE CALLEE IS NOT ONE OF ITS OWN ARGUMENTS.
+            //
+            // `walk_expr` visits a Call's `func` alongside its `args`, so
+            // raising the depth around the whole node put the callee's own
+            // name — the single path `print` — in format position. The
+            // harvest filed it as a formatted VARIABLE (harmless: no
+            // binding by that name) and the T1487 flag read it as "a
+            // non-literal is being formatted" (not harmless: `print
+            // ("hello")` then seeded `fmt`, and a hello-world's user time
+            // went 0.42 s -> 2.36 s, measured by running the same binary
+            // with the seed gated off).
+            //
+            // Walk the callee OUTSIDE the raised depth and the arguments
+            // inside it.
+            match &expr.kind {
+                ExprKind::Call { func, args, .. } => {
+                    self.visit_expr(func);
+                    self.depth += 1;
+                    for a in args.iter() {
+                        self.visit_expr(a);
+                    }
+                    self.depth -= 1;
+                }
+                _ => {
+                    self.depth += 1;
+                    verum_ast::visitor::walk_expr(self, expr);
+                    self.depth -= 1;
+                }
+            }
         } else {
             verum_ast::visitor::walk_expr(self, expr);
         }
