@@ -7370,7 +7370,6 @@ impl verum_ast::visitor::Visitor for FormattedCallHarvest {
 /// formats.  Empty for a program that prints only literals — which is
 /// the point: such a program pays nothing for this.
 fn formatted_call_names(user_module: &verum_ast::Module) -> HashSet<String> {
-    use verum_ast::visitor::Visitor;
     formatted_call_names_and_flag(user_module).0
 }
 
