@@ -39,8 +39,9 @@ mount super.super.mem.allocator.{
 mount super.super.mem.header.{AllocationHeader, HEADER_SIZE};
 
 // CBGR header field offsets, from the ONE declared layout
-// (`core/mem/header.vr`, mirrored by `verum_common::layout`'s
-// `ALLOCATION_HEADER_*` constants and pinned there by `offset_of` tests):
+// (`core/mem/header.vr`, mirrored on the Rust side by the layout
+// module's `ALLOCATION_HEADER_*` constants and pinned there by its
+// `offset_of` tests):
 //
 //     0  size u32   4 alignment u16   6 base_offset u16
 //     8  generation u32                12 epoch_and_caps u32

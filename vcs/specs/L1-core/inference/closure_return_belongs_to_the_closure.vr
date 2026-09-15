@@ -59,7 +59,7 @@ fn closure_in_a_let() -> Int {
 }
 
 // An UNANNOTATED closure still infers from its body, which is what
-// `Maybe::None` on the saved slot buys: `return` synthesises rather than
+// an absent saved slot buys: `return` synthesises rather than
 // checking against a signature that is not there.
 fn unannotated_closure() -> Int {
     let pred = |x: Int| { return x > 1; };

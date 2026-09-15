@@ -7,7 +7,7 @@
 
 /// `fn peekable(self) -> PeekableIter<Self>` is the shape every adapter
 /// constructor has. When the bake failed to resolve that `Self` it stored
-/// `TypeRef::Concrete(TypeId::PTR)` — and `PTR`, `USize` and `ISize` are the
+/// the concrete PTR type reference — and `PTR`, `USize` and `ISize` are the
 /// same id, so the archive metadata rendered `PeekableIter<ISize>` and every
 /// call site inherited a projection over a base that was never bound:
 ///
