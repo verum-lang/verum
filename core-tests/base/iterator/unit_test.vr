@@ -1674,7 +1674,7 @@ fn test_successors_none_start() {
 /// Test Range<UInt64> works correctly
 @test
 fn test_range_uint64() {
-    let iter: Range<UInt64> = Range { current: 0u64, end: 5u64 };
+    let iter: Range<UInt64> = Range { current: 0u64, end: 5u64, inclusive: false };
     let result: List<UInt64> = iter.collect();
     assert_eq(result, [0u64, 1u64, 2u64, 3u64, 4u64]);
 }
@@ -1682,7 +1682,7 @@ fn test_range_uint64() {
 /// Test Range<UInt64> size hint
 @test
 fn test_range_uint64_size_hint() {
-    let iter: Range<UInt64> = Range { current: 10u64, end: 20u64 };
+    let iter: Range<UInt64> = Range { current: 10u64, end: 20u64, inclusive: false };
     let (lower, upper) = iter.size_hint();
     assert_eq(lower, 10);
     assert_eq(upper, Maybe.Some(10));
