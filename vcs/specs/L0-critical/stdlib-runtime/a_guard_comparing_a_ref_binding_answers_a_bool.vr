@@ -1,0 +1,87 @@
+// @test: run-interpreter
+// @level: L0
+// @tier: 0
+// @tags: stdlib-runtime, iterator, references, equality
+// @expected-stdout-begin
+// dup [1, 2, 3, 1]
+// uniq [1, 2, 3, 4, 5]
+// twin [1, 2, 3, 1]
+// @expected-stdout-end
+
+// `DedupIter.next`'s guard — `match self.last { Maybe.Some(ref l) if
+// l == &x => continue, … }` — answered TRUE for every element, so
+// `dedup()` kept only the first element of any input, INCLUDING an
+// input with no duplicates at all.
+//
+// It looked archive-resident and was not. Carrying the same impl into a
+// user file and driving it with the stdlib's own driver, the answer
+// depends on what ELSE the programme calls: with `collect`, `filter`,
+// `take`, `unique`, or a bare `mount` of the type name it is correct;
+// add ONE call to the stdlib `dedup` and the user's own identical impl
+// answers `[1]`. The body still runs — a `print` inside it fires — so
+// nothing displaced `next`.
+//
+// THE INSTRUMENT NAMED IT IN ONE LINE. Rewriting the guard as a binding
+// and printing it:
+//
+//     let same = l == &x;      control  ->  true false false
+//                              flipped  ->  {1, None}  x3
+//
+// `same` is declared `Bool` and holds a two-field TUPLE — the shape of
+// `Iterator.size_hint`'s `(Int, Maybe<Int>)`. `if same` then takes the
+// true arm every time.
+//
+// `handle_eqg` took both operands RAW out of the registers. `ref l`
+// lowers to `GetVariantDataRef`, a heap-INTERIOR pointer at the payload
+// SLOT; `&x` is a CBGR register-ref. Neither is the value being
+// compared, and the handler probed the interior pointer's bytes as an
+// `ObjectHeader` to pick a type to dispatch on — reading `type_id 1` =
+// `Bool` out of a payload slot, then calling the first `Bool.eq` a
+// linear scan over the module's functions reached. Decoding `DedupIter`
+// moves that winner: same misread, different victim.
+//
+// The third line is the one that matters most: a local twin in the SAME
+// programme as the subject. Measured in isolation it was always
+// correct, which is how this was mis-filed as archive residency.
+
+type Src is { data: List<Int>, pos: Int };
+
+implement Iterator for Src {
+    type Item = Int;
+    fn next(&mut self) -> Maybe<Int> {
+        if self.pos >= self.data.len() { return Maybe.None; }
+        let v = self.data[self.pos];
+        self.pos = self.pos + 1;
+        Maybe.Some(v)
+    }
+}
+
+type TwinDedup<I> is { iter: I, last: Maybe<I.Item> };
+
+implement<I: Iterator> Iterator for TwinDedup<I>
+where I.Item: Eq + Clone {
+    type Item = I.Item;
+    fn next(&mut self) -> Maybe<I.Item> {
+        while let Maybe.Some(x) = self.iter.next() {
+            match self.last {
+                Maybe.Some(ref l) if l == &x => continue,
+                _ => { self.last = Maybe.Some(x.clone()); return Maybe.Some(x); }
+            }
+        }
+        Maybe.None
+    }
+}
+
+fn main() {
+    let a: List<Int> = [1, 1, 2, 2, 2, 3, 1, 1];
+    print(f"dup {a.iter().map(|x| *x).dedup().collect():?}");
+
+    let b: List<Int> = [1, 2, 3, 4, 5];
+    print(f"uniq {b.iter().map(|x| *x).dedup().collect():?}");
+
+    let src: List<Int> = [1, 1, 2, 2, 2, 3, 1, 1];
+    let mut t = TwinDedup { iter: Src { data: src, pos: 0 }, last: Maybe.None };
+    let mut out: List<Int> = List.new();
+    while let Maybe.Some(v) = t.next() { out.push(v); }
+    print(f"twin {out:?}");
+}

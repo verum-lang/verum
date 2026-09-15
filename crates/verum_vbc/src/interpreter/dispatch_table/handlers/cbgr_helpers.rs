@@ -265,6 +265,97 @@ pub(super) fn resolve_arg_value(
 /// receiver-consuming handler (GetF, RefField, StructFieldAddr, the
 /// deref family) should resolve through THIS, not through private
 /// one-hop copies — the copies are how the gap keeps reopening.
+/// A COMPARISON operand, resolved to the value it names (T1491).
+///
+/// `==` and `<` take whatever the registers hold, and two of the three
+/// reference encodings arrive unpeeled: a CBGR register-ref (`&x` on a
+/// local) and a heap-INTERIOR pointer (`Maybe.Some(ref l)` lowers to
+/// `GetVariantDataRef`, which addresses the payload SLOT). Neither is
+/// the thing being compared, and `handle_eqg` then probed the interior
+/// pointer's bytes as an `ObjectHeader` to pick a type to dispatch on:
+///
+///     match self.last { Maybe.Some(ref l) if l == &x => continue, … }
+///
+/// read `type_id 1` = `Bool` out of a payload slot, looked up `Bool.eq`
+/// by a linear scan over the module's functions, called the first match
+/// with (interior-ptr, register-ref), and the guard answered a TUPLE —
+/// `{1, None}`, the shape of `Iterator.size_hint` — which `if` then read
+/// as true. `DedupIter` kept only the first element of every input, and
+/// so did any user impl of the same shape in a programme that also
+/// called it, because the scan's winner moves with the decode set.
+///
+/// NOT `resolve_receiver`, and the difference cost a suite run. That
+/// function composes `resolve_arg_value`, whose `cbgr_mutable_ptrs` peel
+/// is unguarded against a STALE entry — the set is never cleaned on free
+/// (task #48), so an address it still holds can have been recycled into
+/// a live object. `Data.Object(o1) == Data.Object(o2)` duly peeled both
+/// VARIANTS to their payload `Map`s, dispatched `Map.eq` and answered
+/// false where it had answered true.
+///
+/// So the interior hop yields only a SCALAR slot. A heap-object base
+/// that a stale entry still names holds a pointer, not a scalar, and is
+/// left alone; a payload slot holding an `Int` has no other reading.
+/// Gating on "not an object base" was tried first and did NOT hold —
+/// the recycled address is not in the heap's object index either.
+///
+/// One hop for the slot, because the slot holds exactly one `Value`;
+/// looping would turn a compared POINTER into its first field, the
+/// casualty `resolve_receiver` documents just below.
+pub(in crate::interpreter) fn resolve_comparison_operand(
+    state: &super::super::super::state::InterpreterState,
+    val: Value,
+) -> Value {
+    // Register-ref chains peel to a fixpoint: a reference forwarded
+    // through nested frames can name another reference.
+    let mut v = val;
+    let mut hops = 0u8;
+    while hops < 8 && is_cbgr_ref(&v) {
+        let (abs_index, _gen) = decode_cbgr_ref(v);
+        let next = state.registers.get_absolute(abs_index);
+        if next.bits() == v.bits() {
+            break;
+        }
+        v = next;
+        hops += 1;
+    }
+    if v.is_ptr() && !v.is_nil() {
+        let addr = v.as_ptr::<u8>() as usize;
+        if state.cbgr_mutable_ptrs.contains(&addr)
+            && addr.is_multiple_of(std::mem::align_of::<Value>())
+            // Bridge memory is DATA, not a cell — the same precedence
+            // `resolve_arg_value` states: provenance outranks the
+            // cell registry.
+            && super::cbgr::bridge_extent_room(state, addr).is_none()
+        {
+            // SAFETY: the address is tracked as an interior reference,
+            // is `Value`-aligned and belongs to no bridge extent — so it
+            // addresses a live `Value` slot, the same contract
+            // `handle_get_field`'s own peel relies on.
+            let slot = unsafe { *(addr as *const Value) };
+            // ONLY A SCALAR SLOT, and this is the guard that makes the
+            // peel safe against a STALE entry. `cbgr_mutable_ptrs` is
+            // never cleaned on free (task #48), so an address it still
+            // holds can have been recycled into a live object — and
+            // `Data.Object(o1) == Data.Object(o2)` duly peeled both
+            // VARIANTS, dispatched `Map.eq` on their payloads and
+            // answered false where it had answered true.
+            //
+            // A slot holding a POINTER is the case the comparison
+            // already gets right without help: `deep_value_eq` walks it
+            // structurally. A slot holding a SCALAR is the one that has
+            // no other reading — an Int payload compared as an object
+            // is what fabricated `Bool` out of a payload slot. So this
+            // is `handle_get_field`'s own rule inverted: GetF follows
+            // the slot only when it holds a pointer, because it wants
+            // an object; equality peels it only when it does not.
+            if !slot.is_ptr() {
+                return slot;
+            }
+        }
+    }
+    v
+}
+
 pub(in crate::interpreter) fn resolve_receiver(
     state: &super::super::super::state::InterpreterState,
     val: Value,

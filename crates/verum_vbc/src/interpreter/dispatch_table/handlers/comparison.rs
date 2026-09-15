@@ -240,8 +240,15 @@ pub(in super::super) fn handle_eqg(
     let b = read_reg(state)?;
     let protocol_id = read_varint(state)? as u32;
 
-    let va = state.get_reg(a);
-    let vb = state.get_reg(b);
+    // BOTH OPERANDS ARE RESOLVED FIRST (T1491). A register-ref (`&x` on
+    // a local) and a heap-interior pointer (`Maybe.Some(ref l)`) are
+    // reference ENCODINGS, not the values being compared, and the
+    // type-name probe below reads its operand's bytes as an
+    // `ObjectHeader` — on a payload slot that fabricates a type and
+    // dispatches somebody else's `eq`. See
+    // `cbgr_helpers::resolve_comparison_operand` for the measurement.
+    let va = super::cbgr_helpers::resolve_comparison_operand(state, state.get_reg(a));
+    let vb = super::cbgr_helpers::resolve_comparison_operand(state, state.get_reg(b));
 
     // Remember the operands for a failing `Assert` further down the
     // block (see `InterpreterState::last_generic_eq`). Recorded HERE, at
@@ -414,8 +421,12 @@ pub(in super::super) fn handle_cmpg(
     // Read protocol_id (future: call protocol method)
     let _protocol_id = read_varint(state)? as u32;
 
-    let va = state.get_reg(a);
-    let vb = state.get_reg(b);
+    // Same resolution as `handle_eqg` (T1491) — `<` over a `ref`
+    // binding or a `&local` is the identical question, and an
+    // unresolved operand here reads a reference encoding as an
+    // integer-like value.
+    let va = super::cbgr_helpers::resolve_comparison_operand(state, state.get_reg(a));
+    let vb = super::cbgr_helpers::resolve_comparison_operand(state, state.get_reg(b));
 
     // Determine ordering based on value types
     // Bool values are treated as integers (false=0, true=1) for comparison
