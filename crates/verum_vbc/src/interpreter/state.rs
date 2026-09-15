@@ -414,20 +414,6 @@ pub struct InterpreterState {
     /// is exact and costs one `u32` compare.
     pub last_generic_eq: Option<(crate::instruction::Reg, Value, Value, u32)>,
 
-    /// `TypeId` → the type's own `clone`, if it declares one.
-    ///
-    /// `find_method_by_receiver_type` is a linear scan over every type
-    /// descriptor plus a walk of its protocol impls, and the universal
-    /// `clone` interception asks it of EVERY heap receiver. Asking it
-    /// once per clone took the conformance suite from ~25 minutes to
-    /// over 110 (T1490, measured — the run was killed rather than
-    /// finished). Asking it once per TYPE is a HashMap probe.
-    ///
-    /// `None` is a real answer and is cached: most types declare no
-    /// `clone` and must fall through to the value-copy without paying
-    /// the scan twice.
-    pub clone_impl_cache: HashMap<crate::types::TypeId, Option<crate::module::FunctionId>>,
-
     /// Host-provided global values, keyed by name — the data-exchange channel
     /// for the embedded scripting engine (`core.script`).  The engine seeds
     /// these from the host before a script runs and reads back any the script
@@ -2645,7 +2631,6 @@ impl InterpreterState {
             context_stack: ContextStack::new(),
             ctx_dense_slot_map: None,
             last_generic_eq: None,
-            clone_impl_cache: HashMap::new(),
             defer_stack: Vec::new(),
             open_files: std::collections::HashMap::new(),
             next_fd: 100,
