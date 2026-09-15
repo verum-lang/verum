@@ -521,6 +521,54 @@ impl VbcCodegen {
                 .set_fixed_array_count(&name.name, declared_len as usize);
         }
 
+        // PACKED-ARRAY-FROM-CALL-1 (T1475): `let d = make();` where `make`
+        // is DECLARED `-> [T; N]`. The callee returns a packed buffer —
+        // `NewByteArray` / `NewTypedArray`, measured in the bytecode of
+        // both spellings — and nothing marked the binding, so every
+        // `d[i]` after it lowered to the generic `GetE`, whose Tier-1
+        // form classifies its receiver at run time and reads the
+        // buffer's own bytes as a header.
+        //
+        // ELEVEN LINES, NO STDLIB, and the fault address IS the data:
+        //
+        //     fn make() -> [Byte; 8] { … out[0] = 11; out[7] = 22; out }
+        //     let d = make();  d[0]
+        //       tier 0 -> 11        tier 1 -> rc=139 at 0x160000000000000b
+        //
+        // `0x16` is 22 (out[7]) and `0x0b` is 11 (out[0]) — the array's
+        // own contents used as a pointer.
+        //
+        // WHY THE MARK AND NOT A CLASSIFIER ARM: a packed buffer is
+        // unstamped by design, because the FFI byte-buffer contract's
+        // first rule requires `[Byte; N]` destined for C to BE packed.
+        // It can never be made self-describing, so the reader must know
+        // statically — which is what the byte/typed fast paths (T0172,
+        // T0356) already do for an annotated local. This gives a
+        // call-bound local the same footing.
+        //
+        // The declared RETURN is the authority, exactly as the field
+        // declaration is for `PACKED-BYTE-LOCAL-FROM-FIELD-1`. A callee
+        // whose return type is not a primitive array is left alone, so
+        // List-returning functions keep the generic path they need.
+        if let verum_ast::PatternKind::Ident { name, .. } = &pattern.kind
+            && ty.is_none()
+            && let Some(v) = value
+            && let Some(info) = self.call_callee_info(v)
+            && let Some(crate::types::TypeRef::Array { element, length }) = info.return_type
+            && length > 0
+            && let Some((elem_size, is_float)) =
+                self.primitive_array_element_spec(&element)
+        {
+            if elem_size == 1 {
+                self.ctx.mark_byte_array_var(&name.name);
+            } else {
+                self.ctx
+                    .mark_typed_array_var(&name.name, elem_size, is_float);
+            }
+            self.ctx
+                .set_fixed_array_count(&name.name, length as usize);
+        }
+
         // `let (a, b, …) = <expr>` — record the destructured elements'
         // types so downstream method dispatch on the bound names
         // (`a.as_bytes()`) resolves a receiver type. `compile_match` only
@@ -1697,6 +1745,99 @@ impl VbcCodegen {
     }
 
     /// Gets the init value for typed array from repeat syntax [value; N].
+    /// The callee's registered `FunctionInfo` for an initialiser that is a
+    /// call, in either spelling the parser produces.
+    ///
+    /// BOTH SPELLINGS ARE NEEDED, and the second is the one that matters:
+    /// `plain()` arrives as `ExprKind::Call`, but `H.digest(1)` arrives as
+    /// `ExprKind::MethodCall` with `H` as the receiver — and every one of the
+    /// 89 byte-array returns in `core/` is written that way (`Sha512.digest`,
+    /// `Sha256.finalize`, `UInt64.to_be_bytes`). Handling only `Call` covered
+    /// the probe and none of the stdlib.
+    fn call_callee_info(
+        &self,
+        value: &verum_ast::Expr,
+    ) -> Option<crate::codegen::context::FunctionInfo> {
+        use verum_ast::expr::ExprKind;
+        use verum_ast::ty::PathSegment;
+        match &value.kind {
+            ExprKind::Call { func, .. } => {
+                let ExprKind::Path(path) = &func.kind else {
+                    return None;
+                };
+                Self::path_call_names(path)
+                    .iter()
+                    .find_map(|n| self.ctx.lookup_function_in_scope(n).cloned())
+            }
+            ExprKind::MethodCall {
+                receiver, method, ..
+            } => {
+                // A TYPE receiver (`H.digest`) is a static call and its
+                // registration key is `Type.method`. An instance receiver
+                // (`h.finalize()`) needs the receiver's tracked type name,
+                // which is the same table `packed_field_receiver_type` reads.
+                let owner = match &receiver.kind {
+                    ExprKind::Path(p) if p.segments.len() == 1 => {
+                        match p.segments.last() {
+                            Some(PathSegment::Name(n))
+                                if n.as_str()
+                                    .chars()
+                                    .next()
+                                    .is_some_and(|c| c.is_uppercase()) =>
+                            {
+                                Some(n.to_string())
+                            }
+                            Some(PathSegment::Name(n)) => {
+                                self.ctx.variable_type_names.get(n.as_str()).cloned()
+                            }
+                            _ => None,
+                        }
+                    }
+                    _ => None,
+                }?;
+                let base = owner.split('<').next().unwrap_or(&owner);
+                self.ctx
+                    .lookup_function_in_scope(&format!("{}.{}", base, method.name))
+                    .cloned()
+            }
+            _ => None,
+        }
+    }
+
+    /// The names a call's callee path may be registered under, most
+    /// qualified first.
+    ///
+    /// `H.digest(…)` must be looked up as `"H.digest"` — NOT as `"digest"`.
+    /// Measured (T1475): the bare-last-segment lookup made the packed-return
+    /// mark miss every qualified call, so `let d = Sha512.digest(…)` stayed
+    /// unmarked while `let d = plain()` was marked. And a bare `"digest"` is
+    /// not merely useless here, it is dangerous: simple names are
+    /// first-wins across the tree, so it can resolve to an unrelated
+    /// function of the same name and answer with ITS return type.
+    fn path_call_names(path: &verum_ast::ty::Path) -> Vec<String> {
+        use verum_ast::ty::PathSegment;
+        let segs: Vec<String> = path
+            .segments
+            .iter()
+            .filter_map(|s| match s {
+                PathSegment::Name(n) => Some(n.to_string()),
+                _ => None,
+            })
+            .collect();
+        let mut out = Vec::new();
+        if segs.len() >= 2 {
+            // `Type.method` — the registration key for an impl function.
+            out.push(segs[segs.len() - 2..].join("."));
+            if segs.len() > 2 {
+                out.push(segs.join("."));
+            }
+        }
+        if let Some(last) = segs.last() {
+            out.push(last.clone());
+        }
+        out
+    }
+
     /// Returns Some(value) for literal integers, None otherwise.
     fn get_typed_array_init_value(&self, expr: &verum_ast::Expr) -> Option<i64> {
         use verum_ast::ExprKind;

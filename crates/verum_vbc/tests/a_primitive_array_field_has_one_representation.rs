@@ -481,3 +481,128 @@ fn an_annotated_local_is_unaffected_by_the_field_binding_rule() {
         instrs
     );
 }
+
+/// PACKED-ARRAY-FROM-CALL-1 (T1475). `let d = make();` where `make` is declared
+/// `-> [Byte; N]` binds a local to the callee's PACKED buffer. Nothing marked
+/// it, so `d[i]` took the generic path and the Tier-1 classifier read the
+/// array's own bytes as a header — the fault address was literally the data
+/// (`0x160000000000000b` = 22 and 11).
+///
+/// 89 functions in `core/` return `[Byte; N]`: every `to_be_bytes`, every
+/// `digest`/`finalize`, `hkdf_extract_*`, `chacha20_block`, `uuid.to_bytes`.
+#[test]
+fn a_local_bound_from_a_call_returning_a_byte_array_is_packed() {
+    let vbc = compile(
+        "m",
+        "module m;\n\
+         public fn make() -> [Byte; 8] {\n\
+             let mut o: [Byte; 8] = [0 as Byte; 8];\n\
+             o[0] = 11 as Byte;\n\
+             o\n\
+         }\n\
+         public fn use_it() -> Byte {\n\
+             let d = make();\n\
+             d[0]\n\
+         }\n",
+    );
+    let instrs = decoded_fn(&vbc, "use_it");
+    assert_eq!(
+        count_sub_op(&instrs, MemSubOpcode::ByteArrayLoad),
+        1,
+        "reading the returned array must use the byte stride:\n{:#?}",
+        instrs
+    );
+    assert!(
+        !instrs.iter().any(|i| matches!(i, Instruction::GetE { .. })),
+        "the generic GetE is the classifier path this avoids:\n{:#?}",
+        instrs
+    );
+}
+
+/// The same for a NON-byte return: `[UInt32; 8]` is packed too — measured in
+/// the callee's bytecode (`NewTypedArray`, stride 4) — so it wants the typed
+/// stride, not the byte one and not the generic path.
+#[test]
+fn a_local_bound_from_a_call_returning_a_typed_array_is_packed() {
+    let vbc = compile(
+        "m",
+        "module m;\n\
+         public fn make32() -> [UInt32; 8] {\n\
+             let mut o: [UInt32; 8] = [0; 8];\n\
+             o[0] = 11;\n\
+             o\n\
+         }\n\
+         public fn use_it() -> UInt32 {\n\
+             let d = make32();\n\
+             d[0]\n\
+         }\n",
+    );
+    let instrs = decoded_fn(&vbc, "use_it");
+    assert_eq!(
+        count_sub_op(&instrs, MemSubOpcode::TypedArrayLoad),
+        1,
+        "reading a returned `[UInt32; N]` must use the declared stride:\n{:#?}",
+        instrs
+    );
+}
+
+/// CONTROL — a call returning a `List` must NOT be marked packed. The control
+/// matters: the return-form probe measured `List<Byte>` as CORRECT at both
+/// tiers already, so marking it would break something that works.
+#[test]
+fn a_local_bound_from_a_call_returning_a_list_is_not_packed() {
+    let vbc = compile(
+        "m",
+        "module m;\n\
+         public fn make_list() -> List<Byte> {\n\
+             let mut o: List<Byte> = [];\n\
+             o.push(11 as Byte);\n\
+             o\n\
+         }\n\
+         public fn use_it() -> Byte {\n\
+             let d = make_list();\n\
+             d[0]\n\
+         }\n",
+    );
+    let instrs = decoded_fn(&vbc, "use_it");
+    assert_eq!(
+        count_sub_op(&instrs, MemSubOpcode::ByteArrayLoad),
+        0,
+        "a List return must keep the generic index:\n{:#?}",
+        instrs
+    );
+}
+
+/// A QUALIFIED call reaches the same routing (T1475). `Sha512.digest(…)` is
+/// how 89 of the 89 byte-array returns in `core/` are actually spelled —
+/// `digest`, `finalize`, `to_be_bytes` are all impl methods — so a lookup by
+/// the path's LAST segment covered almost none of them.
+///
+/// Worse than useless: a bare `"digest"` is first-wins across the tree, so it
+/// can resolve to an unrelated function and answer with ITS return type.
+#[test]
+fn a_local_bound_from_a_qualified_call_is_packed() {
+    let vbc = compile(
+        "m",
+        "module m;\n\
+         public type H is { n: Int };\n\
+         implement H {\n\
+             public fn digest(v: Int) -> [Byte; 8] {\n\
+                 let mut o: [Byte; 8] = [0 as Byte; 8];\n\
+                 o[0] = 11 as Byte;\n\
+                 o\n\
+             }\n\
+         }\n\
+         public fn use_it() -> Byte {\n\
+             let d = H.digest(1);\n\
+             d[0]\n\
+         }\n",
+    );
+    let instrs = decoded_fn(&vbc, "use_it");
+    assert_eq!(
+        count_sub_op(&instrs, MemSubOpcode::ByteArrayLoad),
+        1,
+        "a qualified call's returned array must use the byte stride:\n{:#?}",
+        instrs
+    );
+}
