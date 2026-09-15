@@ -5980,6 +5980,55 @@ pub(super) fn dispatch_primitive_method(
             let p = receiver.as_ptr::<u8>();
             if !p.is_null() && ptr_addr.is_multiple_of(std::mem::align_of::<heap::ObjectHeader>())
             {
+                // A DECLARED `Clone` OUTRANKS THE VALUE-COPY (T1490).
+                //
+                // `value_copy` is a SHALLOW slot copy for a record — a
+                // fresh object carrying the same slots — which is right
+                // for `let b = rec` and wrong for a type whose own
+                // `clone` exists to copy what those slots POINT AT.
+                //
+                //     type Wrap<I> is { iter: I, tag: Int };
+                //     implement<I: Clone> Clone for Wrap<I> {
+                //         fn clone(&self) -> Wrap<I> {
+                //             Wrap { iter: self.iter.clone(), tag: self.tag }
+                //         }
+                //     }
+                //
+                // reached through a FIELD receiver, that impl never ran:
+                // this arm fired first and handed back a record sharing
+                // the SAME inner iterator, so draining the "clone"
+                // drained the field. `cycle()` answers six elements
+                // where ten are asked for exactly this reason —
+                // `self.iter = self.orig.clone()` is a shallow copy, so
+                // after the first restart both fields walk one iterator.
+                //
+                // A LOCAL receiver never showed it: there the static type
+                // is known, dispatch reaches the impl directly, and this
+                // arm is not consulted at all.
+                //
+                // The receiver's header carries its type id, and the
+                // walk above already asks `find_method_by_receiver_type`
+                // of a smart pointer's inner value. Ask it of the
+                // receiver itself; a type that declares no `clone` falls
+                // through to the value-copy exactly as before.
+                let self_header = unsafe { heap::ObjectHeader::ref_or_stub(p) };
+                let tid = self_header.type_id;
+                // Cached per TYPE, not per clone: the lookup is a linear
+                // scan over every descriptor, and asking it of every heap
+                // receiver took the suite from ~25 minutes to over 110.
+                let declared = match state.clone_impl_cache.get(&tid) {
+                    Some(hit) => *hit,
+                    None => {
+                        let found =
+                            state.module.find_method_by_receiver_type(tid, "clone");
+                        state.clone_impl_cache.insert(tid, found);
+                        found
+                    }
+                };
+                if let Some(found) = declared {
+                    let result = call_function_sync(state, found, &[*receiver])?;
+                    return Ok(Some(result));
+                }
                 return Ok(Some(super::memory_collections::value_copy(state, *receiver)?));
             }
         }
