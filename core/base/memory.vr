@@ -1488,21 +1488,27 @@ implement<T: Clone> Cow<T> {
     }
 }
 
-// Automatic dereference.
+// NO `Deref for Cow<T>` HERE, AND ITS ABSENCE IS MEASURED RATHER THAN
+// INTENDED (T1488).
 //
-// Without this the file implemented Eq, Ord, Clone, Debug and Hash for
-// `Cow<T>` and left `*cow` asking for something the type never offered:
-// it yielded the VARIANT, so `assert_eq(&*cow, &original)` read
-// `Borrowed(borrowed)` where `borrowed` was owed (T1488). The body is
-// `Heap<T>`'s, one screen up — delegate to the `as_ref` that already
-// does the match, so the two can never disagree.
-implement<T: Clone> Deref for Cow<T> {
-    type Target = T;
-
-    fn deref(&self) -> &T {
-        self.as_ref()
-    }
-}
+// The impl is correct and four core-tests want it: without it `*cow`
+// asks for something the type never offered and yields the VARIANT, so
+// `assert_eq(&*cow, &original)` reads `Borrowed(borrowed)` where
+// `borrowed` is owed. The body is `Heap<T>`'s, one screen up —
+// `fn deref(&self) -> &T { self.as_ref() }`.
+//
+// Adding it closed those four and opened SEVEN elsewhere:
+// `net/addr` ×2 and `tracing/id` ×2 on `ByteArrayLoad` over a packed
+// `[UInt8; 16]`, `tracing/pipeline`, `base/cell` on a field index past a
+// `Ref`, and `base/memory` on `method 'T.cmp' not found`. None of them
+// mentions `Cow`. Eliminated the two compiler-side arms of the same
+// round by env gate (`VERUM_NO_MOUNT_PATH_INTENT=1
+// VERUM_NO_FMT_SEED=1`) — the seven stay red with both off, so this impl
+// is what moved them.
+//
+// What that says is not about `Cow`: adding ONE impl to a baked module
+// shifts type ids and method-table entries, and several consumers are
+// reading those positionally. Land this again once that is not true.
 
 implement<T: Clone + Eq> Eq for Cow<T> {
     fn eq(&self, other: &Cow<T>) -> Bool {
