@@ -19960,10 +19960,37 @@ fn lower_call_method<'ctx>(
                     //
                     // The band-aid was invisible while the generic
                     // `MappedIter.next` was unreachable (T1214 made it
-                    // reachable). `VERUM_NO_ITER_EAGER_WALK=1` skips the
-                    // interception so the lazy path can be MEASURED
-                    // rather than argued about; the default is unchanged.
-                    if std::env::var_os("VERUM_NO_ITER_EAGER_WALK").is_none() {
+                    // reachable). `VERUM_NO_ITER_EAGER_WALK=1` skipped the
+                    // interception so the lazy path could be MEASURED
+                    // rather than argued about.
+                    //
+                    // MEASURED, AND THE DEFAULT IS NOW THE LAZY PATH
+                    // (T0260, 2026-09-16). Three `.map()` consumers, one
+                    // AOT build per setting, Tier 0 correct throughout:
+                    //
+                    //     shape                 eager          lazy
+                    //     .map(f).count()       SIGSEGV        3      ok
+                    //     .map(f).collect()     SIGSEGV        honest refusal
+                    //     .map(f).sum() + 3     rc=0, prints   sum 6, then
+                    //       more lines         ONLY "A"        an honest refusal
+                    //
+                    // The third row is the one that decided it: the eager
+                    // walk does not crash there, it SILENTLY STOPS and
+                    // exits 0 — a wrong result reported as success, which
+                    // is the one failure mode this codebase refuses
+                    // outright ("never fabricate a result"). The lazy
+                    // path answers one more line correctly and then names
+                    // what it cannot do.
+                    //
+                    // What the lazy path still fails at — `filter`, and
+                    // `fmt_debug` on a `Maybe` — are separate defects the
+                    // eager walk was MASKING, not ones it fixed: `filter`
+                    // is not intercepted here at all, so it behaves
+                    // identically under both settings.
+                    //
+                    // The switch is kept, inverted: `VERUM_ITER_EAGER_WALK=1`
+                    // restores the old interception for a bisect.
+                    if std::env::var_os("VERUM_ITER_EAGER_WALK").is_some() {
                         return emit_listiter_eager_walk(
                             ctx,
                             dst,

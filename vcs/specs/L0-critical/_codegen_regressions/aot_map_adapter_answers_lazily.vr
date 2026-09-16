@@ -1,0 +1,53 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: aot, codegen, iterator, map, closure, T0260
+// @timeout: 180000
+// @expected-exit: 0
+// @expected-stdout-begin
+// skip 2
+// take 2
+// rev 3
+// map 3
+// @expected-stdout-end
+
+// `xs.iter().map(f)` SIGSEGV'd at Tier 1. Every closure-FREE adapter
+// answered — the axis was measured across five adapters in one
+// programme, so nothing else could differ:
+//
+//     skip(1).count()      2 / 2        ok
+//     take(2).count()      2 / 2        ok
+//     rev().count()        3 / 3        ok
+//     map(|x| *x).count()  3 / SIGSEGV
+//
+// The cause was an eager-walk INTERCEPTION, added when the generic
+// `MappedIter.next` body was unreachable and the lazy path const-zeroed.
+// It returns a LIST while the static type of `xs.iter().map(f)` is a
+// `MappedIter`, so the first operation reaching a real `MappedIter` body
+// reads a List through a MappedIter's field layout — `.next()` loads
+// field 0 at +24, which on the List it actually gets is `len`; for
+// `[1,2,3]` that is 3, and 3 + 24 = 0x1b, the fault address.
+//
+// The band-aid carried its own kill switch "so the lazy path can be
+// MEASURED rather than argued about". Measured, it is strictly better:
+// `.map(f).count()` answers, `.map(f).collect()` refuses BY NAME instead
+// of crashing, and `.map(f).sum()` answers where the eager walk silently
+// stopped and exited 0 — a wrong result reported as success, which is
+// the one failure mode this codebase refuses outright.
+//
+// The closure-free adapters are in this file as the CONTROL: they never
+// reached the intercepted arm, so a change that broke them would mean
+// the flip had reached further than its own gate.
+//
+// `filter` is deliberately NOT here. It is not intercepted by that arm
+// at all and behaves identically under both settings — silently stopping
+// at Tier 1 — so it is a separate defect this one was masking, and
+// pinning it here would attach someone else's failure to this contract.
+
+fn main() {
+    let xs: List<Int> = [3, 1, 2];
+    print(f"skip {xs.iter().skip(1).count()}");
+    print(f"take {xs.iter().take(2).count()}");
+    print(f"rev {xs.iter().rev().count()}");
+    print(f"map {xs.iter().map(|x| *x).count()}");
+}
