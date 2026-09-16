@@ -1507,9 +1507,33 @@ implement<T: Clone> Cow<T> {
 // VERUM_NO_FMT_SEED=1`) — the seven stay red with both off, so this impl
 // is what moved them.
 //
-// What that says is not about `Cow`: adding ONE impl to a baked module
-// shifts type ids and method-table entries, and several consumers are
-// reading those positionally. Land this again once that is not true.
+// BOTH OF THOSE SENTENCES WERE WRONG, AND THE CORRECTION COST TWO CLEAN
+// EXPERIMENTS (T1488, 2026-09-16).
+//
+// FIRST: the seven were not seven. The binary called "before" predated
+// another session's uncommitted `codegen/statements.rs`, so "with the
+// impl" and "with their change" moved together. That file is committed
+// now, and the same comparison against a HEAD where nothing else differs
+// opens TWO, not seven — 18456 passed / 141 failed against 18453 / 144,
+// with all four Cow tests fixed:
+//
+//     base/cell/integration_test  test_refcell_accumulate_via_borrow_mut
+//     base/memory/unit_test       test_maybe_uninit_new_uninit
+//
+// both deterministic (3 of 3 red with the impl, 2 of 2 green without).
+//
+// SECOND, and this is the sentence that mattered: it is NOT the id
+// shift. The probe this comment itself asked for — a NO-OP impl in this
+// same baked module, standing in for the real one — leaves both tests
+// GREEN while the Cow tests stay red. So adding an impl here is not what
+// moves them; adding THIS impl is.
+//
+// What it exposes is a dispatch defect, not a layout one. `(*r).get(0)`
+// on a `RefCell` guard is the shape that breaks, and registering a
+// second `deref` body is exactly the input the interpreter's bare-suffix
+// scan is known to bind non-deterministically. Land this with that scan,
+// not before it — and do not re-derive "id shift" from the paragraph
+// above, which is kept only so the correction has something to correct.
 
 implement<T: Clone + Eq> Eq for Cow<T> {
     fn eq(&self, other: &Cow<T>) -> Bool {
