@@ -1,0 +1,92 @@
+// @test: run-interpreter
+// @level: L0
+// @tier: 0
+// @tags: vbc, statics, mutex, cells
+// @timeout: 120000
+// @expected-stdout-begin
+// read1 1
+// read2 1
+// init_runs 1
+// int_write 7
+// record_len 3 tag 9
+// @expected-stdout-end
+
+// A module-level `static` was a CONSTANT, not a cell: its initialiser
+// re-ran on every read. Measured with a printing initialiser —
+//
+//     static C: Counter = Counter.make();   // prints INIT RAN
+//     C.n; C.n
+//         ->  INIT RAN / read1 1 / INIT RAN / read2 1
+//
+// two reads, two objects. For `static SLOT: Mutex<T>` that means every
+// `lock()` gets a FRESH mutex: the write lands inside the scope and the
+// next lock re-runs the initialiser, so every global registry in `core/`
+// was permanently empty and nothing refused — callers read a default.
+//
+// The arm's own comment had said so since `static mut` was routed to a
+// real cell for exactly this reason; only the immutable half was left on
+// the constant path.
+//
+// SCALARS KEEP THE CONSTANT PATH and that is deliberate: re-running
+// `= 42` is unobservable, and the scalar classifier here is the same one
+// the wide-initialiser guard uses, so the two cannot drift. Radius
+// counted rather than assumed: `core/` declares seven module-level
+// immutable statics and every one is a process-wide-cell type — Mutex
+// x3, Waker, OnceCell, Lazy, GlobalAllocator. Not one is a constant.
+//
+// A SECOND DEFECT rode on the same probe and is fixed with it: `*g` on
+// the guard of a `static` Mutex lost its user-`Deref` dispatch and fell
+// to the bare `Deref` opcode, whose identity arm hands the GUARD back —
+// `*SI.lock()…` printed `{{{{0}}, 42, {0}}}`, the whole Mutex with the
+// 42 visible inside it. The declared type of an immutable static was
+// never recorded, so the type chain had nothing to start from. The
+// discriminator was one function pair in one programme: the local
+// spelling lowers to `CallM MutexGuard.deref` + `Deref`, the static's to
+// `ChkRef` + a bare `Deref`.
+//
+// `read1`/`read2` are here because a fix that made the static a cell but
+// left the initialiser re-running would still print the right numbers
+// for the Int; only the INIT RAN count separates them.
+
+mount core.sync.mutex.{Mutex};
+
+static mut INIT_RUNS: Int = 0;
+
+type Counter is { n: Int };
+implement Counter {
+    public fn make() -> Counter {
+        unsafe { INIT_RUNS = INIT_RUNS + 1; }
+        Counter { n: 1 }
+    }
+}
+
+type Q is { items: List<Int>, marker: Int };
+
+static C: Counter = Counter.make();
+static SI: Mutex<Int> = Mutex.new(42);
+static SLOT: Mutex<Maybe<Q>> = Mutex.new(Maybe.None);
+
+fn main() {
+    // The initialiser must run ONCE, not once per read — and the COUNT
+    // is what says so: `C.n` answers 1 either way.
+    print(f"read1 {C.n}");
+    print(f"read2 {C.n}");
+    unsafe { print(f"init_runs {INIT_RUNS}"); }
+
+    // A write through the guard must survive the next lock.
+    { let mut g = SI.lock().unwrap_or_else(|e| e.into_inner()); *g = 7; }
+    { let g = SI.lock().unwrap_or_else(|e| e.into_inner()); print(f"int_write {*g}"); }
+
+    // And a record stored through the slot must come back whole.
+    {
+        let mut g = SLOT.lock().unwrap_or_else(|e| e.into_inner());
+        *g = Maybe.Some(Q { items: [1, 2, 3], marker: 9 });
+    }
+    {
+        let g = SLOT.lock().unwrap_or_else(|e| e.into_inner());
+        match &*g {
+            Maybe.Some(p) => print(f"record_len {p.items.len()} tag {p.marker}"),
+            Maybe.None => print("record_len NONE"),
+        }
+    }
+}

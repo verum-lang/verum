@@ -9917,8 +9917,40 @@ impl VbcCodegen {
                 // slot mechanism that `@thread_local` uses — that's a real heap slot
                 // that survives across frames and matches the "process-wide writable
                 // global" semantics the user expects.
+                // A `static` OF A NON-SCALAR TYPE IS A CELL, NOT A
+                // CONSTANT (T1275).
+                //
+                // The constant path re-runs the initialiser on EVERY
+                // read — this arm's own comment says so, which is why
+                // `static mut` was routed to TLS. Measured, and it is
+                // not a subtlety:
+                //
+                //     static C: Counter = Counter.make();   // prints INIT RAN
+                //     C.n; C.n
+                //         ->  INIT RAN / read1 1 / INIT RAN / read2 1
+                //
+                // Two reads, two objects. For `static SLOT: Mutex<T>`
+                // that means every `lock()` gets a FRESH mutex: the
+                // write lands (`in_scope 7`) and the next lock reads the
+                // initialiser again (`next_lock 42`), so every global
+                // registry in `core/` was permanently empty.
+                //
+                // Scalars keep the constant path: re-running `= 42` is
+                // unobservable, and they are what the path was built for
+                // (`static_mut_byte_width` is the same scalar classifier
+                // the T0133 guard below uses, so the two cannot drift).
+                // Everything else gets the one real cell.
+                //
+                // Radius, counted rather than assumed: `core/` declares
+                // SEVEN module-level immutable statics, and every one is
+                // a process-wide-cell type — `Mutex` x3, `Waker`,
+                // `OnceCell`, `Lazy`, `GlobalAllocator`. Not one is a
+                // constant, so nothing that wanted re-evaluation loses
+                // it.
+                let declared_is_scalar = Self::static_mut_byte_width(&static_decl.ty).is_some();
                 let is_thread_local = item.attributes.iter().any(|a| a.is_named("thread_local"))
-                    || static_decl.is_mut;
+                    || static_decl.is_mut
+                    || !declared_is_scalar;
                 // FN-LOCAL-STATIC-ONCE-1 (task #16): a `static` declared
                 // INSIDE a fn body (this arm is reached through
                 // `collect_nested_declarations_from_block`, which leaves
@@ -10060,6 +10092,48 @@ impl VbcCodegen {
                         Some(&static_decl.value),
                         Some(&static_decl.ty),
                     )?;
+                    // AN IMMUTABLE STATIC HAS A DECLARED TYPE TOO (T1275).
+                    //
+                    // The `static mut` branch above records it; this one
+                    // did not, and the whole type chain downstream of the
+                    // name then had nothing to start from. `*g` on the
+                    // guard of a `static SLOT: Mutex<T>` lost its
+                    // user-`Deref` dispatch and fell to the bare `Deref`
+                    // opcode, whose identity arm hands the GUARD back:
+                    //
+                    //     static SI: Mutex<Int> = Mutex.new(42);
+                    //     *SI.lock().unwrap_or_else(…)
+                    //         ->  {{{{0}}, 42, {0}}}     the whole Mutex
+                    //
+                    // The 42 is visible inside it, so nothing was lost or
+                    // zeroed — only the projection never happened, and
+                    // every caller of a global registry read a default.
+                    //
+                    // Measured discriminator, one function pair in one
+                    // programme: the LOCAL spelling lowers to
+                    // `CallM MutexGuard.deref` + `Deref` and answers 42;
+                    // the static's lowers to `ChkRef` + a bare `Deref`.
+                    // Annotating the binding (`let g: MutexGuard<Int>`)
+                    // or binding the static to a local first restores it
+                    // — both supply by hand the fact this map holds.
+                    //
+                    // Same two keys as the branch above: the bare name
+                    // and the module-qualified alias, so a cross-module
+                    // mount of the same static surfaces the type
+                    // identically.
+                    let declared_type_name =
+                        Self::extract_type_name_from_ast(&static_decl.ty);
+                    if !declared_type_name.is_empty() {
+                        let bare = static_decl.name.name.to_string();
+                        self.static_mut_type_names
+                            .insert(bare.clone(), declared_type_name.clone());
+                        let module_name = &self.config.module_name;
+                        if !module_name.is_empty() && module_name != "main" {
+                            let qualified_name = format!("{}.{}", module_name, bare);
+                            self.static_mut_type_names
+                                .insert(qualified_name, declared_type_name);
+                        }
+                    }
                     // Track static init functions as global constructors
                     if let Some(info) = self.ctx.lookup_function(&static_decl.name.name) {
                         self.static_init_functions.push(info.id);
