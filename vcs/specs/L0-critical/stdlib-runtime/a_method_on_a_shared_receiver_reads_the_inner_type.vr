@@ -1,0 +1,66 @@
+// @test: run-interpreter
+// @level: L0
+// @tier: 0
+// @tags: stdlib-runtime, shared, deref, dispatch
+// @expected-stdout-begin
+// plain 111 222
+// shared 111 222
+// wide 4
+// star 111
+// @expected-stdout-end
+
+// A method called on a `Shared<T>` receiver read T's field offsets off
+// the SHARED CARRIER instead of the wrapped value. The two halves broke
+// differently, and the silent one is why this was a P0 on a six-line
+// probe:
+//
+//     field index 1-2   answered SILENTLY WRONG
+//     field index >= 3  panicked
+//
+// so `Small { x, y }` gave a plausible number for `second()` and a
+// four-field record crashed — the same defect reading as two.
+//
+// `implement<T> Deref for Shared<T>` exists in core/base/memory.vr, so
+// the dispatch always had a hop to follow and did not follow it. That
+// is what makes this a DISPATCH defect rather than a layout one, and it
+// is why the neighbouring `(*sh).x` spelling REFUSED loudly with
+// "type 'Shared' has no field named 'x'" while the method path answered:
+// two routes to the same confusion, one of them silent.
+//
+// CLOSED BY A NEIGHBOUR AND NEVER RE-MEASURED. T0468 — "a Deref wrapper
+// forwards to what it wraps, on both routes that bypassed the hop",
+// 2026-09-12 — fixed exactly the mechanism this row asked for, and the
+// row sat open for four days afterwards. This file exists so the next
+// regression is caught by a gate rather than by someone re-reading a
+// register row.
+//
+// The `wide` line carries index 3 deliberately: a fix that peeled the
+// carrier for the first two slots and not beyond would pass every other
+// line here.
+
+mount core.base.memory.{Shared};
+
+type Small is { x: Int, y: Int };
+implement Small {
+    fn first(&self) -> Int { self.x }
+    fn second(&self) -> Int { self.y }
+}
+
+type Wide is { a: Int, b: Int, c: Int, d: Int };
+implement Wide {
+    fn fourth(&self) -> Int { self.d }
+}
+
+fn main() {
+    let s = Small { x: 111, y: 222 };
+    print(f"plain {s.first()} {s.second()}");
+
+    let sh = Shared.new(Small { x: 111, y: 222 });
+    print(f"shared {sh.first()} {sh.second()}");
+
+    let w = Shared.new(Wide { a: 1, b: 2, c: 3, d: 4 });
+    print(f"wide {w.fourth()}");
+
+    // The route that refused loudly while the method path answered.
+    print(f"star {(*sh).x}");
+}
