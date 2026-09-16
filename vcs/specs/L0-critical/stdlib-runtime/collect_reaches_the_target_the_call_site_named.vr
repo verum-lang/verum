@@ -1,0 +1,66 @@
+// @test: run-interpreter
+// @level: L0
+// @tier: 0
+// @tags: stdlib-runtime, iterator, collect, generics
+// @timeout: 120000
+// @expected-stdout-begin
+// list [3, 1, 2, 1]
+// set 3
+// map 2
+// btree 3
+// into hi
+// @expected-stdout-end
+
+// `collect<C: FromIterator<Self.Item>>(self) -> C { C.from_iter(self) }`
+// needs `C` from the CALL SITE. The codegen used to emit the parameter's
+// NAME in the callee's scope — `dyn:C.from_iter`, plus the const string
+// "C" — and a downstream recovery then invented an owner from the
+// ITERATOR's type id. The invention was `FFIAbi` (a sum type of FFI
+// calling conventions with zero impl blocks, chosen for no reason to do
+// with itself), and `FFIAbi.from_iter` was the largest unresolved class
+// in a real programme: 24 reachable sites of 151.
+//
+// Tier 0 answers all four targets today, through the `SetCallWitness`
+// sidecar — the outer call site stages `C`'s binding and the interpreter
+// attaches it to the frame it pushes, so the generic body reads a real
+// witness instead of an erased name.
+//
+// NOTHING RAN THIS BEFORE. `vcs/specs/core/base/iterator_collections_test.vr`
+// covers the same shapes and is `@test: typecheck-pass` — it proves the
+// programme compiles and never asks what it answers. The row that owns
+// this defect recorded "the erased target C defaults to List" as a
+// standing limitation; that is no longer true and only a RUN can say so.
+//
+// Set and Map are here because they are the targets the limitation
+// named: a fix that resolved `C` to `List` unconditionally passes the
+// first line and fails the next three. `btree` is a second non-List,
+// non-hash target so the pin does not rest on one implementation of
+// `from_iter`. `into` rides along because it is the same defect one
+// blanket over — `implement<T, U: From<T>> Into<U> for T` needs `U` from
+// the call site exactly as `collect` needs `C`.
+//
+// TIER 1 IS NOT PINNED HERE AND THAT IS DELIBERATE: it still fails, and
+// it fails in TWO ways — `list`/`set` SIGSEGV while `map` refuses
+// cleanly by name ("no compiled candidate … Refusing to fabricate a
+// result"). Pinning a tier-1 expectation would freeze one of those two
+// failure modes as if it were the contract.
+
+fn main() {
+    let xs: List<Int> = [3, 1, 2, 1];
+
+    let l: List<Int> = xs.iter().map(|x| *x).collect();
+    print(f"list {l:?}");
+
+    let s: Set<Int> = xs.iter().map(|x| *x).collect();
+    print(f"set {s.len()}");
+
+    let pairs: List<(Text, Int)> = [("a", 1), ("b", 2)];
+    let m: Map<Text, Int> = pairs.iter().map(|p| *p).collect();
+    print(f"map {m.len()}");
+
+    let b: BTreeSet<Int> = xs.iter().map(|x| *x).collect();
+    print(f"btree {b.len()}");
+
+    let t: Text = "hi".into();
+    print(f"into {t}");
+}
