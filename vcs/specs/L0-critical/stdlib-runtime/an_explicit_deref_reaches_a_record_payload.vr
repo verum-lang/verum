@@ -1,0 +1,54 @@
+// @test: run-interpreter
+// @level: L0
+// @tier: 0
+// @tags: stdlib-runtime, heap, deref, carrier
+// @expected-stdout-begin
+// v=u
+// heap_field=11
+// shared_field=41
+// @expected-stdout-end
+
+// NAMING `deref` BY HAND used to kill the compiler outright. Six lines,
+// no AOT, no generics:
+//
+//     let a = Heap.new(GitSource { url: "u" });
+//     let inner = a.deref();
+//     print(f"v={inner.url}");      ->  rc=139, SIGSEGV, crash report
+//
+// while the IMPLICIT form (`a.url`, `a.method()`) worked all along. That
+// asymmetry is what made it a P0 on a six-line programme: `deref` is how
+// every guard in the library is meant to be used — 25 declarations,
+// Mutex, RwLock, Path, Cell, Heap, channels — and calling it by name is
+// the most ordinary thing a user can do with one. The TYPE CHECKER
+// materialises exactly this call when it repairs a smart-pointer method
+// call, so its own repair path emitted the form that crashed.
+//
+// The payload being a RECORD is the half that decided the failure MODE,
+// not the failure: the interpreter substitutes its own CBGR cell for
+// `Heap.new` (32-byte AllocationHeader + one 8-byte Value), the declared
+// body reads `self.ptr` off a three-field record that is not there, and
+// what happens next is whatever the stored value happens to be — an
+// `{ id: Int }` payload panicked "field access out of bounds", a
+// `{ url: Text }` payload used the value as an ADDRESS and SIGSEGV'd.
+//
+// `carrier_deref_field.vr` beside this one pins `(*h).field`, the
+// read-side fold. This pins the EXPLICIT call, which is a different
+// route to the same payload and was the one that crashed.
+
+mount core.base.memory.{Heap};
+mount core.prelude.*;
+
+type GitSource is { url: Text };
+type Box is { v: Int };
+
+fn main() {
+    let a = Heap.new(GitSource { url: "u" });
+    let inner = a.deref();
+    print(f"v={inner.url}");
+
+    let h = Heap.new(Box { v: 11 });
+    print(f"heap_field={h.deref().v}");
+
+    let s = Shared.new(Box { v: 41 });
+    print(f"shared_field={s.deref().v}");
+}
