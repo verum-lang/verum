@@ -1005,12 +1005,47 @@ fn mem_extended_body(
                 state.set_reg(dst, v);
                 return Ok(DispatchResult::Continue);
             }
+            // EIGHT BYTES ARE ASKED WHETHER THEY ARE A `Value` (T1474).
+            //
+            // `ptr_read(&p.a)` on `type Pair is { a: Int, b: Int }`
+            // answered 9221401712017801257, which is 0x7ff9000000000029 —
+            // the NaN box around 41, handed back as an integer. The slot a
+            // field pointer names holds a boxed `Value`; an FFI cell holds
+            // a machine integer; and the eight bytes alone cannot say which
+            // without being asked.
+            //
+            // THE RULE IS NOT NEW AND THE DISCRIMINATOR IS NOT INVENTED
+            // HERE: the sibling read at sub-op 0x10 in this same file
+            // already does exactly this, and its comment states why —
+            // `is_tagged()` is true precisely for the canonical quiet-NaN
+            // window 0x7FF8…–0x7FFF… that every boxed Int, Bool, pointer
+            // and small string occupies, and false for a genuine C
+            // `int64_t`, which keeps the historical `from_i64` reading.
+            // This handler was the copy that had never been told, which is
+            // the failure mode the note beside it names outright: paired
+            // implementations are an oracle, so when one copy of a pattern
+            // is right, the question is why the others differ.
+            //
+            // Widths 1/2/4 are untouched: their whole purpose is to reach
+            // past the tag to the payload bytes.
+            if size == 8 {
+                // SAFETY: null-checked above; the caller guarantees eight
+                // readable bytes. `read_unaligned` handles alignment.
+                let raw = unsafe { std::ptr::read_unaligned(ptr as *const u64) };
+                let boxed = Value::from_bits(raw);
+                let out = if boxed.is_tagged() {
+                    boxed
+                } else {
+                    Value::from_i64(raw as i64)
+                };
+                state.set_reg(dst, out);
+                return Ok(DispatchResult::Continue);
+            }
             let value = unsafe {
                 match size {
                     1 => *ptr as i64,
                     2 => std::ptr::read_unaligned(ptr as *const u16) as i64,
                     4 => std::ptr::read_unaligned(ptr as *const u32) as i64,
-                    8 => std::ptr::read_unaligned(ptr as *const i64),
                     _ => {
                         return Err(InterpreterError::InvalidOperand {
                             message: format!("invalid ptr_read size: {}", size),
@@ -1110,6 +1145,34 @@ fn mem_extended_body(
                 && room >= header.size as usize
             {
                 return super::cbgr::bridge_flat_store(state, ptr, room, v, "ptr_write");
+            }
+            // A SLOT THAT HOLDS A BOX TAKES A BOX BACK (T1474).
+            //
+            // The read side one arm up now answers a boxed `Value` when the
+            // eight bytes are tagged. A write that laid down the machine
+            // payload into that same slot would break the round trip the
+            // other way: `ptr_write(&mut p.a, 7)` stored a bare 7 where a
+            // boxed Int was owed, and the next ordinary read of `p.a`
+            // rendered those bits as a denormal float.
+            //
+            // The target decides, not the value: read what the slot holds
+            // now and match it. A record field or List element holds a box
+            // and gets `bits()`; an FFI cell (`*mut Int`, a bridge
+            // allocation, a `static mut`) holds a machine integer, is not
+            // tagged, and keeps the payload form below unchanged — which is
+            // what every existing caller of this opcode depends on.
+            if size == 8 {
+                // SAFETY: null-checked above; eight readable bytes by the
+                // same contract the write below relies on.
+                let existing = Value::from_bits(unsafe {
+                    std::ptr::read_unaligned(ptr as *const u64)
+                });
+                if existing.is_tagged() {
+                    // SAFETY: as above, and the slot is writable — this is
+                    // the store the machine-payload path would have made.
+                    unsafe { std::ptr::write_unaligned(ptr as *mut u64, v.bits()) };
+                    return Ok(DispatchResult::Continue);
+                }
             }
             // MACHINE representation: the payload (as_i64 for ints,
             // bit-pattern for floats via to_f64 bits, raw ptr for heap

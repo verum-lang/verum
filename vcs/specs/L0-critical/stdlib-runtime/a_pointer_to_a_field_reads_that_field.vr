@@ -1,0 +1,71 @@
+// @test: run-interpreter
+// @level: L0
+// @tier: 0
+// @tags: stdlib-runtime, intrinsics, references, records
+// @expected-stdout-begin
+// control 41 99
+// read 41 99
+// write 7 8
+// @expected-stdout-end
+
+// A POINTER TAKEN AT A FIELD READS THAT FIELD, not the record holding it.
+//
+// `ptr_read(&p.a)` on `type Pair is { a: Int, b: Int }` answered the WHOLE
+// record — `{41, 99}` where 41 was owed — and `ptr_read(&p.b)` answered
+// `{99, …}`, the same record read one slot along. The address was right
+// all along; the WIDTH was wrong.
+//
+// WHY IT WAS WIDE. `try_compile_flat_record_rw` asks
+// `infer_expr_type_name` for the pointee of the argument, and that helper
+// answers the OWNER's type for `&p.a`. Seeing a two-field record, it
+// emitted the flat-record read: width 16, plus a type id, so the
+// interpreter faithfully rebuilt an object from 16 bytes. Measured with a
+// tracer in the 0x1A handler: `size=16 regular_ptr=true`. The handler was
+// never wrong — it was told to read a record.
+//
+// THE TYPE SYSTEM DISAGREED WITH THAT CLASSIFICATION AND WAS RIGHT, which
+// is what makes this a codegen defect rather than a language one: in the
+// same programme `takes_int_ref(&p.a)` typechecks against `&Int`, an
+// annotated `let r: &Int = &p.a` is accepted, and `*r` answers 41. Three
+// independent readings of the same expression, all scalar.
+//
+// THE THIRD LINE IS NOT DECORATION. A write that lands one slot off looks
+// like a success at the field it was aimed at and shows up only in its
+// NEIGHBOUR, so both fields are printed after both writes.
+//
+// The first line is the control: the ordinary field read was correct
+// before this fix and must stay correct after it.
+//
+// NOT EXERCISED HERE, DELIBERATELY: reading the WHOLE record through a
+// pointer (`ptr_read(&p)`). It dies on a null dereference today, and it
+// did so before this change too — the fix declines the flat-record
+// emission on a syntactic `&<field>`, which a bare `&p` is not, so the
+// guard cannot reach it. Filed separately rather than smuggled in here,
+// because a spec that fails for a second reason stops reporting on its
+// own subject.
+
+mount core.intrinsics.memory.{ptr_read, ptr_write};
+
+type Pair is { a: Int, b: Int };
+
+fn takes_int_ref(x: &Int) -> Int { *x }
+
+fn main() {
+    let mut p = Pair { a: 41, b: 99 };
+
+    // CONTROL: the ordinary field read, and the type system's own reading
+    // of the same expression.
+    print(f"control {p.a} {takes_int_ref(&p.b)}");
+
+    unsafe {
+        let va = ptr_read(&p.a);
+        let vb = ptr_read(&p.b);
+        print(f"read {va} {vb}");
+    }
+
+    unsafe {
+        ptr_write(&mut p.a, 7);
+        ptr_write(&mut p.b, 8);
+    }
+    print(f"write {p.a} {p.b}");
+}

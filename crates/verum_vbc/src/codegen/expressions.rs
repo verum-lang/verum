@@ -34718,6 +34718,43 @@ impl VbcCodegen {
         if pointee.is_empty() {
             return Ok(None);
         }
+        // THE POINTEE IS THE FIELD, NOT ITS OWNER (T1474).
+        //
+        // `infer_expr_type_name` answers the OWNER's type for `&p.a`:
+        // measured with a tracer in the 0x1A handler, `ptr_read(&p.a)` on
+        // `type Pair is { a: Int, b: Int }` arrived with size=16 — the whole
+        // record — so this function had classified a field read as a
+        // two-field record read. The value came back as `{41, 99}` where 41
+        // was owed, and `&p.b` answered `{99, …}`: the same record, one slot
+        // along, which is how the address was shown to be right and only the
+        // WIDTH wrong.
+        //
+        // The type system disagrees with that classification and is correct:
+        // in the same programme `takes_int_ref(&p.a)` typechecks against
+        // `fn takes_int_ref(x: &Int)`, and `let r: &Int = &p.a; *r` answers
+        // 41. So the record spelling is this codegen helper's own inference,
+        // not the language's.
+        //
+        // A reference taken AT A FIELD therefore leaves this fast path: the
+        // flat-record emission exists for reading a record through a pointer
+        // to that record, which is a different operation. Falling through
+        // keeps the scalar 8-byte wrapper path, the one `ptr_read` was
+        // designed around (`PtrReadRaw` pushes width 8).
+        //
+        // Callers this reaches: `Shared.try_unwrap` reads its payload with
+        // `ptr_read(&(*self.ptr).value)` (core/base/memory.vr:762) and
+        // answered `Ok(nil)` for a `Shared.new(41)` whose `*s` was 41 one
+        // line earlier (T1285).
+        if matches!(
+            &ptr_expr.kind,
+            verum_ast::expr::ExprKind::Unary { op, expr: inner }
+                if matches!(
+                    op,
+                    verum_ast::expr::UnOp::Ref | verum_ast::expr::UnOp::RefMut
+                ) && matches!(inner.kind, verum_ast::expr::ExprKind::Field { .. })
+        ) {
+            return Ok(None);
+        }
         // ONLY multi-field records. A single-field record and every
         // scalar keep the wrapper path byte-for-byte: for them the
         // baked 8-byte width IS the whole payload, so today's emission
