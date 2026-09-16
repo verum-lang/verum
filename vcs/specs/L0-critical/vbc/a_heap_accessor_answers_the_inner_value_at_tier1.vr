@@ -1,0 +1,52 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, aot, heap, returned-reference
+// @timeout: 180000
+// @expected-exit: 0
+// @expected-stdout-begin
+// star 41
+// deref 41
+// as_ref 41
+// into_inner 13
+// @expected-stdout-end
+
+// `Heap<T>` IS the inner value at Tier 1 — `Heap.new(x)` passes `x`
+// through and adds no indirection, which is why `*h` has always
+// answered. The accessors did not: `h.as_ref()` and `h.into_inner()`
+// both SIGSEGV'd while `*h` printed 41 on the same binary, one
+// programme per line.
+//
+// The emitted IR said why in three lines:
+//
+//     define internal fastcc i64 @Heap.as_ref()    <- no self parameter
+//       store i64 41, ptr %r0_slot                 <- the transparent VALUE
+//       %p = inttoptr i64 41 to ptr
+//       getelementptr i8, ptr %p, i64 24; load     <- reads address 65
+//
+// `Heap.new` had already been folded away, so the callee's receiver WAS
+// the value 41, and `core/base/memory.vr`'s `as_ref` — `self.ptr` on a
+// 3-field record — read 24 bytes past it. The same shape as the
+// `into_raw`/`from_raw`/`is_valid` intercepts that already existed
+// beside it, whose own comment names the failure mode verbatim:
+// "misreads the transparent value as a 3-field record".
+//
+// The MUTABLE family is deliberately not here. `as_mut`, `deref_mut`
+// and `leak` return `&mut T`, and under transparency there is no
+// storage for a write to reach — an identity would hand back a copy.
+// Making them identity turned a SIGTRAP into a printed heap address,
+// which is the one direction this must not move; they keep the
+// behaviour they had, and Tier 0 refuses them with a diagnostic that
+// names the carrier substitution.
+//
+// `*h` is in this file because it is the reading that already worked:
+// a fix that traded it would be no fix.
+
+fn main() {
+    let h = Heap.new(41);
+    print(f"star {*h}");
+    print(f"deref {h.deref()}");
+    print(f"as_ref {*h.as_ref()}");
+    let w = Heap.new(13);
+    print(f"into_inner {w.into_inner()}");
+}

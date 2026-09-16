@@ -13938,6 +13938,28 @@ fn lower_call<'ctx>(
         }
         return Ok(());
     }
+    // **HEAP-ACCESSORS-TRANSPARENT-1 (AOT `Call`-form twin, T1489)** —
+    // the accessors that hand back the inner value are the identity
+    // under the transparent model; see the CallM-side block for the
+    // measurement. Here `self` is argument 0.
+    if matches!(
+        func_name,
+        "Heap.as_ref" | "Heap.deref" | "Heap.into_inner"
+    ) && args.count == 1
+    {
+        let v = ctx.get_register(args.start.0)?;
+        ctx.set_register(dst.0, v);
+        if func_name != "Heap.into_inner" {
+            ctx.mark_pass_through_ref(dst.0);
+        }
+        if let Some(tn) = ctx
+            .get_obj_register_type(args.start.0)
+            .map(|s| s.to_string())
+        {
+            ctx.set_obj_register_type(dst.0, tn);
+        }
+        return Ok(());
+    }
     if func_name == "Heap.is_valid" && args.count == 1 {
         let i64_type = ctx.types().i64_type();
         ctx.set_register(dst.0, i64_type.const_int(1, false).into());
@@ -16553,6 +16575,64 @@ fn lower_call_method<'ctx>(
                 .get_obj_register_type(src_reg)
                 .map(|s| s.to_string())
             {
+                ctx.set_obj_register_type(dst.0, tn);
+            }
+            return Ok(());
+        }
+        // **HEAP-ACCESSORS-TRANSPARENT-1 (T1489)** — the same contract,
+        // for the accessors that HAND BACK the inner value.
+        //
+        // `Heap.as_ref`, `deref` and `into_inner` all read `self.ptr`,
+        // and under the transparent model there is no record to read it
+        // from. Measured on the
+        // six-line programme: `*h` printed 41 while `h.as_ref()` and
+        // `h.into_inner()` both SIGSEGV'd, and the emitted IR said why
+        // in three lines —
+        //
+        //     define internal fastcc i64 @Heap.as_ref()     <- no self
+        //       store i64 41, ptr %r0_slot                  <- the VALUE
+        //       %p = inttoptr i64 41 to ptr
+        //       getelementptr i8, ptr %p, i64 24; load      <- address 65
+        //
+        // `Heap.new` had already been folded away, so the callee's
+        // receiver WAS the transparent 41 and its `self.ptr` read 24
+        // bytes past it. Under transparency every one of these is the
+        // IDENTITY, exactly as `into_raw` above is.
+        //
+        // The reference-returning ones carry `pass_through_ref` so a
+        // following `*` passes through instead of loading — the same
+        // mark and the same reason as `Heap.new`. `into_inner` does not:
+        // it yields the T itself, not a reference to it.
+        //
+        // THE MUTABLE FAMILY IS DELIBERATELY ABSENT, and it was in the
+        // first landing. `as_mut`/`deref_mut`/`leak` return `&mut T`,
+        // and under transparency there is no storage for a write to
+        // reach — the identity hands back a COPY. Measured: `*m.as_mut()`
+        // went from SIGTRAP (rc=133) to printing `6165946680`, a heap
+        // address. Trading a crash for a silent wrong answer is the one
+        // direction this must not move; those three keep the behaviour
+        // they had. Tier 0 refuses them outright with a diagnostic that
+        // names T1189, which is where the carrier substitution lives.
+        let heap_accessor = matches!(bare_method_early, "as_ref" | "deref" | "into_inner")
+            && args.count == 0
+            && (method_name_str == format!("Heap.{bare_method_early}")
+                || method_name_str == format!("dyn:Heap.{bare_method_early}"));
+        if heap_accessor {
+            let inner_val = ctx.get_register(receiver.0)?;
+            ctx.set_register(dst.0, inner_val);
+            if bare_method_early != "into_inner" {
+                ctx.mark_pass_through_ref(dst.0);
+            }
+            if ctx.is_list_register(receiver.0) {
+                ctx.mark_list_register(dst.0);
+            }
+            if ctx.is_map_register(receiver.0) {
+                ctx.mark_map_register(dst.0);
+            }
+            if ctx.is_set_register(receiver.0) {
+                ctx.mark_set_register(dst.0);
+            }
+            if let Some(tn) = ctx.get_obj_register_type(receiver.0).map(|s| s.to_string()) {
                 ctx.set_obj_register_type(dst.0, tn);
             }
             return Ok(());
