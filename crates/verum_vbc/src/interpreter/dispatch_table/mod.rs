@@ -846,6 +846,31 @@ pub(crate) fn call_closure_sync(
     let return_pc = state.pc();
     let entry_depth = state.call_stack.depth();
 
+    // **CALLSYNC-R0-CLOBBER-1, the CLOSURE twin (T1274).** The same
+    // hazard `call_function_sync` documents twenty lines below, in the
+    // helper beside it, unguarded: `do_return` writes the callee's
+    // return value into the caller frame's `return_reg`, this helper has
+    // no real destination, and the `Reg(0)` placeholder therefore
+    // overwrites the caller's r0 — `self` in any method frame.
+    //
+    // Measured casualty: `List.retain`'s intercept calls this once per
+    // element, so
+    //
+    //     fn drop_evens(&mut self) { self.items.retain(|x| *x % 2 == 1); }
+    //
+    // returned with `self` replaced by the closure's last Bool, and the
+    // caller's own write-back `SetF { obj: Reg(0), field_idx: 0 }` —
+    // the instruction that commits a mutated field back into its record
+    // — refused it as a null pointer. `truncate`, `reverse`, `sort` and
+    // even `sort_by` through the same field all work: they emit the
+    // IDENTICAL write-back and simply never reach this helper.
+    //
+    // The result is the dispatch loop's return value, not the register
+    // side-channel, so saving and restoring r0 costs one read and one
+    // conditional write per closure call.
+    let caller_base = state.reg_base();
+    let saved_r0 = state.registers.get(caller_base, Reg(0));
+
     let new_base = state
         .call_stack
         .push_frame(func_id, reg_count, return_pc, Reg(0))?;
@@ -875,7 +900,15 @@ pub(crate) fn call_closure_sync(
     }
 
     state.set_pc(0);
-    dispatch_loop_table_with_entry_depth(state, entry_depth)
+    let result = dispatch_loop_table_with_entry_depth(state, entry_depth);
+    // Restore the caller's r0 whether the callee succeeded or not — on
+    // the error path the frames above `entry_depth` have already been
+    // unwound by the dispatch loop's error handling. Same guard as the
+    // twin below.
+    if state.call_stack.depth() == entry_depth {
+        state.registers.set(caller_base, Reg(0), saved_r0);
+    }
+    result
 }
 
 /// Execute a function by FunctionId synchronously, returning its result.
