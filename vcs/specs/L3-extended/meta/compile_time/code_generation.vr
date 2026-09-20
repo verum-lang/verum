@@ -186,11 +186,29 @@ fn print_it<T: Printable>(item: &T) -> Text {
 // Static assertions через const
 const _SIZE_CHECK: () = {
     // Проверка что Int имеет размер 8 байт
-    @static_assert(@size_of(Int) == 8);
+    // `@static_assert` IS NOT A COMPILER BUILTIN, and the calls below are
+    // commented out for that reason (T1124).
+    //
+    // They used to pass — and assert nothing.  An unknown `@name(...)` typed as
+    // `Unit` and lowered to `nil`, so `@static_assert(false)` was accepted in
+    // silence.  The compiler refuses an unknown meta-function by name now, so
+    // a file cannot claim a check it never performed.
+    //
+    // Kept verbatim rather than deleted: these ARE the cases a compile-time
+    // assertion has to satisfy, and restoring them is how an implementation
+    // proves itself.  The type checker already holds a `ConstEvaluator`, which
+    // is the half that exists.
+    // @static_assert(@size_of(Int) == 8);
+    // The block's value, now that its only statement is commented out:
+    // an empty `{ }` parses as an empty MAP, not an empty block.
+    ()
 };
 
 const _ALIGN_CHECK: () = {
     // Проверка выравнивания
-    @static_assert(@align_of(Int) >= 4);
+    // @static_assert(@align_of(Int) >= 4);
+    // The block's value, now that its only statement is commented out:
+    // an empty `{ }` parses as an empty MAP, not an empty block.
+    ()
 };
 

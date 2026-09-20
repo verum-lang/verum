@@ -13138,9 +13138,278 @@ impl TypeChecker {
             .unwrap_or_else(|| Type::Var(TypeVar::fresh()))
     }
 
+    /// Is `ty` definitively NOT a number?
+    ///
+    /// Deliberately one-sided. A meta-function argument is checked before
+    /// ordinary unification has finished, so an unresolved variable, a
+    /// `Named`/`Generic` head, a reference or `Unknown` must all pass —
+    /// refusing on those reports on the checker's progress rather than on
+    /// the program. Only a concrete non-numeric answer is a refusal.
+    fn meta_arg_is_definitely_not_numeric(ty: &Type) -> bool {
+        matches!(
+            ty,
+            Type::Text
+                | Type::Bool
+                | Type::Char
+                | Type::Unit
+                | Type::Tuple(_)
+                | Type::Record(_)
+                | Type::Function { .. }
+        )
+    }
+
+    /// Refuse an `@name(...)` the compiler cannot honour, naming the name.
+    ///
+    /// The front door for T1124. Before this existed, `@name(...)` in
+    /// expression position had NO validation at any layer: the parser
+    /// emitted a warning and built the node anyway, this function's
+    /// catch-all typed the result `Unit`, and VBC codegen's catch-all
+    /// lowered it to `nil`. Measured 2026-09-16, six probes:
+    ///
+    /// ```text
+    ///   @zzznotathing(1)     0 errors, prints nil   (name exists nowhere)
+    ///   @abs(1, 2, 3)        0 errors, prints 1     (extras discarded)
+    ///   @sqrt("text")        0 errors, prints nil   (Text to a float op)
+    ///   @abs()               internal compiler error: @abs requires 1 argument
+    ///   @pow(2)              0 errors, prints nil
+    ///   @clamp("a","b","c")  0 errors, prints nil
+    /// ```
+    ///
+    /// `nil` is indistinguishable from a legitimate answer, which is what
+    /// made the class expensive rather than merely untidy: `core/io/file.vr`
+    /// built its `fstat(2)` buffer with `@zeroed()` — not a meta-function,
+    /// therefore `Unit`, therefore a zero-byte object handed to an FFI.
+    ///
+    /// The checks are ordered from cheapest and most certain to most
+    /// speculative, and every one of them names the offending `@name`.
+    fn validate_meta_function_call(
+        &mut self,
+        name: &verum_ast::ty::Ident,
+        args: &verum_common::List<Expr>,
+        parenthesized: bool,
+        span: verum_ast::span::Span,
+    ) -> Result<()> {
+        use verum_ast::meta_fn::{self, ArgKind, Status};
+
+        let n = name.name.as_str();
+
+        // The open namespace. `@builtin_*` carries its semantics and its
+        // return type at the stdlib DECLARATION site, so there is no arity
+        // to state here and nothing to check.
+        if meta_fn::is_builtin_namespace(n) {
+            return Ok(());
+        }
+
+        // A name the user DECLARED with `meta`. Saying "unknown" about a
+        // declaration three lines up would be a false positive, and a false
+        // positive is the expensive kind — it argues for deleting a check
+        // that is right about everything else. It is still refused, because
+        // macro expansion is not implemented and the alternative is `nil`,
+        // but the diagnostic says which of the two problems this is.
+        if self.declared_meta_macros.contains(name.name.as_str()) {
+            return Err(TypeError::OtherWithCodeSpanned {
+                code: Text::from("E0441"),
+                msg: Text::from(format!(
+                    "`@{n}` names a `meta` macro declared in this module, but macro \
+                     expansion is not implemented, so the call cannot be lowered. \
+                     Until it is, call an ordinary `fn` instead."
+                )),
+                span,
+            });
+        }
+
+        let Some(spec) = meta_fn::lookup(n) else {
+            let hint = match meta_fn::similar(n) {
+                Some(s) => format!(" — did you mean `@{s}`?"),
+                // No enumeration here. The parser's `E0410` warning fires on
+                // the same span and already lists the grammar's names, so
+                // repeating them makes one problem read as two walls of text.
+                None => format!(
+                    " — a `@name(...)` outside the grammar's `meta_function_name` \
+                     list must be a macro declared with `meta {n}(...)`"
+                ),
+            };
+            return Err(TypeError::OtherWithCodeSpanned {
+                code: Text::from("E0410"),
+                msg: Text::from(format!(
+                    "unknown meta-function `@{n}`: no compiler builtin and no \
+                     `meta` declaration of that name is in scope{hint}"
+                )),
+                span,
+            });
+        };
+
+        // A name the language reserves and the compiler cannot lower.
+        // Refused rather than typed, because typing it means `nil`.
+        if spec.status == Status::Unimplemented {
+            let where_from = if spec.in_grammar_list {
+                "the grammar's `meta_function_name` production lists it"
+            } else {
+                "the compiler recognises the name"
+            };
+            return Err(TypeError::OtherWithCodeSpanned {
+                code: Text::from("E0442"),
+                msg: Text::from(format!(
+                    "`@{n}` is not implemented: {where_from}, but no lowering \
+                     exists, so the call has no value to produce"
+                )),
+                span,
+            });
+        }
+
+        // A BARE `@name` states no arguments, so there is no arity to check.
+        // The grammar makes the call-part optional, and the two spellings
+        // want opposite answers: `@abs()` is a call missing its argument and
+        // must be refused, while `integrate(@sin, 0.0, 3.14, 100000)` names
+        // the meta-function and must not be. `args.len()` is 0 for both;
+        // only the parser knows which was written.
+        if !parenthesized {
+            return Ok(());
+        }
+
+        if !spec.arity.admits(args.len()) {
+            return Err(TypeError::OtherWithCodeSpanned {
+                code: Text::from("E0443"),
+                msg: Text::from(format!(
+                    "`@{n}` takes {}, but {} {} given",
+                    spec.arity.describe().as_str(),
+                    args.len(),
+                    if args.len() == 1 { "was" } else { "were" }
+                )),
+                span,
+            });
+        }
+
+        for (i, arg) in args.iter().enumerate() {
+            match spec.arg_kind(i) {
+                ArgKind::Any | ArgKind::CfgPredicate | ArgKind::TypeName => {}
+
+                // Syntactic, so it can be checked with certainty and
+                // without running inference on the argument.
+                ArgKind::TextLiteral => {
+                    let is_text_literal = matches!(
+                        &arg.kind,
+                        ExprKind::Literal(lit)
+                            if matches!(&lit.kind, verum_ast::LiteralKind::Text(_))
+                    );
+                    if !is_text_literal {
+                        return Err(TypeError::OtherWithCodeSpanned {
+                            code: Text::from("E0444"),
+                            msg: Text::from(format!(
+                                "`@{n}` argument {} must be a text literal",
+                                i + 1
+                            )),
+                            span: arg.span,
+                        });
+                    }
+                }
+                ArgKind::Ident => {
+                    let is_ident = matches!(&arg.kind, ExprKind::Path(_));
+                    if !is_ident {
+                        return Err(TypeError::OtherWithCodeSpanned {
+                            code: Text::from("E0444"),
+                            msg: Text::from(format!(
+                                "`@{n}` argument {} must be a bare identifier",
+                                i + 1
+                            )),
+                            span: arg.span,
+                        });
+                    }
+                }
+
+                // Semantic, and therefore one-sided: synthesise, and refuse
+                // only a CONCRETE non-numeric answer. An error from the
+                // synthesis itself is not this check's to report — the
+                // ordinary path will report it with a better message.
+                ArgKind::Numeric | ArgKind::Float => {
+                    if let Ok(res) = self.synth_expr(arg) {
+                        let resolved = self.unifier.apply(&res.ty);
+                        if Self::meta_arg_is_definitely_not_numeric(&resolved) {
+                            return Err(TypeError::OtherWithCodeSpanned {
+                                code: Text::from("E0444"),
+                                msg: Text::from(format!(
+                                    "`@{n}` argument {} must be a number, but it is \
+                                     `{}`",
+                                    i + 1,
+                                    resolved
+                                )),
+                                span: arg.span,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     fn infer_expr_meta_function(&mut self, expr: &Expr) -> Result<InferResult> {
         use ExprKind::*;
-        let ExprKind::MetaFunction { name, args } = &expr.kind else { unreachable!() };
+        let ExprKind::MetaFunction {
+            name,
+            args,
+            parenthesized,
+        } = &expr.kind
+        else {
+            unreachable!()
+        };
+
+        // REFUSE FIRST, TYPE SECOND (T1124).  Every arm below assumes the
+        // name is one the compiler can lower and that it was handed the
+        // arguments its contract names; that assumption used to be
+        // unchecked, so `@abs(1, 2, 3)` answered 1 and `@abs()` reached
+        // codegen and raised an internal compiler error.
+        self.validate_meta_function_call(name, args, *parenthesized, expr.span)?;
+
+        // A BARE `@name` with a non-zero arity NAMES the meta-function
+        // rather than calling it, and the compiler cannot lower that.
+        //
+        // Typing it as a function type is easy and WRONG to stop at: VBC
+        // codegen has no way to produce a value for a meta-function, so the
+        // program then fails later with
+        // `undefined function: `@sin` needs an argument in position 1` and
+        // no span. Measured on `L0-critical/vbc/stress/002_computation_stress.vr`,
+        // which passes `integrate(@sin, 0.0, 3.14159265, 100000)`.
+        //
+        // Refused here instead, where the diagnostic carries a span AND the
+        // rewrite that works. `@file`, `@line`, `@column`, `@module` and
+        // `@function` are unaffected: their arity is zero, so the bare form
+        // IS the call and is the documented spelling.
+        if !*parenthesized
+            && let Some(spec) = verum_ast::meta_fn::lookup(name.name.as_str())
+            && let verum_ast::meta_fn::Arity::Exact(n) = spec.arity
+            && n > 0
+        {
+            let n_ = name.name.as_str();
+            let params: Vec<String> = (0..n).map(|i| format!("x{}", i + 1)).collect();
+            return Err(TypeError::OtherWithCodeSpanned {
+                code: Text::from("E0446"),
+                msg: Text::from(format!(
+                    "`@{n_}` names a meta-function; one cannot be passed as a \
+                     value. Wrap it in a lambda: `|{}| @{n_}({})`",
+                    params.join(", "),
+                    params.join(", ")
+                )),
+                span: expr.span,
+            });
+        }
+
+        let result_type = self.meta_function_result_type(name, args, expr)?;
+        Ok(InferResult::new(result_type))
+    }
+
+    /// The type a CALL to `@name(...)` produces.
+    ///
+    /// Split out of `infer_expr_meta_function` so the bare form can reuse it
+    /// as a function type's RETURN type instead of as the whole answer.
+    fn meta_function_result_type(
+        &mut self,
+        name: &verum_ast::ty::Ident,
+        args: &verum_common::List<Expr>,
+        expr: &Expr,
+    ) -> Result<Type> {
+        use ExprKind::*;
         // Infer type based on the meta-function name
         let result_type = match name.name.as_str() {
             // Source location functions return Text or Int
@@ -13153,7 +13422,7 @@ impl TypeChecker {
             // Compile-time evaluation: type is the type of the argument
             "const" => {
                 if let Some(arg) = args.first() {
-                    return self.synth_expr(arg);
+                    return Ok(self.synth_expr(arg)?.ty);
                 }
                 Type::unit()
             }
@@ -13161,8 +13430,11 @@ impl TypeChecker {
             // String operations return Text
             "concat" | "stringify" => Type::text(),
 
-            // Diagnostics return Unit
-            "warning" | "error" => Type::unit(),
+            // `@warning(msg)` reports and evaluates to nothing.  `@error`
+            // is NOT its twin — it raises, and its arm is below, next to the
+            // other names whose typing decides a program's fate rather than
+            // merely labelling it.
+            "warning" => Type::unit(),
 
             // Compiler intrinsics - type is inferred from expected type
             // or from the last argument's type if applicable
@@ -13441,6 +13713,113 @@ impl TypeChecker {
             // @get_tag(variant) -> Int - Returns the tag index of a variant value
             "get_tag" => Type::int(),
 
+            // ---- names whose lowering exists and whose typing did not ------
+            //
+            // Each of these has a VBC codegen arm and produced a real value
+            // at run time, while typing as `Unit` — so `let v = @block_on(f)`
+            // ran correctly and would not compile against any annotation.
+            // Measured on the current binary: `@catch(1)` answers `Ok(1)`,
+            // `@block_on(1)` and `@timeout(1, 1)` answer `1`, `@ref_eq(1, 1)`
+            // answers `true`, both generation reads answer an Int.
+            "forget" => Type::unit(),
+            "ref_eq" => Type::bool(),
+            "get_generation" | "get_stored_generation" => Type::int(),
+            "byte_list_with_capacity" => Type::list(Type::Named {
+                path: verum_ast::ty::Path::single(verum_ast::Ident::new(
+                    "Byte", expr.span,
+                )),
+                args: List::new(),
+            }),
+            "block_on" | "timeout" => match args.first() {
+                Some(arg) => self.synth_expr(arg)?.ty,
+                None => Type::unit(),
+            },
+            "catch" | "catch_cbgr_violation" => {
+                let ok = match args.first() {
+                    Some(arg) => self.synth_expr(arg)?.ty,
+                    None => Type::unit(),
+                };
+                Type::Named {
+                    path: verum_ast::ty::Path::single(verum_ast::Ident::new(
+                        WKT::Result.as_str(),
+                        expr.span,
+                    )),
+                    args: List::from_iter([ok, Type::Var(TypeVar::fresh())]),
+                }
+            }
+
+            // ---- numeric meta-functions ------------------------------------
+            //
+            // These had NO arm here: they fell through to the catch-all and
+            // typed as `Unit`, which is why `let r: Int = @max(10, 20)` read
+            // "expected 'Int', found 'Unit'" and a bare `print(@max(10,20))`
+            // printed `nil` (T1124).  The `"min"|"max"|"clamp"|"abs" =>
+            // Type::int()` arm that DOES exist lives in
+            // `infer_expr_macro_call`, which `@name(...)` never reaches:
+            // `ExprKind::MacroCall` is only built for the Rust-style `name!`
+            // spelling the language refuses, so that arm has never run for
+            // any program.
+            //
+            // The float family is float-in float-out.  The polymorphic
+            // family (abs/min/max/clamp/pow) takes its result from its
+            // arguments, so an Int argument keeps an Int result — which is
+            // what `dp[i][j] = @max(dp[i-1][j], dp[i][j-1])` needs.
+            "sqrt" | "sin" | "cos" | "tan" | "log" | "exp" | "floor" | "ceil"
+            | "round" => {
+                for arg in args.iter() {
+                    let _ = self.synth_expr(arg);
+                }
+                Type::float()
+            }
+            "abs" | "min" | "max" | "clamp" | "pow" => {
+                // The widest argument type wins: any Float makes the result
+                // Float, otherwise Int.  An unresolved argument leaves a
+                // fresh variable rather than guessing, so a later constraint
+                // can still settle it.
+                let mut saw_float = false;
+                let mut saw_unresolved = false;
+                for arg in args.iter() {
+                    match self.synth_expr(arg) {
+                        Ok(res) => match self.unifier.apply(&res.ty) {
+                            Type::Float => saw_float = true,
+                            Type::Int => {}
+                            _ => saw_unresolved = true,
+                        },
+                        Err(_) => saw_unresolved = true,
+                    }
+                }
+                if saw_float {
+                    Type::float()
+                } else if saw_unresolved {
+                    Type::Var(TypeVar::fresh())
+                } else {
+                    Type::int()
+                }
+            }
+
+            // @error("msg") raises a compile-time error carrying the
+            // message.  That IS its semantics; typing it `Unit` and letting
+            // codegen answer `nil` made `@error` a no-op.
+            "error" => {
+                let msg = args
+                    .first()
+                    .and_then(|a| match &a.kind {
+                        ExprKind::Literal(lit) => match &lit.kind {
+                            verum_ast::LiteralKind::Text(t) => {
+                                Some(t.as_str().to_string())
+                            }
+                            _ => None,
+                        },
+                        _ => None,
+                    })
+                    .unwrap_or_else(|| String::from("(no message)"));
+                return Err(TypeError::OtherWithCodeSpanned {
+                    code: Text::from("E0445"),
+                    msg: Text::from(msg),
+                    span: expr.span,
+                });
+            }
+
             // @list_with_capacity(N) -> List<T> where T is inferred from context
             "list_with_capacity" => Type::list(Type::Var(TypeVar::fresh())),
 
@@ -13557,7 +13936,18 @@ impl TypeChecker {
                 Type::Var(TypeVar::fresh())
             }
 
-            // Unknown meta-function - default to unit.
+            // Unreachable for an unknown name since T1124.
+            //
+            // `validate_meta_function_call` runs before this match and
+            // refuses any name that is not in `verum_ast::meta_fn::REGISTRY`,
+            // is in it but has no lowering, or was handed the wrong number
+            // or kind of arguments.  What still lands here is a REGISTERED
+            // name with no typing arm — a gap inside the compiler rather
+            // than a mistake in the program — so the levers below stay as
+            // the instrument for finding one.
+            //
+            // The historical note that follows is kept because it records
+            // the measurement that decided where the refusal belongs.
             //
             // T1352.  This arm is SILENT: a name the compiler does not
             // know types as `Unit` and nothing is reported, so a
@@ -13606,23 +13996,24 @@ impl TypeChecker {
                     || std::env::var_os("VERUM_STRICT_META_FN").is_some()
                 {
                     eprintln!(
-                        "[meta-fn] unknown '@{}' with {} arg(s) — typing as Unit",
+                        "[meta-fn] registered '@{}' with {} arg(s) has no typing arm",
                         unknown,
                         args.len()
                     );
                 }
-                if std::env::var_os("VERUM_STRICT_META_FN").is_some() {
-                    return Err(TypeError::Other(verum_common::Text::from(format!(
-                        "unknown meta-function `@{}`: no compiler builtin and no \
-                         `meta fn` of that name is in scope",
-                        unknown
-                    ))));
+                // A registered name with no typing arm is `@builtin_*`,
+                // whose return type lives at the stdlib declaration site.
+                // A fresh variable is the right answer there; for anything
+                // else it would be a compiler gap, and the lever above is
+                // what names it.
+                for arg in args.iter() {
+                    let _ = self.synth_expr(arg);
                 }
-                Type::unit()
+                Type::Var(TypeVar::fresh())
             }
         };
 
-        Ok(InferResult::new(result_type))
+        Ok(result_type)
     }
 
     fn infer_expr_lift(&mut self, expr: &Expr) -> Result<InferResult> {

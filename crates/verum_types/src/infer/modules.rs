@@ -114,7 +114,42 @@ impl TypeChecker {
     /// Relies on RUST_MIN_STACK=16MB for stack safety on deep recursion.
     pub fn check_item(&mut self, item: &verum_ast::Item) -> Result<()> {
         let _depth_guard = self.inc_inference_depth("check_item")?;
+        // A `meta` declaration must be on record BEFORE any body that calls
+        // it is inferred, so that `validate_meta_function_call` refuses
+        // `@my_macro(...)` for the right reason. Items arrive one at a time
+        // here, so declaration-before-use is what this covers; callers
+        // holding the whole module call `register_declared_meta_macros`,
+        // which covers the other order too.
+        self.note_declared_meta_macros(item);
         self.check_item_inner(item)
+    }
+
+    /// Record every `meta <name>(...)` declaration in `module`, including
+    /// nested modules.
+    ///
+    /// Idempotent, so calling it as well as `check_item` costs nothing.
+    pub fn register_declared_meta_macros(&mut self, module: &verum_ast::Module) {
+        for item in module.items.iter() {
+            self.note_declared_meta_macros(item);
+        }
+    }
+
+    /// One item's contribution to [`Self::register_declared_meta_macros`].
+    fn note_declared_meta_macros(&mut self, item: &verum_ast::Item) {
+        use verum_ast::ItemKind;
+        match &item.kind {
+            ItemKind::Meta(meta) => {
+                self.declared_meta_macros.insert(meta.name.name.clone());
+            }
+            ItemKind::Module(m) => {
+                if let verum_common::Maybe::Some(items) = &m.items {
+                    for inner in items.iter() {
+                        self.note_declared_meta_macros(inner);
+                    }
+                }
+            }
+            _ => {}
+        }
     }
 
     /// Inner implementation of check_item

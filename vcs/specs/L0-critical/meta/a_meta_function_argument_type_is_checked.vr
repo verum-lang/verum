@@ -1,0 +1,16 @@
+// @test: typecheck-fail
+// @level: L0
+// @tier: 0
+// @tags: meta, meta-functions, arguments
+// @expected-error: E0444
+
+// `@sqrt("text")` answered `nil`.  The check is deliberately ONE-SIDED:
+// only a concrete non-numeric type is refused, so an unresolved variable or
+// a `Named` head still passes.  A meta-function argument is examined before
+// unification has finished, and refusing on the checker's progress rather
+// than on the program is how a narrowing check reaches correct code.
+
+fn main() {
+    let v = @sqrt("text");
+    print(f"v={v}");
+}

@@ -2076,7 +2076,7 @@ impl<'s> CompilationPipeline<'s> {
         use verum_ast::expr::ExprKind;
 
         match &expr.kind {
-            ExprKind::MetaFunction { name, args } if name.as_str() == "const" => {
+            ExprKind::MetaFunction { name, args, .. } if name.as_str() == "const" => {
                 // @const { ... } block — evaluate arguments
                 for arg in args.iter() {
                     // ARCH-P4 step (ii): VBC-engine-first under the

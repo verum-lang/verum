@@ -1,0 +1,20 @@
+// @test: typecheck-fail
+// @level: L0
+// @tier: 0
+// @tags: meta, meta-functions, diagnostics
+// @expected-error: E0442
+
+// A name the language RESERVES and the compiler cannot lower is refused
+// too, and for the same reason as an unknown one: the alternative is `nil`.
+//
+// `@type_name` is in the grammar's own `meta_function_name` production, and
+// lowering it needs the checker's view of the argument threaded into
+// codegen — machinery that does not exist.  Until it does, the honest
+// answer is a diagnostic naming the name, not a value nobody chose.
+//
+// Thirty-one names were in this state when the registry was built.
+
+fn main() {
+    let v = @type_name(Int);
+    print(f"v={v}");
+}

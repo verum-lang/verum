@@ -1601,7 +1601,7 @@ pub fn walk_expr<V: Visitor>(visitor: &mut V, expr: &Expr) {
             visitor.visit_ident(type_param);
             visit_child!(visitor, bound, Type);
         }
-        ExprKind::MetaFunction { name, args } => {
+        ExprKind::MetaFunction { name, args, .. } => {
             visitor.visit_ident(name);
             for arg in args.iter() {
                 visit_child!(visitor, arg, Expr);

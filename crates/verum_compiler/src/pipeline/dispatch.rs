@@ -726,6 +726,17 @@ impl<'s> CompilationPipeline<'s> {
         // declares are real defects, but they belong to the meta system,
         // not to harness parity, and adding an unmeasured phase to the
         // shipped path to chase them would be its own kind of drift.
+        //
+        // BOTH of those defects are fixed as of T1124, and neither needed a
+        // phase added here — which is the measurement above holding up. The
+        // parser now suppresses its warning for a name a `meta` declaration
+        // in the same module provides (the filter runs after the parse, when
+        // the whole item list is in hand, so a declaration BELOW the call
+        // counts), and the type checker refuses the call outright with
+        // `E0441` naming the macro, instead of typing it `Unit` and letting
+        // codegen answer `nil`. What has not changed is this path: macro
+        // EXPANSION is still unimplemented everywhere, which is why the
+        // refusal says so rather than pretending the call works.
         if std::env::var("VERUM_FULL_STDLIB").is_err() {
             self.clear_non_compilable_stdlib_modules(Some(&module));
         }

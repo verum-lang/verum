@@ -1,16 +1,24 @@
 #!/usr/bin/env python3
-"""An `@name(...)` in EXPRESSION position that the compiler does not know
-types as `Unit` — silently, with only a parser warning.
+"""An `@name(...)` in EXPRESSION position that the compiler cannot honour.
 
-Root, one line, `crates/verum_types/src/infer/expr.rs`:
+FIXED AT THE ROOT 2026-09-16 (T1124), and this gate outlives the fix
+because the two guard different things.  The compiler now REFUSES such a
+call — `verum_types` checks the name, its arity and its argument kinds
+against one registry (`crates/verum_ast/src/meta_fn.rs`) before typing
+anything — so a name that misses the rosters no longer compiles.  This
+gate keeps counting them in `core/` because a REFUSAL is still a broken
+stdlib file, and because the roster below records which names are
+*expected* to be in that state: a new one appearing is the signal.
+
+WHAT IT USED TO BE, kept because the roster's shape is inherited from it.
+The catch-all of the meta-function match in inference read
 
     _ => Type::unit(),
 
-the catch-all of the match on a meta-function name.  Upstream of it the
-parser (`crates/verum_fast_parser/src/expr.rs`) pushes an `E0410`
-*warning* for a name outside `KNOWN_META_FUNCTIONS` and then builds
-`ExprKind::MetaFunction` anyway, so nothing refuses.  Downstream, the
-expression has type `Unit`: a zero-byte object.
+and the parser pushed an `E0410` *warning* for a name outside its private
+`KNOWN_META_FUNCTIONS` list and built `ExprKind::MetaFunction` anyway, so
+nothing refused.  Downstream, the expression had type `Unit`: a zero-byte
+object.
 
 What that cost, measured: `core/io/file.vr` built its `fstat(2)` buffer
 with `unsafe { @zeroed() }`.  `@zeroed` is not a meta-function, so the
@@ -101,6 +109,7 @@ import sys
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
 PARSER = REPO / "crates/verum_fast_parser/src/expr.rs"
+REGISTRY = REPO / "crates/verum_ast/src/meta_fn.rs"
 INFER = REPO / "crates/verum_types/src/infer/expr.rs"
 CORE = REPO / "core"
 
@@ -138,21 +147,72 @@ MIN_INFER_NAMES = 10
 
 
 def parser_roster() -> set[str]:
-    m = re.search(
-        r"const KNOWN_META_FUNCTIONS: &\[&str\] = &\[(.*?)\n\];",
-        PARSER.read_text(),
-        re.S,
-    )
-    if not m:
-        return set()
-    return set(re.findall(r'"([A-Za-z_][A-Za-z0-9_]*)"', m.group(1)))
+    """THE names the compiler recognises in expression position.
+
+    Read from `verum_ast::meta_fn::REGISTRY`, which is where the roster
+    lives since T1124. It used to be a private `KNOWN_META_FUNCTIONS` list
+    inside the parser, with a second copy in the type checker and a third
+    in VBC codegen — and they disagreed in every direction: 31 names the
+    parser admitted had no lowering, three the checker typed were reported
+    unknown by the parser, one codegen implements warned on every use.
+
+    `no_private_roster_survives` below is what keeps this true: a new
+    private list in the parser makes this gate fail rather than silently
+    measure the wrong thing.
+    """
+    rows = re.findall(r'row\(\s*"([A-Za-z_][A-Za-z0-9_]*)"', REGISTRY.read_text())
+    return set(rows)
+
+
+def unimplemented_roster() -> set[str]:
+    """Registry rows marked `Unimplemented` — names that are RECOGNISED and
+    still have no value to produce.
+
+    These are refused by the type checker now, so they cannot reach `core/`
+    and answer `nil`. The set is extracted so that a row flipped to
+    `Implemented` without a lowering is visible here rather than at a user.
+    """
+    out: set[str] = set()
+    for name, body in re.findall(
+        r'row\(\s*"([A-Za-z_][A-Za-z0-9_]*)"(.*?)\),\n', REGISTRY.read_text(), re.S
+    ):
+        if "Unimplemented" in body:
+            out.add(name)
+    return out
+
+
+def no_private_roster_survives() -> list[str]:
+    """The drift-source, checked as absent.
+
+    A roster that is one table is only one table for as long as nobody adds
+    a second. The three that existed before T1124 each looked reasonable in
+    isolation; what made them expensive was that no instrument compared
+    them.
+    """
+    problems: list[str] = []
+    if "const KNOWN_META_FUNCTIONS" in PARSER.read_text():
+        problems.append(
+            f"{PARSER.relative_to(REPO)}: a private meta-function roster is back; "
+            "the authority is crates/verum_ast/src/meta_fn.rs"
+        )
+    return problems
 
 
 def inference_roster() -> set[str]:
+    """The names the type checker has a TYPING arm for.
+
+    Anchored on the function that owns the match, not on a destructuring
+    line: `infer_expr_meta_function` used to destructure and match in one
+    body, and when T1124 split the match out into
+    `meta_function_result_type` the old anchor stopped matching. The gate
+    refused to judge rather than reporting an empty roster — which is the
+    floor below doing its job — but an anchor that moves with a refactor is
+    one this file should not have had.
+    """
     lines = INFER.read_text().splitlines()
     start = None
     for i, line in enumerate(lines):
-        if "let ExprKind::MetaFunction { name, args } = &expr.kind" in line:
+        if "fn meta_function_result_type(" in line:
             start = i
             break
     if start is None:
@@ -309,13 +369,17 @@ def main() -> int:
     if rc:
         return rc
 
+    for problem in no_private_roster_survives():
+        print(f"[FAIL] {problem}")
+        return 1
+
     parser_names = parser_roster()
     infer_names = inference_roster()
     if len(parser_names) < MIN_PARSER_NAMES:
         print(
-            f"[FAIL] KNOWN_META_FUNCTIONS yielded {len(parser_names)} names "
-            f"(< {MIN_PARSER_NAMES}) — the parser roster moved or "
-            f"{PARSER.relative_to(REPO)} changed shape. Refusing to judge."
+            f"[FAIL] meta_fn::REGISTRY yielded {len(parser_names)} names "
+            f"(< {MIN_PARSER_NAMES}) — the roster moved or "
+            f"{REGISTRY.relative_to(REPO)} changed shape. Refusing to judge."
         )
         return 2
     if len(infer_names) < MIN_INFER_NAMES:
@@ -341,26 +405,32 @@ def main() -> int:
         n for n in set(found) & set(KNOWN) if len(found[n]) != KNOWN[n]
     )
 
+    unimplemented = unimplemented_roster()
     print(
         f"meta-function names accepted by the compiler: "
-        f"{len(parser_names)} parser + {len(infer_names)} inference "
-        f"+ {len(codegen_names)} codegen "
+        f"{len(parser_names)} in the registry ({len(unimplemented)} of them "
+        f"recognised-but-unimplemented, and therefore REFUSED at the call) "
+        f"+ {len(infer_names)} typed + {len(codegen_names)} codegen builtins "
         f"= {len(parser_names | infer_names | codegen_names)} distinct"
     )
     print(f"untyped expression meta-calls in core/: {total} (roster {BASELINE})")
 
     if new_names:
-        print(f"\n[FAIL] {len(new_names)} name(s) NOT in the roster — each types as Unit:")
+        print(
+            f"\n[FAIL] {len(new_names)} name(s) NOT in the roster — "
+            f"each is REFUSED at the call, so its file does not compile:"
+        )
         for n in new_names:
             for loc in found[n][:6]:
                 print(f"    @{n} at {loc}")
             if len(found[n]) > 6:
                 print(f"    ... and {len(found[n]) - 6} more")
         print(
-            "\n  A meta-function the compiler does not know is not a lint: the\n"
-            "  expression is Unit, a zero-byte object. Spell it as something\n"
-            "  that exists, or add it to both the parser roster and the\n"
-            "  inference match."
+            "\n  A meta-function the compiler does not know is not a lint: it is\n"
+            "  refused at the call since T1124, so a name here does not compile.\n"
+            "  Spell it as something that exists, or add a row to\n"
+            f"  {REGISTRY.relative_to(REPO)} together with the lowering that\n"
+            "  makes the row's `Implemented` true."
         )
         return 1
 

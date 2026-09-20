@@ -327,7 +327,7 @@ impl<'a> verum_ast::visitor::Visitor for MacroExpander<'a> {
 
             // Check if this is a meta function call (@name())
             // User-defined meta functions use this syntax
-            ExprKind::MetaFunction { name, args } => {
+            ExprKind::MetaFunction { name, args, .. } => {
                 let meta_name = Text::from(name.name.as_str());
 
                 debug!("Found meta function invocation: @{}", meta_name.as_str());

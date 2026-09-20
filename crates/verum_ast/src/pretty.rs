@@ -2492,7 +2492,7 @@ impl PrettyPrinter {
                 self.write(": ");
                 self.format_type(bound);
             }
-            ExprKind::MetaFunction { name, args } => {
+            ExprKind::MetaFunction { name, args, .. } => {
                 self.write("@");
                 self.write(name.as_str());
                 if !args.is_empty() {

@@ -195,13 +195,19 @@ meta fn abs_diff(a: Int64, b: Int64) -> Int64 {
 // 10. COMPILE-TIME ASSERTIONS
 // ============================================================
 
-const _SIZE_CHECK: () = {
-    @static_assert(@size_of(Int) == 8);
-};
-
-const _ALIGN_CHECK: () = {
-    @static_assert(@align_of(Int) >= 4);
-};
+// `@static_assert` IS NOT A COMPILER BUILTIN.  Both blocks used to pass
+// only because an unknown `@name(...)` typed as `Unit` and lowered to
+// `nil`, so neither check ever ran.  The compiler refuses an unknown
+// meta-function by name now (T1124); the intent is kept here as the
+// contract an implementation has to meet.
+//
+// const _SIZE_CHECK: () = {
+//     @static_assert(@size_of(Int) == 8);
+// };
+//
+// const _ALIGN_CHECK: () = {
+//     @static_assert(@align_of(Int) >= 4);
+// };
 
 // ============================================================
 // ИСПОЛЬЗОВАНИЕ РАЗРЕШЁННЫХ ОПЕРАЦИЙ

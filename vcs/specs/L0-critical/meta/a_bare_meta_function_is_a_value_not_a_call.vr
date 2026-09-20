@@ -1,0 +1,49 @@
+// @test: typecheck-fail
+// @level: L0
+// @tier: 0
+// @tags: meta, meta-functions, arity
+// @expected-error: E0446
+
+// `@sin` and `@sin()` are different programs that reach the type checker
+// with the SAME zero arguments, and they want opposite answers.
+//
+// The grammar makes the call-part optional —
+//
+//     meta_function = '@' , meta_function_name , [ '(' , [ argument_list ] , ')' ]
+//
+// — so a bare `@name` NAMES the meta-function, while `@abs()` is a call
+// with its argument missing.  An arity check that counts arguments alone
+// cannot tell them apart; only the parser knows which was written, and it
+// records it now.  Without that, this file read
+// ``@sin` takes exactly 1 argument, but 0 were given`, which is a
+// diagnostic about a call nobody made.
+//
+// Naming one is refused for its own reason: VBC code generation has no way
+// to produce a value for a meta-function, so typing it as a function would
+// only move the failure to codegen, where the message has no span —
+// `undefined function: `@sin` needs an argument in position 1`.  The
+// refusal carries the rewrite that works instead.
+//
+// Its twin is `a_meta_function_with_no_arguments_is_refused.vr`, which
+// holds the other half: `@abs()` is an arity error naming the name.
+//
+// `@file`, `@line`, `@column`, `@module` and `@function` are unaffected —
+// their arity is zero, so the bare form IS the call and is the documented
+// spelling.
+
+fn integrate(f: fn(Float) -> Float, a: Float, b: Float, n: Int) -> Float {
+    let mut acc = 0.0;
+    let h = (b - a) / (n as Float);
+    let mut i = 0;
+    while i < n {
+        acc = acc + f(a + (i as Float) * h) * h;
+        i = i + 1;
+    }
+    return acc;
+}
+
+fn main() {
+    // The compiler names the rewrite: `|x1| @sin(x1)`.
+    let area = integrate(@sin, 0.0, 3.14159265, 1000);
+    print(f"area {area > 1.9}");
+}

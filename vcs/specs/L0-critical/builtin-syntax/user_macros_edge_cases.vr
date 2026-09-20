@@ -1,8 +1,23 @@
-// @test: typecheck-pass
+// @test: parse-pass
 // @tier: all
 // @level: L0
 // @tags: builtin-syntax, macros, meta, edge-cases
 // @description: Tests edge cases for user-defined macros with @ prefix
+//
+// WAS `typecheck-pass`, AND THAT CLAIM WAS NEVER TRUE (T1124).  It passed
+// because every `@macro(...)` call below typed as `Unit` and lowered to
+// `nil`: a `meta` declaration is parsed, kept, and never consulted by any
+// phase, so calling one did nothing and nothing said so.  Eleven calls in
+// this file were in that state.
+//
+// The compiler now refuses such a call — `error<E0441>: `@log` names a
+// `meta` macro declared in this module, but macro expansion is not
+// implemented` — so the type-level assertion cannot be made honestly until
+// expansion exists.  What this file still pins, and pins well, is the
+// SYNTAX: a macro declaration, and a call to it in every position the
+// grammar admits.  That is what `parse-pass` asserts.
+//
+// Restore `typecheck-pass` in the same commit that implements expansion.
 
 /// Edge cases for user-defined macros:
 /// 1. Macro calls in different contexts

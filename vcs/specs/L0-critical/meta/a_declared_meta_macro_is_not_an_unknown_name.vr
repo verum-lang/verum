@@ -1,0 +1,25 @@
+// @test: parse-pass
+// @level: L0
+// @tier: 0
+// @tags: meta, meta-functions, macros
+
+// A `meta <name>(...)` declaration makes `@name(...)` a DECLARED macro, not
+// an unknown meta-function — and the declaration may come AFTER the call,
+// which a single-pass parser cannot know at the call site.  The filter
+// therefore runs once per parse, with the whole item list in hand.
+//
+// Without it, every file declaring its own macros reported them as unknown:
+// the warning named the very declaration three lines up.
+//
+// Expansion itself is a separate matter.  Calling one is refused by the
+// type checker with a diagnostic that says which of the two problems it is,
+// rather than the `nil` the call used to produce.
+
+fn main() -> Int {
+    @twice(21);
+    return 0;
+}
+
+meta twice(x: expr) {
+    x => x + x
+}

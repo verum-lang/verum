@@ -1400,7 +1400,7 @@ impl ToTokens for Expr {
                 bound.to_tokens(stream);
             }
 
-            ExprKind::MetaFunction { name, args } => {
+            ExprKind::MetaFunction { name, args, .. } => {
                 // Output as: @name or @name(args)
                 stream.push(Token::new(TokenKind::At, self.span));
                 stream.push(Token::new(

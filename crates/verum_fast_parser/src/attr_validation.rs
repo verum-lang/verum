@@ -114,6 +114,16 @@ pub struct AttributeValidationWarning {
     pub hint: Option<Text>,
     /// Error code for reference
     pub code: Text,
+    /// The `@name` this warning is ABOUT, when it is about one.
+    ///
+    /// A warning's message is prose and cannot be matched on. The post-parse
+    /// filter in `FastParser::parse_module_internal` needs to drop the
+    /// `unknown meta-function` warnings whose name a `meta` declaration in
+    /// the same module provides — a question no single-pass parser can
+    /// answer at the call site, because the declaration may come after the
+    /// call. This field is what lets that filter key on the name instead of
+    /// on the wording (T1124).
+    pub subject: Option<Text>,
 }
 
 impl AttributeValidationWarning {
@@ -125,7 +135,15 @@ impl AttributeValidationWarning {
             span,
             hint: None,
             code: Text::from("W0400"),
+            subject: None,
         }
+    }
+
+    /// Name the `@name` this warning is about.
+    #[must_use]
+    pub fn with_subject(mut self, subject: impl Into<Text>) -> Self {
+        self.subject = Some(subject.into());
+        self
     }
 
     /// Add a hint to the warning.

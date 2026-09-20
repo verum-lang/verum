@@ -147,6 +147,35 @@ impl FastParser {
         }
     }
 
+    /// Every name declared with `meta <name>(...)` among `items`,
+    /// including inside nested modules.
+    ///
+    /// A declared macro is not an unknown meta-function, and the parser
+    /// cannot tell the two apart at the call site — the declaration may
+    /// follow the call. Collected once per parse, only when there is at
+    /// least one warning that could be filtered.
+    fn declared_meta_macro_names(items: &[Item]) -> std::collections::HashSet<String> {
+        fn walk(items: &[Item], out: &mut std::collections::HashSet<String>) {
+            for item in items {
+                match &item.kind {
+                    verum_ast::ItemKind::Meta(m) => {
+                        out.insert(m.name.name.as_str().to_string());
+                    }
+                    verum_ast::ItemKind::Module(m) => {
+                        if let verum_common::Maybe::Some(inner) = &m.items {
+                            let nested: Vec<Item> = inner.iter().cloned().collect();
+                            walk(&nested, out);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        let mut out = std::collections::HashSet::new();
+        walk(items, &mut out);
+        out
+    }
+
     /// Parse a complete module from a token stream.
     pub fn parse_module(&self, lexer: Lexer, file_id: FileId) -> ParseResult<Module> {
         // Delegate to internal method with None for source
@@ -262,7 +291,25 @@ impl FastParser {
         // produced whatever attribute warnings it saw, and a channel only
         // drained on the success path is the same silence one layer in.
         {
-            let taken = parser.take_attr_warnings();
+            let mut taken = parser.take_attr_warnings();
+            // A `meta <name>(...)` declaration ANYWHERE in this module makes
+            // `@name(...)` a declared macro, not an unknown meta-function.
+            // The warning is pushed at the call site, where a single-pass
+            // parser cannot yet know about a declaration further down the
+            // file — so the filter runs here, with the whole item list in
+            // hand. Without it, every `vcs/specs/.../user_macros_*.vr`
+            // reports its own macros as unknown (T1124).
+            if !taken.is_empty()
+                && let Ok(items) = result.as_ref()
+            {
+                let declared = Self::declared_meta_macro_names(items);
+                if !declared.is_empty() {
+                    taken.retain(|w| match (&w.subject, w.code.as_str()) {
+                        (Some(name), "E0410") => !declared.contains(name.as_str()),
+                        _ => true,
+                    });
+                }
+            }
             if !taken.is_empty()
                 && let Ok(mut sink) = self.attr_warnings.lock()
             {

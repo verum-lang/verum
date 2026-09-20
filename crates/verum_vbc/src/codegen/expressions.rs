@@ -1412,7 +1412,7 @@ impl VbcCodegen {
 
             // === Meta expressions ===
             ExprKind::Meta(block) => self.compile_meta_block(block),
-            ExprKind::MetaFunction { name, args } => self.compile_meta_function(name, args),
+            ExprKind::MetaFunction { name, args, .. } => self.compile_meta_function(name, args),
             ExprKind::MacroCall { path, args } => self.compile_macro_call(path, args),
             ExprKind::Quote {
                 target_stage,
@@ -33849,6 +33849,56 @@ impl VbcCodegen {
     }
 
     /// Compiles meta function: @file, @line, @intrinsic, etc.
+    /// The literal text of `expr`, if it is one.
+    ///
+    /// `@concat` and `@error` fold at compile time, so a non-literal
+    /// argument has nothing to fold and must be refused rather than
+    /// silently rendered.
+    fn meta_literal_text(expr: &Expr) -> Option<String> {
+        let ExprKind::Literal(lit) = &expr.kind else {
+            return None;
+        };
+        match &lit.kind {
+            verum_ast::LiteralKind::Text(t) => Some(t.as_str().to_string()),
+            verum_ast::LiteralKind::Int(i) => Some(i.value.to_string()),
+            verum_ast::LiteralKind::Float(f) => Some(f.value.to_string()),
+            verum_ast::LiteralKind::Bool(b) => Some(b.to_string()),
+            verum_ast::LiteralKind::Char(c) => Some(c.to_string()),
+            _ => None,
+        }
+    }
+
+    /// Compile argument `idx` of `@name`, or refuse by name.
+    ///
+    /// The missing-argument case used to be `CodegenError::internal` — an
+    /// INTERNAL COMPILER ERROR printed at a user who wrote `@abs()`, which
+    /// is the shape T1124 was filed on. Arity is refused in the type
+    /// checker now, so reaching this is a route that skipped typing; the
+    /// message says which name and which position rather than claiming the
+    /// compiler broke.
+    fn meta_arg_reg(
+        &mut self,
+        name: &str,
+        args: &verum_common::List<Expr>,
+        idx: usize,
+    ) -> CodegenResult<Reg> {
+        let arg = args.get(idx).ok_or_else(|| {
+            CodegenError::undefined_function(format!(
+                "`@{name}` needs an argument in position {}, but only {} \
+                 {} given",
+                idx + 1,
+                args.len(),
+                if args.len() == 1 { "was" } else { "were" }
+            ))
+        })?;
+        self.compile_expr(arg)?.ok_or_else(|| {
+            CodegenError::undefined_function(format!(
+                "`@{name}` argument {} has no value",
+                idx + 1
+            ))
+        })
+    }
+
     fn compile_meta_function(
         &mut self,
         name: &verum_ast::ty::Ident,
@@ -33944,12 +33994,7 @@ impl VbcCodegen {
             }
             // Runtime intrinsics callable via @name(args) syntax
             "get_tag" => {
-                if args.is_empty() {
-                    return Err(CodegenError::internal("@get_tag requires 1 argument"));
-                }
-                let arg_reg = self
-                    .compile_expr(&args[0])?
-                    .or_internal("@get_tag arg has no value")?;
+                let arg_reg = Self::meta_arg_reg(self, "get_tag", args, 0)?;
                 self.ctx.emit(Instruction::GetTag {
                     dst: dest,
                     variant: arg_reg,
@@ -33957,18 +34002,241 @@ impl VbcCodegen {
                 self.ctx.free_temp(arg_reg);
             }
             "abs" => {
-                if args.is_empty() {
-                    return Err(CodegenError::internal("@abs requires 1 argument"));
-                }
-                let arg_reg = self
-                    .compile_expr(&args[0])?
-                    .or_internal("@abs arg has no value")?;
+                // `args.is_empty()` was an `internal` error — an internal
+                // compiler error shown to a user who wrote `@abs()`, which is
+                // a program mistake, not a compiler one (T1124). Arity is
+                // refused by `validate_meta_function_call` in the type
+                // checker, where the diagnostic carries a span; this is the
+                // backstop for a route that skips typing, and it says so.
+                let arg_reg = Self::meta_arg_reg(self, "abs", args, 0)?;
                 self.ctx.emit(Instruction::UnaryI {
                     op: UnaryIntOp::Abs,
                     dst: dest,
                     src: arg_reg,
                 });
                 self.ctx.free_temp(arg_reg);
+            }
+
+            // ---- float unary maths -------------------------------------
+            //
+            // These names were in the parser's roster and in nothing else, so
+            // each one type-checked, lowered through the catch-all below and
+            // answered `nil` — 31 names were in that state, measured
+            // 2026-09-16 across the whole roster. The opcodes existed the
+            // whole time: `UnaryFloatOp` has carried Sqrt/Exp/Log/Sin/Cos/
+            // Tan/Floor/Ceil/Round since the instruction set was written, and
+            // `InlineSequenceId::SqrtF64` already emits one of them.
+            "sqrt" | "sin" | "cos" | "tan" | "log" | "exp" | "floor" | "ceil"
+            | "round" => {
+                let op = match name.name.as_str() {
+                    "sqrt" => UnaryFloatOp::Sqrt,
+                    "sin" => UnaryFloatOp::Sin,
+                    "cos" => UnaryFloatOp::Cos,
+                    "tan" => UnaryFloatOp::Tan,
+                    "log" => UnaryFloatOp::Log,
+                    "exp" => UnaryFloatOp::Exp,
+                    "floor" => UnaryFloatOp::Floor,
+                    "ceil" => UnaryFloatOp::Ceil,
+                    "round" => UnaryFloatOp::Round,
+                    other => {
+                        return Err(CodegenError::internal(format!(
+                            "unary float meta-function `@{other}` reached its \
+                             arm without a matching opcode"
+                        )))
+                    }
+                };
+                let arg_reg = Self::meta_arg_reg(self, name.name.as_str(), args, 0)?;
+                self.ctx.emit(Instruction::UnaryF {
+                    op,
+                    dst: dest,
+                    src: arg_reg,
+                });
+                self.ctx.free_temp(arg_reg);
+            }
+
+            // ---- polymorphic min / max / clamp ---------------------------
+            //
+            // `ArithSubOpcode::PolyMin`/`PolyMax`/`PolyClamp` work for every
+            // `Ord` type, which is why these take `Numeric` rather than
+            // `Float`: `@max(dp[i-1][j], dp[i][j-1])` over `Int` is the shape
+            // that found them missing.
+            "min" | "max" | "clamp" => {
+                let sub_op = match name.name.as_str() {
+                    "min" => crate::instruction::ArithSubOpcode::PolyMin,
+                    "max" => crate::instruction::ArithSubOpcode::PolyMax,
+                    _ => crate::instruction::ArithSubOpcode::PolyClamp,
+                };
+                let wanted = if matches!(
+                    sub_op,
+                    crate::instruction::ArithSubOpcode::PolyClamp
+                ) {
+                    3
+                } else {
+                    2
+                };
+                let mut regs = Vec::with_capacity(wanted);
+                for i in 0..wanted {
+                    regs.push(Self::meta_arg_reg(self, name.name.as_str(), args, i)?);
+                }
+                let mut operands = Vec::<u8>::new();
+                Self::write_reg(&mut operands, dest.0);
+                for r in &regs {
+                    Self::write_reg(&mut operands, r.0);
+                }
+                self.ctx.emit(Instruction::ArithExtended {
+                    sub_op: sub_op as u8,
+                    operands,
+                });
+                for r in regs {
+                    self.ctx.free_temp(r);
+                }
+            }
+
+            // ---- exponentiation -------------------------------------------
+            //
+            // `BinaryIntOp::Pow` is the opcode the `**` operator lowers to, so
+            // `@pow(a, b)` and `a ** b` cannot disagree.
+            "pow" => {
+                let base = Self::meta_arg_reg(self, "pow", args, 0)?;
+                let exp = Self::meta_arg_reg(self, "pow", args, 1)?;
+                self.ctx.emit(Instruction::BinaryI {
+                    op: BinaryIntOp::Pow,
+                    dst: dest,
+                    a: base,
+                    b: exp,
+                });
+                self.ctx.free_temp(base);
+                self.ctx.free_temp(exp);
+            }
+
+            // ---- source introspection --------------------------------------
+            //
+            // `current_function` is `Module.path.fn_name`; `@function` is the
+            // last segment and `@module` everything before it. Both used to
+            // fall through to the catch-all and answer `nil`, while their
+            // siblings `@file`/`@line`/`@column` had arms — a split with no
+            // reason behind it.
+            "module" | "function" => {
+                let qualified = self
+                    .ctx
+                    .current_function
+                    .clone()
+                    .unwrap_or_else(|| String::from("unknown"));
+                let text = if name.name.as_str() == "function" {
+                    qualified
+                        .rsplit('.')
+                        .next()
+                        .unwrap_or(qualified.as_str())
+                        .to_string()
+                } else {
+                    match qualified.rfind('.') {
+                        Some(i) => qualified[..i].to_string(),
+                        None => String::from("main"),
+                    }
+                };
+                let const_id = self.ctx.add_const_string(&text);
+                self.ctx.emit(Instruction::LoadK {
+                    dst: dest,
+                    const_id: const_id.0,
+                });
+            }
+
+            // ---- token manipulation -----------------------------------------
+            //
+            // Compile-time only: `@stringify(expr)` is the SOURCE of its
+            // argument, so the argument is never evaluated, and `@concat`
+            // folds its literal arguments into one constant.
+            "stringify" => {
+                let rendered = match args.first() {
+                    Some(arg) => verum_ast::pretty::format_expr(arg).as_str().to_string(),
+                    None => String::new(),
+                };
+                let const_id = self.ctx.add_const_string(&rendered);
+                self.ctx.emit(Instruction::LoadK {
+                    dst: dest,
+                    const_id: const_id.0,
+                });
+            }
+            "concat" => {
+                let mut out = String::new();
+                for arg in args.iter() {
+                    match Self::meta_literal_text(arg) {
+                        Some(t) => out.push_str(&t),
+                        // Not a literal, so there is nothing to fold at
+                        // compile time. Refused by name rather than folded
+                        // into a wrong constant.
+                        None => {
+                            return Err(CodegenError::undefined_function(format!(
+                                "`@concat` folds literals at compile time; \
+                                 `{}` is not a literal",
+                                verum_ast::pretty::format_expr(arg).as_str()
+                            )))
+                        }
+                    }
+                }
+                let const_id = self.ctx.add_const_string(&out);
+                self.ctx.emit(Instruction::LoadK {
+                    dst: dest,
+                    const_id: const_id.0,
+                });
+            }
+
+            // ---- compile-time diagnostics ------------------------------------
+            //
+            // `@error` is refused by the type checker, which owns spans, so
+            // reaching codegen means a route that skipped typing; say so
+            // rather than answering. `@warning` has already been reported by
+            // then and its value is Unit.
+            "error" => {
+                let msg = args
+                    .first()
+                    .and_then(Self::meta_literal_text)
+                    .unwrap_or_else(|| String::from("(no message)"));
+                return Err(CodegenError::undefined_function(format!(
+                    "@error(\"{msg}\")"
+                )));
+            }
+            "warning" => {
+                self.ctx.emit(Instruction::LoadNil { dst: dest });
+            }
+
+            // ---- backend escape hatches -------------------------------------
+            //
+            // `@asm("lfence")` is a STATEMENT: 84 sites in `core/` spell
+            // memory barriers and CPU hints with it, and every one of them
+            // reached the catch-all below and answered `nil`. At Tier 0 the
+            // interpreter is sequential and cannot execute an instruction, so
+            // emitting nothing IS the correct lowering; the value is unit.
+            // Tier 1 is where the instruction has to appear, and does not yet
+            // — named in the debt register rather than hidden behind a `nil`.
+            //
+            // `@llvm` / `@llvm_only` say "LLVM backend only" by construction,
+            // so Tier 0 has nothing to do for them either. In `core/` all 96
+            // `@llvm_only` occurrences are ATTRIBUTES on declarations, which
+            // never reach this function.
+            "asm" | "llvm" | "llvm_only" => {
+                self.ctx.emit(Instruction::LoadNil { dst: dest });
+            }
+
+            // ---- compile-time size and alignment ------------------------------
+            //
+            // Routed to the SAME constant the `@intrinsic("size_of", T)`
+            // spelling uses, so the two cannot disagree. That constant is a
+            // PLACEHOLDER 8 for every type — its own comment says so — and
+            // `core/runtime/config.vr:1226` multiplies an allocation count by
+            // it. A wrong number a reader can see is not a fix, but it is a
+            // different defect from the `nil` these answered before, and the
+            // debt register now carries it as one.
+            //
+            // `@type_name` and `@type_id` are NOT routed here even though that
+            // helper has arms for them: those arms read the enclosing
+            // function's single generic parameter, not the argument the call
+            // names, so `@type_name(Int)` would answer whatever `T` happens to
+            // be in scope. The registry keeps both `Unimplemented` and the
+            // checker refuses them, which is the honest answer until the
+            // argument's type is threaded in.
+            "size_of" | "align_of" => {
+                self.emit_intrinsic_compile_time_constant(name.name.as_str(), dest)?;
             }
             "list_with_capacity" => {
                 // @list_with_capacity(N) — create an empty list (capacity hint ignored at Tier 0)

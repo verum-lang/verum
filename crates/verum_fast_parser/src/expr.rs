@@ -56,74 +56,17 @@ use crate::parser::{ParseResult, RecursiveParser};
 /// Meta-functions use `@` prefix in expression context. Grammar:
 /// meta_function_call = '@' , meta_function_name , [ '(' , arg_list , ')' ] ;
 /// Only known meta-function names are valid after `@` prefix.
-const KNOWN_META_FUNCTIONS: &[&str] = &[
-    // Compile-time evaluation
-    "const",
-    // Diagnostics
-    "error",
-    "warning",
-    // Token manipulation
-    "stringify",
-    "concat",
-    // Configuration
-    "cfg",
-    // Source location introspection
-    "file",
-    "line",
-    "column",
-    "module",
-    "function",
-    // Type introspection meta-functions for compile-time type reflection
-    "type_name",
-    "type_fields",
-    "field_access",
-    "type_of",
-    "fields_of",
-    "variants_of",
-    "is_struct",
-    "is_enum",
-    "is_tuple",
-    "implements",
-    // VBC intrinsic calls (core/math library)
-    "vbc",
-    "vbc_raw",
-    // MLIR intrinsic calls (core/math/internal)
-    "mlir",
-    "mlir_typed",
-    // Context manager for parameter binding
-    "with_params",
-    // Intrinsic function call by name
-    "intrinsic",
-    // Runtime intrinsics callable via @name(args) syntax
-    "get_tag",
-    "abs",
-    "sin",
-    "cos",
-    "sqrt",
-    "log",
-    "exp",
-    "floor",
-    "ceil",
-    "round",
-    "min",
-    "max",
-    "clamp",
-    "pow",
-    "has_gpu",
-    // Error handling and async meta-functions
-    "catch",
-    "catch_cbgr_violation",
-    "block_on",
-    "timeout",
-    // Memory management meta-functions
-    "forget",
-    "ref_eq",
-    "get_generation",
-    "get_stored_generation",
-    // Collection/utility meta-functions
-    "unwrap",
-    "list_with_capacity",
-];
+// The roster of `@name(...)` forms used to live here as a flat list of
+// strings, with a second copy in the type checker and a third in VBC
+// codegen.  They disagreed: 31 names this parser admitted had no lowering
+// and answered `nil`; three the checker typed were reported unknown here;
+// one codegen implements (`@byte_list_with_capacity`) warned on every use.
+// The single authority is now `verum_ast::meta_fn::REGISTRY`, which also
+// carries each name's arity, its argument expectations, and whether a
+// lowering exists — the last being what lets an unimplemented name be
+// REFUSED by name instead of typed and lowered to nothing (T1124).
+use verum_ast::meta_fn;
+
 
 /// Attributes that are ONLY valid on declarations, NOT as expressions.
 /// Using these as @name(...) in expression context is an ERROR.
@@ -166,96 +109,51 @@ fn is_declaration_only_attribute(name: &str) -> bool {
     DECLARATION_ONLY_ATTRIBUTES.contains(&name)
 }
 
-/// Calculate edit distance between two strings for similarity matching.
-#[allow(clippy::needless_range_loop)] // DP initialization is clearer with direct indexing
-fn edit_distance(a: &str, b: &str) -> usize {
-    let a_chars: Vec<char> = a.chars().collect();
-    let b_chars: Vec<char> = b.chars().collect();
-    let m = a_chars.len();
-    let n = b_chars.len();
-
-    if m == 0 {
-        return n;
-    }
-    if n == 0 {
-        return m;
-    }
-
-    let mut dp = vec![vec![0; n + 1]; m + 1];
-
-    for i in 0..=m {
-        dp[i][0] = i;
-    }
-    for j in 0..=n {
-        dp[0][j] = j;
-    }
-
-    for i in 1..=m {
-        for j in 1..=n {
-            let cost = if a_chars[i - 1] == b_chars[j - 1] {
-                0
-            } else {
-                1
-            };
-            dp[i][j] = (dp[i - 1][j] + 1) // deletion
-                .min(dp[i][j - 1] + 1) // insertion
-                .min(dp[i - 1][j - 1] + cost); // substitution
-        }
-    }
-
-    dp[m][n]
-}
 
 /// Find similar meta-function names for "did you mean?" suggestions.
+///
+/// Delegates to the registry so the suggestion cannot name something this
+/// parser admits and the rest of the compiler does not.
 fn find_similar_meta_function(unknown: &str) -> Option<&'static str> {
-    let mut best_match: Option<&str> = None;
-    let mut best_distance = usize::MAX;
-    let max_distance = 3; // Maximum edit distance for suggestions
-
-    for &known in KNOWN_META_FUNCTIONS {
-        let distance = edit_distance(unknown, known);
-        if distance < best_distance && distance <= max_distance {
-            best_distance = distance;
-            best_match = Some(known);
-        }
-    }
-
-    // Also check if unknown is a prefix of any known name
-    if best_match.is_none() {
-        for &known in KNOWN_META_FUNCTIONS {
-            if known.starts_with(unknown) || unknown.starts_with(known) {
-                return Some(known);
-            }
-        }
-    }
-
-    best_match
+    meta_fn::similar(unknown)
 }
 
 /// Check if a name is a known meta-function.
 ///
-/// Three places in this compiler answer "is this `@name` known", and they
+/// Four places in this compiler answer "is this `@name` known", and they
 /// have to agree, because a name one admits and another rejects produces a
 /// diagnostic about working code:
 ///
 ///   * this function — `@name(...)` in EXPRESSION position;
 ///   * `attr_validation.rs` — `@name` on a DECLARATION;
-///   * `verum_types/src/infer/expr.rs` — the typing of a meta-call.
+///   * `verum_types/src/infer/expr.rs` — the typing of a meta-call;
+///   * `verum_vbc/src/codegen/expressions.rs` — the lowering of one.
 ///
-/// The flat `KNOWN_META_FUNCTIONS` list is not the whole answer, because the
-/// `builtin_` namespace is open by design: a `@builtin_*` name carries its
-/// semantics and its return type at the stdlib DECLARATION site rather than
-/// in a table inside the compiler, and the type checker admits the whole
-/// prefix with a fresh type variable for exactly that reason. The other two
-/// judges already encode the prefix rule; this one did not, and the gap was
-/// measurable — nine `@builtin_*` calls in `core/math/hott.vr` (`@builtin_refl`,
+/// They now read one table, `verum_ast::meta_fn::REGISTRY`. Before T1124
+/// each carried its own list and the lists disagreed in every direction:
+/// 31 names admitted here had no lowering and answered `nil`; `@asm`,
+/// `@llvm` and `@llvm_only` were typed by the checker and reported unknown
+/// here; `@byte_list_with_capacity` is lowered by codegen and warned on
+/// every use.
+///
+/// The table is not the whole answer, because the `builtin_` namespace is
+/// open by design: a `@builtin_*` name carries its semantics and its return
+/// type at the stdlib DECLARATION site rather than in a table inside the
+/// compiler, and the type checker admits the whole prefix with a fresh type
+/// variable for exactly that reason. The other judges already encoded the
+/// prefix rule; this one did not, and the gap was measurable — nine
+/// `@builtin_*` calls in `core/math/hott.vr` (`@builtin_refl`,
 /// `@builtin_transport`, `@builtin_hcomp`, …) were each reported as
 /// `unknown meta-function` while the type checker was deliberately accepting
 /// them. That is a false positive against correct stdlib code, and a false
 /// positive is the expensive kind: it argues for deleting a warning that is
 /// right about the other twelve names it finds.
+///
+/// This function answers RECOGNITION only. Arity, argument kinds and
+/// whether a lowering exists are the registry's other columns, checked by
+/// the type checker where a diagnostic can carry a span and a reason.
 fn is_known_meta_function(name: &str) -> bool {
-    KNOWN_META_FUNCTIONS.contains(&name) || name.starts_with("builtin_")
+    meta_fn::is_recognised(name)
 }
 
 /// Map Rust macro names to their Verum equivalents.
@@ -7491,22 +7389,44 @@ impl<'a> RecursiveParser<'a> {
                 ),
                 name_span,
             )
-            .with_code("E0410");
+            .with_code("E0410")
+            .with_subject(name_str.clone());
 
             // Provide "did you mean?" suggestion if a similar name exists
             if let Some(suggestion) = find_similar_meta_function(name_str.as_str()) {
                 warning = warning.with_hint(format!("did you mean `@{}`?", suggestion));
             } else {
-                warning = warning.with_hint(
-                    "known meta-functions: @const, @cfg, @file, @line, @column, @module, \
-                     @function, @error, @warning, @stringify, @concat, @type_name, @type_of, \
-                     @fields_of, @variants_of, @is_struct, @is_enum, @is_tuple, @implements"
-                        .to_string(),
-                );
+                // The grammar's own `meta_function_name` enumeration, read
+                // from the registry rather than transcribed, so a reader who
+                // follows this hint into `grammar/verum.ebnf` finds the same
+                // names. The transcribed version had drifted: it omitted
+                // `@type_fields` and `@field_access`, both of which the
+                // production lists.
+                let listed: Vec<&str> = meta_fn::grammar_listed_names().collect();
+                warning = warning.with_hint(format!(
+                    "known meta-functions: @{}",
+                    listed.join(", @")
+                ));
             }
 
             self.attr_warnings.push(warning);
         }
+
+        // Was a call-part written at all?
+        //
+        // The grammar makes it optional
+        // (`meta_function = '@' , meta_function_name ,
+        //   [ '(' , [ argument_list ] , ')' ]`), so `@sin` and `@sin()` both
+        // reach the type checker with zero arguments and want OPPOSITE
+        // answers: the first names the meta-function and is passed as a
+        // value, the second calls it with a missing argument. Only this
+        // parser can tell them apart, so it records which was written
+        // (T1124). `@const expr` counts as parenthesised — it has an
+        // argument, just without the delimiters.
+        let parenthesized = name_str.as_str() == "const"
+            || self.stream.check(&TokenKind::LParen)
+            || self.stream.check(&TokenKind::LBracket)
+            || self.stream.check(&TokenKind::LBrace);
 
         // Parse arguments based on meta-function type:
         // - @const expr: takes the next expression without parentheses
@@ -7582,7 +7502,14 @@ impl<'a> RecursiveParser<'a> {
         };
 
         let span = self.stream.make_span(start_pos);
-        Ok(Expr::new(ExprKind::MetaFunction { name, args }, span))
+        Ok(Expr::new(
+            ExprKind::MetaFunction {
+                name,
+                args,
+                parenthesized,
+            },
+            span,
+        ))
     }
 
     // ========================================================================

@@ -1,12 +1,30 @@
 // =============================================================================
 // type_introspection.vr - Tests for compile-time type introspection intrinsics
 // =============================================================================
-// @test: unit
+// @test: typecheck-fail
+// @expected-error: E0442
 // @tier: 1
 // @level: L1
 // @tags: meta, introspection, compile-time, reflection
 // @spec: docs/improvements.md Section 15 - Compile-Time Reflection
 // =============================================================================
+//
+// EVERY NAME BELOW IS RESERVED AND REFUSED (T1124), and this file asserts
+// the refusal rather than a success it never had.  It used to be
+// `@test: unit` and passed, because each `@type_name(T)` typed as `Unit`
+// and lowered to `nil`: the consts it defines were never computed and the
+// assertions compared nothing to nothing.
+//
+// Lowering these needs the type checker's view of the ARGUMENT threaded
+// into code generation.  `emit_intrinsic_compile_time_constant` has arms
+// named `type_name` and `type_id`, but they read the enclosing function's
+// single generic parameter rather than the argument the call names — so
+// routing to them would answer whatever `T` happens to be in scope, which
+// is worse than refusing.
+//
+// The body is kept verbatim as the record of the intended API: it is what
+// an implementation has to satisfy, and restoring `@test: unit` is how
+// that implementation proves itself.
 //
 // Tests for the type introspection intrinsics:
 // - @type_name(T) -> Text

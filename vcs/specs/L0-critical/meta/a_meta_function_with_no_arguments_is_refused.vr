@@ -1,0 +1,18 @@
+// @test: typecheck-fail
+// @level: L0
+// @tier: 0
+// @tags: meta, meta-functions, arity, diagnostics
+// @expected-error: E0443
+
+// `@abs()` used to reach VBC codegen and raise
+//
+//     internal compiler error: @abs requires 1 argument
+//
+// An INTERNAL COMPILER ERROR shown to someone who wrote a program with a
+// missing argument.  Arity is a property of the call, so it is refused
+// where a diagnostic can carry a span.
+
+fn main() {
+    let v = @abs();
+    print(f"v={v}");
+}

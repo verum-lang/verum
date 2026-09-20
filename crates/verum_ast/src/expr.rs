@@ -1347,6 +1347,21 @@ pub enum ExprKind {
         name: Ident,
         /// Optional arguments (for @cfg(cond), @const expr, @stringify(tokens), etc.)
         args: List<Expr>,
+        /// Whether the call-part was WRITTEN.
+        ///
+        /// The grammar makes it optional —
+        /// `meta_function = '@' , meta_function_name , [ '(' , [ argument_list ] , ')' ]`
+        /// — so `@sin` and `@sin()` are different programs that both arrive
+        /// here with zero arguments. The first names the meta-function; the
+        /// second calls it with none.
+        ///
+        /// Without this flag an arity check cannot tell them apart, and the
+        /// two demands are opposite: `@abs()` must be REFUSED (that refusal
+        /// is T1124's subject — it used to be an internal compiler error)
+        /// while `integrate(@sin, 0.0, 3.14, 100000)` in
+        /// `L0-critical/vbc/stress/002_computation_stress.vr` passes `@sin`
+        /// as a value and must not be.
+        parenthesized: bool,
     },
 
     /// Macro invocation: path!(args)

@@ -1,0 +1,20 @@
+// @test: typecheck-fail
+// @level: L0
+// @tier: 0
+// @tags: meta, meta-functions, diagnostics
+// @expected-error: E0410 "unknown meta-function"
+
+// An `@name(...)` that names nothing used to type as `Unit` and lower to
+// `nil`, with only a parser WARNING.  `nil` is indistinguishable from a
+// legitimate answer, which is what made the class expensive: `core/io/file.vr`
+// built its `fstat(2)` buffer with `@zeroed()`, so the buffer was a
+// zero-byte object handed to an FFI.
+//
+// The refusal names the offending name.  It is the type checker's, not the
+// parser's, because the parser cannot know whether a `meta` declaration
+// further down the file provides the name.
+
+fn main() {
+    let v = @zzznotathing(1);
+    print(f"v={v}");
+}

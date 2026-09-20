@@ -1,0 +1,39 @@
+// @test: run-interpreter
+// @level: L0
+// @tier: 0
+// @tags: meta, meta-functions, numeric
+// @expected-stdout-begin
+// abs 5
+// min 3
+// max 7
+// clamp 5
+// pow 8
+// sqrt true
+// floor true
+// ceil true
+// @expected-stdout-end
+
+// Thirteen numeric names were in the parser's roster of "known
+// meta-functions" and in nothing else, so each one type-checked, lowered
+// through codegen's catch-all and answered `nil`.  The opcodes existed the
+// whole time: `UnaryFloatOp` has carried Sqrt/Sin/Cos/Tan/Log/Exp/Floor/
+// Ceil/Round since the instruction set was written, and `ArithSubOpcode`
+// carries PolyMin/PolyMax/PolyClamp.
+//
+// The shape that found them is the one pinned here: a dynamic-programming
+// recurrence, `dp[i][j] = @max(dp[i - 1][j], dp[i][j - 1])`, which read as
+// working code and computed nothing.
+//
+// `@abs`, `@min`, `@max`, `@clamp` and `@pow` are polymorphic over Ord, so
+// Int arguments give an Int answer — that is what the recurrence needs.
+
+fn main() {
+    print(f"abs {@abs(0 - 5)}");
+    print(f"min {@min(3, 7)}");
+    print(f"max {@max(3, 7)}");
+    print(f"clamp {@clamp(9, 1, 5)}");
+    print(f"pow {@pow(2, 3)}");
+    print(f"sqrt {@sqrt(4.0) == 2.0}");
+    print(f"floor {@floor(1.7) == 1.0}");
+    print(f"ceil {@ceil(1.2) == 2.0}");
+}

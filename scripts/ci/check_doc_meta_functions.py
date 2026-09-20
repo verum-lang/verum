@@ -6,10 +6,18 @@ WHY THIS EXISTS, and why it is a SEPARATE family from the intrinsic-key
 gate next to it. `check_doc_intrinsic_traps` (T1372) keys on
 `@intrinsic("verum.*")` — a call whose key names a missing
 implementation. This one keys on the OTHER shape: `@name(...)` where
-`name` is in NEITHER compiler roster. The parser emits
-`warning<E0410>` and builds `ExprKind::MetaFunction` anyway; inference
-falls to `_ => Type::unit()`. So the call compiles, types as Unit, and
-whatever the example does with the result is done to nothing.
+`name` is in NEITHER compiler roster.
+
+WHAT SUCH A NAME DOES CHANGED IN T1124, and the gate is worth MORE
+after the change rather than less. It used to be silent: the parser
+emitted `warning<E0410>` and built `ExprKind::MetaFunction` anyway,
+inference fell to `_ => Type::unit()`, and the call compiled, typed as
+Unit, and did whatever the example did to nothing. Now the type checker
+REFUSES it, so a documented example carrying such a name does not
+compile at all — a reader who copies the block gets an error rather than
+a value nobody chose. Teaching a name the compiler rejects outright is a
+louder failure than teaching one it silently ignores, which is why the
+baseline here stays at zero.
 
 Measured 2026-09-10: eleven such names probed against all three
 registries — the parser's `KNOWN_META_FUNCTIONS`, the inference match,
@@ -131,11 +139,10 @@ def accepted_names() -> set[str]:
 # above their call. Neither belongs in a census of names the compiler does
 # not accept, and both were in this gate's first two runs.
 # A page that already SAYS the name does not work is not the defect this
-# gate is for. `reference/meta-functions.md` carries a `:::caution Not yet
-# callable` block naming the exact behaviour — "warn E0410 and evaluate to
-# Unit ... treat the code blocks as the intended surface, not as working
-# examples". Demanding a second fix there teaches the reader of this gate
-# to re-fix what is fixed.
+# gate is for. `reference/meta-functions.md` carries `:::caution Not yet
+# callable` blocks naming the exact behaviour — since T1124 that behaviour
+# is a REFUSAL quoting the code, and the blocks say so. Demanding a second
+# fix there teaches the reader of this gate to re-fix what is fixed.
 #
 # The marker is the compiler's OWN diagnostic code rather than a phrase:
 # a page that prints `E0410` is talking about this warning and nothing

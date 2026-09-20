@@ -125,12 +125,27 @@ meta fn local_mutation(n: UInt64) -> UInt64 {
 // Статические проверки одинаковых результатов
 const _: () = {
     // Эти assertion-ы проверяются во время компиляции
-    @static_assert(deterministic_math(5) == 36);  // 25 + 10 + 1
-    @static_assert(deterministic_fib(10) == 55);
-    @static_assert(deterministic_hash(1, 2, 3) == deterministic_hash(1, 2, 3));
+    // `@static_assert` IS NOT A COMPILER BUILTIN, and the calls below are
+    // commented out for that reason (T1124).
+    //
+    // They used to pass — and assert nothing.  An unknown `@name(...)` typed as
+    // `Unit` and lowered to `nil`, so `@static_assert(false)` was accepted in
+    // silence.  The compiler refuses an unknown meta-function by name now, so
+    // a file cannot claim a check it never performed.
+    //
+    // Kept verbatim rather than deleted: these ARE the cases a compile-time
+    // assertion has to satisfy, and restoring them is how an implementation
+    // proves itself.  The type checker already holds a `ConstEvaluator`, which
+    // is the half that exists.
+    // @static_assert(deterministic_math(5) == 36);  // 25 + 10 + 1
+    // @static_assert(deterministic_fib(10) == 55);
+    // @static_assert(deterministic_hash(1, 2, 3) == deterministic_hash(1, 2, 3));
 
     // Повторные вызовы дают одинаковый результат
-    @static_assert(deterministic_math(100) == deterministic_math(100));
+    // @static_assert(deterministic_math(100) == deterministic_math(100));
+    // The block's value, now that its only statement is commented out:
+    // an empty `{ }` parses as an empty MAP, not an empty block.
+    ()
 };
 
 // Компилятор может кэшировать результаты meta функций,
@@ -151,7 +166,7 @@ meta fn idempotent_clamp(x: Int64, min: Int64, max: Int64) -> Int64 {
 const _: () = {
     let clamped = idempotent_clamp(150, 0, 100);     // 100
     let reclamped = idempotent_clamp(clamped, 0, 100); // 100
-    @static_assert(clamped == reclamped);  // Повторное clamping не меняет результат
+    // @static_assert(clamped == reclamped);  // Повторное clamping не меняет результат
 };
 
 // ============================================================
@@ -168,8 +183,11 @@ meta fn min_of_two(a: Int64, b: Int64) -> Int64 {
 
 const _: () = {
     // max и min коммутативны
-    @static_assert(max_of_two(10, 20) == max_of_two(20, 10));
-    @static_assert(min_of_two(10, 20) == min_of_two(20, 10));
+    // @static_assert(max_of_two(10, 20) == max_of_two(20, 10));
+    // @static_assert(min_of_two(10, 20) == min_of_two(20, 10));
+    // The block's value, now that its only statement is commented out:
+    // an empty `{ }` parses as an empty MAP, not an empty block.
+    ()
 };
 
 // ============================================================
@@ -182,7 +200,10 @@ meta fn add(a: Int64, b: Int64) -> Int64 {
 
 const _: () = {
     // Сложение ассоциативно
-    @static_assert(add(add(1, 2), 3) == add(1, add(2, 3)));
+    // @static_assert(add(add(1, 2), 3) == add(1, add(2, 3)));
+    // The block's value, now that its only statement is commented out:
+    // an empty `{ }` parses as an empty MAP, not an empty block.
+    ()
 };
 
 // ============================================================

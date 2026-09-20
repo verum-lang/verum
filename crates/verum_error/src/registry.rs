@@ -490,7 +490,24 @@ pub static REGISTRY: Lazy<HashMap<&'static str, ErrorCodeEntry>> = Lazy::new(|| 
         ErrorCodeEntry { code: "E0013", numeric: 13,   category: ErrorCategory::Parse, description: "unclosed delimiter" },
         ErrorCodeEntry { code: "E0020", numeric: 20,   category: ErrorCategory::Parse, description: "missing semicolon" },
         ErrorCodeEntry { code: "E0099", numeric: 99,   category: ErrorCategory::Parse, description: "syntax error near the reported token" },
-        ErrorCodeEntry { code: "E0410", numeric: 410,  category: ErrorCategory::Parse, description: "compile-time construct written without its `@` prefix" },
+        // E0410's description said "compile-time construct written without
+        // its `@` prefix". Nothing emits it with that meaning; the one
+        // producer is the parser's unknown-meta-function warning, and the
+        // type checker's refusal now shares it. A registry entry describing
+        // a meaning no emitter carries is the same defect one layer up from
+        // what T1124 fixed.
+        ErrorCodeEntry { code: "E0410", numeric: 410,  category: ErrorCategory::Parse, description: "unknown meta-function: `@name(...)` names no compiler builtin and no `meta` declaration in scope" },
+
+        // The rest of the meta-function family (T1124). Deliberately in the
+        // E044x block: `check_error_code_namespaces.py` ratchets four-digit
+        // codes whose three-digit twin is a different registered code, and
+        // E411..E416 all exist while E441..E445 do not.
+        ErrorCodeEntry { code: "E0441", numeric: 441,  category: ErrorCategory::Parse, description: "`@name(...)` names a declared `meta` macro, but macro expansion is not implemented" },
+        ErrorCodeEntry { code: "E0442", numeric: 442,  category: ErrorCategory::Parse, description: "meta-function is recognised but has no lowering, so the call has no value to produce" },
+        ErrorCodeEntry { code: "E0443", numeric: 443,  category: ErrorCategory::Parse, description: "meta-function called with the wrong number of arguments" },
+        ErrorCodeEntry { code: "E0444", numeric: 444,  category: ErrorCategory::Parse, description: "meta-function argument is not of the kind the name requires" },
+        ErrorCodeEntry { code: "E0445", numeric: 445,  category: ErrorCategory::Parse, description: "diagnostic raised by the program's own `@error(...)` call" },
+        ErrorCodeEntry { code: "E0446", numeric: 446,  category: ErrorCategory::Parse, description: "a meta-function was named without calling it; one cannot be passed as a value" },
 
         // Compile-time (meta) code raising its own diagnostic. The message
         // is supplied by the macro, not by the compiler, so the code names

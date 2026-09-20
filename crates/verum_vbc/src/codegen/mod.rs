@@ -4961,7 +4961,7 @@ impl VbcCodegen {
                 }
             };
             if let Some(expr) = body_expr
-                && let verum_ast::ExprKind::MetaFunction { name, args } = &expr.kind
+                && let verum_ast::ExprKind::MetaFunction { name, args, .. } = &expr.kind
                 && name.name.as_str() == "intrinsic"
                 && let Some(first_arg) = args.first()
                 && let verum_ast::ExprKind::Literal(lit) = &first_arg.kind

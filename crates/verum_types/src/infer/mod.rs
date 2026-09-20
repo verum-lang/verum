@@ -591,6 +591,15 @@ pub struct TypeChecker {
     /// Generator functions: fn* syntax yields values lazily, producing Iterator<Item=T> types
     generator_context: Maybe<GeneratorContext>,
     /// Collected diagnostics (warnings, notes, etc.)
+    /// Names declared with `meta <name>(...)` in the code being checked.
+    ///
+    /// Read by `validate_meta_function_call` so that `@my_macro(...)`
+    /// against a declaration three lines up is refused for the RIGHT
+    /// reason (expansion is not implemented) rather than reported as an
+    /// unknown name. Populated by `check_item` as it walks a module and by
+    /// `register_declared_meta_macros` for callers holding a whole module,
+    /// which is what makes use-before-declaration answer correctly.
+    pub(crate) declared_meta_macros: std::collections::HashSet<Text>,
     pub(crate) diagnostics: List<Diagnostic>,
     /// The SAME errors as `diagnostics`, kept in their SOURCE form.
     ///

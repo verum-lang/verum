@@ -197,20 +197,44 @@ const CLAMPED: UInt64 = clamp(100, 0, 50);     // 50
 // ============================================================
 
 const _FACTORIAL_CHECK: () = {
-    @static_assert(factorial(5) == 120);
+    // `@static_assert` IS NOT A COMPILER BUILTIN, and the calls below are
+    // commented out for that reason (T1124).
+    //
+    // They used to pass — and assert nothing.  An unknown `@name(...)` typed as
+    // `Unit` and lowered to `nil`, so `@static_assert(false)` was accepted in
+    // silence.  The compiler refuses an unknown meta-function by name now, so
+    // a file cannot claim a check it never performed.
+    //
+    // Kept verbatim rather than deleted: these ARE the cases a compile-time
+    // assertion has to satisfy, and restoring them is how an implementation
+    // proves itself.  The type checker already holds a `ConstEvaluator`, which
+    // is the half that exists.
+    // @static_assert(factorial(5) == 120);
+    // The block's value, now that its only statement is commented out:
+    // an empty `{ }` parses as an empty MAP, not an empty block.
+    ()
 };
 
 const _FIBONACCI_CHECK: () = {
-    @static_assert(fibonacci(10) == 55);
+    // @static_assert(fibonacci(10) == 55);
+    // The block's value, now that its only statement is commented out:
+    // an empty `{ }` parses as an empty MAP, not an empty block.
+    ()
 };
 
 const _GCD_CHECK: () = {
-    @static_assert(gcd(48, 18) == 6);
+    // @static_assert(gcd(48, 18) == 6);
+    // The block's value, now that its only statement is commented out:
+    // an empty `{ }` parses as an empty MAP, not an empty block.
+    ()
 };
 
 const _PRIME_CHECK: () = {
-    @static_assert(is_prime(17) == true);
-    @static_assert(is_prime(18) == false);
+    // @static_assert(is_prime(17) == true);
+    // @static_assert(is_prime(18) == false);
+    // The block's value, now that its only statement is commented out:
+    // an empty `{ }` parses as an empty MAP, not an empty block.
+    ()
 };
 
 // ============================================================

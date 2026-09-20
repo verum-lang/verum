@@ -1,0 +1,15 @@
+// @test: typecheck-fail
+// @level: L0
+// @tier: 0
+// @tags: meta, meta-functions, arity
+// @expected-error: E0443
+
+// `@abs(1, 2, 3)` answered 1: the extra arguments were discarded in
+// silence, because nothing between the parser and codegen held a contract
+// saying how many `@abs` takes.  The contract lives in one registry now
+// (the `meta_fn` module of `verum_ast`) and the checker enforces it.
+
+fn main() {
+    let v = @abs(1, 2, 3);
+    print(f"v={v}");
+}

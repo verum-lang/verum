@@ -103,6 +103,18 @@ type Optional<T> is
 // const VALUE: Int32 = meta_unwrap(Optional.Present(42), 0);  // 42
 
 // Compile-time assertions
-const _: () = @assert(SECONDS_PER_DAY == 86400);
-const _: () = @assert(FLAG_ALL == 7);
-const _: () = @assert(IS_64_BIT || PTR_SIZE == 4);
+//
+// `@assert` IS NOT A COMPILER BUILTIN, and these three lines used to pass
+// only because an unknown `@name(...)` typed as `Unit` and lowered to
+// `nil` — so `const _: () = @assert(false)` was accepted and asserted
+// nothing.  The compiler refuses an unknown meta-function by name now
+// (T1124), which is why they are commented out rather than left to make
+// this file claim a check it never performed.
+//
+// Commented, in the same style the block above uses for `meta_unwrap`,
+// because the INTENT is worth keeping: whoever implements a compile-time
+// assertion has the three cases it has to satisfy right here.
+//
+// const _: () = @assert(SECONDS_PER_DAY == 86400);
+// const _: () = @assert(FLAG_ALL == 7);
+// const _: () = @assert(IS_64_BIT || PTR_SIZE == 4);
