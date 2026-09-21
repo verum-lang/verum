@@ -1977,9 +1977,66 @@ impl TypeChecker {
         use ExprKind::*;
         let ExprKind::Record { path, fields, base } = &expr.kind
             else { unreachable!() };
+                // SELF-LITERAL-RESOLVES-ITS-TYPE-1 (T1367): `Self { … }` has to
+                // be looked up under the type it MEANS, not under the word
+                // `Self`.
+                //
+                // `path_to_string` renders a `SelfValue` segment as the
+                // lowercase string "self", so every field lookup below
+                // probed `__struct_fields_self` — a key nothing writes. The
+                // arm then fell through to `synth_and_check`, and the
+                // synthesised path's own fallback accepts a literal whose
+                // type it cannot resolve structurally, UNCHECKED. Net effect,
+                // measured on five shapes that differ only in spelling:
+                //
+                //     Two  { a: 1 }   ->  Missing required field 'b'
+                //     Self { a: 1 }   ->  accepted, and `t.b` reads 0.0
+                //
+                // in EVERY position — return, annotated let, and a function
+                // whose declared return type is the named type. So the miss
+                // is the SPELLING, not the position, and `Self { … }` is the
+                // dominant shape of a stdlib constructor.
+                //
+                // The same resolution already existed twenty lines below,
+                // used only to name the type in the unification step. It is
+                // hoisted here so the lookup and the unification agree about
+                // what `Self` is.
+                // SELF-IS-A-NAME-NOT-A-SEGMENT-1: the parser emits `Self` as
+                // `PathSegment::Name("Self")`, NOT as `SelfValue`.
+                // `SelfValue` is the LOWERCASE `self` (parser expr.rs: "SelfType
+                // (Self) is a type reference, create as Name(\"Self\") not
+                // SelfValue"). A first version of this resolution matched the
+                // segment kind and was measurably INERT for that reason.
+                let head_is_self = path.segments.len() == 1
+                    && match &path.segments[0] {
+                        verum_ast::ty::PathSegment::SelfValue => true,
+                        verum_ast::ty::PathSegment::Name(id) => id.name.as_str() == "Self",
+                        _ => false,
+                    };
+                let self_resolved_path = if head_is_self {
+                    match &self.current_self_type {
+                        // `define_type("Self", …)` installs a placeholder that
+                        // points at itself, so a route that has not bound the
+                        // real type yet would resolve `Self` to `Self`
+                        // forever. Refuse the self-reference rather than loop.
+                        // A const-generic impl binds it as `Generic`, not
+                        // `Named`, and only the latter is a path we can use
+                        // as a lookup key anyway.
+                        Maybe::Some(Type::Named {
+                            path: self_path, ..
+                        }) if self.path_to_string(self_path).as_str() != "Self" => {
+                            Some(self_path.clone())
+                        }
+                        _ => None,
+                    }
+                } else {
+                    None
+                };
+                let lookup_path = self_resolved_path.as_ref().unwrap_or(path);
+
                 // For generic struct instantiation, extract type args from expected type
                 // and substitute them into the field types
-                let type_name = self.path_to_string(path);
+                let type_name = self.path_to_string(lookup_path);
                 let struct_key = format!("__struct_fields_{}", type_name);
 
                 // Check if type_name is a variant record constructor by looking it up in the env.
@@ -2169,24 +2226,88 @@ impl TypeChecker {
                     }
                 }
 
+                // MISSING-FIELD-CHECK-PARITY-1 (T1367): every field the type
+                // DECLARES must be present, not just every field the literal
+                // NAMES.
+                //
+                // This is a PORT, not a new check. The synthesised path's
+                // "Step 5: Validate all required fields are present" already
+                // walks the expectation and refuses a missing field; the
+                // message below is copied from it verbatim so the two paths
+                // cannot drift into two spellings of one diagnostic.
+                //
+                // What the gap looked like, one variable apart on one binary:
+                //
+                //     let t      = Two { a: 1 };   rc=101, Missing required field 'b'
+                //     let t: Two = Two { a: 1 };   rc=0,   and `t.b` reads 0.0
+                //
+                // The annotation routes the literal HERE, through `check_expr`
+                // against an expected type, and this loop only ever asked the
+                // converse question. The `0.0` is not a default: a field
+                // declared `Int` renders through the integer path, and `0.0`
+                // is that path failing over on a value that is not an integer.
+                //
+                // The silent positions are not only annotated `let`s. A
+                // constructor's `Self { … }` takes its expectation from the
+                // declared RETURN type and lands here too, which is the
+                // dominant shape of a stdlib constructor — so this check
+                // reaches further than any static count of annotated bindings
+                // suggests.
+                //
+                // GATED ON `base.is_none()`: `Self { a: 1, ..other }` takes
+                // its remaining fields from the base, and 289 literals in
+                // `core/` are of that form.
+                //
+                // `VERUM_TRACE_MISSING_FIELD=1` reports and CONTINUES, which
+                // is how the population was counted: a hard error returns on
+                // the first, so one run would have shown one site per
+                // function.
+                if base.is_none() {
+                    for (expected_name, expected_ty) in expected_fields.iter() {
+                        if fields
+                            .iter()
+                            .any(|f| f.name.name.as_str() == expected_name.as_str())
+                        {
+                            continue;
+                        }
+                        if std::env::var_os("VERUM_TRACE_MISSING_FIELD").is_some() {
+                            eprintln!(
+                                "[missing-field] {}.{} ({}) omitted in {}",
+                                type_name,
+                                expected_name,
+                                expected_ty,
+                                match &self.current_function_name {
+                                    Maybe::Some(n) => n.as_str().to_string(),
+                                    Maybe::None => String::from("<no enclosing fn>"),
+                                }
+                            );
+                            continue;
+                        }
+                        return Err(TypeError::Other(verum_common::Text::from(format!(
+                            "Missing required field '{}' of type {} in record construction",
+                            expected_name, expected_ty
+                        ))));
+                    }
+                }
+
                 // CRITICAL FIX: Unify the actual struct type with the expected type
                 // This is essential for generic type inference: when expected is a type
                 // variable τ37, we need to bind it to the actual struct type (e.g., Handle)
                 // so that outer generic structs like Wrapper<T> can resolve T correctly.
                 // NOTE: Resolve Self to actual type path if needed
-                let resolved_path = if path.segments.len() == 1
-                    && matches!(path.segments[0], verum_ast::ty::PathSegment::SelfValue)
-                {
-                    if let Maybe::Some(Type::Named {
-                        path: self_path, ..
-                    }) = &self.current_self_type
-                    {
-                        self_path.clone()
-                    } else {
-                        path.clone()
-                    }
-                } else {
-                    path.clone()
+                // THE SAME `Self` TEST AS THE LOOKUP ABOVE, and they have to
+                // agree. This block matched only the `SelfValue` segment, so
+                // while the field lookup also missed on `Self` the two were
+                // consistently wrong and the arm bailed to `synth_and_check`
+                // before either mattered. Teaching the lookup about
+                // `Name("Self")` without teaching this made them DISAGREE:
+                // the fields resolved as `Buf`, the unification still said
+                // `Self`, and three const-generic tests reported
+                // `expected 'Buf<Int>', found 'Self<Int>'` — the placeholder
+                // escaping under its own name.
+                let resolved_path = match &self_resolved_path {
+                    Some(p) => p.clone(),
+                    None => path.clone(),
                 };
                 // VARIANT-RECORD literal under CHECK (T0701 retry leg):
                 // a two-segment `Type.Variant { … }` whose head expands
@@ -11534,6 +11655,33 @@ impl TypeChecker {
                                         {
                                             field_types.clone()
                                         } else {
+                                            // THE THIRD ESCAPE HATCH (T1367).
+                                            // A literal whose type cannot be
+                                            // resolved to a field map is
+                                            // accepted UNCHECKED — neither
+                                            // Step 5 (missing) nor Step 6
+                                            // (extra) runs on it. That is
+                                            // deliberate for a genuinely
+                                            // opaque cross-module record, and
+                                            // it is also where every
+                                            // unresolved spelling lands, so
+                                            // the lever says when it is taken
+                                            // rather than leaving the count
+                                            // to a static guess.
+                                            if std::env::var_os(
+                                                "VERUM_TRACE_MISSING_FIELD",
+                                            )
+                                            .is_some()
+                                            {
+                                                eprintln!(
+                                                    "[unchecked-record] {} accepted with no field map in {}",
+                                                    name,
+                                                    match &self.current_function_name {
+                                                        Maybe::Some(n) => n.as_str().to_string(),
+                                                        Maybe::None => String::from("<no enclosing fn>"),
+                                                    }
+                                                );
+                                            }
                                             let base_maybe = base
                                                 .as_ref()
                                                 .map(|b| Heap::new((**b).clone()));

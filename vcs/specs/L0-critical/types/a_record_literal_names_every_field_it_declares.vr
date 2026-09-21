@@ -1,0 +1,27 @@
+// @test: typecheck-fail
+// @level: L0
+// @tier: 0
+// @tags: types, records, literals
+// @expected-error: "Missing required field"
+
+// A record literal that omits a declared field was accepted, and the
+// omitted field read back as a value of the wrong type: `t.b`, declared
+// `Int`, printed `0.0`.  That is not a default — it is the integer
+// interpolation path failing over on a value that is not an integer.
+//
+// The check existed and a TYPE ANNOTATION turned it off.  One variable
+// apart, on one binary:
+//
+//     let t      = Two { a: 1 };   refused, 'Missing required field b'
+//     let t: Two = Two { a: 1 };   accepted, and `t.b` read 0.0
+//
+// The annotation routes the literal through the CHECK path, which
+// validated every field the literal NAMED and never asked the converse.
+// Both directions now live on both paths, with one wording.
+
+type Two is { a: Int, b: Int };
+
+fn main() {
+    let t: Two = Two { a: 1 };
+    print(f"a={t.a} b={t.b}");
+}

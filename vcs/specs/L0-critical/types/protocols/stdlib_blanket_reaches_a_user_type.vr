@@ -4,7 +4,10 @@
 // @tags: protocols, blanket-impls, stdlib
 // @timeout: 30000
 // @expected-exit: 0
-// @expected-stdout: Some(<)
+// @expected-stdout-begin
+// Some(<)
+// Some(<)
+// @expected-stdout-end
 // @description: A stdlib blanket impl applies to a USER type, and the
 //   stdlib type it always worked for keeps working.
 
@@ -25,6 +28,14 @@
 // BOTH arms are here on purpose.  The stdlib arm is not decoration: a
 // repair that seeded the wrong impls, or that broke the receiver-driven
 // path, would still satisfy the user arm alone.  T1071.
+//
+// AND BOTH ARMS MUST BE IN THE EXPECTATION.  This file printed two lines
+// and asserted one, so it has been failing since it landed — on the
+// directive, not on the language: the program does exactly what its own
+// comments say, and `verum check` reports nothing. A single-line
+// `@expected-stdout` against a two-`print` body is a spec that cannot
+// pass, and the half it silently dropped is the stdlib CONTROL the
+// paragraph above calls "not decoration".
 
 type MyKey is { v: Int };
 

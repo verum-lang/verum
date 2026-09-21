@@ -460,6 +460,18 @@ fn install_runtime<R: RuntimeConfig>(runtime: R) -> Result<(), InitError> {
             isolation: IsolationLevel.Shared,
             parallelism: detect_parallelism(),
             task_id: TaskId.main(),
+            // T1367 — `restart_policy` and `task_locals` were omitted here
+            // while `ExecutionEnv.new` in core/runtime/env.vr sets both.
+            // Two construction sites of one type disagreeing about its
+            // shape, and neither was reported: an omitted field is not a
+            // compile error on this path, and what the slot holds is not
+            // of the declared type. Same values as env.vr's, so the two
+            // sites now agree.
+            restart_policy: Maybe.None,
+            task_locals: TaskLocalStorage {
+                slots: [&() as &dyn Any; 8],
+                slot_count: 0,
+            },
         },
     };
 

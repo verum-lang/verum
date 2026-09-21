@@ -1,0 +1,43 @@
+// @test: typecheck-fail
+// @level: L0
+// @tier: 0
+// @tags: types, records, literals, self
+// @expected-error: "Missing required field"
+
+// `Self { … }` is the dominant shape of a constructor, and it was the
+// one shape no check reached.
+//
+// Five forms that differ ONLY in the spelling of the literal's head, all
+// measured on one binary:
+//
+//     fn f() -> Self { Self { a: 1 } }   accepted, t.b read 0.0
+//     fn f() -> Two  { Self { a: 1 } }   accepted
+//     fn f() -> Self { Two  { a: 1 } }   REFUSED
+//     let x: Self = Self { a: 1 };       accepted
+//     let x: Two  = Self { a: 1 };       accepted
+//
+// So the miss was the SPELLING, in every position — not the position, as
+// the defect's own filing predicted.
+//
+// The parser emits `Self` as an ordinary `Name("Self")`, reserving the
+// `SelfValue` segment for the lowercase `self`.  `Name("Self")` fell
+// through to the ordinary type-name lookup and found the placeholder a
+// `define_type("Self", …)` installs — a name pointing at itself — so the
+// field-map probe missed and the literal took a structural fallback that
+// accepts anything.
+//
+// A first fix matched the `SelfValue` segment and was measurably inert
+// for exactly that reason.
+
+type Two is { a: Int, b: Int };
+
+implement Two {
+    public fn new() -> Self {
+        Self { a: 1 }
+    }
+}
+
+fn main() {
+    let t = Two.new();
+    print(f"a={t.a} b={t.b}");
+}

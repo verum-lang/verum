@@ -1,0 +1,26 @@
+// @test: run-interpreter
+// @level: L0
+// @tier: 0
+// @tags: types, records, literals
+// @expected-stdout-begin
+// a=9 b=2
+// full a=1 b=2
+// @expected-stdout-end
+
+// THE CONTROL for the missing-field check, and it is the half that is
+// easy to break: `Self { a: 1, ..other }` takes its remaining fields
+// FROM the base, so a check that counted declared fields against listed
+// ones without that gate would refuse 289 correct literals in the
+// standard library alone.
+//
+// A complete literal is here for the same reason — a check that fires on
+// everything is indistinguishable from one that fires on nothing.
+
+type Two is { a: Int, b: Int };
+
+fn main() {
+    let full: Two = Two { a: 1, b: 2 };
+    let updated: Two = Two { a: 9, ..full };
+    print(f"a={updated.a} b={updated.b}");
+    print(f"full a={full.a} b={full.b}");
+}

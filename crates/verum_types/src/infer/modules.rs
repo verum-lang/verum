@@ -14827,6 +14827,48 @@ impl TypeChecker {
                 verum_ast::ty::PathSegment::Name(id) => {
                     let name = id.name.as_str();
 
+                    // SELF-IS-A-NAME-NOT-A-SEGMENT-1 (T1367). `Self { … }`
+                    // arrives HERE, not in the `SelfValue` arm below: the
+                    // parser emits the `Self` keyword as an ordinary
+                    // `Name("Self")` and reserves `SelfValue` for lowercase
+                    // `self`. Without this arm the lookup fell through to the
+                    // ordinary type-name search, which found the placeholder
+                    // that `define_type("Self", Named{Self})` installs — a
+                    // name pointing at itself. `__struct_fields_Self` matches
+                    // nothing, so the caller took its structural fallback and
+                    // accepted the literal UNCHECKED.
+                    //
+                    // Measured cost of that: `Self { a: 1 }` on a two-field
+                    // record was accepted in every position while
+                    // `Two { a: 1 }` was refused, and the omitted `Int` field
+                    // read back as `0.0`. `Self { … }` is the dominant shape
+                    // of a stdlib constructor.
+                    if name == "Self"
+                        && let Maybe::Some(ref self_ty) = self.current_self_type
+                    {
+                        // The placeholder points at itself; resolving it would
+                        // answer `Self` forever. Only a real binding counts.
+                        //
+                        // IT HAS TWO SPELLINGS, and recognising only the first
+                        // cost three const-generic tests: an
+                        // `implement<const SIZE: Int> Buf<SIZE>` block binds
+                        // `Self` as `Generic { name: "Self", args: [...] }`,
+                        // not as `Named`. Matching `Named` alone let that
+                        // through and the checker then reported
+                        // `expected 'Buf<Int>', found 'Self<Int>'` — the
+                        // placeholder escaping under its own name.
+                        let is_placeholder = match self_ty {
+                            Type::Named { path: p, .. } => {
+                                self.path_to_string(p).as_str() == "Self"
+                            }
+                            Type::Generic { name, .. } => name.as_str() == "Self",
+                            _ => false,
+                        };
+                        if !is_placeholder {
+                            return Ok(self_ty.clone());
+                        }
+                    }
+
                     // Check for import ambiguity first
                     // Name resolution across modules: qualified paths, import disambiguation, re-exports, path resolution in imports — Import Ambiguity
                     let mount_scoped_source = if let Some(sources) =
