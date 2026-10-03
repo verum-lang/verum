@@ -76,6 +76,61 @@ The final rerun completed all 122 test binaries with **4,223 passed,
 zero failed and zero ignored**. The register and landed-marker checks
 also passed after this reconciliation.
 
+**Pending main work and language development: T1334/T1497/T1498,
+T1501–T1504.** The ten originally staged paths were preserved in a binary
+patch and adopted in the isolated `codex/finish-main-changes` worktree.
+Record-variant `ref`/`ref mut` bindings now carry payload-slot addresses;
+by-value bindings still carry values. Interpreter execution and LLVM lowering
+share that contract. The original two pattern programmes passed both tiers,
+along with four execution pins, 43 LLVM tests and a native payload-address
+JIT test.
+
+Explicit Future awaiting now uses one VBC poll loop for both execution tiers,
+requires carried protocol membership and propagates the associated Output
+through generic arguments. The interpreter-only pending patch's method-name
+membership guess and 10,000-poll cutoff were removed. Ten contract pins cover
+Pending state, Result polarity, captured mutable references, generic Output
+records and ordinary eager async results. Native execution produced the same
+`ready=7 error=5 wrote=41 output=7 eager=7` control as the interpreter.
+This advances the existing eager async law; it does not implement lazy calls
+or a resumable executor. Native AsyncYield remains a no-op.
+
+The socket changes remove calls to the nonexistent `IOEngine.current`, sample
+kernel readiness synchronously for zero-timeout queries, and retain the Poll
+wrapper on Linux/Windows writes. Four readiness pins passed on macOS. Linux
+x86_64 and aarch64 syscall snippets compiled; Linux execution was not measured.
+A real delayed localhost TCP exchange read, stored and echoed exactly 12
+bytes. Runtime list constructors reserve at least 16 elements even for a zero
+hint, so `List.new()` is not a valid zero-capacity control.
+An experimental source-assembled host control could not resolve List.capacity;
+it is excluded from the passing suite. T1497 remains open for a valid
+full-pipeline zero-capacity control despite the positive-capacity fix.
+
+Cancellation now consumes AtomicInt.compare_exchange's Result contract.
+The adopted explicit Shared dereferences let the interpreter observe token
+clones, preserve the first cancellation reason and acquire/reject/release a
+connection-limit ticket. These are workarounds for T1474, whose implicit
+receiver-dispatch root remains open. T1505 records the imported qualified-type
+signature that degraded `Shared<core.sync.atomic.AtomicBool>` to `Shared<core>`.
+
+The VBC codegen/lib suite with compression, table_dispatch, codegen and ffi
+completed twice with **2,028 passed, zero failed and one pre-existing ignored
+coverage-report test (T0839)**. After the final poll-identity guard, all 13
+async stdlib compilation fixtures passed again. The ignored coverage report
+was attempted with the repository's 16 MiB Rust stack but stopped after 57
+minutes without a verdict; it is not included in the passing count. The
+memory-opcode count pin now includes the already existing DerefValue opcode
+(T1502), without changing the wire format. A full default-feature CLI was
+built with a fresh embedded archive; this is not a full workspace or
+whole-language conformance verdict.
+
+**Reproduced remaining failures:** default Weft reaches the TCP read, then
+fails during timeout composition with an already eager result (T1507).
+Native cancellation reaches a missing runtime candidate for Iterator.next
+(T1506); its new passing conformance pin therefore explicitly targets Tier 0.
+T1498's complete HTTP request/response acceptance remains open. Together with
+T1474 and T1505, these failures must stay visible when judging the next stage.
+
 The remaining development order follows the release spine below:
 
 1. **Identity authority** — T0690/T0691: carry symbol identity through
