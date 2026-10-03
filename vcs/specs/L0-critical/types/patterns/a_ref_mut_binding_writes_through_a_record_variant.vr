@@ -1,0 +1,56 @@
+// @test: run-interpreter
+// @level: L0
+// @tier: 0
+// @tags: types, patterns, variants, ref-mut
+// @expected-stdout-begin
+// tuple=3 struct=3 sum=3
+// @expected-stdout-end
+
+// THREE FORMS IN ONE PROGRAM, and that is the point: two of them always
+// worked and the third silently did not, so nothing at a call site showed
+// which one you had.
+//
+//     Tup.One(ref mut v)        => *v = *v + 2    tuple=3   worked
+//     r.a = r.a + 2             (plain field)     struct=3  worked
+//     Sum.Pair { x: ref mut x } => *x = *x + 2    sum=1     LOST
+//
+// The two variant forms differ only in whether the payload is NAMED. The
+// tuple arm of the pattern binder asked `pattern_needs_ref` and took the
+// field's address; the record arm, forty lines below in the same match,
+// never asked and always took the value — so the write went to a copy
+// discarded at the end of the arm.
+//
+// `ref x` is what the pattern table on the language site teaches, so the
+// documented spelling was the silent one. Two neighbouring repairs lead
+// away from the answer as well: `x = x + n` is refused, and
+// `*x = *x + n` without `ref` compiles and loses the write.
+//
+// The control is not decoration. A record variant with no `ref` must
+// still bind by value, and the plain-field write must keep working — a
+// repair that handed out addresses everywhere would satisfy the subject
+// alone.
+
+type Tup is One(Int) | TNil;
+type Sum is Pair { x: Int, y: Int } | SNil;
+type Rec is { a: Int };
+
+fn main() {
+    let mut t = Tup.One(1);
+    match &mut t {
+        Tup.One(ref mut v) => { *v = *v + 2; },
+        Tup.TNil => {},
+    }
+    let tv = match t { Tup.One(v) => v, Tup.TNil => 0 };
+
+    let mut r = Rec { a: 1 };
+    r.a = r.a + 2;
+
+    let mut s = Sum.Pair { x: 1, y: 0 };
+    match &mut s {
+        Sum.Pair { x: ref mut xv, y: _ } => { *xv = *xv + 2; },
+        Sum.SNil => {},
+    }
+    let sv = match s { Sum.Pair { x, y: _ } => x, Sum.SNil => 0 };
+
+    print(f"tuple={tv} struct={r.a} sum={sv}");
+}

@@ -8047,11 +8047,33 @@ pub fn lower_instruction<'ctx>(
             variant,
             field,
         } => {
-            // Same as GetVariantData but returns reference to field
+            // VARIANT-FIELD-ADDRESS-AT-TIER-1 (T1334): the ADDRESS of the
+            // field, which is what the opcode's name says and what a
+            // `ref`/`ref mut` binding needs.
+            //
+            // This arm called `lower_get_variant_data` — the VALUE — under a
+            // comment reading "Same as GetVariantData but returns reference to
+            // field". The comment answered "is this handled?" with yes while
+            // the code did the other thing, so at Tier 1 a `ref mut` binding
+            // held a value and the write through it SIGSEGV'd. A marked probe
+            // shows the shape exactly: Tier 0 prints through to `tuple=3`,
+            // Tier 1 prints `A: before`, `B: built`, `C: in arm` and dies with
+            // rc=139 on the write.
+            //
+            // ITS SECOND READER MOVES WITH IT. `wrapped_payload_is_slot_address`
+            // classified a `GetVariantDataRef`-fed payload as "already a value"
+            // precisely BECAUSE of this lowering; that arm is now the address
+            // case. Fixing one without the other is what turns a consistently
+            // wrong answer — which was load-bearing — into a disagreement.
             let variant_ptr = as_ptr(ctx, ctx.get_register(variant.0)?, "variant_ptr")?;
             let runtime = RuntimeLowering::new(ctx.llvm_context());
-            let data = runtime.lower_get_variant_data(ctx.builder(), variant_ptr, *field)?;
-            ctx.set_register(dst.0, data.into());
+            let addr =
+                runtime.lower_get_variant_data_addr(ctx.builder(), variant_ptr, *field)?;
+            let as_int = ctx
+                .builder()
+                .build_ptr_to_int(addr, ctx.types().i64_type(), "variant_field_addr_i64")
+                .or_llvm_err()?;
+            ctx.set_register(dst.0, as_int.into());
             Ok(())
         }
 
@@ -40235,11 +40257,19 @@ fn wrapped_payload_is_slot_address(instrs: &[verum_vbc::Instruction]) -> bool {
                     from_getf = true;
                     break;
                 }
-                // Known definers that are NOT a slot-address read: reaching
-                // one means the payload is already the value.
-                I::GetVariantData { dst, .. } | I::GetVariantDataRef { dst, .. }
-                    if dst.0 == r =>
-                {
+                // `GetVariantDataRef` yields the field's ADDRESS since
+                // T1334 — the opcode's own name, and what Tier 0 has always
+                // meant by it. Before that it lowered to the VALUE, and this
+                // arm classified it accordingly; the two moved together,
+                // because a consistently wrong answer here was load-bearing
+                // and half of it is not.
+                I::GetVariantDataRef { dst, .. } if dst.0 == r => {
+                    from_getf = true;
+                    break;
+                }
+                // `GetVariantData` IS the value: reaching one means the
+                // payload needs no peel.
+                I::GetVariantData { dst, .. } if dst.0 == r => {
                     break;
                 }
                 // Known instructions that do not define `r` here — walk on.

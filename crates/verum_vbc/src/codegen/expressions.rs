@@ -20944,11 +20944,49 @@ impl VbcCodegen {
                                 // Resolve actual field position from type layout
                                 let field_idx =
                                     self.resolve_field_index(Some(&field_key), &field_name);
-                                self.ctx.emit(Instruction::GetVariantData {
-                                    dst: field_reg,
-                                    variant: scrutinee,
-                                    field: field_idx,
-                                });
+
+                                // RECORD-VARIANT-REF-BINDING-PARITY-1 (T1334):
+                                // a `ref`/`ref mut` binding gets the field's
+                                // ADDRESS, exactly as the tuple arm forty lines
+                                // above already does.
+                                //
+                                // This arm emitted `GetVariantData`
+                                // unconditionally, so a record-variant field
+                                // bound `ref mut` was a COPY and the write
+                                // through it went nowhere. Three forms in one
+                                // program, one run, before the fix:
+                                //
+                                //     Tup.One(ref mut v)        => *v = *v + 2   3  works
+                                //     r.a = r.a + 2             (plain field)    3  works
+                                //     Sum.Pair { x: ref mut x } => *x = *x + 2   1  LOST
+                                //
+                                // The two variant forms differ only in whether
+                                // the payload is named, and nothing at the call
+                                // site shows which one you have. `ref x` is also
+                                // what the pattern table on the language site
+                                // teaches, so the documented spelling was the
+                                // silent one.
+                                let field_needs_ref = match &field.pattern {
+                                    verum_common::Maybe::Some(inner) => {
+                                        Self::pattern_needs_ref(inner)
+                                    }
+                                    // Shorthand `{ field }` binds by value; there
+                                    // is no `ref` to honour.
+                                    verum_common::Maybe::None => false,
+                                };
+                                if field_needs_ref {
+                                    self.ctx.emit(Instruction::GetVariantDataRef {
+                                        dst: field_reg,
+                                        variant: scrutinee,
+                                        field: field_idx,
+                                    });
+                                } else {
+                                    self.ctx.emit(Instruction::GetVariantData {
+                                        dst: field_reg,
+                                        variant: scrutinee,
+                                        field: field_idx,
+                                    });
+                                }
 
                                 // Bind the field value
                                 if let verum_common::Maybe::Some(ref inner_pattern) = field.pattern

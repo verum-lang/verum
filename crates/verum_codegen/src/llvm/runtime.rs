@@ -1775,19 +1775,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         let i64_type = self.context.i64_type();
 
         let emit_load = |builder: &Builder<'ctx>| -> Result<IntValue<'ctx>> {
-            // SAFETY: GEP on a pointer to an object whose layout puts
-            // `offset` inside the allocation. Nullness is the caller's
-            // declared concern, not this GEP's.
-            let elem_ptr = unsafe {
-                builder
-                    .build_in_bounds_gep(
-                        self.context.i8_type(),
-                        ptr,
-                        &[i64_type.const_int(offset, false)],
-                        &format!("{what}_ptr"),
-                    )
-                    .or_llvm_err()?
-            };
+            let elem_ptr = self.addr_i64_at_offset(builder, ptr, offset, what)?;
             Ok(builder
                 .build_load(i64_type, elem_ptr, &format!("{what}_value"))
                 .or_llvm_err()?
@@ -1821,9 +1809,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
 
         builder.position_at_end(load_bb);
         let loaded = emit_load(builder)?;
-        builder
-            .build_unconditional_branch(merge_bb)
-            .or_llvm_err()?;
+        builder.build_unconditional_branch(merge_bb).or_llvm_err()?;
 
         builder.position_at_end(merge_bb);
         let value = builder
@@ -1831,6 +1817,39 @@ impl<'ctx> RuntimeLowering<'ctx> {
             .or_llvm_err()?;
         value.add_incoming(&[(&i64_type.const_zero(), entry_bb), (&loaded, load_bb)]);
         Ok(value.as_basic_value().into_int_value())
+    }
+
+    /// The address of an i64 payload slot, without loading it.
+    ///
+    /// VARIANT-FIELD-ADDRESS-AT-TIER-1 (T1334). `load_i64_at_offset` computes
+    /// exactly this pointer and then loads through it; a `ref`/`ref mut`
+    /// binding needs the pointer itself, so the GEP is split out rather than
+    /// duplicated.
+    ///
+    /// No null guard: the caller is `GetVariantDataRef`, whose scrutinee is a
+    /// matched variant — a null there is a compiler defect, which is the same
+    /// judgement `NullMeans::CompilerDefect` makes on the load path.
+    pub fn addr_i64_at_offset(
+        &self,
+        builder: &Builder<'ctx>,
+        ptr: PointerValue<'ctx>,
+        offset: u64,
+        what: &str,
+    ) -> Result<PointerValue<'ctx>> {
+        let i64_type = self.context.i64_type();
+        // SAFETY: GEP on a pointer to an object whose layout puts `offset`
+        // inside the allocation — the same layout the sibling load relies on.
+        let elem_ptr = unsafe {
+            builder
+                .build_in_bounds_gep(
+                    self.context.i8_type(),
+                    ptr,
+                    &[i64_type.const_int(offset, false)],
+                    &format!("{what}_addr"),
+                )
+                .or_llvm_err()?
+        };
+        Ok(elem_ptr)
     }
 
     /// Lower GetVariantData instruction.
@@ -1859,9 +1878,31 @@ impl<'ctx> RuntimeLowering<'ctx> {
         )
     }
 
-    /// Lower IsVar instruction.
+    /// The ADDRESS of a variant's payload field.
     ///
-    /// Checks if a variant has the specified tag.
+    /// VARIANT-FIELD-ADDRESS-AT-TIER-1 (T1334). The `GetVariantDataRef`
+    /// lowering used to call `lower_get_variant_data` — the VALUE — under a
+    /// comment reading "Same as GetVariantData but returns reference to
+    /// field". The comment described the intent and the code did the other
+    /// thing, so a `ref mut` binding at Tier 1 held a VALUE and the write
+    /// through it SIGSEGV'd. Measured with a marked probe:
+    ///
+    /// ```text
+    ///     A: before   B: built   C: in arm   then rc=139
+    /// ```
+    ///
+    /// where Tier 0 printed through to `F: tuple=3`.
+    pub fn lower_get_variant_data_addr(
+        &self,
+        builder: &Builder<'ctx>,
+        variant_ptr: PointerValue<'ctx>,
+        field_idx: u32,
+    ) -> Result<PointerValue<'ctx>> {
+        let field_offset = Self::VARIANT_PAYLOAD_OFFSET + (field_idx as u64 * VALUE_SIZE);
+        self.addr_i64_at_offset(builder, variant_ptr, field_offset, "variant_field")
+    }
+
+    /// Lower IsVar: check whether a variant has the specified tag.
     pub fn lower_is_var(
         &self,
         builder: &Builder<'ctx>,

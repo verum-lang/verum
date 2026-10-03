@@ -1,0 +1,32 @@
+// @test: run-interpreter
+// @level: L0
+// @tier: 0
+// @tags: types, patterns, variants
+// @expected-stdout-begin
+// read=1 untouched=1
+// @expected-stdout-end
+
+// THE CONTROL for the `ref mut` repair, and the half that is easy to
+// break: a record-variant field bound WITHOUT `ref` is a value, and
+// reading it must not turn into reading an address.
+//
+// The fix that made `{ x: ref mut x }` write through works by emitting
+// the field's ADDRESS instead of its value. A version that did so
+// unconditionally would make every ordinary destructure hand out a
+// pointer, and the first `print` of a bound field would show a heap
+// number instead of 1.
+
+type Sum is Pair { x: Int, y: Int } | SNil;
+
+fn main() {
+    let s = Sum.Pair { x: 1, y: 0 };
+    let read = match &s {
+        Sum.Pair { x, y: _ } => x,
+        Sum.SNil => 0,
+    };
+    let untouched = match s {
+        Sum.Pair { x, y: _ } => x,
+        Sum.SNil => 0,
+    };
+    print(f"read={read} untouched={untouched}");
+}
