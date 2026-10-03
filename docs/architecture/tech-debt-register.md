@@ -55,13 +55,26 @@ and the four `interpolation_*.vr` specs in the L0 parser literal directory.
 
 **Validation:** `cargo test --offline -p verum_fast_parser --lib --tests
 --no-fail-fast` completed all 122 test binaries: **4,220 passed, zero
-failed, three pre-existing ignored semicolon-insertion tests**. Before the
+failed, three pre-existing ignored semicolon-insertion tests** for T1418. Before the
 fix, the new tests reproduced acceptance of trailing tokens while their
 well-formed control passed. The four VCS pins were also parsed by the Rust
 integration test; the full `vtest` runner and AOT execution were not run.
 After the table repair, **all 40 source gates passed**, using the same
 locally available website documentation as the baseline. The isolated
 worktree needs that documentation supplied explicitly to the status gate.
+
+**Ignored-test reconciliation: T1500.** Running the three ignored
+semicolon-insertion tests explicitly produced three failures, all E010.
+They asserted automatic insertion of a terminator that `grammar/verum.ebnf`
+§let_stmt requires in the source. They now actively check the existing
+grammar through the public parser API: three missing terminators in the
+loop case, one in the mixed case and one before an `if` expression.
+The explicit-terminator control still passes. This changes the tests'
+contract to the adopted grammar; automatic semicolon insertion is not
+implemented or added to the language by this change.
+The final rerun completed all 122 test binaries with **4,223 passed,
+zero failed and zero ignored**. The register and landed-marker checks
+also passed after this reconciliation.
 
 The remaining development order follows the release spine below:
 
