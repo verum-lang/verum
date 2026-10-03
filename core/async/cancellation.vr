@@ -285,11 +285,13 @@ implement CancellationFlag {
     // false if already cancelled (idempotent).
     public fn cancel_with(&self, r: CancelReason) -> Bool {
         // Compare-exchange: active → cancelling. Losers bail out.
-        let prev = self.state.compare_exchange(
+        let transition = self.state.compare_exchange(
             STATE_ACTIVE, STATE_CANCELLING,
             MemoryOrdering.AcqRel, MemoryOrdering.Acquire,
         );
-        if prev != STATE_ACTIVE {
+        // compare_exchange returns Result<old, actual>, not the old Int.
+        // Only the winner may publish the reason and notify observers.
+        if transition.is_err() {
             return false;
         }
 
@@ -445,23 +447,27 @@ implement CancellationToken {
     /// Quick synchronous check.
     @inline(always)
     public fn is_cancelled(&self) -> Bool {
-        self.inner.is_cancelled()
+        // Explicit deref: `inner` is a `Shared<CancellationFlag>` and an
+        // implicit method call on a carrier answers the wrong object
+        // today (T1474) — `cancel()` followed by `is_cancelled()`
+        // answered false. Comes out when that lands.
+        (*self.inner).is_cancelled()
     }
 
     /// Read the cancellation reason if set. Maybe.None while active.
     public fn reason(&self) -> Maybe<CancelReason> {
-        self.inner.reason()
+        (*self.inner).reason()
     }
 
     /// Trigger cancellation with default `Cancelled` reason.
     /// Idempotent.
     public fn cancel(&self) {
-        let _ = self.inner.cancel_with(CancelReason.Cancelled);
+        let _ = (*self.inner).cancel_with(CancelReason.Cancelled);
     }
 
     /// Trigger cancellation with an explicit structured reason.
     public fn cancel_with(&self, r: CancelReason) {
-        let _ = self.inner.cancel_with(r);
+        let _ = (*self.inner).cancel_with(r);
     }
 
     /// Return `Result.Err(CancellationError)` if cancelled, else `Result.Ok(())`.

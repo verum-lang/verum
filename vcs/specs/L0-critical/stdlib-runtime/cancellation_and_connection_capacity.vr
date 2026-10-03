@@ -1,0 +1,41 @@
+// @test: run-interpreter
+// @level: L0
+// @tier: 0
+// @timeout: 180000
+// @tags: cancellation, weft, shared, atomics
+// @expected-stdout-begin
+// before=false after=true clone=true
+// repeated=true first_reason=true
+// initial=0 occupied=1 rejected=true released=0
+// @expected-stdout-end
+// @expected-exit: 0
+// Native execution is tracked separately by T1506: cancel_with currently
+// loses the iterator receiver identity at the call to next.
+
+mount core.async.cancellation.{CancellationTokenSource, CancelReason};
+mount core.net.weft.listener.{ConnectionLimiter};
+
+fn main() {
+    let source = CancellationTokenSource.new();
+    let token = source.token();
+    let clone = token.clone();
+    let before = token.is_cancelled();
+    source.cancel();
+    print(f"before={before} after={token.is_cancelled()} clone={clone.is_cancelled()}");
+    source.cancel_with(CancelReason.Aborted("second"));
+    source.cancel();
+    let first_reason = match token.reason() {
+        Maybe.Some(CancelReason.Cancelled) => true,
+        _ => false,
+    };
+    print(f"repeated={token.is_cancelled()} first_reason={first_reason}");
+
+    let limiter = ConnectionLimiter.new(1);
+    let initial = limiter.in_flight();
+    let ticket = limiter.try_acquire().unwrap();
+    let occupied = limiter.in_flight();
+    let rejected = limiter.try_acquire().is_none();
+    drop(ticket);
+    let released = limiter.in_flight();
+    print(f"initial={initial} occupied={occupied} rejected={rejected} released={released}");
+}

@@ -283,9 +283,23 @@ public async fn accept_loop<R: ConnectionRunner + Clone + Send + Sync + 'static>
     let limiter = ConnectionLimiter.new(config.max_concurrent_connections);
     let per_ip = PerIpLimiter.new(config.per_ip_max);
 
+    // THE EXPLICIT DEREFERENCE IS LOAD-BEARING HERE (T1474).
+    //
+    // `draining` is a `Shared<AtomicBool>`, and an atomic reached through
+    // a carrier by an IMPLICIT method call does not answer its value
+    // today: a flag holding `false` reads as `true`, so this loop broke
+    // on its first iteration and every weft server bound a socket and
+    // accepted nothing. Measured: `Shared.new(AtomicBool.new(false))
+    // .load(Acquire)` -> true, while the same atomic read directly, and
+    // through `(*flag)`, answers false.
+    //
+    // The `*` is not decoration and must not be "tidied away": it routes
+    // the call through the deref hop that reads the carrier's extent
+    // correctly. It comes out when T1474's remaining half lands, and the
+    // acceptance for that is this loop accepting a connection.
     loop {
-        if token.is_cancelled() { break; }
-        if draining.load(MemoryOrdering.Acquire) { break; }
+        if (*token).is_cancelled() { break; }
+        if (*draining).load(MemoryOrdering.Acquire) { break; }
 
         match listener.accept_cancellable(&token).await {
             Result.Err(_cancelled) => break,
@@ -384,11 +398,11 @@ implement ConnectionLimiter {
     /// connection. On `Maybe.Some(ticket)`, the slot is reserved until
     /// the ticket is dropped.
     public fn try_acquire(&self) -> Maybe<ConnectionTicket> {
-        let cur = self.in_flight.fetch_add(1, MemoryOrdering.AcqRel) + 1;
+        let cur = (*self.in_flight).fetch_add(1, MemoryOrdering.AcqRel) + 1;
         if cur > self.max {
             // Race-loser: roll back the optimistic increment
             // immediately and reject.
-            self.in_flight.fetch_sub(1, MemoryOrdering.AcqRel);
+            (*self.in_flight).fetch_sub(1, MemoryOrdering.AcqRel);
             Maybe.None
         } else {
             Maybe.Some(ConnectionTicket {
@@ -409,13 +423,13 @@ implement ConnectionLimiter {
         &self,
         per_ip_slot: Shared<AtomicInt>,
     ) -> Maybe<ConnectionTicket> {
-        let cur = self.in_flight.fetch_add(1, MemoryOrdering.AcqRel) + 1;
+        let cur = (*self.in_flight).fetch_add(1, MemoryOrdering.AcqRel) + 1;
         if cur > self.max {
-            self.in_flight.fetch_sub(1, MemoryOrdering.AcqRel);
+            (*self.in_flight).fetch_sub(1, MemoryOrdering.AcqRel);
             // Caller's per-IP slot was acquired before this call
             // — release it on race-loss so the limiter doesn't
             // leak the per-IP entry.
-            per_ip_slot.fetch_sub(1, MemoryOrdering.AcqRel);
+            (*per_ip_slot).fetch_sub(1, MemoryOrdering.AcqRel);
             Maybe.None
         } else {
             Maybe.Some(ConnectionTicket {
@@ -427,7 +441,7 @@ implement ConnectionLimiter {
 
     /// Current in-flight count — for graceful-drain polling.
     public fn in_flight(&self) -> Int {
-        self.in_flight.load(MemoryOrdering.Acquire)
+        (*self.in_flight).load(MemoryOrdering.Acquire)
     }
 }
 
@@ -444,9 +458,9 @@ public type ConnectionTicket is {
 
 implement Drop for ConnectionTicket {
     fn drop(&mut self) {
-        self.in_flight.fetch_sub(1, MemoryOrdering.AcqRel);
+        (*self.in_flight).fetch_sub(1, MemoryOrdering.AcqRel);
         if let Maybe.Some(slot) = &self.per_ip_slot {
-            slot.fetch_sub(1, MemoryOrdering.AcqRel);
+            (*slot).fetch_sub(1, MemoryOrdering.AcqRel);
         }
     }
 }
@@ -511,10 +525,10 @@ implement PerIpLimiter {
                 s
             }
         };
-        let cur = slot.fetch_add(1, MemoryOrdering.AcqRel) + 1;
+        let cur = (*slot).fetch_add(1, MemoryOrdering.AcqRel) + 1;
         if cur > self.max {
             // Race-loser: roll back the optimistic increment.
-            slot.fetch_sub(1, MemoryOrdering.AcqRel);
+            (*slot).fetch_sub(1, MemoryOrdering.AcqRel);
             Maybe.None
         } else {
             Maybe.Some(slot)
@@ -579,7 +593,7 @@ implement<H: Handler + Send + Sync + 'static> Server<H> {
     /// Phase-1 shutdown: stop accepting new connections, signal
     /// keep-alive connections to stamp `Connection: close` next.
     public fn begin_drain(&self) {
-        self.draining.store(true, MemoryOrdering.Release);
+        (*self.draining).store(true, MemoryOrdering.Release);
     }
 
     /// Full shutdown: drain + token cancel. Running handlers see
