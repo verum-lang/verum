@@ -17117,7 +17117,7 @@ mod tests {
         );
         assert_eq!(
             sweep(MemSubOpcode::from_byte, MemSubOpcode::to_byte),
-            37,
+            38, // T1492 added DerefValue to the 37-operation memory family.
             "MemSubOpcode variant count drift"
         );
     }
