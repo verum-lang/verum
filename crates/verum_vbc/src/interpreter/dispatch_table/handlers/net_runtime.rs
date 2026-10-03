@@ -843,6 +843,9 @@ fn coop_wait(
     readable: bool,
     timeout_ms: i64,
 ) -> i64 {
+    if timeout_ms == 0 {
+        return if readable { io_wait_readable(fd, 0) } else { io_wait_writable(fd, 0) };
+    }
     // Beyond max depth, fall back to plain blocking — preserves
     // correctness while preventing unbounded recursion in
     // pathological many-task scenarios.

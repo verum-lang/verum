@@ -478,8 +478,7 @@ implement AsyncRead for UnixStream {
                 Poll.Ready(Result.Ok(n as Int))
             }
             Result.Err(e) if e.would_block() => {
-                let io_engine = IOEngine.current();
-                io_engine.register(self.fd, IOInterest.Read, cx.waker());
+                cx.waker().wake_by_ref();
                 Poll.Pending
             }
             Result.Err(e) => Poll.Ready(Result.Err(IoError.from_os(e))),
@@ -505,8 +504,7 @@ implement AsyncWrite for UnixStream {
         match result {
             Result.Ok(n) => Poll.Ready(Result.Ok(n as Int)),
             Result.Err(e) if e.would_block() => {
-                let io_engine = IOEngine.current();
-                io_engine.register(self.fd, IOInterest.Write, cx.waker());
+                cx.waker().wake_by_ref();
                 Poll.Pending
             }
             Result.Err(e) => Poll.Ready(Result.Err(IoError.from_os(e))),
@@ -761,8 +759,7 @@ implement<'a> Stream for UnixIncoming<'a> {
                 Poll.Ready(Maybe.Some(Result.Ok(UnixStream { fd: client_fd, peer_path: peer })))
             }
             Result.Err(e) if e.would_block() => {
-                let io_engine = IOEngine.current();
-                io_engine.register(self.listener.fd, IOInterest.Read, cx.waker());
+                cx.waker().wake_by_ref();
                 Poll.Pending
             }
             Result.Err(e) => Poll.Ready(Maybe.Some(Result.Err(UnixError.from_os_error(e)))),

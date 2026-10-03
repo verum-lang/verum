@@ -428,6 +428,11 @@ pub fn wait_writable(fd: i64, timeout: Duration) -> WaitOutcome {
 }
 
 fn wait(fd: i64, kind: InterestKind, timeout: Duration) -> WaitOutcome {
+    // A readiness probe must sample the kernel synchronously. Registering a
+    // waiter and immediately expiring it races the background reactor thread.
+    if timeout.is_zero() {
+        return probe_readiness(fd, kind);
+    }
     let reactor = &*REACTOR;
     if !reactor.healthy.load(Ordering::Acquire) {
         return WaitOutcome::Error;
@@ -489,6 +494,86 @@ fn wait(fd: i64, kind: InterestKind, timeout: Duration) -> WaitOutcome {
 
     reactor.release_slot(shard_idx, slot_idx);
     outcome
+}
+
+/// Zero-timeout readiness query without allocating a reactor waiter.
+fn probe_readiness(fd: i64, kind: InterestKind) -> WaitOutcome {
+    if fd < 0 || fd > i32::MAX as i64 {
+        return WaitOutcome::Error;
+    }
+    #[repr(C)]
+    struct PollFd {
+        fd: i32,
+        events: i16,
+        revents: i16,
+    }
+    let events = match kind {
+        InterestKind::Readable => 1,
+        InterestKind::Writable => 4,
+    };
+    let mut descriptor = PollFd {
+        fd: fd as i32,
+        events,
+        revents: 0,
+    };
+
+    #[cfg(target_os = "macos")]
+    // SAFETY: PollFd mirrors libSystem's pollfd, and the single element is live.
+    let result = unsafe { libc::poll((&mut descriptor as *mut PollFd).cast(), 1, 0) as i64 };
+
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    let result = {
+        let result: i64;
+        // SAFETY: poll(2), one writable pollfd, zero timeout. Direct syscall
+        // preserves the no-libc boundary on Linux.
+        unsafe {
+            std::arch::asm!("syscall", inlateout("rax") 7_i64 => result,
+                in("rdi") &mut descriptor, in("rsi") 1_usize, in("rdx") 0_usize,
+                lateout("rcx") _, lateout("r11") _, options(nostack));
+        }
+        result
+    };
+    #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+    let result = {
+        #[repr(C)]
+        struct Timespec {
+            seconds: i64,
+            nanos: i64,
+        }
+        let timeout = Timespec {
+            seconds: 0,
+            nanos: 0,
+        };
+        let result: i64;
+        // SAFETY: ppoll(2) with one pollfd, live timespec, no signal mask.
+        unsafe {
+            std::arch::asm!("svc #0", in("x8") 73_usize,
+                inlateout("x0") &mut descriptor as *mut PollFd as i64 => result,
+                in("x1") 1_usize, in("x2") &timeout, in("x3") 0_usize,
+                in("x4") 0_usize, options(nostack));
+        }
+        result
+    };
+    #[cfg(not(any(
+        target_os = "macos",
+        all(
+            target_os = "linux",
+            any(target_arch = "x86_64", target_arch = "aarch64")
+        )
+    )))]
+    let result = -1_i64;
+
+    if result < 0 || descriptor.revents & 0x20 != 0 {
+        // POLLNVAL
+        WaitOutcome::Error
+    } else if result == 0 {
+        WaitOutcome::TimedOut
+    } else if descriptor.revents & (events | 0x08 | 0x10) != 0 {
+        // POLLERR/POLLHUP permit the operation to report EOF/error
+        WaitOutcome::Ready
+    } else {
+        WaitOutcome::TimedOut
+    }
 }
 
 // ============================================================================

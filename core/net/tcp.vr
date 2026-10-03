@@ -194,7 +194,7 @@ mount sys.windows.winsock2.{
 mount sys.common.{FileDesc, OSError};
 
 // Import I/O engine for async operations
-mount sys.io_engine.{IOEngine, IOInterest};
+mount sys.io_engine.{IOInterest};
 mount core.io.{IoError, IoErrorKind};
 
 // Unified TCP-listen intrinsic family (#25 cascade). These dispatch
@@ -205,7 +205,7 @@ mount core.io.{IoError, IoErrorKind};
 // socket+setsockopt+bind+listen IR directly. Both paths produce a
 // real kernel fd, so the rest of `core.net.tcp` (`accept` / `close` /
 // `setsockopt` / `getsockname`) works uniformly across modes.
-mount core.intrinsics.runtime.os.{__tcp_listen_v2_raw, __tcp_local_port_raw};
+mount core.intrinsics.runtime.os.{__tcp_listen_v2_raw, __tcp_local_port_raw, __io_wait_readable_raw, __io_wait_writable_raw};
 
 // =============================================================================
 // AsyncIoReady - Future for async I/O readiness
@@ -214,12 +214,11 @@ mount core.intrinsics.runtime.os.{__tcp_listen_v2_raw, __tcp_local_port_raw};
 /// Future that completes when a file descriptor becomes ready for I/O.
 ///
 
-/// Uses the native V-LLSI IOEngine (io_uring on Linux, kqueue on macOS)
-/// for efficient event notification with minimal syscall overhead.
+/// Checks native descriptor readiness. Pending requests a cooperative retry;
+/// the current eager async driver yields between polls.
 type AsyncIoReady is {
     fd: FileDesc,
     interest: IOInterest,
-    registered: Bool,
 };
 
 implement AsyncIoReady {
@@ -228,7 +227,6 @@ implement AsyncIoReady {
         AsyncIoReady {
             fd: fd,
             interest: interest,
-            registered: false,
         }
     }
 
@@ -247,33 +245,20 @@ implement Future for AsyncIoReady {
     type Output = ();
 
     fn poll(&mut self, cx: &mut Context) -> Poll<()> {
-        // Get the I/O engine from runtime context
-        let io_engine = IOEngine.current();
-
-        if !self.registered {
-            // Register interest with the I/O engine
-            io_engine.register(self.fd, self.interest, cx.waker());
-            self.registered = true;
-            return Poll.Pending;
-        }
-
-        // Check if ready
-        if io_engine.is_ready(self.fd, self.interest) {
-            io_engine.unregister(self.fd, self.interest);
-            Poll.Ready(())
-        } else {
-            // Re-register waker in case it changed
-            io_engine.update_waker(self.fd, self.interest, cx.waker());
+        let fd = self.fd.as_raw();
+        let ready = match self.interest {
+            IOInterest.Read => __io_wait_readable_raw(fd, 0),
+            IOInterest.Write => __io_wait_writable_raw(fd, 0),
+            IOInterest.ReadWrite => {
+                let readable = __io_wait_readable_raw(fd, 0);
+                if readable == 1 { readable } else { __io_wait_writable_raw(fd, 0) }
+            },
+        };
+        if ready < 0 { panic("I/O readiness probe failed"); }
+        if ready == 1 { Poll.Ready(()) }
+        else {
+            cx.waker().wake_by_ref();
             Poll.Pending
-        }
-    }
-}
-
-implement Drop for AsyncIoReady {
-    fn drop(&mut self) {
-        if self.registered {
-            let io_engine = IOEngine.current();
-            io_engine.unregister(self.fd, self.interest);
         }
     }
 }
@@ -830,8 +815,8 @@ implement Write for TcpStream {
 //
 
 // Wraps the sync recv/send syscalls with readiness-waiting via AsyncIoReady.
-// poll_read: if data ready → recv() → Ready(n); if WouldBlock → Pending +
-// waker registered with I/O engine so receiver is woken on next read event.
+// poll_read: data returns Ready(n); WouldBlock requests a cooperative retry.
+// Full event-driven suspension is a separate executor development step.
 //
 
 // Buffer parameter is `&mut List<Byte>` (red-team §4 fix): byte-typed
@@ -841,7 +826,7 @@ implement Write for TcpStream {
 
 implement AsyncRead for TcpStream {
     fn poll_read(&mut self, cx: &mut Context, buf: &mut List<Byte>) -> Poll<IoResult<Int>> {
-        // Try a non-blocking read first. If WouldBlock, register waker.
+        // Try a non-blocking read first. If WouldBlock, request another poll.
         let cap = buf.capacity();
         // Packed `[Byte; N]`, for the reason `local_addr` states: a
         // NaN-boxed List is 8-byte-strided, and `recv`/`send` write and
@@ -872,9 +857,9 @@ implement AsyncRead for TcpStream {
                 Poll.Ready(Result.Ok(n as Int))
             }
             Result.Err(e) if e.would_block() => {
-                // Register waker with I/O engine for read-ready event.
-                let io_engine = IOEngine.current();
-                io_engine.register(self.fd, IOInterest.Read, cx.waker());
+                // Eager async uses cooperative retry. Request another poll
+                // instead of naming a nonexistent global IOEngine constructor.
+                cx.waker().wake_by_ref();
                 Poll.Pending
             }
             Result.Err(e) => Poll.Ready(Result.Err(IoError.from_os(e))),
@@ -901,7 +886,7 @@ implement AsyncWrite for TcpStream {
 
         @cfg(any(target_os = "linux", target_os = "windows"))
         let result = {
-            return send(self.fd, &byte_buf[..write_len], MSG_NOSIGNAL | MSG_DONTWAIT);
+            send(self.fd, &byte_buf[..write_len], MSG_NOSIGNAL | MSG_DONTWAIT)
         };
 
         @cfg(target_os = "macos")
@@ -910,8 +895,7 @@ implement AsyncWrite for TcpStream {
         match result {
             Result.Ok(n) => Poll.Ready(Result.Ok(n as Int)),
             Result.Err(e) if e.would_block() => {
-                let io_engine = IOEngine.current();
-                io_engine.register(self.fd, IOInterest.Write, cx.waker());
+                cx.waker().wake_by_ref();
                 Poll.Pending
             }
             Result.Err(e) => Poll.Ready(Result.Err(IoError.from_os(e))),
@@ -1463,9 +1447,7 @@ implement<'a> Stream for AsyncIncoming<'a> {
                 }
             }
             Result.Err(e) if e.code == EAGAIN => {
-                // No connection pending — register I/O readiness waker.
-                let io_engine = IOEngine.current();
-                io_engine.register(self.listener.fd, IOInterest.Read, cx.waker());
+                cx.waker().wake_by_ref();
                 Poll.Pending
             }
             Result.Err(e) => Poll.Ready(Maybe.Some(Result.Err(IoError.from_os(e)))),
