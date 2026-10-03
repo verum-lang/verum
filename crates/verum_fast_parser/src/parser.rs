@@ -381,6 +381,22 @@ impl<'a> RecursiveParser<'a> {
         }
     }
 
+    /// A complete fragment must leave no tokens after its construct.
+    /// Shared by the string, token-slice and interpolation entry points.
+    pub(crate) fn require_input_consumed(&self) -> ParseResult<()> {
+        if self.stream.at_end() {
+            return Ok(());
+        }
+
+        let error = match self.stream.peek() {
+            Some(token) => ParseError::unexpected(&[TokenKind::Eof], token.clone()),
+            None => ParseError::unexpected_eof(&[TokenKind::Eof], self.stream.current_span()),
+        }
+        .with_help("this entry point parses the whole fragment; the text after this point is not part of the construct");
+
+        Err(error)
+    }
+
     /// Enable script-mode top-level parsing.
     ///
     /// In script mode, [`Self::parse_module`] accepts statements

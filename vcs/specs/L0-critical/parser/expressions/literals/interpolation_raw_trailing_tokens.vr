@@ -1,0 +1,11 @@
+// @test: parse-fail
+// @tier: all
+// @level: L0
+// @tags: parser, interpolation, regression, T1418
+// @expected-error: E005
+// @description: The @raw directive preserves full-expression validation in safe strings.
+
+fn main() {
+    let a = 1;
+    let page = html"<p>{@raw a + 1 garbage}</p>";
+}

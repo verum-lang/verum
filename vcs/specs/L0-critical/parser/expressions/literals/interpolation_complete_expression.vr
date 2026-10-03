@@ -1,0 +1,12 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, interpolation, regression, T1418
+// @description: Complete expressions, nested blocks and format specs remain valid.
+
+fn main() {
+    let a = 1;
+    let plain = f"one={a} two={a + 1} hex={(a + 1):04x}";
+    let nested = f"choice={if a > 0 { a + 1 } else { 0 }}";
+    let page = html"<p>{@raw a + 1}</p>";
+}

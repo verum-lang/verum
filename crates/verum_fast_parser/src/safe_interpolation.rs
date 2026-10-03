@@ -16,7 +16,7 @@
 use crate::error::ParseError;
 use crate::parser::{ParseResult, RecursiveParser};
 use verum_ast::{Expr, ExprKind, Span};
-use verum_common::{List, Text};
+use verum_common::{List, Maybe, Text};
 
 /// Parse the content of an interpolated string into parts and expressions.
 ///
@@ -58,7 +58,7 @@ pub fn parse_interpolated_content(
     let mut pos = 0; // Track position for error reporting
 
     while let Some(ch) = chars.next() {
-        pos += 1;
+        pos += ch.len_utf8();
 
         match ch {
             '{' => {
@@ -81,7 +81,7 @@ pub fn parse_interpolated_content(
                 let expr_start_pos = pos;
 
                 for inner_ch in chars.by_ref() {
-                    pos += 1;
+                    pos += inner_ch.len_utf8();
 
                     match inner_ch {
                         '{' => {
@@ -104,7 +104,11 @@ pub fn parse_interpolated_content(
                 if brace_depth != 0 {
                     return Err(ParseError::invalid_interpolation(
                         "unclosed interpolation brace in string",
-                        Span::new(expr_start_pos as u32, pos as u32, file_id),
+                        Span::new(
+                            span_base + expr_start_pos as u32,
+                            span_base + pos as u32,
+                            file_id,
+                        ),
                     ));
                 }
 
@@ -113,7 +117,7 @@ pub fn parse_interpolated_content(
                 // inside interpolations represent actual quotes in the Verum code to be parsed
                 let expr = parse_interpolation_expr(
                     parser,
-                    expr_str.trim(),
+                    &expr_str,
                     file_id,
                     span_base as usize + expr_start_pos,
                 )?;
@@ -129,7 +133,7 @@ pub fn parse_interpolated_content(
                     // Unmatched closing brace
                     return Err(ParseError::invalid_interpolation(
                         "unmatched closing brace in interpolated string",
-                        Span::new(pos as u32, pos as u32, file_id),
+                        Span::new(span_base + pos as u32 - 1, span_base + pos as u32, file_id),
                     ));
                 }
             }
@@ -156,94 +160,92 @@ fn parse_interpolation_expr(
     _parser: &mut RecursiveParser,
     expr_str: &str,
     file_id: verum_ast::FileId,
-    start_pos: usize,
+    mut start_pos: usize,
 ) -> ParseResult<Expr> {
     use verum_ast::{Ident, Path};
     use verum_lexer::Lexer;
 
-    // Check for @raw directive
-    let (is_raw, actual_expr_str) = if let Some(stripped) = expr_str.strip_prefix("@raw ") {
-        (true, stripped.trim())
-    } else if let Some(stripped) = expr_str.strip_prefix("@raw\t") {
-        (true, stripped.trim())
+    // Preserve the source offset when removing whitespace or the @raw directive.
+    let trimmed = expr_str.trim_start();
+    start_pos += expr_str.len() - trimmed.len();
+    let (is_raw, actual_expr_str) = if let Some(stripped) = trimmed
+        .strip_prefix("@raw ")
+        .or_else(|| trimmed.strip_prefix("@raw\t"))
+    {
+        let actual = stripped.trim_start();
+        start_pos += trimmed.len() - actual.len();
+        (true, actual)
     } else {
-        (false, expr_str)
+        (false, trimmed)
     };
-
-    // Handle format specifiers: f"{expr:spec}" -> wrap expr in stdlib
-    // formatter call so the codegen path actually honours the spec.
-    //
-
-    // History: this used to silently DROP the format spec (the
-    // returned string was just the expression, the spec discarded).
-    // Result: f"{v:x}" with v=195 emitted "195" instead of "c3" —
-    // discovered while validating task #37, opened as task #38.
-    //
-
-    // Strategy: split the expression and the spec here, parse the
-    // expression normally, then wrap in `expr.to_<radix>()` (or
-    // future `__fmt(expr, "spec")` for richer specs). Keeps the
-    // AST shape unchanged (still a single Expr per interpolation)
-    // and reuses the existing stdlib `Int.to_hex / to_octal /
-    // to_binary` methods on `core/base/primitives.vr`.
-    let (actual_expr_str, format_spec) = split_expr_and_spec(actual_expr_str);
-    if actual_expr_str.is_empty() && format_spec.is_some() {
-        // Empty expression with format spec (e.g., {:?}) - not valid in Verum
-        return Err(ParseError::invalid_interpolation(
-            format!(
-                "empty expression with format spec `{}`",
-                format_spec.unwrap_or("")
-            ),
-            Span::new(
-                start_pos as u32,
-                (start_pos + expr_str.len()) as u32,
-                file_id,
-            ),
-        ));
-    }
 
     // Unescape the expression string so that \" becomes " and \\ becomes \, etc.
     // This is necessary because inside interpolated strings, escape sequences like \"
     // represent literal characters in the Verum code to be parsed.
-    let unescaped_expr = unescape_interpolation_expr(actual_expr_str);
+    let (unescaped_expr, source_offsets) = unescape_interpolation_expr(actual_expr_str);
 
     // Lex the fragment AT its absolute file position (T0845 kin):
     // zero-based fragment lexing gave equal-shaped interpolations
     // IDENTICAL spans, and every span-keyed map (resolved call
     // targets, diagnostics) collapsed them — the second entry
-    // silently overwrote the first. Escape unfolding can shift the
-    // positions by a few bytes; uniqueness and ordering — which the
-    // maps need — survive exactly.
-    let lexer = Lexer::new_at(&unescaped_expr, file_id, start_pos as u32);
-
-    // Collect tokens (Result types need to be handled)
-    let tokens_result: Result<Vec<_>, _> = lexer.collect();
-    let tokens = tokens_result.map_err(|e| {
-        ParseError::invalid_interpolation(
-            format!("lexer error in interpolation: {:?}", e),
-            Span::new(
+    // silently overwrote the first. Map unfolded escapes back to the
+    // original bytes as well, so a diagnostic names the source token.
+    let locate = |span: Span| -> Span {
+        match &source_offsets {
+            Some(offsets) => Span::new(
+                start_pos as u32 + offsets[(span.start as usize) - start_pos],
+                start_pos as u32 + offsets[(span.end as usize) - start_pos],
+                file_id,
+            ),
+            None => span,
+        }
+    };
+    let mut lexer = Lexer::new_at(unescaped_expr.as_str(), file_id, start_pos as u32);
+    let mut tokens = List::new();
+    while let Some(result) = lexer.next() {
+        let mut token = result.map_err(|error| {
+            let span = lexer.last_error_span().unwrap_or(Span::new(
                 start_pos as u32,
                 (start_pos + unescaped_expr.len()) as u32,
                 file_id,
-            ),
-        )
-    })?;
-
-    // CRITICAL FIX: Parse within the scope where tokens are valid
-    // instead of leaking memory with Box::leak
-    // The tokens Vec lives on the stack and the parser borrows from it
-    let expr = {
-        let mut temp_parser = RecursiveParser::new(&tokens, file_id);
-        temp_parser.parse_expr().map_err(|e| {
+            ));
             ParseError::invalid_interpolation(
-                format!("invalid expression in interpolation: {}", e),
-                Span::new(
-                    start_pos as u32,
-                    (start_pos + unescaped_expr.len()) as u32,
-                    file_id,
-                ),
+                format!("lexer error in interpolation: {error}"),
+                locate(span),
             )
-        })?
+        })?;
+        token.span = locate(token.span);
+        tokens.push(token);
+    }
+
+    // The fragment parser borrows the tokens only while they are alive.
+    let (expr, format_spec) = {
+        let mut temp_parser = RecursiveParser::new(&tokens, file_id);
+        temp_parser
+            .parse_expr()
+            .and_then(|expr| {
+                if let Some(error) = temp_parser.errors.first() {
+                    return Err(error.clone());
+                }
+                // Only a colon immediately after the complete expression
+                // starts a format spec. Let the expression parser distinguish
+                // comparisons, strings and nested type annotations instead of
+                // maintaining another bracket scanner (T1418).
+                let format_spec = if temp_parser.stream.check(&verum_lexer::TokenKind::Colon) {
+                    let spec_start = temp_parser.stream.current_span().end as usize - start_pos;
+                    Some(actual_expr_str[spec_start..].trim_end())
+                } else {
+                    temp_parser.require_input_consumed()?;
+                    None
+                };
+                Ok((expr, format_spec))
+            })
+            .map_err(|e| {
+                ParseError::invalid_interpolation(
+                    format!("invalid expression in interpolation: {}", e),
+                    e.span,
+                )
+            })?
     };
     // tokens is dropped here, no memory leak
 
@@ -339,9 +341,7 @@ fn wrap_with_format_spec(expr: Expr, spec: &str) -> ParseResult<Expr> {
                 // non-float receiver surfaces a normal missing-method error
                 // at that call site (T0604).
                 method_call_one_int_arg(expr, "to_precision", prec as i64, span)
-            } else if parsed.width == 0
-                && !parsed.upper
-                && matches!(parsed.sign, SpecSign::Default)
+            } else if parsed.width == 0 && !parsed.upper && matches!(parsed.sign, SpecSign::Default)
             {
                 return Ok(expr);
             } else if parsed.width > 0
@@ -392,7 +392,10 @@ fn wrap_with_format_spec(expr: Expr, spec: &str) -> ParseResult<Expr> {
         let fill_lit = char_literal(fill_char, span);
         let numeric_marker = !matches!(parsed.sign, SpecSign::Default)
             || parsed.precision.is_some()
-            || matches!(parsed.type_char, Some('x') | Some('X') | Some('o') | Some('b'));
+            || matches!(
+                parsed.type_char,
+                Some('x') | Some('X') | Some('o') | Some('b')
+            );
         let pad_method = match parsed.align {
             SpecAlign::Left => "pad_right",
             SpecAlign::Right => "pad_left",
@@ -625,9 +628,9 @@ fn format_debug_call(expr: Expr, span: verum_ast::Span) -> Expr {
     // `format_debug` as a Path expression
     let callee = Expr::new(
         ExprKind::Path(verum_ast::ty::Path::new(
-            verum_common::List::from(vec![
-                verum_ast::ty::PathSegment::Name(verum_ast::Ident::new("format_debug", span)),
-            ]),
+            verum_common::List::from(vec![verum_ast::ty::PathSegment::Name(
+                verum_ast::Ident::new("format_debug", span),
+            )]),
             span,
         )),
         span,
@@ -667,86 +670,65 @@ fn char_literal(value: char, span: verum_ast::Span) -> Expr {
     )
 }
 
-/// Split an interpolation expression into (expr_str, format_spec).
-///
-/// Mirrors the bracket-aware logic of `strip_format_spec` but
-/// returns the spec instead of dropping it.
-fn split_expr_and_spec(expr_str: &str) -> (&str, Option<&str>) {
-    let mut depth = 0i32;
-    for (i, ch) in expr_str.char_indices() {
-        match ch {
-            '(' | '[' | '{' | '<' => depth += 1,
-            ')' | ']' | '}' | '>' => depth -= 1,
-            ':' if depth == 0 => {
-                let spec = &expr_str[i + 1..];
-                return (&expr_str[..i], Some(spec));
-            }
-            _ => {}
-        }
-    }
-    (expr_str, None)
-}
-
-/// Strip format specifier from an interpolation expression.
-///
-/// Given `x:02` returns `x`, given `val:.2f` returns `val`.
-/// Given `name` returns `name` (no specifier).
-/// Given `:?` returns `` (empty expression, for debug format).
-/// Handles nested brackets/parens/braces to avoid stripping colons inside expressions.
-fn strip_format_spec(expr_str: &str) -> &str {
-    let mut depth = 0i32;
-    for (i, ch) in expr_str.char_indices() {
-        match ch {
-            '(' | '[' | '{' | '<' => depth += 1,
-            ')' | ']' | '}' | '>' => depth -= 1,
-            ':' if depth == 0 => {
-                // Found a top-level colon - everything before is the expression
-                return &expr_str[..i];
-            }
-            _ => {}
-        }
-    }
-    // No format specifier found
-    expr_str
-}
-
 /// Unescape an expression string extracted from an interpolation.
 ///
 /// This handles escape sequences that appear in the interpolated string content
 /// and converts them to the actual characters they represent for Verum parsing.
 ///
 /// For example: `\"hello\"` becomes `"hello"`, `\\n` becomes `\n`, etc.
-fn unescape_interpolation_expr(s: &str) -> String {
-    let mut result = String::with_capacity(s.len());
-    let mut chars = s.chars();
+fn unescape_interpolation_expr(s: &str) -> (Text, Maybe<List<u32>>) {
+    if !s.contains('\\') {
+        return (Text::from(s), None);
+    }
 
-    while let Some(ch) = chars.next() {
+    let mut result = Text::with_capacity(s.len());
+    // Each output-byte boundary records its original source-byte boundary.
+    let mut offsets = List::with_capacity(s.len() + 1);
+    offsets.push(0);
+    let append =
+        |result: &mut Text, offsets: &mut List<u32>, ch: char, start: usize, end: usize| {
+            result.push(ch);
+            for byte in 1..ch.len_utf8() {
+                offsets.push((start + byte) as u32);
+            }
+            offsets.push(end as u32);
+        };
+    let mut chars = s.char_indices();
+
+    while let Some((start, ch)) = chars.next() {
         if ch == '\\' {
             match chars.next() {
-                Some('n') => result.push('\n'),
-                Some('r') => result.push('\r'),
-                Some('t') => result.push('\t'),
-                Some('\\') => result.push('\\'),
-                Some('"') => result.push('"'),
-                Some('\'') => result.push('\''),
-                Some('{') => result.push('{'),
-                Some('}') => result.push('}'),
-                Some(other) => {
-                    // Unknown escape sequence - preserve as-is
-                    result.push('\\');
-                    result.push(other);
+                Some((escaped_start, escaped)) => {
+                    let decoded = match escaped {
+                        'n' => Some('\n'),
+                        'r' => Some('\r'),
+                        't' => Some('\t'),
+                        '\\' | '"' | '\'' | '{' | '}' => Some(escaped),
+                        _ => None,
+                    };
+                    if let Some(decoded) = decoded {
+                        append(&mut result, &mut offsets, decoded, start, escaped_start + 1);
+                    } else {
+                        append(&mut result, &mut offsets, '\\', start, start + 1);
+                        append(
+                            &mut result,
+                            &mut offsets,
+                            escaped,
+                            escaped_start,
+                            escaped_start + escaped.len_utf8(),
+                        );
+                    }
                 }
                 None => {
-                    // Trailing backslash - preserve it
-                    result.push('\\');
+                    append(&mut result, &mut offsets, '\\', start, start + 1);
                 }
             }
         } else {
-            result.push(ch);
+            append(&mut result, &mut offsets, ch, start, start + ch.len_utf8());
         }
     }
 
-    result
+    (result, Some(offsets))
 }
 
 #[cfg(test)]
@@ -775,8 +757,8 @@ mod tests {
         let file_id = FileId::new(0);
 
         with_parser("", |parser| {
-            let (parts, exprs) =
-                parse_interpolated_content(parser, content, file_id, false, 0).expect("should parse");
+            let (parts, exprs) = parse_interpolated_content(parser, content, file_id, false, 0)
+                .expect("should parse");
 
             assert_eq!(parts.len(), 2);
             assert_eq!(exprs.len(), 1);
@@ -791,8 +773,8 @@ mod tests {
         let file_id = FileId::new(0);
 
         with_parser("", |parser| {
-            let (parts, exprs) =
-                parse_interpolated_content(parser, content, file_id, false, 0).expect("should parse");
+            let (parts, exprs) = parse_interpolated_content(parser, content, file_id, false, 0)
+                .expect("should parse");
 
             assert_eq!(parts.len(), 4);
             assert_eq!(exprs.len(), 3);
@@ -809,8 +791,8 @@ mod tests {
         let file_id = FileId::new(0);
 
         with_parser("", |parser| {
-            let (parts, exprs) =
-                parse_interpolated_content(parser, content, file_id, false, 0).expect("should parse");
+            let (parts, exprs) = parse_interpolated_content(parser, content, file_id, false, 0)
+                .expect("should parse");
 
             assert_eq!(parts.len(), 2);
             assert_eq!(exprs.len(), 1);
@@ -825,8 +807,8 @@ mod tests {
         let file_id = FileId::new(0);
 
         with_parser("", |parser| {
-            let (parts, exprs) =
-                parse_interpolated_content(parser, content, file_id, false, 0).expect("should parse");
+            let (parts, exprs) = parse_interpolated_content(parser, content, file_id, false, 0)
+                .expect("should parse");
 
             assert_eq!(parts.len(), 2);
             assert_eq!(exprs.len(), 1);
@@ -842,8 +824,8 @@ mod tests {
         let file_id = FileId::new(0);
 
         with_parser("", |parser| {
-            let (parts, exprs) =
-                parse_interpolated_content(parser, content, file_id, false, 0).expect("should parse");
+            let (parts, exprs) = parse_interpolated_content(parser, content, file_id, false, 0)
+                .expect("should parse");
 
             assert_eq!(parts.len(), 2);
             assert_eq!(exprs.len(), 1);
@@ -859,8 +841,8 @@ mod tests {
         let file_id = FileId::new(0);
 
         with_parser("", |parser| {
-            let (parts, exprs) =
-                parse_interpolated_content(parser, content, file_id, false, 0).expect("should parse");
+            let (parts, exprs) = parse_interpolated_content(parser, content, file_id, false, 0)
+                .expect("should parse");
 
             assert_eq!(parts.len(), 2);
             assert_eq!(exprs.len(), 1);
@@ -875,8 +857,8 @@ mod tests {
         let file_id = FileId::new(0);
 
         with_parser("", |parser| {
-            let (parts, exprs) =
-                parse_interpolated_content(parser, content, file_id, false, 0).expect("should parse");
+            let (parts, exprs) = parse_interpolated_content(parser, content, file_id, false, 0)
+                .expect("should parse");
 
             assert_eq!(parts.len(), 1);
             assert_eq!(exprs.len(), 0);

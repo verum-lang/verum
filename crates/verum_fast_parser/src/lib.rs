@@ -402,10 +402,9 @@ impl FastParser {
 
     /// Reject input the parser stopped short of consuming.
     ///
-    /// The whole-string entry points below promise something the token-slice
-    /// entry points do not: that *this text* is an expression, or a type.
-    /// The caller hands over a string and gets back a node -- it has no
-    /// stream to inspect, so a parse that stopped halfway is indistinguishable
+    /// Complete string, token-slice and interpolation entry points promise
+    /// that the whole fragment is one construct. The caller has no stream to
+    /// inspect, so a parse that stopped halfway is indistinguishable
     /// from one that succeeded. Without this check `parse_expr_str` returns
     /// `Ok` for `mat#[[1, 2]]` having read only the composite `mat#[[1, 2]`
     /// -- a literal whose content is the unbalanced `[1, 2` -- and the caller
@@ -422,20 +421,9 @@ impl FastParser {
     /// The error names the first unconsumed token, which is where the
     /// accepted prefix ended -- the one position that explains the refusal.
     fn require_input_consumed(parser: &RecursiveParser<'_>) -> ParseResult<()> {
-        if parser.stream.at_end() {
-            return Ok(());
-        }
-
-        let trailing = parser.stream.current_span();
-        let err = match parser.stream.peek() {
-            Some(token) => ParseError::unexpected(&[TokenKind::Eof], token.clone()),
-            // `at_end()` is false, so `peek()` is `Some`; this arm is
-            // unreachable and kept only to avoid an unwrap.
-            None => ParseError::unexpected_eof(&[TokenKind::Eof], trailing),
-        }
-        .with_help("this entry point parses the whole string; the text after this point is not part of the construct");
-
-        Err(List::from(vec![err]))
+        parser
+            .require_input_consumed()
+            .map_err(|error| List::from(vec![error]))
     }
 
     /// Parse a single expression from a string.

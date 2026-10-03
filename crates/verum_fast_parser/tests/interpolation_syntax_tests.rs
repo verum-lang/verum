@@ -181,15 +181,22 @@ fn test_regex_string_with_interpolation() {
 
 #[test]
 fn test_regex_string_complex_pattern() {
-    // Complex regex patterns
-    let source = r#"
-        fn test() {
-            let url_pattern = rx"https?://(?:www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b(?:[-a-zA-Z0-9()@:%_\+.~#?&/=]*)";
-        }
-    "#;
-
-    let items = parse(source).expect("parsing failed");
-    assert!(!items.is_empty(), "Should parse successfully");
+    // Literal quantifier braces are doubled in an interpolated string.
+    // Before T1418, `{1,256}` parsed as the expression `1` and silently
+    // discarded `,256`; accepting the file did not preserve the regex.
+    let source = r#"rx"https?://(?:www\\.)?[-a-zA-Z0-9@:%._\\+~#=]{{1,256}}\\.[a-zA-Z0-9()]{{1,6}}\\b(?:[-a-zA-Z0-9()@:%_\\+.~#?&/=]*)""#;
+    let expr = VerumParser::new()
+        .parse_expr_str(source, FileId::new(0))
+        .expect("escaped quantifiers must parse");
+    let ExprKind::InterpolatedString { parts, exprs, .. } = expr.kind else {
+        panic!("expected regex interpolation");
+    };
+    assert!(exprs.is_empty(), "quantifiers must remain literal text");
+    assert_eq!(parts.len(), 1);
+    assert_eq!(
+        parts[0].as_str(),
+        r"https?://(?:www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b(?:[-a-zA-Z0-9()@:%_\+.~#?&/=]*)"
+    );
 }
 
 // ============================================================================

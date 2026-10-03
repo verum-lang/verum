@@ -16,6 +16,22 @@ The Verum parser transforms source code into an Abstract Syntax Tree (AST) follo
 
 ## Architecture
 
+### Complete fragment parsing
+
+The expression, type and single-item entry points consume the entire supplied
+fragment. String interpolations use the same completion check: `f"x={a + 1}"`
+is valid, while `f"x={a + 1 garbage}"` reports `E005` at `garbage`.
+This applies to format strings, raw multiline strings and safe interpolation
+handlers, including `@raw`. Whitespace and escaped text retain source byte
+positions in diagnostics. Format specifications such as `f"{a:04x}"` continue
+to wrap the expression with formatter calls.
+
+The shared check lives in `RecursiveParser::require_input_consumed`;
+`safe_interpolation.rs` applies it before returning an interpolated expression.
+Regression tests are in `tests/interpolation_consumption_tests.rs` and the
+`interpolation_*.vr` specs under `vcs/specs/L0-critical/parser/expressions/literals/`.
+
+
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                         PUBLIC API (lib.rs)                             │
