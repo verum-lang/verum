@@ -1,0 +1,51 @@
+// @test: differential
+// @level: L0
+// @tier: all
+// @timeout: 180000
+// @tags: async, await, future, protocols, associated-types
+// @expected-stdout-begin
+// ready=7 error=5 wrote=41 output=7 eager=7
+// @expected-stdout-end
+// @expected-exit: 0
+
+mount core.async.future.{Future};
+mount core.async.poll.{Poll};
+mount core.async.waker.{Context};
+
+type AnswerFuture is { pending: Int, value: Int };
+implement Future for AnswerFuture {
+    type Output = Result<Int, Int>;
+    fn poll(&mut self, _cx: &mut Context) -> Poll<Result<Int, Int>> {
+        if self.pending > 0 {
+            self.pending = self.pending - 1;
+            Poll.Pending
+        } else if self.value > 0 {
+            Poll.Ready(Result.Ok(self.value))
+        } else { Poll.Ready(Result.Err(5)) }
+    }
+}
+
+type OutputRecord is { padding: Int, answer: Int };
+type Writer is { target: &mut Int, answer: Int };
+implement Future for Writer {
+    type Output = OutputRecord;
+    fn poll(&mut self, _cx: &mut Context) -> Poll<OutputRecord> {
+        *self.target = 41;
+        Poll.Ready(OutputRecord { padding: 99, answer: self.answer })
+    }
+}
+
+async fn eager() -> Int { 7 }
+
+fn main() {
+    let ready = match (AnswerFuture { pending: 3, value: 7 }.await) {
+        Result.Ok(n) => n, Result.Err(_) => 1000,
+    };
+    let error = match (AnswerFuture { pending: 0, value: 0 }.await) {
+        Result.Ok(_) => 1000, Result.Err(n) => n,
+    };
+    let mut value = 0;
+    let output = Writer { target: &mut value, answer: 7 }.await;
+    let eager_value = eager().await;
+    print(f"ready={ready} error={error} wrote={value} output={output.answer} eager={eager_value}");
+}

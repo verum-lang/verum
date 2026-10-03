@@ -25738,6 +25738,28 @@ impl VbcCodegen {
             let base = t.split('<').next().unwrap_or(t);
             base == "TaskHandle" || base == "Future"
         };
+        if let Some(type_name) = self
+            .extract_expr_type_name(inner)
+            .or_else(|| self.infer_expr_type_name(inner))
+            && let verum_common::Maybe::Some(_) = self.future_implementation(&type_name)
+        {
+            // A protocol implementation is the authority. An unrelated
+            // inherent method named `poll` does not make a value a Future.
+            // ProtocolImpl method IDs imported from archives may still be
+            // archive-local (T0277). Resolve the implementing owner's poll
+            // in the current module; arity alone cannot establish identity.
+            let owner = self.resolve_type_alias(Self::strip_generic_args(&type_name));
+            let poll_id = self
+                .ctx
+                .lookup_function_in_scope(&format!("{owner}.poll"))
+                .filter(|info| info.param_count == 2)
+                .map(|info| info.id.0)
+                .ok_or_else(|| {
+                    CodegenError::internal("Future implementation has no callable poll")
+                })?;
+            return self.compile_protocol_future_await(task_reg, poll_id);
+        }
+
         let needs_runtime_await = matches!(inner.kind, ExprKind::Spawn { .. })
             || self
                 .extract_expr_type_name(inner)
@@ -25756,6 +25778,158 @@ impl VbcCodegen {
         });
 
         self.ctx.free_temp(task_reg);
+        Ok(Some(result))
+    }
+
+    /// Find the carried Future implementation, including aliases and generic instances.
+    fn future_implementation(
+        &self,
+        type_name: &str,
+    ) -> verum_common::Maybe<&crate::types::ProtocolImpl> {
+        use verum_common::Maybe;
+        let base = self.resolve_type_alias(Self::strip_generic_args(type_name));
+        let Some(id) = self.type_name_to_id.get(base.as_str()) else {
+            return Maybe::None;
+        };
+        let Some(descriptor) = self.type_by_id(*id) else {
+            return Maybe::None;
+        };
+        descriptor
+            .protocols
+            .iter()
+            .find(|implementation| {
+                self.type_by_id(crate::types::TypeId(implementation.protocol.0))
+                    .and_then(|protocol| self.ctx.strings.get(protocol.name.0 as usize))
+                    .is_some_and(|name| {
+                        WKP::Future.matches(name.rsplit('.').next().unwrap_or(name))
+                    })
+            })
+            .map_or(Maybe::None, Maybe::Some)
+    }
+
+    /// Carry the associated Output type to consumers of the awaited value.
+    fn future_output_type_name(&self, type_name: &str) -> verum_common::Maybe<verum_common::Text> {
+        use crate::types::TypeRef;
+        use verum_common::{List, Maybe, Text};
+        fn render(codegen: &VbcCodegen, ty: &TypeRef, args: &[String]) -> Maybe<Text> {
+            match ty {
+                TypeRef::Generic(parameter) => args
+                    .get(parameter.0 as usize)
+                    .map_or(Maybe::None, |name| Maybe::Some(Text::from(name.as_str()))),
+                TypeRef::Instantiated { base, args: inner } => {
+                    let Some(base_name) = codegen.type_ref_to_field_name(&TypeRef::Concrete(*base))
+                    else {
+                        return Maybe::None;
+                    };
+                    let mut names: List<Text> = List::new();
+                    for ty in inner {
+                        let Maybe::Some(name) = render(codegen, ty, args) else {
+                            return Maybe::None;
+                        };
+                        names.push(name);
+                    }
+                    Maybe::Some(Text::from(format!("{}<{}>", base_name, names.join(", "))))
+                }
+                _ => codegen
+                    .type_ref_to_field_name(ty)
+                    .map_or(Maybe::None, |name| Maybe::Some(Text::from(name))),
+            }
+        }
+        let Maybe::Some(implementation) = self.future_implementation(type_name) else {
+            return Maybe::None;
+        };
+        let Some((_, output)) = implementation.associated_types.iter().find(|(name, _)| {
+            self.ctx
+                .strings
+                .get(name.0 as usize)
+                .is_some_and(|name| name == "Output")
+        }) else {
+            return Maybe::None;
+        };
+        render(self, output, &Self::split_generic_args(type_name))
+    }
+
+    /// One lowering for interpreter and AOT: poll, yield on Pending, return Ready's payload.
+    /// The driver owns both the waker and Context for the entire poll loop.
+    fn compile_protocol_future_await(
+        &mut self,
+        future: Reg,
+        poll_id: u32,
+    ) -> CodegenResult<Option<Reg>> {
+        let resolve = |canonical: &str, short: &str| {
+            self.ctx
+                .lookup_function_in_scope(canonical)
+                .or_else(|| self.ctx.lookup_function_in_scope(short))
+                .map(|info| info.id.0)
+                .ok_or_else(|| CodegenError::internal(format!("Future await requires {canonical}")))
+        };
+        let noop_id = resolve("core.async.waker.noop_waker", "noop_waker")?;
+        let context_id = resolve("core.async.waker.Context.from_waker", "Context.from_waker")?;
+        let ready_tag =
+            self.lookup_stdlib_variant_tag("Ready", "Poll.Ready", "Poll", "Future await")?;
+
+        let result = self.ctx.alloc_temp();
+        let waker = self.ctx.alloc_temp();
+        let context = self.ctx.alloc_temp();
+        let polled = self.ctx.alloc_temp();
+        let ready = self.ctx.alloc_temp();
+        let args = self.ctx.registers.reserve(2);
+        let cx_arg = Reg(args.0 + 1);
+
+        self.ctx.emit(Instruction::Call {
+            dst: waker,
+            func_id: noop_id,
+            args: RegRange::new(args, 0),
+        });
+        self.ctx.emit(Instruction::RefObj {
+            dst: args,
+            src: waker,
+        });
+        self.ctx.emit(Instruction::Call {
+            dst: context,
+            func_id: context_id,
+            args: RegRange::new(args, 1),
+        });
+        self.ctx.emit(Instruction::RefMut {
+            dst: args,
+            src: future,
+        });
+        self.ctx.emit(Instruction::RefObj {
+            dst: cx_arg,
+            src: context,
+        });
+
+        let poll_label = self.ctx.new_label("await_poll");
+        let ready_label = self.ctx.new_label("await_ready");
+        self.ctx.define_label(&poll_label);
+        self.ctx.emit(Instruction::Call {
+            dst: polled,
+            func_id: poll_id,
+            args: RegRange::new(args, 2),
+        });
+        self.ctx.emit(Instruction::IsVar {
+            dst: ready,
+            value: polled,
+            tag: ready_tag,
+        });
+        self.ctx
+            .emit_forward_jump(&ready_label, |offset| Instruction::JmpIf {
+                cond: ready,
+                offset,
+            });
+        self.ctx.emit(Instruction::AsyncYield);
+        self.ctx
+            .emit_backward_jump(&poll_label, |offset| Instruction::Jmp { offset })?;
+        self.ctx.define_label(&ready_label);
+        self.ctx.emit(Instruction::GetVariantData {
+            dst: result,
+            variant: polled,
+            field: 0,
+        });
+
+        for reg in [future, waker, context, polled, ready, args, cx_arg] {
+            self.ctx.free_temp(reg);
+        }
         Ok(Some(result))
     }
 
@@ -29072,6 +29246,14 @@ impl VbcCodegen {
             // `core.io.stdio.stdout`.
             ExprKind::Await(inner) => {
                 let t = self.extract_expr_type_name(inner);
+                if let Some(ref name) = t
+                    && self.future_implementation(name).is_some()
+                {
+                    return match self.future_output_type_name(name) {
+                        verum_common::Maybe::Some(output) => Some(output.to_string()),
+                        verum_common::Maybe::None => None,
+                    };
+                }
                 // A handle-typed inner means the await RESULT is the
                 // task's payload type, which the bare "TaskHandle"
                 // marker does not carry — return None (honest unknown)
@@ -29080,6 +29262,9 @@ impl VbcCodegen {
                 // a second runtime Await on a non-handle downstream).
                 match t.as_deref().map(|s| s.split('<').next().unwrap_or(s)) {
                     Some("TaskHandle") => None,
+                    Some("Future") => t
+                        .as_deref()
+                        .and_then(|name| Self::split_generic_args(name).into_iter().next()),
                     _ => t,
                 }
             }
