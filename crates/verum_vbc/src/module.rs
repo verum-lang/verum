@@ -1165,6 +1165,21 @@ impl VbcModule {
         self.resolve_band_id(id).unwrap_or(FunctionId(id))
     }
 
+    /// A body under the exact carried name owns that spelling. Historical
+    /// archives can also retain an earlier mount row after a local declaration
+    /// reclaimed it; replaying that row must not replace the declaration.
+    /// Name-resolved placeholders and declarations without a body do not prove
+    /// this ownership. The existing exact-name index keeps repeated alias
+    /// checks bounded; no leaf or suffix lookup participates.
+    pub fn mount_alias_shadowed_by_definition(&self, alias: &str) -> bool {
+        self.function_indices_named(alias).iter().any(|index| {
+            let function = &self.functions[*index as usize];
+            !crate::stub_ranges::is_name_resolved_stub_id(function.id.0)
+                && (function.bytecode_length > 0
+                    || function.instructions.as_ref().is_some_and(|body| !body.is_empty()))
+        })
+    }
+
     /// **T0144** — the qualified callee name the precompile recorded
     /// in [`Self::external_function_names`] for a band/stub reference
     /// id, for diagnostics.
@@ -1198,6 +1213,9 @@ impl VbcModule {
     /// Returns `(real id, canonical spelling)`.
     #[inline]
     pub fn mount_alias_target(&self, alias: &str) -> Option<(FunctionId, &str)> {
+        if self.mount_alias_shadowed_by_definition(alias) {
+            return None;
+        }
         self.mount_aliases.iter().find_map(|(a, fid, canon)| {
             if self.get_string(*a) == Some(alias) {
                 Some((*fid, self.get_string(*canon).unwrap_or("")))

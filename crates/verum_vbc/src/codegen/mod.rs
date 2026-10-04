@@ -855,9 +855,9 @@ pub struct VbcCodegen {
     /// aliases into its own `ctx.functions` before recompiling any
     /// body from this module.
     ///
-    /// Carries `(alias_name, FunctionId)`.  Drained on every
+    /// Carries alias, target ID/name, and source-qualified alias owner. Drained on every
     /// `finalize_module` so the buffer resets between modules.
-    mount_aliases_buffer: Vec<(String, FunctionId, String)>,
+    mount_aliases_buffer: Vec<(String, FunctionId, String, String)>,
     /// Module-qualified re-export keys (`<module>.<alias>`) that a MOUNT
     /// created — the provenance half of MOUNT-VS-DECL-KEY-1 (T0670).
     /// Written only by [`Self::register_mount_qualified_key`], read only
@@ -9035,6 +9035,9 @@ impl VbcCodegen {
         self.ffi_contract_exprs.clear();
         // Clear pending imports
         self.pending_imports.clear();
+        self.mount_aliases_buffer.clear();
+        self.mount_installed_qualified_keys.clear();
+        self.decl_installed_qualified_keys.clear();
         // Clear variant collisions (but typically these persist across modules)
         // Don't clear - collisions should accumulate across all compiled types
         // Clear field name indices
@@ -10974,6 +10977,12 @@ impl VbcCodegen {
             self.ctx.unit_declared_fns.insert(name.clone());
         }
         self.ctx.register_function(name.clone(), info.clone());
+        // Preserve declaration provenance even when context registration has
+        // already mirrored its full key, or the configured root is `main`.
+        if self.nested_function_scope.is_empty() {
+            let owner = self.mount_alias_source_key(&name, self.ctx.current_source_module.as_deref());
+            self.decl_installed_qualified_keys.insert(owner);
+        }
 
         // Also register under the function's fully-qualified module path, so
         // cross-module calls like `sys.darwin.tls.ctx_get(slot)` (and the
@@ -11108,17 +11117,16 @@ impl VbcCodegen {
             if holder.is_none() {
                 self.ctx
                     .register_function(dot_qualified.clone(), info.clone());
-                self.decl_installed_qualified_keys
-                    .insert(dot_qualified.clone());
             } else if mount_held || stub_held || !local_held {
                 self.ctx
                     .register_function_authoritative(dot_qualified.clone(), info.clone());
                 // The definition owns it now; a later arity overload must
                 // see it as declaration-held, not mount-held.
                 self.mount_installed_qualified_keys.remove(&dot_qualified);
-                self.decl_installed_qualified_keys
-                    .insert(dot_qualified.clone());
             }
+            // The context may already have mirrored this very declaration
+            // under its qualified key. That still proves declaration ownership.
+            self.decl_installed_qualified_keys.insert(dot_qualified.clone());
             if self.ctx.lookup_function(&colon_qualified).is_none() {
                 self.ctx.register_function(colon_qualified, info.clone());
             }
@@ -11730,6 +11738,15 @@ impl VbcCodegen {
         }
     }
 
+    fn mount_alias_source_key(&self, name: &str, source_module: Option<&str>) -> String {
+        let owner = source_module.unwrap_or(&self.config.module_name);
+        if name.contains('.') || name.contains("::") || owner.is_empty() || owner == "main" {
+            name.to_string()
+        } else {
+            format!("{owner}.{name}")
+        }
+    }
+
     fn bind_mounted_function(
         &mut self,
         alias_name: &str,
@@ -11787,9 +11804,10 @@ impl VbcCodegen {
             // unmappable at load — the carried name is the authority,
             // the fid a same-entry fast path.
             self.mount_aliases_buffer.push((
-                qualified_alias,
+                qualified_alias.clone(),
                 fid,
                 resolved_key.to_string(),
+                qualified_alias,
             ));
         }
         self.ctx
@@ -11807,6 +11825,7 @@ impl VbcCodegen {
                 alias_name.to_string(),
                 fid,
                 resolved_key.to_string(),
+                self.mount_alias_source_key(alias_name, self.ctx.current_source_module.as_deref()),
             ));
         }
     }
@@ -11834,9 +11853,10 @@ impl VbcCodegen {
             let qualified_alias = format!("{}.{}", scope, alias_name);
             self.register_mount_qualified_key(&qualified_alias, func_info.clone());
             self.mount_aliases_buffer.push((
-                qualified_alias,
+                qualified_alias.clone(),
                 fid,
                 resolved_key.to_string(),
+                qualified_alias,
             ));
         }
         self.ctx
@@ -11852,6 +11872,7 @@ impl VbcCodegen {
                 alias_name.to_string(),
                 fid,
                 resolved_key.to_string(),
+                self.mount_alias_source_key(alias_name, owning_module),
             ));
         }
     }
@@ -12528,13 +12549,15 @@ impl VbcCodegen {
                             qualified_alias.clone(),
                             placeholder,
                             anchored,
+                            qualified_alias.clone(),
                         ));
                     }
                     if qualified_alias != written {
                         self.mount_aliases_buffer.push((
-                            qualified_alias,
+                            qualified_alias.clone(),
                             placeholder,
                             written,
+                            qualified_alias,
                         ));
                     }
                 }
@@ -25677,7 +25700,13 @@ impl VbcCodegen {
             let drained = std::mem::take(&mut self.mount_aliases_buffer);
             let mut emitted: Vec<(StringId, FunctionId, StringId)> =
                 Vec::with_capacity(drained.len());
-            for (alias_name, fid, target_key) in drained {
+            for (alias_name, fid, target_key, source_alias) in drained {
+                // A source declaration may reclaim an imported spelling after
+                // its alias was captured. Persist the final declaration owner,
+                // not an earlier mount that would overwrite it during replay.
+                if self.decl_installed_qualified_keys.contains(&source_alias) {
+                    continue;
+                }
                 if !seen.insert((alias_name.clone(), fid.0, target_key.clone())) {
                     continue;
                 }

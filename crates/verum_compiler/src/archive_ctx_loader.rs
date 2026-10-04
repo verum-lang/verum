@@ -3437,7 +3437,7 @@ impl ArchiveCtxCache {
                 continue;
             };
             primary_alias_triples
-                .extend(collect_mount_alias_triples(module, pruned_remap));
+                .extend(collect_mount_alias_triples(module, entry_name, pruned_remap));
         }
         install_mount_alias_archive_names(&primary_alias_triples, codegen);
         let t_types = std::time::Instant::now();
@@ -3735,9 +3735,9 @@ impl ArchiveCtxCache {
                 Option<verum_vbc::module::FunctionId>,
                 String,
             )> = Vec::new();
-            for (i, (_entry_name, module)) in matched_modules.iter().enumerate() {
+            for (i, (entry_name, module)) in matched_modules.iter().enumerate() {
                 pass2_alias_triples
-                    .extend(collect_mount_alias_triples(module, &pass2_remaps[i]));
+                    .extend(collect_mount_alias_triples(module, entry_name, &pass2_remaps[i]));
             }
             install_mount_alias_archive_names(&pass2_alias_triples, codegen);
             install_mount_alias_archive_names(&primary_alias_triples, codegen);
@@ -3894,23 +3894,19 @@ fn replay_mount_aliases(
     // Pre-resolve (alias_name, fid?, target_key) triples in a single
     // read pass so the subsequent register loop can hold &mut
     // codegen.ctx without aliasing the immutable module borrow.
-    let pairs = collect_mount_alias_triples(module, func_id_remap);
+    let pairs = collect_mount_alias_triples(module, entry_name, func_id_remap);
     if pairs.is_empty() {
         return;
     }
     let ctx = codegen.ctx_mut();
     for (alias_name, user_fid, target_key) in pairs {
-        let info = match user_fid
-            .and_then(|fid| ctx.lookup_function_by_id(fid))
-            .or_else(|| {
-                // Name-authoritative fallback: the target's canonical
-                // registry key, registered when ITS entry loaded.
-                if target_key.is_empty() {
-                    None
-                } else {
-                    ctx.lookup_function(&target_key)
-                }
-            })
+        // The carried target name remains authoritative across entry-local IDs.
+        let named = if target_key.is_empty() {
+            None
+        } else {
+            ctx.lookup_function(&target_key)
+        };
+        let info = match named
             .or_else(|| {
                 // ROOTED fallback. `mount_aliases` carries the target in
                 // the BAKE-TIME spelling (`sys.darwin.errno.is_retryable`),
@@ -3934,7 +3930,8 @@ fn replay_mount_aliases(
                         ctx.lookup_function(&rooted)
                     }
                 }
-            }) {
+            })
+            .or_else(|| user_fid.and_then(|fid| ctx.lookup_function_by_id(fid))) {
             Some(info) => info.clone(),
             None => continue,
         };
@@ -3957,6 +3954,7 @@ fn replay_mount_aliases(
 /// install).
 fn collect_mount_alias_triples(
     module: &VbcModule,
+    entry_name: &str,
     func_id_remap: &std::collections::HashMap<u32, verum_vbc::module::FunctionId>,
 ) -> Vec<(String, Option<verum_vbc::module::FunctionId>, String)> {
     let mut triples = Vec::with_capacity(module.mount_aliases.len());
@@ -3965,11 +3963,26 @@ fn collect_mount_alias_triples(
             Some(s) if !s.is_empty() => s.to_string(),
             _ => continue,
         };
+        if module.mount_alias_shadowed_by_definition(&alias_name) {
+            continue;
+        }
         let target_key = module
             .get_string(*target_str_id)
             .unwrap_or("")
             .to_string();
-        let user_fid = func_id_remap.get(&archive_fid.0).copied();
+        // Numeric IDs are local to an archive entry. A foreign mount can
+        // carry the same number as an unrelated local descriptor; only its
+        // carried exact name can prove that the numeric fast path is local.
+        let same_entry = target_key.is_empty()
+            || module.get_function(*archive_fid)
+                .filter(|function| function.id == *archive_fid)
+                .and_then(|function| module.get_string(function.name))
+                .is_some_and(|name| name == target_key
+                    || merge_module_and_simple_name(entry_name, name)
+                        == merge_module_and_simple_name(entry_name, &target_key));
+        let user_fid = same_entry
+            .then(|| func_id_remap.get(&archive_fid.0).copied())
+            .flatten();
         if user_fid.is_none() && target_key.is_empty() {
             continue;
         }
