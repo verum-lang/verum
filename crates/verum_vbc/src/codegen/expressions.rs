@@ -27933,9 +27933,10 @@ impl VbcCodegen {
         param_type_names: &[String],
         args: &[Expr],
     ) -> Option<String> {
-        let is_generic = |s: &str| -> bool {
-            s.len() <= 2 && s.chars().all(|c| c.is_uppercase() || c.is_numeric())
-        };
+        // Actual arguments belong to the caller's scope. A declared type
+        // parameter is unresolved there; a short nominal such as AB is
+        // concrete regardless of its spelling (T1506).
+        let is_generic = |s: &str| self.ctx.generic_type_params.contains(s);
         let strip = |s: &str| -> String {
             let t = s.trim();
             let t = t.strip_prefix("&mut ").unwrap_or(t);

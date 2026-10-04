@@ -6,10 +6,26 @@ use verum_vbc::codegen::{CodegenConfig, VbcCodegen};
 use verum_vbc::interpreter::Interpreter;
 
 fn run(source: &str) -> i64 {
-    let ast = Parser::new(source).parse_module().expect("parse");
-    let module = VbcCodegen::with_config(CodegenConfig::new("generic_return_pins"))
-        .compile_module(&ast)
-        .expect("compile");
+    run_with_result_type(source, None)
+}
+
+fn run_with_result_type(source: &str, result_type: Option<&str>) -> i64 {
+    // The public report snapshots the previous function when the next
+    // function starts; flush probe's bindings before reading that report.
+    let source = format!("{source}\nfn after_probe() {{}}\n");
+    let ast = Parser::new(&source).parse_module().expect("parse");
+    let mut codegen = VbcCodegen::with_config(CodegenConfig::new("generic_return_pins"));
+    let module = codegen.compile_module(&ast).expect("compile");
+    if let Some(result_type) = result_type {
+        assert_eq!(
+            codegen
+                .variable_type_names()
+                .get("result")
+                .map(String::as_str),
+            Some(result_type),
+            "the public inferred-type report must preserve the nominal identity"
+        );
+    }
     let entry = module
         .functions
         .iter()
@@ -186,5 +202,43 @@ fn probe() -> Int {
 }
 "#),
         48
+    );
+}
+
+#[test]
+fn a_short_uppercase_nominal_is_a_concrete_generic_argument() {
+    assert_eq!(
+        run_with_result_type(
+            r#"
+type Decoy is { answer: Int, padding: Int, extra: Int };
+type AB is { padding: Int, answer: Int };
+fn identity<Element>(value: Element) -> Element { value }
+fn probe() -> Int {
+    let result = identity(AB { padding: 99, answer: 7 });
+    result.answer
+}
+"#,
+            Some("AB")
+        ),
+        7
+    );
+}
+
+#[test]
+fn a_container_binds_a_short_uppercase_nominal_argument() {
+    assert_eq!(
+        run_with_result_type(
+            r#"
+type Decoy is { answer: Int, padding: Int, extra: Int };
+type AB is { padding: Int, answer: Int };
+fn first<Element>(values: List<Element>) -> Element { values[0] }
+fn probe() -> Int {
+    let result = first([AB { padding: 99, answer: 7 }]);
+    result.answer
+}
+"#,
+            Some("AB")
+        ),
+        7
     );
 }
