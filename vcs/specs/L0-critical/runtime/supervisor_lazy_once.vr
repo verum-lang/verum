@@ -1,0 +1,41 @@
+// @test: differential
+// @level: L0
+// @tier: 0,1
+// @timeout: 1200000
+// @tags: runtime, supervisor, static, once, regression
+// @expected-exit: 0
+// @expected-stdout: once=37 count=1 root=0
+// T1542: a static OnceLock initializes its payload on first access only.
+// Exercise the same API as the global supervisor, then its public accessor.
+
+mount core.sync.once.OnceLock;
+mount core.runtime.supervisor.root_supervisor;
+
+static mut SUPERVISOR_ONCE_INIT_COUNT: Int = 0;
+static SUPERVISOR_ONCE_CELL: OnceLock<Int> = OnceLock.new();
+
+fn supervisor_once_initialize() -> Int {
+    SUPERVISOR_ONCE_INIT_COUNT = SUPERVISOR_ONCE_INIT_COUNT + 1;
+    37
+}
+
+fn main() {
+    assert_eq(SUPERVISOR_ONCE_INIT_COUNT, 0);
+    assert(!SUPERVISOR_ONCE_CELL.is_initialized());
+    let first: &Int = SUPERVISOR_ONCE_CELL.get_or_init(supervisor_once_initialize);
+    let second: &Int = SUPERVISOR_ONCE_CELL.get_or_init(|| {
+        SUPERVISOR_ONCE_INIT_COUNT = SUPERVISOR_ONCE_INIT_COUNT + 100;
+        99
+    });
+    assert_eq(*first, 37);
+    assert_eq(*second, 37);
+    assert_eq(SUPERVISOR_ONCE_INIT_COUNT, 1);
+
+    let root = root_supervisor();
+    let again = root_supervisor();
+    assert_eq(root.id().raw(), 0_u64);
+    assert_eq(again.id().raw(), 0_u64);
+    assert_eq(root.name(), "root");
+    assert_eq(again.name(), "root");
+    print("once=37 count=1 root=0");
+}

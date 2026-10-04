@@ -76,6 +76,7 @@ mount core.intrinsics.{
     async_sleep_ms as async_sleep_ms_intrinsic,
 };
 mount sync.{AtomicBool, AtomicU8, AtomicU16, AtomicU64, MemoryOrdering, Mutex, RwLock};
+mount core.sync.once.OnceLock;
 mount core.{List, Map, Text, Maybe, Result, TypeId};
 mount async.{Future, Task, JoinHandle};
 mount async.task.spawn_detached;
@@ -1633,13 +1634,13 @@ implement ChildState {
 // =============================================================================
 
 /// Global root supervisor (lazily initialized)
-static ROOT_SUPERVISOR: Lazy<SupervisorHandle> = Lazy.new(|| {
-    SupervisorHandle.root(SupervisorConfig.one_for_one("root"))
-});
+static ROOT_SUPERVISOR: OnceLock<SupervisorHandle> = OnceLock.new();
 
 /// Get the global root supervisor
 public fn root_supervisor() -> &SupervisorHandle {
-    &*ROOT_SUPERVISOR
+    ROOT_SUPERVISOR.get_or_init(|| {
+        SupervisorHandle.root(SupervisorConfig.one_for_one("root"))
+    })
 }
 
 /// Spawn a supervised task with default specification

@@ -1,0 +1,14 @@
+// @test: differential
+// @level: L0
+// @tier: 0,1
+// @timeout: 1200000
+// @tags: runtime, formatting, static, regression
+// @expected-exit: 0
+// @expected-stdout: number=37
+// T1542: formatting currently imports Display implementations from runtime.
+// Its global constructors must remain executable before this program's main.
+
+fn main() {
+    let number = 37;
+    print(f"number={number}");
+}
