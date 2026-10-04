@@ -27,11 +27,37 @@ harness:
 * `PoisonError<T>` constructor + `get_ref` / `into_inner` accessors
   on the type-parameterised inner-value field.
 
-Live `lock()` / `try_lock()` blocking semantics + contention
-behaviour + `MutexGuard` `Deref`/`DerefMut` over the protected data
-+ `Drop` releasing the futex require an actually-running concurrent
-harness — tested at the language level in
-`vcs/specs/L2-standard/sync/mutex/`.
+Contention and futex wait/wake behavior require a concurrent harness.
+Uncontended acquisition, `MutexGuard` access, and whether destruction
+releases a lock can be checked sequentially; they must not be excluded
+from coverage merely because no concurrent harness ran.
+
+## Current status — partial, measured 2026-10-04
+
+The historical data-shape and poison-state coverage below does not
+establish the guard lifetime contract. A sequential source control
+observes one mutex while its guard is live, after scope exit, and a
+second mutex after explicit `drop(guard)`. The expected lock states are
+`true, false, false`.
+
+| Measurement | Observed lock states | Verdict |
+|---|---|---|
+| Stage7 integrated interpreter, complete combined program | `false, false, false` | FAIL: the lock is already reported released inside the guard scope |
+| Earlier native source control described in the lifecycle note | `1, 1, 1` | FAIL: scope exit and explicit drop did not release the lock |
+| Stage6 native combined program | Not reached | NOT_RUN: execution failed during supervisor borrowed-result access before the mutex phase |
+
+The stage7 combined program completes with exit zero and its independent
+pointer control passes. Neither result turns the failed mutex-state
+assertion into a pass. The earlier native failure remains evidence of
+incomplete cleanup, not a current-snapshot native result. No new native
+mutex run or full `core-tests/sync/mutex` suite was performed for this
+status correction, and no historical test totals have been revised.
+
+The common ownership and destruction boundary remains open in
+T1538/T1540. The source control, explanation of the premature interpreter
+cleanup, and native cleanup limitation are recorded in
+[`native-drop-lifecycle-gap.md`](../../../docs/architecture/native-drop-lifecycle-gap.md).
+Concurrent contention coverage remains separate.
 
 ## 1. Cross-stdlib usage
 
@@ -62,10 +88,13 @@ harness — tested at the language level in
 
 ## 3. Language-implementation gaps
 
-### §3.1 Live lock / try_lock require multi-threaded harness
+### §3.1 Sequential guard lifetime and concurrent contention are separate
 
-Cannot be tested at the data-shape level. The futex wait/wake
-machinery is exercised at `vcs/specs/L2-standard/sync/mutex/`.
+Construction and poison-state tests do not establish guard lifetime.
+Sequential acquisition, scope-exit release and explicit drop are
+measurable without additional threads; their current failure is recorded
+above. Contention and futex wait/wake require the concurrent harness at
+`vcs/specs/L2-standard/sync/mutex/`.
 
 ### §3.2 Poisoning is *advisory*, not panic-driven
 
@@ -120,7 +149,8 @@ the two — pinned in `unit_test.vr` §6 + `property_test.vr` §C.
 
 | Item | Scope | Estimated effort |
 |---|---|---|
-| Live lock/unlock + contention tests | `vcs/specs/L2-standard/sync/mutex/` | 1 day |
+| Sequential guard lifetime | T1538/T1540; preserve inside/scope-exit/explicit-drop observations | open |
+| Concurrent lock contention tests | `vcs/specs/L2-standard/sync/mutex/` | 1 day |
 | Auto-poisoning on panic (Rust-style) | language-level: thread-panicking predicate + codegen guard insertion | multi-day |
 | `Default<T>` flip from `Mutex.new(0)` → `Mutex.new(T.default())` | gated on task #17 close | 30 min once unblocked |
 | `MutexGuard.Deref`/`DerefMut` runtime verification | `vcs/specs/L2-standard/sync/mutex/` | language-level |
