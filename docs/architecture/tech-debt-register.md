@@ -372,9 +372,41 @@ Actual archive/execution evidence remains mixed:
 - All 16 real retry-unit tests pass, including the four RetryBudget cases.
   Qualified import checking accepts AtomicBool and rejects Int with E400.
 
-Main integration is withheld while these newly reached native/bootstrap
-boundaries are repaired; the passing unit counts do not replace their
-execution verdicts.
+The following source repairs are committed after that executable snapshot:
+
+- T1228 keeps independent type-method receiver facts across `GetF` and derives
+  the destination type from its exact nominal field declaration. Seven new
+  controls cover source execution, references, generic owners and stale facts.
+- T1536 resolves canonical sums before their defining bootstrap module exists
+  and constructs Result using descriptor-owned tags or checked dotted
+  constructor registrations. Eight bootstrap controls include the actual
+  `core/intrinsics/control.vr` caller sequence.
+- T1545 shares declared Deref field-owner inference with field emission and
+  preserves qualified field spellings in archives. Eight controls cover
+  ordinary/generic/Deref chains, sibling import order and missing owners.
+- T1546 preserves canonical scalar IDs across archive imports and bootstrap
+  dependency maps. Six import controls and four source-bootstrap controls
+  cover signatures, protocol metadata, aliases and same-named nominal types.
+  The native failure was measured as `core.base` Bool ID 1 becoming user ID
+  1097, followed by Result predicates printing integers. The permanent VCS
+  control also requires unrelated same-named Int methods to print 9001/9002.
+
+Execution acceptance for these changes still requires a fresh coherent CLI.
+The first verification build at `b576b2eb1` was stopped after independent
+review found that T1545's new generic-field inference exposed the existing
+text substitution helper to qualified nominal names: an owner parameter
+`Item` could rewrite `alpha.Item`. The correction must also retain structured
+owner arguments and locally bound function-type parameters; passing simple
+field-chain tests does not cover those forms.
+
+T1547 separately records a source declaration defect: Byte/UInt8 and
+USize/ISize impls attach to whichever alias descriptor was collected first.
+A source-to-VBC-to-wire probe fails in all four alias/order combinations and
+passes two Bool/Int controls. Importing already-correct alias carriers is not
+proof that source declaration attachment works.
+
+Main integration remains pending this execution validation; the passing unit
+counts do not replace the actual program verdicts.
 
 A separate read-only audit found the remaining nonexistent `Lazy.new/get` use
 in `configuration.builtin_registry`. T1544 tracks its once-owned registry,
