@@ -6675,13 +6675,38 @@ impl VbcCodegen {
 
     fn render_field_type_ref(&self, ty: &crate::types::TypeRef, qualified: bool) -> Option<String> {
         use crate::types::{CbgrTier, TypeRef};
+        let canonical_name = |id: crate::types::TypeId| {
+            let name = id.well_known_name()?;
+            if self.nominal_type_id(name) == Some(id) {
+                return Some(name.to_owned());
+            }
+            // A local declaration may own the bare spelling. Canonical IDs
+            // retain their canonical module instead of becoming that local type.
+            let known = verum_common::well_known_types::WellKnownType::from_name(name)?;
+            known.canonical_archive_modules().iter().find_map(|owner| {
+                let qualified = format!("{owner}.{name}");
+                (self.nominal_type_id(&qualified) == Some(id)).then_some(qualified)
+            })
+        };
         let nominal_name = |id| {
             let descriptor = self.type_by_id(id)?;
             let name = self.ctx.strings.get(descriptor.name.0 as usize)?;
             if qualified {
-                let owner = descriptor.origin_module
-                    .and_then(|id| self.ctx.strings.get(id.0 as usize))?;
-                Some(crate::module::qualify_module_name(owner, name))
+                if let Some(owner) = descriptor.origin_module
+                    .and_then(|id| self.ctx.strings.get(id.0 as usize))
+                {
+                    Some(crate::module::qualify_module_name(owner, name))
+                } else if self.local_concrete_types.contains(name)
+                    && self.type_name_to_id.get(name) == Some(&id)
+                    && !self.archive_claimed_type_ids.contains(&id.0)
+                {
+                    // Standalone source declarations can lack a module origin.
+                    // Their exact local declaration owns this name; imported
+                    // descriptors without an origin do not gain that authority.
+                    Some(name.clone())
+                } else {
+                    None
+                }
             } else {
                 Some(name.clone())
             }
@@ -6691,13 +6716,14 @@ impl VbcCodegen {
                 if let Some(prim) = self.primitive_type_id_to_name(*tid) {
                     return Some(prim.to_string());
                 }
-                nominal_name(*tid)
+                nominal_name(*tid).or_else(|| canonical_name(*tid))
             }
             TypeRef::Instantiated { base, args } => {
                 let base_name = self
                     .primitive_type_id_to_name(*base)
                     .map(|s| s.to_string())
-                    .or_else(|| nominal_name(*base))?;
+                    .or_else(|| nominal_name(*base))
+                    .or_else(|| canonical_name(*base))?;
                 if args.is_empty() {
                     Some(base_name)
                 } else {
@@ -9038,6 +9064,7 @@ impl VbcCodegen {
         self.mount_aliases_buffer.clear();
         self.mount_installed_qualified_keys.clear();
         self.decl_installed_qualified_keys.clear();
+        self.local_concrete_types.clear();
         // Clear variant collisions (but typically these persist across modules)
         // Don't clear - collisions should accumulate across all compiled types
         // Clear field name indices

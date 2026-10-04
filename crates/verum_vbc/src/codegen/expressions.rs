@@ -728,6 +728,67 @@ impl VbcCodegen {
         agreed
     }
 
+    /// The scrutinee's nominal descriptor owns each payload slot. A known
+    /// descriptor with an unresolved slot is distinct from absent metadata:
+    /// callers must not replace the former with a sibling constructor cache.
+    fn declared_variant_payload_type(
+        &self,
+        pattern_path: &str,
+        field: usize,
+    ) -> Option<Option<String>> {
+        let scrutinee = Self::strip_wrapper_type(self.ctx.match_scrutinee_type.as_deref()?);
+        let base = Self::strip_generic_args(scrutinee);
+        let owner = self.nominal_type_id(base)?;
+        let descriptor = self.type_by_id(owner)?;
+        if descriptor.kind != crate::types::TypeKind::Sum {
+            return None;
+        }
+        let path = self.resolve_variant_path_alias(&pattern_path.replace("::", "."));
+        let variant_name = if let Some((parent, variant)) = path.rsplit_once('.') {
+            if self.nominal_type_id(parent) != Some(owner) {
+                return Some(None);
+            }
+            variant
+        } else {
+            path.as_str()
+        };
+        let Some(variant) = descriptor.variants.iter().find(|variant| {
+            self.ctx.strings.get(variant.name.0 as usize)
+                .is_some_and(|name| name == variant_name)
+        }) else {
+            return Some(None);
+        };
+        let Some(payload) = variant.fields.get(field)
+            .map(|field| &field.type_ref)
+            .or_else(|| (field == 0).then_some(variant.payload.as_ref()).flatten())
+        else {
+            return Some(None);
+        };
+        let mut substitution = crate::mono::TypeSubstitution::empty();
+        if !descriptor.type_params.is_empty() {
+            let Ok(parsed) = verum_fast_parser::Parser::new(scrutinee).parse_type() else {
+                return Some(None);
+            };
+            let verum_ast::TypeKind::Generic { args, .. } = &parsed.kind else {
+                return Some(None);
+            };
+            if args.len() != descriptor.type_params.len() {
+                return Some(None);
+            }
+            for (parameter, argument) in descriptor.type_params.iter().zip(args.iter()) {
+                if let verum_ast::GenericArg::Type(ty) = argument
+                    && let Some(actual) = self.type_name_to_type_ref_mono(
+                        &Self::render_field_type_name(ty, true),
+                    )
+                {
+                    substitution.bind(parameter.id, actual);
+                }
+            }
+        }
+        let payload = substitution.apply(payload);
+        Some(self.render_field_type_ref(&payload, true))
+    }
+
     /// **MATCH-DESTRUCTURE-VARIANT-OFFSET-1 (T0243).** The type-name KEY a
     /// record-variant PATTERN's field-slot resolution must hand to
     /// `resolve_field_index`: the variant QUALIFIED by its declaring
@@ -21479,7 +21540,11 @@ impl VbcCodegen {
                                             && s.chars().all(|c| c.is_uppercase() || c.is_numeric())
                                     };
 
-                                    let field_type: Option<String> = {
+                                    let field_type: Option<String> = if let Some(declared) =
+                                        self.declared_variant_payload_type(&variant_name, i)
+                                    {
+                                        declared
+                                    } else {
                                         // Check if we have concrete (non-generic) payload types
                                         let concrete_payload = payload_types
                                             .as_ref()
