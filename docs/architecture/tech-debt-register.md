@@ -399,6 +399,26 @@ text substitution helper to qualified nominal names: an owner parameter
 owner arguments and locally bound function-type parameters; passing simple
 field-chain tests does not cover those forms.
 
+T1545's follow-up, `0634cb100`, now parses the carried type syntax and
+substitutes declaration-owned root parameters with binder-aware source-span
+edits. Qualified nominal paths and Unicode remain intact; tuple/function
+arguments are not split at nested commas. A local function-type binder masks
+an outer parameter, and capture or an unsupported carrier returns unknown
+instead of a partially rewritten type. Source field registration also keeps
+qualified names before inference consumes them. The new parser helper is
+included in the stdlib bake fingerprint. The existing eight field controls
+passed while seven added regressions failed before this correction; the
+completed change passes **61 focused Cargo tests**. Parser identifier spans
+that point after the consumed name are tracked separately as T1548; the field
+helper validates the exact root bytes before applying an edit.
+
+The pre-follow-up `b576b2eb1` full VBC measurement passed **2,035 library
+tests plus 290 tests in 34 targeted binaries**, with zero failures and one
+existing ignored library test. At `0634cb100`, all **40 source gates pass**;
+a fresh full VBC run and coherent CLI/std-library build are in progress.
+These counts distinguish the tested source snapshots from the pending
+executable acceptance.
+
 T1547 separately records a source declaration defect: Byte/UInt8 and
 USize/ISize impls attach to whichever alias descriptor was collected first.
 A source-to-VBC-to-wire probe fails in all four alias/order combinations and
