@@ -3953,6 +3953,15 @@ impl CodegenContext {
         parts: &[String],
         arity: usize,
     ) -> Option<(String, FunctionInfo)> {
+        self.resolve_qualified_dotted_call_in_scope(parts, arity, self.current_source_module.as_deref())
+    }
+
+    pub(super) fn resolve_qualified_dotted_call_in_scope(
+        &self,
+        parts: &[String],
+        arity: usize,
+        scope: Option<&str>,
+    ) -> Option<(String, FunctionInfo)> {
         if parts.len() < 2 {
             return None;
         }
@@ -4044,7 +4053,7 @@ impl CodegenContext {
             }
         }
         // Stage 3: current-module-anchored candidates, deepest first.
-        if let Some(cur) = self.current_source_module.as_deref()
+        if let Some(cur) = scope
             && !cur.is_empty()
             && cur != "main"
         {

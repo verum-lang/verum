@@ -253,3 +253,149 @@ fn typed_array_byte_extent_cannot_overflow() {
         .expect_err("count times element size must fit");
     assert!(error.to_string().contains("array count"), "{error}");
 }
+
+#[test]
+fn named_alias_and_division_initializers_pack_bytes() {
+    for prefix in [
+        "const BASE: Int = 4; const SIZE: Int = BASE;",
+        "const SIZE: Int = 8 / 2;",
+        "const SIZE: Int = BASE + 2; const BASE: Int = 2;",
+    ] {
+        assert_packed("let mut byte_buf: [Byte; SIZE] = [0; SIZE];", prefix, "");
+    }
+}
+
+#[test]
+fn named_constant_cycles_are_rejected() {
+    let ast = Parser::new("const FIRST: Int = SECOND; const SECOND: Int = FIRST; fn probe() { let bytes: [Byte; FIRST] = [0; FIRST]; }")
+        .parse_module().expect("parse");
+    let error = VbcCodegen::with_config(CodegenConfig::new("cyclic_count"))
+        .compile_module(&ast)
+        .expect_err("constant cycle cannot give a count");
+    assert!(error.to_string().contains("cyclic constant"), "{error}");
+}
+
+#[test]
+fn qualified_alias_uses_its_declaration_scope() {
+    let origin = Parser::new("module origin; const BASE: Int = 3; public const SIZE: Int = BASE;")
+        .parse_module()
+        .expect("parse origin");
+    let caller = Parser::new("module caller; const BASE: Int = 7; fn probe() -> Int { let bytes: [Byte; origin.SIZE] = [0; origin.SIZE]; bytes.len() }")
+        .parse_module().expect("parse caller");
+    let mut codegen = VbcCodegen::with_config(CodegenConfig::new("alias_scopes"));
+    codegen
+        .collect_unit_declarations(&[&origin, &caller])
+        .expect("collect");
+    codegen
+        .compile_unit_items(
+            &[&origin, &caller],
+            verum_vbc::codegen::ItemFailurePolicy::Strict,
+        )
+        .expect("compile");
+    let module = codegen.finalize_module().expect("finalize");
+    let probe = module
+        .functions
+        .iter()
+        .find(|f| {
+            module
+                .get_string(f.name)
+                .is_some_and(|n| n == "probe" || n.ends_with(".probe"))
+        })
+        .expect("probe");
+    let start = probe.bytecode_offset as usize;
+    let instructions =
+        decode_instructions(&module.bytecode[start..start + probe.bytecode_length as usize])
+            .expect("decode");
+    assert!(instructions.iter().any(|i| matches!(i,
+        Instruction::MemExtended { sub_op, .. } if *sub_op == MemSubOpcode::NewByteArray.to_byte()
+    )), "qualified alias must allocate packed bytes: {instructions:?}");
+    let entry = probe.id;
+    let value = verum_vbc::interpreter::Interpreter::new(std::sync::Arc::new(module))
+        .execute_function(entry)
+        .expect("execute");
+    assert_eq!(value.as_i64(), 3);
+}
+
+#[test]
+fn folded_alias_value_survives_serialization_without_source_ast() {
+    let ast = Parser::new("const BASE: Int = 8; public const SIZE: Int = BASE / 2;")
+        .parse_module()
+        .expect("parse");
+    let module = VbcCodegen::with_config(CodegenConfig::new("archived_count"))
+        .compile_module(&ast)
+        .expect("compile");
+    let bytes = verum_vbc::serialize::serialize_module(&module).expect("serialize");
+    let module = verum_vbc::deserialize::deserialize_module(&bytes).expect("deserialize");
+    let constant = module
+        .functions
+        .iter()
+        .find(|f| {
+            module
+                .get_string(f.name)
+                .is_some_and(|n| n == "SIZE" || n.ends_with(".SIZE"))
+        })
+        .expect("SIZE");
+    assert!(constant.is_const);
+    assert_eq!(
+        constant.intrinsic_name.and_then(|id| module.get_string(id)),
+        Some("__const_val_4")
+    );
+    let entry = constant.id;
+    let value = verum_vbc::interpreter::Interpreter::new(std::sync::Arc::new(module))
+        .execute_function(entry)
+        .expect("execute constant");
+    assert_eq!(value.as_i64(), 4);
+}
+
+#[test]
+fn repeated_constant_dependencies_are_memoized() {
+    let mut source = String::from("const N0: Int = 1;\n");
+    for index in 1..=24 {
+        source.push_str(&format!(
+            "const N{index}: Int = N{} + N{};\n",
+            index - 1,
+            index - 1
+        ));
+    }
+    source.push_str("fn probe() { let bytes: [Byte; N24] = [0; N24]; }");
+    let ast = Parser::new(&source).parse_module().expect("parse");
+    let module = VbcCodegen::with_config(CodegenConfig::new("constant_dag"))
+        .compile_module(&ast)
+        .expect("compile");
+    let constant = module
+        .functions
+        .iter()
+        .find(|f| {
+            module
+                .get_string(f.name)
+                .is_some_and(|n| n == "N24" || n.ends_with(".N24"))
+        })
+        .expect("N24");
+    assert_eq!(
+        constant.intrinsic_name.and_then(|id| module.get_string(id)),
+        Some("__const_val_16777216")
+    );
+}
+
+#[test]
+fn local_constant_shadow_does_not_change_a_module_alias() {
+    let ast = Parser::new("module counts; const BASE: Int = 3; const SIZE: Int = BASE; fn probe() -> Int { const BASE: Int = 7; let bytes: [Byte; SIZE] = [0; SIZE]; bytes.len() }")
+        .parse_module().expect("parse");
+    let module = VbcCodegen::with_config(CodegenConfig::new("counts"))
+        .compile_module(&ast)
+        .expect("compile");
+    let entry = module
+        .functions
+        .iter()
+        .find(|f| {
+            module
+                .get_string(f.name)
+                .is_some_and(|n| n == "probe" || n.ends_with(".probe"))
+        })
+        .expect("probe")
+        .id;
+    let value = verum_vbc::interpreter::Interpreter::new(std::sync::Arc::new(module))
+        .execute_function(entry)
+        .expect("execute");
+    assert_eq!(value.as_i64(), 3);
+}

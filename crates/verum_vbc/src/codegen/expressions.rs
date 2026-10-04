@@ -44718,7 +44718,63 @@ impl VbcCodegen {
 
     /// Fold a statically known integer without wrapping. Unknown runtime
     /// expressions stay unknown; invalid static arithmetic is an error.
+    pub(super) fn constant_integer_name(expr: &Expr) -> Option<String> {
+        match &expr.kind {
+            ExprKind::Path(path) => Some(path.to_string().replace("::", ".")),
+            ExprKind::Field { expr: base, field } => {
+                Some(format!("{}.{}", Self::constant_integer_name(base)?, field.name))
+            }
+            ExprKind::Paren(inner) => Self::constant_integer_name(inner),
+            _ => None,
+        }
+    }
+
+    pub(super) fn constant_integer_dependencies(expr: &Expr) -> verum_common::List<verum_common::Text> {
+        fn collect(expr: &Expr, names: &mut verum_common::List<verum_common::Text>) {
+            if let Some(name) = VbcCodegen::constant_integer_name(expr) {
+                names.push(verum_common::Text::from(name));
+            } else {
+                match &expr.kind {
+                    ExprKind::Paren(inner) | ExprKind::Unary { expr: inner, .. } => collect(inner, names),
+                    ExprKind::Binary { left, right, .. } => { collect(left, names); collect(right, names); }
+                    _ => {}
+                }
+            }
+        }
+        let mut names = verum_common::List::new();
+        collect(expr, &mut names);
+        names
+    }
+
+    pub(super) fn constant_integer_binding(&self, name: &str, scope: Option<&str>) -> Option<super::context::FunctionInfo> {
+        if name.contains('.') {
+            let parts: Vec<String> = name.split('.').map(str::to_string).collect();
+            self.ctx.resolve_qualified_dotted_call_in_scope(&parts, 0, scope)
+                .map(|(_, info)| info)
+        } else {
+            scope.and_then(|scope| {
+                self.ctx.scoped_functions.get(&(scope.to_string(), name.to_string()))
+            }).or_else(|| self.ctx.lookup_function(name)).cloned()
+        }
+    }
+
     pub(super) fn const_eval_i64(&self, expr: &verum_ast::expr::Expr) -> CodegenResult<Option<i64>> {
+        self.const_eval_i64_in_scope(
+            expr, self.ctx.current_source_module.as_deref(), None, true,
+            &mut verum_common::Set::new(), &mut verum_common::Map::new(), 0,
+        )
+    }
+
+    pub(super) fn const_eval_i64_in_scope(
+        &self,
+        expr: &Expr,
+        scope: Option<&str>,
+        bindings: Option<&verum_common::Map<verum_common::Text, super::context::FunctionInfo>>,
+        inspect_runtime_bindings: bool,
+        active: &mut verum_common::Set<crate::module::FunctionId>,
+        cached: &mut verum_common::Map<crate::module::FunctionId, i64>,
+        depth: usize,
+    ) -> CodegenResult<Option<i64>> {
         use verum_ast::expr::{BinOp, ExprKind, UnOp};
         use verum_ast::literal::LiteralKind;
         let invalid = || CodegenError::with_span(
@@ -44728,40 +44784,74 @@ impl VbcCodegen {
             expr.span,
         );
         let checked = |value: Option<i64>| value.map(Some).ok_or_else(invalid);
+        if depth >= 128 {
+            return Err(CodegenError::with_span(
+                super::error::CodegenErrorKind::InvalidLiteral(
+                    "constant integer dependency depth exceeds the evaluation limit".to_string(),
+                ), expr.span,
+            ));
+        }
 
         match &expr.kind {
             ExprKind::Literal(lit) => match &lit.kind {
                 LiteralKind::Int(n) => checked(i64::try_from(n.value).ok()),
                 _ => Ok(None),
             },
-            ExprKind::Paren(inner) => self.const_eval_i64(inner),
-            ExprKind::Path(path) => {
-                if let Some(ident) = path.as_ident()
-                    && (self.ctx.lookup_var(ident.as_str()).is_some()
-                        || self.ctx.const_generic_params.contains(ident.as_str()))
+            ExprKind::Paren(inner) => self.const_eval_i64_in_scope(inner, scope, bindings, inspect_runtime_bindings, active, cached, depth + 1),
+            ExprKind::Path(_) | ExprKind::Field { .. } => {
+                let Some(name) = Self::constant_integer_name(expr) else { return Ok(None) };
+                let root = name.split('.').next().unwrap_or(&name);
+                if inspect_runtime_bindings
+                    && (self.ctx.lookup_var(root).is_some()
+                        || self.ctx.const_generic_params.contains(root))
                 {
-                    // A runtime binding or const-generic witness shadows a
-                    // module constant; it cannot be folded using that name.
                     return Ok(None);
                 }
-                let name = path.to_string().replace("::", ".");
-                let Some(info) = self.ctx.lookup_function_in_scope(&name)
-                    .filter(|info| info.is_const && info.param_count == 0)
-                else {
-                    return Ok(None);
-                };
+                let info = bindings.and_then(|bindings| bindings.get(&verum_common::Text::from(name.as_str()))).cloned()
+                    .or_else(|| {
+                        (!inspect_runtime_bindings).then(|| {
+                            self.module_constant_bindings.get(&(
+                                verum_common::Text::from(scope.unwrap_or_default()),
+                                verum_common::Text::from(name.as_str()),
+                            )).cloned()
+                        }).flatten()
+                    })
+                    .or_else(|| self.constant_integer_binding(&name, scope));
+                let Some(info) = info.filter(|info| info.is_const && info.param_count == 0)
+                else { return Ok(None) };
                 if let Some(value) = info.intrinsic_name.as_deref()
                     .and_then(|name| name.strip_prefix("__const_val_"))
                 {
                     return checked(value.parse::<i64>().ok());
                 }
-                // A declared constant whose value cannot be proved must not
-                // quietly choose a different packed-array representation.
+                if let Some(value) = cached.get(&info.id) {
+                    return Ok(Some(*value));
+                }
+                if let Some((initializer, declaration_scope, declaration_bindings)) = self.constant_initializers.get(&info.id) {
+                    if !active.insert(info.id) {
+                        return Err(CodegenError::with_span(
+                            super::error::CodegenErrorKind::InvalidLiteral(format!(
+                                "cyclic constant integer dependency at `{name}`"
+                            )), expr.span,
+                        ));
+                    }
+                    let declaration_scope = match declaration_scope {
+                        verum_common::Maybe::Some(scope) => Some(scope.as_str()),
+                        verum_common::Maybe::None => None,
+                    };
+                    let result = self.const_eval_i64_in_scope(
+                        initializer, declaration_scope, Some(declaration_bindings), false, active, cached, depth + 1,
+                    );
+                    active.remove(&info.id);
+                    if let Some(value) = result? {
+                        cached.insert(info.id, value);
+                        return Ok(Some(value));
+                    }
+                }
                 Err(CodegenError::with_span(
                     super::error::CodegenErrorKind::InvalidLiteral(format!(
                         "cannot evaluate constant integer `{name}`"
-                    )),
-                    expr.span,
+                    )), expr.span,
                 ))
             }
             ExprKind::Unary { op: UnOp::Neg, expr: operand } => {
@@ -44770,13 +44860,13 @@ impl VbcCodegen {
                 {
                     return checked(n.value.checked_neg().and_then(|n| i64::try_from(n).ok()));
                 }
-                match self.const_eval_i64(operand)? {
+                match self.const_eval_i64_in_scope(operand, scope, bindings, inspect_runtime_bindings, active, cached, depth + 1)? {
                     Some(value) => checked(value.checked_neg()),
                     None => Ok(None),
                 }
             }
             ExprKind::Binary { op, left, right } => {
-                let (Some(l), Some(r)) = (self.const_eval_i64(left)?, self.const_eval_i64(right)?)
+                let (Some(l), Some(r)) = (self.const_eval_i64_in_scope(left, scope, bindings, inspect_runtime_bindings, active, cached, depth + 1)?, self.const_eval_i64_in_scope(right, scope, bindings, inspect_runtime_bindings, active, cached, depth + 1)?)
                 else { return Ok(None) };
                 match op {
                     BinOp::Add => checked(l.checked_add(r)),

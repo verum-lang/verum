@@ -1004,6 +1004,16 @@ pub struct VbcCodegen {
     /// own `sys.bitfield.X` — task #121 archive-side regression.
     pending_constants: Vec<(String, verum_ast::Expr, Option<String>)>,
 
+    /// Constant initializers remain available after pending bodies are drained.
+    /// Function identity and declaration module keep dependency evaluation
+    /// independent of the caller's same-named constants and local bindings.
+    constant_initializers: verum_common::Map<
+        FunctionId,
+        (verum_ast::Expr, verum_common::Maybe<verum_common::Text>, verum_common::Map<verum_common::Text, FunctionInfo>),
+    >,
+    /// Module declarations are stable even when a local const shadows a name.
+    module_constant_bindings: verum_common::Map<(verum_common::Text, verum_common::Text), FunctionInfo>,
+
     /// VBC-GENERIC-INSTANTIATION: generic-function instantiations discovered at
     /// call sites — `(callee raw codegen FunctionId, [concrete type-arg
     /// TypeRefs in TypeParamId order])`.  Written to `module.specializations`
@@ -2229,6 +2239,8 @@ impl VbcCodegen {
             static_mut_type_names: std::collections::HashMap::new(),
             // Pending constants for deferred compilation
             pending_constants: Vec::new(),
+            constant_initializers: verum_common::Map::new(),
+            module_constant_bindings: verum_common::Map::new(),
             pending_specializations: Vec::new(),
             archive_func_name_to_fid: std::collections::HashMap::new(),
             user_xmod_band_by_name: std::collections::HashMap::new(),
@@ -16300,6 +16312,30 @@ impl VbcCodegen {
         let id = FunctionId(self.next_func_id);
         self.next_func_id = self.next_func_id.saturating_add(1);
 
+        if let Some(expr) = value_expr {
+            let mut bindings = verum_common::Map::new();
+            for dependency in Self::constant_integer_dependencies(expr) {
+                let info = if dependency.contains(".") {
+                    self.constant_integer_binding(dependency.as_str(), self.ctx.current_source_module.as_deref())
+                } else if let Some(scope) = &self.ctx.current_source_module {
+                    self.ctx.scoped_functions.get(&(scope.clone(), dependency.to_string())).cloned()
+                } else {
+                    self.module_constant_bindings.get(&(verum_common::Text::from(""), dependency.clone())).cloned()
+                };
+                if let Some(info) = info.filter(|info| info.is_const) {
+                    bindings.insert(dependency, info);
+                }
+            }
+            self.constant_initializers.insert(id, (
+                expr.clone(),
+                self.ctx.current_source_module.as_deref().map_or(
+                    verum_common::Maybe::None,
+                    |scope| verum_common::Maybe::Some(verum_common::Text::from(scope)),
+                ),
+                bindings,
+            ));
+        }
+
         // Try to extract a literal integer value from the expression.
         // If successful, register as an inlineable constant (no function call needed).
         let intrinsic_name = value_expr
@@ -16409,6 +16445,13 @@ impl VbcCodegen {
             if self.ctx.lookup_function(&colon_qualified).is_none() {
                 self.ctx.register_function(colon_qualified, info.clone());
             }
+        }
+
+        if self.ctx.current_function.is_none() {
+            self.module_constant_bindings.insert((
+                verum_common::Text::from(self.ctx.current_source_module.as_deref().unwrap_or_default()),
+                verum_common::Text::from(name),
+            ), info.clone());
         }
 
         // Register the constant's type for correct instruction selection.
@@ -16526,12 +16569,28 @@ impl VbcCodegen {
                 None => continue, // Skip if not found (shouldn't happen)
             };
 
+            // Publish scalar dependency folding through the existing archive
+            // constant marker, so imported array counts need no source AST.
+            let folded_integer = if func_info.return_type_name.as_deref() == Some("Int") {
+                self.const_eval_i64_in_scope(
+                    &expr, queued_source_module.as_deref(),
+                    self.constant_initializers.get(&func_info.id).map(|(_, _, bindings)| bindings), false,
+                    &mut verum_common::Set::new(), &mut verum_common::Map::new(), 0,
+                ).ok().flatten()
+            } else {
+                None
+            };
+
             // Begin compiling the constant as a zero-argument function
             self.ctx.begin_function(&name, &[], None);
 
             // Compile the constant expression
             // Compile the constant expression
-            if let Ok(Some(result_reg)) = self.compile_expr(&expr) {
+            if let Some(value) = folded_integer {
+                let result_reg = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::LoadI { dst: result_reg, value });
+                self.ctx.emit(Instruction::Ret { value: result_reg });
+            } else if let Ok(Some(result_reg)) = self.compile_expr(&expr) {
                 // Return the result
                 self.ctx.emit(Instruction::Ret { value: result_reg });
             } else {
@@ -16605,6 +16664,11 @@ impl VbcCodegen {
             // struct-literal const (MemProt's read/write/exec triples,
             // anything carrying composite initialisers).
             descriptor.is_const = true;
+            if let Some(value) = folded_integer {
+                descriptor.intrinsic_name = Some(StringId(self.intern_string(&format!(
+                    "__const_val_{value}"
+                ))));
+            }
 
             // Propagate the const's TYPE into the archive descriptor.
             // `FunctionDescriptor::new` defaults `return_type` to
