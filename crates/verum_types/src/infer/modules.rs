@@ -15516,17 +15516,13 @@ impl TypeChecker {
     }
 
     /// Extract the type name from a Type for inherent method lookup.
-    /// Returns the simple name for named types, or None for complex types.
+    /// Preserves the resolved declaration path for named types.
     pub(super) fn get_type_name(&self, ty: &Type) -> Option<Text> {
         // First unwrap any references
         let unwrapped = self.unwrap_reference_type(ty);
 
         match unwrapped {
-            Type::Named { path, .. } => {
-                // Extract the simple name from the path
-                path.as_ident()
-                    .map(|id| verum_common::Text::from(id.name.as_str()))
-            }
+            Type::Named { path, .. } => Some(self.path_to_string(path)),
             Type::Generic { name, .. } => Some(name.clone()),
             Type::Record(_) => None, // Anonymous records don't have names
             Type::Variant(_) => {
@@ -15602,9 +15598,7 @@ impl TypeChecker {
             // that should be found BEFORE auto-deref unwraps to the inner type.
             Type::Generic { name, .. } => Some(name.clone()),
             // Named types (e.g., user-defined types)
-            Type::Named { path, .. } => path
-                .as_ident()
-                .map(|id| verum_common::Text::from(id.name.as_str())),
+            Type::Named { path, .. } => Some(self.path_to_string(path)),
             // Raw pointer types have methods like sub, add, offset
             Type::Pointer { .. } => Some(verum_common::Text::from("Pointer")),
             Type::VolatilePointer { .. } => Some(verum_common::Text::from("VolatilePointer")),
@@ -18748,9 +18742,9 @@ impl TypeChecker {
     /// Used to determine whether a method call consumes the receiver for affine tracking.
     fn method_takes_self_by_value(&self, recv_ty: &Type, method: &Ident) -> bool {
         let method_name = verum_common::Text::from(method.name.as_str());
-        let type_name = self.type_to_name(recv_ty);
-        self.self_by_value_methods
-            .contains(&(type_name, method_name))
+        self.get_type_name(recv_ty).is_some_and(|type_name| {
+            self.self_by_value_methods.contains(&(type_name, method_name))
+        })
     }
 
     /// Variant of infer_method_call_inner that takes a pre-computed receiver type.
@@ -19890,9 +19884,7 @@ impl TypeChecker {
                 match &recv_ty {
                     Type::Text => Some(verum_common::Text::from(WKT::Text.as_str())),
                     Type::Generic { name, .. } => Some(name.clone()),
-                    Type::Named { path, .. } => path
-                        .as_ident()
-                        .map(|id| verum_common::Text::from(id.name.as_str())),
+                    Type::Named { path, .. } => Some(self.path_to_string(path)),
                     // A STRUCTURAL variant still has a nominal name, and
                     // this arm is where it was thrown away (T0741).
                     //
@@ -26645,6 +26637,18 @@ bake to have this verified.",
                 // served.  `canonical_alias_target` already walks the
                 // alias chain and had exactly one caller in this file
                 // (the variant-constructor branch); this is its second.
+                // Resolve the lexical receiver exactly as a type annotation does.
+                // A source declaration can carry a qualified nominal head even
+                // when this call spells only its local name.
+                let nominal_owner = self
+                    .resolve_type_name(type_name.as_str(), span)
+                    .ok()
+                    .and_then(|ty| match ty {
+                        Type::Named { path, .. } => Some(self.path_to_string(&path)),
+                        Type::Generic { name, .. } => Some(name),
+                        _ => None,
+                    });
+                let type_name = nominal_owner.unwrap_or_else(|| type_name.into());
                 let canonical = self.canonical_alias_target(type_name.as_str());
                 let type_name: &str = if canonical.as_str() != type_name.as_str() {
                     canonical.as_str()

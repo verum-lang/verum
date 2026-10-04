@@ -179,10 +179,11 @@ impl TypeChecker {
         }
 
         let arity = param_record.len();
-        let type_params_key: verum_common::Text =
-            format!("__type_params_{}", type_name).into();
-        self.ctx
-            .define_type(type_params_key, Type::Record(param_record));
+        self.define_declared_type_metadata(
+            "__type_params_",
+            type_name.as_str(),
+            Type::Record(param_record),
+        );
         arity
     }
 
@@ -861,8 +862,11 @@ impl TypeChecker {
                     }
                 }
                 if !fields.is_empty() {
-                    let struct_key = format!("__struct_fields_{}", type_name);
-                    self.ctx.define_type(struct_key, Type::Record(fields));
+                    self.define_declared_type_metadata(
+                        "__struct_fields_",
+                        type_name.as_str(),
+                        Type::Record(fields),
+                    );
                 }
             }
             TypeDeclBody::Quotient { base, .. } => {
@@ -1896,8 +1900,11 @@ impl TypeChecker {
 
                     // Also store the record structure under a different key for field access
                     // This allows us to validate field accesses while keeping the nominal type
-                    let struct_key: Text = format!("__struct_fields_{}", type_name).into();
-                    self.define_type_in_current_module(struct_key, Type::Record(record_map));
+                    self.define_declared_type_metadata(
+                        "__struct_fields_",
+                        type_name.as_str(),
+                        Type::Record(record_map),
+                    );
 
                     // Store type parameter names for bidirectional inference.
                     // This allows us to substitute concrete types for generic parameters
@@ -2985,8 +2992,11 @@ impl TypeChecker {
                     }
                 }
                 if !fields.is_empty() {
-                    let struct_key = format!("__struct_fields_{}", type_name);
-                    self.ctx.define_type(struct_key, Type::Record(fields));
+                    self.define_declared_type_metadata(
+                        "__struct_fields_",
+                        type_name.as_str(),
+                        Type::Record(fields),
+                    );
                 }
             }
             TypeDeclBody::Inductive(_) => {
@@ -3509,8 +3519,11 @@ impl TypeChecker {
 
                     // CRITICAL: Also register empty struct fields for pattern matching
                     // Empty record allows `match e { Empty {} => ... }` patterns
-                    let struct_key: Text = format!("__struct_fields_{}", type_name).into();
-                    self.define_type_in_current_module(struct_key, Type::Record(record_map));
+                    self.define_declared_type_metadata(
+                        "__struct_fields_",
+                        type_name.as_str(),
+                        Type::Record(record_map),
+                    );
                 } else {
                     // Non-empty record: Register as Named type with field structure
 
@@ -3676,8 +3689,11 @@ impl TypeChecker {
                     };
 
                     // Store record structure for field access
-                    let struct_key: Text = format!("__struct_fields_{}", type_name).into();
-                    self.define_type_in_current_module(struct_key, Type::Record(record_map));
+                    self.define_declared_type_metadata(
+                        "__struct_fields_",
+                        type_name.as_str(),
+                        Type::Record(record_map),
+                    );
 
                     // Store type parameters for bidirectional inference.
                     self.register_declared_type_arity(&type_name, &type_decl.generics);
@@ -5639,33 +5655,38 @@ impl TypeChecker {
                 self.set_current_self_type(Maybe::Some(self_type.clone()));
 
                 // Get the type name for registering qualified method names
-                let type_name = match &for_type.kind {
+                let type_name = match &self_type {
+                    Type::Named { path, .. } => Some(self.path_to_string(path)),
+                    Type::Generic { name, .. } => Some(name.clone()),
+                    _ => None,
+                }
+                .or_else(|| match &for_type.kind {
                     verum_ast::ty::TypeKind::Path(path) => {
-                        path.as_ident().map(|id| id.name.as_str().to_string())
+                        path.as_ident().map(|id| id.name.clone())
                     }
                     verum_ast::ty::TypeKind::Generic { base, .. } => {
                         // For generic types like List<T>, extract the base type name
                         match &base.kind {
                             verum_ast::ty::TypeKind::Path(path) => {
-                                path.as_ident().map(|id| id.name.as_str().to_string())
+                                path.as_ident().map(|id| id.name.clone())
                             }
                             _ => None,
                         }
                     }
                     // CRITICAL: Handle primitive types for inherent impls
                     // e.g., `implement Int { fn max_value() -> Int { ... } }`
-                    verum_ast::ty::TypeKind::Int => Some(WKT::Int.as_str().to_string()),
-                    verum_ast::ty::TypeKind::Float => Some(WKT::Float.as_str().to_string()),
-                    verum_ast::ty::TypeKind::Bool => Some(WKT::Bool.as_str().to_string()),
-                    verum_ast::ty::TypeKind::Char => Some(WKT::Char.as_str().to_string()),
-                    verum_ast::ty::TypeKind::Text => Some(WKT::Text.as_str().to_string()),
-                    verum_ast::ty::TypeKind::Unit => Some("Unit".to_string()),
+                    verum_ast::ty::TypeKind::Int => Some(WKT::Int.as_str().into()),
+                    verum_ast::ty::TypeKind::Float => Some(WKT::Float.as_str().into()),
+                    verum_ast::ty::TypeKind::Bool => Some(WKT::Bool.as_str().into()),
+                    verum_ast::ty::TypeKind::Char => Some(WKT::Char.as_str().into()),
+                    verum_ast::ty::TypeKind::Text => Some(WKT::Text.as_str().into()),
+                    verum_ast::ty::TypeKind::Unit => Some("Unit".into()),
                     // CRITICAL: Handle slice and array types for inherent impls
                     // e.g., `implement<T> [T] { fn len(&self) -> Int { ... } }`
-                    verum_ast::ty::TypeKind::Slice(_) => Some("Slice".to_string()),
-                    verum_ast::ty::TypeKind::Array { .. } => Some("Array".to_string()),
+                    verum_ast::ty::TypeKind::Slice(_) => Some("Slice".into()),
+                    verum_ast::ty::TypeKind::Array { .. } => Some("Array".into()),
                     _ => None,
-                };
+                });
 
                 // Register all method signatures
                 if let Some(type_name_str) = type_name {
@@ -6110,26 +6131,32 @@ impl TypeChecker {
                 // `implement Ord for Int { fn cmp(&self, other: &Int) -> Ordering { ... } }`
 
                 // Extract type name - handles both path types and primitive types
-                let type_name_opt = match &for_type.kind {
+                let resolved_self_type = self.ast_to_type(for_type)?;
+                let type_name_opt = match &resolved_self_type {
+                    Type::Named { path, .. } => Some(self.path_to_string(path)),
+                    Type::Generic { name, .. } => Some(name.clone()),
+                    _ => None,
+                }
+                .or_else(|| match &for_type.kind {
                     verum_ast::ty::TypeKind::Path(path) => {
-                        path.as_ident().map(|id| id.name.as_str().to_string())
+                        path.as_ident().map(|id| id.name.clone())
                     }
                     verum_ast::ty::TypeKind::Generic { base, .. } => match &base.kind {
                         verum_ast::ty::TypeKind::Path(path) => {
-                            path.as_ident().map(|id| id.name.as_str().to_string())
+                            path.as_ident().map(|id| id.name.clone())
                         }
                         _ => None,
                     },
                     // CRITICAL: Handle primitive types for protocol implementations
                     // e.g., `implement Hash for Int { ... }`
-                    verum_ast::ty::TypeKind::Int => Some(WKT::Int.as_str().to_string()),
-                    verum_ast::ty::TypeKind::Float => Some(WKT::Float.as_str().to_string()),
-                    verum_ast::ty::TypeKind::Bool => Some(WKT::Bool.as_str().to_string()),
-                    verum_ast::ty::TypeKind::Char => Some(WKT::Char.as_str().to_string()),
-                    verum_ast::ty::TypeKind::Text => Some(WKT::Text.as_str().to_string()),
-                    verum_ast::ty::TypeKind::Unit => Some("Unit".to_string()),
+                    verum_ast::ty::TypeKind::Int => Some(WKT::Int.as_str().into()),
+                    verum_ast::ty::TypeKind::Float => Some(WKT::Float.as_str().into()),
+                    verum_ast::ty::TypeKind::Bool => Some(WKT::Bool.as_str().into()),
+                    verum_ast::ty::TypeKind::Char => Some(WKT::Char.as_str().into()),
+                    verum_ast::ty::TypeKind::Text => Some(WKT::Text.as_str().into()),
+                    verum_ast::ty::TypeKind::Unit => Some("Unit".into()),
                     _ => None,
-                };
+                });
 
                 // Extract protocol name for debug logging
                 let protocol_name = protocol
@@ -6179,7 +6206,7 @@ impl TypeChecker {
                         }
                     }
                     // Set current_self_type for Self resolution in method signatures
-                    let self_type = self.ast_to_type(for_type)?;
+                    let self_type = resolved_self_type;
                     let previous_self_type = self.current_self_type.clone();
                     self.set_current_self_type(Maybe::Some(self_type));
 

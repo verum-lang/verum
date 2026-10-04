@@ -8641,6 +8641,15 @@ impl TypeChecker {
         }
     }
 
+    /// Publish declaration metadata under the same nominal key used by values.
+    /// Keep the existing lexical spelling for syntax that has not been resolved
+    /// yet; qualified consumers must never borrow a sibling's bare field map.
+    pub(crate) fn define_declared_type_metadata(&mut self, prefix: &str, name: &str, ty: Type) {
+        let nominal_key = self.declared_type_key(name);
+        self.define_type_in_current_module(format!("{prefix}{name}").into(), ty.clone());
+        self.ctx.define_type(format!("{prefix}{nominal_key}"), ty);
+    }
+
     /// Keep transparent alias lookup and usage discipline on the same exact key
     /// as the alias's nominal declaration. Flat entries retain local lookup.
     pub(crate) fn declare_type_alias_target(&mut self, name: Text, target: Type) {

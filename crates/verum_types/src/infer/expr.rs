@@ -10049,15 +10049,17 @@ impl TypeChecker {
                 // spelling would miss both probes above and fall
                 // through to a fresh var. Qualified spellings stay
                 // FIRST (collision-immune); the leaf retry only fires
-                // when they found nothing, so colliding names keep
-                // resolving through their qualified keys.
+                // when the exact declaration has no field map. A known map
+                // that lacks this field must not borrow a sibling's field.
                 if crate::ctor_trace_enabled() {
                     eprintln!(
                         "[ctor-trace] field-miss type_name={} field={}",
                         type_name, field_name
                     );
                 }
-                if type_name.contains(".") {
+                if type_name.contains(".")
+                    && self.ctx.lookup_type(struct_key.as_str()).is_none()
+                {
                     let leaf = type_name
                         .as_str()
                         .rsplit('.')
