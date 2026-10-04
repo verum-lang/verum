@@ -983,6 +983,40 @@ pub fn check_no_unresolved_generic_calls() -> Result<()> {
 // first via `runtime::libsys_extern`) or, for the socket family,
 // leave the canonical declaration bodyless for the linker.
 
+/// The platform emitter owns these external declarations. They must remain
+/// linker-resolved even when no source-language FFI descriptor exists (T1536).
+pub(crate) const PLATFORM_EXTERN_ATTRIBUTE: &str = "verum.platform.extern";
+
+pub(crate) fn mark_platform_extern<'ctx>(
+    llvm_ctx: &'ctx verum_llvm::context::Context,
+    function: verum_llvm::values::FunctionValue<'ctx>,
+) {
+    function.add_attribute(
+        verum_llvm::attributes::AttributeLoc::Function,
+        llvm_ctx.create_string_attribute(PLATFORM_EXTERN_ATTRIBUTE, ""),
+    );
+}
+
+/// Declare the actual double-return callee and repair an earlier declaration.
+/// LLVM control-flow analysis reads the enum attribute, not a string with the
+/// same spelling. Apply it on existing declarations as well as new ones.
+pub(crate) fn get_or_declare_returns_twice_function<'ctx>(
+    module: &verum_llvm::module::Module<'ctx>,
+    llvm_ctx: &'ctx verum_llvm::context::Context,
+    name: &str,
+    fn_type: verum_llvm::types::FunctionType<'ctx>,
+) -> verum_llvm::values::FunctionValue<'ctx> {
+    let function = get_or_declare_function(module, name, fn_type);
+    function.add_attribute(
+        verum_llvm::attributes::AttributeLoc::Function,
+        llvm_ctx.create_enum_attribute(
+            verum_llvm::attributes::Attribute::get_named_enum_kind_id("returns_twice"),
+            0,
+        ),
+    );
+    function
+}
+
 /// Get-or-declare an LLVM function and tag it with `noreturn` on
 /// the first declaration.  Idempotent on subsequent calls — when the
 /// function already exists the attribute is *not* re-applied (LLVM

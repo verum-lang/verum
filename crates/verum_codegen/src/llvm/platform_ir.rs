@@ -3328,23 +3328,26 @@ impl<'ctx> PlatformIR<'ctx> {
         // spurious no-libc-surface entry even if never referenced.
         if super::target_triple::target_is_darwin(module) {
             let void_type = ctx.void_type();
-            if module.get_function("setjmp").is_none() {
-                let fn_type = i32_type.fn_type(&[ptr_type.into()], false);
-                let f = module.add_function("setjmp", fn_type, None);
-                // setjmp returns twice
-                f.add_attribute(
-                    AttributeLoc::Function,
-                    ctx.create_string_attribute("returns_twice", ""),
-                );
-            }
-            if module.get_function("longjmp").is_none() {
-                let fn_type = void_type.fn_type(&[ptr_type.into(), i32_type.into()], false);
-                let f = module.add_function("longjmp", fn_type, None);
-                f.add_attribute(
-                    AttributeLoc::Function,
-                    ctx.create_string_attribute("noreturn", ""),
-                );
-            }
+            let setjmp = super::error::get_or_declare_returns_twice_function(
+                module,
+                ctx,
+                "_setjmp",
+                i32_type.fn_type(&[ptr_type.into()], false),
+            );
+            super::error::mark_platform_extern(ctx, setjmp);
+            let longjmp = super::error::get_or_declare_function(
+                module,
+                "longjmp",
+                void_type.fn_type(&[ptr_type.into(), i32_type.into()], false),
+            );
+            super::error::mark_platform_extern(ctx, longjmp);
+            longjmp.add_attribute(
+                AttributeLoc::Function,
+                ctx.create_enum_attribute(
+                    verum_llvm::attributes::Attribute::get_named_enum_kind_id("noreturn"),
+                    0,
+                ),
+            );
         }
 
         // Exception handler stack globals

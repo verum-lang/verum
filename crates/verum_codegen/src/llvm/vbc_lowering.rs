@@ -1777,8 +1777,17 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                     // `@ffi` declaration is an entry in `vbc_module
                     // .ffi_symbols`, named through the string table. Asking
                     // that cannot rot, because it is the same table the call
-                    // site resolved against.
-                    if ffi_symbol_names.contains(name.as_str()) {
+                    // site resolved against. Platform-created declarations
+                    // carry the same authority explicitly (T1536); their
+                    // names need not appear in a source-language FFI table.
+                    if ffi_symbol_names.contains(name.as_str())
+                        || f
+                            .get_string_attribute(
+                                verum_llvm::attributes::AttributeLoc::Function,
+                                super::error::PLATFORM_EXTERN_ATTRIBUTE,
+                            )
+                            .is_some()
+                    {
                         skipped_libc += 1;
                         func = next;
                         continue;
@@ -4820,10 +4829,12 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                     //    later longjmp would restore a stale frame and crash.
                     //    See `docs/architecture/no-libc-architecture.md`.
                     let setjmp_result = if super::target_triple::target_is_darwin(&module) {
-                        let setjmp_fn = module.get_function("_setjmp").unwrap_or_else(|| {
-                            let fn_type = i32_type.fn_type(&[ptr_type.into()], false);
-                            module.add_function("_setjmp", fn_type, None)
-                        });
+                        let setjmp_fn = super::error::get_or_declare_returns_twice_function(
+                            module,
+                            self.context,
+                            "_setjmp",
+                            i32_type.fn_type(&[ptr_type.into()], false),
+                        );
                         ctx.builder()
                             .build_call(setjmp_fn, &[jmp_buf_ptr.into()], "setjmp_result")
                             .or_llvm_err()?
@@ -4885,6 +4896,12 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                                         "llvm.eh.sjlj.setjmp intrinsic unavailable",
                                     )
                                 })?;
+                        let sjlj_setjmp_fn = super::error::get_or_declare_returns_twice_function(
+                            module,
+                            self.context,
+                            "llvm.eh.sjlj.setjmp",
+                            sjlj_setjmp_fn.get_type(),
+                        );
                         ctx.builder()
                             .build_call(sjlj_setjmp_fn, &[jmp_buf_p.into()], "setjmp_result")
                             .or_llvm_err()?
