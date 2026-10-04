@@ -4,7 +4,7 @@
 // @timeout: 1200000
 // @tags: runtime, supervisor, static, once, regression
 // @expected-exit: 0
-// @expected-stdout: once=37 count=1 root=0
+// @expected-stdout: once=37 second=37 count=1 root=0 again=0 name=root again_name=root
 // T1542: a static OnceLock initializes its payload on first access only.
 // Exercise the same API as the global supervisor, then its public accessor.
 
@@ -27,15 +27,23 @@ fn main() {
         SUPERVISOR_ONCE_INIT_COUNT = SUPERVISOR_ONCE_INIT_COUNT + 100;
         99
     });
-    assert_eq(*first, 37);
-    assert_eq(*second, 37);
-    assert_eq(SUPERVISOR_ONCE_INIT_COUNT, 1);
-
+    let first_value = *first + 0;
+    let second_value = *second + 0;
+    let count = SUPERVISOR_ONCE_INIT_COUNT + 0;
     let root = root_supervisor();
     let again = root_supervisor();
-    assert_eq(root.id().raw(), 0_u64);
-    assert_eq(again.id().raw(), 0_u64);
-    assert_eq(root.name(), "root");
-    assert_eq(again.name(), "root");
-    print("once=37 count=1 root=0");
+    let root_id = root.id().raw();
+    let again_id = again.id().raw();
+    let root_name = root.name();
+    let again_name = again.name();
+    // Observe values before assertions; a literal success line cannot detect
+    // a backend loading the wrong field or a folded dereference comparison.
+    print(f"once={first_value} second={second_value} count={count} root={root_id} again={again_id} name={root_name} again_name={again_name}");
+    assert_eq(first_value + 0, 37);
+    assert_eq(second_value + 0, 37);
+    assert_eq(count + 0, 1);
+    assert_eq(root_id, 0_u64);
+    assert_eq(again_id, 0_u64);
+    assert_eq(root_name, "root");
+    assert_eq(again_name, "root");
 }
