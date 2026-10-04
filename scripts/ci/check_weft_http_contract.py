@@ -65,6 +65,14 @@ def tail(log, size=16384):
         return data.read().decode(errors="replace")
 
 
+def require_execution_tier(tier, lines):
+    if tier == "aot":
+        require(not any("Falling back to interpreter" in line for line in lines),
+                "AOT compilation fell back to the interpreter")
+        require(any(re.match(r"\s*Running `.+`\s*$", line) for line in lines),
+                "missing native executable launch; this is not an AOT result")
+
+
 def stop_owned(process):
     if process.poll() is not None:
         return
@@ -178,6 +186,7 @@ def run(args, program, log, port, expected):
             process.wait(timeout=args.exit_timeout)
             require(process.returncode == 0, f"child exit={process.returncode}: {tail(log)}")
             lines = log.read_text(errors="replace").splitlines()
+            require_execution_tier(args.tier, lines)
             for line in expected:
                 require(line in lines, f"missing contract output: {line}")
             emit(tier=args.tier, verdict="PASS", contracts=len(FIXTURES), http_cases=len(CASES))
