@@ -1,6 +1,7 @@
 //! T1555: native callbacks consume the carrier emitted by source NewClosure.
 use std::cell::RefCell;
 use verum_codegen::llvm::{LoweringConfig, VbcToLlvmLowering};
+use verum_common::{Heap, List, Text};
 use verum_fast_parser::Parser;
 use verum_llvm::OptimizationLevel;
 use verum_llvm::context::Context;
@@ -12,12 +13,12 @@ use verum_vbc::codegen::VbcCodegen;
 thread_local! {
     // Only the allocator is replaced in the JIT harness. Source closure
     // construction, capture loads and both callback consumers are real IR.
-    static ALLOCATIONS: RefCell<Vec<Box<[u64]>>> = const { RefCell::new(Vec::new()) };
+    static ALLOCATIONS: RefCell<List<Heap<[u64]>>> = RefCell::new(List::new());
 }
 
 extern "C" fn allocate(size: u64) -> *mut u64 {
     ALLOCATIONS.with(|allocations| {
-        let mut storage = vec![0_u64; size.div_ceil(8) as usize].into_boxed_slice();
+        let mut storage = List::from_elem(0_u64, size.div_ceil(8) as usize).into_boxed_slice();
         let pointer = storage.as_mut_ptr();
         allocations.borrow_mut().push(storage);
         pointer
@@ -54,14 +55,14 @@ fn with_source_ir(check: impl FnOnce(&Context, &str)) {
         LoweringConfig::debug("callback_abi").with_debug_info(false),
     );
     lower.lower_module(&vbc).expect("source LLVM");
-    let mut definitions = String::from(
+    let mut definitions = Text::from(
         "declare ptr @verum_checked_malloc(i64)\ndeclare void @verum_internal_exit_i64(i64)\n",
     );
     for descriptor in &vbc.functions {
         let name = vbc.get_string(descriptor.name).expect("function name");
         let function = lower.module().get_function(name).expect(name);
         assert!(function.verify(true), "{name}");
-        definitions.push_str(&function.print_to_string().to_string());
+        definitions.push_str(function.print_to_string().to_str().expect("UTF-8 IR"));
         definitions.push('\n');
     }
     check(&context, &definitions);
