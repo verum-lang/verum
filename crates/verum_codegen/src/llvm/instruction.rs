@@ -2839,6 +2839,15 @@ pub fn lower_instruction<'ctx>(
 ) -> Result<()> {
     ctx.increment_instruction_count();
 
+    ctx.check_register_writes()?;
+    lower_instruction_impl(ctx, instr)?;
+    ctx.check_register_writes()
+}
+
+fn lower_instruction_impl<'ctx>(
+    ctx: &mut FunctionContext<'_, 'ctx>,
+    instr: &Instruction,
+) -> Result<()> {
     match instr {
         // ====================================================================
         // Data Movement

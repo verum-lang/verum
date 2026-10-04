@@ -4942,6 +4942,10 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
             }
         }
 
+        // Parameter setup and specialized control-flow lowering also write
+        // registers outside lower_instruction's checked boundary.
+        ctx.check_register_writes()?;
+
         let num_blocks = block_starts.len();
 
         // **#98 diagnostic**: VERUM_SKIP_ORPHAN_SWEEP=1 disables BOTH

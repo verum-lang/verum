@@ -574,6 +574,9 @@ pub struct FunctionContext<'a, 'ctx> {
     // Separate storage keeps the existing value ABI while reference consumers
     // receive the original cell. Entry allocas make joins/backedges sound.
     field_reference_slots: verum_common::Map<u16, PointerValue<'ctx>>,
+    /// First failure from legacy infallible register writes. Lowering boundaries
+    /// must reject the function before any incomplete provenance can be used.
+    register_write_error: Option<LlvmLoweringError>,
 
     /// Per-instruction overrides for Len dispatch.
     /// When a register is reused for both List and Text at different instruction points,
@@ -905,6 +908,7 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
             generic_type_args: HashMap::new(),
             gete_element_ptrs: std::collections::HashMap::new(),
             field_reference_slots: verum_common::Map::new(),
+            register_write_error: None,
             len_list_overrides: std::collections::HashSet::new(),
             current_vbc_instr_idx: 0,
             func_id_base: 0,
@@ -1017,6 +1021,7 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
             generic_type_args: HashMap::new(),
             gete_element_ptrs: std::collections::HashMap::new(),
             field_reference_slots: verum_common::Map::new(),
+            register_write_error: None,
             len_list_overrides: std::collections::HashSet::new(),
             current_vbc_instr_idx: 0,
             func_id_base: 0,
@@ -2623,15 +2628,31 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
         }
     }
 
+    /// Propagate a failure recorded by the legacy infallible set_register API.
+    /// Called at instruction and function boundaries, including parameter setup.
+    pub fn check_register_writes(&mut self) -> Result<()> {
+        match self.register_write_error.take() {
+            Some(error) => Err(error),
+            None => Ok(()),
+        }
+    }
+
     /// Set a register value.
     /// In alloca mode, stores to the alloca slot; otherwise stores the SSA value directly.
     /// All alloca slots uniformly use i64 type. This ensures that VBC registers reused
     /// across branches with different types (ptr, i1, i64) share a single alloca.
     /// Values are coerced to i64 on store (zext for small ints, ptrtoint for pointers).
     pub fn set_register(&mut self, reg: u16, value: BasicValueEnum<'ctx>) {
-        if let Some(slot) = self.field_reference_slots.get(&reg) {
-            self.builder.build_store(*slot, self.types.i64_type().const_zero())
-                .expect("field provenance clear");
+        if self.register_write_error.is_some() {
+            return;
+        }
+        if let Some(slot) = self.field_reference_slots.get(&reg)
+            && let Err(error) = self.builder
+                .build_store(*slot, self.types.i64_type().const_zero())
+                .or_llvm_err()
+        {
+            self.register_write_error = Some(error);
+            return;
         }
         // Clear stale type marks — callers that need string/bool/float marks
         // will re-add them after this call.

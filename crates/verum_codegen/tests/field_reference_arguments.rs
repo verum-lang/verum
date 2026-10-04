@@ -282,3 +282,39 @@ fn forwarded_field_reference_reaches_native_futex_mismatch_precheck() {
     );
     assert_eq!(&fields[3..], &[41, 7]);
 }
+
+#[test]
+fn provenance_clear_builder_failure_returns_a_lowering_error() {
+    use verum_codegen::llvm::{context::FunctionContext, instruction::lower_instruction};
+    use verum_vbc::{Instruction, Reg};
+    let context = Context::create();
+    let module = context.create_module("write_error");
+    let function = module.add_function("probe", context.void_type().fn_type(&[], false), None);
+    let mut ctx = FunctionContext::new(&context, &module, function, "probe");
+    let entry = context.append_basic_block(function, "entry");
+    ctx.builder().position_at_end(entry);
+    ctx.prepare_field_reference_slots([0]).expect("provenance slot");
+    ctx.builder().clear_insertion_position();
+    let error = lower_instruction(&mut ctx, &Instruction::LoadI { dst: Reg(0), value: 3 })
+        .expect_err("failed provenance clearing must reject lowering");
+    assert!(error.to_string().contains("Builder error"), "{error}");
+}
+
+#[test]
+fn parameter_write_failure_is_checked_before_the_next_instruction() {
+    use verum_codegen::llvm::{context::FunctionContext, instruction::lower_instruction};
+    use verum_vbc::Instruction;
+    let context = Context::create();
+    let module = context.create_module("parameter_error");
+    let function = module.add_function("probe", context.void_type().fn_type(&[], false), None);
+    let mut ctx = FunctionContext::new(&context, &module, function, "probe");
+    let entry = context.append_basic_block(function, "entry");
+    ctx.builder().position_at_end(entry);
+    ctx.prepare_field_reference_slots([0]).expect("provenance slot");
+    ctx.builder().clear_insertion_position();
+    ctx.set_register(0, context.i64_type().const_zero().into());
+    // Restoring the builder cannot erase the earlier failed register write.
+    ctx.builder().position_at_end(entry);
+    assert!(lower_instruction(&mut ctx, &Instruction::RetV).is_err());
+    assert!(entry.get_terminator().is_none());
+}
