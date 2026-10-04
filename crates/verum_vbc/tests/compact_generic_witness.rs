@@ -119,6 +119,16 @@ fn legacy_missing_roster_and_indexed_vectors_still_resolve() {
 }
 
 #[test]
+fn legacy_indexed_const_slot_survives_an_incomplete_type_roster() {
+    let result = direct(
+        &[0],
+        vec![TypeRef::Concrete(TypeId::INT), TypeRef::ConstValue(37)],
+        generic(1),
+    );
+    assert_eq!(result.as_i64(), 37);
+}
+
+#[test]
 fn compact_const_value_witness_loads_as_a_value() {
     assert_eq!(
         direct(
