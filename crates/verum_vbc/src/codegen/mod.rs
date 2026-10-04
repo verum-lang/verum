@@ -20671,7 +20671,16 @@ impl VbcCodegen {
         }
 
         if let Some(outer_type_names) = outer_type_names {
-            self.ctx.variable_type_names = outer_type_names;
+            // Restore only bindings declared in the scope being left.
+            // Refinements of an outer binding (e.g. List -> List<Record>
+            // after push) remain valid when no local shadows that binding.
+            for (name, _) in &vars {
+                if let Some(outer_type) = outer_type_names.get(name) {
+                    self.ctx.variable_type_names.insert(name.clone(), outer_type.clone());
+                } else {
+                    self.ctx.variable_type_names.remove(name);
+                }
+            }
         }
 
         Ok(final_result)

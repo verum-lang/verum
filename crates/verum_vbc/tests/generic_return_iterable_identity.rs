@@ -109,6 +109,39 @@ fn probe() -> Int {
 }
 
 #[test]
+fn leaving_a_block_preserves_refinements_of_outer_bindings() {
+    for push in [
+        "values.push(Actual { padding: 99, answer: 7 });",
+        "{ values.push(Actual { padding: 99, answer: 7 }); }",
+    ] {
+        let source = format!(
+            r#"
+type Decoy is {{ answer: Int, padding: Int, extra: Int }};
+type Actual is {{ padding: Int, answer: Int }};
+fn probe() -> Int {{
+    let mut values = List.new();
+    {push}
+    values[0].answer
+}}
+fn capture_type_report() {{}}
+"#
+        );
+        assert_eq!(run(&source), 7, "{push}");
+        let ast = Parser::new(&source).parse_module().expect("parse");
+        let mut codegen = VbcCodegen::with_config(CodegenConfig::new("block_refinement"));
+        codegen.compile_module(&ast).expect("compile");
+        assert_eq!(
+            codegen
+                .variable_type_names()
+                .get("values")
+                .map(String::as_str),
+            Some("List<Actual>"),
+            "{push}: {:?}",
+            codegen.variable_type_names()
+        );
+    }
+}
+#[test]
 fn a_dereferenced_generic_guard_passes_its_target_type_to_a_generic_call() {
     assert_eq!(
         run(r#"
