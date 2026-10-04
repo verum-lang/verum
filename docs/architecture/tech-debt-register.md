@@ -581,9 +581,45 @@ path treats that pointer slot as a raw state integer and never calls the
 initializer. T1567 tracks removal of this conflicting representation. This
 is distinct from both missing initializer roots and callback-carrier layout.
 
-Main integration remains pending execution validation. Passing unit counts
-do not replace actual program verdicts, and these failures prevent a
-whole-platform or industrial-readiness claim.
+**Coherent snapshot `388b4d0bd` — 2026-10-04.** The full CLI build
+completed in 2,832.35 seconds with stdlib input fingerprint
+`844cb0795095ced52ca28a5dd136c8842469d1e5bb3ee70d71c94f0b6ab311a4`
+and runtime archive SHA-256
+`e9220b4cc0cb2b55114067f01dd8495d04866b35971f8be30ecbe04ce4f80e0d`.
+All three saved artifacts match their manifest sizes and hashes. The minimal
+VBC suite passes 2,048 library and 416 integration tests across 46 integration
+binaries, with zero failures; the coverage-report test remains ignored.
+The archive-dependent ignored test was run explicitly and passed, alongside
+all 58 fresh-archive checks. Public compiler archive/mono tests pass nine
+checks; executable LLVM Once/closure and spawn suites pass 18 and seven;
+the CLI regressions pass eleven. These are scoped, overlapping checks.
+
+T1567 removes the private native Once representation and uses the declared
+Once/OnceLock method bodies with common AtomicInt lowering. T1536 prevents
+stale mount aliases from replacing source-owned declarations, resolves replay
+targets by canonical identity before local numeric IDs, and derives variant
+payload types from their nominal descriptor even when another type argument
+is unresolved. Same-leaf declarations, both import orders, reset and foreign
+numeric-ID collisions are covered. The public compiler declaration-authority
+regression now also runs as a blocking PR check.
+
+Actual combined interpreter execution passes factory/collect, panic payload,
+eager handler and supervisor once initialization in one program, including
+the exact expected values and without the former guessed field-owner
+warnings. Its later mutex check still reports `false,false,false`. The
+subsequent field-address check fails at `RefField`; the identical standalone
+address control passes. The trace identifies an ordinary record TypeId above
+`0x8000` being misclassified as a synthetic variant by `GetF`, which reads
+its payload incorrectly before `RefField`. This remains a failing combined
+execution result, not a passing whole-program verdict.
+
+The interpreter list-backing control passes all eight outputs. The HTTP gate
+also passes all five language contracts, a true zero-capacity TCP read and
+four connections: exact binary 200 body, header and slow-drip 408 responses
+at 0.695 and 0.647 seconds, and cancellation with no response bytes.
+Native execution of this snapshot is still under validation. Main integration
+and a whole-platform or industrial-readiness claim remain pending; unit and
+archive checks do not replace actual execution results.
 
 The separate website repository has also been updated and committed: its
 homepage and public guide describe the integrated platform and dated current
