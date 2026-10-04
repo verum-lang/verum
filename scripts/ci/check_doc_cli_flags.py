@@ -77,12 +77,18 @@ DOCS = Path(DOCS_ENV) if DOCS_ENV else REPO.parent / "website" / "docs"
 # merely names a command mid-sentence still does not match — "Run verum
 # test --workspace to check everything" has no anchor at position 0 and
 # `^` cannot match anywhere else. That case is in the self-test.
-# The `(?=\s|$)` is load-bearing: `verum hello.vr` invokes a FILE, not a
-# subcommand called `hello`, and without the boundary the name matched up
-# to the dot and three pages were reported as naming a missing command.
+# Keep one space before a command: `verum      addn0` is a benchmark
+# result column. Root flags may follow joined continuations (extra spaces)
+# and belong to root help, independently of the subcommand (T1569).
 INVOCATION = re.compile(
-    r"(?:\$ |^\s*(?:[-*>]\s+)?)verum ([a-z][a-z0-9-]*)(?=\s|$)"
+    r"(?:\$ |^\s*(?:[-*>]\s+)?)verum (?=\S|\s*-)"
     r"((?:(?!\s[|&;#])[^\n])*)")
+COMMAND = re.compile(r"([a-z][a-z0-9-]*)(?=\s|$)(.*)")
+# Only these root options consume a following value in the supported CLI.
+# This is a bounded prefix recognizer, not a shell or argument-value parser.
+ROOT_VALUE_OPTIONS = {"--color"}
+ROOT_EXIT_OPTIONS = {"--help", "--version", "-h", "-V"}
+OPTION_FLAG = re.compile(r"^\s*(?:-[A-Za-z],\s+)?(--[a-z][a-z0-9-]*)(?=\s|=|$)", re.M)
 FLAG = re.compile(r"--[a-z][a-z0-9-]*")
 EXCUSED = re.compile(
     r"#[^\n]*\b(NOT IMPLEMENTED|does not exist|not implemented|"
@@ -128,40 +134,56 @@ def logical_lines(text: str) -> list[tuple[int, str]]:
     return out
 
 
-def parse_line(line: str) -> tuple[str, list[str], bool] | None:
-    """(subcommand path, flags, is-a-documented-gap), or None.
+Invocation = tuple[str, list[str], bool]
 
-    ONE parser, used by both the corpus walk and the self-test. They
-    used to be two copies of the same logic, which is a gate that can
-    pass its own test while doing something else.
+
+def parse_line(line: str) -> list[Invocation]:
+    """Claims for root options and the subcommand, or an empty list.
+
+    An empty command path means root help. Root and subcommand options
+    stay separate: `--allow-all run` is invalid even if `run --allow-all`
+    is supported. A bare script's trailing tokens are its own arguments.
     """
-    m = INVOCATION.search(line)
-    if not m:
-        return None
-    tail = m.group(2)
-    # `--` ends verum's own arguments: `verum run -- --json a.txt`
-    # passes `--json` to the PROGRAM. Measured — without this the
-    # gate reports the program's flag as a missing verum flag.
-    tail = tail.split(" -- ", 1)[0]
-    # Leading bare words are a SUBCOMMAND PATH, not arguments:
-    # `verum cog-registry publish --manifest` asks about
-    # `cog-registry publish`, whose flags `cog-registry --help`
-    # does not list. Measured — treating them as one command
-    # reported nine flags that all exist, one level down.
-    # A SUBCOMMAND PATH IS SINGLE-SPACED. A run of two or more spaces is
-    # column alignment, and what follows it is another column:
-    # `verum run             shape ok` is a table row reporting that the
-    # tier-0 run prints "shape ok", not a call of `verum run shape ok`.
+    match = INVOCATION.search(line)
+    if not match:
+        return []
+    body = re.split(r"(?:^|\s)--(?=\s|$)", match.group(1), maxsplit=1)[0].lstrip()
+    gap = bool(EXCUSED.search(line))
+    words = list(re.finditer(r"\S+", body))
+    claims: list[Invocation] = []
+    root_flags: list[str] = []
+    index = 0
+    while index < len(words) and words[index].group().startswith("-"):
+        token = words[index].group()
+        option = token.split("=", 1)[0]
+        if FLAG.fullmatch(option) and option not in UNIVERSAL:
+            root_flags.append(option)
+        index += 1
+        if option in ROOT_EXIT_OPTIONS:
+            return [("", root_flags, gap)]
+        if option in ROOT_VALUE_OPTIONS and "=" not in token and index < len(words):
+            if not words[index].group().startswith("-"):
+                index += 1
+    if index:
+        claims.append(("", root_flags, gap))
+        body = body[words[index].start():] if index < len(words) else ""
+    command = COMMAND.fullmatch(body)
+    if not command:
+        # Paths, including quoted paths, are not subcommands. In script
+        # shorthand every token after the path is forwarded by script.rs.
+        return claims
+    tail = command.group(2)
+    # Preserve the existing single-spaced subcommand-path convention:
+    # doubled spaces mark a documentation table's next column.
     head = re.split(r"  +", tail)[0]
-    words = []
-    for w in head.split():
-        if w.startswith("-"):
+    subcommands = []
+    for word in head.split():
+        if not re.fullmatch(r"[a-z][a-z0-9-]*", word):
             break
-        if not re.fullmatch(r"[a-z][a-z0-9-]*", w):
-            break
-        words.append(w)
-    flags = [f for f in FLAG.findall(tail) if f not in UNIVERSAL]
-    return " ".join([m.group(1)] + words), flags, bool(EXCUSED.search(line))
+        subcommands.append(word)
+    flags = [flag for flag in FLAG.findall(tail) if flag not in UNIVERSAL]
+    claims.append((" ".join([command.group(1)] + subcommands), flags, gap))
+    return claims
 
 
 Where = list[tuple[str, int]]
@@ -207,22 +229,15 @@ def shown(docs: Path) -> tuple[dict[str, dict[str, Where]],
             continue
         rows = logical_lines(text)
         for lineno, line in rows:
-            parsed = parse_line(line)
-            if parsed is None:
-                continue
-            path, flags, excused = parsed
-            if excused:
-                absent.append((rel, lineno, path, flags))
-            else:
-                # RECORDED EVEN WITH NO FLAGS. A shown command must exist
-                # whether or not the line happens to carry a `--flag`, and
-                # keying on flags made three of the four wrong `verum
-                # cache …` lines invisible while catching the fourth —
-                # the one difference between them being a `--older-than`.
-                present.setdefault(path, {})
-                for fl in flags:
-                    present[path].setdefault(fl, []).append((rel, lineno))
-                cmd_where.setdefault(path, []).append((rel, lineno))
+            for path, flags, excused in parse_line(line):
+                if excused:
+                    absent.append((rel, lineno, path, flags))
+                else:
+                    # A shown command must exist even without a flag.
+                    present.setdefault(path, {})
+                    for fl in flags:
+                        present[path].setdefault(fl, []).append((rel, lineno))
+                    cmd_where.setdefault(path, []).append((rel, lineno))
     return present, absent, cmd_where
 
 
@@ -262,7 +277,9 @@ def real_flags(bin_path: str, cmd: str) -> set[str] | None:
     text = p.stdout + p.stderr
     if p.returncode != 0 and ABSENT_MSG.search(text):
         return None
-    found = set(FLAG.findall(text))
+    # Root help includes QUICK START examples of subcommand flags, such
+    # as `run --interp`. Only option rows declare root options.
+    found = set((OPTION_FLAG if not cmd else FLAG).findall(text))
     return found or None
 
 
@@ -308,7 +325,29 @@ SELF_TEST = [
     # A FILE, not a subcommand: `verum hello.vr` runs the script.
     ("$ verum hello.vr", None),
     ("$ verum script.vr        # frontmatter wins", None),
-    ("$ verum --allow-all untrusted.vr", None),
+    ("$ verum --allow-all untrusted.vr", ("", ["--allow-all"], False)),
+    # T1569: root options are checked against root help, independently of
+    # subcommand options. Script arguments do not belong to either population.
+    ("verum --allow-all script.vr --program-only", ("", ["--allow-all"], False)),
+    ("verum  --allow-all script.vr", ("", ["--allow-all"], False)),
+    ("verum --verbose --color never", ("", ["--verbose", "--color"], False)),
+    ("verum --color=never --verbose build --release",
+     [("", ["--color", "--verbose"], False), ("build", ["--release"], False)]),
+    ("verum --color never run script.vr -- --program-only",
+     [("", ["--color"], False), ("run", [], False)]),
+    ("verum --allow-all run script.vr",
+     [("", ["--allow-all"], False), ("run", [], False)]),
+    ("verum --verbose ./script.vr --program-only", ("", ["--verbose"], False)),
+    ("verum ./script.vr --program-only", None),
+    ('verum "script path.vr" --program-only', None),
+    ("verum run script.vr -- --program-only --allow-all", ("run", [], False)),
+    ("verum run --", ("run", [], False)),
+    ("verum --version", ("", [], False)),
+    ("verum --help    -> neither name appears", ("", [], False)),
+    ("verum --allow-all script.vr # NOT IMPLEMENTED", ("", ["--allow-all"], True)),
+    ("Run verum --allow-all script.vr", None),
+    # Benchmark output is a table headed by a system name, not a command.
+    ("  verum      addn0                        elapsed_ms       0", None),
     # Column alignment, not a subcommand path: this row says what the
     # tier-0 run PRINTS.
     ("verum run             shape ok", ("run", [], False)),
@@ -492,12 +531,57 @@ def option_table_self_test() -> int:
     return bad
 
 
+def root_gate_self_test() -> tuple[int, int]:
+    """Exercise the real corpus-to-help verdict without running a program."""
+    import contextlib
+    import io
+    import tempfile
+    from unittest.mock import patch
+
+    root_help = "Options:\n  -v, --verbose\n      --color <MODE>\n  -h, --help\nQUICK START\n    verum run --interp file.vr\n"
+    run_help = "Options:\n  --allow-all\n  --interp\n  --help\n"
+    cases = [
+        ("verum --allow-all script.vr", 1, "--allow-all"),
+        ("verum --allow-all run script.vr", 1, "--allow-all"),
+        ("verum --interp script.vr", 1, "--interp"),
+        ("verum --verbose --color never run script.vr -- --program-only", 0, "0 unknown"),
+        ("verum --verbose\nverum script.vr --program-only --allow-all", 0, "0 unknown"),
+        ("verum --allow-all script.vr # NOT IMPLEMENTED", 0, "0 unknown"),
+        ("verum --verbose # NOT IMPLEMENTED", 1, "gap(s)"),
+        ("verum --verbose run --missing # NOT IMPLEMENTED", 0, "0 unknown"),
+        ("verum --verbose run --interp # NOT IMPLEMENTED", 1, "gap(s)"),
+    ]
+    bad = 0
+    for source, expected, marker in cases:
+        with tempfile.TemporaryDirectory() as directory:
+            docs = Path(directory)
+            (docs / "page.md").write_text(source)
+            executable = docs / "verum"
+            executable.touch()
+
+            def help_only(argv, **_kwargs):
+                assert argv[-1] == "--help", argv
+                command = argv[1:-1]
+                assert command in ([], ["run"]), argv
+                return subprocess.CompletedProcess(argv, 0, run_help if command else root_help, "")
+
+            output = io.StringIO()
+            with patch.dict(globals(), {"DOCS": docs, "binary": lambda: str(executable)}), \
+                    patch.object(sys, "argv", ["check_doc_cli_flags.py", "--check"]), \
+                    patch.object(subprocess, "run", side_effect=help_only), \
+                    contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
+                got = main()
+            if got != expected or marker not in output.getvalue():
+                bad += 1
+                print(f"FAIL root gate {source!r}: exit {got}, {output.getvalue()!r}", file=sys.stderr)
+    return bad, len(cases)
+
+
 def self_test() -> int:
     bad = 0
     for line, want in SELF_TEST:
         got = parse_line(line)
-        if got is not None:
-            got = (got[0], got[1], got[2])
+        got = got[0] if len(got) == 1 else got or None
         if got != want:
             bad += 1
             print(f"FAIL {line!r} -> {got}, expected {want}", file=sys.stderr)
@@ -507,11 +591,13 @@ def self_test() -> int:
             bad += 1
             print(f"FAIL join {text!r} -> {got}, expected {want}", file=sys.stderr)
     bad += option_table_self_test()
+    root_bad, root_count = root_gate_self_test()
+    bad += root_bad
     if bad:
         print(f"self-test: {bad} case(s) FAILED", file=sys.stderr)
         return 1
     print(f"self-test: {len(SELF_TEST)} parse + {len(JOIN_TEST)} join + "
-          f"{len(OPTION_TABLE_TEST)} option-table case(s) OK")
+          f"{len(OPTION_TABLE_TEST)} option-table + {root_count} root-gate case(s) OK")
     return 0
 
 
@@ -592,14 +678,17 @@ def main() -> int:
     # THE OTHER POLARITY. A line saying a thing does not exist is a claim,
     # and a claim that has come true in reverse is worse than a missing
     # one: the reader is told not to use a working command.
-    for rel, lineno, cmd, flags in sorted(absent):
+    absent_sites: dict[tuple[str, int], list[tuple[str, list[str]]]] = {}
+    for rel, lineno, cmd, flags in absent:
+        absent_sites.setdefault((rel, lineno), []).append((cmd, flags))
+    for (rel, lineno), claims in sorted(absent_sites.items()):
         checked += 1
-        real = help_of[cmd]
-        if real is None:
-            continue  # the command still does not exist — claim holds
-        if flags and not all(f in real for f in flags):
-            continue  # at least one flag is still missing — claim holds
-        what = f"{cmd} {' '.join(flags)}".strip()
+        # The gap belongs to the whole original line. A valid root option
+        # does not close a gap in its subcommand, and vice versa.
+        if any(help_of[cmd] is None or any(flag not in help_of[cmd] for flag in flags)
+               for cmd, flags in claims):
+            continue
+        what = " ".join(f"{cmd} {' '.join(flags)}".strip() for cmd, flags in claims).strip()
         stale.append((what, None, [f"{rel}:{lineno}"]))
 
     if unreadable:
@@ -636,7 +725,7 @@ def main() -> int:
     print(f"check-doc-cli-flags: {len(help_of)} command(s), {checked} claim(s) "
           f"({table_claims} from option tables) "
           f"({sum(len(v) for v in present.values())} shown, "
-          f"{len(absent)} documented gaps), 0 unknown")
+          f"{len(absent_sites)} documented gaps), 0 unknown")
     return 0
 
 
