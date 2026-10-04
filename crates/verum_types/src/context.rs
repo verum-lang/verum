@@ -50,6 +50,10 @@ pub struct TypeScheme {
     /// When 0 (default), all vars are treated as potentially bindable from
     /// receiver type args (backward compatible).
     pub impl_var_count: usize,
+    /// Method-owned explicit argument slots in declaration order. The stored
+    /// TypeVars belong to this scheme, not to the receiver's parameter list.
+    /// None means legacy metadata; an empty list is a known nongeneric method.
+    pub explicit_method_vars: Option<List<Option<TypeVar>>>,
 }
 
 impl TypeScheme {
@@ -62,6 +66,7 @@ impl TypeScheme {
             var_type_bounds: Map::new(),
             var_protocol_bounds: Map::new(),
             impl_var_count: 0,
+            explicit_method_vars: None,
         }
     }
 
@@ -74,6 +79,7 @@ impl TypeScheme {
             var_type_bounds: Map::new(),
             var_protocol_bounds: Map::new(),
             impl_var_count: 0,
+            explicit_method_vars: None,
         }
     }
 
@@ -87,6 +93,7 @@ impl TypeScheme {
             var_type_bounds: Map::new(),
             var_protocol_bounds: Map::new(),
             impl_var_count: 0,
+            explicit_method_vars: None,
         }
     }
 
@@ -105,6 +112,7 @@ impl TypeScheme {
             var_type_bounds,
             var_protocol_bounds: Map::new(),
             impl_var_count: 0,
+            explicit_method_vars: None,
         }
     }
 
@@ -247,6 +255,26 @@ impl TypeScheme {
         }
 
         (self.ty.apply_subst(&subst), fresh_vars, fresh_implicit)
+    }
+
+    /// Rebase declared explicit slots onto this call's fresh instantiation.
+    pub(crate) fn fresh_explicit_method_vars(
+        &self,
+        fresh_vars: &[TypeVar],
+    ) -> Option<List<Option<TypeVar>>> {
+        self.explicit_method_vars.as_ref().map(|slots| {
+            slots
+                .iter()
+                .map(|slot| {
+                    slot.and_then(|original| {
+                        self.vars
+                            .iter()
+                            .position(|var| *var == original)
+                            .and_then(|index| fresh_vars.get(index).copied())
+                    })
+                })
+                .collect()
+        })
     }
 
     /// Instantiate the type scheme and return type, fresh vars, and type bounds mapped to fresh vars.

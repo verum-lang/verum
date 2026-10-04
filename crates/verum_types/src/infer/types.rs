@@ -3175,6 +3175,68 @@ fn substitute_refinement_binder(
         }
     }
 
+    /// Capture declaration-owned slots before method generic scope is left.
+    /// Non-type parameters occupy a slot; implicit parameters occupy none.
+    pub(super) fn record_explicit_method_vars(
+        &self,
+        scheme: &mut crate::context::TypeScheme,
+        func: &verum_ast::decl::FunctionDecl,
+    ) {
+        scheme.explicit_method_vars = Some(
+            func.generics
+                .iter()
+                .filter(|parameter| !parameter.is_implicit)
+                .map(|parameter| match &parameter.kind {
+                    verum_ast::ty::GenericParamKind::Type { name, .. } => {
+                        match self.ctx.lookup_type(name.name.as_str()) {
+                            Some(Type::Var(var)) => Some(*var),
+                            _ => None,
+                        }
+                    }
+                    _ => None,
+                })
+                .collect(),
+        );
+    }
+
+    /// Constrain method slots before argument checking and return inference.
+
+    pub(super) fn bind_explicit_method_arguments(
+        &mut self,
+        slots: Option<&List<Option<TypeVar>>>,
+        arguments: &List<verum_ast::ty::GenericArg>,
+        method: &verum_ast::Ident,
+        span: Span,
+    ) -> Result<crate::ty::Substitution> {
+        let mut combined = crate::ty::Substitution::new();
+        let Some(slots) = slots else {
+            return Ok(combined);
+        };
+        if arguments.len() > slots.len() {
+            return Err(TypeError::OtherWithCodeSpanned {
+                code: "E408".into(),
+                msg: format!("Method '{}' accepts {} explicit generic arguments, but {} were provided",
+                    method.name, slots.len(), arguments.len()).into(),
+                span,
+            });
+        }
+        for (argument, slot) in arguments.iter().zip(slots.iter()) {
+            if let Some(var) = slot {
+                let verum_ast::ty::GenericArg::Type(ty) = argument else {
+                    return Err(TypeError::OtherWithCodeSpanned {
+                        code: "E400".into(),
+                        msg: format!("Method '{}' requires a type argument in this generic slot",
+                            method.name).into(),
+                        span,
+                    });
+                };
+                let provided = self.ast_to_type(ty)?;
+                combined.extend(self.unifier.unify(&Type::Var(*var), &provided, span)?);
+            }
+        }
+        Ok(combined)
+    }
+
     /// Instantiate a method's type parameters and optionally unify with explicit type arguments.
     ///
     /// For generic methods like `fn collect<U>(&self) -> List<U>`, when called as

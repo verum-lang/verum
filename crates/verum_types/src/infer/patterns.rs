@@ -3506,6 +3506,7 @@ impl TypeChecker {
                     var_type_bounds: Map::new(),
                     var_protocol_bounds: Map::new(),
                     impl_var_count: 0,
+                    explicit_method_vars: None,
                 },
             );
         }

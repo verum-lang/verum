@@ -5600,6 +5600,15 @@ impl TypeChecker {
         let ImplKind::Inherent(for_type) = &impl_decl.kind
             else { unreachable!() };
         let type_param_names = type_param_names.clone();
+        // Preserve the impl's identities before a method shadows their names.
+        let impl_bindings: List<(Text, Type)> = type_param_names
+            .iter()
+            .filter_map(|name| {
+                self.ctx.lookup_type(name.as_str()).cloned()
+                    .map(|ty| (name.clone(), ty))
+            })
+            .collect();
+
                 // CRITICAL FIX: Set current_self_type FIRST so Self types in method signatures resolve correctly
                 // This enables patterns like `implement TypeName { fn new() -> Self { ... } }`
                 let self_type = self.ast_to_type(for_type)?;
@@ -5927,7 +5936,7 @@ impl TypeChecker {
                                     let mut impl_vars_outside: Vec<TypeVar> = Vec::new();
                                     for name in type_param_names.iter() {
                                         if let Option::Some(Type::Var(v)) =
-                                            self.ctx.lookup_type(name.as_str())
+                                            impl_bindings.iter().find(|(n, _)| n == name).map(|(_, ty)| ty)
                                         {
                                             if for_type_free.contains(v) {
                                                 impl_vars_in_for_type.push(*v);
@@ -5963,6 +5972,7 @@ impl TypeChecker {
                                     // TypeVars and leaves impl_vars_outside free
                                     // (to be inferred from bounds / unification).
                                     method_scheme.impl_var_count = impl_vars_in_for_type.len();
+                                    self.record_explicit_method_vars(&mut method_scheme, func);
                                     if std::env::var("VERUM_TRACE_METHOD_LOOKUP").is_ok() { eprintln!("[implvc-set] site=decls.rs:5370 count={}", impl_vars_in_for_type.len()); }
 
                                     // CRITICAL: Add type bounds to the TypeScheme for closure type inference
@@ -6031,6 +6041,10 @@ impl TypeChecker {
                                 }
                                 Ok(())
                             }; // end of method registration closure
+                            for (name, ty) in &impl_bindings {
+                                self.ctx.define_type(name.clone(), ty.clone());
+                            }
+
                             if let Err(_e) = method_result {
                                 // Method type resolution failed — skip this method and continue
                                 // with remaining methods in the impl block

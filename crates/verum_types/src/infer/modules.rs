@@ -20076,7 +20076,8 @@ impl TypeChecker {
                             ));
                             return None;
                         }
-                        Some(((ty, fresh_vars, impl_vc), type_bounds))
+                        let explicit_vars = scheme.fresh_explicit_method_vars(&fresh_vars);
+                        Some(((ty, fresh_vars, impl_vc, explicit_vars), type_bounds))
                     })
                 };
                 if crate::ctor_trace_enabled() && early_method_info.is_none() {
@@ -20086,7 +20087,7 @@ impl TypeChecker {
                     );
                 }
 
-                if let Some(((method_ty, ordered_fresh_vars, impl_var_count), type_bounds)) =
+                if let Some(((method_ty, ordered_fresh_vars, impl_var_count, explicit_vars), type_bounds)) =
                     early_method_info
                 {
                     // #91/#95 — STATIC-DISPATCH ONLY.  Stamp the
@@ -20205,6 +20206,9 @@ impl TypeChecker {
                                     combined_subst.extend(subst);
                                 }
                             }
+                            combined_subst.extend(self.bind_explicit_method_arguments(
+                                explicit_vars.as_ref(), type_args, method, span,
+                            )?);
                             self.apply_fn_bound_extraction(&type_bounds, span);
 
                             // OVERLOAD GUARD: If a closure argument doesn't match the parameter
@@ -22592,7 +22596,7 @@ impl TypeChecker {
         // Protocol-driven method resolution: methods resolved by searching implemented protocols for matching signatures
 
         let (inherent_result, specialization_rejected) = self.try_inherent_method_dispatch(
-            &recv_ty, method, args, span,
+            &recv_ty, method, type_args, args, span,
         )?;
         if let Some(r) = inherent_result {
             return Ok(r);
@@ -24201,6 +24205,7 @@ impl TypeChecker {
         &mut self,
         recv_ty: &Type,
         method: &Ident,
+        type_args: &List<verum_ast::ty::GenericArg>,
         args: &[Expr],
         span: Span,
     ) -> Result<(Option<InferResult>, bool)> {
@@ -24333,7 +24338,8 @@ impl TypeChecker {
                         let impl_vc = scheme.impl_var_count;
                         let (ty, fresh_vars, type_bounds) =
                             scheme.instantiate_with_type_bounds();
-                        Some(((ty, fresh_vars, impl_vc), type_bounds))
+                        let explicit_vars = scheme.fresh_explicit_method_vars(&fresh_vars);
+                        Some(((ty, fresh_vars, impl_vc, explicit_vars), type_bounds))
                     })
                 })
             })
@@ -24347,7 +24353,7 @@ impl TypeChecker {
             // AND that function type bounds (like F: fn(T) -> U) are preserved for closure checking.
             let _ = type_name_text; // Used in original code but now method_info_opt is computed above
 
-            if let Some(((method_ty, ordered_fresh_vars, impl_var_count), type_bounds)) =
+            if let Some(((method_ty, ordered_fresh_vars, impl_var_count, explicit_vars), type_bounds)) =
                 method_info_opt
             {
                 // CRITICAL: Register type bounds for fresh type variables
@@ -24514,6 +24520,9 @@ impl TypeChecker {
                             combined_subst.extend(subst);
                         }
                     }
+                    combined_subst.extend(self.bind_explicit_method_arguments(
+                        explicit_vars.as_ref(), type_args, method, span,
+                    )?);
                     self.apply_fn_bound_extraction(&type_bounds, span);
 
                     // `params` is a slice since T1270; the `.clone()` that
