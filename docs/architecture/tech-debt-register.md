@@ -415,9 +415,12 @@ helper validates the exact root bytes before applying an edit.
 The pre-follow-up `b576b2eb1` full VBC measurement passed **2,035 library
 tests plus 290 tests in 34 targeted binaries**, with zero failures and one
 existing ignored library test. At `0634cb100`, all **40 source gates pass**;
-a fresh full VBC run and coherent CLI/std-library build are in progress.
-These counts distinguish the tested source snapshots from the pending
-executable acceptance.
+the completed full VBC run passes **2,040 library tests plus 300 tests in
+34 targeted binaries**, with zero failures and one existing ignored library
+test. The library run took 986.44 seconds, and the complete command took
+1,043.39 seconds alongside the separate CLI build. The coherent CLI/std-library
+build remains in progress. These counts distinguish the tested source
+snapshots from the pending executable acceptance.
 
 T1547 separately records a source declaration defect: Byte/UInt8 and
 USize/ISize impls attach to whichever alias descriptor was collected first.

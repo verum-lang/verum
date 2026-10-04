@@ -200,11 +200,14 @@ Test counts are deliberately not pinned here — they move with every added test
 and a stale number reads as a target to hit.  Run the suite for the current
 figure; what is pinned is the gate.
 
-**Latest measured codegen surface — 2026-10-04, source `a67c786a4`:**
+**Latest measured codegen surface — 2026-10-04, source `0634cb100`:**
 the lib suite with `--no-default-features --features
-compression,table_dispatch,codegen,ffi` passed 2,035 tests, failed none,
-and retained one pre-existing ignored test (T0839), in 536.81 seconds.
-Eighteen targeted integration binaries passed another 186 tests.
+compression,table_dispatch,codegen,ffi` passed 2,040 tests, failed none,
+and retained one pre-existing ignored test (T0839), in 986.44 seconds.
+Thirty-four targeted integration binaries passed another 300 tests.
+The complete command took 1,043.39 seconds while the separate CLI/std-library
+build was also running; this is a loaded-machine test duration, not a
+compilation-speed benchmark.
 This is a private-target Cargo measurement, not a full workspace,
 default-feature, or native language-conformance verdict. See T1516 and
 `docs/architecture/tech-debt-register.md` for the separate CLI/AOT results.
