@@ -1947,17 +1947,10 @@ impl VbcCodegen {
                 // nil (byte-identical to the historical LoadNil placeholder).
                 if self.ctx.const_generic_params.contains(&name.to_string()) {
                     let dest = self.ctx.alloc_temp();
-                    if let Some(idx) = self
-                        .ctx
-                        .generic_type_params_ordered
-                        .iter()
-                        .position(|p| p == &name.to_string())
-                    {
+                    if let Some(param_id) = self.ctx.current_generic_param_id(&name) {
                         self.ctx.emit(Instruction::LoadT {
                             dst: dest,
-                            type_ref: crate::types::TypeRef::Generic(
-                                crate::types::TypeParamId(idx as u16),
-                            ),
+                            type_ref: crate::types::TypeRef::Generic(param_id),
                         });
                     } else {
                         // Not in the ordered numbering (registration path
@@ -6382,21 +6375,14 @@ impl VbcCodegen {
             && matches!(method_ident.name.as_str(), "default" | "zero" | "one")
         {
             let tp_name = tp_ident.name.as_str();
-            if let Some(idx) = self
-                .ctx
-                .generic_type_params_ordered
-                .iter()
-                .position(|p| p == tp_name)
-            {
+            if let Some(param_id) = self.ctx.current_generic_param_id(tp_name) {
                 if std::env::var_os("VERUM_TRACE_TPCALL").is_some() {
-                    eprintln!("[tpcall] compile_call intercept: {}.{} idx={}", tp_name, method_ident.name.as_str(), idx);
+                    eprintln!("[tpcall] compile_call intercept: {}.{} idx={}", tp_name, method_ident.name.as_str(), param_id.0);
                 }
                 let recv = self.ctx.alloc_temp();
                 self.ctx.emit(Instruction::LoadT {
                     dst: recv,
-                    type_ref: crate::types::TypeRef::Generic(
-                        crate::types::TypeParamId(idx as u16),
-                    ),
+                    type_ref: crate::types::TypeRef::Generic(param_id),
                 });
                 // Compile arguments into a contiguous block.
                 let mut arg_regs: Vec<Reg> = Vec::with_capacity(args.len());
@@ -12959,27 +12945,21 @@ impl VbcCodegen {
         if let ExprKind::Path(recv_path) = &receiver.kind
             && recv_path.segments.len() == 1
             && let PathSegment::Name(recv_ident) = &recv_path.segments[0]
-            && let Some(idx) = self
-                .ctx
-                .generic_type_params_ordered
-                .iter()
-                .position(|p| p == recv_ident.name.as_str())
+            && let Some(param_id) = self.ctx.current_generic_param_id(recv_ident.name.as_str())
         {
             if std::env::var_os("VERUM_TRACE_TPCALL").is_some() {
                 eprintln!(
                     "[tpcall] T1214 witness: recv={} method={} idx={} args={}",
                     recv_ident.name.as_str(),
                     method.name.as_str(),
-                    idx,
+                    param_id.0,
                     args.len()
                 );
             }
             let recv_reg = self.ctx.alloc_temp();
             self.ctx.emit(Instruction::LoadT {
                 dst: recv_reg,
-                type_ref: crate::types::TypeRef::Generic(crate::types::TypeParamId(
-                    idx as u16,
-                )),
+                type_ref: crate::types::TypeRef::Generic(param_id),
             });
             crate::codegen::bare_method::record("<witness>", method.name.as_str());
             // Arguments go in a contiguous block, as every CallM expects.
@@ -13069,31 +13049,27 @@ impl VbcCodegen {
                 // LoadT yields nil and the dispatcher's nil-receiver
                 // fallback reproduces the historical identity (0/0/1) —
                 // strictly-better, never-worse than the old hardcode.
-                let witness_idx: Option<usize> = match &receiver.kind {
+                let witness_id = match &receiver.kind {
                     ExprKind::Path(path)
                         if path.segments.len() == 1 =>
                     {
                         match &path.segments[0] {
                             PathSegment::Name(ident) => self
                                 .ctx
-                                .generic_type_params_ordered
-                                .iter()
-                                .position(|p| p == ident.name.as_str()),
+                                .current_generic_param_id(ident.name.as_str()),
                             _ => None,
                         }
                     }
                     _ => None,
                 };
-                if let Some(idx) = witness_idx {
+                if let Some(param_id) = witness_id {
                     if std::env::var_os("VERUM_TRACE_TPCALL").is_some() {
-                        eprintln!("[tpcall] task17 witness: method={} idx={}", method.name.as_str(), idx);
+                        eprintln!("[tpcall] task17 witness: method={} idx={}", method.name.as_str(), param_id.0);
                     }
                     let recv = self.ctx.alloc_temp();
                     self.ctx.emit(Instruction::LoadT {
                         dst: recv,
-                        type_ref: crate::types::TypeRef::Generic(
-                            crate::types::TypeParamId(idx as u16),
-                        ),
+                        type_ref: crate::types::TypeRef::Generic(param_id),
                     });
                         // second witness (LoadT{Generic}) — counted so the fan-out has names (T0753).
                         crate::codegen::bare_method::record("<witness>", method.name.as_str());

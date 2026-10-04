@@ -13,7 +13,7 @@ use super::registers::{RegisterAllocator, RegisterInfo};
 use crate::cbgr::DereferenceCodegen;
 use crate::instruction::{Instruction, Reg};
 use crate::module::{ConstId, FunctionId};
-use crate::types::{CbgrTier, TypeRef};
+use crate::types::{CbgrTier, TypeParamId, TypeRef};
 use std::collections::{HashMap, HashSet};
 use verum_cbgr::tier_types::Tier0Reason;
 use verum_common::Map;
@@ -4336,6 +4336,23 @@ impl CodegenContext {
         self.type_generic_params
             .get(type_name)
             .and_then(|params| params.iter().position(|p| p == param))
+    }
+
+    /// Resolve a body witness against the active signature, including method
+    /// parameters that shadow owner parameters. Parameters not represented in
+    /// the signature map (such as legacy const witnesses) retain their existing
+    /// declaration-order IDs.
+    pub(super) fn current_generic_param_id(&self, name: &str) -> Option<TypeParamId> {
+        self.current_generic_param_ids
+            .get(name)
+            .copied()
+            .map(TypeParamId)
+            .or_else(|| {
+                self.generic_type_params_ordered
+                    .iter()
+                    .position(|param| param == name)
+                    .map(|index| TypeParamId(index as u16))
+            })
     }
 
     /// Find a variant descriptor by its parent type name and variant name.

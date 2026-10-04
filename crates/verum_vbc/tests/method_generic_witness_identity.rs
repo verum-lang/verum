@@ -217,6 +217,30 @@ fn probe() -> Int {
     assert_eq!(args[0], TypeRef::Concrete(verum_vbc::types::TypeId::INT));
     assert_eq!(args.len(), 2, "shadow witness must stay compact");
     assert_eq!(args[1], TypeRef::Concrete(type_id(&module, "Answer")));
+
+    let mut pc = descriptor.bytecode_offset as usize;
+    let end = pc + descriptor.bytecode_length as usize;
+    let mut loaded_params = Vec::new();
+    while pc < end {
+        if let Instruction::LoadT {
+            type_ref: TypeRef::Generic(id),
+            ..
+        } = decode_instruction(&module.bytecode, &mut pc).unwrap()
+        {
+            loaded_params.push(id);
+        }
+    }
+    assert_eq!(loaded_params, vec![verum_vbc::types::TypeParamId(0x8000)]);
+    let entry = module
+        .functions
+        .iter()
+        .find(|f| module.get_string(f.name).unwrap().ends_with("probe"))
+        .unwrap()
+        .id;
+    let value = verum_vbc::interpreter::Interpreter::new(std::sync::Arc::new(module))
+        .execute_function(entry)
+        .expect("execute method shadow type");
+    assert_eq!(value.as_i64(), 7);
 }
 
 #[test]
