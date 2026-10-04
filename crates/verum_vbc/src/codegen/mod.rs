@@ -3127,7 +3127,32 @@ impl VbcCodegen {
             }
             return;
         }
-        // First claim by THIS module: bind the simple key to a fresh id.
+        // T1536: the canonical source declaration completes the built-in
+        // sum identity; it must not allocate a second ID for the same type.
+        // Intrinsic signatures and variant opcodes share these reserved IDs.
+        // The first archive owner is the source-declared owner, whereas later
+        // entries are bundle lookup alternatives, not declaration authority.
+        let canonical_sum_id = {
+            use verum_common::well_known_types::WellKnownType;
+            WellKnownType::from_name(type_name).and_then(|kind| {
+                if kind.canonical_archive_modules().first().copied() != Some(module_name) {
+                    return None;
+                }
+                match kind {
+                    WellKnownType::Maybe => Some(TypeId::MAYBE),
+                    WellKnownType::Result => Some(TypeId::RESULT),
+                    WellKnownType::Ordering => Some(TypeId::ORDERING),
+                    _ => None,
+                }
+            })
+        };
+        if let Some(id) = canonical_sum_id {
+            // Source mounts may skip re-registering variant constructors that
+            // are already built in. Install their qualified key in the same
+            // prepass that claims the simple key, before that skip.
+            self.type_name_to_id.insert(format!("{module_name}.{type_name}"), id);
+        }
+        // First claim by THIS module: bind the simple key to its declared id.
         // If the key was already bound (archive import or an earlier
         // module's claim), the local declaration shadows it for this
         // module's bodies — evict the stale simple-key layout cache so
@@ -3152,7 +3177,7 @@ impl VbcCodegen {
         // the archive came back field-scrambled (the vcs #143 register
         // entry). Lexical scoping: the declaring module owns its simple
         // key; the foreign layout stays reachable via its qualified key.
-        let type_id = self.alloc_user_type_id();
+        let type_id = canonical_sum_id.unwrap_or_else(|| self.alloc_user_type_id());
         if trace_type_binding(type_name) {
             eprintln!(
                 "[type-claim] EVICT  name={} layout_was={:?}",
@@ -3182,6 +3207,7 @@ impl VbcCodegen {
         if let Some(old_id) = self
             .type_name_to_id
             .insert(type_name.to_string(), type_id)
+            .filter(|old_id| *old_id != type_id)
         {
             // The finalize type-table gate requires ONE descriptor per
             // NAME. The shadowed descriptor keeps its identity under its

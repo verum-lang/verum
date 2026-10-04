@@ -36861,7 +36861,7 @@ impl VbcCodegen {
                         _ => return Err(CodegenError::internal("catch_unwind error must have a concrete declared record type")),
                     }
                 }
-                _ => return Err(CodegenError::internal("catch_unwind declaration must return Result<T, PanicInfo>")),
+                _ => return Err(CodegenError::internal(format!("catch_unwind declaration must return Result<T, PanicInfo>; got {return_type:?}"))),
             }
         } else {
             let contract = crate::intrinsics::registry::CATCH_UNWIND_ERROR_TYPE;
