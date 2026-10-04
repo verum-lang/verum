@@ -56,6 +56,7 @@ pub mod registers;
 
 mod bootstrap_types;
 mod expressions;
+mod parsed_field_types;
 mod statements;
 
 #[cfg(test)]
@@ -10127,7 +10128,7 @@ impl VbcCodegen {
                         fields.iter().map(|f| f.name.name.to_string()).collect();
                     let field_types: Vec<String> = fields
                         .iter()
-                        .map(|f| Self::extract_type_name_from_ast(&f.ty))
+                        .map(|f| Self::render_field_type_name(&f.ty, true))
                         .collect();
                     self.register_record_fields(&type_decl.name.name, field_names, field_types);
 

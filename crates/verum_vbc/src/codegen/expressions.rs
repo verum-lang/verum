@@ -23220,13 +23220,12 @@ impl VbcCodegen {
             .type_generic_params
             .get(base)
             .or_else(|| self.collection_type_params.get(base));
-        let arguments = Self::split_generic_args(owner);
-        Some(match parameters {
-            Some(parameters) if !arguments.is_empty() => {
-                Self::substitute_generic_params_in_type_name(declared, parameters, &arguments)
+        match parameters {
+            Some(parameters) if owner.contains('<') => {
+                super::parsed_field_types::instantiate(owner, parameters, declared)
             }
-            _ => declared.to_owned(),
-        })
+            _ => Some(declared.to_owned()),
+        }
     }
 
     /// Materialize exactly the same receiver steps used by field inference.
