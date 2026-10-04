@@ -15643,12 +15643,13 @@ impl VbcCodegen {
         } else if let ExprKind::MethodCall {
             receiver: inner_receiver,
             method: inner_method,
+            type_args: inner_type_args,
             ..
         } = &receiver.kind
         {
             // Case 3: Receiver is a method call - determine return type of the inner method
             // This handles chains like: obj.as_nanos().checked_add(...)
-            self.determine_method_return_type_prefix(inner_receiver, inner_method, method)
+            self.determine_method_return_type_prefix(inner_receiver, inner_method, inner_type_args, method)
         } else if let ExprKind::Field { expr: base, field } = &receiver.kind {
             // Case 4: Receiver is a field access - check if base is a type name or instance
             // Handles: FileDesc.STDIN.is_valid(), self.inner.next(), var.field.method()
@@ -17017,7 +17018,12 @@ impl VbcCodegen {
     /// Read a method result through the same finite Deref route used to
     /// compile its receiver. Substitute the resolved owner's arguments before
     /// the result becomes the receiver of the next call.
-    fn resolved_method_return_type_name(&self, receiver: &str, method: &str) -> Option<String> {
+    fn resolved_method_return_type_name(
+        &self,
+        receiver: &str,
+        method: &str,
+        explicit: &verum_common::List<verum_ast::ty::GenericArg>,
+    ) -> Option<String> {
         let mut receiver = Self::method_receiver_type_name(receiver).to_string();
         for _ in 0..self.method_receiver_deref_count(&receiver, method) {
             receiver = self.user_deref_target_type_name(&receiver)?.to_string();
@@ -17056,11 +17062,21 @@ impl VbcCodegen {
             .find(|f| f.descriptor.id == info.id)
             .map(|f| &f.descriptor.return_type)
             .or(info.return_type.as_ref());
-        if let Some(ret) = structural_return.filter(|ret| has_shadow(ret)) {
+        if let Some(ret) = structural_return.filter(|ret| !explicit.is_empty() || has_shadow(ret)) {
             let mut substitution = crate::mono::TypeSubstitution::empty();
             for (index, arg) in Self::split_generic_args(&receiver).iter().enumerate() {
                 if let Some(ty) = self.type_name_to_type_ref_mono(arg) {
                     substitution.bind(crate::types::TypeParamId(index as u16), ty);
+                }
+            }
+            // A method's explicit parameters belong to its declaration, not
+            // the receiver's argument positions. Apply the same IDs as CallG
+            // before the result is used as a field or method receiver.
+            for (arg, id) in explicit.iter().zip(&info.explicit_type_param_ids) {
+                if let (verum_ast::ty::GenericArg::Type(ty), Some(id)) = (arg, id)
+                    && let Some(witness) = self.explicit_type_witness(ty, None)
+                {
+                    substitution.bind(*id, witness);
                 }
             }
             return self.type_ref_to_field_name(&substitution.apply(ret));
@@ -17097,7 +17113,7 @@ impl VbcCodegen {
     fn infer_method_chain_return_type(&self, expr: &Expr) -> Option<String> {
         match &expr.kind {
             ExprKind::MethodCall {
-                receiver, method, ..
+                receiver, method, type_args, ..
             } => {
                 // A namespace call may infer its constructor's arguments from
                 // values. Leave that to the existing static-call producer.
@@ -17114,7 +17130,7 @@ impl VbcCodegen {
                 let receiver_type = self
                     .extract_expr_type_name(receiver)
                     .or_else(|| self.infer_method_chain_return_type(receiver))?;
-                self.resolved_method_return_type_name(&receiver_type, method.name.as_str())
+                self.resolved_method_return_type_name(&receiver_type, method.name.as_str(), type_args)
             }
             ExprKind::Path(path) if path.segments.len() == 1 => {
                 if let verum_ast::ty::PathSegment::Name(ident) = &path.segments[0] {
@@ -17148,11 +17164,12 @@ impl VbcCodegen {
         &self,
         inner_receiver: &Expr,
         inner_method: &verum_ast::Ident,
+        inner_type_args: &verum_common::List<verum_ast::ty::GenericArg>,
         outer_method_name: &verum_ast::Ident,
     ) -> String {
         if let Some(receiver) = self.infer_method_chain_return_type(inner_receiver)
             && let Some(result) = self.resolved_method_return_type_name(
-                &receiver, inner_method.name.as_str(),
+                &receiver, inner_method.name.as_str(), inner_type_args,
             )
         {
             let base = Self::strip_generic_args(Self::method_receiver_type_name(&result));

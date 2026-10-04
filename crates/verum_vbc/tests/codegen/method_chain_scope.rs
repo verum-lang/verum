@@ -16,7 +16,7 @@ implement<T> Owner<T> {
     let mut codegen = VbcCodegen::with_config(CodegenConfig::new("chain_scope"));
     codegen.compile_module(&ast).expect("compile");
     let name = codegen
-        .resolved_method_return_type_name("Owner<Int>", "pair")
+        .resolved_method_return_type_name("Owner<Int>", "pair", &verum_common::List::new())
         .expect("result");
     assert!(name.contains("Owner<Int>"), "{name}");
     assert!(
