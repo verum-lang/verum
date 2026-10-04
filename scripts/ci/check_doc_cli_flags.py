@@ -169,8 +169,11 @@ def parse_line(line: str) -> list[Invocation]:
         body = body[words[index].start():] if index < len(words) else ""
     command = COMMAND.fullmatch(body)
     if not command:
-        # Paths, including quoted paths, are not subcommands. In script
-        # shorthand every token after the path is forwarded by script.rs.
+        # script.rs rewrites shorthand only when argv[1] is the script.
+        # After root options no rewrite occurs: later flags still belong
+        # to the root parser. An explicit `--` was already removed above.
+        if index:
+            root_flags.extend(flag for flag in FLAG.findall(body) if flag not in UNIVERSAL)
         return claims
     tail = command.group(2)
     # Preserve the existing single-spaced subcommand-path convention:
@@ -328,7 +331,7 @@ SELF_TEST = [
     ("$ verum --allow-all untrusted.vr", ("", ["--allow-all"], False)),
     # T1569: root options are checked against root help, independently of
     # subcommand options. Script arguments do not belong to either population.
-    ("verum --allow-all script.vr --program-only", ("", ["--allow-all"], False)),
+    ("verum --allow-all script.vr --program-only", ("", ["--allow-all", "--program-only"], False)),
     ("verum  --allow-all script.vr", ("", ["--allow-all"], False)),
     ("verum --verbose --color never", ("", ["--verbose", "--color"], False)),
     ("verum --color=never --verbose build --release",
@@ -337,7 +340,9 @@ SELF_TEST = [
      [("", ["--color"], False), ("run", [], False)]),
     ("verum --allow-all run script.vr",
      [("", ["--allow-all"], False), ("run", [], False)]),
-    ("verum --verbose ./script.vr --program-only", ("", ["--verbose"], False)),
+    ("verum --verbose ./script.vr --program-only", ("", ["--verbose", "--program-only"], False)),
+    ("verum --color never script.vr --allow-all", ("", ["--color", "--allow-all"], False)),
+    ("verum --verbose script.vr -- --program-only", ("", ["--verbose"], False)),
     ("verum ./script.vr --program-only", None),
     ('verum "script path.vr" --program-only', None),
     ("verum run script.vr -- --program-only --allow-all", ("run", [], False)),
@@ -544,6 +549,7 @@ def root_gate_self_test() -> tuple[int, int]:
         ("verum --allow-all script.vr", 1, "--allow-all"),
         ("verum --allow-all run script.vr", 1, "--allow-all"),
         ("verum --interp script.vr", 1, "--interp"),
+        ("verum --verbose script.vr --allow-all", 1, "--allow-all"),
         ("verum --verbose --color never run script.vr -- --program-only", 0, "0 unknown"),
         ("verum --verbose\nverum script.vr --program-only --allow-all", 0, "0 unknown"),
         ("verum --allow-all script.vr # NOT IMPLEMENTED", 0, "0 unknown"),
