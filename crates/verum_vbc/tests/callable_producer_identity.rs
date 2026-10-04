@@ -21,7 +21,7 @@ fn nominal(module: &VbcModule, name: &str) -> TypeRef {
     TypeRef::Concrete(desc.id)
 }
 
-fn closures(module: &VbcModule) -> Vec<&FunctionDescriptor> {
+fn closures(module: &VbcModule) -> verum_common::List<&FunctionDescriptor> {
     module
         .functions
         .iter()
@@ -172,4 +172,92 @@ fn caller_generic_annotation_stays_generic_despite_same_named_nominal() {
     let f = closures(&module)[0];
     assert_eq!(f.params[1].type_ref, TypeRef::Generic(TypeParamId(0)));
     assert_eq!(f.return_type, TypeRef::Generic(TypeParamId(0)));
+}
+
+#[test]
+fn tuple_owner_argument_is_one_contextual_parameter() {
+    let module = compile(
+        r#"
+type Left is { value: Int };
+type Right is { value: Int };
+type Stage<T> is { value: T };
+implement<T> Stage<T> { fn transform(self, f: fn(T) -> T) -> Int { 0 } }
+fn probe(stage: Stage<(Left, Right)>) -> Int { stage.transform(|x| x) }
+"#,
+    );
+    let expected = TypeRef::Tuple(vec![nominal(&module, "Left"), nominal(&module, "Right")]);
+    let f = closures(&module)[0];
+    assert_eq!(f.params[1].type_ref, expected);
+    assert_eq!(f.return_type, expected);
+}
+
+#[test]
+fn function_owner_argument_preserves_full_signature() {
+    let module = compile(
+        r#"
+type Left is { value: Int };
+type Right is { value: Int };
+type Output is { value: Int };
+type Stage<T> is { value: T };
+implement<T> Stage<T> { fn transform(self, f: fn(T) -> T) -> Int { 0 } }
+fn probe(stage: Stage<fn(Left, Right) -> Output>) -> Int { stage.transform(|x| x) }
+"#,
+    );
+    let expected = TypeRef::Function {
+        params: vec![nominal(&module, "Left"), nominal(&module, "Right")],
+        return_type: Box::new(nominal(&module, "Output")),
+        contexts: Default::default(),
+    };
+    let f = closures(&module)[0];
+    assert_eq!(f.params[1].type_ref, expected);
+    assert_eq!(f.return_type, expected);
+}
+
+#[test]
+fn static_callable_parameters_do_not_skip_a_receiver_slot() {
+    let module = compile(
+        r#"
+type Payload is { value: Int };
+type Stage is { value: Int };
+implement Stage { fn transform(first: fn(Payload) -> Payload, second: fn(Bool) -> Bool) -> Int { 0 } }
+fn probe() -> Int { Stage.transform(|x| x, |x| x) }
+"#,
+    );
+    let fs = closures(&module);
+    assert_eq!(fs[0].params[1].type_ref, nominal(&module, "Payload"));
+    assert_eq!(fs[1].params[1].type_ref, TypeRef::Concrete(TypeId::BOOL));
+}
+
+#[test]
+fn equal_offsets_in_distinct_source_files_keep_callback_contexts_separate() {
+    let source = r#"
+type Payload is { value: Int };
+type Stage<T> is { value: T };
+implement<T> Stage<T> { fn both(self, first: fn(T) -> T, second: fn(Bool) -> Bool) -> Int { 0 } }
+fn probe(stage: Stage<Payload>) -> Int { stage.both(|x| x, |x| x) }
+"#;
+    let mut ast = Parser::new(source).parse_module().expect("parse");
+    for item in &mut ast.items {
+        let verum_ast::ItemKind::Function(func) = &mut item.kind else {
+            continue;
+        };
+        let Some(verum_ast::FunctionBody::Block(block)) = func.body.as_mut() else {
+            continue;
+        };
+        let Some(expr) = block.expr.as_mut() else {
+            continue;
+        };
+        let verum_ast::ExprKind::MethodCall { args, .. } = &mut expr.kind else {
+            continue;
+        };
+        for (index, arg) in args.iter_mut().enumerate() {
+            arg.span = verum_ast::Span::new(10, 20, verum_ast::FileId::new(index as u32 + 1));
+        }
+    }
+    let module = VbcCodegen::with_config(CodegenConfig::new("callable"))
+        .compile_module(&ast)
+        .expect("compile");
+    let fs = closures(&module);
+    assert_eq!(fs[0].params[1].type_ref, nominal(&module, "Payload"));
+    assert_eq!(fs[1].params[1].type_ref, TypeRef::Concrete(TypeId::BOOL));
 }

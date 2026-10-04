@@ -467,7 +467,7 @@ pub struct CodegenContext {
     /// Types exclude captures and come from the resolved callable signature
     /// or existing adapter element inference. Compilation removes only its
     /// own entry, keeping sibling and nested callback contexts separate.
-    pub closure_param_type_hints: HashMap<u64, Vec<Option<crate::types::TypeRef>>>,
+    pub closure_param_type_hints: Map<verum_ast::Span, verum_common::List<Option<crate::types::TypeRef>>>,
 
     /// Current match scrutinee type name for resolving variant patterns.
     ///
@@ -1657,7 +1657,7 @@ impl CodegenContext {
             reference_bindings: std::collections::HashSet::new(),
             object_ref_param_regs: std::collections::HashSet::new(),
             last_function_variable_types: HashMap::new(),
-            closure_param_type_hints: HashMap::new(),
+            closure_param_type_hints: Map::new(),
             match_scrutinee_type: None,
             match_tuple_element_types: None,
             pending_let_tuple_types: None,

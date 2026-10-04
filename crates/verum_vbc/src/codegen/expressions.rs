@@ -1360,7 +1360,7 @@ impl VbcCodegen {
                 let hint_key = if expr.span.start == 0 && expr.span.end == 0 {
                     None
                 } else {
-                    Some(((expr.span.start as u64) << 32) | (expr.span.end as u64))
+                    Some(expr.span)
                 };
                 self.compile_closure(params, body, return_type.as_ref(), hint_key)
             }
@@ -8992,6 +8992,13 @@ impl VbcCodegen {
                     tier,
                 })
             }
+            TypeKind::Function { params, return_type, contexts, .. } if contexts.requirements.is_empty() => {
+                Some(TypeRef::Function {
+                    params: params.iter().map(|ty| self.explicit_type_witness(ty, None)).collect::<Option<Vec<_>>>()?,
+                    return_type: Box::new(self.explicit_type_witness(return_type, None)?),
+                    contexts: Default::default(),
+                })
+            }
             TypeKind::Tuple(items) => {
                 let expected_items = match expected { Some(TypeRef::Tuple(items)) => Some(items), _ => None };
                 let items: Option<Vec<_>> = items.iter().enumerate().map(|(i, ty)| {
@@ -12514,8 +12521,7 @@ impl VbcCodegen {
                     receiver, method.name.as_str(), index, type_args,
                 ) {
                     if arg.span.start != 0 || arg.span.end != 0 {
-                        let key = ((arg.span.start as u64) << 32) | arg.span.end as u64;
-                        self.ctx.closure_param_type_hints.insert(key, hints);
+                        self.ctx.closure_param_type_hints.insert(arg.span, hints);
                     }
                 } else {
                     self.set_adapter_closure_param_hints(receiver, method.name.as_str(), arg);
@@ -31959,6 +31965,52 @@ impl VbcCodegen {
         Some(elem)
     }
 
+    /// Render a complete contextual callable type without replacing unknown
+    /// constituents with positional placeholders. Field-name rendering omits
+    /// function shapes and erases managed references, so it is only the nominal
+    /// leaf authority here.
+    fn callable_type_name(&self, ty: &crate::types::TypeRef) -> Option<verum_common::Text> {
+        use crate::types::{CbgrTier, Mutability, TypeRef};
+        match ty {
+            TypeRef::Concrete(_) => self.type_ref_to_field_name(ty).map(Into::into),
+            TypeRef::Instantiated { base, args } => Some(format!("{}<{}>",
+                self.type_ref_to_field_name(&TypeRef::Concrete(*base))?,
+                args.iter().map(|arg| self.callable_type_name(arg)).collect::<Option<verum_common::List<_>>>()?.join(", ")).into()),
+            TypeRef::Tuple(items) => Some(format!("({})",
+                items.iter().map(|item| self.callable_type_name(item)).collect::<Option<verum_common::List<_>>>()?.join(", ")).into()),
+            TypeRef::Function { params, return_type, contexts } if contexts.is_empty() => Some(format!("fn({}) -> {}",
+                params.iter().map(|param| self.callable_type_name(param)).collect::<Option<verum_common::List<_>>>()?.join(", "),
+                self.callable_type_name(return_type)?).into()),
+            TypeRef::Reference { inner, tier, mutability } => Some(format!("&{}{}{}",
+                match tier { CbgrTier::Tier0 => "", CbgrTier::Tier1 => "checked ", CbgrTier::Tier2 => "unsafe " },
+                if *mutability == Mutability::Mutable { "mut " } else { "" }, self.callable_type_name(inner)?).into()),
+            TypeRef::Slice(inner) => self.callable_type_name(inner).map(|name| format!("[{name}]").into()),
+            TypeRef::ConstValue(value) => Some(value.to_string().into()),
+            _ => None,
+        }
+    }
+
+    /// Parse owner arguments as types, then bind exactly the declared roster.
+    /// Missing, surplus and unsupported arguments provide no partial facts.
+    fn callable_owner_substitution(&self, owner: &str) -> Option<crate::mono::TypeSubstitution> {
+        let mut substitution = crate::mono::TypeSubstitution::empty();
+        let owner_id = self.nominal_type_id(Self::strip_generic_args(owner))?;
+        let owner_descriptor = self.type_by_id(owner_id)?;
+        let owner_ast = verum_fast_parser::Parser::new(owner).parse_type().ok()?;
+        let owner_args = match &owner_ast.kind {
+            verum_ast::ty::TypeKind::Generic { args, .. } => args.as_slice(),
+            _ => &[],
+        };
+        if owner_args.len() != owner_descriptor.type_params.len() {
+            return None;
+        }
+        for (arg, parameter) in owner_args.iter().zip(&owner_descriptor.type_params) {
+            let verum_ast::ty::GenericArg::Type(ty) = arg else { return None };
+            substitution.bind(parameter.id, self.explicit_type_witness(ty, None)?);
+        }
+        Some(substitution)
+    }
+
     /// Contextual lambda parameters come from the exact resolved declaration.
     /// Receiver and explicit generic arguments are applied before hints cross
     /// the closure boundary; unresolved slots supply no invented type.
@@ -31968,28 +32020,30 @@ impl VbcCodegen {
         method: &str,
         argument: usize,
         explicit: &verum_common::List<verum_ast::ty::GenericArg>,
-    ) -> Option<Vec<Option<crate::types::TypeRef>>> {
-        use crate::types::{TypeParamId, TypeRef};
-        let mut owner = Self::method_receiver_type_name(
-            &self.extract_expr_type_name(receiver)?,
-        ).to_string();
+    ) -> Option<verum_common::List<Option<crate::types::TypeRef>>> {
+        use crate::types::TypeRef;
+        let receiver_name = self.extract_expr_type_name(receiver).or_else(|| {
+            let ExprKind::Path(path) = &receiver.kind else { return None };
+            let name = path.to_string().replace("::", ".");
+            if self.ctx.lookup_var(&name).is_some() || self.ctx.generic_type_params.contains(&name) {
+                return None;
+            }
+            self.nominal_type_id(&name).map(|_| name)
+        })?;
+        let mut owner = Self::method_receiver_type_name(&receiver_name).to_string();
         for _ in 0..self.method_receiver_deref_count(&owner, method) {
             owner = self.user_deref_target_type_name(&owner)?.to_string();
         }
         let key = self.registered_receiver_method(&owner, method)?;
         let info = self.ctx.lookup_qualified_function(&key)?;
         let params = self.functions.iter().find(|f| f.descriptor.id == info.id)
-            .map(|f| f.descriptor.params.iter().map(|p| p.type_ref.clone()).collect::<Vec<_>>())
-            .or_else(|| self.ctx.archive_fn_param_types.get(&info.id.0).cloned())?;
-        let TypeRef::Function { params, .. } = params.get(argument + 1)? else {
+            .map(|f| f.descriptor.params.iter().map(|p| p.type_ref.clone()).collect::<verum_common::List<_>>())
+            .or_else(|| self.ctx.archive_fn_param_types.get(&info.id.0).map(|params| params.as_slice().into()))?;
+        let receiver_slots = usize::from(info.param_names.first().is_some_and(|name| name == "self"));
+        let TypeRef::Function { params, .. } = params.get(argument + receiver_slots)? else {
             return None;
         };
-        let mut substitution = crate::mono::TypeSubstitution::empty();
-        for (index, arg) in Self::split_generic_args(&owner).iter().enumerate() {
-            if let Some(ty) = self.type_name_to_type_ref_mono(arg) {
-                substitution.bind(TypeParamId(index as u16), ty);
-            }
-        }
+        let mut substitution = self.callable_owner_substitution(&owner)?;
         for (arg, id) in explicit.iter().zip(&info.explicit_type_param_ids) {
             if let (verum_ast::ty::GenericArg::Type(ty), Some(id)) = (arg, id)
                 && let Some(ty) = self.explicit_type_witness(ty, None)
@@ -31997,9 +32051,9 @@ impl VbcCodegen {
                 substitution.bind(*id, ty);
             }
         }
-        let hints: Vec<_> = params.iter().map(|ty| {
+        let hints: verum_common::List<_> = params.iter().map(|ty| {
             let ty = substitution.apply(ty);
-            (!ty.is_generic() && self.type_ref_to_field_name(&ty).is_some()).then_some(ty)
+            (!ty.is_generic() && self.callable_type_name(&ty).is_some()).then_some(ty)
         }).collect();
         hints.iter().any(Option::is_some).then_some(hints)
     }
@@ -32029,12 +32083,12 @@ impl VbcCodegen {
         };
         let max = positions.iter().max().copied().unwrap_or(0);
         let Some(elem_ty) = self.type_name_to_type_ref_mono(&elem_ty) else { return };
-        let mut hints = vec![None; max + 1];
+        let mut hints = verum_common::List::new();
+        hints.resize(max + 1, None);
         for &p in positions {
             hints[p] = Some(elem_ty.clone());
         }
-        let key = ((arg.span.start as u64) << 32) | (arg.span.end as u64);
-        self.ctx.closure_param_type_hints.entry(key).or_insert(hints);
+        self.ctx.closure_param_type_hints.entry(arg.span).or_insert(hints);
     }
 
     /// Compiles a closure expression.
@@ -32044,8 +32098,8 @@ impl VbcCodegen {
     /// 2. Compiling the closure body as a separate function with captures as first parameters
     /// 3. Emitting NewClosure instruction with the function ID and captured values
     ///
-    /// `hint_key` is the dispatching closure NODE's span key
-    /// (`(span.start << 32) | span.end`) used to claim pending
+    /// `hint_key` is the dispatching closure node's full source span,
+    /// including file identity, used to claim pending
     /// adapter-element param hints (REFL-CLOSURE-XREC-1) — `None` for
     /// synthesized closures, which never claim hints.
     pub(crate) fn compile_closure(
@@ -32053,7 +32107,7 @@ impl VbcCodegen {
         params: &verum_common::List<verum_ast::ClosureParam>,
         body: &Expr,
         return_type: Option<&verum_ast::ty::Type>,
-        hint_key: Option<u64>,
+        hint_key: Option<verum_ast::Span>,
     ) -> CodegenResult<Option<Reg>> {
         // Claim only this closure's contextual signature; sibling callbacks
         // and closures compiled inside the receiver keep their own entries.
@@ -32140,13 +32194,13 @@ impl VbcCodegen {
         // registered an EMPTY type name, so `r?` inside the closure
         // classified as neither Result nor Maybe and fell into the
         // from_residual name-dice (task #50, `Err("error")` → `Err(0)`).
-        let param_type_refs: Vec<Option<crate::types::TypeRef>> = params.iter().enumerate()
+        let param_type_refs: verum_common::List<Option<crate::types::TypeRef>> = params.iter().enumerate()
             .map(|(index, p)| p.ty.as_ref().map(|ty| self.resolve_signature_type_ref(ty, &self.ctx.current_generic_param_ids))
                 .or_else(|| elem_hints.as_ref().and_then(|hints| hints.get(index)).cloned().flatten()))
             .collect();
         let param_type_names: Vec<Option<String>> = params.iter().enumerate()
             .map(|(index, p)| p.ty.as_ref().map(|ty| self.type_to_simple_name(ty))
-                .or_else(|| param_type_refs[index].as_ref().and_then(|ty| self.type_ref_to_field_name(ty))))
+                .or_else(|| param_type_refs[index].as_ref().and_then(|ty| self.callable_type_name(ty)).map(|name| name.to_string())))
             .collect();
 
         // Step 4: Register and compile the closure body as a new function
@@ -46347,6 +46401,10 @@ mod future_output_tests;
 #[cfg(test)]
 #[path = "../../tests/codegen/method_chain_scope.rs"]
 mod method_chain_scope_tests;
+
+#[cfg(test)]
+#[path = "../../tests/codegen/callable_owner.rs"]
+mod callable_owner_tests;
 
 #[cfg(test)]
 #[path = "../../tests/codegen/deref_target.rs"]
