@@ -15755,6 +15755,38 @@ fn emit_collect_drain<'ctx>(
     Ok(())
 }
 
+/// T1523: test body availability without scanning the module for every type.
+/// The exact-name bucket retains duplicate descriptors, unlike the single
+/// by_name winner. Keep `Some(empty)` and later bodies eligible as before.
+fn method_will_have_body(
+    function: FunctionValue<'_>,
+    vbc: &verum_vbc::module::VbcModule,
+    index: Option<&super::context::FuncNameIndex>,
+    qualified_name: &str,
+) -> bool {
+    if function.count_basic_blocks() > 0 {
+        return true;
+    }
+    if let Some(index) = index {
+        index.find_by_suffix(qualified_name).iter().any(|entry| {
+            entry.name == qualified_name
+                && vbc
+                    .functions
+                    .get(entry.index)
+                    .is_some_and(|fd| fd.instructions.is_some())
+        })
+    } else {
+        // Standalone lowering contexts may omit the shared module index.
+        vbc.functions.iter().any(|fd| {
+            vbc.get_string(fd.name) == Some(qualified_name) && fd.instructions.is_some()
+        })
+    }
+}
+
+#[cfg(test)]
+#[path = "tests/method_body_index.rs"]
+mod method_body_index_tests;
+
 fn lower_call_method<'ctx>(
     ctx: &mut FunctionContext<'_, 'ctx>,
     dst: Reg,
@@ -21658,14 +21690,8 @@ fn lower_call_method<'ctx>(
                         // The VBC descriptor answers it at the right
                         // time: a descriptor carrying instructions gets a
                         // body. Arity still comes from the declaration.
-                        let will_have_body = f.count_basic_blocks() > 0
-                            || vbc
-                                .functions
-                                .iter()
-                                .any(|fd| {
-                                    vbc.get_string(fd.name) == Some(qual.as_str())
-                                        && fd.instructions.is_some()
-                                });
+                        let will_have_body =
+                            method_will_have_body(f, vbc, ctx.func_name_index(), &qual);
                         if will_have_body {
                             let pc = f.count_params() as usize;
                             if pc == args.count as usize + 1
