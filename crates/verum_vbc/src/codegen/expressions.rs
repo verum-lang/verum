@@ -25,7 +25,7 @@
 
 use super::context::ExprId;
 use super::error::CodegenOptionExt;
-use super::{CodegenError, CodegenErrorKind, CodegenResult, FunctionInfo, VbcCodegen};
+use super::{CodegenError, CodegenErrorKind, CodegenResult, FunctionInfo, ResultDemand, VbcCodegen};
 use crate::instruction::{
     ArithSubOpcode, AtomicRmwOp, BinaryFloatOp, BinaryIntOp, BitwiseOp, CmpSubOpcode, CompareOp,
     FloatToIntMode, Instruction, Reg, RegRange, UnaryFloatOp, UnaryIntOp,
@@ -1200,6 +1200,16 @@ impl VbcCodegen {
     ///
     /// Returns `None` for expressions that don't produce a value (e.g., return).
     pub fn compile_expr(&mut self, expr: &Expr) -> CodegenResult<Option<Reg>> {
+        self.compile_expr_with_demand(expr, ResultDemand::Used)
+    }
+
+    /// Only value-forwarding syntax propagates demand. Operands needed for an
+    /// operation still use compile_expr, even when its final result is discarded.
+    pub(super) fn compile_expr_with_demand(
+        &mut self,
+        expr: &Expr,
+        demand: ResultDemand,
+    ) -> CodegenResult<Option<Reg>> {
         self.ctx.stats.expressions_compiled += 1;
         // Track source span for DWARF debug info (SourceMap population)
         self.ctx.set_current_span(expr.span);
@@ -1254,13 +1264,13 @@ impl VbcCodegen {
                 condition,
                 then_branch,
                 else_branch,
-            } => self.compile_if(condition, then_branch, else_branch.as_deref()),
+            } => self.compile_if(condition, then_branch, else_branch.as_deref(), demand),
             ExprKind::Match {
                 expr: scrutinee,
                 arms,
-            } => self.compile_match(scrutinee, arms),
+            } => self.compile_match(scrutinee, arms, demand),
             ExprKind::Loop { label, body, .. } => {
-                self.compile_loop(label.as_ref().map(|l| l.as_str()), body)
+                self.compile_loop(label.as_ref().map(|l| l.as_str()), body, demand)
             }
             ExprKind::While {
                 label,
@@ -1277,7 +1287,7 @@ impl VbcCodegen {
             } => self.compile_for(label.as_ref().map(|l| l.as_str()), pattern, iter, body),
 
             // === Block ===
-            ExprKind::Block(block) => self.compile_block(block),
+            ExprKind::Block(block) => self.compile_block_with_demand(block, demand),
 
             // === Return/Break/Continue ===
             ExprKind::Return(value) => self.compile_return(value.as_deref()),
@@ -1312,7 +1322,7 @@ impl VbcCodegen {
             }
 
             // === References ===
-            ExprKind::Paren(inner) => self.compile_expr(inner),
+            ExprKind::Paren(inner) => self.compile_expr_with_demand(inner, demand),
 
             // === Async ===
             ExprKind::Async(block) => self.compile_async_block(block),
@@ -1359,7 +1369,7 @@ impl VbcCodegen {
             ExprKind::Pipeline { left, right } => self.compile_pipeline(left, right),
 
             // === Null coalescing: a ?? b ===
-            ExprKind::NullCoalesce { left, right } => self.compile_null_coalesce(left, right),
+            ExprKind::NullCoalesce { left, right } => self.compile_null_coalesce(left, right, demand),
 
             // === Pattern test: x is Pattern ===
             ExprKind::Is {
@@ -1372,26 +1382,26 @@ impl VbcCodegen {
             ExprKind::Throw(error_expr) => self.compile_throw(error_expr),
 
             ExprKind::TryRecover { try_block, recover } => {
-                self.compile_try_recover(try_block, recover)
+                self.compile_try_recover(try_block, recover, demand)
             }
 
             ExprKind::TryFinally {
                 try_block,
                 finally_block,
-            } => self.compile_try_finally(try_block, finally_block),
+            } => self.compile_try_finally(try_block, finally_block, demand),
 
             ExprKind::TryRecoverFinally {
                 try_block,
                 recover,
                 finally_block,
-            } => self.compile_try_recover_finally(try_block, recover, finally_block),
+            } => self.compile_try_recover_finally(try_block, recover, finally_block, demand),
 
             // === Async ===
             ExprKind::Spawn { expr, contexts: _ } => self.compile_spawn(expr),
 
             ExprKind::Inject { type_path } => self.compile_inject(type_path),
 
-            ExprKind::Select { biased, arms, .. } => self.compile_select(*biased, arms),
+            ExprKind::Select { biased, arms, .. } => self.compile_select(*biased, arms, demand),
 
             ExprKind::ForAwait {
                 label,
@@ -1409,7 +1419,7 @@ impl VbcCodegen {
             ExprKind::Yield(value) => self.compile_yield(value),
 
             // === Unsafe block ===
-            ExprKind::Unsafe(block) => self.compile_unsafe_block(block),
+            ExprKind::Unsafe(block) => self.compile_unsafe_block(block, demand),
 
             // === Meta expressions ===
             ExprKind::Meta(block) => self.compile_meta_block(block),
@@ -1419,11 +1429,11 @@ impl VbcCodegen {
                 target_stage,
                 tokens,
             } => self.compile_quote_expr(target_stage, tokens),
-            ExprKind::StageEscape { stage, expr } => self.compile_stage_escape(*stage, expr),
+            ExprKind::StageEscape { stage, expr } => self.compile_stage_escape(*stage, expr, demand),
             ExprKind::Lift { expr } => {
                 // Lift is syntactic sugar for stage escape at the current stage
                 // Compile as: $(stage current){ expr }
-                self.compile_lift_expr(expr)
+                self.compile_lift_expr(expr, demand)
             }
 
             // === Context system ===
@@ -1431,7 +1441,7 @@ impl VbcCodegen {
                 context,
                 handler,
                 body,
-            } => self.compile_use_context(context, handler, body),
+            } => self.compile_use_context(context, handler, body, demand),
 
             ExprKind::Attenuate {
                 context,
@@ -1506,7 +1516,7 @@ impl VbcCodegen {
                 on_cancel,
                 recover,
                 ..
-            } => self.compile_nursery(options, body, on_cancel.as_ref(), recover.as_ref()),
+            } => self.compile_nursery(options, body, on_cancel.as_ref(), recover.as_ref(), demand),
 
             // === Inline Assembly ===
             // Inline assembly requires native code execution (AOT/LLVM path).
@@ -17955,6 +17965,7 @@ impl VbcCodegen {
         condition: &verum_ast::IfCondition,
         then_branch: &Block,
         else_branch: Option<&Expr>,
+        demand: ResultDemand,
     ) -> CodegenResult<Option<Reg>> {
         let result = self.ctx.alloc_temp();
         let else_label = self.ctx.new_label("else");
@@ -18087,7 +18098,7 @@ impl VbcCodegen {
         }
 
         // All conditions passed - compile then branch
-        let then_result = self.compile_block(then_branch)?;
+        let then_result = self.compile_block_with_demand(then_branch, demand)?;
         if let Some(reg) = then_result {
             self.ctx.emit(Instruction::Mov {
                 dst: result,
@@ -18121,7 +18132,7 @@ impl VbcCodegen {
 
         // Compile else branch
         if let Some(else_expr) = else_branch {
-            let else_result = self.compile_expr(else_expr)?;
+            let else_result = self.compile_expr_with_demand(else_expr, demand)?;
             if let Some(reg) = else_result {
                 self.ctx.emit(Instruction::Mov {
                     dst: result,
@@ -18183,8 +18194,13 @@ impl VbcCodegen {
 
         // Compile break value if present
         if let Some(expr) = value {
+            let demand = if loop_ctx.break_value_reg.is_some() {
+                ResultDemand::Used
+            } else {
+                ResultDemand::Discarded
+            };
             let val_reg = self
-                .compile_expr(expr)?
+                .compile_expr_with_demand(expr, demand)?
                 .or_internal("break value has no value")?;
 
             if let Some(break_reg) = loop_ctx.break_value_reg {
@@ -18221,17 +18237,23 @@ impl VbcCodegen {
     }
 
     /// Compiles a loop expression.
-    fn compile_loop(&mut self, label: Option<&str>, body: &Block) -> CodegenResult<Option<Reg>> {
+    fn compile_loop(
+        &mut self,
+        label: Option<&str>,
+        body: &Block,
+        demand: ResultDemand,
+    ) -> CodegenResult<Option<Reg>> {
         let result = self.ctx.alloc_temp();
-        let loop_ctx = self
-            .ctx
-            .enter_loop(label.map(|s| s.to_string()), Some(result));
+        let loop_ctx = self.ctx.enter_loop(
+            label.map(|s| s.to_string()),
+            (demand == ResultDemand::Used).then_some(result),
+        );
 
         // Loop start
         self.ctx.define_label(&loop_ctx.continue_label);
 
         // Compile body
-        self.compile_block(body)?;
+        self.compile_block_with_demand(body, ResultDemand::Discarded)?;
 
         // Jump back to start
         self.ctx
@@ -18380,7 +18402,7 @@ impl VbcCodegen {
         self.ctx.free_temp(cond_reg);
 
         // Compile body
-        self.compile_block(body)?;
+        self.compile_block_with_demand(body, ResultDemand::Discarded)?;
 
         // Jump back to start
         self.ctx
@@ -18438,7 +18460,7 @@ impl VbcCodegen {
         self.exit_scrutinee_type_for_bind(bind_prev);
 
         // Compile body
-        self.compile_block(body)?;
+        self.compile_block_with_demand(body, ResultDemand::Discarded)?;
 
         // Exit scope (handle defers)
         let (_, defers) = self.ctx.exit_scope(false);
@@ -18786,7 +18808,7 @@ impl VbcCodegen {
         self.compile_pattern_bind(pattern, elem_reg)?;
 
         // Compile body
-        self.compile_block(body)?;
+        self.compile_block_with_demand(body, ResultDemand::Discarded)?;
 
         let (_, defers) = self.ctx.exit_scope(false);
         for defer_instrs in defers {
@@ -19006,7 +19028,7 @@ impl VbcCodegen {
         }
 
         // Compile body
-        self.compile_block(body)?;
+        self.compile_block_with_demand(body, ResultDemand::Discarded)?;
 
         let (_, defers) = self.ctx.exit_scope(false);
         for defer_instrs in defers {
@@ -19043,6 +19065,7 @@ impl VbcCodegen {
         &mut self,
         scrutinee: &Expr,
         arms: &verum_common::List<verum_ast::MatchArm>,
+        demand: ResultDemand,
     ) -> CodegenResult<Option<Reg>> {
         // Evaluate scrutinee
         let scrutinee_reg = self
@@ -19104,7 +19127,7 @@ impl VbcCodegen {
             }
 
             // Compile arm body
-            let arm_result = self.compile_expr(&arm.body)?;
+            let arm_result = self.compile_expr_with_demand(&arm.body, demand)?;
             if std::env::var("VERUM_TRACE_MATCH_ARM").is_ok() {
                 eprintln!(
                     "[match-arm {}] result_reg={} arm_result={:?}",
@@ -33064,7 +33087,12 @@ impl VbcCodegen {
     /// Compiles null coalescing: a ?? b
     ///
     /// Returns a if a is not None, otherwise returns b.
-    fn compile_null_coalesce(&mut self, left: &Expr, right: &Expr) -> CodegenResult<Option<Reg>> {
+    fn compile_null_coalesce(
+        &mut self,
+        left: &Expr,
+        right: &Expr,
+        demand: ResultDemand,
+    ) -> CodegenResult<Option<Reg>> {
         let dest = self.ctx.alloc_temp();
         let end_label = self.ctx.new_label("coalesce_end");
 
@@ -33112,7 +33140,7 @@ impl VbcCodegen {
 
         // Left is None - evaluate and use right
         let right_reg = self
-            .compile_expr(right)?
+            .compile_expr_with_demand(right, demand)?
             .or_internal("coalesce right has no value")?;
 
         self.ctx.emit(Instruction::Mov {
@@ -33192,6 +33220,7 @@ impl VbcCodegen {
         &mut self,
         try_block: &Expr,
         recover: &verum_ast::RecoverBody,
+        demand: ResultDemand,
     ) -> CodegenResult<Option<Reg>> {
         use verum_ast::expr::RecoverBody;
 
@@ -33209,7 +33238,7 @@ impl VbcCodegen {
         self.ctx.try_recover_depth += 1;
 
         // Compile try block
-        let try_result = self.compile_expr(try_block)?;
+        let try_result = self.compile_expr_with_demand(try_block, demand)?;
         if let Some(try_reg) = try_result {
             self.ctx.emit(Instruction::Mov {
                 dst: dest,
@@ -33262,7 +33291,7 @@ impl VbcCodegen {
                     self.compile_pattern_bind(&arm.pattern, exception_reg)?;
 
                     // Compile arm body
-                    let arm_result = self.compile_expr(&arm.body)?;
+                    let arm_result = self.compile_expr_with_demand(&arm.body, demand)?;
                     if let Some(arm_reg) = arm_result {
                         self.ctx.emit(Instruction::Mov {
                             dst: dest,
@@ -33306,7 +33335,7 @@ impl VbcCodegen {
                 });
 
                 // Compile body
-                let body_result = self.compile_expr(body)?;
+                let body_result = self.compile_expr_with_demand(body, demand)?;
                 if let Some(body_reg) = body_result {
                     self.ctx.emit(Instruction::Mov {
                         dst: dest,
@@ -33335,6 +33364,7 @@ impl VbcCodegen {
         &mut self,
         try_block: &Expr,
         finally_block: &Expr,
+        demand: ResultDemand,
     ) -> CodegenResult<Option<Reg>> {
         let dest = self.ctx.alloc_temp();
         let finally_label = self.ctx.new_label("finally");
@@ -33343,7 +33373,7 @@ impl VbcCodegen {
         self.ctx.emit(Instruction::TryBegin { handler_offset: 0 });
 
         // Compile try block
-        let try_result = self.compile_expr(try_block)?;
+        let try_result = self.compile_expr_with_demand(try_block, demand)?;
         if let Some(try_reg) = try_result {
             self.ctx.emit(Instruction::Mov {
                 dst: dest,
@@ -33356,7 +33386,7 @@ impl VbcCodegen {
 
         // Always execute finally (normal path)
         self.ctx.define_label(&finally_label);
-        let _ = self.compile_expr(finally_block)?;
+        let _ = self.compile_expr_with_demand(finally_block, ResultDemand::Discarded)?;
 
         Ok(Some(dest))
     }
@@ -33367,12 +33397,13 @@ impl VbcCodegen {
         try_block: &Expr,
         recover: &verum_ast::RecoverBody,
         finally_block: &Expr,
+        demand: ResultDemand,
     ) -> CodegenResult<Option<Reg>> {
         // Compile try-recover first
-        let result = self.compile_try_recover(try_block, recover)?;
+        let result = self.compile_try_recover(try_block, recover, demand)?;
 
         // Then always execute finally
-        let _ = self.compile_expr(finally_block)?;
+        let _ = self.compile_expr_with_demand(finally_block, ResultDemand::Discarded)?;
 
         Ok(result)
     }
@@ -33797,6 +33828,7 @@ impl VbcCodegen {
         &mut self,
         biased: bool,
         arms: &verum_common::List<verum_ast::expr::SelectArm>,
+        demand: ResultDemand,
     ) -> CodegenResult<Option<Reg>> {
         let dest = self.ctx.alloc_temp();
         // T1131: define the destination BEFORE the arms. A freshly
@@ -33887,7 +33919,7 @@ impl VbcCodegen {
             }
 
             // Compile arm body
-            let arm_result = self.compile_expr(&arm.body)?;
+            let arm_result = self.compile_expr_with_demand(&arm.body, demand)?;
             if let Some(arm_reg) = arm_result {
                 self.ctx.emit(Instruction::Mov {
                     dst: dest,
@@ -33944,6 +33976,7 @@ impl VbcCodegen {
         body: &verum_ast::Block,
         on_cancel: Option<&verum_ast::Block>,
         recover: Option<&verum_ast::RecoverBody>,
+        demand: ResultDemand,
     ) -> CodegenResult<Option<Reg>> {
         let dest = self.ctx.alloc_temp();
         let end_label = self.ctx.new_label("nursery_end");
@@ -34010,7 +34043,7 @@ impl VbcCodegen {
 
         // === Compile body ===
         // The body contains spawn expressions that will register tasks with the nursery
-        let body_result = self.compile_block(body)?;
+        let body_result = self.compile_block_with_demand(body, demand)?;
 
         // === Wait for all tasks ===
         // After body completes, wait for all spawned tasks to finish
@@ -34046,7 +34079,7 @@ impl VbcCodegen {
         // === Cancel handler ===
         self.ctx.define_label(&cancel_label);
         if let Some(cancel_block) = on_cancel {
-            let _ = self.compile_block(cancel_block)?;
+            let _ = self.compile_block_with_demand(cancel_block, ResultDemand::Discarded)?;
         }
         // After cancel, go to cleanup
         self.ctx
@@ -34098,7 +34131,7 @@ impl VbcCodegen {
                         }
 
                         // Execute arm body
-                        let arm_result = self.compile_expr(&arm.body)?;
+                        let arm_result = self.compile_expr_with_demand(&arm.body, demand)?;
                         if let Some(arm_reg) = arm_result {
                             self.ctx.emit(Instruction::Mov {
                                 dst: dest,
@@ -34129,7 +34162,7 @@ impl VbcCodegen {
                     self.compile_pattern_bind(&param.pattern, error_reg)?;
 
                     // Execute closure body
-                    let closure_result = self.compile_expr(body)?;
+                    let closure_result = self.compile_expr_with_demand(body, demand)?;
                     if let Some(result_reg) = closure_result {
                         self.ctx.emit(Instruction::Mov {
                             dst: dest,
@@ -34250,7 +34283,7 @@ impl VbcCodegen {
         self.compile_pattern_bind(pattern, elem_reg)?;
 
         // Compile body
-        self.compile_block(body)?;
+        self.compile_block_with_demand(body, ResultDemand::Discarded)?;
 
         let (_, defers) = self.ctx.exit_scope(false);
         for defer_instrs in defers {
@@ -34314,7 +34347,7 @@ impl VbcCodegen {
         });
 
         // Still compile the expression for side effects, but discard its value
-        if let Ok(Some(expr_reg)) = self.compile_expr(expr) {
+        if let Ok(Some(expr_reg)) = self.compile_expr_with_demand(expr, ResultDemand::Discarded) {
             self.ctx.free_temp(expr_reg);
         }
 
@@ -34355,12 +34388,16 @@ impl VbcCodegen {
     ///
     /// This properly handles nested unsafe blocks by saving and restoring
     /// the previous unsafe state.
-    fn compile_unsafe_block(&mut self, block: &verum_ast::Block) -> CodegenResult<Option<Reg>> {
+    fn compile_unsafe_block(
+        &mut self,
+        block: &verum_ast::Block,
+        demand: ResultDemand,
+    ) -> CodegenResult<Option<Reg>> {
         // Enter unsafe context, saving previous state for nested blocks
         let prev_unsafe = self.ctx.enter_unsafe();
 
         // Compile block contents with unsafe tier promotion enabled
-        let result = self.compile_block(block);
+        let result = self.compile_block_with_demand(block, demand);
 
         // Restore previous unsafe state (handles nested unsafe blocks)
         self.ctx.exit_unsafe(prev_unsafe);
@@ -34685,11 +34722,16 @@ impl VbcCodegen {
     /// Staged meta-compilation: stage escapes (`$expr` inside `quote { }`) evaluate
     /// the inner expression at the enclosing stage level and splice the result into
     /// the generated token stream. Enables inserting computed values into generated code.
-    fn compile_stage_escape(&mut self, _stage: u32, expr: &Expr) -> CodegenResult<Option<Reg>> {
+    fn compile_stage_escape(
+        &mut self,
+        _stage: u32,
+        expr: &Expr,
+        demand: ResultDemand,
+    ) -> CodegenResult<Option<Reg>> {
         // Stage escape expressions are processed during staged compilation.
         // During normal VBC codegen, we simply compile the inner expression.
         // The stage context is handled by the meta pipeline.
-        self.compile_expr(expr)
+        self.compile_expr_with_demand(expr, demand)
     }
 
     /// Compiles lift expression: lift(expr)
@@ -34699,11 +34741,15 @@ impl VbcCodegen {
     /// During normal VBC codegen, we simply compile the inner expression.
     ///
     /// Spec: grammar/verum.ebnf - quote_lift production
-    fn compile_lift_expr(&mut self, expr: &Expr) -> CodegenResult<Option<Reg>> {
+    fn compile_lift_expr(
+        &mut self,
+        expr: &Expr,
+        demand: ResultDemand,
+    ) -> CodegenResult<Option<Reg>> {
         // Lift expressions are processed during staged compilation.
         // During normal VBC codegen, we simply compile the inner expression.
         // The stage context is handled by the meta pipeline.
-        self.compile_expr(expr)
+        self.compile_expr_with_demand(expr, demand)
     }
 
     /// Compiles meta function: @file, @line, @intrinsic, etc.
@@ -42322,6 +42368,7 @@ impl VbcCodegen {
         context: &verum_ast::ty::Path,
         handler: &Expr,
         body: &Expr,
+        demand: ResultDemand,
     ) -> CodegenResult<Option<Reg>> {
         // Compile handler
         let handler_reg = self
@@ -42347,7 +42394,7 @@ impl VbcCodegen {
         });
 
         // Compile body
-        let result = self.compile_expr(body)?;
+        let result = self.compile_expr_with_demand(body, demand)?;
 
         // Pop context
         self.ctx.emit(Instruction::PopContext { name: name_id });

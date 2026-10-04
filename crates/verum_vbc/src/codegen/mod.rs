@@ -677,6 +677,14 @@ impl VbcCodegen {
     }
 }
 
+/// Whether the enclosing syntax consumes this expression's value. This is
+/// evaluation demand, not an ownership classification of its runtime bits.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum ResultDemand {
+    Used,
+    Discarded,
+}
+
 /// AST-to-VBC code generator: owns the module under construction (string /
 /// constant / type pools, function descriptors, bytecode) plus the resolution
 /// tables — mounts, protocol registry, blanket impls — consulted while
@@ -20787,6 +20795,14 @@ impl VbcCodegen {
 
     /// Compiles a block.
     fn compile_block(&mut self, block: &Block) -> CodegenResult<Option<Reg>> {
+        self.compile_block_with_demand(block, ResultDemand::Used)
+    }
+
+    fn compile_block_with_demand(
+        &mut self,
+        block: &Block,
+        demand: ResultDemand,
+    ) -> CodegenResult<Option<Reg>> {
         // Function-body locals remain available to the playground's final
         // type report. Nested lexical blocks restore their outer bindings.
         let outer_type_names = (self.ctx.registers.scope_level() > 0)
@@ -20799,15 +20815,20 @@ impl VbcCodegen {
         // Only update result when a statement produces a value (Some).
         // This handles @cfg filtered statements that return None - they should
         // not overwrite the result from a previous statement that did compile.
-        for stmt in block.stmts.iter() {
-            if let Some(reg) = self.compile_stmt(stmt)? {
+        for (index, stmt) in block.stmts.iter().enumerate() {
+            let statement_demand = if block.expr.is_none() && index + 1 == block.stmts.len() {
+                demand
+            } else {
+                ResultDemand::Discarded
+            };
+            if let Some(reg) = self.compile_stmt_with_demand(stmt, statement_demand)? {
                 result = Some(reg);
             }
         }
 
         // Compile trailing expression
         if let Some(ref expr) = block.expr {
-            result = self.compile_expr(expr)?;
+            result = self.compile_expr_with_demand(expr, demand)?;
         }
 
         // T1506: preserve the result while its binding is still in scope.
@@ -20866,6 +20887,15 @@ impl VbcCodegen {
         // handled by interpreter-side stabilisation in `do_return`
         // (commit chain phase 3).
         for (name, var_reg) in vars.iter().rev() {
+            // T1539: the tail value has just been handed to final_result.
+            // Only a consumer using the result receives that obligation.
+            // Discarded tails retain ordinary local cleanup.
+            // Dropping its local slot here would destroy that same object
+            // before the enclosing expression/caller can use it. Other
+            // locals retain their ordinary reverse declaration cleanup.
+            if demand == ResultDemand::Used && block.expr.is_some() && result == Some(*var_reg) {
+                continue;
+            }
             if self.ctx.current_fn_escaping_vars.contains(name) {
                 continue;
             }

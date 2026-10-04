@@ -139,3 +139,42 @@ ATTRIBUTED rather than guessed at.
 * Copying a reference-typed binding's pointee. `reference_bindings`
   carries which names are references; consult it.
 * Deep-copying through an untracked pointer.
+
+
+## 6. Block-tail cleanup demand (T1539)
+
+A block first copies its result into a safe register so register recycling
+cannot overwrite it. If a used tail names a local binding in that block,
+its scope cleanup must not destroy the same value before the consumer can
+use it. The exact source register identifies this handoff; neither a type
+name nor a pointer-shaped value establishes ownership.
+
+`ResultDemand` records whether enclosing syntax uses or discards the
+result. Blocks, parentheses, unsafe blocks and value-producing branch arms
+forward that demand. So do recover/finally result paths, scoped contexts,
+select/nursery result arms, stage forwarding and the right branch of
+coalescing. Conditions, call arguments and other operands remain used even
+when their parent's result is discarded. Loop bodies, deferred/finally
+cleanup, cancel handlers and expression statements discard their values.
+A loop break value follows the loop result's demand.
+
+This distinction is required at the producer: skipping every local-tail
+`DropRef` would leak `{ let value = Watch { ... }; value };`. An ignored
+result has no receiving binding, so its local retains ordinary cleanup.
+The compiler does not issue an extra guessed `DropRef` on arbitrary
+expression temporaries; in particular borrowed and raw aliases do not gain
+an ownership obligation.
+
+`crates/verum_vbc/tests/block_result_lifetime.rs` pins direct/nested return,
+reverse cleanup order, explicit drop, used and discarded forwarding paths,
+loop body/break values, deferred/finally/recover cleanup and borrowed/raw
+negative controls. These are source-to-VBC/interpreter checks. Native owned
+Drop remains T1538/T1540.
+
+The bound is exact local-tail handoff. It does not prove arbitrary ownership
+transfer through calls or aggregates, nor selection of an outer local by a
+branch merge: `let a = ...; let b = ...; if flag { a } else { b }` needs a
+shared lifecycle plan identifying which obligation moved. Implicit copies
+of exclusive resources and general temporary-result destruction also
+remain outside this rule. The demand flag is not a replacement for that
+ownership model.

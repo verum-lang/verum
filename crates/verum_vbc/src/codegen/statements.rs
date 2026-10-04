@@ -4,7 +4,7 @@
 
 use super::error::CodegenOptionExt;
 use super::context::VarTypeKind;
-use super::{CodegenError, CodegenResult, VbcCodegen};
+use super::{CodegenError, CodegenResult, ResultDemand, VbcCodegen};
 use crate::instruction::{Instruction, Reg};
 
 use verum_ast::{Stmt, StmtKind};
@@ -12,6 +12,14 @@ use verum_ast::{Stmt, StmtKind};
 impl VbcCodegen {
     /// Compiles a statement and returns the result register (if any).
     pub fn compile_stmt(&mut self, stmt: &Stmt) -> CodegenResult<Option<Reg>> {
+        self.compile_stmt_with_demand(stmt, ResultDemand::Used)
+    }
+
+    pub(super) fn compile_stmt_with_demand(
+        &mut self,
+        stmt: &Stmt,
+        demand: ResultDemand,
+    ) -> CodegenResult<Option<Reg>> {
         // @cfg statement-level filtering
         // Skip statements with non-matching @cfg attributes for the target platform.
         // This prevents issues like:
@@ -76,7 +84,12 @@ impl VbcCodegen {
                 {
                     self.ctx.emit(Instruction::BranchHint { likely });
                 }
-                let result = self.compile_expr(expr)?;
+                let expression_demand = if *has_semi {
+                    ResultDemand::Discarded
+                } else {
+                    demand
+                };
+                let result = self.compile_expr_with_demand(expr, expression_demand)?;
                 if *has_semi {
                     // Statement expression - discard result
                     if let Some(reg) = result {
@@ -324,7 +337,7 @@ impl VbcCodegen {
                 alias: _,
                 value,
                 block,
-            } => self.compile_provide_scope(context, value, block),
+            } => self.compile_provide_scope(context, value, block, demand),
 
             StmtKind::Empty => {
                 // No-op
@@ -2045,7 +2058,7 @@ impl VbcCodegen {
         self.ctx.free_temp(match_reg);
 
         // Else block (must diverge)
-        self.compile_block(else_block)?;
+        self.compile_block_with_demand(else_block, ResultDemand::Discarded)?;
         // Note: else block should return/break/continue/panic, so no fallthrough
 
         // Bind pattern
@@ -2072,8 +2085,8 @@ impl VbcCodegen {
         // For now, compile to a temp buffer
         let saved_instrs = std::mem::take(&mut self.ctx.instructions);
 
-        // Compile the deferred expression
-        self.compile_expr(expr)?;
+        // Deferred statements discard their result, including a local block tail.
+        self.compile_expr_with_demand(expr, ResultDemand::Discarded)?;
 
         // Capture the generated instructions
         let defer_instrs = std::mem::replace(&mut self.ctx.instructions, saved_instrs);
@@ -2200,6 +2213,7 @@ impl VbcCodegen {
         context: &str,
         value: &verum_ast::Expr,
         body: &verum_ast::Expr,
+        demand: ResultDemand,
     ) -> CodegenResult<Option<Reg>> {
         // Compile value
         let value_reg = self
@@ -2227,7 +2241,7 @@ impl VbcCodegen {
 
         // Compile body (can be block expression or any expression)
         self.ctx.enter_scope();
-        let result = self.compile_expr(body)?;
+        let result = self.compile_expr_with_demand(body, demand)?;
         let (_, defers) = self.ctx.exit_scope(false);
 
         if ctx_newly_required {
