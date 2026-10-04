@@ -18039,19 +18039,28 @@ impl VbcCodegen {
                 ty.kind.primitive_name().map(|n| n.to_string())
             }
             TypeKind::Path(path) => {
-                // Extract the first type name from the path
-                // `Self` is encoded as `PathSegment::SelfValue` — surface it
-                // as the canonical capitalised `"Self"` token so downstream
-                // `substitute_self_in_type_name` can perform Self → concrete
-                // substitution at register_impl_function time (default-method
-                // monomorphisation of protocol bodies — `fn max(self, other:
-                // Self) -> Self` registered onto a concrete `<T>` must
-                // surface `return_type_name = "T"`, not `None`).
-                path.segments.iter().find_map(|seg| match seg {
-                    PathSegment::Name(ident) => Some(ident.name.to_string()),
-                    PathSegment::SelfValue => Some("Self".to_string()),
-                    _ => None,
-                })
+                // T1505: this spelling crosses the archive boundary into
+                // callable type schemes. Keep the complete nominal path:
+                // taking its first segment turned Carrier<domain.Flag>
+                // into Carrier<domain>, losing the actual constraint.
+                // Self keeps its type spelling for later substitution;
+                // navigation prefixes keep their source spelling too.
+                let segments: verum_common::List<&str> = path
+                    .segments
+                    .iter()
+                    .map(|seg| match seg {
+                        PathSegment::Name(ident) => ident.name.as_str(),
+                        PathSegment::SelfValue => "Self",
+                        PathSegment::Super => "super",
+                        PathSegment::Cog => "cog",
+                        PathSegment::Relative => "",
+                    })
+                    .collect();
+                if segments.is_empty() {
+                    None
+                } else {
+                    Some(segments.join(".").to_string())
+                }
             }
             TypeKind::Generic { base, args } => {
                 // For generic types like Result<T, E>, extract the full type including args
