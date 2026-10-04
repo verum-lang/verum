@@ -236,3 +236,39 @@ async fn probe() -> Int { Answer { value: 7 }.await }
         7
     );
 }
+
+#[test]
+fn an_awaited_wrapper_preserves_the_inner_futures_record_layout() {
+    assert_eq!(
+        run(r#"
+type Result<T, E> is Ok(T) | Err(E);
+type UnrelatedLayout is { answer: Int, padding: Int };
+type OutputRecord is { padding: Int, answer: Int };
+type Inner is { answer: Int };
+implement Future for Inner {
+    type Output = OutputRecord;
+    fn poll(&mut self, _cx: &mut Context) -> Poll<OutputRecord> {
+        Poll.Ready(OutputRecord { padding: 41, answer: self.answer })
+    }
+}
+type Wrapper<F> is { inner: F };
+implement<F: Future> Future for Wrapper<F> {
+    type Output = Result<F.Output, Bool>;
+    fn poll(&mut self, cx: &mut Context) -> Poll<Result<F.Output, Bool>> {
+        match self.inner.poll(cx) {
+            Poll.Ready(value) => Poll.Ready(Result.Ok(value)),
+            Poll.Pending => Poll.Pending,
+        }
+    }
+}
+async fn probe() -> Int {
+    let wrapped: Wrapper<Inner> = Wrapper { inner: Inner { answer: 7 } };
+    match wrapped.await {
+        Result.Ok(record) => record.answer,
+        Result.Err(_) => 1000,
+    }
+}
+"#),
+        7
+    );
+}

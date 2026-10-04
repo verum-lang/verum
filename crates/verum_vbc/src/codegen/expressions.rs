@@ -25846,8 +25846,24 @@ impl VbcCodegen {
     /// Carry the associated Output type to consumers of the awaited value.
     fn future_output_type_name(&self, type_name: &str) -> verum_common::Maybe<verum_common::Text> {
         use crate::types::TypeRef;
-        use verum_common::{List, Maybe, Text};
-        fn render(codegen: &VbcCodegen, ty: &TypeRef, args: &[String]) -> Maybe<Text> {
+        use verum_common::{List, Maybe, Set, Text};
+
+        // Imported descriptor graphs may contain cycles, including expanding
+        // ones (Grow<T>.Output -> Grow<Grow<T>>.Output). A repeated-name guard
+        // handles ordinary cycles; a depth bound also covers expanding ones.
+        // Failure keeps the output unknown instead of inventing a layout.
+        const MAX_OUTPUT_DEPTH: usize = 64;
+
+        fn render(
+            codegen: &VbcCodegen,
+            ty: &TypeRef,
+            args: &[String],
+            active: &mut Set<Text>,
+            depth: usize,
+        ) -> Maybe<Text> {
+            if depth >= MAX_OUTPUT_DEPTH {
+                return Maybe::None;
+            }
             match ty {
                 TypeRef::Generic(parameter) => args
                     .get(parameter.0 as usize)
@@ -25859,30 +25875,67 @@ impl VbcCodegen {
                     };
                     let mut names: List<Text> = List::new();
                     for ty in inner {
-                        let Maybe::Some(name) = render(codegen, ty, args) else {
+                        let Maybe::Some(name) = render(codegen, ty, args, active, depth + 1) else {
                             return Maybe::None;
                         };
                         names.push(name);
                     }
                     Maybe::Some(Text::from(format!("{}<{}>", base_name, names.join(", "))))
                 }
+                TypeRef::AssociatedProjection { base, assoc } if assoc == "Output" => {
+                    // Resolve the base in the enclosing implementation's
+                    // parameter scope first. Its own Future implementation
+                    // supplies both the associated type and the new scope:
+                    // Wrapper<Ready<Int>>'s F.Output is Ready<Int>.Output.
+                    let Maybe::Some(base_name) = render(codegen, base, args, active, depth + 1)
+                    else {
+                        return Maybe::None;
+                    };
+                    resolve_output(codegen, base_name.as_str(), active, depth + 1)
+                }
                 _ => codegen
                     .type_ref_to_field_name(ty)
                     .map_or(Maybe::None, |name| Maybe::Some(Text::from(name))),
             }
         }
-        let Maybe::Some(implementation) = self.future_implementation(type_name) else {
-            return Maybe::None;
-        };
-        let Some((_, output)) = implementation.associated_types.iter().find(|(name, _)| {
-            self.ctx
-                .strings
-                .get(name.0 as usize)
-                .is_some_and(|name| name == "Output")
-        }) else {
-            return Maybe::None;
-        };
-        render(self, output, &Self::split_generic_args(type_name))
+
+        fn resolve_output(
+            codegen: &VbcCodegen,
+            type_name: &str,
+            active: &mut Set<Text>,
+            depth: usize,
+        ) -> Maybe<Text> {
+            if depth >= MAX_OUTPUT_DEPTH {
+                return Maybe::None;
+            }
+            let Maybe::Some(implementation) = codegen.future_implementation(type_name) else {
+                return Maybe::None;
+            };
+            let Some((_, output)) = implementation.associated_types.iter().find(|(name, _)| {
+                codegen
+                    .ctx
+                    .strings
+                    .get(name.0 as usize)
+                    .is_some_and(|name| name == "Output")
+            }) else {
+                return Maybe::None;
+            };
+            let key = Text::from(type_name);
+            if !active.insert(key.clone()) {
+                return Maybe::None;
+            }
+            let result = render(
+                codegen,
+                output,
+                &VbcCodegen::split_generic_args(type_name),
+                active,
+                depth + 1,
+            );
+            active.remove(&key);
+            result
+        }
+
+        resolve_output(self, type_name, &mut Set::new(), 0)
     }
 
     /// One lowering for interpreter and AOT: poll, yield on Pending, return Ready's payload.
@@ -45501,6 +45554,10 @@ fn typed_primitive_pointee_deref(t: &str) -> Option<(crate::instruction::MemSubO
         _ => None,
     }
 }
+
+#[cfg(test)]
+#[path = "test_future_output.rs"]
+mod future_output_tests;
 
 #[cfg(test)]
 mod tests {
