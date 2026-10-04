@@ -2694,6 +2694,23 @@ fn as_i64<'ctx>(
     }
 }
 
+/// Encode a native callable value in the 64-bit register slot convention.
+/// F32 travels as the bit pattern of its value-preserving f64 widening, just
+/// like FunctionContext's register storage. Decode uses coerce_value, which
+/// recovers that f64 and narrows at the declared callee boundary.
+fn closure_slot_value<'ctx>(
+    ctx: &FunctionContext<'_, 'ctx>,
+    value: BasicValueEnum<'ctx>,
+    name: &str,
+) -> Result<verum_llvm::values::IntValue<'ctx>> {
+    let value = if value.is_float_value() {
+        coerce_value(ctx, value, ctx.types().f64_type().into(), name)?
+    } else {
+        value
+    };
+    as_i64(ctx, value, name)
+}
+
 /// Kill-switch (T0104 CVT-PASSTHRU-1 / POLY-FLOAT-ARM): setting
 /// `VERUM_AOT_CVT_PASSTHRU_LEGACY=1` restores the pre-fix behaviour — dynamic
 /// int<->float conversions bit-passthrough their source register and the
@@ -4052,7 +4069,11 @@ fn lower_instruction_impl<'ctx>(
             };
             let mut call_args = verum_common::List::with_capacity(args.count as usize);
             for register in args.iter() {
-                call_args.push(as_i64(ctx, ctx.get_register(register.0)?, "closure_arg")?);
+                call_args.push(closure_slot_value(
+                    ctx,
+                    ctx.get_register(register.0)?,
+                    "closure_arg",
+                )?);
             }
             let result = RuntimeLowering::new(ctx.llvm_context()).lower_call_closure(
                 ctx.builder(),
@@ -4152,85 +4173,102 @@ fn lower_instruction_impl<'ctx>(
                     func_name
                 ))?;
 
-            // Determine if we need a trampoline: when wrapping a non-closure named function
-            // as a closure, we need a trampoline that accepts (env_ptr, args...) and forwards
-            // to the original function as (args...), discarding env_ptr.
+            // Preserve the existing generated closure-body environment
+            // convention. Adapt the exact declared LLVM signature, including
+            // lambdas with typed scalar parameters/results, to CallClosure's
+            // single slot ABI. Ordinary functions ignore the extra env slot.
             let is_closure_fn = func_name.contains("$closure$");
-            let needs_trampoline = captures.is_empty() && !is_closure_fn;
+            let native_params = llvm_fn.get_type().get_param_types();
+            let i64_type = ctx.types().i64_type();
+            let ptr_type = ctx.types().ptr_type();
+            let already_slot_abi = is_closure_fn
+                && llvm_fn.get_call_conventions() == 0
+                && native_params.first() == Some(&BasicMetadataTypeEnum::PointerType(ptr_type))
+                && native_params
+                    .iter()
+                    .skip(1)
+                    .all(|ty| *ty == i64_type.into())
+                && llvm_fn.get_type().get_return_type() == Some(i64_type.into());
 
-            let fn_ptr = if needs_trampoline {
+            let fn_ptr = if !already_slot_abi {
                 let trampoline_name = format!("{}$trampoline$", func_name);
-                // Check if trampoline already exists
                 let trampoline_fn = if let Some(existing) =
                     ctx.get_module().get_function(&trampoline_name)
                 {
                     existing
                 } else {
-                    // Create trampoline: fn(env_ptr, args...) -> ret_type
-                    let i64_type = ctx.types().i64_type();
-                    let ptr_type = ctx.types().ptr_type();
-                    let orig_param_count = llvm_fn.count_params();
-
-                    // Trampoline params: [ptr env, i64 arg0, i64 arg1, ...]
-                    let mut trampoline_params: Vec<BasicMetadataTypeEnum> = Vec::new();
-                    trampoline_params.push(ptr_type.into()); // env_ptr (ignored)
-                    for _ in 0..orig_param_count {
+                    let environment_params = u32::from(is_closure_fn);
+                    let user_param_count =
+                        llvm_fn
+                            .count_params()
+                            .checked_sub(environment_params)
+                            .or_internal("closure body lacks its environment parameter")?;
+                    let mut trampoline_params =
+                        verum_common::List::with_capacity(user_param_count as usize + 1);
+                    trampoline_params.push(ptr_type.into());
+                    for _ in 0..user_param_count {
                         trampoline_params.push(i64_type.into());
                     }
-
-                    let ret_type = llvm_fn.get_type().get_return_type();
-                    let trampoline_ty = match ret_type {
-                        Some(BasicTypeEnum::IntType(it)) => it.fn_type(&trampoline_params, false),
-                        Some(BasicTypeEnum::FloatType(ft)) => ft.fn_type(&trampoline_params, false),
-                        Some(BasicTypeEnum::PointerType(pt)) => {
-                            pt.fn_type(&trampoline_params, false)
-                        }
-                        _ => i64_type.fn_type(&trampoline_params, false),
-                    };
-
+                    let trampoline_ty = i64_type.fn_type(&trampoline_params, false);
                     let trampoline =
                         ctx.get_module()
                             .add_function(&trampoline_name, trampoline_ty, None);
-
-                    // Build trampoline body: call original function, forwarding args (skipping env)
                     let entry_block = ctx.llvm_context().append_basic_block(trampoline, "entry");
                     let saved_block = ctx.builder().get_insert_block();
                     ctx.builder().position_at_end(entry_block);
-
-                    let mut forward_args: Vec<BasicMetadataValueEnum> = Vec::new();
-                    for i in 0..orig_param_count {
-                        // Skip param 0 (env_ptr), forward params 1..N
-                        // Trampoline/original arity can disagree when the
-                        // closure's fn-type came from a degraded signature —
-                        // degrade the single argument, not the whole module
-                        // lowering (task #22: 'missing param 1' aborted AOT
-                        // for files whose tuple hints re-routed dispatch).
-                        forward_args.push(match trampoline.get_nth_param(i + 1) {
-                            Some(p) => p.into(),
-                            None => i64_type.const_zero().into(),
-                        });
-                    }
-
-                    let call_result = ctx
-                        .builder()
-                        .build_call(llvm_fn, &forward_args, "fwd_call")
-                        .or_llvm_err()?;
-
-                    if let Some(ret_val) = call_result.try_as_basic_value().basic() {
-                        ctx.builder()
-                            .build_return(Some(&ret_val))
+                    let emitted = (|| -> Result<()> {
+                        let mut forward_args =
+                            verum_common::List::with_capacity(native_params.len());
+                        for (index, expected) in native_params.iter().enumerate() {
+                            let parameter = if is_closure_fn { index } else { index + 1 };
+                            let slot = trampoline
+                                .get_nth_param(parameter as u32)
+                                .or_internal("callable adapter parameter mismatch")?;
+                            let expected = meta_type_to_basic(*expected)
+                                .or_internal("callable adapter cannot pass metadata parameters")?;
+                            if !matches!(
+                                expected,
+                                BasicTypeEnum::IntType(_)
+                                    | BasicTypeEnum::FloatType(_)
+                                    | BasicTypeEnum::PointerType(_)
+                            ) {
+                                return Err(LlvmLoweringError::internal(
+                                    "callable adapter requires a scalar or pointer parameter",
+                                ));
+                            }
+                            forward_args
+                                .push(coerce_value(ctx, slot, expected, "closure_decode")?.into());
+                        }
+                        let call_result = ctx
+                            .builder()
+                            .build_call(llvm_fn, &forward_args, "fwd_call")
                             .or_llvm_err()?;
-                    } else {
-                        ctx.builder()
-                            .build_return(Some(&i64_type.const_zero()))
-                            .or_llvm_err()?;
-                    }
-
-                    // Restore builder position
+                        call_result.set_call_convention(llvm_fn.get_call_conventions());
+                        let result = match call_result.try_as_basic_value().basic() {
+                            Some(value)
+                                if matches!(
+                                    value,
+                                    BasicValueEnum::IntValue(_)
+                                        | BasicValueEnum::FloatValue(_)
+                                        | BasicValueEnum::PointerValue(_)
+                                ) =>
+                            {
+                                closure_slot_value(ctx, value, "closure_encode")?
+                            }
+                            Some(_) => {
+                                return Err(LlvmLoweringError::internal(
+                                    "callable adapter requires a scalar or pointer result",
+                                ));
+                            }
+                            None => i64_type.const_zero(),
+                        };
+                        ctx.builder().build_return(Some(&result)).or_llvm_err()?;
+                        Ok(())
+                    })();
                     if let Some(saved) = saved_block {
                         ctx.builder().position_at_end(saved);
                     }
-
+                    emitted?;
                     trampoline
                 };
                 trampoline_fn.as_global_value().as_pointer_value()
