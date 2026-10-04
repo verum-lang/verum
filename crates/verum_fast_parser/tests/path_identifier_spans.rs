@@ -145,3 +145,63 @@ fn rank2_parameter_and_return_paths_keep_their_own_source_offsets() {
     assert_name(source, assoc_name, "Item", 35, 39);
     assert_eq!(return_type.span, Span::new(33, 39, FILE));
 }
+
+#[test]
+fn array_const_expression_name_has_its_identifier_token_span() {
+    for (source, spelling, end) in [("[T; N]", "N", 5), ("[T; Число]", "Число", 14)] {
+        let ty = parse(source);
+        let TypeKind::Array { size, .. } = &ty.kind else {
+            panic!("expected an array: {ty:?}");
+        };
+        let size = size.as_ref().expect("array has a size expression");
+        let verum_ast::expr::ExprKind::Path(parsed) = &size.kind else {
+            panic!("expected a named const expression: {size:?}");
+        };
+        assert_name(source, name(parsed, 0), spelling, 4, end);
+        assert_eq!(parsed.span, Span::new(4, end, FILE));
+        assert_eq!(size.span, parsed.span);
+    }
+}
+
+fn expression_path(source: &str) -> Path {
+    let expr = VerumParser::new()
+        .parse_expr_str(source, FILE)
+        .unwrap_or_else(|errors| panic!("{source:?}: {errors:?}"));
+    match expr.kind {
+        verum_ast::expr::ExprKind::Path(path) => path,
+        other => panic!("expected an expression path, got {other:?}"),
+    }
+}
+
+#[test]
+fn ordinary_expression_path_name_retains_utf8_token_span() {
+    for (source, spelling, start, end) in [("N", "N", 0, 1), (" Число ", "Число", 1, 11)]
+    {
+        let parsed = expression_path(source);
+        assert_name(source, name(&parsed, 0), spelling, start, end);
+        assert_eq!(parsed.span, Span::new(start, end, FILE));
+    }
+}
+
+#[test]
+fn self_type_expression_path_is_a_name_with_its_token_span() {
+    let source = " Self ";
+    let parsed = expression_path(source);
+    assert_name(source, name(&parsed, 0), "Self", 1, 5);
+    assert_eq!(parsed.span, Span::new(1, 5, FILE));
+}
+
+#[test]
+fn recovery_colon_paths_retain_each_identifier_span() {
+    // `::` is diagnostic recovery syntax, not a new accepted Verum separator.
+    for (source, first, second, first_end, end) in [
+        ("Size::Count", "Size", "Count", 4, 11),
+        ("Тип::Размер", "Тип", "Размер", 6, 20),
+    ] {
+        let parsed = expression_path(source);
+        assert_eq!(parsed.segments.len(), 2);
+        assert_name(source, name(&parsed, 1), second, first_end + 2, end);
+        assert_name(source, name(&parsed, 0), first, 0, first_end);
+        assert_eq!(parsed.span, Span::new(0, end, FILE));
+    }
+}

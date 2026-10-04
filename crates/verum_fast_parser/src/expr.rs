@@ -3916,13 +3916,14 @@ impl<'a> RecursiveParser<'a> {
         let mut segments = Vec::new();
 
         // Parse first (and only) segment in expression context
+        let first_span = self.stream.current_span();
         let first_segment = if self.stream.consume(&TokenKind::SelfValue).is_some() {
             PathSegment::SelfValue
         } else if self.stream.consume(&TokenKind::SelfType).is_some() {
             // SelfType (Self) is a type reference, create as Name("Self") not SelfValue
             PathSegment::Name(verum_ast::ty::Ident::new(
                 Text::from("Self"),
-                self.stream.current_span(),
+                first_span,
             ))
         } else if self.stream.consume(&TokenKind::Super).is_some() {
             // Handle super keyword token
@@ -3933,8 +3934,7 @@ impl<'a> RecursiveParser<'a> {
         } else {
             // Parse regular identifier or keyword as path segment
             let name = self.consume_ident_or_keyword()?;
-            let span = self.stream.current_span();
-            PathSegment::Name(verum_ast::ty::Ident::new(name, span))
+            PathSegment::Name(verum_ast::ty::Ident::new(name, first_span))
         };
         segments.push(first_segment);
 
@@ -3976,8 +3976,8 @@ impl<'a> RecursiveParser<'a> {
                 .unwrap_or(false);
             if next_is_ident {
                 self.stream.advance(); // consume `::`
-                let seg_name = self.consume_ident_or_keyword()?;
                 let seg_span = self.stream.current_span();
+                let seg_name = self.consume_ident_or_keyword()?;
                 segments.push(PathSegment::Name(verum_ast::ty::Ident::new(
                     seg_name, seg_span,
                 )));
