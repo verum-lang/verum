@@ -18427,7 +18427,7 @@ fn lower_call_method<'ctx>(
         }
     };
     if is_atomic_by_prefix || is_atomic_by_register {
-        let _is_bool = method_type_prefix == Some("AtomicBool")
+        let is_bool = method_type_prefix == Some("AtomicBool")
             || ctx
                 .get_obj_register_type(receiver.0)
                 .map_or(false, |t| t == "AtomicBool");
@@ -18436,6 +18436,20 @@ fn lower_call_method<'ctx>(
         let i64_type = ctx.types().i64_type();
         let i8_type = ctx.types().i8_type();
         let ptr_type = ctx.types().ptr_type();
+        // AtomicBool stores a machine word in this native representation,
+        // but its scalar results obey Bool's value and formatting contract.
+        let set_old_value = |ctx: &mut FunctionContext<'_, 'ctx>, value: IntValue<'ctx>| -> Result<()> {
+            if is_bool {
+                let boolean = ctx.builder()
+                    .build_int_compare(IntPredicate::NE, value, i64_type.const_zero(), "atomic_bool")
+                    .or_llvm_err()?;
+                ctx.set_register(dst.0, boolean.into());
+                ctx.mark_bool_register(dst.0);
+            } else {
+                ctx.set_register(dst.0, value.into());
+            }
+            Ok(())
+        };
         let recv_val = as_i64(ctx, ctx.get_register(receiver.0)?, "atomic_recv")?;
         let recv_ptr = ctx
             .builder()
@@ -18489,7 +18503,7 @@ fn lower_call_method<'ctx>(
                 ctx.mark_atomic_int_register(dst.0);
                 ctx.set_obj_register_type(
                     dst.0,
-                    if _is_bool {
+                    if is_bool {
                         "AtomicBool".to_string()
                     } else {
                         "AtomicInt".to_string()
@@ -18511,8 +18525,7 @@ fn lower_call_method<'ctx>(
                     .map_err(|_| {
                         LlvmLoweringError::internal("Failed to set atomic ordering on load")
                     })?;
-                ctx.set_register(dst.0, load);
-                return Ok(());
+                return set_old_value(ctx, load.into_int_value());
             }
             "store" => {
                 // AtomicInt.store(&self, val, order) → atomic store to value field
@@ -18596,8 +18609,7 @@ fn lower_call_method<'ctx>(
                         AtomicOrdering::SequentiallyConsistent,
                     )
                     .or_llvm_err()?;
-                ctx.set_register(dst.0, result.into());
-                return Ok(());
+                return set_old_value(ctx, result);
             }
             "fetch_or" => {
                 let val = as_i64(ctx, ctx.get_register(args.start.0)?, "atomic_or_val")?;
@@ -18610,8 +18622,7 @@ fn lower_call_method<'ctx>(
                         AtomicOrdering::SequentiallyConsistent,
                     )
                     .or_llvm_err()?;
-                ctx.set_register(dst.0, result.into());
-                return Ok(());
+                return set_old_value(ctx, result);
             }
             "fetch_xor" => {
                 let val = as_i64(ctx, ctx.get_register(args.start.0)?, "atomic_xor_val")?;
@@ -18624,8 +18635,7 @@ fn lower_call_method<'ctx>(
                         AtomicOrdering::SequentiallyConsistent,
                     )
                     .or_llvm_err()?;
-                ctx.set_register(dst.0, result.into());
-                return Ok(());
+                return set_old_value(ctx, result);
             }
             "swap" => {
                 // AtomicInt.swap(&self, val, order) → atomicrmw xchg
@@ -18639,8 +18649,7 @@ fn lower_call_method<'ctx>(
                         AtomicOrdering::SequentiallyConsistent,
                     )
                     .or_llvm_err()?;
-                ctx.set_register(dst.0, result.into());
-                return Ok(());
+                return set_old_value(ctx, result);
             }
             "compare_exchange" => {
                 // AtomicInt.compare_exchange(&self, current, new, success_order, fail_order)
@@ -47334,4 +47343,3 @@ mod ffi_placeholder_arms_never_fake_success {
         );
     }
 }
-
