@@ -46,12 +46,15 @@ second mutex after explicit `drop(guard)`. The expected lock states are
 | Earlier native source control described in the lifecycle note | `1, 1, 1` | FAIL: scope exit and explicit drop did not release the lock |
 | Stage6 native combined program | Not reached | NOT_RUN: execution failed during supervisor borrowed-result access before the mutex phase |
 | Stage8 fresh native reference/scalar program | `true, true, true` | FAIL: scope exit and explicit drop still leave the lock held; the later pointer control completes |
+| Stage10 coherent CLI, interpreter and native controls | Interpreter `false, false, false`; native `true, true, true` | FAIL in both tiers; both complete the independent pointer control |
 
 The stage7 combined program completes with exit zero and its independent
 pointer control passes. Neither result turns the failed mutex-state
 assertion into a pass. The stage8 native program also completes with exit zero and
 `pointer_probe_ok=true`, while its mutex lifecycle assertion fails. This is a
 current native observation distinct from the earlier numeric-output control.
+The [stage-10 snapshot](../../../docs/architecture/platform-acceptance-2026-10-04-stage10.md)
+reconfirms both failures on one coherent CLI.
 No full `core-tests/sync/mutex` suite was rerun, and no historical test totals
 have been revised.
 

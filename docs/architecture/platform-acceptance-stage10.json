@@ -1,0 +1,193 @@
+{
+  "date": "2026-10-04",
+  "source_revision": "ca7d1334b23651258500217d805ea4e290d4d4ef",
+  "build": {
+    "engine_commit": "ca7d1334b23651258500217d805ea4e290d4d4ef",
+    "seconds": 1449.36,
+    "source_fingerprint_blake3": "7b3bbaec364e3a8d94bf27397a4aca705a3af0bb2c7b79cecf3d364d0b401aa7",
+    "schema": "v46-2026-09-03-module_level_statics",
+    "artifacts": {
+      "runtime.vbca": {
+        "bytes": 26571551,
+        "sha256": "a29c368523da045948a749d12a2c55d9b7184bb648028a0674afe70090226ae0"
+      },
+      "runtime.core_metadata": {
+        "bytes": 66573260,
+        "sha256": "3e7e454e8e5b648275c824070319a74f0736e7b88da4731a1fb3c73bc2bfb115"
+      },
+      "runtime.symbol_graph": {
+        "bytes": 5933976,
+        "sha256": "565e871b79329a73da4098aea8517d548bd196d37ec6a217084383473e3d6c94"
+      }
+    }
+  },
+  "cli": {
+    "bytes": 476274104,
+    "sha256": "459bc1a71d6238aee6f0e31b8e738995926a07e1176acec1b65894fcb70b45aa"
+  },
+  "focused_checks": {
+    "vbc": 38,
+    "llvm_jit": 17,
+    "source_gates": 40
+  },
+  "fresh_archive_checks": {
+    "baked_owner": {
+      "passed": 5,
+      "failed": 0
+    },
+    "fresh_archive": {
+      "passed": 58,
+      "failed": 0
+    },
+    "qualified_archive": {
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0
+    },
+    "public_compiler_owner": {
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0,
+      "stdlib_cache": "HIT",
+      "build_seconds": 32.12,
+      "test_seconds": 0.11
+    }
+  },
+  "same_source_sha256": "918adcc5d66a70f18aed78f031c6912bd14b9f34fa1acf523e1f7e79c752efd3",
+  "interpreter": {
+    "seconds": 46.41,
+    "exit": 0,
+    "timed_out": false,
+    "native_seen": false,
+    "completed": true,
+    "runtime_output": [
+      "phase=atomics",
+      "plain_load=true",
+      "plain_swap=true",
+      "plain_after=false",
+      "shared_load=true",
+      "shared_swap=true",
+      "shared_after=false",
+      "integer_swap=73",
+      "integer_after=91",
+      "phase=predicates",
+      "true",
+      "false",
+      "false",
+      "true",
+      "9001",
+      "9002",
+      "phase=references",
+      "scope_inside=false",
+      "scope_after=false",
+      "explicit_after=false",
+      "pointer_probe_begin",
+      "pointer_probe_ok=true",
+      "reference_scalar_completed=true",
+      "phase=hash_dispatch",
+      "hash_user=37",
+      "hash_builtin=-1747035056885442531",
+      "native_acceptance_completed=true"
+    ],
+    "atomic_identity": "PASS",
+    "predicate_identity_and_order": "PASS",
+    "field_address": "PASS",
+    "user_hash_body": "PASS",
+    "primitive_hash_parity": "PASS",
+    "output_order": "PASS",
+    "mutex_observations": [
+      "scope_inside=false",
+      "scope_after=false",
+      "explicit_after=false"
+    ],
+    "mutex_lifecycle": "FAIL",
+    "log_sha256": "021aec1d92543f5e6f2c68e5c4289fe4cd9bc3f18b65fd8c193c60b398410811",
+    "overall": "FAIL"
+  },
+  "native": {
+    "seconds": 510.93,
+    "exit": 0,
+    "timed_out": false,
+    "native_seen": true,
+    "completed": true,
+    "runtime_output": [
+      "phase=atomics",
+      "plain_load=true",
+      "plain_swap=true",
+      "plain_after=false",
+      "shared_load=true",
+      "shared_swap=true",
+      "shared_after=false",
+      "integer_swap=73",
+      "integer_after=91",
+      "phase=predicates",
+      "true",
+      "false",
+      "false",
+      "true",
+      "9001",
+      "9002",
+      "phase=references",
+      "scope_inside=true",
+      "scope_after=true",
+      "explicit_after=true",
+      "pointer_probe_begin",
+      "pointer_probe_ok=true",
+      "reference_scalar_completed=true",
+      "phase=hash_dispatch",
+      "hash_user=37",
+      "hash_builtin=5465015992139406178",
+      "native_acceptance_completed=true"
+    ],
+    "atomic_identity": "PASS",
+    "predicate_identity_and_order": "PASS",
+    "field_address": "PASS",
+    "user_hash_body": "PASS",
+    "primitive_hash_parity": "FAIL",
+    "output_order": "FAIL",
+    "mutex_observations": [
+      "scope_inside=true",
+      "scope_after=true",
+      "explicit_after=true"
+    ],
+    "mutex_lifecycle": "FAIL",
+    "log_sha256": "cb4b017c62a08fd327efd78db0354a768fce1f2e2d17b2fb42f21530ee007bd3",
+    "overall": "FAIL"
+  },
+  "native_binary": {
+    "sha256": "8000bc65645643b51cdbf08ece43793e7122058620d9091fdad0e6f6a0767d8d",
+    "bytes": 161928
+  },
+  "overall": "FAIL",
+  "remaining_failures": [
+    "T1538/T1540 Mutex guard ownership/drop",
+    "T1587 native primitive hash algorithm parity"
+  ],
+  "limits": [
+    "Focused checks only; not whole-platform acceptance",
+    "Stage10 archives differ from stage8; no complete semantic-equivalence claim",
+    "Separate six-asset release dependency audit uses a different source revision"
+  ],
+  "native_binary_inspection": {
+    "target": "aarch64-apple-darwin",
+    "dynamic_dependencies": [
+      "/usr/lib/libSystem.B.dylib"
+    ],
+    "undefined_symbols": [
+      "___ulock_wait",
+      "__exit",
+      "_bzero",
+      "_longjmp",
+      "_memcpy",
+      "_memset",
+      "_mmap",
+      "_munmap",
+      "_pthread_getspecific",
+      "_pthread_key_create",
+      "_pthread_setspecific",
+      "_write",
+      "dyld_stub_binder"
+    ],
+    "scope": "Exact saved stage10 native control only; not all runtime paths or other targets; behavior overall FAIL remains."
+  }
+}

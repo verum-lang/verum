@@ -1,5 +1,14 @@
 # Verum Technical-Debt Register
 
+## Coherent archive and native acceptance — T1579 / T1580 / T1583 (2026-10-04)
+
+The fresh default-feature `ca7d1334b` CLI passes declaration-owner and archive
+checks, actual user `hash_value` body selection, and native integer/predicate
+output ordering. It does not pass overall native acceptance: Mutex lifecycle
+still fails and primitive hashing differs across tiers (T1587). See the
+[stage-10 record](platform-acceptance-2026-10-04-stage10.md) for exact source,
+CLI/archive/binary hashes, focused counts, phase verdicts and retained failures.
+
 ## AOT no-libc and host dependency audit — T1585 / T1586 (2026-10-04)
 
 The strict no-libc requirement applies to generated AOT programs and their
