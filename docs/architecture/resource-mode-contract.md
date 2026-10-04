@@ -96,9 +96,10 @@ obligation; an implicit consuming use must still obey affine/linear rules.
    archive remapping and monomorphization. Missing data stays unknown.
    Both tiers must consume the same resulting lifecycle plan.
 
-The first implementation unit should fix declaration identity and parser
-preservation, with source tests. The next unit can carry the reviewed
-facts through archives. Neither unit should invoke new native Drop glue.
+The first source units now preserve declaration identity and parser
+metadata, with normal regression tests described below. The next unit must
+carry the reviewed facts through archives. These source changes do not
+invoke new native Drop glue.
 Direct locals, by-value parameters and direct returns are the first use
 sites; field/variant insertion, closure capture, branch joins and loops
 need explicit transfer facts before their cleanup can be enabled.
@@ -127,7 +128,7 @@ fn consume(x: beta.Token) {}
 fn probe(x: beta.Token) { consume(x); consume(x); }
 ```
 
-Measured on 2026-10-04: beta alone is accepted. Registering alpha as well
+Before the source correction, measured on 2026-10-04: beta alone is accepted. Registering alpha as well
 causes `MovedValueUsed` for beta, in either registration order. Replacing
 beta with alpha correctly rejects the second consuming use. Borrowing
 alpha twice and then consuming it once is accepted in both orders. This
@@ -149,9 +150,19 @@ public CLI, archive or runtime parity. A separate frozen public CLI check
 of an unused linear local reported E303. Other public controls exceeded
 the bounded time limit and have no acceptance verdict.
 
-Before wire work, promote these controls into normal parser/checker tests
-and add local shadowing, `@must_consume`, aliases, unresolved generic
-components and source/serialized-import equivalents. Before native
+The normal parser suite now includes
+`crates/verum_parser/tests/event_resource_declarations.rs`: qualifiers,
+visibility, ordered outer attributes, malformed declaration diagnostics and
+recovery are preserved. The checker suite includes
+`crates/verum_types/tests/resource_declaration_identity.rs`: same-leaf
+owners, borrowing, local shadowing, `@must_consume`, aliases and imported
+generic aliases use the resolved declaration key. Source and imported aliases
+retain their target's owner and generic parameter roster.
+
+These are source-stage guarantees. The existing permissive treatment of an
+unresolved qualified name still exists; absence of resource metadata is not
+yet represented by the proposed `Unknown` state. Before wire work, add exact
+source/serialized-import equivalence and unresolved-component handling. Before native
 cleanup, add real timing/count controls for Shared releases, scope versus
 explicit drop, borrowed/raw aliases, return and nested-variant transfers,
 branches, register reuse and loops. The original mutex guard must stay

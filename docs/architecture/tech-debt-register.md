@@ -438,9 +438,11 @@ Fresh execution on that frozen binary establishes these separate results:
   lifetime observations remain `true/true/true`, rather than the required
   `true/false/false`: this does not close owned-resource destruction.
 - The interpreter supervisor control prints `once=37 count=1 root=0`.
-  Native acceptance is still separate; an initial run stopped on sandbox
-  object-file write permission before any executable ran and is being
-  repeated with the required filesystem access.
+  The first native attempt stopped on object-file write permission before
+  execution. The permitted rerun actually executed, then exited 255 with
+  a null-cell fault in `OnceLock.get_or_init`. T1553 reproduced loss of
+  constructor/destructor roots in monomorphization; this is a product
+  failure distinct from that first environment failure.
 - The interpreter Weft HTTP gate passes five language contracts and four
   real-connection cases: binary response bytes, header timeout, cancellation
   and a slow-drip timeout. Both timeout responses carry HTTP 408 and the
@@ -467,8 +469,61 @@ A source-to-VBC-to-wire probe fails in all four alias/order combinations and
 passes two Bool/Int controls. Importing already-correct alias carriers is not
 proof that source declaration attachment works.
 
-Main integration remains pending this execution validation; the passing unit
-counts do not replace the actual program verdicts.
+**Coherent snapshot `86b64ec2d` — 2026-10-04.** The full CLI build
+completed in 1,931.65 seconds with source fingerprint
+`7f70c0e3659de20aede2d2c535984090cdfe8a75d6fb5424ef613b55106e48ba`.
+The executable SHA-256 is
+`a9373df3fdf9c1c7f88c487ffac83540ed4a527a5b274539cc335b427cd9a6fd`.
+Its three archive artifacts were retained separately and verified against
+the build manifest before any subsequent rebuild. All 40 source gates and
+2,044 VBC library tests plus 345 tests in 37 integration binaries passed;
+one existing library coverage test remains ignored. The real compiler's
+public archive gates passed six controls, and its archive-loader suite
+passed 23 with three pre-existing ignored diagnostic probes.
+
+The actual combined interpreter program still does **not** run. Finalization
+rejects duplicate canonical IDs for `Byte/UInt8` and `ISize/USize` after full
+archive import. The public scalar-impl tests did not exercise whole-program
+finalization. The CLI explicit-AOT-failure regression also fails in its
+interpreter positive control for the same duplicate IDs, after its explicit
+AOT rejection checks passed. T1547 therefore remains open.
+
+Fresh archive inspection separately passes 55 nominal, payload, optional
+metadata and named-glue checks, but fails the unresolved callable witness.
+The cancellation closure still has an Int parameter/result instead of its
+declared nominal types. Its collect receiver retains the source ListIter ID
+230 while the consumer's ListIter ID is 175; ID 230 names ErrnoCode in that
+consumer. This is a demonstrated namespace error, not evidence of a valid
+collect specialization. The caller also still emits guessed panic-payload
+field warnings. T1228/T1536 require full bootstrap/import coverage beyond
+the passing isolated source tests.
+
+The next committed source units preserve lifecycle roots through exact
+function-ID remapping (T1553), keep registered static values out of module
+path dispatch (T1554), preserve resource modifiers/attributes through the
+event parser (T1556), and classify resolved source resources and aliases by
+their declaring owner (T1558). The resource contract remains a producer plan;
+archive resource metadata and native owned Drop are not enabled by it.
+T1517 adds one heap-backed/raw backing-address authority and bounds managed
+reallocation copies by the actual payload size. Its focused 77 checks pass;
+`list_backing_shrink_regrow.vr` prints actual values before its assertions
+for the pending interpreter/native acceptance. Generic element layout and
+raw allocation reclamation remain separate open boundaries.
+
+Main integration remains pending execution validation. Passing unit counts
+do not replace actual program verdicts, and the fresh failures above prevent
+a whole-platform or industrial-readiness claim.
+
+The separate website repository has also been updated and committed: its
+homepage and public guide describe the integrated platform and dated current
+limitations; runtime/async/reference contracts agree with the measured
+execution model. A mobile navigation defect was reproduced at viewport
+390 by 844 and repaired by removing the header backdrop filter at the mobile
+breakpoint. Both themes, full-height scrolling, nested navigation and closing
+were checked; TypeScript, documentation gates and the production build pass.
+Node 22 is now selected consistently for local development and primary CI;
+the existing Node 20 compatibility job is retained. These website changes
+are in that repository's local main; no publication is claimed.
 
 A separate read-only audit found the remaining nonexistent `Lazy.new/get` use
 in `configuration.builtin_registry`. T1544 tracks its once-owned registry,
