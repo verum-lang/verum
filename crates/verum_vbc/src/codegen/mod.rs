@@ -3100,6 +3100,15 @@ impl VbcCodegen {
         }
     }
 
+    /// Scalar impl descriptors carry metadata for a built-in, not a new
+    /// nominal type. Both the kind and original ID must confirm the name.
+    fn canonical_scalar_type_id(ty: &TypeDescriptor, name: &str) -> Option<TypeId> {
+        (ty.kind == crate::types::TypeKind::Primitive)
+            .then(|| TypeId::from_well_known_scalar_name(name))
+            .flatten()
+            .filter(|id| *id == ty.id)
+    }
+
     /// Reserved sum identities exist before their source module is compiled.
     /// Only the exact canonical declaring owner has this authority.
     fn canonical_sum_type_id(module_name: &str, type_name: &str) -> Option<TypeId> {
@@ -6398,7 +6407,8 @@ impl VbcCodegen {
         // lookups, drop/variant dispatch — resolves a type BY NAME via
         // `type_name_to_id`, so rerouting this type's instructions to the new id
         // is automatic; nothing depends on the module-local numeric id.
-        if !self.type_name_to_id.contains_key(&simple_name)
+        if Self::canonical_scalar_type_id(&ty, &simple_name).is_none()
+            && !self.type_name_to_id.contains_key(&simple_name)
             && self.type_name_to_id.values().any(|id| id.0 == ty.id.0)
         {
             ty.id = self.alloc_user_type_id();
@@ -6856,6 +6866,26 @@ impl VbcCodegen {
     /// happened to register, which is the existing well-known
     /// alias semantic).
     fn push_type_dedupe(&mut self, ty: crate::types::TypeDescriptor) {
+        // T1546: scalar carriers may contribute impls from several modules.
+        // Merge the same spelling additively, retaining distinct alias
+        // spellings (Byte/UInt8, USize/ISize) for name-keyed metadata readers.
+        let scalar = self.ctx.strings.get(ty.name.0 as usize)
+            .and_then(|name| Self::canonical_scalar_type_id(&ty, name));
+        if scalar.is_some() {
+            if let Some(existing) = self.types.iter_mut().find(|existing| {
+                existing.id == ty.id && existing.name == ty.name
+                    && existing.kind == crate::types::TypeKind::Primitive
+            }) {
+                for implementation in ty.protocols {
+                    if !existing.protocols.contains(&implementation) {
+                        existing.protocols.push(implementation);
+                    }
+                }
+            } else {
+                self.push_type_descriptor(ty);
+            }
+            return;
+        }
         // If a descriptor with this id already exists AND it carries
         // populated structural data (variants OR fields), skip the
         // re-push — the first wins. But if the existing entry is
@@ -25834,6 +25864,7 @@ impl VbcCodegen {
         let name_str = owner.zip(qualified_key.as_ref())
             .and_then(|(owner, name)| name.strip_prefix(&format!("{owner}.")))
             .unwrap_or(&name_str).to_owned();
+        let scalar_id = Self::canonical_scalar_type_id(ty, &name_str);
         // REFINE-FIELD-DYNAMIC-BYPASS-1 phase 2: hydrate field
         // refinements on THIS import path too — the lazy loader
         // reaches most stdlib types through the protocol-remap
@@ -25877,7 +25908,8 @@ impl VbcCodegen {
             .map(|p| format!("{}.{}", p, name_str));
         // Idempotence: this exact qualified type was already imported
         // (repeat archive merges) — nothing to do.
-        if let Some(q) = qualified_key.as_deref()
+        if scalar_id.is_none()
+            && let Some(q) = qualified_key.as_deref()
             && let Some(&qid) = self.type_name_to_id.get(q)
             && self.type_by_id(qid).is_some()
         {
@@ -25900,7 +25932,13 @@ impl VbcCodegen {
         //      simple binding untouched.
         let reserved = qualified_key.as_ref()
             .and_then(|key| self.type_name_to_id.get(key)).copied();
-        let (new_id, owns_simple_key) = if let Some(id) = reserved {
+        let (new_id, owns_simple_key) = if let Some(id) = scalar_id {
+            // An impl in another module does not redeclare the scalar.
+            // Keep nominal same-name types independent in the bare registry.
+            let owns = self.type_name_to_id.get(&name_str).is_none_or(|current| *current == id);
+            if owns { self.type_name_to_id.insert(name_str.clone(), id); }
+            (id, owns)
+        } else if let Some(id) = reserved {
             let owns = self.type_name_to_id.get(&name_str).is_none_or(|current| *current == id);
             if owns { self.type_name_to_id.insert(name_str.clone(), id); }
             (id, owns)
@@ -25917,6 +25955,10 @@ impl VbcCodegen {
                             // registration would be unreachable anyway.
                             None => return,
                         }
+                    } else if TypeId::from_well_known_scalar_name(&name_str) == Some(existing_id) {
+                        // A nominal same-name type cannot adopt a reserved
+                        // scalar ID before the first impl carrier arrives.
+                        (self.alloc_user_type_id(), false)
                     } else {
                         // Case (b).
                         (existing_id, true)
