@@ -337,12 +337,19 @@ impl AstSink {
         let mut generics = List::new();
         let mut body = None;
         let mut where_clause = Maybe::None;
-        let mut attributes = List::new();
+        let attributes = self.collect_attributes(node);
+        let mut resource_modifier = Maybe::None;
 
         for child in node.children() {
             match child {
                 SyntaxElement::Token(token) => match token.kind() {
-                    SyntaxKind::PUB_KW => visibility = Visibility::Public,
+                    SyntaxKind::PUB_KW | SyntaxKind::PUBLIC_KW => visibility = Visibility::Public,
+                    SyntaxKind::AFFINE_KW => {
+                        resource_modifier = Maybe::Some(verum_ast::ResourceModifier::Affine);
+                    }
+                    SyntaxKind::LINEAR_KW => {
+                        resource_modifier = Maybe::Some(verum_ast::ResourceModifier::Linear);
+                    }
                     SyntaxKind::IDENT => {
                         if name.is_none() {
                             name = Some(self.token_to_ident(&token));
@@ -385,11 +392,6 @@ impl AstSink {
                                 body = Some(TypeDeclBody::Alias(ty));
                             }
                         }
-                        SyntaxKind::ATTRIBUTE => {
-                            if let Some(attr) = self.convert_attribute(&child_node) {
-                                attributes.push(attr);
-                            }
-                        }
                         _ => {}
                     }
                 }
@@ -405,7 +407,7 @@ impl AstSink {
             name,
             generics,
             body,
-            resource_modifier: Maybe::None,
+            resource_modifier,
             generic_where_clause: where_clause, // Use the parsed where clause
             meta_where_clause: Maybe::None,
             attributes,
@@ -1116,7 +1118,28 @@ impl AstSink {
 
     /// Collect attributes from a node.
     fn collect_attributes(&mut self, node: &SyntaxNode) -> List<Attribute> {
-        let mut attrs = List::new();
+        // Event parsing keeps outer attributes as preceding siblings. Stop at
+        // another item or significant token so attributes cannot leak to the
+        // next declaration. Nested attributes are collected below as before.
+        let mut preceding = List::new();
+        let mut sibling = node.prev_sibling();
+        while let Some(element) = sibling {
+            sibling = element.prev_sibling();
+            match element {
+                SyntaxElement::Node(attribute)
+                    if attribute.kind() == SyntaxKind::ATTRIBUTE
+                        && !self.is_inner_attribute(&attribute) =>
+                {
+                    if let Some(attribute) = self.convert_attribute(&attribute) {
+                        preceding.push(attribute);
+                    }
+                }
+                SyntaxElement::Token(token) if token.is_trivia() => {}
+                _ => break,
+            }
+        }
+        preceding.reverse();
+        let mut attrs = preceding;
         for child in node.child_nodes() {
             if child.kind() == SyntaxKind::ATTRIBUTE {
                 if let Some(attr) = self.convert_attribute(&child) {

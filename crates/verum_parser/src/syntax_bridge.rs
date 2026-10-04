@@ -582,7 +582,9 @@ impl EventBasedParser {
 
         match &token.token.kind {
             // Visibility modifier - look ahead to determine item type
-            TokenKind::Pub => self.parse_item_with_visibility(source, tokens, start_pos, builder),
+            TokenKind::Pub | TokenKind::Public => {
+                self.parse_item_with_visibility(source, tokens, start_pos, builder)
+            }
             // Function modifiers - look ahead to determine if it's a function
             TokenKind::Async | TokenKind::Pure | TokenKind::Meta | TokenKind::Unsafe => {
                 self.parse_item_with_modifiers(source, tokens, start_pos, builder)
@@ -642,7 +644,9 @@ impl EventBasedParser {
         let pos = start_pos;
 
         // Look ahead to find the actual item
-        if pos >= tokens.len() || !matches!(tokens[pos].token.kind, TokenKind::Pub) {
+        if pos >= tokens.len()
+            || !matches!(tokens[pos].token.kind, TokenKind::Pub | TokenKind::Public)
+        {
             return (start_pos, false);
         }
 
@@ -1099,9 +1103,11 @@ impl EventBasedParser {
         // Start TYPE_DEF node
         let type_marker = builder.start();
 
-        // Optional visibility: pub
-        if pos < tokens.len() && matches!(tokens[pos].token.kind, TokenKind::Pub) {
-            builder.token(SyntaxKind::PUB_KW);
+        // Optional visibility: public (or pub)
+        if pos < tokens.len()
+            && matches!(tokens[pos].token.kind, TokenKind::Pub | TokenKind::Public)
+        {
+            builder.token(token_kind_to_syntax_kind(&tokens[pos].token.kind));
             pos += 1;
         }
 
@@ -1113,10 +1119,19 @@ impl EventBasedParser {
         builder.token(SyntaxKind::TYPE_KW);
         pos += 1;
 
+        // A resource qualifier belongs to the declaration, before its name.
+        if pos < tokens.len()
+            && matches!(tokens[pos].token.kind, TokenKind::Affine | TokenKind::Linear)
+        {
+            builder.token(token_kind_to_syntax_kind(&tokens[pos].token.kind));
+            pos += 1;
+        }
+
         // Expect identifier (type name)
         if pos >= tokens.len() || !matches!(tokens[pos].token.kind, TokenKind::Ident(_)) {
-            type_marker.abandon(builder);
-            return (start_pos, false);
+            builder.error("expected type name after 'type' or its resource qualifier");
+            type_marker.complete(builder, SyntaxKind::ERROR);
+            return (pos, true);
         }
         builder.token(SyntaxKind::IDENT);
         pos += 1;
@@ -1129,13 +1144,15 @@ impl EventBasedParser {
 
         // Expect 'is'
         if pos >= tokens.len() || !matches!(tokens[pos].token.kind, TokenKind::Is) {
-            type_marker.abandon(builder);
-            return (start_pos, false);
+            builder.error("expected 'is' after type declaration name");
+            type_marker.complete(builder, SyntaxKind::ERROR);
+            return (pos, true);
         }
         builder.token(SyntaxKind::IS_KW);
         pos += 1;
 
-        // Parse type body based on what follows
+        // Parse type body based on what follows.
+        let body_start = pos;
         if pos < tokens.len() {
             match &tokens[pos].token.kind {
                 // Record type: type Foo is { x: Int, y: Int };
@@ -1169,6 +1186,12 @@ impl EventBasedParser {
                     }
                 }
             }
+        }
+
+        if pos == body_start {
+            builder.error("expected a type declaration body after 'is'");
+            type_marker.complete(builder, SyntaxKind::ERROR);
+            return (pos, true);
         }
 
         // Optional where clause
