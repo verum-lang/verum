@@ -510,9 +510,51 @@ reallocation copies by the actual payload size. Its focused 77 checks pass;
 for the pending interpreter/native acceptance. Generic element layout and
 raw allocation reclamation remain separate open boundaries.
 
+**Coherent snapshot `a4fec0740` — 2026-10-04.** The fresh CLI build
+completed in 2,152.96 seconds. Its BLAKE3 input fingerprint is
+`03ce5e18cbb286db530c3ce3a192a5e912805de5a161135dc0fc74b988ee2bf7`;
+the runtime archive SHA-256 is
+`de44bf48f4f307c48810054fc0134e9f25ae93b8723518606c211c965581c747`.
+All three artifact byte counts and hashes were checked before preserving the
+snapshot. The VBC suite passes 2,048 library tests and 396 integration tests
+in 43 binaries, with zero failures. Its existing coverage-report test remains
+ignored; the other ignored test, which requires an explicit fresh archive,
+was subsequently run and passed. All 40 source gates pass. The integrated
+parser/checker campaign passes 6,578 tests with seven pre-existing ignored
+cases after correcting the obsolete regex fixture; these counts are not a
+whole-workspace or runtime-conformance verdict.
+
+The strengthened fresh-archive probe passes 58 checks, including the exact
+consumer `ListIter<Weak<CancellationFlag>>` receiver and concrete callable
+input/output. This removes the prior source-ID collision and unresolved
+callable witness from that archive. Scalar alias finalization also permits
+the explicit-AOT-failure test's real interpreter positive control to run.
+
+Actual interpreter execution passes standalone eager-handler, panic-payload,
+once/supervisor and list-backing controls. List output confirms zero-capacity
+shrink and subsequent growth for Byte and Int, plus raw and managed backing
+shrink; the supervisor prints both initialization values, count, IDs and names.
+Panic output still has guessed static field-owner warnings despite its correct
+runtime values. The combined program and the HTTP gate stop in source checking:
+qualified local types lose method-result or field lookup. None of the combined
+runtime assertions or HTTP connections ran. This new producer/consumer mismatch
+must be repaired without weakening type checks or annotating the fixtures.
+
+A subsequent LLVM/CLI-only relink at `63ca59306` retains exactly the same
+stdlib fingerprint and all three artifact hashes. Fifteen executable LLVM
+closure tests and seven counted-spawn tests pass. The former share OnceLock
+and ordinary closure invocation and adapt typed callable signatures to the
+value-slot ABI; the latter check arity before loading a counted pack, including
+actual guard-page controls. The CLI native-failure gate passes. The project-tier
+gate initially had one incorrect expectation: an omitted codegen section was
+assumed to select the interpreter, but both manifest default paths select AOT.
+The corrected ten-test gate passes against the actual CLI and preserves the
+explicit interpreter controls. CLI help and public documentation now distinguish
+file execution from project configuration. Production defaults are unchanged.
+
 Main integration remains pending execution validation. Passing unit counts
-do not replace actual program verdicts, and the fresh failures above prevent
-a whole-platform or industrial-readiness claim.
+do not replace actual program verdicts, and these failures prevent a
+whole-platform or industrial-readiness claim.
 
 The separate website repository has also been updated and committed: its
 homepage and public guide describe the integrated platform and dated current

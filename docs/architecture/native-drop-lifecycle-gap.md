@@ -114,12 +114,13 @@ references, raw pointers and primitive values, but does not consult the
 resource mode before emitting `Clone`. VBC type/parameter descriptors also
 lack the resource/transfer contract described above.
 
-Resource classification itself needs exact declaration identity: the current
-`AffineTracker::get_type_resource_kind` uses the last path segment. The
-alternate parser's `AstSink::convert_type_def` also constructs declarations
-with `resource_modifier: Maybe::None`. Neither route is an ownership authority for
-same-named qualified resources. Adding `affine` to MutexGuard alone therefore
-cannot implement its runtime contract.
+The source prerequisite now preserves exact declaration identity: T1558
+classifies named resources and transparent aliases by their declaring owner,
+and T1556 retains resource modifiers and attributes through the alternate
+parser. Their source regression suites cover same-named qualified resources
+and both parser routes. These repairs do not publish ownership operations or
+serialize resource discipline into VBC. Adding `affine` to MutexGuard alone
+therefore still cannot implement its runtime contract.
 
 A first shared implementation can bound its acceptance to direct locals,
 arguments and returns: preserve the declaration-owned resource mode through
