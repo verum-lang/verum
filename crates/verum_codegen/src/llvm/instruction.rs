@@ -15784,7 +15784,7 @@ fn method_will_have_body(
 }
 
 #[cfg(test)]
-#[path = "tests/method_body_index.rs"]
+#[path = "../../tests/llvm/method_body_index.rs"]
 mod method_body_index_tests;
 
 fn lower_call_method<'ctx>(
