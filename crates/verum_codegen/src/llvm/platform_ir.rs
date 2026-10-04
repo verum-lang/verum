@@ -27,6 +27,10 @@ use verum_llvm::values::{
 };
 use verum_llvm::{AddressSpace, IntPredicate};
 
+/// Maximum arity of the internal raw-code spawn dispatch ABI.
+/// Zero/one use the pool fast path; two through this bound use counted packs.
+pub(super) const SPAWN_MAX_ARGS: u8 = 8;
+
 /// Manifest-driven runtime configuration values that flow from
 /// `LanguageFeatures.runtime` through `LoweringConfig` into
 /// LLVM-IR globals. Each field corresponds to a `[runtime].*`
@@ -18980,103 +18984,101 @@ impl<'ctx> PlatformIR<'ctx> {
             .or_llvm_err()?
             .into_int_value();
 
-        // Load all args (up to 8 supported) into an alloca array
-        // We'll do a switch on count to call with the right number of args
-        // SAFETY: GEP at a known offset within an allocated object; the pointer is valid and the offset does not exceed the allocation size
-        let args_base = unsafe {
-            builder
-                .build_gep(i8_type, packed_ptr, &[i64_type.const_int(16, false)], "ab")
-                .or_llvm_err()?
-        };
-
-        // Load up to 8 args
-        let mut arg_vals = Vec::new();
-        for i in 0..8u64 {
-            let off = i64_type.const_int(i * 8, false);
-            // SAFETY: GEP into the FFI arguments array at offset i*8; the array was allocated with space for 8 i64 argument slots
-            let p = unsafe {
-                builder
-                    .build_gep(i8_type, args_base, &[off], &format!("a{}_p", i))
-                    .or_llvm_err()?
-            };
-            let v = builder
-                .build_load(i64_type, p, &format!("a{}", i))
-                .or_llvm_err()?;
-            arg_vals.push(v);
-        }
-
-        // Free the packed struct: size = (2 + count) * 8
-        let total = builder
-            .build_int_add(count, i64_type.const_int(2, false), "tc")
-            .or_llvm_err()?;
-        let total_sz = builder
-            .build_int_mul(total, i64_type.const_int(8, false), "tsz")
-            .or_llvm_err()?;
-        builder
-            .build_call(dealloc_fn, &[packed_ptr.into(), total_sz.into()], "")
-            .or_llvm_err()?;
-
-        // Call func with appropriate number of args via switch on count
-        // For simplicity, always call with count args. Since LLVM IR requires
-        // statically typed calls, we'll emit a series of conditional blocks.
-        // Common case is 2-4 args. We handle 2-8 via cascading if-else.
+        // The producer allocates only count argument slots. Select an arity
+        // before touching those slots; hoisting eight loads into entry reads
+        // beyond short packs, even when the later call uses fewer values.
         let ret_bb = ctx.append_basic_block(func, "ret");
-
-        // Build call blocks for each arg count
-        let mut call_bbs = Vec::new();
-        for n in 2..=8u64 {
-            let bb = ctx.append_basic_block(func, &format!("call_{}", n));
-            call_bbs.push((n, bb));
-        }
-        let fallback_bb = ctx.append_basic_block(func, "fallback");
-
-        // Dispatch based on count
-        let mut cur_bb = entry;
-        for &(n, bb) in &call_bbs {
-            builder.position_at_end(cur_bb);
-            if n == 2 {
-                // First check
-            }
-            let is_n = builder
-                .build_int_compare(
-                    IntPredicate::EQ,
-                    count,
-                    i64_type.const_int(n, false),
-                    &format!("is_{}", n),
-                )
-                .or_llvm_err()?;
-            let next_bb = if n < 8 {
-                ctx.append_basic_block(func, &format!("check_{}", n + 1))
-            } else {
-                fallback_bb
-            };
-            builder
-                .build_conditional_branch(is_n, bb, next_bb)
-                .or_llvm_err()?;
-            cur_bb = next_bb;
-        }
-        // fallback: just call with 2 args (shouldn't happen)
-        builder.position_at_end(fallback_bb);
+        let invalid_bb = ctx.append_basic_block(func, "unsupported_arity");
+        let call_bbs: verum_common::List<_> = (2..=u64::from(SPAWN_MAX_ARGS))
+            .map(|n| (n, ctx.append_basic_block(func, &format!("call_{}", n))))
+            .collect();
+        let cases: verum_common::List<_> = call_bbs
+            .iter()
+            .map(|(n, bb)| (i64_type.const_int(*n, false), *bb))
+            .collect();
         builder
-            .build_unconditional_branch(call_bbs[0].1)
+            .build_switch(count, invalid_bb, cases.as_slice())
             .or_llvm_err()?;
 
-        // Result phi in ret block
+        // A malformed/internal unsupported pack cannot be interpreted as a
+        // two-argument call. Use the normal configured panic policy and do not
+        // read or free an allocation whose size is not established by this ABI.
+        builder.position_at_end(invalid_bb);
+        let message = format!(
+            "native spawn pack arity must be between 2 and {}",
+            SPAWN_MAX_ARGS
+        );
+        let message_ptr = builder
+            .build_global_string_ptr(&message, "spawn_pack_arity_error")
+            .or_llvm_err()?;
+        let panic_fn = self.get_or_declare_fn(
+            module,
+            "verum_panic",
+            void_type.fn_type(
+                &[
+                    ptr_type.into(),
+                    i64_type.into(),
+                    ptr_type.into(),
+                    ctx.i32_type().into(),
+                ],
+                false,
+            ),
+        );
+        builder
+            .build_call(
+                panic_fn,
+                &[
+                    message_ptr.as_pointer_value().into(),
+                    i64_type.const_int(message.len() as u64, false).into(),
+                    ptr_type.const_null().into(),
+                    ctx.i32_type().const_zero().into(),
+                ],
+                "",
+            )
+            .or_llvm_err()?;
+        builder.build_unreachable().or_llvm_err()?;
+
         builder.position_at_end(ret_bb);
         let result_phi = builder.build_phi(i64_type, "result").or_llvm_err()?;
-
-        // Emit call blocks
         for &(n, bb) in &call_bbs {
             builder.position_at_end(bb);
-            let args: Vec<verum_llvm::values::BasicMetadataValueEnum> =
-                (0..n as usize).map(|i| arg_vals[i].into()).collect();
-            let fn_type_n = i64_type.fn_type(&vec![i64_type.into(); n as usize], false);
+            let mut args = verum_common::List::with_capacity(n as usize);
+            for i in 0..n {
+                // SAFETY: this block is selected only for count == n, and the
+                // producer allocates two header words followed by n arguments.
+                let slot = unsafe {
+                    builder
+                        .build_gep(
+                            i8_type,
+                            packed_ptr,
+                            &[i64_type.const_int((2 + i) * 8, false)],
+                            &format!("a{}_p", i),
+                        )
+                        .or_llvm_err()?
+                };
+                let value = builder
+                    .build_load(i64_type, slot, &format!("a{}", i))
+                    .or_llvm_err()?;
+                args.push(verum_llvm::values::BasicMetadataValueEnum::from(value));
+            }
+            // Capture all values before freeing their storage; preserve the
+            // existing ownership transfer before invoking the raw callee.
+            builder
+                .build_call(
+                    dealloc_fn,
+                    &[
+                        packed_ptr.into(),
+                        i64_type.const_int((2 + n) * 8, false).into(),
+                    ],
+                    "",
+                )
+                .or_llvm_err()?;
+            let param_types: verum_common::List<_> = (0..n).map(|_| i64_type.into()).collect();
+            let fn_type_n = i64_type.fn_type(param_types.as_slice(), false);
             let res = builder
-                .build_indirect_call(fn_type_n, fn_ptr, &args, &format!("r{}", n))
+                .build_indirect_call(fn_type_n, fn_ptr, args.as_slice(), &format!("r{}", n))
                 .or_llvm_err()?
-                .try_as_basic_value()
-                .basic()
-                .unwrap_or_else(|| i64_type.const_zero().into());
+                .basic_value_or("raw spawn callable must return a value")?;
             let res_i64 = res.into_int_value();
             result_phi.add_incoming(&[(&res_i64, bb)]);
             builder.build_unconditional_branch(ret_bb).or_llvm_err()?;
@@ -19744,3 +19746,7 @@ mod runtime_bridge_zero_overhead_tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "../../tests/llvm/spawn_pack_bounds.rs"]
+mod spawn_pack_bounds_tests;

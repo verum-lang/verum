@@ -46348,6 +46348,14 @@ fn lower_spawn<'ctx>(
             ),
         ));
     }
+    if args.count > super::platform_ir::SPAWN_MAX_ARGS {
+        return Err(LlvmLoweringError::UnsupportedInstruction(
+            format!(
+                "Spawn has {} arguments; the native spawn ABI supports at most {}",
+                args.count, super::platform_ir::SPAWN_MAX_ARGS,
+            ).into(),
+        ));
+    }
     let i64_type = ctx.types().i64_type();
     let ptr_type = ctx.types().ptr_type();
     let _i32_type = ctx.types().i32_type();
