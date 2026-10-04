@@ -465,6 +465,19 @@ impl VbcCodegen {
             let function = &module.functions[fi];
             if let Some(id) = self.bootstrap_function_id(module, function.id.0) {
                 let result = remap_type_ref_archive(&function.return_type, &maps[mi]);
+                // Bootstrap consumers compile before imported bodies exist in
+                // `self.functions`. Preserve the same declaration-owned input
+                // facts used by ordinary archive call lowering, in this pool.
+                self.ctx.archive_fn_param_types.insert(
+                    id,
+                    function.params.iter().map(|parameter|
+                        remap_type_ref_archive(&parameter.type_ref, &maps[mi])).collect(),
+                );
+                self.ctx.archive_fn_parameter_generics.insert(
+                    id,
+                    (0..function.params.len()).map(|index|
+                        function.parameter_generic_id(index, |name| module.strings.get(name))).collect(),
+                );
                 for info in self
                     .ctx
                     .functions

@@ -4539,10 +4539,13 @@ impl VbcCodegen {
             .collect();
         for function in &self.functions {
             let descriptor = &function.descriptor;
-            let Some(owner) = descriptor.origin_module
-                .and_then(|id| self.ctx.strings.get(id.0 as usize)) else {
-                continue;
-            };
+            // Synthetic/default bodies emitted before a source file is active
+            // belong to this compilation unit, as they do in VbcModule's
+            // canonical descriptor identity. Export that key before bootstrap
+            // callers attempt to remap their pool-owned signatures.
+            let owner = descriptor.origin_module
+                .and_then(|id| self.ctx.strings.get(id.0 as usize))
+                .map_or(self.config.module_name.as_str(), String::as_str);
             let Some(name) = self.ctx.strings.get(descriptor.name.0 as usize) else {
                 continue;
             };
