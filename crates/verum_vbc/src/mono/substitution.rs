@@ -32,7 +32,7 @@ impl TypeSubstitution {
         // T1526/T1528: compact witnesses follow the declaration's exact ID
         // roster, including shadow parameters. The descriptor owns legacy
         // indexed compatibility as well; consumers never infer slot identity.
-        if !func.type_params.is_empty() {
+        if !func.type_params.is_empty() && args.len() <= func.type_params.len() {
             let mut result = Self::empty();
             for param in &func.type_params {
                 if let Some(arg) = func.generic_argument(args, param.id) {
@@ -41,6 +41,8 @@ impl TypeSubstitution {
             }
             return result;
         }
+        // Metadata-free and legacy surplus vectors are indexed by ID. The
+        // surplus can contain real const arguments omitted from old rosters.
         let mut bindings = HashMap::new();
         for (i, arg) in args.iter().enumerate() {
             bindings.insert(crate::types::TypeParamId(i as u16), arg.clone());

@@ -71,6 +71,11 @@ pub enum MonoPhaseError {
     /// thread pool. Carries the rayon error message and the
     /// configured worker count for triage.
     ParallelExecution(String),
+    /// A recursive instantiation exceeded a configured compilation budget.
+    ResourceLimit {
+        resource: &'static str,
+        limit: usize,
+    },
 }
 
 impl std::fmt::Display for MonoPhaseError {
@@ -82,6 +87,10 @@ impl std::fmt::Display for MonoPhaseError {
             MonoPhaseError::FunctionNotFound(id) => write!(f, "Function not found: {:?}", id),
             MonoPhaseError::Io(e) => write!(f, "IO error: {}", e),
             MonoPhaseError::ParallelExecution(e) => write!(f, "Parallel execution error: {}", e),
+            MonoPhaseError::ResourceLimit { resource, limit } => write!(
+                f,
+                "Monomorphization {resource} limit ({limit}) exceeded; simplify recursive generic instantiations or increase the explicit mono budget"
+            ),
         }
     }
 }
@@ -131,6 +140,10 @@ pub struct MonoPhaseConfig {
     pub optimize: bool,
     /// Cache directory path (None = default).
     pub cache_dir: Option<std::path::PathBuf>,
+    /// Maximum unique instantiations, including nested discoveries.
+    pub max_instantiations: usize,
+    /// Maximum discovery rounds for a chain of nested generic calls.
+    pub max_rounds: usize,
 }
 
 impl Default for MonoPhaseConfig {
@@ -142,6 +155,8 @@ impl Default for MonoPhaseConfig {
             num_threads: 0,
             optimize: true,
             cache_dir: None,
+            max_instantiations: 65_536,
+            max_rounds: 256,
         }
     }
 }
@@ -156,6 +171,8 @@ impl MonoPhaseConfig {
             num_threads: 1,
             optimize: false,
             cache_dir: None,
+            max_instantiations: 65_536,
+            max_rounds: 256,
         }
     }
 
@@ -263,25 +280,65 @@ impl MonomorphizationPhase {
             eprintln!("[mono-exec] graph.len()={}", graph.len());
         }
 
-        // Step 2: Resolve all instantiations
-        resolver.resolve(graph)?;
-
-        // Step 3: Specialize pending functions
-        let pending = resolver.take_pending();
-        if trace_mono {
-            let rs = resolver.stats();
-            eprintln!(
-                "[mono-exec] resolved: pending={} stdlib_hits={} cache_hits={}",
-                pending.len(),
-                rs.stdlib_hits,
-                rs.cache_hits
-            );
+        // T1526: specialization exposes concrete nested CallG sites. Resolve
+        // those through the same graph until no new exact instantiation is
+        // discovered. Graph deduplication terminates ordinary recursion;
+        // record_instantiation enforces the existing type-depth budget.
+        let mut graph = graph.clone();
+        let mut specialized = Vec::new();
+        let mut rounds = 0;
+        loop {
+            if graph.len() > self.config.max_instantiations {
+                return Err(MonoPhaseError::ResourceLimit {
+                    resource: "instantiation count",
+                    limit: self.config.max_instantiations,
+                });
+            }
+            resolver.resolve(&graph)?;
+            let pending = resolver.take_pending();
+            if pending.is_empty() {
+                break;
+            }
+            if rounds >= self.config.max_rounds {
+                return Err(MonoPhaseError::ResourceLimit {
+                    resource: "discovery rounds",
+                    limit: self.config.max_rounds,
+                });
+            }
+            rounds += 1;
+            let batch = if self.config.parallel && pending.len() > 1 {
+                self.specialize_parallel(&user_module, &graph, &pending)?
+            } else {
+                self.specialize_sequential(&user_module, &graph, &pending)?
+            };
+            let previous_count = graph.len();
+            for (_, body) in &batch {
+                let instructions =
+                    crate::bytecode::decode_instructions(&body.bytecode).map_err(|error| {
+                        SpecializationError::InvalidBytecode {
+                            offset: 0,
+                            message: format!("specialized body decode failed: {error:?}"),
+                        }
+                    })?;
+                for instruction in &instructions {
+                    let Some((callee, args)) =
+                        super::discovery::concrete_call(&user_module, instruction, 0)
+                    else {
+                        continue;
+                    };
+                    super::discovery::record_concrete_instantiation(
+                        &mut graph,
+                        callee,
+                        args,
+                        self.config.max_instantiations,
+                    )?;
+                }
+            }
+            specialized.extend(batch);
+            if graph.len() == previous_count {
+                break;
+            }
         }
-        let specialized = if self.config.parallel && pending.len() > 1 {
-            self.specialize_parallel(&user_module, graph, &pending)?
-        } else {
-            self.specialize_sequential(&user_module, graph, &pending)?
-        };
         if trace_mono {
             eprintln!("[mono-exec] specialized={}", specialized.len());
         }
@@ -307,6 +364,10 @@ impl MonomorphizationPhase {
 
         // Step 5: Merge into final module
         let resolver_stats = resolver.stats().clone();
+        let bytecode_generated = specialized
+            .iter()
+            .map(|(_, body)| body.bytecode.len())
+            .sum();
         let merger = ModuleMerger::new(user_module, self.stdlib.clone(), specialized, resolver);
         let (module, merge_stats) = merger.merge()?;
 
@@ -317,7 +378,7 @@ impl MonomorphizationPhase {
             cache_hits: resolver_stats.stdlib_hits + resolver_stats.cache_hits,
             new_specializations: merge_stats.new_specializations,
             stdlib_hits: resolver_stats.stdlib_hits,
-            bytecode_generated: merge_stats.bytecode_after - merge_stats.bytecode_before,
+            bytecode_generated,
             duration_ms: duration.as_millis() as u64,
         };
 
@@ -346,7 +407,11 @@ impl MonomorphizationPhase {
                 .ok_or(MonoPhaseError::FunctionNotFound(request.function_id))?;
 
             // Create substitution
-            let substitution = TypeSubstitution::from_function(func, &request.type_args);
+            let substitution = if func.type_params.len() == request.type_args.len() {
+                TypeSubstitution::new(&func.type_params, &request.type_args)
+            } else {
+                TypeSubstitution::from_function(func, &request.type_args)
+            };
 
             // Create specializer
             let mut specializer = BytecodeSpecializer::new(module, &substitution, graph);

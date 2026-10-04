@@ -468,6 +468,9 @@ impl ModuleMerger {
             new_func.locals_count = specialized.locals_count;
             new_func.max_stack = specialized.max_stack;
             new_func.is_generic = false;
+            new_func.type_params.clear();
+            // Specialized bodies carry normalized merged-table IDs.
+            new_func.func_id_base = 0;
             // Decode the specialized body NOW, from its own coherent byte
             // stream (jump offsets converted BYTE→INSTRUCTION form — the
             // representation the AOT body-lowering consumes). The id
@@ -542,12 +545,11 @@ impl ModuleMerger {
             TypeRef::AssociatedProjection { base, assoc } => {
                 let rbase =
                     Self::resolve_ret_projections(base, type_args, output, user_module, stdlib);
-                Self::resolve_assoc_via_method(&rbase, assoc, output, user_module, stdlib).unwrap_or(
-                    TypeRef::AssociatedProjection {
+                Self::resolve_assoc_via_method(&rbase, assoc, output, user_module, stdlib)
+                    .unwrap_or(TypeRef::AssociatedProjection {
                         base: Box::new(rbase),
                         assoc: assoc.clone(),
-                    },
-                )
+                    })
             }
             TypeRef::Instantiated { base, args } => TypeRef::Instantiated {
                 base: *base,
@@ -564,7 +566,11 @@ impl ModuleMerger {
                 tier,
             } => TypeRef::Reference {
                 inner: Box::new(Self::resolve_ret_projections(
-                    inner, type_args, output, user_module, stdlib,
+                    inner,
+                    type_args,
+                    output,
+                    user_module,
+                    stdlib,
                 )),
                 mutability: *mutability,
                 tier: *tier,
@@ -735,7 +741,9 @@ impl ModuleMerger {
                 if target_byte < 0 {
                     return None;
                 }
-                byte_to_idx.get(&(target_byte as usize)).map(|&j| j - i as i32)
+                byte_to_idx
+                    .get(&(target_byte as usize))
+                    .map(|&j| j - i as i32)
             };
             match &mut instrs[i] {
                 Instruction::Jmp { offset }
@@ -789,14 +797,8 @@ impl ModuleMerger {
     /// stale-`instructions` re-decode pass (the instructions ARE the
     /// artifact being rewritten).
     ///
-    /// Routing semantics preserved from the byte twin:
-    ///  * VBC-GENERIC-INSTANTIATION single-instantiation routing — a
-    ///    generic with EXACTLY ONE specialization routes EVERY reference
-    ///    (any opcode) to the specialized body via the id map.
-    ///  * Per-site `CallG` routing — the site's static type args select
-    ///    the matching specialization; site targets are freshly-appended
-    ///    output ids, disjoint from the old-id keyspace of the blanket
-    ///    map, so the passes compose without double-remap.
+    /// Only the site's exact callee and declared type arguments select a
+    /// specialization. Untyped or unresolved calls retain the generic body.
     fn rewrite_references(&mut self, output: &mut VbcModule) {
         use crate::instruction::Instruction;
 
@@ -806,29 +808,8 @@ impl ModuleMerger {
             id_remap.insert(old_id.0, new_id.0);
         }
 
-        // Single-instantiation routing (see doc above).
-        {
-            let mut spec_count: HashMap<u32, usize> = HashMap::new();
-            for spec in &output.specializations {
-                if self.mapping.get_by_hash(spec.hash).is_some() {
-                    *spec_count.entry(spec.generic_fn.0).or_insert(0) += 1;
-                }
-            }
-            let trace = std::env::var_os("VERUM_TRACE_MONO").is_some();
-            for spec in &output.specializations {
-                if spec_count.get(&spec.generic_fn.0) == Some(&1)
-                    && let Some(spec_id) = self.mapping.get_by_hash(spec.hash)
-                {
-                    if trace {
-                        eprintln!(
-                            "[mono-route] generic_fn={} -> specialized_fn={}",
-                            spec.generic_fn.0, spec_id.0
-                        );
-                    }
-                    id_remap.insert(spec.generic_fn.0, spec_id.0);
-                }
-            }
-        }
+        // T1526: a lone specialization is not evidence for an untyped call.
+        // Only exact CallG (callee, declaration-ordered args) sites route to it.
 
         // Per-site CallG routing table.
         let mut site_route: HashMap<(u32, Vec<TypeRef>), u32> = HashMap::new();
@@ -840,35 +821,59 @@ impl ModuleMerger {
 
         struct MonoIdRemap<'a> {
             map: &'a HashMap<u32, u32>,
+            module: &'a VbcModule,
+            base: u32,
         }
         impl crate::bytecode_remap::IdRemap for MonoIdRemap<'_> {
             fn map_function(&self, src: FunctionId) -> FunctionId {
+                let src =
+                    super::discovery::call_target(self.module, src.0, self.base).unwrap_or(src);
                 FunctionId(*self.map.get(&src.0).unwrap_or(&src.0))
             }
         }
-        let remap = MonoIdRemap { map: &id_remap };
-
         for func in output.functions.iter_mut() {
             let Some(instrs) = func.instructions.as_mut() else {
                 continue;
             };
+            let remap = MonoIdRemap {
+                map: &id_remap,
+                module: &self.user_module,
+                base: func.func_id_base,
+            };
             for instr in instrs.iter_mut() {
                 if let Instruction::CallG {
-                    func_id, type_args, ..
+                    dst,
+                    func_id,
+                    type_args,
+                    args: registers,
                 } = instr
                 {
-                    if let Some(&spec_id) =
-                        site_route.get(&(*func_id, type_args.clone()))
+                    let target = super::discovery::call_target(
+                        &self.user_module,
+                        *func_id,
+                        func.func_id_base,
+                    );
+                    let args = target
+                        .and_then(|id| self.user_module.get_function(id))
+                        .and_then(|desc| super::canonical_type_args(desc, type_args));
+                    if let Some(&spec_id) = target
+                        .zip(args)
+                        .and_then(|(id, args)| site_route.get(&(id.0, args)))
                     {
                         // Site target is a final output id — no further
                         // remap applies (and none matches: the blanket
                         // map is keyed by OLD-space ids).
-                        *func_id = spec_id;
+                        *instr = Instruction::Call {
+                            dst: *dst,
+                            func_id: spec_id,
+                            args: *registers,
+                        };
                         continue;
                     }
                 }
                 crate::bytecode_remap::rewrite_instruction_ids(instr, &remap);
             }
+            func.func_id_base = 0;
         }
 
         // Update specialization entries with the routed generic ids.
@@ -946,5 +951,4 @@ mod tests {
         assert_eq!(stats.stdlib_specializations, 0);
         assert_eq!(stats.new_specializations, 0);
     }
-
 }

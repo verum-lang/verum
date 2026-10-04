@@ -140,10 +140,15 @@ pub const MAX_TYPE_REF_DEPTH: usize = 64;
 pub fn type_ref_depth(type_ref: &TypeRef) -> usize {
     match type_ref {
         TypeRef::Concrete(_) | TypeRef::Generic(_) => 1,
-        TypeRef::Instantiated { args, .. } => {
+        TypeRef::Instantiated { args, .. } | TypeRef::Tuple(args) => {
             1 + args.iter().map(type_ref_depth).max().unwrap_or(0)
         }
         TypeRef::Function {
+            params,
+            return_type,
+            ..
+        }
+        | TypeRef::Rank2Function {
             params,
             return_type,
             ..
@@ -152,7 +157,9 @@ pub fn type_ref_depth(type_ref: &TypeRef) -> usize {
             let r = type_ref_depth(return_type);
             1 + p.max(r)
         }
-        TypeRef::Reference { inner, .. } => 1 + type_ref_depth(inner),
+        TypeRef::Reference { inner, .. } | TypeRef::Slice(inner) => 1 + type_ref_depth(inner),
+        TypeRef::Array { element, .. } => 1 + type_ref_depth(element),
+        TypeRef::AssociatedProjection { base, .. } => 1 + type_ref_depth(base),
         _ => 1,
     }
 }
@@ -261,6 +268,7 @@ fn hash_type_ref<H: Hasher>(type_ref: &TypeRef, hasher: &mut H) {
 /// - Index by function ID for fast lookup
 /// - Dependencies between instantiations (A calls B<T>)
 /// - Mapping from instantiation to specialized function ID
+#[derive(Clone)]
 pub struct InstantiationGraph {
     /// All instantiation requests (deduplicated).
     instantiations: Vec<InstantiationRequest>,

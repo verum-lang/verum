@@ -75,10 +75,8 @@ use std::time::{Duration, Instant};
 use super::{CompilationPhase, PhaseData, PhaseInput, PhaseMetrics, PhaseOutput, VbcModuleData};
 use verum_common::{List, Text};
 use verum_diagnostics::Diagnostic;
-use verum_vbc::module::{FunctionId, VbcModule};
-use verum_vbc::mono::{
-    InstantiationGraph, MonoPhaseConfig, MonomorphizationPhase as VbcMonoPhase, SourceLocation,
-};
+use verum_vbc::module::VbcModule;
+use verum_vbc::mono::{InstantiationGraph, MonoPhaseConfig, MonomorphizationPhase as VbcMonoPhase};
 
 // ============================================================================
 // Monomorphization Phase
@@ -174,16 +172,8 @@ impl VbcMonomorphizationPhase {
     ///
     /// Returns the monomorphized module on success, or diagnostic errors on failure.
     pub fn monomorphize(&mut self, module: &VbcModule) -> Result<VbcModule, List<Diagnostic>> {
-        // Fast path: with no seeded instantiations there is nothing to
-        // specialize, so skip the whole pass — including the per-function
-        // `is_generic` recovery below, which walks all ~42k descriptors and is
-        // pure waste when no specialization will run.  Codegen seeds
-        // `module.specializations` (VBC-GENERIC-INSTANTIATION) only for
-        // programs that actually instantiate a generic function needing
-        // monomorphization, so the common case pays a single clone and returns.
-        if module.specializations.is_empty() {
-            return Ok(module.clone());
-        }
+        // T1526: CallG is itself an instantiation fact. The optional producer
+        // seed table may be empty; the graph's emptiness is the fast path.
         let mut cloned = module.clone();
         // VBC-GENERIC-INSTANTIATION: recover the `is_generic` flag from each
         // descriptor's parameter/return `TypeRef`s.  The codegen never sets
@@ -202,7 +192,8 @@ impl VbcMonomorphizationPhase {
         let mut recovered = 0usize;
         for f in cloned.functions.iter_mut() {
             if !f.is_generic
-                && (f.params.iter().any(|p| p.type_ref.is_generic())
+                && (!f.type_params.is_empty()
+                    || f.params.iter().any(|p| p.type_ref.is_generic())
                     || f.return_type.is_generic())
             {
                 f.is_generic = true;
@@ -291,7 +282,16 @@ impl VbcMonomorphizationPhase {
         // sites that carry a `ConstValue` type argument (see
         // `analyze_function_bytecode`) — through the specializer.  The scan is
         // O(total bytecode) and small next to LLVM lowering.
-        let graph = self.build_instantiation_graph(module);
+        let graph = self.build_instantiation_graph(module).map_err(|error| {
+            let mut diagnostics = List::new();
+            diagnostics.push(
+                verum_diagnostics::DiagnosticBuilder::error()
+                    .code("E0801")
+                    .message(format!("Monomorphization failed: {error}"))
+                    .build(),
+            );
+            diagnostics
+        })?;
         if graph.is_empty() {
             tracing::debug!(
                 "VBC monomorphization: module '{}' — nothing to specialize \
@@ -320,6 +320,7 @@ impl VbcMonomorphizationPhase {
             num_threads: 0, // Auto-detect
             optimize: self.enable_optimize,
             cache_dir: self.cache_dir.clone(),
+            ..MonoPhaseConfig::default()
         };
 
         // Execute monomorphization
@@ -370,104 +371,54 @@ impl VbcMonomorphizationPhase {
     }
 
     /// Builds the instantiation graph by analyzing bytecode.
-    fn build_instantiation_graph(&self, module: &VbcModule) -> InstantiationGraph {
+    fn build_instantiation_graph(
+        &self,
+        module: &VbcModule,
+    ) -> Result<InstantiationGraph, verum_vbc::mono::MonoPhaseError> {
         let mut graph = InstantiationGraph::new();
-
-        // Collect generic function IDs
-        let generic_fns: Vec<FunctionId> = module
-            .functions
-            .iter()
-            .enumerate()
-            .filter(|(_, f)| f.is_generic)
-            .map(|(i, _)| FunctionId(i as u32))
-            .collect();
 
         // Add instantiations from existing specialization entries
         for spec in &module.specializations {
-            graph.record_instantiation(
-                spec.generic_fn,
-                spec.type_args.clone(),
-                SourceLocation::default(),
-            );
+            if let Some(func) = module.get_function(spec.generic_fn)
+                && let Some(args) = verum_vbc::mono::canonical_type_args(func, &spec.type_args)
+            {
+                verum_vbc::mono::record_concrete_instantiation(
+                    &mut graph,
+                    spec.generic_fn,
+                    args,
+                    MonoPhaseConfig::default().max_instantiations,
+                )?;
+            }
         }
 
         // Analyze bytecode for CALL_G instructions
-        for (func_idx, func) in module.functions.iter().enumerate() {
+        for func in &module.functions {
+            if let Some(instructions) = &func.instructions {
+                verum_vbc::mono::discover_call_instantiations(
+                    module,
+                    instructions,
+                    func.func_id_base,
+                    &mut graph,
+                )?;
+                continue;
+            }
             let start = func.bytecode_offset as usize;
             let end = start + func.bytecode_length as usize;
 
             if let Some(bytecode) = module.bytecode.get(start..end) {
-                self.analyze_function_bytecode(
-                    bytecode,
-                    FunctionId(func_idx as u32),
-                    &generic_fns,
-                    &mut graph,
-                );
-            }
-        }
-
-        graph
-    }
-
-    /// Analyzes a function's bytecode for generic calls.
-    fn analyze_function_bytecode(
-        &self,
-        bytecode: &[u8],
-        _caller: FunctionId,
-        generic_fns: &[FunctionId],
-        graph: &mut InstantiationGraph,
-    ) {
-        use verum_vbc::instruction::Instruction;
-
-        let generic_set: std::collections::HashSet<FunctionId> =
-            generic_fns.iter().copied().collect();
-        let mut pc = 0;
-
-        // Decode with the CANONICAL decoder so the scan stays ALIGNED to real
-        // instruction boundaries.  The previous hand-rolled
-        // `skip_instruction_operands` length table was incomplete (a
-        // "simplified" copy of the same class of bug as the specializer's
-        // get_operand_bytes) — one wrong length desynchronised the stream and
-        // made a later operand byte (e.g. a 0x80 register byte) decode as a
-        // phantom CALL_G whose garbage callee happened to land in the generic
-        // set, injecting instantiations for completely unrelated functions.
-        while pc < bytecode.len() {
-            let instr_start = pc;
-            match verum_vbc::bytecode::decode_instruction(bytecode, &mut pc) {
-                Ok(Instruction::CallG {
-                    func_id, type_args, ..
-                }) => {
-                    let callee = FunctionId(func_id);
-                    // CONST-GENERIC-AOT-LEG-1: a CallG carrying a `ConstValue`
-                    // type argument is a const-generic instantiation whose body
-                    // reads `LoadT{Generic(idx)}`.  At Tier-1 that lowers to null
-                    // (no witness table on native frames), so the callee MUST be
-                    // specialized — the specializer rewrites `LoadT{Generic}` →
-                    // `LoadT{ConstValue}` via the substitution.  Seed it
-                    // regardless of the historically-dead `is_generic` flag
-                    // (which leaves `generic_set` empty).  Type-ONLY generic
-                    // CallGs keep the existing uniform-i64 shared-body path
-                    // (runtime type info rides the value), so only const-generics
-                    // — which genuinely need distinct per-value bodies — are
-                    // routed through mono here.
-                    let has_const_generic = type_args
-                        .iter()
-                        .any(|t| matches!(t, verum_vbc::types::TypeRef::ConstValue(_)));
-                    if !type_args.is_empty()
-                        && (has_const_generic || generic_set.contains(&callee))
-                    {
-                        graph.record_instantiation(callee, type_args, SourceLocation::default());
-                    }
+                if let Ok(instructions) = verum_vbc::bytecode::decode_instructions(bytecode) {
+                    verum_vbc::mono::discover_call_instantiations(
+                        module,
+                        &instructions,
+                        func.func_id_base,
+                        &mut graph,
+                    )?;
                 }
-                Ok(_) => {}
-                Err(_) => break,
-            }
-            if pc <= instr_start {
-                break;
             }
         }
-    }
 
+        Ok(graph)
+    }
 }
 
 impl Default for VbcMonomorphizationPhase {

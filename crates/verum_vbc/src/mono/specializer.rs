@@ -259,21 +259,6 @@ pub struct BytecodeSpecializer<'a> {
     /// Maps register index -> known type at that register.
     #[allow(dead_code)] // T0134
     register_types: HashMap<u16, TypeRef>,
-    /// Which TYPE PARAMETER a register holds, for registers produced by
-    /// `LoadT { type_ref: Generic(idx) }`.
-    ///
-    /// T1214: the devirtualiser used to read witness slot 0
-    /// unconditionally. That is right when the receiver IS the first
-    /// type parameter — `future_poll_sync<F: Future>` calling
-    /// `future.poll()` — and wrong for a call whose receiver is a LATER
-    /// one. `collect<C: FromIterator<Self.Item>>(self) -> C` calls
-    /// `C.from_iter(self)`, and `C` is slot 1: the resolver asked for
-    /// `Range.from_iter` (slot 0, the iterator's own element type
-    /// parameter) and found nothing, while `List.from_iter` — slot 1 —
-    /// exists and is found the moment it is asked for.
-    ///
-    /// Rebuilt per body, in a pre-pass over the decoded instructions.
-    loadt_generic_regs: HashMap<u16, TypeParamId>,
     /// New constants generated during specialization.
     new_constants: Vec<Constant>,
     /// New type descriptors generated during specialization.
@@ -311,7 +296,6 @@ impl<'a> BytecodeSpecializer<'a> {
             instantiated_types: HashMap::new(),
             next_type_id: max_type_id + 1,
             register_types: HashMap::new(),
-            loadt_generic_regs: HashMap::new(),
             new_constants: Vec::new(),
             new_type_descriptors: Vec::new(),
             stats: SpecializerStats::default(),
@@ -398,23 +382,32 @@ impl<'a> BytecodeSpecializer<'a> {
             }
         })?;
         crate::bytecode::jump_offsets_to_instr_indices(&mut instrs);
-        // T1214 pre-pass: a `CallM` whose RECEIVER came from
-        // `LoadT { type_ref: Generic(idx) }` is a call on a type
-        // PARAMETER, and `idx` says which one. Recorded before the
-        // walk because the `LoadT` always precedes its use, and read
-        // by `devirt_dyn_method_id` instead of the hardcoded slot 0.
-        self.loadt_generic_regs.clear();
-        for instr in instrs.iter() {
-            if let crate::instruction::Instruction::LoadT { dst, type_ref } = instr
-                && let TypeRef::Generic(idx) = type_ref
-            {
-                self.loadt_generic_regs.insert(dst.0, *idx);
+        // Resolve legacy local/band function IDs once before producing a new
+        // body in the merged module's function namespace.
+        struct Calls<'a> {
+            module: &'a VbcModule,
+            base: u32,
+        }
+        impl crate::bytecode_remap::IdRemap for Calls<'_> {
+            fn map_function(&self, id: FunctionId) -> FunctionId {
+                super::discovery::call_target(self.module, id.0, self.base).unwrap_or(id)
             }
         }
+        let calls = Calls {
+            module: self.module,
+            base: func.func_id_base,
+        };
         for instr in instrs.iter_mut() {
+            crate::bytecode_remap::rewrite_instruction_ids(instr, &calls);
             self.stats.total_instructions += 1;
             self.specialize_instr_value(instr);
         }
+        super::method_calls::resolve_type_methods(
+            self.module,
+            func,
+            self.substitution,
+            &mut instrs,
+        );
         // **L2 (task #44): ToString → Display expansion.**  With T
         // substituted concrete, a `f"{x}"` in the generic body should
         // route through the type's own `fmt` exactly like a
@@ -469,16 +462,6 @@ impl<'a> BytecodeSpecializer<'a> {
         })
     }
 
-    /// Specializes a CALL_G instruction.
-    ///
-    /// Specializes a CALL_V instruction.
-    ///
-    /// CALL_V format: dst:reg receiver:reg protocol:varint method_idx:u8 arg_count:u8 [args:reg...]
-    ///
-    /// Resolve a `dyn:Protocol.method` method-id string to the concrete
-    /// `ConcreteType.method` string id via the substitution's primary type
-    /// parameter.  Returns None if the token is not a dyn-dispatch, the primary
-    /// type isn't concrete, or the concrete method function is absent.
     /// Value-form specialization of one canonical instruction
     /// (task #44 L2/L3 structural discipline — see `specialize`).
     /// Mutates in place; instructions with no generic content pass
@@ -527,19 +510,9 @@ impl<'a> BytecodeSpecializer<'a> {
                     }
                 }
             }
-            I::CallM {
-                method_id, receiver, ..
-            } => {
-                // Which type parameter is the receiver? Slot 0 unless
-                // the pre-pass saw a `LoadT{Generic(idx)}` fill this
-                // register (T1214).
-                let slot = self
-                    .loadt_generic_regs
-                    .get(&receiver.0)
-                    .copied()
-                    .unwrap_or(TypeParamId(0));
-                if let Some(devirt) = self.devirt_dyn_method_id(*method_id, slot) {
-                    *method_id = devirt;
+            I::SetCallWitness { type_args } => {
+                for ty in type_args {
+                    *ty = self.substitution.apply(ty);
                 }
             }
             I::BinaryG {
@@ -696,7 +669,9 @@ impl<'a> BytecodeSpecializer<'a> {
         // ---- collect expandable sites ----
         let mut sites: Vec<(usize, u16, u32)> = Vec::new(); // (idx, src_reg, fmt_fid)
         for (idx, instr) in instrs.iter().enumerate() {
-            let I::ToString { src, .. } = instr else { continue };
+            let I::ToString { src, .. } = instr else {
+                continue;
+            };
             let Some(TypeRef::Concrete(tid)) = reg_types.get(&src.0) else {
                 continue;
             };
@@ -705,7 +680,9 @@ impl<'a> BytecodeSpecializer<'a> {
             if tid.is_builtin() {
                 continue;
             }
-            let Some(type_name) = self.type_name_of(*tid) else { continue };
+            let Some(type_name) = self.type_name_of(*tid) else {
+                continue;
+            };
             let fmt_name = format!("{}.fmt", type_name);
             let Some(fmt_fid) = self.module.find_function_by_name(&fmt_name) else {
                 continue;
@@ -734,7 +711,9 @@ impl<'a> BytecodeSpecializer<'a> {
         // position map: old index -> shift accumulated AFTER insertions
         let mut inserted_at: Vec<(usize, usize)> = Vec::new(); // (old_idx, count_inserted)
         for &(idx, src_reg, fmt_fid) in sites.iter().rev() {
-            let I::ToString { dst, .. } = instrs[idx] else { continue };
+            let I::ToString { dst, .. } = instrs[idx] else {
+                continue;
+            };
             let r = |k: u16| Reg(base + expansions * 6 + k);
             let buf = r(0);
             let buf_ref = r(1);
@@ -746,20 +725,38 @@ impl<'a> BytecodeSpecializer<'a> {
                 I::Call {
                     dst: buf,
                     func_id: text_new.0,
-                    args: crate::instruction::RegRange { start: Reg(0), count: 0 },
+                    args: crate::instruction::RegRange {
+                        start: Reg(0),
+                        count: 0,
+                    },
                 },
-                I::RefObj { dst: buf_ref, src: buf },
+                I::RefObj {
+                    dst: buf_ref,
+                    src: buf,
+                },
                 I::Call {
                     dst: formatter,
                     func_id: formatter_new.0,
-                    args: crate::instruction::RegRange { start: buf_ref, count: 1 },
+                    args: crate::instruction::RegRange {
+                        start: buf_ref,
+                        count: 1,
+                    },
                 },
-                I::Mov { dst: a0, src: Reg(src_reg) },
-                I::RefObj { dst: a1, src: formatter },
+                I::Mov {
+                    dst: a0,
+                    src: Reg(src_reg),
+                },
+                I::RefObj {
+                    dst: a1,
+                    src: formatter,
+                },
                 I::Call {
                     dst: res,
                     func_id: fmt_fid,
-                    args: crate::instruction::RegRange { start: a0, count: 2 },
+                    args: crate::instruction::RegRange {
+                        start: a0,
+                        count: 2,
+                    },
                 },
                 I::Mov { dst, src: buf },
             ];
@@ -852,65 +849,6 @@ impl<'a> BytecodeSpecializer<'a> {
             })
     }
 
-    fn devirt_dyn_method_id(&self, method_id: u32, slot: TypeParamId) -> Option<u32> {
-        let name = self
-            .module
-            .get_string(crate::types::StringId(method_id))?
-            .to_string();
-        // Extract the method name from either a `dyn:Protocol.method` token or
-        // a BARE `method` (a protocol-method call on a type parameter whose
-        // receiver's concrete type is only known after substitution — e.g.
-        // `future.poll()` in `future_poll_sync<F: Future>` compiles to a
-        // CALL_M with the bare method name "poll").  An already-concrete
-        // `Type.method` is left untouched.
-        let method: &str = if let Some(rest) = name.strip_prefix("dyn:") {
-            rest.rsplit('.').next()?
-        } else if !name.contains('.') {
-            name.as_str()
-        } else {
-            return None;
-        };
-        // Devirtualize on the receiver's BASE type. A monomorphized receiver
-        // like `ReadyFuture<Text>` is carried as `Instantiated { base, args }`
-        // (the args preserve the payload type for associated-type resolution);
-        // the concrete method lives on the base `ReadyFuture.poll`.
-        let tid = match self.substitution.get(slot)? {
-            TypeRef::Concrete(id) => id,
-            TypeRef::Instantiated { base, .. } => base,
-            _ => return None,
-        };
-        // T0330 S2: a PRIMITIVE receiver (`Maybe.fmt<Int>`'s payload
-        // `v.fmt(f)` — T := Int) has no `module.types` descriptor, so
-        // `get_type_name` returns None and the devirt silently bailed —
-        // the spec body kept a bare `fmt` CallM that AOT degrades to
-        // const-zero (`m: Some()` with the payload swallowed).
-        // `display_type_id` names EVERY TypeId, primitives included.
-        let type_name = self
-            .module
-            .get_type_name(*tid)
-            .unwrap_or_else(|| self.module.display_type_id(*tid));
-        if type_name.is_empty() || type_name == "()" {
-            return None;
-        }
-        let concrete = format!("{}.{}", type_name, method);
-        if std::env::var_os("VERUM_TRACE_MONO").is_some() {
-            let hit = self
-                .module
-                .functions
-                .iter()
-                .any(|f| self.module.get_string(f.name).is_some_and(|s| s == concrete));
-            eprintln!(
-                "[mono-callm] dyn='{}' slot={} -> concrete='{}' found={}",
-                name, slot.0, concrete, hit
-            );
-        }
-        self.module
-            .functions
-            .iter()
-            .find(|f| self.module.get_string(f.name).is_some_and(|s| s == concrete))
-            .map(|f| f.name.0)
-    }
-
     /// Looks up a protocol implementation for a concrete type.
     ///
     /// Returns the function ID for the method if the type implements the protocol.
@@ -971,12 +909,12 @@ impl<'a> BytecodeSpecializer<'a> {
             TypeRef::Reference { .. } => 16, // ThinRef size
             TypeRef::Tuple(elements) => elements.iter().map(|e| self.get_type_size(e)).sum(),
             TypeRef::Array { element, length } => self.get_type_size(element) * (*length as u32),
-            TypeRef::Slice(_) => 16,            // ptr + len
-            TypeRef::Function { .. } => 8,      // function pointer
-            TypeRef::Rank2Function { .. } => 8, // function pointer (rank-2 polymorphic)
-            TypeRef::Generic(_) => 8,           // Should be substituted by now
+            TypeRef::Slice(_) => 16,                   // ptr + len
+            TypeRef::Function { .. } => 8,             // function pointer
+            TypeRef::Rank2Function { .. } => 8,        // function pointer (rank-2 polymorphic)
+            TypeRef::Generic(_) => 8,                  // Should be substituted by now
             TypeRef::AssociatedProjection { .. } => 8, // resolved before mono
-            TypeRef::ConstValue(_) => 8,        // integer value slot
+            TypeRef::ConstValue(_) => 8,               // integer value slot
         }
     }
 
@@ -1006,7 +944,7 @@ impl<'a> BytecodeSpecializer<'a> {
             TypeRef::Rank2Function { .. } => 8,
             TypeRef::Generic(_) => 8,
             TypeRef::AssociatedProjection { .. } => 8, // resolved before mono
-            TypeRef::ConstValue(_) => 8,       // integer value slot
+            TypeRef::ConstValue(_) => 8,               // integer value slot
         }
     }
 
@@ -1079,9 +1017,7 @@ impl<'a> BytecodeSpecializer<'a> {
             // `Meters<Int>` (hypothetical) from a transparent base
             // stays transparent.  See
             // `TypeDescriptor::is_transparent_wrapper`.
-            is_transparent_wrapper: base_desc
-                .map(|d| d.is_transparent_wrapper)
-                .unwrap_or(false),
+            is_transparent_wrapper: base_desc.map(|d| d.is_transparent_wrapper).unwrap_or(false),
         };
 
         // Update layout cache
@@ -1522,7 +1458,10 @@ mod tests {
     #[test]
     fn test_specialized_function_layout() {
         let sf = SpecializedFunction {
-            bytecode: vec![crate::instruction::Opcode::Nop.to_byte(), crate::instruction::Opcode::RetV.to_byte()],
+            bytecode: vec![
+                crate::instruction::Opcode::Nop.to_byte(),
+                crate::instruction::Opcode::RetV.to_byte(),
+            ],
             register_count: 4,
             locals_count: 2,
             max_stack: 8,

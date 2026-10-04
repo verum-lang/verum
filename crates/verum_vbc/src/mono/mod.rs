@@ -40,8 +40,10 @@
 //! zero-overhead generics in AOT and optimized interpreter execution.
 
 mod cache;
+mod discovery;
 mod graph;
 mod merger;
+mod method_calls;
 mod optimizer;
 mod phase;
 mod resolver;
@@ -49,6 +51,7 @@ mod specializer;
 mod substitution;
 
 pub use cache::MonomorphizationCache;
+pub use discovery::{canonical_type_args, discover_call_instantiations, record_concrete_instantiation};
 pub use graph::{
     CallSite, InstantiationGraph, InstantiationKey, InstantiationRequest, SourceLocation,
 };
