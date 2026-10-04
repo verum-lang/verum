@@ -12211,6 +12211,42 @@ impl VbcCodegen {
             ));
         }
 
+        // T1474: implicit Shared<T> method forwarding must use the same
+        // receiver lowering as explicit `(*shared).method()`. Shared.deref
+        // returns an address of a Value slot, not the inner object itself;
+        // late runtime forwarding lost the load and dispatched on that address.
+        // Preserve methods declared on Shared before looking through it, and
+        // keep dynamic protocol receivers on their vtable dispatch path.
+        if let Some(receiver_type) = self.extract_expr_type_name(receiver)
+            && receiver_type.starts_with("Shared<")
+            && let Some(inner_type) = Self::extract_element_type(&receiver_type)
+            && !inner_type.trim().is_empty()
+            && !inner_type.trim_start().starts_with("dyn:")
+            && self.ctx.lookup_qualified_function(&format!("Shared.{}", method.name)).is_none()
+            && self.ctx.lookup_qualified_function("Shared.deref")
+                .is_some_and(|f| f.param_count == 1)
+        {
+            // A method receiver already permits implicit reference dereference.
+            // Parenthesizing keeps compile_unary's *reference-binding special
+            // case from consuming only that reference instead of Shared.deref.
+            let operand = Expr::new(
+                ExprKind::Paren(verum_common::Heap::new(receiver.clone())),
+                receiver.span,
+            );
+            let dereferenced = Expr::new(
+                ExprKind::Unary {
+                    op: UnOp::Deref,
+                    expr: verum_common::Heap::new(operand),
+                },
+                receiver.span,
+            );
+            let adjusted = Expr::new(
+                ExprKind::Paren(verum_common::Heap::new(dereferenced)),
+                receiver.span,
+            );
+            return self.compile_method_call(&adjusted, method, args, resolved_target);
+        }
+
         // ──────────────────────────────────────────────────────────
         // TIER-COHERENCE-TOSTRING-1: `x.to_text()` / `x.to_string()` on a
         // PRIMITIVE must yield the SAME Text the f-string ToString path does.

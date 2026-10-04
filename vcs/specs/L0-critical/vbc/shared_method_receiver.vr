@@ -1,0 +1,44 @@
+// @test: differential
+// @level: L0
+// @tier: all
+// @timeout: 180000
+// @tags: shared, atomic, deref, dispatch
+// @expected-stdout-begin
+// direct=5 explicit=5 implicit=5 previous=5 remaining=3 flag=true
+// unique=777 collision=777 borrowed=777 count=2 cloned=777
+// @expected-stdout-end
+// @expected-exit: 0
+
+mount core.sync.atomic.{AtomicInt, AtomicBool, MemoryOrdering};
+
+type ReceiverCell is { padding: Int, value: Int };
+implement ReceiverCell {
+    fn read_unique_1474(&self) -> Int { self.value }
+    fn load(&self) -> Int { self.value }
+}
+
+fn borrowed(cell: &Shared<ReceiverCell>) -> Int { cell.load() }
+
+fn main() {
+    let direct = AtomicInt.new(5);
+    let explicit = Shared.new(AtomicInt.new(5));
+    let implicit = Shared.new(AtomicInt.new(5));
+    let flag = Shared.new(AtomicBool.new(false));
+    let direct_value = direct.load(MemoryOrdering.Acquire);
+    let explicit_value = (*explicit).load(MemoryOrdering.Acquire);
+    let implicit_value = implicit.load(MemoryOrdering.Acquire);
+    let previous = implicit.fetch_sub(2, MemoryOrdering.AcqRel);
+    let remaining = implicit.load(MemoryOrdering.Acquire);
+    flag.store(true, MemoryOrdering.Release);
+    let flag_value = flag.load(MemoryOrdering.Acquire);
+    print(f"direct={direct_value} explicit={explicit_value} implicit={implicit_value} previous={previous} remaining={remaining} flag={flag_value}");
+
+    let cell = Shared.new(ReceiverCell { padding: 41, value: 777 });
+    let clone = cell.clone();
+    let unique = cell.read_unique_1474();
+    let collision = cell.load();
+    let borrowed_value = borrowed(&cell);
+    let count = cell.strong_count();
+    let cloned = clone.load();
+    print(f"unique={unique} collision={collision} borrowed={borrowed_value} count={count} cloned={cloned}");
+}
