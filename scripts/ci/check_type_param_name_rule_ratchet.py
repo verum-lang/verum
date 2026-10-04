@@ -103,12 +103,14 @@ KNOWN: dict[tuple[str, str, str], int] = {
     ("crates/verum_types/src/unify.rs", "== 1", "oname.len() == 1"): 1,
     ("crates/verum_vbc/src/codegen/expressions.rs", "<= 2", "s.len() <= 2"): 2,
     ("crates/verum_vbc/src/codegen/expressions.rs", "<= 2",
-     "s.len() <= 2 && s.chars().all(|c| c.is_uppercase() || c.is_numeric())"): 2,
+     # T1506 removed resolve_generic_from_args' spelling test in favour
+     # of the caller's declared generic parameter scope. One site remains.
+     "s.len() <= 2 && s.chars().all(|c| c.is_uppercase() || c.is_numeric())"): 1,
     ("crates/verum_vbc/src/codegen/expressions.rs", "<= 2",
      "if ret_type_name.len() <= 2"): 2,
 }
 BASELINE = sum(KNOWN.values())
-BASELINE_THRESHOLDS = {"== 1": 5, "<= 2": 6}
+BASELINE_THRESHOLDS = {"== 1": 5, "<= 2": 5}
 
 
 def compare(found: dict, roster: dict) -> tuple[list, list, list]:
