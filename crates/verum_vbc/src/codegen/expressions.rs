@@ -6020,21 +6020,7 @@ impl VbcCodegen {
                         // (self: &mut Maybe; Maybe `implement Deref { fn
                         // deref(&self)->&T }`) called `Maybe::deref` and bound
                         // the payload T instead of the Maybe.
-                        let inner_is_ref = if let ExprKind::Path(p) = &inner.kind {
-                            p.segments.len() == 1
-                                && match &p.segments[0] {
-                                    PathSegment::Name(id) => {
-                                        self.ctx.reference_bindings.contains(id.name.as_str())
-                                    }
-                                    PathSegment::SelfValue => {
-                                        self.ctx.reference_bindings.contains("self")
-                                    }
-                                    _ => false,
-                                }
-                        } else {
-                            false
-                        };
-                        if inner_is_ref {
+                        if self.is_reference_binding_operand(inner) {
                             return None;
                         }
                         // **User Deref-protocol dispatch (cell #119)**.
@@ -12050,6 +12036,178 @@ impl VbcCodegen {
         None
     }
 
+    /// Reference bindings already carry their pointee's nominal name. A
+    /// built-in `*reference` preserves that name instead of invoking Deref.
+    fn is_reference_binding_operand(&self, expr: &Expr) -> bool {
+        let ExprKind::Path(path) = &expr.kind else {
+            return false;
+        };
+        if path.segments.len() != 1 {
+            return false;
+        }
+        match &path.segments[0] {
+            PathSegment::Name(id) => self.ctx.reference_bindings.contains(id.name.as_str()),
+            PathSegment::SelfValue => self.ctx.reference_bindings.contains("self"),
+            _ => false,
+        }
+    }
+
+    /// Instantiate the declared result of the same Deref method used by
+    /// operator lowering. Qualified aliases retain the method owner's generic
+    /// parameter order instead of guessing the target from the first argument.
+    fn user_deref_target_type_name(
+        &self,
+        type_name: &str,
+    ) -> verum_common::Maybe<verum_common::Text> {
+        use verum_common::{Maybe, Text};
+        let Some(key) = self.registered_receiver_method(type_name, "deref") else {
+            return Maybe::None;
+        };
+        let Some(info) = self.ctx.lookup_qualified_function(&key) else {
+            return Maybe::None;
+        };
+        let Some(target) = info
+            .return_type_name
+            .as_deref()
+            .filter(|_| info.param_count == 1)
+        else {
+            return Maybe::None;
+        };
+        let receiver_base = Self::strip_generic_args(type_name);
+        let owner = key
+            .rsplit_once('.')
+            .map_or(receiver_base, |(owner, _)| owner);
+        let params = self
+            .ctx
+            .type_generic_params
+            .get(owner)
+            .or_else(|| self.ctx.type_generic_params.get(receiver_base))
+            .or_else(|| self.collection_type_params.get(owner))
+            .or_else(|| self.collection_type_params.get(receiver_base));
+        let actual = Self::split_generic_args(type_name);
+        // The protocol's associated Target is authoritative even when the
+        // method signature spells its return as `&Self.Target`. The archive
+        // carries this binding in the owner's generic-parameter order.
+        if let Some(descriptor) = self
+            .type_name_to_id
+            .get(receiver_base)
+            .or_else(|| self.type_name_to_id.get(owner))
+            .and_then(|id| self.type_by_id(*id))
+        {
+            for implementation in &descriptor.protocols {
+                let is_deref = self
+                    .type_by_id(crate::types::TypeId(implementation.protocol.0))
+                    .and_then(|protocol| self.ctx.strings.get(protocol.name.0 as usize))
+                    .is_some_and(|name| name.rsplit('.').next() == Some("Deref"));
+                if !is_deref {
+                    continue;
+                }
+                if let Some((_, target)) =
+                    implementation.associated_types.iter().find(|(name, _)| {
+                        self.ctx
+                            .strings
+                            .get(name.0 as usize)
+                            .is_some_and(|name| name == "Target")
+                    })
+                {
+                    fn render(
+                        codegen: &VbcCodegen,
+                        target: &crate::types::TypeRef,
+                        actual: &[String],
+                        depth: usize,
+                    ) -> Maybe<Text> {
+                        use crate::types::TypeRef;
+                        if depth >= 64 {
+                            return Maybe::None;
+                        }
+                        match target {
+                            TypeRef::Generic(parameter) => actual
+                                .get(parameter.0 as usize)
+                                .map_or(Maybe::None, |name| Maybe::Some(Text::from(name.as_str()))),
+                            TypeRef::Instantiated { base, args } => {
+                                let Some(base_name) =
+                                    codegen.type_ref_to_field_name(&TypeRef::Concrete(*base))
+                                else {
+                                    return Maybe::None;
+                                };
+                                let mut names: verum_common::List<Text> = verum_common::List::new();
+                                for arg in args {
+                                    let Maybe::Some(name) = render(codegen, arg, actual, depth + 1)
+                                    else {
+                                        return Maybe::None;
+                                    };
+                                    names.push(name);
+                                }
+                                Maybe::Some(Text::from(format!(
+                                    "{}<{}>",
+                                    base_name,
+                                    names.join(", ")
+                                )))
+                            }
+                            _ => codegen
+                                .type_ref_to_field_name(target)
+                                .map_or(Maybe::None, |name| Maybe::Some(Text::from(name))),
+                        }
+                    }
+                    if let Maybe::Some(name) = render(self, target, &actual, 0) {
+                        return Maybe::Some(name);
+                    }
+                }
+            }
+        }
+        let target = params.map_or_else(
+            || target.to_string(),
+            |params| Self::substitute_generic_params_in_type_name(target, params, &actual),
+        );
+        let target = target
+            .trim_start_matches("&checked ")
+            .trim_start_matches("&unsafe ")
+            .trim_start_matches("&mut ")
+            .trim_start_matches('&')
+            .trim();
+        if target.is_empty() {
+            Maybe::None
+        } else {
+            Maybe::Some(Text::from(target))
+        }
+    }
+
+    /// Resolve a finite implicit Deref chain before changing the receiver.
+    /// Cyclic or expanding declarations keep the existing unresolved-call path;
+    /// they must never cause unbounded recursive compilation. Dynamic targets
+    /// retain their existing protocol-dispatch path.
+    fn method_receiver_deref_count(&self, type_name: &str, method: &str) -> usize {
+        use verum_common::{Maybe, Set, Text};
+        const MAX_DEREF_DEPTH: usize = 64;
+        // Expansions such as Growing<Pair<T, T>> can double the type text
+        // each hop. A depth bound alone would permit exponential allocation.
+        const MAX_DEREF_TYPE_BYTES: usize = 65536;
+        let mut current = Text::from(type_name);
+        let mut seen: Set<Text> = Set::new();
+        for depth in 0..MAX_DEREF_DEPTH {
+            if current.len() > MAX_DEREF_TYPE_BYTES {
+                return 0;
+            }
+            if self
+                .registered_receiver_method(current.as_str(), method)
+                .is_some()
+            {
+                return depth;
+            }
+            if !seen.insert(current.clone()) {
+                return 0;
+            }
+            let Maybe::Some(target) = self.user_deref_target_type_name(current.as_str()) else {
+                return depth;
+            };
+            if target.trim_start().starts_with("dyn:") {
+                return 0;
+            }
+            current = target;
+        }
+        0
+    }
+
     fn compile_method_call(
         &mut self,
         receiver: &Expr,
@@ -12222,42 +12380,36 @@ impl VbcCodegen {
             ));
         }
 
-        // T1474: implicit Shared<T> method forwarding must use the same
-        // receiver lowering as explicit `(*shared).method()`. Shared.deref
-        // returns an address of a Value slot, not the inner object itself;
-        // late runtime forwarding lost the load and dispatched on that address.
-        // Preserve methods declared on Shared before looking through it, and
-        // keep dynamic protocol receivers on their vtable dispatch path.
-        if let Some(receiver_type) = self.extract_expr_type_name(receiver)
-            && let Some((receiver_base, _)) = receiver_type.split_once('<')
-            && receiver_base.rsplit('.').next() == Some("Shared")
-            && let Some(inner_type) = Self::extract_element_type(&receiver_type)
-            && !inner_type.trim().is_empty()
-            && !inner_type.trim_start().starts_with("dyn:")
-            && self.registered_receiver_method(receiver_base, method.name.as_str()).is_none()
-            && let Some(deref_key) = self.registered_receiver_method(receiver_base, "deref")
-            && self.ctx.lookup_qualified_function(&deref_key)
-                .is_some_and(|f| f.param_count == 1)
-        {
-            // A method receiver already permits implicit reference dereference.
-            // Parenthesizing keeps compile_unary's *reference-binding special
-            // case from consuming only that reference instead of Shared.deref.
-            let operand = Expr::new(
-                ExprKind::Paren(verum_common::Heap::new(receiver.clone())),
-                receiver.span,
-            );
-            let dereferenced = Expr::new(
-                ExprKind::Unary {
-                    op: UnOp::Deref,
-                    expr: verum_common::Heap::new(operand),
-                },
-                receiver.span,
-            );
-            let adjusted = Expr::new(
-                ExprKind::Paren(verum_common::Heap::new(dereferenced)),
-                receiver.span,
-            );
-            return self.compile_method_call(&adjusted, method, args, resolved_target);
+        // Implicit method forwarding uses the explicit Deref lowering, which
+        // calls the registered method and then loads its returned Value slot.
+        // Resolve the complete chain first so wrapper methods win at each hop
+        // and cyclic declarations cannot recurse through compile_method_call.
+        if let Some(receiver_type) = self.extract_expr_type_name(receiver) {
+            let depth = self.method_receiver_deref_count(&receiver_type, method.name.as_str());
+            if depth > 0 {
+                let mut adjusted = receiver.clone();
+                for _ in 0..depth {
+                    // A method receiver permits implicit reference dereference.
+                    // Parenthesizing keeps *reference-binding lowering from
+                    // consuming only the reference instead of calling Deref.
+                    let operand = Expr::new(
+                        ExprKind::Paren(verum_common::Heap::new(adjusted)),
+                        receiver.span,
+                    );
+                    let dereferenced = Expr::new(
+                        ExprKind::Unary {
+                            op: UnOp::Deref,
+                            expr: verum_common::Heap::new(operand),
+                        },
+                        receiver.span,
+                    );
+                    adjusted = Expr::new(
+                        ExprKind::Paren(verum_common::Heap::new(dereferenced)),
+                        receiver.span,
+                    );
+                }
+                return self.compile_method_call(&adjusted, method, args, resolved_target);
+            }
         }
 
         // ──────────────────────────────────────────────────────────
@@ -15374,44 +15526,13 @@ impl VbcCodegen {
                     method.name.to_string()
                 }
             } else if let UnOp::Deref = op {
-                // Case 6b: Dereference - infer inner type and unwrap Heap<T>/Shared<T>
-                // This handles `(*l).method()` where l: Heap<T> → method on T
-                if let Some(inner_type) = self.extract_expr_type_name(inner) {
-                    // Strip Heap<T> or Shared<T> wrapper to get inner type T
-                    let derefed_type =
-                        if matches!(inner_type.split('<').next().and_then(|base| base.rsplit('.').next()), Some("Heap" | "Shared")) {
-                            // Extract T from Heap<T>
-                            if let Some(start) = inner_type.find('<') {
-                                let end = inner_type.rfind('>').unwrap_or(inner_type.len());
-                                inner_type[start + 1..end].to_string()
-                            } else {
-                                inner_type.clone()
-                            }
-                        } else if self.is_allocating_wrapper(&inner_type) {
-                            // Plain Heap/Shared without generic args — can't determine inner type
-                            method.name.to_string();
-                            inner_type.clone()
-                        } else {
-                            inner_type.clone()
-                        };
+                // Use the operator result, including user Deref targets,
+                // rather than reconstructing only known wrapper names here.
+                if let Some(derefed_type) = self.extract_expr_type_name(receiver) {
                     let base_type = VbcCodegen::strip_generic_args(&derefed_type);
-                    // **Architectural rule** (closes task #12 generic-method-
-                    // dispatch leg): when the deref'd base_type looks like an
-                    // unresolved generic type-param (single letter `T`, `K`,
-                    // `V`, `E` …), emitting `T.method` would burn the param
-                    // name into the runtime CallM key — runtime then panics
-                    // with "method 'T.lock' not found on receiver of runtime
-                    // kind Object" (canonical case: `(*shared).lock()` where
-                    // `shared: Shared<Mutex<T>>` inside `AsyncSemaphore.
-                    // available_permits` — the Shared<T> wrap erases the
-                    // outer generic instantiation through method-call return-
-                    // type tracking, leaving `T` as the visible derefed
-                    // shape).  Mirror the Case 1a / 1b discipline (named
-                    // bare-variable / SelfValue receiver) and fall back to
-                    // bare method-name dispatch — the runtime then routes
-                    // by the receiver's ACTUAL heap-tagged type at dispatch
-                    // time.
-                    if verum_common::well_known_types::looks_like_type_param(&base_type) {
+                    // Declared caller generics use runtime dispatch. A concrete
+                    // nominal named U is still a nominal, regardless of spelling.
+                    if self.ctx.generic_type_params.contains(base_type) {
                         method.name.to_string()
                     } else {
                         self.qualify_method_with_module_authority(&base_type, method.name.as_str())
@@ -15527,44 +15648,12 @@ impl VbcCodegen {
                             let extracted = self.extract_expr_type_name(inner_unary);
                             eprintln!("[paren-deref] method={} inner_type={:?}", method.name, extracted);
                         }
-                        // Handle `(*x).method()` — infer inner type and unwrap Heap<T>/Shared<T>.
-                        //
-                        // Mirrors the non-paren `*x.method()` arm above
-                        // (Case 6b) including the `looks_like_type_param`
-                        // guard: when the derefed `base_type` is a generic
-                        // type-param (`T`, `K`, `V`, `E`, …), emitting
-                        // `T.method` burns the param name into the runtime
-                        // CallM key and the dispatcher panics with
-                        // "method 'T.method' not found on receiver of
-                        // runtime kind ..." instead of routing by
-                        // receiver's actual heap-tagged TypeId.
-                        //
-                        // Canonical case closing task #12 §B: inside
-                        // `AsyncSemaphore.available_permits`,
-                        // `(*shared).lock()` where
-                        // `shared: Shared<Mutex<SemaphoreInner>>` — the
-                        // `extract_expr_type_name` chain returns "T"
-                        // when Shared.clone's `return_type_name` is the
-                        // literal `Shared<T>` (concrete instantiation
-                        // not propagated through the .clone()
-                        // intermediary).  Without this guard the body
-                        // emitted `CallM { method_id: 'T.lock' }`,
-                        // mis-routed dispatch down the failure chain,
-                        // and panicked at `into_inner` on Unit.
-                        if let Some(inner_type) = self.extract_expr_type_name(inner_unary) {
-                            let derefed_type = if matches!(inner_type.split('<').next().and_then(|base| base.rsplit('.').next()), Some("Heap" | "Shared"))
-                            {
-                                if let Some(start) = inner_type.find('<') {
-                                    let end = inner_type.rfind('>').unwrap_or(inner_type.len());
-                                    inner_type[start + 1..end].to_string()
-                                } else {
-                                    inner_type.clone()
-                                }
-                            } else {
-                                inner_type.clone()
-                            };
+                        // Both explicit and implicit receivers use the operator's
+                        // result type, including user-defined Deref and reference
+                        // bindings. Unresolved generic targets retain bare dispatch.
+                        if let Some(derefed_type) = self.extract_expr_type_name(inner) {
                             let base_type = VbcCodegen::strip_generic_args(&derefed_type);
-                            if verum_common::well_known_types::looks_like_type_param(&base_type) {
+                            if self.ctx.generic_type_params.contains(base_type) {
                                 method.name.to_string()
                             } else {
                                 self.qualify_method_with_module_authority(&base_type, method.name.as_str())
@@ -28313,6 +28402,11 @@ impl VbcCodegen {
                 if matches!(op, verum_ast::expr::UnOp::Deref)
                     && let Some(ref t) = inner_type
                 {
+                    if self.is_reference_binding_operand(inner)
+                        && !t.starts_with('&') && !t.starts_with('*')
+                    {
+                        return inner_type;
+                    }
                     // For Deref on Heap<T>/Shared<T>, unwrap to inner type T.
                     // Degenerate carriers ("Heap<>" / bare "Heap") report
                     // UNKNOWN — see the infer_expr_type_name mirror arm.
@@ -28345,22 +28439,8 @@ impl VbcCodegen {
                     // the operator lowering: deref() returns a reference
                     // to the result, not the wrapper itself. Preserve the
                     // receiver's instantiation (e.g. Guard<List<Int>>).
-                    if let Some(info) = self.ctx.lookup_function(&format!("{wrapper_base}.deref"))
-                        && let Some(target) = info.return_type_name.as_deref()
-                    {
-                        let params = self.ctx.type_generic_params.get(wrapper_base)
-                            .or_else(|| self.collection_type_params.get(wrapper_base));
-                        let actual = Self::split_generic_args(t);
-                        let target = match params {
-                            Some(params) => Self::substitute_generic_params_in_type_name(
-                                target, params, &actual,
-                            ),
-                            None => target.to_string(),
-                        };
-                        return Some(target.trim_start_matches("&checked ")
-                            .trim_start_matches("&unsafe ")
-                            .trim_start_matches("&mut ")
-                            .trim_start_matches('&').trim().to_string());
+                    if let verum_common::Maybe::Some(target) = self.user_deref_target_type_name(t) {
+                        return Some(target.to_string());
                     }
                 }
                 inner_type
@@ -30001,6 +30081,11 @@ impl VbcCodegen {
                 expr: inner,
             } => {
                 let inner_ty = self.infer_expr_type_name(inner)?;
+                if self.is_reference_binding_operand(inner)
+                    && !inner_ty.starts_with('&') && !inner_ty.starts_with('*')
+                {
+                    return Some(inner_ty);
+                }
                 // Allocating-wrapper deref: `*heap_box` / `*shared` yield
                 // the inner T (mirrors extract_expr_type_name's Deref
                 // arm).  Without this, `f"{*restored}"` on a
@@ -30038,7 +30123,10 @@ impl VbcCodegen {
                     .or_else(|| inner_ty.strip_prefix("*volatile mut "))
                     .or_else(|| inner_ty.strip_prefix("*volatile "))
                     .map(|s| s.trim().to_string())
-                    .unwrap_or(inner_ty);
+                    .unwrap_or_else(|| match self.user_deref_target_type_name(&inner_ty) {
+                        verum_common::Maybe::Some(target) => target.to_string(),
+                        verum_common::Maybe::None => inner_ty,
+                    });
                 Some(stripped)
             }
             // Reference-of: `&x` / `&mut x` where `x: T` should
