@@ -399,3 +399,15 @@ fn local_constant_shadow_does_not_change_a_module_alias() {
         .expect("execute");
     assert_eq!(value.as_i64(), 3);
 }
+
+#[test]
+fn reusing_codegen_does_not_reuse_previous_constant_bindings() {
+    let first = Parser::new("const BASE: Int = 9; fn seed() {}").parse_module().expect("first parse");
+    let second = Parser::new("const SIZE: Int = BASE; fn probe() { let bytes: [Byte; SIZE] = [0; SIZE]; }")
+        .parse_module().expect("second parse");
+    let mut codegen = VbcCodegen::with_config(CodegenConfig::new("reused_counts"));
+    codegen.compile_module(&first).expect("first compile");
+    let error = codegen.compile_module(&second)
+        .expect_err("BASE from the previous module must not survive reset or FunctionId reuse");
+    assert!(error.to_string().contains("constant integer"), "{error}");
+}

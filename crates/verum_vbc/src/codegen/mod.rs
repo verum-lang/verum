@@ -8700,6 +8700,8 @@ impl VbcCodegen {
         self.type_field_refinements.clear();
         // Clear pending constants
         self.pending_constants.clear();
+        self.constant_initializers.clear();
+        self.module_constant_bindings.clear();
         // Clear static init function tracking
         self.static_init_functions.clear();
         // Clear pending TLS initializations
