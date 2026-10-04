@@ -314,7 +314,12 @@ impl VbcCodegen {
         };
         for &(mi, fi) in &function_sites {
             let function = &available[mi].functions[fi];
-            let key = function_identity(available[mi], function).unwrap();
+            let key = function_identity(available[mi], function).ok_or_else(|| {
+                CodegenError::internal(format!(
+                    "bootstrap function {} has no source identity in {}",
+                    function.id.0, available[mi].name
+                ))
+            })?;
             add_dependencies(
                 mi,
                 &key,
