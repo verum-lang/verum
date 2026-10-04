@@ -165,20 +165,17 @@ fn monomorphized_lifecycle_keeps_its_mapped_native_entry_calls() {
         init < entry && entry < fini,
         "post-mono entry order: {main}"
     );
-    let init_body = ir
-        .split("define void @__verum_static_init()")
-        .nth(1)
-        .expect("native static initializer wrapper")
-        .split("\n}")
-        .next()
-        .unwrap();
-    let fini_body = ir
-        .split("define void @__verum_static_fini()")
-        .nth(1)
-        .expect("native static finalizer wrapper")
-        .split("\n}")
-        .next()
-        .unwrap();
+    // Linkage is internalized during lowering; select a definition by
+    // its exact symbol rather than requiring a particular linkage spelling.
+    let body = |symbol: &str| {
+        let header = ir.lines().find(|line| {
+            line.starts_with("define ") && line.contains(&format!("@{symbol}("))
+        }).unwrap_or_else(|| panic!("missing lifecycle definition: {symbol}"));
+        let start = ir.find(header).unwrap();
+        ir[start..].split("\n}").next().unwrap()
+    };
+    let init_body = body("__verum_static_init");
+    let fini_body = body("__verum_static_fini");
     assert!(
         init_body.contains("@static_seed("),
         "ctor callee: {init_body}"
