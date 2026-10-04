@@ -6601,27 +6601,6 @@ impl VbcCodegen {
         self.push_type_dedupe(ty);
     }
 
-    /// TYPE-REMAP-QUALIFIED-ONLY-1 (#45): deterministically resolve a
-    /// bare simple type name to a codegen `TypeId` when the exact
-    /// module-qualified key is unavailable.  Collects every
-    /// module-qualified registration whose leaf equals `simple`
-    /// (`"<module>.<simple>"`) and picks the min by qualified key —
-    /// the ARCH-P2 determinism discipline (min-by-key, never a HashMap
-    /// first-match walk).  Returns `None` when no qualified candidate
-    /// exists, so callers can distinguish "ambiguous, pick a stable
-    /// winner" from "genuinely unknown".
-    fn resolve_bare_type_name_deterministic(
-        &self,
-        simple: &str,
-    ) -> Option<crate::types::TypeId> {
-        let suffix = format!(".{}", simple);
-        self.type_name_to_id
-            .iter()
-            .filter(|(k, _)| k.ends_with(&suffix))
-            .min_by(|(a, _), (b, _)| a.as_str().cmp(b.as_str()))
-            .map(|(_, id)| *id)
-    }
-
     /// TYPE-REMAP-QUALIFIED-ONLY-1 (#45): when the body-merge remap
     /// finds no target for an archive-local type id, `map_type_id`
     /// falls back to IDENTITY — using the module-local id as-is in the
@@ -6654,29 +6633,40 @@ impl VbcCodegen {
     /// entries stay byte-identical.  See `register_archive_type` for
     /// rationale and consumer surface.
     fn type_ref_to_field_name(&self, ty: &crate::types::TypeRef) -> Option<String> {
+        self.render_field_type_ref(ty, false)
+    }
+
+    fn render_field_type_ref(&self, ty: &crate::types::TypeRef, qualified: bool) -> Option<String> {
         use crate::types::{CbgrTier, TypeRef};
+        let nominal_name = |id| {
+            let descriptor = self.type_by_id(id)?;
+            let name = self.ctx.strings.get(descriptor.name.0 as usize)?;
+            if qualified {
+                let owner = descriptor.origin_module
+                    .and_then(|id| self.ctx.strings.get(id.0 as usize))?;
+                Some(crate::module::qualify_module_name(owner, name))
+            } else {
+                Some(name.clone())
+            }
+        };
         match ty {
             TypeRef::Concrete(tid) => {
                 if let Some(prim) = self.primitive_type_id_to_name(*tid) {
                     return Some(prim.to_string());
                 }
-                self.type_by_id(*tid)
-                    .and_then(|t| self.ctx.strings.get(t.name.0 as usize).cloned())
+                nominal_name(*tid)
             }
             TypeRef::Instantiated { base, args } => {
                 let base_name = self
                     .primitive_type_id_to_name(*base)
                     .map(|s| s.to_string())
-                    .or_else(|| {
-                        self.type_by_id(*base)
-                            .and_then(|t| self.ctx.strings.get(t.name.0 as usize).cloned())
-                    })?;
+                    .or_else(|| nominal_name(*base))?;
                 if args.is_empty() {
                     Some(base_name)
                 } else {
                     let arg_names: Vec<String> = args
                         .iter()
-                        .map(|a| self.type_ref_to_field_name(a).unwrap_or_else(|| "_".into()))
+                        .map(|a| self.render_field_type_ref(a, qualified).unwrap_or_else(|| "_".into()))
                         .collect();
                     Some(format!("{}<{}>", base_name, arg_names.join(", ")))
                 }
@@ -6688,12 +6678,12 @@ impl VbcCodegen {
             // prefix only.  Tier2 (`&unsafe T`) preserves the prefix.
             TypeRef::Reference { inner, tier, .. } => match tier {
                 CbgrTier::Tier2 => self
-                    .type_ref_to_field_name(inner)
+                    .render_field_type_ref(inner, qualified)
                     .map(|n| format!("&unsafe {}", n)),
-                _ => self.type_ref_to_field_name(inner),
+                _ => self.render_field_type_ref(inner, qualified),
             },
             TypeRef::Slice(inner) => {
-                self.type_ref_to_field_name(inner).map(|n| format!("[{}]", n))
+                self.render_field_type_ref(inner, qualified).map(|n| format!("[{}]", n))
             }
             // Tuple `(A, B, …)` — render the canonical parenthesised form,
             // matching `extract_type_name_from_ast`'s `Tuple` arm. This is
@@ -6712,7 +6702,7 @@ impl VbcCodegen {
             TypeRef::Tuple(elems) => {
                 let names: Vec<String> = elems
                     .iter()
-                    .map(|e| self.type_ref_to_field_name(e).unwrap_or_else(|| "_".into()))
+                    .map(|e| self.render_field_type_ref(e, qualified).unwrap_or_else(|| "_".into()))
                     .collect();
                 Some(format!("({})", names.join(", ")))
             }
@@ -26395,6 +26385,31 @@ impl VbcCodegen {
         self.push_type_dedupe(imported);
     }
 
+    /// Translate only identities declared by this archive module. A same-leaf
+    /// type from another module is never a substitute for a missing owner.
+    fn archive_type_id_remap(
+        &self,
+        module: &crate::module::VbcModule,
+    ) -> std::collections::HashMap<u32, u32> {
+        module.types.iter().filter_map(|ty| {
+            let local = bootstrap_types::identity(module, ty)
+                .and_then(|key| self.type_name_to_id.get(&key).copied())
+                .or_else(|| {
+                    let name = module.strings.get(ty.name)?;
+                    Self::canonical_scalar_type_id(ty, name)
+                });
+            if local.is_none()
+                && let Some(name) = module.strings.get(ty.name)
+                && let Some(foreign) = self.identity_remap_alias(name, ty.id.0)
+            {
+                tracing::error!(target: "vbc_codegen::type_remap",
+                    "archive type {name} in {} has no qualified local identity; source ID {} aliases {foreign}",
+                    module.name, ty.id.0);
+            }
+            local.map(|id| (ty.id.0, id.0))
+        }).collect()
+    }
+
     /// Bulk import every TypeDescriptor in an archive module into the
     /// user codegen.  Wraps `import_archive_type` for caller
     /// convenience; the loader uses this from the archive lazy-load
@@ -26456,24 +26471,32 @@ impl VbcCodegen {
                 Some(s) => s.to_string(),
                 None => continue,
             };
-            let codegen_id = match self.type_name_to_id.get(&proto_name).copied() {
+            let Some(qualified) = bootstrap_types::identity(module, ty) else {
+                continue;
+            };
+            let source_owner = ty
+                .origin_module
+                .and_then(|id| module.strings.get(id))
+                .unwrap_or(&module.name);
+            let codegen_id = match self.type_name_to_id.get(&qualified).copied() {
                 Some(existing) => existing,
                 None => {
                     let id = self.alloc_user_type_id();
                     if std::env::var("VERUM_TRACE_TYPEBIND").is_ok() {
-                        eprintln!("[typebind] site=proto_import name={} id={}", proto_name, id.0);
+                        eprintln!("[typebind] site=proto_import name={} id={}", qualified, id.0);
                     }
-                    self.type_name_to_id.insert(proto_name.clone(), id);
+                    self.type_name_to_id.insert(qualified, id);
                     id
                 }
             };
-            // Qualified protocol key — keeps `merge_archive_function_bodies`'
-            // qualified-first type-id remap exact for protocol references
-            // too. `or_insert`: the simple-name binding may already point
-            // at a DIFFERENT module's protocol; the qualified key is ours.
+            // Simple and bundled aliases are convenience keys. Only the
+            // exact declaration identity may select an existing local ID.
+            self.type_name_to_id
+                .entry(proto_name.clone())
+                .or_insert(codegen_id);
             if let Some(p) = module_prefix {
                 self.type_name_to_id
-                    .entry(format!("{}.{}", p, proto_name))
+                    .entry(crate::module::qualify_module_name(p, &proto_name))
                     .or_insert(codegen_id);
             }
             protocol_id_remap.insert(ty.id, codegen_id);
@@ -26484,11 +26507,14 @@ impl VbcCodegen {
                 let stub_name_id = crate::types::StringId(
                     self.ctx.intern_string_raw(&proto_name),
                 );
+                let source_owner_id = (!source_owner.is_empty()).then(|| {
+                    crate::types::StringId(self.ctx.intern_string_raw(source_owner))
+                });
                 self.push_type_descriptor(crate::types::TypeDescriptor {
                     id: codegen_id,
                     name: stub_name_id,
                     kind: crate::types::TypeKind::Protocol,
-                    origin_module: None,
+                    origin_module: source_owner_id,
                     type_params: smallvec::SmallVec::new(),
                     fields: smallvec::SmallVec::new(),
                     // CLEARED — see comment block above.
@@ -26517,6 +26543,52 @@ impl VbcCodegen {
                 &protocol_id_remap,
                 module_prefix,
             );
+        }
+        // All local identities now exist, including forward field targets.
+        // Read original source references on every import: existing descriptors
+        // may already contain local IDs after an earlier import (T1536).
+        let type_id_remap = self.archive_type_id_remap(module);
+        for source in &module.types {
+            if source.kind == crate::types::TypeKind::Protocol {
+                continue;
+            }
+            let Some(&local) = type_id_remap.get(&source.id.0) else {
+                continue;
+            };
+            if let Some(index) = self.type_index_of(crate::types::TypeId(local)) {
+                copy_remapped_data_type_carriers(source, &mut self.types[index], &type_id_remap);
+            }
+        }
+        // Optional source spellings may be absent in older descriptors. The
+        // eager importer cannot interpret those source-local refs against our
+        // table. Replace only this producer's derived entries after remapping.
+        let mut refreshed = verum_common::List::new();
+        for source in &module.types {
+            let Some(&local) = type_id_remap.get(&source.id.0) else {
+                continue;
+            };
+            let Some(target) = self.type_by_id(crate::types::TypeId(local)) else {
+                continue;
+            };
+            let Some(owner) = bootstrap_types::identity(module, source) else {
+                continue;
+            };
+            let Some(simple) = self.ctx.strings.get(target.name.0 as usize) else {
+                continue;
+            };
+            for (field, original) in target.fields.iter().zip(&source.fields) {
+                if original.type_name != crate::types::StringId::EMPTY {
+                    continue;
+                }
+                let Some(name) = self.ctx.strings.get(field.name.0 as usize) else {
+                    continue;
+                };
+                let value = self.render_field_type_ref(&field.type_ref, true);
+                refreshed.push(((owner.clone(), name.clone()), value.clone()));
+                if self.type_name_to_id.get(simple).is_some_and(|id| id.0 == local) {
+                    refreshed.push(((simple.clone(), name.clone()), value));
+                }
+            }
         }
         // SECOND PASS — populate `type_aliases` for every imported
         // `TypeKind::Alias` descriptor by resolving its `alias_target`
@@ -26662,6 +26734,13 @@ impl VbcCodegen {
         };
         for (key, value) in pending {
             self.type_field_type_names.entry(key).or_insert(value);
+        }
+        for (key, value) in refreshed {
+            if let Some(value) = value {
+                self.type_field_type_names.insert(key, value);
+            } else {
+                self.type_field_type_names.remove(&key);
+            }
         }
     }
 
@@ -26846,84 +26925,22 @@ impl VbcCodegen {
 
         // ----- Build per-archive-module ID remap tables -----
 
-        // archive type id → codegen type id (via type-name lookup;
-        // codegen.type_name_to_id was populated by
-        // `import_archive_module_types`).
-        //
-        // META-GROUP-XMODULE-1: prefer the MODULE-QUALIFIED key
-        // (`"<module>.<Type>"`) — the simple name is first-wins across
-        // every loaded archive module, so when two modules declare the
-        // same simple type name (`meta.token.Group` record vs
-        // `math.algebra.Group` protocol) the simple lookup remaps THIS
-        // module's constructions onto the foreign winner's id (wrong
-        // kind/arity → out-of-bounds field writes at runtime). The
-        // qualified key is registered unconditionally at type import,
-        // so bodies from this archive module resolve to their own type.
-        let mut type_id_remap: HashMap<u32, u32> = HashMap::new();
-        for ty in archive_module.types.iter() {
-            let archive_name = match archive_module.strings.get(ty.name) {
-                Some(s) => s,
-                None => continue,
-            };
-            let qualified_tid = bootstrap_types::identity(archive_module, ty)
-                .and_then(|key| self.type_name_to_id.get(&key).copied())
-                .or_else(|| (!archive_module.name.is_empty())
-                    .then(|| format!("{}.{}", archive_module.name, archive_name))
-                    .and_then(|key| self.type_name_to_id.get(&key).copied()));
-            // TYPE-REMAP-QUALIFIED-ONLY-1 (#45): the exact per-module
-            // qualified key is authoritative.  When it misses, the bare
-            // simple name is a safe fallback ONLY while it is
-            // unambiguous (a single module owns it).  For a leaf that
-            // TWO modules registered, the first-wins bare slot points at
-            // a registration-order-dependent winner — resolve it
-            // deterministically by min-qualified-name instead so the
-            // remap is stable across bakes and never seats this module's
-            // bodies on a foreign same-named type.
-            let resolved = qualified_tid.or_else(|| {
-                if self.ambiguous_bare_type_names.contains(archive_name) {
-                    self.resolve_bare_type_name_deterministic(archive_name)
-                } else {
-                    self.type_name_to_id.get(archive_name).copied()
-                }
-            });
-            if trace_type_binding(archive_name) {
-                eprintln!(
-                    "[type-claim] REMAP  name={} archive_mod={:?} qualified={:?}                      ambiguous={} archive_ty_id={} -> {:?}",
-                    archive_name,
-                    archive_module.name,
-                    qualified_tid.map(|i| i.0),
-                    self.ambiguous_bare_type_names.contains(archive_name),
-                    ty.id.0,
-                    resolved.map(|i| i.0)
-                );
+        // Type descriptors, body instructions and call-site signatures share
+        // this source-module-owned identity map (T1536).
+        let type_id_remap = self.archive_type_id_remap(archive_module);
+        let signatures: verum_common::Map<_, _> = archive_module.functions.iter()
+            .filter_map(|source| func_id_remap.get(&source.id.0).map(|local| (local.0, source)))
+            .collect();
+        for info in self.ctx.functions.values_mut() {
+            if let Some(source) = signatures.get(&info.id.0) {
+                info.return_type = Some(remap_type_ref_archive(&source.return_type, &type_id_remap));
+                info.yield_type = source.yield_type.as_ref()
+                    .map(|ty| remap_type_ref_archive(ty, &type_id_remap));
             }
-            match resolved {
-                Some(codegen_tid) => {
-                    type_id_remap.insert(ty.id.0, codegen_tid.0);
-                }
-                None => {
-                    // No remap target: `map_type_id` will fall back to
-                    // IDENTITY.  Refuse to do that SILENTLY when the
-                    // archive-local id aliases a DIFFERENT live user type
-                    // — that is the Text(4)-class miscompile.  Genuinely
-                    // unimported types (id unclaimed in the user
-                    // namespace) still resolve later by name, so those
-                    // stay quiet.
-                    if let Some(foreign) =
-                        self.identity_remap_alias(archive_name, ty.id.0)
-                    {
-                        tracing::error!(
-                            target: "vbc_codegen::type_remap",
-                            "TYPE-REMAP-QUALIFIED-ONLY-1: archive type '{}' \
-                             (module '{}', local id {}) has no qualified remap \
-                             target and its id aliases live user type '{}' — \
-                             refusing silent identity remap (would miscompile \
-                             this module's bodies onto a foreign type)",
-                            archive_name, archive_module.name, ty.id.0, foreign,
-                        );
-                    }
-                }
-            }
+        }
+        for (&local, source) in &signatures {
+            self.ctx.archive_fn_param_types.insert(local, source.params.iter()
+                .map(|param| remap_type_ref_archive(&param.type_ref, &type_id_remap)).collect());
         }
 
         // archive const id → codegen const id. Deep-copy each
@@ -28487,6 +28504,36 @@ fn byte_offsets_to_instr_indices(instructions: &mut [crate::instruction::Instruc
     crate::bytecode::jump_offsets_to_instr_indices(instructions);
 }
 
+/// Rebuild structured data references from their declaration's namespace.
+/// Names stay in the target string pool; source references are never remapped
+/// from an already-imported descriptor, making repeated imports idempotent.
+fn copy_remapped_data_type_carriers(
+    source: &crate::types::TypeDescriptor,
+    target: &mut crate::types::TypeDescriptor,
+    ids: &std::collections::HashMap<u32, u32>,
+) {
+    let tr = |ty: &crate::types::TypeRef| remap_type_ref_archive(ty, ids);
+    for (to, from) in target.fields.iter_mut().zip(&source.fields) {
+        to.type_ref = tr(&from.type_ref);
+    }
+    for (to, from) in target.variants.iter_mut().zip(&source.variants) {
+        to.payload = from.payload.as_ref().map(tr);
+        for (to, from) in to.fields.iter_mut().zip(&from.fields) {
+            to.type_ref = tr(&from.type_ref);
+        }
+    }
+    for (to, from) in target.type_params.iter_mut().zip(&source.type_params) {
+        to.bounds = from
+            .bounds
+            .iter()
+            .map(|id| crate::types::ProtocolId(ids.get(&id.0).copied().unwrap_or(id.0)))
+            .collect();
+        to.default = from.default.as_ref().map(tr);
+        to.type_bounds = from.type_bounds.iter().map(tr).collect();
+    }
+    target.alias_target = source.alias_target.as_ref().map(tr);
+}
+
 /// Recursive [`TypeRef`] remap shared by
 /// [`VbcCodegen::merge_archive_function_bodies`] descriptor + constant
 /// rewrites. Mirrors `linker::VbcLinker::remap_type_ref` but takes a
@@ -28921,10 +28968,9 @@ mod tests {
     /// TYPE-REMAP-QUALIFIED-ONLY-1 (#45): two modules registering the
     /// same simple type name must each resolve to their OWN id via the
     /// module-qualified key, the bare leaf must be flagged ambiguous,
-    /// and the deterministic fallback must pick the min-by-qualified-name
-    /// candidate (never a registration-order-dependent first-wins).
+    /// and an unknown declaring module must not borrow a same-leaf candidate.
     #[test]
-    fn test_type_remap_qualified_only_ambiguous_bare_and_deterministic() {
+    fn test_type_remap_qualified_only_rejects_unknown_same_leaf_owner() {
         use crate::types::{StringId, TypeDescriptor, TypeId, TypeKind};
         let mut codegen = VbcCodegen::new();
         let mk = |id: u32| TypeDescriptor {
@@ -28934,9 +28980,8 @@ mod tests {
             ..Default::default()
         };
         // "Group" registered by two DISTINCT modules with distinct ids.
-        // zz.tokens registers FIRST so that first-wins (the OLD, unsafe
-        // behaviour) would have seated the bare leaf on the zz id — the
-        // deterministic resolver must instead pick the min-named module.
+        // zz.tokens registers first, but neither a first-wins nor a stable
+        // leaf ordering can prove ownership for another declaring module.
         codegen.register_archive_type_qualified(
             mk(1301),
             "Group".to_string(),
@@ -28969,16 +29014,15 @@ mod tests {
             "second distinct-module registration must mark the bare leaf ambiguous",
         );
 
-        // Deterministic fallback picks the MIN qualified key
-        // ("aa.algebra.Group" < "zz.tokens.Group"), independent of the
-        // registration order above.
-        let resolved = codegen
-            .resolve_bare_type_name_deterministic("Group")
-            .expect("ambiguous leaf still resolves deterministically");
-        assert_eq!(
-            resolved.0, aa.0,
-            "deterministic resolution must pick min-by-qualified-name (aa.algebra)",
-        );
+        let mut archive = crate::module::VbcModule::new("unknown.owner".to_owned());
+        let mut source = mk(21);
+        source.name = archive.strings.intern("Group");
+        archive.types.push(source);
+        assert!(codegen.archive_type_id_remap(&archive).is_empty());
+        archive.name = "aa.algebra".to_owned();
+        assert_eq!(codegen.archive_type_id_remap(&archive).get(&21), Some(&aa.0));
+        archive.name = "zz.tokens".to_owned();
+        assert_eq!(codegen.archive_type_id_remap(&archive).get(&21), Some(&zz.0));
     }
 
     /// TYPE-REMAP-QUALIFIED-ONLY-1 (#45): the identity-remap alias guard

@@ -1,6 +1,8 @@
 //! Nominal dependencies of a source unit compiled against earlier bootstrap units.
 
-use super::{CodegenError, CodegenResult, VbcCodegen, remap_type_ref_archive};
+use super::{
+    CodegenError, CodegenResult, VbcCodegen, copy_remapped_data_type_carriers, remap_type_ref_archive,
+};
 use crate::module::{FunctionDescriptor, VbcModule};
 use crate::types::{TypeDescriptor, TypeId, TypeRef};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -393,27 +395,7 @@ impl VbcCodegen {
             let mut ty = module.types[ti].clone();
             let remap = &maps[mi];
             let tr = |value: &TypeRef| remap_type_ref_archive(value, remap);
-            for field in &mut ty.fields {
-                field.type_ref = tr(&field.type_ref);
-            }
-            for variant in &mut ty.variants {
-                if let Some(payload) = &mut variant.payload {
-                    *payload = tr(payload);
-                }
-                for field in &mut variant.fields {
-                    field.type_ref = tr(&field.type_ref);
-                }
-            }
-            for param in &mut ty.type_params {
-                for bound in &mut param.bounds {
-                    bound.0 = *remap.get(&bound.0).unwrap_or(&bound.0);
-                }
-                param.default = param.default.as_ref().map(tr);
-                for bound in &mut param.type_bounds {
-                    *bound = tr(bound);
-                }
-            }
-            ty.alias_target = ty.alias_target.as_ref().map(tr);
+            copy_remapped_data_type_carriers(&module.types[ti], &mut ty, remap);
             for implementation in &mut ty.protocols {
                 implementation.protocol.0 = *remap
                     .get(&implementation.protocol.0)
