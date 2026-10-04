@@ -27708,7 +27708,11 @@ impl VbcCodegen {
                     let pname_id = self.ctx.intern_string_raw(pname_text);
                     param.name = StringId(pname_id);
                 }
-                if let Some(tname_text) = archive_module.strings.get(param.type_name) {
+                // Optional parameter spelling uses zero as an absence marker,
+                // even when the source string table has real text at slot zero.
+                if param.type_name != StringId::EMPTY
+                    && let Some(tname_text) = archive_module.strings.get(param.type_name)
+                {
                     let tname_id = self.ctx.intern_string_raw(tname_text);
                     param.type_name = StringId(tname_id);
                 }
