@@ -2,6 +2,7 @@
 """T1507/T1516: explicit localhost integration gate, separate from source gates.
 
 One Verum invocation runs repository language contracts and four HTTP clients.
+The accepted TCP stream first checks a real zero-capacity asynchronous read.
 Both tiers use the same source; AOT therefore compiles once. Generated sources
 and logs remain in the printed temporary directory, including after failure.
 """
@@ -19,6 +20,7 @@ import time
 
 
 CASES = ("http200", "header_timeout", "cancelled", "slow_drip")
+TCP_ZERO_OUTPUT = "tcp_zero_capacity=0 read=0 len=0"
 REQUEST = b"GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"
 BUDGET_MS, DRIP_INTERVAL = 500, 0.08
 FIXTURES = (
@@ -56,6 +58,7 @@ def prepare(repo, port):
     template = (template.replace("@PORT@", str(port)).replace("@BUDGET_MS@", str(BUDGET_MS))
                 .replace("@CONTRACT_CALLS@", "\n".join(calls)))
     require(not re.search(r"@[A-Z_]+@", template), "unexpanded server template placeholder")
+    expected.append(TCP_ZERO_OUTPUT)
     return "\n\n".join(parts + [template]), expected
 
 
@@ -189,7 +192,8 @@ def run(args, program, log, port, expected):
             require_execution_tier(args.tier, lines)
             for line in expected:
                 require(line in lines, f"missing contract output: {line}")
-            emit(tier=args.tier, verdict="PASS", contracts=len(FIXTURES), http_cases=len(CASES))
+            emit(tier=args.tier, verdict="PASS", contracts=len(FIXTURES), http_cases=len(CASES),
+                 zero_capacity_reads=1)
         finally:
             stop_owned(process)
 

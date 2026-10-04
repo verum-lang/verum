@@ -21,7 +21,20 @@ fn main() {
 @CONTRACT_CALLS@
     let listener = TcpListener.bind("127.0.0.1:@PORT@").unwrap();
     for case in ["http200", "header_timeout", "cancelled", "slow_drip"] {
-        let (stream, peer) = listener.accept().unwrap();
+        let (mut stream, peer) = listener.accept().unwrap();
+        if case == "http200" {
+            // Constructors reserve storage even for a zero hint. Exercise the
+            // actual zero-capacity poll branch before the client sends bytes.
+            let mut empty: List<Byte> = List.new();
+            empty.shrink_to_fit();
+            let capacity = empty.capacity();
+            assert_eq(capacity, 0);
+            let count = stream.read_async(&mut empty).await.unwrap();
+            let len = empty.len();
+            print(f"tcp_zero_capacity={capacity} read={count} len={len}");
+            assert_eq(count + 1, 1);
+            assert_eq(len, 0);
+        }
         let config = if case == "header_timeout" || case == "slow_drip" {
             ConnectionConfig {
                 keep_alive: false,

@@ -574,10 +574,16 @@ Built-in adapter registrations are also still commented out. Neither that
 configuration API nor the native ownership foundation is repaired by changing
 the supervisor initializer.
 
+The fresh `63ca59306` CLI now passes T1497's real loopback interpreter
+control: shrinking the empty buffer establishes capacity zero, asynchronous
+read returns integer zero with length zero, and a subsequent delayed read
+and write returns `12/12/12` with an exact twelve-byte echo. The portable HTTP
+gate now checks that same zero-capacity branch before sending its first
+request. Its next full combined execution remains pending the qualified-field
+checker repair; native zero-capacity execution is not established.
+
 Remaining scope is explicit: T0467 also contains folded IO/FD/process
-acceptances that these slice regressions do not close. T1497 still needs a
-valid full-pipeline zero-capacity control; attempting List.shrink_to_fit
-exposed T1517 instead. T1510 loses mutability in unsafe-reference signature
+acceptances that these slice regressions do not close. T1510 loses mutability in unsafe-reference signature
 carry, T1511 misindexes type arguments after lifetime parameters, and T1520
 erases references nested in associated-type arguments. T1521 tracks
 binder-aware qualification of rank-2 field types; this stage preserves their
