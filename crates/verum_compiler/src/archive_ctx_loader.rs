@@ -309,43 +309,7 @@ fn fn_takes_self_mut_ref(
 }
 
 fn merge_module_and_simple_name(module_name: &str, simple_name: &str) -> String {
-    if !simple_name.contains('.') {
-        // Bare leaf — the precompiler did no module promotion.
-        // Prepend module_name unconditionally.
-        return format!("{}.{}", module_name, simple_name);
-    }
-    let module_segs: Vec<&str> = module_name.split('.').collect();
-    let simple_segs: Vec<&str> = simple_name.split('.').collect();
-    // Longest overlap: try `module_segs[k..]` against `simple_segs[..len-k]`
-    // for k decreasing from |module_segs|.min(|simple_segs|) down to 1.
-    // First match wins (longest). k=0 (no overlap) falls through to
-    // the prepend branch at the bottom.
-    let max_overlap = module_segs.len().min(simple_segs.len());
-    for overlap_len in (1..=max_overlap).rev() {
-        let module_suffix = &module_segs[module_segs.len() - overlap_len..];
-        let simple_prefix = &simple_segs[..overlap_len];
-        if module_suffix == simple_prefix {
-            // Emit non-overlapping module_name prefix + full simple_name.
-            let prefix_len = module_segs.len() - overlap_len;
-            if prefix_len == 0 {
-                return simple_name.to_string();
-            }
-            let mut out = String::with_capacity(module_name.len() + simple_name.len() + 1);
-            for (i, seg) in module_segs[..prefix_len].iter().enumerate() {
-                if i > 0 {
-                    out.push('.');
-                }
-                out.push_str(seg);
-            }
-            out.push('.');
-            out.push_str(simple_name);
-            return out;
-        }
-    }
-    // No overlap — descriptor's leading segment is unrelated to
-    // module_name (e.g. tls13's `tls13.handshake....` under
-    // `core.net`). Prepend module_name verbatim.
-    format!("{}.{}", module_name, simple_name)
+    verum_vbc::module::qualify_module_name(module_name, simple_name)
 }
 
 /// Walk every module in the archive and register its functions and
@@ -2843,7 +2807,7 @@ impl ArchiveCtxCache {
                     && let Some(name) = module.strings.get(fn_desc.name)
                     && !name.is_empty()
                 {
-                    codegen.record_archive_function_name(name, user_fid);
+                    codegen.record_archive_function_descriptor(module, fn_desc, user_fid);
                 }
             }
             codegen.merge_archive_function_bodies(module, &fresh_remap);
@@ -3302,11 +3266,6 @@ impl ArchiveCtxCache {
         // round-trip discipline as the apply_lazy call site in
         // `pipeline/vbc_codegen.rs`.
         let next_id_ptr: *mut u32 = codegen.next_func_id_mut() as *mut u32;
-        // UMBRELLA-MOUNT-PRUNE-1: the decoded modules' TYPE descriptors
-        // get their fn-id references (drop_fn / clone_fn / protocol
-        // vtables) rewritten in place before import — see
-        // `remap_type_glue_fn_ids`.  Needs `mut` access.
-        let mut decoded = decoded;
         // **Two-phase merge** (task #12 fix).
         //
         // Pre-fix this loop ran register → types → merge per archive
@@ -3369,8 +3328,7 @@ impl ArchiveCtxCache {
         // restores the total-map behaviour bit-for-bit.
         //
         // NOTE: the keep computation reads the ORIGINAL archive-local
-        // glue ids off the decoded type tables, so it must run BEFORE
-        // `remap_type_glue_fn_ids` rewrites them below.
+        // glue ids off the unchanged decoded type tables.
         let keep_by_entry: Option<std::collections::HashMap<String, std::collections::HashSet<u32>>> =
             if prune_disabled {
                 None
@@ -3388,27 +3346,9 @@ impl ArchiveCtxCache {
         // before body merge so the body's TypeId remap (consults
         // `codegen.type_name_to_id`) sees the imported descriptors.
         //
-        // **Imported-type glue-id rewrite** (pruning mode only): the
-        // import copies `drop_fn` / `clone_fn` / `ProtocolImpl.methods`
-        // VERBATIM — i.e. as ARCHIVE-LOCAL fn ids — and the finalize
-        // pass later remaps those values as if they were ctx ids.
-        // Under merge-all that latent id-space confusion is masked
-        // (every low ctx id owns a merged body, so the stale value
-        // lands on a consistent, harmless target); under pruning the
-        // compacted final table exposed it as drop-glue misdispatch
-        // (`DropRef` on a span-test local executing `Signal.fmt`).
-        // Rewriting the references through this entry's total remap
-        // BEFORE the import turns them into real ctx ids, so finalize
-        // resolves them to the kept glue bodies — see
-        // `remap_type_glue_fn_ids`.  Gated on pruning so the
-        // kill-switch path stays bit-identical to the old behaviour.
-        for i in 0..decoded.len() {
-            if !prune_disabled {
-                let total_remap = &per_archive_remaps[i].1;
-                let module = &mut decoded[i].1;
-                remap_type_glue_fn_ids(module, total_remap);
-            }
-            let module = &decoded[i].1;
+        // Preserve archive-local and named external glue ids until the
+        // codegen merger translates them once, alongside the function bodies.
+        for (_, module) in &decoded {
             if !module.types.is_empty() {
                 codegen.import_archive_module_types(module);
                 type_modules += 1;
@@ -3465,7 +3405,7 @@ impl ArchiveCtxCache {
                     && let Some(name) = module.strings.get(fn_desc.name)
                     && !name.is_empty()
                 {
-                    codegen.record_archive_function_name(name, user_fid);
+                    codegen.record_archive_function_descriptor(module, fn_desc, user_fid);
                 }
             }
         }
@@ -3733,13 +3673,6 @@ impl ArchiveCtxCache {
                     next_id_ref,
                 );
                 fn_modules += 1;
-                // Imported-type glue-id rewrite — same rationale as the
-                // primary pass's site above (drop_fn / clone_fn /
-                // vtable ids must arrive as ctx ids for finalize).
-                if !prune_disabled {
-                    remap_type_glue_fn_ids(module, &func_id_remap);
-                }
-
                 // ALSO import the parent type's descriptor so the
                 // typed-form `MakeVariantTyped` gate at
                 // `vbc/codegen/expressions.rs::emit_make_variant`
@@ -3780,7 +3713,7 @@ impl ArchiveCtxCache {
                         && let Some(name) = module.strings.get(fn_desc.name)
                         && !name.is_empty()
                     {
-                        codegen.record_archive_function_name(name, user_fid);
+                        codegen.record_archive_function_descriptor(module, fn_desc, user_fid);
                     }
                 }
                 pass2_remaps.push(func_id_remap);
@@ -3876,7 +3809,7 @@ impl ArchiveCtxCache {
                             && let Some(name) = module.strings.get(fn_desc.name)
                             && !name.is_empty()
                         {
-                            codegen.record_archive_function_name(name, user_fid);
+                            codegen.record_archive_function_descriptor(module, fn_desc, user_fid);
                         }
                     }
                     supplemental_merges.push((entry_name.clone(), supplement));
@@ -4299,6 +4232,15 @@ fn compute_merge_keep_sets(
                 name_to_loc.entry(suffix).or_insert((idx, *fid));
             }
         }
+        for function in &module.functions {
+            if let Some(name) = module.strings.get(function.name) {
+                let owner = function.origin_module
+                    .and_then(|id| module.strings.get(id))
+                    .unwrap_or(&module.name);
+                name_to_loc.entry(merge_module_and_simple_name(owner, name))
+                    .or_insert((idx, function.id.0));
+            }
+        }
         aux.push(EntryAux {
             module,
             name_by_id,
@@ -4392,6 +4334,19 @@ fn compute_merge_keep_sets(
         m
     }
 
+    // A glue reference can be a local body or a canonical external name.
+    macro_rules! keep_glue {
+        ($idx:expr, $fid:expr) => {
+            if let Some(name) = aux[$idx].external_name_by_id.get(&$fid) {
+                if let Some(&(owner, fid)) = name_to_loc.get(*name) {
+                    push_fn!(owner, fid);
+                }
+            } else if aux[$idx].desc_by_id.contains_key(&$fid) {
+                push_fn!($idx, $fid);
+            }
+        };
+    }
+
     // Type-surface rule (5): vtable ids + drop/clone glue + name-shape
     // methods of a type that is user-visible or constructed by kept
     // code.  `seen_types` makes the rule idempotent per (entry, tid).
@@ -4408,14 +4363,10 @@ fn compute_merge_keep_sets(
                         }
                     }
                     if let Some(dfn) = ty.drop_fn {
-                        if aux[$idx].desc_by_id.contains_key(&dfn) {
-                            push_fn!($idx, dfn);
-                        }
+                        keep_glue!($idx, dfn);
                     }
                     if let Some(cfn) = ty.clone_fn {
-                        if aux[$idx].desc_by_id.contains_key(&cfn) {
-                            push_fn!($idx, cfn);
-                        }
+                        keep_glue!($idx, cfn);
                     }
                     if let Some(tname) = aux[$idx].name_by_id.get(&ty.name).copied() {
                         if methods_index[$idx].is_none() {
@@ -4480,14 +4431,10 @@ fn compute_merge_keep_sets(
                     }
                 }
                 if let Some(dfn) = ty.drop_fn {
-                    if aux[idx].desc_by_id.contains_key(&dfn) {
-                        push_fn!(idx, dfn);
-                    }
+                    keep_glue!(idx, dfn);
                 }
                 if let Some(cfn) = ty.clone_fn {
-                    if aux[idx].desc_by_id.contains_key(&cfn) {
-                        push_fn!(idx, cfn);
-                    }
+                    keep_glue!(idx, cfn);
                 }
             }
         }
@@ -4848,95 +4795,6 @@ fn compute_merge_keep_sets(
             (entry_name.clone(), std::mem::take(&mut keep[idx]))
         })
         .collect()
-}
-
-/// ARCHIVE-TYPE-GLUE-IDS-1: rewrite a decoded archive module's
-/// TYPE-descriptor `drop_fn` / `clone_fn` references from
-/// ARCHIVE-LOCAL fn ids to the ctx FunctionIds the loader allocated
-/// for this module, BEFORE the descriptors are imported.
-///
-/// `import_archive_module_types` / `import_archive_type` copy these
-/// fields VERBATIM — i.e. as ARCHIVE-LOCAL fn ids — and the finalize
-/// pass later remaps the values through its ctx→final table as if
-/// they had been ctx ids all along.  The two id spaces are unrelated,
-/// so on the merge-all path every imported type's drop/clone glue has
-/// ALWAYS dispatched to an arbitrary (id-coincident) function — an
-/// effective no-op that the dense 46K-function table kept benign and
-/// stable.  Pruning compacted the final table and turned the same
-/// stale ids into loud misdispatch (`DropRef` on a span-test local
-/// executing `Signal.fmt` → `Formatter.write_str` on Unit → panic);
-/// the bring-up stopgap cleared both fields (deterministic no-glue).
-///
-/// The proper translation implemented here: `func_id_remap` (from
-/// `register_module_filtered`) is TOTAL over this module's own
-/// function table — id allocation precedes the registration filter —
-/// so an archive-local glue id resolves to exactly the ctx id whose
-/// body the keep-set closure guarantees is merged
-/// (`compute_merge_keep_sets` seeds every descriptor's `drop_fn` /
-/// `clone_fn` — see "Type-glue surface of EVERY imported
-/// descriptor").  Finalize then remaps ctx→final and `DropRef`
-/// executes the REAL glue body.
-///
-/// Fallback: a glue id with NO remap entry references a function
-/// whose body does not live in this module (a cross-module Drop impl
-/// left as a precompile-global sparse id by the bake's per-module
-/// finalize).  There is no ctx binding to route it through — clear
-/// the field so the runtime takes its no-glue default instead of the
-/// id-roulette.
-///
-/// `ProtocolImpl.methods` are left untouched: their consumer
-/// validates by name before dispatching, so stale ids fall through
-/// harmlessly there.  Gated on pruning so the kill-switch path stays
-/// bit-identical.
-///
-/// `VERUM_TRACE_GLUE_REMAP=1` lists every glue rewrite/clear
-/// (entry, type, old→new id, archive-side fn name) for per-type
-/// bisection when activating real glue surfaces a latent drop/clone
-/// body bug.
-fn remap_type_glue_fn_ids(
-    module: &mut VbcModule,
-    func_id_remap: &HashMap<u32, verum_vbc::module::FunctionId>,
-) {
-    let trace = std::env::var("VERUM_TRACE_GLUE_REMAP").is_ok();
-    // Split field borrows: the trace needs `strings` / `functions`
-    // (immutable) while `types` is mutated.
-    let VbcModule {
-        name,
-        strings,
-        types,
-        functions,
-        ..
-    } = module;
-    for ty in types.iter_mut() {
-        let (old_drop, old_clone) = (ty.drop_fn, ty.clone_fn);
-        if old_drop.is_none() && old_clone.is_none() {
-            continue;
-        }
-        ty.drop_fn = old_drop.and_then(|f| func_id_remap.get(&f).map(|fid| fid.0));
-        ty.clone_fn = old_clone.and_then(|f| func_id_remap.get(&f).map(|fid| fid.0));
-        if trace {
-            let fn_name = |fid: Option<u32>| -> &str {
-                fid.and_then(|f| {
-                    functions
-                        .iter()
-                        .find(|d| d.id.0 == f)
-                        .and_then(|d| strings.get(d.name))
-                })
-                .unwrap_or("-")
-            };
-            eprintln!(
-                "[GLUE-REMAP] entry={} type={} drop {:?}→{:?} ({}) clone {:?}→{:?} ({})",
-                name,
-                strings.get(ty.name).unwrap_or("?"),
-                old_drop,
-                ty.drop_fn,
-                fn_name(old_drop),
-                old_clone,
-                ty.clone_fn,
-                fn_name(old_clone),
-            );
-        }
-    }
 }
 
 /// UMBRELLA-MOUNT-PRUNE-1: harvest a decoded module's cross-module
@@ -8464,3 +8322,7 @@ mod formatted_call_harvest_tests {
 #[cfg(test)]
 #[path = "../tests/archive/explicit_generic_params.rs"]
 mod explicit_generic_param_tests;
+
+#[cfg(test)]
+#[path = "../tests/archive/bootstrap_glue.rs"]
+mod bootstrap_glue_tests;

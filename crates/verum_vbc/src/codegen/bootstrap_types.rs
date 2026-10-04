@@ -6,17 +6,13 @@ use crate::types::{TypeDescriptor, TypeId, TypeRef};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use verum_ast::{ItemKind, MountTree, MountTreeKind, Visitor};
 
-fn identity(module: &VbcModule, ty: &TypeDescriptor) -> Option<String> {
+pub(super) fn identity(module: &VbcModule, ty: &TypeDescriptor) -> Option<String> {
     let name = module.strings.get(ty.name)?;
     let owner = ty
         .origin_module
         .and_then(|id| module.strings.get(id))
         .unwrap_or(&module.name);
-    if name.starts_with(&format!("{owner}.")) {
-        Some(name.to_owned())
-    } else {
-        Some(format!("{owner}.{name}"))
-    }
+    Some(crate::module::qualify_module_name(owner, name))
 }
 
 fn type_ids(ty: &TypeRef, ids: &mut Vec<TypeId>) {
@@ -339,6 +335,10 @@ impl VbcCodegen {
             let origin = crate::types::StringId(self.ctx.intern_string_raw(owner));
             if let Some(imported) = self.types.iter_mut().find(|ty| ty.id == local) {
                 imported.origin_module = Some(origin);
+                // Unlike a general archive import, these two fields have
+                // already been translated through the bootstrap registry.
+                imported.drop_fn = ty.drop_fn;
+                imported.clone_fn = ty.clone_fn;
             }
             let params = ty
                 .type_params
@@ -391,6 +391,17 @@ impl VbcCodegen {
     }
 
     fn bootstrap_function_id(&self, module: &VbcModule, id: u32) -> Option<u32> {
+        if let Some((_, name)) = module
+            .external_function_names
+            .iter()
+            .find(|(source, _)| source.0 == id)
+        {
+            return module
+                .strings
+                .get(*name)
+                .and_then(|name| self.ctx.functions.get(name))
+                .map(|info| info.id.0);
+        }
         let function = module
             .functions
             .iter()
@@ -402,12 +413,7 @@ impl VbcCodegen {
             .unwrap_or(&module.name);
         self.ctx
             .functions
-            .get(&format!("{owner}.{name}"))
-            .or_else(|| {
-                name.starts_with(&format!("{owner}."))
-                    .then(|| self.ctx.functions.get(name))
-                    .flatten()
-            })
+            .get(&crate::module::qualify_module_name(owner, name))
             .map(|info| info.id.0)
     }
 }

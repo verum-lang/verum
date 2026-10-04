@@ -4481,7 +4481,30 @@ impl VbcCodegen {
     /// This is used during stdlib compilation to collect functions
     /// from this module for use by dependent modules.
     pub fn export_functions(&self) -> std::collections::HashMap<String, FunctionInfo> {
-        self.ctx.export_functions()
+        let mut functions = self.ctx.export_functions();
+        // Bundled modules retain each body's declaring file. Publish that
+        // exact identity for metadata-only edges (Drop/Clone), whose owner
+        // cannot be recovered from a possibly colliding bare registry key.
+        let by_id: std::collections::HashMap<_, _> = self.ctx.functions.values()
+            .map(|info| (info.id, info))
+            .collect();
+        for function in &self.functions {
+            let descriptor = &function.descriptor;
+            let Some(owner) = descriptor.origin_module
+                .and_then(|id| self.ctx.strings.get(id.0 as usize)) else {
+                continue;
+            };
+            let Some(name) = self.ctx.strings.get(descriptor.name.0 as usize) else {
+                continue;
+            };
+            let info = self.ctx.functions.get(name)
+                .filter(|info| info.id == descriptor.id)
+                .or_else(|| by_id.get(&descriptor.id).copied());
+            if let Some(info) = info {
+                functions.insert(crate::module::qualify_module_name(owner, name), info.clone());
+            }
+        }
+        functions
     }
 
     /// Export this module's record field layouts (type-name → declared
@@ -7345,6 +7368,24 @@ impl VbcCodegen {
         self.archive_func_name_to_fid
             .entry(name.to_string())
             .or_insert(fid);
+    }
+
+    /// Record both the emitted spelling and the declaring file's canonical
+    /// spelling before archive bodies or implicit glue are merged.
+    pub fn record_archive_function_descriptor(
+        &mut self,
+        module: &crate::module::VbcModule,
+        function: &crate::module::FunctionDescriptor,
+        id: FunctionId,
+    ) {
+        if let Some(name) = module.strings.get(function.name) {
+            self.record_archive_function_name(name, id);
+            let owner = function.origin_module
+                .and_then(|id| module.strings.get(id))
+                .unwrap_or(&module.name);
+            let canonical = crate::module::qualify_module_name(owner, name);
+            self.record_archive_function_name(&canonical, id);
+        }
     }
 
     /// Read-side twin of [`Self::record_archive_function_name`].
@@ -24731,6 +24772,19 @@ impl VbcCodegen {
             }
         }
 
+        // Glue is an executable dependency even if no Call instruction names
+        // it. Its codegen-global identity uses the same named external carrier.
+        for ty in &self.types {
+            for fid in [ty.drop_fn, ty.clone_fn].into_iter().flatten() {
+                if !func_id_remap.contains_key(&fid)
+                    && fid < EXTERN_SENTINEL_THRESHOLD
+                    && external_seen.insert(fid)
+                {
+                    external_pending.push(fid);
+                }
+            }
+        }
+
         // **XMOD-CALL-ID-BAND-1 (fundamental)** — re-home every plain
         // cross-module call id into a RESERVED band so the emitted
         // bytecode can never confuse a cross-module reference with a
@@ -24843,6 +24897,21 @@ impl VbcCodegen {
                 })
                 .collect()
         };
+        // The type pass above preserves local glue and clears unresolved raw
+        // numbers. Restore only externally named targets in the disjoint band.
+        for ty in &mut module.types {
+            if let Some(source) = self.type_by_id(ty.id) {
+                if ty.drop_fn.is_none() {
+                    ty.drop_fn = source.drop_fn.and_then(|id| xmod_band.get(&id).copied())
+                        .filter(|id| !crate::stub_ranges::is_remap_poison(*id));
+                }
+                if ty.clone_fn.is_none() {
+                    ty.clone_fn = source.clone_fn.and_then(|id| xmod_band.get(&id).copied())
+                        .filter(|id| !crate::stub_ranges::is_remap_poison(*id));
+                }
+            }
+        }
+
         if !nameless_externals.is_empty() {
             tracing::error!(
                 target: "verum_vbc::codegen::external_funcs",
@@ -25678,8 +25747,11 @@ impl VbcCodegen {
             Some(s) => s.to_string(),
             None => return,
         };
-        let name_str = module_prefix
-            .and_then(|owner| name_str.strip_prefix(&format!("{owner}.")))
+        let source_owner = ty.origin_module.and_then(|id| archive_strings.get(id));
+        let owner = source_owner.or(module_prefix).filter(|owner| !owner.is_empty());
+        let qualified_key = owner.map(|owner| crate::module::qualify_module_name(owner, &name_str));
+        let name_str = owner.zip(qualified_key.as_ref())
+            .and_then(|(owner, name)| name.strip_prefix(&format!("{owner}.")))
             .unwrap_or(&name_str).to_owned();
         // REFINE-FIELD-DYNAMIC-BYPASS-1 phase 2: hydrate field
         // refinements on THIS import path too — the lazy loader
@@ -25720,8 +25792,7 @@ impl VbcCodegen {
         // unrelated type's variant ALSO has tag 0/1
         // (`AliasError.EmptyWeights` vs `Maybe.None`,
         // `AliasError.NonFiniteWeight` vs `Maybe.Some`).
-        let qualified_key: Option<String> = module_prefix
-            .filter(|p| !p.is_empty())
+        let bundle_key = module_prefix.filter(|p| !p.is_empty())
             .map(|p| format!("{}.{}", p, name_str));
         // Idempotence: this exact qualified type was already imported
         // (repeat archive merges) — nothing to do.
@@ -25729,6 +25800,9 @@ impl VbcCodegen {
             && let Some(&qid) = self.type_name_to_id.get(q)
             && self.type_by_id(qid).is_some()
         {
+            if let Some(bundle_key) = bundle_key {
+                self.type_name_to_id.entry(bundle_key).or_insert(qid);
+            }
             return;
         }
         // `owns_simple_key`: whether THIS import may claim / reuse the
@@ -25780,6 +25854,9 @@ impl VbcCodegen {
         // The qualified key ALWAYS registers (collision-free namespace).
         if let Some(q) = qualified_key.clone() {
             self.type_name_to_id.entry(q).or_insert(new_id);
+        }
+        if let Some(bundle_key) = bundle_key {
+            self.type_name_to_id.entry(bundle_key).or_insert(new_id);
         }
         // LOCAL-TYPE-SHADOW-1 carried fact — THIS is the path the lazy
         // loader reaches most stdlib types through (see the
@@ -25927,8 +26004,10 @@ impl VbcCodegen {
             variants: new_variants,
             size: ty.size,
             alignment: ty.alignment,
-            drop_fn: ty.drop_fn,
-            clone_fn: ty.clone_fn,
+            // Body IDs belong to the source archive. The common body merge
+            // installs local/named glue only after resolving that ownership.
+            drop_fn: None,
+            clone_fn: None,
             protocols: new_protocols,
             visibility: ty.visibility,
             alias_target: ty.alias_target.clone(),
@@ -26555,9 +26634,6 @@ impl VbcCodegen {
         func_id_remap: &std::collections::HashMap<u32, crate::module::FunctionId>,
     ) -> usize {
         use std::collections::HashMap;
-        if func_id_remap.is_empty() {
-            return 0;
-        }
 
         // **Archive-wide name index population** (task #12 fix).
         //
@@ -26575,9 +26651,7 @@ impl VbcCodegen {
                 && let Some(name) = archive_module.strings.get(fn_desc.name)
                 && !name.is_empty()
             {
-                self.archive_func_name_to_fid
-                    .entry(name.to_string())
-                    .or_insert(user_fid);
+                self.record_archive_function_descriptor(archive_module, fn_desc, user_fid);
                 // **task #17/#39 + #10/§3.3 close-out** — propagate
                 // `__tls_init_*` synthetic functions from the archive's
                 // codegen into the user-side `static_init_functions`
@@ -26639,9 +26713,11 @@ impl VbcCodegen {
                 Some(s) => s,
                 None => continue,
             };
-            let qualified_tid = (!archive_module.name.is_empty())
-                .then(|| format!("{}.{}", archive_module.name, archive_name))
-                .and_then(|q| self.type_name_to_id.get(&q).copied());
+            let qualified_tid = bootstrap_types::identity(archive_module, ty)
+                .and_then(|key| self.type_name_to_id.get(&key).copied())
+                .or_else(|| (!archive_module.name.is_empty())
+                    .then(|| format!("{}.{}", archive_module.name, archive_name))
+                    .and_then(|key| self.type_name_to_id.get(&key).copied()));
             // TYPE-REMAP-QUALIFIED-ONLY-1 (#45): the exact per-module
             // qualified key is authoritative.  When it misses, the bare
             // simple name is a safe fallback ONLY while it is
@@ -26939,6 +27015,41 @@ impl VbcCodegen {
             archive_func_by_name: &archive_func_by_name_snapshot,
             resolved_names: std::cell::RefCell::new(std::collections::HashMap::new()),
         };
+
+        // Type glue has the same source id space as this archive's calls.
+        // Restore it only on the exact source nominal, including dependency
+        // copies; never update a same-leaf local declaration or sibling type.
+        for source in &archive_module.types {
+            let Some(key) = bootstrap_types::identity(archive_module, source) else {
+                continue;
+            };
+            let Some(&local) = self.type_name_to_id.get(&key) else {
+                continue;
+            };
+            if !self.archive_claimed_type_ids.contains(&local.0) {
+                continue;
+            }
+            let resolve = |id: u32| {
+                if let Some(name) = archive_external_id_to_name.get(&id) {
+                    ctx_func_by_name.get(name).or_else(|| archive_func_by_name_snapshot.get(name))
+                        .map(|id| id.0)
+                        .filter(|id| !crate::stub_ranges::is_stub_id(*id)
+                            && !crate::stub_ranges::in_xmod_call_band(*id))
+                } else {
+                    func_id_remap.get(&id).map(|id| id.0)
+                }
+            };
+            let drop_fn = source.drop_fn.and_then(resolve);
+            let clone_fn = source.clone_fn.and_then(resolve);
+            if let Some(target) = self.types.iter_mut().find(|ty| ty.id == local) {
+                if drop_fn.is_some() {
+                    target.drop_fn = drop_fn;
+                }
+                if clone_fn.is_some() {
+                    target.clone_fn = clone_fn;
+                }
+            }
+        }
 
         // **T0378 producer-side remap: ATTEMPTED AND REVERTED (T0277,
         // 2026-08-01).** `pi.methods` carries archive-local FunctionIds
