@@ -12001,10 +12001,20 @@ impl VbcCodegen {
         (!proto.is_empty()).then_some(proto)
     }
 
+    /// Method owners are pointee types; reference qualifiers describe how the
+    /// value is carried, not a separate nominal implementation. This changes
+    /// only lookup identity and never emits an explicit or user-defined deref.
+    fn method_receiver_type_name(mut name: &str) -> &str {
+        while let Some(pointee) = reference_pointee_type_name(name) {
+            name = pointee;
+        }
+        name
+    }
+
     /// Retain method identity when a nominal has both qualified and short
     /// registry keys. A short key is usable only for the same registered type.
     fn registered_receiver_method(&self, type_name: &str, method: &str) -> Option<String> {
-        let base = Self::strip_generic_args(type_name);
+        let base = Self::strip_generic_args(Self::method_receiver_type_name(type_name));
         if self.ctx.generic_type_params.contains(base) {
             return None;
         }
@@ -12052,6 +12062,7 @@ impl VbcCodegen {
         type_name: &str,
     ) -> verum_common::Maybe<verum_common::Text> {
         use verum_common::{Maybe, Text};
+        let type_name = Self::method_receiver_type_name(type_name);
         let Some(key) = self.registered_receiver_method(type_name, "deref") else {
             return Maybe::None;
         };
@@ -15208,7 +15219,9 @@ impl VbcCodegen {
                     // answered.
                     if let Some(declared) = self.ctx.variable_type_names.get(&*ident.name)
                         && let Some(width) =
-                            crate::prim_mangle::PrimWidth::from_type_name(declared.as_str())
+                            crate::prim_mangle::PrimWidth::from_type_name(
+                                Self::method_receiver_type_name(declared.as_str()),
+                            )
                     {
                         crate::prim_mangle::dispatch_name(width, &method.name)
                     } else {
@@ -15247,6 +15260,7 @@ impl VbcCodegen {
                             // This enables correct method dispatch for user-defined struct types
                             // like MapFlags and MemProt which both have to_unix_flags() methods.
                             if let Some(type_name) = self.ctx.variable_type_names.get(&var_name) {
+                                let type_name = Self::method_receiver_type_name(type_name);
                                 if std::env::var("VERUM_TRACE_DYN").is_ok() {
                                     eprintln!("[dyn-detect] var={} type_name={:?} method={}", var_name, type_name, method.name);
                                 }
@@ -15267,7 +15281,7 @@ impl VbcCodegen {
                                 // dispatch erasure).
                                 if let Some(proto) = Self::dyn_protocol_of(type_name) {
                                     format!("dyn:{}.{}", proto, method.name)
-                                } else if self.ctx.generic_type_params.contains(type_name.as_str()) {
+                                } else if self.ctx.generic_type_params.contains(type_name) {
                                     // Generic type parameter — runtime
                                     // dispatch routes by receiver kind.
                                     //
@@ -15899,6 +15913,12 @@ impl VbcCodegen {
             } else {
                 effective_method_name
             };
+
+        // T1522: reference-carrying match results and field expressions can
+        // retain `&T` even when their runtime receiver is already the value.
+        // Keep the selected method and normalize only its nominal owner.
+        let effective_method_name =
+            Self::method_receiver_type_name(&effective_method_name).to_string();
 
         // Normalize slice-type prefixes: `[T].method` is the natural name
         // produced by `extract_type_name_from_ast` for field/variable types
@@ -45887,6 +45907,31 @@ impl FreeVarAnalyzer {
     }
 }
 
+/// Remove exactly one reference layer from an AST-rendered type name.
+/// Operator lowering uses one layer; nominal method lookup may peel more.
+fn reference_pointee_type_name(t: &str) -> Option<&str> {
+    let t = t.trim();
+    // Strip the reference prefix. The order matters: longer prefixes
+    // (e.g. `&unsafe mut`) must be tested before shorter ones
+    // (`&unsafe`, `&mut`, `&`).
+    let pointee = if let Some(rest) = t.strip_prefix("&unsafe mut ") {
+        rest
+    } else if let Some(rest) = t.strip_prefix("&unsafe ") {
+        rest
+    } else if let Some(rest) = t.strip_prefix("&checked mut ") {
+        rest
+    } else if let Some(rest) = t.strip_prefix("&checked ") {
+        rest
+    } else if let Some(rest) = t.strip_prefix("&mut ") {
+        rest
+    } else if let Some(rest) = t.strip_prefix("&") {
+        rest
+    } else {
+        return None;
+    };
+    Some(pointee.trim())
+}
+
 /// Map a typed-reference's pointee name to the matching typed-deref
 /// `(SystemSubOpcode, size)` pair. Returns `Some` when the pointee is a
 /// C primitive smaller than 8 bytes — signals that `*ptr` should emit
@@ -45911,26 +45956,7 @@ impl FreeVarAnalyzer {
 /// an extremely rare FFI shape (most C `float` returns come back via
 /// register, not pointer).
 fn typed_primitive_pointee_deref(t: &str) -> Option<(crate::instruction::MemSubOpcode, u8)> {
-    let t = t.trim();
-    // Strip the reference prefix. The order matters: longer prefixes
-    // (e.g. `&unsafe mut`) must be tested before shorter ones
-    // (`&unsafe`, `&mut`, `&`).
-    let pointee = if let Some(rest) = t.strip_prefix("&unsafe mut ") {
-        rest
-    } else if let Some(rest) = t.strip_prefix("&unsafe ") {
-        rest
-    } else if let Some(rest) = t.strip_prefix("&checked mut ") {
-        rest
-    } else if let Some(rest) = t.strip_prefix("&checked ") {
-        rest
-    } else if let Some(rest) = t.strip_prefix("&mut ") {
-        rest
-    } else if let Some(rest) = t.strip_prefix("&") {
-        rest
-    } else {
-        return None;
-    };
-    let pointee = pointee.trim();
+    let pointee = reference_pointee_type_name(t)?;
     match pointee {
         // Signed C primitives — sign-extend.
         "Int8" | "i8" => Some((crate::instruction::MemSubOpcode::DerefRawSigned, 1)),
