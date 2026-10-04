@@ -510,3 +510,179 @@ implement Payload { fn probe(self) -> Int { let f = |x: Self| -> Self { x }; 0 }
     assert_eq!(f.params[1].type_ref, nominal(&module, "Payload"));
     assert_eq!(f.return_type, nominal(&module, "Payload"));
 }
+
+#[test]
+fn callable_identity_survives_the_following_generic_method() {
+    let module = compile(
+        r#"
+type Payload is { value: Int };
+type Stage<T> is { value: T };
+type Wrapped<I, F> is { owner: I, callback: F };
+implement<T> Stage<T> {
+    fn transform<R, F: fn(T) -> R>(self, f: F) -> Wrapped<Self, F> { Wrapped { owner: self, callback: f } }
+}
+implement<I, F> Wrapped<I, F> { fn finish<C>(self) -> C { C.default() } }
+fn probe(stage: Stage<Payload>) -> Int { stage.transform(|x| x).finish<Int>() }
+"#,
+    );
+    let payload = nominal(&module, "Payload");
+    let TypeRef::Concrete(stage) = nominal(&module, "Stage") else {
+        panic!("stage")
+    };
+    let expected = vec![
+        TypeRef::Instantiated {
+            base: stage,
+            args: vec![payload.clone()],
+        },
+        TypeRef::Function {
+            params: vec![payload.clone()],
+            return_type: Box::new(payload),
+            contexts: Default::default(),
+        },
+        TypeRef::Concrete(TypeId::INT),
+    ];
+    assert_eq!(
+        method_calls(&module, "Wrapped.finish").as_slice(),
+        &[expected]
+    );
+}
+
+#[test]
+fn callable_identity_survives_a_binding_and_multiple_method_results() {
+    let module = compile(
+        r#"
+type Payload is { value: Int };
+type Stage<T> is { value: T };
+type Wrapped<I, F> is { owner: I, callback: F };
+implement<T> Stage<T> {
+    fn transform<R, F: fn(T) -> R>(self, f: F) -> Wrapped<Self, F> { Wrapped { owner: self, callback: f } }
+}
+implement<I, F> Wrapped<I, F> {
+    fn keep(self) -> Self { self }
+    fn finish<C>(self) -> C { C.default() }
+}
+fn probe(stage: Stage<Payload>) -> Int {
+    let mapped = stage.transform(|x| x).keep();
+    mapped.finish<Int>()
+}
+"#,
+    );
+    let payload = nominal(&module, "Payload");
+    let expected = TypeRef::Function {
+        params: vec![payload.clone()],
+        return_type: Box::new(payload),
+        contexts: Default::default(),
+    };
+    assert_eq!(method_calls(&module, "Wrapped.keep")[0][1], expected);
+    assert_eq!(method_calls(&module, "Wrapped.finish")[0][1], expected);
+}
+
+#[test]
+fn unknown_callable_in_chain_cannot_bind_an_unrelated_nominal_f() {
+    let module = compile(
+        r#"
+type F is { decoy: Int };
+type Stage<T> is { value: T };
+type Wrapped<I, F> is { owner: I, callback: F };
+implement<T> Stage<T> {
+    fn transform<F>(self, f: F) -> Wrapped<Self, F> { Wrapped { owner: self, callback: f } }
+}
+implement<I, F> Wrapped<I, F> { fn keep(self) -> Self { self } fn finish<C>(self) -> C { C.default() } }
+fn probe(stage: Stage<Int>) -> Int { stage.transform(|x| x).keep().keep().finish<Int>() }
+"#,
+    );
+    assert_eq!(
+        method_calls(&module, "Wrapped.finish")[0][1],
+        TypeRef::Generic(verum_vbc::types::TypeParamId(1))
+    );
+}
+
+#[test]
+fn method_shadow_callable_keeps_its_owner_binding_in_the_result() {
+    let module = compile(
+        r#"
+type Payload is { value: Int };
+type Stage<F> is { value: F };
+type Wrapped<I, F> is { owner: I, callback: F };
+implement<F> Stage<F> {
+    fn transform<F: fn(Payload) -> Payload>(self, f: F) -> Wrapped<Self, F> { Wrapped { owner: self, callback: f } }
+}
+implement<I, F> Wrapped<I, F> { fn finish<C>(self) -> C { C.default() } }
+fn probe(stage: Stage<Int>) -> Int { stage.transform(|x| x).finish<Int>() }
+"#,
+    );
+    let payload = nominal(&module, "Payload");
+    let TypeRef::Concrete(stage) = nominal(&module, "Stage") else {
+        panic!("stage")
+    };
+    assert_eq!(
+        method_calls(&module, "Wrapped.finish")[0],
+        vec![
+            TypeRef::Instantiated {
+                base: stage,
+                args: vec![TypeRef::Concrete(TypeId::INT)]
+            },
+            TypeRef::Function {
+                params: vec![payload.clone()],
+                return_type: Box::new(payload),
+                contexts: Default::default()
+            },
+            TypeRef::Concrete(TypeId::INT),
+        ]
+    );
+}
+
+#[test]
+fn static_callable_result_uses_parameter_zero_in_the_following_chain() {
+    let module = compile(
+        r#"
+type Payload is { value: Int };
+type Factory is { value: Int };
+type Wrapped<I, F> is { owner: I, callback: F };
+implement Factory {
+    fn make<F: fn(Payload) -> Payload>(f: F) -> Wrapped<Payload, F> {
+        Wrapped { owner: Payload { value: 7 }, callback: f }
+    }
+}
+implement<I, F> Wrapped<I, F> { fn finish<C>(self) -> C { C.default() } }
+fn probe() -> Int { Factory.make(|x| x).finish<Int>() }
+"#,
+    );
+    let payload = nominal(&module, "Payload");
+    assert_eq!(
+        method_calls(&module, "Wrapped.finish")[0],
+        vec![
+            payload.clone(),
+            TypeRef::Function {
+                params: vec![payload.clone()],
+                return_type: Box::new(payload),
+                contexts: Default::default()
+            },
+            TypeRef::Concrete(TypeId::INT),
+        ]
+    );
+}
+
+#[test]
+fn overlong_explicit_roster_does_not_partially_certify_a_callable_result() {
+    // Public VBC lowering can be invoked without the source checker. An
+    // invalid explicit roster must not become a partial semantic proof here.
+    let module = compile(
+        r#"
+type Payload is { value: Int };
+type Stage<T> is { value: T };
+type Wrapped<I, F> is { owner: I, callback: F };
+implement<T> Stage<T> {
+    fn transform<R, F: fn(T) -> R>(self, f: F) -> Wrapped<Self, F> { Wrapped { owner: self, callback: f } }
+}
+implement<I, F> Wrapped<I, F> { fn finish<C>(self) -> C { C.default() } }
+fn probe(stage: Stage<Payload>) -> Int {
+    stage.transform<Payload, _, Bool>(|x| x).finish<Int>()
+}
+"#,
+    );
+    assert_eq!(
+        method_calls(&module, "Wrapped.finish")[0][1],
+        TypeRef::Generic(verum_vbc::types::TypeParamId(1))
+    );
+}

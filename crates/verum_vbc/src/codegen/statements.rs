@@ -1498,9 +1498,9 @@ impl VbcCodegen {
             self.ctx.emit(Instruction::LoadUnit { dst: reg });
             Some(reg)
         };
-        // A block's result type becomes available while compiling its
-        // locals. Consume that carried fact after the initializer, rather
-        // than keeping a pre-compilation guess from an outer binding.
+        // Block locals and callable bodies establish result types during
+        // compilation. Consume those facts after the initializer, rather
+        // than retaining a pre-compilation guess or generic placeholder.
         if ty.is_none()
             && let verum_ast::PatternKind::Ident { name, .. } = &pattern.kind
             && let Some(expr) = value
@@ -1514,7 +1514,7 @@ impl VbcCodegen {
                 | verum_ast::ExprKind::Unsafe(_)
                 | verum_ast::ExprKind::If { .. }
                 | verum_ast::ExprKind::Match { .. }
-            ) {
+            ) || self.callable_method_result_type(inner).is_some() {
                 let result_type = self.extract_expr_type_name(expr)
                     .or_else(|| self.infer_expr_type_name(expr));
                 if let Some(result_type) = result_type {

@@ -55,3 +55,14 @@ fn callable_owner_structural_arguments_keep_declared_slot_ids() {
         })
     );
 }
+
+#[test]
+fn function_name_boundary_rejects_unsupported_contexts_and_trailing_syntax() {
+    let codegen = codegen();
+    for name in [
+        "fn(Payload) -> Payload using [Ctx]",
+        "fn(Payload) -> Payload trailing",
+    ] {
+        assert!(codegen.type_name_to_type_ref_mono(name).is_none(), "{name}");
+    }
+}

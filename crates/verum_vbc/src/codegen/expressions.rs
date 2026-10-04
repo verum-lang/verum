@@ -8573,6 +8573,84 @@ impl VbcCodegen {
                 .and_then(|parameters| parameters.get(index)).copied().flatten())
     }
 
+    fn bind_compiled_callable_argument(
+        &self,
+        func_id: u32,
+        parameter: usize,
+        declared_type: &crate::types::TypeRef,
+        argument: &Expr,
+        bindings: &mut std::collections::BTreeMap<u32, crate::types::TypeRef>,
+    ) -> bool {
+        let Some(signature) = self.compiled_callable_signature(argument) else { return false };
+        bind_generic_free(declared_type, signature, bindings);
+        if let Some(id) = self.parameter_generic_id(func_id, parameter) {
+            bindings.entry(u32::from(id.0)).or_insert_with(|| signature.clone());
+        }
+        true
+    }
+
+    /// Instantiate a method result from proven callable arguments, or from a
+    /// receiver that already carries such a result. Keep TypeRefs structural
+    /// across chained calls; textual method names select declarations only.
+    pub(super) fn callable_method_result_type(&self, expr: &Expr) -> Option<crate::types::TypeRef> {
+        use crate::types::TypeRef;
+        let ExprKind::MethodCall { receiver, method, type_args, args } = &expr.kind else {
+            if let ExprKind::Paren(inner) = &expr.kind { return self.callable_method_result_type(inner); }
+            return None;
+        };
+        let carried_receiver = self.callable_method_result_type(receiver);
+        if carried_receiver.is_none() && !args.iter().any(|arg| {
+            let mut arg = arg;
+            while let ExprKind::Paren(inner) = &arg.kind { arg = inner; }
+            matches!(&arg.kind, ExprKind::Closure { .. })
+        }) {
+            return None;
+        }
+        let receiver_name = match carried_receiver.as_ref() {
+            Some(ty) => self.callable_type_name(ty).map(|name| name.to_string())
+                .or_else(|| self.type_ref_to_field_name(ty))?,
+            None => self.declared_callable_receiver_name(receiver)?,
+        };
+        let mut owner = Self::method_receiver_type_name(&receiver_name).to_string();
+        for _ in 0..self.method_receiver_deref_count(&owner, method.name.as_str()) {
+            owner = self.user_deref_target_type_name(&owner)?.to_string();
+        }
+        let key = self.registered_receiver_method(&owner, method.name.as_str())?;
+        let info = self.ctx.lookup_qualified_function(&key)?;
+        // Partial explicit lists are valid inference inputs. Surplus arguments
+        // must not be truncated into a seemingly valid result instantiation.
+        if type_args.len() > info.explicit_type_param_ids.len() { return None; }
+
+        let local = self.functions.iter().find(|function| function.descriptor.id == info.id).map(|function| &function.descriptor);
+        let result = local.map(|descriptor| &descriptor.return_type).or(info.return_type.as_ref())?;
+        let owner_id = self.nominal_type_id(Self::strip_generic_args(&owner))?;
+        let owner_descriptor = self.type_by_id(owner_id)?;
+        let mut substitution = match carried_receiver.as_ref() {
+            Some(TypeRef::Instantiated { base, args }) if *base == owner_id && args.len() == owner_descriptor.type_params.len() =>
+                crate::mono::TypeSubstitution::new(&owner_descriptor.type_params, args),
+            _ => self.callable_owner_substitution(&owner)?,
+        };
+        let mut bindings: std::collections::BTreeMap<u32, TypeRef> = info.type_param_ids.iter()
+            .filter_map(|id| substitution.get(*id).map(|ty| (u32::from(id.0), ty.clone()))).collect();
+        let receiver_slots = usize::from(info.param_names.first().is_some_and(|name| name == "self"));
+        for (index, arg) in args.iter().enumerate() {
+            let index = index + receiver_slots;
+            let parameter = local.and_then(|descriptor| descriptor.params.get(index).map(|p| &p.type_ref))
+                .or_else(|| self.ctx.archive_fn_param_types.get(&info.id.0).and_then(|params| params.get(index)));
+            if let Some(parameter) = parameter {
+                self.bind_compiled_callable_argument(info.id.0, index, parameter, arg, &mut bindings);
+            }
+        }
+        for (id, ty) in bindings { substitution.bind(crate::types::TypeParamId(id as u16), ty); }
+        for (arg, id) in type_args.iter().zip(&info.explicit_type_param_ids) {
+            if let (verum_ast::ty::GenericArg::Type(ty), Some(id)) = (arg, id)
+                && let Some(ty) = self.explicit_type_witness(ty, None) {
+                substitution.bind(*id, ty);
+            }
+        }
+        Some(substitution.apply(result))
+    }
+
     /// Record a generic-function instantiation discovered at a call site.
     /// Looks up the callee's descriptor by `func_id`, and if it is generic
     /// (any parameter or the return type mentions a type parameter), binds each
@@ -8752,14 +8830,14 @@ impl VbcCodegen {
                 while let ExprKind::Paren(inner) = &unwrapped.kind { unwrapped = inner; }
                 if matches!(&unwrapped.kind, ExprKind::Closure { .. }) {
                     let declared = self.parameter_generic_id(func_id, i);
-                    if let Some(signature) = self.compiled_callable_signature(unwrapped) {
-                        bind_generic(ptr, signature, &mut bindings);
-                        if let Some(id) = declared {
-                            bindings.entry(u32::from(id.0)).or_insert_with(|| signature.clone());
-                        }
-                    } else if let Some(id) = declared {
+                    if !self.bind_compiled_callable_argument(func_id, i, ptr, unwrapped, &mut bindings)
+                        && let Some(id) = declared {
                         unresolved_callables.insert(u32::from(id.0));
                     }
+                    continue;
+                }
+                if let Some(carried) = self.callable_method_result_type(arg) {
+                    bind_generic(ptr, &carried, &mut bindings);
                     continue;
                 }
                 if let Some(concrete) = self
@@ -9063,6 +9141,14 @@ impl VbcCodegen {
     /// Returns None when the base name is unknown or a bare type parameter.
     fn type_name_to_type_ref_mono(&self, name: &str) -> Option<crate::types::TypeRef> {
         let name = name.trim();
+        if name.starts_with("fn(") || name.starts_with("fn (") {
+            let ty = verum_fast_parser::Parser::new(name).parse_type().ok()?;
+            if !matches!(&ty.kind, verum_ast::ty::TypeKind::Function { contexts, calling_convention, .. }
+                if contexts.requirements.is_empty() && calling_convention.is_none()) {
+                return None;
+            }
+            return self.explicit_type_witness(&ty, None);
+        }
         // CONST-GENERIC-VALUE-CARRY-1: a const-generic ARG renders as its
         // integer literal (`StackAllocator<256>` → arg "256") — parse it
         // back as the value form so receiver-name-derived witnesses carry
@@ -17177,6 +17263,10 @@ impl VbcCodegen {
     /// Infer a chain one receiver at a time, retaining each declared result's
     /// generic arguments and the identity of any resolved Deref owner.
     fn infer_method_chain_return_type(&self, expr: &Expr) -> Option<String> {
+        if let Some(ty) = self.callable_method_result_type(expr) {
+            return self.callable_type_name(&ty).map(|name| name.to_string())
+                .or_else(|| self.type_ref_to_field_name(&ty));
+        }
         match &expr.kind {
             ExprKind::MethodCall {
                 receiver, method, type_args, ..
@@ -32059,6 +32149,17 @@ impl VbcCodegen {
         Some(substitution)
     }
 
+    fn declared_callable_receiver_name(&self, receiver: &Expr) -> Option<String> {
+        self.extract_expr_type_name(receiver).or_else(|| {
+            let ExprKind::Path(path) = &receiver.kind else { return None };
+            let name = path.to_string().replace("::", ".");
+            if self.ctx.lookup_var(&name).is_some() || self.ctx.generic_type_params.contains(&name) {
+                return None;
+            }
+            self.nominal_type_id(&name).map(|_| name)
+        })
+    }
+
     /// Contextual lambda parameters come from the exact resolved declaration.
     /// Receiver and explicit generic arguments are applied before hints cross
     /// the closure boundary; unresolved slots supply no invented type.
@@ -32070,14 +32171,7 @@ impl VbcCodegen {
         explicit: &verum_common::List<verum_ast::ty::GenericArg>,
     ) -> Option<verum_common::List<Option<crate::types::TypeRef>>> {
         use crate::types::TypeRef;
-        let receiver_name = self.extract_expr_type_name(receiver).or_else(|| {
-            let ExprKind::Path(path) = &receiver.kind else { return None };
-            let name = path.to_string().replace("::", ".");
-            if self.ctx.lookup_var(&name).is_some() || self.ctx.generic_type_params.contains(&name) {
-                return None;
-            }
-            self.nominal_type_id(&name).map(|_| name)
-        })?;
+        let receiver_name = self.declared_callable_receiver_name(receiver)?;
         let mut owner = Self::method_receiver_type_name(&receiver_name).to_string();
         for _ in 0..self.method_receiver_deref_count(&owner, method) {
             owner = self.user_deref_target_type_name(&owner)?.to_string();
