@@ -132,6 +132,11 @@ once. Aggregate/variant transfer remains a separate required step before the
 MutexGuard acceptance can pass. No new surface `move` syntax is needed to
 carry the already existing consuming contexts.
 
+The proposed [declaration-owned resource contract](resource-mode-contract.md)
+separates usage discipline from Copy/Clone capability and cleanup obligation.
+It records source-level qualified-sibling and alternate-parser failures to fix
+before versioning archive metadata or enabling native destruction.
+
 ## Reuse the CBGR pipeline, after supplying exact events
 
 The existing pipeline is the appropriate integration point, but its
