@@ -25017,7 +25017,7 @@ fn lower_text_extended<'ctx>(
                 ctx.mark_text_register(dst);
                 return Ok(());
             }
-            // Prefer verum_int_to_text (LLVM IR, snprintf-based) — compiled Text.from_int has broken push_byte.
+            // Prefer verum_int_to_text (LLVM IR, internal integer formatter) — compiled Text.from_int has broken push_byte.
             let fn_type = i64_ty.fn_type(&[i64_ty.into()], false);
         let to_text_fn = super::error::get_or_declare_function(module, "verum_int_to_text", fn_type);
             let coerced = coerce_value(
@@ -25127,7 +25127,7 @@ fn lower_text_extended<'ctx>(
             let ptr_ty = ctx.types().ptr_type();
             let i64_ty = ctx.types().i64_type();
             let f64_ty = ctx.types().f64_type();
-            // task #36: use the C snprintf-based `verum_float_to_text` (the same path
+            // task #36: use the LLVM IR `verum_float_to_text` helper (the same path
             // `lower_to_string` takes), NOT the compiled `Text.from_float` — under AOT
             // the latter truncates a float to its integer part (e.g. 3.5 → "3"),
             // which corrupted a typed f-string interpolation of a Float value. as_f64
@@ -46580,7 +46580,8 @@ fn lower_to_string<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, dst: Reg, src: Reg
         return Ok(());
     }
 
-    // Float → Text: prefer verum_float_to_text (emitted as LLVM IR, uses snprintf).
+    // Float → Text: use verum_float_to_text and its internal f64 formatter.
+    // The formatter's numerical correctness boundary is tracked by T1582.
     if ctx.is_float_register(src.0) {
         let fn_type = i64_type.fn_type(&[f64_type.into()], false);
         let text_from_float_fn = super::error::get_or_declare_function(module, "verum_float_to_text", fn_type);
@@ -46699,7 +46700,7 @@ fn lower_to_string<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, dst: Reg, src: Reg
         return Ok(());
     }
 
-    // Integer → Text: prefer verum_int_to_text (emitted as LLVM IR, uses snprintf).
+    // Integer → Text: use verum_int_to_text and its internal decimal formatter.
     // The compiled Text.from_int from text.vr has broken push_byte in AOT,
     // so we use the direct IR implementation which is reliable.
     let fn_type = i64_type.fn_type(&[i64_type.into()], false);

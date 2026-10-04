@@ -1,155 +1,170 @@
-# No-libc Architecture Rule
+# No-libc AOT and host-tool dependency rules
 
-**Status: load-bearing architectural invariant**.  Per user directive
-2026-05-01: «лучше вообще удалить весь код имеющий отношение к libc —
-чтобы не было путаницы и чётко прописать что interpreter+aot у нас не
-должен использовать libc».
+**Required contracts; implementation audit updated 2026-10-04 (T1585).**
+The strict no-libc requirement applies to **programs compiled AOT by Verum**,
+including their standard-library/runtime code and emitted libraries or object
+files. It excludes dynamically and statically linked libc implementations,
+subject to the documented macOS system-ABI boundary below.
 
-## The rule
+The **Verum CLI and its hosted interpreter** have a separate distribution
+requirement: they must run on a clean installation of each supported OS
+baseline without the user installing extra runtime libraries. They may use
+that OS's standard libc and system libraries. Host dependencies do not become
+permitted dependencies of generated AOT programs. Conversely, a host use of
+Rust `std` or libc is not itself an AOT no-libc violation.
 
-Verum's two execution paths — the **VBC interpreter** (Tier 0) and
-the **AOT-compiled binary** (Tier 1) — MUST NOT call into libc.
-This applies to every artefact the user runs — `verum run` (Tier 0
-interpreter), `verum build` + execution of the produced `.exe`
-(Tier 1 AOT), and any shared library / object file emitted by the
-codegen pipeline.
+Neither requirement is fully verified today. The audit below separates AOT
+implementation gaps from host packaging and OS compatibility gaps.
 
-## Per-platform replacement strategy
+## The AOT rule
 
-| Target  | Replacement for libc                                |
-|---------|-----------------------------------------------------|
-| Linux   | Direct syscalls via `syscall` / `svc #0` instruction. |
-| macOS   | libSystem.dylib (Apple's required system interface; not "libc" in glibc/musl sense — Apple prohibits direct syscalls and `libSystem` is the minimum boundary). |
-| Windows | `kernel32.dll` + `ntdll.dll` (no MSVC CRT, no UCRT). |
-| FreeBSD | Direct syscalls via `int 0x80` / `syscall`.         |
-| Embedded| Bare-metal — no OS dependencies at all.             |
+* Linux and FreeBSD runtime services use the supported kernel ABI directly.
+  Depending on glibc, musl, their wrappers, or a statically linked copy of
+  either violates the AOT contract.
+* macOS uses the supported system ABI through `libSystem`. This is the
+  documented platform exception to the AOT rule. It does not allow Homebrew
+  dependencies in generated programs or claim libSystem contains no C APIs.
+* Windows uses the declared OS boundary (`kernel32.dll` and `ntdll.dll`)
+  without MSVC CRT or UCRT. Additional OS imports require an explicit
+  capability/platform decision; they are not silently covered by this pair.
+* Embedded targets use their specified bare-metal facilities.
+* Explicit application FFI dependencies must be declared and audited as such.
+  An interoperability example linking a foreign library is not evidence that
+  the Verum runtime requires that library, or a no-libc conformance sample.
 
-The macOS and embedded paths are *exceptions by necessity* — Apple's
-ABI requires libSystem, and embedded has no OS to ask.  Every other
-path must hit kernel facilities directly.
+Tools used to build Verum have their own development prerequisites. End users
+of the published CLI must not need a compiler toolchain, Homebrew, OpenSSL
+packages or a separately installed Visual C++ runtime merely to launch it.
+Static inclusion or removal of host dependencies is a packaging option; the
+same technique does **not** make statically linked libc acceptable in AOT
+output. Supported OS versions must be explicit and tested, not inferred from
+the library names present on a developer's machine.
 
-## What this rules out
+## Per-platform AOT replacement strategy
 
-* No `extern "C" fn open`, `read`, `write`, `close` declarations in
-  emitted LLVM IR (or in any `core/sys/<plat>/*.vr` for the Tier 0
-  interpreter side).  Use the platform-specific direct-syscall
-  intrinsic instead.
-* No `extern "C" fn malloc`, `free`, `calloc`, `realloc`.  The
-  allocator lives in `core/mem/allocator.vr` and uses `mmap` /
-  `VirtualAlloc` directly.
-* No `__error` / `__errno_location` indirection.  Errno is a
-  per-platform syscall convention — Linux returns `-errno` from the
-  syscall instruction, Windows uses `GetLastError`, macOS uses
-  `__error`.  Codegen emits the appropriate primitive based on the
-  *target* triple (NOT host `#[cfg]`).
-* No `nanosleep`, `clock_gettime`, `getpid`, `getrandom`,
-  `getentropy`, `gettid` libc wrappers.  Direct syscalls.
-* No libc string/byte intrinsics — `memcpy`, `memset`, `memcmp`,
-  `strlen`, `strcmp`.  These ALL have LLVM intrinsic forms
-  (`llvm.memcpy.p0.i64`, `llvm.memset.p0.i64`, etc.) that are
-  *NOT* libc — LLVM's `MemCpyOptPass` / backend lowers them to
-  inline asm or an equivalent native code sequence.  Use
-  `verum_codegen::llvm::ffi::FfiLowering::lower_memset` (and
-  friends) which emit the intrinsic, never the libc symbol.
-* No `socket` / `bind` / `listen` / `accept` / `connect` libc
-  declarations — TCP/UDP go through the v2 intrinsic family
-  (`__tcp_listen_v2_raw`, `__tcp_accept_raw`, etc.) which
-  themselves dispatch to direct syscalls (Linux) or libSystem
-  (macOS).
-* No `pthread_*` declarations (other than macOS's
-  `pthread_threadid_np` which IS in libSystem and acceptable).
-  Threading goes through Linux `clone3` / Windows `CreateThread` /
-  macOS pthread (libSystem path).
+| Target | Required AOT runtime boundary |
+|---|---|
+| Linux | Direct target-specific syscalls (`syscall` on x86_64, `svc #0` on AArch64); no libc/CRT. |
+| macOS | Supported system APIs through `libSystem`; explicitly selected platform capabilities are reviewed separately. |
+| Windows | `kernel32.dll` and `ntdll.dll`; no MSVC CRT or UCRT. |
+| FreeBSD | Direct syscalls using that target's syscall convention. |
+| Embedded | Bare-metal implementation for the selected board/target. |
+
+Platform selection in emitted LLVM IR reads the **target** triple. It must
+not use host `#[cfg(target_os = ...)]` to choose another target's ABI.
+On macOS, the supported system-library boundary is intentional; do not turn
+that into a claim that direct syscalls are legally prohibited.
+
+## What the AOT rule excludes
+
+No implicit AOT runtime use of libc allocation, I/O, networking, threading,
+formatting, parsing, string or memory functions outside the documented target
+boundary. Reaching such a dependency through a helper wrapper or statically
+linked archive does not remove it. The host interpreter's Rust `std`, libffi
+and libc paths are governed by the separate host distribution requirement.
+A crate named `libc` may also provide constants and ABI types: a text search
+alone cannot decide which uses execute a call.
+
+LLVM memory intrinsics are **not sufficient proof**. Ordinary `llvm.memcpy`
+can lower to an external call. LLVM provides a separate
+[`llvm.memcpy.inline` guarantee](https://llvm.org/docs/LangRef.html#llvm-memcpy-inline-intrinsic),
+with its own constraints. Inspect final objects and binaries, and supply
+Verum-owned implementations where the backend needs a helper. Renaming a
+wrapper `verum_internal_*` does not establish the origin of its callees.
 
 ## Verification
 
-CI must confirm no libc:
+Keep two independent acceptance records: **AOT dependency conformance** and
+**host CLI clean-OS compatibility**. Record source revision, target, build
+flags, asset and executable SHA-256, and dependencies/symbols. Static
+inspection does not execute a foreign-target executable:
 
-```bash
-# Linux: no libc.so.6 / libgcc / libpthread references.
-ldd target/release/<bin>
-# Expected output (Linux):
-#   linux-vdso.so.1 (...)
-#   /lib64/ld-linux-x86-64.so.2 (...)
-# That's it — only the dynamic linker.
+```sh
+# Linux: inspect the host CLI and generated AOT program separately.
+llvm-readelf --program-headers --dynamic --version-info ./verum
+llvm-readelf --program-headers --dynamic --version-info ./program
+llvm-nm --undefined-only ./program.o
 
-# macOS: only libSystem (acceptable).
-otool -L target/release/<bin>
-# Expected output:
-#   /usr/lib/libSystem.B.dylib
+# macOS: system and external dynamic dependencies.
+otool -L ./verum
+otool -L ./program
+nm -u ./program.o
 
-# Windows: only kernel32 + ntdll.
-dumpbin /imports <bin>.exe
-# Expected: kernel32.dll, ntdll.dll only.
+# Windows: PE imports, including api-ms-win-crt-* forwarding DLLs.
+llvm-readobj --coff-imports ./verum.exe
+llvm-readobj --coff-imports ./program.exe
 ```
 
-A CI gate that runs this check on every release artifact closes the
-loop.
+In **Linux AOT output**, `libc.so.6`, a musl dependency, or versioned `GLIBC_*`
+imports refute no-libc conformance. A static binary or an empty dynamic
+import list does **not** prove absence of statically linked libc: inspect
+linked members/symbol provenance and execute representative runtime paths.
+Likewise, macOS `libSystem` linkage alone says nothing about a Linux build.
 
-## Current state (2026-05-01)
+For the **host CLI**, resolve the complete dependency closure against a clean
+supported OS image with no developer packages or third-party runtimes. Test
+the oldest declared OS baseline, startup, interpretation, compilation and
+package/network paths. A version smoke on a dependency-rich CI builder is
+insufficient. System libc is allowed; missing packages and unavailable symbol
+versions are release compatibility defects.
 
-Migration is **in progress**.  Already libc-free:
+The existing `scripts/ci/check_no_libc_link.sh` builds one AOT smoke program.
+Its current coverage is limited: Linux/macOS only, unknown dependencies are
+warnings, unsupported hosts exit successfully, and static library provenance
+is not checked. The release matrix in `.github/workflows/build-verum.yml`
+builds GNU Linux and MSVC Windows CLI targets and runs `--version`, without
+clean-baseline dependency acceptance. Neither check completes its respective
+contract; the host packaging gate must remain distinct from the AOT gate.
 
-* Linux direct syscalls for `clock_gettime` (monotonic + realtime),
-  `nanosleep`, `getpid`, `gettid` — `runtime.rs::emit_verum_time_*`
-  + `emit_verum_sys_*`.
-* TCP listener / accept / send / recv / close — `__tcp_listen_v2_raw`
-  family in `verum_vbc::intrinsics`.
-* Cryptographic zeroise — `lower_secure_zero` emits volatile
-  `llvm.memset` intrinsic, not libc memset.  Audit at
-  `tls-quic-security-audit.md` §2 Action #2 closed.
-* MakeVariantTyped placeholder safety gate — variant codegen no
-  longer emits invalid `MakeVariantTyped` against placeholder
-  type descriptors (commit 064ea429).
-* Cross-compilation-correct codegen: every per-platform decision
-  in `runtime.rs` / `platform_ir.rs` reads `module.get_triple()`,
-  not host `#[cfg(target_os = "...")]`.
+## Current state (2026-10-04)
 
-Remaining libc surface (load-bearing punch list — close before
-shipping):
+The source audit used integration revision `ca7d1334b` and distinguishes
+implemented replacements from complete end-to-end acceptance:
 
-| File                                          | Symbol(s)             | Replacement                                  |
-|-----------------------------------------------|-----------------------|----------------------------------------------|
-| ✅ `runtime.rs::get_or_declare_open`          | `open`                | Linux x86_64 `SYS_open` (2) / aarch64 `SYS_openat` (56) ; libSystem on macOS.  Variadic ABI bug closed by construction (fixed 3-arg wrapper). **Closed.** |
-| ✅ `runtime.rs::get_or_declare_close`         | `close`               | Linux `SYS_close` (3) direct syscall ; libSystem on macOS. **Closed (commit pending).** |
-| ✅ `runtime.rs::get_or_declare_read`          | `read`                | Linux `SYS_read` (0) direct syscall ; libSystem on macOS. **Closed.** |
-| ✅ `runtime.rs::get_or_declare_write`         | `write`               | Linux `SYS_write` (1) direct syscall ; libSystem on macOS. **Closed.** |
-| ✅ `runtime.rs::get_or_declare_strlen`        | `strlen`              | Open-coded null-byte scan loop emitted in IR (no symbol). **Closed.** |
-| ✅ `runtime.rs::get_or_declare_memcpy`        | `memcpy`              | Internal-linkage wrapper over `llvm.memcpy.p0.p0.i64`. **Closed.** |
-| ✅ `runtime.rs::get_or_declare_memset`        | `memset`              | Internal-linkage wrapper over `llvm.memset.p0.i64`. **Closed.** |
-| ✅ `runtime.rs::get_or_declare_malloc`        | `malloc`              | Wrapper `verum_checked_malloc` routes through `verum_os_alloc` (mmap on Linux/macOS, VirtualAlloc on Windows) + `verum_os_exit` for OOM abort. **Closed.** |
-| ✅ `ffi.rs::get_or_declare_malloc/free/realloc` | `malloc`/`free`/`realloc` | malloc → `verum_os_alloc`; free → `verum_internal_free` (no-op stub; CBGR epoch model handles bulk invalidation); realloc → `verum_internal_realloc` (allocate-new wrapper). **Closed.** |
-| ✅ `instruction.rs::checked_malloc_instr`     | `malloc` + `_exit`    | Both routed through `verum_os_alloc` and `verum_os_exit`. **Closed.** |
-| ✅ `instruction.rs` strcmp call sites (×3)    | `strcmp`              | Single shared `verum_internal_strcmp` helper — inline byte-by-byte comparison loop with null-termination check.  Internal-linkage so the symbol doesn't escape. **Closed.** |
-| ✅ `instruction.rs` puts call sites (×9)      | `puts`                | Single shared `verum_internal_puts` helper that calls `verum_internal_strlen` + `verum_internal_write` (both libc-free) plus a trailing newline.  Internal-linkage. **Closed.** |
-| ✅ All `_exit` call sites (×13+ across instruction.rs / ffi.rs / platform_ir.rs / runtime.rs) | `_exit` | Bulk-renamed to `verum_internal_exit_i64` — internal-linkage wrapper that truncates i64→i32 and calls `verum_os_exit` (which itself uses ExitProcess on Windows, `_exit` syscall on Linux, libSystem `_exit` on macOS). **Closed.** |
-| ✅ `runtime.rs` `free` call sites (×13 declarations + lookups) | `free` | Bulk-renamed to `verum_internal_free` — wrapper defined in `ffi.rs::get_or_declare_free` (no-op stub since CBGR's epoch model handles bulk invalidation; explicit per-pointer free is rarely on the hot path). **Closed.** |
-| ✅ `runtime.rs` `calloc` call sites (×4) | `calloc` | New `define_internal_calloc` helper computes `n*size` then routes through `verum_os_alloc` (mmap-based — pages are MAP_ANONYMOUS-zeroed, so calloc's zero-init contract is satisfied without an explicit memset).  All 4 call sites + 2 declaration sites updated. **Closed.** |
-| ✅ `runtime.rs` orphan `malloc` + inline libc `strlen` / `memcpy` declarations (×3) | `malloc`/`strlen`/`memcpy` | Re-pointed to `verum_os_alloc` / `verum_internal_strlen` / `verum_internal_memcpy` (all libc-free wrappers). **Closed.** |
-| ✅ `runtime.rs::get_or_declare_unlink`        | `unlink`              | Linux x86_64 `SYS_unlink` (87) / aarch64 `SYS_unlinkat` (35) ; libSystem on macOS. **Closed.** |
-| ✅ `runtime.rs::get_or_declare_lseek`         | `lseek`               | Linux `SYS_lseek` (8) direct syscall ; libSystem on macOS. **Closed.** |
-| ✅ `runtime.rs::get_or_declare_access`        | `access`              | Linux x86_64 `SYS_access` (21) / aarch64 `SYS_faccessat` (48) ; libSystem on macOS. **Closed.** |
-| `runtime.rs::get_or_declare_clock_gettime`    | `clock_gettime`       | Already replaced for Linux / macOS via direct syscall + libSystem; the helper itself remains for the macOS + other-Unix fallback paths.  Audit each remaining call. |
-| `runtime.rs::get_or_declare_nanosleep`        | `nanosleep`           | Same as clock_gettime.                       |
-| ✅ ~~`runtime.rs::get_or_declare_getaddrinfo` / `get_or_declare_freeaddrinfo`~~ (deleted) | `getaddrinfo` / `freeaddrinfo` | **CLOSED — last member of the getaddrinfo class (task #43, 2026-07-16).** Native resolver had already LANDED in `core/net/dns.vr` (pure RFC-1035 DNS-over-UDP/TCP on the B1d UDP stack, no FFI: 0xC0 pointer-decompression depth-capped, `/etc/resolv.conf` via raw-syscall `read_system_file`, `/etc/hosts` + hardcoded RFC-6761 loopback resolved **before** any network query, timeout+retry, UDP→TCP fallback, A/AAAA/CNAME/MX/TXT/SRV/NS/PTR/SOA). The remaining AOT hole — `verum_tcp_connect` open-coding `getaddrinfo`/`freeaddrinfo` to resolve+connect in one step — is now closed: **(1)** `verum_tcp_connect` is narrowed to **IP-literal-only**, building `sockaddr_in` directly and parsing the address through the already-libc-free `verum_internal_inet_pton` (AF_INET), then `socket`/`connect` — mirroring the `verum_udp_send_to` closure; a non-IP / `inet_pton ≤ 0` input returns the honest connect-fail sentinel `-1` (never a silent 0). Both `get_or_declare_getaddrinfo` and `get_or_declare_freeaddrinfo` are **deleted** (grep over `crates/verum_codegen` = 0 live declarations); `getaddrinfo`/`freeaddrinfo` also dropped from the `is_libc_extern` allow-list in `vbc_lowering.rs`. **(2)** `RawTcpStream.connect` in `core/sys/net_ops.vr` now resolves the host through `core.net.dns.lookup_host` FIRST (which fast-paths IP literals with zero network I/O and hits the static host DB for `localhost`) and hands the intrinsic the first IPv4 result as a dotted-quad literal. Interp path (`net_runtime::tcp_connect`) uses host Rust `std::net` and is unaffected by the AOT no-libc invariant. |
-| ✅ `runtime.rs::get_or_declare_inet_pton`     | `inet_pton`           | Open-coded IPv4 dotted-decimal parser emitted as `verum_internal_inet_pton` (internal-linkage).  Walks src byte-by-byte with PHI-driven state machine: 4 octets × ≤3 digits, validates each in [0,255], stores i8 into dst[0..4].  Returns 1 on success, 0 on parse error, -1 on AF_INET6 (unsupported in this minimal version — IPv6 callers fall back to libSystem on macOS or use the v2 TCP intrinsic family). **Closed for IPv4.** |
-| ✅ `platform_ir.rs::ensure_networking_syscalls` (×11 socket family) | `socket`/`connect`/`bind`/`listen`/`accept`/`send`/`recv`/`sendto`/`recvfrom`/`setsockopt`/`waitpid` | Refactored from `extern "C"` declarations to internal-linkage wrappers via new `emit_libc_free_socket_wrapper` helper.  Linux dispatch via direct syscalls with arch-correct numbers (x86_64: socket=41, connect=42, accept=43, sendto=44, recvfrom=45, bind=49, listen=50, setsockopt=54, waitpid=61; aarch64: socket=198, connect=203, accept=202, sendto=206, recvfrom=207, bind=200, listen=201, setsockopt=208, waitpid=260).  macOS routes through `__verum_libsys_*` indirection to libSystem.  **Closed.** |
-| `verum_vbc::ffi::*` (libffi paths)            | All libc syscalls     | Replace with `__sys_*_raw` intrinsics that bypass libffi.  Substantial work — ~1000 LOC across `verum_vbc/src/ffi/platform/{linux,darwin}.rs`.  **Deferred — large standalone task.** |
-| ✅ `instruction.rs::lower_debug_print` integer arm | formerly `printf` | Ordinary source `print(Int)` now uses the existing `verum_internal_i64_to_decimal` and target-aware `verum_internal_puts`/`write`, sharing Text/Bool output order. Source LLVM and redirected JIT controls cover signed i64 boundaries, UInt8, already-formatted UInt64 Text and loops. **Integer path fixed (T1581); full task remains open.** |
-| `instruction.rs::lower_debug_print` Float arms (×2) | `printf` | **User-facing and open.** Ordinary Float print still uses buffered `%g`; replacing it with the existing V0 decimal formatter would lose tiny/large values and signed zero. T1582 records the measured shared-formatter prerequisite. Mixed Text/Bool/Int/Float redirected ordering and full printf removal are not yet established. |
-| ✅ `instruction.rs` strtol                    | `strtol`              | Open-coded base-10 integer parser emitted as `verum_internal_strtol` (internal-linkage).  PHI-driven state machine: skip whitespace → optional `+`/`-` sign → digit-accumulation loop → multiply by sign.  Signature matches libc `(ptr, ptr, i32) -> i64`. **Closed.** |
-| ✅ `instruction.rs` strtod (×2) + `runtime.rs::emit_verum_text_parse_float` | `strtod`              | Float parsing.  All three call sites (2-operand `ParseFloat` in `instruction.rs`, and `verum_text_parse_float` in `runtime.rs` which the method-call `.to_float()`/`.parse_float()` path reaches) route through the open-coded `verum_internal_strtod` (internal-linkage, `get_or_declare_internal_strtod`, commit 3bbd867c5) on **every** target — no libc `strtod` symbol is declared or referenced anywhere in codegen (verified: `grep '"strtod"'` = 0 hits).  Grammar: `[ws][±][int][.frac][eE±exp]`; i64 mantissa + power-of-ten f64 scaling (bounded 400 loops → ±Inf/0 by IEEE on over-range, so `"1e400"` → +Inf matches Tier-0).  **Closed for `-nostdlib` linkage.**  *V0 boundary (differential-parity gap, NOT a link blocker):* `inf`/`infinity`/`nan` text literals are not yet recognized — Tier-0 (`str.trim().parse::<f64>()`) returns `Some(±inf)`/`Some(nan)` while Tier-1 returns `Maybe.None` (the `has_digit` gate at `instruction.rs:~21415` and `verum_text_parse_float`'s scan reject a digit-free string).  Close by teaching `verum_internal_strtod` the case-insensitive `inf`/`nan` prefix AND relaxing both None-gates to accept an `i`/`n` lead byte; requires a `verum` rebuild + differential run to land safely — deferred as a coherence follow-up. |
-| ✅ `platform_ir.rs::emit_exception_handling` + `emit_exception_ir` + `vbc_lowering.rs` TryBegin | `setjmp`/`longjmp`    | Exception unwinding primitive.  Cross-compilation bug fixed earlier (reads `target_is_darwin(module)`, not host `cfg!`).  **macOS:** libSystem `_setjmp` (TryBegin) + `longjmp` (throw) — acceptable per the architecture rule; unchanged.  **Linux / other Unix (libc-free):** the setjmp site emits `llvm.eh.sjlj.setjmp` **inline** at TryBegin — exactly the sequence clang lowers `__builtin_setjmp` to (store `llvm.frameaddress(0)`→buf[0], `llvm.stacksave()`→buf[2], then the intrinsic → i32).  It must be inline, NOT a `verum_internal_setjmp` wrapper: the frame/stack it saves must be the try-block function's own frame — a helper's frame is dead after it returns, so a later longjmp would restore a stale frame.  The throw site (`emit_exception_ir::verum_exception_throw`) emits `llvm.eh.sjlj.longjmp(buf)`.  Both intrinsics lower to inline asm in the backend — no libc symbol; the bare `setjmp`/`longjmp` module declarations in `emit_exception_handling` are now gated to darwin only.  **Linux body landed — needs native Linux run verify (build + AOT try/throw execution on x86_64 + aarch64).** |
-| `verum_kernel` / Rust internals               | Rust stdlib's libc usage | Not in scope — Verum compiler/host concerns; the *produced binary* is the audit target. |
-| **Link-step surface (2026-07-15 audit):**     |                       |                                              |
-| ✅ Empty C stub `.c`→clang→`.o` per compile unit | (none — vestige)   | `generate_runtime_stubs` / `compile_c_file` and `verum_codegen::runtime_stubs` DELETED — the whole runtime is LLVM IR inside the main object; nothing external is compiled.  `detect_c_compiler` survives only as the platform *linker driver*. **Closed.** |
-| ✅ `link_executable` Linux flags              | `-ldl -lrt -lstdc++ -rdynamic` | Removed — the emitted IR references no `dl*` symbols (dlopen appears only in a name-classification list), no rt-only symbols (time = direct syscalls), no C++ runtime (CBGR is pure IR).  **Closed.** |
-| ✅ `FinalLinker` system-mode host-`#[cfg]` defaults | `-lrt` (Linux), `-framework CoreFoundation` (macOS) | Removed — unjustified (no CF symbol is ever emitted) and host-gated (cross-link miscompile).  User-specified `[link] libraries` remain the explicit FFI escape hatch. **Closed.** |
-| ✅ `linker_config.rs::default_libraries`      | `pthread`/`m`/`dl` (Linux), **`msvcrt`** (Windows) | Linux default now EMPTY; Windows default now `kernel32` + `ntdll` (msvcrt violated the no-CRT rule outright). **Closed.** |
-| ✅ `NoLibcConfig::macos()` unconditional GPU frameworks | Metal/Foundation/objc | Removed from the preset — framework links are gated by the post-globaldce `needs_metal` probe (#100) via `extra_flags`. **Closed.** |
-| `link_executable` (cc-driver path) full `-nostdlib` | host crt/libc via driver defaults | The canonical no-libc flags live in `NoLibcConfig` (consumed by the FinalLinker/lld path — Linux default).  The cc-driver fallback (and the primary macOS path) still let the driver add crt/libc.  **Groundwork landed (#28 NOSTDLIB-CC-DRIVER-1, 2026-07-15):** opt-in gate `VERUM_NOSTDLIB_CC_DRIVER` in `link_executable` adds `-nostdlib -lSystem` (darwin) / `-nostdlib -nostartfiles` (Linux) + a target-aware compiler-rt **builtins** archive (`NoLibcConfig::compiler_rt_builtins_archive`).  Default OFF ⇒ darwin acceptance (otool -L → libSystem only) unchanged.  Blocker status after audit: **(a) compiler-rt builtins — CLOSED on darwin** (see §Compiler-rt audit below: 0 builtin symbols emitted; `-nostdlib -lSystem` links a correct libSystem-only binary today); **(b) `strtod` Linux body — CLOSED** (all call sites route through the libc-free `verum_internal_strtod`; zero `strtod` symbols; `inf`/`nan` differential-parity gap tracked separately, not a link blocker); **(c) `setjmp`/`longjmp` Linux body — CLOSED (needs native Linux run verify)** (inline `llvm.eh.sjlj.setjmp`/`llvm.eh.sjlj.longjmp`, clang `__builtin_setjmp` pattern, target-aware; darwin still binds libSystem `_setjmp`/`longjmp`); (d) `getaddrinfo` native resolver — **CLOSED (task #43, 2026-07-16):** resolver LANDED in `core/net/dns.vr` (RFC-1035 DNS-over-UDP/TCP on the B1d UDP stack + `/etc/hosts` + `/etc/resolv.conf` + hardcoded RFC-6761 loopback) AND the AOT `verum_tcp_connect` IR emitter is now IP-literal-only (`verum_internal_inet_pton` reuse), so `get_or_declare_getaddrinfo`/`freeaddrinfo` are deleted — see the `freeaddrinfo` row above.  **Linux bodies (b)(c) landed statically; native Linux link + AOT try/throw + float-parse run verify remain.** |
+| Boundary | Evidence and remaining work |
+|---|---|
+| Native integer print | T1581 replaced `printf` with the existing integer formatter and internal target-aware writer. Source/LLVM/JIT boundary and ordering controls pass. |
+| Native Float print | Two `lower_debug_print` arms still emit `printf`. These are ordinary source `print(Float)` calls, not debug-only tooling. T1581/T1582 remain open. |
+| Native Float-to-Text | Uses `verum_internal_f64_to_decimal`, without libc formatting; its tiny/large-value and signed-zero failures require a correct shared formatter (T1582). Removing a dependency does not establish numerical correctness. |
+| Host interpreter networking | `interpreter/dispatch_table/handlers/net_runtime.rs` uses Rust `std::net` and direct `libc` socket calls on Unix. This is allowed by the host policy when provided by the supported OS; it does not authorize libc calls in emitted AOT code. |
+| Standard-library terminal paths | `core/term/raw/termios.vr` and `core/term/event/source.vr` declare `@ffi("libc")`, including a Linux `poll` path. Audit selected AOT objects and replace forbidden target dependencies. macOS terminal APIs through the permitted libSystem boundary are a separate case; source declarations alone do not establish every emitted call. |
+| Host foreign-library plumbing | `ffi/platform/linux.rs` uses `libc::dlopen`, `dlsym`, `dlclose`, `mmap` and `munmap`. OS-provided host loader/allocation services are allowed; user-selected FFI libraries remain explicit application dependencies. |
+| Emitted low-level helpers | Direct-syscall and internal allocation/I/O helpers exist. Check each selected target and final emitted object; old source-level replacement records alone do not certify all reachable paths. |
+| Float parsing / DNS / exceptions | Prior Linux `strtod`, native `getaddrinfo`, and setjmp migration work landed. Parsing parity and native target execution are separate checks; these should not be listed as entirely absent implementations. |
+| Linker fallback | The Linux no-libc linker configuration exists, but the cc-driver `VERUM_NOSTDLIB_CC_DRIVER` path is opt-in. Audit the selected AOT link route and compiler-generated library calls. |
+| Shipped Rust/LLVM CLI | GNU/MSVC host triples are allowed. Actual imports, versions and clean-OS runs must establish availability without additional installations; AOT dependency evidence cannot establish this. |
+
+### Published dev artifact audit
+
+All six rolling `dev` assets updated on 2026-10-04 at 13:53 UTC were
+downloaded, verified against their GitHub SHA-256 digests, and inspected
+without executing the binaries. The observed tag pointed to `c75c7e888`.
+The [machine-readable evidence](no-libc-dev-artifacts-2026-10-04.json) records
+each asset URL, update time, archive/executable SHA-256 and complete direct
+import list. A rolling tag can move; the hashes identify this observation.
+
+| Published host CLI | Actual imports and compatibility implications |
+|---|---|
+| Linux x86_64 and AArch64 | `libc.so.6`, `libm.so.6`, `libgcc_s.so.1`, `libstdc++.so.6`, `libssl.so.3`, `libcrypto.so.3`, and the architecture's GNU loader; versioned imports include `GLIBC_2.39`. libc itself is allowed, but the old glibc 2.31 minimum is false. Availability of every other library must be checked on clean supported distributions. |
+| macOS x86_64 and AArch64 | Homebrew `libssl.3.dylib` / `libcrypto.3.dylib` under `/usr/local/opt/openssl@3` and `/opt/homebrew/opt/openssl@3` respectively is a confirmed external dependency to remove from the distributed CLI. System frameworks, `libc++`, `libiconv`, `libz` and libSystem are allowed if available at the supported OS baseline. |
+| Windows x86_64 and AArch64 | `api-ms-win-crt-*` imports, `MSVCP140.dll` and `VCRUNTIME140.dll`; x86_64 also imports `VCRUNTIME140_1.dll`. UCRT is an OS component on Windows 10 and later; VC runtime redistributables are a separate dependency whose availability cannot be assumed on a clean OS. |
+
+Microsoft documents the distinction between
+[OS-provided UCRT](https://learn.microsoft.com/en-us/cpp/windows/universal-crt-deployment?view=msvc-170)
+and [runtime libraries to redistribute](https://learn.microsoft.com/en-us/cpp/windows/determining-which-dlls-to-redistribute?view=msvc-170).
+No Windows clean-OS execution was performed in this audit.
+
+The old universal "glibc >= 2.31", "self-contained CLI", and "macOS CLI links
+only libSystem" statements do not describe these files. `GLIBC_2.39` is an
+observed symbol-version requirement, not a newly approved minimum OS or a
+complete compatibility test. Host packaging needs repair and clean-baseline
+verification. It is independent of proving strict no-libc in AOT output.
 
 ## Compiler-rt audit (#28, 2026-07-15, darwin arm64)
+
+The following is preserved historical evidence for the named Darwin probes.
+It does not certify today's CLI, another target, or every generated program.
+
 
 Method: built representative AOT binaries with `verum build --keep-temps`
 (a basic-arithmetic probe, an `Int128` div/rem + `Float`↔`Int128`
@@ -201,27 +216,21 @@ then lowers to a libcall on each target.
 
 ## Why this matters
 
-* **Reproducibility**: A binary that links libc inherits libc's
-  versioning (glibc 2.31 vs 2.35), security posture, and ABI churn.
-  Eliminating libc means a Verum binary built today runs on any
-  kernel from the lifetime of the Verum-supported syscall set —
-  forever, no `GLIBC_2.34: not found` errors.
-* **Security**: libc is a large attack surface.  Verum's own runtime
-  is auditable in isolation; libc is not.  Removing it reduces the
-  attack surface to just the kernel ABI.
-* **Performance**: Direct syscalls skip the libc-side wrapper
-  (typically 5-15 ns per call), errno-thread-local indirection,
-  and call-site glue.
-* **Scientific honesty**: Verum claims to be a from-first-principles
-  language.  A binary that depends on libc *isn't* — every libc
-  call drags in C's invariants and bug catalogue.  The "no libc"
-  rule keeps the claim load-bearing.
+For generated AOT programs, removing libc removes that dependency's ABI and
+deployment constraints. Kernel versions, architecture, CPU features and
+explicitly selected OS capabilities still bound compatibility. The runtime
+remains responsible for allocation, I/O, parsing and formatting correctness.
+Performance claims need measurements of the actual target and path.
+
+For the host CLI, the goal is installation without dependency setup on every
+supported OS baseline. A system-library dependency is acceptable only when
+that baseline actually supplies the required ABI. Neither goal promises
+compatibility with every OS version or every future system.
 
 ## Owner / mechanism
 
-* Owner: codegen (verum_codegen) + runtime (verum_vbc) maintainers.
-* Mechanism: every PR that adds an `extern "C"` declaration in IR
-  emission code or a `@intrinsic` dispatch path must justify the
-  symbol against this document.  Reviewers reject unless the symbol
-  is in the macOS-libSystem allow-list (acceptable per Apple ABI)
-  or the embedded-bare-metal allow-list.
+Codegen/runtime maintainers own AOT dependency and behavior acceptance;
+release maintainers own host packaging and clean-OS compatibility. Every
+external runtime symbol must identify its provider and target. Record these
+acceptances separately, keep implementation gaps visible, and do not convert
+a build-machine dependency into an installation requirement to hide it.

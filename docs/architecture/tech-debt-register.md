@@ -1,5 +1,28 @@
 # Verum Technical-Debt Register
 
+## AOT no-libc and host dependency audit — T1585 / T1586 (2026-10-04)
+
+The strict no-libc requirement applies to generated AOT programs and their
+runtime/standard-library code, with the documented macOS system-ABI exception.
+The host CLI and interpreter may use baseline OS libraries, but must run on
+clean supported systems without extra runtime installations. These are
+separate acceptance criteria, as clarified by the user on this date.
+
+All six published dev assets updated at 13:53 UTC were downloaded, SHA-256
+verified and statically inspected without execution. Both Linux CLIs import
+`libc.so.6` and `GLIBC_2.39`; system libc is allowed, but this refutes the old
+glibc 2.31 minimum. Both Windows CLIs import UCRT and MSVC runtime DLLs;
+OS-provided UCRT must be distinguished from separately deployed VC runtimes.
+Both macOS CLIs import build-machine Homebrew OpenSSL, a confirmed dependency
+outside a clean OS. System libraries beyond libSystem are not themselves a
+host-policy violation. Clean-OS compatibility remains unverified.
+
+The [architecture audit](no-libc-architecture.md) and
+[asset evidence](no-libc-dev-artifacts-2026-10-04.json) record exact hashes,
+imports and limits. Native Float printing (T1581/T1582), Linux terminal FFI
+and AOT link/gate conformance remain runtime work. Host packaging and baseline
+OS tests are separate release work; neither is closed by editing these docs.
+
 ## Native Drop ownership gap — T1538 / T1540 (2026-10-04)
 
 **Open:** native object `DropRef` does not invoke declared user glue; the

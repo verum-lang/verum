@@ -1,21 +1,28 @@
 # Verum Language Platform
 
-## CRITICAL: No libc in interpreter or AOT
+## CRITICAL: No libc in generated AOT programs
 
-**Architectural invariant**: Verum's VBC interpreter (Tier 0) and
-AOT-compiled binaries (Tier 1) MUST NOT call into libc.  All
-runtime functionality goes through:
+**AOT invariant**: Programs, libraries and objects compiled by Verum (Tier 1),
+including their standard-library/runtime code, MUST NOT depend on libc,
+including statically linked copies, outside the documented macOS system ABI.
+AOT runtime functionality goes through:
 
 * **Linux**: direct syscalls via `syscall` / `svc #0` instructions.
-* **macOS**: libSystem.B.dylib only (Apple-required boundary, NOT
-  libc in the glibc/musl sense).
+* **macOS**: libSystem.B.dylib (documented supported system-ABI exception).
 * **Windows**: kernel32.dll + ntdll.dll only (no MSVC CRT, no UCRT).
 * **FreeBSD**: direct syscalls.
 * **Embedded**: bare-metal, no OS dependencies.
 
+**Host CLI/interpreter requirement**: the distributed Verum executable must
+run on a clean supported OS without extra runtime-library installations.
+System libc and other baseline OS libraries are allowed in the host tool;
+they do not become allowed dependencies of generated AOT programs. Verify
+library versions and clean-OS execution separately from AOT no-libc checks.
+
 See `docs/architecture/no-libc-architecture.md` for the full
-ruleset, verification procedure (`ldd` / `otool` / `dumpbin`), and
-the remaining migration punch-list.
+ruleset, dated source/release-artifact audit and verification procedure.
+The current implementation has recorded violations; do not claim full
+conformance from one AOT smoke, a static binary or a dependency name alone.
 
 When emitting LLVM IR, every per-platform decision (syscall
 numbers, sockaddr layout, errno-fn name, socket-option constants,

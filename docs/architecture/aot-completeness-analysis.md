@@ -18,16 +18,17 @@ The **instruction lowering surface is comprehensive** — the main
 `lower_instruction` dispatch (`instruction.rs:1784`) covers ~169
 `Instruction::*` arms plus every Extended sub-op family
 (Ffi/Arith/Math/Text/Simd/Cbgr/Char/Log/Mem/Tensor/Gpu/Cubical). The
-no-libc migration is **mostly closed** (see that doc's table). The AOT
-gaps that actually block stdlib modules are a small number of
-**correctness** defects, dominated by ONE:
+no-libc source migrations described below are historical partial results.
+The [2026-10-04 platform audit](no-libc-architecture.md#current-state-2026-10-04)
+records remaining AOT violations and separate host-packaging gaps. The
+following table retains this July audit's AOT correctness findings:
 
 | # | Gap | Leverage | Status |
 |---|-----|----------|--------|
 | 1a | **ptr_offset byte-stride (Text/parse byte buffers ×8 too far)** | stdlib-wide (Text append / parse / Display) | **FIXED 2026-07-06 (986bee268)** |
 | 1b | **nested `&mut self` writeback lost (grow-from-null)** | empty-Text build-from-scratch | OPEN — remaining #1 lever |
 | 2 | Cross-module aggregate-field value lowering (tuple/record-through-ref) | broad | tuple-destructure **FIXED 2026-07-06**; record-let-ref-type-loss OPEN |
-| 3 | `strtod` (float parse) on Linux; `setjmp` Linux body; native DNS; ffi `__sys_*_raw` | targeted | OPEN (per no-libc doc) |
+| 3 | Native Float print, target terminal FFI, AOT link-route and dependency conformance | generated AOT | OPEN; see the current no-libc audit |
 | 4 | Scripting `Engine.*` Extended sub-ops (0x20–0x60) | niche (host-embedding only) | interp-only |
 | 5 | `MakeVariantTyped` cross-module placeholder warnings (~170) | cosmetic | non-fatal |
 
@@ -301,12 +302,17 @@ way.
 
 ## 3. no-libc remaining surface (see no-libc-architecture.md table)
 
-Open: `strtod` (Linux float parse — Ryu/exponent/NaN), `setjmp`/`longjmp`
-Linux body (`llvm.eh.sjlj.setjmp`), native DNS resolver (replace
-`getaddrinfo`/`freeaddrinfo`, ~500 LOC), `verum_vbc::ffi` `__sys_*_raw`
-(~1000 LOC), and the debug-only `printf` (×3). Everything else in the
-punch-list (open/close/read/write/malloc/free/calloc/socket family/
-strcmp/strlen/memcpy/inet_pton IPv4/strtol/…) is **closed**.
+Updated 2026-10-04: the earlier Linux float-parser, setjmp-body and native-DNS
+migrations landed; their existence is separate from numerical parity and
+native target verification. Two ordinary Float-print paths still emit
+`printf` (T1581/T1582). Target-specific standard-library terminal FFI and
+AOT link routes also need verification. The hosted interpreter may use OS
+libc; published CLI dependencies have a separate clean-OS packaging contract.
+
+The authoritative scope, source evidence, artifact inspection procedure and
+remaining release checks are in [No-libc Architecture](no-libc-architecture.md).
+An internal wrapper, LLVM memory intrinsic, static link, or successful
+Darwin AOT sample is insufficient evidence for complete conformance.
 
 ## 4. Scripting Engine Extended sub-ops (0x20–0x60)
 
@@ -327,8 +333,9 @@ per the scripting roadmap).
    fix already landed on the interp side.
 3. RECORD-LET-REF-TYPE-LOSS + INLINE-AGG-REF-ARG + SELECTBESTMEDIA — the
    remaining compile-time codegen crashers (each unblocks a net module).
-4. no-libc: `strtod` Linux + `setjmp` Linux body (ship-blockers for a
-   truly libc-free Linux target); native DNS + ffi `__sys_raw` are
-   large standalone tasks.
+4. no-libc: remove forbidden dependencies from remaining native Float,
+   terminal and selected AOT link paths; verify emitted objects and target
+   execution. Audit host CLI clean-OS packaging separately. Follow the current
+   audit instead of repeating closed July work.
 5. Scripting Engine AOT sub-ops — only when host-embedded AOT scripts
    are a target.

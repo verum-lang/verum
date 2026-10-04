@@ -10,7 +10,7 @@ Refinement types discharged by SMT · three-tier memory safety (CBGR) ·
 capability-based contexts · dependent types with cubical HoTT · a single
 bytecode IR that runs under both interpreter and AOT native ·
 structured concurrency with OTP-style supervision · a standard library
-written in Verum, without a libc or Rust-runtime dependency.
+written in Verum, with a strict no-libc contract for generated AOT programs.
 
 [**Documentation**](https://verum-lang.org/docs/intro) ·
 [**Language tour**](https://verum-lang.org/docs/getting-started/tour) ·
@@ -42,11 +42,13 @@ analysis. Dependency injection is a language feature (`using
 [Database, Logger]`) that unifies runtime and compile-time contexts.
 Metaprogramming is the same language, staged.
 
-The compiler is written in Rust (25 crates). The standard library is
-written in Verum, with zero `libc`, `pthread`, or Rust-std dependency
-— system calls go through VBC opcodes directly. The runtime ships in
-five profiles from `full` (servers) down to `embedded`
-(microcontrollers).
+The compiler is written in Rust. The standard library is written in Verum.
+Generated AOT programs follow the no-libc contract with a documented macOS
+system-ABI exception. The host CLI may use baseline OS libraries and must run
+without extra runtime installations on supported systems. Current AOT and
+release-packaging gaps are documented separately in the
+[architecture audit](docs/architecture/no-libc-architecture.md). Runtime
+profiles range from `full` (servers) to `embedded` (microcontrollers).
 
 ## Features at a glance
 

@@ -93,9 +93,11 @@ Not by severity label — by the order in which someone who has never
 seen this repository would run into them.
 
 **Step 1 — install and run one file.** `verum run hello.vr` works and
-`verum build` emits a Mach-O linking only libSystem, so the no-libc
-invariant holds on darwin — reported by the peer session 2026-08-30,
-NOT re-measured here; the same run printed `Call fn-id … missing in the
+`verum build` produced a Mach-O linking only libSystem in a peer
+sample on 2026-08-30, NOT re-measured here. That observation covers the
+sample's dynamic dependencies, not the CLI, all runtime paths or other
+targets; see the [current AOT and host-dependency audit](no-libc-architecture.md).
+In the historical sample, the same run printed `Call fn-id … missing in the
 VBC module table` for `default_panic_handler`, so a call degraded while
 the binary still built. Startup is 137 ms for a one-line
 script against bun's 22 ms, 89 ms of it after process start with a warm

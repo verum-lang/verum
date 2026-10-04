@@ -82,9 +82,11 @@ parking_lot = { workspace = true, optional = true }
 
 # Unix-only syscall surface for the interpreter runtime handlers
 # (setsockopt / getpeername / getsockname / close in net_runtime, plus
-# fatal-signal handling). Windows builds are libc-free: the cross-platform
-# socket paths go through `std::net`, errno constants through local
-# definitions, and Windows system APIs through `windows-sys` below.
+# fatal-signal handling). OS-provided libc is allowed in the host interpreter;
+# generated AOT programs have a separate strict no-libc requirement.
+# Windows does not use this Unix-only crate dependency. Neither its absence
+# nor std::net/windows-sys proves clean-OS availability of all CLI dependencies.
+# See docs/architecture/no-libc-architecture.md for the artifact audit.
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 

@@ -175,9 +175,12 @@ transport matrix).
 
 ## 4. Physical enforcement, honestly scoped (P2)
 
-A declared Shape should HOLD, not merely describe. Verum owns its
-entire syscall surface (no-libc), which makes the compilation of
-`Shape.exposes` into enforcement uniquely cheap here:
+A declared Shape should HOLD, not merely describe. The no-libc architecture
+requires generated AOT programs to own their syscall surface within each
+target's documented OS boundary. The current
+[AOT and host audit](no-libc-architecture.md) records remaining native gaps.
+The hosted interpreter may use OS libraries whose calls also need accounting
+before `Shape.exposes` can enforce the complete process boundary:
 
 - **Allowlist algebra**: the enforced set = *runtime base* ∪ Σ(module
   deltas). The async runtime's own syscalls belong to the RUNTIME's
