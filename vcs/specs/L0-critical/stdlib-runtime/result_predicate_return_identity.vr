@@ -1,0 +1,37 @@
+// @test: differential
+// @level: L0
+// @tier: all
+// @timeout: 1200000
+// @tags: result, bool, archive, method-dispatch, regression
+// @description: Result predicates preserve Bool identity; same-named Int methods retain their declared result.
+// @expected-exit: 0
+// @expected-stdout-begin
+// true
+// false
+// false
+// true
+// 9001
+// 9002
+// @expected-stdout-end
+// T1546: imported primitive descriptors must retain their canonical type IDs.
+// Printed values pin runtime representation without a foldable comparison.
+
+type PredicateNumbers is { base: Int };
+
+implement PredicateNumbers {
+    fn is_ok(&self) -> Int { self.base + 1 }
+    fn is_err(&self) -> Int { self.base + 2 }
+}
+
+fn main() {
+    let good: Result<Int, Int> = Result.Ok(7);
+    let bad: Result<Int, Int> = Result.Err(9);
+    print(good.is_ok());
+    print(good.is_err());
+    print(bad.is_ok());
+    print(bad.is_err());
+
+    let numbers = PredicateNumbers { base: 9000 };
+    print(numbers.is_ok());
+    print(numbers.is_err());
+}
