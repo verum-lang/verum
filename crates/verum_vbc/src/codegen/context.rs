@@ -463,29 +463,11 @@ pub struct CodegenContext {
     /// after compilation (the main map gets cleared between functions).
     pub last_function_variable_types: HashMap<String, String>,
 
-    /// REFL-CLOSURE-XREC-1 (runtime leg): element-type hints for the user
-    /// params of a closure compiled as an iterator-adapter argument
-    /// (`xs.iter().map(|p| p.x + p.y)` — `p` carries the receiver's element
-    /// type). Shape: `(span_key, hints)` where `span_key` identifies the
-    /// exact `ExprKind::Closure` node the hints were derived for
-    /// (`(span.start << 32) | span.end`) and `hints[i]` types user param
-    /// `i` (captures excluded).
-    ///
-    /// Set once at `compile_method_call` entry when the method is a known
-    /// adapter, an arg is a closure, and the receiver's element type
-    /// resolves to a registered record; consumed by `compile_closure` IFF
-    /// the dispatching closure's span key matches — unmatched entries are
-    /// left in place (a nested adapter in receiver position must not
-    /// steal the outer call's hints) and are inert by construction (the
-    /// key can only ever match the closure it was derived for). The
-    /// consumer registers hinted params in `variable_type_names` — the
-    /// same channel the for-loop binder uses (`compile_for`) — so field
-    /// accesses inside the closure body resolve LOCAL field indices
-    /// instead of falling through `resolve_field_index` to the global
-    /// intern table (wrong offsets → runtime "field access out of
-    /// bounds"). `None` entries / absent hints fail open to today's
-    /// behavior.
-    pub closure_param_type_hints: Option<(u64, Vec<Option<String>>)>,
+    /// Structural parameter hints keyed by the exact closure node span.
+    /// Types exclude captures and come from the resolved callable signature
+    /// or existing adapter element inference. Compilation removes only its
+    /// own entry, keeping sibling and nested callback contexts separate.
+    pub closure_param_type_hints: HashMap<u64, Vec<Option<crate::types::TypeRef>>>,
 
     /// Current match scrutinee type name for resolving variant patterns.
     ///
@@ -1675,7 +1657,7 @@ impl CodegenContext {
             reference_bindings: std::collections::HashSet::new(),
             object_ref_param_regs: std::collections::HashSet::new(),
             last_function_variable_types: HashMap::new(),
-            closure_param_type_hints: None,
+            closure_param_type_hints: HashMap::new(),
             match_scrutinee_type: None,
             match_tuple_element_types: None,
             pending_let_tuple_types: None,

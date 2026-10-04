@@ -12505,21 +12505,21 @@ impl VbcCodegen {
         type_args: &verum_common::List<verum_ast::ty::GenericArg>,
     ) -> CodegenResult<Option<Reg>> {
         // ──────────────────────────────────────────────────────────
-        // REFL-CLOSURE-XREC-1 (runtime leg): iterator-adapter calls with a
-        // closure argument stash span-keyed element-type hints derived from
-        // the receiver ONCE, up front — every downstream branch
-        // (pre-resolved static path, CallM cascade, builtin intercepts)
-        // funnels the closure arg through `compile_expr` →
-        // `compile_closure`, which claims the hints iff the span key
-        // matches that exact closure node. Mirrors the for-loop binder
-        // typing in `compile_for` (`for r in xs.iter() { r.hot }`), fixing
-        // `xs.iter().map(|p| p.x)` closure params falling to
-        // `resolve_field_index`'s global-intern fallback (wrong offsets →
-        // runtime "field access out of bounds").
-        for arg in args.iter() {
+        // Resolve callback parameter types from the same owner used for
+        // method dispatch. Each closure claims only its own span-keyed hints.
+        // Keep the existing adapter inference when a declaration is unavailable.
+        for (index, arg) in args.iter().enumerate() {
             if matches!(arg.kind, ExprKind::Closure { .. }) {
-                self.set_adapter_closure_param_hints(receiver, method.name.as_str(), arg);
-                break;
+                if let Some(hints) = self.declared_method_closure_param_hints(
+                    receiver, method.name.as_str(), index, type_args,
+                ) {
+                    if arg.span.start != 0 || arg.span.end != 0 {
+                        let key = ((arg.span.start as u64) << 32) | arg.span.end as u64;
+                        self.ctx.closure_param_type_hints.insert(key, hints);
+                    }
+                } else {
+                    self.set_adapter_closure_param_hints(receiver, method.name.as_str(), arg);
+                }
             }
         }
 
@@ -31959,6 +31959,51 @@ impl VbcCodegen {
         Some(elem)
     }
 
+    /// Contextual lambda parameters come from the exact resolved declaration.
+    /// Receiver and explicit generic arguments are applied before hints cross
+    /// the closure boundary; unresolved slots supply no invented type.
+    fn declared_method_closure_param_hints(
+        &self,
+        receiver: &Expr,
+        method: &str,
+        argument: usize,
+        explicit: &verum_common::List<verum_ast::ty::GenericArg>,
+    ) -> Option<Vec<Option<crate::types::TypeRef>>> {
+        use crate::types::{TypeParamId, TypeRef};
+        let mut owner = Self::method_receiver_type_name(
+            &self.extract_expr_type_name(receiver)?,
+        ).to_string();
+        for _ in 0..self.method_receiver_deref_count(&owner, method) {
+            owner = self.user_deref_target_type_name(&owner)?.to_string();
+        }
+        let key = self.registered_receiver_method(&owner, method)?;
+        let info = self.ctx.lookup_qualified_function(&key)?;
+        let params = self.functions.iter().find(|f| f.descriptor.id == info.id)
+            .map(|f| f.descriptor.params.iter().map(|p| p.type_ref.clone()).collect::<Vec<_>>())
+            .or_else(|| self.ctx.archive_fn_param_types.get(&info.id.0).cloned())?;
+        let TypeRef::Function { params, .. } = params.get(argument + 1)? else {
+            return None;
+        };
+        let mut substitution = crate::mono::TypeSubstitution::empty();
+        for (index, arg) in Self::split_generic_args(&owner).iter().enumerate() {
+            if let Some(ty) = self.type_name_to_type_ref_mono(arg) {
+                substitution.bind(TypeParamId(index as u16), ty);
+            }
+        }
+        for (arg, id) in explicit.iter().zip(&info.explicit_type_param_ids) {
+            if let (verum_ast::ty::GenericArg::Type(ty), Some(id)) = (arg, id)
+                && let Some(ty) = self.explicit_type_witness(ty, None)
+            {
+                substitution.bind(*id, ty);
+            }
+        }
+        let hints: Vec<_> = params.iter().map(|ty| {
+            let ty = substitution.apply(ty);
+            (!ty.is_generic() && self.type_ref_to_field_name(&ty).is_some()).then_some(ty)
+        }).collect();
+        hints.iter().any(Option::is_some).then_some(hints)
+    }
+
     /// REFL-CLOSURE-XREC-1 (runtime leg): if `arg` is a closure argument of
     /// iterator-adapter `method` over `receiver`, stash span-keyed
     /// element-type hints for the closure's element-carrying params in
@@ -31983,12 +32028,13 @@ impl VbcCodegen {
             return;
         };
         let max = positions.iter().max().copied().unwrap_or(0);
-        let mut hints: Vec<Option<String>> = vec![None; max + 1];
+        let Some(elem_ty) = self.type_name_to_type_ref_mono(&elem_ty) else { return };
+        let mut hints = vec![None; max + 1];
         for &p in positions {
             hints[p] = Some(elem_ty.clone());
         }
         let key = ((arg.span.start as u64) << 32) | (arg.span.end as u64);
-        self.ctx.closure_param_type_hints = Some((key, hints));
+        self.ctx.closure_param_type_hints.entry(key).or_insert(hints);
     }
 
     /// Compiles a closure expression.
@@ -32009,22 +32055,9 @@ impl VbcCodegen {
         return_type: Option<&verum_ast::ty::Type>,
         hint_key: Option<u64>,
     ) -> CodegenResult<Option<Reg>> {
-        // REFL-CLOSURE-XREC-1 (runtime leg): claim the pending adapter
-        // element-type hints IFF they were derived for exactly this
-        // closure node. Unmatched entries stay pending (they belong to an
-        // enclosing adapter call whose closure arg compiles later).
-        let claim_hints = matches!(
-            (hint_key, self.ctx.closure_param_type_hints.as_ref()),
-            (Some(key), Some((pending_key, _))) if *pending_key == key
-        );
-        let elem_hints: Option<Vec<Option<String>>> = if claim_hints {
-            self.ctx
-                .closure_param_type_hints
-                .take()
-                .map(|(_, hints)| hints)
-        } else {
-            None
-        };
+        // Claim only this closure's contextual signature; sibling callbacks
+        // and closures compiled inside the receiver keep their own entries.
+        let elem_hints = hint_key.and_then(|key| self.ctx.closure_param_type_hints.remove(&key));
         // Step 1: Extract parameter info for the closure
         // For simple ident patterns, use the name directly
         // For complex patterns (tuple, etc.), generate synthetic names
@@ -32107,11 +32140,13 @@ impl VbcCodegen {
         // registered an EMPTY type name, so `r?` inside the closure
         // classified as neither Result nor Maybe and fell into the
         // from_residual name-dice (task #50, `Err("error")` → `Err(0)`).
-        let param_type_names: Vec<Option<String>> = params
-            .iter()
-            .map(|p| {
-                p.ty.as_ref().map(|t| self.type_to_simple_name(t)).filter(|n| !n.is_empty())
-            })
+        let param_type_refs: Vec<Option<crate::types::TypeRef>> = params.iter().enumerate()
+            .map(|(index, p)| p.ty.as_ref().map(|ty| self.resolve_signature_type_ref(ty, &self.ctx.current_generic_param_ids))
+                .or_else(|| elem_hints.as_ref().and_then(|hints| hints.get(index)).cloned().flatten()))
+            .collect();
+        let param_type_names: Vec<Option<String>> = params.iter().enumerate()
+            .map(|(index, p)| p.ty.as_ref().map(|ty| self.type_to_simple_name(ty))
+                .or_else(|| param_type_refs[index].as_ref().and_then(|ty| self.type_ref_to_field_name(ty))))
             .collect();
 
         // Step 4: Register and compile the closure body as a new function
@@ -32120,10 +32155,10 @@ impl VbcCodegen {
             &captures_with_mut,
             &param_names,
             &param_type_names,
+            &param_type_refs,
             &complex_patterns,
             body,
             return_type,
-            elem_hints.as_deref(),
         )?;
 
         // Step 5: Emit NewClosure instruction
@@ -32213,10 +32248,10 @@ impl VbcCodegen {
         captures: &[(String, bool)],
         params: &[String],
         param_type_names: &[Option<String>],
+        param_type_refs: &[Option<crate::types::TypeRef>],
         complex_patterns: &[(usize, &verum_ast::Pattern)],
         body: &Expr,
         return_type_ast: Option<&verum_ast::ty::Type>,
-        elem_hints: Option<&[Option<String>]>,
     ) -> CodegenResult<u32> {
         // Generate unique name for closure function
         let closure_name = format!(
@@ -32243,7 +32278,8 @@ impl VbcCodegen {
         let param_names: Vec<String> = all_params.iter().map(|(n, _)| n.clone()).collect();
 
         // Convert AST return type to TypeRef for the function descriptor.
-        let closure_return_type_ref = return_type_ast.map(|ty| self.ast_type_to_type_ref(ty));
+        let closure_return_type_ref = return_type_ast.map(|ty|
+            self.resolve_signature_type_ref(ty, &self.ctx.current_generic_param_ids));
 
         // Compute the return type name string for type tracking.
         let closure_return_type_name = return_type_ast.map(|ty| self.type_to_simple_name(ty));
@@ -32399,21 +32435,9 @@ impl VbcCodegen {
             let var_type = self.type_name_to_var_type(type_name);
             self.ctx.register_variable_type(pname, var_type);
         }
-        if let Some(hints) = elem_hints {
-            for (i, hint) in hints.iter().enumerate() {
-                let Some(elem_ty) = hint else { continue };
-                if param_type_names.get(i).is_some_and(|t| t.is_some()) {
-                    continue;
-                }
-                if complex_patterns.iter().any(|(idx, _)| *idx == i) {
-                    continue;
-                }
-                let Some(pname) = params.get(i) else { continue };
-                self.ctx
-                    .variable_type_names
-                    .insert(pname.clone(), elem_ty.clone());
-                let var_type = self.type_name_to_var_type(elem_ty);
-                self.ctx.register_variable_type(pname, var_type);
+        for (name, ty) in params.iter().zip(param_type_refs) {
+            if matches!(ty, Some(crate::types::TypeRef::Reference { .. })) {
+                self.ctx.reference_bindings.insert(name.clone());
             }
         }
 
@@ -32460,6 +32484,30 @@ impl VbcCodegen {
 
         // Compile the body expression
         let result = self.compile_expr(body)?;
+        // Infer while closure parameters and compiled block results are still
+        // in scope. The surrounding function's return context is not evidence.
+        let mut tail = body;
+        loop {
+            match &tail.kind {
+                ExprKind::Paren(inner) => tail = inner,
+                ExprKind::Block(block) if block.stmts.is_empty() => {
+                    let Some(expr) = block.expr.as_ref() else { break };
+                    tail = expr;
+                }
+                _ => break,
+            }
+        }
+        let parameter_result = match &tail.kind {
+            ExprKind::Path(path) => path.as_ident().and_then(|ident|
+                params.iter().position(|name| name == ident.name.as_str()))
+                .and_then(|index| param_type_refs.get(index)).cloned().flatten(),
+            _ => None,
+        };
+        let inferred_return_type = parameter_result.or_else(|| self.extract_expr_type_name(body)
+            .or_else(|| self.infer_expr_type_name(body))
+            .or_else(|| Self::literal_default_type_name(body))
+            .and_then(|name| self.type_name_to_type_ref_mono(&name)));
+        let closure_return_type_ref = closure_return_type_ref.or(inferred_return_type);
         if let Some(saved) = saved_closure_rtn_wp {
             self.ctx.pop_disambig_context(saved);
         }
@@ -32483,6 +32531,10 @@ impl VbcCodegen {
         // Restore labels and loop context
         self.ctx.restore_closure_context(saved_closure_ctx);
 
+        if let Some(info) = self.ctx.functions.get_mut(&closure_name) {
+            info.return_type = closure_return_type_ref.clone();
+        }
+
         // Create VBC function descriptor
         let name_id = crate::types::StringId(self.intern_string(&closure_name));
         let mut descriptor = crate::module::FunctionDescriptor::new(name_id);
@@ -32501,21 +32553,8 @@ impl VbcCodegen {
         });
         for (i, param) in params.iter().enumerate() {
             let pname_id = crate::types::StringId(self.intern_string(param));
-            // Use AST type annotation for correct register tracking in LLVM lowering
-            let type_ref = if let Some(Some(type_name)) = param_type_names.get(i) {
-                match type_name.as_str() {
-                    "Text" => crate::types::TypeRef::Concrete(crate::types::TypeId::TEXT),
-                    "List" => crate::types::TypeRef::Concrete(crate::types::TypeId::LIST),
-                    "Map" => crate::types::TypeRef::Concrete(crate::types::TypeId::MAP),
-                    "Set" => crate::types::TypeRef::Concrete(crate::types::TypeId::SET),
-                    "Float" => crate::types::TypeRef::Concrete(crate::types::TypeId::FLOAT),
-                    "Bool" => crate::types::TypeRef::Concrete(crate::types::TypeId::BOOL),
-                    "Channel" => crate::types::TypeRef::Concrete(crate::types::TypeId::CHANNEL),
-                    _ => crate::types::TypeRef::Concrete(crate::types::TypeId::INT),
-                }
-            } else {
-                crate::types::TypeRef::Concrete(crate::types::TypeId::INT)
-            };
+            let type_ref = param_type_refs.get(i).cloned().flatten()
+                .unwrap_or(crate::types::TypeRef::Concrete(crate::types::TypeId::INT));
             descriptor.params.push(crate::module::ParamDescriptor {
                 name: pname_id,
                 type_ref,
@@ -32526,8 +32565,8 @@ impl VbcCodegen {
         }
         // Store capture count in max_stack for LLVM prologue generation
         descriptor.max_stack = captures.len() as u16;
-        // Set closure return type from AST annotation if available,
-        // otherwise default to INT (i64) since closures return values not void.
+        // Prefer the declared or proven body result. Keep the legacy ABI
+        // fallback only when no structural result was established.
         descriptor.return_type = closure_return_type_ref
             .unwrap_or_else(|| crate::types::TypeRef::Concrete(crate::types::TypeId::INT));
 
