@@ -391,8 +391,8 @@ The following source repairs are committed after that executable snapshot:
   1097, followed by Result predicates printing integers. The permanent VCS
   control also requires unrelated same-named Int methods to print 9001/9002.
 
-Execution acceptance for these changes still requires a fresh coherent CLI.
-The first verification build at `b576b2eb1` was stopped after independent
+Execution acceptance now includes the coherent `0634cb100` CLI described
+below. The first verification build at `b576b2eb1` was stopped after independent
 review found that T1545's new generic-field inference exposed the existing
 text substitution helper to qualified nominal names: an owner parameter
 `Item` could rewrite `alpha.Item`. The correction must also retain structured
@@ -419,8 +419,47 @@ the completed full VBC run passes **2,040 library tests plus 300 tests in
 34 targeted binaries**, with zero failures and one existing ignored library
 test. The library run took 986.44 seconds, and the complete command took
 1,043.39 seconds alongside the separate CLI build. The coherent CLI/std-library
-build remains in progress. These counts distinguish the tested source
-snapshots from the pending executable acceptance.
+build completed in 1,853.83 seconds. CLI SHA-256 is
+`9cc0de4f7c78fc1301dbf7376169e2cb5bab87805d283d8f3b83ba9a993103cf`;
+its source fingerprint is
+`a063b721293f9d4b53699c8be13c075bcdedfc1862ecceed98a6ea767ba812f4`.
+The saved build manifest binds the executable to its runtime archive,
+core metadata and symbol graph.
+
+Fresh execution on that frozen binary establishes these separate results:
+
+- Generic factory ordinary/shadow results and range/mapped collection pass
+  both interpretation and actual native execution. The observable outputs
+  are `7/7`, `5/5`, `Stdcall/C`; native execution took 175.5 seconds including
+  compilation. `factory_collect_return_identity.vr` preserves this scenario.
+- Result predicates print `true/false/false/true`, and unrelated same-named
+  Int methods print `9001/9002` under actual native execution.
+- The raw field-address probe passes natively. The accompanying mutex
+  lifetime observations remain `true/true/true`, rather than the required
+  `true/false/false`: this does not close owned-resource destruction.
+- The interpreter supervisor control prints `once=37 count=1 root=0`.
+  Native acceptance is still separate; an initial run stopped on sandbox
+  object-file write permission before any executable ran and is being
+  repeated with the required filesystem access.
+- The interpreter Weft HTTP gate passes five language contracts and four
+  real-connection cases: binary response bytes, header timeout, cancellation
+  and a slow-drip timeout. Both timeout responses carry HTTP 408 and the
+  exact `request timeout` body. This is not native HTTP evidence or closure
+  of the wider folded IO/process task.
+- Fresh archive inspection confirms a real catch body with the expected
+  Result/panic payload metadata, but an actual downstream combined caller
+  still fails compilation: ordinary import leaves source-module TypeIds in
+  FunctionInfo while descriptors use local IDs. T1536 repairs that shared
+  boundary; none of the combined runtime assertions ran.
+
+Subsequent focused commits fix identifier-token spans at the parser source,
+remove the field helper's span workaround, attach scalar impls by their
+canonical primitive ID and declared spelling, and produce callable
+signatures independently of legacy ABI Int defaults. The parser's full
+suite passes 4,233 tests; the callable producer change passes 81 focused
+checks on its isolated branch. These are source-level results: they are not
+part of the frozen binary above and require a new coherent build before
+public execution acceptance.
 
 T1547 separately records a source declaration defect: Byte/UInt8 and
 USize/ISize impls attach to whichever alias descriptor was collected first.
