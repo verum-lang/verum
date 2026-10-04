@@ -61,6 +61,7 @@ fn check(body: &str, expected: Option<i64>) -> List<Text> {
                     .unwrap(),
             )),
             Instruction::Deref { .. } => operations.push(Text::from("*")),
+            Instruction::Len { .. } => operations.push(Text::from("Len")),
             _ => {}
         }
     }
@@ -339,4 +340,81 @@ fn probe(g: Growing<Cell>) -> Int { g.missing() }
         None,
     );
     assert!(!ops.iter().any(|op| op.ends_with(".deref")), "{ops:?}");
+}
+
+#[test]
+fn parenthesizing_a_reference_operand_preserves_explicit_deref() {
+    for operand in ["g", "(g)", "((g))"] {
+        let body = format!("fn probe(g: &Guard<Cell>) -> Int {{ (*{operand}).own() }}");
+        let ops = check(&body, None);
+        assert!(
+            ops.iter().any(|op| op.ends_with("Guard.own")),
+            "{operand}: {ops:?}"
+        );
+        assert!(
+            !ops.iter()
+                .any(|op| op.ends_with("Guard.deref") || op.ends_with("Cell.own")),
+            "{operand}: {ops:?}"
+        );
+        check(
+            &format!(
+                r#"
+fn through_reference(g: &Guard<Cell>) -> Int {{ (*{operand}).own() }}
+fn probe() -> Int {{
+    let g: Guard<Cell> = Guard {{ marker: 13, value: Cell {{ padding: 41, value: 7 }} }};
+    through_reference(&g)
+}}
+"#
+            ),
+            Some(13),
+        );
+    }
+}
+
+#[test]
+fn associated_target_with_reference_arguments_resolves_container_methods() {
+    for return_type in ["&Self.Target", "&List<&T>"] {
+        let ops = check(
+            &format!(
+                r#"
+type RefList<T> is {{ values: List<&T> }};
+implement<T> Deref for RefList<T> {{
+    type Target = List<&T>;
+    fn deref(&self) -> {return_type} {{ &self.values }}
+}}
+fn probe(g: RefList<Cell>) -> Int {{ g.len() }}
+"#
+            ),
+            None,
+        );
+        assert!(
+            ops.iter().any(|op| op.ends_with("RefList.deref")),
+            "{return_type}: {ops:?}"
+        );
+        assert!(
+            ops.iter().any(|op| op.ends_with("List.len") || op == "Len"),
+            "{return_type}: {ops:?}"
+        );
+    }
+}
+
+#[test]
+fn caller_generic_target_never_uses_a_same_named_nominal_deref() {
+    let ops = check(
+        r#"
+type Reader is protocol { fn read(&self) -> Int; };
+type Decoy is { value: Int };
+implement Decoy { fn read(&self) -> Int { self.value } }
+type U is { value: Decoy };
+implement Deref for U { type Target = Decoy; fn deref(&self) -> &Decoy { &self.value } }
+fn probe<U: Reader>(g: Guard<U>) -> Int { g.read() }
+"#,
+        None,
+    );
+    assert!(ops.iter().any(|op| op.ends_with("Guard.deref")), "{ops:?}");
+    assert!(
+        !ops.iter()
+            .any(|op| op.ends_with("U.deref") || op.ends_with("Decoy.read")),
+        "{ops:?}"
+    );
 }

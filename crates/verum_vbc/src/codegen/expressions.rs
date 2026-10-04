@@ -6104,22 +6104,7 @@ impl VbcCodegen {
                     // returns the pointed-to Value), so the resulting
                     // semantics match user expectation: `*m` yields T
                     // for any type that opts into `Deref<Target = T>`.
-                    let tmp_ref = self.ctx.alloc_temp();
-                    let method_id_str = self.ctx.intern_string_raw(&deref_qualified);
-                    self.ctx.emit(Instruction::CallM {
-                        dst: tmp_ref,
-                        receiver: inner_reg,
-                        method_id: method_id_str,
-                        args: crate::instruction::RegRange {
-                            start: inner_reg,
-                            count: 0,
-                        },
-                    });
-                    self.ctx.emit(Instruction::Deref {
-                        dst: dest,
-                        ref_reg: tmp_ref,
-                    });
-                    self.ctx.free_temp(tmp_ref);
+                    self.emit_user_deref_value(dest, inner_reg, &deref_qualified);
                     // The gate's binding is now the qualified name and
                     // is USED, above. It used to be the function id, held
                     // only to prove the gate had hit — while the emission
@@ -12020,6 +12005,9 @@ impl VbcCodegen {
     /// registry keys. A short key is usable only for the same registered type.
     fn registered_receiver_method(&self, type_name: &str, method: &str) -> Option<String> {
         let base = Self::strip_generic_args(type_name);
+        if self.ctx.generic_type_params.contains(base) {
+            return None;
+        }
         let qualified = format!("{base}.{method}");
         if self.ctx.lookup_qualified_function(&qualified).is_some() {
             return Some(qualified);
@@ -12039,6 +12027,10 @@ impl VbcCodegen {
     /// Reference bindings already carry their pointee's nominal name. A
     /// built-in `*reference` preserves that name instead of invoking Deref.
     fn is_reference_binding_operand(&self, expr: &Expr) -> bool {
+        let mut expr = expr;
+        while let ExprKind::Paren(inner) = &expr.kind {
+            expr = inner;
+        }
         let ExprKind::Path(path) = &expr.kind else {
             return false;
         };
@@ -12125,8 +12117,9 @@ impl VbcCodegen {
                                 .get(parameter.0 as usize)
                                 .map_or(Maybe::None, |name| Maybe::Some(Text::from(name.as_str()))),
                             TypeRef::Instantiated { base, args } => {
-                                let Some(base_name) =
-                                    codegen.type_ref_to_field_name(&TypeRef::Concrete(*base))
+                                let Some(base_name) = codegen
+                                    .type_ref_to_field_name(&TypeRef::Concrete(*base))
+                                    .or_else(|| base.well_known_name().map(str::to_string))
                                 else {
                                     return Maybe::None;
                                 };
@@ -12144,9 +12137,59 @@ impl VbcCodegen {
                                     names.join(", ")
                                 )))
                             }
-                            _ => codegen
+                            TypeRef::Reference {
+                                inner,
+                                mutability,
+                                tier,
+                            } => {
+                                let Maybe::Some(inner) = render(codegen, inner, actual, depth + 1)
+                                else {
+                                    return Maybe::None;
+                                };
+                                let tier = match tier {
+                                    crate::types::CbgrTier::Tier0 => "",
+                                    crate::types::CbgrTier::Tier1 => "checked ",
+                                    crate::types::CbgrTier::Tier2 => "unsafe ",
+                                };
+                                let mutable = if *mutability == crate::types::Mutability::Mutable {
+                                    "mut "
+                                } else {
+                                    ""
+                                };
+                                Maybe::Some(Text::from(format!("&{tier}{mutable}{inner}")))
+                            }
+                            TypeRef::Slice(inner) => {
+                                let Maybe::Some(inner) = render(codegen, inner, actual, depth + 1)
+                                else {
+                                    return Maybe::None;
+                                };
+                                Maybe::Some(Text::from(format!("[{inner}]")))
+                            }
+                            TypeRef::Tuple(elements) => {
+                                let mut names: verum_common::List<Text> = verum_common::List::new();
+                                for element in elements {
+                                    let Maybe::Some(name) =
+                                        render(codegen, element, actual, depth + 1)
+                                    else {
+                                        return Maybe::None;
+                                    };
+                                    names.push(name);
+                                }
+                                Maybe::Some(Text::from(format!("({})", names.join(", "))))
+                            }
+                            TypeRef::Array { element, length } => {
+                                let Maybe::Some(element) =
+                                    render(codegen, element, actual, depth + 1)
+                                else {
+                                    return Maybe::None;
+                                };
+                                Maybe::Some(Text::from(format!("[{element}; {length}]")))
+                            }
+                            TypeRef::Concrete(id) => codegen
                                 .type_ref_to_field_name(target)
+                                .or_else(|| id.well_known_name().map(str::to_string))
                                 .map_or(Maybe::None, |name| Maybe::Some(Text::from(name))),
+                            _ => Maybe::None,
                         }
                     }
                     if let Maybe::Some(name) = render(self, target, &actual, 0) {
@@ -12206,6 +12249,103 @@ impl VbcCodegen {
             current = target;
         }
         0
+    }
+
+    /// Load the value returned by a registered user Deref implementation.
+    /// Both operator lowering and method-receiver adjustment use this path.
+    fn emit_user_deref_value(&mut self, dest: Reg, receiver: Reg, method: &str) {
+        let reference = self.ctx.alloc_temp();
+        let method_id = self.ctx.intern_string_raw(method);
+        self.ctx.emit(Instruction::CallM {
+            dst: reference,
+            receiver,
+            method_id,
+            args: crate::instruction::RegRange {
+                start: receiver,
+                count: 0,
+            },
+        });
+        self.ctx.emit(Instruction::Deref {
+            dst: dest,
+            ref_reg: reference,
+        });
+        self.ctx.free_temp(reference);
+    }
+
+    /// Evaluate an implicit receiver adjustment once and expose the result as
+    /// a scoped compiler value. Source parentheses never encode lowering mode.
+    fn compile_adjusted_method_receiver(
+        &mut self,
+        receiver: &Expr,
+        receiver_type: &str,
+        depth: usize,
+        method: &verum_ast::Ident,
+        args: &verum_common::List<Expr>,
+        resolved_target: Option<&verum_ast::expr::ResolvedCallTarget>,
+    ) -> CodegenResult<Option<Reg>> {
+        let mut value = self
+            .compile_expr(receiver)?
+            .or_internal("method receiver has no value")?;
+        let mut target = verum_common::Text::from(receiver_type);
+        for _ in 0..depth {
+            let key = self
+                .registered_receiver_method(target.as_str(), "deref")
+                .or_internal("resolved Deref receiver lost its method")?;
+            let verum_common::Maybe::Some(next_type) =
+                self.user_deref_target_type_name(target.as_str())
+            else {
+                return Err(CodegenError::internal(
+                    "resolved Deref receiver lost its target",
+                ));
+            };
+            let next_value = self.ctx.alloc_temp();
+            self.emit_user_deref_value(next_value, value, &key);
+            self.ctx.free_temp(value);
+            value = next_value;
+            target = next_type;
+        }
+
+        // Reserve the result outside the local scope: a method interception
+        // may return its receiver register directly, so carry it before exit.
+        let result_value = self.ctx.alloc_temp();
+        self.ctx.enter_scope();
+        let binding = self.ctx.new_label("$method_receiver");
+        let local = self.ctx.define_var(&binding, false);
+        self.ctx.emit(Instruction::Mov {
+            dst: local,
+            src: value,
+        });
+        self.ctx.free_temp(value);
+        self.ctx
+            .variable_type_names
+            .insert(binding.clone(), target.to_string());
+        self.ctx
+            .register_variable_type(&binding, self.type_name_to_var_type(target.as_str()));
+        let adjusted = Expr::ident(verum_ast::Ident::new(binding.clone(), receiver.span));
+        let result = self.compile_method_call(&adjusted, method, args, resolved_target);
+        if let Ok(Some(reg)) = &result {
+            self.ctx.emit(Instruction::Mov {
+                dst: result_value,
+                src: *reg,
+            });
+            self.ctx.free_temp(*reg);
+        }
+        let (_, defers) = self.ctx.exit_scope(result.is_err());
+        for instructions in defers {
+            for instruction in instructions {
+                self.ctx.emit(instruction);
+            }
+        }
+        self.ctx.variable_type_names.remove(&binding);
+        self.ctx.variable_types.remove(&binding);
+        self.ctx.array_element_type_names.remove(&binding);
+        match result {
+            Ok(Some(_)) => Ok(Some(result_value)),
+            other => {
+                self.ctx.free_temp(result_value);
+                other
+            }
+        }
     }
 
     fn compile_method_call(
@@ -12380,35 +12520,14 @@ impl VbcCodegen {
             ));
         }
 
-        // Implicit method forwarding uses the explicit Deref lowering, which
-        // calls the registered method and then loads its returned Value slot.
-        // Resolve the complete chain first so wrapper methods win at each hop
-        // and cyclic declarations cannot recurse through compile_method_call.
+        // Resolve the complete receiver chain before lowering it. Own
+        // methods win at each hop and cycles cannot recursively expand calls.
         if let Some(receiver_type) = self.extract_expr_type_name(receiver) {
             let depth = self.method_receiver_deref_count(&receiver_type, method.name.as_str());
             if depth > 0 {
-                let mut adjusted = receiver.clone();
-                for _ in 0..depth {
-                    // A method receiver permits implicit reference dereference.
-                    // Parenthesizing keeps *reference-binding lowering from
-                    // consuming only the reference instead of calling Deref.
-                    let operand = Expr::new(
-                        ExprKind::Paren(verum_common::Heap::new(adjusted)),
-                        receiver.span,
-                    );
-                    let dereferenced = Expr::new(
-                        ExprKind::Unary {
-                            op: UnOp::Deref,
-                            expr: verum_common::Heap::new(operand),
-                        },
-                        receiver.span,
-                    );
-                    adjusted = Expr::new(
-                        ExprKind::Paren(verum_common::Heap::new(dereferenced)),
-                        receiver.span,
-                    );
-                }
-                return self.compile_method_call(&adjusted, method, args, resolved_target);
+                return self.compile_adjusted_method_receiver(
+                    receiver, &receiver_type, depth, method, args, resolved_target,
+                );
             }
         }
 
@@ -15148,7 +15267,7 @@ impl VbcCodegen {
                                 // dispatch erasure).
                                 if let Some(proto) = Self::dyn_protocol_of(type_name) {
                                     format!("dyn:{}.{}", proto, method.name)
-                                } else if verum_common::well_known_types::looks_like_type_param(type_name) {
+                                } else if self.ctx.generic_type_params.contains(type_name.as_str()) {
                                     // Generic type parameter — runtime
                                     // dispatch routes by receiver kind.
                                     //
@@ -45745,6 +45864,52 @@ mod future_output_tests;
 #[cfg(test)]
 mod tests {
     use super::resolve_stdlib_constant_value;
+
+    #[test]
+    fn deref_target_renders_carried_reference_slice_tuple_and_array_arguments() {
+        use super::VbcCodegen;
+        use crate::codegen::CodegenConfig;
+        use crate::types::{CbgrTier, Mutability, TypeId, TypeParamId, TypeRef};
+        use verum_common::{Maybe, Text};
+        let ast = verum_fast_parser::Parser::new(
+            r#"
+type Deref is protocol { type Target; fn deref(&self) -> &Self.Target; };
+type Guard<T> is { value: T };
+implement<T> Deref for Guard<T> { type Target = T; fn deref(&self) -> &T { &self.value } }
+"#,
+        )
+        .parse_module()
+        .expect("parse");
+        let mut codegen = VbcCodegen::with_config(CodegenConfig::new("deref_target_render"));
+        codegen.compile_module(&ast).expect("compile");
+        let id = codegen.type_name_to_id["Guard"];
+        let descriptor = codegen
+            .types
+            .iter_mut()
+            .find(|t| t.id == id)
+            .expect("Guard");
+        // Source collection currently erases references nested in associated
+        // generic arguments. Pin the complete archive descriptor independently.
+        descriptor.protocols[0].associated_types[0].1 = TypeRef::Instantiated {
+            base: TypeId::LIST,
+            args: vec![TypeRef::Tuple(vec![
+                TypeRef::Reference {
+                    inner: Box::new(TypeRef::Generic(TypeParamId(0))),
+                    mutability: Mutability::Mutable,
+                    tier: CbgrTier::Tier0,
+                },
+                TypeRef::Slice(Box::new(TypeRef::Generic(TypeParamId(0)))),
+                TypeRef::Array {
+                    element: Box::new(TypeRef::Generic(TypeParamId(0))),
+                    length: 3,
+                },
+            ])],
+        };
+        assert_eq!(
+            codegen.user_deref_target_type_name("Guard<Int>"),
+            Maybe::Some(Text::from("List<(&mut Int, [Int], [Int; 3])>"))
+        );
+    }
 
     #[test]
     fn test_expressions_module_exists() {
