@@ -447,27 +447,23 @@ implement CancellationToken {
     /// Quick synchronous check.
     @inline(always)
     public fn is_cancelled(&self) -> Bool {
-        // Explicit deref: `inner` is a `Shared<CancellationFlag>` and an
-        // implicit method call on a carrier answers the wrong object
-        // today (T1474) — `cancel()` followed by `is_cancelled()`
-        // answered false. Comes out when that lands.
-        (*self.inner).is_cancelled()
+        self.inner.is_cancelled()
     }
 
     /// Read the cancellation reason if set. Maybe.None while active.
     public fn reason(&self) -> Maybe<CancelReason> {
-        (*self.inner).reason()
+        self.inner.reason()
     }
 
     /// Trigger cancellation with default `Cancelled` reason.
     /// Idempotent.
     public fn cancel(&self) {
-        let _ = (*self.inner).cancel_with(CancelReason.Cancelled);
+        let _ = self.inner.cancel_with(CancelReason.Cancelled);
     }
 
     /// Trigger cancellation with an explicit structured reason.
     public fn cancel_with(&self, r: CancelReason) {
-        let _ = (*self.inner).cancel_with(r);
+        let _ = self.inner.cancel_with(r);
     }
 
     /// Return `Result.Err(CancellationError)` if cancelled, else `Result.Ok(())`.

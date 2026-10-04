@@ -819,10 +819,9 @@ implement Write for TcpStream {
 // Full event-driven suspension is a separate executor development step.
 //
 
-// Buffer parameter is `&mut List<Byte>` (red-team §4 fix): byte-typed
-// end-to-end so the per-element footprint is 1 byte rather than 8 bytes
-// (NaN-boxed Value). 10 000-connection × 16-KiB-buffer pool drops from
-// 1.28 GiB to 160 MiB.
+// The public buffer stores Byte values in a List. Its interpreter storage
+// still uses NaN-boxed slots; the packed scratch array below provides the
+// contiguous bytes required by the socket ABI.
 
 implement AsyncRead for TcpStream {
     fn poll_read(&mut self, cx: &mut Context, buf: &mut List<Byte>) -> Poll<IoResult<Int>> {

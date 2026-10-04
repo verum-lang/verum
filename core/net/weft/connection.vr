@@ -285,18 +285,12 @@ public async fn serve_http1<T: WeftTransport, S: Handler>(
 ) -> Result<(), ConnError> {
     let mut waiting_for_next_request = false;
     loop {
-        // EXPLICIT DEREFERENCE, LOAD-BEARING (T1474): an atomic reached
-        // through a `Shared` carrier by an implicit method call does not
-        // answer its value today — a flag holding `false` reads as
-        // `true`, so a fresh connection was treated as draining and the
-        // accept loop it came from broke on its first iteration. The `*`
-        // comes out when T1474's remaining half lands.
-        if (*token).is_cancelled() {
+        if token.is_cancelled() {
             return Result.Err(ConnError.Cancelled);
         }
         // If the listener started draining, disable keep-alive for the
         // next message so this connection closes cleanly afterwards.
-        let drain_now = (*draining).load(MemoryOrdering.Acquire);
+        let drain_now = draining.load(MemoryOrdering.Acquire);
         let effective_cfg: ConnectionConfig = if drain_now {
             ConnectionConfig { keep_alive: false, ..config.clone() }
         } else {
