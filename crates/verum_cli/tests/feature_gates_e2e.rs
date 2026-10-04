@@ -461,8 +461,7 @@ fn tier1_aot_rejects_unsafe_when_gate_off() {
     assert!(
         !combined.contains("Falling back to interpreter"),
         "Tier 1 must not silently fall back on gate rejection — that \
-         would let the unsafe code actually run. The fallback is reserved \
-         for infrastructure errors (LLVM glitch, etc.), not feature gates.\n{}",
+         would let the unsafe code actually run.\n{}",
         combined
     );
 }

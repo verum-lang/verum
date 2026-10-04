@@ -524,40 +524,10 @@ pub fn run_with_tier_and_flags(
                     }
                 }
                 Err(aot_err) => {
-                    // If the error came from a feature gate (safety,
-                    // unsafe, FFI, etc.) — do NOT fall back. A gate
-                    // rejection is a user-intent check, not a build
-                    // system hiccup, and silently falling back would
-                    // defeat the gate.
-                    let err_str = aot_err.to_string();
-                    if err_str.contains("safety gate")
-                        || err_str.contains("[safety]")
-                        || err_str.contains("[meta]")
-                        || err_str.contains("[context]")
-                    {
-                        return Err(CliError::CompilationFailed(err_str));
-                    }
-
-                    // Graceful fallback: AOT failed for an unrelated
-                    // reason (LLVM glitch, toolchain issue) — retry
-                    // with the interpreter. Preserve language_features
-                    // so the interpreter applies the same gates.
-                    ui::warn(&format!(
-                        "AOT compilation failed: {}. Falling back to interpreter.",
-                        aot_err
-                    ));
-                    let fallback_options = CompilerOptions {
-                        input: input.clone(),
-                        verify_mode,
-                        output_format: OutputFormat::Human,
-                        language_features: language_features.clone(),
-                        ..Default::default()
-                    };
-                    let mut fallback_session = Session::new(fallback_options);
-                    let mut fallback_pipeline = CompilationPipeline::new(&mut fallback_session);
-                    fallback_pipeline
-                        .run_interpreter(args)
-                        .map_err(|e| CliError::RuntimeError(e.to_string()))?;
+                    // Tier 1 is an explicit execution request. Reporting an
+                    // interpreter success here would conceal a broken native
+                    // build and execute the program under a different tier.
+                    return Err(CliError::CompilationFailed(aot_err.to_string()));
                 }
             }
         }
