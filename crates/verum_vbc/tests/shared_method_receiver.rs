@@ -8,6 +8,7 @@ use verum_vbc::instruction::Instruction;
 // Inspect the compiler boundary without a baked stdlib. Runtime coverage uses
 // the actual Shared/atomic implementations in shared_method_receiver.vr.
 const ENV: &str = r#"
+module shared_receiver;
 type Deref is protocol { type Target; fn deref(&self) -> &Self.Target; };
 type Shared<T> is { value: T };
 implement<T> Deref for Shared<T> {
@@ -123,4 +124,30 @@ fn temporary_receiver_is_evaluated_once() {
         "{ops:?}"
     );
     assert!(ops.iter().any(|op| op == "Shared.deref"), "{ops:?}");
+}
+
+#[test]
+fn qualified_shared_return_preserves_the_same_receiver_adjustment() {
+    let ops = operations(
+        "fn make() -> shared_receiver.Shared<Cell> { Shared { value: Cell { padding: 41, value: 777 } } } fn probe() -> Int { make().load() }",
+    );
+    assert!(ops.iter().any(|op| op.ends_with("Shared.deref")), "{ops:?}");
+    assert!(ops.iter().any(|op| op == "*"), "{ops:?}");
+    assert!(ops.iter().any(|op| op.ends_with("Cell.load")), "{ops:?}");
+}
+
+#[test]
+fn qualified_shared_keeps_its_own_methods() {
+    let ops = operations(
+        "fn make() -> shared_receiver.Shared<Cell> { Shared { value: Cell { padding: 41, value: 777 } } } fn probe() -> Int { make().strong_count() }",
+    );
+    assert!(
+        ops.iter().any(|op| op.ends_with("Shared.strong_count")),
+        "{ops:?}"
+    );
+    assert!(
+        !ops.iter()
+            .any(|op| op.ends_with("Shared.deref") || op.ends_with("Cell.strong_count")),
+        "{ops:?}"
+    );
 }

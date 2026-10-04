@@ -984,6 +984,7 @@ pub struct ClosureCompilationContext {
     pub defer_stack: Vec<Vec<DeferInfo>>,
     /// Saved variable type names (critical for method resolution).
     pub variable_type_names: HashMap<String, String>,
+    /// Saved block result facts in the enclosing function's type scope.
     pub compiled_block_result_types:
         Map<verum_ast::Span, verum_common::Maybe<verum_common::Text>>,
     /// T0701: the let-annotation / return-context stash.  Closure

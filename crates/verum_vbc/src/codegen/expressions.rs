@@ -6088,18 +6088,9 @@ impl VbcCodegen {
                         {
                             return None;
                         }
-                        let qualified = format!("{}.deref", base);
-                        self.ctx
-                            .lookup_function(&qualified)
-                            .filter(|f| f.param_count == 1) // &self
-                            // Carry the QUALIFIED NAME out, not the id: the
-                            // emission below needs a string for `CallM`'s
-                            // `method_id`, and this closure is the only
-                            // place the receiver's type name exists
-                            // (T0753). Returning the id meant the caller
-                            // had a verified qualified name and no way to
-                            // spell it, so it emitted the bare `"deref"`.
-                            .map(|_| qualified)
+                        self.registered_receiver_method(&base, "deref")
+                            .filter(|key| self.ctx.lookup_qualified_function(key)
+                                .is_some_and(|f| f.param_count == 1))
                     })
                 {
                     // Emit CallM(tmp, receiver=inner, method_id="…deref",
@@ -12039,6 +12030,26 @@ impl VbcCodegen {
         (!proto.is_empty()).then_some(proto)
     }
 
+    /// Retain method identity when a nominal has both qualified and short
+    /// registry keys. A short key is usable only for the same registered type.
+    fn registered_receiver_method(&self, type_name: &str, method: &str) -> Option<String> {
+        let base = Self::strip_generic_args(type_name);
+        let qualified = format!("{base}.{method}");
+        if self.ctx.lookup_qualified_function(&qualified).is_some() {
+            return Some(qualified);
+        }
+        let (_, leaf) = base.rsplit_once('.')?;
+        if self.type_name_to_id.get(base).zip(self.type_name_to_id.get(leaf))
+            .is_some_and(|(qualified_id, short_id)| qualified_id == short_id)
+        {
+            let short = format!("{leaf}.{method}");
+            if self.ctx.lookup_qualified_function(&short).is_some() {
+                return Some(short);
+            }
+        }
+        None
+    }
+
     fn compile_method_call(
         &mut self,
         receiver: &Expr,
@@ -12218,12 +12229,14 @@ impl VbcCodegen {
         // Preserve methods declared on Shared before looking through it, and
         // keep dynamic protocol receivers on their vtable dispatch path.
         if let Some(receiver_type) = self.extract_expr_type_name(receiver)
-            && receiver_type.starts_with("Shared<")
+            && let Some((receiver_base, _)) = receiver_type.split_once('<')
+            && receiver_base.rsplit('.').next() == Some("Shared")
             && let Some(inner_type) = Self::extract_element_type(&receiver_type)
             && !inner_type.trim().is_empty()
             && !inner_type.trim_start().starts_with("dyn:")
-            && self.ctx.lookup_qualified_function(&format!("Shared.{}", method.name)).is_none()
-            && self.ctx.lookup_qualified_function("Shared.deref")
+            && self.registered_receiver_method(receiver_base, method.name.as_str()).is_none()
+            && let Some(deref_key) = self.registered_receiver_method(receiver_base, "deref")
+            && self.ctx.lookup_qualified_function(&deref_key)
                 .is_some_and(|f| f.param_count == 1)
         {
             // A method receiver already permits implicit reference dereference.
@@ -15366,7 +15379,7 @@ impl VbcCodegen {
                 if let Some(inner_type) = self.extract_expr_type_name(inner) {
                     // Strip Heap<T> or Shared<T> wrapper to get inner type T
                     let derefed_type =
-                        if inner_type.starts_with("Heap<") || inner_type.starts_with("Shared<") {
+                        if matches!(inner_type.split('<').next().and_then(|base| base.rsplit('.').next()), Some("Heap" | "Shared")) {
                             // Extract T from Heap<T>
                             if let Some(start) = inner_type.find('<') {
                                 let end = inner_type.rfind('>').unwrap_or(inner_type.len());
@@ -15539,8 +15552,7 @@ impl VbcCodegen {
                         // mis-routed dispatch down the failure chain,
                         // and panicked at `into_inner` on Unit.
                         if let Some(inner_type) = self.extract_expr_type_name(inner_unary) {
-                            let derefed_type = if inner_type.starts_with("Heap<")
-                                || inner_type.starts_with("Shared<")
+                            let derefed_type = if matches!(inner_type.split('<').next().and_then(|base| base.rsplit('.').next()), Some("Heap" | "Shared"))
                             {
                                 if let Some(start) = inner_type.find('<') {
                                     let end = inner_type.rfind('>').unwrap_or(inner_type.len());
@@ -15662,7 +15674,7 @@ impl VbcCodegen {
                     let resolved = self.resolve_type_alias(base_type);
                     let final_base = VbcCodegen::strip_generic_args(&resolved);
                     if !final_base.is_empty()
-                        && final_base
+                        && final_base.rsplit('.').next().unwrap_or(final_base)
                             .chars()
                             .next()
                             .map(|c| c.is_ascii_uppercase())
@@ -29986,7 +29998,7 @@ impl VbcCodegen {
                 // runtime (HEAP-INTORAW-1 fallout).
                 {
                     let base = inner_ty.split('<').next().unwrap_or(&inner_ty);
-                    if base == "Heap" || base == "Shared" {
+                    if matches!(base.rsplit('.').next(), Some("Heap" | "Shared")) {
                         // Degenerate carrier names ("Heap<>" / bare
                         // "Heap" — archive descriptors whose generic
                         // args were lost) must report UNKNOWN —
