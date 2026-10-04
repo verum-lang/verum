@@ -1,0 +1,88 @@
+// @test: differential
+// @level: L0
+// @tier: all
+// @timeout: 1200000
+// @tags: generics, shadow, collect, regression
+// @expected-exit: 0
+// @expected-stdout-begin
+// factory_ordinary=7 factory_shadow=7
+// range=5
+// mapped=5
+// abi=Stdcall
+// second=C
+// @expected-stdout-end
+// @description: Generic factory results survive ordinary and shadowed method parameters before iterator collection.
+// Source counterparts: method_generic_witness_identity.rs and
+// collect-return-param-vs-variant-name.vr. Printed outputs exercise both backends.
+
+
+mount core.prelude.*;
+
+// The collision, declared here so the file owns it. `C` is a perfectly
+// ordinary variant name — the C calling convention, an ABI tag, a
+// grade — and nothing about it should reach a generic parameter.
+type Abi is | C | Stdcall;
+
+fn collect_contract_1228() {
+    // POSITIVE — the defect itself. Pre-fix, Tier 0 prints these and
+    // Tier 1 aborts inside `Range.collect` / `MappedIter.collect`.
+    let nums: List<Int> = (0..5).collect();
+    print(f"range={nums.len()}");
+
+    let xs = [1, 2, 3, 4, 5];
+    let doubled: List<Int> = xs.iter().map(|n| n * 2).collect();
+    print(f"mapped={doubled.len()}");
+
+    // NEGATIVE CONTROL — the arm being guarded must keep its day job.
+    // A bare variant name that is NOT a type parameter in scope still
+    // has to resolve to its parent type; a fix that answered "unknown"
+    // for every uppercase identifier would pass the positive half and
+    // break this.
+    let a = Abi.Stdcall;
+    match a {
+        Abi.C => print("abi=C"),
+        Abi.Stdcall => print("abi=Stdcall"),
+    }
+
+    // SECOND NEGATIVE CONTROL — a variant whose name is a SINGLE
+    // UPPERCASE LETTER and is genuinely wanted as a value. This is the
+    // case a `looks_like_type_param` heuristic would break: it answers
+    // true for any one-letter uppercase name, so it cannot tell this
+    // line from the one inside `collect`. Only the per-function
+    // generic-parameter SET can.
+    let b = Abi.C;
+    match b {
+        Abi.C => print("second=C"),
+        Abi.Stdcall => print("second=Stdcall"),
+    }
+}
+
+type Answer is { value: Int };
+implement Answer { fn from_value(value: Int) -> Answer { Answer { value } } }
+type Factory<Item> is { value: Item };
+implement<Item> Factory<Item> {
+    fn build<Output>(self) -> Output { Output.from_value(self.value) }
+}
+fn ordinary_factory_probe_1228() -> Int {
+    let factory: Factory<Int> = Factory { value: 7 };
+    let result = factory.build<Answer>();
+    result.value
+}
+
+type ShadowAnswer1228 is { value: Int };
+implement ShadowAnswer1228 { fn from_value(value: Int) -> ShadowAnswer1228 { ShadowAnswer1228 { value } } }
+type ShadowFactory1228<Item> is { value: Item };
+implement<Item> ShadowFactory1228<Item> { fn build<Item>(self) -> Item { Item.from_value(7) } }
+fn shadow_factory_probe_1228() -> Int {
+    let factory: ShadowFactory1228<Int> = ShadowFactory1228 { value: 7 };
+    factory.build<ShadowAnswer1228>().value
+}
+
+fn main() {
+    let ordinary = ordinary_factory_probe_1228();
+    let shadow = shadow_factory_probe_1228();
+    assert_eq(ordinary, 7);
+    assert_eq(shadow, 7);
+    print(f"factory_ordinary={ordinary} factory_shadow={shadow}");
+    collect_contract_1228();
+}
