@@ -74,6 +74,26 @@ fn usable(ty: &TypeRef) -> bool {
     discovery::concrete(ty) && !matches!(ty, TypeRef::Concrete(TypeId::UNIT | TypeId::PTR))
 }
 
+// GetF reads through references, but its field layout and generic parameters
+// belong to the exact nominal owner. Caller/method parameter IDs are a different
+// scope and cannot fill a missing owner argument.
+fn field_type(module: &VbcModule, mut receiver: &TypeRef, index: u32) -> Option<TypeRef> {
+    while let TypeRef::Reference { inner, .. } = receiver {
+        receiver = inner;
+    }
+    let owner = module.get_type(receiver.base_type_id()?)?;
+    let field = owner.fields.get(index as usize)?;
+    let bindings = match receiver {
+        TypeRef::Instantiated { args, .. } if args.len() == owner.type_params.len() => {
+            TypeSubstitution::new(&owner.type_params, args)
+        }
+        TypeRef::Concrete(_) if owner.type_params.is_empty() => TypeSubstitution::empty(),
+        _ => return None,
+    };
+    let result = bindings.apply(&field.type_ref);
+    usable(&result).then_some(result)
+}
+
 fn static_call(
     module: &VbcModule,
     receiver: &TypeRef,
@@ -203,6 +223,23 @@ pub(super) fn resolve_type_methods(
                 }
                 if let Some(token) = token {
                     tokens.insert(dst.0, token);
+                }
+            }
+            I::GetF {
+                dst,
+                obj,
+                field_idx,
+            } => {
+                let value = values
+                    .get(&obj.0)
+                    .and_then(|receiver| field_type(module, receiver, *field_idx));
+                // A field read changes only its destination. Keep independent
+                // LoadT facts used by C.make(self.field), but never keep stale
+                // destination facts when the field's type cannot be proved.
+                values.remove(&dst.0);
+                tokens.remove(&dst.0);
+                if let Some(value) = value {
+                    values.insert(dst.0, value);
                 }
             }
             I::SetCallWitness { type_args } => {
