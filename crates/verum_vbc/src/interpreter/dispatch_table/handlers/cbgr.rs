@@ -1809,6 +1809,19 @@ pub(in super::super) fn container_to_slice_fat_ref(
     if src.is_fat_ref() || heap::value_as_byte_slice(&src).is_some() {
         return Some(src);
     }
+    container_slice_descriptor(state, src).map(Value::from_fat_ref)
+}
+
+/// The descriptor authority shared by whole-container and sub-slice borrows.
+/// Keep it unboxed until the final slice is known: a sub-slice must not allocate
+/// a second, unused entry in the global FatRef table for its whole source.
+fn container_slice_descriptor(
+    state: &crate::interpreter::InterpreterState,
+    src: Value,
+) -> Option<FatRef> {
+    if src.is_fat_ref() {
+        return Some(src.as_fat_ref());
+    }
     if !src.is_regular_ptr() {
         return None;
     }
@@ -1841,7 +1854,7 @@ pub(in super::super) fn container_to_slice_fat_ref(
                 len.max(0) as u64,
             );
             fat_ref.reserved = if header.type_id == TypeId::BYTE_LIST { 1 } else { 0 };
-            Some(Value::from_fat_ref(fat_ref))
+            Some(fat_ref)
         }
         TypeId::U8 | TypeId::U16 | TypeId::U32 | TypeId::U64 => {
             let stride: u32 = match header.type_id {
@@ -1860,10 +1873,22 @@ pub(in super::super) fn container_to_slice_fat_ref(
                 len,
             );
             fat_ref.reserved = stride;
-            Some(Value::from_fat_ref(fat_ref))
+            Some(fat_ref)
         }
         _ => None,
     }
+}
+
+fn validate_slice_range(start: usize, len: u64, available: u64) -> InterpreterResult<()> {
+    if start as u64 > available || len > available - start as u64 {
+        return Err(InterpreterError::Panic {
+            message: format!(
+                "slice range start {} length {} exceeds source length {}",
+                start, len, available
+            ),
+        });
+    }
+    Ok(())
 }
 
 pub(in super::super) fn handle_cbgr_extended(
@@ -2439,11 +2464,44 @@ fn cbgr_extended_body(
             let start_reg = read_reg(state)?;
             let len_reg = read_reg(state)?;
 
-            let src = state.get_reg(src_reg);
-            let start = state.get_reg(start_reg).as_i64() as usize;
-            let len = state.get_reg(len_reg).as_i64() as u64;
+            let mut src = state.get_reg(src_reg);
+            // T0467: `&list` passed to a slice parameter is a register ref,
+            // possibly forwarded through more than one frame. Resolve its
+            // value before classifying the container; otherwise the fallback
+            // below fabricated a nonempty FatRef with a null data pointer.
+            // A finite register file bounds every acyclic reference chain.
+            let mut remaining_hops = state.registers.top();
+            while is_cbgr_ref(&src) {
+                let (abs_index, generation) = decode_cbgr_ref(src);
+                if abs_index as usize >= state.registers.top() || remaining_hops == 0 {
+                    return Err(InterpreterError::InvalidOperand {
+                        message: "slice source contains an invalid or cyclic register reference"
+                            .into(),
+                    });
+                }
+                validate_cbgr_generation(state, abs_index, generation)?;
+                src = state.registers.get_absolute(abs_index);
+                remaining_hops -= 1;
+            }
+            let start_value = state.get_reg(start_reg).as_i64();
+            let len_value = state.get_reg(len_reg).as_i64();
+            if start_value < 0 || len_value < 0 {
+                return Err(InterpreterError::Panic {
+                    message: format!(
+                        "slice range has negative start {} or length {}",
+                        start_value, len_value
+                    ),
+                });
+            }
+            let start = usize::try_from(start_value).map_err(|_| InterpreterError::Panic {
+                message: "slice start exceeds the addressable range".into(),
+            })?;
+            let len = len_value as u64;
 
-            // FatRef fast-path (mirrors SliceSubslice below). A FatRef src —
+            // Canonical container/FatRef path (mirrors SliceSubslice below).
+            // The shared descriptor keeps List/ByteList strides and lengths
+            // aligned with as_slice, without an intermediate allocation.
+            // A FatRef src —
             // a slice-of-a-slice, e.g. `&remaining[..n]` where `remaining`
             // is itself a byte-slice from `text.as_bytes()` (HttpParser.feed
             // re-slices `&buf[pos..]`) — shares TAG_POINTER, so the generic
@@ -2452,14 +2510,25 @@ fn cbgr_extended_body(
             // elem-size probe) → SIGSEGV. Re-slice directly, carrying the
             // element stride in `reserved` (1/2/4/8 for raw integers, 0 =
             // NaN-boxed Value) so we don't walk past the end of a byte slice.
-            if src.is_fat_ref() {
-                let fat_ref = src.as_fat_ref();
+            if let Some(fat_ref) = container_slice_descriptor(state, src) {
+                validate_slice_range(start, len, fat_ref.len())?;
                 let element_size = if fat_ref.reserved == 0 {
                     std::mem::size_of::<Value>()
                 } else {
                     fat_ref.reserved as usize
                 };
-                let new_ptr = unsafe { fat_ref.ptr().add(start * element_size) };
+                let offset = start.checked_mul(element_size).ok_or_else(|| {
+                    InterpreterError::Panic {
+                        message: "slice byte offset exceeds the addressable range".into(),
+                    }
+                })?;
+                let new_ptr = if offset == 0 {
+                    fat_ref.ptr()
+                } else if fat_ref.ptr().is_null() {
+                    return Err(InterpreterError::NullPointer);
+                } else {
+                    unsafe { fat_ref.ptr().add(offset) }
+                };
                 let mut new_fat_ref = crate::value::FatRef::new(
                     new_ptr,
                     fat_ref.generation(),
@@ -2479,11 +2548,14 @@ fn cbgr_extended_body(
             // generic pointer path below would probe the 528 header,
             // skip it, and treat the raw `{ptr, len}` payload words as
             // element data.
-            if let Some((base, _src_len)) = heap::value_as_byte_slice(&src) {
-                // SAFETY: `base` addresses the source view's bytes;
-                // `start` was bounds-established by the compiler-emitted
-                // range checks that precede RefSlice.
-                let new_ptr = unsafe { base.add(start) };
+            if let Some((base, src_len)) = heap::value_as_byte_slice(&src) {
+                validate_slice_range(start, len, src_len)?;
+                // SAFETY: the range was validated against this view's length.
+                let new_ptr = if start == 0 {
+                    base
+                } else {
+                    unsafe { base.add(start) }
+                };
                 let obj = state.heap.alloc_byte_slice(new_ptr, len)?;
                 state.record_allocation();
                 state.set_reg(dst, Value::from_ptr(obj.as_ptr() as *mut u8));
@@ -2534,8 +2606,14 @@ fn cbgr_extended_body(
                         base_ptr = unsafe { backing_array.add(heap::OBJECT_HEADER_SIZE) };
                     }
                 } else {
-                    // Non-LIST typed arrays (e.g., [Int; 3] allocated with TypeId::U64).
+                    // Known packed arrays use the descriptor arm above. The
+                    // remaining inline arrays store NaN-boxed Value slots.
                     // Layout: [ObjectHeader][data...] — skip past the header.
+                    validate_slice_range(
+                        start,
+                        len,
+                        header.size as u64 / std::mem::size_of::<Value>() as u64,
+                    )?;
                     base_ptr = unsafe { base_ptr.add(heap::OBJECT_HEADER_SIZE) };
                 }
             }
