@@ -691,7 +691,13 @@ jobs:
       - name: Build verum CLI
         run: cargo build -p verum_cli --release --locked
 
-      # Reuses the release CLI; fixtures stop before source/backend compilation.
+      # T1536: exercise the public archive loader in both declaration orders.
+      # Reuses the compiler/stdlib build above; no native program is compiled.
+      - name: Archive declaration authority
+        timeout-minutes: 15
+        run: cargo test --locked --release -p verum_compiler --test archive_mount_declaration_owner
+
+      # Reuses the release CLI; includes an actual interpreter positive control.
       - name: Project run tier selection
         timeout-minutes: 5
         run: cargo test --locked --release -p verum_cli --test run_manifest_tier

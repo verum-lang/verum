@@ -279,10 +279,11 @@ quoting either anywhere a reader will act on it. The gate
     `integration-vbc`), on top of the `--lib --bins` unit job. That
     campaign is T0709; check the job list before assuming a suite is
     inert, and say in the commit which job runs your gate.
-  - Still NOT gated on a PR: the AOT-heavy crates (`verum_cli`,
-    `verum_compiler`, `verum_codegen`'s AOT suites,
-    `verum_integration_tests`), which run in `nightly-aot.yml` as a
-    non-blocking measurement lane.
+  - Selected public compiler/CLI regressions also block PRs in
+    `strict-gates`: archive declaration authority and project run tier
+    selection. Consult the workflow for the exact targets; this does not
+    cover their complete test suites. Broad AOT-heavy suites remain in
+    `nightly-aot.yml` as a non-blocking measurement lane.
 - Benchmarks in `benches/` (criterion)
 - One implementation per feature
 
