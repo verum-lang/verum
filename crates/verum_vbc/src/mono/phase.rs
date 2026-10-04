@@ -73,7 +73,9 @@ pub enum MonoPhaseError {
     ParallelExecution(String),
     /// A recursive instantiation exceeded a configured compilation budget.
     ResourceLimit {
+        /// Name of the bounded compilation resource.
         resource: &'static str,
+        /// Configured maximum for this resource.
         limit: usize,
     },
 }
