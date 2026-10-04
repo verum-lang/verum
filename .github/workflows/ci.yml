@@ -691,11 +691,14 @@ jobs:
       - name: Build verum CLI
         run: cargo build -p verum_cli --release --locked
 
-      # T1536: exercise the public archive loader in both declaration orders.
+      # T1536/T1579: pin archive mounts and source-shadow declaration identity.
       # Reuses the compiler/stdlib build above; no native program is compiled.
-      - name: Archive declaration authority
+      - name: Archive mount and shadow declaration authority
         timeout-minutes: 15
-        run: cargo test --locked --release -p verum_compiler --test archive_mount_declaration_owner
+        run: >-
+          cargo test --locked --release -p verum_compiler
+          --test archive_mount_declaration_owner
+          --test shadowed_type_metadata_owner
 
       # Reuses the release CLI; includes an actual interpreter positive control.
       - name: Project run tier selection
