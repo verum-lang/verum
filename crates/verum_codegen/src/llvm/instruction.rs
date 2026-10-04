@@ -46396,7 +46396,7 @@ fn lower_debug_print<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, value: Reg) -> R
 
     if is_string {
         // Register holds a Text* pointer (stored as i64 in alloca mode).
-        // Extract char* via verum_text_get_ptr, then use libc puts.
+        // Extract char* via verum_text_get_ptr, then use the internal writer.
         let puts_fn = get_or_declare_internal_puts(ctx.llvm_context(), &module);
         // Extract char* from Text object
         let fn_type = ptr_type.fn_type(&[i64_type.into()], false);
@@ -46485,9 +46485,8 @@ fn lower_debug_print<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, value: Reg) -> R
                     .or_llvm_err()?;
             }
             _ => {
-                // Integer debug: use printf("%ld\n", val)
-                let fn_type = ctx.types().i32_type().fn_type(&[ptr_type.into()], true);
-        let printf_fn = super::error::get_or_declare_function(module, "printf", fn_type);
+                // Preserve the existing integer carrier conversion; share the
+                // unbuffered writer used by Text and Bool.
                 let i64_val = match val {
                     BasicValueEnum::IntValue(v) => {
                         if v.get_type().get_bit_width() == 64 {
@@ -46500,16 +46499,43 @@ fn lower_debug_print<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, value: Reg) -> R
                     }
                     _ => i64_type.const_int(0, false),
                 };
-                let fmt = ctx
+                let formatter = get_or_declare_internal_i64_to_decimal(ctx.llvm_context(), module);
+                let puts = get_or_declare_internal_puts(ctx.llvm_context(), module);
+                // One fixed entry allocation per print site, including in loops:
+                // 20 bytes for i64::MIN plus the NUL required by internal puts.
+                let entry = ctx
+                    .function()
+                    .get_first_basic_block()
+                    .or_internal("integer print requires a function entry")?;
+                let allocation_builder = ctx.llvm_context().create_builder();
+                if let Some(first) = entry.get_first_instruction() {
+                    allocation_builder.position_before(&first);
+                } else {
+                    allocation_builder.position_at_end(entry);
+                }
+                let buffer = allocation_builder
+                    .build_alloca(ctx.types().i8_type().array_type(21), "print_integer_buffer")
+                    .or_llvm_err()?;
+                let len = ctx
                     .builder()
-                    .build_global_string_ptr("%ld\n", "fmt_int_debug")
+                    .build_call(formatter, &[buffer.into(), i64_val.into()], "print_integer_len")
+                    .or_llvm_err()?
+                    .try_as_basic_value()
+                    .basic()
+                    .or_internal("integer formatter must return its output length")?
+                    .into_int_value();
+                // SAFETY: the formatter writes at most 20 bytes into this
+                // 21-byte buffer, leaving space for the terminator.
+                let terminator = unsafe {
+                    ctx.builder()
+                        .build_gep(ctx.types().i8_type(), buffer, &[len], "print_integer_end")
+                        .or_llvm_err()?
+                };
+                ctx.builder()
+                    .build_store(terminator, ctx.types().i8_type().const_zero())
                     .or_llvm_err()?;
                 ctx.builder()
-                    .build_call(
-                        printf_fn,
-                        &[fmt.as_pointer_value().into(), i64_val.into()],
-                        "",
-                    )
+                    .build_call(puts, &[buffer.into()], "")
                     .or_llvm_err()?;
             }
         }
