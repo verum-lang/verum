@@ -1093,6 +1093,21 @@ one module and therefore never seeded",
 
         let mut stubs_registered: usize = 0;
         for (_module_name, ast_modules) in all_modules {
+            // Resolve the owner's declaration inside this archive module. A
+            // duplicate nominal spelling is deliberately unknown, never a
+            // sibling declaration selected by insertion order.
+            let mut owner_generics: std::collections::HashMap<String, Option<Vec<String>>> = std::collections::HashMap::new();
+            for (_, ast) in ast_modules {
+                for item in &ast.items {
+                    if let ItemKind::Type(decl) = &item.kind {
+                        let names = decl.generics.iter().filter_map(|p| match &p.kind {
+                            verum_ast::ty::GenericParamKind::Type { name, .. } => Some(name.name.to_string()),
+                            _ => None,
+                        }).collect();
+                        owner_generics.entry(decl.name.name.to_string()).and_modify(|v| *v = None).or_insert(Some(names));
+                    }
+                }
+            }
             for (_file_path, ast_module) in ast_modules {
                 for item in ast_module.items.iter() {
                     let impl_decl = match &item.kind {
@@ -1213,6 +1228,8 @@ one module and therefore never seeded",
                             verum_vbc::stub_ranges::STAGE1_BASE - stubs_registered as u32,
                         );
                         let info = FunctionInfo {
+                            type_param_ids: Vec::new(),
+                            explicit_type_param_ids: Vec::new(),
                             id: stub_id,
                             param_count: 0,
                             param_names: vec![],
@@ -1340,7 +1357,14 @@ one module and therefore never seeded",
                                     | verum_ast::decl::FunctionParamKind::SelfRefUnsafeMut
                             )
                         );
+                        let impl_names: Vec<String> = impl_decl.generics.iter().filter_map(|p| match &p.kind {
+                            verum_ast::ty::GenericParamKind::Type { name, .. } => Some(name.name.to_string()),
+                            _ => None,
+                        }).collect();
+                        let parent_names = owner_generics.get(&target_type_name).and_then(|v| v.as_deref()).unwrap_or(&[]);
                         let info = FunctionInfo {
+                            type_param_ids: verum_vbc::codegen::VbcCodegen::declared_type_param_ids(func, parent_names, &impl_names),
+                            explicit_type_param_ids: verum_vbc::codegen::VbcCodegen::declared_explicit_type_param_ids(func, parent_names, &impl_names),
                             id: stub_id,
                             param_count,
                             param_names,
@@ -1513,6 +1537,8 @@ one module and therefore never seeded",
                             .map(|i| format!("_arg{}", i))
                             .collect();
                         let info = FunctionInfo {
+                            type_param_ids: Vec::new(),
+                            explicit_type_param_ids: Vec::new(),
                             id: stub_id,
                             param_count: arity,
                             param_names,
@@ -1642,6 +1668,8 @@ one module and therefore never seeded",
                         .map(|i| format!("_arg{}", i))
                         .collect();
                     let info = FunctionInfo {
+                        type_param_ids: verum_vbc::codegen::VbcCodegen::declared_type_param_ids(func, &[], &[]),
+                        explicit_type_param_ids: verum_vbc::codegen::VbcCodegen::declared_explicit_type_param_ids(func, &[], &[]),
                         id: stub_id,
                         param_count,
                         param_names,
@@ -1778,6 +1806,8 @@ one module and therefore never seeded",
                         verum_vbc::stub_ranges::STAGE4_BASE - consts_registered as u32,
                     );
                     let info = FunctionInfo {
+                        type_param_ids: Vec::new(),
+                        explicit_type_param_ids: Vec::new(),
                         id: stub_id,
                         param_count: 0,
                         param_names: vec![],

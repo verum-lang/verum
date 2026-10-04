@@ -3424,7 +3424,7 @@ impl VbcCodegen {
             if self.ctx.lookup_function(&full_method_name).is_some() {
                 continue;
             }
-            self.register_impl_function(&default_func, &type_name)?;
+            self.register_impl_function(&default_func, &type_name, &[])?;
             self.pending_default_methods
                 .push((default_func, type_name));
         }
@@ -3465,6 +3465,7 @@ impl VbcCodegen {
             // them).
             self.ctx.generic_type_params.clear();
             self.ctx.generic_type_params_ordered.clear();
+            self.ctx.current_generic_param_ids.clear();
             self.ctx.const_generic_params.clear();
             if let Some(&parent_tid) = self.type_name_to_id.get(type_name.as_str()) {
                 let impl_names: Vec<String> = self
@@ -3900,6 +3901,8 @@ impl VbcCodegen {
             let id = FunctionId(self.next_func_id);
             self.next_func_id = self.next_func_id.saturating_add(1);
             let info = FunctionInfo {
+                type_param_ids: Vec::new(),
+                explicit_type_param_ids: Vec::new(),
                 id,
                 param_count: 0,
                 param_names: vec![],
@@ -4445,6 +4448,8 @@ impl VbcCodegen {
             let id = FunctionId(self.next_func_id);
             self.next_func_id = self.next_func_id.saturating_add(1);
             let info = FunctionInfo {
+                type_param_ids: Vec::new(),
+                explicit_type_param_ids: Vec::new(),
                 id,
                 param_count,
                 param_names: vec![],
@@ -5424,6 +5429,7 @@ impl VbcCodegen {
             ItemKind::Function(func) => {
                 self.ctx.generic_type_params.clear();
             self.ctx.generic_type_params_ordered.clear();
+            self.ctx.current_generic_param_ids.clear();
                 self.ctx.const_generic_params.clear();
                 if let Err(e) = self.compile_function(func, None) {
                     // Symmetric with the impl-item branch below. Promoted to
@@ -5551,6 +5557,7 @@ impl VbcCodegen {
                         }
                         self.ctx.generic_type_params.clear();
             self.ctx.generic_type_params_ordered.clear();
+            self.ctx.current_generic_param_ids.clear();
                         self.ctx.const_generic_params.clear();
                         for g in &impl_type_generics {
                             self.ctx.generic_type_params.insert(g.clone());
@@ -5668,6 +5675,7 @@ impl VbcCodegen {
             ItemKind::Pattern(pat_decl) => {
                 self.ctx.generic_type_params.clear();
             self.ctx.generic_type_params_ordered.clear();
+            self.ctx.current_generic_param_ids.clear();
                 self.ctx.const_generic_params.clear();
                 let _ = self.compile_pattern_as_function(pat_decl);
             }
@@ -6490,6 +6498,8 @@ impl VbcCodegen {
                     crate::types::VariantKind::Record => v.fields.len(),
                 };
                 let info = FunctionInfo {
+                    type_param_ids: Vec::new(),
+                    explicit_type_param_ids: Vec::new(),
                     id: FunctionId(u32::MAX - variant_index as u32),
                     param_count,
                     param_names: (0..param_count).map(|i| format!("_{}", i)).collect(),
@@ -9008,6 +9018,8 @@ impl VbcCodegen {
             // which would mis-dispatch variants through the newtype pass-through path.
             let sentinel_id = FunctionId(u32::MAX - *tag);
             let info = FunctionInfo {
+                type_param_ids: Vec::new(),
+                explicit_type_param_ids: Vec::new(),
                 id: sentinel_id,
                 param_count: *arity,
                 param_names: param_names.clone(),
@@ -9148,6 +9160,8 @@ impl VbcCodegen {
             self.push_function_dedup(VbcFunction::new(stub_descriptor, vec![]));
 
             let info = FunctionInfo {
+                type_param_ids: Vec::new(),
+                explicit_type_param_ids: Vec::new(),
                 id: func_id,
                 param_count: *param_count,
                 param_names: vec![],
@@ -9400,7 +9414,7 @@ impl VbcCodegen {
                             // and method resolution. We do NOT register by simple name to avoid
                             // collisions with standalone functions of the same name.
                             if let Some(ref ty_name) = type_name {
-                                self.register_impl_function(func, ty_name)?;
+                                self.register_impl_function(func, ty_name, &self.resolve_impl_generics(impl_decl).0)?;
 
                                 // If this is a Drop impl and the function is named "drop",
                                 // record the drop function ID in the TypeDescriptor
@@ -10715,32 +10729,6 @@ impl VbcCodegen {
             })
             .collect();
 
-        // Convert return type for method dispatch prefixing.
-        // This enables correct method name prefixing when calling methods on function returns
-        // (e.g., return_uint64().checked_add(1) should use uint64$checked_add).
-        let return_type = func
-            .return_type
-            .as_ref()
-            .map(|ret_ty| {
-                // Free-function registration precedes body compilation,
-                // so its generic names are not in the current body scope.
-                // Preserve a declared bare result parameter instead of
-                // lowering it to the unknown-name pointer carrier (T1506).
-                if let verum_ast::ty::TypeKind::Path(path) = &ret_ty.kind
-                    && let Some(result_name) = path.as_ident()
-                    && let Some(index) = func.generics.iter().filter_map(|param| {
-                        match &param.kind {
-                            verum_ast::ty::GenericParamKind::Type { name, .. } => Some(name),
-                            _ => None,
-                        }
-                    }).position(|name| name.name == result_name.name)
-                {
-                    TypeRef::Generic(crate::types::TypeParamId(index as u16))
-                } else {
-                    self.ast_type_to_type_ref(ret_ty)
-                }
-            });
-
         // Extract intrinsic name from @intrinsic("name") attribute if present.
         // This enables industrial-grade intrinsic resolution at declaration time.
         // If the function doesn't have @intrinsic but was previously registered
@@ -10765,7 +10753,14 @@ impl VbcCodegen {
             None
         };
 
+        let (dense, shadow) = self.function_generic_param_maps(func, None, &[]);
+        let mut signature_scope = dense.clone();
+        signature_scope.extend(shadow.clone());
+        let return_type = func.return_type.as_ref()
+            .map(|ty| self.resolve_field_type_ref(ty, &signature_scope));
         let info = FunctionInfo {
+            type_param_ids: Self::ordered_generic_param_ids(&dense, &shadow),
+            explicit_type_param_ids: Self::explicit_generic_param_ids(func, &dense, &shadow),
             id,
             param_count: param_names.len(),
             param_names,
@@ -11023,6 +11018,8 @@ impl VbcCodegen {
         let is_partial = Self::is_maybe_return_type(&pat.return_type);
 
         let info = FunctionInfo {
+            type_param_ids: Vec::new(),
+            explicit_type_param_ids: Vec::new(),
             id,
             param_count: param_names.len(),
             param_names,
@@ -11380,6 +11377,8 @@ impl VbcCodegen {
             None
         };
         let info = FunctionInfo {
+            type_param_ids: Vec::new(),
+            explicit_type_param_ids: Vec::new(),
             id: FunctionId(u32::MAX),
             param_count: param_names.len(),
             param_names,
@@ -13071,6 +13070,114 @@ impl VbcCodegen {
         }
     }
 
+    /// Canonical method parameter numbering, shared by registration and rendering.
+    fn function_generic_param_maps(
+        &self,
+        func: &FunctionDecl,
+        impl_type_name: Option<&str>,
+        fallback_generics: &[String],
+    ) -> (std::collections::HashMap<String, u16>, std::collections::HashMap<String, u16>) {
+        let parent_names: Vec<String> = impl_type_name
+            .and_then(|name| self.type_name_to_id.get(name))
+            .and_then(|id| self.type_by_id(*id))
+            .map(|desc| desc.type_params.iter().filter_map(|p| self.ctx.strings.get(p.name.0 as usize).cloned()).collect())
+            .unwrap_or_default();
+        Self::declaration_generic_param_maps(func, &parent_names, fallback_generics)
+    }
+
+    fn declaration_generic_param_maps(
+        func: &FunctionDecl,
+        parent_names: &[String],
+        fallback_generics: &[String],
+    ) -> (std::collections::HashMap<String, u16>, std::collections::HashMap<String, u16>) {
+        use verum_ast::ty::GenericParamKind;
+        let mut dense = std::collections::HashMap::new();
+        let mut shadow = std::collections::HashMap::new();
+        let mut next_id = 0u16;
+        for name in parent_names {
+            if !dense.contains_key(name) {
+                dense.insert(name.clone(), next_id);
+                next_id += 1;
+            }
+        }
+        // The fallback belongs exclusively to the impl scope. Context, const
+        // and other method-owned names must not pre-number later type params.
+        let own: std::collections::HashSet<&str> = func.generics.iter().filter_map(|p| match &p.kind {
+            GenericParamKind::Type { name, .. } | GenericParamKind::Context { name }
+            | GenericParamKind::HigherKinded { name, .. } | GenericParamKind::Const { name, .. }
+            | GenericParamKind::Meta { name, .. } | GenericParamKind::Level { name }
+            | GenericParamKind::KindAnnotated { name, .. } => Some(name.name.as_str()),
+            GenericParamKind::Lifetime { .. } => None,
+        }).collect();
+        let mut fallback = fallback_generics.to_vec();
+        fallback.sort_unstable();
+        for name in fallback {
+            if !dense.contains_key(&name) && !own.contains(name.as_str()) {
+                dense.insert(name, next_id);
+                next_id += 1;
+            }
+        }
+        for p in &func.generics {
+            if let GenericParamKind::Type { name, .. } = &p.kind {
+                let name = name.name.to_string();
+                if !dense.contains_key(&name) {
+                    dense.insert(name, next_id);
+                    next_id += 1;
+                } else if !shadow.contains_key(&name) {
+                    shadow.insert(name, 0x8000 | shadow.len() as u16);
+                }
+            }
+        }
+        (dense, shadow)
+    }
+
+    /// Declaration-owned explicit generic slots for bootstrap registries that
+    /// precede TypeDescriptor creation. Parent names are in declaration order;
+    /// impl names are the same type-only fallback used during normal codegen.
+    pub fn declared_explicit_type_param_ids(
+        func: &FunctionDecl,
+        parent_names: &[String],
+        impl_names: &[String],
+    ) -> Vec<Option<crate::types::TypeParamId>> {
+        let (dense, shadow) = Self::declaration_generic_param_maps(func, parent_names, impl_names);
+        Self::explicit_generic_param_ids(func, &dense, &shadow)
+    }
+
+    fn ordered_generic_param_ids(
+        dense: &std::collections::HashMap<String, u16>,
+        shadow: &std::collections::HashMap<String, u16>,
+    ) -> Vec<crate::types::TypeParamId> {
+        let mut ids: Vec<u16> = dense.values().chain(shadow.values()).copied().collect();
+        ids.sort_unstable();
+        ids.dedup();
+        ids.into_iter().map(crate::types::TypeParamId).collect()
+    }
+
+    /// Full declaration-owned roster for compact call witnesses in bootstrap.
+    pub fn declared_type_param_ids(
+        func: &FunctionDecl,
+        parent_names: &[String],
+        impl_names: &[String],
+    ) -> Vec<crate::types::TypeParamId> {
+        let (dense, shadow) = Self::declaration_generic_param_maps(func, parent_names, impl_names);
+        Self::ordered_generic_param_ids(&dense, &shadow)
+    }
+
+    fn explicit_generic_param_ids(
+        func: &FunctionDecl,
+        dense: &std::collections::HashMap<String, u16>,
+        shadow: &std::collections::HashMap<String, u16>,
+    ) -> Vec<Option<crate::types::TypeParamId>> {
+        func.generics.iter().filter(|p| !p.is_implicit).map(|p| {
+            if let verum_ast::ty::GenericParamKind::Type { name, .. } = &p.kind {
+                shadow.get(name.name.as_str()).or_else(|| dense.get(name.name.as_str()))
+                    .copied().map(crate::types::TypeParamId)
+            } else {
+                None
+            }
+        }).collect()
+    }
+
     /// Registers an impl function with a qualified name (e.g., "List.new").
     ///
     /// This allows static method calls like `List.new()` to be resolved.
@@ -13078,6 +13185,7 @@ impl VbcCodegen {
         &mut self,
         func: &FunctionDecl,
         type_name: &str,
+        impl_generics: &[String],
     ) -> CodegenResult<()> {
         let self_type_name = self.declared_impl_type_name(type_name);
         let func_name = func.name.name.to_string();
@@ -13201,19 +13309,18 @@ impl VbcCodegen {
             None
         };
 
-        // Convert return type for method dispatch and list/string register tracking.
-        // **Self-aware** so a `fn new(...) -> Self` constructor archives
-        // its return type as the concrete impl type's TypeId, not the
-        // USize/PTR unknown-carrier fallback (see
-        // `ast_type_to_type_ref_self_aware`). Without this the archived
-        // `return_type_name` round-trips to "USize" and `let p =
-        // T.new(...)` loses `p`'s type, breaking field-index resolution.
-        let return_type = func
-            .return_type
-            .as_ref()
-            .map(|ret_ty| self.ast_type_to_type_ref_self_aware(ret_ty, type_name));
-
+        // Preserve declaration-owned Generic IDs before the body exists;
+        // forward calls and bootstrap imports use this signature for inference.
+        let (dense, shadow) = self.function_generic_param_maps(func, Some(type_name), impl_generics);
+        let mut signature_scope = dense.clone();
+        signature_scope.extend(shadow.clone());
+        let saved_impl = self.ctx.current_impl_type_name.replace(type_name.to_owned());
+        let return_type = func.return_type.as_ref()
+            .map(|ty| self.resolve_field_type_ref(ty, &signature_scope));
+        self.ctx.current_impl_type_name = saved_impl;
         let info = FunctionInfo {
+            type_param_ids: Self::ordered_generic_param_ids(&dense, &shadow),
+            explicit_type_param_ids: Self::explicit_generic_param_ids(func, &dense, &shadow),
             id,
             param_count: param_names.len(),
             param_names,
@@ -13334,6 +13441,8 @@ impl VbcCodegen {
             let return_type_name = self.extract_type_name(&ffi_func.signature.return_type);
 
             let info = FunctionInfo {
+                type_param_ids: Vec::new(),
+                explicit_type_param_ids: Vec::new(),
                 id,
                 param_count: param_names.len(),
                 param_names,
@@ -13888,6 +13997,8 @@ impl VbcCodegen {
                 self.next_func_id = self.next_func_id.saturating_add(1);
 
                 let getter_info = FunctionInfo {
+                    type_param_ids: Vec::new(),
+                    explicit_type_param_ids: Vec::new(),
                     id: getter_id,
                     param_count: 1, // &self
                     param_names: vec!["self".to_string()],
@@ -13920,6 +14031,8 @@ impl VbcCodegen {
                 self.next_func_id = self.next_func_id.saturating_add(1);
 
                 let setter_info = FunctionInfo {
+                    type_param_ids: Vec::new(),
+                    explicit_type_param_ids: Vec::new(),
                     id: setter_id,
                     param_count: 2, // &mut self, value
                     param_names: vec!["self".to_string(), "value".to_string()],
@@ -15212,6 +15325,8 @@ impl VbcCodegen {
                     let tag = variant_index as u32;
 
                     let info = FunctionInfo {
+                        type_param_ids: Vec::new(),
+                        explicit_type_param_ids: Vec::new(),
                         id,
                         param_count,
                         param_names: param_names.clone(),
@@ -15703,6 +15818,8 @@ impl VbcCodegen {
                     fields.iter().map(|f| f.name.name.to_string()).collect();
 
                 let info = FunctionInfo {
+                    type_param_ids: Vec::new(),
+                    explicit_type_param_ids: Vec::new(),
                     id,
                     param_count: fields.len(),
                     param_names,
@@ -16141,6 +16258,8 @@ impl VbcCodegen {
                 let id = FunctionId(u32::MAX / 2);
 
                 let info = FunctionInfo {
+                    type_param_ids: Vec::new(),
+                    explicit_type_param_ids: Vec::new(),
                     id,
                     param_count: 1,
                     param_names: vec!["_0".to_string()],
@@ -16252,6 +16371,8 @@ impl VbcCodegen {
                     (0..types.len()).map(|i| format!("_{}", i)).collect();
 
                 let info = FunctionInfo {
+                    type_param_ids: Vec::new(),
+                    explicit_type_param_ids: Vec::new(),
                     id,
                     param_count: types.len(),
                     param_names,
@@ -16315,6 +16436,8 @@ impl VbcCodegen {
                 let id = FunctionId(u32::MAX / 2);
 
                 let info = FunctionInfo {
+                    type_param_ids: Vec::new(),
+                    explicit_type_param_ids: Vec::new(),
                     id,
                     param_count: 0,
                     param_names: vec![],
@@ -16348,6 +16471,8 @@ impl VbcCodegen {
                     (0..types.len()).map(|i| format!("_{}", i)).collect();
 
                 let info = FunctionInfo {
+                    type_param_ids: Vec::new(),
+                    explicit_type_param_ids: Vec::new(),
                     id,
                     param_count: types.len(),
                     param_names,
@@ -16398,6 +16523,8 @@ impl VbcCodegen {
 
                 // `Q.of(rep: T) -> Q`
                 let of_info = FunctionInfo {
+                    type_param_ids: Vec::new(),
+                    explicit_type_param_ids: Vec::new(),
                     id: pass_through_id,
                     param_count: 1,
                     param_names: vec!["rep".to_string()],
@@ -16428,6 +16555,8 @@ impl VbcCodegen {
 
                 // `q.rep(&self) -> T`
                 let rep_info = FunctionInfo {
+                    type_param_ids: Vec::new(),
+                    explicit_type_param_ids: Vec::new(),
                     id: pass_through_id,
                     param_count: 1,
                     param_names: vec!["self".to_string()],
@@ -16575,6 +16704,8 @@ impl VbcCodegen {
         let return_type_name = const_type.and_then(|ty| self.extract_type_name(ty));
 
         let info = FunctionInfo {
+            type_param_ids: Vec::new(),
+            explicit_type_param_ids: Vec::new(),
             id,
             param_count: 0,
             param_names: vec![],
@@ -18245,62 +18376,6 @@ impl VbcCodegen {
         )
     }
 
-    /// `Self`-aware variant of [`ast_type_to_type_ref`] for impl-method
-    /// signatures.
-    ///
-    /// The plain `ast_type_to_type_ref` has no notion of the enclosing
-    /// impl type, so a bare `Self` return (encoded as a
-    /// `PathSegment::SelfValue` path) falls through its `TypeKind::Path`
-    /// arm with an empty `type_name`, misses `get_well_known_type_id`,
-    /// and lands on the `TypeId::PTR` "unknown carrier" fallback.
-    /// `TypeId::PTR` aliases `TypeId::USIZE`, so the archive then stores
-    /// the return type of every `fn new(...) -> Self` /
-    /// `fn default() -> Self` static constructor as USize — and
-    /// `archive_ctx_loader`'s `type_ref_simple_name` recovers
-    /// `return_type_name = "USize"`.  Downstream `let p = T.new(...)`
-    /// then records `variable_type_names["p"] = "USize"`, so `p.<field>`
-    /// resolves field indices against USize (no layout) → global
-    /// field-intern fallback → out-of-bounds `GetF` on the correctly
-    /// constructed record.
-    ///
-    /// This wrapper substitutes a bare `Self` (and `&Self` / `&mut Self`
-    /// reference wrappers) with the concrete impl type's `TypeId` so the
-    /// archived `return_type` round-trips to the real type name. Falls
-    /// back to the plain conversion for every other shape (so nested /
-    /// generic / non-Self return types are unchanged).
-    fn ast_type_to_type_ref_self_aware(
-        &self,
-        ty: &verum_ast::ty::Type,
-        self_type_name: &str,
-    ) -> TypeRef {
-        use verum_ast::ty::{PathSegment, TypeKind};
-        match &ty.kind {
-            // Raw pointers are machine words (see the primary mapper's
-            // T0846 note) — same law here.
-            TypeKind::UnsafeReference { .. } | TypeKind::Pointer { .. } => {
-                TypeRef::Concrete(TypeId::PTR)
-            }
-            // Peel managed/checked wrappers, preserving Self-awareness.
-            TypeKind::Reference { inner, .. }
-            | TypeKind::CheckedReference { inner, .. } => {
-                self.ast_type_to_type_ref_self_aware(inner, self_type_name)
-            }
-            TypeKind::Path(path) => {
-                // A bare `Self` path resolves to the concrete impl type.
-                let is_bare_self = path.segments.len() == 1
-                    && matches!(path.segments[0], PathSegment::SelfValue);
-                if is_bare_self {
-                    let base = Self::strip_generic_args(self_type_name);
-                    if let Some(tid) = self.get_well_known_type_id(base) {
-                        return TypeRef::Concrete(tid);
-                    }
-                }
-                self.ast_type_to_type_ref(ty)
-            }
-            _ => self.ast_type_to_type_ref(ty),
-        }
-    }
-
     /// Extracts the base type name from an AST Type for method dispatch tracking.
     ///
     /// For `Result<T, E>`, returns `Some("Result")`.
@@ -18619,6 +18694,7 @@ impl VbcCodegen {
                 // Clear generic params for standalone functions (impl methods set them before calling)
                 self.ctx.generic_type_params.clear();
             self.ctx.generic_type_params_ordered.clear();
+            self.ctx.current_generic_param_ids.clear();
                 self.ctx.const_generic_params.clear();
                 self.compile_function(func, None)?;
                 // Compile any nested functions in this function's body
@@ -18670,6 +18746,7 @@ impl VbcCodegen {
                         // compile_function will add function's own generics to this
                         self.ctx.generic_type_params.clear();
             self.ctx.generic_type_params_ordered.clear();
+            self.ctx.current_generic_param_ids.clear();
                         self.ctx.const_generic_params.clear();
                         for g in &impl_type_generics {
                             self.ctx.generic_type_params.insert(g.clone());
@@ -18761,6 +18838,7 @@ impl VbcCodegen {
             ItemKind::Pattern(pat_decl) => {
                 self.ctx.generic_type_params.clear();
             self.ctx.generic_type_params_ordered.clear();
+            self.ctx.current_generic_param_ids.clear();
                 self.ctx.const_generic_params.clear();
                 self.compile_pattern_as_function(pat_decl)?;
             }
@@ -19304,6 +19382,13 @@ impl VbcCodegen {
                     .insert(alias_ident.name.to_string(), ctx_type_name.clone());
             }
         }
+
+        let inherited_generics: Vec<String> = self.ctx.generic_type_params.iter().cloned().collect();
+        let (mut caller_generics, caller_shadows) = self.function_generic_param_maps(
+            func, impl_type_name.map(|name| name.as_str()), &inherited_generics,
+        );
+        caller_generics.extend(caller_shadows);
+        self.ctx.current_generic_param_ids = caller_generics;
 
         // Add function's generic parameters to context for recognition in expressions.
         // This prevents "undefined variable" errors when T or SIZE appears in expressions
@@ -19924,129 +20009,14 @@ impl VbcCodegen {
         // landed with `default: Heap`.  Result: `Maybe<Int>.unwrap_or(0)`
         // failed at user-code typecheck with `expected 'Heap',
         // found 'Int'`.
-        let mut method_generic_param_map: std::collections::HashMap<String, u16> =
-            std::collections::HashMap::new();
-        let mut next_pid: u16 = 0;
-        // 1. Inherit impl-block generics from the parent type's
-        //    `TypeDescriptor.type_params` if available.  This is
-        //    the authoritative source — populated by the Sum/Record
-        //    arms of `register_type_constructors` from
-        //    `type_decl.generics`.  Resolves T/E/K/V correctly even
-        //    when ctx.generic_type_params got cleared between the
-        //    impl-block setup and compile_function entry (which
-        //    happens for some collect-decls → compile-bodies pass
-        //    sequences in stdlib bootstrap).
-        if let Some(parent_name) = impl_type_name {
-            if let Some(&parent_tid) = self.type_name_to_id.get(parent_name.as_str()) {
-                if let Some(parent_desc) = self.type_by_id(parent_tid) {
-                    for tp in parent_desc.type_params.iter() {
-                        if let Some(name) = self.ctx.strings.get(tp.name.0 as usize) {
-                            if !method_generic_param_map.contains_key(name) {
-                                method_generic_param_map.insert(name.clone(), next_pid);
-                                next_pid += 1;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        // 2. Fallback: also inherit from ctx.generic_type_params.
-        // ARCHIVE-SERIALIZE-DETERMINISM-1 dice-6 (SEMANTIC): this is a
-        // HashSet — walk order is per-process, so method TypeParamIds
-        // (A↔E in `implement<A, E> Action<A, E>` methods) FLIPPED
-        // between bakes (byte-diff: Generic(0)/Generic(1) swapped in
-        // function descriptors — positional type_args semantics
-        // rolled dice). Sorted walk = declaration-independent but
-        // STABLE ids. (Step 1 — the authoritative parent-descriptor
-        // path — is declaration-ordered and unaffected; this fallback
-        // only fires when the parent map is unavailable.)
-        {
-            // LAYERED-MAP discipline (T0701): the fallback exists for
-            // IMPL-level names when the parent descriptor is
-            // unavailable — it must NEVER pre-number the function's
-            // OWN generics, or the fn-level pids depend on what the
-            // session's HashSet happened to accumulate (measured:
-            // `from_fn<T, F>` numbered F=0,T=1 via the sorted fallback
-            // — declaration order inverted — and every positional
-            // carry consumer had to guess).
-            let fn_own: std::collections::HashSet<String> = func
-                .generics
-                .iter()
-                .filter_map(|gp| match &gp.kind {
-                    verum_ast::ty::GenericParamKind::Type { name, .. } => {
-                        Some(name.name.to_string())
-                    }
-                    _ => None,
-                })
-                .collect();
-            let mut fallback_generics: Vec<&String> =
-                self.ctx.generic_type_params.iter().collect();
-            fallback_generics.sort_unstable();
-            for g in fallback_generics {
-                if !method_generic_param_map.contains_key(g) && !fn_own.contains(g) {
-                    method_generic_param_map.insert(g.clone(), next_pid);
-                    next_pid += 1;
-                }
-            }
-        }
-        // Function-level generics added after, in DECLARATION order.
-        // SHADOW semantics (T0701 zip-class root, second landing —
-        // the first (d91a38801) was reverted because the fallback
-        // above had already pre-numbered fn-level names, so shadowing
-        // SHIFTED pids under every carry consumer): a method generic
-        // that reuses an impl-level name (`implement<A, B> … { fn
-        // map<B, F: fn(Item<Self>) -> B> }` — Iterator's default map
-        // materialised onto ZipIter<A, B>) gets its OWN pid; the
-        // displaced impl binding is preserved for the
-        // GENERICNAME-CARRY fill so `descriptor.type_params` stays
-        // DENSE over 0..next_pid (mono binds by entry id; the
-        // reconnect probes resolve the METHOD slot via rposition).
-        // SHADOW WITHDRAWN for now (b83 measured): numbering the
-        // method's same-named generic separately is correct in
-        // PRINCIPLE (the zip-class root), but the fn-bound renderer
-        // (`substitute_fn_bound_for_generic`) resolves the bound's
-        // `Self`-side through THIS map too, so the receiver inside
-        // `fn(Item<ZipIter<A, B>>) -> B` rendered with the METHOD's
-        // B (`__generic_2`) instead of the impl's (`__generic_1`) —
-        // zip stayed red and `reduce` picked up a NEW disconnect.
-        // The complete fix must render bound-Self in the IMPL scope
-        // and the bound's return in the METHOD scope (layered
-        // rendering, not just layered numbering) — T0701 journal.
-        // Kept from this landing: declaration-order fn pids and the
-        // fallback gate (deterministic from_fn<T, F> numbering).
+        let fallback_generics: Vec<String> = self.ctx.generic_type_params.iter().cloned().collect();
+        let (method_generic_param_map, method_shadow_band) = self.function_generic_param_maps(
+            func, impl_type_name.map(|n| n.as_str()), &fallback_generics,
+        );
         let shadowed_impl_generics: Vec<(String, u16)> = Vec::new();
-        // VARIANT C — SHADOW PID BAND (T0701 third landing, boundary
-        // proven by direct sidecar dump): a method generic that
-        // REUSES an impl-level name (Iterator's default `map<B, F>`
-        // materialised onto `ZipIter<A, B>`; `reduce<F>` onto
-        // `MappedIter<I, F>`) must NOT merge into the impl pid — the
-        // merge made the closure's return the receiver's second type
-        // arg (`zip.map(|p| 1)` → "expected ListIter<Int>, found
-        // Int") and unified every new Mapped closure with the
-        // previous one (the b85 reduce disconnect).  It must not
-        // renumber the dense pids either — b83/b85 measured every
-        // positional carry consumer desyncing.  Colliding names get a
-        // pid in a RESERVED BAND (0x8000 | seq) in a SEPARATE layer:
-        // the dense map keeps the impl binding for every existing
-        // consumer (Self-expansion included), while the RENDER map
-        // (band over dense) serves the method's own signature, where
-        // the source name can only mean the method's parameter.
-        const METHOD_SHADOW_BAND: u16 = 0x8000;
-        let mut method_shadow_band: std::collections::HashMap<String, u16> =
-            std::collections::HashMap::new();
-        let mut band_seq: u16 = 0;
-        for gp in func.generics.iter() {
-            if let verum_ast::ty::GenericParamKind::Type { name: gname, .. } = &gp.kind {
-                let n = gname.name.to_string();
-                if !method_generic_param_map.contains_key(&n) {
-                    method_generic_param_map.insert(n, next_pid);
-                    next_pid += 1;
-                } else if !method_shadow_band.contains_key(&n) {
-                    method_shadow_band.insert(n, METHOD_SHADOW_BAND | band_seq);
-                    band_seq += 1;
-                }
-            }
-        }
+        descriptor.explicit_type_param_ids = Self::explicit_generic_param_ids(
+            func, &method_generic_param_map, &method_shadow_band,
+        );
         // The rendering scope for THIS method's own signature strings:
         // band entries win by name; everything else falls through to
         // the dense map.  `impl_self_type_ref` stays band-proof by
@@ -20509,6 +20479,8 @@ impl VbcCodegen {
         let id = FunctionId(self.next_func_id);
         self.next_func_id = self.next_func_id.saturating_add(1);
         let info = FunctionInfo {
+            type_param_ids: Vec::new(),
+            explicit_type_param_ids: Vec::new(),
             id,
             param_count,
             param_names: params_with_mutability.iter().map(|(n, _)| n.clone()).collect(),
@@ -23564,6 +23536,8 @@ impl VbcCodegen {
                         // recovered name in the descriptor for
                         // diagnosis.
                         crate::codegen::FunctionInfo {
+                            type_param_ids: Vec::new(),
+                            explicit_type_param_ids: Vec::new(),
                             id: crate::module::FunctionId(stub_id),
                             param_count: 0,
                             param_names: Vec::new(),

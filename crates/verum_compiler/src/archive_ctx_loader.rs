@@ -633,6 +633,8 @@ fn register_module(
             );
         }
         let info = FunctionInfo {
+            type_param_ids: fn_desc.type_params.iter().map(|p| p.id).collect(),
+            explicit_type_param_ids: fn_desc.explicit_type_param_ids.clone(),
             id: new_id,
             param_count: fn_desc.params.len(),
             param_names,
@@ -805,6 +807,8 @@ fn register_module(
             };
             let param_names: Vec<String> = (0..arity).map(|i| format!("_{}", i)).collect();
             let info = FunctionInfo {
+                type_param_ids: Vec::new(),
+                explicit_type_param_ids: Vec::new(),
                 id: FunctionId(u32::MAX - variant.tag),
                 param_count: arity,
                 param_names,
@@ -925,6 +929,8 @@ fn register_module(
             .map(|f| type_ref_simple_name(&f.type_ref, module).unwrap_or_default())
             .collect();
         let info = FunctionInfo {
+            type_param_ids: Vec::new(),
+            explicit_type_param_ids: Vec::new(),
             id: verum_vbc::module::FunctionId(u32::MAX / 2),
             param_count: arity,
             param_names,
@@ -6513,6 +6519,8 @@ fn register_module_filtered(
             );
         }
         let info = FunctionInfo {
+            type_param_ids: fn_desc.type_params.iter().map(|p| p.id).collect(),
+            explicit_type_param_ids: fn_desc.explicit_type_param_ids.clone(),
             id: new_id,
             param_count: fn_desc.params.len(),
             param_names,
@@ -6952,6 +6960,8 @@ fn register_module_filtered(
             };
             let param_names: Vec<String> = (0..arity).map(|i| format!("_{}", i)).collect();
             let info = FunctionInfo {
+                type_param_ids: Vec::new(),
+                explicit_type_param_ids: Vec::new(),
                 id: FunctionId(u32::MAX - variant.tag),
                 param_count: arity,
                 param_names,
@@ -7037,6 +7047,8 @@ fn register_module_filtered(
             .map(|f| type_ref_simple_name(&f.type_ref, module).unwrap_or_default())
             .collect();
         let info = FunctionInfo {
+            type_param_ids: Vec::new(),
+            explicit_type_param_ids: Vec::new(),
             id: FunctionId(u32::MAX / 2),
             param_count: arity,
             param_names,
@@ -8448,3 +8460,7 @@ mod formatted_call_harvest_tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "../tests/archive/explicit_generic_params.rs"]
+mod explicit_generic_param_tests;

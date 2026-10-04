@@ -1240,12 +1240,13 @@ impl VbcCodegen {
                 receiver,
                 method,
                 args,
-                type_args: _,
+                type_args,
             } => self.compile_method_call(
                 receiver,
                 method,
                 args,
                 expr.resolved_call_target.as_ref(),
+                type_args,
             ),
 
             // === Control Flow ===
@@ -6768,6 +6769,8 @@ impl VbcCodegen {
                 );
             }
             let info = FunctionInfo {
+                type_param_ids: Vec::new(),
+                explicit_type_param_ids: Vec::new(),
                 id: stub_id,
                 param_count: args.len(),
                 param_names: (0..args.len()).map(|i| format!("_arg{}", i)).collect(),
@@ -8489,11 +8492,14 @@ impl VbcCodegen {
                 start: args_start,
                 count: call_arg_count as u8,
             };
-            let type_args = if final_func_id != UNRESOLVED_FN_ID {
+            let type_args_inferred = if final_func_id != UNRESOLVED_FN_ID {
                 self.record_generic_instantiation(final_func_id, args)
             } else {
                 None
             };
+            let type_args = self.apply_explicit_generic_args(
+                (final_func_id != UNRESOLVED_FN_ID).then_some(final_func_id), type_args, type_args_inferred,
+            );
             match type_args {
                 Some(type_args) if !type_args.is_empty() => {
                     self.ctx.emit(Instruction::CallG {
@@ -8872,39 +8878,140 @@ impl VbcCodegen {
         if bindings.is_empty() {
             return None;
         }
-        // POSITIONAL contract (#44-B): the witness consumer indexes the
-        // vector by TypeParamId (`LoadT { Generic(idx) }` →
-        // `type_args[idx]`), so emit a DENSE vector over the callee's
-        // declared type params — unresolved slots carry
-        // `TypeRef::Generic(i)` placeholders (runtime: no witness → nil
-        // → legacy fallback), never collapse to a shorter list.
-        let param_count = self
-            .functions
-            .iter()
-            .find(|f| f.descriptor.id.0 == func_id)
-            .map(|f| f.descriptor.type_params.len())
-            .unwrap_or(0)
-            .max(
-                bindings
-                    .keys()
-                    .next_back()
-                    .map(|k| *k as usize + 1)
-                    .unwrap_or(0),
-            );
-        let type_args: Vec<crate::types::TypeRef> = (0..param_count)
-            .map(|i| {
-                bindings.get(&(i as u32)).cloned().unwrap_or(
-                    crate::types::TypeRef::Generic(crate::types::TypeParamId(
-                        i as u16,
-                    )),
-                )
-            })
-            .collect();
+        // Compact descriptor-order witnesses preserve exact IDs without
+        // allocating padding for the method shadow band. Legacy entries with
+        // no declaration roster retain their positional representation.
+        let declared_ids = self.ctx.lookup_function_by_id(crate::module::FunctionId(func_id))
+            .map(|info| info.type_param_ids.as_slice()).unwrap_or(&[]);
+        let type_args: Vec<crate::types::TypeRef> = if declared_ids.is_empty() {
+            let count = bindings.keys().next_back().map_or(0, |id| *id as usize + 1);
+            (0..count).map(|id| bindings.get(&(id as u32)).cloned()
+                .unwrap_or(crate::types::TypeRef::Generic(crate::types::TypeParamId(id as u16)))).collect()
+        } else {
+            declared_ids.iter().map(|id| bindings.get(&u32::from(id.0)).cloned()
+                .unwrap_or(crate::types::TypeRef::Generic(*id))).collect()
+        };
         if mono_seed {
             self.pending_specializations
                 .push((func_id, type_args.clone()));
         }
         Some(type_args)
+    }
+
+    /// Apply source arguments to their declaration-owned slots after inference.
+    /// Explicit arguments win over enclosing return hints; holes can only use
+    /// the matching structural expected type, never an unrelated positional slot.
+    fn apply_explicit_generic_args(
+        &mut self,
+        func_id: Option<u32>,
+        explicit: &verum_common::List<verum_ast::ty::GenericArg>,
+        inferred: Option<Vec<crate::types::TypeRef>>,
+    ) -> Option<Vec<crate::types::TypeRef>> {
+        use crate::types::TypeRef;
+        use verum_ast::ty::GenericArg;
+        if explicit.is_empty() { return inferred; }
+        let Some(info) = func_id.and_then(|id| self.ctx.lookup_function_by_id(crate::module::FunctionId(id))).cloned() else {
+            return inferred;
+        };
+        if info.explicit_type_param_ids.is_empty() || info.type_param_ids.is_empty() { return inferred; }
+        let ret = self.functions.iter().find(|f| f.descriptor.id == info.id)
+            .map(|f| &f.descriptor.return_type).or(info.return_type.as_ref());
+        let expected = self.ctx.current_return_type_full.as_ref()
+            .or(self.ctx.current_return_type_name.as_ref())
+            .and_then(|name| self.type_name_to_type_ref_mono(name));
+        let mut expected_bindings = std::collections::BTreeMap::new();
+        if let (Some(ret), Some(expected)) = (ret, expected.as_ref()) {
+            bind_generic_free(ret, expected, &mut expected_bindings);
+        }
+        let mut bindings: std::collections::BTreeMap<u16, TypeRef> = info.type_param_ids.iter().enumerate()
+            .filter_map(|(i, id)| inferred.as_ref().and_then(|args| args.get(i)).map(|arg| (id.0, arg.clone())))
+            .collect();
+        for (arg, id) in explicit.iter().zip(&info.explicit_type_param_ids) {
+            let Some(id) = id else { continue; };
+            let expected_slot = expected_bindings.get(&u32::from(id.0)).or_else(|| bindings.get(&id.0));
+            let value = match arg {
+                GenericArg::Type(ty) => self.explicit_type_witness(ty, expected_slot),
+                _ => None,
+            };
+            bindings.insert(id.0, value.unwrap_or(TypeRef::Generic(*id)));
+        }
+        let result: Vec<TypeRef> = info.type_param_ids.iter().map(|id| {
+            bindings.remove(&id.0).unwrap_or(TypeRef::Generic(*id))
+        }).collect();
+        if std::env::var_os("VERUM_ENABLE_MONO_AOT").is_some() {
+            if let Some(old) = inferred.as_ref() {
+                self.pending_specializations.retain(|(id, args)| *id != info.id.0 || args != old);
+            }
+            self.pending_specializations.push((info.id.0, result.clone()));
+        }
+        Some(result)
+    }
+
+    fn explicit_type_witness(
+        &self,
+        ty: &verum_ast::ty::Type,
+        expected: Option<&crate::types::TypeRef>,
+    ) -> Option<crate::types::TypeRef> {
+        use crate::types::{TypeParamId, TypeRef};
+        use verum_ast::ty::{GenericArg, TypeKind};
+        match &ty.kind {
+            TypeKind::Inferred => expected.cloned(),
+            TypeKind::Generic { base, args } => {
+                let base_name = Self::extract_type_name_from_ast(base);
+                let base_id = self.type_name_to_id.get(&base_name).copied()
+                    .or_else(|| self.get_well_known_type_id(&base_name))?;
+                let expected_args = match expected {
+                    Some(TypeRef::Instantiated { base, args }) if *base == base_id => Some(args),
+                    _ => None,
+                };
+                let resolved: Option<Vec<TypeRef>> = args.iter().enumerate().map(|(i, arg)| {
+                    match arg {
+                        GenericArg::Type(ty) => self.explicit_type_witness(ty, expected_args.and_then(|a| a.get(i))),
+                        GenericArg::Const(expr) => Self::render_const_generic_arg(expr).and_then(|s| s.parse().ok()).map(TypeRef::ConstValue),
+                        _ => None,
+                    }
+                }).collect();
+                Some(TypeRef::Instantiated { base: base_id, args: resolved? })
+            }
+            TypeKind::Reference { inner, mutable }
+            | TypeKind::CheckedReference { inner, mutable }
+            | TypeKind::UnsafeReference { inner, mutable } => {
+                let expected_inner = match expected {
+                    Some(TypeRef::Reference { inner, .. }) => Some(inner.as_ref()), _ => None,
+                };
+                let inner = self.explicit_type_witness(inner, expected_inner)?;
+                let tier = match &ty.kind {
+                    TypeKind::CheckedReference { .. } => crate::types::CbgrTier::Tier1,
+                    TypeKind::UnsafeReference { .. } => crate::types::CbgrTier::Tier2,
+                    _ => crate::types::CbgrTier::Tier0,
+                };
+                Some(TypeRef::Reference {
+                    inner: Box::new(inner),
+                    mutability: if *mutable { crate::types::Mutability::Mutable } else { crate::types::Mutability::Immutable },
+                    tier,
+                })
+            }
+            TypeKind::Tuple(items) => {
+                let expected_items = match expected { Some(TypeRef::Tuple(items)) => Some(items), _ => None };
+                let items: Option<Vec<_>> = items.iter().enumerate().map(|(i, ty)| {
+                    self.explicit_type_witness(ty, expected_items.and_then(|items| items.get(i)))
+                }).collect();
+                items.map(TypeRef::Tuple)
+            }
+            TypeKind::Slice(inner) => {
+                let expected_inner = match expected { Some(TypeRef::Slice(inner)) => Some(inner.as_ref()), _ => None };
+                self.explicit_type_witness(inner, expected_inner).map(|inner| TypeRef::Slice(Box::new(inner)))
+            }
+            _ => {
+                let name = Self::extract_type_name_from_ast(ty);
+                if self.ctx.generic_type_params.contains(&name) {
+                    self.ctx.current_generic_param_ids.get(&name)
+                        .map(|id| TypeRef::Generic(TypeParamId(*id)))
+                } else {
+                    self.type_name_to_type_ref_mono(&name)
+                }
+            }
+        }
     }
 
     /// Parse a (possibly generic) type NAME like `ReadyFuture<Text>` or
@@ -10931,6 +11038,7 @@ impl VbcCodegen {
         receiver: Option<&Expr>,
         args: &verum_common::List<Expr>,
         method: &verum_ast::Ident,
+        type_args: &verum_common::List<verum_ast::ty::GenericArg>,
     ) -> CodegenResult<Option<Reg>> {
         use verum_ast::expr::ResolvedCallTarget;
         match target {
@@ -11057,6 +11165,7 @@ impl VbcCodegen {
                         method.name.as_str(),
                         recv,
                         args,
+                        type_args,
                     )?
                 {
                     return Ok(redirect);
@@ -11178,10 +11287,10 @@ impl VbcCodegen {
                                     recv.span,
                                 );
                                 return self.compile_method_call(
-                                    &head_expr, method, args, None,
+                                    &head_expr, method, args, None, type_args,
                                 );
                             }
-                            return self.compile_method_call(recv, method, args, None);
+                            return self.compile_method_call(recv, method, args, None, type_args);
                         }
                         // [diag] see VERUM_TRACE_UNDEF_FN in compile_call.
                         if let Ok(filter) = std::env::var("VERUM_TRACE_UNDEF_FN")
@@ -11335,7 +11444,7 @@ impl VbcCodegen {
                         false
                     };
                     if recv_is_sized_primitive {
-                        return self.compile_method_call(recv, method, args, None);
+                        return self.compile_method_call(recv, method, args, None, type_args);
                     }
                     let mut prepended: Vec<Expr> = Vec::with_capacity(args.len() + 1);
                     prepended.push((*recv).clone());
@@ -11352,9 +11461,9 @@ impl VbcCodegen {
                         self.ctx.pending_static_call_type_args =
                             self.derive_receiver_witnesses(recv);
                     }
-                    return self.compile_static_method_call(&info, &prepended_list);
+                    return self.compile_static_method_call(&info, &prepended_list, type_args);
                 }
-                self.compile_static_method_call(&info, args)
+                self.compile_static_method_call(&info, args, type_args)
             }
             ResolvedCallTarget::VariantCtor { tag, parent_type_name } => {
                 // The typechecker already resolved the parent sum
@@ -11818,6 +11927,7 @@ impl VbcCodegen {
         method_name: &str,
         receiver: &Expr,
         args: &verum_common::List<Expr>,
+        type_args: &verum_common::List<verum_ast::ty::GenericArg>,
     ) -> CodegenResult<Option<Option<Reg>>> {
         // The TYPE component is the segment before the final `.method`,
         // tolerating a mount-upgraded `module.path.Type.method` form
@@ -11854,7 +11964,7 @@ impl VbcCodegen {
         // `dispatch_array_method` first, then falls back to the
         // compiled body for non-intercepted methods.
         let method_ident = verum_ast::Ident::new(method_name, receiver.span);
-        let result = self.compile_method_call(receiver, &method_ident, args, None)?;
+        let result = self.compile_method_call(receiver, &method_ident, args, None, type_args)?;
         Ok(Some(result))
     }
 
@@ -12320,6 +12430,7 @@ impl VbcCodegen {
         method: &verum_ast::Ident,
         args: &verum_common::List<Expr>,
         resolved_target: Option<&verum_ast::expr::ResolvedCallTarget>,
+        type_args: &verum_common::List<verum_ast::ty::GenericArg>,
     ) -> CodegenResult<Option<Reg>> {
         let mut value = self
             .compile_expr(receiver)?
@@ -12360,7 +12471,7 @@ impl VbcCodegen {
         self.ctx
             .register_variable_type(&binding, self.type_name_to_var_type(target.as_str()));
         let adjusted = Expr::ident(verum_ast::Ident::new(binding.clone(), receiver.span));
-        let result = self.compile_method_call(&adjusted, method, args, resolved_target);
+        let result = self.compile_method_call(&adjusted, method, args, resolved_target, type_args);
         if let Ok(Some(reg)) = &result {
             self.ctx.emit(Instruction::Mov {
                 dst: result_value,
@@ -12392,6 +12503,7 @@ impl VbcCodegen {
         method: &verum_ast::Ident,
         args: &verum_common::List<Expr>,
         resolved_target: Option<&verum_ast::expr::ResolvedCallTarget>,
+        type_args: &verum_common::List<verum_ast::ty::GenericArg>,
     ) -> CodegenResult<Option<Reg>> {
         // ──────────────────────────────────────────────────────────
         // REFL-CLOSURE-XREC-1 (runtime leg): iterator-adapter calls with a
@@ -12564,7 +12676,7 @@ impl VbcCodegen {
             let depth = self.method_receiver_deref_count(&receiver_type, method.name.as_str());
             if depth > 0 {
                 return self.compile_adjusted_method_receiver(
-                    receiver, &receiver_type, depth, method, args, resolved_target,
+                    receiver, &receiver_type, depth, method, args, resolved_target, type_args,
                 );
             }
         }
@@ -13024,6 +13136,7 @@ impl VbcCodegen {
                 Some(receiver),
                 args,
                 method,
+                type_args,
             );
         }
         if std::env::var_os("VERUM_TRACE_PROTOSTAMP").is_some()
@@ -13670,7 +13783,7 @@ impl VbcCodegen {
                     // call (taken at its entry; every non-consuming path
                     // drops them).
                     self.ctx.pending_static_call_type_args = static_witness_args.clone();
-                    return self.compile_static_method_call(&func_info, args);
+                    return self.compile_static_method_call(&func_info, args, type_args);
                 }
                 if let Some(func_info) = self.ctx.lookup_function(candidate).cloned()
                     && func_info.param_count == args.len()
@@ -13684,7 +13797,7 @@ impl VbcCodegen {
                         );
                     }
                     self.ctx.pending_static_call_type_args = static_witness_args.clone();
-                    return self.compile_static_method_call(&func_info, args);
+                    return self.compile_static_method_call(&func_info, args, type_args);
                 }
             }
         }
@@ -13720,7 +13833,7 @@ impl VbcCodegen {
                 if let Some(tag) = func_info.variant_tag {
                     return self.compile_variant_constructor_with_tag(tag, args);
                 }
-                return self.compile_static_method_call(&func_info, args);
+                return self.compile_static_method_call(&func_info, args, type_args);
             }
 
             // Try Verum-style - only use if argument count matches
@@ -13733,7 +13846,7 @@ impl VbcCodegen {
                 if let Some(tag) = func_info.variant_tag {
                     return self.compile_variant_constructor_with_tag(tag, args);
                 }
-                return self.compile_static_method_call(&func_info, args);
+                return self.compile_static_method_call(&func_info, args, type_args);
             }
 
             // **#122 call-side mirror — `core.`-rooted canonical path.**
@@ -13756,7 +13869,7 @@ impl VbcCodegen {
                     if let Some(tag) = func_info.variant_tag {
                         return self.compile_variant_constructor_with_tag(tag, args);
                     }
-                    return self.compile_static_method_call(&func_info, args);
+                    return self.compile_static_method_call(&func_info, args, type_args);
                 }
             }
 
@@ -13822,7 +13935,7 @@ impl VbcCodegen {
                                 aliased.first().map(|s| s.as_str()),
                             );
                         }
-                        return self.compile_static_method_call(&func_info, args);
+                        return self.compile_static_method_call(&func_info, args, type_args);
                     }
                     if let Some(func_info) = self
                         .ctx
@@ -13838,7 +13951,7 @@ impl VbcCodegen {
                                 aliased.first().map(|s| s.as_str()),
                             );
                         }
-                        return self.compile_static_method_call(&func_info, args);
+                        return self.compile_static_method_call(&func_info, args, type_args);
                     }
                 }
             }
@@ -13958,7 +14071,7 @@ impl VbcCodegen {
                     if let Some(tag) = func_info.variant_tag {
                         return self.compile_variant_constructor_with_tag(tag, args);
                     }
-                    return self.compile_static_method_call(&func_info, args);
+                    return self.compile_static_method_call(&func_info, args, type_args);
                 }
             }
 
@@ -13980,7 +14093,7 @@ impl VbcCodegen {
                 if let Some(tag) = func_info.variant_tag {
                     return self.compile_variant_constructor_with_tag(tag, args);
                 }
-                return self.compile_static_method_call(&func_info, args);
+                return self.compile_static_method_call(&func_info, args, type_args);
             }
 
             // Try just the function name (it may have been imported).
@@ -14043,7 +14156,7 @@ impl VbcCodegen {
                 if let Some(tag) = func_info.variant_tag {
                     return self.compile_variant_constructor_with_tag(tag, args);
                 }
-                return self.compile_static_method_call(&func_info, args);
+                return self.compile_static_method_call(&func_info, args, type_args);
             }
 
             // If this is a module/type namespace (not a local variable),
@@ -14188,7 +14301,7 @@ impl VbcCodegen {
                         && info.variant_tag.is_none()
                         && crate::stub_ranges::is_name_resolved_stub_id(info.id.0)
                     {
-                        return self.compile_static_method_call(&info, args);
+                        return self.compile_static_method_call(&info, args, type_args);
                     }
                 }
                 // L0-STATIC-ARITY (#42, 891_impl_methods): when a USER type
@@ -14213,7 +14326,7 @@ impl VbcCodegen {
                         && info.variant_tag.is_none()
                         && info.intrinsic_name.is_none()
                     {
-                        return self.compile_static_method_call(&info, args);
+                        return self.compile_static_method_call(&info, args, type_args);
                     }
                 }
                 if (is_module_ns || is_type_ns) && !receiver_is_known_value {
@@ -14254,7 +14367,7 @@ impl VbcCodegen {
                         let dotted = parts.join(".");
                         let info =
                             self.synthesize_qualified_call_stub(&dotted, args.len());
-                        return self.compile_static_method_call(&info, args);
+                        return self.compile_static_method_call(&info, args, type_args);
                     }
                     if std::env::var_os("VERUM_TRACE_TPCALL").is_some() {
                         eprintln!(
@@ -14272,7 +14385,7 @@ impl VbcCodegen {
             }
         }
 
-        if let Some(result) = self.try_resolve_static_method(receiver, method, args)? {
+        if let Some(result) = self.try_resolve_static_method(receiver, method, args, type_args)? {
             return Ok(result);
         }
 
@@ -16243,7 +16356,7 @@ impl VbcCodegen {
             let ret_bindings: std::collections::BTreeMap<u32, crate::types::TypeRef> =
                 match (
                     ret_leg_desc_ret,
-                    self.ctx.current_return_type_name.clone(),
+                    self.ctx.current_return_type_full.clone().or_else(|| self.ctx.current_return_type_name.clone()),
                 ) {
                     (Some(ret_tr), Some(expected_name)) if ret_tr.is_generic() => {
                         let stripped = expected_name
@@ -16280,23 +16393,31 @@ impl VbcCodegen {
             if ret_bindings.is_empty() {
                 sidecar_args
             } else {
-                let max_pid = *ret_bindings.keys().next_back().unwrap() as usize;
+                let roster = resolvable_fid.and_then(|id| self.ctx.lookup_function_by_id(crate::module::FunctionId(id)))
+                    .map(|info| info.type_param_ids.as_slice()).unwrap_or(&[]);
                 let mut v = sidecar_args.unwrap_or_default();
-                while v.len() <= max_pid {
-                    let i = v.len();
-                    v.push(crate::types::TypeRef::Generic(
-                        crate::types::TypeParamId(i as u16),
-                    ));
-                }
-                for (pid, tr) in ret_bindings {
-                    let slot = &mut v[pid as usize];
-                    if matches!(slot, crate::types::TypeRef::Generic(_)) {
-                        *slot = tr;
+                if roster.is_empty() {
+                    // Pre-carrier synthetic entries retain the legacy positional contract.
+                    let max_pid = *ret_bindings.keys().next_back().unwrap() as usize;
+                    while v.len() <= max_pid {
+                        v.push(crate::types::TypeRef::Generic(crate::types::TypeParamId(v.len() as u16)));
+                    }
+                    for (pid, tr) in ret_bindings {
+                        if matches!(v[pid as usize], crate::types::TypeRef::Generic(_)) { v[pid as usize] = tr; }
+                    }
+                } else {
+                    for id in roster.iter().skip(v.len()) { v.push(crate::types::TypeRef::Generic(*id)); }
+                    for (pid, tr) in ret_bindings {
+                        if let Some(index) = roster.iter().position(|id| u32::from(id.0) == pid) {
+                            if matches!(v[index], crate::types::TypeRef::Generic(_)) { v[index] = tr; }
+                        }
                     }
                 }
                 Some(v)
             }
         };
+
+        let sidecar_args = self.apply_explicit_generic_args(resolvable_fid, type_args, sidecar_args);
 
         if std::env::var_os("VERUM_TRACE_TPCALL").is_some() {
             eprintln!(
@@ -16493,6 +16614,7 @@ impl VbcCodegen {
         receiver: &Expr,
         method: &verum_ast::Ident,
         args: &verum_common::List<Expr>,
+        type_args: &verum_common::List<verum_ast::ty::GenericArg>,
     ) -> CodegenResult<Option<Option<Reg>>> {
         let ExprKind::Path(ref path) = receiver.kind else {
             return Ok(None);
@@ -16664,7 +16786,7 @@ impl VbcCodegen {
                         Some(&type_name),
                     )?));
                 }
-                return Ok(Some(self.compile_static_method_call(&func_info, args)?));
+                return Ok(Some(self.compile_static_method_call(&func_info, args, type_args)?));
             }
         }
         // ALIASED head retry. `IoError.new(..)` where IoError is core.io's
@@ -16693,7 +16815,7 @@ impl VbcCodegen {
                         Some(&resolved_head),
                     )?));
                 }
-                return Ok(Some(self.compile_static_method_call(&func_info, args)?));
+                return Ok(Some(self.compile_static_method_call(&func_info, args, type_args)?));
             }
         }
 
@@ -16725,7 +16847,7 @@ impl VbcCodegen {
                         self.ctx.emit(Instruction::LoadI { dst: dest, value });
                         return Ok(Some(Some(dest)));
                     }
-                    return Ok(Some(self.compile_static_method_call(&func_info, args)?));
+                    return Ok(Some(self.compile_static_method_call(&func_info, args, type_args)?));
                 }
             }
 
@@ -16737,7 +16859,7 @@ impl VbcCodegen {
                 let aliased_qualified = format!("{}.{}", resolved_type, method_name);
                 if let Some(func_info) = self.ctx.lookup_function(&aliased_qualified).cloned() {
                     if func_info.param_count == args.len() {
-                        return Ok(Some(self.compile_static_method_call(&func_info, args)?));
+                        return Ok(Some(self.compile_static_method_call(&func_info, args, type_args)?));
                     }
                 }
             }
@@ -16749,7 +16871,7 @@ impl VbcCodegen {
                 let aliased_qualified = format!("{}.{}", base_type, method_name);
                 if let Some(func_info) = self.ctx.lookup_function(&aliased_qualified).cloned() {
                     if func_info.param_count == args.len() {
-                        return Ok(Some(self.compile_static_method_call(&func_info, args)?));
+                        return Ok(Some(self.compile_static_method_call(&func_info, args, type_args)?));
                     }
                 }
             }
@@ -17438,6 +17560,8 @@ impl VbcCodegen {
             );
         }
         let info = FunctionInfo {
+            type_param_ids: Vec::new(),
+            explicit_type_param_ids: Vec::new(),
             id: stub_id,
             param_count: arity,
             param_names: (0..arity).map(|i| format!("_arg{}", i)).collect(),
@@ -17467,6 +17591,7 @@ impl VbcCodegen {
         &mut self,
         func_info: &FunctionInfo,
         args: &verum_common::List<Expr>,
+        type_args: &verum_common::List<verum_ast::ty::GenericArg>,
     ) -> CodegenResult<Option<Reg>> {
         // CONST-GENERIC-VALUE-CARRY-1: take the callsite-staged witness
         // args UNCONDITIONALLY at entry — every early-return path
@@ -17679,7 +17804,7 @@ impl VbcCodegen {
             start: args_start,
             count: args.len() as u8,
         };
-        match self
+        let mut inferred_type_args = self
             .record_generic_instantiation(func_info.id.0, args)
             // Chain honesty (T0499): an all-placeholder structural
             // derivation must not suppress the callsite-staged
@@ -17689,8 +17814,18 @@ impl VbcCodegen {
                     && ta
                         .iter()
                         .any(|t| !matches!(t, crate::types::TypeRef::Generic(_)))
-            })
-            .or(staged_type_args)
+            });
+        if let Some(staged) = staged_type_args {
+            let inferred = inferred_type_args.get_or_insert_with(Vec::new);
+            for (index, value) in staged.into_iter().enumerate() {
+                if let Some(slot) = inferred.get_mut(index) {
+                    if matches!(slot, crate::types::TypeRef::Generic(_)) { *slot = value; }
+                } else {
+                    inferred.push(value);
+                }
+            }
+        }
+        match self.apply_explicit_generic_args(Some(func_info.id.0), type_args, inferred_type_args)
         {
             Some(type_args) if !type_args.is_empty() => {
                 self.ctx.emit(Instruction::CallG {
@@ -32148,6 +32283,8 @@ impl VbcCodegen {
 
         // Register the closure function
         let info = super::FunctionInfo {
+            type_param_ids: Vec::new(),
+            explicit_type_param_ids: Vec::new(),
             id: crate::module::FunctionId(func_id),
             param_count: param_names.len(),
             param_names,
@@ -33483,6 +33620,8 @@ impl VbcCodegen {
 
         let param_names: Vec<String> = capture_names.iter().map(|(n, _)| n.clone()).collect();
         let info = super::FunctionInfo {
+            type_param_ids: Vec::new(),
+            explicit_type_param_ids: Vec::new(),
             id: crate::module::FunctionId(func_id),
             param_count: param_names.len(),
             param_names: param_names.clone(),
@@ -42668,6 +42807,8 @@ impl VbcCodegen {
 
         // Register the generator function
         let info = super::FunctionInfo {
+            type_param_ids: Vec::new(),
+            explicit_type_param_ids: Vec::new(),
             id: crate::module::FunctionId(func_id),
             param_count: captures.len(),
             param_names: captures.to_vec(),

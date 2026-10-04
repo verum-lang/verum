@@ -437,6 +437,7 @@ impl Serializer {
         // pre-2.12 readers stop before it and decode `None`.
         self.serialize_optional_u32(desc.origin_module.map(|s| s.0));
 
+
         Ok(())
     }
 
@@ -732,6 +733,12 @@ impl Serializer {
         // `TypeDescriptor.origin_module`.  Same trailing optional-u32
         // discipline; pre-2.13 readers stop before it and decode `None`.
         self.serialize_optional_u32(desc.origin_module.map(|s| s.0));
+
+        // v2.16: declaration-owned explicit generic slots, not a guessed suffix.
+        encode_varint(desc.explicit_type_param_ids.len() as u64, &mut self.output);
+        for id in &desc.explicit_type_param_ids {
+            self.serialize_optional_u32(id.map(|id| u32::from(id.0)));
+        }
 
         Ok(())
     }

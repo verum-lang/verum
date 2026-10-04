@@ -249,6 +249,7 @@ fn test_roundtrip_function_descriptor() {
     let b_name = module.intern_string("b");
 
     let desc = FunctionDescriptor {
+            explicit_type_param_ids: Vec::new(),
         id: FunctionId(0),
         name,
         parent_type: None,
@@ -326,6 +327,7 @@ fn intrinsic_name_marker_survives_round_trip() {
     let name = module.intern_string("MAX_FOO");
     let iname = module.intern_string("__const_val_256");
     module.functions.push(FunctionDescriptor {
+            explicit_type_param_ids: Vec::new(),
         id: FunctionId(0),
         name,
         parent_type: None,

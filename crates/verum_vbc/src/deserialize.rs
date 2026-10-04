@@ -1536,7 +1536,31 @@ impl<'a> Deserializer<'a> {
  None
  };
 
+ // v2.16: older descriptors end before this count. Never try to read the
+ // following function as an optional trailing field.
+ let mut explicit_type_param_ids = Vec::new();
+ if fmt_minor >= 16 {
+ let count = decode_varint(self.data, &mut self.offset)? as usize;
+ if count > MAX_FN_TYPE_REF_PARAMS {
+ return Err(VbcError::TableTooLarge {
+ field: "fn_explicit_type_param_count",
+ count: count.min(u32::MAX as usize) as u32,
+ max: MAX_FN_TYPE_REF_PARAMS as u32,
+ });
+ }
+ for _ in 0..count {
+ let id = self.parse_optional_u32()?;
+ if id.is_some_and(|id| id > u16::MAX as u32) {
+ return Err(VbcError::TableTooLarge {
+ field: "fn_explicit_type_param_id", count: id.unwrap(), max: u16::MAX as u32,
+ });
+ }
+ explicit_type_param_ids.push(id.map(|id| TypeParamId(id as u16)));
+ }
+ }
+
  Ok(FunctionDescriptor {
+ explicit_type_param_ids,
  id,
  name,
  parent_type,
@@ -2236,3 +2260,7 @@ mod tests {
  assert_eq!(fast_loaded.name, module.name);
  }
 }
+
+#[cfg(test)]
+#[path = "../tests/format/explicit_generic_params.rs"]
+mod explicit_generic_param_tests;

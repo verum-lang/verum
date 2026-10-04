@@ -808,6 +808,8 @@ mod security_tests {
         let mut ctx = CodegenContext::new();
 
         let info = FunctionInfo {
+            type_param_ids: Vec::new(),
+            explicit_type_param_ids: Vec::new(),
             id: FunctionId(42),
             param_count: 3,
             param_names: vec!["a".into(), "b".into(), "c".into()],
@@ -1590,6 +1592,8 @@ mod stress_tests {
 
         for i in 0..1000 {
             let info = FunctionInfo {
+                type_param_ids: Vec::new(),
+                explicit_type_param_ids: Vec::new(),
                 id: FunctionId(i),
                 param_count: (i % 10) as usize,
                 param_names: vec![],
@@ -2464,6 +2468,8 @@ mod cross_module_path_tests {
     /// Helper to create a minimal FunctionInfo for tests.
     fn make_func_info(id: u32, param_count: usize, is_async: bool) -> FunctionInfo {
         FunctionInfo {
+            type_param_ids: Vec::new(),
+            explicit_type_param_ids: Vec::new(),
             id: FunctionId(id),
             param_count,
             param_names: vec![],
@@ -2687,6 +2693,8 @@ mod cross_module_path_tests {
         let mut ctx = CodegenContext::new();
 
         let info = FunctionInfo {
+            type_param_ids: Vec::new(),
+            explicit_type_param_ids: Vec::new(),
             id: FunctionId(60),
             param_count: 0,
             param_names: vec![],
@@ -2724,6 +2732,8 @@ mod cross_module_path_tests {
         let mut ctx = CodegenContext::new();
 
         let info = FunctionInfo {
+            type_param_ids: Vec::new(),
+            explicit_type_param_ids: Vec::new(),
             id: FunctionId(80),
             param_count: 3,
             param_names: vec!["x".to_string(), "y".to_string(), "z".to_string()],

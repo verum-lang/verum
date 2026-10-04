@@ -1660,6 +1660,7 @@ impl VbcModule {
                     })
                     .collect();
                 let desc = FunctionDescriptor {
+                    explicit_type_param_ids: Vec::new(),
                     id: FunctionId(self.functions.len() as u32),
                     name: name_id,
                     parent_type: None,
@@ -2731,6 +2732,13 @@ pub struct FunctionDescriptor {
     /// the entry-name fallback.
     #[serde(default)]
     pub origin_module: Option<StringId>,
+    /// Exact declaration IDs for explicit generic arguments, in source order.
+    /// Implicit parameters are omitted; non-type slots without a TypeParamId
+    /// remain None so a partial argument list never shifts later type slots.
+    /// Versioned in the VBC 2.16 function table; older archives carry no facts.
+    #[serde(default)]
+    pub explicit_type_param_ids: Vec<Option<crate::types::TypeParamId>>,
+
 }
 
 /// Debug information for a local variable or parameter.
@@ -2801,6 +2809,7 @@ impl Default for FunctionDescriptor {
             register_type_hints: Vec::new(),
             return_type_name: None,
             origin_module: None,
+            explicit_type_param_ids: Vec::new(),
         }
     }
 }
@@ -4019,6 +4028,7 @@ mod precompile_extension_tests {
         let mut m = make_module();
         // Synthesise a function whose body is at offset 100, length 32.
         let mut desc = FunctionDescriptor {
+            explicit_type_param_ids: Vec::new(),
             id: FunctionId(0),
             name: m.intern_string("hello"),
             parent_type: None,
@@ -4073,6 +4083,7 @@ mod precompile_extension_tests {
         let mut m = make_module();
         // One placeholder function so the variant lookup has a target.
         let desc = FunctionDescriptor {
+            explicit_type_param_ids: Vec::new(),
             id: FunctionId(0),
             name: m.intern_string("syscall_x"),
             parent_type: None,

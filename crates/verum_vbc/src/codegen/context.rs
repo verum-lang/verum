@@ -595,6 +595,10 @@ pub struct CodegenContext {
     /// lockstep with `generic_type_params`; cleared per function.
     pub generic_type_params_ordered: Vec<String>,
 
+    /// Exact active signature IDs, including method shadow slots. Inherited by
+    /// closures and replaced at each declared function boundary.
+    pub current_generic_param_ids: HashMap<String, u16>,
+
     /// Registers with a LIVE register-reference taken on them (#48
     /// self-referential-slot corruption class). `emit_ref_instruction`
     /// pins its `src` here; `free_temp` refuses to recycle a pinned
@@ -1186,6 +1190,15 @@ pub struct FunctionInfo {
     /// Empty by default — callers that don't populate it (test stubs,
     /// synthetic constructors, etc.) get the no-op path.
     pub param_closure_return_type_names: Vec<Option<String>>,
+
+    /// Exact declaration IDs for explicit generic arguments, in source order.
+    /// Implicit parameters are omitted; unsupported non-type slots remain None.
+    /// Empty for synthetic functions and archives predating VBC 2.16.
+    pub explicit_type_param_ids: Vec<Option<crate::types::TypeParamId>>,
+
+    /// Full signature parameter IDs in descriptor order, including impl and
+    /// implicit parameters. Compact call witnesses follow this exact roster.
+    pub type_param_ids: Vec<crate::types::TypeParamId>,
 }
 
 /// Statistics collected during codegen.
@@ -1672,6 +1685,7 @@ impl CodegenContext {
             raw_pointer_regs: HashSet::new(),
             generic_type_params: HashSet::new(),
             generic_type_params_ordered: Vec::new(),
+            current_generic_param_ids: HashMap::new(),
             type_generic_params: HashMap::new(),
             type_const_param_names: HashMap::new(),
             ref_pinned_regs: std::collections::HashSet::new(),
@@ -1712,6 +1726,7 @@ impl CodegenContext {
             raw_pointer_regs: HashSet::new(),
             generic_type_params: HashSet::new(),
             generic_type_params_ordered: Vec::new(),
+            current_generic_param_ids: HashMap::new(),
             type_generic_params: HashMap::new(),
             type_const_param_names: HashMap::new(),
             ref_pinned_regs: std::collections::HashSet::new(),
@@ -4648,6 +4663,7 @@ impl CodegenContext {
         self.generic_type_params.clear();
         self.compiled_block_result_types.clear();
         self.generic_type_params_ordered.clear();
+        self.current_generic_param_ids.clear();
         self.const_generic_params.clear();
         self.clear_required_contexts();
     }

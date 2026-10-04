@@ -100,7 +100,10 @@ pub const VERSION_MAJOR: u16 = 2;
 /// the prelude re-exports through a glob.  The type namespace hid the
 /// same hole behind `ensure_stdlib_type_loaded`; the value namespace has
 /// no lookup-on-miss, so there the hole was fatal.
-pub const VERSION_MINOR: u16 = 15; // 15: FfiStructField carries the nested layout index (T1359)
+/// Version 2.16 carries declared explicit generic parameter IDs in each
+/// function descriptor. The trailing count is read only at minor >= 16; old
+/// archives have no declaration-owned explicit slot facts.
+pub const VERSION_MINOR: u16 = 16; // 16: declared explicit generic parameter IDs (T1228)
 
 /// Minor-version floors for sections whose presence readers gate on.  The
 /// register-type-hints section has been written unconditionally since minor 2,
