@@ -176,7 +176,7 @@ fn mem_extended_body(
             let size_reg = read_reg(state)?;
             let align_reg = read_reg(state)?;
 
-            let ptr = state.get_reg(ptr_reg).as_ptr::<u8>();
+            let ptr = value_as_addr(state.get_reg(ptr_reg)) as *mut u8;
             let size = state.get_reg(size_reg).as_i64() as usize;
             let align = state.get_reg(align_reg).as_i64() as usize;
 
@@ -207,7 +207,7 @@ fn mem_extended_body(
             let new_size_reg = read_reg(state)?;
             let align_reg = read_reg(state)?;
 
-            let ptr = state.get_reg(ptr_reg).as_ptr::<u8>();
+            let ptr = value_as_addr(state.get_reg(ptr_reg)) as *mut u8;
             let old_size = state.get_reg(old_size_reg).as_i64() as usize;
             let new_size = state.get_reg(new_size_reg).as_i64() as usize;
             let align = state.get_reg(align_reg).as_i64() as usize;
