@@ -4,8 +4,9 @@
 
 **Open:** native object `DropRef` does not invoke declared user glue; the
 interpreter exposes a separate premature guard drop while wrapping a local
-in `Result`. The measured mutex control is native `1,1,1` versus interpreter
-`false,false,false`, where the contract requires `true,false,false`.
+in `Result`. The fresh native mutex control reports `true,true,true` versus interpreter
+`false,false,false`, where the contract requires `true,false,false`. Earlier
+native output rendered the same held-lock states as `1,1,1`.
 T1537 addresses field-reference arguments; T1539 tracks direct tail
 handoff and disposal of unused block results. Neither establishes native
 guard lifecycle correctness.
@@ -662,6 +663,61 @@ implementation commits, rather than inferred from aggregate test counts.
 Native reference forwarding, native List representation and owned/aggregate
 Drop remain release blockers. These measured snapshots do not establish
 whole-platform or industrial readiness.
+
+**Bootstrap signature snapshot `d80f45550` — 2026-10-04.** T1570 retains
+ordered function resolution and parameter-cache updates, accumulates the last
+return/yield update per exact FunctionId, then visits the live alias registry
+once. It adds no persistent reverse index or lookup policy. All 27 focused
+source controls pass. The actual helper replay produces identical return and
+yield facts with 4,096 registry visits instead of 2,097,152 for 512 updates;
+an empty update set performs no visits. This is an operation-count result,
+not a claim about whole-build speedup.
+
+The normal default-feature CLI build completes in 1,905.69 seconds with
+stdlib input fingerprint
+`6097859b3b0dc036f9d6dda6ac13643c849a9e58f3e539975bef2d3f8e41e57e`
+and runtime archive SHA-256
+`aed827627646dee5141688d529b3acb136e27b0dd15de98449ad4e741a9d32d4`.
+All saved artifact and executable sizes/hashes were checked. The fresh archive
+passes 58 contract checks and the explicitly run ignored qualified-call check.
+Actual interpreter execution passes the four combined core phases and pointer
+control, all eight list outputs, and the HTTP gate's five contracts, four
+connections and true zero-capacity read. Mutex lifetime still fails separately
+with `false,false,false`; process exit zero does not satisfy that contract.
+
+The fresh native reference/scalar program completes in 469.23 seconds with
+exit zero and no interpreter fallback. Direct and Shared AtomicBool load/swap
+print the expected booleans; AtomicInt retains 73/91. The original nested-field
+futex control prints `pointer_probe_ok=true`. Result predicates print
+`true,false,false,true`, and unrelated same-named Int methods retain 9001/9002.
+Those two integers appear after the final completion marker, so the original
+phase-order runner correctly fails. A separate direct run of the saved binary
+reproduces the same stdout with empty stderr. T1581 records the mixed buffered
+`printf`/direct-writer ordering defect; correct predicate values do not close
+it. Native mutex observations are `true,true,true`: neither scope exit nor
+explicit drop releases the lock. No whole native acceptance is claimed.
+
+All three artifact hashes differ from the previous snapshot. Decoded comparison
+checks equal module/type/function counts across 590 modules: all 50,931 function
+descriptors match after resolving StringIds and excluding bytecode positions.
+All 54,087 CoreMetadata function entries and the decoded symbol graph match.
+This does **not** compare function bodies or establish whole-archive equivalence.
+The 55 changed type descriptors differ only in name, but downstream metadata
+does change meaning: an imported `core.archive.ArchiveError` can occupy the
+local `core.cog.archive.ArchiveError` key. T1579 reproduces the pre-existing
+unordered alias choice in `claim_user_type_name`; that producer and its metadata
+consumer were unchanged by the signature optimization. The separate repair
+must preserve exact declaration ownership, not merely sort alias spellings.
+
+The returned-reference investigation rejected a prototype that passed narrow
+record/Once controls but trusted VBC bodies which native dispatch could replace.
+Its source-defined `hash_value` call actually emitted `verum_generic_hash`, and
+the proposed slot normalization would load through the resulting scalar.
+No prototype implementation is integrated. T1578 records the actual native
+call/argument/result authority needed by T1573; T1580 separately tracks the
+existing incorrect replacement. The updated returned-reference contract and
+repository guidance agree on that boundary. Native List storage and aggregate
+ownership remain open under their separate measured contracts.
 
 The separate website repository has also been updated and committed: its
 homepage and public guide describe the integrated platform and dated current

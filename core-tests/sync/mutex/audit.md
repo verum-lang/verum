@@ -45,13 +45,15 @@ second mutex after explicit `drop(guard)`. The expected lock states are
 | Stage7 integrated interpreter, complete combined program | `false, false, false` | FAIL: the lock is already reported released inside the guard scope |
 | Earlier native source control described in the lifecycle note | `1, 1, 1` | FAIL: scope exit and explicit drop did not release the lock |
 | Stage6 native combined program | Not reached | NOT_RUN: execution failed during supervisor borrowed-result access before the mutex phase |
+| Stage8 fresh native reference/scalar program | `true, true, true` | FAIL: scope exit and explicit drop still leave the lock held; the later pointer control completes |
 
 The stage7 combined program completes with exit zero and its independent
 pointer control passes. Neither result turns the failed mutex-state
-assertion into a pass. The earlier native failure remains evidence of
-incomplete cleanup, not a current-snapshot native result. No new native
-mutex run or full `core-tests/sync/mutex` suite was performed for this
-status correction, and no historical test totals have been revised.
+assertion into a pass. The stage8 native program also completes with exit zero and
+`pointer_probe_ok=true`, while its mutex lifecycle assertion fails. This is a
+current native observation distinct from the earlier numeric-output control.
+No full `core-tests/sync/mutex` suite was rerun, and no historical test totals
+have been revised.
 
 The common ownership and destruction boundary remains open in
 T1538/T1540. The source control, explanation of the premature interpreter
