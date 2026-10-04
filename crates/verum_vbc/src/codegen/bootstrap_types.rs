@@ -1,9 +1,9 @@
 //! Nominal dependencies of a source unit compiled against earlier bootstrap units.
 
 use super::{CodegenError, CodegenResult, VbcCodegen, remap_type_ref_archive};
-use crate::module::VbcModule;
+use crate::module::{FunctionDescriptor, VbcModule};
 use crate::types::{TypeDescriptor, TypeId, TypeRef};
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use verum_ast::{ItemKind, MountTree, MountTreeKind, Visitor};
 
 pub(super) fn identity(module: &VbcModule, ty: &TypeDescriptor) -> Option<String> {
@@ -86,6 +86,36 @@ fn descriptor_ids(ty: &TypeDescriptor) -> Vec<TypeId> {
     ids
 }
 
+fn function_ids(function: &FunctionDescriptor) -> Vec<TypeId> {
+    let mut ids = Vec::new();
+    type_ids(&function.return_type, &mut ids);
+    if let Some(yield_type) = &function.yield_type {
+        type_ids(yield_type, &mut ids);
+    }
+    for param in &function.params {
+        type_ids(&param.type_ref, &mut ids);
+    }
+    for param in &function.type_params {
+        ids.extend(param.bounds.iter().map(|id| TypeId(id.0)));
+        if let Some(default) = &param.default {
+            type_ids(default, &mut ids);
+        }
+        for bound in &param.type_bounds {
+            type_ids(bound, &mut ids);
+        }
+    }
+    ids
+}
+
+fn function_identity(module: &VbcModule, function: &FunctionDescriptor) -> Option<String> {
+    let name = module.strings.get(function.name)?;
+    let owner = function
+        .origin_module
+        .and_then(|id| module.strings.get(id))
+        .unwrap_or(&module.name);
+    Some(crate::module::qualify_module_name(owner, name))
+}
+
 fn mounts(
     tree: &MountTree,
     prefix: &str,
@@ -121,17 +151,42 @@ fn mounts(
     }
 }
 
-#[derive(Default)]
-struct SourceNames(BTreeSet<String>);
-impl Visitor for SourceNames {
+struct SourceNames<'a> {
+    names: BTreeSet<String>,
+    codegen: &'a VbcCodegen,
+}
+impl Visitor for SourceNames<'_> {
     fn visit_path(&mut self, path: &verum_ast::Path) {
-        self.0.insert(path.to_string().replace("::", "."));
+        self.names.insert(path.to_string().replace("::", "."));
+    }
+
+    fn visit_expr(&mut self, expr: &verum_ast::Expr) {
+        // The parser represents dotted free calls as MethodCall/Field. Reuse
+        // the call lowering's module-path interpretation before matching the
+        // exact source-owned function catalog.
+        match &expr.kind {
+            verum_ast::ExprKind::MethodCall {
+                receiver, method, ..
+            } => {
+                if let Some(mut path) = self.codegen.try_flatten_module_path_resolved(receiver) {
+                    path.push(method.name.to_string());
+                    self.names.insert(path.join("."));
+                }
+            }
+            verum_ast::ExprKind::Field { .. } => {
+                if let Some(path) = self.codegen.try_flatten_module_path_resolved(expr) {
+                    self.names.insert(path.join("."));
+                }
+            }
+            _ => {}
+        }
+        verum_ast::visitor::walk_expr(self, expr);
     }
 }
 
 impl VbcCodegen {
-    /// Import the nominal dependency closure of source types and their method
-    /// signatures. Source module identities and source string pools remain the
+    /// Import the nominal dependency closure of source types, their methods,
+    /// and free functions referenced by qualified paths or explicit mounts. Source module identities and source string pools remain the
     /// authority; unrelated same-leaf types never share a consumer identity.
     /// All ids are allocated before any structural TypeRef is copied.
     pub fn import_bootstrap_nominal_dependencies(
@@ -140,7 +195,16 @@ impl VbcCodegen {
         available: &[&VbcModule],
     ) -> CodegenResult<usize> {
         let mut catalog = BTreeMap::<String, (usize, usize)>::new();
+        let mut functions = BTreeMap::<String, (usize, usize)>::new();
         let mut source_keys = HashMap::new();
+        let score = |index: usize, key: &str| {
+            let name = &available[index].name;
+            (
+                key.starts_with(&format!("{name}.")),
+                name.len(),
+                name.clone(),
+            )
+        };
         for (mi, module) in available.iter().enumerate() {
             for (ti, ty) in module.types.iter().enumerate() {
                 let Some(key) = identity(module, ty) else {
@@ -149,19 +213,25 @@ impl VbcCodegen {
                 source_keys.insert((mi, ty.id), key.clone());
                 // Prefer the defining unit over an imported copy. Resolve ties
                 // independently of the caller's module iteration order.
-                let score = |index: usize| {
-                    let name = &available[index].name;
-                    (
-                        key.starts_with(&format!("{name}.")),
-                        name.len(),
-                        name.clone(),
-                    )
-                };
                 if catalog
                     .get(&key)
-                    .is_none_or(|&(old, _)| score(mi) > score(old))
+                    .is_none_or(|&(old, _)| score(mi, &key) > score(old, &key))
                 {
                     catalog.insert(key, (mi, ti));
+                }
+            }
+            for (fi, function) in module.functions.iter().enumerate() {
+                if function.parent_type.is_some() {
+                    continue;
+                }
+                let Some(key) = function_identity(module, function) else {
+                    continue;
+                };
+                if functions
+                    .get(&key)
+                    .is_none_or(|&(old, _)| score(mi, &key) > score(old, &key))
+                {
+                    functions.insert(key, (mi, fi));
                 }
             }
         }
@@ -174,7 +244,10 @@ impl VbcCodegen {
         }
         let mut names = BTreeSet::new();
         for source in sources {
-            let mut paths = SourceNames::default();
+            let mut paths = SourceNames {
+                names: BTreeSet::new(),
+                codegen: self,
+            };
             let mut bindings = HashMap::new();
             for item in &source.items {
                 paths.visit_item(item);
@@ -183,7 +256,7 @@ impl VbcCodegen {
                 }
             }
             names.extend(bindings.values().cloned());
-            for name in paths.0 {
+            for name in paths.names {
                 let (head, tail) = name.split_once('.').unwrap_or((&name, ""));
                 names.insert(match bindings.get(head) {
                     Some(owner) if tail.is_empty() => owner.clone(),
@@ -193,7 +266,18 @@ impl VbcCodegen {
             }
         }
         let mut selected = BTreeSet::new();
+        let mut function_sites = BTreeSet::new();
         for name in names {
+            // Free-function roots require a written module path or an exact
+            // mount binding. An unrelated bare registry alias is not authority.
+            if name.contains('.') {
+                if let Some(&site) = functions
+                    .get(&name)
+                    .or_else(|| functions.get(&format!("core.{name}")))
+                {
+                    function_sites.insert(site);
+                }
+            }
             let key = if catalog.contains_key(&name) {
                 Some(name.clone())
             } else if catalog.contains_key(&format!("core.{name}")) {
@@ -208,24 +292,12 @@ impl VbcCodegen {
             }
         }
         let mut pending: Vec<_> = selected.iter().cloned().collect();
-        let mut method_sites = HashSet::new();
-        while let Some(key) = pending.pop() {
-            let (mi, ti) = catalog[&key];
-            let module = available[mi];
-            let ty = &module.types[ti];
-            let mut ids = descriptor_ids(ty);
-            for (fi, function) in module.functions.iter().enumerate() {
-                if function.parent_type == Some(ty.id) {
-                    method_sites.insert((mi, fi));
-                    type_ids(&function.return_type, &mut ids);
-                    if let Some(yield_type) = &function.yield_type {
-                        type_ids(yield_type, &mut ids);
-                    }
-                    for param in &function.params {
-                        type_ids(&param.type_ref, &mut ids);
-                    }
-                }
-            }
+        let add_dependencies = |mi: usize,
+                                key: &str,
+                                ids: Vec<TypeId>,
+                                selected: &mut BTreeSet<String>,
+                                pending: &mut Vec<String>|
+         -> CodegenResult<()> {
             for id in ids {
                 if let Some(dependency) = source_keys.get(&(mi, id)) {
                     if selected.insert(dependency.clone()) {
@@ -234,10 +306,35 @@ impl VbcCodegen {
                 } else if !id.is_builtin() && id.well_known_name().is_none() {
                     return Err(CodegenError::internal(format!(
                         "bootstrap nominal dependency {key} references unknown source TypeId {} in {}",
-                        id.0, module.name
+                        id.0, available[mi].name
                     )));
                 }
             }
+            Ok(())
+        };
+        for &(mi, fi) in &function_sites {
+            let function = &available[mi].functions[fi];
+            let key = function_identity(available[mi], function).unwrap();
+            add_dependencies(
+                mi,
+                &key,
+                function_ids(function),
+                &mut selected,
+                &mut pending,
+            )?;
+        }
+        while let Some(key) = pending.pop() {
+            let (mi, ti) = catalog[&key];
+            let module = available[mi];
+            let ty = &module.types[ti];
+            let mut ids = descriptor_ids(ty);
+            for (fi, function) in module.functions.iter().enumerate() {
+                if function.parent_type == Some(ty.id) {
+                    function_sites.insert((mi, fi));
+                    ids.extend(function_ids(function));
+                }
+            }
+            add_dependencies(mi, &key, ids, &mut selected, &mut pending)?;
         }
         let mut target_ids = HashMap::new();
         for key in &selected {
@@ -355,7 +452,7 @@ impl VbcCodegen {
         }
         // FunctionInfo is another pool-owned TypeRef carrier: leaving its
         // return in the source pool would undo the type import on a call chain.
-        for (mi, fi) in method_sites {
+        for (mi, fi) in function_sites {
             let module = available[mi];
             let function = &module.functions[fi];
             if let Some(id) = self.bootstrap_function_id(module, function.id.0) {
@@ -406,14 +503,9 @@ impl VbcCodegen {
             .functions
             .iter()
             .find(|function| function.id.0 == id)?;
-        let name = module.strings.get(function.name)?;
-        let owner = function
-            .origin_module
-            .and_then(|id| module.strings.get(id))
-            .unwrap_or(&module.name);
         self.ctx
             .functions
-            .get(&crate::module::qualify_module_name(owner, name))
+            .get(&function_identity(module, function)?)
             .map(|info| info.id.0)
     }
 }
