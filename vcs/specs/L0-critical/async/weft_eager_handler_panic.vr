@@ -1,0 +1,61 @@
+// @test: differential
+// @level: L0
+// @tier: all
+// @tags: async, weft, panic, result, eager
+// @timeout: 180000
+// @expected-stdout-begin
+// success=200 typed=422 payload=true panic=500 explicit=7
+// @expected-stdout-end
+// @expected-exit: 0
+// T1532: an eager handler must execute inside the panic boundary.
+
+mount core.net.weft.handler.{Handler, WeftRequest};
+mount core.net.weft.error.{WeftError};
+mount core.net.http.{Response, StatusCode, Method, Headers};
+mount core.intrinsics.control.{catch_unwind};
+mount core.async.panic_fence.{panic_safe};
+mount core.async.future.{ready};
+mount core.async.poll.{Poll};
+mount core.async.waker.{Context};
+
+type EagerPanicHandler is { mode: Int };
+implement Handler for EagerPanicHandler {
+    async fn handle(&self, _req: WeftRequest) -> Result<Response, WeftError> {
+        if self.mode == 1 {
+            Result.Err(WeftError.BadRequest("typed failure"))
+        } else if self.mode == 2 {
+            panic("handler panic")
+        } else {
+            Result.Ok(Response.new(StatusCode.ok()))
+        }
+    }
+}
+
+async fn eager_handler_outcome<H: Handler>(handler: &H) -> Int {
+    let req = WeftRequest.new(Method.Get, "/", Maybe.None, Headers.new(), List.new());
+    match catch_unwind(|| handler.handle(req).await) {
+        Result.Ok(Result.Ok(value)) => {
+            let response: Response = value;
+            response.status.code()
+        }
+        Result.Ok(Result.Err(_)) => 422,
+        Result.Err(_) => 500,
+    }
+}
+
+fn main() {
+    let success = eager_handler_outcome(&EagerPanicHandler { mode: 0 }).await;
+    let typed = eager_handler_outcome(&EagerPanicHandler { mode: 1 }).await;
+    let req = WeftRequest.new(Method.Get, "/", Maybe.None, Headers.new(), List.new());
+    let error_handler = EagerPanicHandler { mode: 1 };
+    let payload = match catch_unwind(|| error_handler.handle(req).await) {
+        Result.Ok(Result.Err(WeftError.BadRequest(message))) => message == "typed failure",
+        _ => false,
+    };
+    let caught = eager_handler_outcome(&EagerPanicHandler { mode: 2 }).await;
+    let explicit = match panic_safe(ready(7)).await {
+        Result.Ok(n) => n,
+        Result.Err(_) => -1,
+    };
+    print(f"success={success} typed={typed} payload={payload} panic={caught} explicit={explicit}");
+}

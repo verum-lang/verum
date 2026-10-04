@@ -32,7 +32,7 @@
 //  document; operator sees no metric increment; SRE on-call
 //  has nothing to triage.
 // 3. Post-fence: handler unwinds, fence catches the panic,
-//  `app.handle(req).await` returns `Result.Err(PanicInfo)`, weft's
+//  the fenced Future returns `Result.Err(PanicInfo)`, and the caller's
 //  error path emits a 500 response with a stable
 //  correlation-id, increments `weft.handler.panic{path,method}`,
 //  logs structured JSON with the panic message. The
@@ -43,13 +43,18 @@
 //
 
 // ```verum
-// let response_result = panic_safe(app.handle(req)).await;
+// let response_result = panic_safe(handler_future).await;
 // let response = match response_result {
 //  Result.Ok(Result.Ok(r)) => r, // typed Ok
 //  Result.Ok(Result.Err(weft_err)) => weft_err.into_response(), // typed Err
 //  Result.Err(panic_info) => render_500_panic(&panic_info), // unwound
 // };
 // ```
+//
+// `handler_future` must explicitly implement Future. Ordinary async
+// function calls execute eagerly and return their result directly.
+// Catch an eager invocation with `catch_unwind(|| app.handle(req).await)`;
+// passing its already computed Result to panic_safe cannot fence the call.
 //
 
 // Three-layer outcome:
@@ -165,8 +170,8 @@ implement<F: Future> Future for PanicFence<F> {
 ///
 
 /// ```verum
-/// // Catch panics from a handler invocation:
-/// let result = panic_safe(app.handle(req)).await;
+/// // Catch panics while polling an explicit handler Future:
+/// let result = panic_safe(handler_future).await;
 /// match result {
 ///  Result.Ok(response) => write_response(stream, &response).await,
 ///  Result.Err(panic_info) => {

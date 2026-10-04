@@ -26,7 +26,7 @@ mount core.net.http_parser.{
     ChunkedDecoder, ChunkProgress,
 };
 mount core.async.cancellation.{CancellationToken};
-mount core.async.panic_fence.{panic_safe};
+mount core.intrinsics.control.{catch_unwind};
 mount core.io.{IoError};
 mount core.sync.atomic.{AtomicBool, MemoryOrdering};
 mount core.net.weft.handler.{WeftRequest, Handler};
@@ -595,26 +595,15 @@ async fn serve_one_message<T: WeftTransport, S: Handler>(
     let req = WeftRequest.new(method, path, raw_query, headers, body)
         .with_peer(*peer_addr);
 
-    // Handler-panic fence (redteam §9, #35). Pre-fix an unwinding
-    // panic during `app.handle(req).await` killed the spawned
-    // connection task silently — connection RST, no 500 response,
-    // no metric, no log. The classic "request vanishes into the
-    // void" production-debugging hell.
-    //
-
-    // Post-fix `panic_safe(...)` (`core/async/panic_fence.vr`)
-    // wraps the inner future so panics during poll() are caught
-    // and surfaced as `Result.Err(IntrinsicPanicInfo)`. We then have a
-    // three-layer outcome:
+    // T1532: async calls execute eagerly. Invoke the handler inside
+    // the catch boundary; its returned Result is not a Future to poll.
+    // The closure preserves the three-layer outcome:
     //
 
     //  * `Result.Ok(Result.Ok(r))` — handler succeeded; render r.
     //  * `Result.Ok(Result.Err(e))` — handler returned typed error; render it
     //  via the existing `IntoResponse` path.
-    //  * `Result.Err(panic)` — handler unwound; render generic 500 with
-    //  the panic message digested into a stable
-    //  correlation-id. Connection survives;
-    //  keep-alive's next request still works.
+    //  * `Result.Err(panic)` — handler unwound; render generic 500.
     //
 
     // The fence is local to the handler call — sibling spawned
@@ -622,7 +611,7 @@ async fn serve_one_message<T: WeftTransport, S: Handler>(
     // own panic semantics; the runtime's own panic paths (OOM,
     // stack overflow) are NOT caught (they correctly abort so
     // the supervisor can restart the subtree).
-    let response = match panic_safe(app.handle(req)).await {
+    let response = match catch_unwind(|| app.handle(req).await) {
         Result.Ok(Result.Ok(r))    => r,
         Result.Ok(Result.Err(e))   => e.into_response(),
         Result.Err(panic_info) => mk_500_panic(&panic_info),
