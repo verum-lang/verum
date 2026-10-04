@@ -121,9 +121,30 @@ def foreign_shas(text: str) -> set:
     return {m.group(1) for m in FOREIGN.finditer(text)}
 
 
+# Data is excluded by OCCURRENCE, not by adding its value to NOT_COMMITS.
+# The register contains UUID output, a labelled AES vector, and labelled
+# archive checksums. A matching token elsewhere (even on the same line) can
+# still be a genuine commit citation. Keep contexts narrow: an unlabelled
+# hex value or "AES fixed in <sha>" must still reach the object-presence gate.
+HEX_DATA = r"(?:`[0-9a-f]{7,64}(?:…|\.\.\.)?`|[0-9a-f]{7,64}(?:…|\.\.\.)?)(?![0-9a-z])"
+DATA_LITERALS = (
+    re.compile(r"(?<![0-9a-z-])[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-"
+               r"[0-9a-f]{4}-[0-9a-f]{12}(?![0-9a-z-])", re.IGNORECASE),
+    re.compile(rf"\b(?:md5|sha256|blake3|stdlib\s+input\s+checksum)\s+{HEX_DATA}"
+               rf"(?:\s*(?:->|→)\s*{HEX_DATA})*", re.IGNORECASE),
+    re.compile(r"\b(?:key|plaintext|ciphertext)\s+`[0-9a-f]{32}`", re.IGNORECASE),
+    re.compile(r"\bboth tiers print\s+`[0-9a-f]{32}`\s+byte for byte\b", re.IGNORECASE),
+)
+
+
 def cited_shas(text: str) -> list[str]:
     foreign = foreign_shas(text)
-    return sorted({m.group(1) for m in SHA.finditer(text)} - foreign)
+    data_spans = [match.span() for pattern in DATA_LITERALS for match in pattern.finditer(text)]
+    return sorted({
+        match.group(1) for match in SHA.finditer(text)
+        if not any(start <= match.start(1) and match.end(1) <= end
+                   for start, end in data_spans)
+    } - foreign)
 
 
 def is_commit(sha: str) -> bool:
@@ -152,6 +173,24 @@ SELF_TEST = [
     # …but only when the attribution is actually there. The same sha with
     # no repository named in front of it is this repository's problem.
     ("pure Verum and runs — b742125", 1),
+    # Data occurrences do not globally exempt a token used as a commit too.
+    ("UUID `a098f44d-30ae-4155-8eb3-21844b03df2e`", 0),
+    ("UUID `a098f44d-30ae-4155-8eb3-21844b03df2e`; fixed in a098f44d", 1),
+    ("UUID `a098f44d-30ae-4155-8eb3-21844b03df2e`; commit 21844b03df2e", 1),
+    ("key `2b7e151628aed2a6abf7158809cf4f3c`", 0),
+    ("plaintext `3243f6a8885a308d313198a2e0370734`", 0),
+    ("ciphertext `3925841d02dc09fbdc118597196a0b32`", 0),
+    ("BOTH tiers print `3925841d02dc09fbdc118597196a0b32` byte for byte", 0),
+    ("key `2b7e151628aed2a6abf7158809cf4f3c`; commit 2b7e151628aed2a6abf7158809cf4f3c", 1),
+    ("AES fixed in 3925841d02dc09fbdc118597196a0b32", 1),
+    ("archive md5 `87870f87a646fba0bab733d495794072`", 0),
+    ("archive md5 87870f87… -> ae971077…", 0),
+    ("archive md5 87870f87… -> ae971077…; fixed in ae971077", 1),
+    ("stdlib input checksum `4b4208643f54edad`", 0),
+    ("stdlib input checksum `4b4208643f54edad`, commit 4b4208643f54edad", 1),
+    ("stdlib input checksum `4b4208643f54edad`\nfixed in 4b4208643f54edad", 1),
+    ("unlabelled `4b4208643f54edad`", 1),
+    ("commit `87870f87a646fba0bab733d495794072`", 1),
 ]
 
 
@@ -184,6 +223,28 @@ def self_test() -> int:
             bad += 1
             print("FAIL: a float fragment is read as a commit and is not in "
                   "NOT_COMMITS", file=sys.stderr)
+
+    # Drive the real refusal branch with a missing object, including a data
+    # occurrence of the very same token. Mock only Git's object-presence fact.
+    import contextlib
+    import io
+    import tempfile
+    from unittest.mock import patch
+
+    with tempfile.TemporaryDirectory() as directory:
+        register = Path(directory) / "register.md"
+        register.write_text(
+            "archive md5 ae971077…, fixed in ae971077\n", encoding="utf-8"
+        )
+        diagnostics = io.StringIO()
+        with patch.dict(globals(), {"REGISTER": register, "is_commit": lambda _: False}), \
+                patch.object(sys, "argv", ["check-register-shas", "--check"]), \
+                contextlib.redirect_stderr(diagnostics):
+            status = main()
+        if status != 2 or "ae971077" not in diagnostics.getvalue():
+            bad += 1
+            print("FAIL: a genuine missing commit was hidden by a data occurrence",
+                  file=sys.stderr)
 
     if bad:
         print(f"self-test: {bad} case(s) FAILED", file=sys.stderr)
@@ -227,7 +288,7 @@ def main() -> int:
     dangling = {s for s in present if not reachable_from_main(s)}
     appeared, disappeared = compare(dangling, DANGLING)
     print(f"check-register-shas: {len(shas)} commit citation(s) "
-          f"({len(NOT_COMMITS)} hex tokens excluded as non-commits), "
+          f"({len(NOT_COMMITS)} named non-commit tokens and contextual data excluded), "
           f"{len(dangling)} unreachable from main, {len(DANGLING)} on the roster")
     for s in sorted(dangling):
         subj = subprocess.run(["git", "log", "-1", "--format=%s", s],
