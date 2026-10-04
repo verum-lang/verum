@@ -37,7 +37,8 @@ fn producer_ir(count: u8) -> Result<Text, Text> {
         .build_return(Some(&ctx.get_register(count as u16).unwrap()))
         .unwrap();
     module.verify().expect("producer IR verifies");
-    Ok(entry.print_to_string().to_string().into())
+    let printed = entry.print_to_string();
+    Ok(Text::from(printed.to_str().expect("LLVM IR is UTF-8")))
 }
 
 #[test]
@@ -109,7 +110,8 @@ fn consumer_loads_arguments_only_in_the_selected_arity_block() {
             );
         }
     }
-    let ir = function.print_to_string().to_string();
+    let printed = function.print_to_string();
+    let ir = printed.to_str().expect("LLVM IR is UTF-8");
     assert!(
         ir.contains("@verum_panic"),
         "unsupported count must fail explicitly"
