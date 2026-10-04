@@ -194,13 +194,13 @@ The crate ships two unit-test surfaces, gated by the `codegen` feature:
 | `cargo test -p verum_vbc --lib --features codegen` | the above plus the AST-to-VBC code-generation pipeline |
 
 `codegen` is feature-gated because it pulls in `verum_ast` / `verum_lexer` /
-`verum_parser` as optional deps.
+`verum_fast_parser` as optional deps.
 
 Test counts are deliberately not pinned here — they move with every added test
 and a stale number reads as a target to hit.  Run the suite for the current
 figure; what is pinned is the gate.
 
-**Latest measured codegen surface — 2026-10-04, source `0634cb100`:**
+**Recorded codegen measurement — 2026-10-04, source `0634cb100`:**
 the lib suite with `--no-default-features --features
 compression,table_dispatch,codegen,ffi` passed 2,040 tests, failed none,
 and retained one pre-existing ignored test (T0839), in 986.44 seconds.
@@ -221,8 +221,8 @@ remaining coordination notes below; do not treat them as current failures:
 | 2026-08-15 | 209236f17 (`ColumnSchema` rename) | 53 → **6** |
 | 2026-08-15 | branch `perf/compile-footprint-205a4e3a` | the 6 re-run: **3 passed, 2 failed**, 1 not in the re-run set |
 
-The two that still fail are `async_intrinsics` and `async_select`, and they
-are ONE defect wearing two names — a simple type name declared twice in
+The two failures remaining in that August re-run were `async_intrinsics`
+and `async_select`. Both involved a simple type name declared twice in
 `core/`, where the layout registry keys by that simple name and the second
 declarer resolves against the first one's fields:
 
@@ -231,26 +231,26 @@ declarer resolves against the first one's fields:
   (`{left_alias, right_alias, kind, on_predicate_id, natural}`) vs
   `core/async/select.vr:291` (`{fut_a, fut_b, result_a, result_b}`)
 
-Both are the class **T0458** owns (module-qualified canonical type identity).
+Both were tracked as the **T0458** class (module-qualified canonical type identity).
 Renaming one side, as the `ColumnSchema` fix did, is available and cheap but
 is a workaround: two modules declaring the same simple name is legitimate,
 and the registry is what should carry the qualifier.
 
-The three that now pass (`math_simple`, `math_integers`, `math_hyperbolic`)
+The three that passed in that re-run (`math_simple`, `math_integers`, `math_hyperbolic`)
 were the `standalone super/crate/relative` class, fixed by scoping a
 whole-module compile to its own `module` declaration (T0743, commit
 `2d668fee7`).
 
-Re-measure before repeating any number here.  A 212 s run of five named
-fixtures is enough to keep this table honest; the full surface takes hours.
+Those timings and failure counts describe the named snapshots. An earlier
+note also recorded 212 seconds for five named fixtures. Re-measure before
+quoting these as current results; they do not set today's test budget.
 
-Two things kept this invisible.  The feature is off for a plain
-`cargo test -p verum_vbc --lib`, so that run reports a clean 1349/1349 and
-never builds these fixtures — they appear only when another package in the
-same invocation turns `codegen` on (e.g. `-p verum_compiler -p verum_vbc`).
-And CI does not run the surface at all (see the gating table above).  A claim
-of "green" that no routine command can falsify is worth less than no claim;
-re-measure before repeating one.
+The historical coverage gap had two parts: a package-only
+`cargo test -p verum_vbc --lib` did not enable `codegen`, and CI then named
+only selected integration binaries. The old 1,349/1,349 default-feature
+result did not exercise those codegen fixtures. Current CI enables the
+feature explicitly; its commands are listed below. Workspace invocations
+can also enable it through dependency feature unification.
 
 The two tests previously listed here as known-red
 were fixed under T0627 (493927b7d) and were never compiler defects: each
@@ -279,28 +279,40 @@ otherwise strips); the fourth was fixed by commit 958e684e (switch
 the test harness to `compile_module_with_mounts` for files that bring
 cross-module symbols in via `mount`).
 
-**What actually gates, read off `.github/workflows/ci.yml` (2026-08-11).**
-This paragraph used to claim that a failure in EITHER surface blocks the PR,
-"no exceptions".  Only the first one does:
+**Current configured CI coverage — source-checked 2026-10-04.**
+The `vbc-guardrails` job in `.github/workflows/ci.yml` now selects every
+feature-enabled test target, including library unit tests. This describes
+the checked-in workflow, not a newly observed remote CI result.
 
-| Surface | CI line | Gates? |
-|---------|---------|--------|
-| `--lib` default features | `cargo test --workspace --lib --bins --locked` (ci.yml:150) | YES |
-| `--features codegen` **lib** (incl. `codegen::test_params::test_compile_stdlib_*`) | — | **NO** |
-| `--features codegen` three `tests/` targets | `-p verum_vbc --features codegen --test layout_invariant_verifier_tests --test intrinsic_key_resolution_gate --test global_type_table_consistency_tests` (ci.yml:206) | YES, those three only |
+| Surface | Configured command | Coverage |
+|---------|--------------------|----------|
+| Workspace libraries and binaries | `cargo test --workspace --lib --bins --locked` | Unit tests across the workspace; enabled features follow that dependency graph |
+| VBC with `codegen,ffi` | `cargo test --locked -p verum_vbc --features codegen,ffi --tests` | All targets with `test = true`, including the library and feature-gated integration binaries; no `codegen::test_params` skip |
+| Additional codegen library step | `cargo test --locked -p verum_vbc --lib --features codegen -- --skip codegen::test_params` | Repeats library tests with the named filter applied to this step only |
 
-`--test <name>` restricts the run to that integration binary and does NOT
-build the lib test target, so the whole AST-to-VBC codegen unit surface is
-unguarded on a PR.  A plausible reason it is not wired in: measured
-2026-08-11, that surface takes **over an hour** in a debug build on an
-otherwise-idle 10-core machine — the `test_compile_stdlib_*` fixtures each
-compile a stdlib module and individually pass the harness's 60-second
-"still running" threshold.
+Cargo's `--tests` includes the library test target; `--test <name>` selects
+only that integration binary. The later explicit `--skip
+codegen::test_params` does not remove those tests from the earlier
+`--tests` command. Old workflow comments and the former three-target table
+record earlier configurations, not the current selection. Ignored tests
+still need an explicit invocation and any required inputs, such as a
+coherent archive; selecting all targets does not run ignored tests.
 
-Run it locally before landing anything in `codegen/`, using a private target.
-Budget from a recent measured run; the historical hour is not a current timing.
-Do not read "CI is green" as covering it.  No "known failure" may be
-documented here without an explicit tracking task.
+The August 11 measurement of more than an hour for the debug codegen
+surface on an otherwise-idle 10-core machine remains historical. Budget
+local runs from a recent measurement
+with the relevant feature set. Before landing changes in `codegen/`, run
+the full library suite with `codegen` enabled in a private target, without
+the CI subset filter. For the minimal feature set used in the recorded
+October run:
+
+```sh
+CARGO_TARGET_DIR=/absolute/path/to/private-target cargo test --locked -p verum_vbc --lib --no-default-features --features compression,table_dispatch,codegen,ffi
+```
+
+This local requirement is unchanged. CI coverage does not replace the
+change-specific integration and language-conformance checks, and no
+"known failure" may be documented here without an explicit tracking task.
 
 ## Performance Targets
 
