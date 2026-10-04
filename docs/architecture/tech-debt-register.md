@@ -124,12 +124,113 @@ memory-opcode count pin now includes the already existing DerefValue opcode
 built with a fresh embedded archive; this is not a full workspace or
 whole-language conformance verdict.
 
-**Reproduced remaining failures:** default Weft reaches the TCP read, then
+**Failures remaining at the first integration:** default Weft reaches the TCP read, then
 fails during timeout composition with an already eager result (T1507).
 Native cancellation reaches a missing runtime candidate for Iterator.next
 (T1506); its new passing conformance pin therefore explicitly targets Tier 0.
 T1498's complete HTTP request/response acceptance remains open. Together with
 T1474 and T1505, these failures must stay visible when judging the next stage.
+
+**Second implementation — 2026-10-04.** The next stage follows those
+reproductions through the common compiler and runtime mechanisms:
+
+- T1474/T1515 resolve implicit receiver methods through the declared
+  `Deref.Target`, with wrapper methods taking precedence. Explicit dereference
+  preserves reference depth and parentheses do not alter dispatch. Caller
+  generic parameters cannot accidentally resolve to an unrelated nominal
+  type. Cancellation and Weft now use ordinary Shared method syntax.
+- T1505 preserves qualified paths in serialized function signatures.
+  T1509 resolves nested generic Future.Output projections with cycle/depth
+  bounds. T1506 carries block results and generic function results through
+  lexical scopes without classifying generics by spelling; T1513 uses the
+  child variant's payload type while binding nested patterns.
+- T0467 resolves CBGR register-reference chains before creating a slice,
+  shares the container descriptor, retains element stride and checks bounds.
+  T1514 folds named array counts in their declaration scope, including
+  dependent constants and checked arithmetic/bit operations. Packed Byte
+  arrays keep byte stride when their count is not an integer literal.
+  Reset clears the new dependency state between compilation sessions.
+- T1518 restores field types from archived descriptors in the eager import
+  API. The actual bootstrap defect was separate: T1519 carries field types
+  alongside layouts between fresh module code generators. Qualified owners,
+  explicit mounts and proven archive origins preserve ownership when modules
+  declare the same leaf name. No unproven parent-prefix lookup is used.
+- T1507 adds a transport Future whose Output is Result and whose poll checks
+  cancellation, an absolute monotonic deadline and one transport read.
+  Header/body/chunked reads retain one deadline across partial reads;
+  between-request idle handling remains separate. The legacy cancellable
+  read API retains its nested Result contract. This works within the existing
+  eager async model and does not add a resumable executor.
+
+At source commit `1a34fbe2c`, the VBC lib suite with compression,
+table_dispatch, codegen and ffi completed with **2,035 passed, zero failed
+and one pre-existing ignored coverage-report test (T0839)**. The combined
+eleven targeted integration binaries passed **117 tests**, covering packed
+array representation, field identity, Future, generic returns, nested
+patterns, qualified signatures, Shared, borrowed slices and user Deref.
+All **40 source gates** also passed. The first coherent CLI bake completed
+in 16m53s with archive checksum `4b4208643f54edad`. It passed all five
+language contracts in the interpreter, four RetryBudget tests, and the
+positive/negative imported generic-signature checks (the negative control
+reports E400, expected AtomicBool, found Int). Archive inspection confirms
+that Weft's writer calls qualified Version and StatusCode methods.
+
+That real run exposed further boundaries before HTTP 200 could complete:
+T1522 normalized a reference receiver's method owner (`&Text` to `Text`);
+T1524 preserves the TypeId of a named zero-field value instead of constructing
+the ordinary `()` value. Their combined receiver regression suite passes
+40 tests. A diagnostic interpreter run with keep-alive disabled delivered
+complete HTTP 408 responses with exact bodies at 0.531s and 0.525s (the latter
+after seven slow-drip bytes), and closed an already-cancelled connection
+without sending data. This is not a passing default HTTP 200 verdict.
+
+The native run reached Shared and Future, then stopped in MappedIter.collect
+at the existing T1228 missing generic-witness boundary. It also printed an
+AtomicBool result as 1 rather than true. T1525 fixes the Bool identity of
+native atomic scalar results: before, two new tests failed while the integer
+control passed; after, all three executable LLVM controls and 44 existing
+LLVM/payload-address tests pass. T1523 replaces a repeated complete function
+scan in native method lowering with the existing exact-name index; five
+integrated LLVM tests preserve declaration-order and duplicate-body behavior.
+T1228's producer and T1526's native consumer now share declaration-owned
+parameter IDs. VBC 2.16 archives preserve explicit method argument slots;
+concrete nested calls enter the specialization graph with exact callee
+identities and bounded discovery. Control-flow joins discard unproven facts,
+and converted method calls consume their witness sidecars.
+T1527 restores the resolved Deref owner and instantiated Self while inferring
+method-chain results. T1528 gives interpreter frames the same compact
+declaration-order witness convention, avoiding a 32,769-element vector for a
+two-parameter method with a shadowed generic name. Its executable controls
+changed from one pass and six failures to seven passes; six shared substitution
+tests also pass, including rank-2 local binder preservation and legacy indexed
+compatibility. A subsequent integrated Cargo run passed 92 producer/receiver
+tests; another passed 26 consumer/runtime/substitution tests, including a
+legacy const-surplus regression. Those counts overlap. Executing the source
+shadowing case exposed one remaining body producer that still loaded the
+owner's parameter ID; T1228 now uses the active signature ID there as well,
+and both ordinary and shadowed Factory.build cases return 7. These focused
+results do not yet establish the complete native iterator chain. The next
+coherent bake and both-tier HTTP acceptance remain pending.
+The reproducible integration entry is `scripts/ci/check_weft_http_contract.py`
+with an explicit `--cli` and `--tier interpret` or `--tier aot`; it uses five
+repository VCS fixtures and checks binary response bytes as well as deadlines.
+
+Remaining scope is explicit: T0467 also contains folded IO/FD/process
+acceptances that these slice regressions do not close. T1497 still needs a
+valid full-pipeline zero-capacity control; attempting List.shrink_to_fit
+exposed T1517 instead. T1510 loses mutability in unsafe-reference signature
+carry, T1511 misindexes type arguments after lifetime parameters, and T1520
+erases references nested in associated-type arguments. T1521 tracks
+binder-aware qualification of rank-2 field types; this stage preserves their
+spelling rather than qualifying bound variables incorrectly. T1512 is an
+unmeasured scope/refinement edge, not a demonstrated runtime failure.
+T1529 separately records an existing mixed type/const instance-method gap:
+a `size()` call on a `Sized<Int, 9>` instance loses the const witness. The
+matching static constructor
+now retains both arguments; the instance failure was reproduced on the previous
+compiler and is not closed by compact generic argument carriage.
+T0690/T0691 and the release spine below remain open: these carry repairs
+do not replace the remaining name-keyed registries with one symbol graph.
 
 The remaining development order follows the release spine below:
 
