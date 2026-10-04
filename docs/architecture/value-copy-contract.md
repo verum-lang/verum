@@ -53,9 +53,11 @@ Two of these deserve their reasons stated, because both were once
 * **The parameter copies in the PROLOGUE, not at the call site.** The
   callee's declaration is what decides whether the argument is taken by
   value or by reference, and under dynamic dispatch the call site cannot
-  see which body it will reach. Only `mut` parameters copy: an immutable
-  binding can neither write through itself nor lend a `&mut`, so no
-  program can observe whether it shares.
+  see which body it will reach. The current prologue copies only `mut`
+  parameters. Read-only field access can hide the resulting sharing for an
+  immutable parameter, but observable `Drop` and returned aliases make it
+  visible. This implementation rule does not prove fresh ownership or grant
+  the callee an independent destruction obligation (T1538/T1540).
 * **A container copies what it is given.** `push`/`insert`/`append`/
   `send` store their argument; the name that supplied it goes on living.
   These are runtime-intercepted and have no Verum body to carry a

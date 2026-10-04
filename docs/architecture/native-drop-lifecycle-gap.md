@@ -87,16 +87,50 @@ that aggregate payload transfer is repaired.
 The proposed runtime carrier is one shared ticket containing the exact
 object base, declared glue identity and live state. Aliases share the
 ticket; destruction consumes live state before calling user code.
-Borrowed and raw views do not gain ownership. Runtime register slots must
-clear on overwrite and follow control-flow joins. A stack ticket per
-allocation *site* is insufficient for loops: a later iteration must not
-revive a ticket still referenced by an earlier alias.
+Borrowed and raw views do not gain ownership. A ticket identifies a cleanup
+obligation, not an object address: an ordinary record copy creates a fresh
+object and obligation, while a `Shared<T>` copy retains the same carrier
+pointer but creates a separate retain/release obligation. Coalescing tickets
+by pointer would lose valid Shared releases. Producer-selected copy, transfer
+and borrow operations must supply that distinction.
+Runtime register slots must clear on overwrite and follow control-flow joins.
+A stack ticket per allocation *site* is insufficient for loops: a later
+iteration must not revive a ticket still referenced by an earlier alias.
 
 An LLVM-only instruction allowlist could support a small acyclic local
 subset, declining calls, aggregate storage and escaping aliases. It was
 not implemented: that would add another ownership model without fixing
 its producer or archive boundaries. No failing or ignored test was added
 to make that unimplemented subset appear covered.
+
+## Resource qualifiers already exist, but their decisions do not reach VBC
+
+`grammar/verum.ebnf` declares `affine` and `linear`; the AST carries them in
+`TypeDecl.resource_modifier`. The checker has `ResourceKind`, argument
+consumption in `consume_affine_call_args`, and consuming by-value receivers.
+Those checks do not currently produce a shared lowering decision. In
+`verum_vbc::codegen::statements`, `copies_from_named_place` distinguishes
+references, raw pointers and primitive values, but does not consult the
+resource mode before emitting `Clone`. VBC type/parameter descriptors also
+lack the resource/transfer contract described above.
+
+Resource classification itself needs exact declaration identity: the current
+`AffineTracker::get_type_resource_kind` uses the last path segment. The
+alternate parser's `AstSink::convert_type_def` also constructs declarations
+with `resource_modifier: Maybe::None`. Neither route is an ownership authority for
+same-named qualified resources. Adding `affine` to MutexGuard alone therefore
+cannot implement its runtime contract.
+
+A first shared implementation can bound its acceptance to direct locals,
+arguments and returns: preserve the declaration-owned resource mode through
+archives and monomorphization; produce explicit copy/transfer/borrow facts;
+and let both execution tiers consume the same cleanup-obligation identity.
+Ordinary record copies must retain value semantics. Tests must distinguish
+consuming arguments from borrows, direct return from a fresh copy, independent
+Shared releases, qualified siblings, and explicit/scope destruction exactly
+once. Aggregate/variant transfer remains a separate required step before the
+MutexGuard acceptance can pass. No new surface `move` syntax is needed to
+carry the already existing consuming contexts.
 
 ## Reuse the CBGR pipeline, after supplying exact events
 
