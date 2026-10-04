@@ -30,9 +30,10 @@ struct TypeEdits<'a> {
 }
 
 impl TypeEdits<'_> {
-    fn root(&mut self, ident: &verum_ast::ty::Ident, start: usize) {
+    fn root(&mut self, ident: &verum_ast::ty::Ident) {
         let name = ident.name.as_str();
-        let end = start + name.len();
+        let start = ident.span.start as usize;
+        let end = ident.span.end as usize;
         if self.source.get(start..end) != Some(name) {
             self.unsupported = true;
             return;
@@ -52,9 +53,8 @@ impl TypeEdits<'_> {
                 self.unsupported = true;
                 return;
             }
-            // Path spans start at the root but may cover `T.Item` in full.
-            // Validate the root's exact bytes; some parser Ident spans point
-            // at the following token. Never replace the projection suffix.
+            // The identifier span covers only the root, including when the
+            // enclosing path/type spans cover a complete `T.Item` projection.
             self.edits.push((start, end, arg.text));
         }
     }
@@ -72,7 +72,7 @@ impl Visitor for TypeEdits<'_> {
                 // A qualified nominal like alpha.Item is indivisible. The
                 // parser represents generic `T.Item` as Qualified{self_ty:T}.
                 if let [PathSegment::Name(ident)] = path.segments.as_slice() {
-                    self.root(ident, path.span.start as usize);
+                    self.root(ident);
                 }
             }
             TypeKind::Function { contexts, .. } if !contexts.requirements.is_empty() => {
@@ -137,7 +137,7 @@ impl Visitor for TypeEdits<'_> {
             ExprKind::Literal(_) => {}
             ExprKind::Path(path) => {
                 if let [PathSegment::Name(ident)] = path.segments.as_slice() {
-                    self.root(ident, path.span.start as usize);
+                    self.root(ident);
                 }
             }
             // A carrier's const expression may introduce its own bindings;
