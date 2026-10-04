@@ -37,37 +37,6 @@ pub(in super::super) fn handle_mem_extended(
     dispatch_enveloped(state, mem_extended_body)
 }
 
-/// The interpreter-heap object a pointer the LANGUAGE handed out belongs
-/// to — accepting both the object's base and its DATA address (T1492).
-///
-/// `List.ptr` addresses element 0, which for an interpreter-allocated
-/// backing is `base + OBJECT_HEADER_SIZE`, and `core/collections/list.vr`
-/// hands that same field to `realloc`/`dealloc` as the allocation it
-/// believes it owns. Both verbs must recognise it or they pass a heap
-/// pointer to the system allocator: `resize`, `extend_from_slice` and
-/// `reserve` all aborted that way (`std::alloc::dealloc` on an address
-/// the system allocator never returned).
-///
-/// `heap::Heap::get_object` is the data-address side and validates the
-/// reconstructed header itself; `contains` is the base side. A raw
-/// `alloc()` block belongs to neither and is answered `None`, which
-/// leaves the system-allocator path exactly as it was.
-fn backing_object_base(
-    state: &InterpreterState,
-    ptr: *mut u8,
-) -> Option<*mut u8> {
-    if ptr.is_null() {
-        return None;
-    }
-    if state.heap.contains(ptr as *const heap::ObjectHeader) {
-        return Some(ptr);
-    }
-    state
-        .heap
-        .get_object(ptr)
-        .map(|obj| obj.as_ptr() as *mut u8)
-}
-
 /// `MemExtended` sub-op arms. Invoked through
 /// [`dispatch_enveloped`](super::envelope::dispatch_enveloped), which owns the
 /// sub-op byte, the operand-length envelope and the pc reposition.
@@ -187,7 +156,7 @@ fn mem_extended_body(
             // it here is heap corruption (SIGABRT, measured on
             // `xs.resize(5, 0)`). Leave it to the GC, exactly as the
             // realloc arm leaves the OLD backing.
-            if backing_object_base(state, ptr).is_some() {
+            if state.heap.backing_view(ptr).owner.is_some() {
                 return Ok(DispatchResult::Continue);
             }
 
@@ -229,7 +198,8 @@ fn mem_extended_body(
             // the DATA address since T1492, and an intercept-built list
             // still carries the base — so resolve through the one
             // authority rather than testing a single spelling.
-            if let Some(ptr) = backing_object_base(state, ptr) {
+            let backing = state.heap.backing_view(ptr);
+            if let Some(ptr) = backing.owner {
                 let is_byte = {
                     let header = unsafe { heap::ObjectHeader::ref_or_stub(ptr) };
                     header.type_id == TypeId::BYTE_LIST
@@ -239,7 +209,7 @@ fn mem_extended_body(
                 } else {
                     std::mem::size_of::<Value>()
                 };
-                let new_cap_slots = new_size / elem_size.max(1);
+                let new_cap_slots = new_size.div_ceil(elem_size);
                 let new_backing = if is_byte {
                     state.heap.alloc(TypeId::BYTE_LIST, new_cap_slots)?
                 } else {
@@ -247,9 +217,9 @@ fn mem_extended_body(
                 };
                 state.record_allocation();
                 let new_ptr = new_backing.as_ptr() as *mut u8;
-                let copy_bytes = old_size.min(new_size);
+                let copy_bytes = backing.copy_len(old_size, new_size);
                 if copy_bytes > 0 {
-                    let old_data = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) };
+                    let old_data = backing.data;
                     let new_data = unsafe { new_ptr.add(heap::OBJECT_HEADER_SIZE) };
                     unsafe {
                         std::ptr::copy_nonoverlapping(old_data, new_data, copy_bytes);

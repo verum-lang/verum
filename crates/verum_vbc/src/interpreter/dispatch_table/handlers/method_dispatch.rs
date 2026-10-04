@@ -6357,7 +6357,7 @@ pub(super) fn dispatch_primitive_method(
                 let list_header = unsafe { heap::ObjectHeader::ref_or_stub(list_ptr) };
                 let mut byte_arr = [0u8; 8];
                 for (i, byte) in byte_arr.iter_mut().enumerate() {
-                    let elem = get_array_element(list_ptr, list_header, i)?;
+                    let elem = get_array_element(state, list_ptr, list_header, i)?;
                     *byte = elem.as_i64() as u8;
                 }
                 if method == "from_le_bytes" {
@@ -6435,7 +6435,7 @@ pub(super) fn dispatch_primitive_method(
                 let list_header = unsafe { heap::ObjectHeader::ref_or_stub(list_ptr) };
                 let mut byte_arr = [0u8; 4];
                 for (i, byte) in byte_arr.iter_mut().enumerate() {
-                    let elem = get_array_element(list_ptr, list_header, i)?;
+                    let elem = get_array_element(state, list_ptr, list_header, i)?;
                     *byte = elem.as_i64() as u8;
                 }
                 if method == "int32$from_le_bytes" {
@@ -6508,7 +6508,7 @@ pub(super) fn dispatch_primitive_method(
                 let list_header = unsafe { heap::ObjectHeader::ref_or_stub(list_ptr) };
                 let mut byte_arr = [0u8; 8];
                 for (i, byte) in byte_arr.iter_mut().enumerate() {
-                    let elem = get_array_element(list_ptr, list_header, i)?;
+                    let elem = get_array_element(state, list_ptr, list_header, i)?;
                     *byte = elem.as_i64() as u8;
                 }
                 if method == "uint64$from_le_bytes" {
@@ -6564,7 +6564,7 @@ pub(super) fn dispatch_primitive_method(
                 let list_header = unsafe { heap::ObjectHeader::ref_or_stub(list_ptr) };
                 let mut byte_arr = [0u8; 4];
                 for (i, byte) in byte_arr.iter_mut().enumerate() {
-                    let elem = get_array_element(list_ptr, list_header, i)?;
+                    let elem = get_array_element(state, list_ptr, list_header, i)?;
                     *byte = elem.as_i64() as u8;
                 }
                 if method == "uint32$from_le_bytes" {
@@ -6591,7 +6591,7 @@ pub(super) fn dispatch_primitive_method(
                 let list_header = unsafe { heap::ObjectHeader::ref_or_stub(list_ptr) };
                 let mut byte_arr = [0u8; 2];
                 for (i, byte) in byte_arr.iter_mut().enumerate() {
-                    let elem = get_array_element(list_ptr, list_header, i)?;
+                    let elem = get_array_element(state, list_ptr, list_header, i)?;
                     *byte = elem.as_i64() as u8;
                 }
                 if method == "uint16$from_le_bytes" {
@@ -6818,7 +6818,7 @@ pub(super) fn dispatch_primitive_method(
                 let list_header = unsafe { heap::ObjectHeader::ref_or_stub(list_ptr) };
                 let mut byte_arr = [0u8; 8];
                 for (i, byte) in byte_arr.iter_mut().enumerate() {
-                    let elem = get_array_element(list_ptr, list_header, i)?;
+                    let elem = get_array_element(state, list_ptr, list_header, i)?;
                     *byte = elem.as_i64() as u8;
                 }
                 if method == "from_le_bytes" {
@@ -7000,7 +7000,7 @@ pub(super) fn dispatch_primitive_method(
                     let len = get_array_length(ptr, header)?;
                     let mut found = false;
                     for i in 0..len {
-                        let elem = get_array_element(ptr, header, i)?;
+                        let elem = get_array_element(state, ptr, header, i)?;
                         if super::memory_collections::value_eq(elem, needle) {
                             found = true;
                             break;
@@ -10981,7 +10981,10 @@ pub(super) fn list_push(
     let data_ptr = unsafe { list_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
     let len = unsafe { (*data_ptr).as_i64() } as usize;
     let cap = unsafe { (*data_ptr.add(1)).as_i64() } as usize;
-    let backing_ptr = unsafe { (*data_ptr.add(2)).as_ptr::<u8>() };
+    let backing_ptr = state
+        .heap
+        .backing_view(super::ffi_extended::value_as_addr(unsafe { *data_ptr.add(2) }) as *mut u8)
+        .data;
 
     if len >= cap {
         // Grow: allocate new backing with 2x capacity, tagged with
@@ -10998,7 +11001,7 @@ pub(super) fn list_push(
 
         // Copy old elements with the right stride
         if len > 0 {
-            let old_data = unsafe { backing_ptr.add(heap::OBJECT_HEADER_SIZE) };
+            let old_data = backing_ptr;
             let new_data = unsafe { new_backing_ptr.add(heap::OBJECT_HEADER_SIZE) };
             unsafe { std::ptr::copy_nonoverlapping(old_data, new_data, len * elem_size) };
         }
@@ -11026,11 +11029,11 @@ pub(super) fn list_push(
         // Write directly with the right stride.
         if is_byte_list {
             let elem_ptr = unsafe {
-                backing_ptr.add(heap::OBJECT_HEADER_SIZE + len * elem_size)
+                backing_ptr.add(len * elem_size)
             };
             unsafe { *elem_ptr = (new_val.as_i64() & 0xFF) as u8 };
         } else {
-            let backing_data = unsafe { backing_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
+            let backing_data = backing_ptr as *mut Value;
             unsafe { *backing_data.add(len) = new_val };
         }
         // Update len
@@ -11556,7 +11559,7 @@ pub(super) fn dispatch_array_method(
 
             let mut results = Vec::with_capacity(len);
             for i in 0..len {
-                let elem = get_array_element(ptr, header, i)?;
+                let elem = get_array_element(state, ptr, header, i)?;
                 let mapped = call_closure_sync(state, closure_val, &[elem])?;
                 results.push(mapped);
             }
@@ -11569,7 +11572,7 @@ pub(super) fn dispatch_array_method(
 
             let mut results = Vec::new();
             for i in 0..len {
-                let elem = get_array_element(ptr, header, i)?;
+                let elem = get_array_element(state, ptr, header, i)?;
                 let keep = call_closure_sync(state, closure_val, &[elem])?;
                 if keep.as_bool() {
                     results.push(elem);
@@ -11584,7 +11587,7 @@ pub(super) fn dispatch_array_method(
             let closure_val = state.registers.get(caller_base, Reg(args.start.0 + 1));
 
             for i in 0..len {
-                let elem = get_array_element(ptr, header, i)?;
+                let elem = get_array_element(state, ptr, header, i)?;
                 acc = call_closure_sync(state, closure_val, &[acc, elem])?;
             }
 
@@ -11598,7 +11601,7 @@ pub(super) fn dispatch_array_method(
         "get" => {
             let idx = state.registers.get(caller_base, Reg(args.start.0)).as_i64() as usize;
             if idx < len {
-                let elem = get_array_element(ptr, header, idx)?;
+                let elem = get_array_element(state, ptr, header, idx)?;
                 let result = make_some_value(state, elem)?;
                 Ok(Some(result))
             } else {
@@ -11608,7 +11611,7 @@ pub(super) fn dispatch_array_method(
         }
         "first" => {
             if len > 0 {
-                let elem = get_array_element(ptr, header, 0)?;
+                let elem = get_array_element(state, ptr, header, 0)?;
                 let result = make_some_value(state, elem)?;
                 Ok(Some(result))
             } else {
@@ -11618,7 +11621,7 @@ pub(super) fn dispatch_array_method(
         }
         "last" => {
             if len > 0 {
-                let elem = get_array_element(ptr, header, len - 1)?;
+                let elem = get_array_element(state, ptr, header, len - 1)?;
                 let result = make_some_value(state, elem)?;
                 Ok(Some(result))
             } else {
@@ -11636,7 +11639,7 @@ pub(super) fn dispatch_array_method(
             let needle = resolve_arg_value(state, needle_raw);
             let mut found = false;
             for i in 0..len {
-                let elem = get_array_element(ptr, header, i)?;
+                let elem = get_array_element(state, ptr, header, i)?;
                 if value_eq(elem, needle) {
                     found = true;
                     break;
@@ -11925,7 +11928,7 @@ pub(super) fn dispatch_array_method(
             // Collect all elements into a Vec, sort, write back
             let mut elems = Vec::with_capacity(len);
             for i in 0..len {
-                elems.push(get_array_element(ptr, header, i)?);
+                elems.push(get_array_element(state, ptr, header, i)?);
             }
             // ORD-DISPATCH (2026-07-09): heap-record elements used to
             // fall into the `to_bits()` arm below — a raw NaN-box
@@ -12012,7 +12015,7 @@ pub(super) fn dispatch_array_method(
             // Collect elements
             let mut elems = Vec::with_capacity(len);
             for i in 0..len {
-                elems.push(get_array_element(ptr, header, i)?);
+                elems.push(get_array_element(state, ptr, header, i)?);
             }
             // Use a simple insertion sort so we can call the closure comparator
             // (Vec::sort_by cannot re-enter the interpreter). Shifting only
@@ -12067,7 +12070,7 @@ pub(super) fn dispatch_array_method(
             // Collect elements first since closure calls may invalidate pointers
             let mut elems = Vec::with_capacity(len);
             for i in 0..len {
-                elems.push(get_array_element(ptr, header, i)?);
+                elems.push(get_array_element(state, ptr, header, i)?);
             }
             for elem in elems {
                 let _ = call_closure_sync(state, closure_val, &[elem])?;
@@ -12078,7 +12081,7 @@ pub(super) fn dispatch_array_method(
             let closure_val = state.registers.get(caller_base, Reg(args.start.0));
             let mut elems = Vec::with_capacity(len);
             for i in 0..len {
-                elems.push(get_array_element(ptr, header, i)?);
+                elems.push(get_array_element(state, ptr, header, i)?);
             }
             for elem in elems {
                 let result = call_closure_sync(state, closure_val, &[elem])?;
@@ -12092,7 +12095,7 @@ pub(super) fn dispatch_array_method(
             let closure_val = state.registers.get(caller_base, Reg(args.start.0));
             let mut elems = Vec::with_capacity(len);
             for i in 0..len {
-                elems.push(get_array_element(ptr, header, i)?);
+                elems.push(get_array_element(state, ptr, header, i)?);
             }
             for elem in elems {
                 let result = call_closure_sync(state, closure_val, &[elem])?;
@@ -12106,7 +12109,7 @@ pub(super) fn dispatch_array_method(
             let closure_val = state.registers.get(caller_base, Reg(args.start.0));
             let mut elems = Vec::with_capacity(len);
             for i in 0..len {
-                elems.push(get_array_element(ptr, header, i)?);
+                elems.push(get_array_element(state, ptr, header, i)?);
             }
             for elem in elems {
                 let result = call_closure_sync(state, closure_val, &[elem])?;
@@ -12134,7 +12137,7 @@ pub(super) fn dispatch_array_method(
             if arg0.is_func_ref() {
                 let mut elems = Vec::with_capacity(len);
                 for i in 0..len {
-                    elems.push(get_array_element(ptr, header, i)?);
+                    elems.push(get_array_element(state, ptr, header, i)?);
                 }
                 for (i, elem) in elems.into_iter().enumerate() {
                     let result = call_closure_sync(state, arg0, &[elem])?;
@@ -12152,7 +12155,7 @@ pub(super) fn dispatch_array_method(
                 // never matches NaN-boxed primitives in the list.
                 let needle = resolve_arg_value(state, arg0);
                 for i in 0..len {
-                    let elem = get_array_element(ptr, header, i)?;
+                    let elem = get_array_element(state, ptr, header, i)?;
                     if value_eq(elem, needle) {
                         let some_val = make_some_value(state, Value::from_i64(i as i64))?;
                         return Ok(Some(some_val));
@@ -12166,7 +12169,7 @@ pub(super) fn dispatch_array_method(
             let closure_val = state.registers.get(caller_base, Reg(args.start.0));
             let mut elems = Vec::with_capacity(len);
             for i in 0..len {
-                elems.push(get_array_element(ptr, header, i)?);
+                elems.push(get_array_element(state, ptr, header, i)?);
             }
             let mut results = Vec::new();
             for elem in elems {
@@ -12177,7 +12180,7 @@ pub(super) fn dispatch_array_method(
                     let inner_header = unsafe { heap::ObjectHeader::ref_or_stub(inner_ptr) };
                     let inner_len = get_array_length(inner_ptr, inner_header)?;
                     for j in 0..inner_len {
-                        let inner_elem = get_array_element(inner_ptr, inner_header, j)?;
+                        let inner_elem = get_array_element(state, inner_ptr, inner_header, j)?;
                         results.push(inner_elem);
                     }
                 }
@@ -12189,14 +12192,14 @@ pub(super) fn dispatch_array_method(
             // Flatten List<List<T>> -> List<T>
             let mut results = Vec::new();
             for i in 0..len {
-                let inner_list = get_array_element(ptr, header, i)?;
+                let inner_list = get_array_element(state, ptr, header, i)?;
                 if inner_list.is_ptr() && !inner_list.is_nil() {
                     let inner_ptr = inner_list.as_ptr::<u8>();
                     if !inner_ptr.is_null() {
                         let inner_header = unsafe { heap::ObjectHeader::ref_or_stub(inner_ptr) };
                         let inner_len = get_array_length(inner_ptr, inner_header)?;
                         for j in 0..inner_len {
-                            let inner_elem = get_array_element(inner_ptr, inner_header, j)?;
+                            let inner_elem = get_array_element(state, inner_ptr, inner_header, j)?;
                             results.push(inner_elem);
                         }
                     }
@@ -12212,7 +12215,7 @@ pub(super) fn dispatch_array_method(
             let start = n.min(len);
             let mut results = Vec::with_capacity(len.saturating_sub(start));
             for i in start..len {
-                results.push(get_array_element(ptr, header, i)?);
+                results.push(get_array_element(state, ptr, header, i)?);
             }
             let result_val = alloc_list_from_values(state, results)?;
             Ok(Some(result_val))
@@ -12222,7 +12225,7 @@ pub(super) fn dispatch_array_method(
             let end = n.min(len);
             let mut results = Vec::with_capacity(end);
             for i in 0..end {
-                results.push(get_array_element(ptr, header, i)?);
+                results.push(get_array_element(state, ptr, header, i)?);
             }
             let result_val = alloc_list_from_values(state, results)?;
             Ok(Some(result_val))
@@ -12238,7 +12241,7 @@ pub(super) fn dispatch_array_method(
             let end = end.max(start); // ensure end >= start
             let mut results = Vec::with_capacity(end - start);
             for i in start..end {
-                results.push(get_array_element(ptr, header, i)?);
+                results.push(get_array_element(state, ptr, header, i)?);
             }
             let result_val = alloc_list_from_values(state, results)?;
             Ok(Some(result_val))
@@ -12248,12 +12251,12 @@ pub(super) fn dispatch_array_method(
         "sum" => {
             let mut total: i64 = 0;
             for i in 0..len {
-                let elem = get_array_element(ptr, header, i)?;
+                let elem = get_array_element(state, ptr, header, i)?;
                 if elem.is_float() {
                     // If we encounter a float, switch to float sum
                     let mut ftotal = total as f64 + elem.as_f64();
                     for j in (i + 1)..len {
-                        let e = get_array_element(ptr, header, j)?;
+                        let e = get_array_element(state, ptr, header, j)?;
                         if e.is_float() {
                             ftotal += e.as_f64();
                         } else {
@@ -12271,9 +12274,9 @@ pub(super) fn dispatch_array_method(
                 let result = make_none_value(state)?;
                 return Ok(Some(result));
             }
-            let mut min_val = get_array_element(ptr, header, 0)?;
+            let mut min_val = get_array_element(state, ptr, header, 0)?;
             for i in 1..len {
-                let elem = get_array_element(ptr, header, i)?;
+                let elem = get_array_element(state, ptr, header, i)?;
                 let is_less = if elem.is_float() && min_val.is_float() {
                     elem.as_f64() < min_val.as_f64()
                 } else if elem.is_int() && !elem.is_bool() && min_val.is_int() && !min_val.is_bool()
@@ -12294,9 +12297,9 @@ pub(super) fn dispatch_array_method(
                 let result = make_none_value(state)?;
                 return Ok(Some(result));
             }
-            let mut max_val = get_array_element(ptr, header, 0)?;
+            let mut max_val = get_array_element(state, ptr, header, 0)?;
             for i in 1..len {
-                let elem = get_array_element(ptr, header, i)?;
+                let elem = get_array_element(state, ptr, header, i)?;
                 let is_greater = if elem.is_float() && max_val.is_float() {
                     elem.as_f64() > max_val.as_f64()
                 } else if elem.is_int() && !elem.is_bool() && max_val.is_int() && !max_val.is_bool()
@@ -12349,7 +12352,7 @@ pub(super) fn dispatch_array_method(
             // Collect elements from the other list first
             let mut other_elems = Vec::with_capacity(other_len);
             for i in 0..other_len {
-                other_elems.push(get_array_element(other_ptr, other_header, i)?);
+                other_elems.push(get_array_element(state, other_ptr, other_header, i)?);
             }
             // Push each element (list_push handles growth and pointer updates)
             for elem in other_elems {
@@ -12392,7 +12395,7 @@ pub(super) fn dispatch_array_method(
             // Collect all elements first (closure calls may invalidate pointers)
             let mut elems = Vec::with_capacity(len);
             for i in 0..len {
-                elems.push(get_array_element(ptr, header, i)?);
+                elems.push(get_array_element(state, ptr, header, i)?);
             }
             let mut kept = Vec::with_capacity(len);
             for elem in elems {
@@ -12421,7 +12424,7 @@ pub(super) fn dispatch_array_method(
         "enumerate" => {
             let mut results = Vec::with_capacity(len);
             for i in 0..len {
-                let elem = get_array_element(ptr, header, i)?;
+                let elem = get_array_element(state, ptr, header, i)?;
                 // Allocate a 2-element tuple: (index, element)
                 let tuple_size = 2 * std::mem::size_of::<Value>();
                 let tuple_obj =
@@ -12457,8 +12460,8 @@ pub(super) fn dispatch_array_method(
             let mut self_elems = Vec::with_capacity(zip_len);
             let mut other_elems = Vec::with_capacity(zip_len);
             for i in 0..zip_len {
-                self_elems.push(get_array_element(ptr, header, i)?);
-                other_elems.push(get_array_element(other_ptr, other_header, i)?);
+                self_elems.push(get_array_element(state, ptr, header, i)?);
+                other_elems.push(get_array_element(state, other_ptr, other_header, i)?);
             }
             let mut results = Vec::with_capacity(zip_len);
             for i in 0..zip_len {
@@ -12508,7 +12511,7 @@ pub(super) fn dispatch_array_method(
             };
             let mut parts = Vec::with_capacity(len);
             for i in 0..len {
-                let elem = get_array_element(ptr, header, i)?;
+                let elem = get_array_element(state, ptr, header, i)?;
                 let s = format_value_for_print(state, elem);
                 parts.push(s);
             }

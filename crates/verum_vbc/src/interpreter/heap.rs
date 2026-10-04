@@ -43,6 +43,7 @@ use std::alloc::{Layout, alloc, dealloc};
 use std::ptr::NonNull;
 
 use bitflags::bitflags;
+use verum_common::Set;
 
 use super::error::{CbgrViolationKind, InterpreterError, InterpreterResult};
 use crate::types::TypeId;
@@ -1022,6 +1023,24 @@ impl Object {
     }
 }
 
+/// Address view shared by container bodies and allocator operations (T1517).
+/// Only exact membership in this heap proves a managed allocation; other
+/// addresses retain the caller's raw-memory contract and carry no guessed size.
+#[derive(Clone, Copy)]
+pub(crate) struct BackingView {
+    pub(crate) data: *mut u8,
+    pub(crate) owner: Option<*mut u8>,
+    pub(crate) payload_size: Option<usize>,
+}
+
+impl BackingView {
+    pub(crate) fn copy_len(self, requested_old: usize, requested_new: usize) -> usize {
+        requested_old
+            .min(requested_new)
+            .min(self.payload_size.unwrap_or(usize::MAX))
+    }
+}
+
 /// Heap allocator for interpreter objects.
 ///
 /// Uses simple bump allocation for fast allocation.
@@ -1032,6 +1051,9 @@ pub struct Heap {
 
     /// All allocated objects (for GC tracing).
     objects: Vec<NonNull<ObjectHeader>>,
+
+    /// Exact live allocation bases for constant-time provenance checks.
+    object_addresses: Set<usize>,
 
     /// Total allocated bytes.
     allocated: usize,
@@ -1091,6 +1113,7 @@ impl Heap {
         Self {
             generation: 1,
             objects: Vec::with_capacity(1024),
+            object_addresses: Set::with_capacity(1024),
             allocated: 0,
             threshold,
             stats: HeapStats::default(),
@@ -1174,6 +1197,7 @@ impl Heap {
             available: 0,
         })?;
         self.objects.push(nn_ptr);
+        self.object_addresses.insert(header_ptr as usize);
 
         // Update stats
         self.allocated += total_size;
@@ -1323,6 +1347,7 @@ impl Heap {
 
         // Remove from tracking (expensive, but correct)
         self.objects.retain(|p| *p != obj.ptr);
+        self.object_addresses.remove(&(obj.ptr.as_ptr() as usize));
     }
 
     /// Returns the next generation number.
@@ -1378,7 +1403,7 @@ impl Heap {
         if ptr.is_null() {
             return false;
         }
-        self.objects.iter().any(|nn| std::ptr::eq(nn.as_ptr(), ptr))
+        self.object_addresses.contains(&(ptr as usize))
     }
 
     /// Validates a CBGR reference against an object.
@@ -1449,8 +1474,37 @@ impl Heap {
                 dealloc(obj_ptr.as_ptr() as *mut u8, layout);
             }
         }
+        self.object_addresses.clear();
         self.allocated = 0;
         self.generation = 1;
+    }
+
+    /// Resolve an owned allocation base or its exact data address. An empty
+    /// address and an untracked raw allocation remain unchanged.
+    pub(crate) fn backing_view(&self, address: *mut u8) -> BackingView {
+        let owner = if self.contains(address as *const ObjectHeader) {
+            Some(address)
+        } else {
+            self.get_object(address)
+                .map(|object| object.as_ptr() as *mut u8)
+        };
+        match owner {
+            Some(base) => {
+                // SAFETY: exact membership above proves this header and its
+                // data allocation are live members of this interpreter heap.
+                let header = unsafe { &*(base as *const ObjectHeader) };
+                BackingView {
+                    data: unsafe { base.add(OBJECT_HEADER_SIZE) },
+                    owner: Some(base),
+                    payload_size: Some(header.size as usize),
+                }
+            }
+            None => BackingView {
+                data: address,
+                owner: None,
+                payload_size: None,
+            },
+        }
     }
 
     /// Gets an Object from a data pointer.
@@ -1474,18 +1528,17 @@ impl Heap {
             return None;
         }
 
-        // Calculate header pointer by subtracting header size
-        let header_ptr = unsafe { data_ptr.sub(OBJECT_HEADER_SIZE) as *mut ObjectHeader };
+        // The address may belong to a raw allocation. Form a candidate without
+        // in-allocation arithmetic; exact membership below precedes any read.
+        let header_ptr = data_ptr.wrapping_sub(OBJECT_HEADER_SIZE) as *mut ObjectHeader;
 
         // SAFETY: Check alignment to prevent type confusion via misaligned pointers
         if !(header_ptr as usize).is_multiple_of(std::mem::align_of::<ObjectHeader>()) {
             return None;
         }
 
-        // Verify this is a valid heap object by checking if it's in our object list
-        // This is O(n) but provides safety; in production could use a hash set
-        let header_nonnull = std::ptr::NonNull::new(header_ptr)?;
-        if !self.objects.contains(&header_nonnull) {
+        // Exact membership proves the candidate is a live allocation base.
+        if !self.contains(header_ptr) {
             return None;
         }
 
@@ -2027,3 +2080,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "../../tests/interpreter/heap_backing_view.rs"]
+mod backing_view_tests;

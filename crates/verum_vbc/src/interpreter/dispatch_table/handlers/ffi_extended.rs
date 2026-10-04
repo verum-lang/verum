@@ -789,7 +789,7 @@ fn ffi_extended_body(
                 } else {
                     // Marshal each element from NaN-boxed Value to C type
                     for i in 0..count {
-                        let elem = super::super::get_array_element(arr_ptr, header, i)?;
+                        let elem = super::super::get_array_element(state, arr_ptr, header, i)?;
                         // SAFETY: `buffer` has `buf_size = count * elem_size`
                         // bytes; each write below indexes `i < count` elements
                         // of `elem_size` bytes, staying in bounds. The element
@@ -2203,7 +2203,7 @@ fn ffi_extended_body(
 /// `PtrIsNull` family used `as_ptr()` alone, which decodes an int-tagged
 /// address as NULL — so `ptr_add(p, 1)` on a cast pointer produced address
 /// 8 and every downstream atomic/deref through it null-faulted.
-pub(super) fn value_as_addr(v: Value) -> usize {
+pub(in crate::interpreter::dispatch_table) fn value_as_addr(v: Value) -> usize {
     if v.is_ptr() {
         v.as_ptr::<u8>() as usize
     } else {

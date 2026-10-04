@@ -5,6 +5,7 @@ use super::super::super::heap;
 use super::super::super::state::InterpreterState;
 use super::super::DispatchResult;
 use super::bytecode_io::*;
+use super::ffi_extended::value_as_addr;
 use super::cbgr_helpers::{decode_cbgr_ref, is_cbgr_ref, peel_heap_cell};
 use crate::types::TypeId;
 use crate::value::Value;
@@ -104,8 +105,7 @@ pub(in super::super) fn handle_new_array(
 /// `realloc`'s own `LIST-REALLOC-CANONICAL-1` guard miss its object and
 /// free a heap pointer through `std::alloc` — SIGABRT on `resize`,
 /// `extend_from_slice` and `reserve`.  The allocator verbs learn the
-/// data-pointer spelling instead (`backing_object_base` in
-/// `mem_extended.rs`), which leaves exactly one rule here.
+/// data-pointer spelling instead (`Heap::backing_view`), which leaves exactly one rule here.
 ///
 /// The address leaves INT-tagged, matching `PtrAdd`/`PtrSub`: a
 /// pointer-tagged interior address becomes a droppable-looking heap
@@ -127,15 +127,12 @@ fn container_backing_out(
     if !is_container_backing_slot(type_id, field_idx) {
         return slot;
     }
-    let addr = if slot.is_ptr() && !slot.is_nil() {
-        slot.as_ptr::<u8>() as usize
+    let backing = state.heap.backing_view(value_as_addr(slot) as *mut u8);
+    if backing.owner.is_some() {
+        Value::from_i64(backing.data as i64)
     } else {
-        return slot;
-    };
-    if addr == 0 || !state.heap.contains(addr as *const heap::ObjectHeader) {
-        return slot;
+        slot
     }
-    Value::from_i64((addr + heap::OBJECT_HEADER_SIZE) as i64)
 }
 
 /// GetF (0x62) - Get field: dst = obj.field
@@ -1373,7 +1370,10 @@ pub(in super::super) fn handle_get_index(
                 state.set_reg(dst, Value::from_ptr(new_obj.as_ptr() as *mut u8));
             } else if header.type_id == TypeId::LIST {
                 let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
-                let backing = unsafe { (*data_ptr.add(2)).as_ptr::<u8>() };
+                let backing = state
+                    .heap
+                    .backing_view(value_as_addr(unsafe { *data_ptr.add(2) }) as *mut u8)
+                    .data;
                 let new_obj = state.heap.alloc_array(TypeId::UNIT, slice_len)?;
                 state.record_allocation();
                 let dst_data = unsafe {
@@ -1382,7 +1382,7 @@ pub(in super::super) fn handle_get_index(
                 for i in 0..slice_len {
                     let elem = unsafe {
                         *((backing as *const u8).add(
-                            heap::OBJECT_HEADER_SIZE + (start + i) * std::mem::size_of::<Value>(),
+                            (start + i) * std::mem::size_of::<Value>(),
                         ) as *const Value)
                     };
                     unsafe {
@@ -1395,7 +1395,10 @@ pub(in super::super) fn handle_get_index(
                 // packed-byte list with the same layout discipline.
                 let src_header_ptr =
                     unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
-                let src_backing = unsafe { (*src_header_ptr.add(2)).as_ptr::<u8>() };
+                let src_backing = state
+                    .heap
+                    .backing_view(value_as_addr(unsafe { *src_header_ptr.add(2) }) as *mut u8)
+                    .data;
 
                 // Allocate the new packed backing of `slice_len` bytes,
                 // tagged with TypeId::BYTE_LIST so the GC / CBGR scan
@@ -1407,7 +1410,7 @@ pub(in super::super) fn handle_get_index(
                 let new_backing_data =
                     unsafe { (new_backing.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE) };
                 if slice_len > 0 {
-                    let src_data = unsafe { src_backing.add(heap::OBJECT_HEADER_SIZE + start) };
+                    let src_data = unsafe { src_backing.add(start) };
                     unsafe {
                         std::ptr::copy_nonoverlapping(src_data, new_backing_data, slice_len);
                     }
@@ -1473,14 +1476,17 @@ pub(in super::super) fn handle_get_index(
                 // List layout: [len: Value, cap: Value, backing_ptr: Value]
                 let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                 let len = unsafe { (*data_ptr).as_i64() } as usize;
-                let backing = unsafe { (*data_ptr.add(2)).as_ptr::<u8>() }; // backing_ptr is at index 2
+                let backing = state
+                    .heap
+                    .backing_view(value_as_addr(unsafe { *data_ptr.add(2) }) as *mut u8)
+                    .data; // backing_ptr is at index 2
 
                 if index < 0 || index as usize >= len {
                     return Err(InterpreterError::IndexOutOfBounds { index, length: len });
                 }
 
                 let elem_offset = index as usize * std::mem::size_of::<Value>();
-                let data_ptr = unsafe { backing.add(heap::OBJECT_HEADER_SIZE + elem_offset) };
+                let data_ptr = unsafe { backing.add(elem_offset) };
                 let value = unsafe { *(data_ptr as *const Value) };
                 state.set_reg(dst, value);
             } else if header.type_id == TypeId::BYTE_LIST {
@@ -1489,14 +1495,17 @@ pub(in super::super) fn handle_get_index(
                 // into a NaN-boxed Value.
                 let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                 let len = unsafe { (*data_ptr).as_i64() } as usize;
-                let backing = unsafe { (*data_ptr.add(2)).as_ptr::<u8>() };
+                let backing = state
+                    .heap
+                    .backing_view(value_as_addr(unsafe { *data_ptr.add(2) }) as *mut u8)
+                    .data;
 
                 if index < 0 || index as usize >= len {
                     return Err(InterpreterError::IndexOutOfBounds { index, length: len });
                 }
 
                 let elem_ptr =
-                    unsafe { backing.add(heap::OBJECT_HEADER_SIZE + index as usize) };
+                    unsafe { backing.add(index as usize) };
                 state.set_reg(dst, Value::from_i64(unsafe { *elem_ptr } as i64));
             } else {
                 // Array/Tuple - elements are stored directly in the object data
@@ -1737,12 +1746,15 @@ pub(in super::super) fn handle_set_index(
             // List layout: [len: Value, cap: Value, backing_ptr: Value]
             let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
             let len = unsafe { (*data_ptr).as_i64() } as usize;
-            let backing = unsafe { (*data_ptr.add(2)).as_ptr::<u8>() };
+            let backing = state
+                .heap
+                .backing_view(value_as_addr(unsafe { *data_ptr.add(2) }) as *mut u8)
+                .data;
             if index < 0 || index as usize >= len {
                 return Err(InterpreterError::IndexOutOfBounds { index, length: len });
             }
             let elem_offset = index as usize * std::mem::size_of::<Value>();
-            let data_ptr = unsafe { backing.add(heap::OBJECT_HEADER_SIZE + elem_offset) };
+            let data_ptr = unsafe { backing.add(elem_offset) };
             unsafe { *(data_ptr as *mut Value) = value };
         } else if header.type_id == TypeId::BYTE_LIST {
             // BYTE_LIST: write the value's low byte into the packed
@@ -1750,12 +1762,15 @@ pub(in super::super) fn handle_set_index(
             // element stride.
             let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
             let len = unsafe { (*data_ptr).as_i64() } as usize;
-            let backing = unsafe { (*data_ptr.add(2)).as_ptr::<u8>() };
+            let backing = state
+                .heap
+                .backing_view(value_as_addr(unsafe { *data_ptr.add(2) }) as *mut u8)
+                .data;
             if index < 0 || index as usize >= len {
                 return Err(InterpreterError::IndexOutOfBounds { index, length: len });
             }
             let elem_ptr =
-                unsafe { backing.add(heap::OBJECT_HEADER_SIZE + index as usize) };
+                unsafe { backing.add(index as usize) };
             unsafe { *(elem_ptr as *mut u8) = (value.as_i64() & 0xFF) as u8 };
         } else {
             // Array/Tuple - elements are stored directly
@@ -2126,7 +2141,10 @@ pub(in super::super) fn handle_list_push(
     let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
     let len = unsafe { (*data_ptr).as_i64() } as usize;
     let cap = unsafe { (*data_ptr.add(1)).as_i64() } as usize;
-    let mut backing_ptr = unsafe { (*data_ptr.add(2)).as_ptr::<u8>() };
+    let mut backing_ptr = state
+        .heap
+        .backing_view(value_as_addr(unsafe { *data_ptr.add(2) }) as *mut u8)
+        .data;
 
     if len >= cap {
         // Grow list: double capacity (minimum 16)
@@ -2146,7 +2164,7 @@ pub(in super::super) fn handle_list_push(
 
         // Copy existing elements
         if len > 0 {
-            let old_data = unsafe { backing_ptr.add(heap::OBJECT_HEADER_SIZE) };
+            let old_data = backing_ptr;
             let new_data = unsafe { new_backing_ptr.add(heap::OBJECT_HEADER_SIZE) };
             unsafe {
                 std::ptr::copy_nonoverlapping(old_data, new_data, len * elem_size);
@@ -2159,17 +2177,17 @@ pub(in super::super) fn handle_list_push(
             *data_ptr.add(2) = Value::from_ptr(new_backing_ptr);
         }
 
-        backing_ptr = new_backing_ptr;
+        backing_ptr = unsafe { new_backing_ptr.add(heap::OBJECT_HEADER_SIZE) };
     }
 
     // Write value to backing array.
     if is_byte_list {
         let elem_ptr =
-            unsafe { backing_ptr.add(heap::OBJECT_HEADER_SIZE + len * elem_size) };
+            unsafe { backing_ptr.add(len * elem_size) };
         unsafe { *elem_ptr = (value.as_i64() & 0xFF) as u8 };
     } else {
         let elem_ptr = unsafe {
-            backing_ptr.add(heap::OBJECT_HEADER_SIZE + len * elem_size) as *mut Value
+            backing_ptr.add(len * elem_size) as *mut Value
         };
         unsafe { *elem_ptr = value };
     }
@@ -2207,16 +2225,22 @@ pub(in super::super) fn handle_list_pop(
         return Ok(DispatchResult::Continue);
     }
 
-    let backing_ptr = unsafe { (*data_ptr.add(2)).as_ptr::<u8>() };
+    let backing_ptr = state
+
+        .heap
+
+        .backing_view(value_as_addr(unsafe { *data_ptr.add(2) }) as *mut u8)
+
+        .data;
 
     // Read last element with the right stride for the layout.
     let value = if is_byte_list {
         let elem_ptr =
-            unsafe { backing_ptr.add(heap::OBJECT_HEADER_SIZE + (len - 1)) };
+            unsafe { backing_ptr.add(len - 1) };
         Value::from_i64(unsafe { *elem_ptr } as i64)
     } else {
         let elem_ptr = unsafe {
-            backing_ptr.add(heap::OBJECT_HEADER_SIZE + (len - 1) * std::mem::size_of::<Value>())
+            backing_ptr.add((len - 1) * std::mem::size_of::<Value>())
                 as *const Value
         };
         unsafe { *elem_ptr }

@@ -228,3 +228,48 @@ fn source_raw_pointer_tag_allocation_still_deallocates() {
         37
     );
 }
+
+#[test]
+fn actual_list_source_can_push_after_zero_capacity() {
+    for ty in ["Byte", "Int"] {
+        assert_eq!(
+            list_source(&format!(
+                "let mut xs=List<{ty}>.new(); xs.shrink_to_fit(); xs.push(37); xs[0] as Int"
+            ))
+            .as_i64(),
+            37,
+            "{ty}"
+        );
+    }
+}
+#[test]
+fn actual_list_source_reserve_after_zero_keeps_compiled_pointer_and_index_in_agreement() {
+    assert_eq!(list_source(r#"let mut xs=List<Int>.new(); xs.shrink_to_fit(); xs.reserve(64); xs.push(37); let raw = @intrinsic("ptr_read", xs.ptr); if raw == xs[0] { 37 } else { 0 }"#).as_i64(),37);
+}
+
+#[test]
+fn packed_byte_nonempty_shrink_preserves_three_elements() {
+    assert_eq!(list_source("let mut xs=List<Byte>.new(); xs.push(37); xs.push(41); xs.push(43); xs.shrink_to_fit(); (xs[0] as Int)+(xs[1] as Int)+(xs[2] as Int)").as_i64(),121);
+}
+
+#[test]
+fn range_and_index_write_agree_for_managed_and_raw_backing() {
+    for ty in ["Byte", "Int"] {
+        for setup in ["", "xs.shrink_to_fit(); xs.reserve(64);"] {
+            assert_eq!(list_source(&format!("let mut xs=List<{ty}>.new(); {setup} xs.push(37); xs.push(41); xs[1]=43; let copied=xs[0..2]; (xs[1] as Int)*1000+(copied[1] as Int)")).as_i64(),43043,"{ty}: {setup}");
+        }
+    }
+}
+
+#[test]
+fn mutable_slice_keeps_raw_backing_aliases() {
+    for ty in ["Byte", "Int"] {
+        assert_eq!(
+            list_source(&format!(
+                "let mut xs=List<{ty}>.new(); xs.shrink_to_fit(); xs.reserve(64); xs.push(37); xs.push(41); let part=&mut xs[0..2]; part[1]=43; xs[1] as Int"
+            )).as_i64(),
+            43,
+            "{ty}"
+        );
+    }
+}

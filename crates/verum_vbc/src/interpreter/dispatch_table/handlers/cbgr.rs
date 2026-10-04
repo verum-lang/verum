@@ -1836,8 +1836,9 @@ fn container_slice_descriptor(
             let backing_val = unsafe {
                 *(base_ptr.add(heap::LIST_PTR_OFFSET) as *const Value)
             };
-            let data_ptr = if backing_val.is_ptr() && !backing_val.is_nil() {
-                unsafe { backing_val.as_ptr::<u8>().add(heap::OBJECT_HEADER_SIZE) }
+            let backing = state.heap.backing_view(value_as_addr(backing_val) as *mut u8);
+            let data_ptr = if !backing.data.is_null() {
+                backing.data
             } else if len == 0 {
                 // Never-pushed list: no backing yet — a dangling-free
                 // empty slice over the header edge is sound (len 0
@@ -2116,10 +2117,11 @@ fn cbgr_extended_body(
                 if index < 0 || (index as usize) >= len {
                     return Err(InterpreterError::IndexOutOfBounds { index, length: len });
                 }
-                let backing = unsafe { (*data_ptr.add(2)).as_ptr::<u8>() };
-                let offset =
-                    heap::OBJECT_HEADER_SIZE + (index as usize) * std::mem::size_of::<Value>();
-                unsafe { backing.add(offset) }
+                let backing = state.heap.backing_view(
+                    value_as_addr(unsafe { *data_ptr.add(2) }) as *mut u8,
+                );
+                let offset = (index as usize) * std::mem::size_of::<Value>();
+                unsafe { backing.data.add(offset) }
             } else {
                 // Inline array / tuple: elements live directly after the
                 // header.
@@ -2600,10 +2602,9 @@ fn cbgr_extended_body(
                     // backing_ptr points to another array object with the actual elements
                     let backing_ptr_val =
                         unsafe { *(base_ptr.add(heap::LIST_PTR_OFFSET) as *const Value) };
-                    if backing_ptr_val.is_ptr() && !backing_ptr_val.is_nil() {
-                        let backing_array = backing_ptr_val.as_ptr::<u8>();
-                        // The backing array also has an ObjectHeader, skip it to get elements
-                        base_ptr = unsafe { backing_array.add(heap::OBJECT_HEADER_SIZE) };
+                    let backing = state.heap.backing_view(value_as_addr(backing_ptr_val) as *mut u8);
+                    if !backing.data.is_null() {
+                        base_ptr = backing.data;
                     }
                 } else {
                     // Known packed arrays use the descriptor arm above. The

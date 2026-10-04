@@ -854,9 +854,9 @@ fn deep_value_eq_depth(va: &Value, vb: &Value, state: &InterpreterState, depth: 
             }
             for i in 0..len_a {
                 let ea =
-                    super::super::get_array_element(ptr_a, header_a, i).unwrap_or(Value::nil());
+                    super::super::get_array_element(state, ptr_a, header_a, i).unwrap_or(Value::nil());
                 let eb =
-                    super::super::get_array_element(ptr_b, header_b, i).unwrap_or(Value::nil());
+                    super::super::get_array_element(state, ptr_b, header_b, i).unwrap_or(Value::nil());
                 if !deep_value_eq_depth(&ea, &eb, state, depth + 1) {
                     return false;
                 }

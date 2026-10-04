@@ -1163,6 +1163,7 @@ pub(crate) fn get_array_length(
 /// stride 1 (no `checked_mul` needed) so the overflow guard runs
 /// only on the stride-8 paths.
 pub(crate) fn get_array_element(
+    state: &super::state::InterpreterState,
     ptr: *const u8,
     header: &super::heap::ObjectHeader,
     index: usize,
@@ -1172,8 +1173,11 @@ pub(crate) fn get_array_element(
         // into a NaN-boxed Value. Stride is 1, so no overflow
         // multiplication.
         let data_ptr = unsafe { ptr.add(super::heap::OBJECT_HEADER_SIZE) as *const Value };
-        let backing = unsafe { (*data_ptr.add(2)).as_ptr::<u8>() };
-        let elem_ptr = unsafe { backing.add(super::heap::OBJECT_HEADER_SIZE + index) };
+        let backing = state
+            .heap
+            .backing_view(handlers::ffi_extended::value_as_addr(unsafe { *data_ptr.add(2) }) as *mut u8)
+            .data;
+        let elem_ptr = unsafe { backing.add(index) };
         return Ok(Value::from_i64(unsafe { *elem_ptr } as i64));
     }
 
@@ -1185,13 +1189,15 @@ pub(crate) fn get_array_element(
 
     if header.type_id == TypeId::LIST {
         // SAFETY: List layout is [header | len | cap | backing_ptr]. The backing pointer
-        // points to an array allocation with elements after its own OBJECT_HEADER_SIZE.
+        // is resolved through heap membership before selecting its data address.
         // `elem_offset` was checked_mul-bounded above, so the pointer arithmetic stays
         // within `usize` and the resulting address is within the live allocation.
         let data_ptr = unsafe { ptr.add(super::heap::OBJECT_HEADER_SIZE) as *const Value };
-        let backing = unsafe { (*data_ptr.add(2)).as_ptr::<u8>() };
-        let elem_ptr =
-            unsafe { backing.add(super::heap::OBJECT_HEADER_SIZE + elem_offset) as *const Value };
+        let backing = state
+            .heap
+            .backing_view(handlers::ffi_extended::value_as_addr(unsafe { *data_ptr.add(2) }) as *mut u8)
+            .data;
+        let elem_ptr = unsafe { backing.add(elem_offset) as *const Value };
         Ok(unsafe { *elem_ptr })
     } else {
         // SAFETY: Non-LIST arrays store Values directly after the header. Same
