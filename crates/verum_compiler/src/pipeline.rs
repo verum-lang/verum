@@ -942,6 +942,10 @@ pub struct CompilationPipeline<'s> {
     /// populated in StdlibBootstrap mode.
     global_type_layout_registry: std::collections::HashMap<String, Vec<String>>,
 
+    /// T1519: field nominal types carried alongside the bootstrap layouts.
+    /// Layout positions alone cannot determine a field method's receiver.
+    global_type_field_name_registry: std::collections::HashMap<(String, String), String>,
+
     /// Global type-alias registry (`alias name → base type name`) for
     /// cross-module alias resolution.  Populated as each module compiles
     /// (via `codegen.export_type_aliases()`) and seeded into the next
@@ -1250,6 +1254,7 @@ impl<'s> CompilationPipeline<'s> {
             stdlib_resolver: None,
             global_function_registry: std::collections::HashMap::new(),
             global_type_layout_registry: std::collections::HashMap::new(),
+            global_type_field_name_registry: std::collections::HashMap::new(),
             global_type_alias_registry: std::collections::HashMap::new(),
             global_transparent_newtypes: std::collections::HashSet::new(),
             ambiguous_core_type_names: std::collections::HashSet::new(),
@@ -1366,6 +1371,7 @@ impl<'s> CompilationPipeline<'s> {
             stdlib_resolver: Some(resolver),
             global_function_registry: std::collections::HashMap::new(),
             global_type_layout_registry: std::collections::HashMap::new(),
+            global_type_field_name_registry: std::collections::HashMap::new(),
             global_type_alias_registry: std::collections::HashMap::new(),
             global_transparent_newtypes: std::collections::HashSet::new(),
             ambiguous_core_type_names: std::collections::HashSet::new(),

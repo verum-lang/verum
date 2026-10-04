@@ -3051,7 +3051,7 @@ impl VbcCodegen {
     ///    `config.module_name.<ast_decl>`.
     ///  * AST decl is already DOTTED → user wrote a fully-
     ///    qualified path; trust it as authoritative.
-    fn resolve_full_module_path(module: &Module, parent_module_name: &str) -> Option<String> {
+    pub fn resolve_full_module_path(module: &Module, parent_module_name: &str) -> Option<String> {
         let ast_name = Self::extract_source_module_name(module)?;
         if ast_name.is_empty() {
             if parent_module_name.is_empty() {
@@ -4488,6 +4488,196 @@ impl VbcCodegen {
     /// perturb TypeId allocation or the descriptor tables.
     pub fn export_type_layouts(&self) -> std::collections::HashMap<String, Vec<String>> {
         self.type_field_layouts.clone()
+    }
+
+    /// Nominal field types accompanying the TypeId-free layout registry.
+    /// A layout alone cannot resolve `record.field.method()` across modules.
+    pub fn export_type_field_names(&self) -> std::collections::HashMap<(String, String), String> {
+        let mut fields = self.type_field_type_names.clone();
+        for ((owner, field), ty) in &mut fields {
+            if let Some(module) = self.type_name_claim_owner.get(owner)
+                && let Some(qualified) = self
+                    .type_field_type_names
+                    .get(&(format!("{module}.{owner}"), field.clone()))
+            {
+                *ty = qualified.clone();
+            }
+        }
+        fields
+    }
+
+    /// Import carried field identities without replacing local declarations.
+    pub fn import_type_field_names(
+        &mut self,
+        fields: &std::collections::HashMap<(String, String), String>,
+    ) {
+        for (key, name) in fields {
+            self.type_field_type_names
+                .entry(key.clone())
+                .or_insert_with(|| name.clone());
+        }
+    }
+
+    /// Field identities rendered in the declaring file's lexical scope.
+    /// Only local declarations and explicit mounts qualify a bare nominal;
+    /// no global suffix search or registration-order inference is used.
+    pub fn declared_field_type_names(
+        &self,
+        module: &Module,
+        parent: &str,
+    ) -> std::collections::HashMap<(String, String), String> {
+        fn mounts(
+            tree: &MountTree,
+            prefix: &str,
+            outer_alias: Option<&verum_ast::ty::Ident>,
+            names: &mut std::collections::HashMap<String, String>,
+        ) {
+            let join = |path: &verum_ast::ty::Path| {
+                let path = path.to_string();
+                if prefix.is_empty() {
+                    path
+                } else {
+                    format!("{prefix}.{path}")
+                }
+            };
+            match &tree.kind {
+                MountTreeKind::Path(path) => {
+                    let full = join(path);
+                    // Relative mounts need the module loader's resolved binding.
+                    // Retain their source spelling instead of inventing an owner.
+                    if full.starts_with('.')
+                        || full.starts_with("super.")
+                        || full.starts_with("self.")
+                        || full.starts_with("cog.")
+                    {
+                        return;
+                    }
+                    let alias = tree.alias.as_ref().or(outer_alias);
+                    let leaf = alias
+                        .map(|id| id.name.as_str())
+                        .unwrap_or_else(|| full.rsplit('.').next().unwrap_or(&full));
+                    names.insert(leaf.to_owned(), full);
+                }
+                MountTreeKind::Nested {
+                    prefix: path,
+                    trees,
+                } => {
+                    let prefix = join(path);
+                    for tree in trees {
+                        mounts(tree, &prefix, None, names);
+                    }
+                }
+                MountTreeKind::Glob(_) | MountTreeKind::File { .. } => {}
+            }
+        }
+        let source_module =
+            Self::resolve_full_module_path(module, parent).unwrap_or_else(|| parent.to_owned());
+        let mut names = std::collections::HashMap::new();
+        for item in &module.items {
+            if let ItemKind::Mount(decl) = &item.kind {
+                mounts(&decl.tree, "", decl.alias.as_ref(), &mut names);
+            }
+        }
+        for item in &module.items {
+            if let ItemKind::Type(decl) = &item.kind {
+                let name = decl.name.name.to_string();
+                names.insert(name.clone(), format!("{source_module}.{name}"));
+            }
+        }
+        let mut fields = std::collections::HashMap::new();
+        for item in &module.items {
+            let ItemKind::Type(decl) = &item.kind else {
+                continue;
+            };
+            let mut scoped_names = names.clone();
+            for param in &decl.generics {
+                use verum_ast::ty::GenericParamKind;
+                match &param.kind {
+                    GenericParamKind::Type { name, .. }
+                    | GenericParamKind::HigherKinded { name, .. }
+                    | GenericParamKind::KindAnnotated { name, .. }
+                    | GenericParamKind::Const { name, .. }
+                    | GenericParamKind::Meta { name, .. }
+                    | GenericParamKind::Context { name }
+                    | GenericParamKind::Level { name } => {
+                        scoped_names.remove(name.name.as_str());
+                    }
+                    GenericParamKind::Lifetime { .. } => {}
+                }
+            }
+            let mut records = Vec::new();
+            let owner = decl.name.name.to_string();
+            match &decl.body {
+                TypeDeclBody::Record(record_fields) => records.push((owner, record_fields)),
+                TypeDeclBody::Variant(variants) => {
+                    for variant in variants {
+                        if let verum_common::Maybe::Some(VariantData::Record(record_fields)) =
+                            &variant.data
+                        {
+                            records.push((format!("{owner}.{}", variant.name.name), record_fields));
+                            records.push((variant.name.name.to_string(), record_fields));
+                        }
+                    }
+                }
+                _ => {}
+            }
+            for (owner, record_fields) in records {
+                for field in record_fields {
+                    let raw = Self::render_field_type_name(&field.ty, true);
+                    // A rank-2 binder introduces its own scope. Preserve the
+                    // complete spelling until qualification can enter that scope
+                    // without rewriting bound variables (T1521).
+                    if raw.contains("fn<") {
+                        fields.insert((owner.clone(), field.name.name.to_string()), raw.clone());
+                        fields.insert(
+                            (
+                                format!("{source_module}.{owner}"),
+                                field.name.name.to_string(),
+                            ),
+                            raw,
+                        );
+                        continue;
+                    }
+                    // Identifiers include dots, so an explicit qualified path
+                    // is preserved as one token; only exact bare bindings change.
+                    let mut qualified = String::new();
+                    let mut at = 0;
+                    while at < raw.len() {
+                        let start = at;
+                        let ch = raw[at..].chars().next().unwrap();
+                        if ch.is_alphabetic() || ch == '_' {
+                            at += ch.len_utf8();
+                            while at < raw.len() {
+                                let ch = raw[at..].chars().next().unwrap();
+                                if !(ch.is_alphanumeric() || ch == '_' || ch == '.') {
+                                    break;
+                                }
+                                at += ch.len_utf8();
+                            }
+                            let token = &raw[start..at];
+                            qualified.push_str(
+                                scoped_names.get(token).map(String::as_str).unwrap_or(token),
+                            );
+                        } else {
+                            qualified.push(ch);
+                            at += ch.len_utf8();
+                        }
+                    }
+                    fields.insert(
+                        (owner.clone(), field.name.name.to_string()),
+                        qualified.clone(),
+                    );
+                    fields.insert(
+                        (
+                            format!("{source_module}.{owner}"),
+                            field.name.name.to_string(),
+                        ),
+                        qualified,
+                    );
+                }
+            }
+        }
+        fields
     }
 
     /// Number of registered type-field layouts.  ARCH-P2 freeze-contract
@@ -7816,6 +8006,14 @@ impl VbcCodegen {
             })();
             self.ctx.current_source_module = previous_scope;
             result?;
+            let fields = self.declared_field_type_names(module, &self.config.module_name);
+            let source_module = Self::resolve_full_module_path(module, &self.config.module_name)
+                .unwrap_or_else(|| self.config.module_name.clone());
+            let prefix = format!("{source_module}.");
+            // Keep local bare field names in their declaring scope. Qualified
+            // metadata is the boundary representation exported to other modules.
+            self.type_field_type_names.extend(fields.into_iter()
+                .filter(|((owner, _), _)| owner.starts_with(&prefix)));
         }
         Ok(())
     }
@@ -22147,6 +22345,53 @@ impl VbcCodegen {
 
     /// Returns the type name of a field within a record type.
     fn field_type_name(&self, type_name: &str, field_name: &str) -> Option<&str> {
+        // An explicit mount owns an unqualified receiver name. Its exact
+        // source-qualified identity wins over an unrelated bare registry slot.
+        // A missing child identity must not resolve to an ancestor's sibling.
+        let local = self
+            .ctx
+            .current_source_module
+            .as_ref()
+            .is_some_and(|module| {
+                self.user_claimed_type_names
+                    .contains(&(module.clone(), type_name.to_owned()))
+            });
+        if !local
+            && !type_name.contains('.')
+            && let Some(path) = self.ctx.mounted_types.get(type_name)
+        {
+            if let Some(ty) = self
+                .type_field_type_names
+                .get(&(path.clone(), field_name.to_owned()))
+            {
+                return Some(ty);
+            }
+            // Archive descriptors carry the declaring file separately from the
+            // directory bundle. Use another registry key only with that proof
+            // AND the same registered TypeId; prefix truncation alone is unsafe.
+            let (module, leaf) = path.rsplit_once('.')?;
+            let descriptor = self.types.iter().find(|descriptor| {
+                self.ctx
+                    .strings
+                    .get(descriptor.name.0 as usize)
+                    .is_some_and(|name| name == leaf)
+                    && descriptor
+                        .origin_module
+                        .and_then(|id| self.ctx.strings.get(id.0 as usize))
+                        .is_some_and(|origin| origin == module)
+            })?;
+            return self
+                .type_name_to_id
+                .iter()
+                .filter(|(_, id)| **id == descriptor.id)
+                .filter_map(|(owner, _)| {
+                    self.type_field_type_names
+                        .get(&(owner.clone(), field_name.to_owned()))
+                        .map(|ty| (owner, ty))
+                })
+                .min_by_key(|(owner, _)| *owner)
+                .map(|(_, ty)| ty.as_str());
+        }
         self.type_field_type_names
             .get(&(type_name.to_string(), field_name.to_string()))
             .map(|s| s.as_str())
@@ -22746,11 +22991,24 @@ impl VbcCodegen {
     /// twin above for the call-scheme contract difference: this one
     /// deliberately flattens `&T`/`&checked T` to `T`).
     pub fn extract_type_name_from_ast(ty: &verum_ast::ty::Type) -> String {
+        Self::render_field_type_name(ty, false)
+    }
+
+    fn render_field_type_name(ty: &verum_ast::ty::Type, qualified_paths: bool) -> String {
         use verum_ast::ty::{GenericArg, PathSegment, TypeKind};
         if let Some(name) = ty.kind.primitive_name() {
             return name.to_string();
         }
         match &ty.kind {
+            TypeKind::Path(path) if qualified_paths => path.segments.iter().map(|segment| {
+                match segment {
+                    PathSegment::Name(ident) => ident.name.as_str(),
+                    PathSegment::SelfValue => "Self",
+                    PathSegment::Super => "super",
+                    PathSegment::Cog => "cog",
+                    PathSegment::Relative => "",
+                }
+            }).collect::<Vec<_>>().join("."),
             TypeKind::Path(path) => {
                 // Get the last segment name (handles qualified paths like core.collections.List)
                 // Self is encoded as PathSegment::SelfValue — surface it as the
@@ -22770,14 +23028,14 @@ impl VbcCodegen {
             }
             TypeKind::Generic { base, args } => {
                 // Preserve generic parameters: List<Token> → "List<Token>"
-                let base_name = Self::extract_type_name_from_ast(base);
+                let base_name = Self::render_field_type_name(base, qualified_paths);
                 if args.is_empty() {
                     base_name
                 } else {
                     let arg_strs: Vec<String> = args
                         .iter()
                         .map(|arg| match arg {
-                            GenericArg::Type(ty) => Self::extract_type_name_from_ast(ty),
+                            GenericArg::Type(ty) => Self::render_field_type_name(ty, qualified_paths),
                             // CONST-GENERIC-VALUE-CARRY-1: render the const
                             // value/name (`StackAllocator<1024>`, symbolic
                             // `B<N>`) so name-carried const witnesses can be
@@ -22821,14 +23079,14 @@ impl VbcCodegen {
             // pointer-array.
             TypeKind::Reference { inner, .. }
             | TypeKind::CheckedReference { inner, .. } => {
-                Self::extract_type_name_from_ast(inner)
+                Self::render_field_type_name(inner, qualified_paths)
             }
             TypeKind::UnsafeReference { inner, .. } => {
-                format!("&unsafe {}", Self::extract_type_name_from_ast(inner))
+                format!("&unsafe {}", Self::render_field_type_name(inner, qualified_paths))
             }
             TypeKind::Pointer { inner, mutable, .. } => {
                 let prefix = if *mutable { "*mut " } else { "*const " };
-                format!("{}{}", prefix, Self::extract_type_name_from_ast(inner))
+                format!("{}{}", prefix, Self::render_field_type_name(inner, qualified_paths))
             }
             // Refinement types erase to their base at runtime — the
             // carrier name IS the base name (`Float{>= 0.0, <= 1.0}` →
@@ -22839,9 +23097,9 @@ impl VbcCodegen {
             // refined-typed record fields (META-REFINED-FIELD-FLOATCMP-1).
             // The refinement PREDICATE is not lost: assert emission reads
             // the AST type directly, never this carrier string.
-            TypeKind::Refined { base, .. } => Self::extract_type_name_from_ast(base),
+            TypeKind::Refined { base, .. } => Self::render_field_type_name(base, qualified_paths),
             TypeKind::Slice(inner) => {
-                format!("[{}]", Self::extract_type_name_from_ast(inner))
+                format!("[{}]", Self::render_field_type_name(inner, qualified_paths))
             }
             // Fixed array `[T; N]` — render as `[T]` (the size is irrelevant
             // for type-name / element-type resolution; `extract_element_type`
@@ -22854,7 +23112,7 @@ impl VbcCodegen {
             // slot index (cap_audit_ring's `slot.state` read the wrong field
             // → garbage seq → SIGSEGV at scale).
             TypeKind::Array { element, .. } => {
-                format!("[{}]", Self::extract_type_name_from_ast(element))
+                format!("[{}]", Self::render_field_type_name(element, qualified_paths))
             }
             // Tuple `(A, B, …)` — render the canonical parenthesised form so
             // downstream tuple-element inference can recover the element
@@ -22867,7 +23125,7 @@ impl VbcCodegen {
             TypeKind::Tuple(elements) => {
                 let elem_names: Vec<String> = elements
                     .iter()
-                    .map(Self::extract_type_name_from_ast)
+                    .map(|ty| Self::render_field_type_name(ty, qualified_paths))
                     .collect();
                 format!("({})", elem_names.join(", "))
             }
@@ -22902,12 +23160,12 @@ impl VbcCodegen {
             } => {
                 let param_names: Vec<String> = params
                     .iter()
-                    .map(Self::extract_type_name_from_ast)
+                    .map(|ty| Self::render_field_type_name(ty, qualified_paths))
                     .collect();
                 format!(
                     "fn({}) -> {}",
                     param_names.join(", "),
-                    Self::extract_type_name_from_ast(return_type)
+                    Self::render_field_type_name(return_type, qualified_paths)
                 )
             }
             TypeKind::Rank2Function {
@@ -22933,13 +23191,13 @@ impl VbcCodegen {
                     .collect();
                 let param_names: Vec<String> = params
                     .iter()
-                    .map(Self::extract_type_name_from_ast)
+                    .map(|ty| Self::render_field_type_name(ty, qualified_paths))
                     .collect();
                 format!(
                     "fn<{}>({}) -> {}",
                     quantified.join(", "),
                     param_names.join(", "),
-                    Self::extract_type_name_from_ast(return_type)
+                    Self::render_field_type_name(return_type, qualified_paths)
                 )
             }
             // Projection spellings must MATCH the archive renderer's
@@ -22953,7 +23211,7 @@ impl VbcCodegen {
             TypeKind::AssociatedType { base, assoc } => format!(
                 "::{}<{}>",
                 assoc.name,
-                Self::extract_type_name_from_ast(base)
+                Self::render_field_type_name(base, qualified_paths)
             ),
             TypeKind::Qualified {
                 self_ty,
@@ -22962,7 +23220,7 @@ impl VbcCodegen {
             } => format!(
                 "::{}<{}>",
                 assoc_name.name,
-                Self::extract_type_name_from_ast(self_ty)
+                Self::render_field_type_name(self_ty, qualified_paths)
             ),
             // A shape with no spelling is named as such rather than as a
             // truncated debug dump. `__opaque_src` is the decoder's
@@ -23091,8 +23349,13 @@ impl VbcCodegen {
         if !type_name.contains('.') {
             if let Some(here) = self.ctx.current_source_module.clone() {
                 if !here.is_empty() {
+                    let qualified = format!("{}.{}", here, type_name);
                     self.type_field_layouts
-                        .insert(format!("{}.{}", here, type_name), field_names.clone());
+                        .insert(qualified.clone(), field_names.clone());
+                    for (name, ty) in field_names.iter().zip(field_types.iter()) {
+                        self.type_field_type_names
+                            .insert((qualified.clone(), name.clone()), ty.clone());
+                    }
                 }
             }
         }

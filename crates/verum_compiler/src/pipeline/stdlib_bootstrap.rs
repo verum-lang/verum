@@ -660,10 +660,22 @@ impl<'s> CompilationPipeline<'s> {
         // inside `resolve_field_index`, is the authority. The qualified key
         // is registered unconditionally because it cannot collide.
         {
+            let field_renderer = VbcCodegen::new();
             let mut layouts_registered = 0usize;
             let mut simple_name_collisions = 0usize;
             for (module_name, ast_modules) in &all_parsed_modules {
                 for (_file_path, ast_module) in ast_modules {
+                    let field_types = field_renderer.declared_field_type_names(ast_module, module_name);
+                    let source_module = VbcCodegen::resolve_full_module_path(ast_module, module_name)
+                        .unwrap_or_else(|| module_name.clone());
+                    let source_prefix = format!("{source_module}.");
+                    for (key, ty) in &field_types {
+                        if key.0.starts_with(&source_prefix) {
+                            self.global_type_field_name_registry
+                                .entry(key.clone())
+                                .or_insert_with(|| ty.clone());
+                        }
+                    }
                     for item in &ast_module.items {
                         let verum_ast::ItemKind::Type(td) = &item.kind else {
                             continue;
@@ -674,16 +686,21 @@ impl<'s> CompilationPipeline<'s> {
                         // payload up under both the qualified `Type.Variant`
                         // spelling and the bare variant name (the
                         // BARE-VARIANT-FIELD-1 arm), so both are registered.
-                        let mut entries: Vec<(String, String, Vec<String>)> = Vec::new();
+                        let mut entries: Vec<(String, String, Vec<String>, Vec<String>)> = Vec::new();
                         let owner = td.name.name.to_string();
                         match &td.body {
-                            verum_ast::decl::TypeDeclBody::Record(fields)
-                                if !fields.is_empty() =>
-                            {
+                            verum_ast::decl::TypeDeclBody::Record(fields) if !fields.is_empty() => {
                                 entries.push((
                                     owner.clone(),
                                     format!("{module_name}.{owner}"),
                                     fields.iter().map(|f| f.name.name.to_string()).collect(),
+                                    fields
+                                        .iter()
+                                        .map(|f| {
+                                            field_types[&(owner.clone(), f.name.name.to_string())]
+                                                .clone()
+                                        })
+                                        .collect(),
                                 ));
                             }
                             verum_ast::decl::TypeDeclBody::Variant(variants) => {
@@ -699,11 +716,22 @@ impl<'s> CompilationPipeline<'s> {
                                     }
                                     let names: Vec<String> =
                                         fields.iter().map(|f| f.name.name.to_string()).collect();
+                                    let types: Vec<String> = fields
+                                        .iter()
+                                        .map(|f| {
+                                            field_types[&(
+                                                format!("{owner}.{}", v.name.name),
+                                                f.name.name.to_string(),
+                                            )]
+                                                .clone()
+                                        })
+                                        .collect();
                                     let vname = v.name.name.to_string();
                                     entries.push((
                                         format!("{owner}.{vname}"),
                                         format!("{module_name}.{owner}.{vname}"),
                                         names.clone(),
+                                        types.clone(),
                                     ));
                                     // Bare variant name, first-wins. Genuinely
                                     // ambiguous across types (the
@@ -712,22 +740,33 @@ impl<'s> CompilationPipeline<'s> {
                                     // why the loser is counted rather than
                                     // overwritten — and why the qualified keys
                                     // above carry the authority.
-                                    entries.push((vname, String::new(), names));
+                                    entries.push((vname, String::new(), names, types));
                                 }
                             }
                             _ => continue,
                         }
-                        for (simple, qualified, names) in entries {
+                        for (simple, qualified, names, types) in entries {
                             if !qualified.is_empty() {
                                 self.global_type_layout_registry
-                                    .entry(qualified)
+                                    .entry(qualified.clone())
                                     .or_insert_with(|| names.clone());
+                                for (field, ty) in names.iter().zip(&types) {
+                                    self.global_type_field_name_registry
+                                        .entry((qualified.clone(), field.clone()))
+                                        .or_insert_with(|| ty.clone());
+                                }
                             }
-                            match self.global_type_layout_registry.entry(simple) {
+                            match self.global_type_layout_registry.entry(simple.clone()) {
                                 std::collections::hash_map::Entry::Occupied(_) => {
                                     simple_name_collisions += 1;
                                 }
                                 std::collections::hash_map::Entry::Vacant(v) => {
+                                    // Bare layout and field types must have the same
+                                    // owner when two modules declare the same leaf.
+                                    for (field, ty) in names.iter().zip(&types) {
+                                        self.global_type_field_name_registry
+                                            .insert((simple.clone(), field.clone()), ty.clone());
+                                    }
                                     v.insert(names);
                                     layouts_registered += 1;
                                 }
@@ -739,8 +778,8 @@ impl<'s> CompilationPipeline<'s> {
             if config.verbose || std::env::var("VERUM_TRACE_STUB").is_ok() {
                 eprintln!(
                     "[stage-layout] pre-registered {layouts_registered} record layouts \
-                     ({simple_name_collisions} simple-name collisions kept under their \
-                     qualified key only)"
+                         ({simple_name_collisions} simple-name collisions kept under their \
+                         qualified key only)"
                 );
             }
         }
@@ -2375,6 +2414,7 @@ one module and therefore never seeded",
         // non-positional global-intern fallback. Additive / first-wins —
         // this module's own declarations (collected just below) always win.
         codegen.import_type_layouts(&self.global_type_layout_registry);
+        codegen.import_type_field_names(&self.global_type_field_name_registry);
         // Seed cross-module type aliases (e.g. `IoError → StreamError`)
         // so a use of an imported alias as a namespace resolves. Additive
         // / first-wins — this module's own alias decls always win.
@@ -2706,6 +2746,9 @@ one module and therefore never seeded",
         // disambiguates those for registered types).
         for (name, layout) in codegen.export_type_layouts() {
             self.global_type_layout_registry.entry(name).or_insert(layout);
+        }
+        for (key, name) in codegen.export_type_field_names() {
+            self.global_type_field_name_registry.entry(key).or_insert(name);
         }
         // Publish this module's type aliases so later modules that mount
         // and use them resolve the alias (companion to the alias-vs-marker

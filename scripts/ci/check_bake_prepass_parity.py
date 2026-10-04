@@ -50,6 +50,12 @@ NOT_A_PREPASS = {
 # bake performs equivalent work (possibly under a different name — record
 # WHICH); "GAP" means it does not, and names the tracking task.
 COVERAGE = {
+    "declared_field_type_names": (
+        "bootstrap",
+        "T1519: the shared collector records source-qualified field identities; "
+        "bootstrap Phase 2.10 calls the same renderer before module compilation "
+        "and transfers the resulting field type registry with layouts.",
+    ),
     "collect_blanket_impls": (
         "bootstrap",
         "Pass 1a.5 in compile_core_module_from_ast calls this same method over "

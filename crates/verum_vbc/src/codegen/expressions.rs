@@ -28443,19 +28443,13 @@ impl VbcCodegen {
                         return Some(elem);
                     }
                     // Try exact match first
-                    if let Some(ft) = self
-                        .type_field_type_names
-                        .get(&(base_type.clone(), field_name.clone()))
-                    {
-                        return Some(ft.clone());
+                    if let Some(ft) = self.field_type_name(&base_type, &field_name) {
+                        return Some(ft.to_owned());
                     }
                     // Try with generic params stripped
                     let stripped = VbcCodegen::strip_generic_args(&base_type);
                     if stripped != base_type {
-                        return self
-                            .type_field_type_names
-                            .get(&(stripped.to_string(), field_name))
-                            .cloned();
+                        return self.field_type_name(stripped, &field_name).map(str::to_owned);
                     }
                 }
                 None
@@ -30340,20 +30334,15 @@ impl VbcCodegen {
                     {
                         return Some(elem);
                     }
-                    if let Some(ft) = self
-                        .type_field_type_names
-                        .get(&(base_type.clone(), field_name.clone()))
-                    {
-                        return Some(ft.clone());
+                    if let Some(ft) = self.field_type_name(&base_type, &field_name) {
+                        return Some(ft.to_owned());
                     }
                     // Try with generic params stripped (e.g., "Map<K, V>" → "Map")
                     let stripped = VbcCodegen::strip_generic_args(&base_type);
                     if stripped != base_type
-                        && let Some(ft) = self
-                            .type_field_type_names
-                            .get(&(stripped.to_string(), field_name.clone()))
+                        && let Some(ft) = self.field_type_name(stripped, &field_name)
                     {
-                        return Some(ft.clone());
+                        return Some(ft.to_owned());
                     }
                 }
                 // Fallback: `<TypeName>.<CONST>` form where the base is
