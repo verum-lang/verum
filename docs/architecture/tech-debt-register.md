@@ -1,5 +1,17 @@
 # Verum Technical-Debt Register
 
+## Native Drop ownership gap — T1538 / T1540 (2026-10-04)
+
+**Open:** native object `DropRef` does not invoke declared user glue; the
+interpreter exposes a separate premature guard drop while wrapping a local
+in `Result`. The measured mutex control is native `1,1,1` versus interpreter
+`false,false,false`, where the contract requires `true,false,false`.
+T1537 addresses field-reference arguments; T1539 addresses direct tail
+handoff. Neither establishes native guard lifecycle correctness.
+See [the measured boundary and shared CBGR implementation plan](native-drop-lifecycle-gap.md).
+No LLVM-local ownership heuristic was added.
+
+
 Status: LIVING DOCUMENT — single consolidated inventory of open debt
 across every layer, with priorities and acceptance criteria. Produced
 from a five-lane repository audit (conformance pins, compiler gap
