@@ -33,21 +33,17 @@ impl TypeSubstitution {
     /// Without this the substitution is empty and every `apply` is a no-op, so
     /// no `Generic` is ever replaced and no protocol-method call devirtualizes.
     pub fn from_function(func: &FunctionDescriptor, args: &[TypeRef]) -> Self {
-        // VARIANT C (T0701): method generics that collide with an
-        // impl-level name are published in the SHADOW BAND (id ≥
-        // 0x8000) after the dense vector.  Receiver type args bind
-        // the DENSE entries only — a band param's concrete type comes
-        // from the call site (the closure), never from the receiver,
-        // so binding it positionally here would recreate the merge
-        // bug this band exists to kill.
-        let dense: Vec<crate::types::TypeParamDescriptor> = func
-            .type_params
-            .iter()
-            .filter(|tp| tp.id.0 < 0x8000)
-            .cloned()
-            .collect();
-        if !dense.is_empty() && dense.len() == args.len() {
-            return Self::new(&dense, args);
+        // T1526/T1528: compact witnesses follow the declaration's exact ID
+        // roster, including shadow parameters. The descriptor owns legacy
+        // indexed compatibility as well; consumers never infer slot identity.
+        if !func.type_params.is_empty() {
+            let mut result = Self::empty();
+            for param in &func.type_params {
+                if let Some(arg) = func.generic_argument(args, param.id) {
+                    result.bind(param.id, arg.clone());
+                }
+            }
+            return result;
         }
         let mut bindings = HashMap::new();
         for (i, arg) in args.iter().enumerate() {
@@ -102,11 +98,18 @@ impl TypeSubstitution {
                 params,
                 return_type,
                 contexts,
-            } => TypeRef::Rank2Function {
-                type_param_count: *type_param_count,
-                params: params.iter().map(|p| self.apply(p)).collect(),
-                return_type: Box::new(self.apply(return_type)),
-                contexts: contexts.clone(),
+            } => {
+                // The locally quantified IDs belong to this function type,
+                // not to the surrounding method/function witness frame.
+                let scoped = Self { bindings: self.bindings.iter()
+                    .filter(|(id, _)| id.0 >= *type_param_count)
+                    .map(|(id, ty)| (*id, ty.clone())).collect() };
+                TypeRef::Rank2Function {
+                    type_param_count: *type_param_count,
+                    params: params.iter().map(|p| scoped.apply(p)).collect(),
+                    return_type: Box::new(scoped.apply(return_type)),
+                    contexts: contexts.clone(),
+                }
             },
             TypeRef::Reference {
                 inner,
@@ -209,5 +212,49 @@ mod tests {
         let result = subst.apply(&generic);
         // Unbound generics remain unchanged
         assert_eq!(result, generic);
+    }
+
+    fn descriptor(ids: &[u16]) -> FunctionDescriptor {
+        let mut function = FunctionDescriptor::default();
+        function.type_params = ids.iter().map(|id| TypeParamDescriptor {
+            id: TypeParamId(*id), name: crate::types::StringId(0),
+            bounds: Default::default(), variance: Variance::Invariant,
+            default: None, type_bounds: Default::default(),
+        }).collect();
+        function
+    }
+
+    #[test]
+    fn compact_shadow_parameters_bind_the_declared_ids() {
+        let subst = TypeSubstitution::from_function(&descriptor(&[0, 0x8000]),
+            &[TypeRef::Concrete(TypeId::INT), TypeRef::Concrete(TypeId::TEXT)]);
+        assert_eq!(subst.apply(&TypeRef::Generic(TypeParamId(0))), TypeRef::Concrete(TypeId::INT));
+        assert_eq!(subst.apply(&TypeRef::Generic(TypeParamId(0x8000))), TypeRef::Concrete(TypeId::TEXT));
+        assert_eq!(subst.apply(&TypeRef::Generic(TypeParamId(1))), TypeRef::Generic(TypeParamId(1)));
+    }
+
+    #[test]
+    fn compact_reordered_and_partial_parameters_keep_identity() {
+        let subst = TypeSubstitution::from_function(&descriptor(&[5, 2]), &[TypeRef::Concrete(TypeId::BOOL)]);
+        assert_eq!(subst.get(TypeParamId(5)), Some(&TypeRef::Concrete(TypeId::BOOL)));
+        assert_eq!(subst.get(TypeParamId(2)), None);
+        assert_eq!(subst.get(TypeParamId(0)), None);
+    }
+
+    #[test]
+    fn rank2_local_parameters_mask_outer_bindings() {
+        let mut subst = TypeSubstitution::empty();
+        subst.bind(TypeParamId(0), TypeRef::Concrete(TypeId::INT));
+        subst.bind(TypeParamId(0x8000), TypeRef::Concrete(TypeId::TEXT));
+        let rank2 = TypeRef::Rank2Function {
+            type_param_count: 1, params: vec![TypeRef::Generic(TypeParamId(0))],
+            return_type: Box::new(TypeRef::Tuple(vec![TypeRef::Generic(TypeParamId(0)), TypeRef::Generic(TypeParamId(0x8000))])),
+            contexts: vec![],
+        };
+        assert_eq!(subst.apply(&rank2), TypeRef::Rank2Function {
+            type_param_count: 1, params: vec![TypeRef::Generic(TypeParamId(0))],
+            return_type: Box::new(TypeRef::Tuple(vec![TypeRef::Generic(TypeParamId(0)), TypeRef::Concrete(TypeId::TEXT)])),
+            contexts: vec![],
+        });
     }
 }
