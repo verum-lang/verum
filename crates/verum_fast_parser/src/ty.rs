@@ -3281,8 +3281,8 @@ impl<'a> RecursiveParser<'a> {
         if self.stream.consume(&TokenKind::Super).is_some() {
             return Ok(PathSegment::Super);
         }
-        let name = self.consume_ident_or_any_keyword()?;
         let span = self.stream.current_span();
+        let name = self.consume_ident_or_any_keyword()?;
         Ok(PathSegment::Name(Ident::new(name, span)))
     }
 
@@ -3306,8 +3306,8 @@ impl<'a> RecursiveParser<'a> {
         }
 
         // Use consume_ident_or_any_keyword to allow keywords (like 'async') as module names
-        let name = self.consume_ident_or_any_keyword()?;
         let span = self.stream.current_span();
+        let name = self.consume_ident_or_any_keyword()?;
         Ok(PathSegment::Name(Ident::new(name, span)))
     }
 
