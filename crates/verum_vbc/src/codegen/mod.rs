@@ -6026,9 +6026,8 @@ impl VbcCodegen {
     ///
     /// Per-variant invariants:
     ///  * `Unit` → `arity == 0` and `fields` is empty.
-    ///  * `Tuple` → `arity > 0` and `fields` is empty (the arity
-    ///  counts payload elements; tuple variants don't
-    ///  use `fields`).
+    ///  * `Tuple` → `arity > 0`; `fields` is either empty for legacy
+    ///  descriptors or carries exactly `arity` positional payload types.
     ///  * `Record` → `arity == 0` and `fields` is non-empty (records
     ///  track their layout in `fields`, not `arity`).
     ///
@@ -7483,15 +7482,13 @@ impl VbcCodegen {
                     VariantKind::Tuple => {
                         // Tuple variants admit two valid `fields` shapes:
                         //
-                        //   * Empty (the import-from-archive form —
-                        //     `import_archive_type` strips fields for
-                        //     Tuple kind because the archive's fields
-                        //     entry is redundant once arity is known).
+                        //   * Empty for legacy descriptors carrying only
+                        //     arity. Import preserves typed payload fields
+                        //     whenever the source descriptor provides them.
                         //
                         //   * Positional `_0`, `_1`, …, `_(arity-1)`
                         //     with `fields.len() == arity` (the
-                        //     fresh-codegen form — see
-                        //     `compile_type_decl` line ~8327, which
+                        //     source-codegen form — `compile_type_decl`
                         //     populates per-slot TypeRef so
                         //     `archive_metadata` can recover the
                         //     payload type for each slot WITHOUT
@@ -24634,6 +24631,16 @@ impl VbcCodegen {
                             f.type_name = *mapped;
                         }
                     }
+                    // Payload fields carry the same refinement metadata as
+                    // record fields; canonicalize both optional StringIds.
+                    if f.refinement_src != StringId::EMPTY {
+                        if let Some(mapped) = string_id_map.get(f.refinement_src.0 as usize) {
+                            f.refinement_src = *mapped;
+                        }
+                        if let Some(mapped) = string_id_map.get(f.refinement_binding.0 as usize) {
+                            f.refinement_binding = *mapped;
+                        }
+                    }
                 }
             }
             // Remap generic type-parameter names from codegen
@@ -25959,35 +25966,25 @@ impl VbcCodegen {
             });
         }
 
-        // Variants (each carries its own field list).  Type-layout
-        // invariants per `verify_type_layout_invariants`:
-        //  * Unit  — `arity == 0` AND `fields.is_empty()`
-        //  * Tuple — `arity > 0`  AND `fields.is_empty()` (payload
-        //    count lives in `arity`, NOT in `fields`)
-        //  * Record — `arity == 0` AND `!fields.is_empty()` (named
-        //    field metadata lives in `fields`)
-        // Some archive precompile sites populate `fields` for Tuple
-        // variants too (positional `_0`/`_1` synthesised names) — our
-        // import strips them to keep the codegen-time invariant
-        // checker happy.
+        // Both tuple and record variants carry structural payload types.
+        // Arity alone cannot identify a tuple slot's generic parameter.
+        // Like record fields above, TypeRefs remain in the caller-supplied
+        // space: bootstrap has already remapped them, while ordinary archive
+        // import supplies source-local references. Only StringIds translate
+        // here; applying a source TypeId map again would corrupt bootstrap.
         let mut new_variants: smallvec::SmallVec<[crate::types::VariantDescriptor; 4]> =
             smallvec::SmallVec::new();
         for v in ty.variants.iter() {
-            let copy_fields = matches!(v.kind, crate::types::VariantKind::Record);
             let mut v_fields: smallvec::SmallVec<[crate::types::FieldDescriptor; 4]> =
                 smallvec::SmallVec::new();
-            if copy_fields {
-                for fd in v.fields.iter() {
-                    v_fields.push(crate::types::FieldDescriptor {
-                        name: intern(self, fd.name),
-                        // UNIFIED-CROSS-MODULE-TYPE-IDENTITY (T0109): re-intern
-                        // the variant field's carried type NAME (archive→local).
-                        type_name: intern(self, fd.type_name),
-                        refinement_src: intern(self, fd.refinement_src),
-                        refinement_binding: intern(self, fd.refinement_binding),
-                        ..fd.clone()
-                    });
-                }
+            for fd in v.fields.iter() {
+                v_fields.push(crate::types::FieldDescriptor {
+                    name: intern(self, fd.name),
+                    type_name: intern(self, fd.type_name),
+                    refinement_src: intern(self, fd.refinement_src),
+                    refinement_binding: intern(self, fd.refinement_binding),
+                    ..fd.clone()
+                });
             }
             // Tuple variants use `arity`; record variants use
             // `fields.len()`. Re-derive arity for record variants so

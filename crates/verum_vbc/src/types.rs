@@ -1189,7 +1189,8 @@ pub struct VariantDescriptor {
     pub kind: VariantKind,
     /// Tuple arity (for tuple variants).
     pub arity: u8,
-    /// Fields (for record variants).
+    /// Named record fields or positional tuple payload fields (`_0`, `_1`, …).
+    /// Legacy tuple descriptors may omit these and carry only `arity`.
     pub fields: SmallVec<[FieldDescriptor; 4]>,
 }
 
