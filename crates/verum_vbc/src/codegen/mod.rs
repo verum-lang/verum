@@ -19628,8 +19628,12 @@ impl VbcCodegen {
                 }
                 let var_type = self.type_kind_to_var_type(&ty.kind);
                 self.ctx.register_variable_type(param_name, var_type);
-                // Track type name for field index resolution
-                let raw_type_name = Self::extract_type_name_from_ast(ty);
+                // Preserve the written nominal owner for field/method lookup.
+                // The field carrier still flattens ordinary references; the
+                // reference_bound_vars fact above retains that distinction.
+                // Losing alpha/beta here makes both parameters read whichever
+                // bare Envelope field metadata was imported first (T1519).
+                let raw_type_name = Self::render_field_type_name(ty, true);
                 let type_name = if let Some(concrete) = impl_type_name {
                     Self::substitute_self_in_type_name(&raw_type_name, concrete)
                 } else {
