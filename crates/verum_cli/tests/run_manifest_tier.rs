@@ -113,3 +113,9 @@ fn unknown_explicit_tier_is_rejected() {
     assert!(!observation.0.status.success());
     assert!(observation.contains("unknown tier"), "{:?}", observation.0);
 }
+
+#[test]
+fn feature_overrides_select_the_effective_manifest_tier() {
+    project(Some("interpret"), &["-Z", "codegen.tier=aot"], false).aot();
+    project(Some("aot"), &["-Z", "codegen.tier=interpret"], false).interpreter();
+}
