@@ -3220,47 +3220,23 @@ fn run_command(cli: Cli) -> Result<()> {
             // variant (file / project / -e / stdin). Idempotent.
             verum_compiler::api::ensure_scripting_compiler_installed();
 
- // Tier resolution precedence:
- // 1. `--interp` / `--aot` shortcuts on the Run command
- // 2. `--tier` from LanguageFeatureOverrides
- // (accepts interpret|aot|check; "check" is invalid
- // for `run` and yields an error)
- // 3. default: interpreter
-            let tier_from_override = feature_overrides
-                .tier
-                .as_ref()
-                .map(|t| t.as_str().to_string());
+            // Preserve whether a tier was actually requested: project runs
+            // otherwise resolve their manifest, while file/eval/stdin retain
+            // their interpreter default.
+            let resolved = tier::resolve(
+                interp,
+                aot,
+                feature_overrides.tier.as_ref(),
+                tier::Tier::Interpret,
+            )?;
+            let tier_num = resolved.explicit.then_some(match resolved.tier {
+                tier::Tier::Interpret => 0,
+                tier::Tier::Aot => 1,
+            });
             feature_overrides::install(feature_overrides);
 
-            let tier_num: Option<u8> = if interp {
-                Some(0)
-            } else if aot {
-                Some(1)
-            } else {
-                match tier_from_override.as_deref() {
-                    Some("interpret") | Some("interpreter") => Some(0),
-                    Some("aot") => Some(1),
-                    Some("check") => {
-                        return Err(CliError::InvalidArgument(
-                            "--tier check is for `verum check`, not `verum run`".into(),
-                        ));
-                    }
-                    Some(other) => {
-                        return Err(CliError::InvalidArgument(format!(
-                            "unknown tier `{}` (expected interpret|aot)",
-                            other
-                        )));
-                    }
-                    None => Some(0), // default = interpreter
-                }
-            };
-
             let args_list: List<Text> = args.into_iter().map(|s| s.into()).collect();
-            let tier_label = if tier_num == Some(1) {
-                "aot"
-            } else {
-                "interpreter"
-            };
+            let tier_label = resolved.tier.as_str();
 
             verum_error::crash::set_command("run");
             verum_error::crash::set_tier(tier_label);

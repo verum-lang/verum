@@ -66,6 +66,8 @@ pub fn execute(
         }
     };
 
+    verum_error::crash::set_tier(compilation_tier.name());
+
     let mode = if release { "release" } else { "debug" };
     let bin_name = if let Some(b) = bin {
         b

@@ -8,9 +8,9 @@
 //!
 //! `--interp` and `--aot` are mutually exclusive in the clap definition;
 //! the resolver additionally reports a clean error if the `--tier` value
-//! is unknown, and lets each command pin its own default (e.g. `run` and
-//! `bench` default to AOT; `check`-style commands may pick a different
-//! default).
+//! is unknown, and lets each command pin its own default. Project `run`
+//! preserves an absent explicit selector so the manifest can choose the
+//! tier; file/eval/stdin default to interpretation, and `bench` to AOT.
 
 use crate::error::{CliError, Result};
 use verum_common::Text;
