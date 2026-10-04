@@ -57,6 +57,7 @@ pub mod registers;
 mod bootstrap_types;
 mod expressions;
 mod parsed_field_types;
+mod associated_types;
 mod statements;
 
 #[cfg(test)]

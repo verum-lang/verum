@@ -240,3 +240,132 @@ fn staged_default_method_remaps_only_its_source_owned_signature_in_both_orders()
         assert_eq!(generic[1], Some(verum_vbc::types::TypeParamId(2)));
     }
 }
+
+fn projected_consumer(
+    extra: &str,
+    associated: &str,
+    target: &str,
+    actual: &str,
+) -> (VbcModule, VbcCodegen) {
+    let source = parse(&format!(
+        r#"
+module alpha.adapters;
+type Payload is {{ value:Int }};
+type Envelope<T> is {{ value:T }};
+type Stage<T> is {{ value:T }};
+type Wrapped<I,F> is {{ owner:I, callback:F }};
+type Transform is protocol {{
+ type {associated};
+ fn transform<R,F:fn(Self.{associated})->R>(self,f:F)->Wrapped<Self,F> {{ Wrapped {{owner:self,callback:f}} }}
+}};
+implement<T> Transform for Stage<T> {{ type {associated}={target}; }}
+implement<I,F> Wrapped<I,F> {{ fn finish<C>(self)->C {{ C.default() }} }}
+{extra}
+"#
+    ));
+    let mut producer = VbcCodegen::with_config(CodegenConfig::new("alpha"));
+    producer
+        .collect_unit_declarations(&[&source])
+        .expect("provider declarations");
+    producer.resolve_pending_imports();
+    producer
+        .compile_pending_default_methods()
+        .expect("defaults");
+    producer
+        .compile_items_into_state(&source)
+        .expect("provider bodies");
+    let provider = producer.finalize_module_from_state().expect("provider");
+    let caller = parse(&format!(
+        "module consumer; mount alpha.adapters.{{Stage,Payload}}; fn probe(stage:{actual})->Int {{ stage.transform(|x|x).finish<Int>() }}"
+    ));
+    let mut cg = VbcCodegen::with_config(CodegenConfig::new("consumer"));
+    cg.import_functions(&producer.export_functions());
+    cg.import_protocols(&producer.export_protocols());
+    cg.import_bootstrap_nominal_dependencies(&[&caller], &[&provider])
+        .expect("nominal boundary");
+    cg.collect_unit_declarations(&[&caller])
+        .expect("declarations");
+    let module = cg.compile_function_bodies(&caller).expect("caller");
+    (module, cg)
+}
+fn callable(module: &VbcModule) -> &verum_vbc::module::FunctionDescriptor {
+    module
+        .functions
+        .iter()
+        .find(|f| {
+            module
+                .strings
+                .get(f.name)
+                .is_some_and(|n| n.contains("$closure$"))
+        })
+        .expect("closure")
+}
+fn finish_witness(module: &VbcModule) -> List<TypeRef> {
+    let mut pc = 0;
+    while pc < module.bytecode.len() {
+        if let verum_vbc::instruction::Instruction::CallG {
+            func_id, type_args, ..
+        } = verum_vbc::bytecode::decode_instruction(&module.bytecode, &mut pc).expect("decode")
+        {
+            if module
+                .band_reference_name(func_id)
+                .is_some_and(|n| n.ends_with("Wrapped.finish"))
+            {
+                return type_args.into();
+            }
+        }
+    }
+    panic!("finish witness")
+}
+#[test]
+fn default_associated_callable_parameter_reaches_the_following_method() {
+    let (module, _) = projected_consumer("", "Item", "T", "Stage<Payload>");
+    let payload = nominal(&module, "Payload");
+    assert_eq!(callable(&module).params[1].type_ref, payload);
+    assert_eq!(callable(&module).return_type, payload);
+    assert_eq!(
+        finish_witness(&module)[1],
+        TypeRef::Function {
+            params: vec![payload.clone()],
+            return_type: Box::new(payload),
+            contexts: Default::default()
+        }
+    );
+}
+#[test]
+fn arbitrary_nested_associated_binding_does_not_depend_on_iterator_names() {
+    let (module, _) = projected_consumer("", "Argument", "Envelope<T>", "Stage<Payload>");
+    let TypeRef::Concrete(base) = nominal(&module, "Envelope") else {
+        panic!("envelope")
+    };
+    let expected = TypeRef::Instantiated {
+        base,
+        args: vec![nominal(&module, "Payload")],
+    };
+    assert_eq!(callable(&module).params[1].type_ref, expected);
+    assert_eq!(callable(&module).return_type, expected);
+    assert!(
+        matches!(&finish_witness(&module)[1],TypeRef::Function{params,..} if params==&[expected])
+    );
+}
+#[test]
+fn ambiguous_associated_binding_cannot_certify_a_callable() {
+    let extra =
+        "type Other is protocol { type Item; }; implement<T> Other for Stage<T> { type Item=Int; }";
+    let (module, _) = projected_consumer(extra, "Item", "T", "Stage<Payload>");
+    assert!(
+        finish_witness(&module)[1].is_generic(),
+        "two incompatible Item declarations cannot select first"
+    );
+}
+#[test]
+fn malformed_owner_arity_cannot_partially_instantiate_projection() {
+    let (module, _) = projected_consumer("", "Item", "T", "Stage<Payload,Int>");
+    assert!(finish_witness(&module)[1].is_generic());
+}
+
+#[test]
+fn recursive_associated_binding_remains_unknown() {
+    let (module, _) = projected_consumer("", "Item", "Self.Item", "Stage<Payload>");
+    assert!(finish_witness(&module)[1].is_generic());
+}

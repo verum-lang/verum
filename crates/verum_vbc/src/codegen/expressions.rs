@@ -32198,7 +32198,7 @@ impl VbcCodegen {
             }
         }
         let hints: verum_common::List<_> = params.iter().map(|ty| {
-            let ty = substitution.apply(ty);
+            let ty = self.resolve_declared_associated_types(&substitution.apply(ty))?;
             (!ty.is_generic() && self.callable_type_name(&ty).is_some()).then_some(ty)
         }).collect();
         hints.iter().any(Option::is_some).then_some(hints)
