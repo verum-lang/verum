@@ -1,12 +1,14 @@
 //! Nominal dependencies of a source unit compiled against earlier bootstrap units.
 
 use super::{
-    CodegenError, CodegenResult, VbcCodegen, copy_remapped_data_type_carriers, remap_type_ref_archive,
+    CodegenError, CodegenResult, FunctionInfo, VbcCodegen, copy_remapped_data_type_carriers,
+    remap_type_ref_archive,
 };
-use crate::module::{FunctionDescriptor, VbcModule};
+use crate::module::{FunctionDescriptor, FunctionId, VbcModule};
 use crate::types::{TypeDescriptor, TypeId, TypeRef};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use verum_ast::{ItemKind, MountTree, MountTreeKind, Visitor};
+use verum_common::Map;
 
 pub(super) fn identity(module: &VbcModule, ty: &TypeDescriptor) -> Option<String> {
     let name = module.strings.get(ty.name)?;
@@ -460,6 +462,7 @@ impl VbcCodegen {
         }
         // FunctionInfo is another pool-owned TypeRef carrier: leaving its
         // return in the source pool would undo the type import on a call chain.
+        let mut signatures = Map::new();
         for (mi, fi) in function_sites {
             let module = available[mi];
             let function = &module.functions[fi];
@@ -478,20 +481,20 @@ impl VbcCodegen {
                     (0..function.params.len()).map(|index|
                         function.parameter_generic_id(index, |name| module.strings.get(name))).collect(),
                 );
-                for info in self
-                    .ctx
-                    .functions
-                    .values_mut()
-                    .filter(|info| info.id.0 == id)
-                {
-                    info.return_type = Some(result.clone());
-                    info.yield_type = function
-                        .yield_type
-                        .as_ref()
-                        .map(|ty| remap_type_ref_archive(ty, &maps[mi]));
-                }
+                // Preserve the ordered sites' last update for a shared ID.
+                // Resolution reads names/IDs only, so signatures can be applied
+                // together after all source-owned parameter facts are carried.
+                signatures.insert(
+                    FunctionId(id),
+                    (
+                        result,
+                        function.yield_type.as_ref()
+                            .map(|ty| remap_type_ref_archive(ty, &maps[mi])),
+                    ),
+                );
             }
         }
+        apply_function_signatures(self.ctx.functions.values_mut(), &signatures);
         Ok(selected.len())
     }
 
@@ -535,3 +538,24 @@ impl VbcCodegen {
             .map(|info| info.id.0)
     }
 }
+
+// Read current alias ownership once; a persistent reverse index could retain
+// names that authoritative registration has since rebound to another ID.
+fn apply_function_signatures<'a>(
+    functions: impl Iterator<Item = &'a mut FunctionInfo>,
+    signatures: &Map<FunctionId, (TypeRef, Option<TypeRef>)>,
+) {
+    if signatures.is_empty() {
+        return;
+    }
+    for info in functions {
+        if let Some((result, yielded)) = signatures.get(&info.id) {
+            info.return_type = Some(result.clone());
+            info.yield_type = yielded.clone();
+        }
+    }
+}
+
+#[cfg(test)]
+#[path = "../../tests/codegen/bootstrap_signature_updates.rs"]
+mod signature_update_tests;
