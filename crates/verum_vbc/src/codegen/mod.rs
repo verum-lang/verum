@@ -10518,7 +10518,25 @@ impl VbcCodegen {
         let return_type = func
             .return_type
             .as_ref()
-            .map(|ret_ty| self.ast_type_to_type_ref(ret_ty));
+            .map(|ret_ty| {
+                // Free-function registration precedes body compilation,
+                // so its generic names are not in the current body scope.
+                // Preserve a declared bare result parameter instead of
+                // lowering it to the unknown-name pointer carrier (T1506).
+                if let verum_ast::ty::TypeKind::Path(path) = &ret_ty.kind
+                    && let Some(result_name) = path.as_ident()
+                    && let Some(index) = func.generics.iter().filter_map(|param| {
+                        match &param.kind {
+                            verum_ast::ty::GenericParamKind::Type { name, .. } => Some(name),
+                            _ => None,
+                        }
+                    }).position(|name| name.name == result_name.name)
+                {
+                    TypeRef::Generic(crate::types::TypeParamId(index as u16))
+                } else {
+                    self.ast_type_to_type_ref(ret_ty)
+                }
+            });
 
         // Extract intrinsic name from @intrinsic("name") attribute if present.
         // This enables industrial-grade intrinsic resolution at declaration time.
@@ -20530,6 +20548,10 @@ impl VbcCodegen {
 
     /// Compiles a block.
     fn compile_block(&mut self, block: &Block) -> CodegenResult<Option<Reg>> {
+        // Function-body locals remain available to the playground's final
+        // type report. Nested lexical blocks restore their outer bindings.
+        let outer_type_names = (self.ctx.registers.scope_level() > 0)
+            .then(|| self.ctx.variable_type_names.clone());
         self.ctx.enter_scope();
 
         let mut result = None;
@@ -20547,6 +20569,19 @@ impl VbcCodegen {
         // Compile trailing expression
         if let Some(ref expr) = block.expr {
             result = self.compile_expr(expr)?;
+        }
+
+        // T1506: preserve the result while its binding is still in scope.
+        // Re-reading a tail name later can see a shadow or a sibling local.
+        if block.span.start < block.span.end {
+            let result_type = block.expr.as_ref().and_then(|expr| {
+                self.extract_expr_type_name(expr)
+                    .or_else(|| self.infer_expr_type_name(expr))
+            });
+            self.ctx.compiled_block_result_types.insert(
+                block.span,
+                result_type.map(verum_common::Text::from),
+            );
         }
 
         // CRITICAL FIX: Copy result to a new register BEFORE exiting scope.
@@ -20633,6 +20668,10 @@ impl VbcCodegen {
                 continue;
             }
             self.ctx.emit(Instruction::DropRef { src: *var_reg });
+        }
+
+        if let Some(outer_type_names) = outer_type_names {
+            self.ctx.variable_type_names = outer_type_names;
         }
 
         Ok(final_result)

@@ -1479,6 +1479,32 @@ impl VbcCodegen {
             self.ctx.emit(Instruction::LoadUnit { dst: reg });
             Some(reg)
         };
+        // A block's result type becomes available while compiling its
+        // locals. Consume that carried fact after the initializer, rather
+        // than keeping a pre-compilation guess from an outer binding.
+        if ty.is_none()
+            && let verum_ast::PatternKind::Ident { name, .. } = &pattern.kind
+            && let Some(expr) = value
+        {
+            let mut inner = expr;
+            while let verum_ast::ExprKind::Paren(nested) = &inner.kind {
+                inner = nested;
+            }
+            if matches!(inner.kind,
+                verum_ast::ExprKind::Block(_)
+                | verum_ast::ExprKind::Unsafe(_)
+                | verum_ast::ExprKind::If { .. }
+                | verum_ast::ExprKind::Match { .. }
+            ) {
+                let result_type = self.extract_expr_type_name(expr)
+                    .or_else(|| self.infer_expr_type_name(expr));
+                if let Some(result_type) = result_type {
+                    self.ctx.variable_type_names.insert(name.name.to_string(), result_type);
+                } else {
+                    self.ctx.variable_type_names.remove(name.name.as_str());
+                }
+            }
+        }
         // Restore regardless of whether the transmute arm consumed the hint.
         self.ctx.pending_transmute_target = saved_transmute_target;
         self.ctx.pending_annotation_witnesses = saved_annotation_witnesses;

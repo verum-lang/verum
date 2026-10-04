@@ -413,6 +413,12 @@ pub struct CodegenContext {
     /// Used to determine if `==` should dispatch to a custom `implement Eq` method.
     pub variable_type_names: HashMap<String, String>,
 
+    /// Result types captured before a block's local bindings leave scope.
+    /// A missing result is a fact too: it must not be re-derived from a
+    /// same-named local belonging to a later sibling block (T1506).
+    pub compiled_block_result_types:
+        Map<verum_ast::Span, verum_common::Maybe<verum_common::Text>>,
+
     /// Element type of an array/slice-annotated local, by variable name.
     ///
     /// Separate from [`variable_type_names`] on purpose: that map holds
@@ -978,6 +984,8 @@ pub struct ClosureCompilationContext {
     pub defer_stack: Vec<Vec<DeferInfo>>,
     /// Saved variable type names (critical for method resolution).
     pub variable_type_names: HashMap<String, String>,
+    pub compiled_block_result_types:
+        Map<verum_ast::Span, verum_common::Maybe<verum_common::Text>>,
     /// T0701: the let-annotation / return-context stash.  Closure
     /// compilation runs begin_function/end_function INSIDE an
     /// expression, and end_function nulls this channel — the sidecar's
@@ -1648,6 +1656,7 @@ impl CodegenContext {
             variable_types: HashMap::new(),
             constant_types: HashMap::new(),
             variable_type_names: HashMap::new(),
+            compiled_block_result_types: Map::new(),
             array_element_type_names: HashMap::new(),
             reference_bindings: std::collections::HashSet::new(),
             object_ref_param_regs: std::collections::HashSet::new(),
@@ -2579,6 +2588,7 @@ impl CodegenContext {
             self.last_function_variable_types = self.variable_type_names.clone();
         }
         self.variable_type_names.clear();
+        self.compiled_block_result_types.clear();
         self.reference_bound_vars.clear();
         self.array_element_type_names.clear();
         // Pillar 1: register-keyed — must not leak across functions (and
@@ -4459,6 +4469,7 @@ impl CodegenContext {
             loop_stack: self.loop_stack.clone(),
             defer_stack: self.defer_stack.clone(),
             variable_type_names: self.variable_type_names.clone(),
+            compiled_block_result_types: self.compiled_block_result_types.clone(),
             current_return_type_name: self.current_return_type_name.clone(),
             current_return_type_full: self.current_return_type_full.clone(),
             reference_bindings: self.reference_bindings.clone(),
@@ -4479,6 +4490,7 @@ impl CodegenContext {
         self.loop_stack = saved.loop_stack;
         self.defer_stack = saved.defer_stack;
         self.variable_type_names = saved.variable_type_names;
+        self.compiled_block_result_types = saved.compiled_block_result_types;
         self.reference_bindings = saved.reference_bindings;
         self.object_ref_param_regs = saved.object_ref_param_regs;
     }
@@ -4624,6 +4636,7 @@ impl CodegenContext {
         self.variable_type_names.clear();
         self.reference_bound_vars.clear();
         self.generic_type_params.clear();
+        self.compiled_block_result_types.clear();
         self.generic_type_params_ordered.clear();
         self.const_generic_params.clear();
         self.clear_required_contexts();

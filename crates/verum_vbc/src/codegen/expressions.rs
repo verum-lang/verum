@@ -28294,7 +28294,8 @@ impl VbcCodegen {
                     // Degenerate carriers ("Heap<>" / bare "Heap") report
                     // UNKNOWN — see the infer_expr_type_name mirror arm.
                     let wrapper_base = t.split('<').next().unwrap_or(t);
-                    if wrapper_base == "Heap" || wrapper_base == "Shared" {
+                    let wrapper_leaf = wrapper_base.rsplit('.').next().unwrap_or(wrapper_base);
+                    if wrapper_leaf == "Heap" || wrapper_leaf == "Shared" {
                         return match Self::extract_element_type(t) {
                             Some(inner_t) if !inner_t.trim().is_empty() => Some(inner_t),
                             _ => None,
@@ -28316,6 +28317,27 @@ impl VbcCodegen {
                         .or_else(|| t.strip_prefix("*volatile "))
                     {
                         return Some(stripped.trim().to_string());
+                    }
+                    // User-defined Deref has the same type contract as
+                    // the operator lowering: deref() returns a reference
+                    // to the result, not the wrapper itself. Preserve the
+                    // receiver's instantiation (e.g. Guard<List<Int>>).
+                    if let Some(info) = self.ctx.lookup_function(&format!("{wrapper_base}.deref"))
+                        && let Some(target) = info.return_type_name.as_deref()
+                    {
+                        let params = self.ctx.type_generic_params.get(wrapper_base)
+                            .or_else(|| self.collection_type_params.get(wrapper_base));
+                        let actual = Self::split_generic_args(t);
+                        let target = match params {
+                            Some(params) => Self::substitute_generic_params_in_type_name(
+                                target, params, &actual,
+                            ),
+                            None => target.to_string(),
+                        };
+                        return Some(target.trim_start_matches("&checked ")
+                            .trim_start_matches("&unsafe ")
+                            .trim_start_matches("&mut ")
+                            .trim_start_matches('&').trim().to_string());
                     }
                 }
                 inner_type
@@ -28428,21 +28450,8 @@ impl VbcCodegen {
                     _ => None,
                 }
             }
-            // Unsafe block: unsafe { expr } → type is the block's trailing expression
-            ExprKind::Unsafe(block) => {
-                if let verum_common::Maybe::Some(ref expr) = block.expr {
-                    self.extract_expr_type_name(expr)
-                } else {
-                    None
-                }
-            }
-            // Block expression: { ...; expr } → type is trailing expression
-            ExprKind::Block(block) => {
-                if let verum_common::Maybe::Some(ref expr) = block.expr {
-                    self.extract_expr_type_name(expr)
-                } else {
-                    None
-                }
+            ExprKind::Unsafe(block) | ExprKind::Block(block) => {
+                self.extract_type_from_block(block)
             }
             // Static method call: OSError.new(...) or instance method call returning Maybe
             ExprKind::MethodCall {
@@ -29074,6 +29083,21 @@ impl VbcCodegen {
                             // type correctly, hence the 2-of-3 split where
                             // explicit-annotation tests passed.
                             if let Some(ref ret_type) = func_info.return_type_name {
+                                // T1506: a bare generic return (`identity<T>
+                                // -> T`, `replace<T> -> T`) needs the same
+                                // call-site substitution as a nested generic
+                                // return. The TypeRef proves this is a type
+                                // parameter; a short uppercase nominal name
+                                // is not evidence of genericity.
+                                if matches!(func_info.return_type, Some(crate::types::TypeRef::Generic(_)))
+                                    && let Some(concrete) = self.resolve_generic_from_args(
+                                        ret_type,
+                                        &func_info.param_type_names,
+                                        args,
+                                    )
+                                {
+                                    return Some(concrete);
+                                }
                                 if let Some(ref inner) = func_info.return_type_inner
                                     && !inner.is_empty()
                                     && !ret_type.contains('<')
@@ -29496,6 +29520,18 @@ impl VbcCodegen {
 
     /// Extracts the type from a block by looking at its trailing expression or last statement.
     fn extract_type_from_block(&self, block: &verum_ast::Block) -> Option<String> {
+        if block.span.start < block.span.end
+            && let Some(result) = self.ctx.compiled_block_result_types.get(&block.span)
+        {
+            return result.as_ref().map(ToString::to_string);
+        }
+        // Local declarations have not been compiled yet. Their tail name
+        // cannot be looked up in the surrounding scope: it may name a
+        // different value there. compile_block captures the actual result
+        // while these locals are live, and compile_let consumes that fact.
+        if !block.stmts.is_empty() {
+            return None;
+        }
         // Check trailing expression first (e.g., `{ m.r0 }` where m.r0 is the expr)
         if let verum_common::Maybe::Some(ref trailing_expr) = block.expr {
             return self.extract_expr_type_name(trailing_expr);
