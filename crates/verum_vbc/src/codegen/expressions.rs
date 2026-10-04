@@ -27258,6 +27258,23 @@ impl VbcCodegen {
             .compile_expr(inner)?
             .or_internal("cast source has no value")?;
 
+        // T1537: a raw-address conversion must remain an operation across
+        // backends. A passthrough loses the address when native RefField keeps
+        // a loaded value alongside its original cell provenance.
+        if matches!(ty.kind, TypeKind::UnsafeReference { .. } | TypeKind::Pointer { .. }) {
+            let dst = self.ctx.alloc_temp();
+            let mut operands = Vec::new();
+            Self::write_reg(&mut operands, dst.0);
+            Self::write_reg(&mut operands, src_reg.0);
+            self.ctx.emit(Instruction::CbgrExtended {
+                sub_op: crate::instruction::CbgrSubOpcode::ToRawPtr as u8,
+                operands,
+            });
+            self.ctx.mark_raw_pointer(dst);
+            self.ctx.free_temp(src_reg);
+            return Ok(Some(dst));
+        }
+
         // Determine source type from expression
         let src_kind = self.infer_expr_type_kind(inner);
 

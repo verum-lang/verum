@@ -657,3 +657,25 @@ not patches.
 Reproduction: the two rungs above, `verum run --tier aot`. The chapter
 that first showed it is `docs/by-example/19-file-io/main.vr`, whose
 `BufRead.read_until` walks `available.iter().enumerate()`.
+
+
+## Field references passed as arguments (T1537)
+
+Native `RefField` lowering can retain a loaded field value for existing value
+consumers while also carrying the original field address. The address has a
+runtime slot for each possible register alias, initialized at function entry,
+cleared on every value definition and copied by `Mov`. This keeps branch joins,
+loop backedges and register reuse from selecting another field's address.
+The alias set is computed by a finite worklist before instruction lowering.
+
+Calls whose declared parameter is a scalar reference or an unsafe reference use
+that original address. Record references retain their existing object-handle
+ABI. Raw-pointer casts use the existing `ToRawPtr` opcode, so they consume the
+same address provenance. A spill of the loaded value cannot implement this
+contract: writes and atomic waits must refer to the original cell.
+
+`field_reference_arguments` checks source-to-native mutation, aliases, branch
+selection, loops, method arguments, by-value controls and the nonblocking futex
+mismatch path. `raw_field_reference_cast` checks the interpreter side. This
+change does not unify unresolved generic, aggregate-carried or iterator element
+reference representations, and does not implement native ownership/drop glue.

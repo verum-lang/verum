@@ -11347,6 +11347,85 @@ fn is_shared_wrapper(type_name: &str) -> bool {
 /// - Strategy 1/2: Compiled stdlib dispatch (list.vr, map.vr, text.vr, etc.)
 /// - Strategy 3: C runtime fallback
 /// - Strategy 4: Direct LLVM function call
+/// The current native ABI passes scalar references as cell addresses and
+/// record references as object handles. Use the declaration, never callee names.
+fn parameter_uses_cell_address(param: &verum_vbc::module::ParamDescriptor) -> bool {
+    use verum_vbc::types::{TypeId, TypeRef};
+    match &param.type_ref {
+        TypeRef::Reference { inner, tier, .. } => {
+            *tier == verum_vbc::types::CbgrTier::Tier2
+                || matches!(inner.as_ref(),
+                TypeRef::Concrete(tid) if matches!(*tid,
+                    TypeId::INT | TypeId::FLOAT | TypeId::BOOL | TypeId::U8 |
+                    TypeId::I8 | TypeId::U16 | TypeId::I16 | TypeId::U32 |
+                    TypeId::I32 | TypeId::U64 | TypeId::F32 | TypeId::PTR))
+        }
+        _ => false,
+    }
+}
+
+fn field_address_or_value<'ctx>(
+    ctx: &FunctionContext<'_, 'ctx>,
+    reg: u16,
+    value: BasicValueEnum<'ctx>,
+    name: &str,
+) -> Result<BasicValueEnum<'ctx>> {
+    let Some(address) = ctx.field_reference_address(reg)? else {
+        return Ok(value);
+    };
+    let raw = as_i64(ctx, value, "field_ref_value")?;
+    let present = ctx
+        .builder()
+        .build_int_compare(
+            IntPredicate::NE,
+            address,
+            ctx.types().i64_type().const_zero(),
+            "field_ref_present",
+        )
+        .or_llvm_err()?;
+    ctx.builder()
+        .build_select(present, address, raw, name)
+        .or_llvm_err()
+}
+
+/// Precompute the finite set of registers that can carry field provenance.
+/// Runtime sidecars, rather than linear SSA facts, preserve branch selections.
+pub(super) fn prepare_field_reference_slots(
+    ctx: &mut FunctionContext<'_, '_>,
+    instructions: &[Instruction],
+) -> Result<()> {
+    use verum_common::{List, Map, Set};
+    let mut aliases = Set::new();
+    let mut moves: Map<u16, List<u16>> = Map::new();
+    for ins in instructions {
+        match ins {
+            Instruction::CbgrExtended {
+                sub_op: CBGR_SUB_REF_FIELD,
+                operands,
+            } if operands.len() >= 3 => {
+                aliases.insert(op_reg(operands, 0));
+            }
+            Instruction::Mov { dst, src } => {
+                moves.entry(src.0).or_default().push(dst.0);
+            }
+            _ => {}
+        }
+    }
+    let mut pending: List<_> = aliases.iter().copied().collect();
+    while let Some(source) = pending.pop() {
+        if let Some(destinations) = moves.get(&source) {
+            for &destination in destinations {
+                if aliases.insert(destination) {
+                    pending.push(destination);
+                }
+            }
+        }
+    }
+    let mut registers: List<_> = aliases.into_iter().collect();
+    registers.sort_unstable();
+    ctx.prepare_field_reference_slots(registers)
+}
+
 /// Lower a Call (function call) instruction to LLVM IR.
 ///
 /// Handles direct function calls including:
@@ -15157,7 +15236,10 @@ fn lower_call<'ctx>(
         .iter()
         .enumerate()
         .map(|(i, r)| {
-            let raw_val = ctx.get_register(r.0)?;
+            let mut raw_val = ctx.get_register(r.0)?;
+            if func_desc.params.get(i).is_some_and(parameter_uses_cell_address) {
+                raw_val = field_address_or_value(ctx, r.0, raw_val, "refield_arg_addr")?;
+            }
             if let Some(expected_meta) = param_types.get(i) {
                 if let Some(expected_ty) = meta_type_to_basic(*expected_meta) {
                     // task #35: i64 → float param must BITCAST (recover the IEEE-754
@@ -22212,6 +22294,17 @@ fn lower_call_method<'ctx>(
         })
         .unwrap_or_default();
 
+    if param_count > args.count as usize {
+        let wants_cell = ctx.vbc_module().and_then(|vbc| {
+            ctx.func_name_index().and_then(|ix| ix.find_by_name(&func_name))
+                .and_then(|entry| vbc.functions.get(entry.index))
+                .and_then(|fd| fd.params.first())
+        }).is_some_and(parameter_uses_cell_address);
+        if wants_cell {
+            receiver_val = field_address_or_value(ctx, receiver.0, receiver_val, "refield_self_addr")?;
+        }
+    }
+
     // Collect all available values: [receiver, arg0, arg1, ...]
     let mut all_vals: Vec<BasicValueEnum> = Vec::with_capacity(args.count as usize + 1);
     all_vals.push(receiver_val);
@@ -22239,6 +22332,14 @@ fn lower_call_method<'ctx>(
                 .build_ptr_to_int(slot, i64_type, "arg_spill_addr")
                 .or_llvm_err()?;
             v = addr.into();
+        }
+        let wants_cell = ctx.vbc_module().and_then(|vbc| {
+            ctx.func_name_index().and_then(|ix| ix.find_by_name(&func_name))
+                .and_then(|entry| vbc.functions.get(entry.index))
+                .and_then(|fd| fd.params.get(pidx))
+        }).is_some_and(parameter_uses_cell_address);
+        if wants_cell {
+            v = field_address_or_value(ctx, r.0, v, "refield_arg_addr")?;
         }
         all_vals.push(v);
     }
@@ -26234,6 +26335,7 @@ fn lower_cbgr_extended<'ctx>(
                     .build_ptr_to_int(field_ptr, i64_type, "refield_slot_addr")
                     .or_llvm_err()?;
                 ctx.set_register(dst, addr.into());
+                ctx.set_field_reference_address(dst, addr)?;
                 return Ok(());
             }
             let loaded = ctx
@@ -26249,6 +26351,8 @@ fn lower_cbgr_extended<'ctx>(
             // which params it derefs, and those arguments spill to slots
             // at the call site.
             ctx.set_register(dst, loaded);
+            let address = ctx.builder().build_ptr_to_int(field_ptr, i64_type, "refield_cell_addr").or_llvm_err()?;
+            ctx.set_field_reference_address(dst, address)?;
             Ok(())
         }
         0x0A => {
@@ -27504,12 +27608,14 @@ fn lower_cbgr_extended<'ctx>(
             Ok(())
         }
         0x32 => {
-            // ToRawPtr — extract raw pointer
+            // ToRawPtr consumes the address of a referenced field, not its
+            // preloaded value. Other pointer producers already hold addresses.
             if operands.len() < 2 {
                 return Ok(());
             }
             let dst = op_reg(operands, 0);
-            let src = ctx.get_register(op_reg(operands, 1))?;
+            let src_reg = op_reg(operands, 1);
+            let src = field_address_or_value(ctx, src_reg, ctx.get_register(src_reg)?, "refield_raw_addr")?;
             ctx.set_register(dst, src);
             Ok(())
         }
@@ -43005,7 +43111,11 @@ fn lower_gpu_extended<'ctx>(
 
 fn lower_mov<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, dst: Reg, src: Reg) -> Result<()> {
     let value = ctx.get_register(src.0)?;
+    let field_address = ctx.field_reference_address(src.0)?;
     ctx.set_register(dst.0, value);
+    if let Some(address) = field_address {
+        ctx.set_field_reference_address(dst.0, address)?;
+    }
     // Ownership transfer for heap-owned text: MOV is a move, not a copy.
     // If src holds an owned Text buffer (from Concat/ToString/CharToStr),
     // transfer ownership to dst so the Ret-time free-loop frees exactly

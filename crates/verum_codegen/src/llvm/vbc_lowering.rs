@@ -3238,6 +3238,8 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
             }
         }
 
+        super::instruction::prepare_field_reference_slots(&mut ctx, &vbc_func.instructions)?;
+
         // Initialize parameters as registers
         // Closure functions use env_ptr convention: fn(env_ptr, user_arg0, arg1, ...)
         // VBC register layout for closures: [captures...][user_args...]

@@ -11,7 +11,7 @@ use verum_llvm::builder::Builder;
 use verum_llvm::context::Context;
 use verum_llvm::module::Module;
 use verum_llvm::types::BasicTypeEnum;
-use verum_llvm::values::{BasicValueEnum, FunctionValue, PointerValue};
+use verum_llvm::values::{BasicValueEnum, FunctionValue, IntValue, PointerValue};
 use verum_vbc::module::VbcModule;
 
 /// Exception handler info for structured exception handling.
@@ -570,6 +570,10 @@ pub struct FunctionContext<'a, 'ctx> {
     /// heap-allocated backing storage (surviving function returns), instead of
     /// creating dangling stack alloca pointers.
     gete_element_ptrs: std::collections::HashMap<u16, PointerValue<'ctx>>,
+    // T1537: runtime provenance for a RefField value and its Mov aliases.
+    // Separate storage keeps the existing value ABI while reference consumers
+    // receive the original cell. Entry allocas make joins/backedges sound.
+    field_reference_slots: verum_common::Map<u16, PointerValue<'ctx>>,
 
     /// Per-instruction overrides for Len dispatch.
     /// When a register is reused for both List and Text at different instruction points,
@@ -900,6 +904,7 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
             tuple_element_types: HashMap::new(),
             generic_type_args: HashMap::new(),
             gete_element_ptrs: std::collections::HashMap::new(),
+            field_reference_slots: verum_common::Map::new(),
             len_list_overrides: std::collections::HashSet::new(),
             current_vbc_instr_idx: 0,
             func_id_base: 0,
@@ -1011,6 +1016,7 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
             tuple_element_types: HashMap::new(),
             generic_type_args: HashMap::new(),
             gete_element_ptrs: std::collections::HashMap::new(),
+            field_reference_slots: verum_common::Map::new(),
             len_list_overrides: std::collections::HashSet::new(),
             current_vbc_instr_idx: 0,
             func_id_base: 0,
@@ -1642,6 +1648,44 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
     /// Get the generic type args for a register, if tracked.
     pub fn get_generic_type_args(&self, reg: u16) -> Option<&Vec<verum_vbc::types::TypeRef>> {
         self.generic_type_args.get(&reg)
+    }
+
+    /// Allocate all possible field-reference aliases before lowering any body
+    /// instruction. Lazy allocation would miss clears on an earlier loop edge.
+    pub fn prepare_field_reference_slots(
+        &mut self,
+        registers: impl IntoIterator<Item = u16>,
+    ) -> Result<()> {
+        for reg in registers {
+            let slot = self
+                .builder
+                .build_alloca(self.types.i64_type(), &format!("r{reg}_field_addr"))
+                .or_llvm_err()?;
+            self.builder
+                .build_store(slot, self.types.i64_type().const_zero())
+                .or_llvm_err()?;
+            self.field_reference_slots.insert(reg, slot);
+        }
+        Ok(())
+    }
+
+    pub fn field_reference_address(&self, reg: u16) -> Result<Option<IntValue<'ctx>>> {
+        self.field_reference_slots
+            .get(&reg)
+            .map(|slot| {
+                self.builder
+                    .build_load(self.types.i64_type(), *slot, "field_addr")
+                    .or_llvm_err()
+                    .map(|v| v.into_int_value())
+            })
+            .transpose()
+    }
+
+    pub fn set_field_reference_address(&self, reg: u16, address: IntValue<'ctx>) -> Result<()> {
+        if let Some(slot) = self.field_reference_slots.get(&reg) {
+            self.builder.build_store(*slot, address).or_llvm_err()?;
+        }
+        Ok(())
     }
 
     /// Save the element pointer from GetE (pointer into list backing array).
@@ -2585,6 +2629,10 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
     /// across branches with different types (ptr, i1, i64) share a single alloca.
     /// Values are coerced to i64 on store (zext for small ints, ptrtoint for pointers).
     pub fn set_register(&mut self, reg: u16, value: BasicValueEnum<'ctx>) {
+        if let Some(slot) = self.field_reference_slots.get(&reg) {
+            self.builder.build_store(*slot, self.types.i64_type().const_zero())
+                .expect("field provenance clear");
+        }
         // Clear stale type marks — callers that need string/bool/float marks
         // will re-add them after this call.
         // Clear unified type map (covers struct, inline_struct, custom_iter, generic_param, etc.)
