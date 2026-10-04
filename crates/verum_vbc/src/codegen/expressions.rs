@@ -17260,6 +17260,42 @@ impl VbcCodegen {
         Some(Self::substitute_self_in_type_name(&result, &receiver))
     }
 
+    /// A namespace call has one selected declaration, even when another module
+    /// declares the same leaf name. `Some(None)` preserves an unresolved explicit
+    /// path instead of inheriting the result of an unrelated suffix candidate.
+    fn namespace_call_result_type_name(&self, expr: &Expr) -> Option<Option<String>> {
+        let ExprKind::MethodCall { receiver, method, args, .. } = &expr.kind else {
+            return None;
+        };
+        let mut parts = self.try_flatten_module_path_resolved(receiver)?;
+        let receiver_name = parts.join(".");
+        // Constants, qualified TLS cells and type namespaces remain on their
+        // existing value/associated-method path. The flattener already excludes
+        // register locals and bare/scoped TLS values.
+        if self.ctx.is_thread_local(&receiver_name).is_some()
+            || self.nominal_type_id(&receiver_name).is_some()
+            || self.ctx.lookup_qualified_function(&receiver_name)
+                .is_some_and(|info| info.param_count == 0)
+        {
+            return None;
+        }
+        parts.push(method.name.to_string());
+        let Some((_, info)) = self.ctx.resolve_qualified_dotted_call(&parts, args.len()) else {
+            return Some(None);
+        };
+        if info.parent_type_name.is_some() || info.variant_tag.is_some() {
+            return None;
+        }
+        Some(info.return_type_name.map(|name| {
+            match info.return_type_inner {
+                Some(inner) if !name.contains('<') && !inner.is_empty()
+                    && inner.iter().all(|part| !part.trim().is_empty()) =>
+                    format!("{}<{}>", name, inner.join(", ")),
+                _ => name,
+            }
+        }))
+    }
+
     /// Infer a chain one receiver at a time, retaining each declared result's
     /// generic arguments and the identity of any resolved Deref owner.
     fn infer_method_chain_return_type(&self, expr: &Expr) -> Option<String> {
@@ -28658,6 +28694,10 @@ impl VbcCodegen {
     /// Best-effort static type NAME of an expression, used for overload and
     /// variant disambiguation. `None` when the shape carries no usable name.
     pub fn extract_expr_type_name(&self, expr: &Expr) -> Option<String> {
+        if let Some(result) = self.namespace_call_result_type_name(expr) {
+            return result;
+        }
+
         use verum_ast::expr::ExprKind;
         use verum_ast::ty::PathSegment;
 
@@ -30282,6 +30322,10 @@ impl VbcCodegen {
     /// For inline record literals, extracts the type name directly.
     /// Used by `compile_binary` to set `protocol_id` in CmpG for custom Eq dispatch.
     pub fn infer_expr_type_name(&self, expr: &Expr) -> Option<String> {
+        if let Some(result) = self.namespace_call_result_type_name(expr) {
+            return result;
+        }
+
         use verum_ast::expr::ExprKind;
         use verum_ast::ty::PathSegment;
 
