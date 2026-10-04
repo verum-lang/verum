@@ -20790,8 +20790,6 @@ impl VbcCodegen {
                                             field: i as u32,
                                         });
                                     }
-                                    self.compile_pattern_bind(pat, field_reg)?;
-
                                     // Track the type of the bound variable for correct method dispatch
                                     // First try explicit payload_types, but skip generic type parameters like "T", "E", "A"
                                     // For generic types, fall back to extracting concrete types from scrutinee type
@@ -20939,6 +20937,18 @@ impl VbcCodegen {
                                             })
                                         }
                                     };
+
+                                    // A nested variant matches this payload, not the
+                                    // enclosing variant. Resolve its type before
+                                    // recursing: Poll<Result<T, E>> -> Result<T, E>
+                                    // -> T. Restore the parent for sibling fields.
+                                    let previous_scrutinee_type = std::mem::replace(
+                                        &mut self.ctx.match_scrutinee_type,
+                                        field_type.clone(),
+                                    );
+                                    let bind_result = self.compile_pattern_bind(pat, field_reg);
+                                    self.ctx.match_scrutinee_type = previous_scrutinee_type;
+                                    bind_result?;
 
                                     // TUPLE-TYPE-TRACK-1 oracle: pairs with the
                                     // [scrut] trace — shows what the variant-payload
