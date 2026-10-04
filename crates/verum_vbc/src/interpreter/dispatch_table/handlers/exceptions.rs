@@ -44,13 +44,7 @@ pub(in super::super) fn handle_throw(
                 handler.handler_pc, handler.stack_depth, handler.func_id
             );
         }
-        // Unwind stack to handler's depth
-        while state.call_stack.depth() > handler.stack_depth {
-            let _ = state.call_stack.pop_frame();
-        }
-
-        // Jump to the exception handler
-        state.call_stack.set_pc(handler.handler_pc as u32);
+        unwind_to_handler(state, handler)?;
         Ok(DispatchResult::Continue)
     } else {
         // No exception handler - propagate as a panic
@@ -59,6 +53,26 @@ pub(in super::super) fn handle_throw(
         let message = format!("unhandled exception: {}", value_str);
         Err(InterpreterError::Panic { message })
     }
+}
+
+/// Restore the same frame-owned state for Throw and caught panic (T1536).
+/// Register popping invalidates CBGR slot generations; call-frame popping
+/// removes generic witnesses. Context providers end with their owner frame.
+pub(in super::super) fn unwind_to_handler(
+    state: &mut InterpreterState,
+    handler: super::super::super::state::ExceptionHandler,
+) -> InterpreterResult<()> {
+    while state.call_stack.depth() > handler.stack_depth {
+        let depth = state.call_stack.depth();
+        let frame = state.call_stack.pop_frame()?;
+        state.context_stack.end_scope(depth);
+        state.registers.pop_frame(frame.reg_base);
+    }
+    // Outer handlers in this same frame remain live.
+    state.exception_handlers.unwind_to_depth(handler.stack_depth.saturating_add(1));
+    state.pending_call_witness = None;
+    state.call_stack.set_pc(handler.handler_pc as u32);
+    Ok(())
 }
 
 /// TryBegin (0xD1) - Begin a try block.

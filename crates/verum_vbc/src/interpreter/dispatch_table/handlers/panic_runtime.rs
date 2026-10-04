@@ -10,16 +10,10 @@
 //! `Result<T, IntrinsicPanicInfo>` — same field shape `{message,
 //! location}`, same intercept.)
 //!
-//! ## Why an intercept and not the TryBegin/TryEnd VBC body?
-//!
-//! The VBC TryBegin/TryEnd mechanism handles explicit `Throw` instructions
-//! (Verum exceptions): the dispatch loop never consults
-//! `state.exception_handlers` when a HANDLER returns an error, so
-//! `InterpreterError::Panic` (a Rust-level error propagating through Rust
-//! call frames) sails past the `TryBegin` the CatchUnwind inline sequence
-//! emits. An intercept that runs the closure via `call_function_sync` from
-//! Rust can catch it with a normal Rust `match`. Tier-1 keeps the compiled
-//! body.
+//! The interpreter's bytecode handler stack catches panic-class errors
+//! (T1536). New intrinsic bodies use that shared path and materialize their
+//! declared nominal error. The name intercept remains for legacy archives
+//! whose catch function has no intrinsic metadata or executable body.
 //!
 //! ## Why `call_function_sync`, NOT `execute_table_with_args` (T0619)
 //!
@@ -85,13 +79,32 @@ use crate::value::Value;
 /// The panic-class subset of interpreter errors — the errors
 /// `catch_unwind` converts to `Result.Err(PanicInfo)`. ONE authority
 /// for "what is a panic" on the Tier-0 catch path.
-fn panic_class_message(err: &InterpreterError) -> Option<String> {
+pub(in super::super) fn panic_class_message(err: &InterpreterError) -> Option<String> {
     match err {
         InterpreterError::Panic { message } => Some(message.clone()),
         InterpreterError::AssertionFailed { message, .. } => Some(message.clone()),
         InterpreterError::Unreachable { .. } => Some("entered unreachable code".to_string()),
         _ => None,
     }
+}
+
+/// T1536: the exception carrier is private. Catch lowering copies its
+/// message into the public error record from the declaration's TypeRef.
+pub(in super::super) fn panic_packet(
+    state: &mut InterpreterState,
+    message: &str,
+) -> InterpreterResult<Value> {
+    let message = alloc_string_value(state, message)?;
+    let object = state.heap.alloc(
+        crate::types::TypeId(verum_common::layout::SYNTHETIC_RECORD_TYPE_ID),
+        std::mem::size_of::<Value>(),
+    )?;
+    state.record_allocation();
+    // SAFETY: one Value payload slot was allocated after the heap header.
+    unsafe {
+        *((object.as_ptr() as *mut u8).add(crate::interpreter::heap::OBJECT_HEADER_SIZE) as *mut Value) = message;
+    }
+    Ok(Value::from_ptr(object.as_ptr() as *mut u8))
 }
 
 /// Try to intercept a `catch_unwind(f)` call.
@@ -101,6 +114,7 @@ fn panic_class_message(err: &InterpreterError) -> Option<String> {
 pub(in super::super) fn try_intercept_catch_unwind(
     state: &mut InterpreterState,
     func_name: &str,
+    callee_id: FunctionId,
     args_start_reg: u16,
     arg_count: u8,
     caller_base: u32,
@@ -110,6 +124,15 @@ pub(in super::super) fn try_intercept_catch_unwind(
         return Ok(None);
     }
     if arg_count != 1 {
+        return Ok(None);
+    }
+    // A compiled intrinsic body owns its public return type. Let it execute
+    // the common TryBegin path instead of allocating the legacy bare type.
+    if state.module.get_function(callee_id).is_some_and(|fd| {
+        fd.bytecode_length > 0
+            && state.module.get_string(fd.name) == Some(func_name)
+            && fd.intrinsic_name.and_then(|name| state.module.get_string(name)) == Some("catch_unwind")
+    }) {
         return Ok(None);
     }
 

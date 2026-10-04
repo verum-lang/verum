@@ -7048,35 +7048,9 @@ pub fn lower_instruction<'ctx>(
                 .get_string(verum_vbc::types::StringId(*message_id))
                 .unwrap_or("explicit panic");
 
-            let module = ctx.get_module();
-            let _ptr_type = ctx.types().ptr_type();
-
-            // Inline panic: puts(msg) + _exit(1). Unified exit code
-            // with interpreter (was: abort() → exit 134).
-            let _i32_ty = ctx.types().i32_type();
-            let i64_type = ctx.types().i64_type();
-            let puts_fn = get_or_declare_internal_puts(ctx.llvm_context(), &module);
-            let fn_type = ctx
-                .llvm_context()
-                .void_type()
-                .fn_type(&[i64_type.into()], false);
-            let exit_fn = super::error::get_or_declare_noreturn_function(
-                &module,
-                ctx.llvm_context(),
-                "verum_internal_exit_i64",
-                fn_type,
-            );
-            let full_msg = format!("panic: {}", msg);
-            let msg_ptr = ctx
-                .builder()
-                .build_global_string_ptr(&full_msg, "panic_msg")
-                .or_llvm_err()?;
-            ctx.builder()
-                .build_call(puts_fn, &[msg_ptr.as_pointer_value().into()], "")
-                .or_llvm_err()?;
-            ctx.builder()
-                .build_call(exit_fn, &[i64_type.const_int(1, false).into()], "")
-                .or_llvm_err()?;
+            // T1536: explicit panic obeys the same configured policy as
+            // runtime panics. The runtime either unwinds or terminates.
+            emit_runtime_abort(ctx, msg, "panic_msg")?;
             ctx.builder()
                 .build_unreachable()
                 .or_llvm_err()?;

@@ -556,6 +556,7 @@ pub(in super::super) fn handle_call(
             if let Some(result) = super::panic_runtime::try_intercept_catch_unwind(
                 state,
                 &func_name,
+                func_id,
                 args.start.0,
                 args.count,
                 caller_base,

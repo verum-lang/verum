@@ -1,0 +1,49 @@
+// @test: differential
+// @level: L0
+// @tier: all
+// @tags: panic, unwind, payload, T1536
+// @timeout: 10000
+// @description: Each public catch API preserves its declared error fields and execution continues.
+// @expected-stdout: base=true control=true nested=true success=37
+
+mount core.base.panic.{PanicInfo};
+mount core.intrinsics.control.{IntrinsicPanicInfo};
+
+fn base_payload() -> Bool {
+    let result = core.base.panic.catch_unwind(|| { panic("base message"); 0 });
+    match result {
+        Ok(_) => false,
+        Err(info) => {
+            let missing = match info.location { None => true, Some(_) => false };
+            info.message == "base message" && missing
+        }
+    }
+}
+
+fn control_payload() -> Bool {
+    let result = core.intrinsics.control.catch_unwind(|| { panic("control message"); 0 });
+    match result {
+        Ok(_) => false,
+        Err(info) => {
+            let missing = match info.location { None => true, Some(_) => false };
+            info.message == "control message" && missing
+        }
+    }
+}
+
+fn nested_payload() -> Bool {
+    let result = core.intrinsics.control.catch_unwind(|| {
+        let inner = core.intrinsics.control.catch_unwind(|| { panic("inner"); 0 });
+        panic("outer"); 0
+    });
+    match result { Ok(_) => false, Err(info) => info.message == "outer" }
+}
+
+fn main() {
+    let base = base_payload();
+    let control = control_payload();
+    let nested = nested_payload();
+    let success = match core.intrinsics.control.catch_unwind(|| 37) { Ok(value) => value, Err(_) => 0 };
+    print(f"base={base} control={control} nested={nested} success={success}");
+    assert(base && control && nested && success == 37);
+}

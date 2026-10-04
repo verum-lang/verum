@@ -7569,7 +7569,7 @@ impl VbcCodegen {
                     // Check if this is an intrinsic function imported from sys.intrinsics
                     // Functions declared with @intrinsic("name") can be called through imports
                     if let Some(intrinsic_info) = lookup_intrinsic(&func_name) {
-                        return self.compile_imported_intrinsic_call(&intrinsic_info, args);
+                        return self.compile_imported_intrinsic_call(&intrinsic_info, args, None);
                     }
 
                     // QUALIFIED-CALL-FIRST-MATCH-1 (stub leg): a
@@ -7765,7 +7765,7 @@ impl VbcCodegen {
         if let Some(intrinsic_name) = &func_info.intrinsic_name
             && let Some(intrinsic_info) = lookup_intrinsic(intrinsic_name)
         {
-            return self.compile_imported_intrinsic_call(&intrinsic_info, args);
+            return self.compile_imported_intrinsic_call(&intrinsic_info, args, func_info.return_type.as_ref());
         }
         // Intrinsic declared but not in registry — fall through to compile function body.
         // This allows @intrinsic functions with fallback bodies (e.g., process_spawn)
@@ -7805,7 +7805,7 @@ impl VbcCodegen {
             && let Some(intrinsic_info) =
                 lookup_intrinsic(Self::call_leaf_name(&func_name))
         {
-            return self.compile_imported_intrinsic_call(&intrinsic_info, args);
+            return self.compile_imported_intrinsic_call(&intrinsic_info, args, None);
         }
 
         // **FLAT-RECORD-RW-1 (T1160)** — `ptr_read` / `ptr_write` over a
@@ -10868,7 +10868,7 @@ impl VbcCodegen {
                                 })
                     });
                     if all_primitive {
-                        let dst = self.compile_imported_intrinsic_call(&intrinsic_info, args)?;
+                        let dst = self.compile_imported_intrinsic_call(&intrinsic_info, args, None)?;
                         return Ok(Some(dst));
                     }
                 }
@@ -17666,7 +17666,7 @@ impl VbcCodegen {
         if let Some(intrinsic_name) = &func_info.intrinsic_name
             && let Some(intrinsic_info) = lookup_intrinsic(intrinsic_name)
         {
-            return self.compile_imported_intrinsic_call(&intrinsic_info, args);
+            return self.compile_imported_intrinsic_call(&intrinsic_info, args, func_info.return_type.as_ref());
         }
 
         // Check argument count
@@ -35491,7 +35491,11 @@ impl VbcCodegen {
         // the pointer operand — used to pick the ptr-arithmetic stride.
         let ptr_elem_stride =
             self.ptr_intrinsic_byte_stride(intrinsic_name, args.iter().nth(1));
-        self.emit_intrinsic_instructions(&intrinsic_info, &arg_regs, dest, ptr_elem_stride)?;
+        let declared_return = self.ctx.current_function.as_deref()
+            .and_then(|name| self.ctx.lookup_function(name))
+            .filter(|function| function.intrinsic_name.as_deref() == Some(intrinsic_info.intrinsic.name))
+            .and_then(|function| function.return_type.clone());
+        self.emit_intrinsic_instructions(&intrinsic_info, &arg_regs, dest, ptr_elem_stride, declared_return.as_ref())?;
 
         // Free argument registers
         for reg in arg_regs.iter().rev() {
@@ -35613,7 +35617,11 @@ impl VbcCodegen {
         // present) is the pointer operand for a ptr-arithmetic intrinsic.
         let ptr_elem_stride =
             self.ptr_intrinsic_byte_stride(intrinsic_name.as_str(), args.iter().nth(1));
-        self.emit_intrinsic_instructions(&intrinsic_info, &arg_regs, dest, ptr_elem_stride)?;
+        let declared_return = self.ctx.current_function.as_deref()
+            .and_then(|name| self.ctx.lookup_function(name))
+            .filter(|function| function.intrinsic_name.as_deref() == Some(intrinsic_info.intrinsic.name))
+            .and_then(|function| function.return_type.clone());
+        self.emit_intrinsic_instructions(&intrinsic_info, &arg_regs, dest, ptr_elem_stride, declared_return.as_ref())?;
 
         // Free argument registers
         for reg in arg_regs.iter().rev() {
@@ -35942,6 +35950,7 @@ impl VbcCodegen {
         &mut self,
         info: &IntrinsicInfo,
         args: &verum_common::List<Expr>,
+        declared_return: Option<&crate::types::TypeRef>,
     ) -> CodegenResult<Option<Reg>> {
         // ARITY IS PART OF THE OPCODE CONTRACT (T0693). An intrinsic
         // called with the wrong number of arguments does not fail here
@@ -35987,7 +35996,7 @@ impl VbcCodegen {
         // so it drives the ptr-arithmetic stride selection.
         let ptr_elem_stride =
             self.ptr_intrinsic_byte_stride(info.intrinsic.name, args.first());
-        self.emit_intrinsic_instructions(info, &arg_regs, dest, ptr_elem_stride)?;
+        self.emit_intrinsic_instructions(info, &arg_regs, dest, ptr_elem_stride, declared_return)?;
 
         // Free argument registers
         for reg in arg_regs.iter().rev() {
@@ -36127,6 +36136,7 @@ impl VbcCodegen {
         args: &[Reg],
         dest: Reg,
         ptr_elem_stride: u8,
+        declared_return: Option<&crate::types::TypeRef>,
     ) -> CodegenResult<()> {
         use crate::intrinsics::registry::{CodegenStrategy, IntrinsicCategory, IntrinsicHint};
 
@@ -36197,10 +36207,10 @@ impl VbcCodegen {
                 // byte-buffer `ptr_offset`/`ptr_add`/`ptr_sub`, whose
                 // seq_id is PtrOffset/PtrSubSeq — so repurposing the
                 // width here is safe: each call carries a single seq_id.
-                self.emit_intrinsic_inline_sequence(*seq_id, args, dest, ptr_elem_stride)?;
+                self.emit_intrinsic_inline_sequence(*seq_id, args, dest, ptr_elem_stride, declared_return)?;
             }
             CodegenStrategy::InlineSequenceWithWidth(seq_id, width) => {
-                self.emit_intrinsic_inline_sequence(*seq_id, args, dest, *width)?;
+                self.emit_intrinsic_inline_sequence(*seq_id, args, dest, *width, declared_return)?;
             }
             CodegenStrategy::CompileTimeConstant => {
                 self.emit_intrinsic_compile_time_constant(intrinsic.name, dest)?;
@@ -36789,6 +36799,48 @@ impl VbcCodegen {
         }
     }
 
+    /// Resolve the panic error from the callee signature. A raw intrinsic
+    /// uses the registry's qualified nominal contract, never a caller return
+    /// type or a same-leaf record from another module (T1536).
+    fn catch_unwind_error_type(
+        &self,
+        declared_return: Option<&crate::types::TypeRef>,
+    ) -> CodegenResult<crate::types::TypeId> {
+        use crate::types::{TypeId, TypeKind, TypeRef};
+        let id = if let Some(return_type) = declared_return {
+            match return_type {
+                TypeRef::Instantiated { base, args } if *base == TypeId::RESULT && args.len() == 2 => {
+                    match &args[1] {
+                        TypeRef::Concrete(id) => *id,
+                        _ => return Err(CodegenError::internal("catch_unwind error must have a concrete declared record type")),
+                    }
+                }
+                _ => return Err(CodegenError::internal("catch_unwind declaration must return Result<T, PanicInfo>")),
+            }
+        } else {
+            let contract = crate::intrinsics::registry::CATCH_UNWIND_ERROR_TYPE;
+            self.types.iter().find(|td| {
+                let name = self.ctx.strings.get(td.name.0 as usize).map(String::as_str);
+                name == Some(contract) || td.origin_module
+                    .and_then(|origin| self.ctx.strings.get(origin.0 as usize))
+                    .zip(name)
+                    .is_some_and(|(origin, name)| format!("{origin}.{name}") == contract)
+            }).map(|td| td.id).ok_or_else(|| CodegenError::internal(format!(
+                "raw catch_unwind requires the canonical {contract} descriptor; mount core.intrinsics.control"
+            )))?
+        };
+        let td = self.type_by_id(id).ok_or_else(|| CodegenError::internal("catch_unwind error descriptor is missing"))?;
+        let valid = td.kind == TypeKind::Record && td.fields.len() == 2
+            && self.ctx.strings.get(td.fields[0].name.0 as usize).map(String::as_str) == Some("message")
+            && td.fields[0].type_ref == TypeRef::Concrete(TypeId::TEXT)
+            && self.ctx.strings.get(td.fields[1].name.0 as usize).map(String::as_str) == Some("location")
+            && matches!(&td.fields[1].type_ref, TypeRef::Instantiated { base, args } if *base == TypeId::MAYBE && args.len() == 1);
+        if !valid {
+            return Err(CodegenError::internal("catch_unwind error descriptor must declare { message: Text, location: Maybe<Location> }"));
+        }
+        Ok(id)
+    }
+
     /// Emits an inline sequence for optimized intrinsic operations.
     /// `byte_width` is used by byte conversion sequences to determine output size.
     fn emit_intrinsic_inline_sequence(
@@ -36797,6 +36849,7 @@ impl VbcCodegen {
         args: &[Reg],
         dest: Reg,
         byte_width: u8,
+        declared_return: Option<&crate::types::TypeRef>,
     ) -> CodegenResult<()> {
         use crate::intrinsics::registry::InlineSequenceId;
 
@@ -39130,7 +39183,21 @@ impl VbcCodegen {
                     self.ctx.define_label(&hl);
                     let ex = self.ctx.alloc_temp();
                     self.ctx.emit(Instruction::GetException { dst: ex });
-                    self.emit_make_result_err(dest, ex, "catch_unwind")?;
+                    // T1536: the runtime packet owns a message, not a public
+                    // PanicInfo nominal. The catch declaration owns that type.
+                    let panic_type = self.catch_unwind_error_type(declared_return)?;
+                    let message = self.ctx.alloc_temp();
+                    let location = self.ctx.alloc_temp();
+                    let public_error = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::GetF { dst: message, obj: ex, field_idx: 0 });
+                    self.emit_make_variant(location, verum_common::well_known_types::maybe_none_tag(), 0, Some("Maybe"));
+                    self.ctx.emit(Instruction::New { dst: public_error, type_id: panic_type.0, field_count: 2 });
+                    self.ctx.emit(Instruction::SetF { obj: public_error, field_idx: 0, value: message });
+                    self.ctx.emit(Instruction::SetF { obj: public_error, field_idx: 1, value: location });
+                    self.emit_make_result_err(dest, public_error, "catch_unwind")?;
+                    self.ctx.free_temp(public_error);
+                    self.ctx.free_temp(location);
+                    self.ctx.free_temp(message);
                     self.ctx.free_temp(ex);
                     self.ctx.define_label(&el);
                 }

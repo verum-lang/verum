@@ -160,6 +160,7 @@ public type IntrinsicPanicInfo is {
 
 /// Execute a closure and catch any panics
 /// Returns Result.Ok(result) if no panic, Result.Err(IntrinsicPanicInfo) if panic occurred
+@intrinsic("catch_unwind")
 public fn catch_unwind<T>(f: fn() -> T) -> Result<T, IntrinsicPanicInfo> {
     @intrinsic("catch_unwind", f)
 }

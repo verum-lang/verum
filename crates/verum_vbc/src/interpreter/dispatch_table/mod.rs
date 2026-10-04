@@ -1426,7 +1426,21 @@ pub fn dispatch_loop_table_with_entry_depth(
 
         // Dispatch via table lookup - O(1) array indexing
         let handler = DISPATCH_TABLE[opcode_byte as usize];
-        let result = handler(state).map_err(|e| {
+        let dispatched = handler(state);
+        // T1536: panic-class errors follow the bytecode handler stack too.
+        // A synchronous nested dispatch must propagate to its Rust caller
+        // before entering a handler owned by that caller's bytecode frame.
+        if let Err(error) = &dispatched
+            && state.exception_handlers.peek().is_some_and(|h| h.stack_depth > entry_depth)
+            && let Some(message) = handlers::panic_runtime::panic_class_message(error)
+        {
+            let packet = handlers::panic_runtime::panic_packet(state, &message)?;
+            let handler = state.exception_handlers.pop().expect("handler checked above");
+            state.current_exception = Some(packet);
+            handlers::exceptions::unwind_to_handler(state, handler)?;
+            continue;
+        }
+        let result = dispatched.map_err(|e| {
             match e {
                 InterpreterError::NotImplemented {
                     feature: _,

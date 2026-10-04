@@ -16409,7 +16409,7 @@ impl<'ctx> PlatformIR<'ctx> {
     // strategy. The branches diverge on what follows:
     //
 
-    //  - Unwind: call verum_exception_throw(0). That function
+    //  - Unwind: pass an owned message packet to verum_exception_throw. That function
     //  longjmps to the topmost installed handler if one exists
     //  (running defers via verum_defer_run_to on the way), or
     //  falls through to _exit(134) when no handler is on the
@@ -16520,20 +16520,42 @@ impl<'ctx> PlatformIR<'ctx> {
 
         match self.panic_strategy {
             super::vbc_lowering::PanicStrategy::Unwind => {
-                // Route through verum_exception_throw — longjmps to
-                // the topmost handler if one exists, else falls
-                // through to _exit(134) inside that function. Pass
-                // value=0; user-visible diagnostics already went to
-                // stderr above. noreturn attribute on
-                // verum_exception_throw means LLVM treats the call
-                // as a terminator.
+                // T1536: private message packet. A catch boundary constructs
+                // its own declared public error nominal; no public TypeId is
+                // guessed here. Text copies its bytes before stack unwinding.
+                let text_fn = self.get_or_declare_fn(
+                    module,
+                    "verum_text_from_stride",
+                    i64_type.fn_type(&[ptr_type.into(), i64_type.into(), i64_type.into()], false),
+                );
+                let message = builder.build_call(
+                    text_fn,
+                    &[msg.into(), write_len.into(), i64_type.const_int(1, false).into()],
+                    "panic_message",
+                ).or_llvm_err()?.basic_value_or("panic message returned void")?;
+                let runtime = super::runtime::RuntimeLowering::new(ctx);
+                let packet = runtime.lower_new_object(&builder, module, 1)?;
+                builder.build_store(packet, ctx.i32_type().const_int(
+                    verum_common::layout::SYNTHETIC_RECORD_TYPE_ID as u64, false,
+                )).or_llvm_err()?;
+                // SAFETY: the private packet has one Value field after the
+                // canonical object header; both slots are in the allocation.
+                let (size_slot, message_slot) = unsafe {
+                    (
+                        builder.build_gep(ctx.i8_type(), packet, &[i64_type.const_int(12, false)], "panic_size").or_llvm_err()?,
+                        builder.build_gep(ctx.i8_type(), packet, &[i64_type.const_int(super::runtime::RuntimeLowering::OBJECT_HEADER_SIZE, false)], "panic_message_slot").or_llvm_err()?,
+                    )
+                };
+                builder.build_store(size_slot, ctx.i32_type().const_int(super::runtime::RuntimeLowering::OBJECT_HEADER_SIZE + 8, false)).or_llvm_err()?;
+                builder.build_store(message_slot, message).or_llvm_err()?;
+                let packet_value = builder.build_ptr_to_int(packet, i64_type, "panic_packet").or_llvm_err()?;
                 let throw_fn = self.get_or_declare_fn(
                     module,
                     "verum_exception_throw",
                     void_type.fn_type(&[i64_type.into()], false),
                 );
                 builder
-                    .build_call(throw_fn, &[i64_type.const_zero().into()], "")
+                    .build_call(throw_fn, &[packet_value.into()], "")
                     .or_llvm_err()?;
                 builder.build_unreachable().or_llvm_err()?;
             }
