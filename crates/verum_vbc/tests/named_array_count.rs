@@ -402,12 +402,75 @@ fn local_constant_shadow_does_not_change_a_module_alias() {
 
 #[test]
 fn reusing_codegen_does_not_reuse_previous_constant_bindings() {
-    let first = Parser::new("const BASE: Int = 9; fn seed() {}").parse_module().expect("first parse");
-    let second = Parser::new("const SIZE: Int = BASE; fn probe() { let bytes: [Byte; SIZE] = [0; SIZE]; }")
-        .parse_module().expect("second parse");
+    let first = Parser::new("const BASE: Int = 9; fn seed() {}")
+        .parse_module()
+        .expect("first parse");
+    let second =
+        Parser::new("const SIZE: Int = BASE; fn probe() { let bytes: [Byte; SIZE] = [0; SIZE]; }")
+            .parse_module()
+            .expect("second parse");
     let mut codegen = VbcCodegen::with_config(CodegenConfig::new("reused_counts"));
     codegen.compile_module(&first).expect("first compile");
-    let error = codegen.compile_module(&second)
+    let error = codegen
+        .compile_module(&second)
         .expect_err("BASE from the previous module must not survive reset or FunctionId reuse");
     assert!(error.to_string().contains("constant integer"), "{error}");
+}
+
+#[test]
+fn direct_and_named_bitwise_counts_pack_bytes() {
+    for (expression, expected) in [
+        ("1 << 3", 8),
+        ("32 >> 2", 8),
+        ("12 & 10", 8),
+        ("8 | 2", 10),
+        ("10 ^ 2", 8),
+        ("~(-9)", 8),
+        ("(1 << 24) >> 21", 8),
+        ("(-8 >> 1) + 12", 8),
+    ] {
+        assert_packed(
+            &format!("let mut byte_buf: [Byte; {expression}] = [0; {expression}];"),
+            "",
+            "",
+        );
+        let prefix = format!("const SIZE: Int = {expression};");
+        assert_packed("let mut byte_buf: [Byte; SIZE] = [0; SIZE];", &prefix, "");
+        let ast = Parser::new(&prefix).parse_module().expect("parse");
+        let module = VbcCodegen::with_config(CodegenConfig::new("bitwise_count"))
+            .compile_module(&ast)
+            .expect("compile");
+        assert!(
+            module.functions.iter().any(|function| {
+                function.intrinsic_name.is_some_and(|name| {
+                    module.get_string(name) == Some(format!("__const_val_{expected}").as_str())
+                })
+            }),
+            "{expression} must fold to {expected}"
+        );
+    }
+}
+
+#[test]
+fn invalid_shift_counts_never_wrap_or_fall_back_to_boxed_arrays() {
+    for expression in [
+        "2 << 63", "1 << 63", "-3 << 62", "1 << 64", "8 << -1", "8 >> 64", "8 >> -1", "~8",
+    ] {
+        for source in [
+            format!("fn probe() {{ let bytes: [Byte; {expression}] = [0; {expression}]; }}"),
+            format!(
+                "const SIZE: Int = {expression}; fn probe() {{ let bytes: [Byte; SIZE] = [0; SIZE]; }}"
+            ),
+        ] {
+            let ast = Parser::new(&source).parse_module().expect("parse");
+            let error = VbcCodegen::with_config(CodegenConfig::new("invalid_shift_count"))
+                .compile_module(&ast)
+                .expect_err(expression);
+            assert!(
+                error.to_string().contains("constant integer")
+                    || error.to_string().contains("array count"),
+                "{expression}: {error}"
+            );
+        }
+    }
 }

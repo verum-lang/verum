@@ -44865,6 +44865,10 @@ impl VbcCodegen {
                     None => Ok(None),
                 }
             }
+            ExprKind::Unary { op: UnOp::BitNot, expr: operand } => {
+                Ok(self.const_eval_i64_in_scope(operand, scope, bindings, inspect_runtime_bindings, active, cached, depth + 1)?
+                    .map(|value| !value))
+            }
             ExprKind::Binary { op, left, right } => {
                 let (Some(l), Some(r)) = (self.const_eval_i64_in_scope(left, scope, bindings, inspect_runtime_bindings, active, cached, depth + 1)?, self.const_eval_i64_in_scope(right, scope, bindings, inspect_runtime_bindings, active, cached, depth + 1)?)
                 else { return Ok(None) };
@@ -44874,6 +44878,16 @@ impl VbcCodegen {
                     BinOp::Mul => checked(l.checked_mul(r)),
                     BinOp::Div => checked(l.checked_div(r)),
                     BinOp::Rem => checked(l.checked_rem(r)),
+                    BinOp::BitAnd => Ok(Some(l & r)),
+                    BinOp::BitOr => Ok(Some(l | r)),
+                    BinOp::BitXor => Ok(Some(l ^ r)),
+                    // checked_shl on i64 only validates the shift amount. Widen
+                    // first so converting back also detects discarded value bits.
+                    BinOp::Shl => checked(u32::try_from(r).ok()
+                        .filter(|shift| *shift < i64::BITS)
+                        .and_then(|shift| i64::try_from((l as i128) << shift).ok())),
+                    BinOp::Shr => checked(u32::try_from(r).ok()
+                        .and_then(|shift| l.checked_shr(shift))),
                     _ => Ok(None),
                 }
             }
