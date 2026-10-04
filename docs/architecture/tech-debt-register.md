@@ -182,7 +182,7 @@ eleven targeted integration binaries passed **117 tests**, covering packed
 array representation, field identity, Future, generic returns, nested
 patterns, qualified signatures, Shared, borrowed slices and user Deref.
 All **40 source gates** also passed. The first coherent CLI bake completed
-in 16m53s with archive checksum `4b4208643f54edad`. It passed all five
+in 16m53s with stdlib input checksum `4b4208643f54edad`. It passed all five
 language contracts in the interpreter, four RetryBudget tests, and the
 positive/negative imported generic-signature checks (the negative control
 reports E400, expected AtomicBool, found Int). Archive inspection confirms
@@ -229,7 +229,7 @@ with an explicit `--cli` and `--tier interpret` or `--tier aot`; it uses five
 repository VCS fixtures and checks binary response bytes as well as deadlines.
 
 **Integrated execution — 2026-10-04.** The coherent CLI build at `a67c786a4`
-(engine `dff347a06`) completed in 17m39s. Its embedded archive checksum was
+(engine `dff347a06`) completed in 17m39s. Its stdlib input checksum was
 `69e69565900beabd161e5bed709291505e4789175e3e0346136462878ad3c18e`.
 The minimal VBC library suite again passed 2,035 tests with the same one
 pre-existing ignored test; 18 targeted binaries passed 186 tests. The real
@@ -287,7 +287,7 @@ fields. Commit `114b687d5` preserves the qualified parameter owner at its
 producer; five source controls cover both module orders without injected local
 type metadata, and 50 focused/adjacent tests pass.
 
-The first stage-three CLI build at `b19857dc9` completed in 23m38s, with archive
+The first stage-three CLI build at `b19857dc9` completed in 23m38s, with stdlib input
 checksum `474f225fe05cd3ca4579a36c4c4def046529be5c7cc6e915eb871dcfde2a7604`.
 All 244 tests in 26 targeted binaries and all 40 source gates passed. The full
 VBC library run instead found two failures in the source-mounted panic modules
@@ -324,8 +324,57 @@ callable with a nominal module name. Its four regression controls live in
 `crates/verum_compiler/tests/archive_parameter_spelling.rs` and exercise the
 public archive conversion API. T1542 initializes the root supervisor through
 the existing `OnceLock`, with format-only startup and once-only initialization
-fixtures. A fresh complete CLI/archive build and execution acceptance are
-pending for this snapshot; earlier binary results remain attributed above.
+fixtures.
+
+The full CLI build of engine `fed342ee1` completed in **28m54s**. Its stdlib
+input checksum is
+`a607e2eccbc18cacdbaec561e6b7e043b2513b9a22d54c632137beba4684e9a4`.
+The build-log checksums quoted in this audit are BLAKE3 fingerprints of the
+bake inputs, not hashes of archive bytes. The published archive for this run
+has SHA-256 `57d50d3116f88d6f722007203676a8ddde3f3ca0677fc74ee988f3b15f72b3ab`.
+
+On that source snapshot, the minimal VBC library passed **2,035 tests** in
+746.83s with one pre-existing ignored coverage report; all **257 tests in
+29 targeted binaries** and all **40 source gates** passed. Compiler public
+API tests passed five controls; archive-loader tests passed 22 with three
+pre-existing ignored diagnostic probes. These counts are separate suites,
+not a whole-language conformance measurement.
+
+Actual archive/execution evidence remains mixed:
+
+- Imported Result/Poll payloads, optional field metadata, concrete
+  CancellationFlag field/result types and exact named Drop glue survive the
+  fresh archive. T1228 still loses the callable parameter of a mapped
+  iterator: the collect witness contains a remaining `Generic1`, and the
+  unannotated lambda descriptor defaults to Int instead of preserving its
+  nominal input/output. Exact nominal carry does not close callable carry.
+- T1543's missing-spelling behavior passes in the actual metadata sidecar.
+  However, `core.intrinsics.control.catch_unwind` still has a lenient
+  panic-stub: the full bootstrap encounters its canonical Result mount
+  before that declaration is imported. The isolated source-mounted test
+  did not cover this order. The HTTP program now passes its five language
+  contracts, reads byte 42 and reaches `armed=http200`, then stops in a
+  separate `serve_one_message` panic-stub for missing Result.Ok constructor
+  registration. Neither is an HTTP 200 success.
+- The unannotated Factory/collect source passes in the interpreter. Its
+  real AOT executable instead exits 134 at a specialized Factory.build:
+  static `from_value` has no compiled candidate. The exact target/body
+  retention path remains under T1228 investigation.
+- The direct-local Drop control passes with returned-scope counter values
+  2 then 3 (T1539). The independent mutex control still reports
+  `false,false,false` in the interpreter, while its field-address probe
+  completes. This is not a guard-lifetime pass.
+- The format-only startup control prints `number=37`. The supervisor
+  control passes once-only payload/count and root ID checks, but its name
+  check reads the strategy field: the archived nested field chain uses
+  index zero where SupervisorConfig.name is field seven. Supervisor
+  execution acceptance remains incomplete.
+- All 16 real retry-unit tests pass, including the four RetryBudget cases.
+  Qualified import checking accepts AtomicBool and rejects Int with E400.
+
+Main integration is withheld while these newly reached native/bootstrap
+boundaries are repaired; the passing unit counts do not replace their
+execution verdicts.
 
 A separate read-only audit found the remaining nonexistent `Lazy.new/get` use
 in `configuration.builtin_registry`. T1544 tracks its once-owned registry,
