@@ -258,8 +258,10 @@ pub struct CodegenContext {
     /// the cross-module first-wins collision class that surfaced 7+
     /// times this session (SIZE_CLASSES allocator vs size_class.vr,
     /// Char.from_digit canonical vs primitives.vr, etc).  Fallback to
-    /// bare `functions` lookup when scope is absent or scope-specific
-    /// entry is missing.  Architectural rule: every call site that
+    /// bare `functions` lookup when a scope-specific entry is missing.
+    /// Source declarations also populate the unnamed root (empty scope key)
+    /// and an exact `name#arity` row; passive registrations cannot own them.
+    /// Architectural rule: every call site that
     /// previously did `lookup_function(name)` and risked first-wins
     /// shadow should migrate to `lookup_function_in_scope(scope, name)`.
     pub scoped_functions: HashMap<(String, String), FunctionInfo>,
@@ -3090,9 +3092,10 @@ impl CodegenContext {
         // (current_source_module, name) key so collision-prone lookups
         // can prefer the per-scope entry.  Only fires when scope is
         // known AND the simple name is bare (no qualifier dots) — fully-
-        // qualified registrations are already collision-safe.
+        // qualified registrations are already collision-safe. Arity rows
+        // belong to the explicit source-declaration producer, not aliases.
         if let Some(scope) = &self.current_source_module
-            && !name.contains('.') && !name.contains("::")
+            && !name.contains('.') && !name.contains("::") && !name.contains('#')
         {
             let key = (scope.clone(), name.clone());
             if self.prefer_existing_functions {
@@ -3605,20 +3608,69 @@ impl CodegenContext {
         found
     }
 
+    /// Scope used by source function declarations. An unnamed/root module
+    /// has an empty internal key; a declared child named `main` stays distinct.
+    fn source_function_scope(&self) -> &str {
+        self.current_source_module.as_deref().unwrap_or("")
+    }
+
+    /// Called only by the AST function-declaration producer. Ambient names,
+    /// archive aliases and builtins must not acquire root declaration ownership.
+    pub(super) fn register_source_function(&mut self, name: &str, info: &FunctionInfo) {
+        let scope = self.source_function_scope().to_owned();
+        self.scoped_functions
+            .insert((scope.clone(), name.to_owned()), info.clone());
+        self.scoped_functions
+            .insert((scope, format!("{name}#{}", info.param_count)), info.clone());
+    }
+
+    /// A scoped row proves identity, not freshness of imported/inferred types.
+    /// Prefer a live registry record only when it belongs to that exact ID.
+    /// A displaced root declaration can have no remaining global alias at all.
+    fn live_scoped_function<'a>(
+        &'a self,
+        name: &str,
+        declared: &'a FunctionInfo,
+    ) -> &'a FunctionInfo {
+        self.functions.get(name).filter(|info| info.id == declared.id)
+            .or_else(|| {
+                let scope = self.source_function_scope();
+                if scope.is_empty() { return None; }
+                self.functions.get(&format!("{scope}.{name}"))
+                    .filter(|info| info.id == declared.id)
+            })
+            .or_else(|| self.functions.get(&format!("{name}#{}", declared.param_count))
+                .filter(|info| info.id == declared.id))
+            .or_else(|| self.lookup_function_by_id(declared.id))
+            .unwrap_or(declared)
+    }
+
+    /// Exact source declaration and arity, with no ambient bare-name fallback.
+    pub(super) fn lookup_declared_function_with_arity(
+        &self,
+        name: &str,
+        arity: usize,
+    ) -> Option<&FunctionInfo> {
+        let key = (self.source_function_scope().to_owned(), format!("{name}#{arity}"));
+        self.scoped_functions.get(&key)
+            .filter(|info| info.param_count == arity)
+            .map(|info| self.live_scoped_function(name, info))
+    }
+
     /// **Scope-aware function lookup** (#17/#39 foundation).
     ///
     /// Probes the per-module scope index first using
-    /// `(current_source_module, name)`; falls back to the bare
-    /// `functions` table when no scope-specific entry is registered.
+    /// `(current_source_module, name)` (including the unnamed root); falls
+    /// back to the bare `functions` table only when its scoped entry is absent.
     /// Call sites that have a current compile-scope (which is most
     /// codegen sites — `current_source_module` is the dotted path of
     /// the module currently being collected/compiled) should prefer
     /// this over plain `lookup_function` to dodge cross-module
     /// first-wins shadowing.
     pub fn lookup_function_in_scope(&self, name: &str) -> Option<&FunctionInfo> {
-        if let Some(scope) = &self.current_source_module
-            && let Some(info) = self.scoped_functions.get(&(scope.clone(), name.to_string()))
-        {
+        let key = (self.source_function_scope().to_owned(), name.to_owned());
+        if let Some(declared) = self.scoped_functions.get(&key) {
+            let info = self.live_scoped_function(name, declared);
             self.note_resolution(name, info);
             return Some(info);
         }
@@ -3649,8 +3701,8 @@ impl CodegenContext {
     }
 
     /// **Scope-aware arity-disambiguated lookup** (#17/#39).
-    /// Probes the per-module index first when scope is known and the
-    /// simple name has no qualifier, then falls back to the standard
+    /// Probes the source declaration/arity index, then its scoped name
+    /// (including the unnamed root), then falls back to the standard
     /// `lookup_function_with_arity` chain.  Same arity-matching
     /// discipline (primary by-name + `name#arity` alternative) applies
     /// to both the scoped and the bare lookup.
@@ -3659,15 +3711,18 @@ impl CodegenContext {
         name: &str,
         arity: usize,
     ) -> Option<&FunctionInfo> {
-        if let Some(scope) = &self.current_source_module
-            && !name.contains('.')
-            && !name.contains("::")
-        {
-            let key = (scope.clone(), name.to_string());
-            if let Some(info) = self.scoped_functions.get(&key)
-                && self.arity_admits(name, info, arity)
-            {
+        if !name.contains('.') && !name.contains("::") {
+            if let Some(info) = self.lookup_declared_function_with_arity(name, arity) {
+                self.note_resolution(name, info);
                 return Some(info);
+            }
+            let key = (self.source_function_scope().to_owned(), name.to_owned());
+            if let Some(declared) = self.scoped_functions.get(&key) {
+                let info = self.live_scoped_function(name, declared);
+                if self.arity_admits(name, info, arity) {
+                    self.note_resolution(name, info);
+                    return Some(info);
+                }
             }
         }
         self.lookup_function_with_arity(name, arity)
@@ -4650,6 +4705,8 @@ impl CodegenContext {
         self.strings.clear();
         self.string_intern.clear();
         self.functions.clear();
+        self.scoped_functions.clear();
+        self.unit_declared_fns.clear();
         // ARCH-P2 stage 1 — the canonical index is DUAL-keyed with
         // `functions` and shares its lifetime: clear it at the same
         // per-module reset boundary so a fresh module never inherits

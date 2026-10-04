@@ -1,0 +1,40 @@
+// @test: differential
+// @level: L0
+// @tier: all
+// @timeout: 180000
+// @tags: modules, function-identity, declaration-order
+// @expected-stdout-begin
+// root_inline_begin
+// 37
+// 57
+// 77
+// 137
+// 157
+// 177
+// root_inline_done
+// @expected-stdout-end
+// @expected-exit: 0
+
+fn choose(value: Int) -> Int { value + 30 }
+
+module alpha {
+    public fn choose(value: Int) -> Int { value + 50 }
+    public fn late(value: Int) -> Int { value + 150 }
+}
+module beta {
+    public fn choose(value: Int) -> Int { value + 70 }
+    public fn late(value: Int) -> Int { value + 170 }
+}
+
+fn late(value: Int) -> Int { value + 130 }
+
+fn main() {
+    print("root_inline_begin");
+    print(choose(7));
+    print(alpha.choose(7));
+    print(beta.choose(7));
+    print(late(7));
+    print(alpha.late(7));
+    print(beta.late(7));
+    print("root_inline_done");
+}

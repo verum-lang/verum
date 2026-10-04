@@ -10808,6 +10808,12 @@ impl VbcCodegen {
                 None
             }
         };
+        // The root has no qualified module spelling, but is still a source
+        // declaration scope. Recollection must reuse its own arity-owned ID.
+        let reuse_id = if self.nested_function_scope.is_empty() {
+            self.ctx.lookup_declared_function_with_arity(&name, arity)
+                .map(|info| info.id).or(reuse_id)
+        } else { reuse_id };
         let id = match reuse_id {
             Some(existing) => existing,
             None => {
@@ -11005,6 +11011,9 @@ impl VbcCodegen {
             self.ctx.unit_declared_fns.insert(name.clone());
         }
         self.ctx.register_function(name.clone(), info.clone());
+        if self.nested_function_scope.is_empty() {
+            self.ctx.register_source_function(&name, &info);
+        }
         // Preserve declaration provenance even when context registration has
         // already mirrored its full key, or the configured root is `main`.
         if self.nested_function_scope.is_empty() {
@@ -19236,6 +19245,9 @@ impl VbcCodegen {
         } else {
             None
         };
+        let declared_lookup = if impl_type_name.is_none() && self.nested_function_scope.is_empty() {
+            self.ctx.lookup_declared_function_with_arity(&base_name, param_count).cloned()
+        } else { None };
         // Diagnostic (VERUM_TRACE_FNPICK, T0670): WHICH branch supplied the
         // id this body will be emitted under, and what the qualified key
         // actually held at that moment.  Registration was proven correct by
@@ -19259,11 +19271,12 @@ impl VbcCodegen {
                 param_count,
                 qn,
                 self.ctx.lookup_function(&qn).map(|f| (f.id.0, f.param_count)),
-                if qualified_lookup.is_some() { "qualified" } else { "bare-fallback" },
-                qualified_lookup.as_ref().map(|i| i.id.0),
+                if declared_lookup.is_some() { "source-declaration" }
+                    else if qualified_lookup.is_some() { "qualified" } else { "bare-fallback" },
+                declared_lookup.as_ref().or(qualified_lookup.as_ref()).map(|i| i.id.0),
             );
         }
-        let func_info = match qualified_lookup {
+        let func_info = match declared_lookup.or(qualified_lookup) {
             Some(info) => info,
             None => self
                 .ctx
