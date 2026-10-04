@@ -1,0 +1,77 @@
+// @test: differential
+// @level: L0
+// @tier: all
+// @timeout: 1200000
+// @tags: collections, memory-safety, allocation, regression
+// @expected-exit: 0
+// @expected-stdout-begin
+// byte_zero=0:0
+// byte_push=37
+// byte_reserve=121
+// byte_raw_shrink=3:121
+// byte_managed_shrink=3:121
+// int_zero=0:0
+// int_push=37
+// int_reserve_shrink=3:121
+// @expected-stdout-end
+// @description: Empty and nonempty list shrink preserve usable backing across push and reserve.
+
+fn main() {
+    let mut byte_push = List<Byte>.new();
+    byte_push.shrink_to_fit();
+    print(f"byte_zero={byte_push.capacity()}:{byte_push.len()}");
+    assert_eq(byte_push.capacity(), 0);
+    assert_eq(byte_push.len(), 0);
+    byte_push.push(37 as Byte);
+    let first_byte = byte_push[0] as Int;
+    print(f"byte_push={first_byte}");
+    assert_eq(first_byte + 0, 37);
+
+    let mut byte_reserve = List<Byte>.new();
+    byte_reserve.shrink_to_fit();
+    byte_reserve.reserve(64);
+    byte_reserve.push(37 as Byte);
+    byte_reserve.push(41 as Byte);
+    byte_reserve.push(43 as Byte);
+    let raw_sum = (byte_reserve[0] as Int) + (byte_reserve[1] as Int) + (byte_reserve[2] as Int);
+    print(f"byte_reserve={raw_sum}");
+    assert_eq(byte_reserve.len(), 3);
+    assert_eq(raw_sum + 0, 121);
+    byte_reserve.shrink_to_fit();
+    let raw_shrunk = (byte_reserve[0] as Int) + (byte_reserve[1] as Int) + (byte_reserve[2] as Int);
+    print(f"byte_raw_shrink={byte_reserve.capacity()}:{raw_shrunk}");
+    assert_eq(byte_reserve.capacity(), 3);
+    assert_eq(raw_shrunk + 0, 121);
+
+    let mut byte_managed = List<Byte>.new();
+    byte_managed.push(37 as Byte);
+    byte_managed.push(41 as Byte);
+    byte_managed.push(43 as Byte);
+    byte_managed.shrink_to_fit();
+    let managed_sum = (byte_managed[0] as Int) + (byte_managed[1] as Int) + (byte_managed[2] as Int);
+    print(f"byte_managed_shrink={byte_managed.capacity()}:{managed_sum}");
+    assert_eq(byte_managed.capacity(), 3);
+    assert_eq(managed_sum + 0, 121);
+
+    let mut int_push = List<Int>.new();
+    int_push.shrink_to_fit();
+    print(f"int_zero={int_push.capacity()}:{int_push.len()}");
+    assert_eq(int_push.capacity(), 0);
+    assert_eq(int_push.len(), 0);
+    int_push.push(37);
+    let first_int = int_push[0];
+    print(f"int_push={first_int}");
+    assert_eq(first_int + 0, 37);
+
+    let mut int_reserve = List<Int>.new();
+    int_reserve.shrink_to_fit();
+    int_reserve.reserve(64);
+    int_reserve.push(37);
+    int_reserve.push(41);
+    int_reserve.push(43);
+    int_reserve.shrink_to_fit();
+    let int_sum = int_reserve[0] + int_reserve[1] + int_reserve[2];
+    print(f"int_reserve_shrink={int_reserve.capacity()}:{int_sum}");
+    assert_eq(int_reserve.capacity(), 3);
+    assert_eq(int_sum + 0, 121);
+}
