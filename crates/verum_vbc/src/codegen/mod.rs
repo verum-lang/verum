@@ -54,6 +54,7 @@ pub mod context;
 pub mod error;
 pub mod registers;
 
+mod bootstrap_types;
 mod expressions;
 mod statements;
 
@@ -18065,7 +18066,9 @@ impl VbcCodegen {
         // segment shapes (Name + SelfValue) so the protocol's
         // synthetic Self mapping registered above (id `0x4000+N`)
         // actually fires.
-        if let TypeKind::Path(path) = &ty.kind {
+        if let TypeKind::Path(path) = &ty.kind
+            && path.segments.len() == 1
+        {
             let type_name = path
                 .segments
                 .iter()
@@ -18160,7 +18163,7 @@ impl VbcCodegen {
 
     /// This enables storing return type information for method dispatch prefixing.
     fn ast_type_to_type_ref(&self, ty: &verum_ast::ty::Type) -> TypeRef {
-        use verum_ast::ty::{PathSegment, TypeKind};
+        use verum_ast::ty::TypeKind;
 
         match &ty.kind {
             TypeKind::Int => TypeRef::Concrete(TypeId::INT),
@@ -18170,21 +18173,10 @@ impl VbcCodegen {
             TypeKind::Unit => TypeRef::Concrete(TypeId::UNIT),
             TypeKind::Never => TypeRef::Concrete(TypeId::NEVER),
             TypeKind::Path(path) => {
-                // Extract the first segment name for primitive type lookup
-                let type_name = path
-                    .segments
-                    .iter()
-                    .find_map(|seg| {
-                        if let PathSegment::Name(ident) = seg {
-                            Some(ident.name.to_string())
-                        } else {
-                            None
-                        }
-                    })
-                    .unwrap_or_default();
+                let type_name = path.to_string().replace("::", ".");
 
                 // Map Verum type names to TypeId via the consolidated registry
-                match self.get_well_known_type_id(&type_name) {
+                match self.nominal_type_id(&type_name) {
                     Some(type_id) => TypeRef::Concrete(type_id),
                     None => {
                         // Truly unknown type — use PTR as generic carrier.
@@ -25686,6 +25678,9 @@ impl VbcCodegen {
             Some(s) => s.to_string(),
             None => return,
         };
+        let name_str = module_prefix
+            .and_then(|owner| name_str.strip_prefix(&format!("{owner}.")))
+            .unwrap_or(&name_str).to_owned();
         // REFINE-FIELD-DYNAMIC-BYPASS-1 phase 2: hydrate field
         // refinements on THIS import path too — the lazy loader
         // reaches most stdlib types through the protocol-remap
@@ -25748,7 +25743,13 @@ impl VbcCodegen {
         //      silently dropped the incoming type; now it imports under
         //      the module-qualified key only (fresh id), leaving the
         //      simple binding untouched.
-        let (new_id, owns_simple_key) =
+        let reserved = qualified_key.as_ref()
+            .and_then(|key| self.type_name_to_id.get(key)).copied();
+        let (new_id, owns_simple_key) = if let Some(id) = reserved {
+            let owns = self.type_name_to_id.get(&name_str).is_none_or(|current| *current == id);
+            if owns { self.type_name_to_id.insert(name_str.clone(), id); }
+            (id, owns)
+        } else {
             match self.type_name_to_id.get(&name_str).copied() {
                 Some(existing_id) => {
                     if self.type_by_id(existing_id).is_some() {
@@ -25774,7 +25775,8 @@ impl VbcCodegen {
                     self.type_name_to_id.insert(name_str.clone(), id);
                     (id, true)
                 }
-            };
+            }
+        };
         // The qualified key ALWAYS registers (collision-free namespace).
         if let Some(q) = qualified_key.clone() {
             self.type_name_to_id.entry(q).or_insert(new_id);
@@ -25800,7 +25802,7 @@ impl VbcCodegen {
                 bounds: tp.bounds.clone(),
                 default: tp.default.clone(),
                 variance: tp.variance,
-                type_bounds: smallvec::SmallVec::new(),
+                type_bounds: tp.type_bounds.clone(),
             });
         }
 
@@ -25814,6 +25816,8 @@ impl VbcCodegen {
                 // field's carried type NAME (archive→local); a raw ..clone()
                 // misindexes it against this module's strings.
                 type_name: intern(self, fd.type_name),
+                refinement_src: intern(self, fd.refinement_src),
+                refinement_binding: intern(self, fd.refinement_binding),
                 ..fd.clone()
             });
         }
@@ -25842,6 +25846,8 @@ impl VbcCodegen {
                         // UNIFIED-CROSS-MODULE-TYPE-IDENTITY (T0109): re-intern
                         // the variant field's carried type NAME (archive→local).
                         type_name: intern(self, fd.type_name),
+                        refinement_src: intern(self, fd.refinement_src),
+                        refinement_binding: intern(self, fd.refinement_binding),
                         ..fd.clone()
                     });
                 }
@@ -25883,7 +25889,8 @@ impl VbcCodegen {
                     // Import-remap preserves the carried bindings as-is
                     // (TypeParamIds are parent-type-local, unaffected by
                     // the protocol-id remap).
-                    associated_types: pi.associated_types.clone(),
+                    associated_types: pi.associated_types.iter()
+                        .map(|(name, ty)| (intern(self, *name), ty.clone())).collect(),
                     // Source-rendered arg text must be re-interned into
                     // the importing module's string table.
                     protocol_args_text: pi

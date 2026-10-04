@@ -9044,7 +9044,7 @@ impl VbcCodegen {
             if close <= lt {
                 return None;
             }
-            let base_id = *self.type_name_to_id.get(base_name)?;
+            let base_id = self.nominal_type_id(base_name)?;
             let inner = &name[lt + 1..close];
             // T1228 — ARITY HONESTY, the rule the tuple branch fifteen
             // lines above already states and this branch did not keep.
@@ -9112,9 +9112,7 @@ impl VbcCodegen {
             // the alias name (it contains '<'), so recursion terminates.
             self.type_name_to_type_ref_mono(&full.clone())
         } else {
-            self.type_name_to_id
-                .get(name)
-                .map(|&id| crate::types::TypeRef::Concrete(id))
+            self.nominal_type_id(name).map(crate::types::TypeRef::Concrete)
         }
     }
 

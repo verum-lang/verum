@@ -2484,6 +2484,13 @@ one module and therefore never seeded",
         codegen.register_stdlib_intrinsics();
         codegen.register_runtime_io_functions();
 
+        // Pool-owned nominal signatures accompany the existing text/layout
+        // registry. Import only this source unit's dependency closure.
+        let mut prior_modules: Vec<_> = self.compiled_stdlib_modules.values().collect();
+        prior_modules.sort_by(|a, b| a.name.cmp(&b.name));
+        codegen.import_bootstrap_nominal_dependencies(ast_modules, &prior_modules)
+            .map_err(|error| anyhow::anyhow!("importing nominal dependencies for {}: {}", module.name, error))?;
+
         // Three-pass compilation within the module (cross-file two-phase collection)
         // ONE collector, the same one a user compile uses (T0692).
         //
