@@ -313,6 +313,27 @@ repair. These executable failures are not replaced by the passing unit counts.
 T1541 separately tracks disposal of the compiler-owned panic packet: its Text
 must survive while the temporary packet allocation is released at both tiers.
 
+The follow-up source snapshot `fed342ee1` repairs the three reproduced archive
+and initialization boundaries. T1531 preserves tuple-variant payload fields
+when importing descriptors and translates their optional metadata into the
+consumer string table. Optional field spelling/refinement IDs retain the
+`StringId::EMPTY` sentinel instead of reading slot zero as the module name.
+T1543 applies the same absence contract to parameter spellings in the public
+archive metadata conversion; a missing spelling no longer replaces an opaque
+callable with a nominal module name. Its four regression controls live in
+`crates/verum_compiler/tests/archive_parameter_spelling.rs` and exercise the
+public archive conversion API. T1542 initializes the root supervisor through
+the existing `OnceLock`, with format-only startup and once-only initialization
+fixtures. A fresh complete CLI/archive build and execution acceptance are
+pending for this snapshot; earlier binary results remain attributed above.
+
+A separate read-only audit found the remaining nonexistent `Lazy.new/get` use
+in `configuration.builtin_registry`. T1544 tracks its once-owned registry,
+borrowed lifetime and preservation of registrations across getter calls.
+Built-in adapter registrations are also still commented out. Neither that
+configuration API nor the native ownership foundation is repaired by changing
+the supervisor initializer.
+
 Remaining scope is explicit: T0467 also contains folded IO/FD/process
 acceptances that these slice regressions do not close. T1497 still needs a
 valid full-pipeline zero-capacity control; attempting List.shrink_to_fit
