@@ -4,9 +4,9 @@
 //! Parse that authority instead of splitting commas or rewriting identifier
 //! fragments. Unsupported forms remain unknown; no partial binding is emitted.
 
-use std::collections::HashSet;
 use verum_ast::ty::{GenericArg, GenericParamKind, PathSegment, Type, TypeKind};
 use verum_ast::visitor::{Visitor, walk_type};
+use verum_common::{List, Set, Text};
 use verum_fast_parser::Parser;
 
 const MAX_TYPE_BYTES: usize = 65_536;
@@ -15,16 +15,16 @@ const MAX_TYPE_DEPTH: usize = 64;
 struct Argument<'a> {
     name: &'a str,
     text: &'a str,
-    free_roots: HashSet<String>,
+    free_roots: Set<Text>,
 }
 
 #[derive(Default)]
 struct TypeEdits<'a> {
     source: &'a str,
     arguments: &'a [Argument<'a>],
-    bound: Vec<String>,
-    free_roots: HashSet<String>,
-    edits: Vec<(usize, usize, &'a str)>,
+    bound: List<Text>,
+    free_roots: Set<Text>,
+    edits: List<(usize, usize, &'a str)>,
     unsupported: bool,
     depth: usize,
 }
@@ -40,7 +40,7 @@ impl TypeEdits<'_> {
         if self.bound.iter().any(|bound| bound == name) {
             return;
         }
-        self.free_roots.insert(name.to_owned());
+        self.free_roots.insert(Text::from(name));
         if let Some(arg) = self.arguments.iter().find(|arg| arg.name == name) {
             // Without declaration IDs for the nested binder, alpha-renaming
             // would guess. Refuse a substitution that would capture an actual.
@@ -99,7 +99,7 @@ impl Visitor for TypeEdits<'_> {
                             bounds,
                             default,
                         } if bounds.is_empty() && default.is_none() => {
-                            self.bound.push(name.name.to_string());
+                            self.bound.push(name.name.clone());
                         }
                         // Field carrier rendering currently erases constraints;
                         // do not invent a scoped result for a richer carrier.
@@ -158,7 +158,7 @@ pub(super) fn instantiate(owner: &str, parameters: &[String], field: &str) -> Op
     if args.len() != parameters.len() {
         return None;
     }
-    let mut arguments = Vec::with_capacity(args.len());
+    let mut arguments = List::with_capacity(args.len());
     for (name, arg) in parameters.iter().zip(args.iter()) {
         let mut free = TypeEdits {
             source: owner,
@@ -195,7 +195,7 @@ pub(super) fn instantiate(owner: &str, parameters: &[String], field: &str) -> Op
         return None;
     }
     visitor.edits.sort_unstable_by_key(|edit| edit.0);
-    let mut output = String::with_capacity(field.len());
+    let mut output = Text::with_capacity(field.len());
     let mut position = 0;
     for (start, end, text) in visitor.edits {
         if start < position || end < start {
@@ -209,7 +209,7 @@ pub(super) fn instantiate(owner: &str, parameters: &[String], field: &str) -> Op
         position = end;
     }
     output.push_str(field.get(position..)?);
-    (output.len() <= MAX_TYPE_BYTES).then_some(output)
+    (output.len() <= MAX_TYPE_BYTES).then(|| String::from(output))
 }
 
 #[cfg(test)]
