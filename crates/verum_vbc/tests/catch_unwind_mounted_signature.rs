@@ -8,7 +8,7 @@ use verum_fast_parser::Parser;
 use verum_vbc::codegen::{CodegenConfig, VbcCodegen};
 use verum_vbc::interpreter::{self as heap, Interpreter};
 use verum_vbc::module::VbcModule;
-use verum_vbc::types::{TypeId, TypeRef};
+use verum_vbc::types::{TypeId, TypeParamId, TypeRef};
 
 struct Fixture(PathBuf);
 impl Fixture {
@@ -80,6 +80,8 @@ fn source_mounted_canonical_sum_ids_match_the_intrinsic_contract() {
     let module = fixture
         .compile(fence_source())
         .expect("canonical source mounts");
+    let bytes = verum_vbc::serialize::serialize_module(&module).expect("serialize source module");
+    let module = verum_vbc::deserialize::deserialize_module(&bytes).expect("reload source module");
     let functions: verum_common::List<_> = module
         .functions
         .iter()
@@ -93,6 +95,26 @@ fn source_mounted_canonical_sum_ids_match_the_intrinsic_contract() {
         .collect();
     assert_eq!(functions.len(), 3);
     for function in functions {
+        if module
+            .get_string(function.name)
+            .is_some_and(|name| name.ends_with(".fence"))
+        {
+            assert_eq!(
+                function.type_params.len(),
+                1,
+                "the declaration roster must survive body compilation"
+            );
+            assert_eq!(function.type_params[0].id, TypeParamId(0));
+            assert_eq!(module.get_string(function.type_params[0].name), Some("T"));
+            assert_eq!(function.explicit_type_param_ids, [Some(TypeParamId(0))]);
+            assert!(
+                matches!(&function.params[0].type_ref,
+                TypeRef::Function { params, return_type, .. }
+                if params.is_empty() && **return_type == TypeRef::Generic(TypeParamId(0))),
+                "callable return must remain linked to declaration T: {:?}",
+                function.params[0].type_ref
+            );
+        }
         assert!(
             matches!(&function.return_type, TypeRef::Instantiated { base, args } if *base == TypeId::RESULT && args.len() == 2),
             "{:?}",
