@@ -6,8 +6,9 @@
 interpreter exposes a separate premature guard drop while wrapping a local
 in `Result`. The measured mutex control is native `1,1,1` versus interpreter
 `false,false,false`, where the contract requires `true,false,false`.
-T1537 addresses field-reference arguments; T1539 addresses direct tail
-handoff. Neither establishes native guard lifecycle correctness.
+T1537 addresses field-reference arguments; T1539 tracks direct tail
+handoff and disposal of unused block results. Neither establishes native
+guard lifecycle correctness.
 See [the measured boundary and shared CBGR implementation plan](native-drop-lifecycle-gap.md).
 No LLVM-local ownership heuristic was added.
 
@@ -221,11 +222,70 @@ legacy const-surplus regression. Those counts overlap. Executing the source
 shadowing case exposed one remaining body producer that still loaded the
 owner's parameter ID; T1228 now uses the active signature ID there as well,
 and both ordinary and shadowed Factory.build cases return 7. These focused
-results do not yet establish the complete native iterator chain. The next
-coherent bake and both-tier HTTP acceptance remain pending.
+results do not establish the complete native iterator chain. The next
+coherent bake exposed the additional boundaries recorded below.
 The reproducible integration entry is `scripts/ci/check_weft_http_contract.py`
 with an explicit `--cli` and `--tier interpret` or `--tier aot`; it uses five
 repository VCS fixtures and checks binary response bytes as well as deadlines.
+
+**Integrated execution — 2026-10-04.** The coherent CLI build at `a67c786a4`
+(engine `dff347a06`) completed in 17m39s. Its embedded archive checksum was
+`69e69565900beabd161e5bed709291505e4789175e3e0346136462878ad3c18e`.
+The minimal VBC library suite again passed 2,035 tests with the same one
+pre-existing ignored test; 18 targeted binaries passed 186 tests. The real
+compiler's mono-discovery and declared-generic archive tests, four RetryBudget
+tests and positive/negative imported signatures also passed. These results
+describe that snapshot, not every subsequent engine commit.
+
+The actual HTTP interpreter gate passed its five language contracts, then
+returned HTTP 500 where binary HTTP 200 was required. True native execution
+passed the first four printed language controls and faulted at address `0x2`
+in `verum_futex_wait`. A separate mutex/address program reproduced two defects:
+passing a scalar field reference lost the address, and scope/explicit native
+Drop left a mutex locked. Its interpreter control also unlocked the guard
+prematurely while returning it through `Result`. No passing native HTTP verdict
+follows from this run.
+
+The next implementation stage separates those causes:
+
+- T1530 binds explicit instance-method type arguments by their declaration
+  slots; T1533 carries that result identity through field access, method chains
+  and unannotated bindings. Their tests check different field layouts and
+  shadowed generic names, rather than only the returned scalar value.
+- T1531 carries nominal dependencies between bootstrap units, including nested
+  `Weak<CancellationFlag>` instead of a synthetic generic placeholder. Drop and
+  Clone references use named cross-module identities and are translated once
+  at archive body merge; metadata-only edges remain reachable. Executing those
+  destructors is a separate lifecycle obligation. Source-selected free functions
+  now carry the same nominal signature closure as methods, including nested
+  return, parameter and yield types; exact paths and mounts select the roots.
+- T1532 places the handler invocation inside the eager panic boundary. T1536
+  routes native Panic through the runtime policy and has the catch producer
+  materialize its declared error type. Interpreter panic-class unwinding shares
+  frame/register/context cleanup with Throw. Missing source locations remain
+  `None`; native execution of the new path still requires the next CLI bake.
+- T1537 retains the actual field cell across native calls and raw-address
+  conversions. Runtime slots preserve branch selections and clear stale facts
+  on register reuse. Its focused tests include an actual futex mismatch call;
+  they do not establish mutex drop correctness.
+- T1535 preserves failure for an explicit AOT request. Before the fix, both
+  `--aot` and `--tier aot` executed an interpreter success after a deterministic
+  native output-directory error. The HTTP gate independently rejects fallback
+  output, so an interpreter result cannot count as native evidence.
+
+T1538/T1540 remain open for a common ownership/lifecycle contract. The existing
+CBGR analysis does not yet carry enough allocation, copy, move and escape facts
+to justify native destructors across functions and aggregate payloads. A new
+LLVM-local guess would duplicate that missing semantic authority. T1539 carries
+explicit result demand through value-forwarding syntax: a used direct local
+block tail survives its source scope, while discarded tails retain cleanup.
+Fifteen focused and 26 adjacent tests pass. Transfer through aggregate payloads,
+calls or branch results referring to outer locals remains outside that repair.
+A source-level T1519 control also remains red: two borrowed, qualified Envelope
+parameters choose the first imported Leaf.identity for both fields, in either
+module load order. Injected local type metadata is not evidence that this source
+path works. Current stage-three aggregate results will be recorded after a new
+coherent build and executable acceptance.
 
 Remaining scope is explicit: T0467 also contains folded IO/FD/process
 acceptances that these slice regressions do not close. T1497 still needs a
