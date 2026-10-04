@@ -15868,9 +15868,11 @@ impl VbcCodegen {
                     // still renders its nominal name in the archive instead of
                     // `__opaque_type_14` (which parse_descriptor_type_string
                     // turns into a fresh Var — the field-identity hole).
+                    // T1545: preserve explicitly written module paths here too;
+                    // a bare leaf would alias a sibling after archive import.
                     let field_type_name = StringId(
                         self.ctx
-                            .intern_string_raw(&Self::extract_type_name_from_ast(&field.ty)),
+                            .intern_string_raw(&Self::render_field_type_name(&field.ty, true)),
                     );
                     type_desc.fields.push(crate::types::FieldDescriptor {
                         name: StringId(self.ctx.intern_string_raw(&field_name)),
