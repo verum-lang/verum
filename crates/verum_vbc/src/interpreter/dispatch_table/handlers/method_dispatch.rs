@@ -11255,24 +11255,7 @@ pub(super) fn dispatch_variant_method(
                 .map(|i| unsafe { heap::variant_payload(base_ptr, i) })
                 .collect();
             // Allocate clone with same (tag, field_count, payload[]).
-            let clone_data_size = 8 + field_count * std::mem::size_of::<Value>();
-            let clone_obj = state.heap.alloc_with_init(
-                parent_type_id,
-                clone_data_size,
-                |data| {
-                    // SAFETY: `data` is the variant data section
-                    // (8 + field_count * 8 bytes).  Write header
-                    // first; payloads are filled in below after the
-                    // closure returns.
-                    unsafe {
-                        heap::write_variant_data_header(
-                            data.as_mut_ptr(),
-                            tag,
-                            field_count_u32,
-                        );
-                    }
-                },
-            )?;
+            let clone_obj = state.heap.alloc_variant(parent_type_id, tag, field_count_u32)?;
             // Copy payloads into the fresh allocation.
             unsafe {
                 let clone_base = clone_obj.as_ptr() as *mut u8;
@@ -12624,13 +12607,7 @@ pub(super) fn alloc_variant_with_payload(
     tag: u32,
     payload: Value,
 ) -> InterpreterResult<Value> {
-    let data_size = 8 + std::mem::size_of::<Value>();
-    let obj = state.heap.alloc_with_init(parent_type_id, data_size, |data| {
-        // SAFETY: data is the variant data section (16 bytes total —
-        // 8-byte (tag, fc) header + 8-byte payload). The helper
-        // writes exactly 8 bytes at the start of `data`.
-        unsafe { heap::write_variant_data_header(data.as_mut_ptr(), tag, 1) };
-    })?;
+    let obj = state.heap.alloc_variant(parent_type_id, tag, 1)?;
     unsafe {
         let base = obj.as_ptr() as *mut u8;
         std::ptr::write(heap::variant_payload_ptr_mut(base, 0), payload);
@@ -12653,13 +12630,7 @@ pub(super) fn alloc_unit_variant(
     parent_type_id: TypeId,
     tag: u32,
 ) -> InterpreterResult<Value> {
-    let data_size = 8;
-    let obj = state.heap.alloc_with_init(parent_type_id, data_size, |data| {
-        // SAFETY: data is the 8-byte variant data section
-        // (tag + field_count, no payload). The helper writes
-        // exactly 8 bytes starting at `data`.
-        unsafe { heap::write_variant_data_header(data.as_mut_ptr(), tag, 0) };
-    })?;
+    let obj = state.heap.alloc_variant(parent_type_id, tag, 0)?;
     state.record_allocation();
     Ok(Value::from_ptr(obj.as_ptr() as *mut u8))
 }

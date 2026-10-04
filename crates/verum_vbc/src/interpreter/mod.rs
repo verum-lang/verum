@@ -718,13 +718,8 @@ impl Interpreter {
     /// is single-sourced with the canonical opcode handler.
     pub fn alloc_variant(&mut self, tag: u32, payload: &[Value]) -> InterpreterResult<Value> {
         let field_count = payload.len() as u32;
-        let data_size = 8 + payload.len() * std::mem::size_of::<Value>();
         let type_id = crate::types::TypeId(verum_common::layout::synthetic_variant_type_id(tag));
-        let obj = self.state.heap.alloc_with_init(type_id, data_size, |data| {
-            // SAFETY: `data` is `data_size` bytes; helper writes the
-            // leading 8 (the (tag, field_count) header).
-            unsafe { heap::write_variant_data_header(data.as_mut_ptr(), tag, field_count) };
-        })?;
+        let obj = self.state.heap.alloc_variant(type_id, tag, field_count)?;
         self.state.record_allocation();
         // Write each payload value into its canonical slot. SAFETY:
         // `obj.as_ptr()` points to the live heap object we just

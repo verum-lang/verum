@@ -470,7 +470,7 @@ pub(in super::super) fn handle_get_field(
         }
     }
 
-    // Auto-deref for Heap<T> (variant wrapper with type_id >= 0x8000):
+    // Auto-deref for a variant wrapper carrying a record payload:
     // Heap objects are stored as variant wrappers where payload[0] is the inner value.
     // When accessing a field on a Heap<T>, we need to unwrap to get the inner T first.
     // SAFETY: Validate pointer alignment before casting to ObjectHeader (requires 4-byte alignment).
@@ -508,27 +508,8 @@ pub(in super::super) fn handle_get_field(
     // falls through to the existing variant unwrap.
     ptr = shared_carrier_inner(state, header, ptr)?;
 
-    // SAFETY: Re-read header — `ptr` may have advanced past Shared
-    // auto-deref above; alignment was re-verified inside the Shared
-    // arm.
-    {
-        let header = unsafe { heap::ObjectHeader::ref_or_stub(ptr) };
-        if header.type_id.0 >= 0x8000 {
-            // This is a variant (e.g., Heap wrapper). Extract payload[0] as the inner object.
-            let payload_offset = heap::OBJECT_HEADER_SIZE + 8; // skip tag + padding
-            // SAFETY: Variant objects are laid out as [ObjectHeader, tag:u64,
-            // payload...]; payload[0] sits at `OBJECT_HEADER_SIZE + 8` and is
-            // initialized at construction. Alignment is satisfied (8 bytes).
-            let inner_value = unsafe { *(ptr.add(payload_offset) as *const Value) };
-            // The inner value should be a pointer to the actual record object
-            if inner_value.is_ptr() && !inner_value.is_nil() {
-                ptr = inner_value.as_ptr::<u8>();
-                if ptr.is_null() {
-                    return Err(InterpreterError::NullPointer);
-                }
-            }
-        }
-    }
+    // SAFETY: aligned live object after Shared/CBGR receiver resolution.
+    ptr = unsafe { super::cbgr_helpers::variant_record_inner(ptr) }?;
 
     // Re-read header AFTER any auto-deref above — the bounds check
     // below uses `header.size`, which must reflect the FINAL `ptr`
@@ -933,7 +914,7 @@ pub(in super::super) fn handle_set_field(
         }
     }
 
-    // Auto-deref for Heap<T> (variant wrapper with type_id >= 0x8000)
+    // Auto-deref for a variant wrapper carrying a record payload
     // SAFETY: Validate pointer alignment before casting to ObjectHeader (requires 4-byte alignment).
     if !(ptr as usize).is_multiple_of(std::mem::align_of::<heap::ObjectHeader>()) {
         return Err(InterpreterError::Panic {
@@ -952,19 +933,8 @@ pub(in super::super) fn handle_set_field(
     // clobbered the refcount) instead of reaching the inner T. ONE authority
     // with the reader (handle_get_field) so the two sides cannot drift.
     ptr = shared_carrier_inner(state, header, ptr)?;
-    // Re-read the header for the (possibly Shared-deref'd) inner object.
-    let header = unsafe { heap::ObjectHeader::ref_or_stub(ptr) };
-    if header.type_id.0 >= 0x8000 {
-        let payload_offset = heap::OBJECT_HEADER_SIZE + 8;
-        // SAFETY: See handle_get_field — variant payload layout applies.
-        let inner_value = unsafe { *(ptr.add(payload_offset) as *const Value) };
-        if inner_value.is_ptr() && !inner_value.is_nil() {
-            ptr = inner_value.as_ptr::<u8>();
-            if ptr.is_null() {
-                return Err(InterpreterError::NullPointer);
-            }
-        }
-    }
+    // SAFETY: aligned live object after Shared/CBGR receiver resolution.
+    ptr = unsafe { super::cbgr_helpers::variant_record_inner(ptr) }?;
     // T0107: re-read the header AFTER the variant deref so the bounds check
     // below validates against the INNER object's size — the write side
     // previously used the stale OUTER header (the read side re-reads; the
@@ -2966,7 +2936,10 @@ pub(crate) fn value_copy(
         // Records, variants, tuples: a fresh object carrying the same
         // slots.
         _ => {
+            let representation = header.flags & heap::ObjectFlags::VARIANT;
             let new_obj = state.heap.alloc(type_id, data_size)?;
+            // SAFETY: fresh object; retain representation, not borrow/GC/lifetime state.
+            unsafe { (*new_obj.as_ptr()).flags |= representation };
             state.record_allocation();
             let src_data = unsafe { src_ptr.add(heap::OBJECT_HEADER_SIZE) };
             let dst_data = new_obj.data_ptr();

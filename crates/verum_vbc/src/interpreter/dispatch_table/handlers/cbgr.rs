@@ -2282,29 +2282,9 @@ fn cbgr_extended_body(
                 }
             }
 
-            // Variant wrapper unwrap (type_id >= 0x8000): payload[0]
-            // holds the inner record pointer.
-            {
-                if !(ptr as usize).is_multiple_of(std::mem::align_of::<heap::ObjectHeader>()) {
-                    return Err(InterpreterError::Panic {
-                        message: format!(
-                            "misaligned pointer {:p} after Shared deref in RefField",
-                            ptr,
-                        ),
-                    });
-                }
-                let header = unsafe { heap::ObjectHeader::ref_or_stub(ptr) };
-                if header.type_id.0 >= 0x8000 {
-                    let payload_offset = heap::OBJECT_HEADER_SIZE + 8;
-                    let inner = unsafe { *(ptr.add(payload_offset) as *const Value) };
-                    if inner.is_ptr() && !inner.is_nil() {
-                        ptr = inner.as_ptr::<u8>();
-                        if ptr.is_null() {
-                            return Err(InterpreterError::NullPointer);
-                        }
-                    }
-                }
-            }
+            // SAFETY: receiver resolves to a live object. The helper guards
+            // alignment, which is also checked on the final pointer below.
+            ptr = unsafe { super::cbgr_helpers::variant_record_inner(ptr) }?;
 
             // Final alignment + bounds check on the unwrapped record.
             if !(ptr as usize).is_multiple_of(std::mem::align_of::<heap::ObjectHeader>()) {

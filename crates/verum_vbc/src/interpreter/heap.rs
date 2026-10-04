@@ -587,6 +587,9 @@ bitflags! {
         const HAS_REFS = 0b0100_0000;
         /// Object has a finalizer.
         const HAS_FINALIZER = 0b1000_0000;
+        /// Allocation has the variant tag/count prefix. Set by alloc_variant,
+        /// independent of nominal/synthetic TypeId (T1571).
+        const VARIANT = 0b1_0000_0000;
     }
 }
 
@@ -1206,6 +1209,30 @@ impl Heap {
         self.stats.peak_bytes = self.stats.peak_bytes.max(self.allocated);
 
         Ok(Object { ptr: nn_ptr })
+    }
+
+    /// Allocate a variant with an explicit representation marker (T1571).
+    /// Numeric type IDs can coincide with legacy synthetic IDs; only the
+    /// producer knows whether the allocation has a tag/count prefix.
+    pub fn alloc_variant(
+        &mut self,
+        type_id: TypeId,
+        tag: u32,
+        field_count: u32,
+    ) -> InterpreterResult<Object> {
+        let size = (field_count as usize)
+            .checked_mul(std::mem::size_of::<Value>())
+            .and_then(|payload| payload.checked_add(8))
+            .ok_or_else(|| InterpreterError::Panic {
+                message: "variant allocation size overflow".into(),
+            })?;
+        let object = self.alloc_with_init(type_id, size, |data| {
+            // SAFETY: the allocation includes the tag/count prefix.
+            unsafe { write_variant_data_header(data.as_mut_ptr(), tag, field_count) };
+        })?;
+        // SAFETY: fresh tracked object; no references have escaped.
+        unsafe { (*object.as_ptr()).flags.insert(ObjectFlags::VARIANT) };
+        Ok(object)
     }
 
     /// Allocates an array of values.

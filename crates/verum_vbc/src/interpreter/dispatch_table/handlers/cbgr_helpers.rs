@@ -433,6 +433,52 @@ pub(super) fn peel_heap_cell(
     unsafe { *(base_ptr as *const Value) }
 }
 
+/// Peel a variant's record payload for field access (T1571).
+/// The allocation flag comes from the variant producer, never a TypeId range.
+/// This also distinguishes a legacy variant and a nominal record with the
+/// same numeric ID. Unit variants and scalar payloads remain unpeeled.
+///
+/// # Safety
+/// `ptr`, if aligned and non-null, must address a live ObjectHeader from
+/// the field receiver's CBGR/heap/Shared resolution. ref_or_stub rejects
+/// unaligned and special-value pointers without reading them.
+pub(super) unsafe fn variant_record_inner(ptr: *mut u8) -> InterpreterResult<*mut u8> {
+    use super::super::super::heap;
+    let header = unsafe { heap::ObjectHeader::ref_or_stub(ptr) };
+    if !header.flags.contains(heap::ObjectFlags::VARIANT) {
+        return Ok(ptr);
+    }
+    if header.size < 8 {
+        return Err(InterpreterError::Panic {
+            message: "variant field receiver lacks tag/count prefix".into(),
+        });
+    }
+    // SAFETY: the producer marker and size prove the prefix is present.
+    let (_, count) = unsafe { heap::variant_header_pair(ptr) };
+    let required = (count as usize)
+        .checked_mul(std::mem::size_of::<Value>())
+        .and_then(|bytes| bytes.checked_add(8));
+    if required.is_none_or(|size| size > header.size as usize) {
+        return Err(InterpreterError::Panic {
+            message: "variant field receiver payload exceeds allocation".into(),
+        });
+    }
+    if count == 0 {
+        return Ok(ptr);
+    }
+    // SAFETY: at least one payload slot is within the checked allocation.
+    let inner = unsafe { heap::variant_payload(ptr, 0) };
+    if inner.is_ptr() && !inner.is_nil() {
+        let inner_ptr = inner.as_ptr::<u8>();
+        if inner_ptr.is_null() {
+            return Err(InterpreterError::NullPointer);
+        }
+        Ok(inner_ptr)
+    } else {
+        Ok(ptr)
+    }
+}
+
 /// Write `value` through whatever reference shape `slot_val` holds, mutating
 /// the ORIGIN storage the reference points at. Write-side twin of
 /// [`resolve_arg_value`] — the same three reference shapes, resolved for a

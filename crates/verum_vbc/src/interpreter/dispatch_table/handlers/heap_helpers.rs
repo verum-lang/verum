@@ -104,15 +104,13 @@ pub(super) fn wrap_in_variant(
     let type_id = lookup_type_id_by_name(state, type_name)
         .unwrap_or(TypeId(verum_common::layout::synthetic_variant_type_id(tag)));
     let field_count = fields.len() as u32;
-    let data_size = 8 + (fields.len() * std::mem::size_of::<Value>());
-    let obj = state.heap.alloc(type_id, data_size)?;
+    let obj = state.heap.alloc_variant(type_id, tag, field_count)?;
     state.record_allocation();
     let base = obj.as_ptr() as *mut u8;
     // SAFETY: alloc returned a live heap object whose data section is
     // sized for the variant `(tag, field_count, payload[0..N])` layout;
     // `field_count` matches the number of payload writes below.
     unsafe {
-        heap::write_variant_data_header(base.add(heap::OBJECT_HEADER_SIZE), tag, field_count);
         for (i, v) in fields.iter().enumerate() {
             *heap::variant_payload_ptr_mut(base, i) = *v;
         }
