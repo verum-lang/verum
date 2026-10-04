@@ -617,9 +617,51 @@ The interpreter list-backing control passes all eight outputs. The HTTP gate
 also passes all five language contracts, a true zero-capacity TCP read and
 four connections: exact binary 200 body, header and slow-drip 408 responses
 at 0.695 and 0.647 seconds, and cancellation with no response bytes.
-Native execution of this snapshot is still under validation. Main integration
-and a whole-platform or industrial-readiness claim remain pending; unit and
-archive checks do not replace actual execution results.
+Actual native execution of the same snapshot passes the factory/collect,
+panic-payload and eager-handler phases, then crashes in `SupervisorHandle.name`.
+The program ran natively and did not fall back to the interpreter. Debugging
+the saved executable confirms both Once results are 37 and the initializer
+count is one: the former private Once-layout defect is repaired. The next
+failure is a reference representation boundary (T1573): `Maybe.as_ref` wraps
+a slot address, `expect` and `OnceLock.get_or_init` forward it, and the method
+consumer treats that slot address as the object itself. The later native
+address and mutex checks did not run. A direct-producer reference test cannot
+substitute for this aggregate and call-chain case.
+
+The separate native list-backing program also starts but fails before any
+expected output. Its `verum_alloc_byte_list_packed` helper is an unresolved
+declaration filled by a constant-null stub. The list handle is already null
+before `shrink_to_fit`; a watchpoint rules out that method overwriting it.
+Two adjacent representation gaps also remain under T1517: NewByteList does not
+mark its result as a List, and native element operations use eight-byte slots.
+Adding only a packed allocation would therefore be unsafe; allocator ownership,
+element stride, source capacity operations and receiver passing must agree.
+
+**Runtime snapshot `de5454776` — 2026-10-04.** T1571 gives actual variant
+allocations an explicit heap flag and makes `GetF`, `SetF` and `RefField`
+consult that flag with payload bounds. Numeric TypeId ranges no longer decide
+whether those field operations unwrap a variant. Value copying preserves this
+representation flag without copying GC/lifetime flags. Controls cover records
+and variants with the same numeric ID, high nominal IDs, malformed wrappers
+and copied values; other numeric-kind consumers are outside this repair.
+
+The ordinary CLI build takes 192.80 seconds and retains the exact stdlib
+fingerprint and all three archive hashes above. The VBC suite passes 2,048
+library and 429 integration tests across 47 integration binaries, with no
+failures and the same two explicitly accounted-for ignored cases. The combined
+interpreter program now completes with exit zero and passes its field-address
+check, alongside all four earlier phases. Its separate mutex lifecycle
+assertion still fails (`false,false,false` instead of `true,false,false`),
+so the acceptance runner correctly remains unsuccessful for that contract.
+List-backing execution and the complete HTTP gate pass again, including the
+zero-capacity read, exact binary body, cancellation and both deadlines.
+
+The earlier source and CI changes are integrated into clean main at `2a655dfa4`.
+Task closure is checked against each task's original acceptance and reachable
+implementation commits, rather than inferred from aggregate test counts.
+Native reference forwarding, native List representation and owned/aggregate
+Drop remain release blockers. These measured snapshots do not establish
+whole-platform or industrial readiness.
 
 The separate website repository has also been updated and committed: its
 homepage and public guide describe the integrated platform and dated current
