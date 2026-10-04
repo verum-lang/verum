@@ -281,11 +281,37 @@ explicit result demand through value-forwarding syntax: a used direct local
 block tail survives its source scope, while discarded tails retain cleanup.
 Fifteen focused and 26 adjacent tests pass. Transfer through aggregate payloads,
 calls or branch results referring to outer locals remains outside that repair.
-A source-level T1519 control also remains red: two borrowed, qualified Envelope
-parameters choose the first imported Leaf.identity for both fields, in either
-module load order. Injected local type metadata is not evidence that this source
-path works. Current stage-three aggregate results will be recorded after a new
-coherent build and executable acceptance.
+A source-level T1519 control exposed another lost identity: two borrowed,
+qualified Envelope parameters chose the first imported Leaf.identity for both
+fields. Commit `114b687d5` preserves the qualified parameter owner at its
+producer; five source controls cover both module orders without injected local
+type metadata, and 50 focused/adjacent tests pass.
+
+The first stage-three CLI build at `b19857dc9` completed in 23m38s, with archive
+checksum `474f225fe05cd3ca4579a36c4c4def046529be5c7cc6e915eb871dcfde2a7604`.
+All 244 tests in 26 targeted binaries and all 40 source gates passed. The full
+VBC library run instead found two failures in the source-mounted panic modules
+(2,033 passed, two failed, one pre-existing ignored test). T1536's strict guard
+exposed a second ID allocated for canonical Result/Maybe declarations.
+Commit `6a079763a` preserves their declaration identities through the existing
+well-known-type authority. On that integrated snapshot the full library run
+passes **2,035 tests, zero failed, one pre-existing ignored**, in 596.57s;
+the five LLVM integration binaries pass **64 tests**, and all **40 source gates**
+pass again. The LLVM setjmp tests cover the actual callee on Darwin/Linux
+arm64/x86_64: `aef1d328c` retains external Darwin setjmp/longjmp instead of
+zero-return stubs and supplies the LLVM enum control-flow attributes.
+
+Actual CLI execution still prevents a stage-three completion claim. The
+explicit-AOT failure regression passes, including its positive interpreter
+control. The HTTP program fails type checking: imported tuple variants lose
+their payload fields (T1531). The panic callable's failed-body stub exports a
+malformed signature; the repaired canonical declaration producer restores its
+generic function shape, but a fresh archive remains necessary. Programs using
+format interpolation also activate a supervisor initializer that calls a
+nonexistent Lazy.new (T1542); unrelated constructor suppression is not a valid
+repair. These executable failures are not replaced by the passing unit counts.
+T1541 separately tracks disposal of the compiler-owned panic packet: its Text
+must survive while the temporary packet allocation is released at both tiers.
 
 Remaining scope is explicit: T0467 also contains folded IO/FD/process
 acceptances that these slice regressions do not close. T1497 still needs a
