@@ -136,3 +136,55 @@ fn a_module_without_statics_carries_no_lifecycle_wrappers() {
          the entry calls are conditional on their existence"
     );
 }
+
+#[test]
+fn monomorphized_lifecycle_keeps_its_mapped_native_entry_calls() {
+    use verum_vbc::module::FunctionId;
+    use verum_vbc::mono::{ModuleMerger, MonomorphizationResolver};
+
+    let mut source = module_with_static_lifecycle();
+    // Table position is not the input FunctionId. A raw roster copy could
+    // otherwise pass while calling a different function after compaction.
+    for (function, id) in source.functions.iter_mut().zip([91, 7, 900]) {
+        function.id = FunctionId(id);
+    }
+    source.global_ctors[0].0 = FunctionId(7);
+    source.global_dtors[0].0 = FunctionId(900);
+    let (module, _) = ModuleMerger::new(source, None, vec![], MonomorphizationResolver::new())
+        .merge()
+        .expect("lifecycle identities must survive mono");
+    assert_eq!(module.global_ctors, vec![(FunctionId(1), 65535)]);
+    assert_eq!(module.global_dtors, vec![(FunctionId(2), 65535)]);
+
+    let ir = lower(&module);
+    let main = body_of_main(&ir);
+    let init = main.find("call void @__verum_static_init").unwrap();
+    let entry = main.find("@verum_main").unwrap();
+    let fini = main.find("call void @__verum_static_fini").unwrap();
+    assert!(
+        init < entry && entry < fini,
+        "post-mono entry order: {main}"
+    );
+    let init_body = ir
+        .split("define void @__verum_static_init()")
+        .nth(1)
+        .expect("native static initializer wrapper")
+        .split("\n}")
+        .next()
+        .unwrap();
+    let fini_body = ir
+        .split("define void @__verum_static_fini()")
+        .nth(1)
+        .expect("native static finalizer wrapper")
+        .split("\n}")
+        .next()
+        .unwrap();
+    assert!(
+        init_body.contains("@static_seed("),
+        "ctor callee: {init_body}"
+    );
+    assert!(
+        fini_body.contains("@static_drop("),
+        "dtor callee: {fini_body}"
+    );
+}

@@ -233,6 +233,10 @@ impl ModuleMerger {
         // Step 2: Copy user bytecode and functions
         self.copy_user_functions(&mut output)?;
 
+        // Lifecycle roots refer to source function IDs. Carry them only after
+        // compaction has established the exact source-to-output mapping.
+        self.copy_lifecycle_functions(&mut output)?;
+
         // Tombstone for the deleted raw-copy stdlib leg: a
         // `StdlibPrecompiled` resolution has no materializer here any
         // more — the raw byte copy it used performed NO string/type/
@@ -354,6 +358,29 @@ impl ModuleMerger {
             self.stats.user_functions += 1;
         }
 
+        Ok(())
+    }
+
+    /// Preserve lifecycle order and priorities while translating function IDs.
+    ///
+    /// Dropping these roots leaves static/TLS cells uninitialized after mono
+    /// (T1553). A missing source ID must not accidentally name a newly compacted
+    /// output function; malformed lifecycle metadata is an identity error.
+    fn copy_lifecycle_functions(&self, output: &mut VbcModule) -> Result<(), MergeError> {
+        for (source, destination) in [
+            (&self.user_module.global_ctors, &mut output.global_ctors),
+            (&self.user_module.global_dtors, &mut output.global_dtors),
+        ] {
+            for &(function_id, priority) in source {
+                let mapped = self.mapping.get(function_id).ok_or_else(|| {
+                    MergeError::FunctionNotFound {
+                        module: self.user_module.name.clone(),
+                        function_id,
+                    }
+                })?;
+                destination.push((mapped, priority));
+            }
+        }
         Ok(())
     }
 
