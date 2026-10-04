@@ -691,6 +691,11 @@ jobs:
       - name: Build verum CLI
         run: cargo build -p verum_cli --release --locked
 
+      # Reuses the release CLI; fixtures stop before source/backend compilation.
+      - name: Project run tier selection
+        timeout-minutes: 5
+        run: cargo test --locked --release -p verum_cli --test run_manifest_tier
+
       # T0927: `verum check` answered core/logic/kripke.vr with 0 errors on
       # some runs and 20 on others, from one binary on one unedited file, and
       # nothing noticed — every other gate in this file runs a file ONCE, and
