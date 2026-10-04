@@ -308,7 +308,7 @@ impl VbcCodegen {
                     *target = tr(target);
                 }
                 // Protocol method slots in existing archives have no per-slot
-                // module provenance (T0378). Keep their declaration bindings,
+                // module provenance. Keep their declaration bindings,
                 // and let canonical method lookup select bodies; do not turn
                 // a coincident source-local number into an unrelated method.
                 implementation.methods.clear();
