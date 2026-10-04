@@ -1342,16 +1342,6 @@ impl MethodDispatchTable {
                 },
             );
         }
-
-        for method in &["new", "call_once", "do_once", "is_completed"] {
-            self.register(
-                "Once",
-                method,
-                MethodDispatchTarget::CRuntime {
-                    symbol: "verum_once_op",
-                },
-            );
-        }
     }
 
     /// Get the number of registered overrides.

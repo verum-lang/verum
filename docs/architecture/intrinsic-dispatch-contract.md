@@ -658,6 +658,22 @@ specialization is the intended Tier-1 route for generic user-type
 arithmetic; until it covers this shape, generic `+` on user records
 under `--aot` remains a known gap (tracked with T0499's residuals).
 
+## Source-defined Once storage
+
+`core.sync.once.Once` stores an `AtomicInt` field. Native construction and
+method calls use those declared source bodies; the LLVM atomic lowering
+operates on the field's `AtomicInt` value. There is no separate native
+`Once` layout or name-based method override. Treating the field slot as a
+raw state would compare the nested object's pointer with `0`, skipping the
+first initializer. User types named `Once` keep their declared methods.
+
+`once_declared_storage` runs the actual library method bodies through native
+JIT for initial and repeated initialization, including named and captured
+callbacks. `closure_callback_abi` covers the separate callable carrier and a
+user-defined same-name type. These focused checks do not establish native
+panic-poisoning or destructor unwinding; those require ownership and unwind
+validation beyond successful initialization.
+
 ## References
 
 - Task #25 [E3] — body @intrinsic vs table authority, LLVM-canonical

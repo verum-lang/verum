@@ -18476,12 +18476,6 @@ fn lower_call_method<'ctx>(
             "new" | "read" | "write" | "try_read" | "try_write" | "is_poisoned"
         );
 
-    // Once detection
-    let is_once_by_prefix = matches!(method_type_prefix, Some("Once"));
-    let is_once_by_register = ctx.get_obj_register_type(receiver.0).map_or(false, |t| t == "Once") // NOTE: Once not in WKT yet
-    && matches!(bare_method_early,
-        "new" | "call_once" | "do_once" | "is_completed");
-
     // Skip Strategy 1/2 for methods that must use C runtime or inline LLVM.
     // Phase 1: Use dispatch_table as primary source, fall back to legacy detection.
     let skip_compiled_lookup = match &dispatch_target {
@@ -18508,8 +18502,6 @@ fn lower_call_method<'ctx>(
                 || is_sem_by_register
                 || is_rwlock_by_prefix
                 || is_rwlock_by_register
-                || is_once_by_prefix
-                || is_once_by_register
         }
     };
     if is_atomic_by_prefix || is_atomic_by_register {
@@ -19568,163 +19560,10 @@ fn lower_call_method<'ctx>(
         }
     }
 
-    // ============================================================
-    // Strategy 0e: Once intercepts.
-    // Layout: header(24) + state(8) = 32 bytes
-    // State: 0=incomplete, 1=running, 2=complete
-    // ============================================================
-    if is_once_by_prefix || is_once_by_register {
-        let i64_type = ctx.types().i64_type();
-        let ptr_type = ctx.types().ptr_type();
-        let module = ctx.get_module();
-
-        match bare_method_early {
-            "new" => {
-                // Once.new() → malloc(32), state=0
-                let raw_ptr =
-                    checked_malloc_instr(ctx, module, i64_type.const_int(32, false), "once_raw")?;
-                // SAFETY: GEP into the Once object (32 bytes: 24B header + state) to initialize the state field at index 3 (offset 24)
-                let state_ptr = unsafe {
-                    ctx.builder()
-                        .build_gep(
-                            i64_type,
-                            raw_ptr,
-                            &[i64_type.const_int(3, false)],
-                            "once_state_ptr",
-                        )
-                        .or_llvm_err()?
-                };
-                ctx.builder()
-                    .build_store(state_ptr, i64_type.const_int(0, false))
-                    .or_llvm_err()?;
-                let result = ctx
-                    .builder()
-                    .build_ptr_to_int(raw_ptr, i64_type, "once_i64")
-                    .or_llvm_err()?;
-                ctx.set_register(dst.0, result.into());
-                ctx.set_obj_register_type(dst.0, "Once".to_string());
-                return Ok(());
-            }
-            "call_once" | "do_once" => {
-                // CAS 0→1, if won: call closure, store 2
-                let recv_val = as_i64(ctx, ctx.get_register(receiver.0)?, "once_self")?;
-                let obj_ptr = ctx
-                    .builder()
-                    .build_int_to_ptr(recv_val, ptr_type, "once_ptr")
-                    .or_llvm_err()?;
-                // SAFETY: GEP into the Once object to access the state field at index 3 (offset 24) for CAS (0=init, 1=running, 2=done)
-                let state_ptr = unsafe {
-                    ctx.builder()
-                        .build_gep(
-                            i64_type,
-                            obj_ptr,
-                            &[i64_type.const_int(3, false)],
-                            "once_state_ptr",
-                        )
-                        .or_llvm_err()?
-                };
-
-                let func = ctx
-                    .builder()
-                    .get_insert_block()
-                    .or_internal("no insert block")?
-                    .get_parent()
-                    .or_internal("block has no parent function")?;
-                let try_bb = ctx.llvm_context().append_basic_block(func, "once_try");
-                let run_bb = ctx.llvm_context().append_basic_block(func, "once_run");
-                let done_bb = ctx.llvm_context().append_basic_block(func, "once_done");
-
-                ctx.builder()
-                    .build_unconditional_branch(try_bb)
-                    .or_llvm_err()?;
-
-                // try_bb: CAS 0 → 1
-                ctx.builder().position_at_end(try_bb);
-                let cas_result = ctx
-                    .builder()
-                    .build_cmpxchg(
-                        state_ptr,
-                        i64_type.const_int(0, false),
-                        i64_type.const_int(1, false),
-                        AtomicOrdering::AcquireRelease,
-                        AtomicOrdering::Acquire,
-                    )
-                    .or_llvm_err()?;
-                let success = ctx
-                    .builder()
-                    .build_extract_value(cas_result, 1, "cas_ok")
-                    .or_llvm_err()?;
-                ctx.builder()
-                    .build_conditional_branch(success.into_int_value(), run_bb, done_bb)
-                    .or_llvm_err()?;
-
-                // run_bb: call the closure, then set state=2
-                ctx.builder().position_at_end(run_bb);
-                if args.count > 0 {
-                    let closure_val = ctx.get_register(args.start.0)?;
-                    let closure_ptr = as_ptr(ctx, closure_val, "once_closure")?;
-                    RuntimeLowering::new(ctx.llvm_context()).lower_call_closure(
-                        ctx.builder(),
-                        closure_ptr,
-                        &[],
-                    )?;
-                }
-                // Set state = COMPLETE (2)
-                ctx.builder()
-                    .build_store(state_ptr, i64_type.const_int(2, false))
-                    .or_llvm_err()?;
-                ctx.builder()
-                    .build_unconditional_branch(done_bb)
-                    .or_llvm_err()?;
-
-                // done_bb
-                ctx.builder().position_at_end(done_bb);
-                ctx.set_register(dst.0, i64_type.const_int(0, false).into());
-                return Ok(());
-            }
-            "is_completed" => {
-                let recv_val = as_i64(ctx, ctx.get_register(receiver.0)?, "once_self")?;
-                let obj_ptr = ctx
-                    .builder()
-                    .build_int_to_ptr(recv_val, ptr_type, "once_ptr")
-                    .or_llvm_err()?;
-                // SAFETY: GEP into the Once object to read the state field at index 3 (offset 24); checking if state == 2 (completed)
-                let state_ptr = unsafe {
-                    ctx.builder()
-                        .build_gep(
-                            i64_type,
-                            obj_ptr,
-                            &[i64_type.const_int(3, false)],
-                            "once_state_ptr",
-                        )
-                        .or_llvm_err()?
-                };
-                let state = ctx
-                    .builder()
-                    .build_load(i64_type, state_ptr, "once_state")
-                    .or_llvm_err()?;
-                let is_done = ctx
-                    .builder()
-                    .build_int_compare(
-                        IntPredicate::EQ,
-                        state.into_int_value(),
-                        i64_type.const_int(2, false),
-                        "once_done",
-                    )
-                    .or_llvm_err()?;
-                let result = ctx
-                    .builder()
-                    .build_int_z_extend(is_done, i64_type, "once_result")
-                    .or_llvm_err()?;
-                ctx.set_register(dst.0, result.into());
-                ctx.mark_bool_register(dst.0);
-                return Ok(());
-            }
-            _ => {
-                // Fall through for unrecognized Once methods
-            }
-        }
-    }
+    // Once is a source-defined record containing an AtomicInt. Its constructor
+    // and methods use the declared bodies below; only the field's atomic
+    // operations have native lowering. A private raw-state layout here would
+    // disagree with source constructors and also intercept unrelated Once types.
 
     // ============================================================
     // Strategy 0c: TcpStream / TcpListener / UdpSocket intercepts.

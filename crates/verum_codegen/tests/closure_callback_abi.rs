@@ -31,7 +31,13 @@ extern "C" fn unexpected_exit(_code: u64) {
 
 const SOURCE: &str = r#"
     type Cell is { value: Int };
+    // A user type with the same leaf name must keep its own source method.
     type Once is { state: Int };
+    implement Once {
+        fn call_once(&self, f: fn()) {
+            if self.state + 0 == 41 { f(); self.state = 42; }
+        }
+    }
     fn make(cell: &mut Cell, increment: Int) -> fn() {
         || { cell.value += increment; }
     }
@@ -69,7 +75,16 @@ fn with_source_ir(check: impl FnOnce(&Context, &str)) {
 }
 
 fn assert_once_abi(ir: &str) {
-    let once = ir.split("@invoke_once(").nth(1).expect("once function");
+    let caller = ir.split("@invoke_once(").nth(1).expect("once caller");
+    let caller = caller.split("\n}").next().unwrap();
+    assert!(
+        caller.contains("@Once.call_once("),
+        "must use user declaration: {caller}"
+    );
+    let once = ir
+        .split("@Once.call_once(")
+        .nth(1)
+        .expect("declared method");
     let once = once.split("\n}").next().unwrap();
     assert!(
         once.contains("call i64 %"),
@@ -119,7 +134,7 @@ fn captured_source_callback_runs_once_and_keeps_its_environment() {
             unexpected_exit as *const () as usize,
         );
         let mut cell = [0_u64; 4];
-        let mut once = [0_u64; 4];
+        let mut once = [0_u64, 0, 0, 41];
         // SAFETY: source functions use the uniform native slot ABI. Record
         // storage includes the header; produced closures live in ALLOCATIONS
         // until after all calls, including their separately allocated envs.
@@ -137,9 +152,9 @@ fn captured_source_callback_runs_once_and_keeps_its_environment() {
             invoke.call(callback);
             assert_eq!(cell[3], 7);
             invoke_once.call(once.as_mut_ptr() as u64, callback);
-            assert_eq!((cell[3], once[3]), (14, 2));
+            assert_eq!((cell[3], once[3]), (14, 42));
             invoke_once.call(once.as_mut_ptr() as u64, callback);
-            assert_eq!((cell[3], once[3]), (14, 2));
+            assert_eq!((cell[3], once[3]), (14, 42));
             let other = make.call(cell.as_mut_ptr() as u64, 91);
             invoke_once.call(once.as_mut_ptr() as u64, other);
             assert_eq!(
@@ -155,11 +170,11 @@ fn captured_source_callback_runs_once_and_keeps_its_environment() {
                 .get_function::<unsafe extern "C" fn() -> u64>("make_empty")
                 .unwrap()
                 .call();
-            once[3] = 0;
+            once[3] = 41;
             initialize.call(once.as_mut_ptr() as u64, cell.as_mut_ptr() as u64, empty);
-            assert_eq!((cell[3], once[3]), (87, 2));
+            assert_eq!((cell[3], once[3]), (87, 42));
             initialize.call(once.as_mut_ptr() as u64, cell.as_mut_ptr() as u64, empty);
-            assert_eq!((cell[3], once[3]), (87, 2));
+            assert_eq!((cell[3], once[3]), (87, 42));
         }
     });
     ALLOCATIONS.with(|allocations| allocations.borrow_mut().clear());
