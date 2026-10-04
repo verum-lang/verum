@@ -31,12 +31,9 @@
 //  closes silently with TCP RST. Client sees no error
 //  document; operator sees no metric increment; SRE on-call
 //  has nothing to triage.
-// 3. Post-fence: handler unwinds, fence catches the panic,
-//  the fenced Future returns `Result.Err(PanicInfo)`, and the caller's
-//  error path emits a 500 response with a stable
-//  correlation-id, increments `weft.handler.panic{path,method}`,
-//  logs structured JSON with the panic message. The
-//  connection's keep-alive survives for the next request.
+// 3. Post-fence: the explicit Future unwinds during poll, and the
+//  fence returns `Result.Err(PanicInfo)`. The caller decides how to
+//  render the error, log it, and handle the connection lifecycle.
 //
 
 // # Usage
