@@ -346,22 +346,27 @@ impl VbcCodegen {
             let (mi, ti) = catalog[key];
             let source = &available[mi].types[ti];
             let leaf = available[mi].strings.get(source.name).unwrap();
-            let id = self.type_name_to_id.get(key).copied().unwrap_or_else(|| {
-                self.type_name_to_id
-                    .get(leaf)
-                    .copied()
-                    .filter(|id| {
-                        id.well_known_name() == Some(leaf)
-                            && self.type_by_id(*id).is_none()
-                            && (!verum_common::well_known_types::BUILTIN_VARIANT_CARRIERS
-                                .iter()
-                                .any(|(name, _)| *name == leaf)
-                                || key.rsplit_once('.').is_some_and(|(owner, name)| {
-                                    Self::canonical_sum_type_id(owner, name) == Some(*id)
-                                }))
-                    })
-                    .unwrap_or_else(|| self.alloc_user_type_id())
-            });
+            let id = Self::canonical_scalar_type_id(source, leaf)
+                .or_else(|| self.type_name_to_id.get(key).copied())
+                .unwrap_or_else(|| {
+                    self.type_name_to_id
+                        .get(leaf)
+                        .copied()
+                        .filter(|id| {
+                            id.well_known_name() == Some(leaf)
+                                // A same-named nominal is not a scalar. Genuine
+                                // scalar carriers were selected above by kind+ID.
+                                && TypeId::from_well_known_scalar_name(leaf).is_none()
+                                && self.type_by_id(*id).is_none()
+                                && (!verum_common::well_known_types::BUILTIN_VARIANT_CARRIERS
+                                    .iter()
+                                    .any(|(name, _)| *name == leaf)
+                                    || key.rsplit_once('.').is_some_and(|(owner, name)| {
+                                        Self::canonical_sum_type_id(owner, name) == Some(*id)
+                                    }))
+                        })
+                        .unwrap_or_else(|| self.alloc_user_type_id())
+                });
             self.type_name_to_id.insert(key.clone(), id);
             if let Some(short) = key.strip_prefix("core.") {
                 self.type_name_to_id.insert(short.to_owned(), id);
@@ -442,7 +447,16 @@ impl VbcCodegen {
             // Old descriptors without origin still have a known owning unit.
             // Carry it now so a second import cannot attribute them to us.
             let origin = crate::types::StringId(self.ctx.intern_string_raw(owner));
-            if let Some(imported) = self.types.iter_mut().find(|ty| ty.id == local) {
+            // Scalar aliases share an ID, but their named carriers retain
+            // separate source metadata (for example Byte and UInt8).
+            let scalar_name = module
+                .strings
+                .get(ty.name)
+                .filter(|name| Self::canonical_scalar_type_id(&ty, name).is_some())
+                .map(|name| crate::types::StringId(self.ctx.intern_string_raw(name)));
+            if let Some(imported) = self.types.iter_mut().find(|imported| {
+                imported.id == local && scalar_name.is_none_or(|name| imported.name == name)
+            }) {
                 imported.origin_module = Some(origin);
                 // Unlike a general archive import, these two fields have
                 // already been translated through the bootstrap registry.
