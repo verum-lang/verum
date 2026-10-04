@@ -1,0 +1,109 @@
+// @test: run-interpreter
+// @level: L0
+// @tier: 0
+// @timeout: 180000
+// @tags: async, weft, cancellation, deadlines, transport
+// @expected-stdout-begin
+// pending=true read=1 byte=42 eof=true io=true expired=true cancelled=true zero=true boundary=true priority=true legacy=true
+// @expected-stdout-end
+// @expected-exit: 0
+// T1507: deterministic poll controls; real socket and both-tier checks are
+// separate integration gates. Native token.cancel is also tracked by T1506.
+
+mount core.net.weft.transport.{WeftTransport, WeftReadError, read_until, read_deadline, read_deadline_elapsed, transport_read_cancellable};
+mount core.net.addr.{SocketAddr};
+mount core.async.cancellation.{CancellationToken, CancellationError};
+mount core.async.poll.{Poll};
+mount core.async.waker.{Context, noop_waker};
+mount core.time.instant.{Instant};
+mount core.io.{IoError};
+mount core.io.protocols.{IoErrorKind};
+
+type FakeTransport is { pending: Int, outcome: Int, calls: Int };
+implement WeftTransport for FakeTransport {
+    fn peer_addr(&self) -> Result<SocketAddr, IoError> {
+        Result.Err(IoError.new(IoErrorKind.NotConnected))
+    }
+    fn poll_transport_read(&mut self, _cx: &mut Context, buf: &mut List<Byte>) -> Poll<Result<Int, IoError>> {
+        self.calls = self.calls + 1;
+        if self.pending > 0 {
+            self.pending = self.pending - 1;
+            Poll.Pending
+        } else if self.outcome < 0 {
+            Poll.Ready(Result.Err(IoError.new(IoErrorKind.ConnectionReset)))
+        } else if self.outcome == 0 {
+            Poll.Ready(Result.Ok(0))
+        } else {
+            buf.push(42 as Byte);
+            Poll.Ready(Result.Ok(1))
+        }
+    }
+    async fn read_cancellable(&mut self, buf: &mut List<Byte>, token: &CancellationToken) -> Result<Result<Int, IoError>, CancellationError> {
+        transport_read_cancellable(self, buf, token).await
+    }
+    async fn write_async(&mut self, buf: &List<Byte>) -> Result<Int, IoError> { Result.Ok(buf.len()) }
+    async fn shutdown_write(&mut self) -> Result<(), IoError> { Result.Ok(()) }
+}
+
+fn main() {
+    let token = CancellationToken.new();
+    let waker = noop_waker();
+    let mut cx = Context.from_waker(&waker);
+    let mut bytes: List<Byte> = List.with_capacity(8);
+    let mut stream = FakeTransport { pending: 1, outcome: 1, calls: 0 };
+    let mut reading = read_until(&mut stream, &mut bytes, &token, Maybe.None);
+    let pending = match reading.poll(&mut cx) { Poll.Pending => true, _ => false };
+    let read = match reading.poll(&mut cx) { Poll.Ready(Result.Ok(n)) => n, _ => -1 };
+    drop(reading);
+    let byte = bytes[0] as Int;
+
+    let mut eof_stream = FakeTransport { pending: 0, outcome: 0, calls: 0 };
+    let eof = match read_until(&mut eof_stream, &mut bytes, &token, Maybe.None).await {
+        Result.Ok(0) => true, _ => false,
+    };
+    let mut bad_stream = FakeTransport { pending: 0, outcome: -1, calls: 0 };
+    let io = match read_until(&mut bad_stream, &mut bytes, &token, Maybe.None).await {
+        Result.Err(WeftReadError.Io(error)) => {
+            let io_error: IoError = error;
+            io_error.kind == IoErrorKind.ConnectionReset
+        }
+        _ => false,
+    };
+    let mut expired_stream = FakeTransport { pending: 0, outcome: 1, calls: 0 };
+    let expired = match read_until(&mut expired_stream, &mut bytes, &token, Maybe.Some(Instant.from_nanos(0))).await {
+        Result.Err(WeftReadError.TimedOut) => expired_stream.calls == 0,
+        _ => false,
+    };
+
+    let cancelled_token = CancellationToken.new();
+    let mut stalled = FakeTransport { pending: 2, outcome: 1, calls: 0 };
+    let mut cancellable = read_until(&mut stalled, &mut bytes, &cancelled_token, Maybe.None);
+    assert(match cancellable.poll(&mut cx) { Poll.Pending => true, _ => false });
+    cancelled_token.cancel();
+    let cancelled = match cancellable.poll(&mut cx) {
+        Poll.Ready(Result.Err(WeftReadError.Cancelled(_))) => true,
+        _ => false,
+    };
+    drop(cancellable);
+    assert_eq(stalled.calls, 1);
+    let zero = read_deadline(0).is_none();
+    let limit = Instant.from_nanos(100);
+    let boundary = !read_deadline_elapsed(Maybe.Some(limit), Instant.from_nanos(99))
+        && read_deadline_elapsed(Maybe.Some(limit), Instant.from_nanos(100))
+        && read_deadline_elapsed(Maybe.Some(limit), Instant.from_nanos(101))
+        && !read_deadline_elapsed(Maybe.None, Instant.from_nanos(101));
+    let mut ready_stream = FakeTransport { pending: 0, outcome: 1, calls: 0 };
+    let priority = match read_until(&mut ready_stream, &mut bytes, &cancelled_token, Maybe.Some(Instant.from_nanos(0))).await {
+        Result.Err(WeftReadError.Cancelled(_)) => ready_stream.calls == 0,
+        _ => false,
+    };
+    let mut legacy_stream = FakeTransport { pending: 1, outcome: 1, calls: 0 };
+    let legacy_read = match legacy_stream.read_cancellable(&mut bytes, &token).await {
+        Result.Ok(Result.Ok(1)) => true, _ => false,
+    };
+    let legacy_cancel = match legacy_stream.read_cancellable(&mut bytes, &cancelled_token).await {
+        Result.Err(_) => true, _ => false,
+    };
+    let legacy = legacy_read && legacy_cancel && legacy_stream.calls == 2;
+    print(f"pending={pending} read={read} byte={byte} eof={eof} io={io} expired={expired} cancelled={cancelled} zero={zero} boundary={boundary} priority={priority} legacy={legacy}");
+}

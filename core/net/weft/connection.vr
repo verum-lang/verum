@@ -16,7 +16,7 @@ mount core.collections.list.{List};
 mount core.net.addr.{SocketAddr};
 mount core.time.instant.{Instant};
 mount core.time.system_time.{SystemTime};
-mount core.net.weft.transport.{WeftTransport};
+mount core.net.weft.transport.{WeftTransport, WeftReadError, read_until, read_deadline};
 mount core.net.weft.bufpool.{BufferPool, BufferHandle};
 mount core.net.weft.arena_pool.{ArenaPool, ArenaLease};
 mount core.net.http.{Method, StatusCode, Version, Headers, Response};
@@ -26,7 +26,6 @@ mount core.net.http_parser.{
     ChunkedDecoder, ChunkProgress,
 };
 mount core.async.cancellation.{CancellationToken};
-mount core.async.timer.{timeout_ms as future_timeout_ms, TimeoutError};
 mount core.async.panic_fence.{panic_safe};
 mount core.io.{IoError};
 mount core.sync.atomic.{AtomicBool, MemoryOrdering};
@@ -284,6 +283,7 @@ public async fn serve_http1<T: WeftTransport, S: Handler>(
     draining: Shared<AtomicBool>,
     config: ConnectionConfig,
 ) -> Result<(), ConnError> {
+    let mut waiting_for_next_request = false;
     loop {
         // EXPLICIT DEREFERENCE, LOAD-BEARING (T1474): an atomic reached
         // through a `Shared` carrier by an implicit method call does not
@@ -302,8 +302,11 @@ public async fn serve_http1<T: WeftTransport, S: Handler>(
         } else {
             config.clone()
         };
-        match serve_one_message(&mut stream, &peer_addr, &*app, &token, &effective_cfg).await {
-            Result.Ok(KeepAlive.Continue) => continue,
+        match serve_one_message(&mut stream, &peer_addr, &*app, &token, &effective_cfg, waiting_for_next_request).await {
+            Result.Ok(KeepAlive.Continue) => {
+                waiting_for_next_request = true;
+                continue;
+            }
             Result.Ok(KeepAlive.Close)    => return Result.Ok(()),
             Result.Err(e)                 => return Result.Err(e),
         }
@@ -316,6 +319,7 @@ async fn serve_one_message<T: WeftTransport, S: Handler>(
     app: &S,
     token: &CancellationToken,
     config: &ConnectionConfig,
+    waiting_for_next_request: Bool,
 ) -> Result<KeepAlive, ConnError> {
     // §6.1 listener stamping (Phase K, #68): capture the wall-clock
     // moment we started reading this request. The CoDelLayer
@@ -437,49 +441,40 @@ async fn serve_one_message<T: WeftTransport, S: Handler>(
         Maybe.None => Maybe.None,
     };
 
+    // The initial request starts its header budget immediately. Later
+    // requests use the idle budget until their first byte, then one header
+    // budget for the entire frame; drip-feeding cannot reset it.
+    let mut awaiting_first_byte = waiting_for_next_request;
+    let mut header_deadline = if awaiting_first_byte {
+        read_deadline(config.idle_deadline_ms)
+    } else {
+        read_deadline(config.header_deadline_ms)
+    };
     loop {
         // Reuse the hoisted chunk: clear() resets `len` to 0 without
         // de-allocating the backing storage.  The transport's
-        // `read_cancellable(&mut buf)` appends to the buffer, so
+        // `poll_transport_read` appends to the buffer, so
         // we get a fresh empty buffer every iteration without
         // re-allocating.
         chunk.clear();
-        // Header-deadline wrap (redteam §2): the `header_deadline_ms`
-        // budget bounds total time-on-wire from the FIRST read of
-        // this request frame to the parser's `Done` verdict.
-        // Pre-fix `read_cancellable` blocked indefinitely under a
-        // slowloris drip-feed; the only escape was the listener-wide
-        // shutdown token. Post-fix the read races against a timer;
-        // the loser is a bounded ConnError.ReadTimeout that closes
-        // the connection cleanly with 408.
-        //
-
-        // 0 disables the deadline (NOT recommended; allows
-        // hostile peers to hold connections indefinitely).
-        let rr: Result<Result<Int, IoError>, CancellationError> = if config.header_deadline_ms > 0 {
-            match future_timeout_ms(
-                config.header_deadline_ms,
-                stream.read_cancellable(&mut chunk, token),
-            ).await {
-                Result.Err(TimeoutError) => {
-                    let _ = write_response(stream, &mk_408()).await;
-                    return Result.Err(ConnError.ReadTimeout);
-                }
-                Result.Ok(rr) => rr,
+        let n = match read_until(stream, &mut chunk, token, header_deadline).await {
+            Result.Ok(n) => n,
+            Result.Err(WeftReadError.Cancelled(_)) => return Result.Err(ConnError.Cancelled),
+            Result.Err(WeftReadError.Io(e)) => return Result.Err(ConnError.IoFailed(e)),
+            Result.Err(WeftReadError.TimedOut) => {
+                let _ = write_response(stream, &mk_408()).await;
+                return Result.Err(ConnError.ReadTimeout);
             }
-        } else {
-            stream.read_cancellable(&mut chunk, token).await
-        };
-        let n = match rr {
-            Result.Err(_) => return Result.Err(ConnError.Cancelled),
-            Result.Ok(Result.Err(e)) => return Result.Err(ConnError.IoFailed(e)),
-            Result.Ok(Result.Ok(n)) => n,
         };
         if n == 0 {
             if accum.is_empty() {
                 return Result.Ok(KeepAlive.Close);
             }
             return Result.Err(ConnError.ClientClosed);
+        }
+        if awaiting_first_byte {
+            awaiting_first_byte = false;
+            header_deadline = read_deadline(config.header_deadline_ms);
         }
         // Pre-read budget check (redteam §5): enforce
         // `max_request_size` BEFORE the per-byte append. Pre-fix
@@ -552,12 +547,17 @@ async fn serve_one_message<T: WeftTransport, S: Handler>(
     }
     headers.set(&"x-weft-submitted-at", &submitted_at_ms.to_text());
 
+    let body_deadline = read_deadline(config.body_deadline_ms);
     let body: List<Byte> = if parser.is_chunked() {
-        match read_chunked_body(stream, &mut accum, hdr.body_start, token, config).await {
+        match read_chunked_body(stream, &mut accum, hdr.body_start, token, config, body_deadline).await {
             Result.Ok(b) => b,
             Result.Err(e) => {
-                // Protocol error on chunked stream — 400, then close.
-                let _ = write_response(stream, &mk_400_chunk()).await;
+                match &e {
+                    ConnError.ReadTimeout => { let _ = write_response(stream, &mk_408()).await; }
+                    ConnError.Parse(_) => { let _ = write_response(stream, &mk_400_chunk()).await; }
+                    ConnError.TooLarge => { let _ = write_response(stream, &mk_413()).await; }
+                    _ => {}
+                }
                 return Result.Err(e);
             }
         }
@@ -572,31 +572,14 @@ async fn serve_one_message<T: WeftTransport, S: Handler>(
         }
         while accum.len() - hdr.body_start < body_len {
             let mut chunk: List<Byte> = List.with_capacity(4096);
-            // Body-deadline wrap (redteam §2): bounds total
-            // time-on-wire for the body half of the request.
-            // Same slowloris defence as the header-read above
-            // — without this a hostile client can announce
-            // Content-Length: 1000000 then drip-feed one byte
-            // per minute to hold the connection open for 10⁶
-            // minutes.
-            let rr: Result<Result<Int, IoError>, CancellationError> = if config.body_deadline_ms > 0 {
-                match future_timeout_ms(
-                    config.body_deadline_ms,
-                    stream.read_cancellable(&mut chunk, token),
-                ).await {
-                    Result.Err(TimeoutError) => {
-                        let _ = write_response(stream, &mk_408()).await;
-                        return Result.Err(ConnError.ReadTimeout);
-                    }
-                    Result.Ok(rr) => rr,
+            let n = match read_until(stream, &mut chunk, token, body_deadline).await {
+                Result.Ok(n) => n,
+                Result.Err(WeftReadError.Cancelled(_)) => return Result.Err(ConnError.Cancelled),
+                Result.Err(WeftReadError.Io(e)) => return Result.Err(ConnError.IoFailed(e)),
+                Result.Err(WeftReadError.TimedOut) => {
+                    let _ = write_response(stream, &mk_408()).await;
+                    return Result.Err(ConnError.ReadTimeout);
                 }
-            } else {
-                stream.read_cancellable(&mut chunk, token).await
-            };
-            let n = match rr {
-                Result.Err(_) => return Result.Err(ConnError.Cancelled),
-                Result.Ok(Result.Err(e)) => return Result.Err(ConnError.IoFailed(e)),
-                Result.Ok(Result.Ok(n)) => n,
             };
             if n == 0 { return Result.Err(ConnError.ClientClosed); }
             // Post-#316 follow-up: chunk is `List<Byte>` — no mask,
@@ -833,6 +816,7 @@ async fn read_chunked_body<T: WeftTransport>(
     body_start: Int,
     token: &CancellationToken,
     config: &ConnectionConfig,
+    deadline: Maybe<Instant>,
 ) -> Result<List<Byte>, ConnError> {
     let mut decoder = ChunkedDecoder.new();
     let mut out: List<Byte> = List.new();
@@ -859,24 +843,11 @@ async fn read_chunked_body<T: WeftTransport>(
                 // Read more bytes and re-feed. Post-#316 the
                 // transport hands out `List<Byte>` directly.
                 let mut chunk: List<Byte> = List.with_capacity(4096);
-                // Body-deadline wrap (redteam §2): chunked
-                // body's per-chunk read budget mirrors the
-                // Content-Length path's body deadline.
-                let rr: Result<Result<Int, IoError>, CancellationError> = if config.body_deadline_ms > 0 {
-                    match future_timeout_ms(
-                        config.body_deadline_ms,
-                        stream.read_cancellable(&mut chunk, token),
-                    ).await {
-                        Result.Err(TimeoutError) => return Result.Err(ConnError.ReadTimeout),
-                        Result.Ok(rr) => rr,
-                    }
-                } else {
-                    stream.read_cancellable(&mut chunk, token).await
-                };
-                let n = match rr {
-                    Result.Err(_)     => return Result.Err(ConnError.Cancelled),
-                    Result.Ok(Result.Err(e)) => return Result.Err(ConnError.IoFailed(e)),
-                    Result.Ok(Result.Ok(n))  => n,
+                let n = match read_until(stream, &mut chunk, token, deadline).await {
+                    Result.Ok(n) => n,
+                    Result.Err(WeftReadError.Cancelled(_)) => return Result.Err(ConnError.Cancelled),
+                    Result.Err(WeftReadError.Io(e)) => return Result.Err(ConnError.IoFailed(e)),
+                    Result.Err(WeftReadError.TimedOut) => return Result.Err(ConnError.ReadTimeout),
                 };
                 if n == 0 { return Result.Err(ConnError.ClientClosed); }
                 // Post-#316 follow-up: chunk is `List<Byte>` — append

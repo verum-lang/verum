@@ -38,6 +38,11 @@ module core.net.weft.transport;
 mount core.collections.list.{List};
 mount core.net.addr.{SocketAddr};
 mount core.async.cancellation.{CancellationToken, CancellationError};
+mount core.async.future.{Future};
+mount core.async.poll.{Poll};
+mount core.async.waker.{Context};
+mount core.time.{Duration};
+mount core.time.instant.{Instant};
 mount core.io.{IoError};
 
 /// Transport protocol — a byte duplex that the HTTP/1.1 pipeline can
@@ -53,6 +58,11 @@ mount core.io.{IoError};
 public type WeftTransport is protocol {
     /// Peek peer address (for logging, tracing, access lists).
     fn peer_addr(&self) -> Result<SocketAddr, IoError>;
+
+    /// Perform one nonblocking read attempt. Pending must leave `buf`
+    /// unchanged and request another poll. This primitive lets the caller
+    /// observe cancellation and deadlines between attempts under eager async.
+    fn poll_transport_read(&mut self, cx: &mut Context, buf: &mut List<Byte>) -> Poll<Result<Int, IoError>>;
 
     /// Cancellable read. Outer Result is the cancellation channel;
     /// inner Result the normal read outcome. `buf` is `&mut List<Byte>`.
@@ -73,6 +83,94 @@ public type WeftTransport is protocol {
     async fn shutdown_write(&mut self) -> Result<(), IoError>;
 };
 
+/// A read's terminal outcome keeps timeout, cancellation and I/O distinct.
+public type WeftReadError is
+    | Io(IoError)
+    | Cancelled(CancellationError)
+    | TimedOut;
+
+/// A phase budget is created once, then shared by all reads in that phase.
+/// Zero disables the budget. A negative budget is also treated as disabled,
+/// matching ConnectionConfig's historical `> 0` enablement condition.
+public fn read_deadline(ms: Int) -> Maybe<Instant> {
+    if ms <= 0 {
+        Maybe.None
+    } else {
+        Maybe.Some(Instant.now() + Duration.from_millis(ms))
+    }
+}
+
+/// Evaluate a phase deadline against a monotonic clock sample. An explicit
+/// sample also makes exact-boundary and virtual-clock checks deterministic.
+@inline(always)
+public fn read_deadline_elapsed(deadline: Maybe<Instant>, now: Instant) -> Bool {
+    match deadline {
+        Maybe.Some(limit) => now >= limit,
+        Maybe.None => false,
+    }
+}
+
+/// Explicit future: constructing it performs no I/O. Each poll first checks
+/// cancellation, then the absolute deadline, then makes one read attempt.
+/// Cancellation therefore wins when it coincides with readiness or timeout.
+/// The cooperative driver currently re-polls Pending; this is not a parked
+/// executor and does not promise a particular wakeup latency.
+public type WeftReadFuture<T: WeftTransport> is {
+    stream: &mut T,
+    buf: &mut List<Byte>,
+    token: &CancellationToken,
+    deadline: Maybe<Instant>,
+};
+
+implement<T: WeftTransport> Future for WeftReadFuture<T> {
+    type Output = Result<Int, WeftReadError>;
+
+    fn poll(&mut self, cx: &mut Context) -> Poll<Result<Int, WeftReadError>> {
+        match self.token.throw_if_cancelled() {
+            Result.Err(reason) => return Poll.Ready(Result.Err(WeftReadError.Cancelled(reason))),
+            Result.Ok(()) => {}
+        }
+        if read_deadline_elapsed(self.deadline, Instant.now()) {
+            return Poll.Ready(Result.Err(WeftReadError.TimedOut));
+        }
+        match self.stream.poll_transport_read(cx, self.buf) {
+            Poll.Ready(Result.Ok(n)) => Poll.Ready(Result.Ok(n)),
+            Poll.Ready(Result.Err(error)) => Poll.Ready(Result.Err(WeftReadError.Io(error))),
+            Poll.Pending => {
+                // Also re-check the deadline/token if the transport's own
+                // readiness event never arrives.
+                cx.waker().wake_by_ref();
+                Poll.Pending
+            }
+        }
+    }
+}
+
+/// Build a cancellable read using an absolute phase deadline. The caller may
+/// await it eagerly or compose the explicit Future with other poll drivers.
+public fn read_until<T: WeftTransport>(
+    stream: &mut T,
+    buf: &mut List<Byte>,
+    token: &CancellationToken,
+    deadline: Maybe<Instant>,
+) -> WeftReadFuture<T> {
+    WeftReadFuture { stream: stream, buf: buf, token: token, deadline: deadline }
+}
+
+/// Preserve the public nested-Result API without racing already eager values.
+public async fn transport_read_cancellable<T: WeftTransport>(
+    stream: &mut T,
+    buf: &mut List<Byte>,
+    token: &CancellationToken,
+) -> Result<Result<Int, IoError>, CancellationError> {
+    match read_until(stream, buf, token, Maybe.None).await {
+        Result.Ok(n) => Result.Ok(Result.Ok(n)),
+        Result.Err(WeftReadError.Io(error)) => Result.Ok(Result.Err(error)),
+        Result.Err(WeftReadError.Cancelled(reason)) => Result.Err(reason),
+        Result.Err(WeftReadError.TimedOut) => unreachable(),
+    }
+}
+
 // =============================================================================
 // TcpStream → WeftTransport blanket impl
 // =============================================================================
@@ -84,12 +182,16 @@ implement WeftTransport for TcpStream {
         TcpStream.peer_addr(self)
     }
 
+    fn poll_transport_read(&mut self, cx: &mut Context, buf: &mut List<Byte>) -> Poll<Result<Int, IoError>> {
+        TcpStream.poll_read(self, cx, buf)
+    }
+
     async fn read_cancellable(
         &mut self,
         buf: &mut List<Byte>,
         token: &CancellationToken,
     ) -> Result<Result<Int, IoError>, CancellationError> {
-        TcpStream.read_cancellable(self, buf, token).await
+        transport_read_cancellable(self, buf, token).await
     }
 
     async fn write_async(&mut self, buf: &List<Byte>) -> Result<Int, IoError> {
