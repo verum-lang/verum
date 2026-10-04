@@ -44509,56 +44509,92 @@ impl VbcCodegen {
         }
     }
 
-    /// Fold an expression to an integer at compile time, or refuse.
-    ///
-    /// Deliberately narrow: literals, negation, the four arithmetic
-    /// operators, `offset_of(T, f)` and the layout properties. Anything
-    /// else returns `None`, which callers must report — a compile-time
-    /// assertion that cannot be evaluated must SAY so, because silently
-    /// passing is exactly how `static_assert` became decoration.
-    fn const_eval_i64(&self, expr: &verum_ast::expr::Expr) -> Option<i64> {
+    /// Fold a statically known integer without wrapping. Unknown runtime
+    /// expressions stay unknown; invalid static arithmetic is an error.
+    pub(super) fn const_eval_i64(&self, expr: &verum_ast::expr::Expr) -> CodegenResult<Option<i64>> {
         use verum_ast::expr::{BinOp, ExprKind, UnOp};
         use verum_ast::literal::LiteralKind;
+        let invalid = || CodegenError::with_span(
+            super::error::CodegenErrorKind::InvalidLiteral(
+                "constant integer is out of range or has invalid arithmetic".to_string(),
+            ),
+            expr.span,
+        );
+        let checked = |value: Option<i64>| value.map(Some).ok_or_else(invalid);
 
         match &expr.kind {
             ExprKind::Literal(lit) => match &lit.kind {
-                LiteralKind::Int(n) => Some(n.value as i64),
-                _ => None,
+                LiteralKind::Int(n) => checked(i64::try_from(n.value).ok()),
+                _ => Ok(None),
             },
-            ExprKind::Unary { op, expr: operand } => match op {
-                UnOp::Neg => self.const_eval_i64(operand)?.checked_neg(),
-                _ => None,
-            },
+            ExprKind::Paren(inner) => self.const_eval_i64(inner),
+            ExprKind::Path(path) => {
+                if let Some(ident) = path.as_ident()
+                    && (self.ctx.lookup_var(ident.as_str()).is_some()
+                        || self.ctx.const_generic_params.contains(ident.as_str()))
+                {
+                    // A runtime binding or const-generic witness shadows a
+                    // module constant; it cannot be folded using that name.
+                    return Ok(None);
+                }
+                let name = path.to_string().replace("::", ".");
+                let Some(info) = self.ctx.lookup_function_in_scope(&name)
+                    .filter(|info| info.is_const && info.param_count == 0)
+                else {
+                    return Ok(None);
+                };
+                if let Some(value) = info.intrinsic_name.as_deref()
+                    .and_then(|name| name.strip_prefix("__const_val_"))
+                {
+                    return checked(value.parse::<i64>().ok());
+                }
+                // A declared constant whose value cannot be proved must not
+                // quietly choose a different packed-array representation.
+                Err(CodegenError::with_span(
+                    super::error::CodegenErrorKind::InvalidLiteral(format!(
+                        "cannot evaluate constant integer `{name}`"
+                    )),
+                    expr.span,
+                ))
+            }
+            ExprKind::Unary { op: UnOp::Neg, expr: operand } => {
+                if let ExprKind::Literal(lit) = &operand.kind
+                    && let LiteralKind::Int(n) = &lit.kind
+                {
+                    return checked(n.value.checked_neg().and_then(|n| i64::try_from(n).ok()));
+                }
+                match self.const_eval_i64(operand)? {
+                    Some(value) => checked(value.checked_neg()),
+                    None => Ok(None),
+                }
+            }
             ExprKind::Binary { op, left, right } => {
-                let (l, r) = (self.const_eval_i64(left)?, self.const_eval_i64(right)?);
+                let (Some(l), Some(r)) = (self.const_eval_i64(left)?, self.const_eval_i64(right)?)
+                else { return Ok(None) };
                 match op {
-                    BinOp::Add => l.checked_add(r),
-                    BinOp::Sub => l.checked_sub(r),
-                    BinOp::Mul => l.checked_mul(r),
-                    // `checked_div` refuses division by zero, so a bad
-                    // assertion reports "cannot evaluate" rather than
-                    // panicking the compiler.
-                    BinOp::Div => l.checked_div(r),
-                    BinOp::Rem => l.checked_rem(r),
-                    _ => None,
+                    BinOp::Add => checked(l.checked_add(r)),
+                    BinOp::Sub => checked(l.checked_sub(r)),
+                    BinOp::Mul => checked(l.checked_mul(r)),
+                    BinOp::Div => checked(l.checked_div(r)),
+                    BinOp::Rem => checked(l.checked_rem(r)),
+                    _ => Ok(None),
                 }
             }
             ExprKind::TypeProperty { ty, property } => {
                 let type_name = self.extract_display_type_name(ty);
-                self.layout_property_value(&type_name, property)
+                Ok(self.layout_property_value(&type_name, property))
             }
             ExprKind::Call { func, args, .. } => {
-                // offset_of(Type, field) — both arguments are NAMES, never
-                // compiled as expressions.
-                if Self::expr_ident_name(func)? != "offset_of" || args.len() != 2 {
-                    return None;
+                // offset_of(Type, field) arguments are names, never executed.
+                if Self::expr_ident_name(func).as_deref() != Some("offset_of") || args.len() != 2 {
+                    return Ok(None);
                 }
-                let ty = Self::expr_ident_name(&args[0])?;
-                let field = Self::expr_ident_name(&args[1])?;
-                // `offset_of` is an ABI query — see `abi_field_offset`.
-                self.abi_field_offset(&ty, &field)
+                let (Some(ty), Some(field)) =
+                    (Self::expr_ident_name(&args[0]), Self::expr_ident_name(&args[1]))
+                else { return Ok(None) };
+                Ok(self.abi_field_offset(&ty, &field))
             }
-            _ => None,
+            _ => Ok(None),
         }
     }
 
@@ -44580,7 +44616,7 @@ impl VbcCodegen {
                 BinOp::And => Some(self.const_eval_bool(left)? && self.const_eval_bool(right)?),
                 BinOp::Or => Some(self.const_eval_bool(left)? || self.const_eval_bool(right)?),
                 BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => {
-                    let (l, r) = (self.const_eval_i64(left)?, self.const_eval_i64(right)?);
+                    let (l, r) = (self.const_eval_i64(left).ok()??, self.const_eval_i64(right).ok()??);
                     Some(match op {
                         BinOp::Eq => l == r,
                         BinOp::Ne => l != r,

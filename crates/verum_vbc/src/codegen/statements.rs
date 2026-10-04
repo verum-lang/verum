@@ -910,9 +910,14 @@ impl VbcCodegen {
         // a byte-suffixed repeat literal (`[0_u8; N]`) — the suffix alone is
         // enough to pack, so an unannotated byte scratch buffer no longer
         // falls through to a List backing (T0308 / T0608).
-        if let Some(byte_array_size) = self
-            .detect_byte_array_type(ty)
-            .or_else(|| value.and_then(|v| self.detect_byte_array_from_repeat_value(v)))
+        let byte_array_size = match self.detect_byte_array_type(ty)? {
+            Some(count) => Some(count),
+            None => match value {
+                Some(value) => self.detect_byte_array_from_repeat_value(value)?,
+                None => None,
+            },
+        };
+        if let Some(byte_array_size) = byte_array_size
             && let Some(expr) = value
         {
             // Determine the initialization value
@@ -1102,7 +1107,7 @@ impl VbcCodegen {
 
         // Check if this is a typed array type (non-byte) - if so, use specialized typed array allocation
         // This enables memory intrinsics like memcpy to work correctly with [UInt64; N] arrays
-        if let Some((count, elem_size, is_float)) = self.detect_typed_array_type(ty)
+        if let Some((count, elem_size, is_float)) = self.detect_typed_array_type(ty)?
             && let Some(expr) = value
             // ONLY a literal array. See the block comment below.
             && matches!(&expr.kind, verum_ast::ExprKind::Array(_))
@@ -1651,7 +1656,7 @@ impl VbcCodegen {
     /// (`SetE`) null-dereferenced — latently breaking `float_to_string` /
     /// any `[byte; N]` scratch buffer that is re-sliced across a call
     /// (T0308 / T0608, which blocked f-string float precision T0604).
-    fn detect_byte_array_from_repeat_value(&self, expr: &verum_ast::Expr) -> Option<usize> {
+    fn detect_byte_array_from_repeat_value(&self, expr: &verum_ast::Expr) -> CodegenResult<Option<usize>> {
         use verum_ast::ExprKind;
         use verum_ast::literal::{IntSuffix, LiteralKind};
 
@@ -1659,38 +1664,37 @@ impl VbcCodegen {
             && let ExprKind::Literal(vlit) = &value.kind
             && let LiteralKind::Int(vint) = &vlit.kind
             && matches!(vint.suffix, Some(IntSuffix::U8) | Some(IntSuffix::I8))
-            && let ExprKind::Literal(clit) = &count.kind
-            && let LiteralKind::Int(cint) = &clit.kind
-            && cint.value >= 0
         {
-            return Some(cint.value as usize);
+            return self.checked_array_count(count, 1);
         }
-        None
+        Ok(None)
     }
 
-    pub(crate) fn detect_byte_array_type(&self, ty: Option<&verum_ast::Type>) -> Option<usize> {
-        use verum_ast::literal::LiteralKind;
+    fn checked_array_count(&self, expr: &verum_ast::Expr, element_size: usize) -> CodegenResult<Option<usize>> {
+        let Some(value) = self.const_eval_i64(expr)? else { return Ok(None) };
+        let count = usize::try_from(value).ok().filter(|count| {
+            count.checked_mul(element_size).is_some_and(|bytes| bytes <= isize::MAX as usize)
+        });
+        count.map(Some).ok_or_else(|| CodegenError::with_span(
+            super::error::CodegenErrorKind::InvalidLiteral(
+                "array count must be nonnegative and its byte size must fit in Int".to_string(),
+            ),
+            expr.span,
+        ))
+    }
+
+    pub(crate) fn detect_byte_array_type(&self, ty: Option<&verum_ast::Type>) -> CodegenResult<Option<usize>> {
         use verum_ast::ty::{PathSegment, TypeKind};
 
-        let ty = ty?;
-        if let TypeKind::Array { element, size } = &ty.kind {
-            // Check if element type is Byte/U8
-            if let TypeKind::Path(path) = &element.kind
-                && let Some(PathSegment::Name(ident)) = path.segments.last()
-            {
-                let name = ident.as_str();
-                if name == "Byte" || name == "U8" || name == "u8" {
-                    // Extract size from expression
-                    if let Some(size_expr) = size
-                        && let verum_ast::ExprKind::Literal(lit) = &size_expr.kind
-                        && let LiteralKind::Int(int_lit) = &lit.kind
-                    {
-                        return Some(int_lit.value as usize);
-                    }
-                }
-            }
+        let Some(ty) = ty else { return Ok(None) };
+        if let TypeKind::Array { element, size: Some(size) } = &ty.kind
+            && let TypeKind::Path(path) = &element.kind
+            && let Some(PathSegment::Name(ident)) = path.segments.last()
+            && matches!(ident.as_str(), "Byte" | "U8" | "u8")
+        {
+            return self.checked_array_count(size, 1);
         }
-        None
+        Ok(None)
     }
 
     /// Detects if type annotation is a typed array [T; N] (non-byte).
@@ -1708,11 +1712,10 @@ impl VbcCodegen {
     pub(crate) fn detect_typed_array_type(
         &self,
         ty: Option<&verum_ast::Type>,
-    ) -> Option<(usize, usize, bool)> {
-        use verum_ast::literal::LiteralKind;
+    ) -> CodegenResult<Option<(usize, usize, bool)>> {
         use verum_ast::ty::{PathSegment, TypeKind};
 
-        let ty = ty?;
+        let Some(ty) = ty else { return Ok(None) };
         if let TypeKind::Array { element, size } = &ty.kind {
             // Determine element size + float-ness from element type.
             // The fast parser produces primitive TypeKind variants (Int, Float, Bool, Char)
@@ -1755,19 +1758,17 @@ impl VbcCodegen {
             if let Some(elem_size) = elem_size {
                 // Bool arrays are 1-byte and handled by detect_byte_array_type
                 if elem_size == 1 {
-                    return None;
+                    return Ok(None);
                 }
 
                 // Extract count from size expression
-                if let Some(size_expr) = size
-                    && let verum_ast::ExprKind::Literal(lit) = &size_expr.kind
-                    && let LiteralKind::Int(int_lit) = &lit.kind
-                {
-                    return Some((int_lit.value as usize, elem_size, is_float));
+                if let Some(size_expr) = size {
+                    return Ok(self.checked_array_count(size_expr, elem_size)?
+                        .map(|count| (count, elem_size, is_float)));
                 }
             }
         }
-        None
+        Ok(None)
     }
 
     /// Gets the init value for typed array from repeat syntax [value; N].

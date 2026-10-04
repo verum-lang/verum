@@ -16818,7 +16818,7 @@ impl VbcCodegen {
 
         match &expr.kind {
             ExprKind::Literal(lit) => match &lit.kind {
-                LiteralKind::Int(int_lit) => Some(int_lit.value as i64),
+                LiteralKind::Int(int_lit) => i64::try_from(int_lit.value).ok(),
                 LiteralKind::Bool(b) => Some(if *b { 1 } else { 0 }),
                 // SOUNDNESS (closes task #io-16): Char literals must also
                 // be inlinable as const values.  Without this, every
@@ -18859,10 +18859,11 @@ impl VbcCodegen {
                         _ => break,
                     }
                 }
-                if let Some(n) = self
-                    .detect_byte_array_type(Some(inner))
-                    .or_else(|| self.detect_typed_array_type(Some(inner)).map(|(c, _, _)| c))
-                {
+                let count = match self.detect_byte_array_type(Some(inner))? {
+                    Some(count) => Some(count),
+                    None => self.detect_typed_array_type(Some(inner))?.map(|(count, _, _)| count),
+                };
+                if let Some(n) = count {
                     self.ctx.set_fixed_array_count(&pname, n);
                 }
             }
