@@ -174,6 +174,36 @@ monomorphization, so interpreter and native lowering consume the same
 facts. Resource qualifiers and the value-copy contract need reconciliation
 before declaring exclusive guards implicitly copyable or transferable.
 
+## Producer and aggregate boundary for the next implementation
+
+The 2026-10-04 source review identifies the existing publication points:
+`consume_affine_call_args` in the checker records consumption only in its
+binding tracker; `phase_type_check` publishes resolved calls and Deref
+adjustments, but no value-use operation. Extend that common publication
+route with a binding/use-site identity and the selected borrow, transfer or
+copy operation. An aggregate destination additionally needs its exact
+nominal owner and field or variant payload slot. A source span remains a
+diagnostic location, not the identity of the cleanup obligation.
+
+The standard-library producer must participate too. Its
+`run_user_validation_phases` runs selected validations without calling
+`phase_type_check` or exporting those user-pipeline side tables. A change
+confined to the ordinary checker route would leave the baked `Mutex.lock`
+body unchanged. Both source routes need the same value-use vocabulary
+before serialization, remapping, specialization and CFG consumers can rely
+on it; this does not require enabling every user validation during bootstrap.
+
+Variant constructors currently emit `SetVariantData` without selecting a
+copy or transfer. Record construction selects `Clone` for a named place
+without consulting resource discipline. The direct block-tail repair does
+not identify a local guard nested inside a returned `Result`. Suppressing
+that local cleanup alone is insufficient: interpreter recursive field
+cleanup handles concrete record fields, not a general generic-variant
+payload obligation. Producer handoff and eventual aggregate cleanup must be
+implemented together and tested for both premature destruction and leaks.
+`MutexGuard` is still an ordinary declaration, so the presence of its
+`Drop` method cannot itself select a transfer.
+
 Acceptance requires source-driven controls at both tiers for scope and
 explicit drop, borrowed/raw aliases, branch joins and register reuse,
 loop iterations, fresh versus aliasing copies, return transfer, and
