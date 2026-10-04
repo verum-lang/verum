@@ -251,6 +251,7 @@ fn source_function_ids_are_never_copied_as_consumer_function_ids() {
     codegen.ctx_mut().register_function(
         "foreign".to_owned(),
         verum_vbc::codegen::context::FunctionInfo {
+            callable_signature: None,
             id: verum_vbc::module::FunctionId(foreign),
             ..Default::default()
         },
@@ -285,6 +286,7 @@ fn method_signature_closure_and_registry_return_use_consumer_type_ids() {
     codegen.ctx_mut().register_function(
         "alpha.Wrapper.reveal".to_owned(),
         verum_vbc::codegen::context::FunctionInfo {
+            callable_signature: None,
             id: verum_vbc::module::FunctionId(9123),
             return_type: Some(original.return_type.clone()),
             ..Default::default()

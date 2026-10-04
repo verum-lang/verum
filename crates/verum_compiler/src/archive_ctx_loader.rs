@@ -597,6 +597,7 @@ fn register_module(
             );
         }
         let info = FunctionInfo {
+            callable_signature: None,
             type_param_ids: fn_desc.type_params.iter().map(|p| p.id).collect(),
             explicit_type_param_ids: fn_desc.explicit_type_param_ids.clone(),
             id: new_id,
@@ -670,6 +671,11 @@ fn register_module(
         ctx.archive_fn_param_types.insert(
             new_id.0,
             fn_desc.params.iter().map(|p| p.type_ref.clone()).collect(),
+        );
+        ctx.archive_fn_parameter_generics.insert(
+            new_id.0,
+            (0..fn_desc.params.len()).map(|index|
+                fn_desc.parameter_generic_id(index, |id| module.strings.get(id))).collect(),
         );
         ctx.register_function(qualified, info.clone());
         stats.functions_registered += 1;
@@ -771,6 +777,7 @@ fn register_module(
             };
             let param_names: Vec<String> = (0..arity).map(|i| format!("_{}", i)).collect();
             let info = FunctionInfo {
+                callable_signature: None,
                 type_param_ids: Vec::new(),
                 explicit_type_param_ids: Vec::new(),
                 id: FunctionId(u32::MAX - variant.tag),
@@ -893,6 +900,7 @@ fn register_module(
             .map(|f| type_ref_simple_name(&f.type_ref, module).unwrap_or_default())
             .collect();
         let info = FunctionInfo {
+            callable_signature: None,
             type_param_ids: Vec::new(),
             explicit_type_param_ids: Vec::new(),
             id: verum_vbc::module::FunctionId(u32::MAX / 2),
@@ -6377,6 +6385,7 @@ fn register_module_filtered(
             );
         }
         let info = FunctionInfo {
+            callable_signature: None,
             type_param_ids: fn_desc.type_params.iter().map(|p| p.id).collect(),
             explicit_type_param_ids: fn_desc.explicit_type_param_ids.clone(),
             id: new_id,
@@ -6417,6 +6426,11 @@ fn register_module_filtered(
         ctx.archive_fn_param_types.insert(
             new_id.0,
             fn_desc.params.iter().map(|p| p.type_ref.clone()).collect(),
+        );
+        ctx.archive_fn_parameter_generics.insert(
+            new_id.0,
+            (0..fn_desc.params.len()).map(|index|
+                fn_desc.parameter_generic_id(index, |id| module.strings.get(id))).collect(),
         );
         ctx.register_function(qualified.clone(), info.clone());
         // T0706 final leg: a last2-accepted descriptor's DISPATCH form
@@ -6818,6 +6832,7 @@ fn register_module_filtered(
             };
             let param_names: Vec<String> = (0..arity).map(|i| format!("_{}", i)).collect();
             let info = FunctionInfo {
+                callable_signature: None,
                 type_param_ids: Vec::new(),
                 explicit_type_param_ids: Vec::new(),
                 id: FunctionId(u32::MAX - variant.tag),
@@ -6905,6 +6920,7 @@ fn register_module_filtered(
             .map(|f| type_ref_simple_name(&f.type_ref, module).unwrap_or_default())
             .collect();
         let info = FunctionInfo {
+            callable_signature: None,
             type_param_ids: Vec::new(),
             explicit_type_param_ids: Vec::new(),
             id: FunctionId(u32::MAX / 2),

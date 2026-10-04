@@ -31,6 +31,7 @@ use verum_vbc::module::FunctionId;
 /// exactly the property that makes a tail meaningful.
 fn extern_decl(param_count: usize) -> FunctionInfo {
     FunctionInfo {
+        callable_signature: None,
         id: FunctionId(u32::MAX),
         param_count,
         ..Default::default()
@@ -40,6 +41,7 @@ fn extern_decl(param_count: usize) -> FunctionInfo {
 /// An ordinary Verum function with a real id and a body.
 fn bodied(param_count: usize) -> FunctionInfo {
     FunctionInfo {
+        callable_signature: None,
         id: FunctionId(7),
         param_count,
         ..Default::default()

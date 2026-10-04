@@ -2879,6 +2879,35 @@ impl FunctionDescriptor {
         }
     }
 
+    /// Recover a parameter's declared generic identity before a callable bound
+    /// was expanded into its structural function type. Method-owned parameters
+    /// take precedence over a same-named owner parameter; ambiguous legacy
+    /// metadata provides no identity. Optional names preserve the EMPTY sentinel.
+    pub fn parameter_generic_id<'a>(
+        &self,
+        index: usize,
+        name: impl Fn(StringId) -> Option<&'a str>,
+    ) -> Option<crate::types::TypeParamId> {
+        let parameter = self.params.get(index)?;
+        if parameter.type_name == StringId::EMPTY { return None; }
+        let declared = name(parameter.type_name)?;
+        let mut matched = None;
+        let mut shadowed = None;
+        let mut count = 0;
+        let mut shadow_count = 0;
+        for generic in &self.type_params {
+            if name(generic.name) == Some(declared) {
+                matched = Some(generic.id);
+                count += 1;
+                if self.explicit_type_param_ids.contains(&Some(generic.id)) {
+                    shadowed = Some(generic.id);
+                    shadow_count += 1;
+                }
+            }
+        }
+        if shadow_count == 1 { shadowed } else if count == 1 { matched } else { None }
+    }
+
     /// Creates a new function descriptor.
     pub fn new(name: StringId) -> Self {
         Self {

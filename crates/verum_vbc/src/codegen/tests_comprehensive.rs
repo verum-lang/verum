@@ -808,6 +808,7 @@ mod security_tests {
         let mut ctx = CodegenContext::new();
 
         let info = FunctionInfo {
+            callable_signature: None,
             type_param_ids: Vec::new(),
             explicit_type_param_ids: Vec::new(),
             id: FunctionId(42),
@@ -1592,6 +1593,7 @@ mod stress_tests {
 
         for i in 0..1000 {
             let info = FunctionInfo {
+                callable_signature: None,
                 type_param_ids: Vec::new(),
                 explicit_type_param_ids: Vec::new(),
                 id: FunctionId(i),
@@ -2468,6 +2470,7 @@ mod cross_module_path_tests {
     /// Helper to create a minimal FunctionInfo for tests.
     fn make_func_info(id: u32, param_count: usize, is_async: bool) -> FunctionInfo {
         FunctionInfo {
+            callable_signature: None,
             type_param_ids: Vec::new(),
             explicit_type_param_ids: Vec::new(),
             id: FunctionId(id),
@@ -2693,6 +2696,7 @@ mod cross_module_path_tests {
         let mut ctx = CodegenContext::new();
 
         let info = FunctionInfo {
+            callable_signature: None,
             type_param_ids: Vec::new(),
             explicit_type_param_ids: Vec::new(),
             id: FunctionId(60),
@@ -2732,6 +2736,7 @@ mod cross_module_path_tests {
         let mut ctx = CodegenContext::new();
 
         let info = FunctionInfo {
+            callable_signature: None,
             type_param_ids: Vec::new(),
             explicit_type_param_ids: Vec::new(),
             id: FunctionId(80),

@@ -1349,10 +1349,7 @@ impl VbcCodegen {
 
             // === Closure ===
             ExprKind::Closure {
-                params,
-                body,
-                return_type,
-                ..
+                async_, contexts, params, body, return_type, ..
             } => {
                 // Span key identifies this exact closure node so it can
                 // claim pending adapter element-type hints
@@ -1362,7 +1359,7 @@ impl VbcCodegen {
                 } else {
                     Some(expr.span)
                 };
-                self.compile_closure(params, body, return_type.as_ref(), hint_key)
+                self.compile_closure(params, body, return_type.as_ref(), hint_key, !async_ && contexts.is_empty())
             }
 
             // === Optional chaining: obj?.field ===
@@ -2196,7 +2193,7 @@ impl VbcCodegen {
                                 },
                                 sp,
                             );
-                            return self.compile_closure(&params, &body, None, None);
+                            return self.compile_closure(&params, &body, None, None, false);
                         }
                     }
 
@@ -6770,6 +6767,7 @@ impl VbcCodegen {
                 );
             }
             let info = FunctionInfo {
+                callable_signature: None,
                 type_param_ids: Vec::new(),
                 explicit_type_param_ids: Vec::new(),
                 id: stub_id,
@@ -8555,8 +8553,27 @@ impl VbcCodegen {
         }
     }
 
+    /// Read the semantic signature produced for this exact closure body.
+    fn compiled_callable_signature(&self, expr: &Expr) -> Option<&crate::types::TypeRef> {
+        match &expr.kind {
+            ExprKind::Paren(inner) => self.compiled_callable_signature(inner),
+            ExprKind::Closure { async_: false, contexts, .. } if contexts.is_empty() => {
+                let id = self.ctx.compiled_closures.get(&expr.span)?;
+                self.ctx.lookup_function_by_id(*id)?.callable_signature.as_ref()
+            }
+            _ => None,
+        }
+    }
+
+    fn parameter_generic_id(&self, func_id: u32, index: usize) -> Option<crate::types::TypeParamId> {
+        self.functions.iter().find(|function| function.descriptor.id.0 == func_id)
+            .and_then(|function| function.descriptor.parameter_generic_id(index, |id|
+                self.ctx.strings.get(id.0 as usize).map(String::as_str)))
+            .or_else(|| self.ctx.archive_fn_parameter_generics.get(&func_id)
+                .and_then(|parameters| parameters.get(index)).copied().flatten())
+    }
+
     /// Record a generic-function instantiation discovered at a call site.
-    ///
     /// Looks up the callee's descriptor by `func_id`, and if it is generic
     /// (any parameter or the return type mentions a type parameter), binds each
     /// `Generic(TypeParamId)` appearing in a parameter's `TypeRef` to the
@@ -8728,8 +8745,23 @@ impl VbcCodegen {
 
         let mut bindings: std::collections::BTreeMap<u32, crate::types::TypeRef> =
             std::collections::BTreeMap::new();
+        let mut unresolved_callables = verum_common::Set::new();
         for (i, ptr) in param_trs.iter().enumerate() {
             if let Some(arg) = args.get(i) {
+                let mut unwrapped = arg;
+                while let ExprKind::Paren(inner) = &unwrapped.kind { unwrapped = inner; }
+                if matches!(&unwrapped.kind, ExprKind::Closure { .. }) {
+                    let declared = self.parameter_generic_id(func_id, i);
+                    if let Some(signature) = self.compiled_callable_signature(unwrapped) {
+                        bind_generic(ptr, signature, &mut bindings);
+                        if let Some(id) = declared {
+                            bindings.entry(u32::from(id.0)).or_insert_with(|| signature.clone());
+                        }
+                    } else if let Some(id) = declared {
+                        unresolved_callables.insert(u32::from(id.0));
+                    }
+                    continue;
+                }
                 if let Some(concrete) = self
                     .infer_expr_type_name(arg)
                     .or_else(|| Self::literal_default_type_name(arg))
@@ -8844,6 +8876,9 @@ impl VbcCodegen {
         {
             bind_generic(&ret_tr, &expected_tr, &mut bindings);
         }
+        // An enclosing expected result cannot turn an untyped callback into
+        // a concrete ABI storage type. Only its proven signature binds that slot.
+        for id in unresolved_callables { bindings.remove(&id); }
         if std::env::var_os("VERUM_TRACE_MONO").is_some() {
             let nm = self
                 .functions
@@ -16349,7 +16384,7 @@ impl VbcCodegen {
                     })
                 })
             };
-            let ret_bindings: std::collections::BTreeMap<u32, crate::types::TypeRef> =
+            let mut ret_bindings: std::collections::BTreeMap<u32, crate::types::TypeRef> =
                 match (
                     ret_leg_desc_ret,
                     self.ctx.current_return_type_full.clone().or_else(|| self.ctx.current_return_type_name.clone()),
@@ -16386,6 +16421,18 @@ impl VbcCodegen {
                         std::collections::BTreeMap::new()
                     }
                 };
+            if let Some(fid) = resolvable_fid {
+                for (index, arg) in args.iter().enumerate() {
+                    let mut unwrapped = arg;
+                    while let ExprKind::Paren(inner) = &unwrapped.kind { unwrapped = inner; }
+                    if matches!(&unwrapped.kind, ExprKind::Closure { .. })
+                        && self.compiled_callable_signature(unwrapped).is_none()
+                        && let Some(id) = self.parameter_generic_id(fid, index + 1)
+                    {
+                        ret_bindings.remove(&u32::from(id.0));
+                    }
+                }
+            }
             if ret_bindings.is_empty() {
                 sidecar_args
             } else {
@@ -17572,6 +17619,7 @@ impl VbcCodegen {
             );
         }
         let info = FunctionInfo {
+            callable_signature: None,
             type_param_ids: Vec::new(),
             explicit_type_param_ids: Vec::new(),
             id: stub_id,
@@ -32108,6 +32156,7 @@ impl VbcCodegen {
         body: &Expr,
         return_type: Option<&verum_ast::ty::Type>,
         hint_key: Option<verum_ast::Span>,
+        signature_is_plain: bool,
     ) -> CodegenResult<Option<Reg>> {
         // Claim only this closure's contextual signature; sibling callbacks
         // and closures compiled inside the receiver keep their own entries.
@@ -32203,6 +32252,16 @@ impl VbcCodegen {
                 .or_else(|| param_type_refs[index].as_ref().and_then(|ty| self.callable_type_name(ty)).map(|name| name.to_string())))
             .collect();
 
+        // Preserve existing ABI lowering for all annotation shapes, but only
+        // complete structural witnesses certify the semantic callable signature.
+        let signature_is_plain = signature_is_plain && params.iter().enumerate().all(|(index, p)| {
+            if let Some(ty) = p.ty.as_ref() {
+                self.explicit_type_witness(ty, None).is_some()
+            } else {
+                param_type_refs[index].is_some()
+            }
+        });
+
         // Step 4: Register and compile the closure body as a new function
         // The closure function has captures as first params, then user params
         let closure_func_id = self.compile_closure_body_with_patterns(
@@ -32213,7 +32272,12 @@ impl VbcCodegen {
             &complex_patterns,
             body,
             return_type,
+            signature_is_plain,
         )?;
+
+        if let Some(span) = hint_key {
+            self.ctx.compiled_closures.insert(span, crate::module::FunctionId(closure_func_id));
+        }
 
         // Step 5: Emit NewClosure instruction
         let result = self.ctx.alloc_temp();
@@ -32306,6 +32370,7 @@ impl VbcCodegen {
         complex_patterns: &[(usize, &verum_ast::Pattern)],
         body: &Expr,
         return_type_ast: Option<&verum_ast::ty::Type>,
+        signature_is_plain: bool,
     ) -> CodegenResult<u32> {
         // Generate unique name for closure function
         let closure_name = format!(
@@ -32332,6 +32397,8 @@ impl VbcCodegen {
         let param_names: Vec<String> = all_params.iter().map(|(n, _)| n.clone()).collect();
 
         // Convert AST return type to TypeRef for the function descriptor.
+        let signature_is_plain = signature_is_plain
+            && return_type_ast.is_none_or(|ty| self.explicit_type_witness(ty, None).is_some());
         let closure_return_type_ref = return_type_ast.map(|ty|
             self.resolve_signature_type_ref(ty, &self.ctx.current_generic_param_ids));
 
@@ -32340,6 +32407,7 @@ impl VbcCodegen {
 
         // Register the closure function
         let info = super::FunctionInfo {
+            callable_signature: None,
             type_param_ids: Vec::new(),
             explicit_type_param_ids: Vec::new(),
             id: crate::module::FunctionId(func_id),
@@ -32585,8 +32653,15 @@ impl VbcCodegen {
         // Restore labels and loop context
         self.ctx.restore_closure_context(saved_closure_ctx);
 
-        if let Some(info) = self.ctx.functions.get_mut(&closure_name) {
+        let callable_signature = param_type_refs.iter().cloned().collect::<Option<Vec<_>>>()
+            .zip(closure_return_type_ref.clone()).filter(|_| signature_is_plain).map(|(params, return_type)| crate::types::TypeRef::Function {
+                params, return_type: Box::new(return_type), contexts: Default::default(),
+            });
+        // Registration may expose several names for this body. Update all
+        // aliases by exact FunctionId so lookup order cannot change its facts.
+        for info in self.ctx.functions.values_mut().filter(|info| info.id.0 == func_id) {
             info.return_type = closure_return_type_ref.clone();
+            info.callable_signature = callable_signature.clone();
         }
 
         // Create VBC function descriptor
@@ -33688,6 +33763,7 @@ impl VbcCodegen {
 
         let param_names: Vec<String> = capture_names.iter().map(|(n, _)| n.clone()).collect();
         let info = super::FunctionInfo {
+            callable_signature: None,
             type_param_ids: Vec::new(),
             explicit_type_param_ids: Vec::new(),
             id: crate::module::FunctionId(func_id),
@@ -42960,6 +43036,7 @@ impl VbcCodegen {
 
         // Register the generator function
         let info = super::FunctionInfo {
+            callable_signature: None,
             type_param_ids: Vec::new(),
             explicit_type_param_ids: Vec::new(),
             id: crate::module::FunctionId(func_id),
@@ -46725,6 +46802,12 @@ fn bind_generic_free(
             for (p, a) in pe.iter().zip(ae.iter()) {
                 bind_generic_free(p, a, bindings);
             }
+        }
+        (TR::Function { params: pp, return_type: pr, contexts: pc },
+         TR::Function { params: ap, return_type: ar, contexts: ac })
+            if pp.len() == ap.len() && pc == ac => {
+            for (p, a) in pp.iter().zip(ap) { bind_generic_free(p, a, bindings); }
+            bind_generic_free(pr, ar, bindings);
         }
         (TR::Reference { inner: pi, .. }, TR::Reference { inner: ai, .. }) => {
             bind_generic_free(pi, ai, bindings)

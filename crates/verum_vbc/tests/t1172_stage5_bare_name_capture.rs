@@ -36,6 +36,7 @@ fn stub(arity: usize) -> FunctionInfo {
     // Stub shape as the mint site builds it: no return type, synthetic
     // parameter names, arity taken from the CALL SITE.
     FunctionInfo {
+        callable_signature: None,
         id: FunctionId(STAGE5_BASE),
         param_count: arity,
         param_names: (0..arity).map(|i| format!("_arg{}", i)).collect(),
@@ -45,6 +46,7 @@ fn stub(arity: usize) -> FunctionInfo {
 
 fn real(arity: usize) -> FunctionInfo {
     FunctionInfo {
+        callable_signature: None,
         id: FunctionId(REAL_ID),
         param_count: arity,
         param_names: (0..arity).map(|i| format!("p{}", i)).collect(),

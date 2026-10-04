@@ -56,3 +56,50 @@ implement<T> Factory<T> { fn build<T, Output>(self) -> Output { Output.default()
         assert_eq!(info.type_param_ids, roster);
     }
 }
+
+#[test]
+fn archive_loaders_preserve_callable_parameter_declaration_identity() {
+    let ast = verum_fast_parser::Parser::new(
+        r#"
+type Payload is { value: Int };
+type Stage<F> is { value: F };
+implement<F> Stage<F> { fn transform<F: fn(Payload) -> Payload>(self, f: F) -> F { f } }
+"#,
+    )
+    .parse_module()
+    .unwrap();
+    let module = verum_vbc::codegen::VbcCodegen::with_config(
+        verum_vbc::codegen::CodegenConfig::new("callable_archive"),
+    )
+    .compile_module(&ast)
+    .unwrap();
+    let mut builder = verum_vbc::archive::ArchiveBuilder::new();
+    builder
+        .add_module("callable_archive", &module, &[])
+        .unwrap();
+    let mut bytes = Vec::new();
+    verum_vbc::archive::write_archive(&builder.finish(), &mut bytes).unwrap();
+    let archive = verum_vbc::archive::read_archive(std::io::Cursor::new(bytes)).unwrap();
+    let mut full = CodegenContext::new();
+    populate_ctx_from_archive(&archive, &mut full, &mut 0).unwrap();
+    let loaded = archive.load_module("callable_archive").unwrap();
+    let mut filtered = CodegenContext::new();
+    let wanted = ["Stage".to_owned(), "Stage.transform".to_owned()]
+        .into_iter()
+        .collect();
+    register_module_filtered(&loaded, "callable_archive", &mut filtered, &wanted, &mut 0);
+    for ctx in [&full, &filtered] {
+        let info = ctx
+            .lookup_function("callable_archive.Stage.transform")
+            .expect("exact method import");
+        assert_eq!(
+            ctx.archive_fn_parameter_generics
+                .get(&info.id.0)
+                .unwrap()
+                .as_slice(),
+            &[None, Some(verum_vbc::types::TypeParamId(0x8000))]
+        );
+        // The wire ABI alone is not evidence of a proven local closure signature.
+        assert!(info.callable_signature.is_none());
+    }
+}

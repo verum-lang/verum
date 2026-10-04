@@ -63,6 +63,13 @@ pub struct CodegenContext {
     pub archive_fn_param_types:
         std::collections::HashMap<u32, Vec<crate::types::TypeRef>>,
 
+    /// Declaration-owned generic IDs behind expanded callable parameter bounds.
+    pub archive_fn_parameter_generics: Map<u32, verum_common::List<Option<TypeParamId>>>,
+
+    /// Source identity of locally compiled closure bodies. Their semantic
+    /// signature lives in FunctionInfo, separately from ABI storage defaults.
+    pub compiled_closures: Map<verum_ast::Span, FunctionId>,
+
     /// **Resolution-time id→name carry** (T0277 leg B part 2).
     ///
     /// Every name-keyed function lookup that hands codegen a
@@ -1053,6 +1060,9 @@ pub struct CanonicalFnEntry {
 /// Information about a function.
 #[derive(Debug, Clone, Default)]
 pub struct FunctionInfo {
+    /// Proven user-visible closure signature, excluding its hidden environment.
+    /// None means unknown, independently of the descriptor's legacy ABI defaults.
+    pub callable_signature: Option<TypeRef>,
     /// Function ID in module.
     pub id: FunctionId,
     /// Parameter count.
@@ -1606,6 +1616,8 @@ impl CodegenContext {
     pub fn new() -> Self {
         Self {
             archive_fn_param_types: HashMap::new(),
+            archive_fn_parameter_generics: Map::new(),
+            compiled_closures: Map::new(),
             resolved_name_by_id: std::cell::RefCell::new(HashMap::new()),
             registers: RegisterAllocator::new(),
             instructions: Vec::new(),
@@ -5045,6 +5057,7 @@ mod tests {
     /// need to be meaningful; everything else uses `Default`.
     fn variant_info(parent: &str, tag: u32, arity: usize) -> FunctionInfo {
         FunctionInfo {
+            callable_signature: None,
             param_count: arity,
             variant_tag: Some(tag),
             parent_type_name: Some(parent.to_string()),
@@ -5056,6 +5069,7 @@ mod tests {
     /// FUNC-REGISTRY-QUALIFICATION-1 tests.
     fn plain_info(id: u32, arity: usize) -> FunctionInfo {
         FunctionInfo {
+            callable_signature: None,
             id: FunctionId(id),
             param_count: arity,
             ..Default::default()

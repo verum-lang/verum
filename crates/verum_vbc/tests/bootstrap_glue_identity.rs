@@ -54,6 +54,7 @@ fn dependent(producer: &VbcModule) -> VbcModule {
     cg.ctx_mut().register_function(
         format!("{owner}.Token.drop"),
         FunctionInfo {
+            callable_signature: None,
             id: FunctionId(9000),
             param_count: 1,
             ..Default::default()
@@ -62,6 +63,7 @@ fn dependent(producer: &VbcModule) -> VbcModule {
     cg.ctx_mut().register_function(
         format!("{owner}.Token.duplicate"),
         FunctionInfo {
+            callable_signature: None,
             id: FunctionId(9001),
             param_count: 1,
             ..Default::default()
@@ -129,6 +131,7 @@ fn merged_glue_resolves_the_original_owner_in_both_module_orders() {
                 cg.ctx_mut().register_function(
                     name,
                     FunctionInfo {
+                        callable_signature: None,
                         id,
                         param_count: function.params.len(),
                         ..Default::default()

@@ -3949,6 +3949,7 @@ impl VbcCodegen {
             let id = FunctionId(self.next_func_id);
             self.next_func_id = self.next_func_id.saturating_add(1);
             let info = FunctionInfo {
+                callable_signature: None,
                 type_param_ids: Vec::new(),
                 explicit_type_param_ids: Vec::new(),
                 id,
@@ -4496,6 +4497,7 @@ impl VbcCodegen {
             let id = FunctionId(self.next_func_id);
             self.next_func_id = self.next_func_id.saturating_add(1);
             let info = FunctionInfo {
+                callable_signature: None,
                 type_param_ids: Vec::new(),
                 explicit_type_param_ids: Vec::new(),
                 id,
@@ -6569,6 +6571,7 @@ impl VbcCodegen {
                     crate::types::VariantKind::Record => v.fields.len(),
                 };
                 let info = FunctionInfo {
+                    callable_signature: None,
                     type_param_ids: Vec::new(),
                     explicit_type_param_ids: Vec::new(),
                     id: FunctionId(u32::MAX - variant_index as u32),
@@ -9125,6 +9128,7 @@ impl VbcCodegen {
             // which would mis-dispatch variants through the newtype pass-through path.
             let sentinel_id = FunctionId(u32::MAX - *tag);
             let info = FunctionInfo {
+                callable_signature: None,
                 type_param_ids: Vec::new(),
                 explicit_type_param_ids: Vec::new(),
                 id: sentinel_id,
@@ -9267,6 +9271,7 @@ impl VbcCodegen {
             self.push_function_dedup(VbcFunction::new(stub_descriptor, vec![]));
 
             let info = FunctionInfo {
+                callable_signature: None,
                 type_param_ids: Vec::new(),
                 explicit_type_param_ids: Vec::new(),
                 id: func_id,
@@ -10881,6 +10886,7 @@ impl VbcCodegen {
         let return_type = func.return_type.as_ref()
             .map(|ty| self.resolve_field_type_ref(ty, &signature_scope));
         let info = FunctionInfo {
+            callable_signature: None,
             type_param_ids: Self::ordered_generic_param_ids(&dense, &shadow),
             explicit_type_param_ids: Self::explicit_generic_param_ids(func, &dense, &shadow),
             id,
@@ -11140,6 +11146,7 @@ impl VbcCodegen {
         let is_partial = Self::is_maybe_return_type(&pat.return_type);
 
         let info = FunctionInfo {
+            callable_signature: None,
             type_param_ids: Vec::new(),
             explicit_type_param_ids: Vec::new(),
             id,
@@ -11499,6 +11506,7 @@ impl VbcCodegen {
             None
         };
         let info = FunctionInfo {
+            callable_signature: None,
             type_param_ids: Vec::new(),
             explicit_type_param_ids: Vec::new(),
             id: FunctionId(u32::MAX),
@@ -13441,6 +13449,7 @@ impl VbcCodegen {
             .map(|ty| self.resolve_field_type_ref(ty, &signature_scope));
         self.ctx.current_impl_type_name = saved_impl;
         let info = FunctionInfo {
+            callable_signature: None,
             type_param_ids: Self::ordered_generic_param_ids(&dense, &shadow),
             explicit_type_param_ids: Self::explicit_generic_param_ids(func, &dense, &shadow),
             id,
@@ -13563,6 +13572,7 @@ impl VbcCodegen {
             let return_type_name = self.extract_type_name(&ffi_func.signature.return_type);
 
             let info = FunctionInfo {
+                callable_signature: None,
                 type_param_ids: Vec::new(),
                 explicit_type_param_ids: Vec::new(),
                 id,
@@ -14119,6 +14129,7 @@ impl VbcCodegen {
                 self.next_func_id = self.next_func_id.saturating_add(1);
 
                 let getter_info = FunctionInfo {
+                    callable_signature: None,
                     type_param_ids: Vec::new(),
                     explicit_type_param_ids: Vec::new(),
                     id: getter_id,
@@ -14153,6 +14164,7 @@ impl VbcCodegen {
                 self.next_func_id = self.next_func_id.saturating_add(1);
 
                 let setter_info = FunctionInfo {
+                    callable_signature: None,
                     type_param_ids: Vec::new(),
                     explicit_type_param_ids: Vec::new(),
                     id: setter_id,
@@ -15447,6 +15459,7 @@ impl VbcCodegen {
                     let tag = variant_index as u32;
 
                     let info = FunctionInfo {
+                        callable_signature: None,
                         type_param_ids: Vec::new(),
                         explicit_type_param_ids: Vec::new(),
                         id,
@@ -15942,6 +15955,7 @@ impl VbcCodegen {
                     fields.iter().map(|f| f.name.name.to_string()).collect();
 
                 let info = FunctionInfo {
+                    callable_signature: None,
                     type_param_ids: Vec::new(),
                     explicit_type_param_ids: Vec::new(),
                     id,
@@ -16382,6 +16396,7 @@ impl VbcCodegen {
                 let id = FunctionId(u32::MAX / 2);
 
                 let info = FunctionInfo {
+                    callable_signature: None,
                     type_param_ids: Vec::new(),
                     explicit_type_param_ids: Vec::new(),
                     id,
@@ -16495,6 +16510,7 @@ impl VbcCodegen {
                     (0..types.len()).map(|i| format!("_{}", i)).collect();
 
                 let info = FunctionInfo {
+                    callable_signature: None,
                     type_param_ids: Vec::new(),
                     explicit_type_param_ids: Vec::new(),
                     id,
@@ -16560,6 +16576,7 @@ impl VbcCodegen {
                 let id = FunctionId(u32::MAX / 2);
 
                 let info = FunctionInfo {
+                    callable_signature: None,
                     type_param_ids: Vec::new(),
                     explicit_type_param_ids: Vec::new(),
                     id,
@@ -16595,6 +16612,7 @@ impl VbcCodegen {
                     (0..types.len()).map(|i| format!("_{}", i)).collect();
 
                 let info = FunctionInfo {
+                    callable_signature: None,
                     type_param_ids: Vec::new(),
                     explicit_type_param_ids: Vec::new(),
                     id,
@@ -16647,6 +16665,7 @@ impl VbcCodegen {
 
                 // `Q.of(rep: T) -> Q`
                 let of_info = FunctionInfo {
+                    callable_signature: None,
                     type_param_ids: Vec::new(),
                     explicit_type_param_ids: Vec::new(),
                     id: pass_through_id,
@@ -16679,6 +16698,7 @@ impl VbcCodegen {
 
                 // `q.rep(&self) -> T`
                 let rep_info = FunctionInfo {
+                    callable_signature: None,
                     type_param_ids: Vec::new(),
                     explicit_type_param_ids: Vec::new(),
                     id: pass_through_id,
@@ -16828,6 +16848,7 @@ impl VbcCodegen {
         let return_type_name = const_type.and_then(|ty| self.extract_type_name(ty));
 
         let info = FunctionInfo {
+            callable_signature: None,
             type_param_ids: Vec::new(),
             explicit_type_param_ids: Vec::new(),
             id,
@@ -20598,6 +20619,7 @@ impl VbcCodegen {
         let id = FunctionId(self.next_func_id);
         self.next_func_id = self.next_func_id.saturating_add(1);
         let info = FunctionInfo {
+            callable_signature: None,
             type_param_ids: Vec::new(),
             explicit_type_param_ids: Vec::new(),
             id,
@@ -23677,6 +23699,7 @@ impl VbcCodegen {
                         // recovered name in the descriptor for
                         // diagnosis.
                         crate::codegen::FunctionInfo {
+                            callable_signature: None,
                             type_param_ids: Vec::new(),
                             explicit_type_param_ids: Vec::new(),
                             id: crate::module::FunctionId(stub_id),

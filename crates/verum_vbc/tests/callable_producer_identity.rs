@@ -261,3 +261,252 @@ fn probe(stage: Stage<Payload>) -> Int { stage.both(|x| x, |x| x) }
     assert_eq!(fs[0].params[1].type_ref, nominal(&module, "Payload"));
     assert_eq!(fs[1].params[1].type_ref, TypeRef::Concrete(TypeId::BOOL));
 }
+
+fn method_calls(module: &VbcModule, suffix: &str) -> verum_common::List<Vec<TypeRef>> {
+    let mut calls = verum_common::List::new();
+    for function in &module.functions {
+        let mut pc = function.bytecode_offset as usize;
+        let end = pc + function.bytecode_length as usize;
+        while pc < end {
+            if let verum_vbc::instruction::Instruction::CallG {
+                func_id, type_args, ..
+            } = verum_vbc::bytecode::decode_instruction(&module.bytecode, &mut pc)
+                .expect("instruction")
+            {
+                if module
+                    .functions
+                    .iter()
+                    .find(|f| f.id.0 == func_id)
+                    .and_then(|f| module.get_string(f.name))
+                    .is_some_and(|name| name.ends_with(suffix))
+                {
+                    calls.push(type_args);
+                }
+            }
+        }
+    }
+    calls
+}
+
+#[test]
+fn proven_callable_signature_binds_the_declared_method_parameter() {
+    let module = compile(
+        r#"
+type Payload is { value: Int };
+type Stage<T> is { value: T };
+implement<T> Stage<T> { fn transform<R, F: fn(T) -> R>(self, f: F) -> F { f } }
+fn probe(stage: Stage<Payload>) -> Int { let f = stage.transform(|x| x); 0 }
+"#,
+    );
+    let payload = nominal(&module, "Payload");
+    let function = TypeRef::Function {
+        params: vec![payload.clone()],
+        return_type: Box::new(payload.clone()),
+        contexts: Default::default(),
+    };
+    assert_eq!(
+        method_calls(&module, "Stage.transform").as_slice(),
+        &[vec![payload.clone(), payload, function]]
+    );
+}
+
+#[test]
+fn untyped_callable_abi_fallback_is_not_a_generic_binding() {
+    let module = compile(
+        r#"
+type Stage<T> is { value: T };
+implement<T> Stage<T> { fn transform<F>(self, f: F) -> F { f } }
+fn probe(stage: Stage<Int>) -> Int { let f = stage.transform(|x| x); 0 }
+"#,
+    );
+    let calls = method_calls(&module, "Stage.transform");
+    assert_eq!(calls.len(), 1);
+    assert_eq!(
+        calls[0][1],
+        TypeRef::Generic(verum_vbc::types::TypeParamId(1))
+    );
+}
+
+#[test]
+fn callback_value_executes_with_the_same_proven_nominal_signature() {
+    let module = compile(
+        r#"
+type Payload is { value: Int };
+type Stage<T> is { value: T };
+implement<T> Stage<T> { fn apply<R, F: fn(T) -> R>(self, f: F) -> R { f(self.value) } }
+fn probe() -> Int {
+    let stage: Stage<Payload> = Stage { value: Payload { value: 7 } };
+    let output: Payload = stage.apply(|x| x);
+    output.value
+}
+"#,
+    );
+    let entry = module
+        .functions
+        .iter()
+        .find(|f| {
+            module
+                .get_string(f.name)
+                .is_some_and(|n| n.ends_with(".probe"))
+        })
+        .expect("entry")
+        .id;
+    let result = verum_vbc::interpreter::Interpreter::new(std::sync::Arc::new(module))
+        .execute_function(entry)
+        .expect("execute callback");
+    assert_eq!(result.as_i64(), 7);
+}
+
+#[test]
+fn callable_parameter_identity_survives_serialized_declaration_and_shadow() {
+    let module = compile(
+        r#"
+type Payload is { value: Int };
+type Stage<F> is { value: F };
+implement<F> Stage<F> { fn transform<F: fn(Payload) -> Payload>(self, f: F) -> F { f } }
+fn probe(stage: Stage<Int>) -> Int { let f = stage.transform(|x| x); 0 }
+"#,
+    );
+    let module = verum_vbc::deserialize::deserialize_module(
+        &verum_vbc::serialize::serialize_module(&module).expect("serialize"),
+    )
+    .expect("deserialize");
+    let f = module
+        .functions
+        .iter()
+        .find(|f| {
+            module
+                .get_string(f.name)
+                .is_some_and(|n| n.ends_with("Stage.transform"))
+        })
+        .expect("method");
+    assert_eq!(
+        f.parameter_generic_id(1, |id| module.get_string(id)),
+        Some(verum_vbc::types::TypeParamId(0x8000))
+    );
+    let payload = nominal(&module, "Payload");
+    let function = TypeRef::Function {
+        params: vec![payload.clone()],
+        return_type: Box::new(payload),
+        contexts: Default::default(),
+    };
+    assert_eq!(
+        method_calls(&module, "Stage.transform").as_slice(),
+        &[vec![TypeRef::Concrete(TypeId::INT), function]]
+    );
+}
+
+#[test]
+fn empty_parameter_name_cannot_alias_nonempty_string_slot_zero() {
+    use verum_vbc::types::{StringId, TypeParamId};
+    let mut f = FunctionDescriptor::default();
+    f.params.push(verum_vbc::module::ParamDescriptor {
+        name: StringId(1),
+        type_ref: TypeRef::Concrete(TypeId::INT),
+        is_mut: false,
+        default: None,
+        type_name: StringId::EMPTY,
+    });
+    f.type_params.push(verum_vbc::types::TypeParamDescriptor {
+        name: StringId(1),
+        id: TypeParamId(7),
+        ..Default::default()
+    });
+    assert_eq!(f.parameter_generic_id(0, |_| Some("F")), None);
+}
+
+#[test]
+fn sibling_callback_values_bind_distinct_return_and_callable_slots() {
+    let module = compile(
+        r#"
+type Payload is { value: Int };
+type Other is { value: Int };
+type Stage<T> is { value: T };
+implement<T> Stage<T> { fn transform<R, F: fn(T) -> R>(self, f: F) -> F { f } }
+fn probe(stage: Stage<Payload>) -> Int {
+    let first = stage.transform(|x| x);
+    let second = stage.transform(|x| -> Other { Other { value: 3 } });
+    0
+}
+"#,
+    );
+    let payload = nominal(&module, "Payload");
+    let other = nominal(&module, "Other");
+    assert_eq!(
+        method_calls(&module, "Stage.transform").as_slice(),
+        &[
+            vec![
+                payload.clone(),
+                payload.clone(),
+                TypeRef::Function {
+                    params: vec![payload.clone()],
+                    return_type: Box::new(payload.clone()),
+                    contexts: Default::default(),
+                }
+            ],
+            vec![
+                payload.clone(),
+                other.clone(),
+                TypeRef::Function {
+                    params: vec![payload],
+                    return_type: Box::new(other),
+                    contexts: Default::default(),
+                }
+            ],
+        ]
+    );
+}
+
+#[test]
+fn ambiguous_legacy_parameter_names_do_not_invent_scope_ownership() {
+    use verum_vbc::types::{StringId, TypeParamId};
+    let mut f = FunctionDescriptor::default();
+    f.params.push(verum_vbc::module::ParamDescriptor {
+        name: StringId(2),
+        type_ref: TypeRef::Concrete(TypeId::INT),
+        is_mut: false,
+        default: None,
+        type_name: StringId(1),
+    });
+    for id in [TypeParamId(0), TypeParamId(0x8000)] {
+        f.type_params.push(verum_vbc::types::TypeParamDescriptor {
+            name: StringId(1),
+            id,
+            ..Default::default()
+        });
+    }
+    assert_eq!(f.parameter_generic_id(0, |_| Some("F")), None);
+    f.explicit_type_param_ids.push(Some(TypeParamId(0x8000)));
+    assert_eq!(
+        f.parameter_generic_id(0, |_| Some("F")),
+        Some(TypeParamId(0x8000))
+    );
+}
+
+#[test]
+fn async_callable_is_not_certified_as_an_ordinary_function() {
+    let module = compile(
+        r#"
+type Stage<T> is { value: T };
+implement<T> Stage<T> { fn transform<F>(self, f: F) -> F { f } }
+fn probe(stage: Stage<Int>) -> Int { let f = stage.transform(async |x: Int| x); 0 }
+"#,
+    );
+    assert_eq!(
+        method_calls(&module, "Stage.transform")[0][1],
+        TypeRef::Generic(verum_vbc::types::TypeParamId(1))
+    );
+}
+
+#[test]
+fn self_annotation_keeps_existing_abi_type_even_without_callable_proof() {
+    let module = compile(
+        r#"
+type Payload is { value: Int };
+implement Payload { fn probe(self) -> Int { let f = |x: Self| -> Self { x }; 0 } }
+"#,
+    );
+    let f = closures(&module)[0];
+    assert_eq!(f.params[1].type_ref, nominal(&module, "Payload"));
+    assert_eq!(f.return_type, nominal(&module, "Payload"));
+}

@@ -191,6 +191,7 @@ impl VbcCodegen {
                                     &body_expr,
                                     return_type,
                                     None,
+                                    false,
                                 )?
                                 {
                                     let fn_name = func.name.name.to_string();
