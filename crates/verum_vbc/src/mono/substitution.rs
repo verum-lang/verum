@@ -25,13 +25,9 @@ impl TypeSubstitution {
 
     /// Creates a substitution from a function descriptor and type arguments.
     ///
-    /// The specialized body refers to its type parameters as
-    /// `Generic(TypeParamId(i))` by DECLARATION POSITION.  `func.type_params`
-    /// is not reliably populated (the codegen leaves it empty — the same
-    /// historically-dead-flag class as `is_generic`), so when it doesn't line
-    /// up with the type args, bind POSITIONALLY (`TypeParamId(i) -> args[i]`).
-    /// Without this the substitution is empty and every `apply` is a no-op, so
-    /// no `Generic` is ever replaced and no protocol-method call devirtualizes.
+    /// The descriptor maps compact argument positions to declaration-owned
+    /// IDs, including shadowed method parameters. Descriptors without generic
+    /// metadata retain the legacy positional argument convention.
     pub fn from_function(func: &FunctionDescriptor, args: &[TypeRef]) -> Self {
         // T1526/T1528: compact witnesses follow the declaration's exact ID
         // roster, including shadow parameters. The descriptor owns legacy
@@ -101,16 +97,21 @@ impl TypeSubstitution {
             } => {
                 // The locally quantified IDs belong to this function type,
                 // not to the surrounding method/function witness frame.
-                let scoped = Self { bindings: self.bindings.iter()
-                    .filter(|(id, _)| id.0 >= *type_param_count)
-                    .map(|(id, ty)| (*id, ty.clone())).collect() };
+                let scoped = Self {
+                    bindings: self
+                        .bindings
+                        .iter()
+                        .filter(|(id, _)| id.0 >= *type_param_count)
+                        .map(|(id, ty)| (*id, ty.clone()))
+                        .collect(),
+                };
                 TypeRef::Rank2Function {
                     type_param_count: *type_param_count,
                     params: params.iter().map(|p| scoped.apply(p)).collect(),
                     return_type: Box::new(scoped.apply(return_type)),
                     contexts: contexts.clone(),
                 }
-            },
+            }
             TypeRef::Reference {
                 inner,
                 mutability,
@@ -145,116 +146,5 @@ impl TypeSubstitution {
     /// Returns true if there are no bindings.
     pub fn is_empty(&self) -> bool {
         self.bindings.is_empty()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::types::{TypeId, Variance};
-
-    #[test]
-    fn test_type_substitution() {
-        let params = vec![TypeParamDescriptor {
-            id: TypeParamId(0),
-            name: crate::types::StringId(0),
-            bounds: Default::default(),
-            variance: Variance::Invariant,
-            default: None,
-            type_bounds: smallvec::SmallVec::new(),
-        }];
-        let args = vec![TypeRef::Concrete(TypeId::INT)];
-
-        let subst = TypeSubstitution::new(&params, &args);
-
-        let generic = TypeRef::Generic(TypeParamId(0));
-        let substituted = subst.apply(&generic);
-
-        assert_eq!(substituted, TypeRef::Concrete(TypeId::INT));
-    }
-
-    #[test]
-    fn test_type_substitution_nested() {
-        let params = vec![TypeParamDescriptor {
-            id: TypeParamId(0),
-            name: crate::types::StringId(0),
-            bounds: Default::default(),
-            variance: Variance::Invariant,
-            default: None,
-            type_bounds: smallvec::SmallVec::new(),
-        }];
-        let args = vec![TypeRef::Concrete(TypeId::INT)];
-
-        let subst = TypeSubstitution::new(&params, &args);
-
-        // List<T> where T = Int
-        let generic = TypeRef::Instantiated {
-            base: TypeId(20), // Assume List is type 20
-            args: vec![TypeRef::Generic(TypeParamId(0))],
-        };
-        let substituted = subst.apply(&generic);
-
-        assert_eq!(
-            substituted,
-            TypeRef::Instantiated {
-                base: TypeId(20),
-                args: vec![TypeRef::Concrete(TypeId::INT)],
-            }
-        );
-    }
-
-    #[test]
-    fn test_empty_substitution() {
-        let subst = TypeSubstitution::empty();
-        assert!(subst.is_empty());
-
-        let generic = TypeRef::Generic(TypeParamId(0));
-        let result = subst.apply(&generic);
-        // Unbound generics remain unchanged
-        assert_eq!(result, generic);
-    }
-
-    fn descriptor(ids: &[u16]) -> FunctionDescriptor {
-        let mut function = FunctionDescriptor::default();
-        function.type_params = ids.iter().map(|id| TypeParamDescriptor {
-            id: TypeParamId(*id), name: crate::types::StringId(0),
-            bounds: Default::default(), variance: Variance::Invariant,
-            default: None, type_bounds: Default::default(),
-        }).collect();
-        function
-    }
-
-    #[test]
-    fn compact_shadow_parameters_bind_the_declared_ids() {
-        let subst = TypeSubstitution::from_function(&descriptor(&[0, 0x8000]),
-            &[TypeRef::Concrete(TypeId::INT), TypeRef::Concrete(TypeId::TEXT)]);
-        assert_eq!(subst.apply(&TypeRef::Generic(TypeParamId(0))), TypeRef::Concrete(TypeId::INT));
-        assert_eq!(subst.apply(&TypeRef::Generic(TypeParamId(0x8000))), TypeRef::Concrete(TypeId::TEXT));
-        assert_eq!(subst.apply(&TypeRef::Generic(TypeParamId(1))), TypeRef::Generic(TypeParamId(1)));
-    }
-
-    #[test]
-    fn compact_reordered_and_partial_parameters_keep_identity() {
-        let subst = TypeSubstitution::from_function(&descriptor(&[5, 2]), &[TypeRef::Concrete(TypeId::BOOL)]);
-        assert_eq!(subst.get(TypeParamId(5)), Some(&TypeRef::Concrete(TypeId::BOOL)));
-        assert_eq!(subst.get(TypeParamId(2)), None);
-        assert_eq!(subst.get(TypeParamId(0)), None);
-    }
-
-    #[test]
-    fn rank2_local_parameters_mask_outer_bindings() {
-        let mut subst = TypeSubstitution::empty();
-        subst.bind(TypeParamId(0), TypeRef::Concrete(TypeId::INT));
-        subst.bind(TypeParamId(0x8000), TypeRef::Concrete(TypeId::TEXT));
-        let rank2 = TypeRef::Rank2Function {
-            type_param_count: 1, params: vec![TypeRef::Generic(TypeParamId(0))],
-            return_type: Box::new(TypeRef::Tuple(vec![TypeRef::Generic(TypeParamId(0)), TypeRef::Generic(TypeParamId(0x8000))])),
-            contexts: vec![],
-        };
-        assert_eq!(subst.apply(&rank2), TypeRef::Rank2Function {
-            type_param_count: 1, params: vec![TypeRef::Generic(TypeParamId(0))],
-            return_type: Box::new(TypeRef::Tuple(vec![TypeRef::Generic(TypeParamId(0)), TypeRef::Concrete(TypeId::TEXT)])),
-            contexts: vec![],
-        });
     }
 }

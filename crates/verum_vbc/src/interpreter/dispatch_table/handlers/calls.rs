@@ -698,8 +698,7 @@ pub(in super::super) fn handle_call_indirect(
 
 /// CallG (0x80) - Generic function call with type parameters.
 ///
-/// Encoding: opcode + dst:reg + func_id:varint + type_args:reg_vec + args:reg_range
-/// type_args is encoded as varint(count) + reg * count (must consume all type arg registers).
+/// Encoding: opcode + dst:reg + func_id:varint + type_args:TypeRef vector + args:reg_range.
 pub(in super::super) fn handle_call_generic(
     state: &mut InterpreterState,
 ) -> InterpreterResult<DispatchResult> {
@@ -717,16 +716,7 @@ pub(in super::super) fn handle_call_generic(
         Vec::with_capacity(type_args_count);
     for _ in 0..type_args_count {
         let tr = super::bytecode_io::read_type_ref(state)?;
-        let resolved = match &tr {
-            crate::types::TypeRef::Generic(param) => state
-                .call_stack
-                .current_generic_witnesses()
-                .and_then(|ta| ta.get(param.0 as usize))
-                .cloned()
-                .unwrap_or(tr),
-            _ => tr,
-        };
-        type_args.push(resolved);
+        type_args.push(state.resolve_generic_witness(&tr));
     }
     let args = read_reg_range(state)?;
 

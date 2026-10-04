@@ -6,7 +6,6 @@ use super::super::DispatchResult;
 use super::super::load_constant;
 use super::bytecode_io::*;
 use crate::module::ConstId;
-use crate::types::TypeId;
 use crate::value::Value;
 
 // ============================================================================
@@ -111,6 +110,7 @@ pub(in super::super) fn handle_loadt(
     // Generic (no witness) loads nil — callers keep their legacy
     // erased-T fallbacks.
     let tr = super::bytecode_io::read_type_ref(state)?;
+    let tr = state.resolve_generic_witness(&tr);
     // CONST-GENERIC-VALUE-CARRY-1 (task #19): a const-generic witness is a
     // VALUE, not a type.  `LoadT { Generic(idx) }` in a const-param body
     // (`fn capacity(&self) -> Int { SIZE }`) resolves through the SAME
@@ -118,44 +118,14 @@ pub(in super::super) fn handle_loadt(
     // materializes the instantiation's integer (`StackAllocator<256>` →
     // 256).  A direct `ConstValue` payload (post-specialization) loads
     // the literal.  No witness → nil (legacy erased fallback), unchanged.
-    {
-        let frame_args = state.call_stack.current_generic_witnesses();
-        let const_hit: Option<i64> = match &tr {
-            crate::types::TypeRef::ConstValue(v) => Some(*v),
-            crate::types::TypeRef::Generic(param) => frame_args
-                .and_then(|ta| ta.get(param.0 as usize))
-                .and_then(|inner| match inner {
-                    crate::types::TypeRef::ConstValue(v) => Some(*v),
-                    _ => None,
-                }),
-            _ => None,
-        };
-        if let Some(v) = const_hit {
-            state.set_reg(dst, Value::from_i64(v));
-            return Ok(DispatchResult::Continue);
-        }
+    if let crate::types::TypeRef::ConstValue(value) = tr {
+        state.set_reg(dst, Value::from_i64(value));
+        return Ok(DispatchResult::Continue);
     }
-    let resolved: Option<TypeId> = {
-        fn head_id(
-            tr: &crate::types::TypeRef,
-            frame_args: Option<&[crate::types::TypeRef]>,
-        ) -> Option<TypeId> {
-            match tr {
-                crate::types::TypeRef::Concrete(id) => Some(*id),
-                crate::types::TypeRef::Instantiated { base, .. } => Some(*base),
-                crate::types::TypeRef::Generic(param) => frame_args
-                    .and_then(|ta| ta.get(param.0 as usize))
-                    .and_then(|inner| match inner {
-                        // One level is enough: entries were resolved
-                        // against the caller chain at CallG time.
-                        crate::types::TypeRef::Generic(_) => None,
-                        other => head_id(other, None),
-                    }),
-                _ => None,
-            }
-        }
-        let frame_args = state.call_stack.current_generic_witnesses();
-        head_id(&tr, frame_args)
+    let resolved = match tr {
+        crate::types::TypeRef::Concrete(id) => Some(id),
+        crate::types::TypeRef::Instantiated { base, .. } => Some(base),
+        _ => None,
     };
     match resolved {
         Some(id) => state.set_reg(dst, Value::from_type(id)),

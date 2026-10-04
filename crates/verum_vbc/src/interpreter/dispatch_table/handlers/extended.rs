@@ -163,16 +163,7 @@ pub(in super::super) fn handle_extended(
                 Vec::with_capacity(count.min(16));
             for _ in 0..count {
                 let tr = super::bytecode_io::read_type_ref(state)?;
-                let resolved = match &tr {
-                    crate::types::TypeRef::Generic(param) => state
-                        .call_stack
-                        .current_generic_witnesses()
-                        .and_then(|ta| ta.get(param.0 as usize))
-                        .cloned()
-                        .unwrap_or(tr),
-                    _ => tr,
-                };
-                type_args.push(resolved);
+                type_args.push(state.resolve_generic_witness(&tr));
             }
             state.pending_call_witness = Some(type_args.into_boxed_slice());
             Ok(DispatchResult::Continue)

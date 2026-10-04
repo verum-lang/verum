@@ -3012,6 +3012,26 @@ impl InterpreterState {
         self.module.get_function(id)
     }
 
+    /// Resolve a call-site type in the current caller's generic scope.
+    /// The descriptor owns parameter IDs; frame vectors carry only arguments.
+    /// Shared substitution also carries arguments nested inside other types.
+    pub(crate) fn resolve_generic_witness(&self, ty: &crate::types::TypeRef) -> crate::types::TypeRef {
+        if !ty.is_generic() {
+            return ty.clone();
+        }
+        let Some(args) = self.call_stack.current_generic_witnesses() else {
+            return ty.clone();
+        };
+        let Some(function) = self
+            .call_stack
+            .current()
+            .and_then(|frame| self.get_function(frame.function))
+        else {
+            return ty.clone();
+        };
+        crate::mono::TypeSubstitution::from_function(function, args).apply(ty)
+    }
+
     /// Gets a constant from the current module.
     pub fn get_constant(&self, id: crate::module::ConstId) -> Option<&crate::module::Constant> {
         self.module.get_constant(id)
