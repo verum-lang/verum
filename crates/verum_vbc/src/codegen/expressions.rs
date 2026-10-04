@@ -1837,6 +1837,32 @@ impl VbcCodegen {
         self.compile_qualified_path(path)
     }
 
+    /// A named fieldless value still has a nominal identity. Ordinary `()`
+    /// uses LoadUnit; named unit/empty-record constructors need a typed object
+    /// so a generic protocol call can recover the declared method table.
+    fn compile_nullary_type_value(&mut self, type_name: &str) -> Reg {
+        let nominal_id = self.type_name_to_id.get(type_name).copied().filter(|id| {
+            *id != crate::types::TypeId::UNIT
+                && self.type_by_id(*id).is_some_and(|desc| {
+                    desc.kind == crate::types::TypeKind::Unit
+                        || (desc.kind == crate::types::TypeKind::Record
+                            && desc.fields.is_empty()
+                            && !desc.is_transparent_wrapper)
+                })
+        });
+        let dest = self.ctx.alloc_temp();
+        if let Some(type_id) = nominal_id {
+            self.ctx.emit(Instruction::New {
+                dst: dest,
+                type_id: type_id.0,
+                field_count: 0,
+            });
+        } else {
+            self.ctx.emit(Instruction::LoadUnit { dst: dest });
+        }
+        dest
+    }
+
     /// Compiles a simple (single-segment) path.
     fn compile_simple_path(&mut self, segment: &PathSegment) -> CodegenResult<Option<Reg>> {
         match segment {
@@ -2242,8 +2268,9 @@ impl VbcCodegen {
                         // with no actual bytecode. Reading it as a 0-param "function" would
                         // emit Call(sentinel) which fails at runtime.
                         if func_info.id.0 == u32::MAX / 2 {
-                            let dest = self.ctx.alloc_temp();
-                            self.ctx.emit(Instruction::LoadUnit { dst: dest });
+                            let dest = self.compile_nullary_type_value(
+                                func_info.return_type_name.as_deref().unwrap_or(name),
+                            );
                             return Ok(Some(dest));
                         }
                         let dest = self.ctx.alloc_temp();
@@ -2387,7 +2414,7 @@ impl VbcCodegen {
                 // unit type (`type X is ();`).  For LOCALLY-declared unit
                 // types `register_type_constructors` registers a sentinel
                 // `FunctionId(u32::MAX / 2)` FunctionInfo and the
-                // function-registry branch above emits `LoadUnit` — but
+                // function-registry branch above constructs the named value — but
                 // archive-mounted types only get a `TypeDescriptor`
                 // (`register_archive_type_qualified` registers no
                 // constructor infos), so `let x: NoopDriver = NoopDriver;`
@@ -2395,7 +2422,7 @@ impl VbcCodegen {
                 // with `UndefinedVariable` in every consumer module.  One
                 // construction semantics for both origins: if the bare
                 // uppercase name resolves to a fieldless, non-transparent
-                // Record descriptor, it IS the unit value.  Gated on the
+                // Record descriptor, it constructs that nominal value. Gated on the
                 // module's local-visibility oracle (`alias_scope`, the
                 // ALIAS-VS-MARKER #41 discipline) so an unmounted
                 // stranger in the accumulated global `type_name_to_id`
@@ -2419,8 +2446,7 @@ impl VbcCodegen {
                             && desc.fields.is_empty()
                             && !desc.is_transparent_wrapper))
                 {
-                    let dest = self.ctx.alloc_temp();
-                    self.ctx.emit(Instruction::LoadUnit { dst: dest });
+                    let dest = self.compile_nullary_type_value(name);
                     return Ok(Some(dest));
                 }
 
@@ -7836,7 +7862,7 @@ impl VbcCodegen {
         //     method table and field-name addressing; collapsing them
         //     to the inner value loses both and corrupts every later
         //     `self.field` access in the type's methods.
-        //   * Unit  (`type X is { }` or `type X is ();`)  → LoadUnit.
+        //   * Named unit / empty record → typed zero-field object.
         //
         // The codegen-local `newtype_names` HashSet is the runtime fast
         // path for the transparent-wrapper question; it is populated
@@ -7845,8 +7871,9 @@ impl VbcCodegen {
         if func_info.id.0 == u32::MAX / 2 {
             if args.is_empty() {
                 // Unit-type / nullary record constructor.
-                let dest = self.ctx.alloc_temp();
-                self.ctx.emit(Instruction::LoadUnit { dst: dest });
+                let dest = self.compile_nullary_type_value(
+                    func_info.return_type_name.as_deref().unwrap_or(&func_name),
+                );
                 return Ok(Some(dest));
             }
             let is_transparent = self.ctx.newtype_names.contains(&func_name);
@@ -17415,12 +17442,11 @@ impl VbcCodegen {
             return self.compile_expr(&args[0]);
         }
         if func_info.id.0 == u32::MAX / 2 && args.is_empty() {
-            // Unit-type constructor with sentinel ID — no body, just
-            // load the canonical Unit value.  The flag-gated arm above
-            // already handled 1-arg wrappers; this arm covers nullary
-            // record / unit / sigma constructors.
-            let dest = self.ctx.alloc_temp();
-            self.ctx.emit(Instruction::LoadUnit { dst: dest });
+            // Preserve the declared nominal identity for body-less
+            // unit/empty-record constructors, including qualified calls.
+            let dest = self.compile_nullary_type_value(
+                func_info.return_type_name.as_deref().unwrap_or(""),
+            );
             return Ok(Some(dest));
         }
         // Multi-field record (sentinel ID, >1 arg) falls through to the
