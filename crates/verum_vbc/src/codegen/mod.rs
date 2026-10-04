@@ -3214,16 +3214,17 @@ impl VbcCodegen {
             .insert(type_name.to_string(), type_id)
             .filter(|old_id| *old_id != type_id)
         {
-            // The finalize type-table gate requires ONE descriptor per
-            // NAME. The shadowed descriptor keeps its identity under its
-            // module-QUALIFIED name (which archive body remap prefers
-            // anyway): rename it to an existing qualified alias when one
-            // is registered, else synthesize a collision-free one.
+            // The finalize gate requires one descriptor per name. Lookup
+            // aliases are not declaration authority: choosing one by map
+            // iteration can promote a foreign type into a sibling's exact
+            // metadata key. Preserve the descriptor's own declared identity.
             let qualified = self
-                .type_name_to_id
-                .iter()
-                .find(|(k, v)| **v == old_id && k.contains('.'))
-                .map(|(k, _)| k.clone())
+                .type_by_id(old_id)
+                .and_then(|ty| {
+                    let owner = self.ctx.strings.get(ty.origin_module?.0 as usize)?;
+                    let name = self.ctx.strings.get(ty.name.0 as usize)?;
+                    (!owner.is_empty()).then(|| crate::module::qualify_module_name(owner, name))
+                })
                 .unwrap_or_else(|| format!("shadowed${}${}", type_name, old_id.0));
             if let Some(td) = self.types.iter_mut().find(|t| t.id == old_id) {
                 let sid = crate::types::StringId(self.ctx.intern_string_raw(&qualified));
