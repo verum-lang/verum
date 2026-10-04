@@ -17,12 +17,14 @@ happened to be.
 
 ## 0. TL;DR — the five rules
 
-1. **A reference is produced by one of four opcodes, and they do not
-   agree about what the register holds.** Two yield an ADDRESS; two
-   yield the already-loaded VALUE.
-2. **The descriptor cannot tell you which.** An archive descriptor erases
-   `&` from the return type exactly as it erases it from parameters. The
-   callee's BODY is the only honest source.
+1. **Reference conventions differ by opcode and backend.** A producer
+   can yield a slot ADDRESS or the already-loaded VALUE; the historical
+   producer table below includes a tier-dependent case.
+2. **A declared reference type cannot tell you which.** Some archive paths
+   erase `&`; even a preserved `&T` does not distinguish an address from an
+   already-loaded value. The exact native producer and its argument/result
+   adaptations own that fact. A VBC body is evidence only when native lowering
+   actually selects that body; see the native-call prerequisite below.
 3. **The caller owes the difference.** A returned address needs one load
    before any consumer applies a layout to it; a returned pre-loaded
    element needs its `interior_list_ref` mark restored so the consumer
@@ -31,12 +33,12 @@ happened to be.
    this are allowed to be incomplete and are not allowed to be wrong; an
    unreadable instruction ends a walk with the answer that reproduces the
    behaviour the compiler had before the rule existed.
-5. **A reference can also arrive WRAPPED.** `Maybe<&T>` crosses the
-   boundary as a variant payload: no producer opcode runs in the caller,
-   and the extraction marks the register "already a value" — so the
-   caller owes a load *and* has been told it owes nothing. This one is
-   decidable at the call site, because here the descriptor does keep the
-   `&`.
+5. **A reference can also arrive WRAPPED.** A `Maybe<&T>` payload can
+   contain either a slot address or an already-loaded value. The preserved
+   `&` establishes the declared type, not the native word representation.
+   Extraction and forwarding need the exact producer fact, scoped to the
+   sum owner, variant tag and field. An unconditional load can double-load
+   a value; an unconditional pass-through mark can conceal an address.
 
 ---
 
@@ -215,13 +217,12 @@ of `Maybe<Int>`, false of `Maybe<&Int>` — and that mark makes the `Deref`
 arm identity. So the wrapped case breaks rule 3 twice over: the caller
 owes a load, and has been told it owes nothing.
 
-This is rule 2 read from the other side. The descriptor DOES carry the
-`&` here — `ListIter.next`'s return-type name dumps as `Maybe<&T>` — so
-the call site can decide without the callee's body. What the name cannot
-give is the associated-type projection: `Maybe<Self.Item>` renders as
-`Maybe<T0>` and the `&` is gone, so the fact is taken from the receiver
-type's `Item` binding instead. Both sources are consulted, and either
-suffices.
+The descriptor carries the declared `&` here: `ListIter.next`'s return-type
+name can render as `Maybe<&T>`. An associated-type binding can supply the same
+declared-type evidence when `Maybe<Self.Item>` renders as `Maybe<T0>`. Neither
+channel establishes whether the payload word is an address or a loaded value.
+The legacy peel also consults the producer body; the native-call prerequisite
+below explains why that body must match the implementation actually emitted.
 
 Scope, stated because guessing here is expensive:
 
@@ -507,7 +508,9 @@ compiler does what it did before this contract existed.
 Sections 3 and 4 answer "what does the caller owe?" by asking the
 CALLEE'S BODY — `wrapped_payload_is_slot_address` walks back from
 `SetVariantData` and answers ADDRESS only for a `GetF`-produced payload.
-That works because the call site knows which body it is calling.
+That local test requires proof that native lowering calls the selected body.
+A declaration lookup alone does not establish this; runtime replacements can
+select a different implementation, as the later native-call control shows.
 
 It stops working the moment the callee is a generic adaptor, and the
 stop is not an omission that a better walker would fix.
@@ -679,3 +682,90 @@ selection, loops, method arguments, by-value controls and the nonblocking futex
 mismatch path. `raw_field_reference_cast` checks the interpreter side. This
 change does not unify unresolved generic, aggregate-carried or iterator element
 reference representations, and does not implement native ownership/drop glue.
+
+
+## Exact native-call authority prerequisite (2026-10-04)
+
+T1573 remains open. The measured native failure crosses
+`Maybe.as_ref -> Maybe.expect -> OnceLock.get_or_init -> root_supervisor`.
+`GetVariantDataRef` produces the original payload cell ADDRESS, the fresh
+variant stores that word, and the generic projection returns it. The final
+method receiver applies a record layout to the cell instead of its contents.
+The stage6 debugger observed successful initialization (37, 37, count 1)
+before this failure; it did not establish successful supervisor access.
+
+An isolated prototype at `f947cdd68` composed typed variant projections and
+ordinary forwarding bodies. Its CFG analysis kept all reachable normal exits,
+treated mixed/cyclic results conservatively, and emitted temporary value views
+without replacing the original cell. Cached facts were limited to summaries
+and relevant sites; register states stayed local to analysis. This prototype
+is **not integrated**: a source control disproved its native-call authority.
+
+| Evidence | Measured result | Limit |
+| --- | --- | --- |
+| Main production with the new actual core-source record-forwarding test | Existing Once tests pass; new record test fails its missing-load IR oracle before unsafe execution | Confirms the scalar Once controls did not cover a record receiver |
+| Prototype with the same core-source test | Record method returns 73 twice; existing Once tests pass | Source-to-LLVM/JIT evidence, not fresh full native supervisor acceptance |
+| Prototype with a differently named generic sum | Record/field read 73, scalar read 73, value return 73, mutation changes the original cell to 91, reference-valued field reads 37 | No claim about unknown field-carrier inference or legacy `RefMut` |
+| Read before versus after an aggregate mutation | Saved payload word retains the original cell address; later read returns the replacement object pointer | Summary invalidates future storage projections, not already-read words |
+| Value, mixed-return and recursive controls | No newly inferred speculative slot load | Incomplete legacy paths are not thereby repaired |
+| Actual native-selection negative | Fails: emitted `verum_generic_hash` result receives the prototype's slot load | Blocks production integration |
+
+The last control declares an ordinary source function whose readable VBC body
+returns a reference through forwarding:
+
+```verum
+fn hash_value(p: &Parcel<Cell>) -> &Cell { forward(p) }
+fn intercepted_read(p: &Parcel<Cell>) -> Int { hash_value(p).value }
+```
+
+The native call path replaces that call with `verum_generic_hash`. The prototype
+trusted the VBC return summary and inserted a load through the replacement's
+scalar result. The negative inspects emitted LLVM and rejects that load before
+executing it. T1580 separately tracks this existing wrong-callee selection:
+an opaque receipt prevents the new speculative load but does not make the
+replacement honor the source body. See the
+[Intrinsic Dispatch Contract](intrinsic-dispatch-contract.md) for the declaration
+and intrinsic-authority boundary. The control demonstrates that a readable body
+and an exact declared FunctionId are insufficient authority for representation
+analysis.
+
+T1578 records the required next unit. The three ordinary emission paths
+(`lower_call`, the `CallG` arm, and `lower_call_m`) need one shared record of
+the **actual selected native call**. A receipt or common call plan must carry:
+
+- The emitted LLVM function/body identity after declaration replacement,
+  FunctionId resolution and name/arity deduplication. An intrinsic/runtime
+  replacement without a source-body contract is explicitly opaque.
+- Argument positions after static-receiver omission, original field-address
+  substitution, scalar spills, header adjustment and ABI coercion. A parameter
+  summary cannot substitute the earlier, unadapted VBC register word.
+- The result representation after any returned-slot normalization. Variant
+  extraction must use the same authority as the legacy payload peel and
+  pass-through marks, so a loaded word cannot subsequently be classified as
+  the original address.
+
+A missing, replaced, ambiguous or cyclic receipt yields Unknown. For a covered
+site this must not fall back to a VBC-body-only returned-slot walk or Maybe peel:
+that would restore the rejected inference through a second path. Declared `&T`,
+callee spelling and a recursion-visited flag cannot prove a slot address.
+The eventual consumer must meet facts from every reachable normal return,
+distinguish Unknown from an unreachable exit, and invalidate future aggregate
+reads after possible mutation through an alias. A previously extracted word
+keeps its own fact. Analysis work, symbolic expression size and retained facts
+need explicit finite budgets; exhausting one yields Unknown, not a positive
+representation claim.
+
+Receipts produced during emission are not available for every forward callee
+when its caller starts lowering. The consumer therefore needs deferred views
+or a sound dependency/fixed-point phase after actual selection. Such a phase
+must account for previously emitted normalization and classification marks;
+adding final IR loads alone is insufficient. Duplicating all dispatch branches
+inside the analysis would create a second call router and is not the next unit.
+The first bounded implementation should establish and test this shared call
+authority without enabling new speculative loads; normalization follows it.
+
+No wire change, ownership/drop rule, name blacklist or production source change
+was landed from the prototype. T1573 still requires both-tier source controls
+and the fresh supervisor result in its acceptance. The separate T1578 gate
+covers native replacements, same-name different arities, static receivers,
+post-adaptation original-cell arguments, value results and conservative cycles.
