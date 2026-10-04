@@ -552,6 +552,35 @@ The corrected ten-test gate passes against the actual CLI and preserves the
 explicit interpreter controls. CLI help and public documentation now distinguish
 file execution from project configuration. Production defaults are unchanged.
 
+At `e16ba666d`, T1530 completes the qualified declaration-key consumers:
+field metadata, inherent and protocol method schemes, static lookup and
+by-value receiver consumption use the same resolved owner. The source suite
+covers missing sibling fields/methods and rejected generic arguments as well
+as accepted calls, in both registration orders. It passes 235 focused and
+adjacent checks. The ordinary CLI relink takes 96.18 seconds and retains all
+three stdlib artifact hashes. Its actual factory/collect program again prints
+`7/7`, `5/5`, `Stdcall/C` without added type annotations. The official CLI
+Cargo gates now pass all ten manifest-routing tests and the native-failure
+regression, including its interpreter positive control.
+
+The real HTTP interpreter gate also passes again: five language contracts,
+a true zero-capacity asynchronous TCP read, and four connections. The binary
+200 body is exact; header and slow-drip 408 responses arrive at 0.624 and
+0.621 seconds with the expected body; cancellation writes no bytes. The
+combined interpreter program now executes the factory block but fails in the
+panic block, dispatching `next` on a value containing function-ID bits. Later
+handler, supervisor, address and mutex assertions do not run. Standalone
+panic success does not replace this integration failure.
+
+Actual native supervisor execution at `63ca59306` takes 698.29 seconds
+including compilation, then exits 255. Debugging the resulting binary reaches
+`verum_main` after its static initializers, confirming that lifecycle roots
+are present. The first `OnceLock.get_or_init` panics in `Maybe.expect`:
+`Once.new` stores an `AtomicInt` object pointer, while the native Once fast
+path treats that pointer slot as a raw state integer and never calls the
+initializer. T1567 tracks removal of this conflicting representation. This
+is distinct from both missing initializer roots and callback-carrier layout.
+
 Main integration remains pending execution validation. Passing unit counts
 do not replace actual program verdicts, and these failures prevent a
 whole-platform or industrial-readiness claim.
@@ -578,9 +607,9 @@ The fresh `63ca59306` CLI now passes T1497's real loopback interpreter
 control: shrinking the empty buffer establishes capacity zero, asynchronous
 read returns integer zero with length zero, and a subsequent delayed read
 and write returns `12/12/12` with an exact twelve-byte echo. The portable HTTP
-gate now checks that same zero-capacity branch before sending its first
-request. Its next full combined execution remains pending the qualified-field
-checker repair; native zero-capacity execution is not established.
+gate checks that same zero-capacity branch before sending its first
+request and passes under the subsequent `e16ba666d` interpreter. Native
+zero-capacity execution is not established.
 
 Remaining scope is explicit: T0467 also contains folded IO/FD/process
 acceptances that these slice regressions do not close. T1510 loses mutability in unsafe-reference signature
