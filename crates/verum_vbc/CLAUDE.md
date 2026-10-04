@@ -200,8 +200,17 @@ Test counts are deliberately not pinned here — they move with every added test
 and a stale number reads as a target to hit.  Run the suite for the current
 figure; what is pinned is the gate.
 
-**The default-features surface is GREEN.  The `codegen` surface is NOT** —
-but the number moved twice in one day, so read the dates, not the adjective:
+**Latest measured codegen surface — 2026-10-04, source `a67c786a4`:**
+the lib suite with `--no-default-features --features
+compression,table_dispatch,codegen,ffi` passed 2,035 tests, failed none,
+and retained one pre-existing ignored test (T0839), in 536.81 seconds.
+Eighteen targeted integration binaries passed another 186 tests.
+This is a private-target Cargo measurement, not a full workspace,
+default-feature, or native language-conformance verdict. See T1516 and
+`docs/architecture/tech-debt-register.md` for the separate CLI/AOT results.
+
+Earlier runs were not green. These historical measurements explain the
+remaining coordination notes below; do not treat them as current failures:
 
 | measured | on | result |
 |---|---|---|
@@ -285,7 +294,8 @@ otherwise-idle 10-core machine — the `test_compile_stdlib_*` fixtures each
 compile a stdlib module and individually pass the harness's 60-second
 "still running" threshold.
 
-Run it locally before landing anything in `codegen/`, and budget the hour.
+Run it locally before landing anything in `codegen/`, using a private target.
+Budget from a recent measured run; the historical hour is not a current timing.
 Do not read "CI is green" as covering it.  No "known failure" may be
 documented here without an explicit tracking task.
 
