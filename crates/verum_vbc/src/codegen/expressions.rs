@@ -23126,10 +23126,14 @@ impl VbcCodegen {
                         PathSegment::Relative => Some(vec![".".to_string()]),
                         PathSegment::Name(ident) => {
                             // Regular identifier - could be module, local variable, or static/const
-                            // Only return as module path if it's:
-                            // 1. NOT a local variable AND
-                            // 2. NOT a static/const (registered as zero-argument function)
-                            let is_local_var = self.ctx.get_var_reg(&ident.name).is_ok();
+                            // Only namespace paths may enter module-call lookup.
+                            // TLS-backed statics are values too (T1554), including
+                            // scoped function-local statics. Otherwise a same-leaf
+                            // free function can consume the call before the value
+                            // receiver is loaded. Use the declaration registry,
+                            // not the binding's spelling or initializer shape.
+                            let is_local_var = self.ctx.get_var_reg(&ident.name).is_ok()
+                                || self.ctx.is_thread_local(&ident.name).is_some();
                             // #17 migration #4: scope-aware probe so
                             // const-detection prefers caller's module's
                             // binding over first-wins archive shadow.
