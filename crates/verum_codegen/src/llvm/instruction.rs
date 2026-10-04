@@ -15166,14 +15166,25 @@ fn lower_call<'ctx>(
         }
     }
 
-    // Intercept protocol methods in Call instructions.
-    // When compiled generic code (map.vr) calls key.hash_value(), the VBC
-    // resolves it to Hash.hash_value which internally chains through
-    // self.hash(hasher) — a protocol call that can't dispatch at runtime.
-    // Replace with verum_generic_hash/verum_generic_eq which detect Text at runtime.
+    // A declared free-function body is not a protocol-method fallback.
+    // compile_function carries a nonempty ParamDescriptor.type_name only
+    // for Regular AST parameters; Self* parameters leave it EMPTY. This
+    // extra fact matters because inherited Unit methods have parent=None.
+    // Missing optional spelling is unknown, not evidence of a Self parameter.
+    let declared_free_body = func_desc.parent_type.is_none()
+        && func_desc.intrinsic_name.is_none()
+        && (func_desc.bytecode_length > 0
+            || func_desc.instructions.as_ref().is_some_and(|body| !body.is_empty()))
+        && (func_desc.params.is_empty()
+            || func_desc.params.first().is_some_and(|param| {
+                param.type_name != StringId::EMPTY
+                    && vbc_mod.get_string(param.type_name).is_some_and(|name| !name.is_empty())
+            }));
+
+    // Preserve the existing method fallback. Its wider CallM/default-method
+    // provenance remains separate from this negative declaration authority.
     let bare_call_method = func_name.rsplit('.').next().unwrap_or(func_name);
-    // Removed debug tracing
-    if bare_call_method == "hash_value" && args.count <= 1 {
+    if bare_call_method == "hash_value" && args.count == 1 && !declared_free_body {
         let i64_type = ctx.types().i64_type();
         let recv = as_i64(ctx, ctx.get_register(args.start.0)?, "call_hash_recv")?;
         let fn_type = i64_type.fn_type(&[i64_type.into()], false);
