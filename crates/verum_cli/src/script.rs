@@ -148,14 +148,11 @@ pub fn rewrite_argv_for_script_mode(argv: Vec<OsString>) -> Vec<OsString> {
 /// `.vr` files. A script is identified by a `#!` shebang line at byte 0
 /// (BOM-tolerant). Files that lack a shebang — even if they end in
 /// `.vr` — must be invoked through the explicit `verum run file.vr`
-/// form. This makes the three execution modes unambiguous from argv
-/// alone:
-///
-/// | Mode | Invocation | Required signal |
-/// |-------------|-----------------------------------|---------------------------|
-/// | Interpreter | `verum run file.vr` | `fn main()` in source |
-/// | AOT | `verum run --aot file.vr` | `fn main()` in source |
-/// | Script | `verum file.vr` or `./file.vr` | `#!` shebang at byte 0 |
+/// form. Script parsing and backend selection are independent: the
+/// shorthand rewrites to `run file.vr` and keeps its interpreter default.
+/// Explicit `verum run --aot script.vr` selects native execution while the
+/// shebang still enables top-level statements. See `should_parse_as_script`
+/// in the compiler pipeline for entry-source detection.
 ///
 /// Conditions, AND-joined:
 /// - Not a flag (does not start with `-`).
