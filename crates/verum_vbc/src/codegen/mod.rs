@@ -10072,7 +10072,22 @@ impl VbcCodegen {
                                 .type_name_to_id
                                 .get(ty_name.as_str())
                                 .copied()
-                                .and_then(|id| self.types.iter().position(|t| t.id == id));
+                                .and_then(|id| {
+                                    // Scalar aliases share an ID, but source
+                                    // impl ownership retains their spelling.
+                                    // A nominal Bool has its own resolved ID.
+                                    let scalar = TypeId::from_well_known_scalar_name(&ty_name)
+                                        == Some(id);
+                                    self.types.iter().position(|ty| {
+                                        ty.id == id
+                                            && (!scalar
+                                                || (Self::canonical_scalar_type_id(ty, &ty_name)
+                                                    == Some(id)
+                                                    && self.ctx.strings.get(ty.name.0 as usize)
+                                                        .map(String::as_str)
+                                                        == Some(ty_name.as_str())))
+                                    })
+                                });
                             match local_slot {
                                 Some(idx) => self.types[idx].protocols.push(impl_record),
                                 None => {
