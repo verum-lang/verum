@@ -25807,6 +25807,15 @@ impl VbcCodegen {
             // amortised vs the linear scan in `Self::intern_string`.
             crate::types::StringId(this.ctx.intern_string_raw(&name))
         };
+        // Optional metadata uses EMPTY as absence even when archive byte
+        // offset zero contains a real string. Required names still use intern.
+        let intern_optional = |this: &mut Self, sid: crate::types::StringId| {
+            if sid == crate::types::StringId::EMPTY {
+                sid
+            } else {
+                intern(this, sid)
+            }
+        };
         // Bail out cleanly when the name doesn't resolve in the archive
         // string table — keeps the loader robust against malformed
         // archive entries instead of panicking mid-walk.
@@ -25959,9 +25968,9 @@ impl VbcCodegen {
                 // UNIFIED-CROSS-MODULE-TYPE-IDENTITY (T0109): re-intern the
                 // field's carried type NAME (archive→local); a raw ..clone()
                 // misindexes it against this module's strings.
-                type_name: intern(self, fd.type_name),
-                refinement_src: intern(self, fd.refinement_src),
-                refinement_binding: intern(self, fd.refinement_binding),
+                type_name: intern_optional(self, fd.type_name),
+                refinement_src: intern_optional(self, fd.refinement_src),
+                refinement_binding: intern_optional(self, fd.refinement_binding),
                 ..fd.clone()
             });
         }
@@ -25980,9 +25989,9 @@ impl VbcCodegen {
             for fd in v.fields.iter() {
                 v_fields.push(crate::types::FieldDescriptor {
                     name: intern(self, fd.name),
-                    type_name: intern(self, fd.type_name),
-                    refinement_src: intern(self, fd.refinement_src),
-                    refinement_binding: intern(self, fd.refinement_binding),
+                    type_name: intern_optional(self, fd.type_name),
+                    refinement_src: intern_optional(self, fd.refinement_src),
+                    refinement_binding: intern_optional(self, fd.refinement_binding),
                     ..fd.clone()
                 });
             }

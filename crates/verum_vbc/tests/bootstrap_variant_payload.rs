@@ -210,3 +210,54 @@ fn importer_preserves_payload_refs_and_reinterns_all_field_strings() {
         assert_ne!(after.fields[0].refinement_src, StringId::EMPTY);
     }
 }
+
+#[test]
+fn absent_field_metadata_does_not_read_the_source_string_at_zero() {
+    let mut source = producer(
+        "alpha",
+        "type Record is { value: Int }; type Choice<T> is First(T) | Named { value: T };",
+    );
+    assert_eq!(source.strings.get(StringId::EMPTY), Some("alpha"));
+    for ty in &mut source.types {
+        for field in ty
+            .fields
+            .iter_mut()
+            .chain(ty.variants.iter_mut().flat_map(|v| &mut v.fields))
+        {
+            field.type_name = StringId::EMPTY;
+            field.refinement_src = StringId::EMPTY;
+            field.refinement_binding = StringId::EMPTY;
+        }
+    }
+    let source = roundtrip(&source);
+    let mut cg = VbcCodegen::with_config(CodegenConfig::new("consumer"));
+    for i in 0..300 {
+        cg.ctx_mut()
+            .intern_string_raw(&format!("foreign_optional_pool_{i}"));
+    }
+    cg.import_archive_module_types(&source);
+    let consumer = ast("module consumer; fn main() {}");
+    cg.collect_unit_declarations(&[&consumer]).unwrap();
+    let result = roundtrip(&cg.compile_function_bodies(&consumer).unwrap());
+    let tuple = &variant(&result, "alpha", "Choice", "First").fields[0];
+    let named = &variant(&result, "alpha", "Choice", "Named").fields[0];
+    let record = &ty(&result, "alpha", "Record").fields[0];
+    for (field, expected_name) in [(tuple, "_0"), (named, "value"), (record, "value")] {
+        assert_eq!(result.strings.get(field.name), Some(expected_name));
+        assert_eq!(
+            field.type_name,
+            StringId::EMPTY,
+            "{expected_name} type name"
+        );
+        assert_eq!(
+            field.refinement_src,
+            StringId::EMPTY,
+            "{expected_name} refinement"
+        );
+        assert_eq!(
+            field.refinement_binding,
+            StringId::EMPTY,
+            "{expected_name} binding"
+        );
+    }
+}
