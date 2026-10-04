@@ -2806,6 +2806,28 @@ impl Default for FunctionDescriptor {
 }
 
 impl FunctionDescriptor {
+    /// Resolve a generic argument by its declaration-owned parameter ID.
+    ///
+    /// VBC 2.16 calls carry a compact vector in `type_params` declaration
+    /// order, including method parameters in the shadow band. Older calls
+    /// may carry an indexed (and therefore longer) vector; descriptors with
+    /// no parameter metadata also retain their positional interpretation.
+    /// A missing declared parameter never aliases an unrelated vector slot.
+    pub fn generic_argument<'a>(
+        &self,
+        args: &'a [TypeRef],
+        param: crate::types::TypeParamId,
+    ) -> Option<&'a TypeRef> {
+        if self.type_params.is_empty() || args.len() > self.type_params.len() {
+            args.get(param.0 as usize)
+        } else {
+            self.type_params
+                .iter()
+                .position(|declared| declared.id == param)
+                .and_then(|index| args.get(index))
+        }
+    }
+
     /// Creates a new function descriptor.
     pub fn new(name: StringId) -> Self {
         Self {
