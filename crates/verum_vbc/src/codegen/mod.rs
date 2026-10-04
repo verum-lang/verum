@@ -6216,45 +6216,36 @@ impl VbcCodegen {
                 })
                 .collect();
             self.hydrate_field_refinements(&ty, &simple_name, archive_strings, &names);
-            // **Type-name map unconditional population** (closes task #9
-            // cross-mount race for archive-loaded types).
-            //
-            // `register_record_fields` (mod.rs:12407 — the user-phase
-            // path) unconditionally populates `type_field_type_names`
-            // even when `type_field_layouts` is first-wins-guarded;
-            // commit `ab768e5d8` established this invariant for the
-            // user phase to keep the type-map fresh under repeated
-            // forward-reference re-registration.  The archive-side
-            // path here previously only populated `type_field_layouts`
-            // and left `type_field_type_names` empty — so when an
-            // archive-loaded record type was queried at a field-access
-            // call site (`f.value` field-type lookup driving
-            // raw-pointer marker propagation, list-mount tracing, …),
-            // the missing entry caused `field_type_name` to return
-            // `None`.  Downstream `resolve_field_index` then fell
-            // through to the "pick the type with the most fields"
-            // global-scan heuristic and silently routed field writes
-            // to wrong offsets — pinned 5 tests at
-            // `core-tests/async/future/regression_test.vr §C`
-            // (ReadyFuture/Join2/Select2/Lazy `.value`/`.f`/`.fut1`
-            // field-access under `List` mount).
-            //
-            // Resolve each field's `TypeRef` to its canonical type
-            // name via `type_ref_to_field_name` (an inline mirror of
-            // `extract_type_name_from_ast`'s prefix preservation:
-            // bare references flatten, `&unsafe`/`*const`/`*mut`
-            // preserve their prefix so the raw-pointer marker at
-            // `compile_field_access` line 14372 still fires).  When
-            // the type-ref doesn't resolve to a nominal name (free
-            // generic param, function type, structural shape), skip
-            // that field — populating with `""` would shadow a future
-            // genuine registration via first-wins.
+            // T1518: carry the field's nominal identity from its own string
+            // pool. TypeRef may be an opaque PTR or an archive-local numeric
+            // id that happens to name a different type in this consumer.
+            // Keep field types under the same owner keys as field layouts;
+            // a same-leaf sibling must not overwrite the bare key's owner.
+            let owns_simple_key = self.type_name_to_id.get(&simple_name) == Some(&ty.id)
+                && qualified_key.as_ref().is_none_or(|qualified| {
+                    self.type_name_first_qualifier.get(&simple_name) == Some(qualified)
+                });
             for (fname, fdesc) in names.iter().zip(ty.fields.iter()) {
-                if let Some(ty_name) = self.type_ref_to_field_name(&fdesc.type_ref) {
-                    self.type_field_type_names.insert(
-                        (simple_name.clone(), fname.clone()),
-                        ty_name,
-                    );
+                let carried = if fdesc.type_name == crate::types::StringId::EMPTY {
+                    None
+                } else {
+                    match archive_strings {
+                        Some(strings) => strings.get(fdesc.type_name).map(str::to_owned),
+                        None => self.ctx.strings.get(fdesc.type_name.0 as usize).cloned(),
+                    }
+                    .filter(|name| !name.is_empty())
+                };
+                if let Some(ty_name) =
+                    carried.or_else(|| self.type_ref_to_field_name(&fdesc.type_ref))
+                {
+                    if owns_simple_key {
+                        self.type_field_type_names
+                            .insert((simple_name.clone(), fname.clone()), ty_name.clone());
+                    }
+                    if let Some(qualified) = &qualified_key {
+                        self.type_field_type_names
+                            .insert((qualified.clone(), fname.clone()), ty_name);
+                    }
                 }
             }
             // Archive-sourced field names live in archive's string
