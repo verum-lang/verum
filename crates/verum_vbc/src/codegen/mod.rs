@@ -3102,15 +3102,6 @@ impl VbcCodegen {
         }
     }
 
-    /// Scalar impl descriptors carry metadata for a built-in, not a new
-    /// nominal type. Both the kind and original ID must confirm the name.
-    fn canonical_scalar_type_id(ty: &TypeDescriptor, name: &str) -> Option<TypeId> {
-        (ty.kind == crate::types::TypeKind::Primitive)
-            .then(|| TypeId::from_well_known_scalar_name(name))
-            .flatten()
-            .filter(|id| *id == ty.id)
-    }
-
     /// Reserved sum identities exist before their source module is compiled.
     /// Only the exact canonical declaring owner has this authority.
     fn canonical_sum_type_id(module_name: &str, type_name: &str) -> Option<TypeId> {
@@ -5933,6 +5924,47 @@ impl VbcCodegen {
         }
     }
 
+    /// Source/archive emission keeps scalar impl carriers under their declared
+    /// spelling. Whole-program runtime assembly needs one descriptor per ID.
+    /// Merge only proven scalar aliases with identical non-identity metadata;
+    /// incompatible duplicates remain visible to the strict consistency check.
+    fn coalesce_runtime_scalar_carriers(&mut self) {
+        fn runtime_shape(ty: &TypeDescriptor) -> TypeDescriptor {
+            let mut shape = ty.clone();
+            shape.name = StringId::EMPTY;
+            shape.origin_module = None;
+            shape.protocols.clear();
+            shape
+        }
+
+        let original = std::mem::take(&mut self.types);
+        self.types.reserve(original.len());
+        self.type_index.clear();
+        let mut scalar_slots = Map::<TypeId, usize>::new();
+        for ty in original {
+            let scalar = self
+                .ctx
+                .strings
+                .get(ty.name.0 as usize)
+                .and_then(|name| ty.canonical_scalar_type_id(name));
+            if let Some(id) = scalar {
+                if let Some(&slot) = scalar_slots.get(&id) {
+                    if runtime_shape(&self.types[slot]) == runtime_shape(&ty) {
+                        for implementation in ty.protocols {
+                            if !self.types[slot].protocols.contains(&implementation) {
+                                self.types[slot].protocols.push(implementation);
+                            }
+                        }
+                        continue;
+                    }
+                } else {
+                    scalar_slots.insert(id, self.types.len());
+                }
+            }
+            self.push_type_descriptor(ty);
+        }
+    }
+
     /// Finish code generation and produce the assembled [`VbcModule`]:
     /// drains pending constants / TLS inits / default-method monomorphisations
     /// and ensures every call target has a descriptor.
@@ -5960,6 +5992,7 @@ impl VbcCodegen {
         // for any id that was registered in `ctx.functions` but
         // hasn't been pushed to `self.functions`.
         self.emit_missing_stub_descriptors();
+        self.coalesce_runtime_scalar_carriers();
         // Verify type-descriptor self-consistency before emitting bytecode.
         // Catches the class of bugs where codegen produces a TypeDescriptor
         // whose variants disagree with their declared `kind`/`arity`/
@@ -6414,7 +6447,7 @@ impl VbcCodegen {
         // lookups, drop/variant dispatch — resolves a type BY NAME via
         // `type_name_to_id`, so rerouting this type's instructions to the new id
         // is automatic; nothing depends on the module-local numeric id.
-        if Self::canonical_scalar_type_id(&ty, &simple_name).is_none()
+        if ty.canonical_scalar_type_id(&simple_name).is_none()
             && !self.type_name_to_id.contains_key(&simple_name)
             && self.type_name_to_id.values().any(|id| id.0 == ty.id.0)
         {
@@ -6868,7 +6901,7 @@ impl VbcCodegen {
         // Merge the same spelling additively, retaining distinct alias
         // spellings (Byte/UInt8, USize/ISize) for name-keyed metadata readers.
         let scalar = self.ctx.strings.get(ty.name.0 as usize)
-            .and_then(|name| Self::canonical_scalar_type_id(&ty, name));
+            .and_then(|name| ty.canonical_scalar_type_id(name));
         if scalar.is_some() {
             if let Some(existing) = self.types.iter_mut().find(|existing| {
                 existing.id == ty.id && existing.name == ty.name
@@ -10080,7 +10113,7 @@ impl VbcCodegen {
                                     self.types.iter().position(|ty| {
                                         ty.id == id
                                             && (!scalar
-                                                || (Self::canonical_scalar_type_id(ty, &ty_name)
+                                                || (ty.canonical_scalar_type_id(&ty_name)
                                                     == Some(id)
                                                     && self.ctx.strings.get(ty.name.0 as usize)
                                                         .map(String::as_str)
@@ -25897,7 +25930,7 @@ impl VbcCodegen {
         let name_str = owner.zip(qualified_key.as_ref())
             .and_then(|(owner, name)| name.strip_prefix(&format!("{owner}.")))
             .unwrap_or(&name_str).to_owned();
-        let scalar_id = Self::canonical_scalar_type_id(ty, &name_str);
+        let scalar_id = ty.canonical_scalar_type_id(&name_str);
         // REFINE-FIELD-DYNAMIC-BYPASS-1 phase 2: hydrate field
         // refinements on THIS import path too — the lazy loader
         // reaches most stdlib types through the protocol-remap
@@ -26400,7 +26433,7 @@ impl VbcCodegen {
                 .and_then(|key| self.type_name_to_id.get(&key).copied())
                 .or_else(|| {
                     let name = module.strings.get(ty.name)?;
-                    Self::canonical_scalar_type_id(ty, name)
+                    ty.canonical_scalar_type_id(name)
                 });
             if local.is_none()
                 && let Some(name) = module.strings.get(ty.name)

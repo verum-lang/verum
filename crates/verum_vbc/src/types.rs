@@ -1024,6 +1024,17 @@ pub struct TypeDescriptor {
     pub is_transparent_wrapper: bool,
 }
 
+impl TypeDescriptor {
+    /// A scalar impl carrier describes a built-in, not a nominal declaration.
+    /// Its kind, declared spelling, and original ID must all agree.
+    pub fn canonical_scalar_type_id(&self, declared_name: &str) -> Option<TypeId> {
+        (self.kind == TypeKind::Primitive)
+            .then(|| TypeId::from_well_known_scalar_name(declared_name))
+            .flatten()
+            .filter(|id| *id == self.id)
+    }
+}
+
 impl Default for TypeDescriptor {
     fn default() -> Self {
         Self {

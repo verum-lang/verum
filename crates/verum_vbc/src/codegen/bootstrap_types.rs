@@ -348,7 +348,7 @@ impl VbcCodegen {
             let (mi, ti) = catalog[key];
             let source = &available[mi].types[ti];
             let leaf = available[mi].strings.get(source.name).unwrap();
-            let id = Self::canonical_scalar_type_id(source, leaf)
+            let id = source.canonical_scalar_type_id(leaf)
                 .or_else(|| self.type_name_to_id.get(key).copied())
                 .unwrap_or_else(|| {
                     self.type_name_to_id
@@ -434,7 +434,7 @@ impl VbcCodegen {
             let scalar_name = module
                 .strings
                 .get(ty.name)
-                .filter(|name| Self::canonical_scalar_type_id(&ty, name).is_some())
+                .filter(|name| ty.canonical_scalar_type_id(name).is_some())
                 .map(|name| crate::types::StringId(self.ctx.intern_string_raw(name)));
             if let Some(imported) = self.types.iter_mut().find(|imported| {
                 imported.id == local && scalar_name.is_none_or(|name| imported.name == name)

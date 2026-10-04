@@ -11,6 +11,7 @@ use std::collections::HashMap;
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
+use verum_common::{List, Map, Text};
 
 use crate::format::{VbcFlags, VbcHeader};
 use crate::instruction::Instruction;
@@ -1336,6 +1337,9 @@ impl VbcModule {
             String,
             std::collections::HashMap<String, Vec<Cand>>,
         > = std::collections::HashMap::new();
+        // Runtime scalar aliases have one descriptor. Keep methods declared
+        // under every scalar spelling only when their carried parent ID agrees.
+        let mut scalar_methods = Map::<u32, List<(Text, u32)>>::new();
         for (idx, desc) in self.functions.iter().enumerate() {
             if crate::stub_ranges::is_stub_id(desc.id.0) {
                 continue;
@@ -1359,6 +1363,15 @@ impl VbcModule {
                     .is_some_and(|c| c.is_ascii_uppercase())
             {
                 continue;
+            }
+            if let Some(id) = TypeId::from_well_known_scalar_name(owner_raw)
+                && desc.parent_type == Some(id)
+                && has_body(desc)
+            {
+                scalar_methods
+                    .entry(id.0)
+                    .or_default()
+                    .push((Text::from(bare), idx as u32));
             }
             owner_index
                 .entry(base_of(owner_raw).to_string())
@@ -1433,6 +1446,13 @@ impl VbcModule {
                     if let Some(fid) = pick(cands, tid, t_unique) {
                         pending.push((tid, bare.clone(), 0, fid));
                     }
+                }
+            }
+            if let Some(id) = descriptor.canonical_scalar_type_id(tname)
+                && let Some(methods) = scalar_methods.get(&id.0)
+            {
+                for (bare, fid) in methods {
+                    pending.push((tid, bare.to_string(), 0, *fid));
                 }
             }
             // Rank 1 — protocol defaults for every protocol this type
