@@ -32,11 +32,15 @@ impl Observation {
 }
 
 fn project(codegen_tier: Option<&str>, flags: &[&str], explicit_directory: bool) -> Observation {
-    let dir = tempfile::tempdir().expect("project fixture");
     let mut manifest: Text = "[cog]\nname = \"tier_probe\"\nversion = \"0.1.0\"\n".into();
     if let Some(tier) = codegen_tier {
         manifest.push_str(&format!("[codegen]\ntier = {tier:?}\n"));
     }
+    project_manifest(&manifest, flags, explicit_directory)
+}
+
+fn project_manifest(manifest: &str, flags: &[&str], explicit_directory: bool) -> Observation {
+    let dir = tempfile::tempdir().expect("project fixture");
     fs::write(dir.path().join("Verum.toml"), manifest).expect("manifest");
     fs::write(dir.path().join("target"), "not a directory").expect("native obstruction");
     let mut command = Command::new(env!("CARGO_BIN_EXE_verum"));
@@ -50,9 +54,24 @@ fn project(codegen_tier: Option<&str>, flags: &[&str], explicit_directory: bool)
 #[test]
 fn absent_selector_honors_each_manifest_execution_tier() {
     for explicit_directory in [false, true] {
-        project(None, &[], explicit_directory).interpreter();
+        project(None, &[], explicit_directory).aot();
         project(Some("interpret"), &[], explicit_directory).interpreter();
         project(Some("aot"), &[], explicit_directory).aot();
+    }
+}
+
+#[test]
+fn empty_codegen_section_keeps_the_declared_aot_default() {
+    // The missing section and missing field take separate serde default paths.
+    // Both reach default_tier(); explicit interpretation must remain a
+    // separate control rather than borrowing the old CLI default.
+    for explicit_directory in [false, true] {
+        project_manifest(
+            "[cog]\nname = \"tier_probe\"\nversion = \"0.1.0\"\n[codegen]\n",
+            &[],
+            explicit_directory,
+        )
+        .aot();
     }
 }
 

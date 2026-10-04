@@ -348,7 +348,7 @@ enum Commands {
         feature_overrides: feature_overrides::LanguageFeatureOverrides,
     },
 
-    /// Run a Verum program (interpreter, --aot for native)
+    /// Run a file (interpreter default) or a project (configured tier)
     #[command(display_order = 101)]
     Run {
  /// .vr file to run, project directory, or `-` to read from stdin.
@@ -359,7 +359,7 @@ enum Commands {
  /// raw stdin without auto-print.
         #[clap(long, short = 'e', value_name = "EXPR", conflicts_with = "file")]
         eval: Option<String>,
- /// Run via interpreter (default, can be omitted)
+ /// Run via interpreter (overrides the project execution tier)
         #[clap(long, conflicts_with = "aot")]
         interp: bool,
  /// Compile to native and run (LLVM AOT)
