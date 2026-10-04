@@ -1,0 +1,31 @@
+// @test: differential
+// @level: L0
+// @tier: all
+// @timeout: 180000
+// @tags: generic, replace, deref, iterator, cancellation
+// @expected-stdout-begin
+// generic_replace=48
+// @expected-stdout-end
+// @expected-exit: 0
+
+type NonemptyGuard1506<Element> is { value: Element };
+implement<Element> NonemptyGuard1506<Element> {
+    fn deref(&self) -> &Element { &self.value }
+    fn deref_mut(&mut self) -> &mut Element { &mut self.value }
+}
+
+fn replace_guard_value_1506<Value>(dest: &mut Value, src: Value) -> Value {
+    @intrinsic("replace", dest, src)
+}
+
+fn main() {
+    let mut first_guard: NonemptyGuard1506<List<Int>> = NonemptyGuard1506 { value: [7, 11] };
+    let first = { let list = replace_guard_value_1506(&mut *first_guard, List.new()); list };
+    let mut total = 0;
+    for value in first { total = total + value; }
+    let mut second_guard: NonemptyGuard1506<List<Int>> = NonemptyGuard1506 { value: [13, 17] };
+    let second = { let list = replace_guard_value_1506(&mut *second_guard, List.new()); list };
+    for value in second { total = total + value; }
+    assert_eq(total, 48);
+    print(f"generic_replace={total}");
+}

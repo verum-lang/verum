@@ -1,0 +1,46 @@
+// T1507/T1516: real loopback acceptance, run explicitly through the Python gate.
+// Language contracts are read from their authoritative VCS fixtures.
+mount core.net.tcp.{TcpListener};
+mount core.net.weft.connection.{ConnectionConfig, ConnError, serve_http1};
+mount core.net.weft.handler.{Handler, WeftRequest};
+mount core.net.weft.error.{WeftError};
+mount core.net.http.{Response, StatusCode};
+mount core.async.cancellation.{CancellationToken};
+mount core.sync.atomic.{AtomicBool};
+
+type WeftHttpContractHandler is ();
+implement Handler for WeftHttpContractHandler {
+    async fn handle(&self, _req: WeftRequest) -> Result<Response, WeftError> {
+        let mut response = Response.new(StatusCode.ok());
+        response.body = [0x56, 0x00, 0xFF, 0x2A];
+        Result.Ok(response)
+    }
+}
+
+fn main() {
+@CONTRACT_CALLS@
+    let listener = TcpListener.bind("127.0.0.1:@PORT@").unwrap();
+    for case in ["http200", "header_timeout", "cancelled", "slow_drip"] {
+        let (stream, peer) = listener.accept().unwrap();
+        let config = if case == "header_timeout" || case == "slow_drip" {
+            ConnectionConfig {
+                keep_alive: false,
+                header_deadline_ms: @BUDGET_MS@,
+                ..ConnectionConfig.default()
+            }
+        } else { ConnectionConfig.default() };
+        let token = CancellationToken.new();
+        let draining: Shared<core.sync.atomic.AtomicBool> = Shared.new(AtomicBool.new(false));
+        if case == "cancelled" { token.cancel(); }
+        print(f"armed={case}");
+        let result = serve_http1(stream, peer, Heap.new(WeftHttpContractHandler), token,
+            draining, config).await;
+        let outcome = match result {
+            Result.Ok(()) => "ok",
+            Result.Err(ConnError.Cancelled) => "cancelled",
+            Result.Err(ConnError.ReadTimeout) => "timeout",
+            Result.Err(_) => "other-error",
+        };
+        print(f"case={case} outcome={outcome}");
+    }
+}

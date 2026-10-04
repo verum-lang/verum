@@ -43,4 +43,3 @@ implement<T> Deref for Guard<T> { type Target = T; fn deref(&self) -> &T { &self
         Maybe::Some(Text::from("List<(&mut Int, [Int], [Int; 3])>"))
     );
 }
-
