@@ -95,6 +95,9 @@ pub mod register_types;
 // Well-known stdlib type constants (replaces hardcoded string comparisons)
 pub mod well_known_types;
 
+// Shared integer-only Float formatting kernel and presentation policy.
+mod float_format;
+
 // Instruction lowering (VBC instructions → LLVM IR)
 pub mod instruction;
 

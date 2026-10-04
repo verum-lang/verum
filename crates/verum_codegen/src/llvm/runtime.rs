@@ -5534,32 +5534,16 @@ impl<'ctx> RuntimeLowering<'ctx> {
         super::instruction::get_or_declare_internal_strtod(self.context, module)
     }
 
-    /// Materialize `verum_internal_f64_to_decimal` (libc-free
-    /// f64 → ASCII decimal writer) via `instruction.rs::
-    /// get_or_declare_internal_f64_to_decimal`. Same bridge pattern
-    /// as the i64-to-decimal and strtod bridges — emits FULL body
-    /// on first call; idempotent thereafter. Replaces the
-    /// `snprintf(buf, _, "%g", value)` call in
-    /// `emit_verum_float_to_text` (T-DEFER-AOT-NO-LIBC float-format
-    /// half).
+    /// Materialize the shared IEEE-bit shortest-decimal formatter. The boolean
+    /// presentation argument selects Display (false) or Debug (true).
     fn get_or_declare_internal_f64_to_decimal(
         &self,
         module: &Module<'ctx>,
-    ) -> FunctionValue<'ctx> {
+    ) -> Result<FunctionValue<'ctx>> {
         super::instruction::get_or_declare_internal_f64_to_decimal(self.context, module)
     }
 
-    /// verum_float_to_text(value: f64) -> i64 (returns Text object pointer as i64)
-    ///
-    /// **Libc-free** (T-DEFER-AOT-NO-LIBC float-format half):
-    /// converts f64 → Text via `verum_internal_f64_to_decimal`
-    /// (open-coded LLVM IR — see `instruction.rs`). Replaces the
-    /// previous `snprintf(buf, 64, "%g", value)` call. The new
-    /// emitter writes ASCII decimal digits directly into a stack
-    /// buffer with no libc dependency. V0 boundary: no scientific
-    /// notation, |value| > i64::MAX saturates, |value| < 1e-6
-    /// rounds to integer; documented in instruction.rs above the
-    /// helper.
+    /// Float Display → Text through the integer-only shared formatter.
     fn emit_verum_float_to_text(&self, module: &Module<'ctx>) -> Result<()> {
         if let Some(f) = module.get_function("verum_float_to_text") {
             if f.count_basic_blocks() > 0 {
@@ -5583,20 +5567,19 @@ impl<'ctx> RuntimeLowering<'ctx> {
             .or_internal("missing param 0")?
             .into_float_value();
 
-        // Stack buffer for our libc-free formatter.  The helper
-        // writes at most "-9223372036854775808.999999" + slack ≈
-        // 28 bytes; 32 leaves room without burning stack.
-        let buf_size: u64 = 32;
+        // Fixed notation includes subnormals: 327 bytes plus trailing NUL.
+        let buf_size = u64::from(super::float_format::BUFFER_CAPACITY);
         let buf = builder
             .build_array_alloca(ctx.i8_type(), i64_type.const_int(buf_size, false), "buf")
             .or_llvm_err()?;
-
-        // verum_internal_f64_to_decimal(buf, value) -> i64 length.
-        // Emitted as full-bodied internal-linkage helper at first
-        // call; subsequent calls re-use the same emit.
-        let f64_to_dec = self.get_or_declare_internal_f64_to_decimal(module);
+        let f64_to_dec = self.get_or_declare_internal_f64_to_decimal(module)?;
+        let bits = builder.build_bit_cast(value, i64_type, "float_bits").or_llvm_err()?;
         let len = builder
-            .build_call(f64_to_dec, &[buf.into(), value.into()], "len")
+            .build_call(
+                f64_to_dec,
+                &[buf.into(), bits.into(), ctx.bool_type().const_zero().into()],
+                "len",
+            )
             .or_llvm_err()?
             .basic_value_or("call returned void")?
             .into_int_value();

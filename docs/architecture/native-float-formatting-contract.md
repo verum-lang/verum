@@ -1,15 +1,15 @@
 # Native Float formatting contract
 
-Status: implementation prerequisite, measured 2026-10-04. T1582 remains open;
-this document does not claim a corrected native formatter or completed no-libc
-migration. The [no-libc invariant](no-libc-architecture.md) applies to ordinary
-numeric output. The remaining `printf` calls are defects, not a permitted runtime
+Status: focused f64 LLVM implementation verified 2026-10-04; ordinary Float
+print integration and final native acceptance remain open. This document does
+not claim completed no-libc migration. The [no-libc invariant](no-libc-architecture.md) applies to ordinary
+native numeric output. The remaining `printf` calls are defects, not a permitted runtime
 requirement.
 
-## Current boundary
+## Baseline boundary
 
 The grammar defines formatting syntax, not a six-significant-digit default.
-Existing execution paths disagree:
+Before the replacement below, execution paths disagreed:
 
 | Path | Current implementation | Measured behavior |
 |---|---|---|
@@ -128,8 +128,8 @@ zero lexical differences and zero round-trip failures on that corpus, with a
 maximum of 327 bytes.
 
 That reference result is **not evidence that Verum's emitted formatter is
-fixed**, nor an exhaustive proof over all f64 bit patterns. The source/JIT
-baseline still fails. The scratch source, logs and reference license material
+fixed**, nor an exhaustive proof over all f64 bit patterns. The recorded source/JIT
+baseline failed before the emitted implementation below. The scratch source, logs and reference license material
 are recorded in the T1582 task journal; no failing/ignored repository test is
 presented as a completed implementation.
 
@@ -139,6 +139,44 @@ accumulator and repeated scaling. Its long-mantissa rounding and special-value
 limitations mean it cannot be the sole formatter oracle. Native format→native
 parse parity requires an independently verified parser correction; the formatter
 must not truncate output to accommodate that parser.
+
+## Emitted f64 implementation (2026-10-04)
+
+`crates/verum_codegen/src/llvm/float_format.rs` now emits the integer interval
+kernel and fixed Display/Debug presentation with ordinary LLVM builders.
+The internal ABI takes raw IEEE bits, so the numeric helper itself contains
+no floating-point operation or target CRT marker. `verum_float_to_text`
+bitcasts the source f64 once, supplies 328 bytes and constructs Text with the
+returned extent. The old out-of-range cast/six-digit helper is removed.
+
+The port uses Ryū's general digit-removal path for all values, omitting its
+common-case two-digit optimization. With the explicit greater-magnitude
+output tie policy, the center trailing-zero flag no longer affects the
+result; endpoint acceptance and lower trailing-zero handling are retained.
+The unchanged split-power tables and their Boost license are adjacent files.
+Output stores are volatile to prevent conversion of variable zero runs into
+an external `memset`; the run is bounded by the fixed f64 extent.
+
+The source/JIT endpoint regression passes, including actual native Text byte
+length. The emitted helper passes 264,928 Display/Debug invocations over the
+same 132,464-input corpus, with zero lexical, finite round-trip or buffer-canary
+failures. Maximum output remains 327 bytes. These are repository tests in
+`crates/verum_codegen/tests/float_format_contract.rs`, not a host replacement
+formatter or only the earlier reference experiment.
+
+Optimized numeric objects were emitted for x86_64 and AArch64 Linux, Darwin
+and Windows. `llvm-nm --undefined-only` reported no undefined symbols in all
+six objects. The durable object test also rejects formatting, memory and
+wide-integer helper imports. This is an isolated numeric-kernel boundary;
+it does not certify the full CLI, full generated Float program, 32-bit targets,
+Text allocation/copy runtime, or the final platform link. A previous f64-typed
+helper ABI exposed the Windows `_fltused` marker; the integer-only ABI avoids
+it here without claiming to repair general Windows Float linking.
+
+The two ordinary native Float print consumers still use `printf` pending
+integration and redirected-output acceptance. f32 default formatting, explicit
+precision, source-only `Text.from_float` and native decimal parsing remain
+outside this completed f64 conversion unit.
 
 ## Required implementation gates
 
