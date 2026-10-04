@@ -3100,6 +3100,22 @@ impl VbcCodegen {
         }
     }
 
+    /// Reserved sum identities exist before their source module is compiled.
+    /// Only the exact canonical declaring owner has this authority.
+    fn canonical_sum_type_id(module_name: &str, type_name: &str) -> Option<TypeId> {
+        use verum_common::well_known_types::WellKnownType;
+        let kind = WellKnownType::from_name(type_name)?;
+        if kind.canonical_archive_modules().first().copied() != Some(module_name) {
+            return None;
+        }
+        match kind {
+            WellKnownType::Maybe => Some(TypeId::MAYBE),
+            WellKnownType::Result => Some(TypeId::RESULT),
+            WellKnownType::Ordering => Some(TypeId::ORDERING),
+            _ => None,
+        }
+    }
+
     /// Claim `type_name` for a declaration in the module being compiled.
     ///
     /// A local declaration SHADOWS an earlier archive/stdlib registration
@@ -3132,20 +3148,7 @@ impl VbcCodegen {
         // Intrinsic signatures and variant opcodes share these reserved IDs.
         // The first archive owner is the source-declared owner, whereas later
         // entries are bundle lookup alternatives, not declaration authority.
-        let canonical_sum_id = {
-            use verum_common::well_known_types::WellKnownType;
-            WellKnownType::from_name(type_name).and_then(|kind| {
-                if kind.canonical_archive_modules().first().copied() != Some(module_name) {
-                    return None;
-                }
-                match kind {
-                    WellKnownType::Maybe => Some(TypeId::MAYBE),
-                    WellKnownType::Result => Some(TypeId::RESULT),
-                    WellKnownType::Ordering => Some(TypeId::ORDERING),
-                    _ => None,
-                }
-            })
-        };
+        let canonical_sum_id = Self::canonical_sum_type_id(module_name, type_name);
         if let Some(id) = canonical_sum_id {
             // Source mounts may skip re-registering variant constructors that
             // are already built in. Install their qualified key in the same

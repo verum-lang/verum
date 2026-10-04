@@ -351,7 +351,14 @@ impl VbcCodegen {
                     .get(leaf)
                     .copied()
                     .filter(|id| {
-                        id.well_known_name() == Some(leaf) && self.type_by_id(*id).is_none()
+                        id.well_known_name() == Some(leaf)
+                            && self.type_by_id(*id).is_none()
+                            && (!verum_common::well_known_types::BUILTIN_VARIANT_CARRIERS
+                                .iter()
+                                .any(|(name, _)| *name == leaf)
+                                || key.rsplit_once('.').is_some_and(|(owner, name)| {
+                                    Self::canonical_sum_type_id(owner, name) == Some(*id)
+                                }))
                     })
                     .unwrap_or_else(|| self.alloc_user_type_id())
             });
@@ -480,16 +487,21 @@ impl VbcCodegen {
     }
 
     pub(super) fn nominal_type_id(&self, name: &str) -> Option<TypeId> {
+        let lookup = |name: &str| {
+            self.type_name_to_id.get(name).copied().or_else(|| {
+                // Bootstrap can compile an intrinsic before core.base. Its
+                // explicit mount still denotes the reserved canonical sum;
+                // an unrelated same-leaf mount has no such authority.
+                let (owner, leaf) = name.rsplit_once('.')?;
+                Self::canonical_sum_type_id(owner, leaf)
+            })
+        };
         if !self.local_concrete_types.contains(name)
             && let Some(mounted) = self.ctx.mounted_types.get(name)
         {
-            return self
-                .type_name_to_id
-                .get(mounted)
-                .or_else(|| self.type_name_to_id.get(&format!("core.{mounted}")))
-                .copied();
+            return lookup(mounted).or_else(|| lookup(&format!("core.{mounted}")));
         }
-        self.type_name_to_id.get(name).copied()
+        lookup(name)
     }
 
     fn bootstrap_function_id(&self, module: &VbcModule, id: u32) -> Option<u32> {

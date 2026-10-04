@@ -1023,47 +1023,62 @@ impl VbcCodegen {
     // `emit_make_result_*` / `emit_make_maybe_*` centralize the construction
     // of canonical stdlib `Result<T, E>` / `Maybe<T>` values. They consult
     // `variant_tags::{OK, ERR, SOME, NONE}` constants for constructor names
-    // and the canonical `RESULT_VARIANT_LAYOUT` / `MAYBE_VARIANT_LAYOUT` for
-    // tag values, so no codegen path hardcodes a variant-name string or
-    // a literal tag integer.
+    // and declaration metadata for tags.
     //
-    // The variant lookup ladder is uniform: bare canonical name (e.g. `"Ok"`,
-    // succeeds when `Result` is imported via `mount`), then fully-qualified
-    // (`"Result::Ok"`, the cross-module form), then a structured CodegenError
-    // citing the missing type and the usage context.
+    // Constructor tags come from the canonical descriptor when available.
+    // Early bootstrap has declaration-owned FunctionInfo facts before that
+    // descriptor is baked; use the registered dotted constructor key then.
+    // A bare Ok/Err may belong to an unrelated sum and is never authority.
     // =====================================================================
 
-    /// Resolve a stdlib variant constructor's runtime tag through the
-    /// canonical `bare → qualified → error` ladder.
-    ///
-    /// Callers pass `canonical` from `variant_tags::{OK, ERR, SOME, NONE}` —
-    /// never raw string literals — and `qualified` as the cross-module form
-    /// (e.g., `"Result::Ok"`). On failure the error message names the
-    /// missing stdlib type and the operator that demanded it.
     fn lookup_stdlib_variant_tag(
         &self,
         canonical: &'static str,
         qualified: &'static str,
         type_display_name: &'static str,
+        type_id: Option<crate::types::TypeId>,
         usage_context: &str,
     ) -> CodegenResult<u32> {
-        // #17 migration #10: variant-tag lookup uses scope-aware
-        // first then falls back to bare lookup.  Qualified names
-        // (with dots) flow through the fallback path unchanged.
-        self.ctx
-            .lookup_function_in_scope(canonical)
-            .and_then(|info| info.variant_tag)
-            .or_else(|| {
+        let tag = if let Some(type_id) = type_id {
+            if let Some(descriptor) = self.type_by_id(type_id) {
+                descriptor.variants.iter().find_map(|variant| {
+                    (self
+                        .ctx
+                        .strings
+                        .get(variant.name.0 as usize)
+                        .map(String::as_str)
+                        == Some(canonical))
+                    .then_some(variant.tag)
+                })
+            } else {
                 self.ctx
                     .lookup_function_in_scope(qualified)
+                    .filter(|info| {
+                        info.parent_type_name
+                            .as_deref()
+                            .and_then(|name| self.nominal_type_id(name))
+                            == Some(type_id)
+                    })
                     .and_then(|info| info.variant_tag)
-            })
-            .ok_or_else(|| {
-                CodegenError::internal(format!(
-                    "variant '{}' not defined: {} type must be in scope for {}",
-                    canonical, type_display_name, usage_context,
-                ))
-            })
+            }
+        } else {
+            // Callers without a reserved nominal identity retain their
+            // source-scoped constructor resolution (for example Poll).
+            self.ctx
+                .lookup_function_in_scope(canonical)
+                .and_then(|info| info.variant_tag)
+                .or_else(|| {
+                    self.ctx
+                        .lookup_function_in_scope(qualified)
+                        .and_then(|info| info.variant_tag)
+                })
+        };
+        tag.ok_or_else(|| {
+            CodegenError::internal(format!(
+                "variant '{}' not defined: {} type must be in scope for {}",
+                canonical, type_display_name, usage_context,
+            ))
+        })
     }
 
     /// Materialize `Result::Ok(payload)` into `dst`.
@@ -1078,17 +1093,12 @@ impl VbcCodegen {
     ) -> CodegenResult<()> {
         let tag = self.lookup_stdlib_variant_tag(
             variant_tags::OK,
-            "Result::Ok",
+            "Result.Ok",
             "Result",
+            Some(crate::types::TypeId::RESULT),
             usage_context,
         )?;
-        self.emit_make_variant_for_function(
-            dst,
-            tag,
-            1,
-            variant_tags::OK,
-            Some("Result::Ok"),
-        );
+        self.emit_make_variant(dst, tag, 1, Some("Result"));
         self.ctx.emit(Instruction::SetVariantData {
             variant: dst,
             field: 0,
@@ -1107,17 +1117,12 @@ impl VbcCodegen {
     ) -> CodegenResult<()> {
         let tag = self.lookup_stdlib_variant_tag(
             variant_tags::ERR,
-            "Result::Err",
+            "Result.Err",
             "Result",
+            Some(crate::types::TypeId::RESULT),
             usage_context,
         )?;
-        self.emit_make_variant_for_function(
-            dst,
-            tag,
-            1,
-            variant_tags::ERR,
-            Some("Result::Err"),
-        );
+        self.emit_make_variant(dst, tag, 1, Some("Result"));
         self.ctx.emit(Instruction::SetVariantData {
             variant: dst,
             field: 0,
@@ -26419,7 +26424,7 @@ impl VbcCodegen {
         let noop_id = resolve("core.async.waker.noop_waker", "noop_waker")?;
         let context_id = resolve("core.async.waker.Context.from_waker", "Context.from_waker")?;
         let ready_tag =
-            self.lookup_stdlib_variant_tag("Ready", "Poll.Ready", "Poll", "Future await")?;
+            self.lookup_stdlib_variant_tag("Ready", "Poll.Ready", "Poll", None, "Future await")?;
 
         let result = self.ctx.alloc_temp();
         let waker = self.ctx.alloc_temp();
@@ -39136,6 +39141,9 @@ impl VbcCodegen {
                 if args.is_empty() {
                     self.ctx.emit(Instruction::LoadNil { dst: dest });
                 } else {
+                    // Validate the declaration before emitting any constructor.
+                    // The declaration owns the public panic payload nominal.
+                    let panic_type = self.catch_unwind_error_type(declared_return)?;
                     let hl = self.ctx.new_label("catch_unwind_h");
                     let el = self.ctx.new_label("catch_unwind_e");
                     self.ctx.emit_forward_jump(&hl, |o| {
@@ -39163,7 +39171,6 @@ impl VbcCodegen {
                     self.ctx.emit(Instruction::GetException { dst: ex });
                     // T1536: the runtime packet owns a message, not a public
                     // PanicInfo nominal. The catch declaration owns that type.
-                    let panic_type = self.catch_unwind_error_type(declared_return)?;
                     let message = self.ctx.alloc_temp();
                     let location = self.ctx.alloc_temp();
                     let public_error = self.ctx.alloc_temp();
