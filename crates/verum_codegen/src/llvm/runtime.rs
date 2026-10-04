@@ -1460,7 +1460,63 @@ impl<'ctx> RuntimeLowering<'ctx> {
     }
 
     /// Closure struct size: { fn_ptr: ptr, env_ptr: ptr } = 16 bytes.
-    pub const CLOSURE_SIZE: u64 = 16;
+    pub const CLOSURE_SIZE: u64 = 2 * verum_common::layout::POINTER_SIZE;
+
+    /// Native closures are headerless pairs, unlike ordinary heap records.
+    const CLOSURE_ENV_OFFSET: u64 = verum_common::layout::POINTER_SIZE;
+
+    /// Invoke the carrier produced by `lower_new_closure` with the value-slot
+    /// convention used by CallClosure: `i64 (ptr environment, i64 args...)`.
+    /// Unit callbacks also return a slot. Typed ABI adaptation is separate
+    /// from this carrier layout and call emission.
+    pub fn lower_call_closure(
+        &self,
+        builder: &Builder<'ctx>,
+        closure: PointerValue<'ctx>,
+        args: &[IntValue<'ctx>],
+    ) -> Result<IntValue<'ctx>> {
+        let i64_type = self.context.i64_type();
+        let ptr_type = self.context.ptr_type(AddressSpace::default());
+        let function = builder
+            .build_load(ptr_type, closure, "closure_fn")
+            .or_llvm_err()?
+            .into_pointer_value();
+        // SAFETY: lower_new_closure allocates CLOSURE_SIZE bytes and stores
+        // the separate environment pointer at CLOSURE_ENV_OFFSET.
+        let env_slot = unsafe {
+            builder
+                .build_in_bounds_gep(
+                    self.context.i8_type(),
+                    closure,
+                    &[i64_type.const_int(Self::CLOSURE_ENV_OFFSET, false)],
+                    "env_slot",
+                )
+                .or_llvm_err()?
+        };
+        let environment = builder
+            .build_load(ptr_type, env_slot, "closure_env")
+            .or_llvm_err()?;
+        let mut call_args: verum_common::List<BasicMetadataValueEnum<'ctx>> =
+            verum_common::List::with_capacity(args.len() + 1);
+        let mut param_types: verum_common::List<verum_llvm::types::BasicMetadataTypeEnum<'ctx>> =
+            verum_common::List::with_capacity(args.len() + 1);
+        call_args.push(environment.into());
+        param_types.push(ptr_type.into());
+        for arg in args {
+            call_args.push((*arg).into());
+            param_types.push(i64_type.into());
+        }
+        builder
+            .build_indirect_call(
+                i64_type.fn_type(&param_types, false),
+                function,
+                &call_args,
+                "closure_call",
+            )
+            .or_llvm_err()?
+            .basic_value_or("native closure call returns one value slot")
+            .map(|value| value.into_int_value())
+    }
 
     /// Lower NewClosure — allocate a closure struct with captured environment.
     ///
@@ -1517,7 +1573,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 .build_in_bounds_gep(
                     i8_type,
                     closure_ptr,
-                    &[i64_type.const_int(8, false)],
+                    &[i64_type.const_int(Self::CLOSURE_ENV_OFFSET, false)],
                     "env_slot",
                 )
                 .or_llvm_err()?

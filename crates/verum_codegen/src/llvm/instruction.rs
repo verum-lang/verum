@@ -4050,65 +4050,16 @@ fn lower_instruction_impl<'ctx>(
                     return Ok(());
                 }
             };
-            let i8_type = ctx.types().i8_type();
-            let i64_type = ctx.types().i64_type();
-            let ptr_type = ctx.types().ptr_type();
-
-            // Load fn_ptr from closure struct offset 0
-            let fn_ptr = ctx
-                .builder()
-                .build_load(ptr_type, closure_ptr, "closure_fn")
-                .or_llvm_err()?
-                .into_pointer_value();
-
-            // Load env_ptr from closure struct offset 8
-            // SAFETY: GEP into the closure struct {fn_ptr, env_ptr} to read the environment pointer at offset 8
-            let env_slot = unsafe {
-                ctx.builder()
-                    .build_in_bounds_gep(
-                        i8_type,
-                        closure_ptr,
-                        &[i64_type.const_int(8, false)],
-                        "env_slot",
-                    )
-                    .or_llvm_err()?
-            };
-            let env_ptr = ctx
-                .builder()
-                .build_load(ptr_type, env_slot, "closure_env")
-                .or_llvm_err()?;
-
-            // Build argument list: [env_ptr, ...args]
-            // Coerce all args to i64 since closure functions use uniform i64 parameters.
-            let mut call_args: Vec<BasicMetadataValueEnum> =
-                Vec::with_capacity(args.count as usize + 1);
-            call_args.push(env_ptr.into());
-            for r in args.iter() {
-                let arg_val = ctx.get_register(r.0)?;
-                let coerced = as_i64(ctx, arg_val, "closure_arg")?;
-                call_args.push(coerced.into());
+            let mut call_args = verum_common::List::with_capacity(args.count as usize);
+            for register in args.iter() {
+                call_args.push(as_i64(ctx, ctx.get_register(register.0)?, "closure_arg")?);
             }
-
-            // Build indirect call — closure functions return i64 by default
-            let ret_type = i64_type;
-            let mut param_types: Vec<BasicMetadataTypeEnum> = Vec::with_capacity(call_args.len());
-            param_types.push(ptr_type.into()); // env
-            for _ in 0..args.count {
-                param_types.push(i64_type.into());
-            }
-            let fn_type = ret_type.fn_type(&param_types, false);
-
-            let call_site = ctx
-                .builder()
-                .build_indirect_call(fn_type, fn_ptr, &call_args, "closure_call")
-                .or_llvm_err()?;
-
-            if let Some(ret_val) = call_site.try_as_basic_value().basic() {
-                ctx.set_register(dst.0, ret_val);
-            } else {
-                let unit_type = ctx.types().context().struct_type(&[], false);
-                ctx.set_register(dst.0, unit_type.const_zero().into());
-            }
+            let result = RuntimeLowering::new(ctx.llvm_context()).lower_call_closure(
+                ctx.builder(),
+                closure_ptr,
+                &call_args,
+            )?;
+            ctx.set_register(dst.0, result.into());
             // Mark dst register based on the closure's tracked return type.
             // This enables correct dispatch for List/Text/Map/etc. results from closures.
             if let Some(ret_type) = ctx.get_closure_return_type(closure.0).cloned() {
@@ -19673,43 +19624,12 @@ fn lower_call_method<'ctx>(
                 ctx.builder().position_at_end(run_bb);
                 if args.count > 0 {
                     let closure_val = ctx.get_register(args.start.0)?;
-                    let closure_i64 = as_i64(ctx, closure_val, "once_closure")?;
-                    let closure_ptr = ctx
-                        .builder()
-                        .build_int_to_ptr(closure_i64, ptr_type, "once_fn_ptr")
-                        .or_llvm_err()?;
-                    // Load function pointer from closure object: offset 24 (after header)
-                    // SAFETY: GEP past the 24-byte object header to load the function pointer from the closure object at field 0
-                    let fn_ptr_ptr = unsafe {
-                        ctx.builder()
-                            .build_gep(
-                                i64_type,
-                                closure_ptr,
-                                &[i64_type.const_int(3, false)],
-                                "once_fnptr_ptr",
-                            )
-                            .or_llvm_err()?
-                    };
-                    let fn_ptr_i64 = ctx
-                        .builder()
-                        .build_load(i64_type, fn_ptr_ptr, "once_fnptr_i64")
-                        .or_llvm_err()?;
-                    // Closure's function signature: fn(closure_env) -> void
-                    let void_type = ctx.llvm_context().void_type();
-                    let fn_type = void_type.fn_type(&[i64_type.into()], false);
-                    let fn_ptr_typed = ctx
-                        .builder()
-                        .build_int_to_ptr(fn_ptr_i64.into_int_value(), ptr_type, "once_fn")
-                        .or_llvm_err()?;
-                    // Call with closure env as arg (the closure pointer itself)
-                    ctx.builder()
-                        .build_indirect_call(
-                            fn_type,
-                            fn_ptr_typed,
-                            &[closure_i64.into()],
-                            "once_call",
-                        )
-                        .or_llvm_err()?;
+                    let closure_ptr = as_ptr(ctx, closure_val, "once_closure")?;
+                    RuntimeLowering::new(ctx.llvm_context()).lower_call_closure(
+                        ctx.builder(),
+                        closure_ptr,
+                        &[],
+                    )?;
                 }
                 // Set state = COMPLETE (2)
                 ctx.builder()
