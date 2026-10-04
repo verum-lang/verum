@@ -13079,6 +13079,7 @@ impl VbcCodegen {
         func: &FunctionDecl,
         type_name: &str,
     ) -> CodegenResult<()> {
+        let self_type_name = self.declared_impl_type_name(type_name);
         let func_name = func.name.name.to_string();
         let qualified_name = format!("{}.{}", type_name, func_name);
 
@@ -13108,7 +13109,7 @@ impl VbcCodegen {
                     // disambiguation, method-receiver inference, and
                     // every `field_type_name` lookup against
                     // `param_type_names` operate on the real layout.
-                    let name = Self::substitute_self_in_type_name(&name, type_name);
+                    let name = Self::substitute_self_in_type_name(&name, &self_type_name);
                     if !name.is_empty() && name != "()" {
                         Some(name)
                     } else {
@@ -13195,7 +13196,7 @@ impl VbcCodegen {
         // `return_type_name` to look up the right field layout.
         let return_type_name = if let verum_common::Maybe::Some(ref ret_ty) = func.return_type {
             self.extract_type_name(ret_ty)
-                .map(|n| Self::substitute_self_in_type_name(&n, type_name))
+                .map(|n| Self::substitute_self_in_type_name(&n, &self_type_name))
         } else {
             None
         };
@@ -17947,8 +17948,30 @@ impl VbcCodegen {
                 return TypeRef::Generic(crate::types::TypeParamId(param_idx));
             }
         }
+        if Self::ast_type_is_bare_self(ty)
+            && let Some(owner) = self.impl_self_type_ref(generic_param_map)
+        {
+            return owner;
+        }
         // Fall back to standard resolution
         self.ast_type_to_type_ref(ty)
+    }
+
+    /// The source spelling of Self keeps the owner's declaration arguments.
+    /// Method-local generics do not participate in this scope.
+    fn declared_impl_type_name(&self, type_name: &str) -> String {
+        if type_name.contains('<') {
+            return type_name.to_string();
+        }
+        let params = self
+            .ctx
+            .type_generic_params
+            .get(type_name)
+            .or_else(|| self.collection_type_params.get(type_name));
+        match params.filter(|params| !params.is_empty()) {
+            Some(params) => format!("{}<{}>", type_name, params.join(", ")),
+            None => type_name.to_string(),
+        }
     }
 
     /// The impl target's `Self` as a structured [`TypeRef`]:
@@ -19222,7 +19245,7 @@ impl VbcCodegen {
         if let Some(type_name) = impl_type_name {
             self.ctx
                 .variable_type_names
-                .insert("self".to_string(), type_name.clone());
+                .insert("self".to_string(), self.declared_impl_type_name(type_name));
             // Stable source for resolving bare `Self { … }` record
             // literals in this method body (instance OR static methods
             // like `new`/`default` that return `Self`). Unlike
@@ -20207,47 +20230,18 @@ impl VbcCodegen {
         // dropped (Maybe.take / Maybe.replace / Text.push_str /
         // every stdlib mutator).
         //
-        // Encoding rule (mirrors `compile_function`'s receiver
-        // setup at the same self-shape branches):
-        //   SelfValue / SelfValueMut / SelfOwn / SelfOwnMut →
-        //     Concrete(parent_type)        — passed by value
-        //   SelfRef         → Reference { Immutable, Tier0 }
-        //   SelfRefMut      → Reference { Mutable,   Tier0 }
-        //   SelfRefChecked  → Reference { Immutable, Checked }
-        //   SelfRefCheckedMut → Reference { Mutable, Checked }
-        //   SelfRefUnsafe   → Reference { Immutable, Unsafe }
-        //   SelfRefUnsafeMut → Reference { Mutable,  Unsafe }
-        //
-        // The inner type is the parent TypeId (the impl target),
-        // OR `TypeId::UNIT` when impl_type_name is None — that case
-        // covers free `fn f(self)` (rare; legacy interpretation)
-        // where there's no parent record/type to anchor the
-        // reference on.  Concrete(UNIT) here is honest: a self of
-        // type Unit really IS Unit, no ref involved.
+        // A receiver's nominal owner and its generic arguments are also
+        // signature facts. Preserve the source reference tier independently
+        // from whether that receiver needs mutable writeback.
         let parent_tid: TypeId = impl_type_name
             .and_then(|n| self.type_name_to_id.get(n.as_str()).copied())
             .or_else(|| impl_type_name.and_then(|n| self.get_well_known_type_id(n)))
             .unwrap_or(TypeId::UNIT);
+        let self_type_ref = self.impl_self_type_ref(&method_generic_param_map)
+            .unwrap_or(TypeRef::Concrete(parent_tid));
         for ((param_name, is_mut), param) in params_with_mutability.iter().zip(func.params.iter()) {
             use verum_ast::FunctionParamKind;
             use crate::types::{CbgrTier, Mutability};
-            // **Targeted fix for task #11** — only the `&mut`-family
-            // self-shape variants need a meaningful `TypeRef` round-trip
-            // (so the user-side dispatch can recover `takes_self_mut_ref`
-            // from `param.type_ref`).  Value-typed self and `&self` keep
-            // `Concrete(UNIT)` (the pre-fix behaviour) — those variants
-            // never trigger `RefMut`/`DerefMut` semantics, so the type
-            // info isn't needed for the writeback-correctness invariant,
-            // and preserving the pre-fix encoding avoids the
-            // "self type tracked as Box but no method-table populated"
-            // regression that surfaced as field-access on the result of
-            // a static constructor returning bogus values.
-            //
-            // Rationale: the `takes_self_mut_ref` detector at
-            // `archive_ctx_loader.rs::param_is_mut_self_ref` only fires
-            // for `Reference { Mutability::Mutable, .. }`.  Every other
-            // self-shape can stay `Concrete(UNIT)` and still produces
-            // the correct false-flag result.
             let type_ref = match &param.kind {
                 FunctionParamKind::Regular { ty, .. } => {
                     let resolved = self.resolve_field_type_ref(ty, &render_generic_param_map);
@@ -20304,31 +20298,37 @@ impl VbcCodegen {
                         resolved
                     }
                 }
-                FunctionParamKind::SelfRefMut => TypeRef::Reference {
-                    inner: Box::new(TypeRef::Concrete(parent_tid)),
-                    mutability: Mutability::Mutable,
+                FunctionParamKind::SelfRef | FunctionParamKind::SelfRefMut => TypeRef::Reference {
+                    inner: Box::new(self_type_ref.clone()),
+                    mutability: if matches!(param.kind, FunctionParamKind::SelfRefMut) {
+                        Mutability::Mutable
+                    } else {
+                        Mutability::Immutable
+                    },
                     tier: CbgrTier::Tier0,
                 },
-                FunctionParamKind::SelfRefCheckedMut => TypeRef::Reference {
-                    inner: Box::new(TypeRef::Concrete(parent_tid)),
-                    mutability: Mutability::Mutable,
+                FunctionParamKind::SelfRefChecked | FunctionParamKind::SelfRefCheckedMut => TypeRef::Reference {
+                    inner: Box::new(self_type_ref.clone()),
+                    mutability: if matches!(param.kind, FunctionParamKind::SelfRefCheckedMut) {
+                        Mutability::Mutable
+                    } else {
+                        Mutability::Immutable
+                    },
                     tier: CbgrTier::Tier1,
                 },
-                FunctionParamKind::SelfRefUnsafeMut => TypeRef::Reference {
-                    inner: Box::new(TypeRef::Concrete(parent_tid)),
-                    mutability: Mutability::Mutable,
+                FunctionParamKind::SelfRefUnsafe | FunctionParamKind::SelfRefUnsafeMut => TypeRef::Reference {
+                    inner: Box::new(self_type_ref.clone()),
+                    mutability: if matches!(param.kind, FunctionParamKind::SelfRefUnsafeMut) {
+                        Mutability::Mutable
+                    } else {
+                        Mutability::Immutable
+                    },
                     tier: CbgrTier::Tier2,
                 },
-                // Value-typed self (`self`, `mut self`, `self` by ownership)
-                // and `&self` / `&checked self` / `&unsafe self` keep
-                // `Concrete(UNIT)` — see comment above.
                 FunctionParamKind::SelfValue
                 | FunctionParamKind::SelfValueMut
                 | FunctionParamKind::SelfOwn
-                | FunctionParamKind::SelfOwnMut
-                | FunctionParamKind::SelfRef
-                | FunctionParamKind::SelfRefChecked
-                | FunctionParamKind::SelfRefUnsafe => TypeRef::Concrete(TypeId::UNIT),
+                | FunctionParamKind::SelfOwnMut => self_type_ref.clone(),
             };
             let param_name_id = StringId(self.intern_string(param_name));
             // BAKED-DEFAULT-ARG-1: carry literal defaults through the
@@ -20363,29 +20363,7 @@ impl VbcCodegen {
         // TypeRef::Concrete(PTR).
         if let verum_common::Maybe::Some(ref ret_ty_ast) = func.return_type {
             let resolved_return = self.resolve_field_type_ref(ret_ty_ast, &render_generic_param_map);
-            // **`Self` return → concrete impl-type TypeId** (§F/§H
-            // read-site).  `resolve_field_type_ref` has no notion of the
-            // impl type, so a bare `-> Self` (a `PathSegment::SelfValue`
-            // path) degrades to the `TypeId::PTR` unknown-carrier — which
-            // aliases `TypeId::USIZE`.  The archived descriptor's
-            // `return_type` then round-trips (via
-            // `archive_ctx_loader::type_ref_simple_name`) to
-            // `return_type_name = "USize"`, so `let p = T.new(...)`
-            // records `variable_type_names["p"] = "USize"` and every
-            // `p.<field>` resolves its index against USize (no layout) →
-            // global field-intern fallback → out-of-bounds `GetF` on the
-            // correctly constructed record.  Substitute the concrete
-            // parent TypeId for a bare `Self` return so the archived
-            // return type carries the real type. Only fires when
-            // `parent_tid` is a genuine user/well-known type (not the
-            // `TypeId::UNIT` free-fn fallback).
-            descriptor.return_type = if Self::ast_type_is_bare_self(ret_ty_ast)
-                && parent_tid != TypeId::UNIT
-            {
-                TypeRef::Concrete(parent_tid)
-            } else {
-                resolved_return
-            };
+            descriptor.return_type = resolved_return;
         }
 
         // Extract optimization hints from AST attributes (@inline, @cold, @hot, etc.)

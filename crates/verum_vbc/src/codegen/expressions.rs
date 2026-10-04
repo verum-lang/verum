@@ -16916,49 +16916,131 @@ impl VbcCodegen {
         Ok(None)
     }
 
-    /// Determines the method name prefix based on the return type of a method call.
-    ///
-    /// Infer the return type of a method chain expression by walking up the chain.
-    /// For `Num.new(1).add(2)`, determines that `.add(2)` returns "Num" by looking up
-    /// the return type of `Num.new` → "Num", then `Num.add` → "Num".
+    /// Read a method result through the same finite Deref route used to
+    /// compile its receiver. Substitute the resolved owner's arguments before
+    /// the result becomes the receiver of the next call.
+    fn resolved_method_return_type_name(&self, receiver: &str, method: &str) -> Option<String> {
+        let mut receiver = Self::method_receiver_type_name(receiver).to_string();
+        for _ in 0..self.method_receiver_deref_count(&receiver, method) {
+            receiver = self.user_deref_target_type_name(&receiver)?.to_string();
+        }
+        let key = self.registered_receiver_method(&receiver, method)?;
+        let info = self.ctx.lookup_qualified_function(&key)?;
+        // Names cannot distinguish an impl parameter from a same-named
+        // method parameter. Use the carried IDs for that case; an unbound
+        // method parameter remains the existing structural `_` placeholder.
+        fn has_shadow(ty: &crate::types::TypeRef) -> bool {
+            use crate::types::TypeRef;
+            match ty {
+                TypeRef::Generic(id) => id.0 >= 0x8000,
+                TypeRef::Instantiated { args, .. } | TypeRef::Tuple(args) => {
+                    args.iter().any(has_shadow)
+                }
+                TypeRef::Reference { inner, .. } | TypeRef::Slice(inner) => has_shadow(inner),
+                TypeRef::Array { element, .. } => has_shadow(element),
+                TypeRef::AssociatedProjection { base, .. } => has_shadow(base),
+                TypeRef::Function {
+                    params,
+                    return_type,
+                    ..
+                }
+                | TypeRef::Rank2Function {
+                    params,
+                    return_type,
+                    ..
+                } => params.iter().any(has_shadow) || has_shadow(return_type),
+                TypeRef::Concrete(_) | TypeRef::ConstValue(_) => false,
+            }
+        }
+        let structural_return = self
+            .functions
+            .iter()
+            .find(|f| f.descriptor.id == info.id)
+            .map(|f| &f.descriptor.return_type)
+            .or(info.return_type.as_ref());
+        if let Some(ret) = structural_return.filter(|ret| has_shadow(ret)) {
+            let mut substitution = crate::mono::TypeSubstitution::empty();
+            for (index, arg) in Self::split_generic_args(&receiver).iter().enumerate() {
+                if let Some(ty) = self.type_name_to_type_ref_mono(arg) {
+                    substitution.bind(crate::types::TypeParamId(index as u16), ty);
+                }
+            }
+            return self.type_ref_to_field_name(&substitution.apply(ret));
+        }
+        let mut result = info.return_type_name.clone()?;
+        if !result.contains('<') {
+            if let Some(inner) = info.return_type_inner.as_ref().filter(|inner| {
+                !inner.is_empty() && inner.iter().all(|name| !name.trim().is_empty())
+            }) {
+                result = format!("{}<{}>", result, inner.join(", "));
+            }
+        }
+        let base = Self::strip_generic_args(&receiver);
+        let owner = key.rsplit_once('.').map_or(base, |(owner, _)| owner);
+        let params = self
+            .ctx
+            .type_generic_params
+            .get(owner)
+            .or_else(|| self.ctx.type_generic_params.get(base))
+            .or_else(|| self.collection_type_params.get(owner))
+            .or_else(|| self.collection_type_params.get(base));
+        if let Some(params) = params {
+            result = Self::substitute_generic_params_in_type_name(
+                &result,
+                params,
+                &Self::split_generic_args(&receiver),
+            );
+        }
+        Some(Self::substitute_self_in_type_name(&result, &receiver))
+    }
+
+    /// Infer a chain one receiver at a time, retaining each declared result's
+    /// generic arguments and the identity of any resolved Deref owner.
     fn infer_method_chain_return_type(&self, expr: &Expr) -> Option<String> {
         match &expr.kind {
-            ExprKind::Path(path) => {
-                // Base case: a variable or type name
-                if path.segments.len() == 1
-                    && let verum_ast::ty::PathSegment::Name(ident) = &path.segments[0]
-                {
-                    let name = ident.name.to_string();
-                    // Check variable_type_names first
-                    if let Some(type_name) = self.ctx.variable_type_names.get(&name) {
-                        return Some(type_name.clone());
-                    }
-                    // Check if it's a type name (constructor)
-                    if let Some(func_info) = self.ctx.lookup_function_in_scope(&name)
-                        && func_info.param_count == 0
-                    {
-                        return func_info.return_type_name.clone();
-                    }
-                    // Could be a type name itself (e.g., "Num" for static methods)
-                    return Some(name);
-                }
-                None
-            }
             ExprKind::MethodCall {
                 receiver, method, ..
             } => {
-                // Recursive case: determine receiver type, then look up method return type
-                if let Some(recv_type) = self.infer_method_chain_return_type(receiver) {
-                    // Strip generic args for function lookup (e.g., "Wrapper<Int>" → "Wrapper")
-                    let base_recv = VbcCodegen::strip_generic_args(&recv_type);
-                    let qualified = format!("{}.{}", base_recv, method.name);
-                    if let Some(func_info) = self.ctx.lookup_function(&qualified) {
-                        return func_info.return_type_name.clone();
-                    }
+                // A namespace call may infer its constructor's arguments from
+                // values. Leave that to the existing static-call producer.
+                if let ExprKind::Path(path) = &receiver.kind
+                    && let Some(ident) = path.as_ident()
+                    && self.type_name_to_id.contains_key(ident.name.as_str())
+                    && !self
+                        .ctx
+                        .variable_type_names
+                        .contains_key(ident.name.as_str())
+                {
+                    return None;
                 }
-                None
+                let receiver_type = self
+                    .extract_expr_type_name(receiver)
+                    .or_else(|| self.infer_method_chain_return_type(receiver))?;
+                self.resolved_method_return_type_name(&receiver_type, method.name.as_str())
             }
-            _ => None,
+            ExprKind::Path(path) if path.segments.len() == 1 => {
+                if let verum_ast::ty::PathSegment::Name(ident) = &path.segments[0] {
+                    let name = ident.name.as_str();
+                    self.ctx
+                        .variable_type_names
+                        .get(name)
+                        .cloned()
+                        .or_else(|| {
+                            self.ctx
+                                .lookup_function_in_scope(name)
+                                .filter(|info| info.param_count == 0)
+                                .and_then(|info| info.return_type_name.clone())
+                        })
+                        .or_else(|| {
+                            self.type_name_to_id
+                                .contains_key(name)
+                                .then(|| name.to_string())
+                        })
+                } else {
+                    self.extract_expr_type_name(expr)
+                }
+            }
+            _ => self.extract_expr_type_name(expr),
         }
     }
 
@@ -16970,6 +17052,16 @@ impl VbcCodegen {
         inner_method: &verum_ast::Ident,
         outer_method_name: &verum_ast::Ident,
     ) -> String {
+        if let Some(receiver) = self.infer_method_chain_return_type(inner_receiver)
+            && let Some(result) = self.resolved_method_return_type_name(
+                &receiver, inner_method.name.as_str(),
+            )
+        {
+            let base = Self::strip_generic_args(Self::method_receiver_type_name(&result));
+            return self.registered_receiver_method(base, outer_method_name.name.as_str())
+                .unwrap_or_else(|| format!("{base}.{}", outer_method_name.name));
+        }
+
         // Known methods that return UInt64.
         //
 
@@ -28722,6 +28814,9 @@ impl VbcCodegen {
                 args,
                 ..
             } => {
+                if let Some(result) = self.infer_method_chain_return_type(expr) {
+                    return Some(result);
+                }
                 // CONST-GENERIC-VALUE-CARRY-1 (task #19): static call on an
                 // explicit TypeExpr receiver (`B<7>.new()`,
                 // `StackAllocator<1024>.new()`).  Pre-fix this arm ignored
@@ -30705,6 +30800,9 @@ impl VbcCodegen {
                     && let Some(inner_type) = self.infer_expr_type_name(first_arg)
                 {
                     return Some(inner_type);
+                }
+                if let Some(result) = self.infer_method_chain_return_type(expr) {
+                    return Some(result);
                 }
                 // Try to get receiver type; if it's a static call like TypeName.method(),
                 // the receiver is the type name itself (not in variable_type_names).
@@ -46005,6 +46103,10 @@ fn typed_primitive_pointee_deref(t: &str) -> Option<(crate::instruction::MemSubO
 #[cfg(test)]
 #[path = "../../tests/codegen/future_output.rs"]
 mod future_output_tests;
+
+#[cfg(test)]
+#[path = "../../tests/codegen/method_chain_scope.rs"]
+mod method_chain_scope_tests;
 
 #[cfg(test)]
 #[path = "../../tests/codegen/deref_target.rs"]
