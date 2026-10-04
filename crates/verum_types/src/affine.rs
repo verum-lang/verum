@@ -291,17 +291,21 @@ impl AffineTracker {
     pub fn get_type_resource_kind(&self, ty: &Type) -> ResourceKind {
         match ty {
             Type::Named { path, .. } => {
-                // Get the last segment of the path as the type name
-                let type_name = path
+                // Resolved nominal paths carry the declaring owner. A sibling
+                // with the same leaf does not inherit this declaration's mode.
+                let parts: Option<List<&str>> = path
                     .segments
-                    .last()
-                    .map(|seg| match seg {
-                        verum_ast::ty::PathSegment::Name(ident) => ident.name.as_str(),
-                        _ => "",
+                    .iter()
+                    .map(|segment| match segment {
+                        verum_ast::ty::PathSegment::Name(name) => Some(name.name.as_str()),
+                        _ => None,
                     })
-                    .unwrap_or("");
-                self.get_resource_kind(type_name)
+                    .collect();
+                parts
+                    .map(|parts| self.get_resource_kind(parts.join(".").as_str()))
+                    .unwrap_or(ResourceKind::Copy)
             }
+            Type::Generic { name, .. } => self.get_resource_kind(name.as_str()),
             _ => ResourceKind::Copy,
         }
     }

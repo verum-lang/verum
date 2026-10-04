@@ -924,6 +924,21 @@ impl TypeChecker {
         Ok(())
     }
 
+    fn inline_module_declaration_path(&self, key: &str) -> String {
+        // Root modules are stored under both `name` and `cog.name`. Prefer the
+        // registered declaring key over its convenience alias, without inventing
+        // an owner when that canonical entry does not exist.
+        let rooted = format!("cog.{key}");
+        if self
+            .inline_modules
+            .contains_key(&Text::from(rooted.as_str()))
+        {
+            rooted
+        } else {
+            key.to_string()
+        }
+    }
+
     /// Resolve a dotted path against inline modules, trying all possible splits
     /// between module prefix and item suffix.
     ///
@@ -987,7 +1002,10 @@ impl TypeChecker {
                 .inline_modules
                 .contains_key(&verum_common::Text::from(module_part))
             {
-                return Some((module_part.to_string(), item_part.to_string()));
+                return Some((
+                    self.inline_module_declaration_path(module_part),
+                    item_part.to_string(),
+                ));
             }
 
             // Try with cog. prefix (nested modules are registered as cog.parent.child)
@@ -1152,7 +1170,7 @@ impl TypeChecker {
                 self.record_import_source(name_text, source);
 
                 // Register the item type in the environment
-                self.register_imported_item_from_inline_module(&module, item_name)?;
+                self.register_imported_item_from_inline_module(&module, module_name, item_name)?;
             }
         }
 
@@ -1321,7 +1339,8 @@ impl TypeChecker {
         }
 
         // Register the item type in the environment
-        let reg_result = self.register_imported_item_from_inline_module(&module, item_name);
+        let reg_result =
+            self.register_imported_item_from_inline_module(&module, module_name, item_name);
 
         // Re-export following (umbrella resolution).
         //
@@ -1405,10 +1424,12 @@ impl TypeChecker {
     fn register_imported_item_from_inline_module(
         &mut self,
         module: &verum_ast::decl::ModuleDecl,
+        module_name: &str,
         item_name: &str,
     ) -> Result<()> {
         use verum_ast::ItemKind;
 
+        let owner = self.inline_module_declaration_path(module_name);
         if let Some(items) = &module.items {
             // First pass: if the imported name is a variant constructor of a
             // sum type declared in this module (e.g. `Ok` / `Err` from
@@ -1425,7 +1446,9 @@ impl TypeChecker {
                             // Register the parent type first (idempotent); this
                             // populates the variant-constructor entries in the
                             // env keyed by the unqualified variant name.
-                            if let Err(e) = self.register_type_declaration(type_decl) {
+                            if let Err(e) =
+                                self.register_type_declaration_in_module(type_decl, &owner)
+                            {
                                 if e.is_soundness_critical() {
                                     return Err(e);
                                 }
@@ -1454,7 +1477,7 @@ impl TypeChecker {
                     }
                     ItemKind::Type(type_decl) if type_decl.name.name.as_str() == item_name => {
                         // Register type
-                        if let Err(e) = self.register_type_declaration(type_decl) {
+                        if let Err(e) = self.register_type_declaration_in_module(type_decl, &owner) {
                             if e.is_soundness_critical() {
                                 return Err(e);
                             }

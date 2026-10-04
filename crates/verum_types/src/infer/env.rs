@@ -1330,30 +1330,29 @@ impl TypeChecker {
     ) -> bool {
         match ty {
             Type::Named { path, args } => {
-                // Check if the named type is affine
-                if let Some(seg) = path.segments.last() {
-                    if let verum_ast::ty::PathSegment::Name(ident) = seg {
-                        let name = ident.name.as_str();
-                        if self.affine_tracker.is_affine_type(name) {
+                let name = self.path_to_string(path);
+                if self.affine_tracker.is_affine_type(&name) {
+                    return true;
+                }
+                let name_text: Text = name.as_str().into();
+                if visited.insert(name_text.clone()) {
+                    let struct_key = match name.as_str().rsplit_once('.') {
+                        Some((owner, leaf)) => format!("{owner}.__struct_fields_{leaf}"),
+                        None => format!("__struct_fields_{name}"),
+                    };
+                    if let Some(fields) = self.ctx.lookup_type(&struct_key) {
+                        if self.type_contains_affine_impl(fields, visited) {
                             return true;
                         }
-                        // Recursively check the type definition if not yet visited
-                        let name_text: Text = name.into();
-                        if !visited.contains(&name_text) {
-                            visited.insert(name_text.clone());
-                            // First, try looking up the struct fields (for record types)
-                            let struct_key = format!("__struct_fields_{}", name);
-                            if let Option::Some(fields_ty) = self.ctx.lookup_type(&struct_key) {
-                                if self.type_contains_affine_impl(fields_ty, visited) {
-                                    return true;
-                                }
-                            }
-                            // Fall back to looking up the type directly (for aliases and variants)
-                            if let Option::Some(def_ty) = self.ctx.lookup_type(name) {
-                                if self.type_contains_affine_impl(def_ty, visited) {
-                                    return true;
-                                }
-                            }
+                    }
+                    if let Some(target) = self.ctx.resolve_alias(&name) {
+                        if self.type_contains_affine_impl(target, visited) {
+                            return true;
+                        }
+                    }
+                    if let Some(definition) = self.ctx.lookup_type(&name) {
+                        if self.type_contains_affine_impl(definition, visited) {
+                            return true;
                         }
                     }
                 }
@@ -8618,6 +8617,44 @@ impl TypeChecker {
         true
     }
 
+    /// Register a lazily imported source declaration under its resolved owner,
+    /// restoring the consumer's scope on both success and failure.
+    pub(crate) fn register_type_declaration_in_module(
+        &mut self,
+        decl: &verum_ast::TypeDecl,
+        owner: &str,
+    ) -> Result<()> {
+        let saved = std::mem::replace(&mut self.current_module_path, owner.into());
+        let result = self.register_type_declaration(decl);
+        self.current_module_path = saved;
+        result
+    }
+
+    /// Key owned by the declaration currently being registered. Never use this
+    /// to infer the owner of a reference to an imported type.
+    pub(crate) fn declared_type_key(&self, name: &str) -> Text {
+        let owner = self.current_module_path.as_str();
+        if owner.is_empty() || owner == "cog" {
+            name.into()
+        } else {
+            format!("{owner}.{name}").into()
+        }
+    }
+
+    /// Keep transparent alias lookup and usage discipline on the same exact key
+    /// as the alias's nominal declaration. Flat entries retain local lookup.
+    pub(crate) fn declare_type_alias_target(&mut self, name: Text, target: Type) {
+        let key = self.declared_type_key(name.as_str());
+        self.ctx.define_alias(key.clone(), target.clone());
+        self.unifier.register_type_alias(key.clone(), target.clone());
+        self.ctx.define_alias(name, target.clone());
+        match self.affine_tracker.get_type_resource_kind(&target) {
+            crate::affine::ResourceKind::Affine => self.affine_tracker.register_affine_type(key),
+            crate::affine::ResourceKind::Linear => self.affine_tracker.register_linear_type(key),
+            crate::affine::ResourceKind::Copy => {}
+        }
+    }
+
     /// Register a type definition in the current module's scope, ALONGSIDE the
     /// unqualified flat registration that feeds `ctx.lookup_type`.
     ///
@@ -8639,7 +8676,28 @@ impl TypeChecker {
     /// No-op fallback (`current_module_path == "cog"` or empty) means
     /// user-code phase / unknown-module context: register only flat, so
     /// behaviour matches pre-change semantics there.
-    pub(crate) fn define_type_in_current_module(&mut self, name: Text, ty: Type) {
+    pub(crate) fn define_type_in_current_module(&mut self, name: Text, mut ty: Type) {
+        // The dictionary key and its nominal payload carry the same defining
+        // owner. Only qualify this declaration's own head, never its arguments
+        // or an already-resolved foreign target.
+        let key = self.declared_type_key(name.as_str());
+        if key != name {
+            if let Type::Named { path, .. } = &mut ty {
+                if path.segments.len() == 1 && path.last_segment_name() == name.as_str() {
+                    let span = path.span;
+                    *path = verum_ast::ty::Path::new(
+                        key.as_str()
+                            .split('.')
+                            .map(|part| {
+                                verum_ast::ty::PathSegment::Name(verum_ast::Ident::new(part, span))
+                            })
+                            .collect(),
+                        span,
+                    );
+                }
+            }
+        }
+
         // E430 horizon leg: this file DECLARED the type.
         self.current_module_declared_types
             .insert(name.as_str().to_string());

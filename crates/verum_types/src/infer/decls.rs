@@ -403,11 +403,13 @@ impl TypeChecker {
         // Register affine types for move semantics enforcement
         // Spec: L0-critical/reference_system/value_transfer - Affine type safety
         if let Some(verum_ast::decl::ResourceModifier::Affine) = &type_decl.resource_modifier {
-            self.affine_tracker.register_affine_type(type_name.clone());
+            self.affine_tracker
+                .register_affine_type(self.declared_type_key(type_name.as_str()));
         }
         // Linear modifier — must consume exactly once.
         if let Some(verum_ast::decl::ResourceModifier::Linear) = &type_decl.resource_modifier {
-            self.affine_tracker.register_linear_type(type_name.clone());
+            self.affine_tracker
+                .register_linear_type(self.declared_type_key(type_name.as_str()));
         }
         // T0266: dependent value-parameter arity — ONE authority, shared
         // with the two-pass flow (`register_type_name_only`).
@@ -422,7 +424,8 @@ impl TypeChecker {
             .iter()
             .any(|a| a.name.as_str() == "must_consume");
         if must_consume {
-            self.affine_tracker.register_linear_type(type_name.clone());
+            self.affine_tracker
+                .register_linear_type(self.declared_type_key(type_name.as_str()));
         }
 
         // Save type parameter names so we can clean them up later
@@ -552,8 +555,7 @@ impl TypeChecker {
                 // 1. resolve_type_name("Reducer") returns Type::Named { path: "Reducer", args: [] }
                 // 2. ast_to_type adds the args to get Type::Named { path: "Reducer", args: [Int, Int] }
                 // 3. normalize_type looks up the alias, builds substitution, and applies it
-                self.ctx
-                    .define_alias(type_name.clone(), resolved_type.clone());
+                self.declare_type_alias_target(type_name.clone(), resolved_type.clone());
                 // Also register in the unifier for transparent alias unification
                 self.unifier
                     .register_type_alias(type_name.clone(), resolved_type.clone());
@@ -572,6 +574,10 @@ impl TypeChecker {
                             }
                         })
                         .collect();
+                    self.unifier.register_type_alias_params(
+                        self.declared_type_key(type_name.as_str()),
+                        alias_param_names.clone(),
+                    );
                     self.unifier
                         .register_type_alias_params(type_name.clone(), alias_param_names);
                 }
@@ -894,8 +900,7 @@ impl TypeChecker {
                 // the unifier makes the quotient type resolvable from
                 // both name lookups and nominal-unification paths.
                 let base_resolved = self.ast_to_type(base)?;
-                self.ctx
-                    .define_alias(type_name.clone(), base_resolved.clone());
+                self.declare_type_alias_target(type_name.clone(), base_resolved.clone());
                 self.unifier
                     .register_type_alias(type_name.clone(), base_resolved.clone());
                 let ty = Type::Named {
@@ -1892,7 +1897,7 @@ impl TypeChecker {
                     // Also store the record structure under a different key for field access
                     // This allows us to validate field accesses while keeping the nominal type
                     let struct_key: Text = format!("__struct_fields_{}", type_name).into();
-                    self.ctx.define_type(struct_key, Type::Record(record_map));
+                    self.define_type_in_current_module(struct_key, Type::Record(record_map));
 
                     // Store type parameter names for bidirectional inference.
                     // This allows us to substitute concrete types for generic parameters
@@ -2655,10 +2660,12 @@ impl TypeChecker {
         // Register affine types for move semantics enforcement
         // Spec: L0-critical/reference_system/value_transfer - Affine type safety
         if let Some(verum_ast::decl::ResourceModifier::Affine) = &type_decl.resource_modifier {
-            self.affine_tracker.register_affine_type(type_name.clone());
+            self.affine_tracker
+                .register_affine_type(self.declared_type_key(type_name.as_str()));
         }
         if let Some(verum_ast::decl::ResourceModifier::Linear) = &type_decl.resource_modifier {
-            self.affine_tracker.register_linear_type(type_name.clone());
+            self.affine_tracker
+                .register_linear_type(self.declared_type_key(type_name.as_str()));
         }
         // `@must_consume` attribute — synonym for `type linear`, must be
         // registered in BOTH the primary and the resolution-loop pass to
@@ -2669,7 +2676,8 @@ impl TypeChecker {
             .iter()
             .any(|a| a.name.as_str() == "must_consume");
         if must_consume_2 {
-            self.affine_tracker.register_linear_type(type_name.clone());
+            self.affine_tracker
+                .register_linear_type(self.declared_type_key(type_name.as_str()));
         }
 
         // Check for cycles: are we already resolving this type?
@@ -2818,8 +2826,7 @@ impl TypeChecker {
             TypeDeclBody::Alias(aliased_type) => {
                 let resolved_type = self.ast_to_type(aliased_type)?;
                 // Register as alias for proper resolution (stores resolved type)
-                self.ctx
-                    .define_alias(type_name.clone(), resolved_type.clone());
+                self.declare_type_alias_target(type_name.clone(), resolved_type.clone());
                 // Also register in the unifier for transparent alias unification
                 self.unifier
                     .register_type_alias(type_name.clone(), resolved_type.clone());
@@ -2836,6 +2843,10 @@ impl TypeChecker {
                             }
                         })
                         .collect();
+                    self.unifier.register_type_alias_params(
+                        self.declared_type_key(type_name.as_str()),
+                        alias_param_names.clone(),
+                    );
                     self.unifier
                         .register_type_alias_params(type_name.clone(), alias_param_names);
                 }
@@ -3027,8 +3038,7 @@ impl TypeChecker {
                 // user code has to name the quotient explicitly when
                 // crossing it in either direction.
                 let base_resolved = self.ast_to_type(base)?;
-                self.ctx
-                    .define_alias(type_name.clone(), base_resolved.clone());
+                self.declare_type_alias_target(type_name.clone(), base_resolved.clone());
                 self.unifier
                     .register_type_alias(type_name.clone(), base_resolved.clone());
                 // Replace the Pass-1 placeholder with a concrete Named
@@ -3177,7 +3187,8 @@ impl TypeChecker {
                 // Memory model: three-tier references (&T managed, &checked T verified, &unsafe T raw) with CBGR runtime checking — #affine-types
                 for (_variant_name, payload_type) in &variant_map {
                     if self.type_contains_affine(payload_type) {
-                        self.affine_tracker.register_affine_type(type_name.clone());
+                        self.affine_tracker
+                            .register_affine_type(self.declared_type_key(type_name.as_str()));
                         break;
                     }
                 }
@@ -3499,7 +3510,7 @@ impl TypeChecker {
                     // CRITICAL: Also register empty struct fields for pattern matching
                     // Empty record allows `match e { Empty {} => ... }` patterns
                     let struct_key: Text = format!("__struct_fields_{}", type_name).into();
-                    self.ctx.define_type(struct_key, Type::Record(record_map));
+                    self.define_type_in_current_module(struct_key, Type::Record(record_map));
                 } else {
                     // Non-empty record: Register as Named type with field structure
 
@@ -3666,7 +3677,7 @@ impl TypeChecker {
 
                     // Store record structure for field access
                     let struct_key: Text = format!("__struct_fields_{}", type_name).into();
-                    self.ctx.define_type(struct_key, Type::Record(record_map));
+                    self.define_type_in_current_module(struct_key, Type::Record(record_map));
 
                     // Store type parameters for bidirectional inference.
                     self.register_declared_type_arity(&type_name, &type_decl.generics);

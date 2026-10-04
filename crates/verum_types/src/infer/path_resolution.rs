@@ -485,6 +485,12 @@ impl TypeChecker {
             }
         }
 
+        // Published exact source identity wins over legacy leaf fallbacks.
+        let qualified = self.path_to_string(path);
+        if let Some(ty) = self.ctx.lookup_type(qualified.as_str()) {
+            return Ok(ty.clone());
+        }
+
         // Try resolving via inline modules first for qualified type paths
         // This handles types referenced as module.Type (e.g., math.Vector, data.models.User)
         // Also handles super.Type and crate.module.Type paths by resolving the prefix first
@@ -559,8 +565,10 @@ impl TypeChecker {
                                     let prev_alias_scope = self.alias_scope.take();
                                     self.alias_scope =
                                         Some(Self::compute_alias_scope(items));
-                                    let reg_result =
-                                        self.register_type_declaration(type_decl);
+                                    let reg_result = self.register_type_declaration_in_module(
+                                        type_decl,
+                                        &module_key,
+                                    );
                                     self.alias_scope = prev_alias_scope;
                                     if let Err(e) = reg_result {
                                         tracing::debug!(
@@ -583,20 +591,15 @@ impl TypeChecker {
             // This handles cases like `crate.database.connection.Pool.new(...)` where Pool is found
             // above but the path includes a function call
             if has_super_prefix || has_crate_prefix {
-                // If the full path didn't match as module.Type, try the last segment as type name
-                // via fallback lookup (the type may have been registered from a previous check)
+                // Preserve unresolved type paths for the later loading pass;
+                // an unrelated leaf entry is not evidence of this owner.
                 if let Some(last_seg) = path.segments.last() {
                     if let PathSegment::Name(ident) = last_seg {
                         let last_name = ident.name.as_str();
                         if last_name.chars().next().is_some_and(|c| c.is_uppercase()) {
-                            if let Maybe::Some(ty) = self.ctx.lookup_type(last_name) {
-                                return Ok(ty.clone());
-                            }
                             // Create a forward reference for the type
                             return Ok(Type::Named {
-                                path: verum_ast::ty::Path::single(verum_ast::ty::Ident::new(
-                                    last_name, span,
-                                )),
+                                path: path.clone(),
                                 args: List::new(),
                             });
                         }
@@ -643,23 +646,17 @@ impl TypeChecker {
                 Err(_module_err) => {
                     // Path not resolved - try fallback strategies before error
 
-                    // For qualified paths (including super.X, crate.X, std.X.Y), create a
-                    // forward reference using the last segment as the type name.
-                    // This allows tests that reference stdlib modules to pass typechecking.
+                    // Preserve the entire qualified forward reference. Uppercase
+                    // leaves remain eligible for the existing deferred loading path,
+                    // but do not resolve through an unrelated same-leaf declaration.
                     if let Some(last_seg) = path.segments.last() {
                         if let PathSegment::Name(ident) = last_seg {
                             let last_name = ident.name.as_str();
                             // Only do this if the last segment looks like a type name (starts uppercase)
                             if last_name.chars().next().is_some_and(|c| c.is_uppercase()) {
-                                // Try to resolve the last segment as a known type
-                                if let Maybe::Some(ty) = self.ctx.lookup_type(last_name) {
-                                    return Ok(ty.clone());
-                                }
-                                // Create a forward reference
+                                // Create a forward reference with its original owner.
                                 return Ok(Type::Named {
-                                    path: verum_ast::ty::Path::single(verum_ast::ty::Ident::new(
-                                        last_name, span,
-                                    )),
+                                    path: path.clone(),
                                     args: List::new(),
                                 });
                             }
@@ -674,15 +671,13 @@ impl TypeChecker {
         } else {
             // No module context
             let path_str = self.path_to_string(path);
-            // Try last segment as type name fallback
+            // Retain the owner on unresolved forward references.
             if let Some(last_seg) = path.segments.last() {
                 if let PathSegment::Name(ident) = last_seg {
                     let last_name = ident.name.as_str();
                     if last_name.chars().next().is_some_and(|c| c.is_uppercase()) {
                         return Ok(Type::Named {
-                            path: verum_ast::ty::Path::single(verum_ast::ty::Ident::new(
-                                last_name, span,
-                            )),
+                            path: path.clone(),
                             args: List::new(),
                         });
                     }
