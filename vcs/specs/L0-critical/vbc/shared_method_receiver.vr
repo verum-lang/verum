@@ -27,7 +27,11 @@ fn main() {
     let direct_value = direct.load(MemoryOrdering.Acquire);
     let explicit_value = (*explicit).load(MemoryOrdering.Acquire);
     let implicit_value = implicit.load(MemoryOrdering.Acquire);
+    let direct_previous = direct.fetch_sub(2, MemoryOrdering.AcqRel);
+    let explicit_previous = (*explicit).fetch_sub(2, MemoryOrdering.AcqRel);
     let previous = implicit.fetch_sub(2, MemoryOrdering.AcqRel);
+    assert_eq(previous, direct_previous);
+    assert_eq(previous, explicit_previous);
     let remaining = implicit.load(MemoryOrdering.Acquire);
     flag.store(true, MemoryOrdering.Release);
     let flag_value = flag.load(MemoryOrdering.Acquire);
