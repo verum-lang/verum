@@ -60,6 +60,8 @@ fn unresolved_xmod_call(
 pub(in super::super) fn handle_call(
     state: &mut InterpreterState,
 ) -> InterpreterResult<DispatchResult> {
+    // A sidecar belongs only to the immediately following method call.
+    state.pending_call_witness = None;
     let dst = read_reg(state)?;
     let func_id = FunctionId(read_varint(state)? as u32);
     let args = read_reg_range(state)?;
@@ -702,6 +704,8 @@ pub(in super::super) fn handle_call_indirect(
 pub(in super::super) fn handle_call_generic(
     state: &mut InterpreterState,
 ) -> InterpreterResult<DispatchResult> {
+    // CallG supplies its own witnesses; never leak a method sidecar onward.
+    state.pending_call_witness = None;
     let dst = read_reg(state)?;
     let func_id = FunctionId(read_varint(state)? as u32);
     // Read type_args as a TypeRef vector: varint(count) + TypeRef * count.

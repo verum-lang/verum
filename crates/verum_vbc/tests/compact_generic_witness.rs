@@ -213,3 +213,45 @@ fn method_sidecar_resolves_shadow_witnesses_inside_nested_types() {
         )
     );
 }
+
+#[test]
+fn direct_calls_discard_a_method_only_sidecar() {
+    for invoke in [
+        call(1, vec![]),
+        Instruction::Call {
+            dst: Reg(0),
+            func_id: 1,
+            args: RegRange {
+                start: Reg(0),
+                count: 0,
+            },
+        },
+    ] {
+        let mut module = VbcModule::new("sidecar_lifetime".into());
+        add_function(
+            &mut module,
+            &[],
+            &[
+                Instruction::SetCallWitness {
+                    type_args: vec![TypeRef::Concrete(TypeId::BOOL)],
+                },
+                invoke,
+                Instruction::Ret { value: Reg(0) },
+            ],
+        );
+        add_function(
+            &mut module,
+            &[],
+            &[
+                Instruction::LoadUnit { dst: Reg(0) },
+                Instruction::Ret { value: Reg(0) },
+            ],
+        );
+        let mut interpreter = Interpreter::new(Arc::new(module));
+        interpreter.execute_function(FunctionId(0)).unwrap();
+        assert!(
+            interpreter.state.pending_call_witness.is_none(),
+            "a direct call must not leave an old witness for a later method call"
+        );
+    }
+}
