@@ -1086,11 +1086,17 @@ fn register_module_metadata(
                 //    (`__opaque_type_` = PTR-collapsed identity), the
                 //    carried spelling is strictly better.  Mirrors the
                 //    record-FIELD repair in `register_module_metadata`.
-                let carried = module
-                    .strings
-                    .get(p.type_name)
-                    .filter(|s| !s.is_empty())
-                    .map(|s| s.to_string());
+                // T1543: this optional channel uses EMPTY as absence.
+                // String-table slot zero itself holds the module name;
+                // reading it would invent a declaration and could replace
+                // an opaque-returning Function with that nominal string.
+                let carried = if p.type_name == verum_vbc::types::StringId::EMPTY {
+                    None
+                } else {
+                    module.strings.get(p.type_name)
+                }
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string());
                 let ty = match &carried {
                     Some(v) if rendered.contains("__opaque_type_") => v.clone(),
                     // T0690 R1: reference-ness is CALL SEMANTICS the
@@ -2083,6 +2089,88 @@ fn builtin_type_name(tid: &verum_vbc::types::TypeId) -> Option<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // T1543: optional spelling IDs must survive the archive boundary as optional.
+    fn parameter_metadata(type_ref: TypeRef, declared: Option<&str>) -> ParamDescriptor {
+        use verum_vbc::module::{FunctionDescriptor, ParamDescriptor as VbcParam};
+        use verum_vbc::types::{StringId, TypeDescriptor, TypeId};
+
+        let mut module = VbcModule::new("fixture.producer".to_string());
+        assert_eq!(module.strings.get(StringId::EMPTY), Some("fixture.producer"));
+        let nominal_name = module.intern_string("NominalCallback");
+        module.add_type(TypeDescriptor {
+            id: TypeId(2000),
+            name: nominal_name,
+            kind: TypeKind::Record,
+            ..Default::default()
+        });
+        let mut function = FunctionDescriptor::new(module.intern_string("accept"));
+        function.params.push(VbcParam {
+            name: module.intern_string("value"),
+            type_ref,
+            type_name: declared
+                .map(|name| module.intern_string(name))
+                .unwrap_or(StringId::EMPTY),
+            ..Default::default()
+        });
+        module.add_function(function);
+        let mut archive = verum_vbc::archive::ArchiveBuilder::stdlib();
+        archive
+            .add_module("fixture.producer", &module, &[])
+            .expect("archive fixture");
+        let metadata = archive_to_core_metadata(&archive.finish());
+        metadata
+            .functions
+            .get(&Text::from("fixture.producer.accept"))
+            .expect("converted function")
+            .params[0]
+            .clone()
+    }
+
+    fn opaque_callback() -> TypeRef {
+        TypeRef::Function {
+            params: Vec::new(),
+            return_type: Box::new(TypeRef::Concrete(verum_vbc::types::TypeId::PTR)),
+            contexts: Default::default(),
+        }
+    }
+
+    #[test]
+    fn absent_parameter_spelling_preserves_opaque_callable_structure() {
+        let param = parameter_metadata(opaque_callback(), None);
+        assert_eq!(param.ty.as_str(), "fn() -> __opaque_type_14");
+        assert!(
+            param.declared_ty.is_empty(),
+            "slot zero is an absent spelling, not a type"
+        );
+    }
+
+    #[test]
+    fn absent_parameter_spelling_does_not_invent_a_nominal_declaration() {
+        let param = parameter_metadata(TypeRef::Concrete(verum_vbc::types::TypeId::INT), None);
+        assert_eq!(param.ty.as_str(), "Int");
+        assert!(param.declared_ty.is_empty());
+    }
+
+    #[test]
+    fn explicit_parameter_spelling_still_repairs_opaque_types() {
+        let nominal = parameter_metadata(
+            TypeRef::Concrete(verum_vbc::types::TypeId::PTR),
+            Some("other.NominalCallback"),
+        );
+        assert_eq!(nominal.ty.as_str(), "other.NominalCallback");
+        assert_eq!(nominal.declared_ty.as_str(), "other.NominalCallback");
+        let callable = parameter_metadata(opaque_callback(), Some("fn() -> other.Token"));
+        assert_eq!(callable.ty.as_str(), "fn() -> other.Token");
+        assert_eq!(callable.declared_ty.as_str(), "fn() -> other.Token");
+    }
+
+    #[test]
+    fn real_nominal_parameter_remains_nominal_without_a_carried_spelling() {
+        let param = parameter_metadata(TypeRef::Concrete(verum_vbc::types::TypeId(2000)), None);
+        assert_eq!(param.ty.as_str(), "NominalCallback");
+        assert!(param.declared_ty.is_empty());
+    }
 
     /// T0724 gate: a stdlib record's field TYPES must survive into the
     /// metadata the typechecker reads.
