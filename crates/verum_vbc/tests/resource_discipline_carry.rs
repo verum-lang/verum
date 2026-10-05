@@ -265,3 +265,80 @@ fn reused_codegen_reclaims_source_owner_after_reset() {
         assert_eq!(effective(&module, "Token"), expected);
     }
 }
+
+#[test]
+fn actual_function_specialization_preserves_instantiated_resource_arguments() {
+    use verum_vbc::{
+        bytecode::decode_instructions,
+        instruction::Instruction,
+        mono::{InstantiationGraph, discover_call_instantiations, monomorphize_minimal},
+    };
+    let mut module = roundtrip(&compile(
+        "type affine Token is { id: Int }; type Borrow is &Token; type Holder<T> is { value: T }; fn relay<T>(value: T) -> T { value } fn owned_probe(value: Holder<Token>) -> Holder<Token> { relay<Holder<Token>>(value) } fn ordinary_probe(value: Holder<Int>) -> Holder<Int> { relay<Holder<Int>>(value) } fn borrowed_probe(value: Holder<Borrow>) -> Holder<Borrow> { relay<Holder<Borrow>>(value) }",
+    ));
+    for function in &mut module.functions {
+        function.is_generic = !function.type_params.is_empty();
+        // The compiler supplies decoded bodies to the mono merger. The
+        // archive roundtrip above deliberately discarded this derived cache.
+        let body = &module.bytecode[function.bytecode_offset as usize
+            ..(function.bytecode_offset + function.bytecode_length) as usize];
+        function.instructions = Some(decode_instructions(body).unwrap());
+    }
+    let mut graph = InstantiationGraph::new();
+    for function in &module.functions {
+        let body = &module.bytecode[function.bytecode_offset as usize
+            ..(function.bytecode_offset + function.bytecode_length) as usize];
+        discover_call_instantiations(
+            &module,
+            &decode_instructions(body).unwrap(),
+            function.func_id_base,
+            &mut graph,
+        )
+        .unwrap();
+    }
+    assert!(!graph.is_empty(), "the source must exercise specialization");
+    let specialized = monomorphize_minimal(module, &graph).unwrap();
+    assert_eq!(specialized.metrics.new_specializations, 3);
+    let module = roundtrip(&specialized.module);
+    for (name, expected) in [
+        ("owned_probe", D::Affine),
+        ("ordinary_probe", D::Unrestricted),
+        ("borrowed_probe", D::Unrestricted),
+    ] {
+        let caller = module
+            .get_function(module.find_function_by_name(name).unwrap())
+            .unwrap();
+        let body = &module.bytecode[caller.bytecode_offset as usize
+            ..(caller.bytecode_offset + caller.bytecode_length) as usize];
+        let calls: Vec<_> = decode_instructions(body)
+            .unwrap()
+            .into_iter()
+            .filter_map(|instruction| match instruction {
+                Instruction::Call { func_id, .. }
+                | Instruction::TailCall { func_id, .. }
+                | Instruction::CallG { func_id, .. } => Some(func_id),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            calls.len(),
+            1,
+            "{name} must select one specialized callee: {:?}",
+            decode_instructions(body).unwrap()
+        );
+        let callee = module
+            .get_function(verum_vbc::FunctionId(calls[0]))
+            .unwrap();
+        assert!(callee.type_params.is_empty(), "{name}: {callee:?}");
+        assert_eq!(
+            module.resource_discipline(&callee.return_type),
+            expected,
+            "{name} return"
+        );
+        assert_eq!(
+            module.resource_discipline(&callee.params[0].type_ref),
+            expected,
+            "{name} parameter"
+        );
+    }
+}

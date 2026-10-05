@@ -210,9 +210,12 @@ unrestricted after import. Those source/metadata controls now pass.
 
 These are focused source/serialization/checker results. They do not establish
 a fresh public CLI bake, actual interpreter/native lifecycle equivalence, or
-an active monomorphized cleanup plan. The existing descriptor-specialization
-helper carries substituted facts but is not itself proof of an executed
-specialization path. Shared retain/release, aggregate handoff, branch joins,
+an active monomorphized cleanup plan. The active function-specialization control discovers three instantiations
+from parsed source, restores the decoded bodies used by the compiler, routes
+each call to its specialized callee, and checks parameter/result discipline
+after serialization. `Holder<Token>`, `Holder<Int>` and a borrowed-component
+holder keep distinct constraints. The parked descriptor-specialization helper
+is still not proof of synthesized concrete type-descriptor execution. Shared retain/release, aggregate handoff, branch joins,
 loops, scope cleanup and explicit `drop` still require the producer-selected
 operations and both-tier lifetime checks described above.
 
@@ -233,3 +236,9 @@ are not a fresh CLI/std-library bake or either-tier lifetime acceptance.
 The separate five-case production archive-metadata harness is likewise
 source/serialization/checker evidence; the public compiler integration
 binary still requires the normal compiler build.
+
+The integrated native backend also passed all 309 library tests and 37 tests
+in eight selected LLVM/JIT suites (layout, numeric output, Windows float ABI
+and hash dispatch). The resource suite subsequently passed 12 tests including
+the active function-specialization control described above. These checks still
+do not execute the public CLI or prove resource destruction timing.
