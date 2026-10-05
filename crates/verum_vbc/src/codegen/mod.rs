@@ -17198,7 +17198,7 @@ impl VbcCodegen {
                     &expr, queued_source_module.as_deref(),
                     self.constant_initializers.get(&func_info.id).map(|(_, _, bindings)| bindings), false,
                     &mut verum_common::Set::new(), &mut verum_common::Map::new(), 0,
-                ).ok().flatten()
+                )?
             } else {
                 None
             };
@@ -17206,20 +17206,29 @@ impl VbcCodegen {
             // Begin compiling the constant as a zero-argument function
             self.ctx.begin_function(&name, &[], None);
 
-            // Compile the constant expression
-            // Compile the constant expression
+            // A failed initializer is a compilation error, never a successful
+            // constant returning nil. Preserve the original diagnostic and
+            // discard any partially emitted body before leaving function scope.
             if let Some(value) = folded_integer {
                 let result_reg = self.ctx.alloc_temp();
                 self.ctx.emit(Instruction::LoadI { dst: result_reg, value });
                 self.ctx.emit(Instruction::Ret { value: result_reg });
-            } else if let Ok(Some(result_reg)) = self.compile_expr(&expr) {
-                // Return the result
-                self.ctx.emit(Instruction::Ret { value: result_reg });
             } else {
-                // If compilation failed or returned no value, emit a nil return
-                let nil_reg = self.ctx.alloc_temp();
-                self.ctx.emit(Instruction::LoadNil { dst: nil_reg });
-                self.ctx.emit(Instruction::Ret { value: nil_reg });
+                match self.compile_expr(&expr) {
+                    Ok(Some(result_reg)) => {
+                        self.ctx.emit(Instruction::Ret { value: result_reg });
+                    }
+                    Ok(None) => {
+                        // A valid unit-valued initializer has no result register.
+                        let nil_reg = self.ctx.alloc_temp();
+                        self.ctx.emit(Instruction::LoadNil { dst: nil_reg });
+                        self.ctx.emit(Instruction::Ret { value: nil_reg });
+                    }
+                    Err(error) => {
+                        self.ctx.end_function();
+                        return Err(error);
+                    }
+                }
             }
 
             // End the function and collect instructions
