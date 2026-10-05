@@ -2233,6 +2233,7 @@ mod tests {
         let mut td = TypeDescriptor::default();
         td.kind = TypeKind::Record;
         td.fields.push(FieldDescriptor {
+            declaration_type: None,
             refinement_src: StringId::EMPTY,
             refinement_binding: StringId::EMPTY,
             type_name: StringId::EMPTY,
@@ -2242,6 +2243,7 @@ mod tests {
             visibility: Visibility::Public,
         });
         td.fields.push(FieldDescriptor {
+            declaration_type: None,
             refinement_src: StringId::EMPTY,
             refinement_binding: StringId::EMPTY,
             type_name: StringId::EMPTY,
@@ -2356,6 +2358,7 @@ mod tests {
     #[test]
     fn test_field_descriptor_custom() {
         let fd = FieldDescriptor {
+            declaration_type: None,
             refinement_src: StringId::EMPTY,
             refinement_binding: StringId::EMPTY,
             type_name: StringId::EMPTY,
@@ -2419,6 +2422,7 @@ mod tests {
     fn test_variant_descriptor_record() {
         let mut fields = SmallVec::new();
         fields.push(FieldDescriptor {
+            declaration_type: None,
             refinement_src: StringId::EMPTY,
             refinement_binding: StringId::EMPTY,
             type_name: StringId::EMPTY,
@@ -2683,6 +2687,7 @@ mod tests {
         td.size = 16;
         td.alignment = 8;
         td.fields.push(FieldDescriptor {
+            declaration_type: None,
             refinement_src: StringId::EMPTY,
             refinement_binding: StringId::EMPTY,
             type_name: StringId::EMPTY,
@@ -2713,6 +2718,7 @@ mod tests {
     #[test]
     fn test_field_descriptor_serde() {
         let fd = FieldDescriptor {
+            declaration_type: None,
             refinement_src: StringId::EMPTY,
             refinement_binding: StringId::EMPTY,
             type_name: StringId::EMPTY,

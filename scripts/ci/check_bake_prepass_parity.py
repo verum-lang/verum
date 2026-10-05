@@ -84,12 +84,13 @@ COVERAGE = {
         "its result is an Ordering — and with it fixed all five render "
         "identically.",
     ),
-    "claim_user_type_name": (
+    "claim_declared_type_items": (
         "bootstrap",
-        "Same Pass 1a.6 (T0692). OWN-DECL-LAYOUT-EVICT-1 (T0125) is "
-        "therefore live for the bake: a stdlib declaration now claims the "
-        "simple type key and evicts a stale archive layout, as the "
-        "single-file path has always done.",
+        "T1594: run_unit_declaration_prepasses calls this recursive claim "
+        "for file and inline declarations before collecting fields or bodies. "
+        "Both source compilation and compile_core_module_from_ast reach it "
+        "through collect_unit_declarations; claim_user_type_name remains "
+        "the per-declaration reservation and stale-layout eviction helper.",
     ),
 }
 

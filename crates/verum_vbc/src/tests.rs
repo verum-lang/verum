@@ -128,6 +128,7 @@ fn test_roundtrip_type_descriptor() {
     let y_name = module.intern_string("y");
 
     let desc = TypeDescriptor {
+        resource_discipline: Default::default(),
             origin_module: None,
         id: TypeId(16),
         name,
@@ -135,6 +136,7 @@ fn test_roundtrip_type_descriptor() {
         type_params: smallvec::smallvec![],
         fields: smallvec::smallvec![
             FieldDescriptor {
+                declaration_type: None,
                 refinement_src: crate::types::StringId::EMPTY,
                 refinement_binding: crate::types::StringId::EMPTY,
                 type_name: crate::types::StringId::EMPTY,
@@ -144,6 +146,7 @@ fn test_roundtrip_type_descriptor() {
                 visibility: Visibility::Public,
             },
             FieldDescriptor {
+                declaration_type: None,
                 refinement_src: crate::types::StringId::EMPTY,
                 refinement_binding: crate::types::StringId::EMPTY,
                 type_name: crate::types::StringId::EMPTY,
@@ -188,6 +191,7 @@ fn test_roundtrip_sum_type() {
     let t_name = module.intern_string("T");
 
     let desc = TypeDescriptor {
+        resource_discipline: Default::default(),
             origin_module: None,
         id: TypeId(16),
         name,
@@ -718,6 +722,7 @@ fn test_roundtrip_all_type_kinds() {
     for (i, kind) in kinds.iter().enumerate() {
         let name = module.intern_string(&format!("Type{}", i));
         module.types.push(TypeDescriptor {
+            resource_discipline: Default::default(),
             origin_module: None,
             id: TypeId(16 + i as u32),
             name,
@@ -757,6 +762,7 @@ fn test_roundtrip_all_visibility_levels() {
     for (i, vis) in visibilities.iter().enumerate() {
         let name = module.intern_string(&format!("Type{}", i));
         module.types.push(TypeDescriptor {
+            resource_discipline: Default::default(),
             origin_module: None,
             id: TypeId(16 + i as u32),
             name,
@@ -908,6 +914,7 @@ fn test_roundtrip_empty_and_full_variants() {
     let val_name = module.intern_string("value");
 
     module.types.push(TypeDescriptor {
+        resource_discipline: Default::default(),
             origin_module: None,
         id: TypeId(16),
         name,
@@ -930,6 +937,7 @@ fn test_roundtrip_empty_and_full_variants() {
                 kind: VariantKind::Record,
                 arity: 1,
                 fields: smallvec::smallvec![FieldDescriptor {
+                    declaration_type: None,
                     refinement_src: crate::types::StringId::EMPTY,
                     refinement_binding: crate::types::StringId::EMPTY,
                     type_name: crate::types::StringId::EMPTY,

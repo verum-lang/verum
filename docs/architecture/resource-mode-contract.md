@@ -215,3 +215,21 @@ helper carries substituted facts but is not itself proof of an executed
 specialization path. Shared retain/release, aggregate handoff, branch joins,
 loops, scope cleanup and explicit `drop` still require the producer-selected
 operations and both-tier lifetime checks described above.
+
+### Local validation, 2026-10-05
+
+The combined resource-2.18/layout-2.17 source passed the complete
+`verum_types --lib --tests` run: 3,840 passed, none failed, three existing
+ignored tests across 159 suites. The full VBC library with
+`compression,table_dispatch,codegen,ffi` and no default features passed
+2,051 tests, none failed, and retained the existing ignored T0839 coverage
+report. Five selected VBC integration binaries passed another 50 tests:
+resource discipline, generic layout, root/inline function identity,
+archive field identity and shadowed type ownership. All 41 source gates
+passed with the website documentation supplied to the claims gate.
+
+These results validate these components in a private Cargo target. They
+are not a fresh CLI/std-library bake or either-tier lifetime acceptance.
+The separate five-case production archive-metadata harness is likewise
+source/serialization/checker evidence; the public compiler integration
+binary still requires the normal compiler build.
