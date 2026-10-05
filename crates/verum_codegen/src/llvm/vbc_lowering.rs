@@ -568,6 +568,7 @@ pub struct VbcToLlvmLowering<'ctx> {
     config: LoweringConfig,
     /// Function map (VBC function ID → LLVM function).
     functions: HashMap<u32, FunctionValue<'ctx>>,
+    native_calls: super::native_call::NativeCallAuthority<'ctx>,
     /// Capture kinds per closure func-id (T0241 facet-2), harvested from each
     /// function's `NewClosure` records as it is lowered and read by the
     /// closure body prologue to re-mark its capture registers. `RefCell` so it
@@ -862,6 +863,7 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
             types,
             config,
             functions: HashMap::new(),
+            native_calls: super::native_call::NativeCallAuthority::default(),
             closure_capture_kinds: std::cell::RefCell::new(HashMap::new()),
             stats: LoweringStats::default(),
             func_name_index: None,
@@ -940,6 +942,7 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
     /// 3. Emit global constructors/destructors
     /// 4. Verify the module
     pub fn lower_module(&mut self, vbc_module: &VbcModule) -> Result<()> {
+        self.native_calls.clear();
         // Phase 0.4: Pre-declare every POSIX syscall under the
         // canonical Verum-ABI signature from the
         // `syscall_registry::POSIX_SYSCALLS` table. This MUST happen
@@ -1980,6 +1983,10 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                 func = next;
             }
         }
+
+        // Actual runtime replacements are now complete. Source-call evidence
+        // survives only for bodies still matching their emission seal.
+        self.native_calls.discard_stale(&self.module);
 
         // Phase 4: Verify the module
         // Skip verification here — GlobalDCE in pipeline.rs will remove dead
@@ -5050,6 +5057,10 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
             }
         }
 
+        self.native_calls.capture(
+            func_id, llvm_fn, std::mem::take(&mut ctx.native_calls),
+        );
+
         // T0241 facet-2: fold this function's NewClosure capture records into
         // the cross-function map so each closure body prologue can re-mark its
         // capture registers (the enclosing fn lowers before its `$closure$`
@@ -5940,3 +5951,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "../../tests/llvm/native_call_authority.rs"]
+mod native_call_authority_tests;

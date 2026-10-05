@@ -214,6 +214,8 @@ pub struct FunctionContext<'a, 'ctx> {
 
     /// Instruction counter.
     instruction_count: usize,
+    pub(crate) native_calls: verum_common::List<super::native_call::NativeCallReceipt<'ctx>>,
+    native_argument_count: usize,
 
     /// Function name for diagnostics.
     function_name: Text,
@@ -842,6 +844,8 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
             register_tiers: HashMap::new(),
             reference_registers: HashMap::new(),
             instruction_count: 0,
+            native_calls: verum_common::List::new(),
+            native_argument_count: 0,
             function_name: function_name.into(),
             cbgr_elimination_stats: CbgrEliminationStats::default(),
             exception_handlers: Vec::new(),
@@ -955,6 +959,8 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
             register_tiers: HashMap::new(),
             reference_registers: HashMap::new(),
             instruction_count: 0,
+            native_calls: verum_common::List::new(),
+            native_argument_count: 0,
             function_name: function_name.into(),
             cbgr_elimination_stats: CbgrEliminationStats::default(),
             exception_handlers: Vec::new(),
@@ -2536,6 +2542,46 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
     /// Get the CBGR elimination statistics.
     pub fn cbgr_elimination_stats(&self) -> &CbgrEliminationStats {
         &self.cbgr_elimination_stats
+    }
+
+    /// Record actual call emission before result normalization.
+    pub(crate) fn record_native_call(
+        &mut self,
+        destination: u16,
+        call: verum_llvm::values::CallSiteValue<'ctx>,
+        arguments: verum_common::List<super::native_call::NativeArgument<'ctx>>,
+    ) -> Option<usize> {
+        if self.native_calls.len() >= super::native_call::MAX_RECEIPTS
+            || arguments.len() > super::native_call::MAX_ARGUMENTS
+            || arguments.len() > super::native_call::MAX_ARGUMENT_WORDS.saturating_sub(self.native_argument_count) {
+            return None;
+        }
+        self.native_argument_count += arguments.len();
+        let index = self.native_calls.len();
+        self.native_calls.push(super::native_call::NativeCallReceipt {
+            instruction: self.current_vbc_instr_idx,
+            destination, call, arguments,
+            result: call.try_as_basic_value().basic(),
+            result_view: super::native_call::ResultView::Opaque,
+        });
+        Some(index)
+    }
+
+    pub(crate) fn finish_native_call(
+        &mut self, index: Option<usize>, result: Option<BasicValueEnum<'ctx>>,
+        view: super::native_call::ResultView,
+    ) {
+        if let Some(receipt) = index.and_then(|index| self.native_calls.get_mut(index)) {
+            receipt.result = result;
+            // Register storage promotes narrow integers/floats and may encode
+            // them differently. This authority does not equate those numeric
+            // adaptations with an unchanged address-capable word.
+            receipt.result_view = match result {
+                Some(BasicValueEnum::IntValue(value)) if value.get_type().get_bit_width() == 64 => view,
+                Some(BasicValueEnum::PointerValue(_)) | None => view,
+                _ => super::native_call::ResultView::Opaque,
+            };
+        }
     }
 
     /// Increment the instruction counter.

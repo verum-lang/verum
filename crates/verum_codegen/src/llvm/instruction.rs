@@ -6914,13 +6914,17 @@ fn lower_instruction_impl<'ctx>(
             let module = ctx.get_module();
 
             let i64_type = ctx.types().i64_type();
+            let mut native_arguments = verum_common::List::new();
             let arg_vals: Vec<BasicMetadataValueEnum> = args
                 .iter()
                 .enumerate()
                 .map(|(i, r)| {
                     let val = ctx.get_register(r.0)?;
                     // Coerce to i64 for uniform call ABI
-                    Ok(as_i64(ctx, val, &format!("callg_arg{}", i))?.into())
+                    let coerced = as_i64(ctx, val, &format!("callg_arg{}", i))?;
+                    let view = super::native_call::ArgumentView::Register(r.0).after_coercion(val, coerced.into());
+                    native_arguments.push(super::native_call::NativeArgument { view, value: coerced.into() });
+                    Ok(coerced.into())
                 })
                 .collect::<Result<Vec<_>>>()?;
 
@@ -6931,6 +6935,8 @@ fn lower_instruction_impl<'ctx>(
                     .build_call(llvm_fn, &arg_vals, "callg_result")
                     .or_llvm_err()?;
 
+                let native_receipt = ctx.record_native_call(dst.0, call_site, native_arguments);
+                ctx.finish_native_call(native_receipt, call_site.try_as_basic_value().basic(), super::native_call::ResultView::Word);
                 if let Some(ret_val) = call_site.try_as_basic_value().basic() {
                     ctx.set_register(dst.0, ret_val);
                     produced_value = true;
@@ -14846,12 +14852,15 @@ fn lower_call<'ctx>(
     // Coerce arguments to match callee's expected parameter types
     // Special handling: Int→Float implicit coercion uses sitofp, not bitcast
     let param_types = llvm_fn.get_type().get_param_types();
+    let mut native_arguments = verum_common::List::new();
     let arg_vals: Vec<BasicMetadataValueEnum> = args
         .iter()
         .enumerate()
         .map(|(i, r)| {
             let mut raw_val = ctx.get_register(r.0)?;
+            let mut view = super::native_call::ArgumentView::Register(r.0);
             if func_desc.params.get(i).is_some_and(parameter_uses_cell_address) {
+                view = super::native_call::ArgumentView::FieldCellOrRegister(r.0);
                 raw_val = field_address_or_value(ctx, r.0, raw_val, "refield_arg_addr")?;
             }
             if let Some(expected_meta) = param_types.get(i) {
@@ -14873,11 +14882,14 @@ fn lower_call<'ctx>(
                     // correct program depends on the removed sitofp path.
                     let coerced =
                         coerce_value(ctx, raw_val, expected_ty, &format!("arg{}_coerce", i))?;
+                    native_arguments.push(super::native_call::NativeArgument { view: view.after_coercion(raw_val, coerced.into()), value: coerced.into() });
                     Ok(coerced.into())
                 } else {
+                    native_arguments.push(super::native_call::NativeArgument { view, value: raw_val.into() });
                     Ok(raw_val.into())
                 }
             } else {
+                native_arguments.push(super::native_call::NativeArgument { view, value: raw_val.into() });
                 Ok(raw_val.into())
             }
         })
@@ -14920,6 +14932,10 @@ fn lower_call<'ctx>(
         .builder()
         .build_call(llvm_fn, &arg_vals, "call_result")
         .or_llvm_err()?;
+    let native_receipt = ctx.record_native_call(dst.0, call_site, native_arguments);
+    if call_site.try_as_basic_value().basic().is_none() {
+        ctx.finish_native_call(native_receipt, None, super::native_call::ResultView::Word);
+    }
     if let Some(ret_val) = call_site.try_as_basic_value().basic() {
         // THE SITE THAT MATTERS, and it is not the obvious one. A user
         // method resolved statically is emitted as `Call { func_id }`,
@@ -14931,8 +14947,12 @@ fn lower_call<'ctx>(
         // so a load placed only at the CallM store never saw a single
         // one of this task's poles. `core/` also has 38 free functions
         // of the same shape (`key_id_to_text(k) -> &Text { &k.0 }`).
+        let raw_return = ret_val;
         let (ret_val, ret_ref_kind) =
             load_returned_slot_address(ctx, &func_name, dst.0, ret_val)?;
+        ctx.finish_native_call(native_receipt, Some(ret_val),
+            if ret_val == raw_return { super::native_call::ResultView::Word }
+            else { super::native_call::ResultView::LoadedSlot });
         ctx.set_register(dst.0, ret_val);
         // Track register types based on function return type
         mark_register_from_return_type(ctx, dst.0, &func_desc.return_type);
@@ -21554,6 +21574,7 @@ fn lower_call_method<'ctx>(
     // - Static method: LLVM fn expects (arg0, arg1, ...)
     //  → skip receiver, pass [args...] only
     let mut receiver_val = ctx.get_register(receiver.0)?;
+    let mut receiver_view = super::native_call::ArgumentView::Register(receiver.0);
     let param_count = llvm_fn.count_params() as usize;
     let param_types = llvm_fn.get_type().get_param_types();
 
@@ -21571,6 +21592,7 @@ fn lower_call_method<'ctx>(
             .build_int_sub(recv_i64, header, "inline_adj")
             .or_llvm_err()?;
         receiver_val = adjusted.into();
+        receiver_view = super::native_call::ArgumentView::Adjusted(receiver.0);
     }
 
     // CALLM-RECEIVER-SPILL (task #22 leg 1): VBC never emits `Ref` for a
@@ -21670,6 +21692,7 @@ fn lower_call_method<'ctx>(
             .build_ptr_to_int(slot, i64_type, "recv_spill_addr")
             .or_llvm_err()?;
         receiver_val = addr.into();
+        receiver_view = super::native_call::ArgumentView::TemporaryCell(receiver.0);
     }
 
     // BODY-FACT-ARG-SPILL (task #22 leg 2): the same contract as the
@@ -21719,6 +21742,9 @@ fn lower_call_method<'ctx>(
                 .and_then(|fd| fd.params.first())
         }).is_some_and(parameter_uses_cell_address);
         if wants_cell {
+            receiver_view = if matches!(receiver_view, super::native_call::ArgumentView::Register(_)) {
+                super::native_call::ArgumentView::FieldCellOrRegister(receiver.0)
+            } else { super::native_call::ArgumentView::Adjusted(receiver.0) };
             receiver_val = field_address_or_value(ctx, receiver.0, receiver_val, "refield_self_addr")?;
         }
     }
@@ -21726,9 +21752,12 @@ fn lower_call_method<'ctx>(
     // Collect all available values: [receiver, arg0, arg1, ...]
     let mut all_vals: Vec<BasicValueEnum> = Vec::with_capacity(args.count as usize + 1);
     all_vals.push(receiver_val);
+    let mut all_views = verum_common::List::new();
+    all_views.push(receiver_view);
     let param_offset = if param_count > args.count as usize { 1 } else { 0 };
     for (ai, r) in args.iter().enumerate() {
         let mut v = ctx.get_register(r.0)?;
+        let mut view = super::native_call::ArgumentView::Register(r.0);
         let pidx = ai + param_offset;
         let wants_deref = deref_params.get(pidx).copied().unwrap_or(false);
         if wants_deref
@@ -21750,6 +21779,7 @@ fn lower_call_method<'ctx>(
                 .build_ptr_to_int(slot, i64_type, "arg_spill_addr")
                 .or_llvm_err()?;
             v = addr.into();
+            view = super::native_call::ArgumentView::TemporaryCell(r.0);
         }
         let wants_cell = ctx.vbc_module().and_then(|vbc| {
             ctx.func_name_index().and_then(|ix| ix.find_by_name(&func_name))
@@ -21757,9 +21787,13 @@ fn lower_call_method<'ctx>(
                 .and_then(|fd| fd.params.get(pidx))
         }).is_some_and(parameter_uses_cell_address);
         if wants_cell {
+            view = if matches!(view, super::native_call::ArgumentView::Register(_)) {
+                super::native_call::ArgumentView::FieldCellOrRegister(r.0)
+            } else { super::native_call::ArgumentView::Adjusted(r.0) };
             v = field_address_or_value(ctx, r.0, v, "refield_arg_addr")?;
         }
         all_vals.push(v);
+        all_views.push(view);
     }
 
     // Determine if this is a static method (skip receiver) or instance method
@@ -21791,10 +21825,19 @@ fn lower_call_method<'ctx>(
         }
     }
 
+    let views_to_pass = if param_count == args.count as usize { &all_views.as_slice()[1..] } else { all_views.as_slice() };
+    let native_arguments = views_to_pass.iter().zip(values_to_pass).zip(call_args.iter()).map(|((view, before), value)| {
+        super::native_call::NativeArgument { view: view.after_coercion(*before, *value), value: *value }
+    }).collect();
+
     let call_site = ctx
         .builder()
         .build_call(llvm_fn, &call_args, "method_call")
         .or_llvm_err()?;
+    let native_receipt = ctx.record_native_call(dst.0, call_site, native_arguments);
+    if call_site.try_as_basic_value().basic().is_none() {
+        ctx.finish_native_call(native_receipt, None, super::native_call::ResultView::Word);
+    }
     if let Some(ret_val) = call_site.try_as_basic_value().basic() {
         // Normalize pointer return values to i64 for VBC register compatibility.
         // Compiled stdlib functions may return ptr type (e.g., generic T compiled
@@ -21888,8 +21931,12 @@ fn lower_call_method<'ctx>(
                 ctx.set_register(dst.0, unwrapped.into());
             }
         } else {
+            let raw_normalized = normalized;
             let (normalized, ret_ref_kind) =
                 load_returned_slot_address(ctx, &func_name, dst.0, normalized)?;
+            ctx.finish_native_call(native_receipt, Some(normalized),
+                if normalized == raw_normalized { super::native_call::ResultView::Word }
+                else { super::native_call::ResultView::LoadedSlot });
             ctx.set_register(dst.0, normalized);
             // Track register types based on method return type
             if let Some(ref ret_type) = resolved_return_type {

@@ -769,3 +769,41 @@ was landed from the prototype. T1573 still requires both-tier source controls
 and the fresh supervisor result in its acceptance. The separate T1578 gate
 covers native replacements, same-name different arities, static receivers,
 post-adaptation original-cell arguments, value results and conservative cycles.
+
+
+### Native emission receipts (implementation boundary, 5 October 2026)
+
+The first T1578 implementation unit records the actual emitted `Call`, `CallG`,
+and exact `CallM` sites. It keeps the selected native body's source FunctionId,
+a deterministic seal of its LLVM type, calling convention, attributes and body,
+and compact instruction positions for arguments and normalized results. Runtime
+replacement, missing bodies, incompatible arity or calling convention invalidate
+that evidence. Final resolution rebuilds handles from the live sealed body;
+removed instructions are not retained across runtime emission. Linkage-only
+internalization does not change the seal.
+
+An argument records register passthrough, conditional original-field-cell
+selection, temporary scalar-cell materialization, or an unclassified adjustment.
+Coercions and unhandled parameter ABI attributes cannot reuse an unchanged
+register fact. Result bridges, numeric storage promotion and unhandled return
+attributes remain opaque. The existing eager returned-slot normalization is
+recorded separately from the raw native result.
+
+Facts are bounded to 131,072 sites and 524,288 argument words per compilation,
+with at most 1,024 arguments per site and 262,144 native instructions per sealed
+body. Function-local capture has the same site/argument limits; exceeding a
+budget removes evidence without changing execution. Printed IR and register
+states are not retained. Final body validation is linear in the emitted bodies
+and recorded sites, not in the product of callers and callee-body lengths.
+
+Focused source-to-LLVM controls cover forward calls, generic calls, static
+receiver omission, original field addresses, cycles as finite edges, runtime
+replacement, ABI changes and numeric coercions. The different-arity collision
+control deliberately remains an opaque negative: its malformed native dispatch
+is separately tracked by T1598 and rejected by LLVM verification.
+
+This unit enables no new reference loads and does not close T1573. The next
+consumer must use these receipts for the finite CFG/aggregate projection
+analysis and remove body-only fallback at covered sites, with the mutation,
+unknown-exit and original-cell rules above. Existing native reference semantics
+are not certified merely by a valid call receipt.
