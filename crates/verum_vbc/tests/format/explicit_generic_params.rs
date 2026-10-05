@@ -1,48 +1,60 @@
 use super::*;
 
+// Frozen v2.15 wire layout, independent of both the current serializer and
+// parser. Offsets: id 0, name 4, parent 8, visibility 9, flags 10,
+// properties 11, bytecode range 13/17, locals/registers/stack 21/23/25,
+// type/ordinary parameter counts 27/28, Concrete(Unit) 29..34, contexts 34,
+// intrinsic/is_const/register hints/return spelling/parameter spellings/origin
+// at 35..41. There are no generator fields or variable-length entries.
+const V215_FUNCTION: [u8; 41] = [
+    0x44, 0x33, 0x22, 0x11, // id 0x11223344
+    0x88, 0x77, 0x66, 0x55, // name 0x55667788
+    0, 1, 0, // no parent, public, no flags
+    0, 0, // properties
+    0, 0, 0, 0, 0, 0, 0, 0, // bytecode offset and length
+    0, 0, 0, 0, 0, 0, // local, register and stack counts
+    0, 0, // type and ordinary parameter counts
+    1, 0, 0, 0, 0, // Concrete(Unit)
+    0, // contexts
+    0, 0, 0, 0, 0, 0, // v2.15 trailing fields described above
+];
+const FIRST_ID: u32 = 0x11223344;
+const NEXT_ID: u32 = 0x12345678;
+
 fn function_bytes(minor: u16) -> Vec<u8> {
-    let mut module = VbcModule::new("generic_wire".into());
-    let name = module.intern_string("sample");
-    module.functions.push(FunctionDescriptor::new(name));
-    let bytes = crate::serialize::serialize_module(&module).unwrap();
-    let mut reader = Deserializer::new(&bytes);
-    let header = reader.parse_header().unwrap();
-    reader.offset = header.function_table_offset as usize;
-    // Select the historical descriptor prefix using its actual reader gate.
-    // Later versions append independent tails (v20 value-use receipts), so
-    // popping the current serializer's last byte no longer locates v16.
-    let mut historical = header.clone();
-    historical.version_minor = minor;
-    reader.header = Some(historical);
-    reader.parse_function_descriptor().unwrap();
-    bytes[header.function_table_offset as usize..reader.offset].to_vec()
+    let mut bytes = V215_FUNCTION.to_vec();
+    if minor >= 16 {
+        bytes.push(0); // v2.16 explicit generic declaration count
+    }
+    if minor >= 20 {
+        bytes.push(0); // v2.20 value-use receipt count
+    }
+    bytes
+}
+
+fn append_next_descriptor(bytes: &mut Vec<u8>, minor: u16) {
+    let mut next = function_bytes(minor);
+    next[..4].copy_from_slice(&NEXT_ID.to_le_bytes());
+    bytes.extend_from_slice(&next);
 }
 
 #[test]
 fn v215_function_table_does_not_consume_the_next_descriptor() {
     let mut old = function_bytes(15);
-    let one_len = old.len();
-    old.extend_from_within(..);
+    assert_eq!(old.len(), 41);
+    append_next_descriptor(&mut old, 15);
     let mut reader = Deserializer::new(&old);
     let mut header = VbcHeader::default();
     header.version_minor = 15;
     reader.header = Some(header);
-    assert!(
-        reader
-            .parse_function_descriptor()
-            .unwrap()
-            .explicit_type_param_ids
-            .is_empty()
-    );
-    assert_eq!(reader.offset, one_len);
-    assert!(
-        reader
-            .parse_function_descriptor()
-            .unwrap()
-            .explicit_type_param_ids
-            .is_empty()
-    );
-    assert_eq!(reader.offset, old.len());
+    let first = reader.parse_function_descriptor().unwrap();
+    assert_eq!(first.id.0, FIRST_ID);
+    assert!(first.explicit_type_param_ids.is_empty());
+    assert_eq!(reader.offset, 41);
+    let second = reader.parse_function_descriptor().unwrap();
+    assert_eq!(second.id.0, NEXT_ID);
+    assert!(second.explicit_type_param_ids.is_empty());
+    assert_eq!(reader.offset, 82);
 }
 
 #[test]
@@ -71,14 +83,17 @@ fn v216_truncated_or_oversized_generic_tail_is_rejected() {
 
 #[test]
 fn versioned_function_tails_stop_at_their_own_descriptor_boundary() {
-    for minor in [15, 16, 19, 20, crate::format::VERSION_MINOR] {
+    for (minor, one_len) in [(15, 41), (16, 42), (19, 42), (20, 43), (crate::format::VERSION_MINOR, 43)] {
         let mut bytes = function_bytes(minor);
-        let one_len = bytes.len();
-        bytes.extend_from_within(..);
+        assert_eq!(bytes.len(), one_len);
+        append_next_descriptor(&mut bytes, minor);
         let mut reader = Deserializer::new(&bytes);
         reader.header = Some(VbcHeader { version_minor: minor, ..VbcHeader::default() });
-        for expected in [one_len, bytes.len()] {
+        for (expected, id) in [(one_len, FIRST_ID), (2 * one_len, NEXT_ID)] {
             let descriptor = reader.parse_function_descriptor().unwrap();
+            assert_eq!(descriptor.id.0, id, "minor={minor}");
+            assert_eq!(descriptor.name.0, 0x55667788);
+            assert_eq!(descriptor.return_type, TypeRef::Concrete(TypeId::UNIT));
             assert!(descriptor.explicit_type_param_ids.is_empty());
             assert!(descriptor.value_uses.is_none());
             assert_eq!(reader.offset, expected, "minor={minor}");
