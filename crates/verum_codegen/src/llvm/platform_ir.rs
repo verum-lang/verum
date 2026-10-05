@@ -81,6 +81,20 @@ pub struct PlatformIR<'ctx> {
 }
 
 impl<'ctx> PlatformIR<'ctx> {
+    /// Erase an emitter-owned body without changing the function or its callers.
+    /// Detaching blocks leaves their global operands alive and poisons module
+    /// verification even after a replacement body has been emitted.
+    fn clear_runtime_body(function: FunctionValue<'ctx>) -> super::error::Result<()> {
+        while let Some(block) = function.get_last_basic_block() {
+            // SAFETY: this emitter replaces the entire body; its old blocks are
+            // not exported as block addresses or retained by another emitter.
+            unsafe { block.delete() }.map_err(|_| {
+                super::error::LlvmLoweringError::Internal("runtime body deletion failed".into())
+            })?;
+        }
+        Ok(())
+    }
+
     /// **ABI bridge: narrow Verum-i64 fd to POSIX-i32 fd.** (#96)
     ///
     /// Verum's internal ABI passes file descriptors / int args as
@@ -4319,14 +4333,7 @@ impl<'ctx> PlatformIR<'ctx> {
 
         // Let me simplify — use alloca + store pattern
         // Remove all blocks and start fresh
-        while func.count_basic_blocks() > 0 {
-            func.get_last_basic_block()
-                .or_internal("no basic block")?
-                .remove_from_function()
-                .map_err(|_| {
-                    super::error::LlvmLoweringError::Internal("remove_from_function failed".into())
-                })?;
-        }
+        Self::clear_runtime_body(func)?;
 
         let entry = ctx.append_basic_block(func, "entry");
         builder.position_at_end(entry);
@@ -15928,16 +15935,7 @@ impl<'ctx> PlatformIR<'ctx> {
             let fn_type = i64_type.fn_type(&[i64_type.into()], false);
             let func = self.get_or_declare_fn(module, "verum_tls_get", fn_type);
             // Remove existing blocks to replace with EC-based implementation
-            while func.count_basic_blocks() > 0 {
-                func.get_last_basic_block()
-                    .or_internal("no basic block")?
-                    .remove_from_function()
-                    .map_err(|_| {
-                        super::error::LlvmLoweringError::Internal(
-                            "remove_from_function failed".into(),
-                        )
-                    })?;
-            }
+            Self::clear_runtime_body(func)?;
             let get_ctx_fn = module
                 .get_function("get_or_create_context")
                 .or_missing_fn("get_or_create_context")?;
@@ -15978,16 +15976,7 @@ impl<'ctx> PlatformIR<'ctx> {
         {
             let fn_type = void_type.fn_type(&[i64_type.into(), i64_type.into()], false);
             let func = self.get_or_declare_fn(module, "verum_tls_set", fn_type);
-            while func.count_basic_blocks() > 0 {
-                func.get_last_basic_block()
-                    .or_internal("no basic block")?
-                    .remove_from_function()
-                    .map_err(|_| {
-                        super::error::LlvmLoweringError::Internal(
-                            "remove_from_function failed".into(),
-                        )
-                    })?;
-            }
+            Self::clear_runtime_body(func)?;
             let get_ctx_fn = module
                 .get_function("get_or_create_context")
                 .or_missing_fn("get_or_create_context")?;
@@ -16055,16 +16044,7 @@ impl<'ctx> PlatformIR<'ctx> {
                 false,
             );
             let func = self.get_or_declare_fn(module, "verum_push_stack_frame", fn_type);
-            while func.count_basic_blocks() > 0 {
-                func.get_last_basic_block()
-                    .or_internal("no basic block")?
-                    .remove_from_function()
-                    .map_err(|_| {
-                        super::error::LlvmLoweringError::Internal(
-                            "remove_from_function failed".into(),
-                        )
-                    })?;
-            }
+            Self::clear_runtime_body(func)?;
             let builder = ctx.create_builder();
             let entry = ctx.append_basic_block(func, "entry");
             let do_push = ctx.append_basic_block(func, "do_push");
@@ -16163,16 +16143,7 @@ impl<'ctx> PlatformIR<'ctx> {
         {
             let fn_type = void_type.fn_type(&[], false);
             let func = self.get_or_declare_fn(module, "verum_pop_stack_frame", fn_type);
-            while func.count_basic_blocks() > 0 {
-                func.get_last_basic_block()
-                    .or_internal("no basic block")?
-                    .remove_from_function()
-                    .map_err(|_| {
-                        super::error::LlvmLoweringError::Internal(
-                            "remove_from_function failed".into(),
-                        )
-                    })?;
-            }
+            Self::clear_runtime_body(func)?;
             let builder = ctx.create_builder();
             let entry = ctx.append_basic_block(func, "entry");
             builder.position_at_end(entry);

@@ -181,8 +181,7 @@ fn pending_source_bodies_survive_native_arity_collisions_in_both_orders() {
         let mut lower = VbcToLlvmLowering::new(&context,
             LoweringConfig::debug("arity").with_debug_info(false));
         lower.lower_module(&vbc).unwrap();
-        // Verify the emitted source bodies below, independently of the
-        // platform runtime declarations included by lower_module.
+        lower.module().verify().expect("source and runtime bodies must verify together");
         let facts = lower.native_calls.resolve(lower.module());
         let calls = facts.get(&probe).unwrap();
         assert_eq!(calls.len(), 2, "each call has its actually emitted source body");
