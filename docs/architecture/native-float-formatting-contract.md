@@ -198,12 +198,13 @@ code and the writer, with no formatting or output callback replacement.
 
 Optimized objects for x86_64 and AArch64 Linux, Darwin and Windows retain the
 source entry points and contain no `printf`/`sprintf`/`snprintf`/`fflush`
-symbols. This is not a full no-libc certificate: optimization synthesizes an
-external `strlen` from the current common writer's byte scan, and its Windows
-path still reaches a `write` fallback. The x86_64 Windows object also retains
-the pre-existing `_fltused` marker. These are common writer/platform boundaries,
-not numeric-kernel dependencies; they require their own corrections and final
-platform verification. A fresh coherent CLI/AOT run is still pending.
+symbols. The following [common writer correction](native-output-contract.md)
+removes synthesized `strlen` and the Windows `write` fallback as well. Its
+six-target objects now have no Linux imports, only system `write` on Darwin,
+and `GetStdHandle`/`WriteFile` on Windows. The pre-existing x86_64 Windows
+`_fltused` marker remains a separate platform ABI requirement to resolve without
+CRT linkage. These source/object/JIT checks do not certify the final platform
+link or replace a fresh coherent CLI/AOT run.
 
 f32 default formatting, explicit precision, source-only `Text.from_float` and
 native decimal parsing remain outside this completed f64 formatting unit.

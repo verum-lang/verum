@@ -30,7 +30,7 @@ use verum_llvm::builder::Builder;
 use verum_llvm::context::Context;
 use verum_llvm::module::Module;
 use verum_llvm::values::{
-    BasicMetadataValueEnum, BasicValueEnum, FunctionValue, IntValue, PointerValue,
+    BasicMetadataValueEnum, BasicValue, BasicValueEnum, FunctionValue, IntValue, PointerValue,
 };
 
 use super::error::{BuildExt, CallSiteExt, LlvmLoweringError, OptionExt, Result};
@@ -1240,7 +1240,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         } else {
             // string_register: text_val is i64 pointer to null-terminated C string
             // Use libc-free verum_internal_strlen (inline byte-scan loop)
-            let strlen_fn = self.get_or_declare_strlen(module);
+            let strlen_fn = self.get_or_declare_strlen(module)?;
             let str_ptr = builder
                 .build_int_to_ptr(text_val, ptr_type, "str_ptr")
                 .or_llvm_err()?;
@@ -6621,8 +6621,8 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 builder.position_at_end(msg_ok_bb);
 
                 // Declare write(fd, buf, count)
-                let write_fn = self.get_or_declare_write(module);
-                let strlen_fn = self.get_or_declare_strlen(module);
+                let write_fn = self.get_or_declare_write(module)?;
+                let strlen_fn = self.get_or_declare_strlen(module)?;
 
                 let i32_type = self.context.i32_type();
                 let stderr_fd = i32_type.const_int(2, false); // fd=2 = stderr
@@ -6823,10 +6823,10 @@ impl<'ctx> RuntimeLowering<'ctx> {
         let _open_fn = self.get_or_declare_open(module);
         let close_fn = self.get_or_declare_close(module);
         let read_fn = self.get_or_declare_read(module);
-        let write_fn = self.get_or_declare_write(module);
+        let write_fn = self.get_or_declare_write(module)?;
         let unlink_fn = self.get_or_declare_unlink(module);
         let lseek_fn = self.get_or_declare_lseek(module);
-        let strlen_fn = self.get_or_declare_strlen(module);
+        let strlen_fn = self.get_or_declare_strlen(module)?;
 
         // Also need verum_text_from_cstr and verum_text_get_ptr (already in module from text IR)
         let ft = i64_type.fn_type(&[ptr_type.into()], false);
@@ -8994,7 +8994,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
             .build_int_to_ptr(data_i64, ptr_type, "data")
             .or_llvm_err()?;
 
-        let strlen_fn = self.get_or_declare_strlen(module);
+        let strlen_fn = self.get_or_declare_strlen(module)?;
         let memcpy_fn = self.get_or_declare_memcpy(module);
         let ft = ptr_type.fn_type(&[i64_type.into()], false);
         let text_get_ptr_fn = super::error::get_or_declare_function(module, "verum_text_get_ptr", ft);
@@ -9731,11 +9731,12 @@ impl<'ctx> RuntimeLowering<'ctx> {
     /// Get or declare a libc-free `write(fd, buf, count) -> i64` wrapper.
     ///
     /// **Libc-free**: Linux uses `SYS_write` (1) direct syscall,
-    /// macOS routes through libSystem. Note: signature here uses
+    /// macOS routes through libSystem; Windows standard streams use WriteFile.
+    /// Note: signature here uses
     /// `i64` for fd (matching the historical caller convention in
     /// `runtime.rs`), but the kernel ABI takes i32; we truncate
     /// before issuing the syscall.
-    pub(crate) fn get_or_declare_write(&self, module: &Module<'ctx>) -> FunctionValue<'ctx> {
+    pub(crate) fn get_or_declare_write(&self, module: &Module<'ctx>) -> Result<FunctionValue<'ctx>> {
         let wrapper_name = "verum_internal_write";
         // Adopt-and-emit pattern (parallels `get_or_declare_strlen`).
         // `get_or_declare_internal_puts` (instruction.rs) forward-
@@ -9746,7 +9747,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         // write call — the visible failure shape was AOT hello-world
         // exiting 0 with no stdout output (#78).
         let wrapper = match module.get_function(wrapper_name) {
-            Some(f) if f.count_basic_blocks() > 0 => return f,
+            Some(f) if f.count_basic_blocks() > 0 => return Ok(f),
             Some(f) => f, // adopt the existing bodyless declaration
             None => {
                 let ptr_type = self.context.ptr_type(AddressSpace::default());
@@ -9758,6 +9759,10 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 f
             }
         };
+        if target_is_windows(module) {
+            super::output::emit_windows_write(self.context, module, wrapper)?;
+            return Ok(wrapper);
+        }
         let ptr_type = self.context.ptr_type(AddressSpace::default());
         let i64_type = self.context.i64_type();
 
@@ -9853,7 +9858,15 @@ impl<'ctx> RuntimeLowering<'ctx> {
             builder.build_return(Some(&ret)).expect("write return");
         }
 
-        wrapper
+        Ok(wrapper)
+    }
+
+    pub(crate) fn get_or_declare_write_all(
+        &self,
+        module: &Module<'ctx>,
+    ) -> Result<FunctionValue<'ctx>> {
+        let write = self.get_or_declare_write(module)?;
+        super::output::get_or_declare_write_all(self.context, module, write)
     }
 
     /// Get or declare `clock_gettime` under the canonical Verum-ABI
@@ -10206,8 +10219,8 @@ impl<'ctx> RuntimeLowering<'ctx> {
     /// **Libc-free**: emits a small open-coded null-byte scan loop
     /// instead of declaring `extern "C" fn strlen`. Internal-linkage
     /// so the symbol doesn't escape into the produced object file.
-    /// LLVM's optimiser typically inlines the body into call sites
-    /// at -O2+ so the wrapper has zero runtime cost.
+    /// Volatile byte reads preserve the owned scan under LoopIdiomRecognize;
+    /// an ordinary load loop may otherwise become a libc strlen call.
     ///
     /// Loop body:
     ///
@@ -10221,7 +10234,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
     ///  return_label: ret i64 %i
     ///
     /// See `docs/architecture/no-libc-architecture.md`.
-    pub(crate) fn get_or_declare_strlen(&self, module: &Module<'ctx>) -> FunctionValue<'ctx> {
+    pub(crate) fn get_or_declare_strlen(&self, module: &Module<'ctx>) -> Result<FunctionValue<'ctx>> {
         let wrapper_name = "verum_internal_strlen";
         // Adopt-and-emit if a prior site declared this wrapper without
         // a body — `get_or_declare_internal_puts` (instruction.rs)
@@ -10234,7 +10247,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         // > 0 means the body is already emitted (idempotent re-entry);
         // == 0 means we still need to fill it.
         let func = match module.get_function(wrapper_name) {
-            Some(f) if f.count_basic_blocks() > 0 => return f,
+            Some(f) if f.count_basic_blocks() > 0 => return Ok(f),
             Some(f) => f, // adopt the existing bodyless declaration
             None => {
                 let ptr_type = self.context.ptr_type(AddressSpace::default());
@@ -10285,6 +10298,11 @@ impl<'ctx> RuntimeLowering<'ctx> {
             .build_load(i8_type, p, "c")
             .expect("strlen load")
             .into_int_value();
+        // Keep this scan inside the generated runtime: LoopIdiomRecognize
+        // would otherwise replace the ordinary load loop with libc strlen.
+        c.as_instruction_value().or_internal("strlen byte load is missing")?
+            .set_volatile(true)
+            .map_err(|error| LlvmLoweringError::internal(format!("strlen volatile load: {error:?}")))?;
         let zero = i8_type.const_zero();
         let is_null = builder
             .build_int_compare(verum_llvm::IntPredicate::EQ, c, zero, "is_null")
@@ -10308,7 +10326,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         builder.position_at_end(return_lbl);
         builder.build_return(Some(&i_val)).expect("strlen return");
 
-        func
+        Ok(func)
     }
 
     /// Get or declare a libc-free `memcpy` wrapper.

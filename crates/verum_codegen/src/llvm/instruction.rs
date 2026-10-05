@@ -1830,92 +1830,85 @@ pub(crate) fn get_or_declare_internal_f64_to_decimal<'ctx>(
 /// Get or declare a libc-free `puts(s) -> i32` wrapper.
 ///
 /// **Libc-free**: emits an internal-linkage wrapper that calls
-/// `verum_internal_strlen` + `verum_internal_write` (both already
-/// libc-free — see runtime.rs). The wrapper writes the string to
+/// `verum_internal_strlen` + `verum_internal_write_all` (see runtime.rs). The wrapper writes the string to
 /// stdout (fd=1) plus a trailing newline, matching libc puts's
 /// observable behaviour. Returns 0 on success (non-negative;
-/// matches libc puts's return-value contract).
+/// matches libc puts's return-value contract); returns -1 on incomplete output.
 ///
 /// See `docs/architecture/no-libc-architecture.md`.
 fn get_or_declare_internal_puts<'ctx>(
     llvm_ctx: &'ctx verum_llvm::context::Context,
     module: &Module<'ctx>,
-) -> verum_llvm::values::FunctionValue<'ctx> {
-    let wrapper_name = "verum_internal_puts";
-    if let Some(f) = module.get_function(wrapper_name) {
-        return f;
-    }
-    let i8_type = llvm_ctx.i8_type();
+) -> Result<FunctionValue<'ctx>> {
     let i32_type = llvm_ctx.i32_type();
     let i64_type = llvm_ctx.i64_type();
     let ptr_type = llvm_ctx.ptr_type(verum_llvm::AddressSpace::default());
-
-    let fn_type = i32_type.fn_type(&[ptr_type.into()], false);
-    let func = module.add_function(wrapper_name, fn_type, None);
-    func.set_linkage(verum_llvm::module::Linkage::Internal);
-
-    // Route through `RuntimeLowering` so the bodies of
-    // `verum_internal_strlen` (open-coded byte-scan) and
-    // `verum_internal_write` (Linux: SYS_write syscall; macOS:
-    // __verum_libsys_write attribute → libSystem write) are emitted
-    // alongside the declaration.  Pre-fix this site only declared
-    // them bodyless and hoped some other emit path would fill them
-    // — which it doesn't for hello-world (the file-I/O emit chain
-    // doesn't run when no fs intrinsics are referenced).  The
-    // bodyless-decl fallback in `vbc_lowering.rs` then synthesised
-    // a `mov w0, #0; ret` stub, silently zero-returning every
-    // strlen/write call.  Closure of #78 (AOT hello-world).
+    let func = match module.get_function("verum_internal_puts") {
+        Some(function) if function.count_basic_blocks() > 0 => return Ok(function),
+        Some(function) => function,
+        None => module.add_function(
+            "verum_internal_puts",
+            i32_type.fn_type(&[ptr_type.into()], false),
+            Some(verum_llvm::module::Linkage::Internal),
+        ),
+    };
     let runtime = super::runtime::RuntimeLowering::new(llvm_ctx);
-    let strlen_fn = runtime.get_or_declare_strlen(module);
-    let write_fn = runtime.get_or_declare_write(module);
-
-    let entry = llvm_ctx.append_basic_block(func, "entry");
+    let strlen = runtime.get_or_declare_strlen(module)?;
+    let write_all = runtime.get_or_declare_write_all(module)?;
     let builder = llvm_ctx.create_builder();
+    let entry = llvm_ctx.append_basic_block(func, "entry");
+    let newline = llvm_ctx.append_basic_block(func, "newline");
+    let fail = llvm_ctx.append_basic_block(func, "error");
     builder.position_at_end(entry);
-
-    let s_param = func
-        .get_first_param()
-        .expect("puts p0")
-        .into_pointer_value();
-
-    // len = strlen(s)
+    let bytes = func.get_first_param().or_internal("puts string")?;
     let len = builder
-        .build_call(strlen_fn, &[s_param.into()], "len")
-        .expect("puts strlen call")
-        .try_as_basic_value()
-        .basic()
-        .expect("puts strlen ret")
+        .build_call(strlen, &[bytes.into()], "len")
+        .or_llvm_err()?
+        .basic_value_or("strlen must return length")?
         .into_int_value();
-
-    // write(1, s, len)
-    let stdout_fd = i64_type.const_int(1, false);
-    let _ = builder
-        .build_call(
-            write_fn,
-            &[stdout_fd.into(), s_param.into(), len.into()],
-            "",
-        )
-        .expect("puts write body");
-
-    // Append newline: write(1, "\n", 1)
+    let fd = i64_type.const_int(1, false);
+    let written = builder
+        .build_call(write_all, &[fd.into(), bytes.into(), len.into()], "written")
+        .or_llvm_err()?
+        .basic_value_or("write-all must return count")?
+        .into_int_value();
+    let complete = builder
+        .build_int_compare(IntPredicate::EQ, written, len, "complete")
+        .or_llvm_err()?;
+    builder
+        .build_conditional_branch(complete, newline, fail)
+        .or_llvm_err()?;
+    builder.position_at_end(newline);
     let nl = builder
         .build_global_string_ptr("\n", "puts_nl")
-        .expect("puts nl global");
+        .or_llvm_err()?;
     let one = i64_type.const_int(1, false);
-    let _ = builder
+    let written = builder
         .build_call(
-            write_fn,
-            &[stdout_fd.into(), nl.as_pointer_value().into(), one.into()],
-            "",
+            write_all,
+            &[fd.into(), nl.as_pointer_value().into(), one.into()],
+            "newline_written",
         )
-        .expect("puts write nl");
-
+        .or_llvm_err()?
+        .basic_value_or("write-all must return count")?
+        .into_int_value();
+    let complete = builder
+        .build_int_compare(IntPredicate::EQ, written, one, "newline_complete")
+        .or_llvm_err()?;
+    let status = builder
+        .build_select(
+            complete,
+            i32_type.const_zero(),
+            i32_type.const_all_ones(),
+            "status",
+        )
+        .or_llvm_err()?;
+    builder.build_return(Some(&status)).or_llvm_err()?;
+    builder.position_at_end(fail);
     builder
-        .build_return(Some(&i32_type.const_zero()))
-        .expect("puts return 0");
-
-    let _ = i8_type; // unused after refactor; kept for type-witness symmetry
-    func
+        .build_return(Some(&i32_type.const_all_ones()))
+        .or_llvm_err()?;
+    Ok(func)
 }
 
 /// Get or declare a libc-free `strcmp(a, b) -> i32` wrapper.
@@ -6642,7 +6635,7 @@ fn lower_instruction_impl<'ctx>(
             ctx.builder().position_at_end(then_bb);
             let _i32_ty = ctx.types().i32_type();
             let i64_type = ctx.types().i64_type();
-            let puts_fn = get_or_declare_internal_puts(ctx.llvm_context(), &module);
+            let puts_fn = get_or_declare_internal_puts(ctx.llvm_context(), &module)?;
             let fn_type = ctx
                 .llvm_context()
                 .void_type()
@@ -10709,7 +10702,7 @@ fn emit_permission_panic<'ctx>(
         .build_global_string_ptr(&msg, "perm_denied_msg")
         .or_llvm_err()?;
 
-    let puts_fn = get_or_declare_internal_puts(ctx.llvm_context(), &module);
+    let puts_fn = get_or_declare_internal_puts(ctx.llvm_context(), &module)?;
     let fn_type = llvm_ctx.void_type().fn_type(&[i64_ty.into()], false);
     let exit_fn = super::error::get_or_declare_noreturn_function(
         &module,
@@ -36380,7 +36373,7 @@ fn safe_int_div<'ctx>(
     ctx.builder().position_at_end(panic_bb);
     let _i32_ty = ctx.types().i32_type();
     let i64_type = ctx.types().i64_type();
-    let puts_fn = get_or_declare_internal_puts(ctx.llvm_context(), &module);
+    let puts_fn = get_or_declare_internal_puts(ctx.llvm_context(), &module)?;
     let fn_type = ctx
         .llvm_context()
         .void_type()
@@ -36477,7 +36470,7 @@ fn emit_div_zero_guard<'ctx>(
         .build_conditional_branch(is_zero, panic_bb, safe_bb)
         .or_llvm_err()?;
     ctx.builder().position_at_end(panic_bb);
-    let puts_fn = get_or_declare_internal_puts(ctx.llvm_context(), &module);
+    let puts_fn = get_or_declare_internal_puts(ctx.llvm_context(), &module)?;
     let i64_type = ctx.types().i64_type();
     let fn_type = ctx
         .llvm_context()
@@ -36540,7 +36533,7 @@ fn safe_int_rem<'ctx>(
     // Panic block
     ctx.builder().position_at_end(panic_bb);
     let _i32_ty = ctx.types().i32_type();
-    let puts_fn = get_or_declare_internal_puts(ctx.llvm_context(), &module);
+    let puts_fn = get_or_declare_internal_puts(ctx.llvm_context(), &module)?;
     let i64_type = ctx.types().i64_type();
     let fn_type = ctx
         .llvm_context()
@@ -37712,7 +37705,7 @@ fn lower_ctx_check_negative<'ctx>(
 
     // Use puts + verum_os_exit(1) for the error — unified with interpreter.
     // Both libc-free.
-    let puts_fn = get_or_declare_internal_puts(llvm_ctx, &module);
+    let puts_fn = get_or_declare_internal_puts(llvm_ctx, &module)?;
 
     let i64_type = ctx.types().i64_type();
     let _ = i64_type; // unused after libc-free migration
@@ -46052,7 +46045,7 @@ fn lower_float_print<'ctx>(
         .build_bit_cast(float, ctx.types().i64_type(), "print_float_bits")
         .or_llvm_err()?;
     let formatter = get_or_declare_internal_f64_to_decimal(ctx.llvm_context(), module)?;
-    let puts = get_or_declare_internal_puts(ctx.llvm_context(), module);
+    let puts = get_or_declare_internal_puts(ctx.llvm_context(), module)?;
     let entry = ctx
         .function()
         .get_first_basic_block()
@@ -46115,7 +46108,7 @@ fn lower_debug_print<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, value: Reg) -> R
     if is_string {
         // Register holds a Text* pointer (stored as i64 in alloca mode).
         // Extract char* via verum_text_get_ptr, then use the internal writer.
-        let puts_fn = get_or_declare_internal_puts(ctx.llvm_context(), &module);
+        let puts_fn = get_or_declare_internal_puts(ctx.llvm_context(), &module)?;
         // Extract char* from Text object
         let fn_type = ptr_type.fn_type(&[i64_type.into()], false);
         let text_get_ptr_fn = super::error::get_or_declare_function(module, "verum_text_get_ptr", fn_type);
@@ -46134,7 +46127,7 @@ fn lower_debug_print<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, value: Reg) -> R
             .or_llvm_err()?;
     } else if ctx.is_bool_register(value.0) {
         // Bool register: print "true" or "false"
-        let puts_fn = get_or_declare_internal_puts(ctx.llvm_context(), &module);
+        let puts_fn = get_or_declare_internal_puts(ctx.llvm_context(), &module)?;
         let true_str = ctx
             .builder()
             .build_global_string_ptr("true", "debug_bool_true")
@@ -46171,7 +46164,7 @@ fn lower_debug_print<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, value: Reg) -> R
         match val {
             BasicValueEnum::PointerValue(v) => {
                 // Non-string pointer — print as string (best guess)
-                let puts_fn = get_or_declare_internal_puts(ctx.llvm_context(), &module);
+                let puts_fn = get_or_declare_internal_puts(ctx.llvm_context(), &module)?;
                 ctx.builder()
                     .build_call(puts_fn, &[v.into()], "")
                     .or_llvm_err()?;
@@ -46195,7 +46188,7 @@ fn lower_debug_print<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, value: Reg) -> R
                     _ => i64_type.const_int(0, false),
                 };
                 let formatter = get_or_declare_internal_i64_to_decimal(ctx.llvm_context(), module);
-                let puts = get_or_declare_internal_puts(ctx.llvm_context(), module);
+                let puts = get_or_declare_internal_puts(ctx.llvm_context(), module)?;
                 // One fixed entry allocation per print site, including in loops:
                 // 20 bytes for i64::MIN plus the NUL required by internal puts.
                 let entry = ctx

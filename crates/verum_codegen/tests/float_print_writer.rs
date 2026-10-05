@@ -340,6 +340,15 @@ fn source_print_objects_have_no_libc_formatting_dependency_on_six_targets() {
                 })
                 .collect();
             for name in &names {
+                let plain = name.trim_start_matches('_');
+                assert_ne!(
+                    plain.as_str(),
+                    "strlen",
+                    "optimized scan must remain internal on {triple}"
+                );
+                if !triple.contains("apple-darwin") {
+                    assert_ne!(plain.as_str(), "write", "no POSIX libc write on {triple}");
+                }
                 assert!(
                     !["printf", "fprintf", "sprintf", "snprintf", "fflush"]
                         .contains(&name.trim_start_matches('_').as_str()),
