@@ -46033,6 +46033,78 @@ fn lower_spawn<'ctx>(
     Ok(())
 }
 
+/// Print a native floating value through the same unbuffered writer as
+/// Text, Bool and Int. Preserve the declared f32 value by exact widening;
+/// shortest-f32 spelling is a separate policy from this f64 carrier path.
+fn lower_float_print<'ctx>(
+    ctx: &FunctionContext<'_, 'ctx>,
+    value: verum_llvm::values::FloatValue<'ctx>,
+) -> Result<()> {
+    let module = ctx.get_module();
+    let float = coerce_value(
+        ctx,
+        value.into(),
+        ctx.types().f64_type().into(),
+        "print_float_widen",
+    )?;
+    let bits = ctx
+        .builder()
+        .build_bit_cast(float, ctx.types().i64_type(), "print_float_bits")
+        .or_llvm_err()?;
+    let formatter = get_or_declare_internal_f64_to_decimal(ctx.llvm_context(), module)?;
+    let puts = get_or_declare_internal_puts(ctx.llvm_context(), module);
+    let entry = ctx
+        .function()
+        .get_first_basic_block()
+        .or_internal("float print requires a function entry")?;
+    let allocation_builder = ctx.llvm_context().create_builder();
+    if let Some(first) = entry.get_first_instruction() {
+        allocation_builder.position_before(&first);
+    } else {
+        allocation_builder.position_at_end(entry);
+    }
+    // A fixed entry allocation is reused on every loop iteration. The
+    // longest signed fixed spelling is 327 bytes, plus one NUL for puts.
+    let buffer = allocation_builder
+        .build_alloca(
+            ctx.types()
+                .i8_type()
+                .array_type(super::float_format::BUFFER_CAPACITY),
+            "print_float_buffer",
+        )
+        .or_llvm_err()?;
+    let len = ctx
+        .builder()
+        .build_call(
+            formatter,
+            &[
+                buffer.into(),
+                bits.into(),
+                ctx.types().bool_type().const_int(1, false).into(),
+            ],
+            "print_float_len",
+        )
+        .or_llvm_err()?
+        .try_as_basic_value()
+        .basic()
+        .or_internal("float formatter must return its output length")?
+        .into_int_value();
+    // SAFETY: the formatter writes at most 327 bytes into our 328-byte buffer;
+    // its returned extent leaves exactly the required room for this NUL.
+    let terminator = unsafe {
+        ctx.builder()
+            .build_gep(ctx.types().i8_type(), buffer, &[len], "print_float_end")
+            .or_llvm_err()?
+    };
+    ctx.builder()
+        .build_store(terminator, ctx.types().i8_type().const_zero())
+        .or_llvm_err()?;
+    ctx.builder()
+        .build_call(puts, &[buffer.into()], "")
+        .or_llvm_err()?;
+    Ok(())
+}
+
 fn lower_debug_print<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, value: Reg) -> Result<()> {
     let is_string = ctx.is_string_register(value.0) || ctx.is_text_register(value.0);
     let val = ctx.get_register(value.0)?;
@@ -46093,22 +46165,8 @@ fn lower_debug_print<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, value: Reg) -> R
             .build_call(puts_fn, &[selected.into()], "")
             .or_llvm_err()?;
     } else if ctx.is_float_register(value.0) {
-        // Float register: use printf("%g\n", val)
-        let _f64_type = ctx.types().f64_type();
-        let fn_type = ctx.types().i32_type().fn_type(&[ptr_type.into()], true);
-        let printf_fn = super::error::get_or_declare_function(module, "printf", fn_type);
-        let f64_val = as_f64(ctx, val, "debug_f64")?;
-        let fmt = ctx
-            .builder()
-            .build_global_string_ptr("%g\n", "fmt_float_debug")
-            .or_llvm_err()?;
-        ctx.builder()
-            .build_call(
-                printf_fn,
-                &[fmt.as_pointer_value().into(), f64_val.into()],
-                "",
-            )
-            .or_llvm_err()?;
+        let float = as_f64(ctx, val, "debug_f64")?;
+        lower_float_print(ctx, float)?;
     } else {
         match val {
             BasicValueEnum::PointerValue(v) => {
@@ -46119,16 +46177,7 @@ fn lower_debug_print<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, value: Reg) -> R
                     .or_llvm_err()?;
             }
             BasicValueEnum::FloatValue(v) => {
-                // SSA mode — float is directly available as FloatValue
-                let fn_type = ctx.types().i32_type().fn_type(&[ptr_type.into()], true);
-        let printf_fn = super::error::get_or_declare_function(module, "printf", fn_type);
-                let fmt = ctx
-                    .builder()
-                    .build_global_string_ptr("%g\n", "fmt_float_debug2")
-                    .or_llvm_err()?;
-                ctx.builder()
-                    .build_call(printf_fn, &[fmt.as_pointer_value().into(), v.into()], "")
-                    .or_llvm_err()?;
+                lower_float_print(ctx, v)?;
             }
             _ => {
                 // Preserve the existing integer carrier conversion; share the

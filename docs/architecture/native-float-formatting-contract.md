@@ -1,17 +1,17 @@
 # Native Float formatting contract
 
-Status: focused f64 LLVM implementation verified 2026-10-04; ordinary Float
-print integration and final native acceptance remain open. This document does
+Status: focused f64 conversion and ordinary print implementation verified
+2026-10-05; final coherent native acceptance remains open. This document does
 not claim completed no-libc migration. The [no-libc invariant](no-libc-architecture.md) applies to ordinary
-native numeric output. The remaining `printf` calls are defects, not a permitted runtime
-requirement.
+native numeric output. The ordinary Float `printf` calls are now removed;
+remaining common-writer dependencies are defects, not a permitted runtime requirement.
 
 ## Baseline boundary
 
 The grammar defines formatting syntax, not a six-significant-digit default.
 Before the replacement below, execution paths disagreed:
 
-| Path | Current implementation | Measured behavior |
+| Path | Baseline implementation | Measured behavior |
 |---|---|---|
 | Interpreter FloatToText / interpolation | Rust Float Display in `text_extended.rs` | Shortest round-trip digits, fixed notation; `-0`, `inf`, `-inf`, `NaN` |
 | Interpreter Text.from_float | `text_static_runtime.rs` | Same default Float Display policy |
@@ -106,7 +106,7 @@ actual Text allocation/access helpers; the formatter was not replaced by a
 host stub. Across 12 endpoint/control inputs, the baseline had nine lexical
 differences and seven finite bit-round-trip failures. Examples:
 
-| Input | Current native conversion | Expected default Display |
+| Input | Baseline native conversion | Expected default Display |
 |---|---|---|
 | 1.25 | `1.25` | `1.25` |
 | negative zero | `0` | `-0` |
@@ -173,10 +173,40 @@ Text allocation/copy runtime, or the final platform link. A previous f64-typed
 helper ABI exposed the Windows `_fltused` marker; the integer-only ABI avoids
 it here without claiming to repair general Windows Float linking.
 
-The two ordinary native Float print consumers still use `printf` pending
-integration and redirected-output acceptance. f32 default formatting, explicit
-precision, source-only `Text.from_float` and native decimal parsing remain
-outside this completed f64 conversion unit.
+## Ordinary Float print integration (2026-10-05)
+
+Both marked-register and SSA Float consumers now use one `lower_float_print`
+helper. It supplies a fixed 328-byte entry-block buffer, invokes the same
+integer-bit kernel with Debug presentation enabled, terminates at the returned
+extent and calls the existing internal puts/write path. Text, Bool and Int
+keep that writer; there is no buffered `printf` side channel.
+
+The source-driven redirected-output regression interleaves Text, Bool, Int
+and Float with a completion marker. It checks 14 f64 values including both
+zero signs, tiny values, both minimum subnormal signs, the minimum normal,
+both maximum finite signs, infinities and NaN. An explicit SSA probe exercises
+the second lowering arm. Declared source Float32 and SSA f32 controls verify
+exact widening before bit extraction for five values. This preserves their
+numeric value; it does not establish a shortest-f32 policy.
+
+Before the consumer change, the focused gate had one pass and three failures:
+source order, direct consumer IR and optimized object dependencies. After the
+change all four tests pass. The existing integer output and Float conversion
+corpus remain separate regression gates. The tests are in
+`crates/verum_codegen/tests/float_print_writer.rs`; they run actual generated
+code and the writer, with no formatting or output callback replacement.
+
+Optimized objects for x86_64 and AArch64 Linux, Darwin and Windows retain the
+source entry points and contain no `printf`/`sprintf`/`snprintf`/`fflush`
+symbols. This is not a full no-libc certificate: optimization synthesizes an
+external `strlen` from the current common writer's byte scan, and its Windows
+path still reaches a `write` fallback. The x86_64 Windows object also retains
+the pre-existing `_fltused` marker. These are common writer/platform boundaries,
+not numeric-kernel dependencies; they require their own corrections and final
+platform verification. A fresh coherent CLI/AOT run is still pending.
+
+f32 default formatting, explicit precision, source-only `Text.from_float` and
+native decimal parsing remain outside this completed f64 formatting unit.
 
 ## Required implementation gates
 
