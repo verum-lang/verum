@@ -162,41 +162,48 @@ fn changed_callee_or_caller_body_cannot_reuse_source_receipts() {
 }
 
 #[test]
-fn arity_collision_cannot_borrow_an_unemitted_source_body() {
-    let mut vbc = compile(
-        "module alpha { public fn choose(value: Int) -> Int { value + 1 } } module beta { public fn choose(left: Int, right: Int) -> Int { left + right } } fn probe(value: Int) -> Int { alpha.choose(value) + beta.choose(value, 7) }",
-    );
-    let one = id(&vbc, "alpha.choose");
-    let two = id(&vbc, "beta.choose");
-    let name = vbc.strings.intern("choose");
-    for fd in &mut vbc.functions {
-        if fd.id.0 == one || fd.id.0 == two {
-            fd.name = name;
+fn pending_source_bodies_survive_native_arity_collisions_in_both_orders() {
+    use verum_llvm::{memory_buffer::MemoryBuffer, targets::{InitializationConfig, Target}, OptimizationLevel};
+    Target::initialize_native(&InitializationConfig::default()).unwrap();
+    for reverse in [false, true] {
+        let alpha = "module alpha { public fn choose(value: Int) -> Int { value + 1 } }";
+        let beta = "module beta { public fn choose(left: Int, right: Int) -> Int { left + right } }";
+        let source = if reverse { format!("{beta} {alpha}") } else { format!("{alpha} {beta}") };
+        let mut vbc = compile(&format!("{source} fn probe(value: Int) -> Int {{ alpha.choose(value) + beta.choose(value, 7) }} fn main() {{ probe(11); }}"));
+        let one = id(&vbc, "alpha.choose");
+        let two = id(&vbc, "beta.choose");
+        let probe = id(&vbc, "probe");
+        let name = vbc.strings.intern("choose");
+        for fd in &mut vbc.functions {
+            if fd.id.0 == one || fd.id.0 == two { fd.name = name; }
         }
+        let context = Context::create();
+        let mut lower = VbcToLlvmLowering::new(&context,
+            LoweringConfig::debug("arity").with_debug_info(false));
+        lower.lower_module(&vbc).unwrap();
+        // Verify the emitted source bodies below, independently of the
+        // platform runtime declarations included by lower_module.
+        let facts = lower.native_calls.resolve(lower.module());
+        let calls = facts.get(&probe).unwrap();
+        assert_eq!(calls.len(), 2, "each call has its actually emitted source body");
+        assert!(calls.iter().any(|(callee, _)| *callee == one));
+        assert!(calls.iter().any(|(callee, _)| *callee == two));
+        let mut ir = verum_common::Text::new();
+        for id in [one, two, probe] {
+            let function = lower.functions.get(&id).unwrap();
+            assert!(function.count_basic_blocks() > 0);
+            function.set_linkage(Linkage::External);
+            ir.push_str(function.print_to_string().to_str().unwrap());
+            ir.push('\n');
+        }
+        let executable = context.create_module_from_ir(
+            MemoryBuffer::create_from_memory_range_copy(ir.as_bytes(), "arity-bodies"))
+            .unwrap();
+        executable.verify().unwrap();
+        let engine = executable.create_jit_execution_engine(OptimizationLevel::None).unwrap();
+        // SAFETY: the source probe has one Int parameter and an Int result.
+        assert_eq!(unsafe { engine.get_function::<unsafe extern "C" fn(i64) -> i64>("probe").unwrap().call(11) }, 30);
     }
-    let context = Context::create();
-    let mut lower = VbcToLlvmLowering::new(
-        &context,
-        LoweringConfig::debug("arity").with_debug_info(false),
-    );
-    lower.lower_module(&vbc).unwrap();
-    let facts = lower.native_calls.resolve(lower.module());
-    let calls = facts.get(&id(&vbc, "probe")).unwrap();
-    assert!(
-        calls.is_empty(),
-        "an arity collision with no surviving source body is opaque"
-    );
-    // T1598: this is an existing dispatch defect, not successful execution.
-    let verification = lower
-        .module()
-        .verify()
-        .expect_err("existing malformed arity collision");
-    assert!(
-        verification
-            .to_str()
-            .unwrap()
-            .contains("Incorrect number of arguments")
-    );
 }
 
 #[test]
@@ -422,4 +429,67 @@ fn retained_abi_attributes_do_not_claim_a_transparent_parameter_or_result_adapte
         ArgumentView::Adjusted(_)
     ));
     assert_eq!(calls[0].1.result_view, ResultView::Opaque);
+}
+
+
+#[test]
+fn only_unused_bodyless_wrong_arity_declarations_are_replaceable() {
+    for state in ["unused", "referenced", "defined"] {
+        let vbc = compile("fn choose(value: Int) -> Int { value + 1 }");
+        let context = Context::create();
+        let mut lower = VbcToLlvmLowering::new(&context,
+            LoweringConfig::debug("forward-arity").with_debug_info(false));
+        let ty = context.i64_type();
+        let existing = lower.module().add_function("choose", ty.fn_type(&[], false), None);
+        let builder = context.create_builder();
+        if state == "referenced" {
+            let caller = lower.module().add_function("existing_caller", ty.fn_type(&[], false), None);
+            builder.position_at_end(context.append_basic_block(caller, "entry"));
+            let value = builder.build_call(existing, &[], "old_call").unwrap()
+                .try_as_basic_value().basic().unwrap();
+            builder.build_return(Some(&value)).unwrap();
+        } else if state == "defined" {
+            builder.position_at_end(context.append_basic_block(existing, "entry"));
+            builder.build_return(Some(&ty.const_int(19, false))).unwrap();
+        }
+        lower.declare_functions(&vbc).unwrap();
+        let selected = lower.functions.get(&id(&vbc, "choose")).unwrap();
+        assert_eq!(selected.count_params(), 1);
+        let primary = lower.module().get_function("choose").unwrap();
+        if state == "unused" {
+            assert_eq!(*selected, primary);
+            assert!(!lower.has_arity_collisions);
+        } else {
+            assert_eq!(primary, existing);
+            assert_ne!(*selected, primary);
+            assert_eq!(primary.count_params(), 0);
+            assert!(lower.has_arity_collisions);
+        }
+        lower.module().verify().unwrap();
+    }
+}
+
+#[test]
+fn archived_pending_body_reserves_its_symbol_before_decoding() {
+    let mut vbc = compile("module alpha { public fn choose(value: Int) -> Int { value + 1 } } module beta { public fn choose(left: Int, right: Int) -> Int { left + right } }");
+    let one = id(&vbc, "alpha.choose");
+    let two = id(&vbc, "beta.choose");
+    let name = vbc.strings.intern("choose");
+    for fd in &mut vbc.functions {
+        if fd.id.0 == one || fd.id.0 == two { fd.name = name; }
+        if fd.id.0 == one {
+            // This declaration-only gate models a body stored in an archive;
+            // no claim about executing an undecoded bytecode range is made.
+            fd.instructions = None;
+            fd.bytecode_length = 1;
+        }
+    }
+    let context = Context::create();
+    let mut lower = VbcToLlvmLowering::new(&context,
+        LoweringConfig::debug("archived-arity").with_debug_info(false));
+    lower.declare_functions(&vbc).unwrap();
+    assert_eq!(lower.functions.get(&one).unwrap().count_params(), 1);
+    assert_eq!(lower.functions.get(&two).unwrap().count_params(), 2);
+    assert_ne!(lower.functions.get(&one), lower.functions.get(&two));
+    lower.module().verify().unwrap();
 }

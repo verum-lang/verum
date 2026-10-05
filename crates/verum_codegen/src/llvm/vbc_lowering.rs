@@ -39,7 +39,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use verum_common::Text;
+use verum_common::{Set, Text};
 use verum_llvm::AddressSpace;
 use verum_llvm::attributes::{Attribute, AttributeLoc};
 use verum_llvm::context::Context;
@@ -49,7 +49,7 @@ use verum_llvm::debug_info::{
 use crate::llvm::runtime::RuntimeLowering;
 use verum_llvm::builder::Builder;
 use verum_llvm::module::{Linkage, Module};
-use verum_llvm::values::{BasicValueEnum, FunctionValue};
+use verum_llvm::values::{BasicValue, BasicValueEnum, FunctionValue};
 use verum_llvm::IntPredicate;
 use verum_vbc::instruction::Instruction;
 use verum_vbc::module::{
@@ -2069,6 +2069,9 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
             _ => None,
         };
 
+        // Source bodies are emitted after this declaration pass. Their LLVM
+        // symbols are still bodyless here, but are not disposable forward stubs.
+        let mut pending_source_bodies = Set::new();
         for (func_idx, func_desc) in vbc_module.functions.iter().enumerate() {
             // Determine effective return type:
             // - If instructions available and contain Ret (value return), use i64
@@ -2207,6 +2210,8 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
             let llvm_fn = if let Some(existing) = self.module.get_function(&func_name) {
                 if existing.count_params() as usize != effective_params.len()
                     && existing.count_basic_blocks() == 0
+                    && !pending_source_bodies.contains(&existing)
+                    && existing.as_global_value().as_pointer_value().get_first_use().is_none()
                 {
                     // BODYLESS forward stub with the WRONG arity (the
                     // stdlib bake ships zero-param forward declarations
@@ -2218,8 +2223,8 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                     // and crucially NO `has_arity_collisions`, which
                     // would degrade the whole module's pass pipeline to
                     // always-inline,globaldce (the O2 perf cliff).
-                    // Safe at declare time: nothing referenced the
-                    // stub yet (bodies lower after all declares).
+                    // Replacement requires both no pending source body and
+                    // no LLVM users: runtime helpers can precede this pass.
                     if std::env::var("VERUM_TRACE_PASSES").is_ok() {
                         eprintln!(
                             "[fwd-stub-replaced] {}: stub arity {} → real arity {}",
@@ -2240,9 +2245,8 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                     // int128_full_width). Purge every map entry naming
                     // the stub BEFORE deleting it.
                     self.functions.retain(|_, f| *f != existing);
-                    // SAFETY: declare phase — call sites are emitted
-                    // later, and the id map was purged above; nothing
-                    // references the stub any more.
+                    // SAFETY: the symbol has no LLVM uses or reserved source
+                    // body, and every id-map reference was removed above.
                     unsafe { existing.delete() };
                     self.module.add_function(&func_name, fn_type, None)
                 } else if existing.count_params() as usize != effective_params.len() {
@@ -2274,21 +2278,8 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                             effective_params.len(),
                         );
                     }
-                    // The ORIGINAL function (existing) keeps its name. If the current
-                    // func_desc has a body and the existing function has different arity,
-                    // lowering this body into the existing function would produce invalid
-                    // IR. Mark the existing function's body for skipping.
-                    // We record THIS func_id as "skip body" when the existing function
-                    // is the one that will get this func_id's body (which it won't —
-                    // the arity-suffixed one gets the body). But the original function
-                    // (from the FIRST declaration) still exists and its body was already
-                    // lowered or will be skipped because it's the FIRST function with
-                    // this name. Actually — the issue is the ORIGINAL declaration maps
-                    // a DIFFERENT func_id. We need to skip that func_id's body.
-                    //
-
-                    // Simple approach: skip body lowering for ANY function whose LLVM
-                    // function name doesn't match the expected name.
+                    // Keep the original id-to-symbol binding: its source
+                    // body may still be pending in this declaration pass.
                     self.module.add_function(&unique_name, fn_type, None)
                 } else if existing.count_basic_blocks() == 0 && existing.get_type() == fn_type {
                     // Same arity, same signature, and the existing symbol is a
@@ -2375,6 +2366,11 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
             }
 
             self.functions.insert(func_desc.id.0, llvm_fn);
+            if func_desc.bytecode_length > 0
+                || func_desc.instructions.as_ref().is_some_and(|body| !body.is_empty())
+            {
+                pending_source_bodies.insert(llvm_fn);
+            }
         }
 
         Ok(())
