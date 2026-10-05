@@ -4907,11 +4907,21 @@ impl TypeChecker {
                 args: List::new(),
             },
         );
-        // Floating point (compat names -> semantic)
-        self.ctx
-            .define_type(verum_common::Text::from("f32"), Type::Float);
-        self.ctx
-            .define_type(verum_common::Text::from("f64"), Type::Float);
+        // Float aliases retain the canonical sized primitive, just like
+        // integer aliases. Mapping both to Float erases f32 before source
+        // signature checking, method lookup, and narrowing diagnostics.
+        for alias in ["f32", "f64"] {
+            self.ctx.define_type(
+                verum_common::Text::from(alias),
+                Type::Named {
+                    path: verum_ast::ty::Path::single(verum_ast::ty::Ident::new(
+                        Type::canonical_primitive(alias),
+                        Span::default(),
+                    )),
+                    args: List::new(),
+                },
+            );
+        }
 
         // ============================================================
         // TYPE ALIASES
