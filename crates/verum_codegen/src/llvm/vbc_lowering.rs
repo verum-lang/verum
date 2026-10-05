@@ -578,6 +578,7 @@ pub struct VbcToLlvmLowering<'ctx> {
     stats: LoweringStats,
     /// Pre-built function name index for O(1) lookups in instruction lowering.
     func_name_index: Option<std::sync::Arc<super::context::FuncNameIndex>>,
+    type_name_index: Option<verum_common::Shared<super::context::TypeNameIndex>>,
     /// True if any function declarations were arity-suffixed due to name collisions.
     /// When set, IR printing is skipped to avoid LLVM crashes on bitcast wrappers.
     has_arity_collisions: bool,
@@ -867,6 +868,7 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
             closure_capture_kinds: std::cell::RefCell::new(HashMap::new()),
             stats: LoweringStats::default(),
             func_name_index: None,
+            type_name_index: None,
             has_arity_collisions: false,
             dibuilder,
             di_compile_unit,
@@ -976,6 +978,9 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
         self.func_name_index = Some(std::sync::Arc::new(super::context::FuncNameIndex::build(
             vbc_module,
         )));
+        self.type_name_index = Some(verum_common::Shared::new(
+            super::context::TypeNameIndex::build(vbc_module),
+        ));
 
         // Phase 1.55 (T0103): reachability walk. Tags every
         // unresolved-call record with whether its enclosing function
@@ -3067,6 +3072,9 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
         // Set pre-built function name index for O(1) lookups
         if let Some(ref index) = self.func_name_index {
             ctx.set_func_name_index(index.clone());
+        }
+        if let Some(ref index) = self.type_name_index {
+            ctx.set_type_name_index(index.clone());
         }
 
         // Share func_id → LLVM function map for collision-safe Call resolution.

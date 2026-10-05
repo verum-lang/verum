@@ -4356,12 +4356,7 @@ fn lower_instruction_impl<'ctx>(
                 // Previously only nested list/map/float elements were stamped,
                 // so a literal `List<Duration>` carried NO element type and
                 // `.sort()` fell back to raw pointer comparison (a no-op).
-                let tid = ctx.vbc_module().and_then(|m| {
-                    m.types
-                        .iter()
-                        .find(|td| m.get_type_name(td.id).as_deref() == Some(elem_tname.as_str()))
-                        .map(|td| td.id)
-                });
+                let tid = ctx.find_type_by_name(&elem_tname).map(|td| td.id);
                 if let Some(tid) = tid {
                     let type_args = vec![TypeRef::Concrete(tid)];
                     ctx.set_generic_type_args(list.0, type_args.clone());
@@ -5333,23 +5328,11 @@ fn lower_instruction_impl<'ctx>(
                     .get_obj_register_type(variant.0)
                     .map(|s| s.to_string())
                     .and_then(|sum_name| {
-                        ctx.vbc_module().map(|m| {
-                            m.types
-                                .iter()
-                                .find(|td| {
-                                    m.get_type_name(td.id).as_deref() == Some(sum_name.as_str())
-                                })
-                                .map(|td| {
-                                    td.variants
-                                        .iter()
-                                        .filter_map(|v| {
-                                            v.fields
-                                                .get(idx)
-                                                .map(|f| (v.tag, f.type_ref.clone()))
-                                        })
-                                        .collect::<Vec<_>>()
-                                })
-                                .unwrap_or_default()
+                        ctx.find_type_by_name(&sum_name).map(|td| {
+                            td.variants.iter().filter_map(|variant| {
+                                variant.fields.get(idx)
+                                    .map(|field| (variant.tag, field.type_ref.clone()))
+                            }).collect::<Vec<_>>()
                         })
                     })
                     .unwrap_or_default();
@@ -17682,15 +17665,7 @@ fn lower_call_method<'ctx>(
                     // (EXC_BAD_ACCESS deref [slot+8] in verum_pool_await).
                     // Same tid resolution as the ListPush leg — ONE stamp
                     // semantics on both push sites.
-                    let tid = ctx.vbc_module().and_then(|m| {
-                        m.types
-                            .iter()
-                            .find(|td| {
-                                m.get_type_name(td.id).as_deref()
-                                    == Some(elem_tname.as_str())
-                            })
-                            .map(|td| td.id)
-                    });
+                    let tid = ctx.find_type_by_name(&elem_tname).map(|td| td.id);
                     if let Some(tid) = tid {
                         let type_args = vec![TypeRef::Concrete(tid)];
                         ctx.set_generic_type_args(receiver.0, type_args.clone());
@@ -31256,10 +31231,7 @@ fn resolve_named_field_index(
     let fname = vbc.strings.get(verum_vbc::types::StringId(name_sid))?;
     let base_ty = ctx.get_obj_register_type(obj_reg).map(|s| s.to_string())?;
     let stripped = base_ty.split('<').next().unwrap_or(&base_ty).to_string();
-    let td = vbc
-        .types
-        .iter()
-        .find(|t| vbc.get_type_name(t.id).as_deref() == Some(stripped.as_str()))?;
+    let td = ctx.find_type_by_name(&stripped)?;
     td.fields
         .iter()
         .position(|fd| vbc.strings.get(fd.name).is_some_and(|n| n == fname))

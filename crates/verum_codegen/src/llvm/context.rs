@@ -5,7 +5,7 @@
 
 use std::collections::HashMap;
 
-use verum_common::Text;
+use verum_common::{Map, Set, Shared, Text};
 use verum_llvm::values::BasicValue;
 use verum_llvm::basic_block::BasicBlock;
 use verum_llvm::builder::Builder;
@@ -130,6 +130,33 @@ impl FuncNameIndex {
     }
 }
 
+/// Exact descriptor names for one immutable lowering input. The first
+/// descriptor for an ID owns its name; the first matching name owns lookup.
+/// This preserves the nested get_type_name scan without its quadratic cost.
+#[derive(Debug, Default)]
+pub struct TypeNameIndex {
+    by_name: Map<Text, usize>,
+}
+
+impl TypeNameIndex {
+    pub fn build(module: &VbcModule) -> Self {
+        let mut by_name = Map::new();
+        let mut seen = Set::new();
+        for (index, descriptor) in module.types.iter().enumerate() {
+            if seen.insert(descriptor.id)
+                && let Some(name) = module.get_string(descriptor.name)
+            {
+                by_name.entry(Text::from(name)).or_insert(index);
+            }
+        }
+        Self { by_name }
+    }
+
+    pub fn find(&self, name: &str) -> Option<usize> {
+        self.by_name.get(&Text::from(name)).copied()
+    }
+}
+
 /// Kind of a closure capture, recorded at `NewClosure` from the enclosing
 /// function's live register marks so the closure body prologue can re-apply
 /// the mark. Without it a captured `Text` loses its type mark across the env
@@ -179,6 +206,7 @@ pub struct FunctionContext<'a, 'ctx> {
 
     /// Pre-built function name index for O(1) lookups (shared across all functions).
     func_name_index: Option<Arc<FuncNameIndex>>,
+    type_name_index: Option<Shared<TypeNameIndex>>,
 
     /// VBC func_id → LLVM function value mapping (shared from lowering context).
     /// Enables Call instructions to resolve by func_id instead of name, avoiding
@@ -835,6 +863,7 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
             module,
             vbc_module: None,
             func_name_index: None,
+            type_name_index: None,
             func_id_map: None,
             builder,
             types,
@@ -951,6 +980,7 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
             module,
             vbc_module: Some(vbc_module),
             func_name_index: None,
+            type_name_index: None,
             func_id_map: None,
             builder,
             types,
@@ -1092,6 +1122,23 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
     /// Set the function name index (shared across all functions in a module).
     pub fn set_func_name_index(&mut self, index: Arc<FuncNameIndex>) {
         self.func_name_index = Some(index);
+    }
+
+    /// Share the index built from this lowering input after module assembly.
+    pub fn set_type_name_index(&mut self, index: Shared<TypeNameIndex>) {
+        self.type_name_index = Some(index);
+    }
+
+    /// Exact name lookup with the same first-ID/first-name rule as the scan.
+    pub fn find_type_by_name(&self, name: &str) -> Option<&'a verum_vbc::types::TypeDescriptor> {
+        let module = self.vbc_module?;
+        let index = if let Some(index) = &self.type_name_index {
+            index.find(name)
+        } else {
+            // Standalone instruction contexts may have no phase index.
+            TypeNameIndex::build(module).find(name)
+        }?;
+        module.types.get(index)
     }
 
     /// Set the func_id → LLVM function map for name-collision-safe resolution.
