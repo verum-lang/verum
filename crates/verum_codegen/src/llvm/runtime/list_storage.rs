@@ -181,7 +181,7 @@ pub(super) fn define<'ctx>(context: &'ctx Context, module: &Module<'ctx>) -> Res
     builder.position_at_end(invalid);
     builder
         .build_call(
-            runtime.get_or_declare_exit(module),
+            runtime.get_or_declare_exit(module)?,
             &[i64_ty.const_int(1, false).into()],
             "",
         )
