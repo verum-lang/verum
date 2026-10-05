@@ -1,5 +1,14 @@
 # Verum Technical-Debt Register
 
+## Fresh interpreter controls and AOT timeout — T1594 / T1606 / T1608 (2026-10-05)
+
+The ordinary stage-12 CLI passes numeric/List and returned-reference
+interpreter controls. The combined atomic/Mutex source stops at a qualified
+Deref metadata error, and numeric AOT compilation times out before launch.
+Exact-owner Deref publication and a measured quadratic type-name search
+have source fixes awaiting a fresh CLI. See the [stage-12 evidence](platform-acceptance-2026-10-05-stage12.md)
+for artifact identities, execution boundaries and retained failures.
+
 ## Fresh CLI and startup regression — T1594 / T1603 (2026-10-05)
 
 Stage 11 built normally, passed the fresh macOS host dependency inspection,
