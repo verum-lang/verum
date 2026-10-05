@@ -98,6 +98,7 @@ pub mod well_known_types;
 // Shared integer-only Float formatting kernel and presentation policy.
 mod float_format;
 mod output;
+mod windows_abi;
 
 // Instruction lowering (VBC instructions → LLVM IR)
 pub mod instruction;

@@ -966,6 +966,9 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
         // Phase 1: Forward declare all functions
         self.declare_functions(vbc_module)?;
 
+        // Backend-introduced ABI data is owned even in library/no-main builds.
+        super::windows_abi::emit_float_marker(self.context, &self.module)?;
+
         // Phase 1.5: Build function name index for O(1) lookups
         self.func_name_index = Some(std::sync::Arc::new(super::context::FuncNameIndex::build(
             vbc_module,

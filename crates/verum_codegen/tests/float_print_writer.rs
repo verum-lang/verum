@@ -96,7 +96,8 @@ fn reachable_ir(module: &Module, roots: &[&str]) -> Text {
     let mut ir = Text::new();
     let full = module.print_to_string();
     for line in full.to_str().unwrap().lines() {
-        if line.starts_with("target ")
+        if line.starts_with("$_fltused =")
+            || line.starts_with("target ")
             || line.starts_with("attributes #")
             || (line.starts_with('%') && line.contains(" = type "))
         {
@@ -105,6 +106,11 @@ fn reachable_ir(module: &Module, roots: &[&str]) -> Text {
         }
     }
     let mut pending: List<Text> = roots.iter().map(|name| Text::from(*name)).collect();
+    // The backend adds this ABI reference after IR optimization; it is not
+    // a textual call edge from the retained source functions.
+    if module.get_global("_fltused").is_some() {
+        pending.push(Text::from("_fltused"));
+    }
     let mut seen = Set::new();
     while let Some(name) = pending.pop() {
         if !seen.insert(name.clone()) {

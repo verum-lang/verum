@@ -64,11 +64,39 @@ The source mixed Text/Bool/Int/Float redirected-output gate and integer boundary
 gates remain green. Six optimized source objects preserve their actual source
 entry points. `llvm-nm --undefined-only` reports no imports for x86_64/AArch64
 Linux, only `write` for Darwin, and `GetStdHandle`/`WriteFile` for Windows.
-The x86_64 Windows Float object additionally retains `_fltused`, separately
-tracked for an owned ABI provider. There are no printf-family or strlen imports.
+The x86_64 Windows Float object defines its own `_fltused` ABI datum.
+There are no printf-family, strlen, or unresolved `_fltused` imports.
 The isolated integer-only Float kernel remains independently free of imports.
 
 Repository gates: `crates/verum_codegen/tests/common_print_writer.rs`,
 `float_print_writer.rs`, `integer_print_writer.rs` and
-`float_format_contract.rs`. They run in the integration job’s codegen test step;
+`float_format_contract.rs`, plus `windows_float_support.rs`. They run in the integration job’s codegen test step;
 final coherent CLI/native and target-system acceptance remain separate.
+
+## Windows x64 Float object support
+
+LLVM introduces an `_fltused` symbol reference for MSVC floating-point code,
+including ordinary arithmetic and calls; it is not evidence that formatting
+needs CRT. This is documented in the [LLVM backend change](https://reviews.llvm.org/D56548).
+The x64 generated-code path uses SSE2 and the owned formatter. It does not
+need the C formatting implementation or the separate x86-32 x87 setup that a
+CRT object historically supplied.
+
+After function declarations, VBC lowering emits one owned i32 zero datum with
+four-byte alignment for the x86_64 Windows MSVC target. `weak_odr` preserves it
+through IR optimization before the backend introduces its reference;
+`ExactMatch` COMDAT coalesces matching providers from separate objects. A
+compatible declaration is completed idempotently. A function, imported datum,
+TLS datum, nondefault address space, wrong width, or nonzero initializer at the
+reserved symbol fails lowering. Other target families do not acquire this
+provider. This does not add a startup routine or silently select a CRT library.
+
+The source fixture `fn first(value: Float) -> Float { value + 1.25 }` is compiled
+through Parser, VBC, LLVM and optimized COFF. Removing only the emitted marker
+reproduces the undefined-symbol failure. With the provider, one object and two
+independently compiled objects link as PE libraries using the real bundled LLD
+with `/dll /noentry /nodefaultlib`; both exported source bodies remain selected
+in the two-object case. `llvm-readobj --coff-imports` reports no DLL imports for
+these closed numeric libraries. The integer-only formatter's six-target object
+certificate remains separate and needs no marker. This verifies object ABI and
+final linking, not execution of a complete program on Windows or all AOT paths.

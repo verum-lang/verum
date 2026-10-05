@@ -201,10 +201,12 @@ source entry points and contain no `printf`/`sprintf`/`snprintf`/`fflush`
 symbols. The following [common writer correction](native-output-contract.md)
 removes synthesized `strlen` and the Windows `write` fallback as well. Its
 six-target objects now have no Linux imports, only system `write` on Darwin,
-and `GetStdHandle`/`WriteFile` on Windows. The pre-existing x86_64 Windows
-`_fltused` marker remains a separate platform ABI requirement to resolve without
-CRT linkage. These source/object/JIT checks do not certify the final platform
-link or replace a fresh coherent CLI/AOT run.
+and `GetStdHandle`/`WriteFile` on Windows. The x86_64 Windows `_fltused` marker
+now has an owned provider with focused source-object and no-CRT final-PE-link
+controls, described in the
+[native output contract](native-output-contract.md#windows-x64-float-object-support).
+These checks do not certify a complete application link or replace a fresh
+coherent CLI/AOT run.
 
 f32 default formatting, explicit precision, source-only `Text.from_float` and
 native decimal parsing remain outside this completed f64 formatting unit.
