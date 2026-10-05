@@ -1,5 +1,15 @@
 # Verum Technical-Debt Register
 
+## Fresh CLI and startup regression — T1594 / T1603 (2026-10-05)
+
+Stage 11 built normally, passed the fresh macOS host dependency inspection,
+and passed interpreter atomics/reference/hash controls. Overall acceptance
+still fails: Mutex lifetime is wrong, a constructor loses its metadata owner,
+and the generated native program traps before user entry in a stubbed runtime
+allocator. The constructor correction and helper-order repair require a new
+CLI bake. See the [stage-11 evidence](platform-acceptance-2026-10-05-stage11.md)
+for immutable artifact identities, actual verdicts and subsequent source gates.
+
 ## Coherent archive and native acceptance — T1579 / T1580 / T1583 (2026-10-04)
 
 The fresh default-feature `ca7d1334b` CLI passes declaration-owner and archive

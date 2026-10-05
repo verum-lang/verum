@@ -2,9 +2,10 @@
 
 Status: declaration carry implemented in source/VBC/metadata, 2026-10-05
 (T1594), following the reviewed contract T1551. VBC 2.18 preserves resource
-discipline and semantic field types after the 2.17 layout tail. Value-use
-publication and owned native `Drop` remain unimplemented. T1538 and T1540
-remain open; this prerequisite does not enable any new destructor.
+discipline and semantic field types after the 2.17 layout tail. VBC 2.20 adds
+[bounded value-use observations](value-use-receipts.md); they are not cleanup
+authority. Owned native `Drop` acceptance remains open (T1538/T1540); neither
+prerequisite enables a destructor by itself.
 
 ## Separate three facts
 
