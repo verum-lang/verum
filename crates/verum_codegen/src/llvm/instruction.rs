@@ -14813,20 +14813,7 @@ fn lower_call<'ctx>(
     // provenance remains separate from this negative declaration authority.
     let bare_call_method = func_name.rsplit('.').next().unwrap_or(func_name);
     if bare_call_method == "hash_value" && args.count == 1 && !declared_free_body {
-        let i64_type = ctx.types().i64_type();
-        let recv = as_i64(ctx, ctx.get_register(args.start.0)?, "call_hash_recv")?;
-        let fn_type = i64_type.fn_type(&[i64_type.into()], false);
-        let module = ctx.get_module();
-        let generic_hash_fn = module
-            .get_function("verum_generic_hash")
-            .unwrap_or_else(|| module.add_function("verum_generic_hash", fn_type, None));
-        let hash_result = ctx
-            .builder()
-            .build_call(generic_hash_fn, &[recv.into()], "call_generic_hash")
-            .or_llvm_err()?
-                    .basic_value_or("verum_generic_hash: no return value")?;
-        ctx.set_register(dst.0, hash_result);
-        return Ok(());
+        return lower_default_hash_value(ctx, dst, Reg(args.start.0));
     }
 
     // Resolve by func_id first (handles name collisions correctly),
@@ -15479,6 +15466,48 @@ fn method_will_have_body(
 #[cfg(test)]
 #[path = "../../tests/llvm/method_body_index.rs"]
 mod method_body_index_tests;
+
+/// Emit an already-selected hash fallback. Its scalar category is carried
+/// by VBC register facts, not inferred from bits that resemble an address.
+/// Erased keys retain the existing compatibility route until their native
+/// container ABI carries a hashing witness (T1587).
+fn lower_default_hash_value<'ctx>(
+    ctx: &mut FunctionContext<'_, 'ctx>,
+    dst: Reg,
+    receiver: Reg,
+) -> Result<()> {
+    let scalar = matches!(
+        ctx.reg_types().get(receiver.0),
+        Some(super::register_types::RegisterType::Int)
+    );
+    let helper = if scalar {
+        "verum_hash_i64"
+    } else {
+        "verum_generic_hash"
+    };
+    // A typed borrowed scalar still carries a cell address. Only the
+    // existing reference mark authorizes loading it; neither the nominal
+    // type nor pointer-shaped integer bits provide that authority.
+    let raw = if scalar {
+        deref_marked_receiver(ctx, receiver.0, "hash_ref")?
+    } else {
+        ctx.get_register(receiver.0)?
+    };
+    let value = as_i64(ctx, raw, "hash_value")?;
+    let i64_type = ctx.types().i64_type();
+    let function = super::error::get_or_declare_function(
+        ctx.get_module(),
+        helper,
+        i64_type.fn_type(&[i64_type.into()], false),
+    );
+    let result = ctx
+        .builder()
+        .build_call(function, &[value.into()], "hash_result")
+        .or_llvm_err()?
+        .basic_value_or("hash helper returned void")?;
+    ctx.set_register(dst.0, result);
+    Ok(())
+}
 
 fn lower_call_method<'ctx>(
     ctx: &mut FunctionContext<'_, 'ctx>,
@@ -16165,23 +16194,7 @@ fn lower_call_method<'ctx>(
             // For built-in protocol methods on primitive types (Int, Text, etc.),
             // provide inline implementations directly.
             if method_name == "hash_value" {
-                // Use verum_generic_hash for runtime type-aware hashing.
-                // This handles both Int keys (FNV-1a on raw bytes) and Text keys
-                // (FNV-1a on string content) correctly at runtime.
-                let i64_type = ctx.types().i64_type();
-                let recv = as_i64(ctx, ctx.get_register(receiver.0)?, "dyn_hash_recv")?;
-                let fn_type = i64_type.fn_type(&[i64_type.into()], false);
-                let module = ctx.get_module();
-                let generic_hash_fn = module
-                    .get_function("verum_generic_hash")
-                    .unwrap_or_else(|| module.add_function("verum_generic_hash", fn_type, None));
-                let hash_result = ctx
-                    .builder()
-                    .build_call(generic_hash_fn, &[recv.into()], "generic_hash")
-                    .or_llvm_err()?
-            .basic_value_or("verum_generic_hash: no return value")?;
-                ctx.set_register(dst.0, hash_result);
-                return Ok(());
+                return lower_default_hash_value(ctx, dst, receiver);
             }
             if method_name == "eq" && args.count == 1 {
                 // Use verum_generic_eq for runtime type-aware comparison.
@@ -16409,23 +16422,7 @@ fn lower_call_method<'ctx>(
     if resolved_func_name.is_none() {
         match bare_method_early {
             "hash_value" if args.count == 0 => {
-                // Use verum_generic_hash for runtime type-aware hashing.
-                // Handles both Int (FNV-1a on raw bytes) and Text (FNV-1a
-                // on string content) correctly at runtime.
-                let i64_type = ctx.types().i64_type();
-                let recv = as_i64(ctx, ctx.get_register(receiver.0)?, "hash_recv")?;
-                let fn_type = i64_type.fn_type(&[i64_type.into()], false);
-                let module = ctx.get_module();
-                let generic_hash_fn = module
-                    .get_function("verum_generic_hash")
-                    .unwrap_or_else(|| module.add_function("verum_generic_hash", fn_type, None));
-                let hash_result = ctx
-                    .builder()
-                    .build_call(generic_hash_fn, &[recv.into()], "generic_hash")
-                    .or_llvm_err()?
-            .basic_value_or("verum_generic_hash: no return value")?;
-                ctx.set_register(dst.0, hash_result);
-                return Ok(());
+                return lower_default_hash_value(ctx, dst, receiver);
             }
             "abs" if args.count == 0 => {
                 // Inline abs: (val < 0) ? -val : val
@@ -19655,25 +19652,11 @@ fn lower_call_method<'ctx>(
         && !ctx.is_binaryheap_register(receiver.0)
         && !ctx.is_chan_register(receiver.0)
         && ctx.get_obj_register_type(receiver.0).is_none();
-    // Always use verum_generic_hash for hash_value() — the compiled
-    // Hash.hash_value default method chains through self.hash() which
-    // fails for generic K (can't dispatch to Text.hash at runtime).
-    // verum_generic_hash handles both Int and Text correctly.
+    // Retain the existing default-method fallback for erased receivers;
+    // a known scalar uses the byte contract directly, without probing it
+    // as a possible Text object (T1587).
     if bare_method_early == "hash_value" && args.count == 0 {
-        let i64_type = ctx.types().i64_type();
-        let recv = as_i64(ctx, ctx.get_register(receiver.0)?, "hash_recv")?;
-        let fn_type = i64_type.fn_type(&[i64_type.into()], false);
-        let module = ctx.get_module();
-        let generic_hash_fn = module
-            .get_function("verum_generic_hash")
-            .unwrap_or_else(|| module.add_function("verum_generic_hash", fn_type, None));
-        let hash_result = ctx
-            .builder()
-            .build_call(generic_hash_fn, &[recv.into()], "generic_hash")
-            .or_llvm_err()?
-                    .basic_value_or("verum_generic_hash: no return value")?;
-        ctx.set_register(dst.0, hash_result);
-        return Ok(());
+        return lower_default_hash_value(ctx, dst, receiver);
     }
 
     // VERUM_AOT_TRACE_CALLM=1: dump the dispatch decision state for every

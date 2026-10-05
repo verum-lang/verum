@@ -1,0 +1,99 @@
+// @test: differential
+// @level: L0
+// @tier: all
+// @timeout: 1200000
+// @tags: hash, collections, protocols, regression
+// @expected-exit: 0
+// @expected-stdout-begin
+// hash=7:-1747035056885442531:-1747035056885442531:-1747035056885442531
+// hash=0:0:0:0
+// hash=-1:3346860396619971396:3346860396619971396:3346860396619971396
+// hash=-9223372036854775808:-4728538181899302272:-4728538181899302272:-4728538181899302272
+// hash=9223372036854775807:-1381677785279330876:-1381677785279330876:-1381677785279330876
+// hash_user=37
+// map_initial=5:221
+// map_update=37:59
+// map_remove=47:4:196:false
+// set_initial=5:false:true
+// set_remove=true:4:false:true
+// @expected-stdout-end
+// @description: Int hash agrees with DefaultHasher LE bytes; Map/Set key operations retain coherence.
+
+mount core.base.protocols.{Hash, Hasher, DefaultHasher};
+
+fn hash_value(value: Int) -> Int { value + 30 }
+
+fn borrowed_hash(value: &Int) -> Int { value.hash_value() }
+
+fn report_hash(value: Int, expected: Int) {
+    let direct = value.hash_value();
+    let mut hasher = DefaultHasher.new();
+    hasher.write_int(value);
+    let streamed = hasher.finish();
+    let borrowed = borrowed_hash(&value);
+    print(f"hash={value}:{direct}:{streamed}:{borrowed}");
+    assert_eq(direct + 0, expected);
+    assert_eq(streamed + 0, expected);
+    assert_eq(borrowed + 0, expected);
+}
+
+fn main() {
+    let minimum = -9223372036854775807 - 1;
+    let maximum = 9223372036854775807;
+    report_hash(7, -1747035056885442531);
+    report_hash(0, 0);
+    report_hash(-1, 3346860396619971396);
+    report_hash(minimum, -4728538181899302272);
+    report_hash(maximum, -1381677785279330876);
+    let user = hash_value(7);
+    print(f"hash_user={user}");
+    assert_eq(user + 0, 37);
+
+    let mut map = Map<Int, Int>.new();
+    map.insert(7, 37);
+    map.insert(0, 41);
+    map.insert(-1, 43);
+    map.insert(minimum, 47);
+    map.insert(maximum, 53);
+    let initial = map.get(7).unwrap_or(-999) + map.get(0).unwrap_or(-999)
+        + map.get(-1).unwrap_or(-999) + map.get(minimum).unwrap_or(-999)
+        + map.get(maximum).unwrap_or(-999);
+    print(f"map_initial={map.len()}:{initial}");
+    assert_eq(map.len(), 5);
+    assert_eq(initial + 0, 221);
+    let replaced = map.insert(7, 59).unwrap_or(-999);
+    let updated = map.get(7).unwrap_or(-999);
+    print(f"map_update={replaced}:{updated}");
+    assert_eq(replaced + 0, 37);
+    assert_eq(updated + 0, 59);
+    let removed = map.remove(minimum).unwrap_or(-999);
+    let remaining = map.get(7).unwrap_or(-999) + map.get(0).unwrap_or(-999)
+        + map.get(-1).unwrap_or(-999) + map.get(maximum).unwrap_or(-999);
+    let still_present = map.contains_key(minimum);
+    print(f"map_remove={removed}:{map.len()}:{remaining}:{still_present}");
+    assert_eq(removed + 0, 47);
+    assert_eq(map.len(), 4);
+    assert_eq(remaining + 0, 196);
+    assert(!still_present);
+
+    let mut set = Set<Int>.new();
+    set.insert(7);
+    set.insert(0);
+    set.insert(-1);
+    set.insert(minimum);
+    set.insert(maximum);
+    let duplicate = set.insert(7);
+    let present = set.contains(minimum);
+    print(f"set_initial={set.len()}:{duplicate}:{present}");
+    assert_eq(set.len(), 5);
+    assert(!duplicate);
+    assert(present);
+    let removed_set = set.remove(-1);
+    let absent = set.contains(-1);
+    let retained = set.contains(maximum);
+    print(f"set_remove={removed_set}:{set.len()}:{absent}:{retained}");
+    assert(removed_set);
+    assert_eq(set.len(), 4);
+    assert(!absent);
+    assert(retained);
+}

@@ -4984,10 +4984,98 @@ impl<'ctx> RuntimeLowering<'ctx> {
         Ok(())
     }
 
+    /// The byte step declared by core.base.protocols.DefaultHasher. Both
+    /// scalar and erased-key hashing share this mixer; neither chooses its
+    /// own seed, byte order or multiplication semantics (T1587).
+    fn emit_verum_hash_byte(&self, module: &Module<'ctx>) -> Result<FunctionValue<'ctx>> {
+        let ctx = self.context;
+        let i64_type = ctx.i64_type();
+        let function = super::error::get_or_declare_function(
+            module,
+            "verum_hash_byte",
+            i64_type.fn_type(&[i64_type.into(), i64_type.into()], false),
+        );
+        if function.count_basic_blocks() > 0 {
+            return Ok(function);
+        }
+        let builder = ctx.create_builder();
+        builder.position_at_end(ctx.append_basic_block(function, "entry"));
+        let state = function
+            .get_nth_param(0)
+            .or_internal("hash state")?
+            .into_int_value();
+        let byte = function
+            .get_nth_param(1)
+            .or_internal("hash byte")?
+            .into_int_value();
+        let left = builder
+            .build_left_shift(state, i64_type.const_int(5, false), "left")
+            .or_llvm_err()?;
+        let right = builder
+            .build_right_shift(state, i64_type.const_int(59, false), false, "right")
+            .or_llvm_err()?;
+        let rotated = builder.build_or(left, right, "rotated").or_llvm_err()?;
+        let mixed = builder.build_xor(rotated, byte, "mixed").or_llvm_err()?;
+        let next = builder
+            .build_int_mul(mixed, i64_type.const_int(0x517cc1b727220a95, false), "next")
+            .or_llvm_err()?;
+        builder.build_return(Some(&next)).or_llvm_err()?;
+        Ok(function)
+    }
+
+    /// Hash the eight little-endian bytes of an integer value. This path
+    /// has no object loads: an Int can contain any bits, including a value
+    /// that resembles a native pointer.
+    fn emit_verum_hash_i64(&self, module: &Module<'ctx>) -> Result<FunctionValue<'ctx>> {
+        let byte_hash = self.emit_verum_hash_byte(module)?;
+        let ctx = self.context;
+        let i64_type = ctx.i64_type();
+        let function = super::error::get_or_declare_function(
+            module,
+            "verum_hash_i64",
+            i64_type.fn_type(&[i64_type.into()], false),
+        );
+        if function.count_basic_blocks() > 0 {
+            return Ok(function);
+        }
+        let builder = ctx.create_builder();
+        builder.position_at_end(ctx.append_basic_block(function, "entry"));
+        let value = function
+            .get_nth_param(0)
+            .or_internal("hash value")?
+            .into_int_value();
+        let mut state = i64_type.const_zero();
+        for index in 0..8 {
+            let shifted = builder
+                .build_right_shift(
+                    value,
+                    i64_type.const_int(index * 8, false),
+                    false,
+                    "shifted",
+                )
+                .or_llvm_err()?;
+            let byte = builder
+                .build_and(shifted, i64_type.const_int(0xff, false), "byte")
+                .or_llvm_err()?;
+            state = builder
+                .build_call(byte_hash, &[state.into(), byte.into()], "state")
+                .or_llvm_err()?
+                .basic_value_or("hash byte returned void")?
+                .into_int_value();
+        }
+        builder.build_return(Some(&state)).or_llvm_err()?;
+        Ok(function)
+    }
+
     /// verum_generic_hash(key: i64) -> i64
-    /// FNV-1a hash — hashes string bytes for Text objects, raw i64 bytes for integers.
+    /// Erased-key compatibility dispatch for the existing collection runtime.
+    /// Uses the canonical byte mixer; known scalar callers bypass its legacy
+    /// Text classifier via verum_hash_i64. Erased-key provenance and NUL-ended
+    /// Text traversal remain distinct limitations of this compatibility path.
     fn emit_verum_generic_hash(&self, module: &Module<'ctx>) -> Result<()> {
         let is_text_fn = self.emit_verum_is_text_object(module)?;
+        let byte_hash = self.emit_verum_hash_byte(module)?;
+        let int_hash = self.emit_verum_hash_i64(module)?;
 
         if let Some(f) = module.get_function("verum_generic_hash") {
             if f.count_basic_blocks() > 0 {
@@ -5011,8 +5099,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         let hash_int_bb = ctx.append_basic_block(func, "hash_int");
 
         let builder = ctx.create_builder();
-        let fnv_offset = i64_type.const_int(14695981039346656037u64, false);
-        let fnv_prime = i64_type.const_int(1099511628211u64, false);
+        let initial_state = i64_type.const_zero();
 
         // Entry: check if key is a Text object
         builder.position_at_end(entry);
@@ -5042,11 +5129,11 @@ impl<'ctx> RuntimeLowering<'ctx> {
             .build_unconditional_branch(hash_text_loop)
             .or_llvm_err()?;
 
-        // hash_text_loop: while (*s) { hash ^= *s++; hash *= prime; }
+        // Existing erased Text traversal; mix each observed byte canonically.
         builder.position_at_end(hash_text_loop);
         let hash_phi = builder.build_phi(i64_type, "hash").or_llvm_err()?;
         let ptr_phi = builder.build_phi(ptr_type, "ptr").or_llvm_err()?;
-        hash_phi.add_incoming(&[(&fnv_offset, hash_text_bb)]);
+        hash_phi.add_incoming(&[(&initial_state, hash_text_bb)]);
         ptr_phi.add_incoming(&[(&str_ptr, hash_text_bb)]);
 
         let cur_ptr = ptr_phi.as_basic_value().into_pointer_value();
@@ -5066,18 +5153,14 @@ impl<'ctx> RuntimeLowering<'ctx> {
             .build_conditional_branch(byte_is_zero, hash_text_done, hash_text_body)
             .or_llvm_err()?;
 
-        // hash_text_body: hash ^= byte; hash *= prime; ptr++
+        // hash_text_body: apply the same byte step as integer hashing.
         builder.position_at_end(hash_text_body);
         let cur_hash = hash_phi.as_basic_value().into_int_value();
         let byte_ext = builder
             .build_int_z_extend(cur_byte, i64_type, "byte_ext")
             .or_llvm_err()?;
-        let xored = builder
-            .build_xor(cur_hash, byte_ext, "xored")
-            .or_llvm_err()?;
-        let mulled = builder
-            .build_int_mul(xored, fnv_prime, "mulled")
-            .or_llvm_err()?;
+        let mulled = builder.build_call(byte_hash, &[cur_hash.into(), byte_ext.into()], "mixed")
+            .or_llvm_err()?.basic_value_or("hash byte returned void")?.into_int_value();
         // SAFETY: in-bounds GEP on a pointer to an object with known layout; the offset is within the allocated size
         let next_ptr = unsafe {
             builder
@@ -5102,24 +5185,10 @@ impl<'ctx> RuntimeLowering<'ctx> {
             .build_return(Some(&text_hash_result))
             .or_llvm_err()?;
 
-        // hash_int: FNV-1a on 8 raw bytes of the i64 value
+        // The erased integer arm uses the exact same scalar implementation.
         builder.position_at_end(hash_int_bb);
-        let mut hash = fnv_offset;
-        for i in 0..8u64 {
-            let shift = i64_type.const_int(i * 8, false);
-            let shifted = builder
-                .build_right_shift(key, shift, false, &format!("sh{}", i))
-                .or_llvm_err()?;
-            let byte = builder
-                .build_and(shifted, i64_type.const_int(0xFF, false), &format!("b{}", i))
-                .or_llvm_err()?;
-            hash = builder
-                .build_xor(hash, byte, &format!("xor{}", i))
-                .or_llvm_err()?;
-            hash = builder
-                .build_int_mul(hash, fnv_prime, &format!("mul{}", i))
-                .or_llvm_err()?;
-        }
+        let hash = builder.build_call(int_hash, &[key.into()], "hash")
+            .or_llvm_err()?.basic_value_or("integer hash returned void")?.into_int_value();
         builder.build_return(Some(&hash)).or_llvm_err()?;
         Ok(())
     }
