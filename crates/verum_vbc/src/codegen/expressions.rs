@@ -13491,13 +13491,19 @@ impl VbcCodegen {
             _ => None,
         };
 
-        // Receiver-type-arg awareness for `List<Byte>` ergonomic
-        // auto-routing (red-team §4): when the receiver expression is
-        // a `TypeExpr` carrying generic args, peek the first arg.
-        // `List<Byte>::with_capacity(N)` → `@byte_list_with_capacity(N)`;
-        // `List<Byte>::new()` → `@byte_list_with_capacity(16)`.
-        let static_receiver_first_arg_is_byte: bool = match &receiver.kind {
-            ExprKind::TypeExpr(ty) => self.is_generic_first_arg(ty, "Byte"),
+        // Packed storage belongs to the canonical byte declaration. The
+        // lexical leaf `Byte` can also denote a user record or a caller's
+        // generic parameter; neither provides a concrete packed encoding.
+        // Keep the signature reference wrapper too: `&Byte` is a value slot.
+        let static_receiver_first_arg_is_byte = match &receiver.kind {
+            ExprKind::TypeExpr(ty) => match &ty.kind {
+                verum_ast::ty::TypeKind::Generic { args, .. } if args.len() == 1 => {
+                    matches!(&args[0], verum_ast::ty::GenericArg::Type(element)
+                        if self.explicit_type_witness(element, None)
+                            == Some(crate::types::TypeRef::Concrete(crate::types::TypeId::U8)))
+                }
+                _ => false,
+            },
             _ => false,
         };
 

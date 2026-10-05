@@ -379,3 +379,32 @@ fn zero_capacity_clone_can_reserve_after_empty_shrink() {
         },
     );
 }
+
+#[test]
+fn nominal_byte_constructor_preserves_record_slots_across_capacity_changes() {
+    with_source(
+        r#"
+        type Byte is { x: Int, y: Int, z: Int };
+        fn make() -> List<Byte> { List<Byte>.with_capacity(2) }
+        fn probe() -> Int {
+            let mut values: List<Byte> = make();
+            values.push(Byte { x: 11, y: 37, z: 99 });
+            values.shrink_to_fit();
+            values.reserve(17);
+            values[0].y
+        }
+        "#,
+        |ir, jit| {
+            assert!(
+                !ir.contains("verum_alloc_byte_list_packed"),
+                "nominal Byte selected packed allocator"
+            );
+            let actual = unsafe {
+                jit.get_function::<unsafe extern "C" fn() -> i64>("probe")
+                    .unwrap()
+                    .call()
+            };
+            assert_eq!(actual, 37);
+        },
+    );
+}

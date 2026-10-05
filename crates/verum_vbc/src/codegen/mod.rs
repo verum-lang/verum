@@ -1610,23 +1610,6 @@ impl VbcCodegen {
         }
     }
 
-    /// Returns `true` iff `ty` is a generic type whose first type-argument
-    /// resolves (via `extract_base_type_name`) to `inner`.  Used to detect
-    /// e.g. `List<Byte>` → for routing `with_capacity(N)` to the packed
-    /// byte-list intrinsic (red-team §4 ergonomic auto-routing).
-    pub(crate) fn is_generic_first_arg(&self, ty: &verum_ast::ty::Type, inner: &str) -> bool {
-        match &ty.kind {
-            verum_ast::ty::TypeKind::Generic { args, .. } => args.iter().next().is_some_and(|a| {
-                if let verum_ast::ty::GenericArg::Type(t) = a {
-                    self.extract_base_type_name(t).as_deref() == Some(inner)
-                } else {
-                    false
-                }
-            }),
-            _ => false,
-        }
-    }
-
     /// Returns `true` if `name` is registered as a transparent *allocating* wrapper
     /// (i.e. Heap or Shared — a wrapper that allocates on the heap, but NOT Maybe).
     /// Used for the `Wrapper(x)` / `Wrapper::new(x)` call patterns which only apply

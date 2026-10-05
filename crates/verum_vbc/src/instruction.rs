@@ -4982,7 +4982,7 @@ pub type FfiSubOpcode = SystemSubOpcode;
 
 /// Memory-operation sub-opcodes for `Opcode::MemExtended` (0xBF) —
 /// the heap/pointer family's honest home (T0852).  Bands:
-/// 0x00-0x0F allocator verbs (the original七 residents), 0x10-0x1F
+/// 0x00-0x0F allocator and storage verbs, 0x10-0x1F
 /// pointer arithmetic + deref leaves, 0x20-0x2F raw fixed-width
 /// load/store, 0x30-0x3F byte/typed array primitives, 0x40-0x4F
 /// static-mut cells.
@@ -17152,8 +17152,12 @@ mod tests {
             "SyncSubOpcode variant count drift"
         );
         assert_eq!(
+            MemSubOpcode::from_byte(0x07),
+            Some(MemSubOpcode::ListStorageStride)
+        );
+        assert_eq!(
             sweep(MemSubOpcode::from_byte, MemSubOpcode::to_byte),
-            38, // T1492 added DerefValue to the 37-operation memory family.
+            39, // ListStorageStride extends the 38-operation memory family.
             "MemSubOpcode variant count drift"
         );
     }
