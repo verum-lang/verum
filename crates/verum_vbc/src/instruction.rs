@@ -5003,6 +5003,9 @@ pub enum MemSubOpcode {
     Replace = 0x05,
     /// Packed byte-list allocator (red-team §4).
     NewByteList = 0x06,
+    /// Query actual List storage width (dst, list), independently of T.size.
+    /// Only canonical LIST/BYTE_LIST runtime carriers are accepted.
+    ListStorageStride = 0x07,
     // -- Pointer arithmetic + deref leaves (0x10-0x1F), carried over
     //    from SystemSubOpcode 0x60-0x6C (T0852).
     /// Unsigned raw-pointer load (dst, addr, size-imm).
@@ -5105,6 +5108,7 @@ impl MemSubOpcode {
             0x04 => Some(Self::Swap),
             0x05 => Some(Self::Replace),
             0x06 => Some(Self::NewByteList),
+            0x07 => Some(Self::ListStorageStride),
             0x10 => Some(Self::DerefRaw),
             0x11 => Some(Self::DerefMutRaw),
             0x12 => Some(Self::DerefRawPtr),

@@ -107,7 +107,8 @@ pub const VERSION_MAJOR: u16 = 2;
 /// `TypeDescriptor.declared_layout` fact. Older descriptors remain unknown;
 /// new readers do not substitute object-slot extent for an absent declaration.
 /// Version 2.18 carries declaration resource discipline and semantic field types.
-pub const VERSION_MINOR: u16 = 18;
+/// Version 2.19 adds the List storage-stride query; old readers refuse it.
+pub const VERSION_MINOR: u16 = 19;
 
 /// Minor-version floors for sections whose presence readers gate on.  The
 /// register-type-hints section has been written unconditionally since minor 2,

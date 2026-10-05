@@ -2067,6 +2067,9 @@ fn compute_core_blake3(core_dir: &Path, files: &[(String, Vec<u8>)]) -> String {
     let codegen_paths: &[&str] = &[
         "crates/verum_vbc/src/intrinsics/mod.rs",
         "crates/verum_vbc/src/intrinsics/registry.rs",
+        // Opcode identities and synthesized wrapper bodies also shape baked calls.
+        "crates/verum_vbc/src/instruction.rs",
+        "crates/verum_vbc/src/intrinsics/expand.rs",
         "crates/verum_vbc/src/intrinsics/codegen.rs",
         "crates/verum_vbc/src/intrinsics/lowering.rs",
         "crates/verum_vbc/src/codegen/expressions.rs",

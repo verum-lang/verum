@@ -197,3 +197,50 @@ interpreter/native CLI. At minimum:
   be excluded by an ignored test or counted as a successful native run.
 
 No production change or native acceptance is recorded by this design commit.
+
+
+## First implementation boundary: existing List buffers
+
+The instance-storage query uses the existing canonical `LIST` (value slots)
+versus `BYTE_LIST` (packed bytes) runtime identity. It does not reinterpret an
+arbitrary nominal TypeId as a layout. `list_storage_stride` is declared in
+`core.intrinsics.memory` and encoded as `MemExtended.ListStorageStride` in VBC
+2.19; unknown identities are refused in both execution paths. The same width
+is the alignment for these two existing encodings.
+
+`next_cap`, `resize_buffer`, `try_resize_buffer` and `free_buffer` use that
+carrier rather than generic `T.size`. Native ordinary List construction,
+growth and clone retain the canonical header and use CBGR backing allocations,
+matching the source allocator/reallocator/deallocator contract. Cloning
+preserves the source encoding. The generated allocator checks its capacity
+limit before multiplying by the width.
+
+The integration control is ordinary source:
+
+```verum
+mount core.*;
+fn main() {
+    let mut values: List<Int> = List<Int>.new();
+    values.reserve(3);
+    values.push(7);
+    values.shrink_to_fit();
+    values.reserve(17);
+    print(f"int_list_layout_control={values[0]}");
+}
+```
+
+The same source-method JIT harness returned 7 before typed layout queries,
+then refused an unresolved `Generic(0)` query inside `List.resize_buffer`.
+The storage query restores 7 using the actual buffer representation. The
+focused gates are `verum_vbc --test list_storage_query` and
+`verum_codegen --test list_storage_query`; they also cover serialized query
+boundaries, unknown encodings, record values, clone and call/return carriers.
+
+This boundary does not enable the native packed-byte constructor or complete
+the full acceptance above. Static element selection, raw element access,
+movement, iterators and slices still need a coherent packed-storage unit.
+In particular, the existing constructor producer selects packed storage for
+a user nominal named `Byte`; an instance query faithfully sees that incorrect
+producer tag and cannot reconstruct the lost declaration identity. Preserve
+this source negative for the constructor repair. Fresh whole-CLI/native List
+acceptance remains required.

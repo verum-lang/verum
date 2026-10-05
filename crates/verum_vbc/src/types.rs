@@ -289,6 +289,17 @@ impl TypeId {
         matches!(self.0, 512 | 527)
     }
 
+    /// Byte width of an element in a declared runtime List representation.
+    /// This describes storage, not the semantic layout of the element type.
+    /// Unknown type identities carry no storage-layout proof.
+    pub fn list_storage_stride(self) -> Option<u64> {
+        match self {
+            Self::LIST => Some(verum_common::layout::VALUE_SLOT_SIZE),
+            Self::BYTE_LIST => Some(1),
+            _ => None,
+        }
+    }
+
     /// Returns `true` for the (small) closed set of TypeIds whose heap
     /// layout the array-method dispatcher
     /// (`dispatch_array_method`) knows how to iterate: `LIST` (512),

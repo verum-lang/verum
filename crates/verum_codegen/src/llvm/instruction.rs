@@ -28364,6 +28364,15 @@ fn lower_mem_extended<'ctx>(
             ctx.set_register(dst, result);
             Ok(())
         }
+        0x07 => {
+            let dst = read_reg_varlen(operands, &mut pos)?;
+            let list = read_reg_varlen(operands, &mut pos)?;
+            let pointer = as_ptr(ctx, ctx.get_register(list)?, "storage_list")?;
+            let runtime = RuntimeLowering::new(ctx.llvm_context());
+            let width = runtime.lower_list_element_width(ctx.builder(), ctx.get_module(), pointer)?;
+            ctx.set_register(dst, width.into());
+            Ok(())
+        }
         // ================================================================
         // T0852 Mem wave: pointer/deref (0x10-0x1B), raw leaves
         // (0x20-0x25), byte/typed arrays (0x30-0x37), static-mut

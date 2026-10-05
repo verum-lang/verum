@@ -122,6 +122,13 @@ public fn forget<T>(value: T) { @intrinsic("forget", value) }
 /// Transmute between types of same size (unsafe, use with care)
 public fn transmute<S, D>(value: S) -> D { @intrinsic("transmute", value) }
 
+/// Width of a physical element in an existing List buffer. This is not
+/// `T.size`: ordinary values occupy Value slots while packed bytes occupy one
+/// byte. The container's declared runtime encoding owns this fact.
+public fn list_storage_stride<T>(list: &List<T>) -> Int {
+    @intrinsic("list_storage_stride", list)
+}
+
 // =============================================================================
 // SECTION 3: Pointer Operations
 // =============================================================================

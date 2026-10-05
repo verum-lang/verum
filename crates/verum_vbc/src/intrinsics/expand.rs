@@ -391,6 +391,12 @@ fn expand_sequence(
     byte_width: u8,
 ) -> bool {
     match seq {
+        InlineSequenceId::ListStorageStride => {
+            e.emit(Instruction::MemExtended {
+                sub_op: crate::instruction::MemSubOpcode::ListStorageStride.to_byte(),
+                operands: extended_operands(dest, args),
+            });
+        }
         InlineSequenceId::Memcpy | InlineSequenceId::Memmove if args.len() >= 3 => {
             let sub_op = if matches!(seq, InlineSequenceId::Memcpy) {
                 0x43 // CMemcpy

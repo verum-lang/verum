@@ -207,130 +207,120 @@ impl<'ctx> RuntimeLowering<'ctx> {
     // List Operations
     // =========================================================================
 
-    /// Lower NewList instruction.
-    ///
-    /// Creates a new empty list with cap=0, len=0, ptr=null.
-    /// Returns pointer to list object.
-    ///
-    /// Layout (NewG): [24-byte header][ptr:i64][len:i64][cap:i64] = 48 bytes
-    /// This matches the struct layout from list.vr: { ptr, len, cap }
-    ///
-    /// The backing array is NOT pre-allocated. The first push triggers
-    /// List.grow() → List.resize_buffer() → alloc() via verum_cbgr_allocate,
-    /// which correctly sets up AllocationHeader for subsequent realloc calls.
+    /// Create an empty value-slot list. The runtime header carries its
+    /// storage representation across argument, reference and return boundaries.
     pub fn lower_new_list(
         &self,
         builder: &Builder<'ctx>,
         module: &Module<'ctx>,
     ) -> Result<PointerValue<'ctx>> {
-        let i64_type = self.context.i64_type();
-
-        // Allocate list object (48 bytes: 24-byte header + 3 fields)
-        let obj_size = i64_type.const_int(LIST_OBJECT_SIZE, false);
-        let obj_ptr = self.emit_checked_malloc(builder, module, obj_size, "list_obj")?;
-
-        // Zero-initialize the entire object (header + all fields = ptr=0, len=0, cap=0)
-        let memset_fn = self.get_or_declare_memset(module)?;
-        let zero_byte = self.context.i32_type().const_int(0, false);
-        builder
-            .build_call(
-                memset_fn,
-                &[obj_ptr.into(), zero_byte.into(), obj_size.into()],
-                "clear_obj",
-            )
-            .or_llvm_err()?;
-
-        // No backing array allocated — cap=0, len=0, ptr=null (all zero from memset).
-        // First push triggers List.grow() → alloc() via verum_cbgr_allocate.
-
-        Ok(obj_ptr)
+        self.lower_new_list_storage(builder, module, self.context.i64_type().const_zero())
     }
 
-    /// Lower NewList with an honoured capacity hint.
-    ///
-    /// `List.with_capacity(n)` is a capacity *guarantee* (matching every
-    /// mainstream `Vec::with_capacity`): immediately after construction
-    /// `capacity() >= n`, and the first `n` pushes provoke no reallocation.
-    /// The zero-hint `lower_new_list` defers all allocation to the first push
-    /// (doubling growth), so `capacity()` would report the runtime default
-    /// instead of `n` — diverging from the Tier-0 interpreter
-    /// (`handle_new_list`, which already honours the hint) and breaking the
-    /// `with_capacity` contract.
-    ///
-    /// The backing array is a plain `verum_internal_calloc(cap, 8)` block —
-    /// exactly the shape `verum_list_grow` produces — so a later grow simply
-    /// `memcpy`s out of it and `calloc`s a doubled block. No special
-    /// allocation header is required on this path.
+    /// Create a value-slot list with CBGR-backed reserved capacity.
     pub fn lower_new_list_with_capacity(
         &self,
         builder: &Builder<'ctx>,
         module: &Module<'ctx>,
         capacity: u64,
     ) -> Result<PointerValue<'ctx>> {
-        let i64_type = self.context.i64_type();
+        self.lower_new_list_storage(
+            builder,
+            module,
+            self.context.i64_type().const_int(capacity, false),
+        )
+    }
 
-        // Allocate + zero the list object header (ptr=0, len=0, cap=0).
+    fn lower_new_list_storage(
+        &self,
+        builder: &Builder<'ctx>,
+        module: &Module<'ctx>,
+        capacity: IntValue<'ctx>,
+    ) -> Result<PointerValue<'ctx>> {
+        let i64_type = self.context.i64_type();
         let obj_size = i64_type.const_int(LIST_OBJECT_SIZE, false);
-        let obj_ptr = self.emit_checked_malloc(builder, module, obj_size, "list_obj_cap")?;
-        let memset_fn = self.get_or_declare_memset(module)?;
-        let zero_byte = self.context.i32_type().const_int(0, false);
+        let obj = self.emit_checked_malloc(builder, module, obj_size, "list_obj")?;
         builder
             .build_call(
-                memset_fn,
-                &[obj_ptr.into(), zero_byte.into(), obj_size.into()],
-                "clear_obj_cap",
+                self.get_or_declare_memset(module)?,
+                &[
+                    obj.into(),
+                    self.context.i32_type().const_zero().into(),
+                    obj_size.into(),
+                ],
+                "",
+            )
+            .or_llvm_err()?;
+        let type_id = verum_vbc::types::TypeId::LIST;
+        builder
+            .build_store(
+                obj,
+                self.context.i32_type().const_int(type_id.0 as u64, false),
+            )
+            .or_llvm_err()?;
+        let size_slot = self.list_field_address(builder, obj, 12, "list_object_size")?;
+        builder
+            .build_store(
+                size_slot,
+                self.context.i32_type().const_int(LIST_OBJECT_SIZE, false),
             )
             .or_llvm_err()?;
 
-        // calloc(capacity, 8) for the backing array of NaN-boxed i64 slots.
-        let cap_val = i64_type.const_int(capacity, false);
-        let calloc_ty = self
-            .context
-            .ptr_type(AddressSpace::default())
-            .fn_type(&[i64_type.into(), i64_type.into()], false);
-        let calloc_fn =
-            super::error::get_or_declare_function(module, "verum_internal_calloc", calloc_ty);
-        let backing = builder
-            .build_call(
-                calloc_fn,
-                &[cap_val.into(), i64_type.const_int(8, false).into()],
-                "list_cap_backing",
-            )
+        let resize_ty = self.context.void_type().fn_type(
+            &[
+                self.context.ptr_type(AddressSpace::default()).into(),
+                i64_type.into(),
+            ],
+            false,
+        );
+        let resize =
+            super::error::get_or_declare_function(module, "verum_list_resize_storage", resize_ty);
+        builder
+            .build_call(resize, &[obj.into(), capacity.into()], "")
+            .or_llvm_err()?;
+        Ok(obj)
+    }
+
+    fn list_field_address(
+        &self,
+        builder: &Builder<'ctx>,
+        list: PointerValue<'ctx>,
+        offset: u64,
+        name: &str,
+    ) -> Result<PointerValue<'ctx>> {
+        // SAFETY: fixed field in the canonical List object/header.
+        unsafe {
+            builder
+                .build_in_bounds_gep(
+                    self.context.i8_type(),
+                    list,
+                    &[self.context.i64_type().const_int(offset, false)],
+                    name,
+                )
+                .or_llvm_err()
+        }
+    }
+
+    /// Read the declared runtime storage representation of a List object.
+    pub fn lower_list_element_width(
+        &self,
+        builder: &Builder<'ctx>,
+        module: &Module<'ctx>,
+        list: PointerValue<'ctx>,
+    ) -> Result<IntValue<'ctx>> {
+        let function = super::error::get_or_declare_function(
+            module,
+            "verum_list_storage_stride",
+            self.context.i64_type().fn_type(
+                &[self.context.ptr_type(AddressSpace::default()).into()],
+                false,
+            ),
+        );
+        Ok(builder
+            .build_call(function, &[list.into()], "list_storage_stride")
             .or_llvm_err()?
-            .basic_value_or("verum_internal_calloc returned void")?
-            .into_pointer_value();
-        let backing_i64 = builder
-            .build_ptr_to_int(backing, i64_type, "list_cap_backing_i64")
-            .or_llvm_err()?;
-
-        // Store ptr = backing, cap = capacity (len stays 0 from the memset).
-        let i8_type = self.context.i8_type();
-        // SAFETY: GEP into the list object header at the fixed data-pointer offset.
-        let ptr_slot = unsafe {
-            builder
-                .build_in_bounds_gep(
-                    i8_type,
-                    obj_ptr,
-                    &[i64_type.const_int(LIST_PTR_OFFSET, false)],
-                    "list_cap_ptr_slot",
-                )
-                .or_llvm_err()?
-        };
-        builder.build_store(ptr_slot, backing_i64).or_llvm_err()?;
-        // SAFETY: GEP into the list object header at the fixed capacity offset.
-        let cap_slot = unsafe {
-            builder
-                .build_in_bounds_gep(
-                    i8_type,
-                    obj_ptr,
-                    &[i64_type.const_int(LIST_CAP_OFFSET, false)],
-                    "list_cap_cap_slot",
-                )
-                .or_llvm_err()?
-        };
-        builder.build_store(cap_slot, cap_val).or_llvm_err()?;
-
-        Ok(obj_ptr)
+            .basic_value_or("List storage query returned void")?
+            .into_int_value())
     }
 
     /// Lower ListPush instruction.
@@ -441,17 +431,10 @@ impl<'ctx> RuntimeLowering<'ctx> {
             .build_load(i64_type, data_ptr_slot, "data_int_post")
             .or_llvm_err()?
             .into_int_value();
-        let data_ptr = builder
-            .build_int_to_ptr(data_as_int, ptr_type, "data_ptr_post")
-            .or_llvm_err()?;
 
-        // Calculate element pointer: data_ptr + len * 8
-        // SAFETY: GEP into the list object header to access the length field at a fixed offset; the list pointer is non-null and valid
-        let elem_ptr = unsafe {
-            builder
-                .build_in_bounds_gep(i64_type, data_ptr, &[len], "elem_ptr")
-                .or_llvm_err()?
-        };
+        let width = self.lower_list_element_width(builder, module, list_ptr)?;
+        let env = super::slice_cell::CellEnv { llvm: self.context, heap_floor: super::target_triple::heap_floor(module) };
+        let (_, elem_ptr) = env.elem_addr(builder, data_as_int, width, len, "list_push")?;
 
         // Store the value - for NaN-boxing, we store all values as i64
         let val_as_i64 = if value.is_int_value() {
@@ -469,7 +452,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
             i64_type.const_int(0, false)
         };
 
-        builder.build_store(elem_ptr, val_as_i64).or_llvm_err()?;
+        env.elem_store(builder, width, elem_ptr, val_as_i64, "list_push")?;
 
         // Update length: len = len + 1
         let one = i64_type.const_int(1, false);
@@ -12912,6 +12895,201 @@ pub fn define_text_ir_helpers<'ctx>(context: &'ctx Context, module: &Module<'ctx
     Ok(())
 }
 
+/// Runtime List storage query shared by source methods and native helpers.
+/// A declared canonical tag is required; neither pointer plausibility nor a
+/// missing element TypeRef implies a Value-slot representation.
+fn define_list_storage_stride<'ctx>(context: &'ctx Context, module: &Module<'ctx>) -> Result<()> {
+    let i64_ty = context.i64_type();
+    let function = super::error::get_or_declare_function(
+        module,
+        "verum_list_storage_stride",
+        i64_ty.fn_type(&[context.ptr_type(AddressSpace::default()).into()], false),
+    );
+    if function.count_basic_blocks() != 0 {
+        return Ok(());
+    }
+    function.set_linkage(verum_llvm::module::Linkage::Internal);
+    let builder = context.create_builder();
+    let entry = context.append_basic_block(function, "entry");
+    let read_tag = context.append_basic_block(function, "read_tag");
+    let invalid = context.append_basic_block(function, "invalid");
+    builder.position_at_end(entry);
+    let list = function
+        .get_first_param()
+        .or_internal("List storage receiver")?
+        .into_pointer_value();
+    let missing = builder.build_is_null(list, "missing_list").or_llvm_err()?;
+    builder
+        .build_conditional_branch(missing, invalid, read_tag)
+        .or_llvm_err()?;
+    builder.position_at_end(read_tag);
+    let tag = builder
+        .build_load(context.i32_type(), list, "list_storage_type")
+        .or_llvm_err()?
+        .into_int_value();
+    let mut cases = verum_common::List::new();
+    for id in [
+        verum_vbc::types::TypeId::LIST,
+        verum_vbc::types::TypeId::BYTE_LIST,
+    ] {
+        let width = id
+            .list_storage_stride()
+            .or_internal("canonical List storage width")?;
+        let block = context.append_basic_block(function, "storage");
+        cases.push((context.i32_type().const_int(id.0 as u64, false), block));
+        builder.position_at_end(block);
+        builder
+            .build_return(Some(&i64_ty.const_int(width, false)))
+            .or_llvm_err()?;
+    }
+    builder.position_at_end(read_tag);
+    builder.build_switch(tag, invalid, &cases).or_llvm_err()?;
+    builder.position_at_end(invalid);
+    let exit = RuntimeLowering::new(context).get_or_declare_exit(module);
+    builder
+        .build_call(exit, &[i64_ty.const_int(1, false).into()], "")
+        .or_llvm_err()?;
+    builder.build_unreachable().or_llvm_err()?;
+    Ok(())
+}
+
+/// Resize either declared List representation through the CBGR allocator.
+/// Capacity remains an element count; only this boundary converts it to bytes.
+fn define_list_storage_resize<'ctx>(context: &'ctx Context, module: &Module<'ctx>) -> Result<()> {
+    let runtime = RuntimeLowering::new(context);
+    runtime.emit_cbgr_allocate(module)?;
+    runtime.emit_cbgr_deallocate(module)?;
+    runtime.emit_cbgr_realloc(module)?;
+    let i64_ty = context.i64_type();
+    let ptr_ty = context.ptr_type(AddressSpace::default());
+    let function = super::error::get_or_declare_function(
+        module,
+        "verum_list_resize_storage",
+        context
+            .void_type()
+            .fn_type(&[ptr_ty.into(), i64_ty.into()], false),
+    );
+    if function.count_basic_blocks() != 0 {
+        return Ok(());
+    }
+    function.set_linkage(verum_llvm::module::Linkage::Internal);
+    let builder = context.create_builder();
+    let entry = context.append_basic_block(function, "entry");
+    let resize = context.append_basic_block(function, "resize");
+    let release = context.append_basic_block(function, "release");
+    let checked = context.append_basic_block(function, "checked");
+    let invalid = context.append_basic_block(function, "invalid");
+    let done = context.append_basic_block(function, "done");
+    builder.position_at_end(entry);
+    let list = function
+        .get_nth_param(0)
+        .or_internal("list resize receiver")?
+        .into_pointer_value();
+    let capacity = function
+        .get_nth_param(1)
+        .or_internal("list resize capacity")?
+        .into_int_value();
+    let width = runtime.lower_list_element_width(&builder, module, list)?;
+    // AllocationHeader stores byte extents in u32. Reserve room for its
+    // header and alignment slack before multiplication, never after wrapping.
+    let limit = builder
+        .build_int_unsigned_div(
+            i64_ty.const_int(
+                u32::MAX as u64 - 3 * verum_common::layout::ALLOCATION_HEADER_SIZE,
+                false,
+            ),
+            width,
+            "list_capacity_limit",
+        )
+        .or_llvm_err()?;
+    let valid = builder
+        .build_int_compare(
+            verum_llvm::IntPredicate::ULE,
+            capacity,
+            limit,
+            "valid_capacity",
+        )
+        .or_llvm_err()?;
+    builder
+        .build_conditional_branch(valid, checked, invalid)
+        .or_llvm_err()?;
+    builder.position_at_end(invalid);
+    let exit = runtime.get_or_declare_exit(module);
+    builder
+        .build_call(exit, &[i64_ty.const_int(1, false).into()], "")
+        .or_llvm_err()?;
+    builder.build_unreachable().or_llvm_err()?;
+    builder.position_at_end(checked);
+    let data_slot =
+        runtime.list_field_address(&builder, list, LIST_PTR_OFFSET, "list_data_slot")?;
+    let cap_slot =
+        runtime.list_field_address(&builder, list, LIST_CAP_OFFSET, "list_capacity_slot")?;
+    let old_data = builder
+        .build_load(i64_ty, data_slot, "list_old_data")
+        .or_llvm_err()?
+        .into_int_value();
+    let old_ptr = builder
+        .build_int_to_ptr(old_data, ptr_ty, "list_old_ptr")
+        .or_llvm_err()?;
+    let is_zero = builder
+        .build_int_compare(
+            verum_llvm::IntPredicate::EQ,
+            capacity,
+            i64_ty.const_zero(),
+            "zero_capacity",
+        )
+        .or_llvm_err()?;
+    builder
+        .build_conditional_branch(is_zero, release, resize)
+        .or_llvm_err()?;
+    builder.position_at_end(release);
+    builder
+        .build_call(
+            module
+                .get_function("verum_cbgr_deallocate")
+                .or_missing_fn("verum_cbgr_deallocate")?,
+            &[old_ptr.into()],
+            "",
+        )
+        .or_llvm_err()?;
+    builder
+        .build_store(data_slot, i64_ty.const_zero())
+        .or_llvm_err()?;
+    builder.build_unconditional_branch(done).or_llvm_err()?;
+    builder.position_at_end(resize);
+    let bytes = builder
+        .build_int_mul(capacity, width, "list_storage_bytes")
+        .or_llvm_err()?;
+    let data = builder
+        .build_call(
+            module
+                .get_function("verum_cbgr_realloc")
+                .or_missing_fn("verum_cbgr_realloc")?,
+            &[old_ptr.into(), bytes.into(), width.into()],
+            "list_resized_data",
+        )
+        .or_llvm_err()?
+        .basic_value_or("CBGR realloc returned void")?
+        .into_pointer_value();
+    let missing = builder
+        .build_is_null(data, "list_resize_failed")
+        .or_llvm_err()?;
+    let store = context.append_basic_block(function, "store");
+    builder
+        .build_conditional_branch(missing, invalid, store)
+        .or_llvm_err()?;
+    builder.position_at_end(store);
+    let data_word = builder
+        .build_ptr_to_int(data, i64_ty, "list_data_word")
+        .or_llvm_err()?;
+    builder.build_store(data_slot, data_word).or_llvm_err()?;
+    builder.build_unconditional_branch(done).or_llvm_err()?;
+    builder.position_at_end(done);
+    builder.build_store(cap_slot, capacity).or_llvm_err()?;
+    builder.build_return(None).or_llvm_err()?;
+    Ok(())
+}
+
 /// Emit LLVM IR definitions for list helper functions, replacing C runtime stubs.
 /// These are called from Strategy 0 list intercepts in instruction.rs.
 pub fn define_list_ir_helpers<'ctx>(context: &'ctx Context, module: &Module<'ctx>) -> Result<()> {
@@ -12937,6 +13115,9 @@ pub fn define_list_ir_helpers<'ctx>(context: &'ctx Context, module: &Module<'ctx
     let ptr_offset = i64_type.const_int(LIST_PTR_OFFSET, false);
     let len_offset = i64_type.const_int(LIST_LEN_OFFSET, false);
     let cap_offset = i64_type.const_int(LIST_CAP_OFFSET, false);
+
+    define_list_storage_stride(context, module)?;
+    define_list_storage_resize(context, module)?;
 
     // --- verum_list_grow(list_ptr: ptr) -> void ---
     // Doubles the capacity, allocates new backing array, copies elements.
@@ -12990,79 +13171,9 @@ pub fn define_list_ir_helpers<'ctx>(context: &'ctx Context, module: &Module<'ctx
             .build_select(use_min, min_cap, new_cap_2x, "new_cap")
             .or_llvm_err()?
             .into_int_value();
-        // calloc(new_cap, 8)
-        let calloc_fn = module
-            .get_function("verum_internal_calloc")
-            .or_missing_fn("verum_internal_calloc")?;
-        let new_data = builder
-            .build_call(
-                calloc_fn,
-                &[new_cap.into(), i64_type.const_int(8, false).into()],
-                "new_data",
-            )
-            .or_llvm_err()?
-            .basic_value_or("call returned void")?
-            .into_pointer_value();
-        // Load old backing ptr and len
-        // SAFETY: GEP into the list object header to access the length field at a fixed offset; the list pointer is non-null and valid
-        let ptr_slot = unsafe {
-            builder
-                .build_in_bounds_gep(i8_type, list_ptr, &[ptr_offset], "ptr_slot")
-                .or_llvm_err()?
-        };
-        let old_data_i64 = builder
-            .build_load(i64_type, ptr_slot, "old_data_i64")
-            .or_llvm_err()?
-            .into_int_value();
-        let old_data = builder
-            .build_int_to_ptr(old_data_i64, ptr_type, "old_data")
-            .or_llvm_err()?;
-        // SAFETY: GEP at a computed offset within the allocated entries array; index is bounded by capacity
-        let len_slot = unsafe {
-            builder
-                .build_in_bounds_gep(i8_type, list_ptr, &[len_offset], "len_slot")
-                .or_llvm_err()?
-        };
-        let len = builder
-            .build_load(i64_type, len_slot, "len")
-            .or_llvm_err()?
-            .into_int_value();
-        // memcpy(new_data, old_data, len * 8)
-        let copy_bytes = builder
-            .build_int_mul(len, i64_type.const_int(8, false), "copy_bytes")
-            .or_llvm_err()?;
-        let memcpy_fn = module
-            .get_function("llvm.memcpy.p0.p0.i64")
-            .unwrap_or_else(|| {
-                let void_ty = context.void_type();
-                let i64_ty = context.i64_type();
-                let ptr_ty = context.ptr_type(AddressSpace::default());
-                let bool_ty = context.bool_type();
-                let fn_ty = void_ty.fn_type(
-                    &[ptr_ty.into(), ptr_ty.into(), i64_ty.into(), bool_ty.into()],
-                    false,
-                );
-                module.add_function("llvm.memcpy.p0.p0.i64", fn_ty, None)
-            });
-        let is_volatile_false = context.bool_type().const_int(0, false);
-        builder
-            .build_call(
-                memcpy_fn,
-                &[
-                    new_data.into(),
-                    old_data.into(),
-                    copy_bytes.into(),
-                    is_volatile_false.into(),
-                ],
-                "",
-            )
-            .or_llvm_err()?;
-        // Store new cap and new ptr
-        builder.build_store(cap_slot, new_cap).or_llvm_err()?;
-        let new_data_i64 = builder
-            .build_ptr_to_int(new_data, i64_type, "new_data_i64")
-            .or_llvm_err()?;
-        builder.build_store(ptr_slot, new_data_i64).or_llvm_err()?;
+        let resize_ty = void_type.fn_type(&[ptr_type.into(), i64_type.into()], false);
+        let resize = super::error::get_or_declare_function(module, "verum_list_resize_storage", resize_ty);
+        builder.build_call(resize, &[list_ptr.into(), new_cap.into()], "").or_llvm_err()?;
         builder.build_unconditional_branch(ret_bb).or_llvm_err()?;
 
         builder.position_at_end(ret_bb);
@@ -14177,22 +14288,13 @@ pub fn define_list_ir_helpers<'ctx>(context: &'ctx Context, module: &Module<'ctx
             .or_llvm_err()?;
 
         builder.position_at_end(do_clone);
-        let calloc_fn = module
-            .get_function("verum_internal_calloc")
-            .or_missing_fn("verum_internal_calloc")?;
-        // Allocate 48-byte list object (6 * 8 = 48)
-        let new_list = builder
-            .build_call(
-                calloc_fn,
-                &[
-                    i64_type.const_int(6, false).into(),
-                    i64_type.const_int(8, false).into(),
-                ],
-                "new_list",
-            )
-            .or_llvm_err()?
-            .basic_value_or("call returned void")?
-            .into_pointer_value();
+        let runtime = RuntimeLowering::new(context);
+        let width = runtime.lower_list_element_width(&builder, module, list_ptr)?;
+        let new_list = runtime.lower_new_list_storage(&builder, module, i64_type.const_zero())?;
+        // Preserve the validated physical encoding, even when the element's
+        // generic TypeRef is erased at this call boundary.
+        let tag = builder.build_load(context.i32_type(), list_ptr, "clone_storage_tag").or_llvm_err()?;
+        builder.build_store(new_list, tag).or_llvm_err()?;
         // Load src fields
         // SAFETY: GEP at a computed offset within the allocated entries array; index is bounded by capacity
         let src_len_slot = unsafe {
@@ -14253,21 +14355,17 @@ pub fn define_list_ir_helpers<'ctx>(context: &'ctx Context, module: &Module<'ctx
             .build_select(use_len, src_len, src_cap, "alloc_cap")
             .or_llvm_err()?
             .into_int_value();
-        let new_data = builder
-            .build_call(
-                calloc_fn,
-                &[alloc_cap.into(), i64_type.const_int(8, false).into()],
-                "new_data",
-            )
-            .or_llvm_err()?
-            .basic_value_or("call returned void")?
-            .into_pointer_value();
-        // memcpy(new_data, src_data, src_len * 8)
+        let resize = module.get_function("verum_list_resize_storage").or_missing_fn("verum_list_resize_storage")?;
+        builder.build_call(resize, &[new_list.into(), alloc_cap.into()], "").or_llvm_err()?;
+        let backing_slot = runtime.list_field_address(&builder, new_list, LIST_PTR_OFFSET, "clone_backing_slot")?;
+        let backing = builder.build_load(i64_type, backing_slot, "clone_backing").or_llvm_err()?.into_int_value();
+        let new_data = builder.build_int_to_ptr(backing, ptr_type, "clone_data").or_llvm_err()?;
+        // Copy exactly the initialized elements in their carried encoding.
         let src_data = builder
             .build_int_to_ptr(src_data_i64, ptr_type, "src_data")
             .or_llvm_err()?;
         let copy_bytes = builder
-            .build_int_mul(src_len, i64_type.const_int(8, false), "copy_bytes")
+            .build_int_mul(src_len, width, "copy_bytes")
             .or_llvm_err()?;
         let memcpy_fn = module
             .get_function("llvm.memcpy.p0.p0.i64")

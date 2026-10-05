@@ -1097,6 +1097,8 @@ pub enum InlineSequenceId {
     // =========================================================================
     // Heap Memory Allocation Intrinsics
     // =========================================================================
+    /// Query the physical element width of an existing List carrier.
+    ListStorageStride,
     /// alloc: allocate heap memory
     Alloc,
     /// alloc_zeroed: allocate zeroed heap memory
@@ -2266,6 +2268,16 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     // =========================================================================
     // Heap Memory Allocation Intrinsics
     // =========================================================================
+    Intrinsic {
+        name: "list_storage_stride",
+        category: IntrinsicCategory::Memory,
+        hints: &[IntrinsicHint::MemoryEffect, IntrinsicHint::Generic, IntrinsicHint::Inline],
+        param_count: 1,
+        return_count: 1,
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::ListStorageStride),
+        mlir_op: None,
+        doc: "Physical element width carried by a canonical List object",
+    },
     Intrinsic {
         name: "alloc",
         category: IntrinsicCategory::Memory,

@@ -46,7 +46,7 @@ mount core.intrinsics.arithmetic.{ilog2};
 // bare variant `Equal` (e.g. the `cmp` chain), so the variants must
 // come in alongside the type.
 mount core.base.ordering.{Ordering, Less, Equal, Greater};
-mount core.intrinsics.memory.{ptr_read, ptr_write, slice_from_raw_parts};
+mount core.intrinsics.memory.{ptr_read, ptr_write, slice_from_raw_parts, list_storage_stride};
 
 // =============================================================================
 // List<T>
@@ -718,7 +718,7 @@ implement<T> List<T> {
         if self.cap == 0 {
             return 4;
         }
-        let max = list_max_len(T.size);
+        let max = list_max_len(list_storage_stride(self));
         // checked_mul instead of `*` so the doubling can't wrap.
         match self.cap.checked_mul(2) {
             Maybe.Some(doubled) => if doubled > max { max } else { doubled },
@@ -737,17 +737,18 @@ implement<T> List<T> {
         // byte-size multiplication below. Panic here matches the
         // panicking discipline of this whole path; callers wanting
         // recoverability use `try_resize_buffer` instead.
-        if new_cap < 0 || new_cap > list_max_len(T.size) {
-            panic(f"List buffer resize: capacity overflow (requested {new_cap}, max {list_max_len(T.size)})");
+        let stride = list_storage_stride(self);
+        if new_cap < 0 || new_cap > list_max_len(stride) {
+            panic(f"List buffer resize: capacity overflow (requested {new_cap}, max {list_max_len(stride)})");
         }
-        let new_size = new_cap * T.size;
-        let align = T.alignment;
+        let new_size = new_cap * stride;
+        let align = stride;
 
         let new_ptr = unsafe {
             if self.cap == 0 {
                 alloc(new_size, align) as &unsafe T
             } else {
-                let old_size = self.cap * T.size;
+                let old_size = self.cap * stride;
                 realloc(
                     self.ptr as &unsafe Byte,
                     old_size,
@@ -776,11 +777,12 @@ implement<T> List<T> {
         // This is the single chokepoint for the List len/cap
         // monotonicity invariant — push/insert/reserve all funnel
         // through here on growth.
-        if new_cap < 0 || new_cap > list_max_len(T.size) {
+        let stride = list_storage_stride(self);
+        if new_cap < 0 || new_cap > list_max_len(stride) {
             return Result.Err(AllocError.CapacityOverflow { requested: new_cap });
         }
-        let new_size = new_cap * T.size;
-        let align = T.alignment;
+        let new_size = new_cap * stride;
+        let align = stride;
 
         // Route through try_alloc / try_realloc so allocator-side
         // errors propagate as typed AllocError variants. The
@@ -788,7 +790,7 @@ implement<T> List<T> {
         let new_raw = if self.cap == 0 {
             try_alloc(new_size, align)?
         } else {
-            let old_size = self.cap * T.size;
+            let old_size = self.cap * stride;
             try_realloc(
                 self.ptr as &unsafe Byte,
                 old_size,
@@ -810,11 +812,12 @@ implement<T> List<T> {
     // Free internal buffer.
     fn free_buffer(&mut self) {
         if self.cap > 0 {
+            let stride = list_storage_stride(self);
             unsafe {
                 dealloc(
                     self.ptr as &unsafe Byte,
-                    self.cap * T.size,
-                    T.alignment,
+                    self.cap * stride,
+                    stride,
                 );
             }
             self.ptr = null_ptr();

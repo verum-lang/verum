@@ -265,6 +265,27 @@ fn mem_extended_body(
             Ok(DispatchResult::Continue)
         }
 
+        // Storage queries use the actual object carrier. A caller's generic
+        // parameter can remain erased without inventing a type layout.
+        0x07 => {
+            let dst = read_reg(state)?;
+            let list_reg = read_reg(state)?;
+            let value = super::cbgr_helpers::resolve_receiver(state, state.get_reg(list_reg));
+            let ptr = value.as_ptr::<heap::ObjectHeader>();
+            if ptr.is_null() || !state.heap.contains(ptr) {
+                return Err(InterpreterError::Panic {
+                    message: "list_storage_stride requires a live List object".into(),
+                });
+            }
+            // SAFETY: exact membership in this interpreter's live heap was checked.
+            let id = unsafe { (*ptr).type_id };
+            let width = id.list_storage_stride().ok_or_else(|| InterpreterError::Panic {
+                message: format!("unknown List storage type: {id:?}"),
+            })?;
+            state.set_reg(dst, Value::from_i64(width as i64));
+            Ok(DispatchResult::Continue)
+        }
+
         // Swap: [a, b]
         //
         // The args are `&mut T` references which materialise as CBGR

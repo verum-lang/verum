@@ -13,7 +13,7 @@
 //!   * cell — word0 is a heap DATA pointer (>= platform heap floor);
 //!   * stamped Pack — header type_id TUPLE(521) / BYTE_SLICE(528):
 //!     `{data@24, len@32}`, byte elements;
-//!   * unstamped List — word0 == 0 stamp: canonical layout
+//!   * List — a canonical small type stamp (or legacy zero): layout
 //!     `{len@24, cap@32, ptr@40}` (verum_common::layout), 8-byte
 //!     Value elements.
 //! REAL branches throughout — the shapes have different valid extents,
@@ -34,7 +34,7 @@
 //! alignment is sound: `lower_pack_typed` zeroes the full 24-byte
 //! header before stamping ONLY a small TypeId constant into the low 4
 //! bytes (521/528, upper 32 bits left 0), and `lower_new_list[_with_capacity]`
-//! memsets the whole header to 0 — word0 for both shapes is always far
+//! zeroes the header then stamps canonical List identity — word0 is still far
 //! below ANY platform floor regardless of alignment, so the floor
 //! compare alone already carries the full disambiguating weight.
 //!
