@@ -1105,6 +1105,8 @@ pub enum InlineSequenceId {
     ListStorageWrite,
     /// Move element ranges within one owner, preserving overlapping regions.
     ListStorageMove,
+    /// Resize an owner while preserving initialized length and allocation provenance.
+    ListStorageResize,
     /// alloc: allocate heap memory
     Alloc,
     /// alloc_zeroed: allocate zeroed heap memory
@@ -2328,6 +2330,21 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::ListStorageMove),
         mlir_op: None,
         doc: "Capacity-checked move using the exact List storage encoding",
+    },
+    Intrinsic {
+        name: "list_storage_resize",
+        category: IntrinsicCategory::Memory,
+        hints: &[
+            IntrinsicHint::Unsafe,
+            IntrinsicHint::MemoryEffect,
+            IntrinsicHint::Generic,
+            IntrinsicHint::Alloc,
+        ],
+        param_count: 2,
+        return_count: 1,
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::ListStorageResize),
+        mlir_op: None,
+        doc: "Resize canonical owned storage; false leaves the owner unchanged",
     },
     Intrinsic {
         name: "alloc",

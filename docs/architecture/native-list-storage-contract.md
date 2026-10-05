@@ -280,3 +280,50 @@ consumers. In particular, generic iterator adaptors cannot recover an
 original byte address from a preloaded value. Their reference representation
 and lifetime proof remain a separate prerequisite. Full acceptance above
 requires the coherent native fixture after those consumers are complete.
+
+## Owner-preserving allocation and source value methods
+
+VBC 2.22 adds `list_storage_resize(owner, capacity) -> Bool`. It validates
+an existing canonical owner, its initialized length and allocation extent.
+The requested capacity must retain every initialized element. Only the
+`len * storage_width` prefix moves; spare capacity is not read as elements.
+A false result leaves length, capacity, pointer and initialized values
+unchanged. Zero capacity is permitted only at zero length. The operation
+invalidates element borrows and does not run element glue.
+
+Source `with_capacity` and `try_with_capacity` first create an empty owner,
+then use its encoding through the source resize methods. `resize_buffer`
+panics on failure, while `try_resize_buffer` returns the declared `AllocError`.
+`free_buffer` checks that logical length is already zero. Interpreter growth
+allocates tracked backing instead of publishing an untracked raw allocation;
+managed old backing remains under the interpreter heap's ownership. Exact
+tracked CBGR backing is released through its existing deallocator. An
+interior bridge address cannot authorize freeing its enclosing allocation.
+Native growth uses the same CBGR header construction for checked and fallible
+allocation, with the latter reporting OS allocation failure before changing
+the owner. It copies initialized bytes before releasing the old block.
+
+The internal native allocator takes an explicit canonical encoding (512 or
+527). Ordinary value-slot construction and cloning reuse it. Source `get`,
+`set`, `push`, `pop`, `insert`, `remove`, `swap` and `swap_remove` use the
+checked owner-based value operations. The legacy native ListPop opcode
+branches before any empty-buffer read and reads nonempty elements using the
+same storage encoding. This does not change element clone/drop semantics.
+
+The durable gates are `verum_vbc --test list_source_storage` and
+`verum_codegen --test list_storage_query`. The source-method fixtures retain
+real List method bodies under distinct names to avoid a method intercept
+hiding their behavior. These are public parser/codegen tests, not a full CLI
+checker or AOT acceptance. They include reserve, growth, insertion/removal,
+clear/truncate, shrink and regrowth for Byte/Int and record slots; allocation-failure controls
+check preservation of the old owner. Native tests retain the compiler-owned
+checked allocator and exit bodies, substituting only OS allocation/exit
+edges. Packed native owners are created by the actual internal allocator,
+not by constructing a header in the test.
+
+This is an internal allocation/value-access boundary. The public native
+packed constructor remains disconnected: borrowed `get_unchecked`, indexing,
+raw-pointer methods, iterators and slices still require an explicit storage
+reference contract. Their original address and width cannot be reconstructed
+from a preloaded word or from `&T` alone. Whole native List acceptance remains
+open until those consumers and the public constructor compose safely.

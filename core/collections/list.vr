@@ -46,7 +46,7 @@ mount core.intrinsics.arithmetic.{ilog2};
 // bare variant `Equal` (e.g. the `cmp` chain), so the variants must
 // come in alongside the type.
 mount core.base.ordering.{Ordering, Less, Equal, Greater};
-mount core.intrinsics.memory.{ptr_read, ptr_write, slice_from_raw_parts, list_storage_stride};
+mount core.intrinsics.memory.{ptr_read, ptr_write, slice_from_raw_parts, list_storage_stride, list_storage_read, list_storage_write, list_storage_move, list_storage_resize};
 
 // =============================================================================
 // List<T>
@@ -165,35 +165,13 @@ implement<T> List<T> {
     }
 
     // Create list with preallocated capacity. Panics on OOM with
-    // the requested byte count attached so post-mortems can
-    // correlate the failure to a specific size. Use
+    // the requested capacity attached. Use
     // `try_with_capacity` on production paths that must degrade
     // gracefully rather than crash.
     public fn with_capacity(capacity: Int) -> List<T> {
-        if capacity == 0 {
-            return List.new();
-        }
-
-        // Capacity-overflow guard so the byte-size multiplication
-        // below cannot wrap. Match the panicking discipline of this
-        // constructor; recoverable callers use `try_with_capacity`.
-        if capacity < 0 || capacity > list_max_len(T.size) {
-            panic(f"List.with_capacity({capacity}) capacity overflow (max {list_max_len(T.size)})");
-        }
-
-        let ptr = unsafe {
-            alloc(capacity * T.size, T.alignment) as &unsafe T
-        };
-
-        if ptr.is_null() {
-            panic(f"List.with_capacity({capacity}) failed: requested {capacity * T.size} bytes");
-        }
-
-        List {
-            ptr: ptr,
-            len: 0,
-            cap: capacity,
-        }
+        let mut result: List<T> = List.new();
+        result.resize_buffer(capacity);
+        result
     }
 
     // Fallible counterpart to `with_capacity`. Returns
@@ -202,36 +180,11 @@ implement<T> List<T> {
     // allocator can't satisfy the request — for daemons / services
     // that need to degrade rather than crash.
     public fn try_with_capacity(capacity: Int) -> Result<List<T>, AllocError> {
-        if capacity == 0 {
-            return Result.Ok(List.new());
+        let mut result: List<T> = List.new();
+        match result.try_resize_buffer(capacity) {
+            Result.Ok(()) => Result.Ok(result),
+            Result.Err(error) => Result.Err(error),
         }
-
-        // Capacity-overflow guard. Same role as in
-        // `try_resize_buffer`, repeated here because direct callers
-        // of `try_with_capacity` skip the resize path.
-        if capacity < 0 || capacity > list_max_len(T.size) {
-            return Result.Err(AllocError.CapacityOverflow { requested: capacity });
-        }
-
-        // Route through try_alloc so allocator-side errors (OutOfMemory,
-        // InvalidSize, InvalidAlignment, MmapFailed, …) propagate as
-        // typed AllocError variants. The defensive null-check is
-        // retained as a belt-and-braces against an allocator that
-        // returns Ok with a null pointer.
-        let raw = try_alloc(capacity * T.size, T.alignment)?;
-        let ptr = raw as &unsafe T;
-
-        if ptr.is_null() {
-            return Result.Err(AllocError.OutOfMemory {
-                requested: capacity * T.size,
-            });
-        }
-
-        Result.Ok(List {
-            ptr: ptr,
-            len: 0,
-            cap: capacity,
-        })
     }
 
     // Create list from slice.
@@ -349,7 +302,7 @@ implement<T> List<T> {
     @inline(always)
     public fn get(&self, idx: Int) -> Maybe<T> {
         if idx >= 0 && idx < self.len {
-            unsafe { Maybe.Some(*self.ptr.offset(idx)) }
+            unsafe { Maybe.Some(list_storage_read(self, idx)) }
         } else {
             Maybe.None
         }
@@ -373,7 +326,7 @@ implement<T> List<T> {
     public fn set(&mut self, idx: Int, value: T) {
         assert(idx >= 0 && idx < self.len, "set index out of bounds");
         unsafe {
-            ptr_write(self.ptr.offset(idx), value);
+            list_storage_write(self, idx, value);
         }
     }
 
@@ -434,7 +387,7 @@ implement<T> List<T> {
             self.grow();
         }
         unsafe {
-            ptr_write(self.ptr.offset(self.len), value);
+            list_storage_write(self, self.len, value);
         }
         self.len = self.len + 1;
     }
@@ -466,7 +419,7 @@ implement<T> List<T> {
         }
         self.len = self.len - 1;
         unsafe {
-            Maybe.Some(ptr_read(self.ptr.offset(self.len)))
+            Maybe.Some(list_storage_read(self, self.len))
         }
     }
 
@@ -499,9 +452,9 @@ implement<T> List<T> {
     //
 
     // SOUNDNESS: relies on the `self.len ≤ max_len()` invariant
-    // maintained by `resize_buffer` / `try_resize_buffer`, so
-    // `idx + 1` (with `idx ≤ self.len`) and `(self.len - idx) * T.size`
-    // are guaranteed not to overflow `Int`.
+    // maintained by `resize_buffer` / `try_resize_buffer`. The storage
+    // operation checks capacity and uses the owner's physical element width;
+    // semantic T.size is not a backing-array stride.
     public fn insert(&mut self, idx: Int, value: T) {
         assert(idx >= 0 && idx <= self.len, "insert index out of bounds");
 
@@ -512,11 +465,9 @@ implement<T> List<T> {
         unsafe {
             // Shift elements right
             if idx < self.len {
-                let dst = self.ptr.offset(idx + 1) as &unsafe Byte;
-                let src = self.ptr.offset(idx) as &unsafe Byte;
-                memmove_addr(dst, src, (self.len - idx) * T.size);
+                list_storage_move(self, idx, idx + 1, self.len - idx);
             }
-            ptr_write(self.ptr.offset(idx), value);
+            list_storage_write(self, idx, value);
         }
         self.len = self.len + 1;
     }
@@ -531,15 +482,11 @@ implement<T> List<T> {
         assert(idx >= 0 && idx < self.len, "remove index out of bounds");
 
         unsafe {
-            let value = ptr_read(self.ptr.offset(idx));
+            let value = list_storage_read(self, idx);
 
             // Shift elements left
             if idx < self.len - 1 {
-                memmove_addr(
-                    self.ptr.offset(idx) as &unsafe Byte,
-                    self.ptr.offset(idx + 1) as &unsafe Byte,
-                    (self.len - idx - 1) * T.size,
-                );
+                list_storage_move(self, idx + 1, idx, self.len - idx - 1);
             }
 
             self.len = self.len - 1;
@@ -553,14 +500,12 @@ implement<T> List<T> {
 
         unsafe {
             let last_idx = self.len - 1;
+            let value = list_storage_read(self, idx);
             if idx != last_idx {
-                let tmp = ptr_read(self.ptr.offset(idx));
-                ptr_write(self.ptr.offset(idx), ptr_read(self.ptr.offset(last_idx)));
-                self.len = self.len - 1;
-                tmp
-            } else {
-                self.pop().expect("List.swap_remove: pop returns Some — outer bounds-check guarantees self.len > 0 at this branch")
+                list_storage_write(self, idx, list_storage_read(self, last_idx));
             }
+            self.len = last_idx;
+            value
         }
     }
 
@@ -606,9 +551,9 @@ implement<T> List<T> {
                "swap indices out of bounds");
         if a != b {
             unsafe {
-                let tmp = ptr_read(self.ptr.offset(a));
-                ptr_write(self.ptr.offset(a), ptr_read(self.ptr.offset(b)));
-                ptr_write(self.ptr.offset(b), tmp);
+                let tmp = list_storage_read(self, a);
+                list_storage_write(self, a, list_storage_read(self, b));
+                list_storage_write(self, b, tmp);
             }
         }
     }
@@ -738,32 +683,12 @@ implement<T> List<T> {
         // panicking discipline of this whole path; callers wanting
         // recoverability use `try_resize_buffer` instead.
         let stride = list_storage_stride(self);
-        if new_cap < 0 || new_cap > list_max_len(stride) {
+        if new_cap < self.len || new_cap > list_max_len(stride) {
             panic(f"List buffer resize: capacity overflow (requested {new_cap}, max {list_max_len(stride)})");
         }
-        let new_size = new_cap * stride;
-        let align = stride;
-
-        let new_ptr = unsafe {
-            if self.cap == 0 {
-                alloc(new_size, align) as &unsafe T
-            } else {
-                let old_size = self.cap * stride;
-                realloc(
-                    self.ptr as &unsafe Byte,
-                    old_size,
-                    new_size,
-                    align,
-                ) as &unsafe T
-            }
-        };
-
-        if new_ptr.is_null() {
-            panic(f"List buffer resize failed: requested {new_size} bytes (capacity {new_cap})");
+        if !unsafe { list_storage_resize(self, new_cap) } {
+            panic(f"List buffer resize failed: requested capacity {new_cap}");
         }
-
-        self.ptr = new_ptr;
-        self.cap = new_cap;
     }
 
     // Fallible counterpart to resize_buffer. Returns
@@ -778,51 +703,21 @@ implement<T> List<T> {
         // monotonicity invariant — push/insert/reserve all funnel
         // through here on growth.
         let stride = list_storage_stride(self);
-        if new_cap < 0 || new_cap > list_max_len(stride) {
+        if new_cap < self.len || new_cap > list_max_len(stride) {
             return Result.Err(AllocError.CapacityOverflow { requested: new_cap });
         }
-        let new_size = new_cap * stride;
-        let align = stride;
-
-        // Route through try_alloc / try_realloc so allocator-side
-        // errors propagate as typed AllocError variants. The
-        // defensive null-check below is retained as belt-and-braces.
-        let new_raw = if self.cap == 0 {
-            try_alloc(new_size, align)?
+        if unsafe { list_storage_resize(self, new_cap) } {
+            Result.Ok(())
         } else {
-            let old_size = self.cap * stride;
-            try_realloc(
-                self.ptr as &unsafe Byte,
-                old_size,
-                new_size,
-                align,
-            )?
-        };
-        let new_ptr = new_raw as &unsafe T;
-
-        if new_ptr.is_null() {
-            return Result.Err(AllocError.OutOfMemory { requested: new_size });
+            Result.Err(AllocError.OutOfMemory { requested: new_cap * stride })
         }
-
-        self.ptr = new_ptr;
-        self.cap = new_cap;
-        Result.Ok(())
     }
 
     // Free internal buffer.
     fn free_buffer(&mut self) {
-        if self.cap > 0 {
-            let stride = list_storage_stride(self);
-            unsafe {
-                dealloc(
-                    self.ptr as &unsafe Byte,
-                    self.cap * stride,
-                    stride,
-                );
-            }
-            self.ptr = null_ptr();
-            self.cap = 0;
-        }
+        // All callers have already removed/dropped the initialized elements.
+        assert(self.len == 0, "List.free_buffer requires empty storage");
+        unsafe { list_storage_resize(self, 0); }
     }
 
     // =========================================================================

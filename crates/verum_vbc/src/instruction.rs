@@ -5012,6 +5012,8 @@ pub enum MemSubOpcode {
     ListStorageWrite = 0x09,
     /// Move overlapping element ranges (dst-unit, list, source, target, count).
     ListStorageMove = 0x0A,
+    /// Resize owned storage without changing initialized length; returns success.
+    ListStorageResize = 0x0B,
     // -- Pointer arithmetic + deref leaves (0x10-0x1F), carried over
     //    from SystemSubOpcode 0x60-0x6C (T0852).
     /// Unsigned raw-pointer load (dst, addr, size-imm).
@@ -5118,6 +5120,7 @@ impl MemSubOpcode {
             0x08 => Some(Self::ListStorageRead),
             0x09 => Some(Self::ListStorageWrite),
             0x0A => Some(Self::ListStorageMove),
+            0x0B => Some(Self::ListStorageResize),
             0x10 => Some(Self::DerefRaw),
             0x11 => Some(Self::DerefMutRaw),
             0x12 => Some(Self::DerefRawPtr),
@@ -17168,8 +17171,12 @@ mod tests {
         assert_eq!(MemSubOpcode::from_byte(0x09), Some(MemSubOpcode::ListStorageWrite));
         assert_eq!(MemSubOpcode::from_byte(0x0A), Some(MemSubOpcode::ListStorageMove));
         assert_eq!(
+            MemSubOpcode::from_byte(0x0B),
+            Some(MemSubOpcode::ListStorageResize)
+        );
+        assert_eq!(
             sweep(MemSubOpcode::from_byte, MemSubOpcode::to_byte),
-            42, // Storage stride plus checked read/write/move operations.
+            43, // Storage stride, checked accesses and owner resize.
             "MemSubOpcode variant count drift"
         );
     }

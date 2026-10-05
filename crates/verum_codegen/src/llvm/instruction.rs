@@ -4373,7 +4373,7 @@ fn lower_instruction_impl<'ctx>(
             let recv_val = deref_marked_receiver(ctx, list.0, "recv_slot")?;
             let list_ptr = as_ptr(ctx, recv_val, "list_ptr")?;
             let runtime = RuntimeLowering::new(ctx.llvm_context());
-            let popped = runtime.lower_list_pop(ctx.builder(), list_ptr)?;
+            let popped = runtime.lower_list_pop(ctx.builder(), ctx.get_module(), list_ptr)?;
             ctx.set_register(dst.0, popped.into());
             Ok(())
         }
@@ -28368,6 +28368,25 @@ fn lower_mem_extended<'ctx>(
                     )
                 })?;
             ctx.set_register(dst, result);
+            Ok(())
+        }
+        0x0B => {
+            let dst = read_reg_varlen(operands, &mut pos)?;
+            let list = read_reg_varlen(operands, &mut pos)?;
+            let capacity = read_reg_varlen(operands, &mut pos)?;
+            let owner = as_ptr(ctx, ctx.get_register(list)?, "resize_owner")?;
+            let capacity = as_i64(ctx, ctx.get_register(capacity)?, "resize_capacity")?;
+            let resize = ctx
+                .get_module()
+                .get_function("verum_list_try_resize_storage")
+                .or_missing_fn("verum_list_try_resize_storage")?;
+            let result = ctx
+                .builder()
+                .build_call(resize, &[owner.into(), capacity.into()], "resized")
+                .or_llvm_err()?
+                .basic_value_or("List resize returned void")?;
+            ctx.set_register(dst, result);
+            ctx.mark_bool_register(dst);
             Ok(())
         }
         0x08..=0x0A => {

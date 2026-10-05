@@ -1,5 +1,5 @@
 //! Actual List source methods use their runtime storage encoding, not T.size.
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use verum_ast::{
     ItemKind,
     decl::{ImplItemKind, ImplKind},
@@ -16,8 +16,14 @@ use verum_llvm::{
 };
 use verum_vbc::codegen::{ItemFailurePolicy, VbcCodegen};
 
-thread_local! { static STORAGE: RefCell<List<Heap<[u64]>>> = RefCell::new(List::new()); }
+thread_local! {
+    static STORAGE: RefCell<List<Heap<[u64]>>> = RefCell::new(List::new());
+    static FAIL_ALLOCATION: Cell<bool> = const { Cell::new(false) };
+}
 extern "C" fn allocate(size: u64) -> *mut u64 {
+    if FAIL_ALLOCATION.replace(false) {
+        return std::ptr::null_mut();
+    }
     STORAGE.with(|s| {
         let mut allocation = List::from_elem(0, size.div_ceil(8) as usize).into_boxed_slice();
         let ptr = allocation.as_mut_ptr();
@@ -26,20 +32,13 @@ extern "C" fn allocate(size: u64) -> *mut u64 {
     })
 }
 extern "C" fn release(_pointer: u64, _size: u64) {}
-extern "C" fn abort(_code: u64) {
+extern "C" fn abort(_code: i32) {
     std::process::abort();
 }
 const BOUNDARIES: &[(&str, &str)] = &[
-    (
-        "verum_checked_malloc",
-        "declare ptr @verum_checked_malloc(i64)\n",
-    ),
     ("verum_os_alloc", "declare ptr @verum_os_alloc(i64)\n"),
     ("verum_dealloc", "declare void @verum_dealloc(ptr, i64)\n"),
-    (
-        "verum_internal_exit_i64",
-        "declare void @verum_internal_exit_i64(i64)\n",
-    ),
+    ("verum_os_exit", "declare void @verum_os_exit(i32)\n"),
 ];
 fn is_list(ty: &verum_ast::Type) -> bool {
     match &ty.kind {
@@ -60,26 +59,131 @@ fn with_source(
         ItemKind::Type(t) => t.name.name == "List",
         ItemKind::Function(f) => f.name.name == "list_max_len",
         ItemKind::Impl(i) if matches!(&i.kind, ImplKind::Inherent(t) if is_list(t)) => {
-            i.items.retain(|m| matches!(&m.kind, ImplItemKind::Function(f) if ["new", "len", "capacity", "reserve", "shrink_to_fit", "resize_buffer", "free_buffer"].contains(&f.name.name.as_str())));
+            // clear/truncate retain their real call to the original pop body.
+            let original_pop = i
+                .items
+                .iter()
+                .find(|item| {
+                    matches!(&item.kind,
+                ImplItemKind::Function(function) if function.name.name == "pop")
+                })
+                .cloned();
+            i.items.retain_mut(|m| {
+                let ImplItemKind::Function(f) = &mut m.kind else {
+                    return false;
+                };
+                if [
+                    "with_capacity",
+                    "try_with_capacity",
+                    "clear",
+                    "truncate",
+                    "get",
+                    "set",
+                    "push",
+                    "pop",
+                    "insert",
+                    "remove",
+                    "swap",
+                    "swap_remove",
+                ]
+                .contains(&f.name.name.as_str())
+                {
+                    // Keep the actual source body while avoiding native method
+                    // intercepts: these tests exercise the source implementation.
+                    f.name.name = format!("checked_{}", f.name.name).into();
+                    true
+                } else {
+                    [
+                        "new",
+                        "len",
+                        "capacity",
+                        "reserve",
+                        "shrink_to_fit",
+                        "resize_buffer",
+                        "try_resize_buffer",
+                        "free_buffer",
+                        "grow",
+                        "next_cap",
+                    ]
+                    .contains(&f.name.name.as_str())
+                }
+            });
+            if let Some(original_pop) = original_pop {
+                i.items.push(original_pop);
+            }
             true
-        },
+        }
         _ => false,
     });
     ast.items.extend(core.items);
     let mut memory = Parser::new(include_str!("../../../core/intrinsics/memory.vr"))
         .parse_module()
         .expect("memory grammar");
-    memory.items.retain(|item| matches!(&item.kind, ItemKind::Function(f) if ["list_storage_read", "list_storage_write", "list_storage_move"].contains(&f.name.name.as_str())));
+    memory.items.retain(|item| matches!(&item.kind, ItemKind::Function(f) if ["list_storage_read", "list_storage_write", "list_storage_move", "list_storage_resize"].contains(&f.name.name.as_str())));
     ast.items.extend(memory.items);
+    let mut primitives = Parser::new(include_str!("../../../core/base/primitives.vr"))
+        .parse_module()
+        .expect("primitive grammar");
+    primitives.items.retain_mut(|item| {
+        let ItemKind::Impl(decl) = &mut item.kind else { return false; };
+        if !matches!(&decl.kind, ImplKind::Inherent(ty) if matches!(&ty.kind,
+            verum_ast::ty::TypeKind::Int)) {
+            return false;
+        }
+        decl.items.retain(|item| matches!(&item.kind, ImplItemKind::Function(function) if function.name.name == "checked_mul"));
+        true
+    });
+    ast.items.extend(primitives.items);
+    let mut arithmetic = Parser::new(include_str!("../../../core/intrinsics/arithmetic.vr"))
+        .parse_module()
+        .expect("arithmetic grammar");
+    arithmetic.items.retain(|item| matches!(&item.kind, ItemKind::Function(function) if function.name.name == "checked_mul"));
+    ast.items.extend(arithmetic.items);
+    let mut allocation = Parser::new(include_str!("../../../core/mem/allocator.vr"))
+        .parse_module()
+        .expect("allocator grammar");
+    allocation.items.retain(
+        |item| matches!(&item.kind, ItemKind::Type(decl) if decl.name.name == "AllocError"),
+    );
+    ast.items.extend(allocation.items);
+    let result_owner =
+        Parser::new("module core.base.result; public type Result<T,E> is Ok(T) | Err(E);")
+            .parse_module()
+            .expect("canonical Result source owner");
+    let mut maybe_owner =
+        Parser::new("module core.base.maybe; public type Maybe<T> is None | Some(T);")
+            .parse_module()
+            .expect("canonical Maybe source owner");
+    let mut maybe_methods = Parser::new(include_str!("../../../core/base/maybe.vr"))
+        .parse_module()
+        .expect("actual Maybe source");
+    maybe_methods.items.retain_mut(|item| {
+        let ItemKind::Impl(decl) = &mut item.kind else {
+            return false;
+        };
+        if !matches!(&decl.kind, ImplKind::Inherent(_)) {
+            return false;
+        }
+        decl.items.retain(|item| {
+            matches!(&item.kind, ImplItemKind::Function(function)
+            if function.name.name == "is_some")
+        });
+        !decl.items.is_empty()
+    });
+    maybe_owner.items.extend(maybe_methods.items);
+
     let mut codegen = VbcCodegen::new();
     codegen.register_builtin_variants();
     codegen.register_stdlib_constants();
     codegen.register_stdlib_intrinsics();
     codegen
-        .collect_unit_declarations(&[&ast])
+        .collect_unit_declarations(&[&maybe_owner, &result_owner, &ast])
         .expect("declarations");
     codegen
-        .compile_unit_items(&[&ast], ItemFailurePolicy::Strict)
+        .compile_unit_items(
+            &[&maybe_owner, &result_owner, &ast],
+            ItemFailurePolicy::Strict,
+        )
         .expect("source bodies");
     let mut vbc = codegen.finalize_module().expect("source VBC");
     vbc.resolve_protocol_dispatch();
@@ -107,7 +211,27 @@ fn with_source(
         LoweringConfig::debug("list_storage").with_debug_info(false),
     );
     lower.lower_module(&vbc).expect("source LLVM");
+    // Pin the legacy ListPop opcode helper on the same owners produced by
+    // source constructors. Source `List.pop` returns Maybe and has a separate
+    // source-body test below; the opcode itself returns a raw slot or Unit.
+    let pointer = context.ptr_type(verum_llvm::AddressSpace::default());
+    let pop = lower.module().add_function(
+        "test_storage_pop",
+        context.i64_type().fn_type(&[pointer.into()], false),
+        None,
+    );
+    let builder = context.create_builder();
+    builder.position_at_end(context.append_basic_block(pop, "entry"));
+    let result = verum_codegen::llvm::runtime::RuntimeLowering::new(&context)
+        .lower_list_pop(
+            &builder,
+            lower.module(),
+            pop.get_first_param().unwrap().into_pointer_value(),
+        )
+        .expect("ListPop helper");
+    builder.build_return(Some(&result)).unwrap();
     let mut todo = List::new();
+    todo.push(pop);
     for fd in &vbc.functions {
         todo.push(
             lower
@@ -159,10 +283,9 @@ fn with_source(
         .create_jit_execution_engine(OptimizationLevel::None)
         .expect("JIT");
     for (name, addr) in [
-        ("verum_checked_malloc", allocate as *const () as usize),
         ("verum_os_alloc", allocate as *const () as usize),
         ("verum_dealloc", release as *const () as usize),
-        ("verum_internal_exit_i64", abort as *const () as usize),
+        ("verum_os_exit", abort as *const () as usize),
     ] {
         if let Some(f) = executable.get_function(name) {
             engine.add_global_mapping(&f, addr);
@@ -512,6 +635,7 @@ fn owned_storage_invalid_range_and_extent_refuse_before_writing() {
         with_source(
             r#"
             fn make()->List<Int> {List<Int>.with_capacity(2)}
+            fn copied(values:List<Int>)->List<Int> {values.clone()}
             fn storage_write_probe(values:List<Int>, index:Int)->Int {@intrinsic("list_storage_write",values,index,37); 0}
             fn movement(values:List<Int>, source:Int,target:Int,count:Int)->Int {@intrinsic("list_storage_move",values,source,target,count); 0}
             "#,
@@ -548,6 +672,23 @@ fn owned_storage_invalid_range_and_extent_refuse_before_writing() {
                             .unwrap()
                             .call(handle, 0, 0, 0);
                     }
+                    "clone-null" | "pop-null" | "clone-length" | "clone-shape" => {
+                        if case == "clone-length" {
+                            *((handle as *mut u64).add(3)) = 3;
+                        } else if case == "clone-shape" {
+                            *((handle as *mut u32).add(3)) = 24;
+                        } else {
+                            *((handle as *mut u64).add(5)) = 0;
+                        }
+                        let name = if case == "pop-null" {
+                            "test_storage_pop"
+                        } else {
+                            "copied"
+                        };
+                        jit.get_function::<unsafe extern "C" fn(u64) -> u64>(name)
+                            .unwrap()
+                            .call(handle);
+                    }
                     "move" => jit
                         .get_function::<unsafe extern "C" fn(u64, i64, i64, i64)>("movement")
                         .unwrap()
@@ -567,6 +708,10 @@ fn owned_storage_invalid_range_and_extent_refuse_before_writing() {
         "move",
         "zero-null",
         "zero-extent",
+        "clone-null",
+        "pop-null",
+        "clone-length",
+        "clone-shape",
     ] {
         let output = std::process::Command::new(std::env::current_exe().unwrap())
             .args([
@@ -679,6 +824,317 @@ fn public_storage_functions_accept_list_borrows() {
                     .call(),
                 37
             );
+        },
+    );
+}
+
+#[test]
+fn internal_storage_allocator_keeps_exact_encoding_and_extent() {
+    with_source(
+        "fn ordinary()->List<Int> {List<Int>.new()}",
+        |_, jit| unsafe {
+            let allocate = jit
+                .get_function::<unsafe extern "C" fn(u64, u32) -> u64>(
+                    "verum_list_allocate_storage",
+                )
+                .expect("internal storage allocator");
+            for (encoding, width) in [(512, 8), (527, 1)] {
+                for capacity in [0, 3, 40] {
+                    let handle = allocate.call(capacity, encoding);
+                    assert_eq!(*(handle as *const u32), encoding);
+                    assert_eq!(*((handle as *const u64).add(3)), 0);
+                    assert_eq!(*((handle as *const u64).add(4)), capacity);
+                    let data = *((handle as *const u64).add(5)) as *const u8;
+                    if capacity == 0 {
+                        assert!(data.is_null());
+                    } else {
+                        assert_eq!(
+                            *(data.sub(verum_common::layout::ALLOCATION_HEADER_SIZE as usize)
+                                as *const u32),
+                            (capacity * width) as u32
+                        );
+                    }
+                }
+            }
+        },
+    );
+}
+
+#[test]
+fn packed_and_slot_source_value_methods_survive_shrink_and_regrow() {
+    with_source(
+        r#"
+        fn ordinary()->List<Int> {List<Int>.new()}
+        fn copy(values:List<Byte>)->List<Byte> {values.clone()}
+        fn exercise(values:List<Byte>)->Int {
+            values.shrink_to_fit();
+            values.reserve(3);
+            values.checked_push(0);
+            values.checked_push(255);
+            values.checked_push(42);
+            values.checked_insert(1,17);
+            let removed=values.checked_remove(1);
+            values.checked_set(0,7);
+            values.checked_swap(0,2);
+            let popped=match values.checked_pop() {Maybe.Some(x)=>x,Maybe.None=>10000};
+            values.shrink_to_fit();
+            values.reserve(17);
+            let first=match values.checked_get(0) {Maybe.Some(x)=>x,Maybe.None=>10000};
+            let second=match values.checked_get(1) {Maybe.Some(x)=>x,Maybe.None=>10000};
+            removed+popped+first+second
+        }
+    "#,
+        |ir, jit| unsafe {
+            let source_get = ir
+                .split("\ndefine ")
+                .find(|body| {
+                    body.lines()
+                        .next()
+                        .is_some_and(|line| line.contains("@List.checked_get("))
+                })
+                .expect("source get body")
+                .split("\n}")
+                .next()
+                .unwrap();
+            assert!(
+                source_get.contains("list_storage_read"),
+                "get still uses raw pointee layout: {source_get}"
+            );
+            let allocate = jit
+                .get_function::<unsafe extern "C" fn(u64, u32) -> u64>(
+                    "verum_list_allocate_storage",
+                )
+                .unwrap();
+            let exercise = jit
+                .get_function::<unsafe extern "C" fn(u64) -> i64>("exercise")
+                .unwrap();
+            for encoding in [512, 527] {
+                let list = allocate.call(0, encoding);
+                assert_eq!(exercise.call(list), 321, "encoding {encoding}");
+                assert_eq!(*(list as *const u32), encoding);
+                assert_eq!(*((list as *const u64).add(3)), 2);
+                assert!(*((list as *const u64).add(4)) >= 19);
+                let copied = jit
+                    .get_function::<unsafe extern "C" fn(u64) -> u64>("copy")
+                    .unwrap()
+                    .call(list);
+                assert_eq!(*(copied as *const u32), encoding);
+                let pop = jit
+                    .get_function::<unsafe extern "C" fn(u64) -> u64>("test_storage_pop")
+                    .unwrap();
+                assert_eq!(pop.call(copied), 255);
+                assert_eq!(pop.call(copied), 42);
+                assert_eq!(pop.call(copied), verum_vbc::value::nanbox::NAN_UNIT_HEADER);
+                assert_eq!(*((list as *const u64).add(3)), 2);
+                let empty = allocate.call(0, encoding);
+                assert_eq!(pop.call(empty), verum_vbc::value::nanbox::NAN_UNIT_HEADER);
+            }
+        },
+    );
+}
+
+#[test]
+fn allocator_rejects_unknown_encoding_and_overflow_before_allocating() {
+    const CHILD: &str = "VERUM_TEST_LIST_ALLOCATION_REFUSAL";
+    if let Some(case) = std::env::var_os(CHILD) {
+        with_source(
+            "fn ordinary()->List<Int>{List<Int>.new()}",
+            |_, jit| unsafe {
+                let allocator = jit
+                    .get_function::<unsafe extern "C" fn(u64, u32) -> u64>(
+                        "verum_list_allocate_storage",
+                    )
+                    .unwrap();
+                let (capacity, encoding) = match case.to_str().unwrap() {
+                    "encoding" => (0, 99999),
+                    "negative" => (u64::MAX, 512),
+                    "slots" => (u32::MAX as u64 / 8 + 1, 512),
+                    "bytes" => (u32::MAX as u64 + 1, 527),
+                    _ => panic!("unknown case"),
+                };
+                allocator.call(capacity, encoding);
+            },
+        );
+        panic!("invalid allocation returned");
+    }
+    for case in ["encoding", "negative", "slots", "bytes"] {
+        let result = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "allocator_rejects_unknown_encoding_and_overflow_before_allocating",
+                "--nocapture",
+            ])
+            .env(CHILD, case)
+            .output()
+            .unwrap();
+        assert!(!result.status.success(), "{case}");
+        assert_ne!(
+            result.status.code(),
+            Some(101),
+            "{case}: {}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+    }
+}
+
+#[test]
+fn resize_failure_preserves_owner_and_only_initialized_prefix_moves() {
+    with_source(
+        r#"
+        fn ordinary()->List<Int>{List<Int>.new()}
+        fn initialize(values:List<Int>) {values.checked_push(37);}
+        fn resize(values:List<Int>,cap:Int)->Bool {unsafe {list_storage_resize(values,cap)}}
+    "#,
+        |_, jit| unsafe {
+            let allocate = jit
+                .get_function::<unsafe extern "C" fn(u64, u32) -> u64>(
+                    "verum_list_allocate_storage",
+                )
+                .unwrap();
+            let initialize = jit
+                .get_function::<unsafe extern "C" fn(u64)>("initialize")
+                .unwrap();
+            let resize = jit
+                .get_function::<unsafe extern "C" fn(u64, u64) -> u64>("resize")
+                .unwrap();
+            let write = jit
+                .get_function::<unsafe extern "C" fn(u64, u64, u64)>("verum_list_storage_write")
+                .unwrap();
+            let read = jit
+                .get_function::<unsafe extern "C" fn(u64, u64) -> u64>("verum_list_storage_read")
+                .unwrap();
+            for encoding in [512, 527] {
+                let owner = allocate.call(4, encoding);
+                initialize.call(owner);
+                write.call(owner, 3, 99); // outside logical len; must not be copied
+                let fields = owner as *const u64;
+                let old_pointer = *fields.add(5);
+                for capacity in [0, u64::MAX, u32::MAX as u64 + 1] {
+                    assert_eq!(resize.call(owner, capacity), 0);
+                    assert_eq!(*fields.add(3), 1);
+                    assert_eq!(*fields.add(4), 4);
+                    assert_eq!(*fields.add(5), old_pointer);
+                    assert_eq!(read.call(owner, 0), 37);
+                }
+                FAIL_ALLOCATION.set(true);
+                let failed = resize.call(owner, 8);
+                FAIL_ALLOCATION.set(false);
+                assert_eq!(failed, 0, "OS allocation failure must be recoverable");
+                assert_eq!(*fields.add(3), 1);
+                assert_eq!(*fields.add(4), 4);
+                assert_eq!(*fields.add(5), old_pointer);
+                assert_eq!(read.call(owner, 0), 37);
+                assert_eq!(resize.call(owner, 8), 1);
+                assert_eq!(read.call(owner, 0), 37);
+                assert_eq!(read.call(owner, 3), 0, "uninitialized tail was copied");
+            }
+        },
+    );
+}
+
+#[test]
+fn fallible_source_resize_reports_oom_without_losing_values() {
+    with_source(
+        r#"
+        fn ordinary()->List<Int>{List<Int>.new()}
+        fn initialize(values:List<Int>) {values.checked_push(37);}
+        fn attempt(values:List<Int>)->Int {
+            match values.try_resize_buffer(8) {
+                Result.Ok(())=>1,
+                Result.Err(AllocError.OutOfMemory{requested})=>2,
+                _=>10000,
+            }
+        }
+    "#,
+        |_, jit| unsafe {
+            let allocate = jit
+                .get_function::<unsafe extern "C" fn(u64, u32) -> u64>(
+                    "verum_list_allocate_storage",
+                )
+                .unwrap();
+            let initialize = jit
+                .get_function::<unsafe extern "C" fn(u64)>("initialize")
+                .unwrap();
+            let attempt = jit
+                .get_function::<unsafe extern "C" fn(u64) -> i64>("attempt")
+                .unwrap();
+            for encoding in [512, 527] {
+                let owner = allocate.call(4, encoding);
+                initialize.call(owner);
+                let fields = owner as *const u64;
+                let pointer = *fields.add(5);
+                FAIL_ALLOCATION.set(true);
+                let failure = attempt.call(owner);
+                FAIL_ALLOCATION.set(false);
+                assert_eq!(failure, 2);
+                assert_eq!(*fields.add(5), pointer);
+                assert_eq!(*fields.add(3), 1);
+                assert_eq!(*fields.add(4), 4);
+                assert_eq!(attempt.call(owner), 1);
+                assert_eq!(*fields.add(4), 8);
+            }
+        },
+    );
+}
+
+#[test]
+fn source_constructors_use_tracked_storage_for_byte_and_record_values() {
+    with_source(
+        r#"
+        type Record is {a:Int,b:Int,c:Int};
+        fn bytes()->Byte {
+            let mut values:List<Byte> = List<Byte>.checked_with_capacity(3);
+            values.checked_push(255);
+            match values.checked_get(0) {Maybe.Some(x)=>x,_=>0}
+        }
+        fn records()->Int {
+            let attempt: Result<List<Record>, AllocError> = List<Record>.checked_try_with_capacity(2);
+            let mut values:List<Record> = match attempt {Result.Ok(xs)=>xs,_=>List.new()};
+            values.checked_push(Record{a:0,b:42,c:0});
+            match values.checked_get(0) {Maybe.Some(x)=>x.b,_=>10000}
+        }
+    "#,
+        |_, jit| unsafe {
+            assert_eq!(
+                jit.get_function::<unsafe extern "C" fn() -> u8>("bytes")
+                    .unwrap()
+                    .call(),
+                255
+            );
+            assert_eq!(
+                jit.get_function::<unsafe extern "C" fn() -> i64>("records")
+                    .unwrap()
+                    .call(),
+                42
+            );
+        },
+    );
+}
+
+#[test]
+fn source_clear_truncate_release_and_regrow_keep_owner_valid() {
+    with_source(
+        r#"
+        fn cycle(values:&mut List<Int>)->Int {
+            values.checked_push(255); values.checked_push(42);
+            values.checked_truncate(1); values.checked_clear(); values.shrink_to_fit();
+            assert(values.len()==0 && values.capacity()==0);
+            values.reserve(4); values.checked_push(37);
+            match values.checked_get(0) {Maybe.Some(x)=>x,_=>10000}
+        }
+    "#,
+        |_, jit| unsafe {
+            let allocate = jit
+                .get_function::<unsafe extern "C" fn(u64, u32) -> u64>(
+                    "verum_list_allocate_storage",
+                )
+                .unwrap();
+            let cycle = jit
+                .get_function::<unsafe extern "C" fn(u64) -> i64>("cycle")
+                .unwrap();
+            for encoding in [512, 527] {
+                assert_eq!(cycle.call(allocate.call(0, encoding)), 37);
+            }
         },
     );
 }

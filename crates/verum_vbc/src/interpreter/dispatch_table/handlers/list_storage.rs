@@ -158,3 +158,90 @@ pub(super) fn access(
     }
     Ok(DispatchResult::Continue)
 }
+
+/// Resize only the initialized prefix of a canonical owner. All fallible
+/// work precedes publication; allocation failure preserves the old fields.
+pub(super) fn resize(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+    let dst = read_reg(state)?;
+    let list = read_reg(state)?;
+    let requested = read_reg(state)?;
+    let value = resolve_receiver(state, state.get_reg(list));
+    let storage = Storage::resolve(state, value)?;
+    let owner = value.as_ptr::<heap::ObjectHeader>();
+    // SAFETY: Storage::resolve proved the exact live owner and field extent.
+    let fields = unsafe { (owner as *mut u8).add(heap::OBJECT_HEADER_SIZE) as *mut Value };
+    let len = unsafe { fields.read_unaligned() }
+        .try_as_i64()
+        .and_then(|n| usize::try_from(n).ok())
+        .filter(|&n| n <= storage.capacity)
+        .ok_or_else(|| invalid("List storage length exceeds capacity"))?;
+    let requested = state
+        .get_reg(requested)
+        .try_as_i64()
+        .ok_or_else(|| invalid("List storage capacity is not Int"))?;
+    let limit = (u32::MAX as usize - 3 * verum_common::layout::ALLOCATION_HEADER_SIZE as usize)
+        / storage.width;
+    let Some(capacity) = usize::try_from(requested)
+        .ok()
+        .filter(|&n| n >= len && n <= limit)
+    else {
+        state.set_reg(dst, Value::from_bool(false));
+        return Ok(DispatchResult::Continue);
+    };
+    if capacity == storage.capacity {
+        state.set_reg(dst, Value::from_bool(true));
+        return Ok(DispatchResult::Continue);
+    }
+    // A bridge interior address is readable, but does not own the enclosing
+    // allocation. Resizing requires the exact tracked allocation base.
+    let managed = state.heap.backing_view(storage.data).owner.is_some();
+    let bridge = state
+        .cbgr_bridge_extents
+        .contains_key(&(storage.data as usize));
+    if !storage.data.is_null() && !managed && !bridge {
+        return Err(invalid("List resize requires an owned allocation base"));
+    }
+    let pointer = if capacity == 0 {
+        Value::from_ptr(std::ptr::null_mut::<()>())
+    } else {
+        let allocation = if storage.width == 1 {
+            state.heap.alloc(crate::types::TypeId::BYTE_LIST, capacity)
+        } else {
+            state.heap.alloc_array(crate::types::TypeId::UNIT, capacity)
+        };
+        let allocation = match allocation {
+            Ok(allocation) => allocation,
+            Err(InterpreterError::OutOfMemory { .. }) => {
+                state.set_reg(dst, Value::from_bool(false));
+                return Ok(DispatchResult::Continue);
+            }
+            Err(error) => return Err(error),
+        };
+        state.record_allocation();
+        if len != 0 {
+            // SAFETY: both complete initialized prefixes were proven; the
+            // fresh allocation cannot overlap a live source allocation.
+            unsafe {
+                std::ptr::copy_nonoverlapping(
+                    storage.data,
+                    (allocation.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE),
+                    len * storage.width,
+                );
+            }
+        }
+        Value::from_ptr(allocation.as_ptr() as *mut ())
+    };
+    if bridge && !managed {
+        super::ffi_extended::cbgr_user_deallocate(state, storage.data as i64);
+    }
+    // Managed old backing remains owned by the GC. No field changed before
+    // the allocation and initialized-prefix copy succeeded.
+    unsafe {
+        fields.add(2).write_unaligned(pointer);
+        fields
+            .add(1)
+            .write_unaligned(Value::from_i64(capacity as i64));
+    }
+    state.set_reg(dst, Value::from_bool(true));
+    Ok(DispatchResult::Continue)
+}

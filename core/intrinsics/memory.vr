@@ -148,6 +148,15 @@ public unsafe fn list_storage_move<T>(list: &mut List<T>, source: Int, target: I
     @intrinsic("list_storage_move", list, source, target, count)
 }
 
+/// Resize the owner's backing while preserving its initialized length.
+/// Returns false for invalid new capacity or allocation failure without
+/// changing the owner. A malformed old owner is rejected before allocation.
+/// The caller holds exclusive access and invalidates existing element borrows.
+/// Only the initialized prefix is copied; this does not run element glue.
+public unsafe fn list_storage_resize<T>(list: &mut List<T>, capacity: Int) -> Bool {
+    @intrinsic("list_storage_resize", list, capacity)
+}
+
 // =============================================================================
 // SECTION 3: Pointer Operations
 // =============================================================================

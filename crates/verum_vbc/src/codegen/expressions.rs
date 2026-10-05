@@ -40218,13 +40218,17 @@ impl VbcCodegen {
             // buffer itself.
             InlineSequenceId::ListStorageRead
             | InlineSequenceId::ListStorageWrite
-            | InlineSequenceId::ListStorageMove => {
+            | InlineSequenceId::ListStorageMove
+            | InlineSequenceId::ListStorageResize => {
                 let sub_op = match seq_id {
                     InlineSequenceId::ListStorageRead => {
                         crate::instruction::MemSubOpcode::ListStorageRead
                     }
                     InlineSequenceId::ListStorageWrite => {
                         crate::instruction::MemSubOpcode::ListStorageWrite
+                    }
+                    InlineSequenceId::ListStorageResize => {
+                        crate::instruction::MemSubOpcode::ListStorageResize
                     }
                     _ => crate::instruction::MemSubOpcode::ListStorageMove,
                 };

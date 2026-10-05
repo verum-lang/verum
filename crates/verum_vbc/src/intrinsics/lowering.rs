@@ -789,7 +789,8 @@ impl IntrinsicLowering {
         match seq_id {
             // This query is defined for VBC runtime carriers, not MLIR values.
             InlineSequenceId::ListStorageStride | InlineSequenceId::ListStorageRead
-            | InlineSequenceId::ListStorageWrite | InlineSequenceId::ListStorageMove => None,
+            | InlineSequenceId::ListStorageWrite | InlineSequenceId::ListStorageMove
+            | InlineSequenceId::ListStorageResize => None,
             InlineSequenceId::Memcpy => self.emit(MlirOp {
                 name: "llvm.intr.memcpy".to_string(),
                 attrs: vec![MlirAttr {
