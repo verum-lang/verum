@@ -54,8 +54,9 @@ fn query_roundtrip_preserves_the_following_call_boundary() {
     let module = compile(&source);
     let wire = verum_vbc::serialize::serialize_module(&module).unwrap();
     let decoded = verum_vbc::deserialize::deserialize_module(&wire).unwrap();
+    assert_eq!(decoded.header.version_minor, verum_vbc::format::VERSION_MINOR);
+    assert!(decoded.header.version_minor >= 19, "storage query requires v2.19");
     assert_eq!(execute(decoded).unwrap(), 9);
-    assert_eq!(verum_vbc::format::VERSION_MINOR, 19);
 }
 #[test]
 fn storage_identity_domain_does_not_include_unknown_or_scalar_types() {
