@@ -1395,7 +1395,17 @@ fn register_module_metadata(
                 .contains(verum_vbc::types::PropertySet::ASYNC),
             is_unsafe: false,
             intrinsic_id: Maybe::None,
-            parent_type: parent_type.clone(),
+            // A method can be implemented in a different module. Its declaring
+            // type is identified by the exact parent TypeId, not the function's
+            // origin or whichever type occupies a bare-name metadata slot.
+            parent_type: parent_type.as_ref().map(|parent| {
+                let parent_owner = fn_desc.parent_type
+                    .and_then(|id| module.types.iter().find(|ty| ty.id == id))
+                    .and_then(|ty| ty.origin_module)
+                    .and_then(|id| module.strings.get(id))
+                    .unwrap_or(module_name);
+                Text::from(join_module_path(parent_owner, parent.as_str()))
+            }),
             impl_generic_names,
             // #97 — round-trip the const-storage marker.
             is_const: fn_desc.is_const,
@@ -1445,6 +1455,17 @@ fn register_module_metadata(
                     }
                 }
             }
+            // Preserve the declaring type in a collision-immune method key.
+            // A bare Container.new slot cannot distinguish alpha.Container from
+            // beta.Container, even when both type descriptors survived import.
+            let parent_owner = fn_desc.parent_type
+                .and_then(|id| module.types.iter().find(|ty| ty.id == id))
+                .and_then(|ty| ty.origin_module)
+                .and_then(|id| module.strings.get(id))
+                .unwrap_or(module_name);
+            let declaring_parent = join_module_path(parent_owner, parent_name.as_str());
+            let declaring_key: Text = format!("{declaring_parent}.{simple_method_name}").into();
+            meta.functions.entry(declaring_key).or_insert_with(|| descriptor.clone());
             // Also alias the descriptor under the qualified key so
             // `register_inherent_methods_from_metadata`'s
             // `metadata.functions.get("Text.with_capacity")` finds it.

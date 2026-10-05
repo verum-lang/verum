@@ -26550,7 +26550,7 @@ bake to have this verified.",
                     self.core_metadata().and_then(|meta| {
                         meta.functions
                             .get(&verum_common::Text::from(cand.as_str()))
-                            .map(Self::scheme_from_function_descriptor)
+                            .map(|fd| Self::scheme_from_function_descriptor(fd, &meta))
                     })
                 })
                 .or_else(|| {
@@ -26589,7 +26589,7 @@ bake to have this verified.",
                     }
                     meta.functions
                         .get(&key)
-                        .map(Self::scheme_from_function_descriptor)
+                        .map(|fd| Self::scheme_from_function_descriptor(fd, &meta))
                 });
             if std::env::var("VERUM_TRACE_QUALPATH").is_ok() {
                 eprintln!("[qualpath]   cand={} hit={}", cand, scheme.is_some());

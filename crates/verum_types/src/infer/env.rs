@@ -420,11 +420,12 @@ impl TypeChecker {
             return None;
         }
         let bare = format!("{type_part}.{method_part}");
-        let fd = metadata.functions.get(&verum_common::Text::from(bare.as_str()))?;
+        let fd = metadata.functions.get(&verum_common::Text::from(qualified_name))
+            .or_else(|| metadata.functions.get(&verum_common::Text::from(bare.as_str())))?;
         if fd.is_const {
             return None;
         }
-        let scheme = Self::scheme_from_function_descriptor(fd);
+        let scheme = Self::scheme_from_function_descriptor(fd, &metadata);
         // Register under the BARE canonical spelling (what the eager
         // scan used), plus the caller's spelling when it differs, so
         // repeat lookups through either form are env hits.
@@ -535,7 +536,17 @@ impl TypeChecker {
     /// (`modules.rs::try_resolve_module_call`).
     pub(super) fn scheme_from_function_descriptor(
         fd: &crate::core_metadata::FunctionDescriptor,
+        metadata: &crate::core_metadata::CoreMetadata,
     ) -> crate::context::TypeScheme {
+        let owner = fd.parent_type.as_ref().and_then(|parent| {
+            let module = fd.origin_module_path.as_ref().unwrap_or(&fd.module_path);
+            let key = verum_common::qualified_name::qualify_module_name(module, parent.as_str());
+            metadata.types.get(parent)
+                .filter(|descriptor| Self::metadata_declaring_key(descriptor) == *parent)
+                .or_else(|| metadata.types.get(&key))
+                .or_else(|| metadata.types.get(parent)
+                    .filter(|descriptor| Self::metadata_declaring_key(descriptor) == key))
+        });
         // LITERAL-SIZED-ALIAS-COERCE-1 oracle: dump the RAW descriptor
         // strings for a named fn (`VERUM_TRACE_FNSCHEME=ptr_add`).
         if let Ok(want) = std::env::var("VERUM_TRACE_FNSCHEME") {
@@ -679,7 +690,21 @@ impl TypeChecker {
             }
             ret
         };
-        let fn_ty = crate::ty::Type::function(params, return_ty);
+        let mut fn_ty = crate::ty::Type::function(params, return_ty);
+        if let Some(owner) = owner {
+            let declaring_key = Self::metadata_declaring_key(owner);
+            let parent = owner.name.as_str().rsplit('.').next().unwrap();
+            let self_args: verum_common::List<crate::ty::Type> = (0..fd.impl_generic_names.len())
+                .filter_map(|i| scope_vars.get(&format!("__generic_{i}"))
+                    .map(|tv| crate::ty::Type::Var(*tv)))
+                .collect();
+            let self_ty = if self_args.is_empty() {
+                crate::ty::Type::Named { path: Self::text_to_path(&declaring_key), args: self_args }
+            } else {
+                crate::ty::Type::Generic { name: declaring_key.clone(), args: self_args }
+            };
+            fn_ty = Self::reconnect_metadata_parent(&fn_ty, parent, &declaring_key, &self_ty);
+        }
         // ONE authority (T0175): declared generics quantified in appearance
         // order, `__opaque_type_N` existentials marked implicit so a caller's
         // positional `<A, B>` type arguments bind ONLY to the real generics.

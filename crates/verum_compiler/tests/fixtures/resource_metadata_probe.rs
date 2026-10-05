@@ -216,3 +216,131 @@ pub fn generic_aliases(convert: fn(&verum_vbc::archive::VbcArchive) -> CoreMetad
         }
     }
 }
+
+/// An imported constructor and its annotation must name the same declaration.
+pub fn imported_generic_constructor_owner(
+    convert: fn(&verum_vbc::archive::VbcArchive) -> CoreMetadata,
+) {
+    for (owner, name) in [("owner", "Container"), ("core.collections.list", "List")] {
+        let source = format!(
+            "module {owner}; public type {name}<T> is {{ value: T }}; implement<T> {name}<T> {{ public fn new(value: T) -> {name}<T> {{ {name} {{ value }} }} }}"
+        );
+        let ast = Parser::new(&source).parse_module().unwrap();
+        let module = VbcCodegen::new().compile_module(&ast).unwrap();
+        let mut archive = ArchiveBuilder::stdlib();
+        archive.add_module(owner, &module, &[]).unwrap();
+        let meta = Arc::new(convert(&archive.finish()));
+        for eager in [false, true] {
+            let mut checker = if eager {
+                TypeChecker::new_with_core_eager(meta.clone())
+            } else {
+                TypeChecker::new_with_core(meta.clone())
+            };
+            let diagnostics = errors(
+                &mut checker,
+                &format!("fn probe() {{ let value: {name}<Int> = {name}<Int>.new(7); }}"),
+            );
+            assert!(
+                diagnostics.is_empty(),
+                "{owner}.{name}, eager={eager}: {diagnostics:?}"
+            );
+        }
+    }
+}
+
+/// The embedded production archive exercises canonical reserved collection IDs.
+pub fn stdlib_collection_constructor_owner(meta: Arc<CoreMetadata>) {
+    for eager in [false, true] {
+        let mut checker = if eager {
+            TypeChecker::new_with_core_eager(meta.clone())
+        } else {
+            TypeChecker::new_with_core(meta.clone())
+        };
+        let diagnostics = errors(
+            &mut checker,
+            "fn probe() { let values: List<Int> = List<Int>.new(); }",
+        );
+        assert!(
+            diagnostics.is_empty(),
+            "stdlib List, eager={eager}: {diagnostics:?}"
+        );
+    }
+}
+
+/// Bare own heads reconnect, but qualified siblings and generic names do not.
+pub fn constructor_owner_boundaries(convert: fn(&verum_vbc::archive::VbcArchive) -> CoreMetadata) {
+    let mut archive = ArchiveBuilder::stdlib();
+    for owner in ["alpha", "beta"] {
+        let source = format!(
+            "module {owner}; public type Container<T> is {{ value: T }}; implement<T> Container<T> {{ public fn new(value: T) -> Container<T> {{ Container {{ value }} }} public fn identity<Container>(value: Container) -> Container {{ value }} public fn foreign(value: beta.Container<T>) -> beta.Container<T> {{ value }} }}"
+        );
+        let module = VbcCodegen::new()
+            .compile_module(&Parser::new(&source).parse_module().unwrap())
+            .unwrap();
+        let mut module = module;
+        // Model an extension implementation: function origin differs from its
+        // exact parent descriptor's declaring module. Parent TypeIds stay intact.
+        if owner == "beta" {
+            let origin = module.strings.intern("extension");
+            for function in &mut module.functions {
+                function.origin_module = Some(origin);
+            }
+        }
+        archive.add_module(owner, &module, &[]).unwrap();
+    }
+    let mut meta = convert(&archive.finish());
+    // Reserved collection TypeIds render their own head without an owner. This
+    // source-produced fixture exercises that legacy spelling for ordinary types.
+    for fd in meta.functions.values_mut() {
+        if fd.name.as_str().ends_with(".new") {
+            fd.return_type = "Container<__generic_0>".into();
+        }
+    }
+    let meta = Arc::new(meta);
+    for eager in [false, true] {
+        for reverse in [false, true] {
+            for (source, accepted) in [
+                (
+                    "fn probe() { let x: alpha.Container<Int> = alpha.Container.new(7); }",
+                    true,
+                ),
+                (
+                    "fn probe() { let x: beta.Container<Int> = beta.Container.new(7); }",
+                    true,
+                ),
+                (
+                    "fn probe(x: beta.Container<Int>) { let y: beta.Container<Int> = alpha.Container.foreign(x); }",
+                    true,
+                ),
+                (
+                    "fn probe(x: beta.Container<Int>) { let y: alpha.Container<Int> = alpha.Container.foreign(x); }",
+                    false,
+                ),
+                (
+                    "fn probe() { let x: Int = alpha.Container.identity(7); }",
+                    true,
+                ),
+            ] {
+                let mut checker = if eager {
+                    TypeChecker::new_with_core_eager(meta.clone())
+                } else {
+                    TypeChecker::new_with_core(meta.clone())
+                };
+                let names = if reverse {
+                    ["beta.Container", "alpha.Container"]
+                } else {
+                    ["alpha.Container", "beta.Container"]
+                };
+                for name in names {
+                    checker.ensure_stdlib_type_loaded(&Text::from(name), &mut Vec::new());
+                }
+                let diagnostics = errors(&mut checker, source);
+                assert_eq!(
+                    diagnostics.is_empty(),
+                    accepted,
+                    "eager={eager}, reverse={reverse}: {source}: {diagnostics:?}"
+                );
+            }
+        }
+    }
+}

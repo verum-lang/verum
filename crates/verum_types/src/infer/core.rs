@@ -1355,7 +1355,7 @@ impl TypeChecker {
         out
     }
 
-    fn metadata_declaring_key(descriptor: &crate::core_metadata::TypeDescriptor) -> Text {
+    pub(super) fn metadata_declaring_key(descriptor: &crate::core_metadata::TypeDescriptor) -> Text {
         let owner = descriptor.origin_module_path.as_ref().filter(|owner| !owner.is_empty())
             .unwrap_or(&descriptor.module_path);
         if owner.is_empty() || owner.as_str() == "cog" {
@@ -3252,97 +3252,28 @@ impl TypeChecker {
                         .map(|tv| Type::Var(*tv))
                 })
                 .collect();
+            let declaring_key = Self::metadata_declaring_key(type_desc);
+            let parent = type_desc.name.as_str().rsplit('.').next().unwrap();
             let self_ty = if impl_k > 0 && self_args.len() == impl_k {
                 Type::Generic {
-                    name: type_name.clone(),
+                    name: declaring_key.clone(),
                     args: self_args,
                 }
             } else {
                 Type::Named {
-                    path: Self::text_to_path(type_name),
+                    path: Self::text_to_path(&declaring_key),
                     args: List::new(),
                 }
             };
-            // The bake's Self render is FLATTENED to the bare parent name
-            // (`substitute_self_in_type_name` — "MappedIter<Range, F>", not
-            // "MappedIter<Self, F>").  Inside a GENERIC parent's own method
-            // signatures an ARGLESS parent-name head can denote nothing but
-            // Self, so rewrite it to the instantiated parent alongside the
-            // literal `Self` spelling.  Non-generic parents (impl_k == 0)
-            // need no rewrite — Named{parent} already IS self_ty.
-            fn rewrite_argless_parent(
-                ty: &Type,
-                parent: &str,
-                self_ty: &Type,
-            ) -> Type {
-                match ty {
-                    Type::Named { path, args }
-                        if args.is_empty()
-                            && path
-                                .as_ident()
-                                .is_some_and(|id| id.name.as_str() == parent) =>
-                    {
-                        self_ty.clone()
-                    }
-                    Type::Generic { name, args }
-                        if args.is_empty() && name.as_str() == parent =>
-                    {
-                        self_ty.clone()
-                    }
-                    Type::Named { path, args } => Type::Named {
-                        path: path.clone(),
-                        args: args
-                            .iter()
-                            .map(|a| rewrite_argless_parent(a, parent, self_ty))
-                            .collect(),
-                    },
-                    Type::Generic { name, args } => Type::Generic {
-                        name: name.clone(),
-                        args: args
-                            .iter()
-                            .map(|a| rewrite_argless_parent(a, parent, self_ty))
-                            .collect(),
-                    },
-                    Type::Reference { inner, mutable } => Type::Reference {
-                        inner: Box::new(rewrite_argless_parent(inner, parent, self_ty)),
-                        mutable: *mutable,
-                    },
-                    Type::Function {
-                        params,
-                        return_type,
-                        contexts,
-                        type_params,
-                        properties,
-                    } => Type::Function {
-                        params: params
-                            .iter()
-                            .map(|p| rewrite_argless_parent(p, parent, self_ty))
-                            .collect(),
-                        return_type: Box::new(rewrite_argless_parent(
-                            return_type,
-                            parent,
-                            self_ty,
-                        )),
-                        contexts: contexts.clone(),
-                        type_params: type_params.clone(),
-                        properties: properties.clone(),
-                    },
-                    Type::Tuple(elems) => Type::Tuple(
-                        elems
-                            .iter()
-                            .map(|e| rewrite_argless_parent(e, parent, self_ty))
-                            .collect(),
-                    ),
-                    other => other.clone(),
-                }
-            }
+            // Metadata can spell this declaration's own nominal head with its
+            // bare name, including generic results such as Container<T>. Rebind
+            // only that head to the descriptor's declaring owner. Qualified
+            // siblings retain their identity; declared generic names have already
+            // become Type::Var and cannot be mistaken for this nominal head.
+            // Legacy argless parent spellings denote Self and recover impl args.
             let reconnect = |t: &Type, checker: &Self| -> Type {
                 let with_self = checker.substitute_self_type(t, &self_ty);
-                if impl_k > 0 {
-                    rewrite_argless_parent(&with_self, type_name.as_str(), &self_ty)
-                } else {
-                    with_self
-                }
+                Self::reconnect_metadata_parent(&with_self, parent, &declaring_key, &self_ty)
             };
             let params: List<Type> =
                 params.iter().map(|t| reconnect(t, self)).collect();
@@ -3709,6 +3640,79 @@ impl TypeChecker {
             }
         }
         referenced
+    }
+
+    pub(super) fn reconnect_metadata_parent(
+        ty: &Type,
+        parent: &str,
+        declaring_key: &Text,
+        self_ty: &Type,
+    ) -> Type {
+        match ty {
+            Type::Named { path, args }
+                if args.is_empty()
+                    && path
+                        .as_ident()
+                        .is_some_and(|id| id.name.as_str() == parent) =>
+            {
+                self_ty.clone()
+            }
+            Type::Generic { name, args }
+                if args.is_empty() && name.as_str() == parent =>
+            {
+                self_ty.clone()
+            }
+            Type::Named { path, args } => Type::Named {
+                path: if path.as_ident().is_some_and(|id| id.name.as_str() == parent) {
+                    Self::text_to_path(declaring_key)
+                } else {
+                    path.clone()
+                },
+                args: args
+                    .iter()
+                    .map(|a| Self::reconnect_metadata_parent(a, parent, declaring_key, self_ty))
+                    .collect(),
+            },
+            Type::Generic { name, args } => Type::Generic {
+                name: if name.as_str() == parent { declaring_key.clone() } else { name.clone() },
+                args: args
+                    .iter()
+                    .map(|a| Self::reconnect_metadata_parent(a, parent, declaring_key, self_ty))
+                    .collect(),
+            },
+            Type::Reference { inner, mutable } => Type::Reference {
+                inner: Box::new(Self::reconnect_metadata_parent(inner, parent, declaring_key, self_ty)),
+                mutable: *mutable,
+            },
+            Type::Function {
+                params,
+                return_type,
+                contexts,
+                type_params,
+                properties,
+            } => Type::Function {
+                params: params
+                    .iter()
+                    .map(|p| Self::reconnect_metadata_parent(p, parent, declaring_key, self_ty))
+                    .collect(),
+                return_type: Box::new(Self::reconnect_metadata_parent(
+                    return_type,
+                    parent,
+                    declaring_key,
+                    self_ty,
+                )),
+                contexts: contexts.clone(),
+                type_params: type_params.clone(),
+                properties: properties.clone(),
+            },
+            Type::Tuple(elems) => Type::Tuple(
+                elems
+                    .iter()
+                    .map(|e| Self::reconnect_metadata_parent(e, parent, declaring_key, self_ty))
+                    .collect(),
+            ),
+            other => other.clone(),
+        }
     }
 
     /// Convert a StageError from the stage checker to a TypeError.
