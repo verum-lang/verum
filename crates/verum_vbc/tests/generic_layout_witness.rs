@@ -589,8 +589,12 @@ fn concrete_self_associated_property_uses_its_declared_binding() {
 
 #[test]
 fn value_root_does_not_become_a_generic_projection() {
-    let source = "type Payload is {size:Int}; type Cell is {Item:Payload}; fn measure<T>()->Int {let T=Cell{Item:Payload{size:37}}; T.Item.size} fn probe()->Int {measure<Byte>()}";
-    assert_eq!(run(roundtrip(&compile(source)), "probe"), 37);
+    for source in [
+        "type Payload is {size:Int}; type Cell is {Item:Payload}; fn measure<T>()->Int {let T=Cell{Item:Payload{size:37}}; T.Item.size} fn probe()->Int {measure<Byte>()}",
+        "type Payload is {size:Int}; type Cell is {Item:Payload}; fn measure<T>(T:Cell)->Int {T.Item.size} fn probe()->Int {measure<Byte>(Cell{Item:Payload{size:37}})}",
+    ] {
+        assert_eq!(run(roundtrip(&compile(source)), "probe"), 37, "{source}");
+    }
 }
 
 #[test]
