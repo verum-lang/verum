@@ -998,7 +998,7 @@ implement Iterator for Components {
         } else if component == ".." {
             Maybe.Some(ParentDir)
         } else {
-            Maybe.Some(Normal(component))
+            Maybe.Some(Component.Normal(component))
         }
     }
 }
@@ -1097,7 +1097,7 @@ public fn normalize(path: &Path) -> PathBuf {
                 components.push(ParentDir);
             }
         } else if let Normal(s) = c {
-            components.push(Normal(s));
+            components.push(Component.Normal(s));
         }
     }
 
