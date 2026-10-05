@@ -12,7 +12,10 @@ fn descriptor_bytes() -> Vec<u8> {
     reader.offset = header.type_table_offset as usize;
     reader.header = Some(header.clone());
     reader.parse_type_descriptor().unwrap();
-    bytes[header.type_table_offset as usize..reader.offset].to_vec()
+    let mut descriptor = bytes[header.type_table_offset as usize..reader.offset].to_vec();
+    // This fixture exercises the v2.17 tail; remove v2.18 resource discipline.
+    assert_eq!(descriptor.pop(), Some(0));
+    descriptor
 }
 
 #[test]
@@ -45,7 +48,9 @@ fn v217_layout_tail_rejects_unknown_tags_and_truncation() {
         let mut malformed = prefix.clone();
         malformed.extend(tail);
         let mut reader = Deserializer::new(&malformed);
-        reader.header = Some(VbcHeader::default());
+        let mut header = VbcHeader::default();
+        header.version_minor = 17;
+        reader.header = Some(header);
         assert!(reader.parse_type_descriptor().is_err());
     }
 }

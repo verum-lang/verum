@@ -3183,6 +3183,9 @@ impl VbcCodegen {
         // entry). Lexical scoping: the declaring module owns its simple
         // key; the foreign layout stays reachable via its qualified key.
         let type_id = canonical_sum_id.unwrap_or_else(|| self.alloc_user_type_id());
+        // The qualified entry belongs to this declaration, independently of
+        // whichever sibling currently occupies the convenience bare key.
+        self.type_name_to_id.insert(format!("{module_name}.{type_name}"), type_id);
         if trace_type_binding(type_name) {
             eprintln!(
                 "[type-claim] EVICT  name={} layout_was={:?}",
@@ -6302,6 +6305,13 @@ impl VbcCodegen {
     }
 
     fn claim_local_type_id(&mut self, type_name: &str) -> crate::types::TypeId {
+        if let Some(owner) = &self.ctx.current_source_module {
+            if self.user_claimed_type_names.contains(&(owner.clone(), type_name.to_owned())) {
+                if let Some(id) = self.type_name_to_id.get(&format!("{owner}.{type_name}")) {
+                    return *id;
+                }
+            }
+        }
         if std::env::var("VERUM_TRACE_CTOR").is_ok() {
             eprintln!(
                 "[ctor-trace] claim_local_type_id '{}' existing={:?} archive_claimed={}",
@@ -7994,15 +8004,7 @@ impl VbcCodegen {
             // it was never ambiguous.
             let module_key = Self::resolve_full_module_path(module, &self.config.module_name)
                 .unwrap_or_else(|| format!("file:{:?}", module.file_id));
-            for item in module.items.iter() {
-                if !self.should_compile_item(item) {
-                    continue;
-                }
-                if let ItemKind::Type(type_decl) = &item.kind {
-                    let type_name = type_decl.name.name.to_string();
-                    self.claim_user_type_name(&module_key, &type_name);
-                }
-            }
+            self.claim_declared_type_items(&module.items, &module_key);
         }
         for module in files {
             self.register_declared_type_aliases(module);
@@ -8012,6 +8014,23 @@ impl VbcCodegen {
         }
         for module in files {
             self.pregenerate_ffi_struct_layouts(module);
+        }
+    }
+
+    /// Inline declarations participate in the same unit prepass as file types.
+    /// Every declaring owner has an ID before any field or body refers to it.
+    fn claim_declared_type_items(&mut self, items: &[verum_ast::Item], owner: &str) {
+        for item in items {
+            if !self.should_compile_item(item) { continue; }
+            match &item.kind {
+                ItemKind::Type(declaration) => self.claim_user_type_name(owner, declaration.name.name.as_str()),
+                ItemKind::Module(module) => {
+                    if let Some(items) = &module.items {
+                        self.claim_declared_type_items(items, module.name.name.as_str());
+                    }
+                }
+                _ => {}
+            }
         }
     }
 
@@ -15366,6 +15385,7 @@ impl VbcCodegen {
                             ));
                         let origin_module = self.current_origin_module_sid();
                         let type_desc = crate::types::TypeDescriptor {
+                            resource_discipline: type_decl.resource_discipline(),
                             id: type_id,
                             name: name_id,
                             kind: crate::types::TypeKind::Alias,
@@ -15695,6 +15715,7 @@ impl VbcCodegen {
                     }
                 }
                 let mut sum_desc = TypeDescriptor {
+                    resource_discipline: type_decl.resource_discipline(),
                     id: type_id,
                     name: StringId(self.ctx.intern_string_raw(&type_name)),
                     kind: crate::types::TypeKind::Sum,
@@ -15760,6 +15781,7 @@ impl VbcCodegen {
                                                 name: StringId(
                                                     self.ctx.intern_string_raw(&pos_name),
                                                 ),
+                                                declaration_type: Some(self.resolve_signature_type_ref(ty, &sum_generic_param_map)),
                                                 type_ref: self.resolve_field_type_ref(
                                                     ty,
                                                     &sum_generic_param_map,
@@ -15795,6 +15817,7 @@ impl VbcCodegen {
                                         name: StringId(
                                             self.ctx.intern_string_raw(f.name.name.as_str()),
                                         ),
+                                        declaration_type: Some(self.resolve_signature_type_ref(&f.ty, &sum_generic_param_map)),
                                         type_ref: self.resolve_field_type_ref(
                                             &f.ty,
                                             &sum_generic_param_map,
@@ -15892,6 +15915,7 @@ impl VbcCodegen {
                 // duplication was Record-arm and Protocol-arm only.
                 // Create a TypeDescriptor for this type (drop_fn will be set later if Drop is implemented)
                 let mut type_desc = TypeDescriptor {
+                    resource_discipline: type_decl.resource_discipline(),
                     id: type_id,
                     name: StringId(self.ctx.intern_string_raw(&type_name)),
                     kind: crate::types::TypeKind::Record,
@@ -16042,6 +16066,7 @@ impl VbcCodegen {
                     type_desc.fields.push(crate::types::FieldDescriptor {
                         name: StringId(self.ctx.intern_string_raw(&field_name)),
                         type_ref: field_type_ref,
+                        declaration_type: Some(self.resolve_signature_type_ref(&field.ty, &generic_param_map)),
                         offset: field_idx * 8, // Use global field index * sizeof(Value)
                         visibility: crate::types::Visibility::Public,
                         refinement_src,
@@ -16092,6 +16117,7 @@ impl VbcCodegen {
                 let type_id = self.claim_local_type_id(&type_name);
 
                 let mut type_desc = TypeDescriptor {
+                    resource_discipline: type_decl.resource_discipline(),
                     id: type_id,
                     name: StringId(self.ctx.intern_string_raw(&type_name)),
                     kind: crate::types::TypeKind::Protocol,
@@ -16385,6 +16411,7 @@ impl VbcCodegen {
                 }
                 let origin_module = self.current_origin_module_sid();
                 let type_desc = crate::types::TypeDescriptor {
+                    resource_discipline: type_decl.resource_discipline(),
                     id: type_id,
                     name: name_id,
                     kind: crate::types::TypeKind::Alias,
@@ -16474,6 +16501,7 @@ impl VbcCodegen {
                 // Record / Sum arms above: the declaring file, not the
                 // archive entry that re-exports it (T1002).
                 let mut type_desc = TypeDescriptor {
+                    resource_discipline: type_decl.resource_discipline(),
                     id: type_id,
                     name: StringId(self.ctx.intern_string_raw(&type_name)),
                     kind: crate::types::TypeKind::Record,
@@ -16484,6 +16512,7 @@ impl VbcCodegen {
                 type_desc.fields.push(crate::types::FieldDescriptor {
                     name: StringId(self.ctx.intern_string_raw("_0")),
                     type_ref: inner_type_ref,
+                    declaration_type: Some(self.resolve_signature_type_ref(_inner_type, &generic_param_map)),
                     offset: inner_field_idx * 8,
                     visibility: crate::types::Visibility::Public,
                     refinement_src: StringId::EMPTY,
@@ -16572,6 +16601,7 @@ impl VbcCodegen {
                 // One name, two spellings, and the working one is not the one
                 // the source states (T1002).
                 let mut type_desc = TypeDescriptor {
+                    resource_discipline: type_decl.resource_discipline(),
                     id: type_id,
                     name: StringId(self.ctx.intern_string_raw(&type_name)),
                     kind: crate::types::TypeKind::Record,
@@ -16594,6 +16624,7 @@ impl VbcCodegen {
                     type_desc.fields.push(crate::types::FieldDescriptor {
                         name: StringId(self.ctx.intern_string_raw(&field_name)),
                         type_ref: inner_type_ref,
+                        declaration_type: Some(self.resolve_signature_type_ref(inner_ty, &generic_param_map)),
                         offset: field_idx * 8,
                         visibility: crate::types::Visibility::Public,
                         refinement_src: StringId::EMPTY,
@@ -16669,6 +16700,7 @@ impl VbcCodegen {
                 // parent — so the type cannot be mounted by the path its own
                 // file declares (T1002).
                 let type_desc = crate::types::TypeDescriptor {
+                    resource_discipline: type_decl.resource_discipline(),
                     id: type_id,
                     name: StringId(self.ctx.intern_string_raw(&type_name)),
                     kind: crate::types::TypeKind::Unit,
@@ -16850,6 +16882,7 @@ impl VbcCodegen {
                 // transparent wrapper like the newtype arms, and takes the
                 // same rule: attribute to the declaring file (T1002).
                 let mut type_desc = TypeDescriptor {
+                    resource_discipline: type_decl.resource_discipline(),
                     id: type_id,
                     name: StringId(self.ctx.intern_string_raw(&type_name)),
                     kind: crate::types::TypeKind::Record,
@@ -26260,6 +26293,7 @@ impl VbcCodegen {
             id: new_id,
             name: new_name_id,
             kind: ty.kind.clone(),
+            resource_discipline: ty.resource_discipline,
             // v2.12: re-intern the origin path into THIS module's table
             // (same discipline as every other StringId in this copy).
             origin_module: ty
@@ -26640,6 +26674,7 @@ impl VbcCodegen {
                     name: stub_name_id,
                     kind: crate::types::TypeKind::Protocol,
                     origin_module: source_owner_id,
+                    resource_discipline: ty.resource_discipline,
                     type_params: smallvec::SmallVec::new(),
                     fields: smallvec::SmallVec::new(),
                     // CLEARED — see comment block above.
@@ -28645,11 +28680,13 @@ fn copy_remapped_data_type_carriers(
     let tr = |ty: &crate::types::TypeRef| remap_type_ref_archive(ty, ids);
     for (to, from) in target.fields.iter_mut().zip(&source.fields) {
         to.type_ref = tr(&from.type_ref);
+        to.declaration_type = from.declaration_type.as_ref().map(tr);
     }
     for (to, from) in target.variants.iter_mut().zip(&source.variants) {
         to.payload = from.payload.as_ref().map(tr);
         for (to, from) in to.fields.iter_mut().zip(&from.fields) {
             to.type_ref = tr(&from.type_ref);
+            to.declaration_type = from.declaration_type.as_ref().map(tr);
         }
     }
     for (to, from) in target.type_params.iter_mut().zip(&source.type_params) {

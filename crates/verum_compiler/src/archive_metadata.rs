@@ -379,7 +379,7 @@ fn register_module_metadata(
                         // swallow every field and a stored-variant
                         // `match e.status` hash-fall-back to a wrong tag).
                         let rendered = type_ref_to_text_with_params(
-                            &f.type_ref,
+                            f.declaration_type.as_ref().unwrap_or(&f.type_ref),
                             &type_id_to_name,
                             &record_param_id_to_name,
                         );
@@ -449,7 +449,7 @@ fn register_module_metadata(
                                 }
                                 for f in v.fields.iter() {
                                     tys.push(Text::from(type_ref_to_text_with_params(
-                                        &f.type_ref,
+                                        f.declaration_type.as_ref().unwrap_or(&f.type_ref),
                                         &type_id_to_name,
                                         &sum_param_id_to_name,
                                     )));
@@ -498,7 +498,7 @@ fn register_module_metadata(
                                             .map(Text::from)
                                             .unwrap_or_default(),
                                         ty: Text::from(type_ref_to_text_with_params(
-                                            &f.type_ref,
+                                            f.declaration_type.as_ref().unwrap_or(&f.type_ref),
                                             &type_id_to_name,
                                             &sum_param_id_to_name,
                                         )),
@@ -743,9 +743,15 @@ fn register_module_metadata(
                 let target = ty
                     .alias_target
                     .as_ref()
-                    .map(|t| Text::from(type_ref_to_text_with_params(
-                        t,
-                        &type_id_to_name,
+                    .map(|target| Text::from(render_type_ref(
+                        target,
+                        &|id| {
+                            let declaration = module.get_type(verum_vbc::types::TypeId(id))?;
+                            let name = module.get_string(declaration.name)?;
+                            let owner = declaration.origin_module.and_then(|sid| module.get_string(sid))
+                                .unwrap_or(ty_module_path.as_str());
+                            Some(verum_common::qualified_name::qualify_module_name(owner, name).to_string())
+                        },
                         &param_id_to_name,
                     )))
                     .unwrap_or_default();
@@ -833,6 +839,7 @@ fn register_module_metadata(
             // typechecker boundary and every `FileDesc.STDIN.0` site
             // failed with `cannot index type 'FileDesc'`.
             is_transparent_wrapper: ty.is_transparent_wrapper,
+            resource_discipline: ty.resource_discipline,
         };
         // Collision policy (deterministic, documented):
         //
@@ -1634,6 +1641,7 @@ fn register_module_metadata(
             // wrappers — they're synthetic carriers for the inherent
             // method table only.
             is_transparent_wrapper: false,
+            resource_discipline: verum_common::ResourceDiscipline::Unknown,
         };
         meta.types.insert(parent_name.clone(), descriptor);
         meta.type_declaration_order.push(parent_name);
@@ -1887,14 +1895,21 @@ fn type_ref_to_text_with_params(
     type_id_to_name: &HashMap<u32, String>,
     param_id_to_name: &HashMap<u16, String>,
 ) -> String {
+    render_type_ref(ty, &|id| type_id_to_name.get(&id).cloned(), param_id_to_name)
+}
+
+/// One structural renderer; callers select the exact declaration-name authority.
+fn render_type_ref(
+    ty: &TypeRef,
+    declared_name: &impl Fn(u32) -> Option<String>,
+    param_id_to_name: &HashMap<u16, String>,
+) -> String {
     match ty {
         TypeRef::Concrete(tid) => {
             if let Some(name) = builtin_type_name(tid) {
                 return name.to_string();
             }
-            type_id_to_name
-                .get(&tid.0)
-                .cloned()
+            declared_name(tid.0)
                 .unwrap_or_else(|| format!("__opaque_type_{}", tid.0))
         }
         TypeRef::Generic(pid) => {
@@ -1909,11 +1924,11 @@ fn type_ref_to_text_with_params(
         TypeRef::Instantiated { base, args } => {
             let base_name = builtin_type_name(base)
                 .map(|n| n.to_string())
-                .or_else(|| type_id_to_name.get(&base.0).cloned())
+                .or_else(|| declared_name(base.0))
                 .unwrap_or_else(|| format!("__opaque_type_{}", base.0));
             let arg_strings: Vec<String> = args
                 .iter()
-                .map(|a| type_ref_to_text_with_params(a, type_id_to_name, param_id_to_name))
+                .map(|a| render_type_ref(a, declared_name, param_id_to_name))
                 .collect();
             if arg_strings.is_empty() {
                 base_name
@@ -1928,12 +1943,12 @@ fn type_ref_to_text_with_params(
         } => {
             let p: Vec<String> = params
                 .iter()
-                .map(|t| type_ref_to_text_with_params(t, type_id_to_name, param_id_to_name))
+                .map(|t| render_type_ref(t, declared_name, param_id_to_name))
                 .collect();
             format!(
                 "fn({}) -> {}",
                 p.join(", "),
-                type_ref_to_text_with_params(return_type, type_id_to_name, param_id_to_name)
+                render_type_ref(return_type, declared_name, param_id_to_name)
             )
         }
         TypeRef::Reference {
@@ -1963,7 +1978,7 @@ fn type_ref_to_text_with_params(
                 "&{}{}{}",
                 tier_kw,
                 mut_kw,
-                type_ref_to_text_with_params(inner, type_id_to_name, param_id_to_name)
+                render_type_ref(inner, declared_name, param_id_to_name)
             )
         }
         // Associated-type projection `F.Output` → `::Output<F>` (parseable back
@@ -1973,7 +1988,7 @@ fn type_ref_to_text_with_params(
             format!(
                 "::{}<{}>",
                 assoc,
-                type_ref_to_text_with_params(base, type_id_to_name, param_id_to_name)
+                render_type_ref(base, declared_name, param_id_to_name)
             )
         }
         // CONST-GENERIC-VALUE-CARRY-1: const-generic VALUE argument renders
@@ -1992,7 +2007,7 @@ fn type_ref_to_text_with_params(
         TypeRef::Tuple(elems) => {
             let rendered: Vec<String> = elems
                 .iter()
-                .map(|e| type_ref_to_text_with_params(e, type_id_to_name, param_id_to_name))
+                .map(|e| render_type_ref(e, declared_name, param_id_to_name))
                 .collect();
             format!("({})", rendered.join(", "))
         }
@@ -2001,12 +2016,12 @@ fn type_ref_to_text_with_params(
         // and a future length-aware parser needs no re-bake to read it.
         TypeRef::Array { element, length } => format!(
             "[{}; {}]",
-            type_ref_to_text_with_params(element, type_id_to_name, param_id_to_name),
+            render_type_ref(element, declared_name, param_id_to_name),
             length
         ),
         TypeRef::Slice(inner) => format!(
             "[{}]",
-            type_ref_to_text_with_params(inner, type_id_to_name, param_id_to_name)
+            render_type_ref(inner, declared_name, param_id_to_name)
         ),
         // `TypeRef::Rank2Function` keeps the placeholder: its spelling
         // `fn<N>(…) -> R` does NOT round-trip — the parser's function arm

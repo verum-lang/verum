@@ -80,6 +80,10 @@
 // =============================================================================
 //
 
+pub mod qualified_name;
+pub mod resource_discipline;
+pub use resource_discipline::ResourceDiscipline;
+
 // These are newtype wrappers providing semantic naming and rich APIs.
 // Re-exported from the semantic_types module where full implementations live.
 //

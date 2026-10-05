@@ -67,6 +67,7 @@ pub mod instruction;
 pub mod module;
 pub mod type_layout;
 pub mod types;
+mod resource_discipline;
 pub mod value;
 
 pub mod bytecode;

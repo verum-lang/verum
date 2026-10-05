@@ -753,6 +753,7 @@ mod make_variant_typed_validation_tests {
         let f_digits = module.intern_string("digits");
         let f_missing = module.intern_string("no_such_field");
         let mk_field = |name: StringId, off: u32| crate::types::FieldDescriptor {
+            declaration_type: None,
             name,
             type_ref: crate::types::TypeRef::Concrete(TypeId::BOOL),
             offset: off,
@@ -762,6 +763,7 @@ mod make_variant_typed_validation_tests {
             type_name: StringId::EMPTY,
         };
         let td = TypeDescriptor {
+            resource_discipline: Default::default(),
             origin_module: None,
             id: TypeId(4000),
             name: tname,

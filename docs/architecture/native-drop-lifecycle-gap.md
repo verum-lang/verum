@@ -78,8 +78,8 @@ that aggregate payload transfer is repaired.
   event. `Mutex.lock` constructs a named guard and returns
   `Result.Ok(guard)` or a nested error wrapper; its lexical cleanup cannot
   decide ownership by checking only the final result register.
-* `TypeDescriptor` carries `drop_fn` and `clone_fn`, but no affine/linear
-  resource mode. `ParamDescriptor` carries the declared type and
+* `TypeDescriptor` now carries declaration-owned resource discipline alongside
+  `drop_fn` and `clone_fn` (T1594). This supplies no per-value ownership event. `ParamDescriptor` carries the declared type and
   mutability, but no ownership-transfer contract. Merely spelling the
   current ordinary `MutexGuard` record `affine` would not supply those
   missing lowering facts.
@@ -111,15 +111,15 @@ consumption in `consume_affine_call_args`, and consuming by-value receivers.
 Those checks do not currently produce a shared lowering decision. In
 `verum_vbc::codegen::statements`, `copies_from_named_place` distinguishes
 references, raw pointers and primitive values, but does not consult the
-resource mode before emitting `Clone`. VBC type/parameter descriptors also
-lack the resource/transfer contract described above.
+resource mode before emitting `Clone`. VBC type descriptors now preserve resource discipline and semantic field types;
+parameter/value operations still lack the transfer contract described above.
 
 The source prerequisite now preserves exact declaration identity: T1558
 classifies named resources and transparent aliases by their declaring owner,
 and T1556 retains resource modifiers and attributes through the alternate
 parser. Their source regression suites cover same-named qualified resources
-and both parser routes. These repairs do not publish ownership operations or
-serialize resource discipline into VBC. Adding `affine` to MutexGuard alone
+and both parser routes. T1594 adds source/VBC/archive/metadata resource carry. These repairs still do
+not publish ownership operations. Adding `affine` to MutexGuard alone
 therefore still cannot implement its runtime contract.
 
 A first shared implementation can bound its acceptance to direct locals,

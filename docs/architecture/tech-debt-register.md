@@ -9,6 +9,17 @@ still fails and primitive hashing differs across tiers (T1587). See the
 [stage-10 record](platform-acceptance-2026-10-04-stage10.md) for exact source,
 CLI/archive/binary hashes, focused counts, phase verdicts and retained failures.
 
+## Declaration-owned resource carry — T1594 (2026-10-05)
+
+VBC 2.18 now distinguishes missing resource metadata from known unrestricted,
+affine or linear declarations, and preserves semantic field references apart
+from runtime layout. Source/archive/checker controls retain exact nominal and
+alias owners, including generic arguments, through eager and lazy loading.
+Unknown components and exhausted graph-analysis budgets grant no new ownership
+authority. See the [resource contract](resource-mode-contract.md#archive-and-metadata-carry-2026-10-05)
+for measured failures, focused validation and implementation limits. Native
+`Drop`, producer-selected transfers and MutexGuard lifetime remain open.
+
 ## AOT dependency guard — T1589 (2026-10-05)
 
 The dynamic-dependency guard now rejects inspector failures, unknown imports,

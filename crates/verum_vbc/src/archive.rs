@@ -1311,6 +1311,7 @@ mod tests {
 
         // Create a type with named fields
         let field1 = FieldDescriptor {
+            declaration_type: None,
             refinement_src: StringId::EMPTY,
             refinement_binding: StringId::EMPTY,
             type_name: StringId::EMPTY,
@@ -1320,6 +1321,7 @@ mod tests {
             visibility: Visibility::Public,
         };
         let field2 = FieldDescriptor {
+            declaration_type: None,
             refinement_src: StringId::EMPTY,
             refinement_binding: StringId::EMPTY,
             type_name: StringId::EMPTY,
@@ -1422,6 +1424,7 @@ mod tests {
 
         // Add a type with named field
         let field = FieldDescriptor {
+            declaration_type: None,
             refinement_src: StringId::EMPTY,
             refinement_binding: StringId::EMPTY,
             type_name: StringId::EMPTY,
@@ -1470,6 +1473,7 @@ mod tests {
             // Add 5 fields per type
             for j in 0..5 {
                 let field = FieldDescriptor {
+                    declaration_type: None,
                     refinement_src: StringId::EMPTY,
                     refinement_binding: StringId::EMPTY,
                     type_name: StringId::EMPTY,

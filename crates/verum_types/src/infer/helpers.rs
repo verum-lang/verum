@@ -1298,6 +1298,17 @@ pub(crate) fn collect_named_types_from_ty(
             // `Path`.  The first-segment names tend to be modules,
             // not types, so we don't harvest them.
             if path.segments.len() > 1 {
+                // Retain the actual requested declaration, not only a leaf
+                // that may belong to a different module's metadata slot.
+                let parts: Option<verum_common::List<&str>> = path.segments.iter().map(|part| {
+                    match part {
+                        verum_ast::ty::PathSegment::Name(name) => Some(name.name.as_str()),
+                        _ => None,
+                    }
+                }).collect();
+                if let Some(parts) = parts {
+                    out.insert(parts.join(".").into());
+                }
                 if let Some(verum_ast::ty::PathSegment::Name(last)) = path.segments.last() {
                     out.insert(last.name.clone());
                 }

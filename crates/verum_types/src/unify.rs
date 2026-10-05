@@ -822,12 +822,16 @@ impl Unifier {
         match ty {
             // Direct Named type alias (e.g., Byte -> UInt8)
             Type::Named { path, args } => {
-                let type_name = path.segments.last().and_then(|seg| match seg {
-                    verum_ast::ty::PathSegment::Name(ident) => Some(ident.name.as_str()),
-                    _ => None,
-                });
-                if let Some(name) = type_name {
-                    let key = Text::from(name);
+                // Qualified aliases belong to their declaration; a sibling's
+                // bare alias is not evidence for an unresolved full path.
+                let parts: Option<List<&str>> = path.segments.iter().map(|segment| {
+                    match segment {
+                        verum_ast::ty::PathSegment::Name(name) => Some(name.name.as_str()),
+                        _ => None,
+                    }
+                }).collect();
+                if let Some(parts) = parts {
+                    let key: Text = parts.join(".").into();
                     if let Some(target) = self.type_aliases.get(&key) {
                         if args.is_empty() {
                             // Simple alias: Byte -> UInt8

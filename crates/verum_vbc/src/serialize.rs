@@ -442,7 +442,8 @@ impl Serializer {
             encode_u64(layout.size, &mut self.output);
             encode_u64(layout.alignment, &mut self.output);
         }
-
+        // v2.18: a missing declaration is distinct from unrestricted usage.
+        self.output.push(desc.resource_discipline as u8);
 
         Ok(())
     }
@@ -501,6 +502,14 @@ impl Serializer {
         // field's source-verbatim type NAME. Fixed-width trailing append;
         // reader gates on version_minor >= 9. Sibling of refinement_src.
         encode_u32(field.type_name.0, &mut self.output);
+        // v2.18: semantic declaration, separate from runtime layout.
+        match &field.declaration_type {
+            Some(ty) => {
+                self.output.push(1);
+                self.serialize_type_ref(ty)?;
+            }
+            None => self.output.push(0),
+        }
         Ok(())
     }
 
