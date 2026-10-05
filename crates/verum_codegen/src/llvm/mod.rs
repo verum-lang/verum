@@ -89,6 +89,7 @@ pub mod cbgr;
 // Per-function lowering context
 pub mod context;
 mod native_call;
+mod return_representation;
 
 // Unified register type tracking (replacing 40+ HashSets)
 pub mod register_types;

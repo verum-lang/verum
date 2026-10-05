@@ -6,6 +6,7 @@
 use std::collections::HashMap;
 
 use verum_common::Text;
+use verum_llvm::values::BasicValue;
 use verum_llvm::basic_block::BasicBlock;
 use verum_llvm::builder::Builder;
 use verum_llvm::context::Context;
@@ -215,6 +216,7 @@ pub struct FunctionContext<'a, 'ctx> {
     /// Instruction counter.
     instruction_count: usize,
     pub(crate) native_calls: verum_common::List<super::native_call::NativeCallReceipt<'ctx>>,
+    pub(crate) reference_sites: verum_common::List<super::native_call::ReferenceSite<'ctx>>,
     native_argument_count: usize,
 
     /// Function name for diagnostics.
@@ -845,6 +847,7 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
             reference_registers: HashMap::new(),
             instruction_count: 0,
             native_calls: verum_common::List::new(),
+            reference_sites: verum_common::List::new(),
             native_argument_count: 0,
             function_name: function_name.into(),
             cbgr_elimination_stats: CbgrEliminationStats::default(),
@@ -960,6 +963,7 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
             reference_registers: HashMap::new(),
             instruction_count: 0,
             native_calls: verum_common::List::new(),
+            reference_sites: verum_common::List::new(),
             native_argument_count: 0,
             function_name: function_name.into(),
             cbgr_elimination_stats: CbgrEliminationStats::default(),
@@ -2542,6 +2546,53 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
     /// Get the CBGR elimination statistics.
     pub fn cbgr_elimination_stats(&self) -> &CbgrEliminationStats {
         &self.cbgr_elimination_stats
+    }
+
+    pub(crate) fn record_reference_site(&mut self, kind: super::native_call::ReferenceSiteKind) {
+        if self.reference_sites.len() < super::native_call::MAX_RECEIPTS {
+            self.reference_sites.push(super::native_call::ReferenceSite {
+                instruction: self.current_vbc_instr_idx,
+                kind,
+                anchor: None,
+            });
+        }
+    }
+
+    /// A use-local view. Its register and original-cell sidecar are unchanged.
+    /// The identity is replaced only after all native bodies are validated.
+    pub(crate) fn reference_value_view(
+        &mut self,
+        register: u16,
+        value: BasicValueEnum<'ctx>,
+    ) -> Result<BasicValueEnum<'ctx>> {
+        if self.reference_sites.len() >= super::native_call::MAX_RECEIPTS {
+            return Ok(value);
+        }
+        let bits = match value {
+            BasicValueEnum::IntValue(value) if value.get_type().get_bit_width() == 64 => value,
+            BasicValueEnum::PointerValue(value) => self.builder
+                .build_ptr_to_int(value, self.types.i64_type(), "reference_word")
+                .or_llvm_err()?,
+            _ => return Ok(value),
+        };
+        let anchor = self.builder
+            .build_int_add(bits, self.types.i64_type().const_zero(), "reference_value_view")
+            .or_llvm_err()?;
+        if let Some(instruction) = anchor.as_instruction_value() {
+            self.reference_sites.push(super::native_call::ReferenceSite {
+                instruction: self.current_vbc_instr_idx,
+                kind: super::native_call::ReferenceSiteKind::ValueInput(register),
+                anchor: Some(instruction),
+            });
+        }
+        if value.is_pointer_value() {
+            self.builder
+                .build_int_to_ptr(anchor, self.types.ptr_type(), "reference_value_ptr")
+                .map(Into::into)
+                .or_llvm_err()
+        } else {
+            Ok(anchor.into())
+        }
     }
 
     /// Record actual call emission before result normalization.

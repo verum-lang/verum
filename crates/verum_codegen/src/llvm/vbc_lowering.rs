@@ -1986,7 +1986,10 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
 
         // Actual runtime replacements are now complete. Source-call evidence
         // survives only for bodies still matching their emission seal.
-        self.native_calls.discard_stale(&self.module);
+        let native_calls = self.native_calls.discard_stale(&self.module);
+        super::return_representation::apply(
+            self.context, &self.module, vbc_module, &self.native_calls, native_calls,
+        )?;
 
         // Phase 4: Verify the module
         // Skip verification here — GlobalDCE in pipeline.rs will remove dead
@@ -5059,6 +5062,7 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
 
         self.native_calls.capture(
             func_id, llvm_fn, std::mem::take(&mut ctx.native_calls),
+            std::mem::take(&mut ctx.reference_sites),
         );
 
         // T0241 facet-2: fold this function's NewClosure capture records into

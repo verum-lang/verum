@@ -5044,6 +5044,7 @@ fn lower_instruction_impl<'ctx>(
             // AOT when a heap-tagged float-bearing slot or CBGR-ref-wrapped
             // variant ptr flowed in.  Closes L3.10 task class.
             let variant_val = ctx.get_register(variant.0)?;
+            let variant_val = ctx.reference_value_view(variant.0, variant_val)?;
             let variant_ptr = as_ptr(ctx, variant_val, "variant_ptr")?;
             // Convert value to i64 if needed (variant data is stored as i64 fields)
             let raw_val = ctx.get_register(value.0)?;
@@ -5129,7 +5130,9 @@ fn lower_instruction_impl<'ctx>(
             // **T1260** — read BEFORE anything stores into `dst`, which may be
             // the same register as `variant`.
             let payload_is_ref = ctx.is_maybe_ref_payload(variant.0);
-            let variant_ptr = as_ptr(ctx, ctx.get_register(variant.0)?, "variant_ptr")?;
+            let variant_value = ctx.get_register(variant.0)?;
+            let variant_value = ctx.reference_value_view(variant.0, variant_value)?;
+            let variant_ptr = as_ptr(ctx, variant_value, "variant_ptr")?;
             let runtime = RuntimeLowering::new(ctx.llvm_context());
             let value = runtime.lower_get_variant_data(ctx.builder(), variant_ptr, *field)?;
             // **T1260** — a `Maybe<&T>` payload word is the pointee's ADDRESS.
@@ -5143,6 +5146,10 @@ fn lower_instruction_impl<'ctx>(
             } else {
                 value
             };
+            ctx.record_reference_site(super::native_call::ReferenceSiteKind::PayloadOutput {
+                register: dst.0,
+                raw_word: !payload_is_ref && !ctx.is_variant_float_field(variant.0, *field),
+            });
             // If this field was stored as float, bitcast i64 back to f64
             if ctx.is_variant_float_field(variant.0, *field) {
                 let f64_val = ctx
@@ -5419,7 +5426,9 @@ fn lower_instruction_impl<'ctx>(
         }
 
         Instruction::GetTag { dst, variant } => {
-            let variant_ptr = as_ptr(ctx, ctx.get_register(variant.0)?, "variant_ptr")?;
+            let variant_value = ctx.get_register(variant.0)?;
+            let variant_value = ctx.reference_value_view(variant.0, variant_value)?;
+            let variant_ptr = as_ptr(ctx, variant_value, "variant_ptr")?;
             let runtime = RuntimeLowering::new(ctx.llvm_context());
             let tag = runtime.lower_get_tag(ctx.builder(), variant_ptr)?;
             ctx.set_register(dst.0, tag.into());
@@ -5441,6 +5450,7 @@ fn lower_instruction_impl<'ctx>(
 
         Instruction::IsVar { dst, value, tag } => {
             let val = ctx.get_register(value.0)?;
+            let val = ctx.reference_value_view(value.0, val)?;
             // T0241: remember which arm this IsVar tested on the variant register
             // so a following GetVariantData (it carries no tag) can classify the
             // extracted Result payload from the matching arm (Ok = 0 / Err = 1).
@@ -5524,6 +5534,7 @@ fn lower_instruction_impl<'ctx>(
         Instruction::AsVar { dst, value, tag: _ } => {
             // AsVar extracts the first field (field 0) of the variant
             let val = ctx.get_register(value.0)?;
+            let val = ctx.reference_value_view(value.0, val)?;
             let variant_ptr = match val {
                 BasicValueEnum::PointerValue(p) => p,
                 BasicValueEnum::IntValue(i) => ctx
@@ -5538,6 +5549,10 @@ fn lower_instruction_impl<'ctx>(
             };
             let runtime = RuntimeLowering::new(ctx.llvm_context());
             let result = runtime.lower_as_var(ctx.builder(), variant_ptr, 0)?;
+            ctx.record_reference_site(super::native_call::ReferenceSiteKind::PayloadOutput {
+                register: dst.0,
+                raw_word: true,
+            });
             ctx.set_register(dst.0, result.into());
             // Propagate string register marking from Maybe<Text> variants
             if ctx.is_maybe_string_register(value.0) {
@@ -5849,6 +5864,7 @@ fn lower_instruction_impl<'ctx>(
             // Pass-through ref: Ref on a primitive just copied the value.
             // Deref should also pass through (VBC: &x for primitives is just x).
             if ctx.is_pass_through_ref(ref_reg.0) {
+                let val = ctx.reference_value_view(ref_reg.0, val)?;
                 if ref_is_float {
                     let f = as_f64(ctx, val, "deref_pass_f64")?;
                     ctx.set_register(dst.0, f.into());
@@ -7687,7 +7703,9 @@ fn lower_instruction_impl<'ctx>(
             // precisely BECAUSE of this lowering; that arm is now the address
             // case. Fixing one without the other is what turns a consistently
             // wrong answer — which was load-bearing — into a disagreement.
-            let variant_ptr = as_ptr(ctx, ctx.get_register(variant.0)?, "variant_ptr")?;
+            let variant_value = ctx.get_register(variant.0)?;
+            let variant_value = ctx.reference_value_view(variant.0, variant_value)?;
+            let variant_ptr = as_ptr(ctx, variant_value, "variant_ptr")?;
             let runtime = RuntimeLowering::new(ctx.llvm_context());
             let addr =
                 runtime.lower_get_variant_data_addr(ctx.builder(), variant_ptr, *field)?;
@@ -7696,6 +7714,7 @@ fn lower_instruction_impl<'ctx>(
                 .build_ptr_to_int(addr, ctx.types().i64_type(), "variant_field_addr_i64")
                 .or_llvm_err()?;
             ctx.set_register(dst.0, as_int.into());
+            ctx.record_reference_site(super::native_call::ReferenceSiteKind::SlotOutput(dst.0));
             Ok(())
         }
 
@@ -25670,7 +25689,9 @@ fn lower_cbgr_extended<'ctx>(
             // handles both PointerValue (already typed) and IntValue
             // (i64-encoded pointer slot reload) via `int_to_ptr` —
             // same dual-shape guard as the rest of the lowering.
-            let base_ptr = as_ptr(ctx, ctx.get_register(base_reg)?, "refield_base")?;
+            let base_value = ctx.get_register(base_reg)?;
+            let base_value = ctx.reference_value_view(base_reg, base_value)?;
+            let base_ptr = as_ptr(ctx, base_value, "refield_base")?;
 
             // field_ptr = base_ptr + OBJECT_HEADER_SIZE + field_idx * sizeof(Value)
             // sizeof(Value) is 8 bytes (canonical Verum Value width).
@@ -25801,6 +25822,11 @@ fn lower_cbgr_extended<'ctx>(
                     .or_llvm_err()?;
                 ctx.set_register(dst, addr.into());
                 ctx.set_field_reference_address(dst, addr)?;
+                ctx.record_reference_site(super::native_call::ReferenceSiteKind::FieldOutput {
+                    register: dst,
+                    base: base_reg,
+                    slot: true,
+                });
                 return Ok(());
             }
             let loaded = ctx
@@ -25818,6 +25844,11 @@ fn lower_cbgr_extended<'ctx>(
             ctx.set_register(dst, loaded);
             let address = ctx.builder().build_ptr_to_int(field_ptr, i64_type, "refield_cell_addr").or_llvm_err()?;
             ctx.set_field_reference_address(dst, address)?;
+            ctx.record_reference_site(super::native_call::ReferenceSiteKind::FieldOutput {
+                register: dst,
+                base: base_reg,
+                slot: false,
+            });
             Ok(())
         }
         0x0A => {
@@ -43541,6 +43572,7 @@ fn lower_get_field<'ctx>(
 ) -> Result<()> {
     let field_idx = field_idx;
     let obj_val = ctx.get_register(obj.0)?;
+    let obj_val = ctx.reference_value_view(obj.0, obj_val)?;
 
     // `VERUM_TRACE_GETFIELD=<fn-name substring>` (or `=1`) — this function
     // has several exits and more than one of them answers with a value that
@@ -44217,6 +44249,7 @@ fn lower_set_field<'ctx>(
 ) -> Result<()> {
     let field_idx = field_idx;
     let obj_val = ctx.get_register(obj.0)?;
+    let obj_val = ctx.reference_value_view(obj.0, obj_val)?;
     let new_val = ctx.get_register(value.0)?;
     // Coherent reference model: a tagged-reference base is loaded to the object
     // before storing the field (a stack struct bypasses).
@@ -45590,6 +45623,9 @@ fn lower_ref_mut_family<'ctx>(
         } else {
             let ptr = as_ptr(ctx, ctx.get_register(src.0)?, "ptr")?;
             ctx.set_register(dst.0, ptr.into());
+            ctx.record_reference_site(super::native_call::ReferenceSiteKind::PassthroughOutput {
+                register: dst.0, source: src.0,
+            });
         }
     } else {
         // Non-alloca mode: same primitive spill logic as Ref.  Object

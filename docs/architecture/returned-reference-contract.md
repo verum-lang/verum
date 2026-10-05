@@ -807,3 +807,68 @@ consumer must use these receipts for the finite CFG/aggregate projection
 analysis and remove body-only fallback at covered sites, with the mutation,
 unknown-exit and original-cell rules above. Existing native reference semantics
 are not certified merely by a valid call receipt.
+
+
+### Bounded projection consumer (implementation boundary, 5 October 2026)
+
+The next T1573 unit consumes surviving native emission receipts after runtime
+body replacement. It composes typed sum payload projections through exact
+selected calls and forwarding returns. It records the actual native field-cell
+producer, object-reference passthrough and payload extraction bridge as well: absent extraction evidence is
+Unknown, including when a receipt budget is exhausted. A declared reference or
+an unchanged payload type does not substitute for that physical evidence.
+
+Each source body is analyzed over its forward CFG. Every reachable normal exit
+participates in the return meet; Unknown differs from no reachable exit. Loops,
+cycles, unsupported exception/context control flow and missing native callees
+remain opaque. An unknown call, a possible store or `DropRef` invalidates future
+aggregate storage reads. A payload word extracted before that operation keeps
+its representation; this is a representation fact, not proof that its pointee
+is still alive. A separate compact parameter-origin map keeps track of later
+return, store and reference uses after storage facts have been invalidated.
+An earlier value read cannot hide those later uses and authorize a whole-call
+argument load. Definitions and CFG joins update that identity independently.
+
+Actual argument positions and adaptations govern parameter composition. A
+callee that only consumes an object value may receive a temporary loaded view
+of a proved slot. Forwarding, mutable-cell and mixed-use parameters keep the
+original operand. Field-address sidecars are included at the use site; ABI
+coercions remain Unknown. `GetF` results are Unknown because a record field can
+itself contain a reference. Existing eager returned-slot and payload loads are
+recorded as already adapted and cannot be reclassified as the raw slot by this
+consumer. This unit does not certify or replace all older normalization paths.
+
+The complete edit plan is computed before changing any sealed body. Field,
+variant and pass-through dereference consumers have use-local native anchors;
+call operands are checked against the recorded actual operand before replacing
+them. The inserted load changes neither the original register nor its original
+cell sidecar. Native producer evidence uses the existing 64-bit value-slot
+convention; unsupported pointer-width targets get no new inference. Packed
+list-element references and erased narrow-pointee encodings require their own
+producer and adapter contract and are not treated as eight-byte cells here.
+
+Symbolic trees have a shared pre-allocation budget of 512 nodes and depth 16,
+including aggregate materialization, substitution, replacement and joins.
+Live analysis states are limited to 4,096 fact nodes, 256 registers, 64 fresh
+objects and 64 pending CFG states. Each state sidecar also has at most 256
+entries and consumes the same node budget, even after register facts are lost. A body has at most 16,384 instructions and
+1,024 parameters; recursive analysis is limited to 32 active bodies and the
+compilation to 2,000,000 processed instructions. Exhaustion yields Unknown.
+Only result summaries and relevant producer/consumer sites survive analysis;
+full register-state maps are not cached per instruction. Function traversal is
+ordered so budget exhaustion does not depend on map iteration order.
+
+Durable focused controls cover a noncanonical generic sum, actual core
+`Maybe.as_ref`/`expect` and `OnceLock.get_or_init`, forwarded scalar and record
+references, method/field consumers, original-cell mutation, a reference-valued
+record field, read-before/read-after mutation and release, mixed/cyclic returns,
+actual native replacement and an already-loaded adapter. The source-to-LLVM/JIT
+record control reads 73 twice and the mutable scalar control changes the
+original cell to 91. These controls also inspect the absence of speculative
+loads before executing sensitive positive cases. Shared aggregate DAG and
+missing-receipt controls pin bounded and conservative analysis.
+
+This is LLVM-only: no VBC format, source ownership/transfer rule, packed storage
+ABI or native Drop glue changes. Both-tier public source acceptance and the
+fresh full supervisor run remain required to close T1573; focused JIT results
+do not establish those final integration outcomes.

@@ -73,6 +73,38 @@ pub(crate) struct NativeCallReceipt<'ctx> {
     pub result_view: ResultView,
 }
 
+/// Actual non-call producer/adaptation or a deferred object-consuming view.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ReferenceSiteKind {
+    ValueInput(u16),
+    SlotOutput(u16),
+    PassthroughOutput {
+        register: u16,
+        source: u16,
+    },
+    FieldOutput {
+        register: u16,
+        base: u16,
+        slot: bool,
+    },
+    PayloadOutput {
+        register: u16,
+        raw_word: bool,
+    },
+}
+#[derive(Debug, Clone)]
+pub(crate) struct ReferenceSite<'ctx> {
+    pub instruction: usize,
+    pub kind: ReferenceSiteKind,
+    pub anchor: Option<verum_llvm::values::InstructionValue<'ctx>>,
+}
+#[derive(Debug)]
+struct StoredReferenceSite {
+    instruction: usize,
+    kind: ReferenceSiteKind,
+    native_instruction: Option<usize>,
+}
+
 /// Native instruction positions survive the emission phase without retaining
 /// handles that a runtime body replacement may delete. Resolve rehydrates only
 /// from the live, sealed body (even an identical re-emission has fresh handles).
@@ -92,6 +124,7 @@ struct SourceBody<'ctx> {
     function: FunctionValue<'ctx>,
     seal: blake3::Hash,
     calls: List<StoredCall>,
+    reference_sites: List<StoredReferenceSite>,
 }
 
 /// Bounded, compilation-local facts. No register states or printed IR survive
@@ -101,6 +134,7 @@ pub(crate) struct NativeCallAuthority<'ctx> {
     bodies: Map<Text, SourceBody<'ctx>>,
     receipt_count: usize,
     argument_count: usize,
+    reference_count: usize,
 }
 
 pub(crate) const MAX_RECEIPTS: usize = 131_072;
@@ -165,6 +199,7 @@ impl<'ctx> NativeCallAuthority<'ctx> {
         self.bodies.clear();
         self.receipt_count = 0;
         self.argument_count = 0;
+        self.reference_count = 0;
     }
 
     pub(crate) fn capture(
@@ -172,6 +207,7 @@ impl<'ctx> NativeCallAuthority<'ctx> {
         id: u32,
         function: FunctionValue<'ctx>,
         calls: List<NativeCallReceipt<'ctx>>,
+        reference_sites: List<ReferenceSite<'ctx>>,
     ) {
         let Some(seal) = body_seal(function) else {
             return;
@@ -235,6 +271,22 @@ impl<'ctx> NativeCallAuthority<'ctx> {
             })
             .take(remaining)
             .collect();
+        let reference_sites: List<_> = reference_sites
+            .into_iter()
+            .filter_map(|site| {
+                let native_instruction = match site.anchor {
+                    Some(anchor) => Some(*positions.get(&(anchor.as_value_ref() as usize))?),
+                    None => None,
+                };
+                Some(StoredReferenceSite {
+                    instruction: site.instruction,
+                    kind: site.kind,
+                    native_instruction,
+                })
+            })
+            .take(MAX_RECEIPTS.saturating_sub(self.reference_count))
+            .collect();
+        self.reference_count += reference_sites.len();
         self.receipt_count += calls.len();
         self.argument_count += calls.iter().map(|call| call.arguments.len()).sum::<usize>();
         self.bodies.insert(
@@ -244,13 +296,17 @@ impl<'ctx> NativeCallAuthority<'ctx> {
                 function,
                 seal,
                 calls,
+                reference_sites,
             },
         );
     }
 
     /// Runtime emission may overwrite VBC bodies after the source pass. Drop
     /// stale candidate evidence before handing the module to later phases.
-    pub(crate) fn discard_stale(&mut self, module: &Module<'ctx>) {
+    pub(crate) fn discard_stale(
+        &mut self,
+        module: &Module<'ctx>,
+    ) -> Map<u32, List<(u32, NativeCallReceipt<'ctx>)>> {
         let valid = self.resolve(module);
         self.bodies.retain(|_, body| {
             let Some(calls) = valid.get(&body.id) else {
@@ -268,6 +324,49 @@ impl<'ctx> NativeCallAuthority<'ctx> {
             .flat_map(|body| body.calls.iter())
             .map(|call| call.arguments.len())
             .sum();
+        self.reference_count = self
+            .bodies
+            .values()
+            .map(|body| body.reference_sites.len())
+            .sum();
+        valid
+    }
+
+    pub(crate) fn resolve_reference_sites(
+        &self,
+        live: &Map<u32, List<(u32, NativeCallReceipt<'ctx>)>>,
+    ) -> Map<u32, List<ReferenceSite<'ctx>>> {
+        // `live` is the immediately preceding discard_stale snapshot. No edits
+        // may occur between these operations; avoid hashing every body twice.
+        self.bodies
+            .values()
+            .filter_map(|body| {
+                if !live.contains_key(&body.id) {
+                    return None;
+                }
+                let current = body.function;
+                let instructions: List<_> = current
+                    .get_basic_blocks()
+                    .iter()
+                    .flat_map(|block| block.get_instructions())
+                    .collect();
+                let sites = body
+                    .reference_sites
+                    .iter()
+                    .filter_map(|site| {
+                        Some(ReferenceSite {
+                            instruction: site.instruction,
+                            kind: site.kind,
+                            anchor: match site.native_instruction {
+                                Some(index) => Some(*instructions.get(index)?),
+                                None => None,
+                            },
+                        })
+                    })
+                    .collect();
+                Some((body.id, sites))
+            })
+            .collect()
     }
 
     /// Resolve once at the end of native emission, before any consumer edits

@@ -410,7 +410,10 @@ fn retained_abi_attributes_do_not_claim_a_transparent_parameter_or_result_adapte
     // its source body with the attributes present, rather than a stale seal.
     lower
         .native_calls
-        .capture(id(&vbc, "selected"), selected, verum_common::List::new());
+        .capture(
+            id(&vbc, "selected"), selected,
+            verum_common::List::new(), verum_common::List::new(),
+        );
     let facts = lower.native_calls.resolve(lower.module());
     let calls = facts.get(&id(&vbc, "probe")).unwrap();
     assert_eq!(calls.len(), 1);

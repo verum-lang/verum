@@ -52,6 +52,13 @@ const CALLER: &str = r#"
             if old == expected { self.value = desired; Result.Ok(old) } else { Result.Err(old) }
         }
     }
+    type RecordCell is { padding: Int, value: Int };
+    implement RecordCell { fn read(&self) -> Int { self.value } }
+    fn make_record_lock() -> OnceLock<RecordCell> { OnceLock.new() }
+    fn record_initializer() -> RecordCell { RecordCell { padding: 11, value: 73 } }
+    fn record_accessor(lock: &OnceLock<RecordCell>) -> &RecordCell { lock.get_or_init(record_initializer) }
+    fn record_root(lock: &OnceLock<RecordCell>) -> &RecordCell { record_accessor(lock) }
+    fn record_name(lock: &OnceLock<RecordCell>) -> Int { record_root(lock).read() }
     fn spin_hint() {}
     fn compiler_fence(order: MemoryOrdering) {}
     type Cell is { value: Int };
@@ -321,5 +328,23 @@ fn source_once_lock_accepts_a_named_initializer_and_skips_the_next_closure() {
                 );
             }
         })
+    });
+}
+
+#[test]
+fn source_once_lock_record_projection_survives_exact_forwarding() {
+    with_core_source(|context, ir| {
+        let caller = ir.split("@record_name(").nth(1).expect("record caller").split("\n}").next().unwrap();
+        assert!(caller.contains("reference_value_load"), "forwarded record cell needs one value view: {caller}");
+        with_native(ir, context, |engine| {
+            // SAFETY: exact source slot ABI; retained allocations outlive calls.
+            unsafe {
+                let make = engine.get_function::<unsafe extern "C" fn() -> u64>("make_record_lock").unwrap();
+                let name = engine.get_function::<unsafe extern "C" fn(u64) -> u64>("record_name").unwrap();
+                let lock = make.call();
+                assert_eq!(name.call(lock), 73);
+                assert_eq!(name.call(lock), 73);
+            }
+        });
     });
 }
