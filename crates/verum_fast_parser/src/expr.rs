@@ -3631,6 +3631,10 @@ impl<'a> RecursiveParser<'a> {
                 | Some(TokenKind::LParen)
                 | Some(TokenKind::RParen)
                 | Some(TokenKind::Ampersand)
+                | Some(TokenKind::Mut)
+                | Some(TokenKind::Checked)
+                | Some(TokenKind::Unsafe)
+                | Some(TokenKind::Lifetime(_))
                 | Some(TokenKind::Star)
                 | Some(TokenKind::SelfType)
                 | Some(TokenKind::Plus) => {
@@ -3701,6 +3705,10 @@ impl<'a> RecursiveParser<'a> {
                 | Some(TokenKind::LParen)
                 | Some(TokenKind::RParen)
                 | Some(TokenKind::Ampersand)
+                | Some(TokenKind::Mut)
+                | Some(TokenKind::Checked)
+                | Some(TokenKind::Unsafe)
+                | Some(TokenKind::Lifetime(_))
                 | Some(TokenKind::Star)
                 | Some(TokenKind::SelfType)
                 | Some(TokenKind::Plus) => {
