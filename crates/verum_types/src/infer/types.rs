@@ -6897,6 +6897,37 @@ fn substitute_refinement_binder(
             return Ok(());
         }
 
+        // Sized float primitives are Named types so their methods retain the
+        // declared width. Handle their conversion before the broader numeric
+        // arms: narrowing a float is precision/range loss, not integer truncation.
+        let float_width = |ty: &Type| {
+            use verum_common::well_known_types::type_names;
+            let name = match ty {
+                Float => "Float",
+                Named { path, args } if args.is_empty() => path.as_ident()?.as_str(),
+                _ => return None,
+            };
+            if type_names::is_float_type(name) {
+                type_names::numeric_bit_width(name)
+            } else {
+                None
+            }
+        };
+        if let (Some(from_bits), Some(to_bits)) = (float_width(from_ty), float_width(to_ty)) {
+            if from_bits > to_bits {
+                self.emit_diagnostic(
+                    DiagnosticBuilder::warning()
+                        .message(format!(
+                            "cast from `{}` to `{}` may lose floating-point precision and range",
+                            from_ty, to_ty
+                        ))
+                        .span(span_to_line_col(span))
+                        .build(),
+                );
+            }
+            return Ok(());
+        }
+
         match (from_ty, to_ty) {
             // Char <-> UInt8/Byte coercion (both are 8-bit values)
             (Char, Named { path, .. }) => {
