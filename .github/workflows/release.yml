@@ -39,7 +39,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist
-          find _artifacts -type f \( -name '*.tar.gz' -o -name '*.zip' -o -name '*.sha256' \) \
+          find _artifacts -type f \( -name '*.tar.gz' -o -name '*.zip' -o -name '*.sha256' -o -name '*.host-dependencies.json' \) \
             -exec cp {} dist/ \;
           (cd dist && cat ./*.sha256 > SHA256SUMS)
           ls -lh dist/

@@ -102,7 +102,13 @@ jobs:
 
       - name: Build verum
         shell: bash
-        run: cargo build --release --locked -p verum_cli --target ${{ matrix.triple }}
+        env:
+          OPENSSL_NO_VENDOR: "0"
+          OPENSSL_STATIC: "1"
+          LIBGIT2_NO_VENDOR: "0"
+        run: |
+          unset LIBSSH2_SYS_USE_PKG_CONFIG
+          cargo build --release --locked -p verum_cli --target ${{ matrix.triple }}
 
       - name: Smoke test
         shell: bash
@@ -137,6 +143,18 @@ jobs:
           fi
           rm -rf stage
           ls -lh
+
+      # Inspect the payload from the actual archive, not a stale build path.
+      # This is the transport dependency gate, not full clean-OS certification.
+      - name: Check packaged host transport dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          NAME="verum-${{ inputs.artifact-version }}-${{ matrix.triple }}"
+          ASSET="dist/${NAME}.tar.gz"
+          [[ "${RUNNER_OS}" == "Windows" ]] && ASSET="dist/${NAME}.zip"
+          python3 scripts/ci/check_host_tls_dependencies.py \
+            --asset "${ASSET}" --report "${ASSET}.host-dependencies.json"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
