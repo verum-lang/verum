@@ -9,6 +9,16 @@ still fails and primitive hashing differs across tiers (T1587). See the
 [stage-10 record](platform-acceptance-2026-10-04-stage10.md) for exact source,
 CLI/archive/binary hashes, focused counts, phase verdicts and retained failures.
 
+## AOT dependency guard — T1589 (2026-10-05)
+
+The dynamic-dependency guard now rejects inspector failures, unknown imports,
+unsupported artifacts and stale/missing build output. Fourteen deterministic
+controls pass; six real ELF/PE/Mach-O CLI files are correctly rejected under
+the AOT policy, while the exact stage-10 Darwin native control and a fresh
+isolated smoke pass its dynamic boundary. This does not establish static libc
+absence or complete Linux/Windows runtime execution. See the
+[verification contract](no-libc-architecture.md#verification).
+
 ## AOT no-libc and host dependency audit — T1585 / T1586 (2026-10-04)
 
 The strict no-libc requirement applies to generated AOT programs and their

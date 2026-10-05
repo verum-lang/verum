@@ -1282,7 +1282,7 @@ jobs:
       # **No-libc dynamic linkage** (#80).
       # Builds a smoke .vr program and verifies the produced binary
       # only links the platform's permitted system boundary
-      # (libSystem.B.dylib on macOS; ld-linux on Linux; nothing else).
+      # (libSystem.B.dylib on macOS; no dynamic runtime or loader on Linux).
       - name: Assert the LLVM tools this job needs are present
         # The smoke build shells out to llc / opt / llvm-link (Phase 7.5).
         # When the fetched prebuilt lacks them the compiler silently falls

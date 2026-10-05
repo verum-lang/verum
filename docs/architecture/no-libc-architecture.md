@@ -108,13 +108,27 @@ package/network paths. A version smoke on a dependency-rich CI builder is
 insufficient. System libc is allowed; missing packages and unavailable symbol
 versions are release compatibility defects.
 
-The existing `scripts/ci/check_no_libc_link.sh` builds one AOT smoke program.
-Its current coverage is limited: Linux/macOS only, unknown dependencies are
-warnings, unsupported hosts exit successfully, and static library provenance
-is not checked. The release matrix in `.github/workflows/build-verum.yml`
-builds GNU Linux and MSVC Windows CLI targets and runs `--version`, without
-clean-baseline dependency acceptance. Neither check completes its respective
-contract; the host packaging gate must remain distinct from the AOT gate.
+Updated 2026-10-05 (T1589): `scripts/ci/check_no_libc_link.sh` builds a smoke
+in a unique temporary workspace, or inspects an existing executable with
+`--artifact PATH`. The inspector selects ELF, Mach-O or PE from the artifact,
+not the host. Unknown imports fail; missing tools, tool errors/diagnostics,
+malformed output and unsupported formats produce a non-success result. Linux
+controls permit no dynamic runtime or userspace loader; Darwin controls allow
+exactly libSystem; Windows controls allow kernel32/ntdll, including inspection
+of delayed imports. Explicit application FFI/capability libraries need a
+separate audit and are not silently exempted by this default-runtime gate.
+
+Fourteen source-only regression tests cover both poles and smoke isolation.
+The real stage-10 Darwin AOT control passes this dynamic boundary; all six
+host CLI artifacts from the audit below are rejected by the AOT policy, as
+expected. They were inspected without execution. A fresh isolated Darwin
+smoke also builds and passes inspection. These are not new Linux/Windows
+execution results or proof about statically linked libc.
+
+The release matrix in `.github/workflows/build-verum.yml` still builds GNU
+Linux and MSVC Windows CLI targets and runs `--version`, without clean-baseline
+dependency acceptance (T1588). The host packaging gate remains separate from
+AOT conformance. Full AOT runtime and static provenance coverage remains open.
 
 ## Current state (2026-10-04)
 
