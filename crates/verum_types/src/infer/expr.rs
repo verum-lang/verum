@@ -2491,10 +2491,12 @@ impl TypeChecker {
     /// the constraint is not enforced, and the E500 that a confirmed
     /// violation over a literal earns:
     ///
-    ///     Int{tw(it) >= 10}     x = 5    W0500
-    ///     Int{tw(it) >= 10}     x = -5   nothing at all
-    ///     Int{[it][0] >= 10}    x = 5    W0500
-    ///     Int{[it][0] >= 10}    x = -5   nothing at all
+    /// ```text
+    /// Int{tw(it) >= 10}     x = 5    W0500
+    /// Int{tw(it) >= 10}     x = -5   nothing at all
+    /// Int{[it][0] >= 10}    x = 5    W0500
+    /// Int{[it][0] >= 10}    x = -5   nothing at all
+    /// ```
     ///
     /// A predicate the solver cannot decide is unenforced whichever sign
     /// the value carries, and the reader is owed the same warning.

@@ -3281,8 +3281,10 @@ impl RefinementChecker {
     /// ask this question first. Measured 2026-09-12, with the same
     /// arithmetic written both ways:
     ///
-    ///     Int{it * 2 >= 10}      v: 20  clean     v: 1  E500
-    ///     Int{twice(it) >= 10}   v: 20  E500      v: 1  E500
+    /// ```text
+    /// Int{it * 2 >= 10}      v: 20  clean     v: 1  E500
+    /// Int{twice(it) >= 10}   v: 20  E500      v: 1  E500
+    /// ```
     ///
     /// The second row refuses `40 >= 10`. A METHOD call is unaffected —
     /// `Text{it.len() > 0}` is clean on "abc" and refuses on "" — because
