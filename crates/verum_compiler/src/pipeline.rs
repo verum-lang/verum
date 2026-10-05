@@ -1613,6 +1613,9 @@ impl<'s> CompilationPipeline<'s> {
                 .map(|(p, _)| p)
                 .unwrap_or("");
             let type_desc = TypeDescriptor {
+                // This legacy text-scan cache has no declaration discipline.
+                // It cannot grant ownership authority from a name or definition.
+                resource_discipline: verum_common::ResourceDiscipline::Unknown,
                 // The incremental cache (`CachedTypeInfo` /
                 // `CachedFunctionInfo`) records no visibility, so this
                 // path cannot filter and keeps the pre-A94 behaviour.

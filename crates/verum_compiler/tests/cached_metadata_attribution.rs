@@ -90,3 +90,18 @@ fn a_bare_name_with_no_module_claims_no_declarer() {
         "no prefix means no declarer, not an empty one"
     );
 }
+
+#[test]
+fn legacy_text_cache_cannot_manufacture_resource_discipline() {
+    for definition in [
+        "public type Token is { id: Int };",
+        "public type affine Token is { id: Int };",
+        "@must_consume public type Token is { id: Int };",
+    ] {
+        let mut entry = cached_type("owner.Token", "record");
+        entry.definition = definition.to_string();
+        let meta = convert(vec![entry]);
+        let ty = meta.types.values().next().unwrap();
+        assert_eq!(ty.resource_discipline, verum_common::ResourceDiscipline::Unknown);
+    }
+}
