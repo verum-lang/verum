@@ -109,7 +109,9 @@ pub const VERSION_MAJOR: u16 = 2;
 /// Version 2.18 carries declaration resource discipline and semantic field types.
 /// Version 2.19 adds the List storage-stride query; old readers refuse it.
 /// Version 2.20 carries bounded, body/signature/use-sealed value-use receipts.
-pub const VERSION_MINOR: u16 = 20;
+/// Version 2.21 adds checked container-owned List read/write/move operations.
+/// The 2.20 function tail remains present; older readers must reject these opcodes.
+pub const VERSION_MINOR: u16 = 21;
 
 /// Minor-version floors for sections whose presence readers gate on.  The
 /// register-type-hints section has been written unconditionally since minor 2,

@@ -40362,6 +40362,28 @@ impl VbcCodegen {
             // literal producing a struct whose `ptr` field pointed to a
             // freshly-allocated "Clone" of the raw buffer instead of the
             // buffer itself.
+            InlineSequenceId::ListStorageRead
+            | InlineSequenceId::ListStorageWrite
+            | InlineSequenceId::ListStorageMove => {
+                let sub_op = match seq_id {
+                    InlineSequenceId::ListStorageRead => {
+                        crate::instruction::MemSubOpcode::ListStorageRead
+                    }
+                    InlineSequenceId::ListStorageWrite => {
+                        crate::instruction::MemSubOpcode::ListStorageWrite
+                    }
+                    _ => crate::instruction::MemSubOpcode::ListStorageMove,
+                };
+                let mut operands = Vec::new();
+                Self::write_reg(&mut operands, dest.0);
+                for &arg in args {
+                    Self::write_reg(&mut operands, arg.0);
+                }
+                self.ctx.emit(Instruction::MemExtended {
+                    sub_op: sub_op.to_byte(),
+                    operands,
+                });
+            }
             InlineSequenceId::ListStorageStride => {
                 // The existing bytecode operand API owns a Vec buffer.
                 let mut operands = Vec::new();

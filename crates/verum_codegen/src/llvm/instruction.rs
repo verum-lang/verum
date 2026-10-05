@@ -2322,11 +2322,11 @@ fn as_i64<'ctx>(
     }
 }
 
-/// Encode a native callable value in the 64-bit register slot convention.
+/// Encode a native value in the 64-bit register slot convention.
 /// F32 travels as the bit pattern of its value-preserving f64 widening, just
 /// like FunctionContext's register storage. Decode uses coerce_value, which
 /// recovers that f64 and narrows at the declared callee boundary.
-fn closure_slot_value<'ctx>(
+fn native_slot_value<'ctx>(
     ctx: &FunctionContext<'_, 'ctx>,
     value: BasicValueEnum<'ctx>,
     name: &str,
@@ -3713,7 +3713,7 @@ fn lower_instruction_impl<'ctx>(
             };
             let mut call_args = verum_common::List::with_capacity(args.count as usize);
             for register in args.iter() {
-                call_args.push(closure_slot_value(
+                call_args.push(native_slot_value(
                     ctx,
                     ctx.get_register(register.0)?,
                     "closure_arg",
@@ -3897,7 +3897,7 @@ fn lower_instruction_impl<'ctx>(
                                         | BasicValueEnum::PointerValue(_)
                                 ) =>
                             {
-                                closure_slot_value(ctx, value, "closure_encode")?
+                                native_slot_value(ctx, value, "closure_encode")?
                             }
                             Some(_) => {
                                 return Err(LlvmLoweringError::internal(
@@ -28393,6 +28393,52 @@ fn lower_mem_extended<'ctx>(
                     )
                 })?;
             ctx.set_register(dst, result);
+            Ok(())
+        }
+        0x08..=0x0A => {
+            let dst = read_reg_varlen(operands, &mut pos)?;
+            let list = read_reg_varlen(operands, &mut pos)?;
+            let index = read_reg_varlen(operands, &mut pos)?;
+            let owner = as_ptr(ctx, ctx.get_register(list)?, "storage_owner")?;
+            let index = as_i64(ctx, ctx.get_register(index)?, "storage_index")?;
+            let mut call_args =
+                verum_common::List::<verum_llvm::values::BasicMetadataValueEnum>::new();
+            call_args.push(owner.into());
+            call_args.push(index.into());
+            for _ in 0..(sub_op - 0x08) {
+                let reg = read_reg_varlen(operands, &mut pos)?;
+                let value = ctx.get_register(reg)?;
+                let operand = if sub_op == 0x09 {
+                    if value_is_i128(&value) {
+                        return Err(LlvmLoweringError::internal(
+                            "List storage write requires a supported 64-bit value carrier; native i128 is not boxed",
+                        ));
+                    }
+                    native_slot_value(ctx, value, "storage_value")?
+                } else {
+                    as_i64(ctx, value, "storage_operand")?
+                };
+                call_args.push(operand.into());
+            }
+            let name = match sub_op {
+                0x08 => "verum_list_storage_read",
+                0x09 => "verum_list_storage_write",
+                _ => "verum_list_storage_move",
+            };
+            let function = ctx.get_module().get_function(name).or_missing_fn(name)?;
+            let call = ctx
+                .builder()
+                .build_call(
+                    function,
+                    &call_args,
+                    if sub_op == 0x08 { "storage_access" } else { "" },
+                )
+                .or_llvm_err()?;
+            if sub_op == 0x08 {
+                ctx.set_register(dst, call.basic_value_or("storage read returned void")?);
+            } else {
+                ctx.set_register(dst, ctx.types().i64_type().const_zero().into());
+            }
             Ok(())
         }
         0x07 => {

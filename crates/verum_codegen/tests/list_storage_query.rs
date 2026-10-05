@@ -66,6 +66,11 @@ fn with_source(
         _ => false,
     });
     ast.items.extend(core.items);
+    let mut memory = Parser::new(include_str!("../../../core/intrinsics/memory.vr"))
+        .parse_module()
+        .expect("memory grammar");
+    memory.items.retain(|item| matches!(&item.kind, ItemKind::Function(f) if ["list_storage_read", "list_storage_write", "list_storage_move"].contains(&f.name.name.as_str())));
+    ast.items.extend(memory.items);
     let mut codegen = VbcCodegen::new();
     codegen.register_builtin_variants();
     codegen.register_stdlib_constants();
@@ -405,6 +410,275 @@ fn nominal_byte_constructor_preserves_record_slots_across_capacity_changes() {
                     .call()
             };
             assert_eq!(actual, 37);
+        },
+    );
+}
+
+#[test]
+fn owned_storage_read_write_and_overlap_preserve_value_slots() {
+    with_source(
+        r#"
+        type Triple is {x:Int,y:Int,z:Int};
+        fn probe()->Int {
+            let values:List<Triple> =List<Triple>.with_capacity(3);
+            @intrinsic("list_storage_write", values, 0, Triple{x:11,y:37,z:99});
+            @intrinsic("list_storage_write", values, 1, Triple{x:22,y:41,z:88});
+            @intrinsic("list_storage_move", values, 0, 1, 2);
+            let first:Triple = @intrinsic("list_storage_read", values, 1);
+            let second:Triple = @intrinsic("list_storage_read", values, 2);
+            first.y + second.y
+        }
+        "#,
+        |_, jit| unsafe {
+            assert_eq!(
+                jit.get_function::<unsafe extern "C" fn() -> i64>("probe")
+                    .unwrap()
+                    .call(),
+                78
+            );
+        },
+    );
+}
+
+#[test]
+fn packed_storage_access_uses_existing_exact_carrier_encoding() {
+    // This pins the consumer ABI using a real emitted CBGR allocation. It
+    // intentionally does not claim a completed native List<Byte> constructor.
+    with_source(
+        r#"
+        fn make()->List<Int> { List<Int>.new() }
+        fn make_backing()->Int { @intrinsic("cbgr_allocate", 4) }
+        fn read(values:List<Byte>, index:Int)->Int { @intrinsic("list_storage_read", values, index) }
+        fn storage_write_probe(values:List<Byte>, index:Int, value:Int) { @intrinsic("list_storage_write", values, index, value) }
+        fn move_range(values:List<Byte>, source:Int, target:Int, count:Int) { @intrinsic("list_storage_move", values, source, target, count) }
+        "#,
+        |_, jit| unsafe {
+            let handle = jit
+                .get_function::<unsafe extern "C" fn() -> u64>("make")
+                .unwrap()
+                .call();
+            let backing = jit
+                .get_function::<unsafe extern "C" fn() -> *mut u8>("make_backing")
+                .unwrap()
+                .call();
+            assert_eq!(
+                *(backing.sub(verum_common::layout::ALLOCATION_HEADER_SIZE as usize) as *const u32),
+                4
+            );
+            *(handle as *mut u32) = verum_vbc::types::TypeId::BYTE_LIST.0;
+            *((handle as *mut u64).add(4)) = 4;
+            *((handle as *mut u64).add(5)) = backing as u64;
+            let write = jit
+                .get_function::<unsafe extern "C" fn(u64, i64, i64)>("storage_write_probe")
+                .unwrap();
+            let read = jit
+                .get_function::<unsafe extern "C" fn(u64, i64) -> i64>("read")
+                .unwrap();
+            let movement = jit
+                .get_function::<unsafe extern "C" fn(u64, i64, i64, i64)>("move_range")
+                .unwrap();
+            for (i, value) in [0, 255, 42, 17].into_iter().enumerate() {
+                write.call(handle, i as i64, value);
+            }
+            assert_eq!(std::slice::from_raw_parts(backing, 4), [0, 255, 42, 17]);
+            movement.call(handle, 0, 1, 3);
+            assert_eq!(std::slice::from_raw_parts(backing, 4), [0, 0, 255, 42]);
+            movement.call(handle, 1, 0, 3);
+            assert_eq!(std::slice::from_raw_parts(backing, 4), [0, 255, 42, 42]);
+            assert_eq!(read.call(handle, 1) + read.call(handle, 2), 297);
+        },
+    );
+}
+
+#[test]
+fn owned_storage_zero_move_does_not_touch_empty_backing() {
+    with_source(
+        r#"fn probe()->Int {let values:List<Int> =List<Int>.new(); @intrinsic("list_storage_move", values, 0, 0, 0); 7}"#,
+        |_, jit| unsafe {
+            assert_eq!(
+                jit.get_function::<unsafe extern "C" fn() -> i64>("probe")
+                    .unwrap()
+                    .call(),
+                7
+            );
+        },
+    );
+}
+
+#[test]
+fn owned_storage_invalid_range_and_extent_refuse_before_writing() {
+    const CHILD: &str = "VERUM_TEST_LIST_ACCESS_REFUSAL";
+    if let Some(case) = std::env::var_os(CHILD) {
+        with_source(
+            r#"
+            fn make()->List<Int> {List<Int>.with_capacity(2)}
+            fn storage_write_probe(values:List<Int>, index:Int)->Int {@intrinsic("list_storage_write",values,index,37); 0}
+            fn movement(values:List<Int>, source:Int,target:Int,count:Int)->Int {@intrinsic("list_storage_move",values,source,target,count); 0}
+            "#,
+            |_, jit| unsafe {
+                let handle = jit
+                    .get_function::<unsafe extern "C" fn() -> u64>("make")
+                    .unwrap()
+                    .call();
+                let write = jit
+                    .get_function::<unsafe extern "C" fn(u64, i64)>("storage_write_probe")
+                    .unwrap();
+                match case.to_str().unwrap() {
+                    "index" => write.call(handle, 2),
+                    "negative" => write.call(handle, -1),
+                    "extent" => {
+                        *((handle as *mut u64).add(4)) = 3;
+                        write.call(handle, 2);
+                    }
+                    "foreign" => {
+                        *(handle as *mut u32) = 99999;
+                        write.call(handle, 0);
+                    }
+                    "shape" => {
+                        *((handle as *mut u32).add(3)) = 24;
+                        write.call(handle, 0);
+                    }
+                    "zero-null" | "zero-extent" => {
+                        if case == "zero-null" {
+                            *((handle as *mut u64).add(5)) = 0;
+                        } else {
+                            *((handle as *mut u64).add(4)) = 3;
+                        }
+                        jit.get_function::<unsafe extern "C" fn(u64, i64, i64, i64)>("movement")
+                            .unwrap()
+                            .call(handle, 0, 0, 0);
+                    }
+                    "move" => jit
+                        .get_function::<unsafe extern "C" fn(u64, i64, i64, i64)>("movement")
+                        .unwrap()
+                        .call(handle, 0, 1, 2),
+                    _ => panic!("unknown refusal case"),
+                }
+            },
+        );
+        panic!("invalid storage access returned");
+    }
+    for case in [
+        "index",
+        "negative",
+        "extent",
+        "foreign",
+        "shape",
+        "move",
+        "zero-null",
+        "zero-extent",
+    ] {
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "owned_storage_invalid_range_and_extent_refuse_before_writing",
+                "--nocapture",
+            ])
+            .env(CHILD, case)
+            .output()
+            .unwrap();
+        assert!(!output.status.success(), "{case}");
+        assert_ne!(
+            output.status.code(),
+            Some(101),
+            "{case}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::ExitStatusExt;
+            assert_eq!(
+                output.status.signal(),
+                Some(6),
+                "{case}: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+    }
+}
+
+#[test]
+fn owned_storage_float_bits_survive_argument_return_and_move() {
+    for ty in ["Float", "Float32"] {
+        let source = r#"
+        fn store(values:List<Float>, value:Float)->Int {
+            let done = 0;
+            @intrinsic("list_storage_write", values, 0, value); done
+        }
+        fn fetch(values:List<Float>)->Float { let value = @intrinsic("list_storage_read", values, 1); value }
+        fn probe()->Float {
+            let values:List<Float> =List<Float>.with_capacity(2);
+            store(values,1.25);
+            @intrinsic("list_storage_move", values, 0, 1, 1);
+            fetch(values)
+        }
+    "#.replace("Float", ty).replace("fn probe()->Float32", "fn probe()->Float");
+        with_source(&source, |_, jit| unsafe {
+            assert_eq!(
+                jit.get_function::<unsafe extern "C" fn() -> f64>("probe")
+                    .unwrap()
+                    .call(),
+                1.25
+            );
+        });
+    }
+}
+
+#[test]
+fn owned_storage_wide_unboxed_value_is_refused() {
+    const CHILD: &str = "VERUM_TEST_LIST_WIDE_REFUSAL";
+    if std::env::var_os(CHILD).is_some() {
+        with_source(
+            r#"
+            fn probe()->Int {
+                let value = 18446744073709551616i128;
+                let values:List<Int128> =List<Int128>.with_capacity(1);
+                @intrinsic("list_storage_write",values,0,value); 0
+            }
+        "#,
+            |_, _| panic!("unsupported wide storage reached JIT"),
+        );
+        return;
+    }
+    // Strict lowering exposes the precise unsupported-carrier error instead
+    // of the existing module-wide lenient function-skip policy.
+    let output = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "owned_storage_wide_unboxed_value_is_refused",
+            "--nocapture",
+        ])
+        .env(CHILD, "1")
+        .env("VERUM_STRICT_CODEGEN", "1")
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(101));
+    let diagnostic = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        diagnostic.contains("native i128 is not boxed"),
+        "{diagnostic}"
+    );
+}
+
+#[test]
+fn public_storage_functions_accept_list_borrows() {
+    with_source(
+        r#"type Triple is {x:Int,y:Int,z:Int}; fn probe()->Int {
+        let mut values:List<Triple> =List<Triple>.with_capacity(2);
+        unsafe {
+            list_storage_write(&mut values,0,Triple{x:11,y:37,z:99});
+            list_storage_move(&mut values,0,1,1);
+            let result:Triple = list_storage_read(&values,1);
+            result.y
+        }
+    }"#,
+        |_, jit| unsafe {
+            assert_eq!(
+                jit.get_function::<unsafe extern "C" fn() -> i64>("probe")
+                    .unwrap()
+                    .call(),
+                37
+            );
         },
     );
 }

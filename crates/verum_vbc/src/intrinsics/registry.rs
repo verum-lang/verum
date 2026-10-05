@@ -1099,6 +1099,12 @@ pub enum InlineSequenceId {
     // =========================================================================
     /// Query the physical element width of an existing List carrier.
     ListStorageStride,
+    /// Read an initialized element using its owner's physical encoding.
+    ListStorageRead,
+    /// Write an element using its owner's physical encoding.
+    ListStorageWrite,
+    /// Move element ranges within one owner, preserving overlapping regions.
+    ListStorageMove,
     /// alloc: allocate heap memory
     Alloc,
     /// alloc_zeroed: allocate zeroed heap memory
@@ -2277,6 +2283,51 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::ListStorageStride),
         mlir_op: None,
         doc: "Physical element width carried by a canonical List object",
+    },
+    Intrinsic {
+        name: "list_storage_read",
+        category: IntrinsicCategory::Memory,
+        hints: &[
+            IntrinsicHint::Unsafe,
+            IntrinsicHint::MemoryEffect,
+            IntrinsicHint::Generic,
+            IntrinsicHint::Inline,
+        ],
+        param_count: 2,
+        return_count: 1,
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::ListStorageRead),
+        mlir_op: None,
+        doc: "Capacity-checked read using the exact List storage encoding",
+    },
+    Intrinsic {
+        name: "list_storage_write",
+        category: IntrinsicCategory::Memory,
+        hints: &[
+            IntrinsicHint::Unsafe,
+            IntrinsicHint::MemoryEffect,
+            IntrinsicHint::Generic,
+            IntrinsicHint::Inline,
+        ],
+        param_count: 3,
+        return_count: 0,
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::ListStorageWrite),
+        mlir_op: None,
+        doc: "Capacity-checked write using the exact List storage encoding",
+    },
+    Intrinsic {
+        name: "list_storage_move",
+        category: IntrinsicCategory::Memory,
+        hints: &[
+            IntrinsicHint::Unsafe,
+            IntrinsicHint::MemoryEffect,
+            IntrinsicHint::Generic,
+            IntrinsicHint::Inline,
+        ],
+        param_count: 4,
+        return_count: 0,
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::ListStorageMove),
+        mlir_op: None,
+        doc: "Capacity-checked move using the exact List storage encoding",
     },
     Intrinsic {
         name: "alloc",

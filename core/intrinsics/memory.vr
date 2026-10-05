@@ -129,6 +129,25 @@ public fn list_storage_stride<T>(list: &List<T>) -> Int {
     @intrinsic("list_storage_stride", list)
 }
 
+/// Read an initialized element within the owner's allocated capacity.
+/// The caller maintains initialization and move/drop obligations; this does
+/// not clone the element. Physical encoding comes from the List, not T.size.
+public unsafe fn list_storage_read<T>(list: &List<T>, index: Int) -> T {
+    @intrinsic("list_storage_read", list, index)
+}
+
+/// Initialize or replace a slot within capacity; the caller drops any old
+/// value and updates logical length as appropriate.
+public unsafe fn list_storage_write<T>(list: &mut List<T>, index: Int, value: T) {
+    @intrinsic("list_storage_write", list, index, value)
+}
+
+/// Move an overlapping range within capacity without invoking element glue.
+/// The caller maintains which source/destination slots remain initialized.
+public unsafe fn list_storage_move<T>(list: &mut List<T>, source: Int, target: Int, count: Int) {
+    @intrinsic("list_storage_move", list, source, target, count)
+}
+
 // =============================================================================
 // SECTION 3: Pointer Operations
 // =============================================================================

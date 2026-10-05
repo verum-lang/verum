@@ -391,6 +391,23 @@ fn expand_sequence(
     byte_width: u8,
 ) -> bool {
     match seq {
+        InlineSequenceId::ListStorageRead
+        | InlineSequenceId::ListStorageWrite
+        | InlineSequenceId::ListStorageMove => {
+            let sub_op = match seq {
+                InlineSequenceId::ListStorageRead => {
+                    crate::instruction::MemSubOpcode::ListStorageRead
+                }
+                InlineSequenceId::ListStorageWrite => {
+                    crate::instruction::MemSubOpcode::ListStorageWrite
+                }
+                _ => crate::instruction::MemSubOpcode::ListStorageMove,
+            };
+            e.emit(Instruction::MemExtended {
+                sub_op: sub_op.to_byte(),
+                operands: extended_operands(dest, args),
+            });
+        }
         InlineSequenceId::ListStorageStride => {
             e.emit(Instruction::MemExtended {
                 sub_op: crate::instruction::MemSubOpcode::ListStorageStride.to_byte(),

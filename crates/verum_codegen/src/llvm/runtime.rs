@@ -25,6 +25,8 @@
 //! | verum_set_remove | Remove value from set |
 //! | __verum_map_iter_next | Scan map slots for next occupied entry |
 
+mod list_storage;
+
 use verum_llvm::AddressSpace;
 use verum_llvm::builder::Builder;
 use verum_llvm::context::Context;
@@ -13118,6 +13120,7 @@ pub fn define_list_ir_helpers<'ctx>(context: &'ctx Context, module: &Module<'ctx
 
     define_list_storage_stride(context, module)?;
     define_list_storage_resize(context, module)?;
+    list_storage::define(context, module)?;
 
     // --- verum_list_grow(list_ptr: ptr) -> void ---
     // Doubles the capacity, allocates new backing array, copies elements.

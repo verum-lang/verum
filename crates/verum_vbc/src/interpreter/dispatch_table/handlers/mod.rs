@@ -197,6 +197,7 @@ pub(super) mod extended;
 pub(super) mod ffi_extended;
 // Family gateways (T0852) — honest homes for the ex-FfiExtended squatters.
 pub(super) mod mem_extended;
+mod list_storage;
 pub(super) mod time_extended;
 pub(super) mod sys_extended;
 pub(super) mod mach_extended;

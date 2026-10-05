@@ -1816,6 +1816,8 @@ fn symbol_count(files: &[(String, Vec<u8>)]) -> usize {
 /// invalidate independently of source.  Format: free-form ASCII;
 /// readable strings make `git log` of this constant tell the story.
 const PRECOMPILE_SCHEMA_VERSION: &str =
+    // v50: List storage access opcodes require VBC2.21, including the v20 receipt tail.
+    // Do not reuse a last-good archive with only the previous memory family.
     // v47: declaration-owned resource discipline changes VBC and bincode metadata.
     // Old sidecars must be rebuilt; serde defaults do not version a bincode struct.
     // v46: the sidecar gained `statics` — module-level `public static`
@@ -1832,7 +1834,7 @@ const PRECOMPILE_SCHEMA_VERSION: &str =
     // cache — measured: the scan was added, the build reported
     // "precompile cache HIT", and the new field stayed empty while the
     // reader had nothing to read. Bumping here is what invalidates it.
-    "v49-2026-10-05-value-use-receipts";
+    "v50-2026-10-05-list-storage-access";
 
 /// T3: blake3 hash of every `core/**/*.vr` file's content, sorted
 /// by relative path, mixed with [`PRECOMPILE_SCHEMA_VERSION`].

@@ -239,8 +239,44 @@ boundaries, unknown encodings, record values, clone and call/return carriers.
 This boundary does not enable the native packed-byte constructor or complete
 the full acceptance above. Static element selection, raw element access,
 movement, iterators and slices still need a coherent packed-storage unit.
-In particular, the existing constructor producer selects packed storage for
-a user nominal named `Byte`; an instance query faithfully sees that incorrect
-producer tag and cannot reconstruct the lost declaration identity. Preserve
-this source negative for the constructor repair. Fresh whole-CLI/native List
-acceptance remains required.
+The constructor selection now uses the exact declared element identity: a
+user nominal named `Byte`, a reference to Byte and a same-spelling generic
+parameter no longer select the packed route. This repairs producer identity;
+it does not enable the missing native packed allocator. Fresh whole-CLI/native
+List acceptance remains required.
+
+
+## Checked container-owned element operations
+
+The next bounded unit declares unsafe `list_storage_read`,
+`list_storage_write` and `list_storage_move` in `core.intrinsics.memory`.
+VBC 2.21 carries their register operands in the existing memory-operation
+length envelope. They take a List owner and element indices, never an
+unqualified raw element pointer. The owner selects the existing 8-byte Value
+slot or 1-byte packed representation. Semantic `T.size` is not consulted.
+
+Both execution paths validate the canonical owner shape, the capacity range
+and the allocation byte extent before access. A zero-count move still
+validates nonempty backing; a legitimate zero-capacity/null owner requires
+no backing dereference. Move validates both complete ranges and supports
+overlap in either direction. It copies storage bits without element glue.
+The unsafe caller remains responsible for initialization, logical length,
+exclusive access, and move/drop obligations. Reading does not clone a value.
+
+The focused source→wire→interpreter tests use both canonical encodings,
+public declarations, record handles and Float values. Source→LLVM/JIT tests
+exercise ordinary value slots and public borrowed-owner calls. A separate
+packed-consumer test builds the existing canonical byte carrier with a real
+emitted CBGR allocation; this is **not** evidence of a working native packed
+constructor. Float32 uses the same value-preserving f64 slot encoding as
+native register storage. Unboxed native i128 writes are unsupported and
+produce a lowering error rather than truncate; the strict-codegen test
+exposes that error independently of the existing lenient function-skip policy.
+
+This unit does not migrate every source List operation or enable the packed
+constructor. Raw `ptr.offset` operations, reference-producing iterators and
+slice construction still need the same encoding carried through their
+consumers. In particular, generic iterator adaptors cannot recover an
+original byte address from a preloaded value. Their reference representation
+and lifetime proof remain a separate prerequisite. Full acceptance above
+requires the coherent native fixture after those consumers are complete.
