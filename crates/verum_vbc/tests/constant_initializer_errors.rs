@@ -133,3 +133,76 @@ fn forward_cross_module_constants_keep_their_declared_owner() {
         );
     }
 }
+
+#[test]
+fn bootstrap_retains_other_files_constants_and_archives_a_loud_failure() {
+    for initializer in [
+        "{ let partial = 7; missing_constant_value + partial }",
+        "([Byte; BAD]).size",
+    ] {
+        let bad = Parser::new(&format!(
+            "module broken; public const BAD:Int={initializer};"
+        ))
+        .parse_module()
+        .expect("bad grammar");
+        let good = Parser::new("module healthy; public type Cell is {value:Int}; public const GOOD:Cell=Cell{value:37}; fn probe()->Int {GOOD.value}")
+            .parse_module().expect("good grammar");
+        let mut codegen = VbcCodegen::new();
+        codegen
+            .collect_unit_declarations(&[&bad, &good])
+            .expect("shared declarations");
+        assert!(codegen.compile_items_into_state(&bad).is_err());
+        codegen
+            .compile_items_into_state(&good)
+            .expect("other file survives");
+        let module = codegen
+            .finalize_module_from_state()
+            .expect("bootstrap finalization");
+        let bytes = verum_vbc::serialize::serialize_module(&module).expect("write archive");
+        let module = verum_vbc::deserialize::deserialize_module(&bytes).expect("read archive");
+        let probe = module
+            .find_function_by_name("healthy.probe")
+            .expect("healthy probe");
+        let failed = module
+            .find_function_by_name("broken.BAD")
+            .expect("failed initializer descriptor");
+        let mut interpreter = Interpreter::new(Shared::new(module).into_arc());
+        assert_eq!(
+            interpreter
+                .execute_function(probe)
+                .expect("healthy constant")
+                .as_i64(),
+            37
+        );
+        let error = interpreter
+            .execute_function(failed)
+            .err()
+            .expect("failed constant must panic");
+        assert!(error.to_string().contains("panic-stub"), "{error}");
+        let expected = if initializer.contains("missing_constant_value") {
+            "missing_constant_value"
+        } else {
+            "cyclic constant"
+        };
+        assert!(error.to_string().contains(expected), "{error}");
+    }
+}
+
+#[test]
+fn strict_initializer_error_cannot_be_cleared_by_retrying_finalization() {
+    let ast = Parser::new("const BAD:Int=missing_constant_value; type Cell is {value:Int}; const GOOD:Cell=Cell{value:37};")
+        .parse_module().expect("grammar");
+    let mut codegen = VbcCodegen::new();
+    codegen
+        .collect_unit_declarations(&[&ast])
+        .expect("declarations");
+    let first = codegen
+        .compile_unit_items(&[&ast], ItemFailurePolicy::Strict)
+        .err()
+        .expect("first error");
+    let retry = codegen
+        .finalize_module()
+        .err()
+        .expect("retry must retain failed initializer");
+    assert_eq!(first.to_string(), retry.to_string());
+}

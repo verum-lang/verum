@@ -8130,7 +8130,16 @@ impl VbcCodegen {
                         }
                     }
                 }
-                self.compile_pending_constants()?;
+                if let Err(error) = self.compile_pending_constants_with_policy(policy) {
+                    match policy {
+                        ItemFailurePolicy::Strict => return Err(error),
+                        ItemFailurePolicy::StubAndContinue => {
+                            if first_error.is_none() {
+                                first_error = Some(error);
+                            }
+                        }
+                    }
+                }
                 self.compile_pending_tls_inits()?;
                 Ok(())
             })();
@@ -17154,10 +17163,17 @@ impl VbcCodegen {
     /// These are constants with complex values (like struct literals) that
     /// are compiled as zero-argument functions returning the constant value.
     fn compile_pending_constants(&mut self) -> CodegenResult<()> {
-        // Take pending constants to avoid borrow issues
-        let constants = std::mem::take(&mut self.pending_constants);
+        self.compile_pending_constants_with_policy(ItemFailurePolicy::Strict)
+    }
 
-        for (name, expr, queued_source_module) in constants {
+    fn compile_pending_constants_with_policy(
+        &mut self,
+        policy: ItemFailurePolicy,
+    ) -> CodegenResult<()> {
+        let mut constants = std::mem::take(&mut self.pending_constants).into_iter();
+        let mut first_error = None;
+
+        while let Some((name, expr, queued_source_module)) = constants.next() {
             // Get the pre-registered function info.
             //
             // **Cross-module same-simple-name const disambiguation.**
@@ -17191,45 +17207,68 @@ impl VbcCodegen {
                 None => continue, // Skip if not found (shouldn't happen)
             };
 
-            // Publish scalar dependency folding through the existing archive
-            // constant marker, so imported array counts need no source AST.
-            let folded_integer = if func_info.return_type_name.as_deref() == Some("Int") {
-                self.const_eval_i64_in_scope(
-                    &expr, queued_source_module.as_deref(),
-                    self.constant_initializers.get(&func_info.id).map(|(_, _, bindings)| bindings), false,
-                    &mut verum_common::Set::new(), &mut verum_common::Map::new(), 0,
-                )?
-            } else {
-                None
-            };
-
-            // Begin compiling the constant as a zero-argument function
             self.ctx.begin_function(&name, &[], None);
-
-            // A failed initializer is a compilation error, never a successful
-            // constant returning nil. Preserve the original diagnostic and
-            // discard any partially emitted body before leaving function scope.
-            if let Some(value) = folded_integer {
-                let result_reg = self.ctx.alloc_temp();
-                self.ctx.emit(Instruction::LoadI { dst: result_reg, value });
-                self.ctx.emit(Instruction::Ret { value: result_reg });
-            } else {
-                match self.compile_expr(&expr) {
-                    Ok(Some(result_reg)) => {
-                        self.ctx.emit(Instruction::Ret { value: result_reg });
-                    }
-                    Ok(None) => {
-                        // A valid unit-valued initializer has no result register.
-                        let nil_reg = self.ctx.alloc_temp();
-                        self.ctx.emit(Instruction::LoadNil { dst: nil_reg });
-                        self.ctx.emit(Instruction::Ret { value: nil_reg });
-                    }
-                    Err(error) => {
-                        self.ctx.end_function();
-                        return Err(error);
+            let compiled: CodegenResult<Option<i64>> = (|| {
+                // Preserve scalar folding for imported array counts without
+                // suppressing an invalid initializer's original diagnostic.
+                let folded_integer = if func_info.return_type_name.as_deref() == Some("Int") {
+                    self.const_eval_i64_in_scope(
+                        &expr, queued_source_module.as_deref(),
+                        self.constant_initializers.get(&func_info.id).map(|(_, _, bindings)| bindings), false,
+                        &mut verum_common::Set::new(), &mut verum_common::Map::new(), 0,
+                    )?
+                } else {
+                    None
+                };
+                if let Some(value) = folded_integer {
+                    let result_reg = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::LoadI { dst: result_reg, value });
+                    self.ctx.emit(Instruction::Ret { value: result_reg });
+                } else if let Some(result_reg) = self.compile_expr(&expr)? {
+                    self.ctx.emit(Instruction::Ret { value: result_reg });
+                } else {
+                    // A valid unit-valued initializer has no result register.
+                    let nil_reg = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::LoadNil { dst: nil_reg });
+                    self.ctx.emit(Instruction::Ret { value: nil_reg });
+                }
+                Ok(folded_integer)
+            })();
+            let folded_integer = match compiled {
+                Ok(value) => value,
+                Err(error) => {
+                    self.ctx.end_function();
+                    match policy {
+                        ItemFailurePolicy::Strict => {
+                            // A caller retrying finalize must still see the
+                            // failure. Keep newly queued entries after the
+                            // original failed initializer and unvisited tail.
+                            let added = std::mem::take(&mut self.pending_constants);
+                            self.pending_constants.push((name, expr, queued_source_module));
+                            self.pending_constants.extend(constants);
+                            self.pending_constants.extend(added);
+                            return Err(error);
+                        }
+                        ItemFailurePolicy::StubAndContinue => {
+                            // Bootstrap may report the diagnostic and continue.
+                            // Preserve this constant's exact id/owner/type via
+                            // the normal descriptor path, with an explicit
+                            // panic instead of a successful nil-return body.
+                            self.ctx.begin_function(&name, &[], None);
+                            let message_id = self.intern_string(&format!(
+                                "[lenient] {} compiled to panic-stub: {}",
+                                qualified_name.as_deref().unwrap_or(&name), error,
+                            ));
+                            self.ctx.emit(Instruction::Panic { message_id });
+                            self.ctx.emit(Instruction::RetV);
+                            if first_error.is_none() {
+                                first_error = Some(error);
+                            }
+                            None
+                        }
                     }
                 }
-            }
+            };
 
             // End the function and collect instructions
             let (instructions, register_count) = self.ctx.end_function();
@@ -17361,7 +17400,10 @@ impl VbcCodegen {
             self.push_function_dedup(vbc_func);
         }
 
-        Ok(())
+        match first_error {
+            Some(error) => Err(error),
+            None => Ok(()),
+        }
     }
 
     /// Compiles pending @thread_local static initializations.
