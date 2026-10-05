@@ -93,6 +93,10 @@ pub struct RegisterInfo {
     /// When true, the register holds a pointer to a 1-field object, and reads/writes
     /// must go through GetF/SetF at field index 0.
     pub is_cell: bool,
+
+    /// The source pattern exposes an alias (`ref` or `name @ pattern`),
+    /// rather than establishing a simple value binding.
+    pub is_pattern_alias: bool,
 }
 
 /// Kind of register binding.
@@ -173,6 +177,7 @@ impl RegisterAllocator {
                     scope_level: 0,
                     kind: RegisterKind::Parameter,
                     is_cell: false,
+                    is_pattern_alias: false,
                 },
             );
             regs.push(reg);
@@ -217,6 +222,7 @@ impl RegisterAllocator {
                 scope_level,
                 kind: RegisterKind::Local,
                 is_cell: false,
+                is_pattern_alias: false,
             },
         );
 
@@ -339,6 +345,28 @@ impl RegisterAllocator {
         }
 
         removed
+    }
+
+    /// Exact lexical bindings still live at an abrupt function exit, including
+    /// shadowed declarations. Merely reading this inventory must not pop scopes:
+    /// sibling CFG paths continue compiling against the same lexical state.
+    pub(super) fn function_exit_bindings(
+        &self,
+    ) -> verum_common::List<(verum_common::Text, RegisterInfo)> {
+        let mut seen = verum_common::Set::new();
+        let mut bindings: verum_common::List<_> = self
+            .variables
+            .iter()
+            .chain(self.scope_stack.iter().flat_map(|scope| {
+                scope.shadowed_vars.iter().map(|(name, info)| (name, info))
+            }))
+            .filter(|(_, info)| info.kind == RegisterKind::Local && seen.insert(info.binding_id))
+            .map(|(name, info)| (verum_common::Text::from(name.as_str()), info.clone()))
+            .collect();
+        bindings.sort_by_key(|(_, info)| {
+            std::cmp::Reverse((info.scope_level, info.binding_id.0))
+        });
+        bindings
     }
 
     /// Returns the current scope level.

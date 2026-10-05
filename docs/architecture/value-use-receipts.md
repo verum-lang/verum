@@ -61,25 +61,26 @@ A plan retains at most 16,384 uses. Exhaustion discards the whole plan. CFG
 materialization decodes at most 65,536 instructions before retaining another
 one. Missing/declined facts never silently become transfer permission.
 
-## Next executable ownership step
+## Remaining ownership steps
 
-Local initialization currently calls `binds_a_copy_of_a_place`, emits `Clone`
-into a temporary, and then `compile_pattern_bind` allocates the destination
-binding. This means the copy observation can precede its destination ID. The
-next producer operation must explicitly join those identities and choose a
-semantic duplication/transfer operation. Replacing `Clone` with `Mov` alone is
-incorrect: lexical cleanup would still own both registers.
+Ordinary local value-copy initialization calls `binds_a_copy_of_a_place`, emits
+`Clone` into a temporary, and then `compile_pattern_bind` allocates the
+destination binding. This means the copy observation can precede its
+destination ID. The direct affine local handoff below joins the source and
+receiving binding through the actual operations. Other producers still need
+their own consuming context; replacing `Clone` with `Mov` alone is incorrect
+because lexical cleanup would still own both registers.
 
 Direct call argument packing emits `Mov` into a consecutive range; the receipt
 can identify the source, but exact selected parameter consumption and callee
 cleanup obligations still need a joint contract. A call result is not currently
 published as a newly owned binding merely because its nominal type is known.
 
-`compile_return` and block-tail preservation identify direct source operands.
-`compile_block` saves the result in a fresh register before `exit_scope` emits
-cleanup. The next stage must atomically transfer the cleanup obligation from
-the exact source binding to the escaping result; reference forwarding must not
-acquire referent ownership. Aggregate fields, variant payloads and call-return
+The explicit direct affine local return below joins the source clear with its
+receiving result. Block-tail preservation is a separate route: `compile_block`
+saves the result in a fresh register before `exit_scope` emits cleanup. A general
+consuming block-tail producer still needs to transfer the exact binding's
+cleanup obligation; reference forwarding must not acquire referent ownership. Aggregate fields, variant payloads and call-return
 values need their own producer operations and obligation identities. Current
 receipts do not reconstruct them from pointer equality, type names, `drop_fn`
 or a later native register mark.
@@ -108,7 +109,46 @@ consulted to execute the handoff or a destructor.
 Source interpreter controls cover timing and exactly-once cleanup, explicit
 destination drop, conditional transfer/join, repeated loop allocations, shadowing
 and register reuse. Checker controls reject subsequent consumption/field use.
-This unit does not add bootstrap use-after-move validation, aggregate insertion
+This local-initialization unit does not add bootstrap use-after-move validation, aggregate insertion
 or extraction, argument/return cleanup contracts, or native object destruction.
 Those are still required for the MutexGuard lifecycle and for closing T1602,
 T1538 or T1540.
+
+
+## Direct named local return (T1602, 2026-10-05)
+
+An explicit `return local` can now hand off an exact active affine/linear local.
+The producer requires the source register and `BindingId` to agree with its
+resolved declaration, writes a fresh receiving slot, clears the source, then
+emits the existing lexical cleanup in reverse declaration/scope order before
+`Ret`. The inventory includes shadowed declarations without popping scopes;
+compiling another branch retains its original binding state. This unit uses
+existing `Mov`, `LoadUnit`, `DropRef` and `Ret` operations, not an observation
+receipt or native register mark as ownership authority.
+
+Pending deferred actions, captured cells, alias patterns, locals matching the
+legacy name-only escape set, and affine parameter returns do not enter this
+path. The escape set cannot suppress cleanup for an unrelated shadowed local:
+this boundary is declined before consuming any source. An observed use of a named affine value in an
+aggregate, call or selected returned expression is also refused until its own
+handoff producer exists. A fresh aggregate result keeps its previous lowering
+without gaining cleanup permission. In particular, existing fresh
+`Result.Ok(Guard { ... })` and `Result.Err(error)` source shapes are not rejected
+just because the result type can hold an affine value.
+
+The unsupported-use guard captures actual emitted operands while their binding
+identities are live. It does not resolve old AST names after an inner scope has
+closed. This bounded capture is independent of optional receipt exhaustion,
+and nested function compilation saves/restores it with the register allocator.
+It never grants Copy, Transfer or Borrow authority.
+
+Source controls cover direct and nested early returns, both branch directions,
+shadowed bindings, return after a local transfer, explicit receiver drop,
+reference/raw locals and reference aliases, and wire roundtrip with receipts
+removed. Fresh affine sum compilation and an inner `Int` shadowing an outer
+affine name are separate positive controls. Interpreter cleanup timing is
+measured; this does not enable native object destruction. Deferred return,
+implicit block-tail transfer, by-value parameter/call ownership, aggregate
+insertion/extraction and the full MutexGuard lifecycle remain open. The next
+call unit must join caller consumption with exact semantic parameter authority
+and actual native call selection before enabling callee cleanup.

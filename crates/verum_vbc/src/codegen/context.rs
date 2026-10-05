@@ -2270,6 +2270,13 @@ impl CodegenContext {
         result
     }
 
+    /// A return cannot replay deferred fragments as an ownership operation
+    /// without their source-use/CFG contract. The direct affine-return unit
+    /// declines this boundary instead of running cleanup before a deferred use.
+    pub(super) fn has_pending_defers(&self) -> bool {
+        self.defer_stack.iter().any(|scope| !scope.is_empty())
+    }
+
     // ==================== Scope Management ====================
 
     /// Enters a new scope.

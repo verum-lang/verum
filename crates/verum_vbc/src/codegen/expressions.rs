@@ -18357,9 +18357,14 @@ impl VbcCodegen {
         }
 
         if let Some(expr) = value {
-            let reg = self
-                .compile_expr(expr)?
-                .or_internal("return value has no value")?;
+            if !self.ctx.registers.value_uses.begin_return_use_capture() {
+                return Err(CodegenError::with_span(CodegenErrorKind::UnsupportedExpr(
+                    "nested return-use observation exceeds its depth bound".into(),
+                ), expr.span));
+            }
+            let compiled = self.compile_expr(expr);
+            let uses_named_affine = self.ctx.registers.value_uses.finish_return_use_capture();
+            let reg = compiled?.or_internal("return value has no value")?;
 
             // If the enclosing function's declared return type carries
             // a refinement predicate, emit the runtime Assert before
@@ -18373,7 +18378,9 @@ impl VbcCodegen {
                 self.emit_return_refinement_assert(reg, Some(&ret_ty), &fn_name);
             }
 
-            self.ctx.emit(Instruction::Ret { value: reg });
+            if !self.emit_direct_affine_return(expr, reg, uses_named_affine)? {
+                self.ctx.emit(Instruction::Ret { value: reg });
+            }
         } else {
             self.ctx.emit(Instruction::RetV);
         }
@@ -21213,9 +21220,12 @@ impl VbcCodegen {
                 mutable,
                 name,
                 subpattern,
-                by_ref: _by_ref,
+                by_ref,
             } => {
                 let var_reg = self.ctx.define_var(&name.name, *mutable);
+                if let Some(binding) = self.ctx.lookup_var_mut(&name.name) {
+                    binding.is_pattern_alias = *by_ref || subpattern.is_some();
+                }
                 // T1192 — ANY new binding of this name drops a recorded
                 // byte-array size. The map is keyed by NAME, so a `let`
                 // in an inner block, a match arm, a `for` binding or a

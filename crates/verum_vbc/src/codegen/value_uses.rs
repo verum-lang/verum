@@ -27,6 +27,10 @@ pub(super) struct ValueUseRecorder {
     forwarded: Map<Reg, BindingFact>,
     pub uses: List<ValueUseReceipt>,
     exhausted: bool,
+    // Scoped guards observe actual source identities while their bindings are
+    // live. They are independent of the optional receipt budget and never
+    // grant ownership permission. Nested functions reset/restore this recorder.
+    return_use_capture: List<bool>,
 }
 impl ValueUseRecorder {
     pub fn allocate(&mut self, reg: Reg) -> BindingId {
@@ -60,6 +64,71 @@ impl ValueUseRecorder {
     }
     pub fn forward_result(&mut self, reg: Reg, fact: BindingFact) {
         self.forwarded.insert(reg, fact);
+    }
+    pub fn begin_return_use_capture(&mut self) -> bool {
+        if self.return_use_capture.len() >= 128 {
+            return false;
+        }
+        self.return_use_capture.push(false);
+        true
+    }
+    pub fn finish_return_use_capture(&mut self) -> bool {
+        self.return_use_capture.pop().unwrap_or(true)
+    }
+    fn capture_affine_operand(&mut self, reg: Reg) {
+        if !self.return_use_capture.is_empty()
+            && self
+                .active
+                .get(&reg)
+                .or_else(|| self.forwarded.get(&reg))
+                .is_some_and(|fact| {
+                    matches!(
+                        fact.discipline,
+                        ResourceDiscipline::Affine | ResourceDiscipline::Linear
+                    )
+                })
+        {
+            for captured in &mut self.return_use_capture {
+                *captured = true;
+            }
+        }
+    }
+    fn capture_return_inputs(&mut self, instruction: &Instruction) {
+        if self.return_use_capture.is_empty() {
+            return;
+        }
+        match instruction {
+            // A named destination is handled by the existing local producer.
+            // A temporary can feed a selected result, aggregate or call instead.
+            Instruction::Mov { dst, src } if !self.active.contains_key(dst) => {
+                self.capture_affine_operand(*src);
+            }
+            Instruction::Clone { src, .. } => self.capture_affine_operand(*src),
+            Instruction::SetF { value, .. } | Instruction::SetVariantData { value, .. } => {
+                self.capture_affine_operand(*value);
+            }
+            Instruction::Call { args, .. }
+            | Instruction::CallG { args, .. }
+            | Instruction::CallClosure { args, .. } => {
+                for i in 0..args.count {
+                    self.capture_affine_operand(Reg(args.start.0 + u16::from(i)));
+                }
+            }
+            Instruction::CallM { receiver, args, .. } => {
+                self.capture_affine_operand(*receiver);
+                for i in 0..args.count {
+                    self.capture_affine_operand(Reg(args.start.0 + u16::from(i)));
+                }
+            }
+            Instruction::Pack {
+                src_start, count, ..
+            } => {
+                for i in 0..*count {
+                    self.capture_affine_operand(Reg(src_start.0 + u16::from(i)));
+                }
+            }
+            _ => {}
+        }
     }
     fn record(
         &mut self,
@@ -102,6 +171,7 @@ impl ValueUseRecorder {
         });
     }
     pub fn observe(&mut self, instruction: &Instruction, index: usize) {
+        self.capture_return_inputs(instruction);
         match instruction {
             Instruction::Mov { dst, src } => {
                 let fact = self.fact(*src);
@@ -171,6 +241,7 @@ impl super::VbcCodegen {
         };
         if binding.reg != reg
             || binding.is_cell
+            || binding.is_pattern_alias
             || !matches!(
                 binding.kind,
                 super::RegisterKind::Local | super::RegisterKind::Parameter
@@ -191,6 +262,101 @@ impl super::VbcCodegen {
                 ResourceDiscipline::Affine | ResourceDiscipline::Linear
             )
     }
+    /// The first complete return handoff is a direct, exact affine local.
+    /// An observed named affine use through a parameter, aggregate or selected
+    /// result needs its own consuming producer and is refused. Fresh or unknown
+    /// result origins retain their existing route without new permission.
+    /// No native destructor is enabled here.
+    pub(super) fn emit_direct_affine_return(
+        &mut self,
+        expr: &verum_ast::Expr,
+        source: Reg,
+        uses_named_affine: bool,
+    ) -> super::CodegenResult<bool> {
+        let constrained = |mode| {
+            matches!(
+                mode,
+                ResourceDiscipline::Affine | ResourceDiscipline::Linear
+            )
+        };
+        let declared = self
+            .current_return_ast_type
+            .as_ref()
+            .map(|ast| self.resolve_signature_type_ref(ast, &self.ctx.current_generic_param_ids));
+        let declared_affine = declared.as_ref().is_some_and(|ty| {
+            constrained(crate::resource_discipline::resource_discipline_with(
+                ty,
+                |id| {
+                    self.type_index_of(id)
+                        .and_then(|index| self.types.get(index))
+                },
+            ))
+        });
+        let fact = self.ctx.registers.value_uses.active.get(&source);
+        // A result declaration is not a consuming event. In particular, a
+        // fresh sum/record result must not be rejected merely because one of
+        // its possible components is affine. Only a use of an existing named
+        // source obligation enters this bounded return handoff.
+        if !fact.is_some_and(|fact| constrained(fact.discipline)) {
+            if !declared_affine || !uses_named_affine {
+                return Ok(false);
+            }
+        }
+        let bindings = self.ctx.registers.function_exit_bindings();
+        let exact_local = bindings.iter().any(|(_, binding)| {
+            binding.reg == source && fact.is_some_and(|fact| fact.id == binding.binding_id)
+        });
+        if !exact_local
+            || !self.consumes_named_place(expr, source)
+            || self.ctx.has_pending_defers()
+            || bindings.iter().any(|(name, binding)| {
+                binding.is_cell
+                    || binding.is_pattern_alias
+                    || self.ctx.current_fn_escaping_vars.contains(name.as_str())
+            })
+        {
+            return Err(super::CodegenError::with_span(super::CodegenErrorKind::UnsupportedExpr(
+                "affine return requires a direct local value with no deferred, aliased or escaping cleanup; parameter, aggregate and selected-result handoffs are not yet implemented".into(),
+            ), expr.span));
+        }
+
+        let returned_fact = fact.cloned();
+        // Establish the receiving slot first, then consume the original on this
+        // CFG edge only. The other edge still owns its untouched local slot.
+        let returned = self.ctx.registers.alloc_fresh();
+        self.ctx.emit(Instruction::Mov {
+            dst: returned,
+            src: source,
+        });
+        self.ctx.emit(Instruction::LoadUnit { dst: source });
+        for (_, binding) in bindings {
+            // Reuse the existing lexical cleanup policy, keyed by the actual
+            // declaration register even when an inner declaration shadows it.
+            // Parameters never enter this inventory and acquire no obligation.
+            if self.ctx.is_raw_pointer(binding.reg) {
+                continue;
+            }
+            let borrowed_or_raw = self
+                .ctx
+                .registers
+                .value_uses
+                .active
+                .get(&binding.reg)
+                .filter(|fact| fact.id == binding.binding_id)
+                .and_then(|fact| fact.declaration_type.as_ref())
+                .is_some_and(|ty| matches!(ty, TypeRef::Reference { .. }));
+            if borrowed_or_raw {
+                continue;
+            }
+            self.ctx.emit(Instruction::DropRef { src: binding.reg });
+        }
+        if let Some(fact) = returned_fact {
+            self.ctx.registers.value_uses.forward_result(returned, fact);
+        }
+        self.ctx.emit(Instruction::Ret { value: returned });
+        Ok(true)
+    }
+
     /// Publish only a supported, resolved source declaration; never a VarTypeKind
     /// or rendered bare-leaf guess. Opaque carrier fallbacks remain unknown.
     pub(super) fn publish_binding_type(&mut self, name: &str, ast: &verum_ast::Type) {
