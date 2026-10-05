@@ -1634,8 +1634,17 @@ impl VbcCodegen {
         // copies as itself.
         let source_value_fact = init_reg.and_then(|reg| self.ctx.registers.value_uses.fact(reg));
         if let Some(reg) = init_reg {
+            // The destination is established before invalidating the source.
+            // Runtime source clearing makes lexical cleanup path-sensitive:
+            // a branch that does not execute this move keeps its obligation.
+            // Destructuring requires a separate aggregate transfer contract.
+            let transfer = matches!(pattern.kind, verum_ast::PatternKind::Ident {
+                subpattern: None,
+                by_ref: false,
+                ..
+            }) && value.is_some_and(|expr| self.consumes_named_place(expr, reg));
             let bound = match value {
-                Some(expr) if self.binds_a_copy_of_a_place(expr, reg) => {
+                Some(expr) if !transfer && self.binds_a_copy_of_a_place(expr, reg) => {
                     let owned = self.ctx.alloc_temp();
                     self.ctx.emit(Instruction::Clone {
                         dst: owned,
@@ -1646,6 +1655,9 @@ impl VbcCodegen {
                 _ => reg,
             };
             self.compile_pattern_bind(pattern, bound)?;
+            if transfer {
+                self.ctx.emit(Instruction::LoadUnit { dst: reg });
+            }
         }
 
         if let verum_ast::PatternKind::Ident { name, .. } = &pattern.kind {

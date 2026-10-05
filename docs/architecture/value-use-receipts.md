@@ -88,3 +88,27 @@ Only after those operations and CFG joins carry real ownership obligations can
 both interpreter and LLVM enable the same cleanup decisions. Receipts alone do
 not close early/duplicate Drop, MutexGuard lifetime or aggregate-result escape
 failures.
+
+## First consuming local handoff (T1602)
+
+The source producer now selects a local transfer for `let destination = source`
+when the exact active binding has a resolved affine or linear declaration fact.
+The binding's register and `BindingId` must both agree; captured cells, raw
+pointers, reference bindings and unresolved generic carriers are not accepted as
+ownership evidence. The ordinary value-copy path remains in use for ordinary
+records, including its separate Shared policy.
+
+The destination's existing `Mov` executes before `LoadUnit` clears the source.
+Consequently a lexical cleanup on the executed branch sees no remaining source
+value, while a branch that did not transfer keeps its cleanup active. This uses
+existing bytecode operations and survives wire roundtrip even after observation
+plans have been discarded. Optional receipts remain observations; they are not
+consulted to execute the handoff or a destructor.
+
+Source interpreter controls cover timing and exactly-once cleanup, explicit
+destination drop, conditional transfer/join, repeated loop allocations, shadowing
+and register reuse. Checker controls reject subsequent consumption/field use.
+This unit does not add bootstrap use-after-move validation, aggregate insertion
+or extraction, argument/return cleanup contracts, or native object destruction.
+Those are still required for the MutexGuard lifecycle and for closing T1602,
+T1538 or T1540.

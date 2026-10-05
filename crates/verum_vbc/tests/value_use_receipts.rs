@@ -48,7 +48,7 @@ fn actual_record_clone_is_published_and_current_interpreter_behavior_is_unchange
     assert_eq!(value.as_i64(), 7);
 }
 #[test]
-fn affine_emitted_clone_is_not_permission_and_no_transfer_is_invented() {
+fn affine_observations_do_not_grant_transfer_or_cleanup_permission() {
     let module = compile(
         "type affine Cell is { value: Int }; fn pass(a: Cell) -> Cell { let b = a; return b; }",
     );

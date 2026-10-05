@@ -1,5 +1,6 @@
-//! Observations at emission, shared by user and bootstrap source producers.
-//! This records operations; it neither changes bytecode nor grants Drop authority.
+//! Declaration facts and emission observations shared by both source producers.
+//! Observations do not grant cleanup authority. A consuming source context may
+//! use an exact active declaration fact to select its explicit value handoff.
 use crate::{
     Instruction,
     instruction::Reg,
@@ -153,6 +154,43 @@ impl ValueUseRecorder {
 }
 
 impl super::VbcCodegen {
+    /// A consuming local use selects transfer from the exact source binding's
+    /// resolved declaration. This reads declaration facts, not the optional
+    /// observation plan; budget exhaustion may discard receipts but cannot
+    /// change program semantics. Captured cells and unknown/generic carriers
+    /// need their own producer contract and are deliberately excluded.
+    pub(super) fn consumes_named_place(&self, expr: &verum_ast::Expr, reg: Reg) -> bool {
+        let verum_ast::ExprKind::Path(path) = &expr.kind else {
+            return false;
+        };
+        let [verum_ast::ty::PathSegment::Name(name)] = path.segments.as_slice() else {
+            return false;
+        };
+        let Some(binding) = self.ctx.lookup_var(name.as_str()) else {
+            return false;
+        };
+        if binding.reg != reg
+            || binding.is_cell
+            || !matches!(
+                binding.kind,
+                super::RegisterKind::Local | super::RegisterKind::Parameter
+            )
+            || self.ctx.reference_bindings.contains(name.as_str())
+            || self.ctx.is_raw_pointer(reg)
+        {
+            return false;
+        }
+        let Some(fact) = self.ctx.registers.value_uses.active.get(&reg) else {
+            return false;
+        };
+        fact.id == binding.binding_id
+            && fact.declaration_type.is_some()
+            && !matches!(fact.declaration_type, Some(TypeRef::Reference { .. }))
+            && matches!(
+                fact.discipline,
+                ResourceDiscipline::Affine | ResourceDiscipline::Linear
+            )
+    }
     /// Publish only a supported, resolved source declaration; never a VarTypeKind
     /// or rendered bare-leaf guess. Opaque carrier fallbacks remain unknown.
     pub(super) fn publish_binding_type(&mut self, name: &str, ast: &verum_ast::Type) {
