@@ -125,21 +125,28 @@ expected. They were inspected without execution. A fresh isolated Darwin
 smoke also builds and passes inspection. These are not new Linux/Windows
 execution results or proof about statically linked libc.
 
-The release matrix in `.github/workflows/build-verum.yml` still builds GNU
-Linux and MSVC Windows CLI targets and runs `--version`, without clean-baseline
-dependency acceptance (T1588). The host packaging gate remains separate from
-AOT conformance. Full AOT runtime and static provenance coverage remains open.
+The release matrix in `.github/workflows/build-verum.yml` builds GNU Linux
+and MSVC Windows CLI targets and runs `--version`. The host transport packaging
+change also inspects the exact packaged executable for external Git/OpenSSL
+dependencies before upload; see [its measured scope](host-transport-packaging.md).
+That narrow gate does not certify Linux symbol-version baselines, Windows
+redistributable availability, or clean-OS execution. Host packaging and AOT
+conformance remain separate. Full AOT runtime and static provenance coverage
+remains open.
 
-## Current state (2026-10-04)
+## Source implementation status (2026-10-05)
 
-The source audit used integration revision `ca7d1334b` and distinguishes
-implemented replacements from complete end-to-end acceptance:
+The original 2026-10-04 audit used integration revision `ca7d1334b`. The
+following rows include the subsequent numeric-output and host-packaging
+source corrections. Focused LLVM/JIT and object checks establish their
+stated scope; coherent CLI execution and clean-system release acceptance
+remain separate requirements.
 
 | Boundary | Evidence and remaining work |
 |---|---|
-| Native integer print | T1581 replaced `printf` with the existing integer formatter and internal target-aware writer. Source/LLVM/JIT boundary and ordering controls pass. |
-| Native Float print | Two `lower_debug_print` arms still emit `printf`. These are ordinary source `print(Float)` calls, not debug-only tooling. T1581/T1582 remain open. |
-| Native Float-to-Text | Uses `verum_internal_f64_to_decimal`, without libc formatting; its tiny/large-value and signed-zero failures require a correct shared formatter (T1582). Removing a dependency does not establish numerical correctness. |
+| Native integer print | Uses the owned integer formatter and [common target-aware writer](native-output-contract.md). Source/LLVM/JIT boundary and ordering controls pass. |
+| Native Float print | Both ordinary print arms now use the owned formatter and common writer. Focused mixed-output and six-target object checks pass without printf-family imports. Fresh CLI and target-system acceptance remain separate; see the [formatting evidence](native-float-formatting-contract.md). |
+| Native Float-to-Text | The shared integer-based Ryū kernel now handles default f64 Display/Debug, including tiny/large finite values and signed zero, under focused numerical and object checks. Explicit precision, source-only conversion and remaining presentation modes retain their own acceptance requirements. |
 | Host interpreter networking | `interpreter/dispatch_table/handlers/net_runtime.rs` uses Rust `std::net` and direct `libc` socket calls on Unix. This is allowed by the host policy when provided by the supported OS; it does not authorize libc calls in emitted AOT code. |
 | Standard-library terminal paths | `core/term/raw/termios.vr` and `core/term/event/source.vr` declare `@ffi("libc")`, including a Linux `poll` path. Audit selected AOT objects and replace forbidden target dependencies. macOS terminal APIs through the permitted libSystem boundary are a separate case; source declarations alone do not establish every emitted call. |
 | Host foreign-library plumbing | `ffi/platform/linux.rs` uses `libc::dlopen`, `dlsym`, `dlclose`, `mmap` and `munmap`. OS-provided host loader/allocation services are allowed; user-selected FFI libraries remain explicit application dependencies. |
