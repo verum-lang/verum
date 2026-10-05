@@ -1035,7 +1035,17 @@ impl<'a> Deserializer<'a> {
  } else {
  None
  };
+ let resource_discipline = if self.header.as_ref().map_or(0, |h| h.version_minor) >= 18 {
+     let value = decode_u8(self.data, &mut self.offset)?;
+     verum_common::ResourceDiscipline::from_wire(value).ok_or_else(|| VbcError::InvalidHeader {
+         field: "resource_discipline",
+         offset: self.offset,
+     })?
+ } else {
+     verum_common::ResourceDiscipline::Unknown
+ };
  Ok(TypeDescriptor {
+ resource_discipline,
  id,
  name,
  kind,
@@ -1164,7 +1174,15 @@ impl<'a> Deserializer<'a> {
  StringId::EMPTY
  };
 
+ let declaration_type = if self.header.as_ref().map_or(0, |h| h.version_minor) >= 18 {
+     match decode_u8(self.data, &mut self.offset)? {
+         0 => None,
+         1 => Some(self.parse_type_ref()?),
+         _ => return Err(VbcError::InvalidHeader { field: "field_declaration_type", offset: self.offset }),
+     }
+ } else { None };
  Ok(FieldDescriptor {
+ declaration_type,
  name,
  type_ref,
  offset,

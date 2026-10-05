@@ -951,6 +951,10 @@ pub struct TypeDescriptor {
     pub size: u32,
     /// Alignment in bytes.
     pub alignment: u32,
+    /// Constraint of the exact declaring owner. Unknown for legacy or synthetic
+    /// descriptors without a declaration; never itself authorizes owned Drop.
+    #[serde(default)]
+    pub resource_discipline: verum_common::ResourceDiscipline,
     /// Drop function (if type needs cleanup).
     pub drop_fn: Option<u32>, // FunctionId.0
     /// Clone function (if type implements Clone).
@@ -1047,6 +1051,7 @@ impl Default for TypeDescriptor {
             variants: SmallVec::new(),
             size: 0,
             alignment: 1,
+            resource_discipline: verum_common::ResourceDiscipline::Unknown,
             drop_fn: None,
             clone_fn: None,
             protocols: SmallVec::new(),
@@ -1112,6 +1117,11 @@ pub struct FieldDescriptor {
     pub name: StringId,
     /// Field type.
     pub type_ref: TypeRef,
+    /// Exact declared type, including reference qualifiers. `type_ref` above
+    /// remains the runtime layout carrier. Missing legacy data is not ownership
+    /// evidence and must not be reconstructed by interpreting pointer bits.
+    #[serde(default)]
+    pub declaration_type: Option<TypeRef>,
     /// Offset within struct (0 for generic types).
     pub offset: u32,
     /// Field visibility.
@@ -1152,6 +1162,7 @@ impl Default for FieldDescriptor {
         Self {
             name: StringId::EMPTY,
             type_ref: TypeRef::Concrete(TypeId::UNIT),
+            declaration_type: None,
             offset: 0,
             visibility: Visibility::Public,
                     refinement_src: StringId::EMPTY,

@@ -977,6 +977,24 @@ pub enum TypeDeclBodyKind {
     Quotient,
 }
 
+impl TypeDecl {
+    /// Declared constraint only: aggregate components and resolved aliases are
+    /// evaluated separately. The absence of a modifier on a real declaration
+    /// is known unrestricted usage, not evidence of a Copy implementation.
+    pub fn resource_discipline(&self) -> verum_common::ResourceDiscipline {
+        use verum_common::ResourceDiscipline;
+        if self.attributes.iter().any(|attribute| attribute.name.as_str() == "must_consume") {
+            ResourceDiscipline::Linear
+        } else {
+            match self.resource_modifier {
+                Some(ResourceModifier::Affine) => ResourceDiscipline::Affine,
+                Some(ResourceModifier::Linear) => ResourceDiscipline::Linear,
+                None => ResourceDiscipline::Unrestricted,
+            }
+        }
+    }
+}
+
 impl TypeDeclBodyKind {
     /// Stable string tag — used by audit gates and JSON exporters.
     pub fn tag(self) -> &'static str {

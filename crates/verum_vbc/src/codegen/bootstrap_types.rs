@@ -60,6 +60,7 @@ fn descriptor_ids(ty: &TypeDescriptor) -> Vec<TypeId> {
     let mut ids = Vec::new();
     for field in &ty.fields {
         type_ids(&field.type_ref, &mut ids);
+        if let Some(ty) = &field.declaration_type { type_ids(ty, &mut ids); }
     }
     for variant in &ty.variants {
         if let Some(payload) = &variant.payload {
@@ -67,6 +68,7 @@ fn descriptor_ids(ty: &TypeDescriptor) -> Vec<TypeId> {
         }
         for field in &variant.fields {
             type_ids(&field.type_ref, &mut ids);
+        if let Some(ty) = &field.declaration_type { type_ids(ty, &mut ids); }
         }
     }
     for param in &ty.type_params {

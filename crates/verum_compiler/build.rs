@@ -1816,6 +1816,8 @@ fn symbol_count(files: &[(String, Vec<u8>)]) -> usize {
 /// invalidate independently of source.  Format: free-form ASCII;
 /// readable strings make `git log` of this constant tell the story.
 const PRECOMPILE_SCHEMA_VERSION: &str =
+    // v47: declaration-owned resource discipline changes VBC and bincode metadata.
+    // Old sidecars must be rebuilt; serde defaults do not version a bincode struct.
     // v46: the sidecar gained `statics` — module-level `public static`
     // declarations, which had no channel at all and so did not appear in
     // any module surface (T1088). Same reasoning as v45: the curated file
@@ -1830,7 +1832,7 @@ const PRECOMPILE_SCHEMA_VERSION: &str =
     // cache — measured: the scan was added, the build reported
     // "precompile cache HIT", and the new field stayed empty while the
     // reader had nothing to read. Bumping here is what invalidates it.
-    "v46-2026-09-03-module_level_statics";
+    "v47-2026-10-05-resource-discipline";
 
 /// T3: blake3 hash of every `core/**/*.vr` file's content, sorted
 /// by relative path, mixed with [`PRECOMPILE_SCHEMA_VERSION`].

@@ -984,12 +984,17 @@ impl<'a> BytecodeSpecializer<'a> {
         // Get base type descriptor to inherit properties
         let base_desc = self.module.types.iter().find(|td| td.id == base);
 
+        // Parameters belong to the type declaration, not the enclosing function.
+        // Concrete descriptors must retain substituted component identities.
+        let type_substitution = base_desc.map(|desc| TypeSubstitution::new(&desc.type_params, args));
+
         // Compute size and alignment based on type args
         let (size, alignment) = self.compute_instantiated_layout(base, args);
 
         // Create new type descriptor (note: TypeDescriptor doesn't have type_args/generic_base)
         // The instantiation relationship is tracked in our instantiated_types cache instead
         let new_type_desc = TypeDescriptor {
+            resource_discipline: base_desc.map(|desc| desc.resource_discipline).unwrap_or_default(),
             // A monomorphized instantiation is synthesized here, not
             // declared in any source file — same rationale as the
             // cleared alias_target_name below (v2.12).
@@ -999,14 +1004,33 @@ impl<'a> BytecodeSpecializer<'a> {
             kind: base_desc.map(|d| d.kind).unwrap_or_default(),
             size,
             alignment,
-            fields: base_desc.map(|d| d.fields.clone()).unwrap_or_default(),
-            variants: base_desc.map(|d| d.variants.clone()).unwrap_or_default(),
+            fields: base_desc.map(|desc| desc.fields.iter().map(|field| {
+                let mut field = field.clone();
+                if let Some(substitution) = &type_substitution {
+                    field.type_ref = substitution.apply(&field.type_ref);
+                    field.declaration_type = field.declaration_type.as_ref().map(|ty| substitution.apply(ty));
+                }
+                field
+            }).collect()).unwrap_or_default(),
+            variants: base_desc.map(|desc| desc.variants.iter().map(|variant| {
+                let mut variant = variant.clone();
+                if let Some(substitution) = &type_substitution {
+                    variant.payload = variant.payload.as_ref().map(|ty| substitution.apply(ty));
+                    for field in &mut variant.fields {
+                        field.type_ref = substitution.apply(&field.type_ref);
+                    field.declaration_type = field.declaration_type.as_ref().map(|ty| substitution.apply(ty));
+                    }
+                }
+                variant
+            }).collect()).unwrap_or_default(),
             type_params: smallvec::smallvec![], // No params - fully instantiated
             drop_fn: base_desc.and_then(|d| d.drop_fn),
             clone_fn: base_desc.and_then(|d| d.clone_fn),
             protocols: base_desc.map(|d| d.protocols.clone()).unwrap_or_default(),
             visibility: base_desc.map(|d| d.visibility).unwrap_or_default(),
-            alias_target: base_desc.and_then(|d| d.alias_target.clone()),
+            alias_target: base_desc.and_then(|desc| desc.alias_target.as_ref()).map(|target| {
+                type_substitution.as_ref().map_or_else(|| target.clone(), |substitution| substitution.apply(target))
+            }),
             // T0533 — the base's `alias_target_name` StringId is interned in
             // the BASE module's string table; re-interning it into this
             // specialised descriptor is a follow-up. `None` keeps the legacy

@@ -103,7 +103,7 @@ pub const VERSION_MAJOR: u16 = 2;
 /// Version 2.16 carries declared explicit generic parameter IDs in each
 /// function descriptor. The trailing count is read only at minor >= 16; old
 /// archives have no declaration-owned explicit slot facts.
-pub const VERSION_MINOR: u16 = 16; // 16: declared explicit generic parameter IDs (T1228)
+pub const VERSION_MINOR: u16 = 18; // 18: declaration resource discipline (T1594); 17: TypeLayout (T1576)
 
 /// Minor-version floors for sections whose presence readers gate on.  The
 /// register-type-hints section has been written unconditionally since minor 2,

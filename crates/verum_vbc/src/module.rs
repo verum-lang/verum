@@ -25,43 +25,7 @@ use crate::types::{
 /// Overlapping path segments are preserved exactly once; no leaf-name search
 /// participates in this canonical spelling.
 pub fn qualify_module_name(module_name: &str, simple_name: &str) -> String {
-    if !simple_name.contains('.') {
-        // Bare leaf — the precompiler did no module promotion.
-        // Prepend module_name unconditionally.
-        return format!("{}.{}", module_name, simple_name);
-    }
-    let module_segs: Vec<&str> = module_name.split('.').collect();
-    let simple_segs: Vec<&str> = simple_name.split('.').collect();
-    // Longest overlap: try `module_segs[k..]` against `simple_segs[..len-k]`
-    // for k decreasing from |module_segs|.min(|simple_segs|) down to 1.
-    // First match wins (longest). k=0 (no overlap) falls through to
-    // the prepend branch at the bottom.
-    let max_overlap = module_segs.len().min(simple_segs.len());
-    for overlap_len in (1..=max_overlap).rev() {
-        let module_suffix = &module_segs[module_segs.len() - overlap_len..];
-        let simple_prefix = &simple_segs[..overlap_len];
-        if module_suffix == simple_prefix {
-            // Emit non-overlapping module_name prefix + full simple_name.
-            let prefix_len = module_segs.len() - overlap_len;
-            if prefix_len == 0 {
-                return simple_name.to_string();
-            }
-            let mut out = String::with_capacity(module_name.len() + simple_name.len() + 1);
-            for (i, seg) in module_segs[..prefix_len].iter().enumerate() {
-                if i > 0 {
-                    out.push('.');
-                }
-                out.push_str(seg);
-            }
-            out.push('.');
-            out.push_str(simple_name);
-            return out;
-        }
-    }
-    // No overlap — descriptor's leading segment is unrelated to
-    // module_name (e.g. tls13's `tls13.handshake....` under
-    // `core.net`). Prepend module_name verbatim.
-    format!("{}.{}", module_name, simple_name)
+    verum_common::qualified_name::qualify_module_name(module_name, simple_name).to_string()
 }
 
 // ============================================================================
