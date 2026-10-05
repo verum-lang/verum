@@ -69,6 +69,16 @@ pub trait IdRemap {
 /// archive merge in lockstep.
 pub fn rewrite_instruction_ids(instr: &mut Instruction, remap: &dyn IdRemap) {
     match instr {
+        Instruction::TypeLayout { type_ref, .. } | Instruction::LoadT { type_ref, .. } => {
+            rewrite_type_ref_ids(type_ref, remap);
+        }
+        Instruction::SetCallWitness { type_args } => {
+            for ty in type_args { rewrite_type_ref_ids(ty, remap); }
+        }
+        Instruction::CallG { func_id, type_args, .. } => {
+            *func_id = remap.map_function(FunctionId(*func_id)).0;
+            for ty in type_args { rewrite_type_ref_ids(ty, remap); }
+        }
         // --- Constant pool index ---
         Instruction::LoadK { const_id, .. } => {
             *const_id = remap.map_const(ConstId(*const_id)).0;
@@ -78,7 +88,6 @@ pub fn rewrite_instruction_ids(instr: &mut Instruction, remap: &dyn IdRemap) {
         }
         // --- Function table index ---
         Instruction::Call { func_id, .. }
-        | Instruction::CallG { func_id, .. }
         | Instruction::TailCall { func_id, .. }
         | Instruction::NewClosure { func_id, .. }
         | Instruction::Spawn { func_id, .. }
@@ -154,6 +163,28 @@ pub fn rewrite_instruction_ids(instr: &mut Instruction, remap: &dyn IdRemap) {
         }
         // Everything else has no id operand.
         _ => {}
+    }
+}
+
+/// Rebase every nested nominal TypeId without changing generic parameter IDs.
+pub fn rewrite_type_ref_ids(ty: &mut crate::types::TypeRef, remap: &dyn IdRemap) {
+    use crate::types::TypeRef;
+    match ty {
+        TypeRef::Concrete(id) => *id = remap.map_type_id(*id),
+        TypeRef::Instantiated { base, args } => {
+            *base = remap.map_type_id(*base);
+            for arg in args { rewrite_type_ref_ids(arg, remap); }
+        }
+        TypeRef::Function { params, return_type, .. }
+        | TypeRef::Rank2Function { params, return_type, .. } => {
+            for param in params { rewrite_type_ref_ids(param, remap); }
+            rewrite_type_ref_ids(return_type, remap);
+        }
+        TypeRef::Reference { inner, .. } | TypeRef::Slice(inner) => rewrite_type_ref_ids(inner, remap),
+        TypeRef::Tuple(elements) => { for element in elements { rewrite_type_ref_ids(element, remap); } }
+        TypeRef::Array { element, .. } => rewrite_type_ref_ids(element, remap),
+        TypeRef::AssociatedProjection { base, .. } => rewrite_type_ref_ids(base, remap),
+        TypeRef::Generic(_) | TypeRef::ConstValue(_) => {}
     }
 }
 

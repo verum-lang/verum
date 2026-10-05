@@ -1035,6 +1035,16 @@ impl<'a> Deserializer<'a> {
  } else {
  None
  };
+ let declared_layout = if self.header.as_ref().map_or(0, |h| h.version_minor) >= 17 {
+     match decode_u8(self.data, &mut self.offset)? {
+         0 => None,
+         1 => Some(crate::types::DeclaredTypeLayout {
+             size: decode_u64(self.data, &mut self.offset)?,
+             alignment: decode_u64(self.data, &mut self.offset)?,
+         }),
+         _ => return Err(VbcError::InvalidHeader { field: "declared_layout", offset: self.offset }),
+     }
+ } else { None };
  let resource_discipline = if self.header.as_ref().map_or(0, |h| h.version_minor) >= 18 {
      let value = decode_u8(self.data, &mut self.offset)?;
      verum_common::ResourceDiscipline::from_wire(value).ok_or_else(|| VbcError::InvalidHeader {
@@ -1045,6 +1055,7 @@ impl<'a> Deserializer<'a> {
      verum_common::ResourceDiscipline::Unknown
  };
  Ok(TypeDescriptor {
+ declared_layout,
  resource_discipline,
  id,
  name,
@@ -2282,3 +2293,7 @@ mod tests {
 #[cfg(test)]
 #[path = "../tests/format/explicit_generic_params.rs"]
 mod explicit_generic_param_tests;
+
+#[cfg(test)]
+#[path = "../tests/format/declared_layout.rs"]
+mod declared_layout_tests;

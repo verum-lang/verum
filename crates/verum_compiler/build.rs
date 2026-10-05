@@ -2094,6 +2094,7 @@ fn compute_core_blake3(core_dir: &Path, files: &[(String, Vec<u8>)]) -> String {
         "crates/verum_vbc/src/codegen/bootstrap_types.rs",
         "crates/verum_vbc/src/codegen/parsed_field_types.rs",
         "crates/verum_vbc/src/codegen/associated_types.rs",
+        "crates/verum_vbc/src/type_layout.rs",
         "crates/verum_vbc/src/codegen/context.rs",
         // The precompile pass itself: `scan_module_reexports` /
         // `inject_decl_spans` / glob-expansion shape ALL live in

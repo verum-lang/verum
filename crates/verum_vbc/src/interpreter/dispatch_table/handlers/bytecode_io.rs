@@ -115,96 +115,20 @@ pub(super) fn read_reg_range(state: &mut InterpreterState) -> InterpreterResult<
     Ok(RegRange { start, count })
 }
 
-/// Read (decode) one serialized `TypeRef` from the bytecode stream.
-///
-/// Same wire format as `crate::bytecode::encode_type_ref`; keep the two in
-/// sync.  (The former `skip_type_ref` twin — which advanced the PC without
-/// decoding — is gone: since #44-B every reader needs the VALUE, so a second
-/// decoder only added drift risk.)  Used by
-/// `handle_call_generic` to materialize CallG type args into the callee
-/// frame (#44-B generic-witness plumbing) and by `handle_loadt`, whose
-/// pre-fix varint read silently desynced the instruction stream on any
-/// LoadT whose payload was a full TypeRef.
-///
-/// Function/Rank2/Tuple payloads are structurally consumed but
-/// head-summarized (the interpreter only ever needs the head type for
-/// dispatch); Concrete / Generic / Instantiated — the forms generic
-/// dispatch needs — round-trip exactly. Reference/Array/Slice/
-/// AssociatedProjection unwrap to their base.
-pub(super) fn read_type_ref(
-    state: &mut InterpreterState,
-) -> InterpreterResult<crate::types::TypeRef> {
-    use crate::types::{TypeParamId, TypeRef};
-    let tag = read_u8(state)?;
-    Ok(match tag {
-        0x00 => TypeRef::Concrete(TypeId(read_varint(state)? as u32)),
-        0x01 => TypeRef::Generic(TypeParamId(read_varint(state)? as u16)),
-        0x02 => {
-            let base = TypeId(read_varint(state)? as u32);
-            let n = read_varint(state)? as usize;
-            let mut args = Vec::with_capacity(n);
-            for _ in 0..n {
-                args.push(read_type_ref(state)?);
-            }
-            TypeRef::Instantiated { base, args }
-        }
-        0x03 | 0x08 => {
-            if tag == 0x08 {
-                read_varint(state)?; // type_param_count
-            }
-            let np = read_varint(state)?;
-            for _ in 0..np {
-                read_type_ref(state)?;
-            }
-            read_type_ref(state)?; // return type
-            let nc = read_varint(state)?;
-            for _ in 0..nc {
-                read_varint(state)?;
-            }
-            // Head-summarized: dispatch never inspects fn-type internals.
-            TypeRef::Concrete(TypeId(0))
-        }
-        0x04 => {
-            let inner = read_type_ref(state)?;
-            read_u8(state)?; // mutability
-            read_u8(state)?; // tier
-            inner
-        }
-        0x05 => {
-            let n = read_varint(state)? as usize;
-            for _ in 0..n {
-                read_type_ref(state)?;
-            }
-            TypeRef::Concrete(TypeId(0))
-        }
-        0x06 => {
-            let elem = read_type_ref(state)?;
-            read_varint(state)?;
-            elem
-        }
-        0x07 => read_type_ref(state)?,
-        0x09 => {
-            let base = read_type_ref(state)?;
-            let len = read_varint(state)? as usize;
-            for _ in 0..len {
-                read_u8(state)?;
-            }
-            base
-        }
-        0x0A => {
-            // ConstValue(i64) — CONST-GENERIC-VALUE-CARRY-1: round-trips
-            // EXACTLY (the generic-witness channel delivers the value to
-            // the callee frame; `LoadT { Generic(idx) }` on a ConstValue
-            // witness materializes `Value::from_i64(v)`).
-            TypeRef::ConstValue(read_varint(state)? as i64)
-        }
-        other => {
-            return Err(InterpreterError::InvalidBytecode {
-                pc: state.pc() as usize,
-                message: format!("invalid TypeRef tag {} in stream", other),
-            });
-        }
-    })
+/// Decode the full witness using the same structural reader as archive/mono.
+/// Runtime dispatch may project a head at its own boundary; witness transport
+/// must not erase reference, array, callable, or associated-type structure.
+pub(super) fn read_type_ref(state: &mut InterpreterState) -> InterpreterResult<crate::types::TypeRef> {
+    let pc = state.pc() as usize;
+    let mut next = pc;
+    let bytes = state.current_bytecode().ok_or_else(|| InterpreterError::InvalidBytecode {
+        pc, message: "missing current function bytecode".to_string(),
+    })?;
+    let ty = crate::bytecode::decode_type_ref(bytes, &mut next).map_err(|error| InterpreterError::InvalidBytecode {
+        pc, message: error.to_string(),
+    })?;
+    state.set_pc(next as u32);
+    Ok(ty)
 }
 
 // ============================================================================
