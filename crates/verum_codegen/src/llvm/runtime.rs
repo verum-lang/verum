@@ -6437,7 +6437,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         }
 
         builder.position_at_end(fail_bb);
-        let exit_fn = self.get_or_declare_exit(module);
+        let exit_fn = self.get_or_declare_exit(module)?;
         builder
             .build_call(exit_fn, &[i64_type.const_int(120, false).into()], "")
             .or_llvm_err()?;
@@ -10480,14 +10480,25 @@ impl<'ctx> RuntimeLowering<'ctx> {
     /// wrapper aborts via `verum_os_exit(1)` — also libc-free.
     fn get_or_declare_malloc(&self, module: &Module<'ctx>) -> Result<FunctionValue<'ctx>> {
         let wrapper_name = "verum_checked_malloc";
-        if let Some(func) = module.get_function(wrapper_name) {
-            return Ok(func);
-        }
-
         let ptr_type = self.context.ptr_type(AddressSpace::default());
         let i64_type = self.context.i64_type();
-
         let malloc_fn_type = ptr_type.fn_type(&[i64_type.into()], false);
+        let wrapper = match module.get_function(wrapper_name) {
+            Some(function) => {
+                if function.get_type() != malloc_fn_type || function.get_call_conventions() != 0 {
+                    return Err(LlvmLoweringError::internal(
+                        "incompatible declaration for compiler-owned verum_checked_malloc",
+                    ));
+                }
+                if function.count_basic_blocks() > 0 {
+                    return Ok(function);
+                }
+                function
+            }
+            None => module.add_function(wrapper_name, malloc_fn_type, None),
+        };
+        // A forward declaration reserves identity, not a completed body. Early
+        // CBGR/List helpers can declare this symbol before an allocation site.
 
         // Underlying allocator: `verum_os_alloc(size) -> ptr` from
         // `platform_ir.rs::emit_verum_os_alloc`. That helper does
@@ -10508,7 +10519,6 @@ impl<'ctx> RuntimeLowering<'ctx> {
         //  if (p == null) verum_os_exit(1);
         //  return p;
         // }
-        let wrapper = module.add_function(wrapper_name, malloc_fn_type, None);
         let entry_bb = self.context.append_basic_block(wrapper, "entry");
         let oom_bb = self.context.append_basic_block(wrapper, "oom");
         let ok_bb = self.context.append_basic_block(wrapper, "ok");
@@ -10581,7 +10591,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
             .or_llvm_err()?;
 
         builder.position_at_end(oom_bb);
-        let exit_fn = self.get_or_declare_exit(module);
+        let exit_fn = self.get_or_declare_exit(module)?;
         let i64_type = self.context.i64_type();
         builder
             .build_call(exit_fn, &[i64_type.const_int(1, false).into()], "")
@@ -10603,21 +10613,33 @@ impl<'ctx> RuntimeLowering<'ctx> {
     /// Wrapper preserves the historical (i64) caller signature so
     /// existing call sites don't need updating; the (i64 → i32)
     /// truncation happens in the wrapper body.
-    fn get_or_declare_exit(&self, module: &Module<'ctx>) -> FunctionValue<'ctx> {
+    fn get_or_declare_exit(&self, module: &Module<'ctx>) -> Result<FunctionValue<'ctx>> {
         let wrapper_name = "verum_internal_exit_i64";
-        if let Some(f) = module.get_function(wrapper_name) {
-            return f;
-        }
         let i64_type = self.context.i64_type();
         let i32_type = self.context.i32_type();
         let void_type = self.context.void_type();
-
         let wrapper_fn_type = void_type.fn_type(&[i64_type.into()], false);
-        let wrapper = module.add_function(wrapper_name, wrapper_fn_type, None);
+        let wrapper = match module.get_function(wrapper_name) {
+            Some(function) => {
+                if function.get_type() != wrapper_fn_type || function.get_call_conventions() != 0 {
+                    return Err(LlvmLoweringError::internal(
+                        "incompatible declaration for compiler-owned verum_internal_exit_i64",
+                    ));
+                }
+                if function.count_basic_blocks() > 0 {
+                    return Ok(function);
+                }
+                function
+            }
+            None => module.add_function(wrapper_name, wrapper_fn_type, None),
+        };
         wrapper.set_linkage(verum_llvm::module::Linkage::Internal);
         wrapper.add_attribute(
             verum_llvm::attributes::AttributeLoc::Function,
-            self.context.create_string_attribute("noreturn", ""),
+            self.context.create_enum_attribute(
+                verum_llvm::attributes::Attribute::get_named_enum_kind_id("noreturn"),
+                0,
+            ),
         );
 
         // Underlying libc-free exit.
@@ -10635,17 +10657,17 @@ impl<'ctx> RuntimeLowering<'ctx> {
 
         let code_i64 = wrapper
             .get_first_param()
-            .expect("exit wrapper missing param 0")
+            .or_internal("exit wrapper missing param 0")?
             .into_int_value();
         let code_i32 = builder
             .build_int_truncate(code_i64, i32_type, "code_i32")
-            .expect("exit i64 trunc");
-        let _ = builder
+            .or_llvm_err()?;
+        builder
             .build_call(os_exit, &[code_i32.into()], "")
-            .expect("exit call os_exit");
-        builder.build_unreachable().expect("exit unreachable");
+            .or_llvm_err()?;
+        builder.build_unreachable().or_llvm_err()?;
 
-        wrapper
+        Ok(wrapper)
     }
 
     /// Get or declare a 3-arg memset wrapper that internally calls
@@ -12947,7 +12969,7 @@ fn define_list_storage_stride<'ctx>(context: &'ctx Context, module: &Module<'ctx
     builder.position_at_end(read_tag);
     builder.build_switch(tag, invalid, &cases).or_llvm_err()?;
     builder.position_at_end(invalid);
-    let exit = RuntimeLowering::new(context).get_or_declare_exit(module);
+    let exit = RuntimeLowering::new(context).get_or_declare_exit(module)?;
     builder
         .build_call(exit, &[i64_ty.const_int(1, false).into()], "")
         .or_llvm_err()?;
@@ -13016,7 +13038,7 @@ fn define_list_storage_resize<'ctx>(context: &'ctx Context, module: &Module<'ctx
         .build_conditional_branch(valid, checked, invalid)
         .or_llvm_err()?;
     builder.position_at_end(invalid);
-    let exit = runtime.get_or_declare_exit(module);
+    let exit = runtime.get_or_declare_exit(module)?;
     builder
         .build_call(exit, &[i64_ty.const_int(1, false).into()], "")
         .or_llvm_err()?;
