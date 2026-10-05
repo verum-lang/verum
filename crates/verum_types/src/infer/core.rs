@@ -1355,6 +1355,27 @@ impl TypeChecker {
         out
     }
 
+    fn metadata_declaring_key(descriptor: &crate::core_metadata::TypeDescriptor) -> Text {
+        let owner = descriptor.origin_module_path.as_ref().filter(|owner| !owner.is_empty())
+            .unwrap_or(&descriptor.module_path);
+        if owner.is_empty() || owner.as_str() == "cog" {
+            descriptor.name.clone()
+        } else {
+            verum_common::qualified_name::qualify_module_name(owner, descriptor.name.as_str())
+        }
+    }
+
+    fn register_metadata_resource_discipline(&mut self, descriptor: &crate::core_metadata::TypeDescriptor) {
+        self.affine_tracker.register_resource_discipline(
+            Self::metadata_declaring_key(descriptor), descriptor.resource_discipline,
+        );
+    }
+
+    /// Declaration fact only; Unknown is not permission to copy or destroy.
+    pub fn declared_resource_discipline(&self, owner_key: &str) -> verum_common::ResourceDiscipline {
+        self.affine_tracker.resource_discipline(owner_key)
+    }
+
     pub fn ensure_stdlib_type_loaded(
         &mut self,
         name: &Text,
@@ -1444,6 +1465,13 @@ impl TypeChecker {
                 }
             }
         };
+        self.register_metadata_resource_discipline(type_desc);
+        // A registered alias does not prove its target was loaded: eager
+        // registration and lazy dependency loading are separate operations.
+        if let crate::core_metadata::TypeDescriptorKind::Alias { target } = &type_desc.kind {
+            let target = parse_descriptor_type_string(target.as_str());
+            Self::push_referenced_type_names(&target, pending);
+        }
         if crate::ctor_trace_enabled() {
             eprintln!(
                 "[ctor-trace] ensure-load HIT name={} kind_record={} in_ctx={}",
@@ -3923,6 +3951,7 @@ impl TypeChecker {
         // appended in alphabetical order so we still register every type.
         let ordered_types = Self::stdlib_iteration_order(metadata);
         for (name, type_desc) in ordered_types {
+            self.register_metadata_resource_discipline(type_desc);
             // Convert core_metadata::TypeDescriptor to Type
             let ty = self.type_descriptor_to_type(type_desc);
             self.ctx.define_type(name.clone(), ty.clone());
@@ -4451,22 +4480,19 @@ impl TypeChecker {
             // Concrete type
             match &desc.kind {
                 TypeDescriptorKind::Record { .. } => Type::Named {
-                    path: Self::text_to_path(&desc.name),
+                    path: Self::text_to_path(&Self::metadata_declaring_key(desc)),
                     args: verum_common::List::new(),
                 },
                 TypeDescriptorKind::Variant { cases } => {
                     Type::Variant(build_variant_payloads(cases))
                 }
                 TypeDescriptorKind::Protocol { .. } => Type::Named {
-                    path: Self::text_to_path(&desc.name),
+                    path: Self::text_to_path(&Self::metadata_declaring_key(desc)),
                     args: verum_common::List::new(),
                 },
-                TypeDescriptorKind::Alias { target } => Type::Named {
-                    path: Self::text_to_path(target),
-                    args: verum_common::List::new(),
-                },
+                TypeDescriptorKind::Alias { target } => parse(target.as_str()),
                 TypeDescriptorKind::Opaque => Type::Named {
-                    path: Self::text_to_path(&desc.name),
+                    path: Self::text_to_path(&Self::metadata_declaring_key(desc)),
                     args: verum_common::List::new(),
                 },
             }
@@ -4484,7 +4510,7 @@ impl TypeChecker {
                     Type::Variant(build_variant_payloads(cases))
                 }
                 _ => Type::Generic {
-                    name: desc.name.clone(),
+                    name: Self::metadata_declaring_key(desc),
                     args: desc
                         .generic_params
                         .iter()

@@ -291,6 +291,11 @@ pub struct TypeDescriptor {
     #[serde(default)]
     pub is_transparent_wrapper: bool,
 
+    /// Declared usage constraint, carried from the exact VBC owner. This is
+    /// not effective aggregate discipline and not a Copy/Clone capability.
+    #[serde(default)]
+    pub resource_discipline: verum_common::ResourceDiscipline,
+
     /// Whether the declaration was written `public type T is …`.
     ///
     /// A private stdlib type must not reach a user program's type

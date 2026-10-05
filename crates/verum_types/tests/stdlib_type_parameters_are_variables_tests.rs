@@ -76,6 +76,7 @@ fn variant_descriptor(name: &str, params: &[&str], cases: List<VariantCase>) -> 
         implements: List::new(),
         decl_span: Maybe::None,
         is_transparent_wrapper: false,
+        resource_discipline: verum_common::ResourceDiscipline::Unknown,
     }
 }
 

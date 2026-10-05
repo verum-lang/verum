@@ -108,12 +108,9 @@ pub struct AffineTracker {
     /// Map from variable name to binding info
     bindings: Map<Text, AffineBinding>,
 
-    /// Set of affine types (by type name) - at most once
-    affine_types: Set<Text>,
-
-    /// Set of linear types (by type name) - exactly once
-    /// Type system improvements: refinement evidence tracking, flow-sensitive propagation, prototype mode — Section 6 (Linear Types)
-    linear_types: Set<Text>,
+    /// Exact declaring key -> usage constraint. Missing is Unknown, distinct
+    /// from a known ordinary declaration and from the Copy protocol.
+    resource_disciplines: Map<Text, verum_common::ResourceDiscipline>,
 
     /// Current loop nesting depth (0 = not in loop)
     loop_depth: usize,
@@ -182,8 +179,7 @@ impl AffineTracker {
     pub fn new() -> Self {
         Self {
             bindings: Map::new(),
-            affine_types: Set::new(),
-            linear_types: Set::new(),
+            resource_disciplines: Map::new(),
             loop_depth: 0,
             leaving_depth: 0,
             pre_loop_bindings: Set::new(),
@@ -219,8 +215,7 @@ impl AffineTracker {
     pub fn new_scope(&self) -> Self {
         Self {
             bindings: Map::new(),
-            affine_types: self.affine_types.clone(),
-            linear_types: self.linear_types.clone(),
+            resource_disciplines: self.resource_disciplines.clone(),
             loop_depth: 0,
             leaving_depth: 0,
             pre_loop_bindings: Set::new(),
@@ -230,7 +225,12 @@ impl AffineTracker {
 
     /// Register a type as affine (at most once)
     pub fn register_affine_type(&mut self, type_name: impl Into<Text>) {
-        self.affine_types.insert(type_name.into());
+        let type_name = type_name.into();
+        // Aggregate propagation adds a constraint; it must not weaken an
+        // already linear declaration (including @must_consume).
+        if self.resource_discipline(type_name.as_str()) != verum_common::ResourceDiscipline::Linear {
+            self.register_resource_discipline(type_name, verum_common::ResourceDiscipline::Affine);
+        }
     }
 
     /// Register a type as linear (exactly once)
@@ -240,22 +240,35 @@ impl AffineTracker {
     ///
     /// Type system improvements: refinement evidence tracking, flow-sensitive propagation, prototype mode — Section 6 (Linear Types)
     pub fn register_linear_type(&mut self, type_name: impl Into<Text>) {
-        self.linear_types.insert(type_name.into());
+        self.register_resource_discipline(type_name, verum_common::ResourceDiscipline::Linear);
     }
 
     /// Check if a type is linear
     pub fn is_linear_type(&self, type_name: &str) -> bool {
-        self.linear_types.contains(&Text::from(type_name))
+        self.resource_discipline(type_name) == verum_common::ResourceDiscipline::Linear
     }
 
-    /// Get resource kind for a type by name
+    /// Register only the discipline supplied by a resolved declaration.
+    pub fn register_resource_discipline(
+        &mut self,
+        type_name: impl Into<Text>,
+        discipline: verum_common::ResourceDiscipline,
+    ) {
+        self.resource_disciplines.insert(type_name.into(), discipline);
+    }
+
+    pub fn resource_discipline(&self, type_name: &str) -> verum_common::ResourceDiscipline {
+        self.resource_disciplines.get(&Text::from(type_name)).copied().unwrap_or_default()
+    }
+
+    /// Existing diagnostics retain their permissive handling of missing facts.
+    /// Runtime ownership consumers must read resource_discipline instead; this
+    /// legacy Copy spelling describes usage, not a duplication capability.
     pub fn get_resource_kind(&self, type_name: &str) -> ResourceKind {
-        if self.linear_types.contains(&Text::from(type_name)) {
-            ResourceKind::Linear
-        } else if self.affine_types.contains(&Text::from(type_name)) {
-            ResourceKind::Affine
-        } else {
-            ResourceKind::Copy
+        match self.resource_discipline(type_name) {
+            verum_common::ResourceDiscipline::Linear => ResourceKind::Linear,
+            verum_common::ResourceDiscipline::Affine => ResourceKind::Affine,
+            _ => ResourceKind::Copy,
         }
     }
 
@@ -266,7 +279,7 @@ impl AffineTracker {
 
     /// Check if a type is affine (at most once)
     pub fn is_affine_type(&self, type_name: &str) -> bool {
-        self.affine_types.contains(&Text::from(type_name))
+        self.resource_discipline(type_name) == verum_common::ResourceDiscipline::Affine
     }
 
     /// Check if a variable binding is tracked as affine (at-most-once usage)

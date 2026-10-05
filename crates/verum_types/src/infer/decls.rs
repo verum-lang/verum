@@ -401,33 +401,10 @@ impl TypeChecker {
         use verum_ast::ty::Path;
         use verum_common::Text;
 
-        // Register affine types for move semantics enforcement
-        // Spec: L0-critical/reference_system/value_transfer - Affine type safety
-        if let Some(verum_ast::decl::ResourceModifier::Affine) = &type_decl.resource_modifier {
-            self.affine_tracker
-                .register_affine_type(self.declared_type_key(type_name.as_str()));
-        }
-        // Linear modifier — must consume exactly once.
-        if let Some(verum_ast::decl::ResourceModifier::Linear) = &type_decl.resource_modifier {
-            self.affine_tracker
-                .register_linear_type(self.declared_type_key(type_name.as_str()));
-        }
-        // T0266: dependent value-parameter arity — ONE authority, shared
-        // with the two-pass flow (`register_type_name_only`).
+        self.affine_tracker.register_resource_discipline(
+            self.declared_type_key(type_name.as_str()), type_decl.resource_discipline(),
+        );
         self.record_dependent_family(type_decl);
-        // `@must_consume` attribute — alias for `type linear`. Lets API
-        // authors mark must-consume types with attribute syntax (which
-        // survives derive expansion / macro re-export) instead of the
-        // prefix `linear` keyword. Same compile-time effect: drop without
-        // explicit consumption is a hard error.
-        let must_consume = type_decl
-            .attributes
-            .iter()
-            .any(|a| a.name.as_str() == "must_consume");
-        if must_consume {
-            self.affine_tracker
-                .register_linear_type(self.declared_type_key(type_name.as_str()));
-        }
 
         // Save type parameter names so we can clean them up later
         // This prevents type parameter pollution across different type declarations
@@ -2664,28 +2641,9 @@ impl TypeChecker {
         let type_name: Text = type_decl.name.name.as_str().into();
         let span = type_decl.span;
 
-        // Register affine types for move semantics enforcement
-        // Spec: L0-critical/reference_system/value_transfer - Affine type safety
-        if let Some(verum_ast::decl::ResourceModifier::Affine) = &type_decl.resource_modifier {
-            self.affine_tracker
-                .register_affine_type(self.declared_type_key(type_name.as_str()));
-        }
-        if let Some(verum_ast::decl::ResourceModifier::Linear) = &type_decl.resource_modifier {
-            self.affine_tracker
-                .register_linear_type(self.declared_type_key(type_name.as_str()));
-        }
-        // `@must_consume` attribute — synonym for `type linear`, must be
-        // registered in BOTH the primary and the resolution-loop pass to
-        // avoid drift when types are visited recursively. See companion
-        // primary-pass registration in register_type_declaration_body.
-        let must_consume_2 = type_decl
-            .attributes
-            .iter()
-            .any(|a| a.name.as_str() == "must_consume");
-        if must_consume_2 {
-            self.affine_tracker
-                .register_linear_type(self.declared_type_key(type_name.as_str()));
-        }
+        self.affine_tracker.register_resource_discipline(
+            self.declared_type_key(type_name.as_str()), type_decl.resource_discipline(),
+        );
 
         // Check for cycles: are we already resolving this type?
         if resolution_stack.iter().any(|t| t == &type_name) {

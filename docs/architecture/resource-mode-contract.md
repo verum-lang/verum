@@ -1,14 +1,17 @@
 # Declaration-owned resource discipline and value use
 
-Status: proposed engineering contract, 2026-10-04 (T1551). This is the
-next bounded producer step for [the native lifecycle gap](native-drop-lifecycle-gap.md),
-not an implementation of owned native `Drop`. No wire change or destructor
-enablement is included. T1538 and T1540 remain open.
+Status: declaration carry implemented in source/VBC/metadata, 2026-10-05
+(T1594), following the reviewed contract T1551. VBC 2.18 preserves resource
+discipline and semantic field types after the 2.17 layout tail. Value-use
+publication and owned native `Drop` remain unimplemented. T1538 and T1540
+remain open; this prerequisite does not enable any new destructor.
 
 ## Separate three facts
 
 The existing checker name `ResourceKind::Copy` means *unrestricted use*;
-`get_resource_kind` returns it whenever neither resource-name set matches.
+the compatibility query still returns it for an unrestricted or unresolved
+name. The underlying tracker now distinguishes `Unknown` from a known
+ordinary declaration.
 It does not prove conformance to `core.base.protocols.Copy`.
 
 | Fact | Authority | Meaning |
@@ -96,10 +99,9 @@ obligation; an implicit consuming use must still obey affine/linear rules.
    archive remapping and monomorphization. Missing data stays unknown.
    Both tiers must consume the same resulting lifecycle plan.
 
-The first source units now preserve declaration identity and parser
-metadata, with normal regression tests described below. The next unit must
-carry the reviewed facts through archives. These source changes do not
-invoke new native Drop glue.
+The source and archive units now preserve declaration identity, parser
+metadata and resource discipline. Resolved value-use operations are the
+next producer unit. These changes do not invoke new native Drop glue.
 Direct locals, by-value parameters and direct returns are the first use
 sites; field/variant insertion, closure capture, branch joins and loops
 need explicit transfer facts before their cleanup can be enabled.
@@ -159,11 +161,57 @@ owners, borrowing, local shadowing, `@must_consume`, aliases and imported
 generic aliases use the resolved declaration key. Source and imported aliases
 retain their target's owner and generic parameter roster.
 
-These are source-stage guarantees. The existing permissive treatment of an
-unresolved qualified name still exists; absence of resource metadata is not
-yet represented by the proposed `Unknown` state. Before wire work, add exact
-source/serialized-import equivalence and unresolved-component handling. Before native
-cleanup, add real timing/count controls for Shared releases, scope versus
+The existing checker still treats an unresolved qualified name permissively
+for compatibility. The new declaration carrier and VBC query preserve
+`Unknown`; that compatibility rule is not a runtime ownership proof. Before
+native cleanup, add real timing/count controls for Shared releases, scope versus
 explicit drop, borrowed/raw aliases, return and nested-variant transfers,
 branches, register reuse and loops. The original mutex guard must stay
 locked throughout its owning scope and unlock afterwards in both tiers.
+
+## Archive and metadata carry (2026-10-05)
+
+`TypeDecl::resource_discipline` supplies the shared interpretation of the
+modifier and `@must_consume`. VBC `TypeDescriptor.resource_discipline` carries
+the declaration fact; pre-2.18 archives read as `Unknown`. Invalid enum or
+optional-field tags are rejected. `FieldDescriptor.declaration_type` preserves
+reference, aggregate and generic shape independently of the existing runtime
+`type_ref` layout carrier. Archive imports and linker remapping retain both.
+
+`VbcModule::resource_discipline` follows exact descriptor IDs, aliases and
+owned components with declaration-owned generic substitution. Borrowed
+references and slices do not consume the referent. A missing descriptor,
+legacy opaque pointer, missing semantic field, unresolved parameter or cycle
+remains `Unknown`. Exact instantiated keys distinguish finite
+`Holder<Holder<Int>>` from recursion. Memoization prevents exponential work
+on shared component graphs; exhaustion of the 4096-node or 128-depth budget
+returns `Unknown` and grants no copy/drop authority.
+
+The archive-to-checker converter retains semantic field qualifiers and exact
+alias target owners using the existing structural renderer. Metadata loaders
+register discipline under the declaring key and retain that key on nominal
+values, including generic heads. Type preloading keeps the requested qualified
+path alongside its compatibility leaf, and already-registered aliases still
+load their target dependencies. The unifier expands a qualified alias by its
+whole path and declaration-owned parameter roster rather than an unrelated
+same-leaf alias.
+
+The durable controls are `verum_vbc/tests/resource_discipline_carry.rs` and
+`verum_compiler/tests/archive_resource_discipline.rs`. They cover old wire
+metadata, independent same-named owners, borrowed fields, nested generic
+components, unknown provenance and bounded graph traversal. The compiler
+fixture parses source, serializes a VBC archive, uses the production metadata
+converter, and checks serialized metadata through both eager and lazy checker
+loading. Ordinary and affine sibling roles are exchanged; generic aliases and
+direct generic annotations are checked separately. The initial failures
+included a borrowed field rendered as owned, an ordinary alias acquiring a
+sibling's affine constraint, and a directly named generic affine type becoming
+unrestricted after import. Those source/metadata controls now pass.
+
+These are focused source/serialization/checker results. They do not establish
+a fresh public CLI bake, actual interpreter/native lifecycle equivalence, or
+an active monomorphized cleanup plan. The existing descriptor-specialization
+helper carries substituted facts but is not itself proof of an executed
+specialization path. Shared retain/release, aggregate handoff, branch joins,
+loops, scope cleanup and explicit `drop` still require the producer-selected
+operations and both-tier lifetime checks described above.
