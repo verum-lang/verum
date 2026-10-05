@@ -89,6 +89,20 @@ write `T.V` or mount `T`"; two+ ⇒ error listing the H-owners (NOT the
 ambient owners). Resolution inside H uses the existing scoped
 machinery; nothing outside H is consulted.
 
+An exact expected owner from a return annotation, local annotation, or a
+callee's declared parameter resolves a constructor within that owner.
+Explicit `A.Pending` names the owner directly. A function or lexical value
+binding of the same spelling wins over the ambient constructor table.
+The enclosing function's return annotation is not an expected type for an
+unannotated local initializer, including a block initializer.
+
+As of 2026-10-05, unresolved multiple-owner synthesis emits E431 in Stage W
+and recovers as `Unknown`; strict mode reports an error immediately. This
+recovery permits further checker diagnostics, not an executable choice of
+owner. Bytecode generation refuses an unresolved constructor with E431 in
+all modes, including lenient body compilation. Qualify the constructor or
+provide its expected owner before execution.
+
 ---
 
 ## Law 2 — BOOLEAN-EQUALITY-CLARITY

@@ -5487,9 +5487,9 @@ impl VbcCodegen {
     /// This is used for imported stdlib modules where some functions may reference
     /// FFI/external symbols not available in VBC interpreter.
     ///
-    /// Returns `Err(CodegenError)` *only* when `config.strict_codegen` is
-    /// `true` AND the per-item failure classifies as `SkipClass::BugClass`.
-    /// All other failures (irreducible, or any failure in non-strict mode)
+    /// Returns `Err(CodegenError)` for every `SkipClass::Fatal` failure,
+    /// or when strict codegen encounters a `SkipClass::BugClass` failure.
+    /// Other failures (irreducible, or a bug-class failure in non-strict mode)
     /// surface as warn-level traces and the function returns `Ok(())` —
     /// the documented Tier-0 contract.
     fn compile_item_lenient(&mut self, item: &Item) -> CodegenResult<()> {
@@ -9066,8 +9066,8 @@ impl VbcCodegen {
         self.mount_installed_qualified_keys.clear();
         self.decl_installed_qualified_keys.clear();
         self.local_concrete_types.clear();
-        // Clear variant collisions (but typically these persist across modules)
-        // Don't clear - collisions should accumulate across all compiled types
+        // Constructor collisions belong to the same registration lifetime as ctx.
+        self.variant_collisions.clear();
         // Clear field name indices
         self.field_name_indices.clear();
         self.next_field_id = 0;

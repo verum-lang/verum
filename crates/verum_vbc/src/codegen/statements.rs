@@ -1409,7 +1409,10 @@ impl VbcCodegen {
                     saved
                 })
         } else {
-            None
+            // An unannotated local initializer has no expected owner merely
+            // because its enclosing function returns that type. This also
+            // bounds nested blocks; typed arguments/fields push their own hint.
+            Some(self.ctx.current_return_type_name.take())
         };
 
         // T0178 (TRANSMUTE-NANBOX-FLOAT-1): a `let x: T = transmute(arg)`
@@ -1535,7 +1538,9 @@ impl VbcCodegen {
             // Bounded to the initializer exactly like its sibling: a stale
             // full-annotation would bind a LATER call's return param to
             // this binding's type.
-            self.ctx.current_return_type_full = None;
+            if ty.is_some() {
+                self.ctx.current_return_type_full = None;
+            }
         }
 
         // MUT-LITERAL-OWNED (#17): a MUTABLE binding initialized from a plain

@@ -2395,6 +2395,10 @@ impl VbcCodegen {
                 // above — so an impl's const param shadows any global of the
                 // same name.)
 
+                self.require_constructor_owner(
+                    name, None, self.ctx.current_return_type_name.as_deref(), ident.span,
+                )?;
+
                 // Fallback for nullary variant constructors not yet registered as functions.
                 // Try to find a qualified name (Type.Variant) that matches.
 
@@ -7770,54 +7774,41 @@ impl VbcCodegen {
         // Check if this is a variant constructor — emit MakeVariant + SetVariantData.
         //
 
-        // Disambiguation: if the resolved `func_info` is a variant whose
-        // parent type does not match the surrounding return-type/scrutinee
-        // context (e.g., we're in `fn new_v4() -> SocketAddr` but the
-        // simple-name lookup returned `IpAddr.V4` because IpAddr was
-        // registered first), redirect to the suffix-and-args lookup that
-        // honours `current_return_type_name`. Without this redirect, two
-        // types declaring the same variant simple name in the same module
-        // produce a layout-mismatched payload at runtime — symptom
-        // class #76. Mirrors the same fix in compile_variant_constructor.
+        // Context selects a whole declaration: changing only the tag while
+        // retaining another parent's metadata produces a different nominal sum.
+        if func_info.variant_tag.is_some()
+            && !func_name.contains("::")
+            && !func_name.contains('.')
+        {
+            self.require_constructor_owner(
+                &func_name, Some(args.len()), self.ctx.current_return_type_name.as_deref(), func.span,
+            )?;
+        }
         if let Some(tag) = func_info.variant_tag {
-            let context_type: Option<String> = self
-                .ctx
-                .current_return_type_name
-                .as_ref()
-                .map(|t| t.split('<').next().unwrap_or(t.as_str()).to_string())
-                .or_else(|| {
-                    self.ctx
-                        .match_scrutinee_type
-                        .as_ref()
-                        .map(|t| t.split('<').next().unwrap_or(t.as_str()).to_string())
-                });
-            let parent_matches = match (&context_type, func_info.parent_type_name.as_deref()) {
-                (Some(ctx), Some(parent)) => ctx == parent,
-                (None, _) => true,
-                (Some(_), None) => false,
-            };
-            let final_tag = if parent_matches {
-                tag
+            let context_type = self.ctx.current_return_type_name.as_deref()
+                .or(self.ctx.match_scrutinee_type.as_deref())
+                .map(Self::strip_generic_args);
+            let contextual_info = if !func_name.contains("::") && !func_name.contains('.') {
+                context_type.and_then(|owner| {
+                    self.ctx.lookup_function(&format!("{owner}.{func_name}"))
+                        .filter(|info| {
+                            info.variant_tag.is_some()
+                                && info.param_count == args.len()
+                                && info.parent_type_name.as_deref() == Some(owner)
+                        })
+                })
             } else {
-                // Try to redirect via the suffix-and-args lookup; if it
-                // resolves to a different variant whose parent matches the
-                // context, use that one.
-                let simple_name = func_name
-                    .rsplit("::")
-                    .next()
-                    .or_else(|| func_name.rsplit('.').next())
-                    .unwrap_or(&func_name);
-                self.ctx
-                    .find_variant_by_suffix_and_args(simple_name, args.len())
-                    .unwrap_or(tag)
+                None
             };
+            let selected = contextual_info.unwrap_or(&func_info);
+            let final_tag = selected.variant_tag.unwrap_or(tag);
+            let parent = self.resolve_variant_parent(selected, &func_name);
             let result = self.ctx.alloc_temp();
             // Route through the unified emit-variant helper so the
             // typed-vs-legacy decision lives in one place. See
             // `emit_make_variant`'s docstring for the SHELL-5a-related
             // rationale (sum types sharing variant tags need the
             // concrete TypeId in the heap header to disambiguate).
-            let parent = self.resolve_variant_parent(&func_info, &func_name);
             self.emit_make_variant(result, final_tag, args.len() as u32, parent.as_deref());
             for (i, arg) in args.iter().enumerate() {
                 let arg_val = self.compile_expr(arg)?.ok_or_else(|| {
@@ -11767,6 +11758,56 @@ impl VbcCodegen {
         self.compile_variant_constructor_hinted(name, args, None)
     }
 
+    /// A collision is recorded by source constructor registration. The exact
+    /// contextual owner may resolve it; suffix order and synthesized tags may not.
+    fn require_constructor_owner(
+        &self,
+        name: &str,
+        arity: Option<usize>,
+        expected: Option<&str>,
+        span: verum_ast::Span,
+    ) -> CodegenResult<()> {
+        if !self.variant_collisions.contains(name) || self.ctx.get_var_reg(name).is_ok() {
+            return Ok(());
+        }
+        if self.ctx.unit_declared_fns.contains(name)
+            && self
+                .ctx
+                .lookup_function_in_scope(name)
+                .is_some_and(|info| info.variant_tag.is_none())
+        {
+            return Ok(());
+        }
+        let mut owners = verum_common::Set::<verum_common::Text>::new();
+        for (key, info) in &self.ctx.functions {
+            if info.variant_tag.is_none() || arity.is_some_and(|arity| info.param_count != arity) {
+                continue;
+            }
+            if let Some(parent) = &info.parent_type_name {
+                if *key == format!("{parent}.{name}") {
+                    owners.insert(verum_common::Text::from(parent.as_str()));
+                }
+            }
+        }
+        if owners.len() < 2 {
+            return Ok(());
+        }
+        let expected = expected.map(|ty| Self::strip_generic_args(ty));
+        if expected.is_some_and(|owner| owners.iter().any(|candidate| candidate.as_str() == owner))
+        {
+            return Ok(());
+        }
+        let mut owners: verum_common::List<_> = owners.into_iter().collect();
+        owners.sort();
+        Err(CodegenError::with_span(
+            CodegenErrorKind::AmbiguousConstructor {
+                name: name.into(),
+                owners,
+            },
+            span,
+        ))
+    }
+
     /// Sibling of `compile_variant_constructor` that accepts an
     /// `explicit_parent: Option<&str>` hint.  Callers reaching this
     /// helper from a `TypeName.Variant(...)` expression (the static-
@@ -11831,6 +11872,9 @@ impl VbcCodegen {
                     .as_ref()
                     .map(|t| t.split('<').next().unwrap_or(t.as_str()).to_string())
             });
+        self.require_constructor_owner(
+            name, Some(args.len()), context_type.as_deref(), verum_ast::Span::dummy(),
+        )?;
         let direct_tag = self.ctx.lookup_function_in_scope(name).and_then(|info| {
             // Only accept the direct hit when we lack a context type or
             // when the parent matches it; otherwise fall through to the

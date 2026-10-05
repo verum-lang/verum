@@ -532,6 +532,7 @@ pub static REGISTRY: Lazy<HashMap<&'static str, ErrorCodeEntry>> = Lazy::new(|| 
         // errors under VERUM_LANGUAGE_LAWS=strict, so both spellings of
         // the same rule reach a user.
         ErrorCodeEntry { code: "E430",  numeric: 430,  category: ErrorCategory::NameResolution, description: "bare constructor resolves outside this file's mount horizon" },
+        ErrorCodeEntry { code: "E431",  numeric: 431,  category: ErrorCategory::NameResolution, description: "bare constructor has multiple visible owning sum types" },
         ErrorCodeEntry { code: "E432",  numeric: 432,  category: ErrorCategory::NameResolution, description: "language law: name resolved by an ambient fallback, not by a binding" },
 
         // Missing import, as classified by the LSP's quick-fix router.

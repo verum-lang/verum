@@ -7064,6 +7064,13 @@ impl TypeChecker {
             };
             collected_param_names.push(name_opt.unwrap_or_else(|| Text::from("")));
         }
+        // Preserve the source declaration's scope as well as the legacy
+        // bare refinement lookup. Constructor precedence must not borrow a
+        // sibling module's same-named declaration as root authority.
+        let qualified_function: Text =
+            format!("{}.{}", self.current_module_path, func.name.name).into();
+        self.function_param_names
+            .insert(qualified_function, collected_param_names.clone());
         self.function_param_names
             .insert(func.name.name.clone(), collected_param_names);
 

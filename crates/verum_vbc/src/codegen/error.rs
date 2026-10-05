@@ -78,6 +78,14 @@ pub enum CodegenErrorKind {
         found: String,
     },
 
+    /// A bare sum constructor has no unique declaration owner (E431).
+    AmbiguousConstructor {
+        /// The unqualified constructor spelling.
+        name: verum_common::Text,
+        /// Exact owners retained from constructor declarations.
+        owners: verum_common::List<verum_common::Text>,
+    },
+
     /// Cannot infer type.
     TypeInference(String),
 
@@ -364,7 +372,8 @@ impl CodegenError {
             // A compile-time assertion that failed — or that could not
             // be evaluated — must halt the build in EVERY mode; see
             // `SkipClass::Fatal`.
-            CodegenErrorKind::StaticAssertionFailed { .. } => SkipClass::Fatal,
+            CodegenErrorKind::StaticAssertionFailed { .. }
+            | CodegenErrorKind::AmbiguousConstructor { .. } => SkipClass::Fatal,
             _ => SkipClass::BugClass,
         }
     }
@@ -387,7 +396,8 @@ pub enum SkipClass {
     /// not been honoured, and dropping the enclosing function with a
     /// warning would leave the assertion looking satisfied. Lenient mode
     /// exists to tolerate constructs Tier-0 cannot express — not to
-    /// tolerate a checked claim coming out false.
+    /// tolerate a checked claim coming out false. An unresolved constructor
+    /// owner likewise refuses compilation rather than selecting arbitrary code.
     Fatal,
 
     /// The error indicates the Tier-0 interpreter cannot compile the
@@ -461,6 +471,9 @@ impl fmt::Display for CodegenErrorKind {
             Self::TypeMismatch { expected, found } => {
                 write!(f, "type mismatch: expected {}, found {}", expected, found)
             }
+            Self::AmbiguousConstructor { name, owners } => write!(f,
+                "E431: bare constructor '{}' is ambiguous between {}; qualify the owning type",
+                name, owners.iter().map(verum_common::Text::as_str).collect::<verum_common::List<_>>().join(", ")),
             Self::TypeInference(msg) => write!(f, "cannot infer type: {}", msg),
             Self::InvalidTypeForOperation { ty, operation } => {
                 write!(f, "invalid type {} for operation {}", ty, operation)

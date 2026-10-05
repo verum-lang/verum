@@ -2069,6 +2069,9 @@ fn compute_core_blake3(core_dir: &Path, files: &[(String, Vec<u8>)]) -> String {
         "crates/verum_vbc/src/intrinsics/lowering.rs",
         "crates/verum_vbc/src/codegen/expressions.rs",
         "crates/verum_vbc/src/codegen/statements.rs",
+        // Error classification decides whether invalid source becomes a baked
+        // panic stub or refuses compilation (including constructor ownership).
+        "crates/verum_vbc/src/codegen/error.rs",
         // `well_known_types.rs` owns `has_runtime_inline_dispatch` —
         // the predicate that decides whether codegen DEVIRTUALISES a
         // method call to a static `Call` or keeps it on `CallM` for the

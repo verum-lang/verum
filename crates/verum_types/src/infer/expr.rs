@@ -4715,6 +4715,10 @@ impl TypeChecker {
                 return Ok(self.unifier.apply(&ty));
             }
 
+            if self.diagnose_ambiguous_constructor(name, None, span)? {
+                return Ok(Type::Unknown);
+            }
+
             // Try local env first, then module context
             if let Some(scheme) = self.ctx.env.lookup(name).cloned() {
                 // =====================================================================
@@ -7307,6 +7311,10 @@ impl TypeChecker {
                 return Ok(InferResult::new(self.unifier.apply(&ty)));
             }
 
+            if self.diagnose_ambiguous_constructor(name, None, expr.span)? {
+                return Ok(InferResult::new(Type::Unknown));
+            }
+
             // COMPLETE module-level lookup: Try local env first, then module context
             match self.ctx.env.lookup(name) {
                 Some(scheme) => {
@@ -7659,6 +7667,12 @@ impl TypeChecker {
                 &func.kind,
                 ExprKind::Path(p) if p.segments.len() == 1
             );
+            if is_bare_path && self.diagnose_ambiguous_constructor(name.as_str(), Some(args.len()), expr.span)? {
+                for arg in args {
+                    self.infer_expr(arg, InferMode::Synth)?;
+                }
+                return Ok(InferResult::new(Type::Unknown));
+            }
             // **Audit-driven fundamental fix** — gate WAS
             // `parents.len() > 1` (multi-parent arity disambiguation
             // only). Single-parent variants then fell through to

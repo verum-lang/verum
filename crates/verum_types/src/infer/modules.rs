@@ -17185,6 +17185,91 @@ impl TypeChecker {
         !some_ctor_fits
     }
 
+    /// Source registration owns a scope-qualified parameter-name row; an
+    /// ambient constructor or a sibling module's bare row cannot supply it.
+    fn explicit_value_outranks_constructor(&self, name: &str) -> bool {
+        self.ctx.env.is_locally_bound(name)
+            || (self.function_param_names.contains_key(&Text::from(format!(
+                "{}.{}",
+                self.current_module_path, name
+            ))) && self
+                .ctx
+                .env
+                .lookup(name)
+                .is_some_and(|scheme| matches!(scheme.instantiate(), Type::Function { .. })))
+    }
+
+    /// Diagnose an unresolved bare constructor before the ambient env slot can
+    /// choose a declaration. Expected-type checking resolves qualified owners
+    /// before entering synthesis; lexical values and declared functions win.
+    pub(super) fn diagnose_ambiguous_constructor(
+        &self,
+        name: &str,
+        arity: Option<usize>,
+        span: Span,
+    ) -> Result<bool> {
+        if !self.imports_in_progress.is_empty()
+            || !self.glob_imports_in_progress.is_empty()
+            || self.explicit_value_outranks_constructor(name)
+        {
+            return Ok(false);
+        }
+        let key = Text::from(name);
+        let Some(parents) = self.variant_constructor_parents.get(&key) else {
+            return Ok(false);
+        };
+        let mount_source = self
+            .explicit_imports
+            .contains(name)
+            .then(|| self.single_import_source(&key))
+            .flatten();
+        let mut owners: List<Text> = parents
+            .iter()
+            .filter(|parent| {
+                let in_horizon = parent.as_str()
+                    == verum_common::well_known_types::type_names::MAYBE
+                    || parent.as_str() == verum_common::well_known_types::type_names::RESULT
+                    || parent.as_str() == verum_common::well_known_types::type_names::ORDERING
+                    || self.current_module_declared_types.contains(parent.as_str())
+                    || self.explicit_imports.contains(parent.as_str())
+                    || mount_source.as_ref().is_some_and(|source| {
+                        self.module_publishes_type(source.as_str(), parent.as_str())
+                    });
+                in_horizon
+                    && arity.is_none_or(|arity| match self.ctx.get_constructors(parent) {
+                        Maybe::Some(constructors) => constructors
+                            .iter()
+                            .any(|ctor| ctor.name == key && ctor.args.len() == arity),
+                        Maybe::None => false,
+                    })
+            })
+            .cloned()
+            .collect();
+        if owners.len() < 2 {
+            return Ok(false);
+        }
+        owners.sort();
+        self.language_law(
+            "E431",
+            format!(
+                "bare constructor '{name}' is ambiguous between visible owners {}",
+                owners
+                    .iter()
+                    .map(Text::as_str)
+                    .collect::<List<_>>()
+                    .join(", ")
+            ),
+            format!(
+                "write '{}.{name}' or qualify another intended owner",
+                owners[0]
+            ),
+            span,
+        )?;
+        // Stage W recovers without inventing an owner; VBC refuses the same
+        // unresolved constructor instead of executing a declaration-order pick.
+        Ok(true)
+    }
+
     pub(super) fn try_resolve_variant_constructor(&self, name: &str) -> Option<Type> {
         self.try_resolve_variant_constructor_with_arity(name, None)
     }
@@ -17233,6 +17318,9 @@ impl TypeChecker {
                 "[ctor-trace] try_resolve_variant_constructor_with_arity('{}', {:?}, hint={:?})",
                 name, expected_arity, expected_parent
             );
+        }
+        if self.explicit_value_outranks_constructor(name) {
+            return None;
         }
         let ctor_text = verum_common::Text::from(name);
         let parents = self.variant_constructor_parents.get(&ctor_text)?;
