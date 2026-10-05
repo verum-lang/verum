@@ -2454,6 +2454,39 @@ impl TypeChecker {
             .collect()
     }
 
+    /// Resolve the carried target through the metadata declaration table, not
+    /// by stripping a qualified name. The archive's old target spelling is a
+    /// supported alias of this exact declaration; its declaring owner is the
+    /// identity used by reconstructed nominal receivers.
+    fn metadata_impl_target_keys(
+        target: &Text,
+        metadata: &crate::core_metadata::CoreMetadata,
+    ) -> List<Text> {
+        let mut keys = List::from_iter([target.clone()]);
+        if let Some(descriptor) = metadata.types.get(target) {
+            let owner = Self::metadata_declaring_key(descriptor);
+            if owner != *target {
+                keys.push(owner);
+            }
+        }
+        keys
+    }
+
+    fn register_metadata_impl(
+        &mut self,
+        implementation: crate::protocol::ProtocolImpl,
+        target: &Text,
+        metadata: &crate::core_metadata::CoreMetadata,
+    ) {
+        for key in Self::metadata_impl_target_keys(target, metadata) {
+            let mut implementation = implementation.clone();
+            if let Type::Named { path, .. } = &mut implementation.for_type {
+                *path = Self::text_to_path(&key);
+            }
+            let _ = self.protocol_checker.write().register_impl(implementation);
+        }
+    }
+
     pub(super) fn register_stdlib_impls_for_target(
         &mut self,
         type_name: &Text,
@@ -2461,8 +2494,18 @@ impl TypeChecker {
     ) -> Vec<Text> {
         use crate::protocol::ProtocolImpl;
         let mut proto_deps: Vec<Text> = Vec::new();
+        let requested_owner = metadata
+            .types
+            .get(type_name)
+            .map(Self::metadata_declaring_key)
+            .unwrap_or_else(|| type_name.clone());
         for impl_desc in metadata.implementations.iter() {
-            if impl_desc.target_type.as_str() != type_name.as_str() {
+            let target_owner = metadata
+                .types
+                .get(&impl_desc.target_type)
+                .map(Self::metadata_declaring_key)
+                .unwrap_or_else(|| impl_desc.target_type.clone());
+            if target_owner != requested_owner {
                 continue;
             }
             if impl_desc.protocol.as_str().is_empty() {
@@ -2508,19 +2551,21 @@ impl TypeChecker {
             // args (`__generic_0..k`) while this probe uses the argless
             // form, and `make_type_key` includes args — so the probe
             // misses and the loop falls through to `register_impl`,
-            // which recognises the duplicate and returns. Correct, just
-            // not free. Making it fire there means hoisting the real
-            // `for_type` construction above this point, which is a
-            // larger change than the defect warrants.
-            let for_type = Type::Named {
-                path: Self::text_to_path(&impl_desc.target_type),
-                args: List::new(),
-            };
+            // which recognises the duplicate and returns. Check every
+            // descriptor-proven spelling before taking this fast path.
             let protocol_path = Self::text_to_path(&impl_desc.protocol);
             let protocol_args = Self::parse_impl_protocol_args(impl_desc);
             {
                 let pc = self.protocol_checker.read();
-                if pc.implements_instantiation(&for_type, &protocol_path, &protocol_args) {
+                if Self::metadata_impl_target_keys(&impl_desc.target_type, metadata)
+                    .iter()
+                    .all(|key| {
+                        let target = Type::Named {
+                            path: Self::text_to_path(key),
+                            args: List::new(),
+                        };
+                        pc.implements_instantiation(&target, &protocol_path, &protocol_args)
+                    }) {
                     proto_deps.push(impl_desc.protocol.clone());
                     continue;
                 }
@@ -2612,7 +2657,7 @@ impl TypeChecker {
                 protocol: Self::text_to_path(&impl_desc.protocol),
                 protocol_args,
                 // Args-ful shape (see the carry comment above) — the
-                // argless `for_type` above serves only the
+                // argless targets above serve only the
                 // idempotence probe; `get_implementations`' base-key
                 // fallback matches both shapes.
                 for_type: for_type_registered,
@@ -2648,7 +2693,7 @@ impl TypeChecker {
                         .collect::<Vec<_>>()
                 );
             }
-            let _ = self.protocol_checker.write().register_impl(protocol_impl);
+            self.register_metadata_impl(protocol_impl, &impl_desc.target_type, metadata);
             proto_deps.push(impl_desc.protocol.clone());
         }
         proto_deps
@@ -4350,8 +4395,8 @@ impl TypeChecker {
                 span: Span::default(),
                 type_param_fn_bounds: verum_common::Map::new(),
             };
-            // Ignore coherence errors during metadata loading
-            let _ = self.protocol_checker.write().register_impl(protocol_impl);
+            // Ignore coherence errors during metadata loading.
+            self.register_metadata_impl(protocol_impl, &impl_desc.target_type, metadata);
         }
 
         // Register inductive constructors for pattern matching
