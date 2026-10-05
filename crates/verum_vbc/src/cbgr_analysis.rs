@@ -236,6 +236,7 @@ impl VbcEscapeAnalyzer {
                 // Local value producers: these create stack-local values.
                 Instruction::LoadK { dst, .. }
                 | Instruction::LoadI { dst, .. }
+                | Instruction::TypeLayout { dst, .. }
                 | Instruction::LoadF { dst, .. }
                 | Instruction::LoadTrue { dst }
                 | Instruction::LoadFalse { dst }

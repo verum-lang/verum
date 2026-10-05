@@ -9785,6 +9785,8 @@ pub enum ExtendedSubOpcode {
     /// resolved against the CURRENT frame's witness table at execution
     /// time (nested generic chains).
     SetCallWitness = 0x02,
+    /// Layout query: `[0x1F][0x05][dst:reg][property:u8][TypeRef]`.
+    TypeLayout = 0x05,
 
     /// Process termination — reads one `Int` register and terminates
     /// the process with that exit code. Format: `[0x1F][0x10][reg:u16]`.
@@ -10036,6 +10038,7 @@ impl ExtendedSubOpcode {
             0x00 => Some(Self::Reserved),
             0x01 => Some(Self::MakeVariantTyped),
             0x02 => Some(Self::SetCallWitness),
+            0x05 => Some(Self::TypeLayout),
             0x10 => Some(Self::ProcessExit),
             0x20 => Some(Self::ScriptEngineNew),
             0x21 => Some(Self::ScriptEngineFree),
@@ -10119,6 +10122,7 @@ impl ExtendedSubOpcode {
             Self::Reserved => "EXT_RESERVED",
             Self::MakeVariantTyped => "EXT_MAKE_VARIANT_TYPED",
             Self::SetCallWitness => "EXT_SET_CALL_WITNESS",
+            Self::TypeLayout => "EXT_TYPE_LAYOUT",
             Self::GetFieldNamed => "EXT_GET_FIELD_NAMED",
             Self::SetFieldNamed => "EXT_SET_FIELD_NAMED",
             Self::ProcessExit => "EXT_PROCESS_EXIT",
@@ -10536,6 +10540,25 @@ impl Opcode {
     }
 }
 
+/// Declaration layout property evaluated after generic substitution.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[repr(u8)]
+pub enum LayoutProperty {
+    /// Declared byte size.
+    Size = 0,
+    /// Declared byte alignment.
+    Alignment = 1,
+    /// Aligned element stride.
+    Stride = 2,
+}
+
+impl LayoutProperty {
+    /// Decode the canonical wire discriminant; unknown queries are rejected.
+    pub fn from_byte(value: u8) -> Option<Self> {
+        match value { 0 => Some(Self::Size), 1 => Some(Self::Alignment), 2 => Some(Self::Stride), _ => None }
+    }
+}
+
 /// Full instruction with opcode and operands.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Instruction {
@@ -10591,6 +10614,15 @@ pub enum Instruction {
         dst: Reg,
         /// Type reference to load.
         type_ref: TypeRef,
+    },
+    /// Query a declared type layout without erasing generic parameter identity.
+    TypeLayout {
+        /// Destination integer register.
+        dst: Reg,
+        /// Full type identity, substituted by the current frame or monomorphizer.
+        type_ref: TypeRef,
+        /// The requested layout property.
+        property: LayoutProperty,
     },
     /// Load small immediate (-64..63).
     LoadSmallI {

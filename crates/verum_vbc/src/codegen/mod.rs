@@ -15910,6 +15910,22 @@ impl VbcCodegen {
                 let field_size = if is_packed { 1u32 } else { 8u32 }; // packed: minimum size per field
                 type_desc.size = (fields.len() as u32) * field_size;
                 type_desc.alignment = type_align;
+                // Property layout is declaration-owned; object fields retain
+                // their existing Value-slot extent even for repr(C) records.
+                type_desc.declared_layout = if self.declared_repr_c.contains(&type_name) {
+                    if type_decl.generics.is_empty() {
+                        self.repr_c_types.get(&type_name)
+                            .and_then(|index| self.ffi_layouts.get(*index as usize))
+                            .map(|layout| crate::types::DeclaredTypeLayout {
+                                size: u64::from(layout.size), alignment: u64::from(layout.align),
+                            })
+                    } else { None }
+                } else {
+                    Some(crate::types::DeclaredTypeLayout {
+                        size: (fields.len() as u64) * verum_common::layout::VALUE_SLOT_SIZE,
+                        alignment: u64::from(type_align),
+                    })
+                };
 
                 // Build generic type param name → index mapping for field type resolution.
                 // E.g., for `type Pair<A, B>`, maps {"A"→0, "B"→1}.
@@ -16347,7 +16363,7 @@ impl VbcCodegen {
                         generic_param_map.insert(gname.name.to_string(), idx as u16);
                     }
                 }
-                let target_ref = self.resolve_field_type_ref(target_type, &generic_param_map);
+                let target_ref = self.resolve_signature_type_ref(target_type, &generic_param_map);
                 if std::env::var("VERUM_TRACE_RTC").is_ok() && type_name == "IoResult" {
                     eprintln!("[RTC-emit] IoResult id={} target_ref={:?}", type_id.0, target_ref);
                 }
@@ -16399,6 +16415,7 @@ impl VbcCodegen {
                     // is decided by the alias *target* type's
                     // descriptor, not by the alias itself.
                     is_transparent_wrapper: false,
+                    declared_layout: None,
                 };
                 self.push_type_dedupe(type_desc);
             }
@@ -26272,6 +26289,7 @@ impl VbcCodegen {
                 (local != crate::types::StringId::EMPTY).then_some(local)
             }),
             is_transparent_wrapper: ty.is_transparent_wrapper,
+            declared_layout: ty.declared_layout,
         };
 
         // Restore the codegen-local newtype fast-cache from the
@@ -26636,6 +26654,7 @@ impl VbcCodegen {
                     // T0533 — protocol stub has no alias target to name.
                     alias_target_name: None,
                     is_transparent_wrapper: false,
+                    declared_layout: ty.declared_layout,
                 });
             }
         }
@@ -28657,83 +28676,15 @@ fn remap_type_ref_archive(
     src: &crate::types::TypeRef,
     type_id_remap: &std::collections::HashMap<u32, u32>,
 ) -> crate::types::TypeRef {
-    use crate::types::TypeRef;
-    match src {
-        TypeRef::Concrete(tid) => {
-            let new_id = type_id_remap
-                .get(&tid.0)
-                .copied()
-                .map(crate::types::TypeId)
-                .unwrap_or(*tid);
-            TypeRef::Concrete(new_id)
+    struct NominalRemap<'a>(&'a std::collections::HashMap<u32, u32>);
+    impl crate::bytecode_remap::IdRemap for NominalRemap<'_> {
+        fn map_type_id(&self, id: TypeId) -> TypeId {
+            self.0.get(&id.0).copied().map(TypeId).unwrap_or(id)
         }
-        TypeRef::Generic(p) => TypeRef::Generic(*p),
-        TypeRef::Instantiated { base, args } => TypeRef::Instantiated {
-            base: type_id_remap
-                .get(&base.0)
-                .copied()
-                .map(crate::types::TypeId)
-                .unwrap_or(*base),
-            args: args
-                .iter()
-                .map(|a| remap_type_ref_archive(a, type_id_remap))
-                .collect(),
-        },
-        TypeRef::Function {
-            params,
-            return_type,
-            contexts,
-        } => TypeRef::Function {
-            params: params
-                .iter()
-                .map(|p| remap_type_ref_archive(p, type_id_remap))
-                .collect(),
-            return_type: Box::new(remap_type_ref_archive(return_type, type_id_remap)),
-            contexts: contexts.clone(),
-        },
-        TypeRef::Rank2Function {
-            type_param_count,
-            params,
-            return_type,
-            contexts,
-        } => TypeRef::Rank2Function {
-            type_param_count: *type_param_count,
-            params: params
-                .iter()
-                .map(|p| remap_type_ref_archive(p, type_id_remap))
-                .collect(),
-            return_type: Box::new(remap_type_ref_archive(return_type, type_id_remap)),
-            contexts: contexts.clone(),
-        },
-        TypeRef::Reference {
-            inner,
-            mutability,
-            tier,
-        } => TypeRef::Reference {
-            inner: Box::new(remap_type_ref_archive(inner, type_id_remap)),
-            mutability: *mutability,
-            tier: *tier,
-        },
-        TypeRef::Tuple(elems) => TypeRef::Tuple(
-            elems
-                .iter()
-                .map(|e| remap_type_ref_archive(e, type_id_remap))
-                .collect(),
-        ),
-        TypeRef::Array { element, length } => TypeRef::Array {
-            element: Box::new(remap_type_ref_archive(element, type_id_remap)),
-            length: *length,
-        },
-        TypeRef::Slice(inner) => {
-            TypeRef::Slice(Box::new(remap_type_ref_archive(inner, type_id_remap)))
-        }
-        TypeRef::AssociatedProjection { base, assoc } => TypeRef::AssociatedProjection {
-            base: Box::new(remap_type_ref_archive(base, type_id_remap)),
-            assoc: assoc.clone(),
-        },
-        // Const-generic VALUE — no type ids to remap.
-        TypeRef::ConstValue(v) => TypeRef::ConstValue(*v),
     }
+    let mut result = src.clone();
+    crate::bytecode_remap::rewrite_type_ref_ids(&mut result, &NominalRemap(type_id_remap));
+    result
 }
 
 /// Cross-module type-table health (#170). Returned by

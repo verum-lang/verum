@@ -122,10 +122,20 @@ pub(in super::super) fn handle_loadt(
         state.set_reg(dst, Value::from_i64(value));
         return Ok(DispatchResult::Continue);
     }
-    let resolved = match tr {
-        crate::types::TypeRef::Concrete(id) => Some(id),
-        crate::types::TypeRef::Instantiated { base, .. } => Some(base),
-        _ => None,
+    // LoadT exposes the historical dispatch head, while CallG/SetCallWitness
+    // now retain structural facts. Keep this projection local to this value
+    // operation rather than destructively summarizing the bytecode decoder.
+    let mut head = &tr;
+    let resolved = loop {
+        use crate::types::TypeRef;
+        match head {
+            TypeRef::Concrete(id) | TypeRef::Instantiated { base: id, .. } => break Some(*id),
+            TypeRef::Reference { inner, .. } | TypeRef::Slice(inner) => head = inner,
+            TypeRef::Array { element, .. } => head = element,
+            TypeRef::AssociatedProjection { base, .. } => head = base,
+            TypeRef::Function { .. } | TypeRef::Rank2Function { .. } | TypeRef::Tuple(_) => break Some(crate::types::TypeId::UNIT),
+            _ => break None,
+        }
     };
     match resolved {
         Some(id) => state.set_reg(dst, Value::from_type(id)),

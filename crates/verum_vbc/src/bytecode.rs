@@ -137,6 +137,14 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
             encode_type_ref(type_ref, output);
         }
 
+        Instruction::TypeLayout { dst, type_ref, property } => {
+            output.push(Opcode::Extended.to_byte());
+            output.push(ExtendedSubOpcode::TypeLayout.to_byte());
+            encode_reg(*dst, output);
+            output.push(*property as u8);
+            encode_type_ref(type_ref, output);
+        }
+
         Instruction::LoadSmallI { dst, value } => {
             output.push(Opcode::LoadSmallI.to_byte());
             encode_reg(*dst, output);
@@ -5093,6 +5101,14 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
             // `Instruction::Extended { sub_op, operands: vec![] }`.
             let sub_op = decode_u8(data, offset)?;
             match ExtendedSubOpcode::from_byte(sub_op) {
+                Some(ExtendedSubOpcode::TypeLayout) => {
+                    let dst = decode_reg(data, offset)?;
+                    let raw_property = decode_u8(data, offset)?;
+                    let property = crate::instruction::LayoutProperty::from_byte(raw_property)
+                        .ok_or_else(|| VbcError::Deserialization(format!("invalid layout property {raw_property}")))?;
+                    let type_ref = decode_type_ref(data, offset)?;
+                    Ok(Instruction::TypeLayout { dst, type_ref, property })
+                }
                 Some(ExtendedSubOpcode::SetCallWitness) => {
                     // `[varint:count][TypeRef * count]` — structural decode
                     // so the validator / disassembler / AOT lowering see the
@@ -5943,7 +5959,7 @@ fn decode_extended_reg_operands(
 /// - 0x08: Rank2Function { type_param_count, params, return_type, contexts }
 /// - 0x09: AssociatedProjection { base, assoc }
 /// - 0x0A: ConstValue(i64) — const-generic value argument
-fn decode_type_ref(data: &[u8], offset: &mut usize) -> VbcResult<TypeRef> {
+pub(crate) fn decode_type_ref(data: &[u8], offset: &mut usize) -> VbcResult<TypeRef> {
     use smallvec::SmallVec;
 
     let discriminant = decode_u8(data, offset)?;

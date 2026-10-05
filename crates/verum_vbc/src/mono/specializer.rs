@@ -591,7 +591,7 @@ impl<'a> BytecodeSpecializer<'a> {
                     _ => {}
                 }
             }
-            I::LoadT { type_ref, .. } => {
+            I::LoadT { type_ref, .. } | I::TypeLayout { type_ref, .. } => {
                 *type_ref = self.substitution.apply(type_ref);
             }
             // NewG carries RUNTIME type-argument REGISTERS on the wire
@@ -798,6 +798,7 @@ impl<'a> BytecodeSpecializer<'a> {
         match instr {
             I::Mov { dst, .. }
             | I::LoadI { dst, .. }
+            | I::TypeLayout { dst, .. }
             | I::LoadK { dst, .. }
             | I::Call { dst, .. }
             | I::CallM { dst, .. }
@@ -1018,6 +1019,7 @@ impl<'a> BytecodeSpecializer<'a> {
             // stays transparent.  See
             // `TypeDescriptor::is_transparent_wrapper`.
             is_transparent_wrapper: base_desc.map(|d| d.is_transparent_wrapper).unwrap_or(false),
+            declared_layout: base_desc.and_then(|d| d.declared_layout),
         };
 
         // Update layout cache

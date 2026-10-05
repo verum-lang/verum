@@ -23075,142 +23075,79 @@ impl VbcCodegen {
 
     // ==================== Field Access ====================
 
-    /// Try to resolve a reference type property like `(&Int).size`, `(&checked T).size`, etc.
-    ///
-    /// Reference memory layout (CBGR spec):
-    /// - Managed ThinRef (`&T`, `&mut T`): 16 bytes (ptr=8 + generation=4 + epoch_caps=4)
-    /// - Managed FatRef (`&[T]`, `&mut [T]`): 24 bytes (ptr=8 + len=8 + generation=4 + epoch_caps=4)
-    /// - Checked thin (`&checked T`): 8 bytes (pointer only)
-    /// - Checked fat (`&checked [T]`): 16 bytes (ptr=8 + len=8)
-    /// - Unsafe thin (`&unsafe T`): 8 bytes (pointer only)
-    /// - Unsafe fat (`&unsafe [T]`): 16 bytes (ptr=8 + len=8)
-    fn try_resolve_ref_type_property(&self, base: &Expr, field: &str) -> Option<i64> {
-        // Only handle "size" and "alignment" properties
-        if field != "size" && field != "alignment" {
-            return None;
-        }
-
-        // Look for Paren(Unary { op: Ref*, expr: ... }) pattern
-        // This matches: (&Int).size, (&checked Int).size, (&mut [T]).size, etc.
-        let inner = match &base.kind {
-            ExprKind::Paren(inner) => inner,
-            _ => return None,
-        };
-
-        let (op, inner_expr) = match &inner.kind {
-            ExprKind::Unary { op, expr } => (op, expr.as_ref()),
-            _ => return None,
-        };
-
-        // Classify the reference tier
-        let is_managed = matches!(op, UnOp::Ref | UnOp::RefMut);
-        let is_checked = matches!(op, UnOp::RefChecked | UnOp::RefCheckedMut);
-        let is_unsafe_ref = matches!(op, UnOp::RefUnsafe | UnOp::RefUnsafeMut);
-
-        if !is_managed && !is_checked && !is_unsafe_ref {
-            return None;
-        }
-
-        // Determine if this is a fat reference (slice type or protocol object).
-        // Slice types: [T] parsed as Array(List([Path("T")])) - single-element array expression
-        // Fixed arrays: [T; N] parsed as Array(Repeat { .. }) - these are NOT fat refs
-        // Protocol objects: known protocol type names (Display, Clone, Write, etc.)
-        let is_fat = match &inner_expr.kind {
-            ExprKind::Array(verum_ast::ArrayExpr::List(_)) => {
-                // [T] or [T, U, ...] - slice type expression → fat ref
-                true
+    /// Type-shaped expression operands retain signature wrappers for the same
+    /// layout authority used by `ExprKind::TypeProperty`. Value bindings never
+    /// enter this path merely because they share a declaration's spelling.
+    fn layout_operand_type_ref(&self, expression: &Expr) -> Option<crate::types::TypeRef> {
+        use crate::types::{CbgrTier, TypeParamId, TypeRef};
+        match &expression.kind {
+            ExprKind::Paren(inner) => self.layout_operand_type_ref(inner),
+            ExprKind::TypeExpr(ty) => {
+                Some(self.resolve_signature_type_ref(ty, &self.ctx.current_generic_param_ids))
             }
-            ExprKind::Array(verum_ast::ArrayExpr::Repeat { .. }) => {
-                // [T; N] - fixed-size array → NOT fat, still thin ref
-                false
-            }
-            ExprKind::Path(path)
-                // Check if this is a known protocol type (produces fat ref with vtable).
-                // Uses centralized WellKnownProtocol registry instead of hardcoded list.
-                if path.segments.len() == 1 => {
-                    if let PathSegment::Name(ident) = &path.segments[0] {
-                        WKP::is_fat_ref_protocol(ident.name.as_str())
-                    } else {
-                        false
-                    }
+            ExprKind::Path(path) => {
+                let name = path.to_string();
+                if self.ctx.get_var_reg(&name).is_ok()
+                    || self.ctx.lookup_function_in_scope(&name).is_some()
+                {
+                    return None;
                 }
-            _ => false,
-        };
-
-        let size: i64 = if is_managed {
-            if is_fat { 24 } else { 16 }
-        } else {
-            // checked or unsafe - no generation/epoch_caps overhead
-            if is_fat { 16 } else { 8 }
-        };
-
-        match field {
-            "size" => Some(size),
-            "alignment" => Some(8), // All reference types are pointer-aligned
+                if let Some(id) = self.ctx.current_generic_param_ids.get(&name) {
+                    return Some(TypeRef::Generic(TypeParamId(*id)));
+                }
+                self.nominal_type_id(&name).map(TypeRef::Concrete)
+            }
+            ExprKind::Array(verum_ast::ArrayExpr::List(elements)) if elements.len() == 1 => Some(
+                TypeRef::Slice(Box::new(self.layout_operand_type_ref(&elements[0])?)),
+            ),
+            ExprKind::Array(verum_ast::ArrayExpr::Repeat { value, count }) => {
+                Some(TypeRef::Array {
+                    element: Box::new(self.layout_operand_type_ref(value)?),
+                    length: u64::try_from(self.const_eval_i64(count).ok()??).ok()?,
+                })
+            }
+            ExprKind::Unary { op, expr } => {
+                let (tier, mutable) = match op {
+                    UnOp::Ref => (CbgrTier::Tier0, false),
+                    UnOp::RefMut => (CbgrTier::Tier0, true),
+                    UnOp::RefChecked => (CbgrTier::Tier1, false),
+                    UnOp::RefCheckedMut => (CbgrTier::Tier1, true),
+                    UnOp::RefUnsafe => (CbgrTier::Tier2, false),
+                    UnOp::RefUnsafeMut => (CbgrTier::Tier2, true),
+                    _ => return None,
+                };
+                Some(TypeRef::Reference {
+                    inner: Box::new(self.layout_operand_type_ref(expr)?),
+                    tier,
+                    mutability: if mutable {
+                        crate::types::Mutability::Mutable
+                    } else {
+                        crate::types::Mutability::Immutable
+                    },
+                })
+            }
             _ => None,
         }
     }
 
-    /// Resolve `.size` / `.alignment` / `.stride` / `.name` on a Type expression
-    /// (e.g., `SharedInner<T>.size`, `Foo<Int>.alignment`). Returns the value to
-    /// load as a compile-time constant.
-    ///
-    /// VBC layout model: every record slot holds a NaN-boxed `Value` (8 bytes),
-    /// so a struct's size is `num_fields * 8` and alignment is 8 regardless of
-    /// the type arguments. This matches the interpreter's heap layout and the
-    /// AOT lowering's per-field 8-byte slot. `cbgr_alloc(size, align)` results
-    /// fit straight into `ptr_write(ptr, struct_value)` for any `T`.
+    /// Non-layout properties retain their existing primitive/name handling.
     fn try_resolve_type_layout_property(
         &self,
         ty: &verum_ast::ty::Type,
         field: &str,
     ) -> Option<TypePropertyValue> {
-        if !matches!(field, "size" | "alignment" | "stride" | "name") {
+        if field != "name" {
             return None;
         }
-        let base_name = self.extract_base_type_name(ty)?;
-        self.layout_property_for_named(&base_name, field)
+        let name = self.extract_base_type_name(ty)?;
+        Some(TypePropertyValue::Str(name))
     }
 
-    /// Backing logic shared between TypeExpr and bare-Path layout-property paths.
     fn layout_property_for_named(&self, type_name: &str, field: &str) -> Option<TypePropertyValue> {
-        // Primitive types route through resolve_type_property for size/alignment/etc.
-        if let Some(value) = resolve_type_property(type_name, field) {
-            return Some(value);
-        }
         if field == "name" {
             return Some(TypePropertyValue::Str(type_name.to_string()));
         }
-        // User-defined record/struct types: NaN-boxed slot per field.
-        if let Some(field_count) = self.type_field_count(type_name) {
-            let size = (field_count as i64) * 8;
-            return Some(match field {
-                "size" | "stride" => TypePropertyValue::Int(size),
-                "alignment" => TypePropertyValue::Int(8),
-                _ => return None,
-            });
-        }
-        // Unknown identifier — most commonly an unconstrained generic parameter
-        // (`T.size` inside an `implement<T>` block). One NaN-boxed slot.
-        //
-        // TYPEINFO-USERTYPE-SIZE-1 instrumentation: a NAMED user record that
-        // reaches this fallback is a resolution miss, not a generic param —
-        // surface every such site under VERUM_TRACE_TYPEPROP.
-        if std::env::var("VERUM_TRACE_TYPEPROP").is_ok() {
-            eprintln!(
-                "[TYPEPROP] fallback-8 for type='{}' field='{}' (layouts_len={} has_key={} known_type_id={}) fn={:?}",
-                type_name,
-                field,
-                self.type_field_layouts.len(),
-                self.type_field_layouts.contains_key(type_name),
-                self.type_name_to_id.contains_key(type_name),
-                self.ctx.current_function
-            );
-        }
-        Some(match field {
-            "size" | "stride" | "alignment" => TypePropertyValue::Int(8),
-            _ => return None,
-        })
+        None
     }
 
     /// Helper to flatten nested Field expressions into a qualified path.
@@ -23565,18 +23502,22 @@ impl VbcCodegen {
             return Ok(Some(result));
         }
 
-        // Handle compile-time reference type properties: (&Int).size, (&checked Int).size, etc.
-        // Reference type expressions in parentheses are type-level property accesses.
-        // CBGR reference memory layout: ThinRef<T> is 16 bytes (ptr + generation + epoch_caps),
-        // FatRef<T> is 24 bytes (ptr + generation + epoch_caps + len). Properties like .size
-        // and .alignment are resolved at compile time from the reference tier.
-        if let Some(size) = self.try_resolve_ref_type_property(base, field) {
-            let result = self.ctx.alloc_temp();
-            self.ctx.emit(Instruction::LoadI {
-                dst: result,
-                value: size,
-            });
-            return Ok(Some(result));
+        let layout_property = match field {
+            "size" => Some(crate::instruction::LayoutProperty::Size),
+            "alignment" => Some(crate::instruction::LayoutProperty::Alignment),
+            "stride" => Some(crate::instruction::LayoutProperty::Stride),
+            _ => None,
+        };
+        if let Some(property) = layout_property
+            && let Some(type_ref) = self.layout_operand_type_ref(base)
+        {
+            let dst = self.ctx.alloc_temp();
+            if let Some(value) = crate::type_layout::query_with(&type_ref, property, |id| self.types.iter().find(|ty| ty.id == id)).and_then(|value| i64::try_from(value).ok()) {
+                self.ctx.emit(Instruction::LoadI { dst, value });
+            } else {
+                self.ctx.emit(Instruction::TypeLayout { dst, type_ref, property });
+            }
+            return Ok(Some(dst));
         }
 
         // Handle compile-time layout property access on a TypeExpr: e.g.,
@@ -24411,10 +24352,8 @@ impl VbcCodegen {
             // Layout property access on user-defined or generic-parameter types:
             // `MyStruct.size`, `T.alignment`, `Foo.stride`, `Bar.name`. The base
             // is a bare path (no <args>) so it bypassed the TypeExpr branch above.
-            // We resolve from the registered field layout when available and
-            // fall back to a single-slot layout (8 / 8) for unknown identifiers
-            // — which is the correct shape for an unconstrained generic parameter
-            // since every NaN-boxed Value is exactly 8 bytes.
+            // Layout properties were handled above through the declared TypeRef;
+            // this remaining path serves the display name only.
             if matches!(field, "size" | "alignment" | "stride" | "name")
                 && std::env::var("VERUM_TRACE_TYPEPROP").is_ok()
             {
@@ -44950,46 +44889,29 @@ impl VbcCodegen {
 
         let dest = self.ctx.alloc_temp();
 
-        // Handle reference types: (&T).size, (&checked T).size, (&unsafe T).size, etc.
-        // CBGR reference memory layout:
-        // - Managed ThinRef (&T, &mut T): 16 bytes (ptr=8 + generation=4 + epoch_caps=4)
-        // - Managed FatRef (&[T], &mut [T]): 24 bytes (ptr=8 + len=8 + generation=4 + epoch_caps=4)
-        // - Checked thin (&checked T): 8 bytes (pointer only)
-        // - Checked fat (&checked [T]): 16 bytes (ptr=8 + len=8)
-        // - Unsafe thin (&unsafe T): 8 bytes (pointer only)
-        // - Unsafe fat (&unsafe [T]): 16 bytes (ptr=8 + len=8)
-        if let Some(ref_size) = self.resolve_ref_type_size(ty, property) {
-            self.ctx.emit(Instruction::LoadI {
-                dst: dest,
-                value: ref_size,
-            });
+        // Layout properties carry the exact signature-owned TypeRef. A
+        // concrete declaration may fold immediately; otherwise the same query
+        // executes after frame/monomorphization substitution.
+        let property_query = match property {
+            TypeProperty::Size => Some(crate::instruction::LayoutProperty::Size),
+            TypeProperty::Alignment => Some(crate::instruction::LayoutProperty::Alignment),
+            TypeProperty::Stride => Some(crate::instruction::LayoutProperty::Stride),
+            _ => None,
+        };
+        if let Some(property) = property_query {
+            let type_ref = self.resolve_signature_type_ref(ty, &self.ctx.current_generic_param_ids);
+            if let Some(value) = crate::type_layout::query_with(&type_ref, property, |id| {
+                self.types.iter().find(|descriptor| descriptor.id == id)
+            }).and_then(|value| i64::try_from(value).ok()) {
+                self.ctx.emit(Instruction::LoadI { dst: dest, value });
+            } else {
+                self.ctx.emit(Instruction::TypeLayout { dst: dest, type_ref, property });
+            }
             return Ok(Some(dest));
         }
 
         // Extract the type name string for property resolution
         let type_name = self.extract_display_type_name(ty);
-
-        // TYPEINFO-USERTYPE-SIZE-1 (task #8): user-defined RECORD types
-        // resolve size/stride/alignment from their registered field layout
-        // — the documented VBC model is `num_fields * 8` NaN-boxed slots,
-        // alignment 8.  `T.size` parses as ExprKind::TypeProperty (NOT a
-        // Field access), so none of compile_field_access's layout branches
-        // ever ran for it; every record fell into the primitive-bits
-        // table's `_ => 64` default below and answered 8.  Gated to
-        // user-defined types: built-in nominal types (Text, List, ...) keep
-        // their existing single-slot answers pending the type-identity
-        // canonicalisation (task #9).
-        if matches!(
-            property,
-            TypeProperty::Size | TypeProperty::Stride | TypeProperty::Alignment
-        ) {
-            // Layout properties go through ONE authority so that emitting
-            // them and folding them at compile time can never disagree.
-            if let Some(value) = self.layout_property_value(&type_name, property) {
-                self.ctx.emit(Instruction::LoadI { dst: dest, value });
-                return Ok(Some(dest));
-            }
-        }
 
         // Get bits for the type
         let bits = match type_name.as_str() {
@@ -45197,66 +45119,6 @@ impl VbcCodegen {
             TypeKind::Unit => "Unit".to_string(),
             TypeKind::Never => "Never".to_string(),
             _ => format!("{:?}", ty.kind),
-        }
-    }
-
-    /// Resolve size/alignment for reference types in type property access.
-    ///
-    /// Returns the property value (as i64) if `ty` is a reference type and
-    /// `property` is Size or Alignment. Returns None for non-reference types.
-    fn resolve_ref_type_size(
-        &self,
-        ty: &verum_ast::ty::Type,
-        property: &verum_ast::TypeProperty,
-    ) -> Option<i64> {
-        use verum_ast::TypeProperty;
-        use verum_ast::ty::TypeKind;
-
-        // Only handle Size and Alignment for reference types
-        if !matches!(property, TypeProperty::Size | TypeProperty::Alignment) {
-            return None;
-        }
-
-        // Classify the reference tier and extract inner type
-        let (is_managed, inner) = match &ty.kind {
-            TypeKind::Reference { inner, .. } => (true, inner),
-            TypeKind::CheckedReference { inner, .. } => (false, inner),
-            TypeKind::UnsafeReference { inner, .. } => (false, inner),
-            _ => return None,
-        };
-
-        // Determine if this is a fat reference.
-        // Fat refs are used for:
-        // - Slice types: [T] (TypeKind::Slice)
-        // - Protocol/trait objects (TypeKind::Path to known protocols)
-        let is_fat = match &inner.kind {
-            TypeKind::Slice(_) => true,
-            // Unsized array [T] (no size) is also a slice → fat reference
-            TypeKind::Array { size: None, .. } => true,
-            TypeKind::Path(path) => {
-                // Known protocol types produce fat refs (vtable pointer needed).
-                // Uses centralized WellKnownProtocol registry.
-                if let Some(ident) = path.as_ident() {
-                    WKP::is_fat_ref_protocol(ident.name.as_str())
-                } else {
-                    false
-                }
-            }
-            _ => false,
-        };
-
-        let size: i64 = if is_managed {
-            // Managed refs carry generation + epoch_caps
-            if is_fat { 24 } else { 16 }
-        } else {
-            // Checked/unsafe refs are just pointers (thin) or ptr+len (fat)
-            if is_fat { 16 } else { 8 }
-        };
-
-        match property {
-            TypeProperty::Size => Some(size),
-            TypeProperty::Alignment => Some(8), // All reference types are pointer-aligned
-            _ => None,
         }
     }
 
@@ -45603,8 +45465,16 @@ impl VbcCodegen {
                 }
             }
             ExprKind::TypeProperty { ty, property } => {
-                let type_name = self.extract_display_type_name(ty);
-                Ok(self.layout_property_value(&type_name, property))
+                let query = match property {
+                    verum_ast::TypeProperty::Size => crate::instruction::LayoutProperty::Size,
+                    verum_ast::TypeProperty::Alignment => crate::instruction::LayoutProperty::Alignment,
+                    verum_ast::TypeProperty::Stride => crate::instruction::LayoutProperty::Stride,
+                    _ => return Ok(None),
+                };
+                let ty = self.resolve_signature_type_ref(ty, &self.ctx.current_generic_param_ids);
+                Ok(crate::type_layout::query_with(&ty, query, |id| {
+                    self.types.iter().find(|descriptor| descriptor.id == id)
+                }).and_then(|value| i64::try_from(value).ok()))
             }
             ExprKind::Call { func, args, .. } => {
                 // offset_of(Type, field) arguments are names, never executed.
@@ -45650,79 +45520,6 @@ impl VbcCodegen {
                 }
                 _ => None,
             },
-            _ => None,
-        }
-    }
-
-    /// The integer value of a LAYOUT property (`size` / `stride` /
-    /// `alignment`) for a named type — the ONE authority both the emitter
-    /// and compile-time folding read, so they cannot drift apart.
-    ///
-    /// Order matters and mirrors how the type was declared:
-    /// 1. `@repr(C)` — the C layout the compiler already built for it.
-    /// 2. a user record — Verum's slot model (`field_count * 8`, align 8).
-    /// 3. a primitive — `verum_common::layout`, the canonical table
-    ///    (`Unit` 0, `Int` 8, `Text` 24).
-    ///
-    /// `None` means "not a layout property, or a type none of the three
-    /// know" — a refusal, never a substituted number.
-    fn layout_property_value(
-        &self,
-        type_name: &str,
-        property: &verum_ast::TypeProperty,
-    ) -> Option<i64> {
-        use verum_ast::TypeProperty;
-        if !matches!(
-            property,
-            TypeProperty::Size | TypeProperty::Stride | TypeProperty::Alignment
-        ) {
-            return None;
-        }
-        let base_name = Self::strip_generic_args(type_name).to_string();
-        if let Some(value) = self.repr_c_type_property(&base_name, property) {
-            return Some(value);
-        }
-        if self.ctx.user_defined_types.contains(&base_name)
-            && let Some(field_count) = self.type_field_count(&base_name)
-        {
-            return Some(match property {
-                TypeProperty::Alignment => 8,
-                _ => (field_count as i64) * 8,
-            });
-        }
-        // T0216: `Unit.size` is 0, not 8 — the inline bits table further
-        // down defaults to 64 bits and would answer 8 for the unit.
-        let size = verum_common::layout::primitive_size_by_name(type_name)?;
-        Some(match property {
-            TypeProperty::Alignment => {
-                verum_common::layout::primitive_alignment_by_name(type_name)
-                    .unwrap_or_else(|| size.min(16)) as i64
-            }
-            // Primitives carry no tail padding, so stride == size.
-            _ => size as i64,
-        })
-    }
-
-    /// `size` / `stride` / `alignment` of a `@repr(C)` type, read from the
-    /// same already-built layout as [`Self::repr_c_field_offset`].
-    ///
-    /// `None` for any other type or property — the caller then uses the
-    /// slot model.
-    fn repr_c_type_property(
-        &self,
-        type_name: &str,
-        property: &verum_ast::TypeProperty,
-    ) -> Option<i64> {
-        use verum_ast::TypeProperty;
-        if !self.declared_repr_c.contains(type_name) {
-            return None;
-        }
-        let layout = self.ffi_layouts.get(*self.repr_c_types.get(type_name)? as usize)?;
-        match property {
-            // A C struct's size already includes its tail padding, so size
-            // and stride coincide.
-            TypeProperty::Size | TypeProperty::Stride => Some(i64::from(layout.size)),
-            TypeProperty::Alignment => Some(i64::from(layout.align)),
             _ => None,
         }
     }

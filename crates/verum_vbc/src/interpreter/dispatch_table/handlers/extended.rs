@@ -153,6 +153,20 @@ pub(in super::super) fn handle_extended(
             // older interpreters.
             Ok(DispatchResult::Continue)
         }
+        Some(ExtendedSubOpcode::TypeLayout) => {
+            let dst = read_reg(state)?;
+            let raw = read_u8(state)?;
+            let property = crate::instruction::LayoutProperty::from_byte(raw).ok_or_else(|| InterpreterError::Panic {
+                message: format!("invalid type layout property {raw}"),
+            })?;
+            let ty = super::bytecode_io::read_type_ref(state)?;
+            let ty = state.resolve_generic_witness(&ty);
+            let value = crate::type_layout::query(&state.module, &ty, property).ok_or_else(|| InterpreterError::Panic {
+                message: format!("unresolved declared type layout: {ty:?}"),
+            })?;
+            state.set_reg(dst, crate::value::Value::from_i64(value as i64));
+            Ok(DispatchResult::Continue)
+        }
         Some(ExtendedSubOpcode::SetCallWitness) => {
             // #44-B generic-witness sidecar: stage the call site's static
             // type args for the immediately-following CallM. `Generic`
@@ -765,6 +779,7 @@ mod make_variant_typed_validation_tests {
             // T0533 — test descriptor: no alias target.
             alias_target_name: None,
             is_transparent_wrapper: false,
+        declared_layout: None,
         };
         module.add_type(td);
         // Runtime objects carry the descriptor's `id` field in their

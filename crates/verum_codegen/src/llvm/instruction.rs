@@ -2547,6 +2547,22 @@ fn lower_instruction_impl<'ctx>(
             Ok(())
         }
 
+        Instruction::TypeLayout { dst, type_ref, property } => {
+            let module = ctx.vbc_module().or_internal("TypeLayout requires declaration metadata")?;
+            if let Some(value) = verum_vbc::type_layout::query(module, type_ref, *property) {
+                ctx.set_register(dst.0, ctx.types().i64_type().const_int(value, false).into());
+            } else {
+                // Generic bodies can coexist with their specializations. If
+                // an erased body is actually called, refuse the missing fact.
+                emit_runtime_abort(ctx, &format!("unresolved declared type layout: {type_ref:?}"), "layout_unresolved")?;
+                ctx.builder().build_unreachable().or_llvm_err()?;
+                let dead = ctx.llvm_context().append_basic_block(ctx.function(), "layout_dead");
+                ctx.builder().position_at_end(dead);
+                ctx.set_register(dst.0, ctx.types().i64_type().get_undef().into());
+            }
+            Ok(())
+        }
+
         Instruction::LoadT { dst, type_ref } => {
             // CONST-GENERIC-VALUE-CARRY-1 (task #19): a const-generic
             // VALUE payload (post-specialization, or a direct
@@ -31463,6 +31479,9 @@ fn lower_extended<'ctx>(
             // No-op anchor — encoders shouldn't emit, but tolerate.
             Ok(())
         }
+        Some(ExtendedSubOpcode::TypeLayout) => Err(LlvmLoweringError::unsupported(
+            "TypeLayout requires the canonical decoded instruction",
+        )),
         Some(ExtendedSubOpcode::SetCallWitness) => {
             // #44-B Tier-0 sidecar (see the typed-variant arm in
             // lower_instruction) — no frame witness table at AOT.

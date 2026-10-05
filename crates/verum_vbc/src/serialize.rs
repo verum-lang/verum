@@ -436,6 +436,12 @@ impl Serializer {
         // submodule's dotted path. Same trailing optional-u32 discipline;
         // pre-2.12 readers stop before it and decode `None`.
         self.serialize_optional_u32(desc.origin_module.map(|s| s.0));
+        // v2.17: semantic property layout, independent of object slot extent.
+        self.output.push(u8::from(desc.declared_layout.is_some()));
+        if let Some(layout) = desc.declared_layout {
+            encode_u64(layout.size, &mut self.output);
+            encode_u64(layout.alignment, &mut self.output);
+        }
 
 
         Ok(())
