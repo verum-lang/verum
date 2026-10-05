@@ -49,11 +49,14 @@ pub struct RegisterAllocator {
     /// build. Per-function-scoped via snapshot/restore/reset, exactly like
     /// `variables`, so nested-function compilation doesn't leak hints.
     type_hints: Vec<(u16, String)>,
+    pub(super) value_uses: super::value_uses::ValueUseRecorder,
 }
 
 /// Information about a register binding.
 #[derive(Debug, Clone)]
 pub struct RegisterInfo {
+    /// Exact source declaration identity, local to this function body.
+    pub binding_id: verum_common::value_use::BindingId,
     /// The allocated register.
     pub reg: Reg,
 
@@ -113,6 +116,7 @@ struct ScopeMarker {
     /// Shadowed variables that need to be restored on scope exit.
     /// Maps variable name to its previous RegisterInfo.
     shadowed_vars: Vec<(String, RegisterInfo)>,
+    shadowed_value_facts: verum_common::List<(Reg, super::value_uses::BindingFact)>,
 }
 
 impl Default for RegisterAllocator {
@@ -130,11 +134,13 @@ impl RegisterAllocator {
             scope_stack: vec![ScopeMarker {
                 scope_vars: Vec::new(),
                 shadowed_vars: Vec::new(),
+                shadowed_value_facts: verum_common::List::new(),
             }],
             peak_usage: 0,
             free_list: Vec::new(),
             recycle_temps: true,
             type_hints: Vec::new(),
+            value_uses: Default::default(),
         }
     }
 
@@ -155,9 +161,11 @@ impl RegisterAllocator {
 
         for (i, (name, is_mutable)) in params.iter().enumerate() {
             let reg = Reg(i as u16);
+            let binding_id = self.value_uses.allocate(reg);
             self.variables.insert(
                 name.clone(),
                 RegisterInfo {
+                    binding_id,
                     reg,
                     is_mutable: *is_mutable,
                     is_initialized: true,
@@ -183,12 +191,16 @@ impl RegisterAllocator {
     /// restored when the scope exits.
     pub fn alloc_local(&mut self, name: &str, is_mutable: bool) -> Reg {
         let reg = self.alloc_fresh();
+        let binding_id = self.value_uses.allocate(reg);
         let scope_level = self.scope_stack.len() - 1;
 
         // If this variable shadows an existing one, save the old binding
         if let Some(scope) = self.scope_stack.last_mut()
             && let Some(old_info) = self.variables.get(name)
         {
+            if let Some(fact) = self.value_uses.active.get(&old_info.reg) {
+                scope.shadowed_value_facts.push((old_info.reg, fact.clone()));
+            }
             scope
                 .shadowed_vars
                 .push((name.to_string(), old_info.clone()));
@@ -197,6 +209,7 @@ impl RegisterAllocator {
         self.variables.insert(
             name.to_string(),
             RegisterInfo {
+                binding_id,
                 reg,
                 is_mutable,
                 is_initialized: true,
@@ -229,6 +242,7 @@ impl RegisterAllocator {
         if self.recycle_temps
             && let Some(reg) = self.free_list.pop()
         {
+            self.value_uses.forget(reg);
             return reg;
         }
         self.alloc_fresh()
@@ -240,6 +254,7 @@ impl RegisterAllocator {
             // Only recycle if it's a temporary (not a named variable)
             let is_named = self.variables.values().any(|info| info.reg == reg);
             if !is_named {
+                self.value_uses.forget(reg);
                 self.free_list.push(reg);
             }
         }
@@ -289,6 +304,7 @@ impl RegisterAllocator {
         self.scope_stack.push(ScopeMarker {
             scope_vars: Vec::new(),
             shadowed_vars: Vec::new(),
+            shadowed_value_facts: verum_common::List::new(),
         });
     }
 
@@ -305,6 +321,7 @@ impl RegisterAllocator {
             for name in &scope.scope_vars {
                 if let Some(info) = self.variables.remove(name) {
                     removed.push((name.clone(), info.reg));
+                    self.value_uses.forget(info.reg);
                     // Recycle the register
                     if self.recycle_temps && info.kind == RegisterKind::Local {
                         self.free_list.push(info.reg);
@@ -312,6 +329,9 @@ impl RegisterAllocator {
                 }
             }
 
+            for (reg, fact) in scope.shadowed_value_facts.into_iter().rev() {
+                self.value_uses.active.insert(reg, fact);
+            }
             // Restore shadowed variables in reverse order (LIFO)
             for (name, info) in scope.shadowed_vars.into_iter().rev() {
                 self.variables.insert(name, info);
@@ -429,6 +449,7 @@ impl RegisterAllocator {
             peak_usage: self.peak_usage,
             free_list: self.free_list.clone(),
             type_hints: self.type_hints.clone(),
+            value_uses: self.value_uses.clone(),
         }
     }
 
@@ -444,6 +465,7 @@ impl RegisterAllocator {
         self.peak_usage = snapshot.peak_usage;
         self.free_list = snapshot.free_list.clone();
         self.type_hints = snapshot.type_hints.clone();
+        self.value_uses = snapshot.value_uses.clone();
     }
 
     /// Resets the allocator for a new function.
@@ -454,10 +476,12 @@ impl RegisterAllocator {
         self.scope_stack.push(ScopeMarker {
             scope_vars: Vec::new(),
             shadowed_vars: Vec::new(),
+            shadowed_value_facts: verum_common::List::new(),
         });
         self.peak_usage = 0;
         self.free_list.clear();
         self.type_hints.clear();
+        self.value_uses = Default::default();
     }
 
     /// Records a register→owner-type hint for the current function
@@ -493,6 +517,7 @@ pub struct RegisterSnapshot {
     /// Saved register→owner-type hints (FUNC-REGISTRY-QUALIFICATION-1) — kept
     /// per-function-scoped across nested-function compilation.
     type_hints: Vec<(u16, String)>,
+    pub(super) value_uses: super::value_uses::ValueUseRecorder,
 }
 
 #[cfg(test)]

@@ -1588,7 +1588,108 @@ impl<'a> Deserializer<'a> {
  }
  }
 
+ let value_uses = if fmt_minor >= 20 {
+     use verum_common::value_use::{
+         BindingId, DuplicationOperation, ValueUseEvent, ValueUseId, ValueUseOperation,
+         ValueUseSite,
+     };
+     let count = decode_varint(self.data, &mut self.offset)? as usize;
+     if count > crate::value_use::MAX_VALUE_USES {
+         return Err(VbcError::TableTooLarge {
+             field: "fn_value_uses",
+             count: count.min(u32::MAX as usize) as u32,
+             max: crate::value_use::MAX_VALUE_USES as u32,
+         });
+     }
+     if count == 0 {
+         None
+     } else {
+         let end = self
+             .offset
+             .checked_add(32)
+             .filter(|end| *end <= self.data.len())
+             .ok_or_else(|| VbcError::eof(self.offset, 32))?;
+         let mut body_hash = [0; 32];
+         body_hash.copy_from_slice(&self.data[self.offset..end]);
+         self.offset = end;
+         let end = self.offset.checked_add(32).ok_or_else(|| {
+             VbcError::Deserialization("value-use signature hash overflow".into())
+         })?;
+         if end > self.data.len() {
+             return Err(VbcError::Deserialization(
+                 "truncated value-use signature hash".into(),
+             ));
+         }
+         let mut signature_hash = [0; 32];
+         signature_hash.copy_from_slice(&self.data[self.offset..end]);
+         self.offset = end;
+         let mut uses = verum_common::List::with_capacity(count);
+         for index in 0..count {
+             let id = ValueUseId(decode_u32(self.data, &mut self.offset)?);
+             if id.0 != index as u32 {
+                 return Err(VbcError::Deserialization(
+                     "unordered value-use IDs".to_owned(),
+                 ));
+             }
+             let binding = BindingId(decode_u32(self.data, &mut self.offset)?);
+             let destination = self.parse_optional_u32()?.map(BindingId);
+             let site = match decode_u8(self.data, &mut self.offset)? {
+                 0 => ValueUseSite::Local,
+                 1 => ValueUseSite::Argument(decode_u16(self.data, &mut self.offset)?),
+                 2 => ValueUseSite::Return,
+                 _ => {
+                     return Err(VbcError::Deserialization(
+                         "invalid value-use site".to_owned(),
+                     ));
+                 }
+             };
+             let operation = match decode_u8(self.data, &mut self.offset)? {
+                 0 => ValueUseOperation::Unknown,
+                 1 => ValueUseOperation::Borrow,
+                 2 => ValueUseOperation::Copy(DuplicationOperation::Carrier),
+                 3 => ValueUseOperation::Copy(DuplicationOperation::ValueCopy),
+                 4 => ValueUseOperation::Transfer,
+                 _ => {
+                     return Err(VbcError::Deserialization(
+                         "invalid value-use operation".to_owned(),
+                     ));
+                 }
+             };
+             let instruction = decode_u32(self.data, &mut self.offset)?;
+             let operand = crate::instruction::Reg(decode_u16(self.data, &mut self.offset)?);
+             let declaration_type = match decode_u8(self.data, &mut self.offset)? {
+                 0 => None,
+                 1 => Some(self.parse_type_ref()?),
+                 _ => {
+                     return Err(VbcError::Deserialization(
+                         "invalid value-use type presence".to_owned(),
+                     ));
+                 }
+             };
+             uses.push(crate::value_use::ValueUseReceipt {
+                 event: ValueUseEvent {
+                     id,
+                     binding,
+                     destination,
+                     site,
+                     operation,
+                 },
+                 instruction,
+                 operand,
+                 declaration_type,
+             });
+         }
+         Some(crate::value_use::ValueUsePlan {
+             body_hash,
+             signature_hash,
+             uses,
+         })
+     }
+ } else {
+     None
+ };
  Ok(FunctionDescriptor {
+ value_uses,
  explicit_type_param_ids,
  id,
  name,

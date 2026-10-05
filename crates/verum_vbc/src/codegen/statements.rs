@@ -1632,6 +1632,7 @@ impl VbcCodegen {
         // carries the exceptions: `Shared<T>` clones by refcount bump
         // rather than forking the cell (T0107), and a non-heap value
         // copies as itself.
+        let source_value_fact = init_reg.and_then(|reg| self.ctx.registers.value_uses.fact(reg));
         if let Some(reg) = init_reg {
             let bound = match value {
                 Some(expr) if self.binds_a_copy_of_a_place(expr, reg) => {
@@ -1645,6 +1646,16 @@ impl VbcCodegen {
                 _ => reg,
             };
             self.compile_pattern_bind(pattern, bound)?;
+        }
+
+        if let verum_ast::PatternKind::Ident { name, .. } = &pattern.kind {
+            if let Some(ty) = ty {
+                self.publish_binding_type(name.name.as_str(), ty);
+            } else if let Some(fact) = source_value_fact {
+                if let (Some(ty), Some(reg)) = (fact.declaration_type, self.ctx.lookup_var(name.name.as_str()).map(|v| v.reg)) {
+                    self.ctx.registers.value_uses.set_type(reg, ty, fact.discipline);
+                }
+            }
         }
 
         // Late initialization: mark variable as uninitialized when no initializer

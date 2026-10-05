@@ -927,6 +927,10 @@ impl VbcLinker {
         _src_bytecode: &[u8],
     ) -> Result<FunctionDescriptor, LinkError> {
         let mut out = src.clone();
+        // The linker has not published a receipt relocation map. Never carry
+        // old semantic IDs/anchors as evidence for a rewritten body.
+        out.value_uses = None;
+
         out.id = remap.map_function(src.id)?;
         out.name = remap.map_string_lenient(src.name);
         if let Some(pt) = src.parent_type {
@@ -1363,6 +1367,7 @@ mod tests {
             register_type_hints: Vec::new(),
             return_type_name: None,
             origin_module: None,  // v2.13 wire field — test fixtures carry no origin
+            value_uses: None,
         };
         let n0 = a.intern_string("alpha");
         let n1 = a.intern_string("beta");

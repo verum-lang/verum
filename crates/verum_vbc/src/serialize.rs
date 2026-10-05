@@ -755,6 +755,49 @@ impl Serializer {
             self.serialize_optional_u32(id.map(|id| u32::from(id.0)));
         }
 
+        // v2.20: explicit bounded receipt tail, using the canonical TypeRef wire.
+        let uses = desc
+            .value_uses
+            .as_ref()
+            .map(|p| p.uses.as_slice())
+            .unwrap_or(&[]);
+        if uses.len() > crate::value_use::MAX_VALUE_USES {
+            return Err(crate::error::VbcError::Serialization(
+                "value-use budget exceeded".to_owned(),
+            ));
+        }
+        encode_varint(uses.len() as u64, &mut self.output);
+        if let Some(plan) = desc.value_uses.as_ref().filter(|_| !uses.is_empty()) {
+            use verum_common::value_use::{DuplicationOperation, ValueUseOperation, ValueUseSite};
+            self.output.extend_from_slice(&plan.body_hash);
+            self.output.extend_from_slice(&plan.signature_hash);
+            for receipt in uses {
+                encode_u32(receipt.event.id.0, &mut self.output);
+                encode_u32(receipt.event.binding.0, &mut self.output);
+                self.serialize_optional_u32(receipt.event.destination.map(|b| b.0));
+                match receipt.event.site {
+                    ValueUseSite::Local => self.output.push(0),
+                    ValueUseSite::Argument(index) => {
+                        self.output.push(1);
+                        encode_u16(index, &mut self.output);
+                    }
+                    ValueUseSite::Return => self.output.push(2),
+                }
+                self.output.push(match receipt.event.operation {
+                    ValueUseOperation::Unknown => 0,
+                    ValueUseOperation::Borrow => 1,
+                    ValueUseOperation::Copy(DuplicationOperation::Carrier) => 2,
+                    ValueUseOperation::Copy(DuplicationOperation::ValueCopy) => 3,
+                    ValueUseOperation::Transfer => 4,
+                });
+                encode_u32(receipt.instruction, &mut self.output);
+                encode_u16(receipt.operand.0, &mut self.output);
+                self.output.push(receipt.declaration_type.is_some() as u8);
+                if let Some(ty) = &receipt.declaration_type {
+                    self.serialize_type_ref(ty)?;
+                }
+            }
+        }
         Ok(())
     }
 

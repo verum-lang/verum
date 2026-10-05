@@ -1704,6 +1704,7 @@ impl VbcModule {
                     })
                     .collect();
                 let desc = FunctionDescriptor {
+                    value_uses: None,
                     explicit_type_param_ids: Vec::new(),
                     id: FunctionId(self.functions.len() as u32),
                     name: name_id,
@@ -2558,6 +2559,9 @@ pub struct OptimizationHints {
 /// bytecode location, and optimization hints.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FunctionDescriptor {
+    /// Body-sealed production facts, without ownership/cleanup authorization.
+    #[serde(default)]
+    pub value_uses: Option<crate::value_use::ValueUsePlan>,
     /// Unique function ID.
     pub id: FunctionId,
 
@@ -2822,6 +2826,7 @@ pub struct RegisterTypeHint {
 impl Default for FunctionDescriptor {
     fn default() -> Self {
         Self {
+            value_uses: None,
             id: FunctionId(0),
             name: StringId::EMPTY,
             parent_type: None,
@@ -4133,6 +4138,7 @@ mod precompile_extension_tests {
             register_type_hints: Vec::new(),
             return_type_name: None,
             origin_module: None,
+            value_uses: None,
         };
         // Backwards-compat field is filled with the existing layout.
         let _ = &mut desc;
@@ -4188,6 +4194,7 @@ mod precompile_extension_tests {
             register_type_hints: Vec::new(),
             return_type_name: None,
             origin_module: None,
+            value_uses: None,
         };
         m.functions.push(desc);
 

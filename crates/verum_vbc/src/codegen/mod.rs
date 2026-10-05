@@ -59,6 +59,7 @@ mod expressions;
 mod parsed_field_types;
 mod associated_types;
 mod statements;
+mod value_uses;
 
 #[cfg(test)]
 mod tests_comprehensive;
@@ -19682,6 +19683,17 @@ impl VbcCodegen {
             }
         }
 
+        // Common source/bootstrap producer: preserve semantic parameter facts
+        // after this declaration owns its exact generic roster, before any
+        // current prologue operation is observed (T1599).
+        for param in &func.params {
+            if let verum_ast::FunctionParamKind::Regular { pattern, ty, .. } = &param.kind {
+                if let Some((name, _)) = self.extract_pattern_name_and_mutable(pattern) {
+                    self.publish_binding_type(&name, ty);
+                }
+            }
+        }
+
         // Register parameter types for proper instruction selection
         // This is critical for generating correct float vs integer operations
         // AND for resolving field indices in type-specific record access.
@@ -20149,6 +20161,7 @@ impl VbcCodegen {
         // carry their own flush. Unconditional (dispatch correctness, not
         // debug info).
         let type_hints = self.ctx.collect_register_type_hints();
+        let value_uses = self.ctx.registers.value_uses.uses.clone();
 
         // End function compilation
         let (instructions, register_count) = self.ctx.end_function();
@@ -20689,6 +20702,7 @@ impl VbcCodegen {
             register_count,
         );
 
+        descriptor.value_uses = crate::value_use::ValueUsePlan::new(&instructions, value_uses, &descriptor);
         let vbc_func = VbcFunction::new(descriptor, instructions);
 
         self.push_function_dedup(vbc_func);
@@ -21074,6 +21088,7 @@ impl VbcCodegen {
         // If the result register is one of those recycled registers, its value
         // would be overwritten when the register is reused later.
         // By copying to a fresh temp register, we ensure the result survives.
+        let result_fact = result.and_then(|reg| self.ctx.registers.value_uses.fact(reg));
         let final_result = if let Some(result_reg) = result {
             let safe_reg = self.ctx.alloc_temp();
             self.ctx.emit(Instruction::Mov {
@@ -21176,6 +21191,9 @@ impl VbcCodegen {
             }
         }
 
+        if let (Some(reg), Some(fact)) = (final_result, result_fact) {
+            self.ctx.registers.value_uses.forward_result(reg, fact);
+        }
         Ok(final_result)
     }
 
@@ -25415,6 +25433,15 @@ impl VbcCodegen {
             let mut descriptor = func.descriptor.clone();
             descriptor.bytecode_offset = bytecode_offset;
             descriptor.bytecode_length = bytecode_length;
+            descriptor.value_uses = descriptor.value_uses.take()
+                .filter(|plan| plan.matches_body(&func.instructions)
+                    && plan.matches_signature(&func.descriptor))
+                .map(|mut plan| {
+                    // This map preserves instruction positions; only ID operands
+                    // and encoded widths change. Semantic types already use codegen IDs.
+                    plan.body_hash = *blake3::hash(&bytecode).as_bytes();
+                    plan
+                });
 
             // Remap function ID to contiguous 0-based index
             if let Some(&new_id) = func_id_remap.get(&descriptor.id.0) {
@@ -27770,6 +27797,15 @@ impl VbcCodegen {
             }
             new_desc.return_type =
                 remap_type_ref_archive(&new_desc.return_type, &type_id_remap);
+            new_desc.value_uses = archive_module.value_use_receipts(archive_desc.id)
+                .and_then(|uses| {
+                    let uses = uses.iter().cloned().map(|mut receipt| {
+                        receipt.declaration_type = receipt.declaration_type
+                            .map(|ty| remap_type_ref_archive(&ty, &type_id_remap));
+                        receipt
+                    }).collect();
+                    crate::value_use::ValueUsePlan::new(&instructions, uses, &new_desc)
+                });
             // Register-type hints carry a type NAME StringId relative to
             // the ARCHIVE string table — re-intern like the fn name above
             // (the consume side resolves against the merged module's

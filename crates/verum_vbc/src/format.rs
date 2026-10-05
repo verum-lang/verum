@@ -108,7 +108,8 @@ pub const VERSION_MAJOR: u16 = 2;
 /// new readers do not substitute object-slot extent for an absent declaration.
 /// Version 2.18 carries declaration resource discipline and semantic field types.
 /// Version 2.19 adds the List storage-stride query; old readers refuse it.
-pub const VERSION_MINOR: u16 = 19;
+/// Version 2.20 carries bounded, body/signature/use-sealed value-use receipts.
+pub const VERSION_MINOR: u16 = 20;
 
 /// Minor-version floors for sections whose presence readers gate on.  The
 /// register-type-hints section has been written unconditionally since minor 2,

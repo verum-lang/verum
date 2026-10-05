@@ -170,7 +170,11 @@ fn missing_or_recursive_provenance_does_not_become_copy_permission() {
 
 #[test]
 fn legacy_descriptor_without_resource_byte_remains_unknown() {
-    let module = compile("type affine Owned is ();");
+    let mut module = compile("type affine Owned is ();");
+    // Isolate the pre-resource type descriptor wire. Source lowering also
+    // generates a constructor; unrelated newer function tails are not v2.17.
+    module.functions.clear();
+    module.bytecode.clear();
     assert_eq!(module.types.len(), 1);
     let mut bytes = serialize_module(&module).unwrap();
     let read_u32 = |bytes: &[u8], at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());

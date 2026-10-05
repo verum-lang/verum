@@ -266,6 +266,9 @@ impl fmt::Display for CallSite {
 /// Control flow graph for dominance analysis
 #[derive(Debug, Clone)]
 pub struct ControlFlowGraph {
+    /// Producer value uses, separate from reference-use/deallocation approximations.
+    /// No event in this table is permission to invoke a destructor.
+    pub value_uses: Map<BlockId, List<verum_common::value_use::ValueUseEvent>>,
     /// Basic blocks
     pub blocks: Map<BlockId, BasicBlock>,
     /// Entry block
@@ -344,6 +347,7 @@ impl ControlFlowGraph {
     pub fn new(entry: BlockId, exit: BlockId) -> Self {
         Self {
             blocks: Map::new(),
+            value_uses: Map::new(),
             entry,
             exit,
         }

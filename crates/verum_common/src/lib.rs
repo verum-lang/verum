@@ -82,6 +82,7 @@
 
 pub mod qualified_name;
 pub mod resource_discipline;
+pub mod value_use;
 pub use resource_discipline::ResourceDiscipline;
 
 // These are newtype wrappers providing semantic naming and rich APIs.

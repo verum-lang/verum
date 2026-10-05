@@ -2088,6 +2088,7 @@ impl CodegenContext {
 
     /// Emits an instruction, recording the current source span for debug info.
     pub fn emit(&mut self, instr: Instruction) {
+        self.registers.value_uses.observe(&instr, self.instructions.len());
         self.instructions.push(instr);
         self.instruction_spans.push(self.current_span);
         self.stats.instructions_generated += 1;
