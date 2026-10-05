@@ -1102,6 +1102,9 @@ param           = param_pattern | self_param ;
 (* Parameters can have attributes for unused marking, optimization hints *)
 (* Example: fn process(@unused x: Int, @must_use result: &mut Out) *)
 param_pattern   = { attribute } , pattern , ':' , type_expr ;
+(* In a parameter, an unqualified identifier immediately before ':' binds a *)
+(* name regardless of case. Qualified/payload/record/tuple patterns retain *)
+(* their normal pattern meaning and the irrefutable-binding requirement. *)
 self_param      = { attribute } , [ ref_modifier ] , 'self' ;
 ref_modifier    = '&' , [ lifetime ] , [ ref_kind ] , [ 'mut' ] ;
 

@@ -346,3 +346,282 @@ fn layout_queries_refuse_extent_overflow_and_invalid_alignment() {
         None
     );
 }
+
+#[test]
+fn lexical_value_bindings_shadow_type_properties_independent_of_case() {
+    for source in [
+        "type Cell is { size: Int }; fn probe() -> Int { let Cell = Cell { size: 37 }; Cell.size }",
+        "type Cell is { size: Int }; fn get(Cell: Cell) -> Int { Cell.size } fn probe() -> Int { get(Cell { size: 37 }) }",
+        "type Cell is { size: Int }; fn get(Cell: &Cell) -> Int { Cell.size } fn probe() -> Int { let item = Cell { size: 37 }; get(&item) }",
+        "type Cell is { size: Int }; fn probe() -> Int { let Cell = Cell { size: 37 }; (Cell).size }",
+        "type Cell is { size: Int }; fn probe() -> Int { let Cell = Cell { size: 37 }; (&Cell).size }",
+        "type Cell is { size: Int }; fn probe() -> Int { let Cell = Cell { size: 37 }; let result = { let Cell = Cell { size: 11 }; Cell.size }; Cell.size + result - 11 }",
+    ] {
+        let module = compile(source);
+        assert_eq!(run(roundtrip(&module), "probe"), 37, "{source}");
+    }
+}
+
+#[test]
+fn declaration_properties_remain_available_to_constant_layouts() {
+    for (source, expected) in [
+        ("type Cell is { first: Int, second: Int }; type Shape is [Byte; Cell.size]; fn probe() -> Int { Shape.size }", 16),
+        ("type Cell is { first: Int, second: Int }; const CAP: Int = Cell.size; type Shape is [Byte; CAP]; fn probe() -> Int { Shape.size }", 16),
+        ("type Shape is [Byte; Int.size]; fn probe() -> Int { Shape.size }", 8),
+    ] {
+        assert_eq!(run(roundtrip(&compile(source)), "probe"), expected, "{source}");
+    }
+}
+
+#[test]
+fn primitive_spelling_value_binding_keeps_its_fields() {
+    for property in ["size", "name", "bits", "id", "is_signed"] {
+        let source = format!(
+            "type Cell is {{ {property}: Int }}; fn probe()->Int {{ let Int=Cell{{{property}:37}}; Int.{property} }}"
+        );
+        assert_eq!(run(roundtrip(&compile(&source)), "probe"), 37, "{property}");
+    }
+}
+
+#[test]
+fn declaration_properties_share_the_existing_nonlayout_route() {
+    for (source, expected) in [
+        ("fn probe()->Int { (Int).bits }", 64),
+        ("fn probe()->Int { if Int.id==Int64.id {1} else {0} }", 1),
+        ("fn probe()->Int { if (Int).name==\"Int\" {1} else {0} }", 1),
+        ("fn probe()->Int { if (Int).is_signed {1} else {0} }", 1),
+    ] {
+        assert_eq!(
+            run(roundtrip(&compile(source)), "probe"),
+            expected,
+            "{source}"
+        );
+    }
+}
+
+#[test]
+fn qualified_property_receivers_preserve_declarations_and_value_roots() {
+    for source in [
+        "module alpha { type Cell is {a:Int,b:Int}; } module beta { type Cell is {a:Int}; } fn probe()->Int {alpha.Cell.size+beta.Cell.size}",
+        "module beta { type Cell is {a:Int}; } module alpha { type Cell is {a:Int,b:Int}; } fn probe()->Int {alpha.Cell.size+beta.Cell.size}",
+    ] {
+        assert_eq!(run(roundtrip(&compile(source)), "probe"), 24, "{source}");
+    }
+    assert_eq!(
+        run(
+            compile(
+                "type Cell is {size:Int}; type Holder is {Cell:Cell}; fn probe()->Int {let alpha=Holder{Cell:Cell{size:37}}; alpha.Cell.size}"
+            ),
+            "probe"
+        ),
+        37
+    );
+}
+
+#[test]
+fn array_property_count_cycles_keep_the_constant_dependency_guard() {
+    for source in ["const N: Int = ([Byte; N]).size; fn probe() { let bytes: [Byte; N] = [0; N]; }"]
+    {
+        let ast = Parser::new(source).parse_module().expect("source grammar");
+        let error = VbcCodegen::new()
+            .compile_module(&ast)
+            .expect_err("cyclic count must be rejected");
+        assert!(error.to_string().contains("cyclic constant"), "{error}");
+    }
+}
+
+#[test]
+fn reference_name_uses_the_existing_explicit_property_semantics() {
+    use verum_ast::decl::FunctionBody;
+    use verum_ast::expr::ExprKind;
+    use verum_ast::ty::{Type, TypeKind};
+    use verum_ast::{ItemKind, TypeProperty};
+    use verum_common::{Heap, Maybe};
+    let mut ast = Parser::new("fn probe()->Text {(&Int).name}")
+        .parse_module()
+        .expect("source grammar");
+    let actual = VbcCodegen::new()
+        .compile_module(&ast)
+        .expect("field property");
+    let ItemKind::Function(function) = &mut ast.items[0].kind else {
+        panic!("function")
+    };
+    let Maybe::Some(FunctionBody::Block(block)) = &mut function.body else {
+        panic!("block")
+    };
+    let Maybe::Some(expression) = &mut block.expr else {
+        panic!("tail")
+    };
+    let ExprKind::Field { expr: base, .. } = &expression.kind else {
+        panic!("field")
+    };
+    let ExprKind::Paren(reference) = &base.kind else {
+        panic!("paren")
+    };
+    let ExprKind::Unary { expr: inner, .. } = &reference.kind else {
+        panic!("reference")
+    };
+    let ExprKind::Path(path) = &inner.kind else {
+        panic!("type path")
+    };
+    let ty = Type::new(
+        TypeKind::Reference {
+            inner: Heap::new(Type::new(TypeKind::Path(path.clone()), inner.span)),
+            mutable: false,
+        },
+        reference.span,
+    );
+    expression.kind = ExprKind::TypeProperty {
+        ty,
+        property: TypeProperty::Name,
+    };
+    let explicit = VbcCodegen::new()
+        .compile_module(&ast)
+        .expect("explicit property");
+    assert_eq!(actual.bytecode, explicit.bytecode);
+    assert!(actual.strings.iter().eq(explicit.strings.iter()));
+}
+
+#[test]
+fn imported_layout_constant_keeps_its_declaring_type_and_ignores_caller_values() {
+    use verum_vbc::codegen::{CodegenConfig, ItemFailurePolicy};
+    for reverse in [false, true] {
+        for local_shadow in [false, true] {
+            for caller_first in [false, true] {
+                let alpha = Parser::new("module alpha; public type Cell is {a:Int,b:Int}; public const SIZE:Int=Cell.size;")
+                .parse_module().expect("alpha");
+                let beta = Parser::new("module beta; public type Cell is {a:Int};")
+                    .parse_module()
+                    .expect("beta");
+                let source = format!(
+                    "module caller; fn probe()->Int {{ {} let bytes:[Byte;alpha.SIZE]=[0;alpha.SIZE]; bytes.len() }}",
+                    if local_shadow { "let Cell=7;" } else { "" }
+                );
+                let caller = Parser::new(&source).parse_module().expect("caller");
+                let modules = if reverse {
+                    vec![&beta, &alpha, &caller]
+                } else {
+                    vec![&alpha, &beta, &caller]
+                };
+                let mut codegen = VbcCodegen::with_config(CodegenConfig::new("main"));
+                codegen
+                    .collect_unit_declarations(&modules)
+                    .expect("collect declarations");
+                let mut body_order = modules.clone();
+                if caller_first {
+                    body_order.rotate_right(1);
+                }
+                codegen
+                    .compile_unit_items(&body_order, ItemFailurePolicy::Strict)
+                    .expect("compile source");
+                let module = roundtrip(&codegen.finalize_module().expect("finalize"));
+                let size = module
+                    .functions
+                    .iter()
+                    .find(|function| module.get_string(function.name) == Some("alpha.SIZE"))
+                    .expect("exact alpha constant");
+                assert_eq!(
+                    size.intrinsic_name.and_then(|id| module.get_string(id)),
+                    Some("__const_val_16"),
+                    "reverse={reverse}, local_shadow={local_shadow}, caller_first={caller_first}"
+                );
+                let entry = module
+                    .find_function_by_name("caller.probe")
+                    .expect("caller probe");
+                let value = Interpreter::new(Arc::new(module))
+                    .execute_function(entry)
+                    .expect("execute array count");
+                assert_eq!(
+                    value.as_i64(),
+                    16,
+                    "reverse={reverse}, local_shadow={local_shadow}, caller_first={caller_first}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn generic_associated_property_keeps_its_projection_through_wire() {
+    use verum_vbc::instruction::{Instruction, LayoutProperty};
+    use verum_vbc::types::{CbgrTier, Mutability, TypeParamId, TypeRef};
+    for (operand, wrapped) in [("T.Item", false), ("(&unsafe T.Item)", true)] {
+        let source = format!(
+            "type Source is protocol {{type Item;}}; fn measure<T:Source>()->Int {{{operand}.size}}"
+        );
+        let module = roundtrip(&compile(&source));
+        let function = module
+            .functions
+            .iter()
+            .find(|f| module.get_string(f.name) == Some("measure"))
+            .expect("measure");
+        let projection = TypeRef::AssociatedProjection {
+            base: Box::new(TypeRef::Generic(TypeParamId(0))),
+            assoc: "Item".into(),
+        };
+        let expected = if wrapped {
+            TypeRef::Reference {
+                inner: Box::new(projection),
+                tier: CbgrTier::Tier2,
+                mutability: Mutability::Immutable,
+            }
+        } else {
+            projection
+        };
+        let start = function.bytecode_offset as usize;
+        let instructions = verum_vbc::bytecode::decode_instructions(
+            &module.bytecode[start..start + function.bytecode_length as usize],
+        )
+        .expect("decode");
+        assert!(instructions.iter().any(|instruction|matches!(instruction,Instruction::TypeLayout{type_ref,property:LayoutProperty::Size,..} if type_ref==&expected)),"{operand}: {instructions:?}");
+    }
+}
+
+#[test]
+fn concrete_self_associated_property_uses_its_declared_binding() {
+    for operand in ["Self.Item", "(&unsafe Self.Item)"] {
+        let source = format!(
+            "type Source is protocol {{type Item;}}; type Cell is {{value:Int}}; implement Source for Cell {{type Item=Int; fn measure(&self)->Int {{{operand}.size}} }} fn probe()->Int {{Cell{{value:7}}.measure()}}"
+        );
+        assert_eq!(run(roundtrip(&compile(&source)), "probe"), 8, "{operand}");
+    }
+}
+
+#[test]
+fn value_root_does_not_become_a_generic_projection() {
+    let source = "type Payload is {size:Int}; type Cell is {Item:Payload}; fn measure<T>()->Int {let T=Cell{Item:Payload{size:37}}; T.Item.size} fn probe()->Int {measure<Byte>()}";
+    assert_eq!(run(roundtrip(&compile(source)), "probe"), 37);
+}
+
+#[test]
+fn module_alias_layout_property_preserves_exact_declared_owner() {
+    for source in [
+        "module alpha {public type Cell is {size:Bool};} mount alpha as short; fn probe()->Int {short.Cell.size}",
+        "mount alpha as short; module alpha {public type Cell is {size:Bool};} fn probe()->Int {short.Cell.size}",
+    ] {
+        assert_eq!(run(roundtrip(&compile(source)), "probe"), 8, "{source}");
+    }
+}
+
+#[test]
+fn module_alias_layout_property_preserves_value_root() {
+    let source = "module alpha {public type Cell is {size:Bool};} mount alpha as short; type Value is {size:Int}; type Holder is {Cell:Value}; fn probe()->Int {let short=Holder{Cell:Value{size:37}}; short.Cell.size}";
+    assert_eq!(run(roundtrip(&compile(source)), "probe"), 37);
+}
+
+#[test]
+fn module_alias_publication_does_not_export_nested_or_file_owned_leaves() {
+    for source in [
+        "module alpha {module child {public type Cell is {a:Int};}} module beta {module child {public type Cell is {a:Int,b:Int};}} mount child as short;",
+        "module beta {module child {public type Cell is {a:Int,b:Int};}} module alpha {module child {public type Cell is {a:Int};}} mount child as short;",
+        "module alpha; module child {public type Cell is {a:Int};} mount child as short;",
+    ] {
+        let ast = Parser::new(source).parse_module().expect("source grammar");
+        let mut codegen = VbcCodegen::new();
+        codegen.compile_module(&ast).expect("compile declarations");
+        assert!(
+            !codegen.ctx_mut().module_aliases.contains_key("short"),
+            "unqualified child exported from {source}"
+        );
+    }
+}

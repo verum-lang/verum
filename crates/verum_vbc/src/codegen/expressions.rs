@@ -86,102 +86,7 @@ pub(crate) fn typed_refs_enabled() -> bool {
     std::env::var_os("VERUM_NO_TYPED_REFS").is_none()
 }
 
-/// Resolve compile-time static constants for primitive types.
-/// Returns the constant value as i128 for TypeName.CONSTANT() calls.
-/// Compile-time type property value.
-enum TypePropertyValue {
-    Int(i64),
-    UInt(u64),
-    Str(String),
-    /// T0216 — `is_signed` is typed Bool by the checker, so it must arrive
-    /// as a Bool here too rather than as Int(1)/Int(0).
-    Bool(bool),
-}
-
-/// Resolve compile-time type properties like `Int32.bits`,
-/// `Int8.size`, `Float64.name`.
-///
-/// All numeric-type recognition (bits / signedness / float-vs-int)
-/// delegates to `verum_common::well_known_types::type_names` —
-/// the canonical registry.  This used to inline the same numeric-
-/// type lists 4× in this single function; consolidating eliminated
-/// ~80 lines of duplicate match arms.
-fn resolve_type_property(type_name: &str, property: &str) -> Option<TypePropertyValue> {
-    use verum_ast::TypeProperty as P;
-
-    // T0216: membership comes from the ONE authority, never from this
-    // function's own list of string literals. The match below is total over
-    // `TypeProperty`, so a property added to the enum fails to compile here
-    // instead of silently falling into a `_ => None` and answering "not a
-    // property" on this route while the type-property route answers it.
-    let property = P::from_str(property)?;
-
-    let bits: Option<i64> = type_names::numeric_bit_width(type_name)
-        .map(|b| b as i64)
-        .or_else(|| match type_name {
-            // Bool / Char are not in `numeric_bit_width` (they're not
-            // `is_numeric_type`), but their compile-time `bits`
-            // property is defined.
-            "Bool" => Some(8),
-            "Char" => Some(32),
-            _ => None,
-        });
-
-    match property {
-        P::Bits => bits.map(TypePropertyValue::Int),
-        P::Size => bits.map(|b| TypePropertyValue::Int(b / 8)),
-        P::Alignment => bits.map(|b| {
-            let size = b / 8;
-            // Alignment is min(size, 16) for most types.
-            TypePropertyValue::Int(size.min(16))
-        }),
-        P::Stride => bits.map(|b| TypePropertyValue::Int(b / 8)),
-        P::Name => Some(TypePropertyValue::Str(type_name.to_string())),
-        // `T.id` is served by `compile_type_property`, which hashes the
-        // CANONICAL identity name so aliases agree (`Int.id == Int64.id`).
-        // Answering it here from a bare type name would produce a second,
-        // non-canonical id for the same type. Returning None lets normal
-        // field resolution continue, which is also what `value.id` — a
-        // genuine user field — needs. Declining is a decision, so it is
-        // written down rather than left to a wildcard.
-        P::Id => None,
-        P::Min => {
-            if type_names::is_unsigned_integer_type(type_name) {
-                return Some(TypePropertyValue::Int(0));
-            }
-            if type_names::is_signed_integer_type(type_name) {
-                let b = bits?;
-                return Some(TypePropertyValue::Int(-(1i64 << (b - 1))));
-            }
-            None
-        }
-        P::Max => {
-            if type_names::is_signed_integer_type(type_name) {
-                let b = bits?;
-                return Some(TypePropertyValue::Int((1i64 << (b - 1)) - 1));
-            }
-            if type_names::is_unsigned_integer_type(type_name) {
-                let b = bits?;
-                if b >= 64 {
-                    return Some(TypePropertyValue::UInt(u64::MAX));
-                }
-                return Some(TypePropertyValue::Int((1i64 << b) - 1));
-            }
-            None
-        }
-        P::IsSigned => {
-            // Signed = signed-integer OR float; everything else is
-            // unsigned, or non-numeric, and answers false rather than
-            // being rejected. Bool, not Int(1)/Int(0): the checker types
-            // this property Bool, and the two must not disagree.
-            Some(TypePropertyValue::Bool(
-                type_names::is_signed_integer_type(type_name)
-                    || type_names::is_float_type(type_name),
-            ))
-        }
-    }
-}
-
+/// Resolve primitive associated constants through the canonical numeric tables.
 fn resolve_type_static_constant(type_name: &str, method: &str) -> Option<i128> {
     // Values come from the language's own numeric-limit tables in
     // `verum_common::well_known_types::type_names` — the single carrier
@@ -23125,81 +23030,179 @@ impl VbcCodegen {
 
     // ==================== Field Access ====================
 
-    /// Type-shaped expression operands retain signature wrappers for the same
-    /// layout authority used by `ExprKind::TypeProperty`. Value bindings never
-    /// enter this path merely because they share a declaration's spelling.
-    fn layout_operand_type_ref(&self, expression: &Expr) -> Option<crate::types::TypeRef> {
-        use crate::types::{CbgrTier, TypeParamId, TypeRef};
-        match &expression.kind {
-            ExprKind::Paren(inner) => self.layout_operand_type_ref(inner),
-            ExprKind::TypeExpr(ty) => {
-                Some(self.resolve_signature_type_ref(ty, &self.ctx.current_generic_param_ids))
+    /// Resolve the declaration operand before interpreting any property name.
+    /// A value binding keeps precedence, including the root of a qualified path.
+    fn declaration_property_operand(&self, expression: &Expr) -> Option<verum_ast::ty::Type> {
+        self.declaration_property_operand_in_scope(
+            expression,
+            self.ctx.current_source_module.as_deref(),
+            true,
+        )
+    }
+
+    fn declaration_property_operand_in_scope(
+        &self,
+        expression: &Expr,
+        scope: Option<&str>,
+        inspect_runtime_bindings: bool,
+    ) -> Option<verum_ast::ty::Type> {
+        use verum_ast::ty::{Path, PathSegment, Type as AstType, TypeKind as K};
+        fn path_operand(expression: &Expr) -> Option<Path> {
+            match &expression.kind {
+                ExprKind::Path(path) => Some(path.clone()),
+                ExprKind::Paren(inner) => path_operand(inner),
+                ExprKind::Field { expr, field } => {
+                    let mut path = path_operand(expr)?;
+                    path.segments.push(PathSegment::Name(field.clone()));
+                    path.span = expression.span;
+                    Some(path)
+                }
+                _ => None,
             }
-            ExprKind::Path(path) => {
-                let name = path.to_string();
-                if self.ctx.get_var_reg(&name).is_ok()
-                    || self.ctx.lookup_function_in_scope(&name).is_some()
+        }
+        let kind = match &expression.kind {
+            ExprKind::TypeExpr(ty) => return Some(ty.clone()),
+            ExprKind::Paren(inner) => {
+                return self.declaration_property_operand_in_scope(
+                    inner,
+                    scope,
+                    inspect_runtime_bindings,
+                );
+            }
+            ExprKind::Path(_) | ExprKind::Field { .. } => {
+                let mut path = path_operand(expression)?;
+                let mut name = path.to_string().replace("::", ".");
+                if let Some(PathSegment::Name(root)) = path.segments.first()
+                    && inspect_runtime_bindings
+                    && (self.ctx.get_var_reg(root.as_str()).is_ok()
+                        || self.ctx.is_thread_local(root.as_str()).is_some())
                 {
                     return None;
                 }
-                if let Some(id) = self.ctx.current_generic_param_ids.get(&name) {
-                    return Some(TypeRef::Generic(TypeParamId(*id)));
+                if self
+                    .constant_integer_binding(&name, scope)
+                    .is_some_and(|info| info.is_const)
+                {
+                    return None;
                 }
-                self.nominal_type_id(&name).map(TypeRef::Concrete)
+                if inspect_runtime_bindings && path.segments.len() > 1 {
+                    let root = match path.segments.first()? {
+                        PathSegment::Name(name) => name.as_str(),
+                        PathSegment::SelfValue => "Self",
+                        _ => return None,
+                    };
+                    if self.ctx.current_generic_param_ids.contains_key(root)
+                        || (root == "Self" && self.ctx.current_impl_type_name.is_some())
+                    {
+                        let mut base = AstType::new(
+                            K::Path(Path::new(
+                                verum_common::List::from_iter([if root == "Self" {
+                                    PathSegment::SelfValue
+                                } else {
+                                    path.segments[0].clone()
+                                }]),
+                                path.span,
+                            )),
+                            path.span,
+                        );
+                        for segment in path.segments.iter().skip(1) {
+                            let PathSegment::Name(assoc) = segment else {
+                                return None;
+                            };
+                            base = AstType::new(
+                                K::AssociatedType {
+                                    base: verum_common::Heap::new(base),
+                                    assoc: assoc.clone(),
+                                },
+                                path.span,
+                            );
+                        }
+                        return Some(base);
+                    }
+                }
+                if path.segments.len() > 1
+                    && let Some(PathSegment::Name(root)) = path.segments.first()
+                    && let Some(owner) = self.ctx.module_aliases.get(root.as_str())
+                {
+                    // The explicit mount owns this prefix. Expand it only
+                    // after lexical values and generic roots have been ruled out.
+                    let segments = owner
+                        .iter()
+                        .map(|part| {
+                            PathSegment::Name(verum_ast::Ident::new(part.as_str(), root.span))
+                        })
+                        .chain(path.segments.iter().skip(1).cloned())
+                        .collect();
+                    path = Path::new(segments, path.span);
+                    name = path.to_string().replace("::", ".");
+                    self.nominal_type_id(&name)?;
+                }
+                let scoped_nominal = scope
+                    .filter(|_| path.is_single())
+                    .and_then(|scope| self.type_name_to_id.get(&format!("{scope}.{name}")));
+                if !(inspect_runtime_bindings
+                    && self.ctx.current_generic_param_ids.contains_key(&name))
+                    && scoped_nominal.is_none()
+                {
+                    self.nominal_type_id(&name)?;
+                }
+                K::Path(path)
             }
-            ExprKind::Array(verum_ast::ArrayExpr::List(elements)) if elements.len() == 1 => Some(
-                TypeRef::Slice(Box::new(self.layout_operand_type_ref(&elements[0])?)),
-            ),
-            ExprKind::Array(verum_ast::ArrayExpr::Repeat { value, count }) => {
-                Some(TypeRef::Array {
-                    element: Box::new(self.layout_operand_type_ref(value)?),
-                    length: u64::try_from(self.const_eval_i64(count).ok()??).ok()?,
-                })
+            ExprKind::Array(verum_ast::ArrayExpr::List(elements)) if elements.len() == 1 => {
+                K::Slice(verum_common::Heap::new(
+                    self.declaration_property_operand_in_scope(
+                        &elements[0],
+                        scope,
+                        inspect_runtime_bindings,
+                    )?,
+                ))
             }
+            ExprKind::Array(verum_ast::ArrayExpr::Repeat { value, count }) => K::Array {
+                element: verum_common::Heap::new(self.declaration_property_operand_in_scope(
+                    value,
+                    scope,
+                    inspect_runtime_bindings,
+                )?),
+                size: Some(count.clone()),
+            },
             ExprKind::Unary { op, expr } => {
-                let (tier, mutable) = match op {
-                    UnOp::Ref => (CbgrTier::Tier0, false),
-                    UnOp::RefMut => (CbgrTier::Tier0, true),
-                    UnOp::RefChecked => (CbgrTier::Tier1, false),
-                    UnOp::RefCheckedMut => (CbgrTier::Tier1, true),
-                    UnOp::RefUnsafe => (CbgrTier::Tier2, false),
-                    UnOp::RefUnsafeMut => (CbgrTier::Tier2, true),
-                    _ => return None,
-                };
-                Some(TypeRef::Reference {
-                    inner: Box::new(self.layout_operand_type_ref(expr)?),
-                    tier,
-                    mutability: if mutable {
-                        crate::types::Mutability::Mutable
-                    } else {
-                        crate::types::Mutability::Immutable
+                let inner = verum_common::Heap::new(self.declaration_property_operand_in_scope(
+                    expr,
+                    scope,
+                    inspect_runtime_bindings,
+                )?);
+                match op {
+                    UnOp::Ref => K::Reference {
+                        inner,
+                        mutable: false,
                     },
-                })
+                    UnOp::RefMut => K::Reference {
+                        inner,
+                        mutable: true,
+                    },
+                    UnOp::RefChecked => K::CheckedReference {
+                        inner,
+                        mutable: false,
+                    },
+                    UnOp::RefCheckedMut => K::CheckedReference {
+                        inner,
+                        mutable: true,
+                    },
+                    UnOp::RefUnsafe => K::UnsafeReference {
+                        inner,
+                        mutable: false,
+                    },
+                    UnOp::RefUnsafeMut => K::UnsafeReference {
+                        inner,
+                        mutable: true,
+                    },
+                    _ => return None,
+                }
             }
-            _ => None,
-        }
+            _ => return None,
+        };
+        Some(AstType::new(kind, expression.span))
     }
-
-    /// Non-layout properties retain their existing primitive/name handling.
-    fn try_resolve_type_layout_property(
-        &self,
-        ty: &verum_ast::ty::Type,
-        field: &str,
-    ) -> Option<TypePropertyValue> {
-        if field != "name" {
-            return None;
-        }
-        let name = self.extract_base_type_name(ty)?;
-        Some(TypePropertyValue::Str(name))
-    }
-
-    fn layout_property_for_named(&self, type_name: &str, field: &str) -> Option<TypePropertyValue> {
-        if field == "name" {
-            return Some(TypePropertyValue::Str(type_name.to_string()));
-        }
-        None
-    }
-
     /// Helper to flatten nested Field expressions into a qualified path.
     /// For example: `Field(Field(Path[super], "sys"), "linux")` → Some(["super", "sys", "linux"])
     /// Returns None if the expression isn't a pure module path.
@@ -23552,65 +23555,10 @@ impl VbcCodegen {
             return Ok(Some(result));
         }
 
-        let layout_property = match field {
-            "size" => Some(crate::instruction::LayoutProperty::Size),
-            "alignment" => Some(crate::instruction::LayoutProperty::Alignment),
-            "stride" => Some(crate::instruction::LayoutProperty::Stride),
-            _ => None,
-        };
-        if let Some(property) = layout_property
-            && let Some(type_ref) = self.layout_operand_type_ref(base)
+        if let Some(property) = verum_ast::TypeProperty::from_str(field)
+            && let Some(ty) = self.declaration_property_operand(base)
         {
-            let dst = self.ctx.alloc_temp();
-            if let Some(value) = crate::type_layout::query_with(&type_ref, property, |id| self.types.iter().find(|ty| ty.id == id)).and_then(|value| i64::try_from(value).ok()) {
-                self.ctx.emit(Instruction::LoadI { dst, value });
-            } else {
-                self.ctx.emit(Instruction::TypeLayout { dst, type_ref, property });
-            }
-            return Ok(Some(dst));
-        }
-
-        // Handle compile-time layout property access on a TypeExpr: e.g.,
-        // `SharedInner<T>.size`, `Foo<Int>.alignment`, `Bar<U>.stride`, `T.name`.
-        // The parser emits ExprKind::TypeExpr when it sees `Path<TypeArgs>` in
-        // expression position; these are pure type-level expressions whose
-        // observable properties are layout constants in the VBC NaN-boxed model
-        // (every record slot is one 8-byte Value).
-        if let ExprKind::TypeExpr(ref ty) = base.kind
-            && let Some(value) = self.try_resolve_type_layout_property(ty, field)
-        {
-            let result = self.ctx.alloc_temp();
-            match value {
-                // T0216: `is_signed` is Bool-typed by the checker, so this
-                // route emits a Bool rather than Int(1)/Int(0).
-                TypePropertyValue::Bool(b) => {
-                    if b {
-                        self.ctx.emit(Instruction::LoadTrue { dst: result });
-                    } else {
-                        self.ctx.emit(Instruction::LoadFalse { dst: result });
-                    }
-                }
-                TypePropertyValue::Int(v) => {
-                    self.ctx.emit(Instruction::LoadI {
-                        dst: result,
-                        value: v,
-                    });
-                }
-                TypePropertyValue::UInt(v) => {
-                    self.ctx.emit(Instruction::LoadI {
-                        dst: result,
-                        value: v as i64,
-                    });
-                }
-                TypePropertyValue::Str(s) => {
-                    let const_id = self.ctx.add_const_string(&s);
-                    self.ctx.emit(Instruction::LoadK {
-                        dst: result,
-                        const_id: const_id.0,
-                    });
-                }
-            }
-            return Ok(Some(result));
+            return self.compile_type_property(&ty, &property);
         }
 
         // **Type-name + variant-ctor fast path**.  `try_flatten_module_path`
@@ -23996,6 +23944,7 @@ impl VbcCodegen {
         if let ExprKind::Path(ref path) = base.kind
             && path.segments.len() == 1
             && let PathSegment::Name(ref type_ident) = path.segments[0]
+            && !self.ctx.registers.contains(type_ident.name.as_str())
         {
             let type_name = type_ident.name.as_str();
             // Lowercase FFI-compat integer/float aliases (`i64`, `u32`,
@@ -24357,101 +24306,6 @@ impl VbcCodegen {
                 // the synthesised "qualified-name as tag" path
                 // into the typed form too.
                 self.emit_make_variant(result, variant_tag, 0, Some(type_name));
-                return Ok(Some(result));
-            }
-
-            // Handle compile-time type property access (e.g., Int32.bits, Int8.size)
-            if is_type_name(type_name)
-                && let Some(value) = resolve_type_property(type_name, field)
-            {
-                let result = self.ctx.alloc_temp();
-                match value {
-                    // T0216: `is_signed` is Bool-typed by the checker, so this
-                    // route emits a Bool rather than Int(1)/Int(0).
-                    TypePropertyValue::Bool(b) => {
-                        if b {
-                            self.ctx.emit(Instruction::LoadTrue { dst: result });
-                        } else {
-                            self.ctx.emit(Instruction::LoadFalse { dst: result });
-                        }
-                    }
-                    TypePropertyValue::Int(v) => {
-                        self.ctx.emit(Instruction::LoadI {
-                            dst: result,
-                            value: v,
-                        });
-                    }
-                    TypePropertyValue::UInt(v) => {
-                        // For large unsigned values like u64::MAX, store as i64 bit pattern
-                        self.ctx.emit(Instruction::LoadI {
-                            dst: result,
-                            value: v as i64,
-                        });
-                    }
-                    TypePropertyValue::Str(s) => {
-                        let const_id = self.ctx.add_const_string(&s);
-                        self.ctx.emit(Instruction::LoadK {
-                            dst: result,
-                            const_id: const_id.0,
-                        });
-                    }
-                }
-                return Ok(Some(result));
-            }
-
-            // Layout property access on user-defined or generic-parameter types:
-            // `MyStruct.size`, `T.alignment`, `Foo.stride`, `Bar.name`. The base
-            // is a bare path (no <args>) so it bypassed the TypeExpr branch above.
-            // Layout properties were handled above through the declared TypeRef;
-            // this remaining path serves the display name only.
-            if matches!(field, "size" | "alignment" | "stride" | "name")
-                && std::env::var("VERUM_TRACE_TYPEPROP").is_ok()
-            {
-                eprintln!(
-                    "[TYPEPROP] bare-path prop base='{}' field='{}' var_reg_hit={} fn_scope_hit={} field_count={:?}",
-                    type_name,
-                    field,
-                    self.ctx.get_var_reg(type_name).is_ok(),
-                    self.ctx.lookup_function_in_scope(type_name).is_some(),
-                    self.type_field_count(type_name)
-                );
-            }
-            if matches!(field, "size" | "alignment" | "stride" | "name")
-                && self.ctx.get_var_reg(type_name).is_err()
-                && self.ctx.lookup_function_in_scope(type_name).is_none()
-                && let Some(value) = self.layout_property_for_named(type_name, field)
-            {
-                let result = self.ctx.alloc_temp();
-                match value {
-                    // T0216: `is_signed` is Bool-typed by the checker, so this
-                    // route emits a Bool rather than Int(1)/Int(0).
-                    TypePropertyValue::Bool(b) => {
-                        if b {
-                            self.ctx.emit(Instruction::LoadTrue { dst: result });
-                        } else {
-                            self.ctx.emit(Instruction::LoadFalse { dst: result });
-                        }
-                    }
-                    TypePropertyValue::Int(v) => {
-                        self.ctx.emit(Instruction::LoadI {
-                            dst: result,
-                            value: v,
-                        });
-                    }
-                    TypePropertyValue::UInt(v) => {
-                        self.ctx.emit(Instruction::LoadI {
-                            dst: result,
-                            value: v as i64,
-                        });
-                    }
-                    TypePropertyValue::Str(s) => {
-                        let const_id = self.ctx.add_const_string(&s);
-                        self.ctx.emit(Instruction::LoadK {
-                            dst: result,
-                            const_id: const_id.0,
-                        });
-                    }
-                }
                 return Ok(Some(result));
             }
 
@@ -44981,7 +44835,19 @@ impl VbcCodegen {
             _ => None,
         };
         if let Some(property) = property_query {
-            let type_ref = self.resolve_signature_type_ref(ty, &self.ctx.current_generic_param_ids);
+            let mut count_error = None;
+            let type_ref = self.resolve_type_ref_scoped_with_count(
+                ty, &self.ctx.current_generic_param_ids, true, self.ctx.current_source_module.as_deref(), &mut |count| {
+                    match self.const_eval_i64(count) {
+                        Ok(value) => value.and_then(|value| u64::try_from(value).ok()),
+                        Err(error) => { count_error = Some(error); None }
+                    }
+                },
+            );
+            if let Some(error) = count_error { return Err(error); }
+            // A concrete impl's associated binding already has one resolver;
+            // generic projections retain their exact base for later consumers.
+            let type_ref = self.resolve_declared_associated_types(&type_ref).unwrap_or(type_ref);
             if let Some(value) = crate::type_layout::query_with(&type_ref, property, |id| {
                 self.types.iter().find(|descriptor| descriptor.id == id)
             }).and_then(|value| i64::try_from(value).ok()) {
@@ -45447,6 +45313,55 @@ impl VbcCodegen {
             ));
         }
 
+        let layout_operand = match &expr.kind {
+            ExprKind::Field { expr: base, field } => {
+                verum_ast::TypeProperty::from_str(field.name.as_str())
+                    .and_then(|property| self.declaration_property_operand_in_scope(base, scope, inspect_runtime_bindings).map(|ty| (ty, property)))
+            }
+            ExprKind::TypeProperty { ty, property } => Some((ty.clone(), property.clone())),
+            _ => None,
+        };
+        if let Some((ty, property)) = layout_operand {
+            let query = match property {
+                verum_ast::TypeProperty::Size => crate::instruction::LayoutProperty::Size,
+                verum_ast::TypeProperty::Alignment => crate::instruction::LayoutProperty::Alignment,
+                verum_ast::TypeProperty::Stride => crate::instruction::LayoutProperty::Stride,
+                _ => return Ok(None),
+            };
+            // Array counts in a property belong to this same constant evaluation.
+            // Starting a new evaluator here would erase the active dependency
+            // set and recurse forever for `const N = ([Byte; N]).size`.
+            let mut failure = None;
+            let mut missing = false;
+            // A module constant has its own declaration scope, not the
+            // current consumer function's generic parameter bindings.
+            let no_caller_generics = std::collections::HashMap::new();
+            let generic_params = if inspect_runtime_bindings {
+                &self.ctx.current_generic_param_ids
+            } else {
+                &no_caller_generics
+            };
+            let ty = self.resolve_type_ref_scoped_with_count(
+                &ty, generic_params, true, scope, &mut |count| {
+                    match self.const_eval_i64_in_scope(
+                        count, scope, bindings, inspect_runtime_bindings, active, cached, depth + 1,
+                    ) {
+                        Ok(Some(value)) => match u64::try_from(value) {
+                            Ok(value) => Some(value),
+                            Err(_) => { failure = Some(invalid()); None }
+                        },
+                        Ok(None) => { missing = true; None }
+                        Err(error) => { failure = Some(error); None }
+                    }
+                },
+            );
+            if let Some(error) = failure { return Err(error); }
+            if missing { return Ok(None); }
+            let ty = self.resolve_declared_associated_types(&ty).unwrap_or(ty);
+            return Ok(crate::type_layout::query_with(&ty, query, |id| {
+                self.types.iter().find(|descriptor| descriptor.id == id)
+            }).and_then(|value| i64::try_from(value).ok()));
+        }
         match &expr.kind {
             ExprKind::Literal(lit) => match &lit.kind {
                 LiteralKind::Int(n) => checked(i64::try_from(n.value).ok()),
@@ -45545,18 +45460,6 @@ impl VbcCodegen {
                         .and_then(|shift| l.checked_shr(shift))),
                     _ => Ok(None),
                 }
-            }
-            ExprKind::TypeProperty { ty, property } => {
-                let query = match property {
-                    verum_ast::TypeProperty::Size => crate::instruction::LayoutProperty::Size,
-                    verum_ast::TypeProperty::Alignment => crate::instruction::LayoutProperty::Alignment,
-                    verum_ast::TypeProperty::Stride => crate::instruction::LayoutProperty::Stride,
-                    _ => return Ok(None),
-                };
-                let ty = self.resolve_signature_type_ref(ty, &self.ctx.current_generic_param_ids);
-                Ok(crate::type_layout::query_with(&ty, query, |id| {
-                    self.types.iter().find(|descriptor| descriptor.id == id)
-                }).and_then(|value| i64::try_from(value).ok()))
             }
             ExprKind::Call { func, args, .. } => {
                 // offset_of(Type, field) arguments are names, never executed.

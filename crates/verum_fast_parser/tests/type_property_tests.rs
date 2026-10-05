@@ -1,266 +1,166 @@
-#![allow(
-    dead_code,
-    unused_imports,
-    unused_variables,
-    unused_mut,
-    unused_must_use,
-    unused_unsafe,
-    deprecated,
-    unexpected_cfgs,
-    unused_comparisons,
-    forgetting_copy_types,
-    useless_ptr_null_checks,
-    unused_assignments
-)]
-//! Tests for type property expression parsing.
-//!
-//! Tests for type property annotations on declarations
-//!
-//! Type properties provide compile-time access to type metadata:
-//! - size: Size in bytes
-//! - alignment: Alignment requirement in bytes
-//! - stride: Memory stride for arrays/iteration
-//! - min: Minimum value (for numeric types)
-//! - max: Maximum value (for numeric types)
-//! - bits: Bit width (for numeric types)
-//! - name: Type name as string
-//!
-//! Examples:
-//! - `Int.size` returns the size of Int in bytes
-//! - `Float.alignment` returns the alignment of Float
-//! - `T.name` returns the type name as a string
-
-use verum_ast::{Expr, ExprKind, FileId, TypeKind, expr::TypeProperty};
-use verum_fast_parser::VerumParser;
+//! Ambiguous names keep value syntax until declaration-aware resolution.
+use verum_ast::{
+    Expr, ExprKind, ItemKind, PatternKind, TypeKind, decl::FunctionParamKind, expr::TypeProperty,
+};
+use verum_fast_parser::Parser;
 
 fn parse_expr(source: &str) -> Expr {
-    let file_id = FileId::new(0);
-    let parser = VerumParser::new();
-    parser
-        .parse_expr_str(source, file_id)
-        .unwrap_or_else(|_| panic!("Failed to parse expression: {}", source))
+    Parser::new(source)
+        .parse_expr()
+        .unwrap_or_else(|error| panic!("{source}: {error:?}"))
 }
 
-// === TYPE PROPERTY TESTS ===
+fn named_field(expression: &Expr, name: &str, member: &str) {
+    let ExprKind::Field { expr, field } = &expression.kind else {
+        panic!("field: {expression:?}");
+    };
+    let ExprKind::Path(path) = &expr.kind else {
+        panic!("path receiver: {expr:?}");
+    };
+    assert_eq!(path.to_string(), name);
+    assert_eq!(field.name.as_str(), member);
+}
 
 #[test]
-fn test_parse_int_size() {
-    let expr = parse_expr("Int.size");
-    match &expr.kind {
-        ExprKind::TypeProperty { ty, property } => {
-            assert!(matches!(ty.kind, TypeKind::Int));
-            assert_eq!(*property, TypeProperty::Size);
-        }
-        _ => panic!("Expected TypeProperty expression, got {:?}", expr.kind),
+fn named_properties_preserve_receiver_identity_regardless_of_case() {
+    for (name, member) in [
+        ("Int", "size"),
+        ("Float", "alignment"),
+        ("Bool", "stride"),
+        ("Int", "min"),
+        ("Int", "max"),
+        ("Int", "bits"),
+        ("Text", "name"),
+        ("Char", "size"),
+        ("MyType", "size"),
+        ("value", "size"),
+        ("Value", "size"),
+        ("x", "length"),
+    ] {
+        named_field(&parse_expr(&format!("{name}.{member}")), name, member);
     }
 }
 
 #[test]
-fn test_parse_float_alignment() {
-    let expr = parse_expr("Float.alignment");
-    match &expr.kind {
-        ExprKind::TypeProperty { ty, property } => {
-            assert!(matches!(ty.kind, TypeKind::Float));
-            assert_eq!(*property, TypeProperty::Alignment);
-        }
-        _ => panic!("Expected TypeProperty expression, got {:?}", expr.kind),
+fn qualified_properties_preserve_each_path_segment() {
+    for root in ["std", "Std"] {
+        let expr = parse_expr(&format!("{root}.collections.List.alignment"));
+        let ExprKind::Field { expr, field } = expr.kind else {
+            panic!("field");
+        };
+        assert_eq!(field.name.as_str(), "alignment");
+        let ExprKind::Field { expr, field } = expr.kind else {
+            panic!("List");
+        };
+        assert_eq!(field.name.as_str(), "List");
+        named_field(&expr, root, "collections");
     }
 }
 
 #[test]
-fn test_parse_bool_stride() {
-    let expr = parse_expr("Bool.stride");
-    match &expr.kind {
-        ExprKind::TypeProperty { ty, property } => {
-            assert!(matches!(ty.kind, TypeKind::Bool));
-            assert_eq!(*property, TypeProperty::Stride);
-        }
-        _ => panic!("Expected TypeProperty expression, got {:?}", expr.kind),
+fn field_binding_survives_parentheses_references_and_expression_contexts() {
+    for source in [
+        "(Cell).size",
+        "(&Cell).size",
+        "(&mut Cell).size",
+        "(&checked Cell).size",
+        "(&unsafe Cell).size",
+    ] {
+        assert!(
+            matches!(parse_expr(source).kind, ExprKind::Field { .. }),
+            "{source}"
+        );
     }
+    let ExprKind::Binary { op, left, .. } = parse_expr("Int.size == 8").kind else {
+        panic!("comparison");
+    };
+    assert_eq!(op, verum_ast::BinOp::Eq);
+    named_field(&left, "Int", "size");
+    let ExprKind::Call { args, .. } = parse_expr("allocate(MyStruct.size)").kind else {
+        panic!("call");
+    };
+    assert_eq!(args.len(), 1);
+    named_field(&args[0], "MyStruct", "size");
 }
 
 #[test]
-fn test_parse_int_min() {
-    let expr = parse_expr("Int.min");
-    match &expr.kind {
-        ExprKind::TypeProperty { ty, property } => {
-            assert!(matches!(ty.kind, TypeKind::Int));
-            assert_eq!(*property, TypeProperty::Min);
-        }
-        _ => panic!("Expected TypeProperty expression, got {:?}", expr.kind),
-    }
+fn explicit_unit_and_generic_type_properties_remain_structural() {
+    let ExprKind::TypeProperty { ty, property } = parse_expr("().size").kind else {
+        panic!("unit property");
+    };
+    assert!(matches!(ty.kind, TypeKind::Unit));
+    assert_eq!(property, TypeProperty::Size);
+    // Generic type expression syntax has already established the type shape.
+    assert!(matches!(
+        parse_expr("List<Int>.alignment").kind,
+        ExprKind::TypeProperty { .. }
+    ));
 }
 
 #[test]
-fn test_parse_int_max() {
-    let expr = parse_expr("Int.max");
-    match &expr.kind {
-        ExprKind::TypeProperty { ty, property } => {
-            assert!(matches!(ty.kind, TypeKind::Int));
-            assert_eq!(*property, TypeProperty::Max);
-        }
-        _ => panic!("Expected TypeProperty expression, got {:?}", expr.kind),
+fn bare_parameter_names_bind_while_structured_patterns_keep_their_shape() {
+    for name in ["cell", "Cell", "Int"] {
+        let ast = Parser::new(&format!("fn probe({name}: Cell) {{}}"))
+            .parse_module()
+            .unwrap();
+        let ItemKind::Function(function) = &ast.items[0].kind else {
+            panic!("function");
+        };
+        let FunctionParamKind::Regular { pattern, .. } = &function.params[0].kind else {
+            panic!("parameter");
+        };
+        let PatternKind::Ident { name: parsed, .. } = &pattern.kind else {
+            panic!("binding: {pattern:?}");
+        };
+        assert_eq!(parsed.name.as_str(), name);
     }
-}
-
-#[test]
-fn test_parse_int_bits() {
-    let expr = parse_expr("Int.bits");
-    match &expr.kind {
-        ExprKind::TypeProperty { ty, property } => {
-            assert!(matches!(ty.kind, TypeKind::Int));
-            assert_eq!(*property, TypeProperty::Bits);
-        }
-        _ => panic!("Expected TypeProperty expression, got {:?}", expr.kind),
+    for (prefix, by_ref, mutable) in [
+        ("mut", false, true),
+        ("ref", true, false),
+        ("ref mut", true, true),
+    ] {
+        let ast = Parser::new(&format!("fn probe({prefix} Cell: Cell) {{}}"))
+            .parse_module()
+            .unwrap();
+        let ItemKind::Function(function) = &ast.items[0].kind else {
+            panic!("function");
+        };
+        let FunctionParamKind::Regular { pattern, .. } = &function.params[0].kind else {
+            panic!("parameter");
+        };
+        let PatternKind::Ident {
+            by_ref: actual_ref,
+            mutable: actual_mut,
+            name,
+            ..
+        } = &pattern.kind
+        else {
+            panic!("explicit binding: {pattern:?}");
+        };
+        assert_eq!(
+            (name.name.as_str(), *actual_ref, *actual_mut),
+            ("Cell", by_ref, mutable)
+        );
     }
-}
-
-#[test]
-fn test_parse_text_name() {
-    let expr = parse_expr("Text.name");
-    match &expr.kind {
-        ExprKind::TypeProperty { ty, property } => {
-            assert!(matches!(ty.kind, TypeKind::Text));
-            assert_eq!(*property, TypeProperty::Name);
-        }
-        _ => panic!("Expected TypeProperty expression, got {:?}", expr.kind),
-    }
-}
-
-#[test]
-fn test_parse_char_size() {
-    let expr = parse_expr("Char.size");
-    match &expr.kind {
-        ExprKind::TypeProperty { ty, property } => {
-            assert!(matches!(ty.kind, TypeKind::Char));
-            assert_eq!(*property, TypeProperty::Size);
-        }
-        _ => panic!("Expected TypeProperty expression, got {:?}", expr.kind),
-    }
-}
-
-// === CUSTOM TYPE PROPERTY TESTS ===
-
-#[test]
-fn test_parse_custom_type_size() {
-    let expr = parse_expr("MyType.size");
-    match &expr.kind {
-        ExprKind::TypeProperty { ty, property } => {
-            // Custom types are parsed as Path types
-            assert!(matches!(ty.kind, TypeKind::Path(_)));
-            assert_eq!(*property, TypeProperty::Size);
-        }
-        _ => panic!("Expected TypeProperty expression, got {:?}", expr.kind),
-    }
-}
-
-#[test]
-fn test_parse_qualified_type_alignment() {
-    // Note: Qualified paths starting with lowercase identifiers (like `std.collections.List`)
-    // are parsed as field access chains at parse time because the parser cannot distinguish
-    // between value paths and type paths without name resolution.
-    // Type checking will resolve `std.collections.List.alignment` as a type property later.
-    let expr = parse_expr("std.collections.List.alignment");
-    match &expr.kind {
-        ExprKind::Field { field, .. } => {
-            // At parse time, this is a chain of field accesses
-            assert_eq!(field.name.as_str(), "alignment");
-        }
-        _ => panic!(
-            "Expected Field expression for lowercase-starting path, got {:?}",
-            expr.kind
-        ),
-    }
-}
-
-// === FIELD ACCESS FALLBACK TESTS ===
-// These tests verify that regular field access still works for non-type-property names
-
-#[test]
-fn test_parse_regular_field_access() {
-    // 'length' is not a type property, so this should be regular field access
-    let expr = parse_expr("x.length");
-    match &expr.kind {
-        ExprKind::Field { expr: _, field } => {
-            assert_eq!(field.name.as_str(), "length");
-        }
-        _ => panic!("Expected Field expression, got {:?}", expr.kind),
-    }
-}
-
-#[test]
-fn test_parse_value_size_field() {
-    // When the receiver is a lowercase identifier, it's a value, not a type
-    // So 'value.size' should still be a field access (the 'size' field of 'value')
-    let expr = parse_expr("value.size");
-    // Note: This currently parses as TypeProperty because we can't distinguish
-    // at parse time between a type and a value with the same name.
-    // Type checking will handle this correctly.
-    match &expr.kind {
-        ExprKind::TypeProperty { .. } => {
-            // For now, path expressions that could be types get converted to TypeProperty
-            // This is correct for type-first-class semantics
-        }
-        ExprKind::Field { expr: _, field } => {
-            // This would also be acceptable
-            assert_eq!(field.name.as_str(), "size");
-        }
-        _ => panic!(
-            "Expected TypeProperty or Field expression, got {:?}",
-            expr.kind
-        ),
-    }
-}
-
-// === TYPE PROPERTY IN EXPRESSIONS ===
-
-#[test]
-fn test_type_property_in_let() {
-    // Parse an expression that would be the RHS of a let statement
-    // (We test just the expression since parse_stmt_str is not exposed)
-    let expr = parse_expr("Int.size");
-    match &expr.kind {
-        ExprKind::TypeProperty { ty, property } => {
-            assert!(matches!(ty.kind, TypeKind::Int));
-            assert_eq!(*property, TypeProperty::Size);
-        }
-        _ => panic!("Expected TypeProperty expression, got {:?}", expr.kind),
-    }
-}
-
-#[test]
-fn test_type_property_in_comparison() {
-    // Int.size should be usable in expressions
-    let expr = parse_expr("Int.size == 8");
-    match &expr.kind {
-        ExprKind::Binary { op, left, right: _ } => {
-            assert_eq!(*op, verum_ast::BinOp::Eq);
-            match &left.kind {
-                ExprKind::TypeProperty { ty, property } => {
-                    assert!(matches!(ty.kind, TypeKind::Int));
-                    assert_eq!(*property, TypeProperty::Size);
-                }
-                _ => panic!("Expected TypeProperty on left side"),
-            }
-        }
-        _ => panic!("Expected Binary expression, got {:?}", expr.kind),
-    }
-}
-
-#[test]
-fn test_type_property_as_function_arg() {
-    let expr = parse_expr("allocate(MyStruct.size)");
-    match &expr.kind {
-        ExprKind::Call { func: _, args, .. } => {
-            assert_eq!(args.len(), 1);
-            match &args[0].kind {
-                ExprKind::TypeProperty { ty, property } => {
-                    assert!(matches!(ty.kind, TypeKind::Path(_)));
-                    assert_eq!(*property, TypeProperty::Size);
-                }
-                _ => panic!("Expected TypeProperty as argument"),
-            }
-        }
-        _ => panic!("Expected Call expression, got {:?}", expr.kind),
+    for (source, expected) in [
+        ("fn probe(UserId(n): UserId) {}", "variant"),
+        ("fn probe((x, y): (Int, Int)) {}", "tuple"),
+        ("fn probe(Choice.None: Choice) {}", "variant"),
+        ("fn probe(Cell { size }: Cell) {}", "record"),
+    ] {
+        let ast = Parser::new(source).parse_module().unwrap();
+        let ItemKind::Function(function) = &ast.items[0].kind else {
+            panic!("function");
+        };
+        let FunctionParamKind::Regular { pattern, .. } = &function.params[0].kind else {
+            panic!("parameter");
+        };
+        let actual = match pattern.kind {
+            PatternKind::Variant { .. } => "variant",
+            PatternKind::Tuple(_) => "tuple",
+            PatternKind::Record { .. } => "record",
+            _ => "other",
+        };
+        assert_eq!(actual, expected, "{source}");
     }
 }

@@ -966,8 +966,8 @@ pub struct VbcCodegen {
     /// the silent one was the one in code.
     type_refinements: std::collections::HashMap<String, FieldRefinementInfo>,
 
-    /// The `module X.Y.Z;` path of every file this compilation unit
-    /// collects, known before any of them is walked.
+    /// Declared file module paths and ownerless root-inline module paths in
+    /// this compilation unit, known before their declarations are walked.
     ///
     /// A mount naming one of these must not be resolved by GUESSING
     /// while the naming file is still ahead in the walk: the qualified
@@ -7986,7 +7986,23 @@ impl VbcCodegen {
             // `unit_module_paths`. The file-id form stays as the
             // fallback for a file with no `module X;` declaration, where
             // it was never ambiguous.
-            let module_key = Self::resolve_full_module_path(module, &self.config.module_name)
+            let declared_owner = Self::resolve_full_module_path(module, &self.config.module_name);
+            if declared_owner.is_none()
+                && (self.config.module_name.is_empty() || self.config.module_name == "main")
+            {
+                // Only immediate children of an ownerless source have this
+                // exact root path. Nested/file-owned module names need their
+                // own qualified namespace authority, not a bare leaf export.
+                for item in &module.items {
+                    if self.should_compile_item(item)
+                        && let ItemKind::Module(inline) = &item.kind
+                        && inline.items.is_some()
+                    {
+                        self.unit_module_paths.insert(inline.name.name.to_string());
+                    }
+                }
+            }
+            let module_key = declared_owner
                 .unwrap_or_else(|| format!("file:{:?}", module.file_id));
             self.claim_declared_type_items(&module.items, &module_key);
         }
@@ -12001,6 +12017,14 @@ impl VbcCodegen {
                         None => func_name.clone(),
                     },
                 };
+
+                // An exact declared module is a namespace even when it has
+                // only types or a single path segment. Publish this intent
+                // before item/function fallbacks can bind the same spelling.
+                if self.unit_module_paths.contains(&full_path.join(".")) {
+                    self.ctx.module_aliases.insert(alias_name, full_path);
+                    return Ok(());
+                }
 
                 // META-GROUP-XMODULE-1: record mounted TYPE bindings.
                 // An uppercase leaf (`mount core.meta.token.{Group}` /
@@ -17954,6 +17978,19 @@ impl VbcCodegen {
         generic_param_map: &std::collections::HashMap<String, u16>,
         preserve_refs: bool,
     ) -> TypeRef {
+        self.resolve_type_ref_scoped_with_count(ty, generic_param_map, preserve_refs, None, &mut |count| {
+            self.const_eval_i64(count).ok().flatten().and_then(|value| u64::try_from(value).ok())
+        })
+    }
+
+    fn resolve_type_ref_scoped_with_count(
+        &self,
+        ty: &verum_ast::ty::Type,
+        generic_param_map: &std::collections::HashMap<String, u16>,
+        preserve_refs: bool,
+        declaration_scope: Option<&str>,
+        array_count: &mut dyn FnMut(&verum_ast::Expr) -> Option<u64>,
+    ) -> TypeRef {
         use verum_ast::ty::{PathSegment, TypeKind};
         // Generic instantiation: recurse into args with the same map
         // so nested type-param references (`Result<T, E>` from
@@ -17961,7 +17998,7 @@ impl VbcCodegen {
         // T → TypeRef::Generic(0) instead of degrading to
         // TypeRef::Concrete(PTR) via the un-aware fallback.
         if let TypeKind::Generic { base, args } = &ty.kind {
-            let base_ref = self.resolve_type_ref_scoped(base, generic_param_map, preserve_refs);
+            let base_ref = self.resolve_type_ref_scoped_with_count(base, generic_param_map, preserve_refs, declaration_scope, array_count);
             if let TypeRef::Concrete(base_id) = base_ref {
                 // T1228 — same arity rule as `type_name_to_type_ref_mono`:
                 // an argument that cannot be resolved HOLDS ITS POSITION
@@ -17976,11 +18013,10 @@ impl VbcCodegen {
                     .map(|(i, arg)| {
                         Self::position_or_generic(i, match arg {
                         verum_ast::ty::GenericArg::Type(inner_ty) => {
-                            Some(self.resolve_type_ref_scoped(
+                            Some(self.resolve_type_ref_scoped_with_count(
                                 inner_ty,
                                 generic_param_map,
-                                preserve_refs,
-                            ))
+                                preserve_refs, declaration_scope, array_count))
                         }
                         // CONST-GENERIC-VALUE-CARRY-1: a LITERAL const arg
                         // carries its value (`StackAllocator<1024>` →
@@ -18036,11 +18072,10 @@ impl VbcCodegen {
             };
             if let Some((inner, mutable, tier)) = reference {
                 return TypeRef::Reference {
-                    inner: Box::new(self.resolve_type_ref_scoped(
+                    inner: Box::new(self.resolve_type_ref_scoped_with_count(
                         inner,
                         generic_param_map,
-                        preserve_refs,
-                    )),
+                        preserve_refs, declaration_scope, array_count)),
                     mutability: if mutable {
                         crate::types::Mutability::Mutable
                     } else {
@@ -18062,7 +18097,7 @@ impl VbcCodegen {
         if let TypeKind::Reference { inner, .. }
         | TypeKind::CheckedReference { inner, .. } = &ty.kind
         {
-            return self.resolve_type_ref_scoped(inner, generic_param_map, preserve_refs);
+            return self.resolve_type_ref_scoped_with_count(inner, generic_param_map, preserve_refs, declaration_scope, array_count);
         }
         // Refinement types erase to their base at the descriptor layer
         // — the runtime representation of `Float{>= 0.0, <= 1.0}` IS a
@@ -18076,7 +18111,7 @@ impl VbcCodegen {
         // compared 0.4 < 0.7 → false). The refinement PREDICATE is not
         // lost — assert emission reads the AST, never descriptors.
         if let TypeKind::Refined { base, .. } = &ty.kind {
-            return self.resolve_type_ref_scoped(base, generic_param_map, preserve_refs);
+            return self.resolve_type_ref_scoped_with_count(base, generic_param_map, preserve_refs, declaration_scope, array_count);
         }
         // #131 Layer E — nested function types must preserve the
         // map through recursion.  The standard `ast_type_to_type_ref`
@@ -18098,9 +18133,9 @@ impl VbcCodegen {
         {
             let param_refs: Vec<TypeRef> = params
                 .iter()
-                .map(|p| self.resolve_type_ref_scoped(p, generic_param_map, preserve_refs))
+                .map(|p| self.resolve_type_ref_scoped_with_count(p, generic_param_map, preserve_refs, declaration_scope, array_count))
                 .collect();
-            let ret_ref = self.resolve_type_ref_scoped(return_type, generic_param_map, preserve_refs);
+            let ret_ref = self.resolve_type_ref_scoped_with_count(return_type, generic_param_map, preserve_refs, declaration_scope, array_count);
             let ctx_refs: smallvec::SmallVec<[crate::types::ContextRef; 2]> = contexts
                 .requirements
                 .iter()
@@ -18143,9 +18178,9 @@ impl VbcCodegen {
         {
             let param_refs: Vec<TypeRef> = params
                 .iter()
-                .map(|p| self.resolve_type_ref_scoped(p, generic_param_map, preserve_refs))
+                .map(|p| self.resolve_type_ref_scoped_with_count(p, generic_param_map, preserve_refs, declaration_scope, array_count))
                 .collect();
-            let ret_ref = self.resolve_type_ref_scoped(return_type, generic_param_map, preserve_refs);
+            let ret_ref = self.resolve_type_ref_scoped_with_count(return_type, generic_param_map, preserve_refs, declaration_scope, array_count);
             let ctx_refs: smallvec::SmallVec<[crate::types::ContextRef; 2]> = contexts
                 .requirements
                 .iter()
@@ -18164,6 +18199,23 @@ impl VbcCodegen {
                 contexts: ctx_refs,
             };
         }
+        // Structural sequence operands retain the same declaration-owned map.
+        // A concrete array count uses the common constant evaluator; symbolic
+        // counts retain the existing numeric-zero fallback; that representation
+        // does not distinguish an unresolved count from an empty array.
+        if let TypeKind::Slice(element) = &ty.kind {
+            return TypeRef::Slice(Box::new(self.resolve_type_ref_scoped_with_count(
+                element, generic_param_map, preserve_refs, declaration_scope, array_count)));
+        }
+        if let TypeKind::Array { element, size } = &ty.kind {
+            let length = size.as_ref()
+                .and_then(|count| array_count(count))
+                .unwrap_or(0);
+            return TypeRef::Array {
+                element: Box::new(self.resolve_type_ref_scoped_with_count(element, generic_param_map, preserve_refs, declaration_scope, array_count)),
+                length,
+            };
+        }
         // Tuple: recurse elements with the SAME map. `type Item =
         // (Int, I.Item)` (EnumerateIter) and `(A.Item, B.Item)`
         // (ZipIter) previously fell through to the map-UNAWARE
@@ -18178,7 +18230,7 @@ impl VbcCodegen {
             }
             let elem_refs: Vec<TypeRef> = elements
                 .iter()
-                .map(|e| self.resolve_type_ref_scoped(e, generic_param_map, preserve_refs))
+                .map(|e| self.resolve_type_ref_scoped_with_count(e, generic_param_map, preserve_refs, declaration_scope, array_count))
                 .collect();
             return TypeRef::Tuple(elem_refs);
         }
@@ -18272,10 +18324,10 @@ impl VbcCodegen {
             // function's parameter binds — the link the fix depends on.
             let base_ref = match &ty.kind {
                 TypeKind::AssociatedType { base, .. } => {
-                    self.resolve_type_ref_scoped(base, generic_param_map, preserve_refs)
+                    self.resolve_type_ref_scoped_with_count(base, generic_param_map, preserve_refs, declaration_scope, array_count)
                 }
                 TypeKind::Qualified { self_ty, .. } => {
-                    self.resolve_type_ref_scoped(self_ty, generic_param_map, preserve_refs)
+                    self.resolve_type_ref_scoped_with_count(self_ty, generic_param_map, preserve_refs, declaration_scope, array_count)
                 }
                 _ => TypeRef::Concrete(crate::types::TypeId::UNIT),
             };
@@ -18351,6 +18403,15 @@ impl VbcCodegen {
             && let Some(owner) = self.impl_self_type_ref(generic_param_map)
         {
             return owner;
+        }
+        // The constant evaluator may be executing a foreign initializer.
+        // Its exact declared owner wins over the consumer's bare-name slot.
+        if let TypeKind::Path(path) = &ty.kind
+            && path.is_single()
+            && let Some(scope) = declaration_scope
+            && let Some(id) = self.type_name_to_id.get(&format!("{scope}.{}", path))
+        {
+            return TypeRef::Concrete(*id);
         }
         // Fall back to standard resolution
         self.ast_type_to_type_ref(ty)

@@ -1268,6 +1268,8 @@ impl Default for UniverseContext {
 pub struct TypeEnv {
     /// Current scope bindings
     bindings: IndexMap<Text, TypeScheme>,
+    /// Declaration-owned type parameters mirrored into the value namespace.
+    type_parameter_mirrors: Set<Text>,
     /// Parent environment (for nested scopes)
     parent: Option<Box<TypeEnv>>,
     /// Type parameters in scope with their bounds
@@ -1286,6 +1288,7 @@ impl TypeEnv {
     pub fn new() -> Self {
         Self {
             bindings: IndexMap::new(),
+            type_parameter_mirrors: Set::new(),
             parent: None,
             type_params: Map::new(),
             current_module: Maybe::None,
@@ -1300,6 +1303,7 @@ impl TypeEnv {
     pub fn child(&self) -> Self {
         Self {
             bindings: IndexMap::new(),
+            type_parameter_mirrors: Set::new(),
             parent: Some(Box::new(self.clone())),
             type_params: Map::new(),
             current_module: self.current_module, // Inherit module context
@@ -1359,7 +1363,16 @@ impl TypeEnv {
     /// Insert a binding in the current scope
     pub fn insert(&mut self, name: impl Into<Text>, scheme: TypeScheme) {
         let name_text: Text = name.into();
+        self.type_parameter_mirrors.remove(&name_text);
         self.bindings.insert(name_text, scheme);
+    }
+
+    /// Publish a declared type parameter in the expression environment.
+    /// Ordinary value insertion always clears this role, even for the same type.
+    pub fn insert_type_parameter_mirror(&mut self, name: impl Into<Text>, scheme: TypeScheme) {
+        let name = name.into();
+        self.insert(name.clone(), scheme);
+        self.type_parameter_mirrors.insert(name);
     }
 
     /// Insert a binding in the ROOT (module-level) scope, surviving
@@ -1381,6 +1394,7 @@ impl TypeEnv {
         while let Some(parent) = env.parent.as_deref_mut() {
             env = parent;
         }
+        env.type_parameter_mirrors.remove(&name_text);
         env.bindings.insert(name_text, scheme);
     }
 
@@ -1396,7 +1410,9 @@ impl TypeEnv {
     /// variant-constructor that a user type declaration should shadow).
     /// Returns `true` if a binding with `name` was present and removed.
     pub fn remove(&mut self, name: &str) -> bool {
-        self.bindings.shift_remove(&Text::from(name)).is_some()
+        let name = Text::from(name);
+        self.type_parameter_mirrors.remove(&name);
+        self.bindings.shift_remove(&name).is_some()
     }
 
     /// Look up a variable, searching parent scopes if needed
@@ -1444,6 +1460,34 @@ impl TypeEnv {
         while let Some(parent) = scope.parent.as_deref() {
             if scope.bindings.contains_key(&key) {
                 return true;
+            }
+            scope = parent;
+        }
+        false
+    }
+
+    /// Whether the first visible binding is a declared type-parameter mirror.
+    /// Type equality is not evidence: a value may have the very same type variable.
+    pub fn is_type_parameter_mirror(&self, name: &str) -> bool {
+        let key = Text::from(name);
+        let mut scope = Some(self);
+        while let Some(env) = scope {
+            if env.bindings.contains_key(&key) {
+                return env.type_parameter_mirrors.contains(&key);
+            }
+            scope = env.parent.as_deref();
+        }
+        false
+    }
+
+    /// A lexical value, rather than a type-parameter mirror, shadows a type
+    /// expression. Stop at the first binding, including a mirror in an inner scope.
+    pub fn is_locally_bound_value(&self, name: &str) -> bool {
+        let key = Text::from(name);
+        let mut scope = self;
+        while let Some(parent) = scope.parent.as_deref() {
+            if scope.bindings.contains_key(&key) {
+                return !scope.type_parameter_mirrors.contains(&key);
             }
             scope = parent;
         }

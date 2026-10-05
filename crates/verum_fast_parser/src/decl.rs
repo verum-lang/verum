@@ -1554,8 +1554,21 @@ impl<'a> RecursiveParser<'a> {
             ));
         }
 
-        // Regular parameter: pattern: Type [= default_value]
-        let pattern = self.parse_pattern()?;
+        // A bare name in this irrefutable binding position is a parameter,
+        // independent of case. Qualified or structured patterns keep their
+        // pattern grammar (including single-variant newtype destructuring).
+        let pattern = if matches!(self.stream.peek_kind(), Some(TokenKind::Ident(_)))
+            && self.stream.peek_nth_kind(1) == Some(&TokenKind::Colon)
+        {
+            let span = self.stream.current_span();
+            let name = self.consume_ident_or_keyword()?;
+            verum_ast::Pattern::new(verum_ast::PatternKind::Ident {
+                by_ref: false, mutable: false,
+                name: Ident::new(name, span), subpattern: Maybe::None,
+            }, span)
+        } else {
+            self.parse_pattern()?
+        };
 
         // E036: Missing parameter type - check if ')' or ',' instead of ':'
         if self.stream.check(&TokenKind::RParen) || self.stream.check(&TokenKind::Comma) {

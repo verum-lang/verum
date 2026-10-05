@@ -9267,9 +9267,233 @@ impl TypeChecker {
         found
     }
 
+    /// Admit a property type path only from an exact declaration or import.
+    /// The general type resolver also creates forward references on misses;
+    /// those are not evidence that a value expression names a type.
+    fn declaration_property_path(&mut self, path: &Path) -> Option<Path> {
+        use verum_ast::ty::PathSegment;
+        if path.segments.len() == 1
+            && self.current_self_type.is_some()
+            && matches!(&path.segments[0], PathSegment::SelfValue)
+        {
+            return Some(path.clone());
+        }
+        let names: Option<List<Text>> = path
+            .segments
+            .iter()
+            .map(|segment| match segment {
+                PathSegment::Name(name) => Some(name.name.clone()),
+                _ => None,
+            })
+            .collect();
+        let names = names?;
+        let root = names.first()?;
+        if self.ctx.env.is_locally_bound_value(root.as_str()) {
+            return None;
+        }
+        // A declared generic root also wins over a same-spelled module alias.
+        // Its associated members are proved separately below.
+        if self.ctx.env.is_type_parameter_mirror(root.as_str()) {
+            return (names.len() == 1).then(|| path.clone());
+        }
+        if names.len() == 1
+            && (self.lookup_decl_param(root.as_str()).is_some()
+                || (root.as_str() == "Self" && self.current_self_type.is_some()))
+        {
+            return Some(path.clone());
+        }
+        let mut key: Text = names
+            .iter()
+            .map(Text::as_str)
+            .collect::<List<_>>()
+            .join(".")
+            .into();
+        if let Some(module) = self.module_aliases.get(root) {
+            key = if names.len() == 1 {
+                module.clone()
+            } else {
+                format!(
+                    "{}.{}",
+                    module,
+                    names
+                        .iter()
+                        .skip(1)
+                        .map(Text::as_str)
+                        .collect::<List<_>>()
+                        .join(".")
+                )
+                .into()
+            };
+        }
+        if self.ctx.lookup_type(key.as_str()).is_none() {
+            // Use the same exact inline-module declaration path as imports.
+            if let Some((owner, name)) = self.find_inline_module_for_import(key.as_str(), false) {
+                let declared: Text = format!("{owner}.{name}").into();
+                if self.ctx.lookup_type(declared.as_str()).is_some() {
+                    key = declared;
+                }
+            }
+        }
+        if self.ctx.lookup_type(key.as_str()).is_none() {
+            let public_declaration = self
+                .core_metadata
+                .as_ref()
+                .and_then(|metadata| metadata.types.get(&key))
+                .is_some_and(|descriptor| descriptor.is_public);
+            if !public_declaration {
+                return None;
+            }
+            // The exact metadata key is the authority. No bare-name or
+            // ancestor-prefix recovery is allowed to select another owner.
+            self.ensure_stdlib_type_loaded(&key, &mut Vec::new());
+            self.ctx.lookup_type(key.as_str())?;
+        }
+        Some(Path::new(
+            key.as_str()
+                .split('.')
+                .map(|name| PathSegment::Name(verum_ast::Ident::new(name, path.span)))
+                .collect(),
+            path.span,
+        ))
+    }
+
+    /// Resolve only declared type operands; a lexical value wins even when
+    /// it shares a type's name. This is the semantic counterpart of a field
+    /// expression deliberately left ambiguous by the parser.
+    fn declaration_property_operand(&mut self, expression: &Expr) -> Option<verum_ast::ty::Type> {
+        use verum_ast::ty::{Type as AstType, TypeKind as K};
+        let kind = match &expression.kind {
+            ExprKind::TypeExpr(ty) => return Some(ty.clone()),
+            ExprKind::Paren(inner) => return self.declaration_property_operand(inner),
+            ExprKind::Path(path) => {
+                if let Some(declared) = self.declaration_property_path(path) {
+                    K::Path(declared)
+                } else {
+                    let (member, prefix) = path.segments.split_last()?;
+                    let verum_ast::ty::PathSegment::Name(member) = member else {
+                        return None;
+                    };
+                    if prefix.is_empty() {
+                        return None;
+                    }
+                    let base = Expr::new(
+                        ExprKind::Path(Path::new(prefix.iter().cloned().collect(), path.span)),
+                        path.span,
+                    );
+                    let projected = Expr::new(
+                        ExprKind::Field {
+                            expr: Heap::new(base),
+                            field: member.clone(),
+                        },
+                        expression.span,
+                    );
+                    return self.declaration_property_operand(&projected);
+                }
+            }
+            ExprKind::Field { expr: base, field } => {
+                if let Some(segments) = self.extract_module_path_from_field(base, field) {
+                    let path = verum_ast::ty::Path::new(
+                        segments
+                            .into_iter()
+                            .map(|name| {
+                                verum_ast::ty::PathSegment::Name(verum_ast::Ident::new(
+                                    name,
+                                    expression.span,
+                                ))
+                            })
+                            .collect(),
+                        expression.span,
+                    );
+                    if let Some(path) = self.declaration_property_path(&path) {
+                        return Some(AstType::new(K::Path(path), expression.span));
+                    }
+                }
+                // An associated projection is a type only when its base is a
+                // declared type and the selected impl or a declared bound
+                // owns this associated member. Unknown forward refs do not.
+                let base = self.declaration_property_operand(base)?;
+                let base_ty = self.ast_to_type(&base).ok()?;
+                let declared = if let Type::Var(var) = &base_ty {
+                    self.get_type_var_bounds(var).iter().any(|bound| {
+                        if bound.is_negative {
+                            return false;
+                        }
+                        let protocol = self.path_to_string(&bound.protocol);
+                        self.protocol_checker
+                            .read()
+                            .get_protocol(&protocol)
+                            .is_some_and(|declaration| {
+                                declaration.associated_types.contains_key(&field.name)
+                            })
+                    })
+                } else {
+                    self.protocol_checker
+                        .read()
+                        .try_find_associated_type(&base_ty, &field.name)
+                        .is_some()
+                };
+                if !declared {
+                    return None;
+                }
+                K::Qualified {
+                    self_ty: Heap::new(base),
+                    trait_ref: Path::new(List::new(), expression.span),
+                    assoc_name: field.clone(),
+                }
+            }
+            ExprKind::Array(verum_ast::ArrayExpr::List(elements)) if elements.len() == 1 => {
+                K::Slice(verum_common::Heap::new(
+                    self.declaration_property_operand(&elements[0])?,
+                ))
+            }
+            ExprKind::Array(verum_ast::ArrayExpr::Repeat { value, count }) => K::Array {
+                element: verum_common::Heap::new(self.declaration_property_operand(value)?),
+                size: Some(count.clone()),
+            },
+            ExprKind::Unary { op, expr } => {
+                let inner = verum_common::Heap::new(self.declaration_property_operand(expr)?);
+                match op {
+                    UnOp::Ref => K::Reference {
+                        inner,
+                        mutable: false,
+                    },
+                    UnOp::RefMut => K::Reference {
+                        inner,
+                        mutable: true,
+                    },
+                    UnOp::RefChecked => K::CheckedReference {
+                        inner,
+                        mutable: false,
+                    },
+                    UnOp::RefCheckedMut => K::CheckedReference {
+                        inner,
+                        mutable: true,
+                    },
+                    UnOp::RefUnsafe => K::UnsafeReference {
+                        inner,
+                        mutable: false,
+                    },
+                    UnOp::RefUnsafeMut => K::UnsafeReference {
+                        inner,
+                        mutable: true,
+                    },
+                    _ => return None,
+                }
+            }
+            _ => return None,
+        };
+        Some(AstType::new(kind, expression.span))
+    }
+
     fn infer_expr_field(&mut self, expr: &Expr) -> Result<InferResult> {
         use ExprKind::*;
         let ExprKind::Field { expr: obj, field } = &expr.kind else { unreachable!() };
+
+        if let Some(property) = verum_ast::TypeProperty::from_str(field.name.as_str())
+            && let Some(ty) = self.declaration_property_operand(obj)
+        {
+            return self.infer_type_property(&ty, &property, expr.span);
+        }
 
         // FULLY-QUALIFIED PATH IN EXPRESSION POSITION (T0779).
         //
@@ -9301,6 +9525,7 @@ impl TypeChecker {
         if let ExprKind::Path(path) = &obj.kind
             && path.segments.len() == 1
             && let verum_ast::ty::PathSegment::Name(ident) = &path.segments[0]
+            && !self.ctx.env.is_locally_bound(ident.name.as_str())
         {
             let obj_name = ident.name.as_str();
             // Check if this is an inline module
@@ -9437,6 +9662,7 @@ impl TypeChecker {
             if let ExprKind::Path(path) = &inner_obj.kind
                 && path.segments.len() == 1
                 && let verum_ast::ty::PathSegment::Name(ident) = &path.segments[0]
+                && !self.ctx.env.is_locally_bound(ident.name.as_str())
                 && self
                     .inline_modules
                     .contains_key(&verum_common::Text::from(ident.name.as_str()))

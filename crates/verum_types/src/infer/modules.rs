@@ -11655,9 +11655,10 @@ impl TypeChecker {
                     };
                     let type_var = Type::Var(tvar);
                     // Add to value environment (for type checking expressions)
-                    self.ctx
-                        .env
-                        .insert(name.name.clone(), TypeScheme::mono(type_var.clone()));
+                    self.ctx.env.insert_type_parameter_mirror(
+                        name.name.clone(),
+                        TypeScheme::mono(type_var.clone()),
+                    );
                     // ALSO add to type environment (for type name resolution)
                     // This allows T to be used in type positions like: fn foo<T>(x: T) -> T
                     self.ctx.define_type(name_text.clone(), type_var);
@@ -11788,7 +11789,7 @@ impl TypeChecker {
                     // Create a type constructor with the appropriate kind
                     let type_constructor = Type::type_constructor(name_text.clone(), *arity, kind);
 
-                    self.ctx.env.insert(
+                    self.ctx.env.insert_type_parameter_mirror(
                         name.name.clone(),
                         TypeScheme::mono(type_constructor.clone()),
                     );
@@ -11880,7 +11881,7 @@ impl TypeChecker {
                     let type_constructor =
                         Type::type_constructor(name_text.clone(), arity, adv_kind);
 
-                    self.ctx.env.insert(
+                    self.ctx.env.insert_type_parameter_mirror(
                         name.name.clone(),
                         TypeScheme::mono(type_constructor.clone()),
                     );

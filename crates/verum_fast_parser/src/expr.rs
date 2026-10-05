@@ -2925,14 +2925,9 @@ impl<'a> RecursiveParser<'a> {
                             true,
                         ))
                     } else {
-                        // Check if this is a type property access (e.g., Int.size, Float.alignment)
-                        // Type properties are: size, alignment, stride, min, max, bits, name
-                        //
-
-                        // CRITICAL FIX: Only convert to TypeProperty if the path looks like a type.
-                        // Type names by convention start with uppercase (PascalCase), while variables
-                        // are lowercase (snake_case or camelCase). This heuristic prevents `p.name`
-                        // (where p is a variable) from being parsed as a TypeProperty expression.
+                        // Only explicit type syntax is unambiguous here. A path
+                        // such as Cell.size must retain its value expression so
+                        // lexical resolution can distinguish a type from a binding.
                         if let Some(type_prop) = TypeProperty::from_str(field_name.as_str()) {
                             // Try to convert expression to a type
                             // This handles: Int, (&Int), (&checked Int), List<Int>, etc.
@@ -8457,184 +8452,16 @@ impl<'a> RecursiveParser<'a> {
     /// - `(&unsafe Int)` -> unsafe reference to Int type
     /// - `(&mut Int)` -> mutable reference to Int type
     ///
-    /// Returns None if the expression cannot be interpreted as a type.
-    ///
-    /// # PascalCase Heuristic
-    ///
-    /// Since the parser doesn't have access to type information (name resolution happens
-    /// later), we use a naming convention heuristic to distinguish type property access
-    /// from regular field access:
-    ///
-    /// - **PascalCase** names (starting with uppercase) are assumed to be types
-    /// - **snake_case/camelCase** names (starting with lowercase) are assumed to be variables
-    ///
-    /// ## Examples
-    ///
-    /// - `Int.size` → parsed as TypeProperty (correct)
-    /// - `point.size` → parsed as Field access (correct)
-    /// - `MyType.alignment` → parsed as TypeProperty (correct)
-    ///
-    /// ## Known Limitation
-    ///
-    /// If a variable is named with PascalCase (e.g., `let Point = get_point();`),
-    /// expressions like `Point.size` will be incorrectly parsed as TypeProperty
-    /// instead of field access. This is acceptable because:
-    ///
-    /// 1. Verum convention is snake_case for variables (enforced by style lints)
-    /// 2. Type checking will catch this misuse and provide a clear error
-    /// 3. Fixing this requires name resolution during parsing (fundamentally changes architecture)
-    ///
-    /// Known limitation: PascalCase heuristic is used since name resolution isn't available at parse time.
+    /// Recognize syntactically explicit type operands only. Bare paths and
+    /// references to paths remain fields until semantic name resolution;
+    /// capitalization is not evidence that a path denotes a declaration.
     fn expr_to_type_for_property(&self, expr: &Expr) -> Option<Type> {
         match &expr.kind {
-            // Path expression: Int, MyType, module.Type
-            ExprKind::Path(path) => {
-                // Apply PascalCase heuristic: only treat as type if name starts with uppercase
-                let looks_like_type = if path.segments.len() == 1 {
-                    if let verum_ast::ty::PathSegment::Name(ident) = &path.segments[0] {
-                        ident
-                            .name
-                            .as_str()
-                            .chars()
-                            .next()
-                            .map(|c| c.is_uppercase())
-                            .unwrap_or(false)
-                    } else {
-                        false
-                    }
-                } else {
-                    // Multi-segment path: could be module.Type, assume type-like
-                    true
-                };
-
-                if looks_like_type {
-                    self.path_to_type(path.clone()).ok()
-                } else {
-                    None
-                }
-            }
-
-            // Parenthesized expression: (T), (&T)
+            ExprKind::TypeExpr(ty) => Some(ty.clone()),
             ExprKind::Paren(inner) => self.expr_to_type_for_property(inner),
-
-            // Empty tuple: `().size` / `().alignment` — route to the Unit type
-            // property (T0216). Without this, `()` stays an ExprKind::Tuple and
-            // `.size` becomes a field access on the unit VALUE, which the
-            // checker still types Int but the runtime deref-panics
-            // ("receiver is not a heap object") — an unsoundness. Non-empty
-            // tuples have no type-property surface, so only the empty case maps.
             ExprKind::Tuple(elements) if elements.is_empty() => {
                 Some(Type::new(verum_ast::ty::TypeKind::Unit, expr.span))
             }
-
-            // Reference expression: &T, &mut T
-            ExprKind::Unary { op, expr: inner } => {
-                match op {
-                    UnOp::Ref => {
-                        // &T -> Reference type (immutable)
-                        let inner_ty = self.expr_to_type_for_property(inner)?;
-                        Some(Type::new(
-                            verum_ast::ty::TypeKind::Reference {
-                                mutable: false,
-                                inner: Heap::new(inner_ty),
-                            },
-                            expr.span,
-                        ))
-                    }
-                    UnOp::RefMut => {
-                        // &mut T -> Mutable reference type
-                        let inner_ty = self.expr_to_type_for_property(inner)?;
-                        Some(Type::new(
-                            verum_ast::ty::TypeKind::Reference {
-                                mutable: true,
-                                inner: Heap::new(inner_ty),
-                            },
-                            expr.span,
-                        ))
-                    }
-                    UnOp::RefChecked => {
-                        // &checked T -> Checked reference type (immutable)
-                        let inner_ty = self.expr_to_type_for_property(inner)?;
-                        Some(Type::new(
-                            verum_ast::ty::TypeKind::CheckedReference {
-                                mutable: false,
-                                inner: Heap::new(inner_ty),
-                            },
-                            expr.span,
-                        ))
-                    }
-                    UnOp::RefCheckedMut => {
-                        // &checked mut T -> Checked reference type (mutable)
-                        let inner_ty = self.expr_to_type_for_property(inner)?;
-                        Some(Type::new(
-                            verum_ast::ty::TypeKind::CheckedReference {
-                                mutable: true,
-                                inner: Heap::new(inner_ty),
-                            },
-                            expr.span,
-                        ))
-                    }
-                    UnOp::RefUnsafe => {
-                        // &unsafe T -> Unsafe reference type (immutable)
-                        let inner_ty = self.expr_to_type_for_property(inner)?;
-                        Some(Type::new(
-                            verum_ast::ty::TypeKind::UnsafeReference {
-                                mutable: false,
-                                inner: Heap::new(inner_ty),
-                            },
-                            expr.span,
-                        ))
-                    }
-                    UnOp::RefUnsafeMut => {
-                        // &unsafe mut T -> Unsafe reference type (mutable)
-                        let inner_ty = self.expr_to_type_for_property(inner)?;
-                        Some(Type::new(
-                            verum_ast::ty::TypeKind::UnsafeReference {
-                                mutable: true,
-                                inner: Heap::new(inner_ty),
-                            },
-                            expr.span,
-                        ))
-                    }
-                    _ => None,
-                }
-            }
-
-            // Index expression: List<Int> parsed as Index(Path("List"), Path("Int"))
-            // This handles generic type syntax in expression context
-            ExprKind::Index {
-                expr: base_expr,
-                index,
-            } => {
-                // Get the base type
-                if let Some(base_ty) = self.expr_to_type_for_property(base_expr) {
-                    // Try to convert the index to a type argument
-                    if let Some(arg_ty) = self.expr_to_type_for_property(index) {
-                        let args: List<verum_ast::ty::GenericArg> =
-                            vec![verum_ast::ty::GenericArg::Type(arg_ty)].into();
-                        return Some(Type::new(
-                            verum_ast::ty::TypeKind::Generic {
-                                base: Heap::new(base_ty),
-                                args,
-                            },
-                            expr.span,
-                        ));
-                    }
-                }
-                None
-            }
-
-            // Slice expression: [T]
-            ExprKind::Array(verum_ast::expr::ArrayExpr::List(elements)) if elements.len() == 1 => {
-                // Try to convert single element as slice type [T]
-                self.expr_to_type_for_property(&elements[0]).map(|elem_ty| {
-                    Type::new(
-                        verum_ast::ty::TypeKind::Slice(Heap::new(elem_ty)),
-                        expr.span,
-                    )
-                })
-            }
-
             _ => None,
         }
     }

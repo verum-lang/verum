@@ -2200,8 +2200,10 @@ impl<'a> RecursiveParser<'a> {
 
             // Unqualified uppercase identifier → unit variant pattern
             // This handles enum variants like Add, Sub, None, Some (without data)
-            // Distinguishes between variant constructors (Add) and bindings (add, x)
-            _ if first_name.chars().next().is_some_and(|c| c.is_uppercase()) => {
+            // Explicit ref/mut modifiers select identifier bindings instead.
+            // Bare match patterns retain the existing variant interpretation.
+            _ if !by_ref && !mutable
+                && first_name.chars().next().is_some_and(|c| c.is_uppercase()) => {
                 let span = self.stream.make_span(start_pos);
                 Ok(Pattern::new(
                     PatternKind::Variant {
