@@ -72,12 +72,15 @@ public type Pool is protocol {
 }
 
 // -----------------------------------------------------------------------------
-// PoolHandle — affine RAII checkout.
+// PoolHandle — affine protocol checkout representation.
 // -----------------------------------------------------------------------------
 
-/// One checked-out connection. Affine: must be released by `release()`
-/// or by being consumed inside `with_connection`. Dropping the handle
-/// returns the connection to the pool.
+/// Protocol-level checkout representation. Affine permits at most one
+/// consuming use; it does not require a terminal call. This type provides
+/// constructor/accessors only: no release method, with_connection helper or
+/// Drop implementation returns it to a pool. Concrete synchronous pools use
+/// pool_impl.PooledConnection instead, with explicit release_* methods.
+/// Do not infer automatic checkout return from this declaration.
 public type affine PoolHandle<C: Connection> is {
     conn: C,
     pool_id: Int,

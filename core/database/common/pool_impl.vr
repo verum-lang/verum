@@ -21,17 +21,17 @@
 //  * `outstanding` counts checked-out connections; the pool refuses
 //  to allocate beyond `max_connections`.
 //  * `acquire_timeout_ms` bounds the wait for an available slot.
-//  We poll-and-sleep rather than condvar-await for portability;
-//  the production runtime swaps in `core.async.notify` when the
-//  async-pool variant lands.
+//  The full-pool path waits on a Condvar with the remaining timeout;
+//  release notifies after updating bookkeeping under the mutex.
 //
 
-// Returned `PoolHandle` is affine — drop after use to release the
-// connection. The vendor-specific façade owns the recycle / discard
-// decision via `release_kind`:
-//  * `Healthy` — return to idle pool.
-//  * `Discard(reason)` — close + decrement outstanding (the next
-//  acquire reopens via the factory).
+// `acquire` returns PooledConnection<C>, not common.pool.PoolHandle. Callers
+// must explicitly use release_healthy or release_discard; PooledConnection
+// has no declared resource modifier or Drop implementation. With the pool
+// lock acquired, Healthy resets/requeues the arena and connection; Discard
+// destroys the arena and relinquishes the connection value. Both update the
+// outstanding count. Discard does not invoke a vendor close API, and implicit
+// connection cleanup requires separate lifecycle evidence.
 // =============================================================================
 
 @arch_module(
@@ -228,8 +228,8 @@ implement<C> ConnectionPool<C> {
     ///   * `release_healthy` / `release_discard` notify_one after
     ///     dropping the inner-state lock — wake-up cost is one
     ///     futex_wake when waiters > 0, otherwise zero.
-    ///   * `drain` notify_alls so every parked acquirer learns the
-    ///     pool is shutting down and can bail with `PekExhausted`.
+    ///   * `drain` also notifies waiters; it has no shutdown-state flag.
+    ///     The caller must prevent new acquisitions during drain.
     ///
     /// Latency: a release that frees a slot reaches the next
     /// acquirer in ~one syscall instead of the previous
@@ -344,10 +344,12 @@ implement<C> ConnectionPool<C> {
         }
     }
 
-    /// Release a checked-out connection. Healthy → recycled; Discard →
-    /// closed + slot count decremented. Returning a connection always
-    /// succeeds (the connection itself may already be closed; we just
-    /// drop it).
+    /// Explicit release route. With the lock acquired, Healthy resets and
+    /// requeues the connection arena; Discard destroys the arena and
+    /// relinquishes the connection value without an explicit vendor close.
+    /// Both paths decrement outstanding and notify a waiter.
+    /// A poisoned lock returns early without those updates. The unit return
+    /// type does not report that failure or prove underlying resource cleanup.
     ///
     /// Healthy-path arena handling: the freshly-released arena is
     /// *reset* (generation++) before being parked in `idle_arenas`.
@@ -360,9 +362,9 @@ implement<C> ConnectionPool<C> {
     /// O(1) regardless of how many bytes were allocated during the
     /// session.
     ///
-    /// Discard-path: the arena is destroyed alongside the
-    /// connection. The next acquire builds a fresh arena via the
-    /// factory + `new_connection`.
+    /// Discard-path: arena.destroy is called explicitly. Connection cleanup
+    /// depends on C and the runtime; relinquishing its value is not proof of
+    /// successful close. The freed capacity permits a later cold acquire.
     ///
     /// Wakeup discipline: the inner-state lock is released BEFORE
     /// `cond.notify_one()`. The mutex-then-notify ordering is the
@@ -409,20 +411,18 @@ implement<C> ConnectionPool<C> {
         &self.pool_arena
     }
 
-    /// Drain — refuse new acquires (caller policed at handler scope),
-    /// wait for in-flight checkouts to release, then close every idle
-    /// connection AND destroy its parked arena. The connection drop
-    /// is the responsibility of `C`'s destructor.
+    /// Caller must stop new acquisitions before draining; this type has no
+    /// shutdown-state flag. Wait for outstanding checkouts until the deadline,
+    /// explicitly destroy idle arenas, then replace the idle lists. There is
+    /// no vendor close call here; cleanup of discarded C values remains a
+    /// separate runtime obligation.
     ///
-    /// Implementation: parks on the same `cond` as `acquire` —
-    /// every `release_*` notifies, so we wake the moment
-    /// `outstanding` could plausibly have hit zero and re-check
-    /// under the lock. `notify_all` here ensures parked acquirers
-    /// also learn the pool is shutting down (their next wake-up
-    /// surface ends in `PekExhausted`).
+    /// Parks on the same condvar as acquire and rechecks outstanding under
+    /// the lock after notification. notify_all wakes waiters, but does not
+    /// itself tell an acquirer to reject work or establish shutdown state.
     public fn drain(&self, deadline_ms: Int) -> Result<(), DbError> {
-        // Wake every parked acquirer so they can re-evaluate and
-        // bail with `PekExhausted` instead of holding the deadline.
+        // Wake waiters to re-evaluate their ordinary conditions. The caller
+        // must prevent new acquisitions; this notification sets no shutdown flag.
         self.cond.notify_all();
         let total_deadline_ns = (deadline_ms as Int) * 1_000_000;
         let start = Instant.now();
@@ -504,10 +504,12 @@ implement<C> ConnectionPool<C> {
 // PooledConnection — checkout handle.
 // -----------------------------------------------------------------------------
 
-/// Affine RAII handle. Caller MUST consume via `release_healthy` or
-/// `release_discard`; the destructor's behaviour for an unconsumed
-/// handle is to release as healthy (defensive — we'd rather leak a
-/// possibly-bad connection back into the pool than leak the slot).
+/// Concrete checkout handle. Callers must use release_healthy or
+/// release_discard as an API obligation. The declaration has no affine,
+/// linear or @must_consume modifier and no Drop implementation supplies a
+/// fallback release. Effective aggregate usage depends on its components;
+/// neither that usage discipline nor scope exit establishes pool return.
+/// Early returns, panic and cancellation must not rely on an implicit release.
 ///
 /// Carries a `SpindleArena` alongside the connection so adapter
 /// code (`Connection.execute`, `Connection.query`, ...) can carve
@@ -526,8 +528,8 @@ public type PooledConnection<C> is {
 implement<C> PooledConnection<C> {
     public fn id(&self) -> Int { self.id }
 
-    /// Borrow the connection mutably — the body runs the actual
-    /// query. Affine consume happens via release_*.
+    /// Borrow the connection mutably for a query. The caller remains
+    /// responsible for an explicit release_* call after handling the result.
     public fn conn_mut(&mut self) -> &mut C {
         match &mut self.conn {
             Maybe.Some(c) => c,
@@ -572,10 +574,10 @@ implement<C> PooledConnection<C> {
         }
     }
 
-    /// Return the connection to the pool as healthy. Resets the
-    /// arena's generation in O(1) so any reference that escaped the
-    /// previous handler scope becomes stale before the next
-    /// acquirer sees the slot.
+    /// Route the connection and arena through the Healthy release path.
+    /// When the pool lock is acquired, that path resets the arena before
+    /// requeueing it. This unit-returning method reports no poisoned-lock
+    /// failure and does not check whether the connection is healthy.
     public fn release_healthy(mut self) {
         let c = match self.conn {
             Maybe.Some(c) => c,
@@ -590,8 +592,9 @@ implement<C> PooledConnection<C> {
         self.pool.release(c, a, Healthy);
     }
 
-    /// Discard the connection (will be reopened on next acquire).
-    /// The arena is destroyed alongside.
+    /// Pass the connection and arena to the pool's Discard release path.
+    /// That path destroys the arena if the lock is acquired, but does not
+    /// explicitly close C. This unit-returning method reports no release error.
     public fn release_discard(mut self, reason: Text) {
         let c = match self.conn {
             Maybe.Some(c) => c,

@@ -18,18 +18,16 @@
 //     `Database<PgPool, C>`; only the `P` parameter differs.
 //   * `acquire().await` reaches into `AsyncPgPool` (channel-based
 //     pool from `async_pool.vr`).
-//   * Returned `AsyncPgPoolGuard` releases on Drop — matches sync
-//     `PooledConnection`'s release-on-Drop with a tighter type
-//     surface (no manual `release_healthy` /
-//     `release_discard` — the V0 async surface treats every
-//     successful return as healthy and every error as fatal,
-//     dropping the connection's actor on actor-side error).
+//   * AsyncPgPoolGuard has explicit async release and a best-effort Drop
+//     body that attempts try_send. Synchronous PooledConnection instead
+//     requires explicit release_healthy/release_discard and has no Drop
+//     implementation. This facade relies on guard destruction; successful
+//     pool return and destructor timing on both backends remain unproven.
 //
 // Out of V0:
-//   * Connection-level error → discard semantics (sync uses
-//     `release_discard(reason)`; async V0 always releases
-//     healthy — connection death surfaces as ACTOR_CLOSED on
-//     the next acquire of the underlying handle).
+//   * Connection-level error -> discard semantics: sync exposes
+//     release_discard(reason), while the async return paths send the
+//     handle back without a health/discard verdict or acknowledgement.
 //   * COPY / NOTIFY / replication async (each its own follow-up).
 // =============================================================================
 
@@ -65,9 +63,9 @@ mount core.database.postgres.transaction.{PgTxOpts, pg_tx_opts_default};
 // -----------------------------------------------------------------------------
 
 implement<C: CanRead> Database<AsyncPgPool, C> {
-    /// Acquire a connection from the pool, dispatch
-    /// `simple_query`, release on Drop. Yields to the executor
-    /// while the actor runs the wire round-trip.
+    /// Acquire a guard and dispatch simple_query through the actor. This
+    /// body relies on scope-exit Drop for the return attempt; it does not
+    /// await explicit release or acknowledge successful pool return.
     public async fn query_simple(&self, sql: &Text)
         -> Result<PgSimpleQueryResult, DbError>
     {
@@ -155,7 +153,8 @@ implement AsyncPgTxScope {
             Maybe.None    => { return Result.Err(scope_used("commit-no-tx")); }
         };
         let r = commit_tx_async(&conn, tx).await;
-        // Drop the guard — connection returns to the pool.
+        // Relinquish the guard; its declared Drop body attempts pool return.
+        // This does not acknowledge delivery or prove destructor dispatch.
         let _ = self.guard.take();
         r
     }

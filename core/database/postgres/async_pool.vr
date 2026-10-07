@@ -232,12 +232,14 @@ implement AsyncPgPool {
 }
 
 // =============================================================================
-// Guard — auto-release on drop
+// Guard — explicit async release and best-effort Drop fallback
 // =============================================================================
 
-/// RAII guard that returns the wrapped `AsyncPgConnection` to the
-/// pool when dropped. Marked affine so it can't be cloned: each
-/// checkout is single-owner.
+/// Affine checkout: at most one consuming use, not a must-consume value.
+/// Explicit release awaits a channel send; the declared Drop implementation
+/// instead attempts a non-blocking try_send. Both ignore the send result.
+/// A Drop body alone does not establish that scope exit or cancellation
+/// dispatches it correctly on both execution backends.
 public type affine AsyncPgPoolGuard is {
     handle: Maybe<AsyncPgConnection>,
     available_tx: Sender<AsyncPgConnection>,
@@ -258,8 +260,9 @@ implement AsyncPgPoolGuard {
         }
     }
 
-    /// Eager release. Cleaner than letting Drop run if the caller
-    /// has more work after the connection is no longer needed.
+    /// Explicit return attempt. Takes the stored handle and awaits
+    /// send_async, discarding its result. Completion is not a delivery or
+    /// health-check acknowledgement; this API has no discard verdict.
     public async fn release(mut self) {
         match self.handle.take() {
             Maybe.Some(h) => { let _ = self.available_tx.send_async(h).await; }
@@ -513,11 +516,10 @@ fn format_pg_timestamp_text(microseconds: Int, with_tz: Bool) -> List<Byte> {
 
 implement Drop for AsyncPgPoolGuard {
     fn drop(&mut self) {
-        // Non-blocking best-effort return. If the channel is full
-        // (impossible — cap == max_size and we hold one slot
-        // ourselves) the connection is dropped and the actor
-        // shuts down; the pool's `current` counter stays high
-        // until V1 adds reconciliation.
+        // Non-blocking return attempt; the result is ignored. No health
+        // check, current-counter reconciliation or explicit actor shutdown
+        // occurs here if try_send fails. This body is not proof that native
+        // scope-exit/panic/cancellation dispatch reaches it.
         match self.handle.take() {
             Maybe.Some(h) => { let _ = self.available_tx.try_send(h); }
             Maybe.None    => {}

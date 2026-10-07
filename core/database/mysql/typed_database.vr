@@ -246,11 +246,10 @@ implement<C: CanTx> Database<MysqlPool, C> {
 // MysqlTxScope — affine wrapper bundling tx + pool checkout
 // -----------------------------------------------------------------------------
 
-/// Active-transaction handle. Holds the `MysqlTransaction` (which
-/// owns a `&mut MysqlConnection`) plus the
-/// `PooledConnection<MysqlConnection>` checkout that keeps the
-/// connection alive. Consumed by `commit` or `rollback` — affine,
-/// so a forgotten consume is a compile error per spec §5.5.
+/// Active-transaction wrapper holding a MysqlTransaction token and its pool
+/// checkout. The token holds options, not a connection borrow. Callers must
+/// explicitly commit or roll back to finish and release the checkout;
+/// affine permits an unused wrapper and does not prove automatic cleanup.
 public type affine MysqlTxScope<P> is {
     tx: MysqlTransaction,
     handle: PooledConnection<MysqlConnection>,

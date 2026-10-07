@@ -166,6 +166,10 @@ implement AsyncMysqlPool {
     }
 }
 
+/// Affine checkout with an explicit async release and a declared Drop
+/// fallback. Both ignore the channel-send result; neither acknowledges
+/// delivery or selects a health/discard verdict. Drop dispatch on scope exit,
+/// panic and cancellation requires separate evidence on both backends.
 public type affine AsyncMysqlPoolGuard is {
     handle: Maybe<AsyncMysqlConnection>,
     available_tx: Sender<AsyncMysqlConnection>,
