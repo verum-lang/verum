@@ -8355,3 +8355,7 @@ mod explicit_generic_param_tests;
 #[cfg(test)]
 #[path = "../tests/archive/bootstrap_glue.rs"]
 mod bootstrap_glue_tests;
+
+#[cfg(test)]
+#[path = "../tests/archive/wanted_leaf_index.rs"]
+mod wanted_leaf_index_tests;
