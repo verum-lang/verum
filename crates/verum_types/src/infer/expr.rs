@@ -9274,12 +9274,9 @@ impl TypeChecker {
     /// those are not evidence that a value expression names a type.
     fn declaration_property_path(&mut self, path: &Path) -> Option<Path> {
         use verum_ast::ty::PathSegment;
-        if path.segments.len() == 1
-            && self.current_self_type.is_some()
-            && matches!(&path.segments[0], PathSegment::SelfValue)
-        {
-            return Some(path.clone());
-        }
+        // In an expression SelfValue is lowercase `self`, a value receiver.
+        // Uppercase `Self` is a Name; explicit type syntax bypasses this
+        // declaration-path probe through ExprKind::TypeExpr.
         let names: Option<List<Text>> = path
             .segments
             .iter()

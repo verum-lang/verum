@@ -629,3 +629,15 @@ fn module_alias_publication_does_not_export_nested_or_file_owned_leaves() {
         );
     }
 }
+
+#[test]
+fn value_self_fields_never_become_associated_type_properties() {
+    for property in ["size", "name", "bits", "id", "is_signed"] {
+        for operand in [format!("self.{property}"), format!("(self).{property}"), format!("self.inner.{property}")] {
+            let source = format!("type Payload is {{ {property}: Int }}; type Cell is {{ {property}: Int, inner: Payload }}; implement Cell {{ fn read(&self)->Int {{ {operand} }} }} fn probe()->Int {{ Cell{{ {property}:37, inner:Payload{{{property}:37}} }}.read() }}");
+            assert_eq!(run(roundtrip(&compile(&source)), "probe"), 37, "{operand}");
+        }
+    }
+    let source = r#"type Config is {name:Text}; type Inner is {config:Config}; type Cell is {inner:Inner}; implement Cell {fn name(&self)->Text {self.inner.config.name}} fn probe()->Int {let cell=Cell{inner:Inner{config:Config{name:"root"}}}; assert_eq(cell.name(),"root");37}"#;
+    assert_eq!(run(roundtrip(&compile(source)), "probe"), 37);
+}

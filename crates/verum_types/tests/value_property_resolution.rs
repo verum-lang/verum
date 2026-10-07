@@ -397,3 +397,14 @@ fn same_typed_lexical_value_shadows_generic_type_parameter() {
         );
     }
 }
+
+#[test]
+fn value_self_fields_keep_their_declared_type() {
+    for property in ["size", "name", "bits", "id", "is_signed"] {
+        for operand in [format!("self.{property}"), format!("(self).{property}"), format!("self.inner.{property}")] {
+            let source = format!("type Payload is {{ {property}: Bool }}; type Cell is {{ {property}: Bool, inner: Payload }}; implement Cell {{ fn probe(&self)->Bool {{ {operand} }} }}");
+            let problems = module_errors(TypeChecker::new(), &source, false);
+            assert!(problems.is_empty(), "{source}: {problems:?}");
+        }
+    }
+}

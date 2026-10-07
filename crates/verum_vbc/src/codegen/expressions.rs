@@ -23081,6 +23081,12 @@ impl VbcCodegen {
             }
             ExprKind::Path(_) | ExprKind::Field { .. } => {
                 let mut path = path_operand(expression)?;
+                // Expression paths preserve lowercase `self` as SelfValue;
+                // uppercase `Self` is a Name and can prove a type operand.
+                // A receiver field chain never becomes an associated type.
+                if matches!(path.segments.first(), Some(PathSegment::SelfValue)) {
+                    return None;
+                }
                 let mut name = path.to_string().replace("::", ".");
                 if let Some(PathSegment::Name(root)) = path.segments.first()
                     && inspect_runtime_bindings
@@ -23098,7 +23104,6 @@ impl VbcCodegen {
                 if inspect_runtime_bindings && path.segments.len() > 1 {
                     let root = match path.segments.first()? {
                         PathSegment::Name(name) => name.as_str(),
-                        PathSegment::SelfValue => "Self",
                         _ => return None,
                     };
                     if self.ctx.current_generic_param_ids.contains_key(root)
