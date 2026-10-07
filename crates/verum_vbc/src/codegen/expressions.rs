@@ -8455,7 +8455,7 @@ impl VbcCodegen {
             };
             let type_args = self.apply_explicit_generic_args(
                 (final_func_id != UNRESOLVED_FN_ID).then_some(final_func_id), type_args, type_args_inferred,
-            );
+            )?;
             match type_args {
                 Some(type_args) if !type_args.is_empty() => {
                     self.ctx.emit(Instruction::CallG {
@@ -8600,8 +8600,8 @@ impl VbcCodegen {
         }
         for (id, ty) in bindings { substitution.bind(crate::types::TypeParamId(id as u16), ty); }
         for (arg, id) in type_args.iter().zip(&info.explicit_type_param_ids) {
-            if let (verum_ast::ty::GenericArg::Type(ty), Some(id)) = (arg, id)
-                && let Some(ty) = self.explicit_type_witness(ty, None) {
+            if let (Some(ty), Some(id)) = (arg.type_for_declared_slot(), id)
+                && let Some(ty) = self.explicit_type_witness(&ty, None) {
                 substitution.bind(*id, ty);
             }
         }
@@ -8977,45 +8977,144 @@ impl VbcCodegen {
         func_id: Option<u32>,
         explicit: &verum_common::List<verum_ast::ty::GenericArg>,
         inferred: Option<Vec<crate::types::TypeRef>>,
-    ) -> Option<Vec<crate::types::TypeRef>> {
+    ) -> CodegenResult<Option<Vec<crate::types::TypeRef>>> {
         use crate::types::TypeRef;
         use verum_ast::ty::GenericArg;
-        if explicit.is_empty() { return inferred; }
-        let Some(info) = func_id.and_then(|id| self.ctx.lookup_function_by_id(crate::module::FunctionId(id))).cloned() else {
-            return inferred;
+        if explicit.is_empty() {
+            return Ok(inferred);
+        }
+        let ambiguous_array = explicit.iter().any(|argument| {
+            matches!(argument,
+            GenericArg::Const(expr) if matches!(expr.kind, verum_ast::ExprKind::Array(_)))
+        });
+        let missing_slots = || {
+            CodegenError::new(CodegenErrorKind::TypeInference(
+                "array generic argument requires declaration-owned slot metadata".into(),
+            ))
         };
-        if info.explicit_type_param_ids.is_empty() || info.type_param_ids.is_empty() { return inferred; }
-        let ret = self.functions.iter().find(|f| f.descriptor.id == info.id)
-            .map(|f| &f.descriptor.return_type).or(info.return_type.as_ref());
-        let expected = self.ctx.current_return_type_full.as_ref()
+        let Some(info) = func_id
+            .and_then(|id| {
+                self.ctx
+                    .lookup_function_by_id(crate::module::FunctionId(id))
+            })
+            .cloned()
+        else {
+            return if ambiguous_array {
+                Err(missing_slots())
+            } else {
+                Ok(inferred)
+            };
+        };
+        if ambiguous_array
+            && (info.explicit_type_param_ids.is_empty()
+                || explicit.len() > info.explicit_type_param_ids.len()
+                || info
+                    .explicit_type_param_ids
+                    .iter()
+                    .flatten()
+                    .any(|id| !info.type_param_ids.contains(id)))
+        {
+            return Err(missing_slots());
+        }
+        if info.explicit_type_param_ids.is_empty() || info.type_param_ids.is_empty() {
+            return Ok(inferred);
+        }
+        let ret = self
+            .functions
+            .iter()
+            .find(|f| f.descriptor.id == info.id)
+            .map(|f| &f.descriptor.return_type)
+            .or(info.return_type.as_ref());
+        let expected = self
+            .ctx
+            .current_return_type_full
+            .as_ref()
             .or(self.ctx.current_return_type_name.as_ref())
             .and_then(|name| self.type_name_to_type_ref_mono(name));
         let mut expected_bindings = std::collections::BTreeMap::new();
         if let (Some(ret), Some(expected)) = (ret, expected.as_ref()) {
             bind_generic_free(ret, expected, &mut expected_bindings);
         }
-        let mut bindings: std::collections::BTreeMap<u16, TypeRef> = info.type_param_ids.iter().enumerate()
-            .filter_map(|(i, id)| inferred.as_ref().and_then(|args| args.get(i)).map(|arg| (id.0, arg.clone())))
+        let mut bindings: std::collections::BTreeMap<u16, TypeRef> = info
+            .type_param_ids
+            .iter()
+            .enumerate()
+            .filter_map(|(i, id)| {
+                inferred
+                    .as_ref()
+                    .and_then(|args| args.get(i))
+                    .map(|arg| (id.0, arg.clone()))
+            })
             .collect();
         for (arg, id) in explicit.iter().zip(&info.explicit_type_param_ids) {
-            let Some(id) = id else { continue; };
-            let expected_slot = expected_bindings.get(&u32::from(id.0)).or_else(|| bindings.get(&id.0));
-            let value = match arg {
-                GenericArg::Type(ty) => self.explicit_type_witness(ty, expected_slot),
-                _ => None,
+            let Some(id) = id else {
+                continue;
             };
+            let expected_slot = expected_bindings
+                .get(&u32::from(id.0))
+                .or_else(|| bindings.get(&id.0));
+            let projected = arg.type_for_declared_slot();
+            let value = projected
+                .as_ref()
+                .and_then(|ty| self.explicit_type_witness(ty, expected_slot));
+            if value.is_none()
+                && (matches!(arg, GenericArg::Const(_))
+                    || projected
+                        .as_ref()
+                        .is_some_and(Self::explicit_type_contains_array))
+            {
+                return Err(CodegenError::new(CodegenErrorKind::TypeInference(
+                    "explicit structural type requires a declared element and checked nonnegative array count".into(),
+                )));
+            }
             bindings.insert(id.0, value.unwrap_or(TypeRef::Generic(*id)));
         }
-        let result: Vec<TypeRef> = info.type_param_ids.iter().map(|id| {
-            bindings.remove(&id.0).unwrap_or(TypeRef::Generic(*id))
-        }).collect();
+        let result: Vec<TypeRef> = info
+            .type_param_ids
+            .iter()
+            .map(|id| bindings.remove(&id.0).unwrap_or(TypeRef::Generic(*id)))
+            .collect();
         if std::env::var_os("VERUM_ENABLE_MONO_AOT").is_some() {
             if let Some(old) = inferred.as_ref() {
-                self.pending_specializations.retain(|(id, args)| *id != info.id.0 || args != old);
+                self.pending_specializations
+                    .retain(|(id, args)| *id != info.id.0 || args != old);
             }
-            self.pending_specializations.push((info.id.0, result.clone()));
+            self.pending_specializations
+                .push((info.id.0, result.clone()));
         }
-        Some(result)
+        Ok(Some(result))
+    }
+
+    /// An invalid fixed-array length may not fall back to an unresolved generic
+    /// when the array is wrapped by a reference, tuple or function type.
+    fn explicit_type_contains_array(ty: &verum_ast::Type) -> bool {
+        use verum_ast::TypeKind;
+        let mut pending = verum_common::List::from_iter([ty]);
+        let mut visited = 0;
+        while let Some(ty) = pending.pop() {
+            visited += 1;
+            if visited > 1024 {
+                return true;
+            }
+            match &ty.kind {
+                TypeKind::Array { .. } => return true,
+                TypeKind::Slice(inner)
+                | TypeKind::Reference { inner, .. }
+                | TypeKind::CheckedReference { inner, .. }
+                | TypeKind::UnsafeReference { inner, .. } => pending.push(inner),
+                TypeKind::Tuple(items) => pending.extend(items),
+                TypeKind::Function {
+                    params,
+                    return_type,
+                    ..
+                } => {
+                    pending.extend(params);
+                    pending.push(return_type);
+                }
+                _ => (),
+            }
+        }
+        false
     }
 
     fn explicit_type_witness(
@@ -9075,6 +9174,17 @@ impl VbcCodegen {
                     self.explicit_type_witness(ty, expected_items.and_then(|items| items.get(i)))
                 }).collect();
                 items.map(TypeRef::Tuple)
+            }
+            TypeKind::Array { element, size: Some(size) } => {
+                let length = u64::try_from(self.const_eval_i64(size).ok()??).ok()?;
+                let expected_element = match expected {
+                    Some(TypeRef::Array { element, length: expected_length }) if *expected_length == length => Some(element.as_ref()),
+                    _ => None,
+                };
+                Some(TypeRef::Array {
+                    element: verum_common::Heap::new(self.explicit_type_witness(element, expected_element)?),
+                    length,
+                })
             }
             TypeKind::Slice(inner) => {
                 let expected_inner = match expected { Some(TypeRef::Slice(inner)) => Some(inner.as_ref()), _ => None };
@@ -16562,7 +16672,7 @@ impl VbcCodegen {
             }
         };
 
-        let sidecar_args = self.apply_explicit_generic_args(resolvable_fid, type_args, sidecar_args);
+        let sidecar_args = self.apply_explicit_generic_args(resolvable_fid, type_args, sidecar_args)?;
 
         if std::env::var_os("VERUM_TRACE_TPCALL").is_some() {
             eprintln!(
@@ -17241,8 +17351,8 @@ impl VbcCodegen {
             // the receiver's argument positions. Apply the same IDs as CallG
             // before the result is used as a field or method receiver.
             for (arg, id) in explicit.iter().zip(&info.explicit_type_param_ids) {
-                if let (verum_ast::ty::GenericArg::Type(ty), Some(id)) = (arg, id)
-                    && let Some(witness) = self.explicit_type_witness(ty, None)
+                if let (Some(ty), Some(id)) = (arg.type_for_declared_slot(), id)
+                    && let Some(witness) = self.explicit_type_witness(&ty, None)
                 {
                     substitution.bind(*id, witness);
                 }
@@ -18027,7 +18137,7 @@ impl VbcCodegen {
                 }
             }
         }
-        match self.apply_explicit_generic_args(Some(func_info.id.0), type_args, inferred_type_args)
+        match self.apply_explicit_generic_args(Some(func_info.id.0), type_args, inferred_type_args)?
         {
             Some(type_args) if !type_args.is_empty() => {
                 self.ctx.emit(Instruction::CallG {
@@ -32158,8 +32268,8 @@ impl VbcCodegen {
         };
         let mut substitution = self.callable_owner_substitution(&owner)?;
         for (arg, id) in explicit.iter().zip(&info.explicit_type_param_ids) {
-            if let (verum_ast::ty::GenericArg::Type(ty), Some(id)) = (arg, id)
-                && let Some(ty) = self.explicit_type_witness(ty, None)
+            if let (Some(ty), Some(id)) = (arg.type_for_declared_slot(), id)
+                && let Some(ty) = self.explicit_type_witness(&ty, None)
             {
                 substitution.bind(*id, ty);
             }

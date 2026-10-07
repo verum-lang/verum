@@ -40,6 +40,7 @@ fn carried_descriptor() -> FunctionDescriptor {
         is_unsafe: false,
         intrinsic_id: Maybe::None,
         parent_type: Maybe::Some(Text::from("Slice")),
+        explicit_type_param_ids: None,
         impl_generic_names: List::from_iter([Text::from("T")]),
         is_const: false,
         decl_span: Maybe::None,

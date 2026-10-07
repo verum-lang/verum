@@ -7928,19 +7928,21 @@ impl TypeChecker {
                     // descriptor doc pins `__generic_i` for
                     // `i < impl_generic_names.len()` to impl params),
                     // removes the coincidence.
-                    for (i, name) in fd
-                        .impl_generic_names
-                        .iter()
-                        .chain(fd.generic_params.iter().map(|gp| &gp.name))
-                        .enumerate()
-                    {
-                        if let Some(tv) =
-                            crate::infer::helpers::intern_scope_generic(name.as_str())
+                    if !Self::seed_metadata_generic_ids(fd) {
+                        for (i, name) in fd
+                            .impl_generic_names
+                            .iter()
+                            .chain(fd.generic_params.iter().map(|gp| &gp.name))
+                            .enumerate()
                         {
-                            crate::infer::helpers::alias_scope_generic(
-                                &format!("__generic_{i}"),
-                                tv,
-                            );
+                            if let Some(tv) =
+                                crate::infer::helpers::intern_scope_generic(name.as_str())
+                            {
+                                crate::infer::helpers::alias_scope_generic(
+                                    &format!("__generic_{i}"),
+                                    tv,
+                                );
+                            }
                         }
                     }
                     // HOF reconnection (T0702) — the free-fn twin of the
@@ -8052,11 +8054,12 @@ impl TypeChecker {
         // per-process-random iteration order made the same fixed descriptor
         // resolve `simd_extract<V, T>` to a different (and often broken)
         // scheme on each run.
-        let scheme = crate::infer::helpers::build_metadata_function_scheme(
+        let mut scheme = crate::infer::helpers::build_metadata_function_scheme(
             fn_ty,
             &scope_vars,
             &declared_names,
         );
+        Self::record_metadata_explicit_slots(fd, &scope_vars, &mut scheme);
         if let Some(required) = required_entry {
             self.function_required_params
                 .insert(Text::from(item_name), required);
@@ -11494,6 +11497,9 @@ impl TypeChecker {
         } else {
             scheme.with_protocol_bounds(func_param_protocol_bounds.clone())
         };
+        let mut scheme = scheme;
+        self.record_explicit_method_vars(&mut scheme, func);
+        let source_explicit_slots = scheme.explicit_method_vars.clone();
         // Protect builtin polymorphic functions from being overwritten by stdlib functions.
         // During stdlib loading, protocol methods like `Drop.drop(&mut self)` would overwrite
         // the builtin `drop: ∀T. fn(T) -> Unit` with a monomorphic version.
@@ -13493,6 +13499,8 @@ impl TypeChecker {
         } else {
             final_scheme.with_protocol_bounds(func_param_protocol_bounds.clone())
         };
+        let mut final_scheme = final_scheme;
+        final_scheme.explicit_method_vars = source_explicit_slots;
         if !self.in_impl_block {
             // T0231 guarded / T1120 declaration channel — see the
             // initial-scheme twin above.
@@ -25140,7 +25148,7 @@ bake to have this verified.",
         }
 
         if let Some(r) =
-            self.try_resolve_module_call(receiver, method, args, span, skip_static_lookup)?
+            self.try_resolve_module_call(receiver, method, type_args, args, span, skip_static_lookup)?
         {
             if crate::ctor_trace_enabled() {
                 eprintln!(
@@ -25922,6 +25930,7 @@ bake to have this verified.",
         &mut self,
         receiver: &Expr,
         method: &Ident,
+        type_args: &List<verum_ast::ty::GenericArg>,
         args: &[Expr],
         span: Span,
         skip_static_lookup: bool,
@@ -25977,7 +25986,7 @@ bake to have this verified.",
                         };
 
                         // Resolve through inline module - this will check visibility
-                        let func_result = self.resolve_inline_module_path(&module_path, span)?;
+                        let func_result = self.resolve_inline_module_path_with_arguments(&module_path, span, Some(type_args))?;
 
                         // Never propagation: if resolution returned Never, propagate it
                         if matches!(func_result.ty, Type::Never) {
@@ -26067,7 +26076,7 @@ bake to have this verified.",
                     // `unbound variable: core` for archive-loaded
                     // stdlib paths whose ROOT happened to be an inline
                     // module in this pipeline).
-                    match self.resolve_inline_module_path(&module_path, span) {
+                    match self.resolve_inline_module_path_with_arguments(&module_path, span, Some(type_args)) {
                         Ok(func_result) => {
                             // Never propagation: if resolution returned Never, propagate it
                             if matches!(func_result.ty, Type::Never) {
@@ -26131,7 +26140,7 @@ bake to have this verified.",
             {
                 let seg_vec: Vec<&str> = segments.to_vec();
                 if let Some(r) =
-                    self.try_resolve_global_module_fn_call(&seg_vec, method, args)?
+                    self.try_resolve_global_module_fn_call(&seg_vec, method, type_args, args)?
                 {
                     return Ok(Some(r));
                 }
@@ -26180,7 +26189,7 @@ bake to have this verified.",
                 }
             }
             if all_names {
-                if let Some(r) = self.try_resolve_global_module_fn_call(&seg_vec, method, args)? {
+                if let Some(r) = self.try_resolve_global_module_fn_call(&seg_vec, method, type_args, args)? {
                     return Ok(Some(r));
                 }
                 if self.module_member_is_missing(&seg_vec, method, skip_static_lookup) {
@@ -26490,15 +26499,17 @@ bake to have this verified.",
         &mut self,
         segments: &[&str],
         method: &Ident,
+        type_args: &List<verum_ast::ty::GenericArg>,
         args: &[Expr],
     ) -> Result<Option<InferResult>> {
-        self.try_resolve_global_module_fn_call_at(segments, method, args, method.span)
+        self.try_resolve_global_module_fn_call_at(segments, method, type_args, args, method.span)
     }
 
     fn try_resolve_global_module_fn_call_at(
         &mut self,
         segments: &[&str],
         method: &Ident,
+        type_args: &List<verum_ast::ty::GenericArg>,
         args: &[Expr],
         span: Span,
     ) -> Result<Option<InferResult>> {
@@ -26603,7 +26614,12 @@ bake to have this verified.",
                 }
             }
             if let Some(scheme) = scheme {
-                let func_type = self.unifier.apply(&scheme.instantiate());
+                let (instantiated, fresh) = scheme.instantiate_with_fresh_vars();
+                let explicit_slots = scheme.fresh_explicit_method_vars(&fresh);
+                if !type_args.is_empty() {
+                    self.bind_explicit_method_arguments(explicit_slots.as_ref(), type_args, method, span)?;
+                }
+                let func_type = self.unifier.apply(&instantiated);
                 if let Type::Function {
                     params,
                     return_type,

@@ -534,6 +534,76 @@ impl TypeChecker {
     /// eager `<Type>.<method>` registration above and the lazy
     /// fully-qualified module-path call resolution
     /// (`modules.rs::try_resolve_module_call`).
+    /// Seed exact declaration IDs before parsing any signature spelling. This
+    /// does not reconstruct IDs from order or duplicate parameter names.
+    pub(super) fn seed_metadata_generic_ids(fd: &crate::core_metadata::FunctionDescriptor) -> bool {
+        if fd.explicit_type_param_ids.is_none() {
+            return false;
+        }
+        let mut ids = verum_common::Set::new();
+        if fd
+            .generic_params
+            .iter()
+            .any(|param| param.pid.is_none_or(|id| !ids.insert(id)))
+        {
+            return false;
+        }
+        let mut names = verum_common::Set::new();
+        for param in &fd.generic_params {
+            let Some(id) = param.pid else {
+                return false;
+            };
+            let placeholder = format!("__generic_{id}");
+            if let Some(var) = crate::infer::helpers::intern_scope_generic(&placeholder) {
+                if names.insert(param.name.clone()) {
+                    crate::infer::helpers::alias_scope_generic(param.name.as_str(), var);
+                }
+            }
+        }
+        true
+    }
+
+    pub(super) fn record_metadata_explicit_slots(
+        fd: &crate::core_metadata::FunctionDescriptor,
+        scope: &indexmap::IndexMap<String, crate::ty::TypeVar>,
+        scheme: &mut crate::context::TypeScheme,
+    ) {
+        let Some(source_slots) = fd.explicit_type_param_ids.as_ref() else {
+            return;
+        };
+        let mut ids = verum_common::Set::new();
+        if fd
+            .generic_params
+            .iter()
+            .any(|param| param.pid.is_none_or(|id| !ids.insert(id)))
+        {
+            return;
+        }
+        let slots: Option<verum_common::List<Option<crate::ty::TypeVar>>> = source_slots
+            .iter()
+            .map(|slot| match slot {
+                Some(id) if ids.contains(id) => {
+                    scope.get(&format!("__generic_{id}")).copied().map(Some)
+                }
+                Some(_) => None,
+                None => Some(None),
+            })
+            .collect();
+        let Some(slots) = slots else {
+            return;
+        };
+        // Aliases in the parsing scope are multiple names for one variable;
+        // quantifying it twice would disconnect the first fresh slot from use.
+        let mut seen = verum_common::Set::new();
+        scheme.vars.retain(|var| seen.insert(*var));
+        for var in slots.iter().flatten() {
+            if seen.insert(*var) {
+                scheme.vars.push(*var);
+            }
+        }
+        scheme.explicit_method_vars = Some(slots);
+    }
+
     pub(super) fn scheme_from_function_descriptor(
         fd: &crate::core_metadata::FunctionDescriptor,
         metadata: &crate::core_metadata::CoreMetadata,
@@ -606,19 +676,21 @@ impl TypeChecker {
                 // the return stayed `List<_>` forever — E404 on every
                 // un-annotated `List.from([..])` / `Shared.new(..)`
                 // chain (the reference_system check-red cluster).
-                for (i, name) in fd
-                    .impl_generic_names
-                    .iter()
-                    .chain(fd.generic_params.iter().map(|gp| &gp.name))
-                    .enumerate()
-                {
-                    if let Some(tv) =
-                        crate::infer::helpers::intern_scope_generic(name.as_str())
+                if !Self::seed_metadata_generic_ids(fd) {
+                    for (i, name) in fd
+                        .impl_generic_names
+                        .iter()
+                        .chain(fd.generic_params.iter().map(|gp| &gp.name))
+                        .enumerate()
                     {
-                        crate::infer::helpers::alias_scope_generic(
-                            &format!("__generic_{i}"),
-                            tv,
-                        );
+                        if let Some(tv) =
+                            crate::infer::helpers::intern_scope_generic(name.as_str())
+                        {
+                            crate::infer::helpers::alias_scope_generic(
+                                &format!("__generic_{i}"),
+                                tv,
+                            );
+                        }
                     }
                 }
                 // HOF reconnection (T0702, free-fn twin of the T0701
@@ -708,7 +780,9 @@ impl TypeChecker {
         // ONE authority (T0175): declared generics quantified in appearance
         // order, `__opaque_type_N` existentials marked implicit so a caller's
         // positional `<A, B>` type arguments bind ONLY to the real generics.
-        crate::infer::helpers::build_metadata_function_scheme(fn_ty, &scope_vars, &declared_names)
+        let mut scheme = crate::infer::helpers::build_metadata_function_scheme(fn_ty, &scope_vars, &declared_names);
+        Self::record_metadata_explicit_slots(fd, &scope_vars, &mut scheme);
+        scheme
     }
 
     pub(super) fn register_stdlib_consts_from_metadata(
@@ -9371,6 +9445,14 @@ impl TypeChecker {
     ///  - Fallible: from throws_clause presence
     ///  - Other properties: inferred from function body
     pub(crate) fn infer_function_type(&mut self, func: &verum_ast::FunctionDecl) -> Result<Type> {
+        self.infer_function_type_with_arguments(func, None)
+    }
+
+    pub(super) fn infer_function_type_with_arguments(
+        &mut self,
+        func: &verum_ast::FunctionDecl,
+        arguments: Option<&List<verum_ast::ty::GenericArg>>,
+    ) -> Result<Type> {
         use verum_ast::decl::FunctionParamKind;
         use verum_ast::ty::GenericParamKind;
 
@@ -9539,8 +9621,16 @@ impl TypeChecker {
         // This handles throws_clause -> Fallible correlation, async -> Async, and body analysis
         let properties = self.property_inferrer.infer_function_decl(func);
 
-        // Exit the scope we entered for generic parameters
+        let mut declaration_slots = TypeScheme::mono(Type::unit());
+        self.record_explicit_method_vars(&mut declaration_slots, func);
+        // Argument spellings belong to the caller, outside the declaration's
+        // generic scope. Captured IDs still refer to this selected signature.
         self.ctx.exit_scope();
+        if let Some(arguments) = arguments.filter(|arguments| !arguments.is_empty()) {
+            self.bind_explicit_method_arguments(
+                declaration_slots.explicit_method_vars.as_ref(), arguments, &func.name, func.span,
+            )?;
+        }
 
         Ok(Type::function_with_properties(
             param_types?,

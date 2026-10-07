@@ -774,6 +774,14 @@ pub struct FunctionDescriptor {
     /// visible to a program that never mounts anything.
     #[serde(default = "visible_by_default")]
     pub is_public: bool,
+
+    /// Declaration-owned explicit generic positions. A type slot carries its
+    /// original TypeParamId; non-type positions remain holes. Missing legacy
+    /// metadata is unknown and must not classify ambiguous array expressions.
+    /// Self-describing readers default absence; bincode publication uses the
+    /// coordinated metadata schema, not serde defaults as a byte compatibility rule.
+    #[serde(default)]
+    pub explicit_type_param_ids: Maybe<List<Maybe<u16>>>,
 }
 
 /// Implementation descriptor (impl Protocol for Type)

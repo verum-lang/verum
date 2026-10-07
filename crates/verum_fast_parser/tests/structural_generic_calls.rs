@@ -147,3 +147,78 @@ fn reference_lifetime_syntax_reaches_the_type_parser() {
         matches!(&type_args[1], GenericArg::Type(ty) if matches!(ty.kind, TypeKind::Reference { .. }))
     );
 }
+
+#[test]
+fn bracket_arguments_are_calls_but_keep_lossless_value_syntax() {
+    for callee in ["size", "util.size", "object.size"] {
+        for spelling in [
+            "[Byte; 3]",
+            "[[Byte; 2]; 3]",
+            "[Byte]",
+            "[N; M]",
+            "[N]",
+            "[3; 4]",
+            "[3, 4]",
+        ] {
+            let source = format!("{callee}<{spelling}>()");
+            let call = parse(&source);
+            let arguments = match call.kind {
+                ExprKind::Call { type_args, .. } | ExprKind::MethodCall { type_args, .. } => {
+                    type_args
+                }
+                other => panic!("genuine parsed call required: {source}: {other:?}"),
+            };
+            assert!(
+                matches!(&arguments[0], GenericArg::Const(expression) if matches!(expression.kind, ExprKind::Array(_))),
+                "declaration must select the role: {source}: {arguments:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn semicolons_outside_brackets_do_not_prove_a_generic_call() {
+    for source in ["size<Byte; 3>()", "size<[Byte; 3>()", "size<Byte]; 3>()"] {
+        let file = FileId::new(0);
+        let tokens = Lexer::new(source, file)
+            .tokenize()
+            .expect("lex malformed expression");
+        let mut parser = RecursiveParser::new(&tokens, file);
+        let result = parser.parse_expr();
+        assert!(
+            result.is_err() || !parser.stream.at_end(),
+            "{source}: {result:?}"
+        );
+    }
+}
+
+#[test]
+fn bracket_comparisons_do_not_close_the_outer_generic_argument_list() {
+    for source in [
+        "size<[Byte; if 2 > 1 { 3 } else { 4 }]>()",
+        "object.size<[Byte; if 2 < 1 { 3 } else { 4 }]>()",
+        "size<[Byte; 8 >> 1]>()",
+    ] {
+        let call = parse(source);
+        let args = match call.kind {
+            ExprKind::Call { type_args, .. } | ExprKind::MethodCall { type_args, .. } => type_args,
+            other => panic!("call expected: {source}: {other:?}"),
+        };
+        assert!(
+            matches!(&args[0], GenericArg::Const(expr) if matches!(expr.kind, ExprKind::Array(_)))
+        );
+    }
+    for source in [
+        "left < [right; if 2 > 1 {3} else {4}]",
+        "left < [right; 8 >> 1]",
+    ] {
+        assert!(
+            matches!(parse(source).kind, ExprKind::Binary { .. }),
+            "{source}"
+        );
+    }
+    assert!(matches!(
+        argument("size<fn([Byte; 3]) -> Int>()"),
+        TypeKind::Function { .. }
+    ));
+}

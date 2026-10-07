@@ -3199,8 +3199,55 @@ fn substitute_refinement_binder(
         );
     }
 
-    /// Constrain method slots before argument checking and return inference.
+    /// Projected array syntax must not erase an invalid length to an unsized
+    /// inference variable. Use the same checked signed constant domain as VBC.
+    fn validate_explicit_array_lengths(&mut self, ty: &verum_ast::Type) -> Result<()> {
+        use verum_ast::TypeKind;
+        let mut pending = List::from_iter([ty]);
+        let mut visited = 0usize;
+        while let Some(ty) = pending.pop() {
+            visited += 1;
+            if visited > 1024 {
+                return Err(TypeError::OtherWithCodeSpanned {
+                    code: "E400".into(),
+                    msg: "explicit type argument is too complex".into(),
+                    span: ty.span,
+                });
+            }
+            match &ty.kind {
+                TypeKind::Array { element, size } => {
+                    if let Some(size) = size {
+                        let length = self
+                            .const_eval
+                            .eval(size)
+                            .ok()
+                            .and_then(|value| value.as_u128())
+                            .and_then(|value| i64::try_from(value).ok())
+                            .and_then(|value| usize::try_from(value).ok());
+                        if length.is_none() {
+                            return Err(TypeError::OtherWithCodeSpanned {
+                                code: "E400".into(), msg: "array type argument requires a checked nonnegative constant length".into(), span: size.span,
+                            });
+                        }
+                    }
+                    pending.push(element);
+                }
+                TypeKind::Slice(inner)
+                | TypeKind::Reference { inner, .. }
+                | TypeKind::CheckedReference { inner, .. }
+                | TypeKind::UnsafeReference { inner, .. } => pending.push(inner),
+                TypeKind::Tuple(elements) => pending.extend(elements),
+                TypeKind::Function { params, return_type, .. } => {
+                    pending.extend(params);
+                    pending.push(return_type);
+                }
+                _ => (),
+            }
+        }
+        Ok(())
+    }
 
+    /// Constrain declaration slots before argument checking and return inference.
     pub(super) fn bind_explicit_method_arguments(
         &mut self,
         slots: Option<&List<Option<TypeVar>>>,
@@ -3210,27 +3257,34 @@ fn substitute_refinement_binder(
     ) -> Result<crate::ty::Substitution> {
         let mut combined = crate::ty::Substitution::new();
         let Some(slots) = slots else {
+            if arguments.iter().any(|argument| matches!(argument,
+                verum_ast::ty::GenericArg::Const(expr) if matches!(expr.kind, ExprKind::Array(_)))) {
+                return Err(TypeError::OtherWithCodeSpanned {
+                    code: "E400".into(), msg: "array generic argument requires declaration-owned slot metadata".into(), span,
+                });
+            }
             return Ok(combined);
         };
         if arguments.len() > slots.len() {
             return Err(TypeError::OtherWithCodeSpanned {
                 code: "E408".into(),
-                msg: format!("Method '{}' accepts {} explicit generic arguments, but {} were provided",
+                msg: format!("Function '{}' accepts {} explicit generic arguments, but {} were provided",
                     method.name, slots.len(), arguments.len()).into(),
                 span,
             });
         }
         for (argument, slot) in arguments.iter().zip(slots.iter()) {
             if let Some(var) = slot {
-                let verum_ast::ty::GenericArg::Type(ty) = argument else {
+                let Some(ty) = argument.type_for_declared_slot() else {
                     return Err(TypeError::OtherWithCodeSpanned {
                         code: "E400".into(),
-                        msg: format!("Method '{}' requires a type argument in this generic slot",
+                        msg: format!("Function '{}' requires a type argument in this generic slot",
                             method.name).into(),
                         span,
                     });
                 };
-                let provided = self.ast_to_type(ty)?;
+                self.validate_explicit_array_lengths(&ty)?;
+                let provided = self.ast_to_type(&ty)?;
                 combined.extend(self.unifier.unify(&Type::Var(*var), &provided, span)?);
             }
         }

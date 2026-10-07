@@ -3564,18 +3564,35 @@ impl<'a> RecursiveParser<'a> {
         // We're at a `<` token. Look ahead to find the matching `>`.
         let mut depth = 0;
         let mut offset = 0;
+        let mut brackets = 0usize;
 
         loop {
             let token = self.stream.peek_nth_kind(offset);
 
             match token {
+                Some(TokenKind::LBracket) => {
+                    brackets += 1;
+                    offset += 1;
+                }
+                Some(TokenKind::RBracket) if brackets > 0 => {
+                    brackets -= 1;
+                    offset += 1;
+                }
+                // The bracket payload is an expression as well as potential
+                // type syntax. Comparisons and shifts inside it cannot close
+                // the surrounding generic argument list. The real parser
+                // validates the payload after this bounded lookahead.
+                Some(_) if brackets > 0 => {
+                    offset += 1;
+                }
+
                 Some(TokenKind::Lt) => {
                     depth += 1;
                     offset += 1;
                 }
                 Some(TokenKind::Gt) => {
                     depth -= 1;
-                    if depth == 0 {
+                    if depth == 0 && brackets == 0 {
                         // Found the matching `>`. Check what follows.
                         offset += 1;
                         let next = self.stream.peek_nth_kind(offset);
@@ -3599,7 +3616,7 @@ impl<'a> RecursiveParser<'a> {
                 // Right shift `>>` can act as two `>` tokens in generic context
                 Some(TokenKind::GtGt) => {
                     depth -= 2;
-                    if depth <= 0 {
+                    if depth <= 0 && brackets == 0 {
                         // Found the end. Check what follows.
                         // NOTE: LParen excluded - func<T>() is a generic function call, not TypeExpr
                         offset += 1;
@@ -3626,8 +3643,8 @@ impl<'a> RecursiveParser<'a> {
                 | Some(TokenKind::Dot)  // For nested paths
                 | Some(TokenKind::Integer(_))
                 | Some(TokenKind::Eq)
-                | Some(TokenKind::LBracket)
-                | Some(TokenKind::RBracket)
+                | Some(TokenKind::Fn)
+                | Some(TokenKind::RArrow)
                 | Some(TokenKind::LParen)
                 | Some(TokenKind::RParen)
                 | Some(TokenKind::Ampersand)
@@ -3663,18 +3680,35 @@ impl<'a> RecursiveParser<'a> {
         // We're at a `<` token. Look ahead to find the matching `>`.
         let mut depth = 0;
         let mut offset = 0;
+        let mut brackets = 0usize;
 
         loop {
             let token = self.stream.peek_nth_kind(offset);
 
             match token {
+                Some(TokenKind::LBracket) => {
+                    brackets += 1;
+                    offset += 1;
+                }
+                Some(TokenKind::RBracket) if brackets > 0 => {
+                    brackets -= 1;
+                    offset += 1;
+                }
+                // The bracket payload is an expression as well as potential
+                // type syntax. Comparisons and shifts inside it cannot close
+                // the surrounding generic argument list. The real parser
+                // validates the payload after this bounded lookahead.
+                Some(_) if brackets > 0 => {
+                    offset += 1;
+                }
+
                 Some(TokenKind::Lt) => {
                     depth += 1;
                     offset += 1;
                 }
                 Some(TokenKind::Gt) => {
                     depth -= 1;
-                    if depth == 0 {
+                    if depth == 0 && brackets == 0 {
                         // Found the matching `>`. For method calls, must be followed by `(`.
                         offset += 1;
                         let next = self.stream.peek_nth_kind(offset);
@@ -3685,7 +3719,7 @@ impl<'a> RecursiveParser<'a> {
                 // Right shift `>>` can act as two `>` tokens in generic context
                 Some(TokenKind::GtGt) => {
                     depth -= 2;
-                    if depth <= 0 {
+                    if depth <= 0 && brackets == 0 {
                         // Found the end. For method calls, must be followed by `(`.
                         offset += 1;
                         let next = self.stream.peek_nth_kind(offset);
@@ -3700,8 +3734,8 @@ impl<'a> RecursiveParser<'a> {
                 | Some(TokenKind::Dot)  // For nested paths
                 | Some(TokenKind::Integer(_))
                 | Some(TokenKind::Eq)
-                | Some(TokenKind::LBracket)
-                | Some(TokenKind::RBracket)
+                | Some(TokenKind::Fn)
+                | Some(TokenKind::RArrow)
                 | Some(TokenKind::LParen)
                 | Some(TokenKind::RParen)
                 | Some(TokenKind::Ampersand)

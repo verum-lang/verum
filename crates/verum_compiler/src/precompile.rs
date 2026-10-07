@@ -3436,6 +3436,7 @@ fn inject_declared_module_free_fn_keys(
                     is_unsafe: fd.is_unsafe,
                     intrinsic_id: Maybe::None,
                     parent_type: Maybe::None,
+                    explicit_type_param_ids: None,
                     impl_generic_names: List::new(),
                     is_const: false,
                     decl_span: Maybe::None,

@@ -3149,59 +3149,61 @@ impl TypeChecker {
                     // instantiates the other.  `generic_params` is the
                     // FULL pid-ordered list (impl level first) on v2.10+
                     // bakes; `impl_generic_names` covers older bakes.
-                    let mut slot_names: Vec<String> = fn_desc
-                        .generic_params
-                        .iter()
-                        .map(|gp| gp.name.as_str().to_string())
-                        .collect();
-                    if slot_names.len() < fn_desc.impl_generic_names.len() {
-                        slot_names = fn_desc
-                            .impl_generic_names
+                    if !Self::seed_metadata_generic_ids(fn_desc) {
+                        let mut slot_names: Vec<String> = fn_desc
+                            .generic_params
                             .iter()
-                            .map(|n| n.as_str().to_string())
+                            .map(|gp| gp.name.as_str().to_string())
                             .collect();
-                    }
-                    // SHADOW BAND (T0701 variant C): a DUPLICATE name in
-                    // the pid-ordered list is a band entry — a method
-                    // generic that reuses an impl-level name, published
-                    // AFTER the dense vector with pid `0x8000 | seq`
-                    // (writer: compile_function's band construction;
-                    // dense names are unique by construction, so
-                    // duplicate ⇒ band, and the j-th duplicate carries
-                    // band seq j).  Band entries get their OWN var,
-                    // reachable under the band placeholder, and the
-                    // BARE name re-points to it (method slot wins —
-                    // measured pre-fix: reduce's verbatim-carried `f: F`
-                    // interned into the IMPL's F, the call-site closure
-                    // unified with the receiver's captured closure, and
-                    // `reduce`/`max` judged
-                    // `Some(Item<MappedIter<_, fn(_,_)->_>>)` E404).
-                    let mut seen_slot_names: std::collections::HashSet<&str> =
-                        std::collections::HashSet::new();
-                    let mut band_seq: usize = 0;
-                    for (i, n) in slot_names.iter().enumerate() {
-                        if seen_slot_names.insert(n.as_str()) {
-                            if let Some(tv) =
-                                crate::infer::helpers::intern_scope_generic(n)
-                            {
-                                crate::infer::helpers::alias_scope_generic(
-                                    &format!("__generic_{}", i),
-                                    tv,
-                                );
+                        if slot_names.len() < fn_desc.impl_generic_names.len() {
+                            slot_names = fn_desc
+                                .impl_generic_names
+                                .iter()
+                                .map(|n| n.as_str().to_string())
+                                .collect();
+                        }
+                        // SHADOW BAND (T0701 variant C): a DUPLICATE name in
+                        // the pid-ordered list is a band entry — a method
+                        // generic that reuses an impl-level name, published
+                        // AFTER the dense vector with pid `0x8000 | seq`
+                        // (writer: compile_function's band construction;
+                        // dense names are unique by construction, so
+                        // duplicate ⇒ band, and the j-th duplicate carries
+                        // band seq j).  Band entries get their OWN var,
+                        // reachable under the band placeholder, and the
+                        // BARE name re-points to it (method slot wins —
+                        // measured pre-fix: reduce's verbatim-carried `f: F`
+                        // interned into the IMPL's F, the call-site closure
+                        // unified with the receiver's captured closure, and
+                        // `reduce`/`max` judged
+                        // `Some(Item<MappedIter<_, fn(_,_)->_>>)` E404).
+                        let mut seen_slot_names: std::collections::HashSet<&str> =
+                            std::collections::HashSet::new();
+                        let mut band_seq: usize = 0;
+                        for (i, n) in slot_names.iter().enumerate() {
+                            if seen_slot_names.insert(n.as_str()) {
+                                if let Some(tv) =
+                                    crate::infer::helpers::intern_scope_generic(n)
+                                {
+                                    crate::infer::helpers::alias_scope_generic(
+                                        &format!("__generic_{}", i),
+                                        tv,
+                                    );
+                                }
+                            } else {
+                                // Band var pre-seeded under its placeholder so
+                                // every occurrence in the bound strings interns
+                                // to ONE var.  The BARE name deliberately stays
+                                // on the impl var: a global re-point (measured
+                                // b114/b115) starves the receiver-coupled paths
+                                // that resolve by source name and regressed
+                                // zip5 to the pre-band error; the parse-side
+                                // consumer that needs the band var reaches it
+                                // through the placeholder spelling.
+                                let band_key = format!("__generic_{}", 0x8000usize | band_seq);
+                                band_seq += 1;
+                                let _ = crate::infer::helpers::intern_scope_generic(&band_key);
                             }
-                        } else {
-                            // Band var pre-seeded under its placeholder so
-                            // every occurrence in the bound strings interns
-                            // to ONE var.  The BARE name deliberately stays
-                            // on the impl var: a global re-point (measured
-                            // b114/b115) starves the receiver-coupled paths
-                            // that resolve by source name and regressed
-                            // zip5 to the pre-band error; the parse-side
-                            // consumer that needs the band var reaches it
-                            // through the placeholder spelling.
-                            let band_key = format!("__generic_{}", 0x8000usize | band_seq);
-                            band_seq += 1;
-                            let _ = crate::infer::helpers::intern_scope_generic(&band_key);
                         }
                     }
                     // HOF reconnection (T0701): a fn-bounded generic param
@@ -3677,6 +3679,8 @@ impl TypeChecker {
                     s
                 }
             };
+            let mut scheme = scheme;
+            Self::record_metadata_explicit_slots(fn_desc, &scope_vars, &mut scheme);
             bucket.insert(method_name.clone(), scheme.clone());
             if is_static {
                 let static_key: Text =

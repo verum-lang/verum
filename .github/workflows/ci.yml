@@ -691,7 +691,7 @@ jobs:
       - name: Build verum CLI
         run: cargo build -p verum_cli --release --locked
 
-      # T1536/T1579: pin archive mounts and source-shadow declaration identity.
+      # T1536/T1579/T1596: archive mounts, source-shadow identity and explicit generic slots.
       # Reuses the compiler/stdlib build above; no native program is compiled.
       - name: Archive mount and shadow declaration authority
         timeout-minutes: 15
@@ -699,6 +699,7 @@ jobs:
           cargo test --locked --release -p verum_compiler
           --test archive_mount_declaration_owner
           --test shadowed_type_metadata_owner
+          --test structural_generic_archive
 
       # Reuses the release CLI; includes an actual interpreter positive control.
       - name: Project run tier selection

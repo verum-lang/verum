@@ -906,6 +906,15 @@ impl TypeChecker {
         path: &Path,
         span: Span,
     ) -> Result<InferResult> {
+        self.resolve_inline_module_path_with_arguments(path, span, None)
+    }
+
+    pub(super) fn resolve_inline_module_path_with_arguments(
+        &mut self,
+        path: &Path,
+        span: Span,
+        arguments: Option<&List<verum_ast::ty::GenericArg>>,
+    ) -> Result<InferResult> {
         use verum_ast::ItemKind;
         use verum_ast::ty::PathSegment;
 
@@ -985,7 +994,7 @@ impl TypeChecker {
                                         span,
                                     });
                                 }
-                                let func_ty = self.infer_function_type(func)?;
+                                let func_ty = self.infer_function_type_with_arguments(func, arguments)?;
                                 return Ok(InferResult::new(func_ty));
                             } else {
                                 return Err(TypeError::Other(verum_common::Text::from(format!(
@@ -1093,8 +1102,14 @@ impl TypeChecker {
                     // Before erroring, consult the qualified env scheme —
                     // exactly Strategy 3's discipline.
                     let qualified = segments.join(".");
-                    if let Some(scheme) = self.ctx.env.lookup(qualified.as_str()) {
-                        return Ok(InferResult::new(scheme.instantiate()));
+                    if let Some(scheme) = self.ctx.env.lookup(qualified.as_str()).cloned() {
+                        let (ty, fresh) = scheme.instantiate_with_fresh_vars();
+                        if let Some(arguments) = arguments.filter(|arguments| !arguments.is_empty()) {
+                            let slots = scheme.fresh_explicit_method_vars(&fresh);
+                            self.bind_explicit_method_arguments(slots.as_ref(), arguments,
+                                &verum_ast::Ident::new(segment_text.clone(), span), span)?;
+                        }
+                        return Ok(InferResult::new(ty));
                     }
                     return Err(TypeError::UnboundVariable {
                         name: verum_common::Text::from(segment_name),

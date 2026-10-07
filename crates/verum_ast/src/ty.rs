@@ -791,6 +791,86 @@ pub enum GenericArg {
     Binding(TypeBinding),
 }
 
+impl GenericArg {
+    /// Interpret ambiguous bracket syntax only after the selected declaration
+    /// proves that this argument occupies a type slot. Const/meta slots must
+    /// keep the original expression. No identifier spelling selects a role.
+    pub fn type_for_declared_slot(&self) -> Option<Type> {
+        use crate::expr::{ArrayExpr, ExprKind, UnOp};
+        fn project(expr: &Expr, remaining: &mut usize, depth: usize) -> Option<Type> {
+            if depth > 64 || *remaining == 0 {
+                return None;
+            }
+            *remaining -= 1;
+            let kind = match &expr.kind {
+                ExprKind::TypeExpr(ty) => return Some(ty.clone()),
+                ExprKind::Path(path) => TypeKind::Path(path.clone()),
+                ExprKind::Paren(inner) => return project(inner, remaining, depth + 1),
+                ExprKind::Field { expr: base, field } => {
+                    let base = project(base, remaining, depth + 1)?;
+                    let TypeKind::Path(mut path) = base.kind else {
+                        return None;
+                    };
+                    path.segments.push(PathSegment::Name(field.clone()));
+                    TypeKind::Path(path)
+                }
+                ExprKind::Array(ArrayExpr::Repeat { value, count }) => TypeKind::Array {
+                    element: Heap::new(project(value, remaining, depth + 1)?),
+                    size: Some(count.clone()),
+                },
+                ExprKind::Array(ArrayExpr::List(elements)) if elements.len() == 1 => {
+                    TypeKind::Slice(Heap::new(project(&elements[0], remaining, depth + 1)?))
+                }
+                ExprKind::Tuple(elements) => TypeKind::Tuple(
+                    elements
+                        .iter()
+                        .map(|element| project(element, remaining, depth + 1))
+                        .collect::<Option<List<_>>>()?,
+                ),
+                ExprKind::Unary { op, expr: inner } => {
+                    let inner = Heap::new(project(inner, remaining, depth + 1)?);
+                    match op {
+                        UnOp::Ref => TypeKind::Reference {
+                            inner,
+                            mutable: false,
+                        },
+                        UnOp::RefMut => TypeKind::Reference {
+                            inner,
+                            mutable: true,
+                        },
+                        UnOp::RefChecked => TypeKind::CheckedReference {
+                            inner,
+                            mutable: false,
+                        },
+                        UnOp::RefCheckedMut => TypeKind::CheckedReference {
+                            inner,
+                            mutable: true,
+                        },
+                        UnOp::RefUnsafe => TypeKind::UnsafeReference {
+                            inner,
+                            mutable: false,
+                        },
+                        UnOp::RefUnsafeMut => TypeKind::UnsafeReference {
+                            inner,
+                            mutable: true,
+                        },
+                        _ => return None,
+                    }
+                }
+                _ => return None,
+            };
+            Some(Type::new(kind, expr.span))
+        }
+        match self {
+            Self::Type(ty) => Some(ty.clone()),
+            Self::Const(expr) if matches!(expr.kind, ExprKind::Array(_)) => {
+                project(expr, &mut 1024, 0)
+            }
+            _ => None,
+        }
+    }
+}
+
 /// A type bound (protocol constraint).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TypeBound {

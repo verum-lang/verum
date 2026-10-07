@@ -1407,6 +1407,9 @@ fn register_module_metadata(
                 Text::from(join_module_path(parent_owner, parent.as_str()))
             }),
             impl_generic_names,
+            // Empty legacy VBC rosters do not prove a declaration slot kind.
+            explicit_type_param_ids: (!fn_desc.explicit_type_param_ids.is_empty()).then(||
+                fn_desc.explicit_type_param_ids.iter().map(|id| id.map(|id| id.0)).collect()),
             // #97 — round-trip the const-storage marker.
             is_const: fn_desc.is_const,
             // #101 — span population deferred to source-walk pass.

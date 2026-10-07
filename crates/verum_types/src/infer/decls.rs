@@ -7305,6 +7305,8 @@ impl TypeChecker {
         } else {
             scheme.with_type_bounds(param_type_bounds)
         };
+        let mut scheme = scheme;
+        self.record_explicit_method_vars(&mut scheme, func);
         // Protect builtin generic/meta functions from being DOWNGRADED by stdlib.
         // When a generic builtin (e.g., fn<T>(T) -> T for abs) already exists,
         // don't let a concrete stdlib version (e.g., fn(Float) -> Float) override it.

@@ -8001,32 +8001,43 @@ impl TypeChecker {
                         }
                     }
 
-                    // Convert type_args to Types and unify with explicit fresh vars only
-                    // Skip implicit vars - they will be inferred from argument types
-                    let mut explicit_var_index = 0;
-                    for fresh_var in fresh_vars.iter() {
-                        // Skip implicit vars - they don't consume explicit type args
-                        if implicit_vars.contains(fresh_var) {
-                            continue;
+                    let explicit_slots = scheme.fresh_explicit_method_vars(&fresh_vars);
+                    if let Some(slots) = explicit_slots.as_ref() {
+                        self.bind_explicit_method_arguments(
+                            Some(slots), type_args,
+                            &verum_ast::Ident::new(name.clone(), expr.span), expr.span,
+                        )?;
+                    } else {
+                        self.bind_explicit_method_arguments(None, type_args,
+                            &verum_ast::Ident::new(name.clone(), expr.span), expr.span)?;
+                        // Convert type_args to Types and unify with explicit fresh vars only
+                        // Skip implicit vars - they will be inferred from argument types
+                        let mut explicit_var_index = 0;
+                        for fresh_var in fresh_vars.iter() {
+                            // Skip implicit vars - they don't consume explicit type args
+                            if implicit_vars.contains(fresh_var) {
+                                continue;
+                            }
+
+                            // Bind explicit type arg to this explicit var
+                            if let Some(type_arg) = type_args.get(explicit_var_index) {
+                                if let verum_ast::ty::GenericArg::Type(ast_ty) = type_arg {
+                                    let provided_ty = self.ast_to_type(ast_ty)?;
+                                    // Unify the fresh var with the provided type
+                                    self.unifier.unify(
+                                        &Type::Var(*fresh_var),
+                                        &provided_ty,
+                                        expr.span,
+                                    )?;
+                                }
+                            }
+                            explicit_var_index += 1;
                         }
 
-                        // Bind explicit type arg to this explicit var
-                        if let Some(type_arg) = type_args.get(explicit_var_index) {
-                            if let verum_ast::ty::GenericArg::Type(ast_ty) = type_arg {
-                                let provided_ty = self.ast_to_type(ast_ty)?;
-                                // Unify the fresh var with the provided type
-                                self.unifier.unify(
-                                    &Type::Var(*fresh_var),
-                                    &provided_ty,
-                                    expr.span,
-                                )?;
-                            }
-                        }
-                        explicit_var_index += 1;
                     }
 
                     // Check that we don't have too many explicit type args
-                    let expected_explicit = fresh_vars.len() - implicit_vars.len();
+                    let expected_explicit = explicit_slots.as_ref().map_or(fresh_vars.len() - implicit_vars.len(), |slots| slots.len());
                     if type_args.len() > expected_explicit {
                         // `TypeError::Other` has NO span field, so this
                         // rendered with no file/line at all — surfaced by

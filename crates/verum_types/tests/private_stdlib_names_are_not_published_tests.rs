@@ -33,6 +33,7 @@ fn const_descriptor(name: &str, is_public: bool) -> FunctionDescriptor {
         is_unsafe: false,
         intrinsic_id: Maybe::None,
         parent_type: Maybe::None,
+        explicit_type_param_ids: None,
         impl_generic_names: List::new(),
         is_const: true,
         decl_span: Maybe::None,
