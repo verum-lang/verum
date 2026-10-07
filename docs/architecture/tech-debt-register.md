@@ -21,10 +21,17 @@ The immutable fix checkpoint passes **3910 checker tests**, with zero failures
 and three existing ignores, plus 18 fresh-process allocation controls. The
 [Default witness record](default-witness-identity.md) separates that checker
 acceptance from unchanged standard-library workarounds and backend behavior.
-T1627 separately fixes checked count lookup that selected a constant from an
-outer module after a nearer module with the same name had already won ownership;
-its cross-layer validation is still in progress. T1628 tracks ordinary relative
-two-segment expression lookup.
+T1627 also corrects checked counts that borrowed a constant from an outer module
+after a nearer module had won ownership. File-aware preparation now distinguishes
+the actual file header from nested and later forward declarations; relative and
+explicit `cog` counts pass the real check-only compiler. At integrated `6813f40b1`,
+the full checker passes **3924 tests** (zero failures, three existing ignores),
+and nine selected checker/VBC binaries pass **69 tests** across namespace owners,
+conditional counts, fixed arrays, bootstrap exports and `Default`. The
+[integration gate record](checked-count-integration.json) preserves commands and
+log hashes. The separate full VBC library gate is still running. T1628 retains
+ordinary relative two-segment expression lookup; T1630 retains nested strict-error
+propagation; T1631 retains pre-existing import-order and module-alias precedence.
 
 These source results do not update the ordinary CLI/AOT verdicts below. The
 fresh-build and native acceptance boundaries, including retained Mutex/Drop,

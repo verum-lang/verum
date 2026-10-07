@@ -1,0 +1,68 @@
+{
+  "source_commit": "6813f40b116f50c7bfda9aeeee5feab32cc604a6",
+  "full_checker": {
+    "commit": "6813f40b116f50c7bfda9aeeee5feab32cc604a6",
+    "command": [
+      "cargo",
+      "test",
+      "--locked",
+      "-p",
+      "verum_types",
+      "--tests",
+      "--no-fail-fast",
+      "--",
+      "--test-threads=4"
+    ],
+    "exit": 0,
+    "seconds": 375.22,
+    "log": "/Users/taaliman/.tmp/verum-codex-01a10248/T1627-integrated-full-types.log",
+    "log_sha256": "b804c91faac6a22440331d79b04ddb17962a0362b3f1b4c397b1b3baf312f960",
+    "passed": 3924,
+    "failed": 0,
+    "ignored": 3,
+    "test_summaries": 172
+  },
+  "combined_focused": {
+    "commit": "6813f40b116f50c7bfda9aeeee5feab32cc604a6",
+    "command": [
+      "cargo",
+      "test",
+      "--locked",
+      "-p",
+      "verum_types",
+      "-p",
+      "verum_vbc",
+      "--no-default-features",
+      "--features",
+      "verum_vbc/compression,verum_vbc/table_dispatch,verum_vbc/codegen,verum_vbc/ffi",
+      "--test",
+      "checked_count_owners",
+      "--test",
+      "conditional_array_count",
+      "--test",
+      "fixed_array_method_owner",
+      "--test",
+      "fixed_array_method_dispatch",
+      "--test",
+      "bootstrap_function_exports",
+      "--test",
+      "default_witness_identity",
+      "--test",
+      "default_witness_leak_tests",
+      "--no-fail-fast"
+    ],
+    "exit": 0,
+    "seconds": 100.84,
+    "log": "/Users/taaliman/.tmp/verum-codex-01a10248/T1627-integrated-focused.log",
+    "log_sha256": "20d796919c910fc3a51d50fe3d7041bf4348c2460ee7c601b42733bc83b54149",
+    "passed": 69,
+    "failed": 0,
+    "ignored": 0,
+    "test_summaries": 9
+  },
+  "limits": [
+    "Source integration gates only; no new ordinary CLI or AOT acceptance.",
+    "The independent T1627 full VBC library gate is still running.",
+    "Three checker ignores are pre-existing."
+  ]
+}
