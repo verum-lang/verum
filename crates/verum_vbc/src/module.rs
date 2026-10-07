@@ -1705,6 +1705,7 @@ impl VbcModule {
                     .collect();
                 let desc = FunctionDescriptor {
                     value_uses: None,
+                    semantic_params: None,
                     explicit_type_param_ids: Vec::new(),
                     id: FunctionId(self.functions.len() as u32),
                     name: name_id,
@@ -2562,6 +2563,11 @@ pub struct FunctionDescriptor {
     /// Body-sealed production facts, without ownership/cleanup authorization.
     #[serde(default)]
     pub value_uses: Option<crate::value_use::ValueUsePlan>,
+    /// Declaration-owned parameter types before ABI erasure (v2.23).
+    /// None means no source proof; a missing slot preserves its exact position.
+    /// This signature does not authorize a transfer, cleanup or native carrier.
+    #[serde(default)]
+    pub semantic_params: Option<verum_common::List<Option<TypeRef>>>,
     /// Unique function ID.
     pub id: FunctionId,
 
@@ -2827,6 +2833,7 @@ impl Default for FunctionDescriptor {
     fn default() -> Self {
         Self {
             value_uses: None,
+            semantic_params: None,
             id: FunctionId(0),
             name: StringId::EMPTY,
             parent_type: None,
@@ -2864,6 +2871,15 @@ impl Default for FunctionDescriptor {
 }
 
 impl FunctionDescriptor {
+    /// Semantic formals belonging to this exact descriptor. Legacy ABI types
+    /// and optional spellings cannot fill absent or malformed declaration facts.
+    pub fn semantic_parameter_types(&self) -> Option<&[Option<TypeRef>]> {
+        self.semantic_params
+            .as_ref()
+            .filter(|p| p.len() == self.params.len())
+            .map(|p| p.as_slice())
+    }
+
     /// Resolve a generic argument by its declaration-owned parameter ID.
     ///
     /// VBC 2.16 calls carry a compact vector in `type_params` declaration
@@ -4139,6 +4155,7 @@ mod precompile_extension_tests {
             return_type_name: None,
             origin_module: None,
             value_uses: None,
+            semantic_params: None,
         };
         // Backwards-compat field is filled with the existing layout.
         let _ = &mut desc;
@@ -4195,6 +4212,7 @@ mod precompile_extension_tests {
             return_type_name: None,
             origin_module: None,
             value_uses: None,
+            semantic_params: None,
         };
         m.functions.push(desc);
 

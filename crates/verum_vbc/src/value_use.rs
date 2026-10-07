@@ -61,6 +61,7 @@ impl ValueUsePlan {
             type_ids,
             &descriptor.return_type,
             &descriptor.yield_type,
+            &descriptor.semantic_params,
             descriptor.register_count,
             uses,
         ))

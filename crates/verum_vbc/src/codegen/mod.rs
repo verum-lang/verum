@@ -60,6 +60,7 @@ mod parsed_field_types;
 mod associated_types;
 mod statements;
 mod value_uses;
+mod formal_parameters;
 
 #[cfg(test)]
 mod tests_comprehensive;
@@ -1075,6 +1076,8 @@ pub struct VbcCodegen {
     /// linkage without the carried structure.  `ctx.generic_type_params`
     /// is a name-only HashSet, hence this parallel carry.
     current_impl_ast_generics: Option<verum_common::List<verum_ast::ty::GenericParam>>,
+    /// Exact source impl target, scoped only around its own method compiler.
+    current_impl_semantic_target: Option<verum_ast::Type>,
 
     /// TypeIds claimed by ARCHIVE-imported descriptors
     /// (`register_archive_type_qualified`).  Carried fact for
@@ -2251,6 +2254,7 @@ impl VbcCodegen {
             sibling_impl_counters: std::collections::HashMap::new(),
             sibling_pairing_counters: std::collections::HashMap::new(),
             current_impl_ast_generics: None,
+            current_impl_semantic_target: None,
             type_name_to_id: {
                 let mut m = std::collections::HashMap::new();
                 use crate::types::TypeId;
@@ -5648,7 +5652,7 @@ impl VbcCodegen {
                         // an unresolved cross-module function reference) is
                         // visible in normal CI / dev runs without RUST_LOG
                         // tweaking.
-                        if let Err(e) = self.compile_function(func, type_name.as_ref()) {
+                        if let Err(e) = self.compile_declared_impl_function(func, &impl_decl.kind, type_name.as_ref()) {
                             let fname = func.name.name.as_str();
                             let ty = type_name.as_deref().unwrap_or("?");
                             let class = e.skip_class();
@@ -10977,6 +10981,10 @@ impl VbcCodegen {
         signature_scope.extend(shadow.clone());
         let return_type = func.return_type.as_ref()
             .map(|ty| self.resolve_field_type_ref(ty, &signature_scope));
+        let semantic_params = self.source_semantic_parameters(
+            func, &signature_scope, &dense, &Self::ordered_generic_param_ids(&dense, &shadow),
+        );
+        self.ctx.semantic_fn_params.insert(id, semantic_params);
         let info = FunctionInfo {
             callable_signature: None,
             type_param_ids: Self::ordered_generic_param_ids(&dense, &shadow),
@@ -19174,7 +19182,7 @@ impl VbcCodegen {
                         // containment at compile_pending_default_methods
                         // (~line 1725).
                         if let Err(e) =
-                            self.compile_function(func, type_name.as_ref())
+                            self.compile_declared_impl_function(func, &impl_decl.kind, type_name.as_ref())
                         {
                             tracing::trace!(
                                 "[compile_item Impl] {}.{} body compile failed: {}",
@@ -20598,6 +20606,12 @@ impl VbcCodegen {
             .unwrap_or(TypeId::UNIT);
         let self_type_ref = self.impl_self_type_ref(&method_generic_param_map)
             .unwrap_or(TypeRef::Concrete(parent_tid));
+        let semantic_params = self.source_semantic_parameters(
+            func, &render_generic_param_map, &method_generic_param_map,
+            &descriptor.type_params.iter().map(|p| p.id).collect::<verum_common::List<_>>(),
+        );
+        self.ctx.semantic_fn_params.insert(descriptor.id, semantic_params.clone());
+        descriptor.semantic_params = Some(semantic_params);
         for ((param_name, is_mut), param) in params_with_mutability.iter().zip(func.params.iter()) {
             use verum_ast::FunctionParamKind;
             use crate::types::{CbgrTier, Mutability};
@@ -27222,6 +27236,10 @@ impl VbcCodegen {
             }
         }
         for (&local, source) in &signatures {
+            self.ctx.semantic_fn_params.remove(&FunctionId(local));
+            if let Some(params) = formal_parameters::remapped_parameters(source, &type_id_remap) {
+                self.ctx.semantic_fn_params.insert(FunctionId(local), params);
+            }
             self.ctx.archive_fn_param_types.insert(local, source.params.iter()
                 .map(|param| remap_type_ref_archive(&param.type_ref, &type_id_remap)).collect());
         }
@@ -27907,6 +27925,7 @@ impl VbcCodegen {
                 }
                 param.type_ref = remap_type_ref_archive(&param.type_ref, &type_id_remap);
             }
+            new_desc.semantic_params = formal_parameters::remapped_parameters(archive_desc, &type_id_remap);
             new_desc.return_type =
                 remap_type_ref_archive(&new_desc.return_type, &type_id_remap);
             new_desc.value_uses = archive_module.value_use_receipts(archive_desc.id)

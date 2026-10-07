@@ -1,8 +1,9 @@
 # Native Drop lifecycle: measured gap and implementation boundary
 
-Status: open, 2026-10-04. T1538 tracks native owned `Drop`; T1540 records
-its required ownership foundation. No lifecycle implementation or new
-passing native-lifecycle claim follows from this note.
+Status: open, updated 2026-10-07. T1538 tracks native owned `Drop`; T1540
+records its required ownership foundation. Direct named-local and return
+handoffs now exist in source lowering. Call/aggregate lifetime and native
+owned destruction remain open; the historical measurements below are unchanged.
 
 ## Measured behavior
 
@@ -79,8 +80,10 @@ that aggregate payload transfer is repaired.
   `Result.Ok(guard)` or a nested error wrapper; its lexical cleanup cannot
   decide ownership by checking only the final result register.
 * `TypeDescriptor` now carries declaration-owned resource discipline alongside
-  `drop_fn` and `clone_fn` (T1594). This supplies no per-value ownership event. `ParamDescriptor` carries the declared type and
-  mutability, but no ownership-transfer contract. Merely spelling the
+  `drop_fn` and `clone_fn` (T1594). This supplies no per-value ownership event.
+  `ParamDescriptor` carries ABI types and mutability, with intentional
+  reference erasure. The separate semantic formal roster preserves supported
+  source parameter types, but supplies no ownership-transfer contract. Merely spelling the
   current ordinary `MutexGuard` record `affine` would not supply those
   missing lowering facts.
 
@@ -103,40 +106,46 @@ not implemented: that would add another ownership model without fixing
 its producer or archive boundaries. No failing or ignored test was added
 to make that unimplemented subset appear covered.
 
-## Resource qualifiers already exist, but their decisions do not reach VBC
+## Published resource facts and bounded source handoffs
 
 `grammar/verum.ebnf` declares `affine` and `linear`; the AST carries them in
-`TypeDecl.resource_modifier`. The checker has `ResourceKind`, argument
-consumption in `consume_affine_call_args`, and consuming by-value receivers.
-Those checks do not currently produce a shared lowering decision. In
-`verum_vbc::codegen::statements`, `copies_from_named_place` distinguishes
-references, raw pointers and primitive values, but does not consult the
-resource mode before emitting `Clone`. VBC type descriptors now preserve resource discipline and semantic field types;
-parameter/value operations still lack the transfer contract described above.
+`TypeDecl.resource_modifier`. The checker tracks argument consumption and
+consuming by-value receivers. VBC declarations now preserve exact resource
+discipline and semantic field types through archives and specialization.
+Source identity and the declaration's resolved type supply local `BindingId`
+facts; name, pointer shape or `Drop` presence cannot substitute for them.
 
-The source prerequisite now preserves exact declaration identity: T1558
-classifies named resources and transparent aliases by their declaring owner,
-and T1556 retains resource modifiers and attributes through the alternate
-parser. Their source regression suites cover same-named qualified resources
-and both parser routes. T1594 adds source/VBC/archive/metadata resource carry. These repairs still do
-not publish ownership operations. Adding `affine` to MutexGuard alone
-therefore still cannot implement its runtime contract.
+T1599 publishes bounded observations of emitted value operations and exposes
+them to the existing CFG/event vocabulary. Body/signature/use validation
+rejects stale receipts. These observations are not transfer or destructor
+permissions. The two source routes, including bootstrap, use the same recorder.
 
-A first shared implementation can bound its acceptance to direct locals,
-arguments and returns: preserve the declaration-owned resource mode through
-archives and monomorphization; produce explicit copy/transfer/borrow facts;
-and let both execution tiers consume the same cleanup-obligation identity.
-Ordinary record copies must retain value semantics. Tests must distinguish
-consuming arguments from borrows, direct return from a fresh copy, independent
-Shared releases, qualified siblings, and explicit/scope destruction exactly
-once. Aggregate/variant transfer remains a separate required step before the
-MutexGuard acceptance can pass. No new surface `move` syntax is needed to
-carry the already existing consuming contexts.
+T1602 adds a bounded executable handoff for a direct named affine local and a
+direct named affine return. Lowering establishes the receiving slot, clears
+the consumed source on that control-flow edge and emits the existing lexical
+cleanup for the exact eligible local inventory. Direct return declines
+parameters, aliased/cell patterns, pending defers and locals covered by the
+legacy name-keyed escape set. It does not authorize aggregate insertion,
+consuming call arguments or native owned `Drop`. Fresh aggregate return routes
+are unchanged; named affine uses in unsupported return shapes are diagnosed.
 
-The proposed [declaration-owned resource contract](resource-mode-contract.md)
-separates usage discipline from Copy/Clone capability and cleanup obligation.
-It records source-level qualified-sibling and alternate-parser failures to fix
-before versioning archive metadata or enabling native destruction.
+The v2.23 semantic formal roster is a separate declaration fact, recorded before
+ABI erasure. It preserves exact generic IDs and supported reference tiers and
+mutability. Source receivers use the exact impl target and its impl-level
+generic scope; the owner template cannot stand in for a concrete instantiation.
+An unmounted sibling alias supplies no declaration authority. A missing roster means legacy/unknown; a missing position does not
+shift later formals. Rank-2, dependent/count, opaque and unsupported forms stay
+unknown. Regular parameter occurrences of `Self` and synthesized methods
+without their original impl target also remain unknown. Archive imports remap through the declaring module's type map; missing
+owner maps cannot turn coincident numeric IDs into local facts. Linker and mono
+use their existing exact remapping/substitution authorities. This roster is not
+a runtime address convention, callable-selection receipt or cleanup obligation.
+
+Before MutexGuard acceptance can pass, consuming arguments and aggregate
+payloads must transfer a single cleanup obligation; borrows must retain the
+original owner, ordinary copies must preserve value semantics, and Shared
+copies must keep their separate retain/release obligations. Merely changing
+`MutexGuard` to `affine` cannot supply these missing runtime events.
 
 ## Reuse the CBGR pipeline, after supplying exact events
 
@@ -194,8 +203,8 @@ before serialization, remapping, specialization and CFG consumers can rely
 on it; this does not require enabling every user validation during bootstrap.
 
 Variant constructors currently emit `SetVariantData` without selecting a
-copy or transfer. Record construction selects `Clone` for a named place
-without consulting resource discipline. The direct block-tail repair does
+copy or transfer. Record construction still needs a destination-owned field handoff; direct
+local selection does not prove transfer into a record payload. The direct block-tail repair does
 not identify a local guard nested inside a returned `Result`. Suppressing
 that local cleanup alone is insufficient: interpreter recursive field
 cleanup handles concrete record fields, not a general generic-variant

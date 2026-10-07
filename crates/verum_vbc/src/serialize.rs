@@ -798,6 +798,20 @@ impl Serializer {
                 }
             }
         }
+        // v2.23: absence is distinct from a proved zero-parameter declaration.
+        self.output.push(desc.semantic_params.is_some() as u8);
+        if let Some(params) = &desc.semantic_params {
+            if params.len() != desc.params.len() {
+                return Err(crate::error::VbcError::Serialization(
+                    "semantic parameter roster arity mismatch".into(),
+                ));
+            }
+            encode_varint(params.len() as u64, &mut self.output);
+            for ty in params {
+                self.output.push(ty.is_some() as u8);
+                if let Some(ty) = ty { self.serialize_type_ref(ty)?; }
+            }
+        }
         Ok(())
     }
 

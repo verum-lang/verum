@@ -1688,7 +1688,35 @@ impl<'a> Deserializer<'a> {
  } else {
      None
  };
+ let semantic_params = if fmt_minor >= 23 {
+     match decode_u8(self.data, &mut self.offset)? {
+         0 => None,
+         1 => {
+             let count = decode_varint(self.data, &mut self.offset)? as usize;
+             if count > MAX_FN_TYPE_REF_PARAMS {
+                 return Err(VbcError::TableTooLarge {
+                     field: "fn_semantic_param_count", count: count.min(u32::MAX as usize) as u32,
+                     max: MAX_FN_TYPE_REF_PARAMS as u32,
+                 });
+             }
+             if count != params.len() {
+                 return Err(VbcError::Deserialization("semantic parameter roster arity mismatch".into()));
+             }
+             let mut slots = verum_common::List::with_capacity(count);
+             for _ in 0..count {
+                 slots.push(match decode_u8(self.data, &mut self.offset)? {
+                     0 => None,
+                     1 => Some(self.parse_type_ref()?),
+                     _ => return Err(VbcError::Deserialization("invalid semantic parameter slot".into())),
+                 });
+             }
+             Some(slots)
+         }
+         _ => return Err(VbcError::Deserialization("invalid semantic parameter presence".into())),
+     }
+ } else { None };
  Ok(FunctionDescriptor {
+ semantic_params,
  value_uses,
  explicit_type_param_ids,
  id,

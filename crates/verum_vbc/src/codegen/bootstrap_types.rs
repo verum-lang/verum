@@ -101,6 +101,9 @@ fn function_ids(function: &FunctionDescriptor) -> Vec<TypeId> {
     for param in &function.params {
         type_ids(&param.type_ref, &mut ids);
     }
+    if let Some(params) = function.semantic_parameter_types() {
+        for ty in params.iter().flatten() { type_ids(ty, &mut ids); }
+    }
     for param in &function.type_params {
         ids.extend(param.bounds.iter().map(|id| TypeId(id.0)));
         if let Some(default) = &param.default {
@@ -478,6 +481,10 @@ impl VbcCodegen {
                     function.params.iter().map(|parameter|
                         remap_type_ref_archive(&parameter.type_ref, &maps[mi])).collect(),
                 );
+                self.ctx.semantic_fn_params.remove(&FunctionId(id));
+                if let Some(params) = super::formal_parameters::remapped_parameters(function, &maps[mi]) {
+                    self.ctx.semantic_fn_params.insert(FunctionId(id), params);
+                }
                 self.ctx.archive_fn_parameter_generics.insert(
                     id,
                     (0..function.params.len()).map(|index|

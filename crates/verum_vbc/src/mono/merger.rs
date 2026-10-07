@@ -514,6 +514,7 @@ impl ModuleMerger {
             if !specialized.params.is_empty() {
                 new_func.params = specialized.params;
             }
+            new_func.semantic_params = specialized.semantic_params;
             new_func.return_type = specialized.return_type;
 
             // Resolve associated-type projections in the inherited return type:

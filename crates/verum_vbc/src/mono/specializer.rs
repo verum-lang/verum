@@ -43,6 +43,8 @@ pub struct SpecializedFunction {
     /// (e.g. Deque<Int>.contains's `value: &Int`); without this the specialized
     /// descriptor has empty params and the AOT can't deref a lone `&scalar`.
     pub params: smallvec::SmallVec<[crate::module::ParamDescriptor; 4]>,
+    /// Source signature facts substituted by the same exact generic-ID map.
+    pub semantic_params: Option<verum_common::List<Option<TypeRef>>>,
     /// task #39/#35: substituted return type — the generic descriptor's
     /// return_type with type params resolved (T → Float64/Float32/…). The merger
     /// writes it onto the specialized FunctionDescriptor so the AOT can
@@ -458,6 +460,8 @@ impl<'a> BytecodeSpecializer<'a> {
             max_stack: func.max_stack,
             new_constants: std::mem::take(&mut self.new_constants),
             params,
+            semantic_params: func.semantic_parameter_types().map(|params| params.iter()
+                .map(|ty| ty.as_ref().map(|ty| self.substitution.apply(ty))).collect()),
             return_type,
         })
     }
@@ -1484,6 +1488,7 @@ mod tests {
     #[test]
     fn test_specialized_function_layout() {
         let sf = SpecializedFunction {
+            semantic_params: None,
             bytecode: vec![
                 crate::instruction::Opcode::Nop.to_byte(),
                 crate::instruction::Opcode::RetV.to_byte(),

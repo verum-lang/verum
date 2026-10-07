@@ -1816,6 +1816,7 @@ fn symbol_count(files: &[(String, Vec<u8>)]) -> usize {
 /// invalidate independently of source.  Format: free-form ASCII;
 /// readable strings make `git log` of this constant tell the story.
 const PRECOMPILE_SCHEMA_VERSION: &str =
+    // v52: source-owned semantic formal parameters require the VBC2.23 tail.
     // v50: List storage access opcodes require VBC2.21, including the v20 receipt tail.
     // Do not reuse a last-good archive with only the previous memory family.
     // v47: declaration-owned resource discipline changes VBC and bincode metadata.
@@ -1834,7 +1835,7 @@ const PRECOMPILE_SCHEMA_VERSION: &str =
     // cache — measured: the scan was added, the build reported
     // "precompile cache HIT", and the new field stayed empty while the
     // reader had nothing to read. Bumping here is what invalidates it.
-    "v51-2026-10-05-list-storage-resize";
+    "v52-2026-10-05-semantic-formal-parameters";
 
 /// T3: blake3 hash of every `core/**/*.vr` file's content, sorted
 /// by relative path, mixed with [`PRECOMPILE_SCHEMA_VERSION`].
@@ -2102,6 +2103,7 @@ fn compute_core_blake3(core_dir: &Path, files: &[(String, Vec<u8>)]) -> String {
         "crates/verum_vbc/src/codegen/bootstrap_types.rs",
         "crates/verum_vbc/src/codegen/parsed_field_types.rs",
         "crates/verum_vbc/src/codegen/value_uses.rs",
+        "crates/verum_vbc/src/codegen/formal_parameters.rs",
         "crates/verum_vbc/src/value_use.rs",
         "crates/verum_vbc/src/resource_discipline.rs",
         "crates/verum_common/src/value_use.rs",

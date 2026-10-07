@@ -112,7 +112,8 @@ pub const VERSION_MAJOR: u16 = 2;
 /// Version 2.21 adds checked container-owned List read/write/move operations.
 /// The 2.20 function tail remains present; older readers must reject these opcodes.
 /// Version 2.22 adds owner-preserving, failure-atomic List storage resize.
-pub const VERSION_MINOR: u16 = 22;
+/// Version 2.23 carries optional declaration-owned semantic formal parameters.
+pub const VERSION_MINOR: u16 = 23;
 
 /// Minor-version floors for sections whose presence readers gate on.  The
 /// register-type-hints section has been written unconditionally since minor 2,
