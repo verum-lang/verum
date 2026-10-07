@@ -213,3 +213,53 @@ fn block_local_projections_never_reach_global_declaration_lookup() {
         );
     }
 }
+
+
+#[test]
+fn enclosing_module_constants_remain_visible_to_checked_counts() {
+    for count in ["CAP", "outer.CAP", "cog.outer.CAP"] {
+        let source = format!("module outer {{ const CAP: Int = 3; module inner {{ fn size<T>()->Int {{T.size}} fn probe()->Int {{size<[Byte; {count}]>()}} }} }}");
+        assert!(errors(&source).is_empty(), "{count}: {:?}", errors(&source));
+    }
+    let source = "const CAP: Int = 3; module outer { module inner { fn size<T>()->Int {T.size} fn probe()->Int {size<[Byte; CAP]>()} } }";
+    assert!(errors(source).is_empty(), "{:?}", errors(source));
+}
+
+#[test]
+fn checked_count_scope_does_not_search_unrelated_siblings_or_skip_errors() {
+    for source in [
+        "module sibling { const CAP: Int = 3; } module outer { module inner { fn size<T>()->Int {T.size} fn probe()->Int {size<[Byte; CAP]>()} } }",
+        "module outer { const CAP: Int = 3; module inner { const CAP: Int = 9223372036854775807 + 1 - 1; fn size<T>()->Int {T.size} fn probe()->Int {size<[Byte; CAP]>()} } }",
+        "const CAP: Int = 3; module outer { const CAP: Int = 9223372036854775807 + 1 - 1; module inner { fn size<T>()->Int {T.size} fn probe()->Int {size<[Byte; CAP]>()} } }",
+    ] {
+        assert!(!errors(source).is_empty(), "invalid count accepted: {source}");
+    }
+}
+
+
+#[test]
+fn checked_array_lengths_keep_nearest_and_explicit_declaration_owners() {
+    let source = "const CAP: Int = 9; module sibling { const CAP: Int = 7; } module outer { const CAP: Int = 3; module inner { const CAP: Int = 5; } }";
+    let ast = Parser::new(source).parse_module().unwrap();
+    let mut checker = TypeChecker::new();
+    checker.register_primitives();
+    for item in &ast.items {
+        checker.check_item(item).unwrap();
+    }
+    for (scope, count, expected) in [
+        ("cog.outer.inner", "CAP", Some(5)),
+        ("cog.outer.inner", "outer.CAP", Some(3)),
+        ("cog.outer.inner", "cog.CAP", Some(9)),
+        ("cog.outer.inner", "cog.outer.CAP", Some(3)),
+        ("cog.outer.deep.child", "CAP", Some(3)),
+        ("cog.other", "missing.CAP", None),
+    ] {
+        checker.set_current_module_path(scope);
+        let syntax = Parser::new(&format!("[Byte; {count}]"))
+            .parse_type().unwrap();
+        let verum_types::ty::Type::Array { size, .. } = checker.ast_to_type(&syntax).unwrap() else {
+            panic!("expected array type");
+        };
+        assert_eq!(size, expected, "{scope}: {count}");
+    }
+}

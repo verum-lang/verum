@@ -325,10 +325,11 @@ impl ConstEvaluator {
                     ExprKind::Path(path) => {
                         let mut parts = List::new();
                         for part in &path.segments {
-                            let PathSegment::Name(ident) = part else {
-                                return None;
-                            };
-                            parts.push(ident.name.as_str());
+                            match part {
+                                PathSegment::Name(ident) => parts.push(ident.name.as_str()),
+                                PathSegment::Cog if parts.is_empty() => parts.push("cog"),
+                                _ => return None,
+                            }
                         }
                         Some(Text::from(parts.join(".")))
                     }
@@ -343,12 +344,26 @@ impl ConstEvaluator {
             let Some(name) = name(leaf, 0) else {
                 return Ok(None);
             };
-            let scoped = Text::from(format!("{scope}.{name}"));
-            match self
-                .count_values
-                .get(&scoped)
-                .or_else(|| self.count_values.get(&name))
-            {
+            // Source constants are keyed by their declaring module. Walk
+            // lexical ancestors, retaining every written path segment. A
+            // missing sibling/owner must never become a same-leaf lookup.
+            // Stop at the nearest recorded result even when it is an error;
+            // an invalid shadow cannot borrow a valid outer value (T1626).
+            let mut anchor = Some(scope);
+            let resolved = loop {
+                if name.starts_with("cog.") {
+                    break self.count_values.get(&name);
+                }
+                let Some(current) = anchor else {
+                    break self.count_values.get(&name);
+                };
+                let key = Text::from(format!("{current}.{name}"));
+                if let Some(value) = self.count_values.get(&key) {
+                    break Some(value);
+                }
+                anchor = current.rsplit_once('.').map(|(parent, _)| parent);
+            };
+            match resolved {
                 Some(Ok(value)) => Ok(Some(*value)),
                 Some(Err(error)) => Err(ConstEvalError::Other(error.clone())),
                 None => Ok(None),

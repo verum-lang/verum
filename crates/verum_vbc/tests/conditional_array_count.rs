@@ -209,3 +209,23 @@ fn repeated_boolean_dependencies_are_memoized_and_cycles_refused() {
             .is_err()
     );
 }
+
+
+#[test]
+fn lexical_count_owners_survive_selected_calls_and_wire() {
+    for (prefix, count, expected) in [
+        ("", "CAP", 3),
+        ("", "outer.CAP", 3),
+        ("const CAP: Int = 5;", "CAP", 5),
+        ("const CAP: Int = 5;", "outer.CAP", 3),
+        ("const EXTRA: Int = CAP + 1;", "EXTRA", 4),
+    ] {
+        let source = format!("module sibling {{ const CAP: Int = 7; }} module outer {{ const CAP: Int = 3; module inner {{ {prefix} fn size<T>()->Int {{T.size}} fn probe()->Int {{size<[Byte; {count}]>()}} }} }}");
+        let ast = Parser::new(&source).parse_module().expect("source grammar");
+        let module = VbcCodegen::new().compile_module(&ast).expect(&source);
+        let bytes = verum_vbc::serialize::serialize_module(&module).unwrap();
+        let module = verum_vbc::deserialize::deserialize_module(&bytes).unwrap();
+        let id = module.functions.iter().find(|f| module.get_string(f.name).is_some_and(|name| name == "probe" || name.ends_with(".probe"))).unwrap().id;
+        assert_eq!(Interpreter::new(Shared::new(module).into_arc()).execute_function(id).unwrap().as_i64(), expected, "{source}");
+    }
+}
