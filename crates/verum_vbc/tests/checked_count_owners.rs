@@ -170,3 +170,29 @@ fn forward_module_declaration_owns_its_missing_count() {
         "{error}"
     );
 }
+
+#[test]
+fn file_header_is_the_enclosing_owner_not_a_shadowing_child() {
+    let origin = Parser::new("module outer; module ns { public const CAP: Int=3; }")
+        .parse_module()
+        .unwrap();
+    let caller = Parser::new("module outer.inner; fn measure<T>()->Int {T.size} fn probe()->Int {measure<[Byte; outer.ns.CAP]>()}").parse_module().unwrap();
+    let mut codegen = VbcCodegen::new();
+    codegen
+        .collect_unit_declarations(&[&origin, &caller])
+        .unwrap();
+    codegen
+        .compile_unit_items(&[&origin, &caller], ItemFailurePolicy::Strict)
+        .unwrap();
+    let module = codegen.finalize_module().unwrap();
+    let bytes = verum_vbc::serialize::serialize_module(&module).unwrap();
+    let module = verum_vbc::deserialize::deserialize_module(&bytes).unwrap();
+    let id = module.find_function_by_name("outer.inner.probe").unwrap();
+    assert_eq!(
+        Interpreter::new(Shared::new(module).into_arc())
+            .execute_function(id)
+            .unwrap()
+            .as_i64(),
+        3
+    );
+}

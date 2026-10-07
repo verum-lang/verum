@@ -8253,7 +8253,19 @@ impl VbcCodegen {
                 self.count_module_owners.declare(path);
             }
             let owner = owner.unwrap_or_else(|| self.count_root().to_owned());
-            self.collect_count_module_owners(&module.items, &owner);
+            // The first named bodiless declaration is the file header selected
+            // by extract_source_module_name, already published above. Later or
+            // nested forward declarations still introduce child owners.
+            let mut header_seen = false;
+            for item in &module.items {
+                if !header_seen && matches!(&item.kind,
+                    ItemKind::Module(decl) if decl.items.is_none() && !decl.name.name.is_empty()
+                ) {
+                    header_seen = true;
+                    continue;
+                }
+                self.collect_count_module_owners(std::slice::from_ref(item), &owner);
+            }
         }
         // Protocols first: a blanket impl monomorphises onto a concrete
         // implementor at the moment that implementor is collected, so
