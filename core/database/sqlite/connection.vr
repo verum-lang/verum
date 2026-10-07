@@ -306,8 +306,9 @@ implement SqliteConnection {
     // `Transaction` is exposed under the same name; commit_tx/rollback_tx
     // consume it; `with_transaction(body)` wraps both.
 
-    /// Begin a deferred transaction. Returns the affine handle the
-    /// caller MUST consume via `commit_tx` / `rollback_tx`.
+    /// Begin a deferred transaction. Callers must finish it through
+    /// `commit_tx` / `rollback_tx`; this is an API obligation, not a
+    /// mandatory-consumption guarantee supplied by the affine modifier.
     public fn begin_tx(&mut self) -> Result<Transaction, DbError> {
         match self.inner.begin_tx() {
             Result.Ok(t)  => Result.Ok(t),
@@ -356,8 +357,9 @@ implement SqliteConnection {
 
     /// Initialise an online backup that will copy this connection's
     /// data into a fresh database at `dst_path`. Returns the affine
-    /// `BackupSession` the caller MUST consume via `backup_step` +
-    /// `backup_finish`.
+    /// `BackupSession`. After stepping, the caller must finish or abandon
+    /// it explicitly and manage the returned destination Database. Affine
+    /// alone does not enforce this terminal call or prove cleanup.
     public fn backup_init_to_path(&self, dst_path: &Text)
         -> Result<BackupSession, DbError>
     {

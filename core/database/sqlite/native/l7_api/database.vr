@@ -513,11 +513,11 @@ implement Database {
     // -------------------------------------------------------------------------
     //
 
-    // Spec database.md §4.1+§5.5: `SqliteTransaction` is `affine` — the value
-    // MUST be consumed by exactly one of `commit_tx` / `rollback_tx`.
-    // The compiler refuses to drop a SqliteTransaction out of scope, which
-    // makes "leaked transaction" (the most common production SQL bug)
-    // lexically impossible.
+    // `SqliteTransaction` permits at most one consuming use. The caller must
+    // finish a manually opened transaction through `commit_tx` / `rollback_tx`;
+    // this API obligation is not a linear/@must_consume declaration. Neither
+    // affine use checking nor token consumption proves successful rollback
+    // or cleanup on early return, panic or cancellation.
     //
 
     // For the 90% case use `with_transaction(|d| body)`; for the
@@ -526,10 +526,9 @@ implement Database {
     /// SQL-classic BEGIN without an affine handle — the plain
     /// `db.begin(); …; db.commit();` flow every sqlite3 user knows,
     /// and the shape the L7 facade e2e specs exercise (T0555).
-    /// Prefer `with_transaction` (RAII) or `begin_tx` (explicit
-    /// affine handle) where transaction leaks must be impossible;
-    /// these thin wrappers trade that guarantee for the classic
-    /// surface.
+    /// Prefer `with_transaction` for explicit handling of the callback's
+    /// Result branches, or `begin_tx` for a manually managed affine token.
+    /// Neither entry point establishes rollback on panic or cancellation.
     public fn begin(&mut self) -> Result<(), SqliteApiDbError> {
         match self.conn.begin_tx(TmDeferred) {
             Result.Ok(_)  => Result.Ok(()),
@@ -553,8 +552,8 @@ implement Database {
         }
     }
 
-    /// Begin a deferred transaction (BEGIN). Returns the affine
-    /// handle the caller MUST consume.
+    /// Begin a deferred transaction (BEGIN). The caller must finish it with
+    /// `commit_tx` or `rollback_tx`; affine alone does not require that call.
     public fn begin_tx(&mut self) -> Result<SqliteTransaction, SqliteApiDbError> {
         let depth = self.conn.tx_depth();
         match self.conn.begin_tx(TmDeferred) {
@@ -613,9 +612,9 @@ implement Database {
         }
     }
 
-    /// Run `body` inside an automatically-managed deferred transaction.
-    /// Begins, runs, and commits on success; rolls back on either a
-    /// `body` error or a panic propagating through the closure.
+    /// Run `body` inside a deferred transaction. An ordinary Ok triggers a
+    /// commit attempt; Err triggers best-effort rollback, preserving the body
+    /// error even if rollback fails. No panic or cancellation guard is installed.
     ///
 
     /// This is the recommended entry point for almost all transactional
@@ -674,9 +673,9 @@ implement Database {
     // Close
     // -------------------------------------------------------------------------
 
-    /// Consume the database. Further methods are unreachable because
-    /// `self` is moved. In the actor-backed version this also
-    /// forwards a Close request to the pager actor.
+    /// Consume the database value. This body does not issue a pager close
+    /// or flush request. Consuming `self` alone does not establish runtime
+    /// resource cleanup or durability; callers must not infer either here.
     public fn close(self) {
         let _ = self;
     }

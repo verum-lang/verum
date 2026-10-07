@@ -239,8 +239,10 @@ implement<C: CanTx> Database<SqlitePool, C> {
 ///   * `handle: PooledConnection<SqliteConnection>` — checkout
 ///     that keeps the connection alive for the duration.
 ///
-/// Affine: must be consumed by `commit` or `rollback`. Forgotten
-/// consume is a compile error per spec §5.5.
+/// Affine permits at most one consuming use. Callers must use `commit` or
+/// `rollback` to finish the transaction and release the pool checkout;
+/// a forgotten call is not rejected merely because the wrapper is affine.
+/// Implicit cleanup on early return, panic or cancellation is not established.
 ///
 /// Internal note on the `Maybe<Transaction>` shape: SQLite's
 /// `commit_tx` consumes the Transaction value. We hold it in a

@@ -84,8 +84,10 @@ mount core.database.sqlite.native.l6_session.{ ConnectionMode};
 // BackupSession — affine handle binding the source / destination pair
 // -----------------------------------------------------------------------------
 
-/// A live backup operation. `affine` so callers can't drop the
-/// session without `backup_finish` (which closes the destination DB).
+/// A live backup operation. Affine permits at most one consuming use; it
+/// does not require `backup_finish` at scope exit. Callers must explicitly
+/// finish or abandon the session and manage the returned destination Database.
+/// Neither terminal function closes or flushes the destination.
 ///
 
 /// Holds the destination Database (owned — no other writer should
@@ -266,15 +268,10 @@ public fn backup_step(
     BoOk
 }
 
-/// Consume the session. In v1 this releases the destination Database
-/// (whose `Drop` flushes any pending writes through the pager); the
-/// returned Database can then be reopened by the caller for inspection.
-///
-
-/// Returns the destination Database to the caller for further use (a
-/// common pattern: backup, then continue using the dst as a working
-/// copy). Affine consume guarantees the session is no longer
-/// referenced after this call.
+/// Consume the session and transfer its destination Database to the caller
+/// for further use or explicit close. This function neither closes nor
+/// flushes that database. Ownership transfer does not establish scope-exit,
+/// panic or cancellation cleanup on either backend.
 public fn backup_finish(session: BackupSession) -> Database {
     // Move the destination out of the session before it goes out of scope.
     let dst = session.dst;

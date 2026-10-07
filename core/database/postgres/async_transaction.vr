@@ -10,11 +10,12 @@
 // / access-mode / deferrable rendering is single-source-of-truth
 // shared with sync.
 //
-// Same affine guarantee: `AsyncPgTransaction` cannot be cloned;
-// every begin must end in exactly one of `commit_tx_async` /
-// `rollback_tx_async`. Drop without commit/rollback leaves the
-// server-side tx open until the connection actor sees its next
-// statement — V1 layer in a Drop guard that auto-rollbacks.
+// `AsyncPgTransaction` permits at most one consuming use; it has no
+// linear/@must_consume obligation or rollback Drop guard. Callers must
+// explicitly finish the transaction through `commit_tx_async` or
+// `rollback_tx_async`. Dropping the token does not send a terminal request;
+// later actor statements are not a substitute for rollback. Cancellation
+// cleanup requires separate runtime evidence.
 // =============================================================================
 
 @arch_module(
@@ -48,10 +49,9 @@ mount core.async.channel.oneshot;
 // Affine handle
 // =============================================================================
 
-/// Affine — exactly one consumer; cannot be cloned. Drops without
-/// explicit commit/rollback leave the wire's tx state open;
-/// `commit_tx_async` / `rollback_tx_async` consume the handle so
-/// the lifecycle is type-checked.
+/// Affine — at most one consuming use. Callers must explicitly commit or
+/// roll back; the declaration does not reject every unused token or prove
+/// server-side termination, including when an awaited operation is cancelled.
 public type affine AsyncPgTransaction is {
     opts: PgTxOpts,
 };
@@ -192,11 +192,12 @@ public async fn rollback_to_savepoint_async(
 }
 
 // =============================================================================
-// with_transaction — RAII-style scope helper
+// with_transaction — callback Result-branch helper
 // =============================================================================
 
-/// Run `body` inside a transaction; commits on Ok, rolls back on
-/// Err. Mirrors `core.database.postgres.transaction.with_transaction`.
+/// Run `body` inside a transaction; attempt commit on Ok and best-effort
+/// rollback on Err, preserving the body error. No panic or cancellation
+/// guard is installed. Mirrors the synchronous helper's Result handling.
 ///
 /// Body's signature follows the same pattern as
 /// `core.database.common.retry_run.run_with_retry` — the closure

@@ -14,10 +14,11 @@ module core.database.postgres.transaction;
 // Spec: database.md §4.1 + §5.5; common/protocol.vr `affine Transaction`.
 //
 
-// PgTransaction mirrors the SQLite L7 affine Transaction shape (commit
-// 8eb1a847) — same safety contract: the type cannot be dropped without
-// being consumed by `commit_tx` / `rollback_tx`, so leaked transactions
-// are a compile-time error rather than a production bug.
+// PgTransaction follows the SQLite L7 affine usage discipline: at most
+// one consuming use, without a linear/@must_consume obligation. Callers
+// must explicitly commit or roll back as an API requirement. The token
+// has no rollback Drop guard; automatic scope-exit, panic and cancellation
+// cleanup cannot be inferred from the declaration.
 //
 
 // On the wire the operation is plain SQL — `BEGIN` / `BEGIN ISOLATION
@@ -294,11 +295,11 @@ public fn rollback_to_savepoint(conn: &mut PgConnection, name: &Text)
 // `with_transaction` callback combinator
 // -----------------------------------------------------------------------------
 
-/// Run `body` inside an automatically-managed transaction. Begins,
-/// runs, commits on `Ok` / rolls back on `Err`. This is the
-/// recommended entry point for almost all transactional code — the
-/// affine PgTransaction value is created and consumed internally so
-/// the caller never has to thread it.
+/// Run `body` inside a transaction. An ordinary Ok triggers a commit
+/// attempt; Err triggers best-effort rollback and preserves the body error
+/// even if rollback fails. No panic or cancellation guard is installed.
+/// The affine token is created and consumed internally; a consumed token
+/// does not prove that the terminal database operation succeeded.
 public fn with_transaction<R>(
     conn: &mut PgConnection,
     body: fn(&mut PgConnection) -> Result<R, DbError>,

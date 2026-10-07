@@ -95,6 +95,9 @@ implement MyTxOpts {
 // MysqlTransaction — affine handle
 // -----------------------------------------------------------------------------
 
+/// At most one consuming use, without a linear/@must_consume obligation.
+/// Callers must explicitly commit or roll back as an API requirement;
+/// affine alone does not establish automatic cleanup on either backend.
 public type affine MysqlTransaction is {
     opts: MyTxOpts,
 }
@@ -205,6 +208,9 @@ public fn rollback_to_savepoint(conn: &mut MysqlConnection, name: &Text)
 // `with_transaction` callback combinator
 // -----------------------------------------------------------------------------
 
+/// Handle ordinary callback Result branches: attempt commit on Ok and
+/// best-effort rollback on Err, retaining the original body error.
+/// No panic or cancellation guard is installed by this helper.
 public fn with_transaction<R>(
     conn: &mut MysqlConnection,
     body: fn(&mut MysqlConnection) -> Result<R, DbError>,

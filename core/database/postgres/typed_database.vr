@@ -171,20 +171,16 @@ implement<C: CanWrite> Database<PgPool, C> {
 
 // -----------------------------------------------------------------------------
 // Tx-bound surface — DbReadWriteTx / DbAdmin / DbUnsafe. Begin a
-// transaction; the returned `PgTransaction` is `affine` (must be
-// consumed by commit / rollback per spec §5.5).
+// transaction and bundle its affine token with the pool checkout. Callers
+// must explicitly commit or roll back; affine does not require consumption.
 // -----------------------------------------------------------------------------
 
 implement<C: CanTx> Database<PgPool, C> {
     /// Open a transaction with the pool's default isolation level
-    /// (READ COMMITTED). The returned `PgTransaction` must be
-    /// consumed by `commit_tx` / `rollback_tx` — affine, so the
-    /// type-checker rejects forgotten-rollback paths.
-    ///
-    /// Acquires a connection from the pool and HOLDS IT for the
-    /// duration of the transaction. Caller releases the connection
-    /// implicitly through the affine consume on commit/rollback.
-    /// This mirrors the spec §5.5 affine `Tx` semantics.
+    /// (READ COMMITTED). The returned TxScope bundles the transaction token
+    /// with its pool checkout. Callers must use its commit/rollback API to
+    /// finish the transaction and release the checkout. Affine alone does
+    /// not reject a forgotten terminal call or establish implicit cleanup.
     public fn begin(&self) -> Result<TxScope<PgPool>, DbError> {
         let mut handle = match self.pool.acquire() {
             Result.Ok(h)  => h,
@@ -209,11 +205,11 @@ implement<C: CanTx> Database<PgPool, C> {
 // terminal operations release the connection back to the pool.
 // -----------------------------------------------------------------------------
 
-/// Active-transaction handle. Holds the `PgTransaction` (which owns
-/// a `&mut PgConnection`) plus the `PooledConnection<PgConnection>`
-/// checkout that keeps the connection alive. Consumed by `commit`
-/// or `rollback` — affine, so a forgotten consume is a compile
-/// error.
+/// Active-transaction wrapper holding a PgTransaction token and the pool
+/// checkout for its connection. The token itself holds options, not a
+/// connection borrow. Callers must use commit/rollback to finish and release
+/// the checkout. The affine declaration permits an unused wrapper; it does
+/// not establish scope-exit, panic or cancellation cleanup.
 public type affine TxScope<P> is {
     tx: PgTransaction,
     handle: PooledConnection<PgConnection>,

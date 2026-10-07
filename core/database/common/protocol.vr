@@ -28,10 +28,10 @@
 // Two design pillars:
 //
 
-//  1. `Transaction` is `affine` — the value MUST be consumed by exactly
-//  one of `commit` / `rollback`. The compiler refuses to drop a
-//  live transaction; the runtime issues an implicit ROLLBACK on
-//  panic before the affine destructor fires.
+//  1. `Transaction` is affine: at most one consuming use. Callers must
+//  explicitly commit or roll back as an API obligation. This protocol has
+//  no linear/@must_consume requirement and supplies no rollback destructor.
+//  Scope-exit, panic and cancellation cleanup need implementation evidence.
 //
 
 //  2. Errors are associated types per protocol — `Connection.Error`,
@@ -172,11 +172,11 @@ public type Connection is protocol {
 /// A live database transaction.
 ///
 
-/// `affine`: the value MUST be consumed by exactly one terminal call —
-/// either `commit` or `rollback`. The compiler refuses to drop a
-/// `Transaction` value out of scope. On panic the runtime emits
-/// `ROLLBACK` to the wire before destruction so the server side never
-/// leaves an orphan tx.
+/// Affine permits at most one consuming use; it does not require a terminal
+/// call before scope exit. Callers must explicitly commit or roll back and
+/// handle errors. The declaration supplies neither automatic rollback nor
+/// proof of cleanup on panic/cancellation. Concrete adapters must establish
+/// their own lifetime behavior; see docs/architecture/resource-mode-contract.md.
 public type affine Transaction is protocol {
     type SP: Savepoint;
 

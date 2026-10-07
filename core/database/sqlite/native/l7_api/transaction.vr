@@ -12,23 +12,21 @@ module core.database.sqlite.native.l7_api.transaction;
 // Spec: database.md §4.1 + §5.5; sqlite-native.md §13.
 //
 
-// `SqliteTransaction` is the affine handle the user MUST consume by calling
-// `Database.commit_tx(tx)` or `Database.rollback_tx(tx)`. Forgetting
-// to consume it is a *compile-time* error — the type system refuses to
-// drop an affine value out of scope, which makes "leaked transaction"
-// (the most common SQL bug in production) lexically impossible.
+// `SqliteTransaction` is affine: at most one consuming use, not mandatory
+// consumption. Callers must finish a transaction through `Database.commit_tx`
+// or `Database.rollback_tx` as an API obligation. There is no @must_consume
+// declaration or rollback Drop guard here. Scope-exit, panic and cancellation
+// cleanup cannot be inferred from this token; see docs/architecture/resource-mode-contract.md.
 //
 
 // Why a token instead of a borrowed Database?
 //
 
-//  The spec ideal (`tx.commit(self)`) requires Tx to hold `&mut Database`
-//  so the call can dispatch back through the connection. Verum's
-//  present field-type surface allows owned values but not borrowed
-//  references in struct fields, so we use the dual form: methods on
-//  `Database` that *consume* a `SqliteTransaction` token. Identical
-//  semantics, identical safety; the only API difference is
-//  `db.commit_tx(tx)` vs `tx.commit()`.
+//  This API keeps the connection separate from the token: methods on
+//  `Database` consume `SqliteTransaction`. The token holds a depth snapshot
+//  and transaction kind, not a borrow or identity of the originating
+//  Database. Callers must use the originating connection; the depth check
+//  is not proof that an unrelated connection owns this transaction.
 //
 
 //  The `with_transaction` callback combinator wraps both halves so most
@@ -40,11 +38,9 @@ module core.database.sqlite.native.l7_api.transaction;
 //
 
 //  * `started_at_depth` — snapshot of `SqliteNativeConnection.tx_depth()` when
-//  `begin_tx` fired. `commit_tx` / `rollback_tx` cross-check the
-//  current depth before issuing the underlying VDBE COMMIT /
-//  ROLLBACK so accidentally pairing a Tx with the wrong nested
-//  scope (e.g. consumed inside a savepoint) is caught at runtime
-//  with `DbMisuse(..)` rather than corrupting tx state.
+//  `begin_tx` fired. `commit_tx` cross-checks the current depth before
+//  issuing COMMIT, reporting `DbMisuse(..)` for an unmatched nested scope.
+//  `rollback_tx` deliberately tolerates stale depth as a recovery path.
 // =============================================================================
 
 mount base.{Result, Ok, Err, Text};
@@ -64,17 +60,17 @@ mount base.{Result, Ok, Err, Text};
 /// avoids SQLITE_BUSY surprises in concurrent-writer setups.
 public type TxKind is TkDeferred | TkImmediate | TkExclusive;
 
-/// Affine transaction handle. Constructed only by
-/// `Database.begin_tx_*`; consumed only by
+/// Affine transaction handle. User code obtains it through
+/// `Database.begin_tx_*` and finishes the transaction through
 /// `Database.commit_tx` / `Database.rollback_tx` (or the
 /// `Database.with_transaction` combinator that wraps both).
 ///
 
 /// Affine semantics:
-///  * Cannot be copied.
-///  * Cannot be dropped without consumption — compile-time error.
-///  * `commit_tx` / `rollback_tx` take `SqliteTransaction` by value; the
-///  compiler then has no live binding to use after the call.
+///  * At most one consuming use; references may observe the live owner.
+///  * Unused locals are permitted; this is not a linear/@must_consume type.
+///  * `commit_tx` / `rollback_tx` take the token by value, including on error.
+///    Consumption does not prove successful COMMIT/ROLLBACK or runtime cleanup.
 public type affine SqliteTransaction is {
     /// Tx-depth snapshot for outer-vs-savepoint sanity checking.
     started_at_depth: Int,
