@@ -440,6 +440,81 @@ impl VbcCodegen {
         ty: Option<&verum_ast::Type>,
         value: Option<&verum_ast::Expr>,
     ) -> CodegenResult<Option<Reg>> {
+        // T1615: collect declaration-owned facts before lowering the initializer,
+        // then attach them to the NEW binding. Initializers may compile closures
+        // or shadow a same-named outer array; neither owns this declaration's ID.
+        let element_name = ty.and_then(|ty| {
+            use verum_ast::ty::TypeKind as TK;
+            let mut ty = ty;
+            while let TK::Reference { inner, .. }
+                | TK::CheckedReference { inner, .. }
+                | TK::UnsafeReference { inner, .. } = &ty.kind
+            {
+                ty = inner;
+            }
+            match &ty.kind {
+                TK::Array { element, .. } | TK::Slice(element) =>
+                    Some(Self::render_field_type_name(element, true)),
+                _ => None,
+            }
+        }).or_else(|| {
+            let verum_ast::expr::ExprKind::Field { expr: base, field } = &value?.kind else {
+                return None;
+            };
+            let owner = Self::self_or_inferred_type_name(&self.ctx, base)
+                .or_else(|| self.infer_expr_type_name(base))?;
+            Self::element_type_name(self.field_type_name(&owner, field.name.as_str())?)
+        }).or_else(|| {
+            let source_type = self.extract_expr_type_name(value?)?;
+            Self::element_type_name(&source_type)
+        });
+
+        // The existing packed field/call carriers (T1475) also publish AFTER
+        // binding. Wider array fields remain slot-backed; only byte fields pack.
+        let inferred_layout = if ty.is_none() {
+            value.and_then(|value| {
+                if let verum_ast::expr::ExprKind::Field { expr: base, field } = &value.kind
+                    && let Some(owner) = self.packed_field_receiver_type(base)
+                    && let Some((1, is_float, count)) = self.field_array_spec(&owner, field.name.as_str())
+                    && count > 0
+                {
+                    return Some((1, is_float, count as usize));
+                }
+                let info = self.call_callee_info(value)?;
+                let crate::types::TypeRef::Array { element, length } = info.return_type? else {
+                    return None;
+                };
+                let (stride, is_float) = self.primitive_array_element_spec(&element)?;
+                (length > 0).then_some((stride, is_float, length as usize))
+            })
+        } else {
+            None
+        };
+        let result = self.compile_let_inner(pattern, ty, value);
+        if result.is_ok()
+            && let verum_ast::PatternKind::Ident { name, .. } = &pattern.kind
+        {
+            if let Some(element) = element_name {
+                self.ctx.set_array_element_type_name(&name.name, element);
+            }
+            if let Some((stride, is_float, count)) = inferred_layout {
+                if stride == 1 {
+                    self.ctx.mark_byte_array_var(&name.name);
+                } else {
+                    self.ctx.mark_typed_array_var(&name.name, stride, is_float);
+                }
+                self.ctx.set_fixed_array_count(&name.name, count);
+            }
+        }
+        result
+    }
+
+    fn compile_let_inner(
+        &mut self,
+        pattern: &verum_ast::Pattern,
+        ty: Option<&verum_ast::Type>,
+        value: Option<&verum_ast::Expr>,
+    ) -> CodegenResult<Option<Reg>> {
         // A LOCAL BINDING CAN HOLD A REFERENCE TOO (T1442).
         //
         // T1438 taught `.0` and `q.rep()` to dereference when their base
@@ -494,95 +569,6 @@ impl VbcCodegen {
                 self.ctx.reference_bound_vars.remove(&name.to_string());
             }
         }
-        // PACKED-BYTE-LOCAL-FROM-FIELD-1 (T1463): `let mut buf = self.buf;`
-        // where the field is DECLARED `[Byte; N]`. The local carries the
-        // same packed buffer, but nothing marked it as one, so every
-        // `buf[i]` after it lowered to the generic `GetE`/`SetE` whose
-        // Tier-1 form classifies its receiver at run time and reads the
-        // buffer's own bytes as a header.
-        //
-        // This is where SHA-256 and SHA-512 land TODAY: with the field-index
-        // fix in place they run through `update` and die in `finalize`, at a
-        // small FIXED offset (`0x18`) rather than at data-as-a-pointer —
-        // a different signature, and this binding is its source.
-        //
-        // THE LOCAL REALLY IS THE SAME BUFFER, checked against the
-        // Value-Copy Contract before relying on it rather than after. The
-        // bytecode is `GetF` + `Mov`, no `Clone`, which looks like the
-        // contract's "Binding" row being skipped — and is not: a packed
-        // array is the contract's "untracked pointer" shape, whose copy IS
-        // itself, "because its bytes are not an ObjectHeader; reading one
-        // there fabricates an object out of the user's payload"
-        // (docs/architecture/value-copy-contract.md §2). So marking the
-        // local packed states a fact, it does not assume one.
-        //
-        // Byte elements only (`elem_size == 1`): a `[UInt32; N]` field holds
-        // a heap List with 8-byte Value slots after
-        // PACKED-FIELD-ONE-REPRESENTATION-1, and a byte stride there would
-        // read garbage SILENTLY — trading a crash for a wrong answer, which
-        // is the one move this task refuses.
-        if let verum_ast::PatternKind::Ident { name, .. } = &pattern.kind
-            && ty.is_none()
-            && let Some(v) = value
-            && let verum_ast::expr::ExprKind::Field { expr: recv, field } = &v.kind
-            && let Some(owner) = self.packed_field_receiver_type(recv)
-            && let Some((1, _, declared_len)) =
-                self.field_array_spec(&owner, field.name.as_str())
-            && declared_len > 0
-        {
-            self.ctx.mark_byte_array_var(&name.name);
-            self.ctx
-                .set_fixed_array_count(&name.name, declared_len as usize);
-        }
-
-        // PACKED-ARRAY-FROM-CALL-1 (T1475): `let d = make();` where `make`
-        // is DECLARED `-> [T; N]`. The callee returns a packed buffer —
-        // `NewByteArray` / `NewTypedArray`, measured in the bytecode of
-        // both spellings — and nothing marked the binding, so every
-        // `d[i]` after it lowered to the generic `GetE`, whose Tier-1
-        // form classifies its receiver at run time and reads the
-        // buffer's own bytes as a header.
-        //
-        // ELEVEN LINES, NO STDLIB, and the fault address IS the data:
-        //
-        //     fn make() -> [Byte; 8] { … out[0] = 11; out[7] = 22; out }
-        //     let d = make();  d[0]
-        //       tier 0 -> 11        tier 1 -> rc=139 at 0x160000000000000b
-        //
-        // `0x16` is 22 (out[7]) and `0x0b` is 11 (out[0]) — the array's
-        // own contents used as a pointer.
-        //
-        // WHY THE MARK AND NOT A CLASSIFIER ARM: a packed buffer is
-        // unstamped by design, because the FFI byte-buffer contract's
-        // first rule requires `[Byte; N]` destined for C to BE packed.
-        // It can never be made self-describing, so the reader must know
-        // statically — which is what the byte/typed fast paths (T0172,
-        // T0356) already do for an annotated local. This gives a
-        // call-bound local the same footing.
-        //
-        // The declared RETURN is the authority, exactly as the field
-        // declaration is for `PACKED-BYTE-LOCAL-FROM-FIELD-1`. A callee
-        // whose return type is not a primitive array is left alone, so
-        // List-returning functions keep the generic path they need.
-        if let verum_ast::PatternKind::Ident { name, .. } = &pattern.kind
-            && ty.is_none()
-            && let Some(v) = value
-            && let Some(info) = self.call_callee_info(v)
-            && let Some(crate::types::TypeRef::Array { element, length }) = info.return_type
-            && length > 0
-            && let Some((elem_size, is_float)) =
-                self.primitive_array_element_spec(&element)
-        {
-            if elem_size == 1 {
-                self.ctx.mark_byte_array_var(&name.name);
-            } else {
-                self.ctx
-                    .mark_typed_array_var(&name.name, elem_size, is_float);
-            }
-            self.ctx
-                .set_fixed_array_count(&name.name, length as usize);
-        }
-
         // `let (a, b, …) = <expr>` — record the destructured elements'
         // types so downstream method dispatch on the bound names
         // (`a.as_bytes()`) resolves a receiver type. `compile_match` only
@@ -846,57 +832,6 @@ impl VbcCodegen {
             // both paths consulted, `let s = sink();` now records
             // `variable_type_names["s"] = "Sink"` reliably and the
             // method-call site emits the qualified `Sink.write` CallM.
-            // The ELEMENT type of an array/slice annotation goes to its
-            // own map, NOT to `variable_type_names`. That map is keyed
-            // by variable and consumed by every qualified-name builder;
-            // writing `[UInt32; _]` into it would make `a.len()` emit
-            // `[UInt32; _].len`. What the method-call site needs is the
-            // element's WIDTH, and only for an INDEXED receiver.
-            //
-            // Without this, `let h: [UInt32; 8]` contributed nothing at
-            // all — the annotation walk handled Path, Generic and
-            // Reference but not Array — so `h[i].to_be_bytes()` could
-            // not know its receiver was 32 bits. SHA-256's `finalize`
-            // serialises exactly that shape.
-            {
-                use verum_ast::ty::TypeKind as TK;
-                // 1. From an explicit annotation: `let h: [UInt32; 8]`.
-                let mut elem_name: Option<String> = None;
-                if let Some(t) = ty {
-                    let elem = match &t.kind {
-                        TK::Array { element, .. } => Some(element),
-                        TK::Slice(element) => Some(element),
-                        _ => None,
-                    };
-                    if let Some(e) = elem
-                        && let TK::Path(path) = &e.kind
-                        && let Some(verum_ast::ty::PathSegment::Name(id)) = path.segments.first()
-                    {
-                        elem_name = Some(id.name.to_string());
-                    }
-                }
-                // 2. From the FIELD's declaration when the initialiser is
-                //    a field read: `let mut h = self.h;` carries no
-                //    annotation, and that is the shape the stdlib
-                //    actually uses — SHA-256's `finalize` binds its
-                //    `[UInt32; 8]` state exactly this way, then
-                //    serialises it with `h[i].to_be_bytes()`. Reading
-                //    the DECLARED field type is the same authority the
-                //    packed-field-init path already uses.
-                if elem_name.is_none()
-                    && let Some(init) = value
-                    && let verum_ast::expr::ExprKind::Field { expr: base, field } = &init.kind
-                    && let Some(owner) = Self::self_or_inferred_type_name(&self.ctx, base)
-                        .or_else(|| self.infer_expr_type_name(base))
-                    && let Some(decl) = self.field_type_name(&owner, field.name.as_str())
-                    && let Some(e) = Self::element_type_name(decl)
-                {
-                    elem_name = Some(e);
-                }
-                if let Some(e) = elem_name {
-                    self.ctx.array_element_type_names.insert(var_name.clone(), e);
-                }
-            }
             if let Some(type_name) = type_name_from_annotation {
                 if std::env::var("VERUM_TRACE_LETTYPE").is_ok() {
                     eprintln!("[lettype] {var_name}: annotation -> {type_name:?}");

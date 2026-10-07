@@ -4853,12 +4853,12 @@ impl VbcCodegen {
     /// "how long is this" and the `Len` opcode reads the array's own
     /// data or past its allocation. Where this returns `Some(n)` the
     /// caller must emit `LoadI n`; where it returns `None` it must fall
-    /// through to `Len` — the absence is not an answer, and zero is
-    /// never a legitimate return here.
+    /// through to `Len` — absence is not an answer, while `Some(0)`
+    /// identifies a known empty array.
     ///
     /// COVERAGE BOUNDARY, stated so it is not later read as
-    /// "that case does not arise": the tracking is keyed by NAME, so
-    /// `self.buf[..]` and `xs[i][..]` have no key and get `None`.
+    /// "that case does not arise": this lookup resolves a local binding,
+    /// so `self.buf[..]` and `xs[i][..]` have no key and get `None`.
     fn static_array_count(&self, expr: &Expr) -> Option<usize> {
         let ExprKind::Path(path) = &expr.kind else {
             return None;
@@ -11165,6 +11165,28 @@ impl VbcCodegen {
         self.compile_variant_constructor_with_tag_named(None, tag, args)
     }
 
+    /// Parse the actual array/slice declaration before any nominal-name
+    /// simplification. Reference qualifiers preserve the structural owner.
+    fn structural_receiver_element(type_name: &str) -> Option<verum_ast::Type> {
+        use verum_ast::ty::TypeKind as TK;
+        let type_name = type_name.trim();
+        if !type_name.starts_with('[') && !type_name.starts_with('&') {
+            return None;
+        }
+        let parsed = verum_fast_parser::Parser::new(type_name).parse_type().ok()?;
+        let mut ty = &parsed;
+        while let TK::Reference { inner, .. }
+            | TK::CheckedReference { inner, .. }
+            | TK::UnsafeReference { inner, .. } = &ty.kind
+        {
+            ty = inner;
+        }
+        match &ty.kind {
+            TK::Array { element, .. } | TK::Slice(element) => Some(element.as_ref().clone()),
+            _ => None,
+        }
+    }
+
     /// Emit bytecode for a typechecker-resolved dispatch target.
     ///
     /// This is the PRE-RESOLVED FAST PATH consumer (#91): the
@@ -11203,18 +11225,24 @@ impl VbcCodegen {
         }
         let recv_ty = recv_ty_opt?;
         let recv_ty = recv_ty.trim();
-        let derived = match self.type_name_to_type_ref_mono(recv_ty) {
-            Some(crate::types::TypeRef::Instantiated { args, .. }) if !args.is_empty() => {
-                Some(args)
-            }
-            _ => {
-                let args = VbcCodegen::split_generic_args(recv_ty);
-                if args.is_empty() {
-                    None
-                } else {
-                    args.iter()
-                        .map(|a| self.type_name_to_type_ref_mono(a))
-                        .collect::<Option<Vec<_>>>()
+        // Structural declarations own their WHOLE element witness. In
+        // [Cell<Int>], nominal angle extraction would incorrectly select Int.
+        let derived = if let Some(element) = Self::structural_receiver_element(recv_ty) {
+            self.explicit_type_witness(&element, None).map(|element| vec![element])
+        } else {
+            match self.type_name_to_type_ref_mono(recv_ty) {
+                Some(crate::types::TypeRef::Instantiated { args, .. }) if !args.is_empty() => {
+                    Some(args)
+                }
+                _ => {
+                    let args = VbcCodegen::split_generic_args(recv_ty);
+                    if args.is_empty() {
+                        None
+                    } else {
+                        args.iter()
+                            .map(|a| self.type_name_to_type_ref_mono(a))
+                            .collect::<Option<Vec<_>>>()
+                    }
                 }
             }
         };
@@ -12701,6 +12729,23 @@ impl VbcCodegen {
             target = next_type;
         }
 
+        self.compile_method_on_adjusted_value(
+            value, target.as_str(), receiver.span, method, args, resolved_target, type_args,
+        )
+    }
+
+    /// Share receiver evaluation and temporary-scope cleanup across implicit
+    /// Deref and fixed-array-to-slice adjustments.
+    fn compile_method_on_adjusted_value(
+        &mut self,
+        value: Reg,
+        target: &str,
+        span: verum_ast::Span,
+        method: &verum_ast::Ident,
+        args: &verum_common::List<Expr>,
+        resolved_target: Option<&verum_ast::expr::ResolvedCallTarget>,
+        type_args: &verum_common::List<verum_ast::ty::GenericArg>,
+    ) -> CodegenResult<Option<Reg>> {
         // Reserve the result outside the local scope: a method interception
         // may return its receiver register directly, so carry it before exit.
         let result_value = self.ctx.alloc_temp();
@@ -12716,8 +12761,8 @@ impl VbcCodegen {
             .variable_type_names
             .insert(binding.clone(), target.to_string());
         self.ctx
-            .register_variable_type(&binding, self.type_name_to_var_type(target.as_str()));
-        let adjusted = Expr::ident(verum_ast::Ident::new(binding.clone(), receiver.span));
+            .register_variable_type(&binding, self.type_name_to_var_type(target));
+        let adjusted = Expr::ident(verum_ast::Ident::new(binding.clone(), span));
         let result = self.compile_method_call(&adjusted, method, args, resolved_target, type_args);
         if let Ok(Some(reg)) = &result {
             self.ctx.emit(Instruction::Mov {
@@ -12734,7 +12779,6 @@ impl VbcCodegen {
         }
         self.ctx.variable_type_names.remove(&binding);
         self.ctx.variable_types.remove(&binding);
-        self.ctx.array_element_type_names.remove(&binding);
         match result {
             Ok(Some(_)) => Ok(Some(result_value)),
             other => {
@@ -12914,6 +12958,46 @@ impl VbcCodegen {
                 },
                 receiver.span,
             ));
+        }
+
+        // T1615: a packed fixed array borrows the structural Slice method
+        // surface. Its allocation has no List owner fields. Carry the known
+        // count and stride into a FatRef BEFORE any nominal or pre-resolved
+        // call path can select a List body. Parentheses preserve the place;
+        // references already arrive as FatRefs and have no packed-local mark.
+        let mut array_receiver = receiver;
+        while let ExprKind::Paren(inner) = &array_receiver.kind {
+            array_receiver = inner;
+        }
+        if let ExprKind::Path(path) = &array_receiver.kind
+            && path.segments.len() == 1
+            && let PathSegment::Name(name) = &path.segments[0]
+            && let Some(stride) = self.ctx.get_typed_array_elem_size(&name.name)
+            && let Some(count) = self.ctx.fixed_array_count(&name.name)
+        {
+            let value = self.compile_expr(array_receiver)?
+                .or_internal("fixed-array receiver has no value")?;
+            let start = self.ctx.alloc_temp();
+            self.ctx.emit(Instruction::LoadSmallI { dst: start, value: 0 });
+            let length = self.ctx.alloc_temp();
+            self.ctx.emit(Instruction::LoadI { dst: length, value: count as i64 });
+            let slice = self.ctx.alloc_temp();
+            let mut operands = verum_common::List::<u8>::new().into();
+            for reg in [slice.0, value.0, start.0, length.0, stride as u16] {
+                Self::write_reg(&mut operands, reg);
+            }
+            self.ctx.emit(Instruction::CbgrExtended {
+                sub_op: crate::instruction::CbgrSubOpcode::RefSlice as u8,
+                operands,
+            });
+            self.ctx.free_temp(value);
+            self.ctx.free_temp(start);
+            self.ctx.free_temp(length);
+            let target = self.ctx.array_element_type_name(name.name.as_str())
+                .map_or_else(|| "Slice".to_string(), |element| format!("Slice<{element}>"));
+            return self.compile_method_on_adjusted_value(
+                slice, &target, receiver.span, method, args, resolved_target, type_args,
+            );
         }
 
         // Resolve the complete receiver chain before lowering it. Own
@@ -15195,66 +15279,6 @@ impl VbcCodegen {
                 .unwrap_or(false)
         };
 
-        // T1276 — `buf.as_ptr()` ON A FIXED-SIZE ARRAY IS `(&buf[..]).as_ptr()`.
-        //
-        // A packed `[T; N]` receiver carries the type name `List`
-        // (`vbc_lowering` marks an array parameter and an array local
-        // alike), so `receiver_defines_own_ptr_method` was true and the
-        // call fell through to `List.as_ptr`, which reads `self.ptr` at
-        // `LIST_PTR_OFFSET` — offset 24 into a HEADERLESS allocation,
-        // i.e. the array's own bytes or past its end. Measured: NULL at
-        // Tier 1, and `open(2)` answered EFAULT through it.
-        //
-        // `ffi-byte-buffer-contract.md` rule 3 documents this spelling
-        // as the wrong one and the subslice as the right one. Documented
-        // is not the same as intended: Rust's `[u8; N]` answers its own
-        // data pointer, and the frontend already knows both N and the
-        // stride. So build the slice and Unslice it — byte-identical to
-        // what `&buf[..]` emits, which is the form that works.
-        if (method.name == "as_ptr" || method.name == "as_mut_ptr")
-            && args.is_empty()
-            && let ExprKind::Path(rpath) = &receiver.kind
-            && rpath.segments.len() == 1
-            && let PathSegment::Name(rident) = &rpath.segments[0]
-            && let Some(elem_sz) = self.ctx.get_typed_array_elem_size(&rident.name)
-            && let Some(n) = self.ctx.fixed_array_count(&rident.name)
-        {
-            let start_reg = self.ctx.alloc_temp();
-            self.ctx.emit(Instruction::LoadSmallI {
-                dst: start_reg,
-                value: 0,
-            });
-            let len_reg = self.ctx.alloc_temp();
-            self.ctx.emit(Instruction::LoadI {
-                dst: len_reg,
-                value: n as i64,
-            });
-            let slice_reg = self.ctx.alloc_temp();
-            let mut sl_ops = Vec::<u8>::with_capacity(8);
-            Self::write_reg(&mut sl_ops, slice_reg.0);
-            Self::write_reg(&mut sl_ops, receiver_reg.0);
-            Self::write_reg(&mut sl_ops, start_reg.0);
-            Self::write_reg(&mut sl_ops, len_reg.0);
-            Self::write_reg(&mut sl_ops, elem_sz as u16);
-            self.ctx.emit(Instruction::CbgrExtended {
-                sub_op: crate::instruction::CbgrSubOpcode::RefSlice as u8,
-                operands: sl_ops,
-            });
-            let result = self.ctx.alloc_temp();
-            let mut un_ops = Vec::<u8>::with_capacity(4);
-            Self::write_reg(&mut un_ops, result.0);
-            Self::write_reg(&mut un_ops, slice_reg.0);
-            self.ctx.emit(Instruction::CbgrExtended {
-                sub_op: crate::instruction::CbgrSubOpcode::Unslice as u8,
-                operands: un_ops,
-            });
-            self.ctx.free_temp(start_reg);
-            self.ctx.free_temp(len_reg);
-            self.ctx.free_temp(slice_reg);
-            self.ctx.free_temp(receiver_reg);
-            return Ok(Some(result));
-        }
-
         if method.name == "as_ptr" && args.is_empty() && !receiver_defines_own_ptr_method {
             // slice.as_ptr() -> extract pointer from fat pointer using Unslice
             let result = self.ctx.alloc_temp();
@@ -15843,8 +15867,7 @@ impl VbcCodegen {
             && let verum_ast::ty::PathSegment::Name(obj_ident) = &obj_path.segments[0]
             && let Some(elem) = self
                 .ctx
-                .array_element_type_names
-                .get(&*obj_ident.name)
+                .array_element_type_name(&obj_ident.name)
                 .cloned()
                 .or_else(|| {
                     self.ctx
@@ -16303,22 +16326,13 @@ impl VbcCodegen {
         let effective_method_name =
             Self::method_receiver_type_name(&effective_method_name).to_string();
 
-        // Normalize slice-type prefixes: `[T].method` is the natural name
-        // produced by `extract_type_name_from_ast` for field/variable types
-        // of kind `[T]`, but `implement<T> [T]` blocks register under the
-        // `Slice.method` prefix (see `extract_impl_type_name_from_type`).
-        // Rewrite here so dispatch and registration agree on a single key.
-        let effective_method_name = if effective_method_name.starts_with('[') {
-            if let Some(close) = effective_method_name.find(']') {
-                let after = &effective_method_name[close + 1..];
-                if let Some(rest) = after.strip_prefix('.') {
-                    format!("Slice.{}", rest)
-                } else {
-                    effective_method_name
-                }
-            } else {
-                effective_method_name
-            }
+        // The declaration, before nominal argument stripping, chooses the
+        // structural Slice owner. Nested elements such as [Cell<Int>] must not
+        // become a guessed `[Cell.method` prefix (T1615).
+        let effective_method_name = if self.infer_expr_type_name(receiver)
+            .and_then(|name| Self::structural_receiver_element(&name)).is_some()
+        {
+            format!("Slice.{}", method.name)
         } else {
             effective_method_name
         };
@@ -21336,13 +21350,9 @@ impl VbcCodegen {
                 if let Some(binding) = self.ctx.lookup_var_mut(&name.name) {
                     binding.is_pattern_alias = *by_ref || subpattern.is_some();
                 }
-                // T1192 — ANY new binding of this name drops a recorded
-                // byte-array size. The map is keyed by NAME, so a `let`
-                // in an inner block, a match arm, a `for` binding or a
-                // parameter that reuses the name must not keep answering
-                // the outer array's length. The byte-array `let` path
-                // marks AFTER calling this, so forgetting here and
-                // re-recording there is the correct order.
+                // A fresh declaration must not inherit a shadowed array's
+                // count. T1615 keys this by binding identity so the outer
+                // declaration's facts survive its temporary shadow.
                 self.ctx.forget_fixed_array_count(&name.name);
                 // When by_ref is true, the scrutinee is already a pointer to the value
                 // (from GetVariantDataRef). We bind this pointer directly - it acts as
@@ -28979,6 +28989,17 @@ impl VbcCodegen {
             ExprKind::Paren(inner) => self.extract_expr_type_name(inner),
             // Unary operations: deref, ref, etc. → propagate inner type
             ExprKind::Unary { op, expr: inner } => {
+                // The whole-array borrow producer emits a FatRef, so a
+                // binding or direct method receiver must retain Slice identity.
+                if matches!(op, UnOp::Ref | UnOp::RefMut)
+                    && let ExprKind::Path(path) = &inner.kind
+                    && path.segments.len() == 1
+                    && let PathSegment::Name(name) = &path.segments[0]
+                    && self.ctx.get_typed_array_elem_size(&name.name).is_some()
+                {
+                    return Some(self.ctx.array_element_type_name(name.name.as_str())
+                        .map_or_else(|| "Slice".to_string(), |element| format!("Slice<{element}>")));
+                }
                 let inner_type = self.extract_expr_type_name(inner);
                 if matches!(op, verum_ast::expr::UnOp::Deref)
                     && let Some(ref t) = inner_type
@@ -32666,8 +32687,12 @@ impl VbcCodegen {
         // Save labels and loop context for restoration after closure compilation
         let saved_closure_ctx = self.ctx.save_closure_context();
 
+        let captured_arrays = self.ctx.capture_array_facts(
+            captures.iter().map(|(name, _)| name.as_str()),
+        );
         // Begin closure function compilation
         self.ctx.begin_function(&closure_name, &all_params, None);
+        self.ctx.bind_captured_array_facts(captured_arrays);
 
         // CLOSURE-CAPTURE-TYPE-1: re-instate the captures' types on the
         // far side of the clear, so the body resolves field indices
@@ -33972,8 +33997,12 @@ impl VbcCodegen {
         let saved_return_type = self.ctx.return_type.clone();
         let saved_closure_ctx = self.ctx.save_closure_context();
 
+        let captured_arrays = self.ctx.capture_array_facts(
+            capture_names.iter().map(|(name, _)| name.as_str()),
+        );
         self.ctx
             .begin_function(&spawn_func_name, &capture_names, None);
+        self.ctx.bind_captured_array_facts(captured_arrays);
         // Inject captured variable type names for VBC codegen (method dispatch, etc.)
         // EXCEPT for types handled by built-in opcodes — those use compiled .vr methods
         // with &self ABI that doesn't match raw i64 spawn parameters. For these types, we only
@@ -43298,8 +43327,10 @@ impl VbcCodegen {
         let captures_with_mut: Vec<(String, bool)> =
             captures.iter().map(|c| (c.clone(), false)).collect();
 
+        let captured_arrays = self.ctx.capture_array_facts(captures.iter().map(String::as_str));
         // Begin generator function compilation
         self.ctx.begin_function(&gen_name, &captures_with_mut, None);
+        self.ctx.bind_captured_array_facts(captured_arrays);
 
         // Mark captured variables
         for cap_name in captures.iter() {

@@ -432,14 +432,11 @@ pub struct CodegenContext {
     pub compiled_block_result_types:
         Map<verum_ast::Span, verum_common::Maybe<verum_common::Text>>,
 
-    /// Element type of an array/slice-annotated local, by variable name.
-    ///
-    /// Separate from [`variable_type_names`] on purpose: that map holds
-    /// the variable's OWN type and every qualified-name builder reads
-    /// it, so an entry like `[UInt32; _]` would surface as a method
-    /// name. This one answers a narrower question — "what is in the
-    /// container?" — and only the indexed-receiver dispatch asks it.
-    pub array_element_type_names: HashMap<String, String>,
+    /// Declared element identity of an array/slice local, keyed by binding ID.
+    /// Separate from the container's own nominal type: indexed method receivers
+    /// and the structural Slice adapter need the declared element, including
+    /// after an inner declaration with the same name leaves scope.
+    pub array_element_type_names: HashMap<verum_common::value_use::BindingId, String>,
 
     /// Names of bindings (params) whose DECLARED type is a REFERENCE
     /// (`&T` / `&mut T` / `&checked T` / `&unsafe T`, plus `&self`-shape
@@ -757,19 +754,21 @@ pub struct CodegenContext {
     /// `core-tests/collections/toposort`).
     pub module_aliases: HashMap<String, Vec<String>>,
 
-    /// Variables that hold byte arrays (contiguous byte buffers).
+    /// Declaration identities that hold byte arrays (contiguous buffers).
+    /// Counts and strides use the same identity: shadowing a spelling cannot
+    /// steal its outer binding's layout or erase it at scope exit (T1615).
     ///
     /// When a variable is declared as `let buf: [Byte; N] = uninit()` or similar,
     /// it's marked as a byte array variable. This affects how `&mut buf[idx] as *mut Byte`
     /// is compiled - we emit `ByteArrayElementAddr` instead of `GetE + Ref` to get
     /// the actual memory address of the element rather than its value.
-    pub byte_array_vars: HashSet<String>,
+    pub byte_array_vars: HashSet<verum_common::value_use::BindingId>,
     /// Element counts for FIXED-SIZE ARRAY variables — `[Byte; N]` from
     /// `byte_array_vars` and `[T; N]` from `typed_array_vars` alike
     /// (T1192 recorded the byte half; T1269 widened it, because
     /// `[Int; 5]` answered 0 for `.len()` at Tier 1 exactly as
     /// `[Byte; 16]` had).
-    pub fixed_array_counts: HashMap<String, usize>,
+    pub fixed_array_counts: HashMap<verum_common::value_use::BindingId, usize>,
 
     /// Task #18 — escape-analysis result for the current function.
     ///
@@ -789,7 +788,7 @@ pub struct CodegenContext {
 
     /// Variables that hold typed arrays with their element sizes.
     ///
-    /// Maps variable name to element size in bytes. For example:
+    /// Maps the active declaration identity to element size in bytes. For example:
     /// - `let arr: [UInt64; 4]` -> ("arr", 8)
     /// - `let arr: [UInt32; 10]` -> ("arr", 4)
     /// - `let arr: [UInt16; 100]` -> ("arr", 2)
@@ -799,7 +798,7 @@ pub struct CodegenContext {
     /// The bool is the element float-ness (`[Float; N]` / `[Float32; N]`), so
     /// the index read/write can emit `TypedArrayLoad`/`TypedArrayStore` with the
     /// `0x80` float flag (T0356: the elem_size alone can't tell F32 from U32).
-    pub typed_array_vars: std::collections::HashMap<String, (usize, bool)>,
+    pub typed_array_vars: HashMap<verum_common::value_use::BindingId, (usize, bool)>,
 
     /// Depth counter for nested try/recover blocks.
     ///
@@ -962,6 +961,15 @@ pub struct DeferInfo {
     pub is_errdefer: bool,
 }
 
+/// Array facts transferred from an explicit capture to its new function binding.
+#[derive(Debug, Clone)]
+pub(super) struct CapturedArrayFacts {
+    byte: bool,
+    count: Option<usize>,
+    typed: Option<(usize, bool)>,
+    element: Option<String>,
+}
+
 /// Saved context state for nested function compilation (closures, generators).
 ///
 /// When compiling a closure or generator inside a function, we call `begin_function()`
@@ -997,6 +1005,15 @@ pub struct ClosureCompilationContext {
     pub current_return_type_full: Option<String>,
     /// Saved reference-binding names (for the `*reference` Deref lowering).
     pub reference_bindings: std::collections::HashSet<String>,
+    /// Array layout facts belong to the saved function's declaration IDs.
+    /// A nested function resets those IDs and cannot supply the outer facts.
+    pub byte_array_vars: HashSet<verum_common::value_use::BindingId>,
+    /// Saved fixed-array element counts.
+    pub fixed_array_counts: HashMap<verum_common::value_use::BindingId, usize>,
+    /// Saved packed element widths and floating-point flags.
+    pub typed_array_vars: HashMap<verum_common::value_use::BindingId, (usize, bool)>,
+    /// Saved declared element names used by method generic arguments.
+    pub array_element_type_names: HashMap<verum_common::value_use::BindingId, String>,
     /// Saved object-ref param registers (Pillar 1 typed-ref emission) —
     /// register-keyed, so the closure body must NOT inherit them.
     pub object_ref_param_regs: std::collections::HashSet<u16>,
@@ -1920,7 +1937,9 @@ impl CodegenContext {
     /// are referenced with `&mut arr[idx] as *mut Byte` - we emit `ByteArrayElementAddr`
     /// instead of `GetE + Ref` to get the actual memory address.
     pub fn mark_byte_array_var(&mut self, name: &str) {
-        self.byte_array_vars.insert(name.to_string());
+        if let Some(binding) = self.lookup_var(name) {
+            self.byte_array_vars.insert(binding.binding_id);
+        }
     }
 
     /// Record a fixed-size array's ELEMENT COUNT alongside the mark above.
@@ -1949,21 +1968,71 @@ impl CodegenContext {
     /// header carrying a type_id, so the probes written against that
     /// shape find one — and at Tier 1 they read the array's own bytes.
     pub fn set_fixed_array_count(&mut self, name: &str, size: usize) {
-        self.fixed_array_counts.insert(name.to_string(), size);
+        if let Some(binding) = self.lookup_var(name) {
+            self.fixed_array_counts.insert(binding.binding_id, size);
+        }
     }
 
-    /// Forget one name's count, for a re-binding that is NOT a
-    /// fixed-size array — `let buf: [Byte; 16] = …;` then an inner
-    /// `let buf = …;` must not keep answering 16.
+    /// Forget the current declaration's count without erasing a shadowed
+    /// outer declaration's facts.
     pub fn forget_fixed_array_count(&mut self, name: &str) {
-        self.fixed_array_counts.remove(name);
+        if let Some(id) = self.lookup_var(name).map(|binding| binding.binding_id) {
+            self.fixed_array_counts.remove(&id);
+        }
     }
 
-    /// The recorded element count, or `None` for "not known here" —
-    /// never zero. A caller must fall through to the `Len` opcode
-    /// rather than treat the absence as an answer.
+    /// The active declaration's recorded element count. `Some(0)` is a
+    /// known empty array; `None` means the layout is not known here.
     pub fn fixed_array_count(&self, name: &str) -> Option<usize> {
-        self.fixed_array_counts.get(name).copied()
+        let binding = self.lookup_var(name)?;
+        self.fixed_array_counts.get(&binding.binding_id).copied()
+    }
+
+    /// Declared element identity for the active binding, independent of shadows.
+    pub fn array_element_type_name(&self, name: &str) -> Option<&String> {
+        let id = self.lookup_var(name)?.binding_id;
+        self.array_element_type_names.get(&id)
+    }
+
+    /// Publish element identity only after the declaration has been bound.
+    pub fn set_array_element_type_name(&mut self, name: &str, element: String) {
+        if let Some(binding) = self.lookup_var(name) {
+            self.array_element_type_names.insert(binding.binding_id, element);
+        }
+    }
+
+    /// Snapshot only explicit captures, resolving each in the enclosing scope.
+    pub(super) fn capture_array_facts<'a>(
+        &self,
+        names: impl Iterator<Item = &'a str>,
+    ) -> verum_common::List<(String, CapturedArrayFacts)> {
+        names.filter_map(|name| {
+            let id = self.lookup_var(name)?.binding_id;
+            let facts = CapturedArrayFacts {
+                byte: self.byte_array_vars.contains(&id),
+                count: self.fixed_array_counts.get(&id).copied(),
+                typed: self.typed_array_vars.get(&id).copied(),
+                element: self.array_element_type_names.get(&id).cloned(),
+            };
+            (facts.byte || facts.count.is_some() || facts.typed.is_some() || facts.element.is_some())
+                .then(|| (name.to_owned(), facts))
+        }).collect()
+    }
+
+    /// Rebind captured facts after begin_function creates fresh declaration IDs.
+    pub(super) fn bind_captured_array_facts(
+        &mut self,
+        captures: verum_common::List<(String, CapturedArrayFacts)>,
+    ) {
+        for (name, facts) in captures {
+            let Some(id) = self.lookup_var(&name).map(|binding| binding.binding_id) else {
+                continue;
+            };
+            if facts.byte { self.byte_array_vars.insert(id); }
+            if let Some(count) = facts.count { self.fixed_array_counts.insert(id, count); }
+            if let Some(typed) = facts.typed { self.typed_array_vars.insert(id, typed); }
+            if let Some(element) = facts.element { self.array_element_type_names.insert(id, element); }
+        }
     }
 
     /// Checks if a variable is a byte array.
@@ -1971,7 +2040,8 @@ impl CodegenContext {
     /// If true, `&mut var[idx] as *mut T` patterns should use `ByteArrayElementAddr`
     /// to compute the element address instead of fetching its value with `GetE`.
     pub fn is_byte_array_var(&self, name: &str) -> bool {
-        self.byte_array_vars.contains(name)
+        self.lookup_var(name)
+            .is_some_and(|binding| self.byte_array_vars.contains(&binding.binding_id))
     }
 
     /// Clears byte array variable tracking.
@@ -1987,8 +2057,9 @@ impl CodegenContext {
     /// are referenced with `&mut arr[idx] as *mut T` - we emit `TypedArrayElementAddr`
     /// with the element size to compute the correct memory address.
     pub fn mark_typed_array_var(&mut self, name: &str, elem_size: usize, is_float: bool) {
-        self.typed_array_vars
-            .insert(name.to_string(), (elem_size, is_float));
+        if let Some(binding) = self.lookup_var(name) {
+            self.typed_array_vars.insert(binding.binding_id, (elem_size, is_float));
+        }
     }
 
     /// Gets the element size of a typed array variable.
@@ -1996,10 +2067,11 @@ impl CodegenContext {
     /// Returns `Some(size)` if the variable is a typed array, `None` otherwise.
     /// For byte arrays (tracked separately), returns `Some(1)`.
     pub fn get_typed_array_elem_size(&self, name: &str) -> Option<usize> {
-        if self.byte_array_vars.contains(name) {
+        let binding = self.lookup_var(name)?;
+        if self.byte_array_vars.contains(&binding.binding_id) {
             Some(1)
         } else {
-            self.typed_array_vars.get(name).map(|&(sz, _)| sz)
+            self.typed_array_vars.get(&binding.binding_id).map(|&(sz, _)| sz)
         }
     }
 
@@ -2009,10 +2081,11 @@ impl CodegenContext {
     /// T0356: routes the index read/write to the `0x80` float flag so
     /// `TypedArrayLoad`/`TypedArrayStore` decode the IEEE bits correctly.
     pub fn get_typed_array_float(&self, name: &str) -> Option<bool> {
-        if self.byte_array_vars.contains(name) {
+        let binding = self.lookup_var(name)?;
+        if self.byte_array_vars.contains(&binding.binding_id) {
             Some(false)
         } else {
-            self.typed_array_vars.get(name).map(|&(_, is_float)| is_float)
+            self.typed_array_vars.get(&binding.binding_id).map(|&(_, is_float)| is_float)
         }
     }
 
@@ -2634,7 +2707,7 @@ impl CodegenContext {
         // ALSO see the enclosing function's generics, so not clearing is
         // correct for them too.
         self.clear_byte_array_vars();
-        // T1192 — the SIZES go with the marks. Same key (variable name),
+        // T1192/T1615 — the SIZES go with the marks. Same binding ID,
         // same lifetime; separating them would give one of the two a
         // stale entry the other cannot see.
         self.fixed_array_counts.clear();
@@ -4577,6 +4650,10 @@ impl CodegenContext {
             current_return_type_name: self.current_return_type_name.clone(),
             current_return_type_full: self.current_return_type_full.clone(),
             reference_bindings: self.reference_bindings.clone(),
+            byte_array_vars: self.byte_array_vars.clone(),
+            fixed_array_counts: self.fixed_array_counts.clone(),
+            typed_array_vars: self.typed_array_vars.clone(),
+            array_element_type_names: self.array_element_type_names.clone(),
             object_ref_param_regs: self.object_ref_param_regs.clone(),
         }
     }
@@ -4596,6 +4673,10 @@ impl CodegenContext {
         self.variable_type_names = saved.variable_type_names;
         self.compiled_block_result_types = saved.compiled_block_result_types;
         self.reference_bindings = saved.reference_bindings;
+        self.byte_array_vars = saved.byte_array_vars;
+        self.fixed_array_counts = saved.fixed_array_counts;
+        self.typed_array_vars = saved.typed_array_vars;
+        self.array_element_type_names = saved.array_element_type_names;
         self.object_ref_param_regs = saved.object_ref_param_regs;
     }
 

@@ -1082,39 +1082,9 @@ pub(in super::super) fn handle_get_index(
     // read the carrier and returned the whole list instead of `20`.
     let arr_val = peel_shared_value(state.get_reg(arr));
 
-    // Handle FatRef (slice) indexing first - FatRef also passes is_ptr() so check this before
-    if arr_val.is_fat_ref() {
-        // (element read shared with IterNext via fat_ref_read_element)
-        let fat_ref = arr_val.as_fat_ref();
-        let raw_idx_val = state.get_reg(idx);
-        let idx_val = raw_idx_val.as_i64() as usize;
-        let len = fat_ref.len() as usize;
-
-        // Bounds check
-        if idx_val >= len {
-            return Err(InterpreterError::Panic {
-                message: format!(
-                    "Slice index out of bounds: index {} but length is {}",
-                    idx_val, len
-                ),
-            });
-        }
-
-        // Get the element from the slice's backing array
-        // The FatRef ptr points to the start of the slice data
-        let base_ptr = fat_ref.ptr();
-        if base_ptr.is_null() {
-            return Err(InterpreterError::NullPointer);
-        }
-
-        // Element read via the ONE FatRef element authority (shared
-        // with IterNext's FATREF_SLICE arm — index and iteration paths
-        // cannot drift).
-        let element = fat_ref_read_element(&fat_ref, idx_val);
-        state.set_reg(dst, element);
-        return Ok(DispatchResult::Continue);
-    }
-
+    // T1615: resolve the receiver before choosing its representation. A
+    // mutable Slice method receives a register reference to its FatRef;
+    // classifying that reference first would read the FatRef as an object.
     // Auto-dereference CBGR register-based references (&T / &mut T).
     // When a function receives `&mut List<Int>`, the register holds a
     // CBGR ref (encoded negative i64 with register index + generation).
@@ -1147,6 +1117,39 @@ pub(in super::super) fn handle_get_index(
     } else {
         arr_val
     };
+
+    // Handle FatRef (slice) indexing first - FatRef also passes is_ptr() so check this before
+    if arr_val.is_fat_ref() {
+        // (element read shared with IterNext via fat_ref_read_element)
+        let fat_ref = arr_val.as_fat_ref();
+        let raw_idx_val = state.get_reg(idx);
+        let idx_val = raw_idx_val.as_i64() as usize;
+        let len = fat_ref.len() as usize;
+
+        // Bounds check
+        if idx_val >= len {
+            return Err(InterpreterError::Panic {
+                message: format!(
+                    "Slice index out of bounds: index {} but length is {}",
+                    idx_val, len
+                ),
+            });
+        }
+
+        // Get the element from the slice's backing array
+        // The FatRef ptr points to the start of the slice data
+        let base_ptr = fat_ref.ptr();
+        if base_ptr.is_null() {
+            return Err(InterpreterError::NullPointer);
+        }
+
+        // Element read via the ONE FatRef element authority (shared
+        // with IterNext's FATREF_SLICE arm — index and iteration paths
+        // cannot drift).
+        let element = fat_ref_read_element(&fat_ref, idx_val);
+        state.set_reg(dst, element);
+        return Ok(DispatchResult::Continue);
+    }
 
     // BYTE_SLICE byte view (ARCH-P5): typed arm reading through the
     // raw `{ptr, len}` payload.  Placed AFTER the reference auto-deref
