@@ -29,8 +29,10 @@ the full checker passes **3924 tests** (zero failures, three existing ignores),
 and nine selected checker/VBC binaries pass **69 tests** across namespace owners,
 conditional counts, fixed arrays, bootstrap exports and `Default`. The
 [integration gate record](checked-count-integration.json) preserves commands and
-log hashes. The separate full VBC library gate is still running. T1628 retains
-ordinary relative two-segment expression lookup; T1630 retains nested strict-error
+log hashes. The namespace checkpoint also passes the full VBC library gate:
+**2063 tests**, zero failures and one existing ignore. T1626 is complete within
+its lexical-count source acceptance. T1628 retains ordinary relative two-segment
+expression lookup; T1630 retains nested strict-error
 propagation; T1631 retains pre-existing import-order and module-alias precedence.
 
 These source results do not update the ordinary CLI/AOT verdicts below. The
@@ -51,7 +53,11 @@ The ordinary rebuilt CLI passes returned-reference/Once/Supervisor, declaration
 properties through inline-module aliases, primitive hash/Map/Set and numeric/List
 storage controls. T1613, T1614 and the bounded T1596 acceptance are complete.
 Atomics, field addresses and root/sibling identity also pass, while both retained
-Mutex checks still release the guard too early. Native Drop, consuming-call and
+Mutex checks still release the guard too early. A subsequent
+[split-expression diagnostic](mutex-producer-handoff.md) on the same pinned CLI
+records guard destruction and unlock before `lock()` returns to its caller,
+preceding `unwrap()`; it preserves the runtime/bytecode correlation limits.
+Native Drop, consuming-call and
 aggregate handoff, native packed List/borrowed consumers and numeric AOT completion
 remain open. The [stage-14 record](platform-acceptance-2026-10-07-stage14.md)
 contains exact source snapshots, output oracles and artifact hashes. Source gates

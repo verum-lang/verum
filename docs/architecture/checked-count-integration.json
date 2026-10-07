@@ -62,7 +62,33 @@
   },
   "limits": [
     "Source integration gates only; no new ordinary CLI or AOT acceptance.",
-    "The independent T1627 full VBC library gate is still running.",
-    "Three checker ignores are pre-existing."
-  ]
+    "Three checker ignores are pre-existing.",
+    "The full VBC library gate ran on the namespace source checkpoint; the integrated branch ran the combined focused gate."
+  ],
+  "independent_namespace_vbc_library": {
+    "command": [
+      "cargo",
+      "test",
+      "--locked",
+      "-p",
+      "verum_vbc",
+      "--lib",
+      "--no-default-features",
+      "--features",
+      "compression,table_dispatch,codegen,ffi",
+      "--",
+      "--test-threads=8"
+    ],
+    "commit": "61d25571d7e9d0ec4c19d88038c3b47b6a7716e7",
+    "tree": "18f695e0a6566e7c4753c5615a319203193d7d37",
+    "started_epoch": 1791378644.2496169,
+    "elapsed_seconds": 1051.8246681690216,
+    "exit_code": 0,
+    "passed": 2063,
+    "failed": 0,
+    "ignored": 1,
+    "ignore": "Existing T0839 control",
+    "log": "/Users/taaliman/.tmp/verum-codex-01a10248-types/T1627-vbc-full-final.log",
+    "log_sha256": "aa26b22c5c5af9a2e7e51d12543dfe46fedd241a47c565383057353b06db3da2"
+  }
 }
