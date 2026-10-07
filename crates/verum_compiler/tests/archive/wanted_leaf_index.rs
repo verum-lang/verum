@@ -31,6 +31,40 @@ fn wanted(names: &[&str]) -> HashSet<String> {
 }
 
 #[test]
+fn borrowed_leaf_buckets_preserve_the_original_candidate_order() {
+    // Each independently seeded set has a different permitted iteration
+    // order. The index must preserve whichever one the caller supplies.
+    for _ in 0..8 {
+        let names = wanted(&[
+            "choose",
+            "alpha.choose",
+            "beta.choose",
+            "core.alpha.choose",
+            "alpha.other",
+            "other",
+            "δοκιμή.choose",
+        ]);
+        let index = wanted_aliases_by_leaf(&names);
+        assert!(index.get(&"absent").is_none());
+        assert_eq!(index.values().map(List::len).sum::<usize>(), names.len());
+        for leaf in ["choose", "other"] {
+            let expected: List<_> = names
+                .iter()
+                .filter(|name| name.rsplit('.').next() == Some(leaf))
+                .collect();
+            let actual = index.get(&leaf).unwrap();
+            assert_eq!(actual.as_slice(), expected.as_slice());
+            for (actual, expected) in actual.iter().zip(&expected) {
+                assert!(
+                    std::ptr::eq(*actual, *expected),
+                    "index must borrow the original name"
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn same_leaf_archive_owners_and_bare_first_wins_survive_both_module_orders() {
     let alpha = source_archive("alpha", "public fn choose()->Int {37}");
     let beta = source_archive("beta", "public fn choose()->Int {99}");

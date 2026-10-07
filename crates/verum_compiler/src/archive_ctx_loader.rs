@@ -42,6 +42,7 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::OnceLock;
+use verum_common::{List, Map};
 
 use verum_vbc::archive::VbcArchive;
 use verum_vbc::codegen::{CodegenContext, FunctionInfo};
@@ -5905,6 +5906,18 @@ fn collect_mount_names(
     }
 }
 
+/// Keep only equal-leaf candidates for the wanted-alias fanout. Names and
+/// leaf keys borrow the caller's set; append in its original iteration order
+/// so filtering cannot reorder the existing first-wins registrations.
+fn wanted_aliases_by_leaf(wanted: &HashSet<String>) -> Map<&str, List<&String>> {
+    let mut by_leaf: Map<&str, List<&String>> = Map::with_capacity(wanted.len());
+    for name in wanted {
+        let leaf = name.rsplit('.').next().unwrap_or(name.as_str());
+        by_leaf.entry(leaf).or_default().push(name);
+    }
+    by_leaf
+}
+
 /// Register only those FunctionInfo entries whose simple or
 /// qualified name appears in `wanted`.  Parallel to
 /// `register_module` but with name-set filtering.
@@ -5950,6 +5963,7 @@ fn register_module_filtered(
     let lookup = |id: verum_vbc::types::StringId| -> Option<&str> {
         name_by_id.get(&id).copied()
     };
+    let wanted_by_leaf = wanted_aliases_by_leaf(wanted);
     // T0706 — CANONICAL-SUFFIX acceptance for two-segment wanted names.
     // A supplemental wanted entry spells the DISPATCH form
     // (`UInt8.to_hex`), while the descriptor canonicalises to the
@@ -6493,11 +6507,10 @@ fn register_module_filtered(
         // whose source-module-qualified descriptor.name ends in `.name`,
         // register the function under the user's wanted form too.
         let simple_leaf = simple_name.rsplit('.').next().unwrap_or(simple_name.as_str());
-        for w in wanted.iter() {
+        for w in wanted_by_leaf.get(&simple_leaf).into_iter().flatten().copied() {
             if w == &qualified {
                 continue;
             }
-            let w_leaf = w.rsplit('.').next().unwrap_or(w.as_str());
             // **Cross-pollination guard** (root cause of tasks #21 + #26):
             //
             // When both `w` and `simple_name` are qualified paths sharing
@@ -6600,8 +6613,7 @@ fn register_module_filtered(
             let may_claim = !bare_wanted
                 || info.variant_tag.is_some()
                 || info.parent_type_name.is_none();
-            if w_leaf == simple_leaf
-                && w != simple_name.as_str()
+            if w != simple_name.as_str()
                 && prefixes_compatible
                 && may_claim
                 && ctx.lookup_function(w).is_none()
