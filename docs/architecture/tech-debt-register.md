@@ -1,5 +1,16 @@
 # Verum Technical-Debt Register
 
+## Native controls and retained acceptance failures — stage 13 (2026-10-07)
+
+The fresh ordinary CLI passes direct/shared atomic identity, user and primitive
+hash selection, output order and field-address controls in both interpreter
+and actual native execution. Root free-function identity also passes its
+retained public-compiler fixture. Mutex lifetime still fails in both backends;
+Byte-list mutation, value-self property chains, root namespace mounts and the
+numeric AOT timeout remain open acceptance failures. See the
+[stage-13 evidence](platform-acceptance-2026-10-07-stage13.md) for immutable
+build identities, phase verdicts and the limits of follow-up source fixes.
+
 ## Fresh interpreter controls and AOT timeout — T1594 / T1606 / T1608 (2026-10-05)
 
 The ordinary stage-12 CLI passes numeric/List and returned-reference
