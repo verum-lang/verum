@@ -4509,16 +4509,40 @@ impl VbcCodegen {
         }
     }
 
-    /// Exports all currently registered functions.
-    ///
-    /// This is used during stdlib compilation to collect functions
-    /// from this module for use by dependent modules.
+    /// Owned export for consumers that retain a complete registry snapshot.
+    /// Bootstrap uses [`Self::export_function_view`] to avoid cloning discarded
+    /// imports while preserving this API's ownership and alias behavior.
     pub fn export_functions(&self) -> std::collections::HashMap<String, FunctionInfo> {
         let mut functions = self.ctx.export_functions();
+        self.visit_function_export_aliases(|name, info| {
+            functions.insert(name.into_string(), info.clone());
+        });
+        functions
+    }
+
+    /// Final export identities borrowing the current declaration metadata.
+    ///
+    /// Apply all canonical aliases before a consumer performs first-wins
+    /// publication. Streaming base bindings followed by aliases would let an
+    /// earlier conflicting binding hide the selected source declaration.
+    pub fn export_function_view(&self) -> Map<verum_common::Text, &FunctionInfo> {
+        let mut functions: Map<_, _> = self.ctx.functions.iter()
+            .map(|(name, info)| (verum_common::Text::from(name.as_str()), info))
+            .collect();
+        self.visit_function_export_aliases(|name, info| {
+            functions.insert(name, info);
+        });
+        functions
+    }
+
+    fn visit_function_export_aliases<'a>(
+        &'a self,
+        mut publish: impl FnMut(verum_common::Text, &'a FunctionInfo),
+    ) {
         // Bundled modules retain each body's declaring file. Publish that
         // exact identity for metadata-only edges (Drop/Clone), whose owner
         // cannot be recovered from a possibly colliding bare registry key.
-        let by_id: std::collections::HashMap<_, _> = self.ctx.functions.values()
+        let by_id: Map<_, _> = self.ctx.functions.values()
             .map(|info| (info.id, info))
             .collect();
         for function in &self.functions {
@@ -4537,10 +4561,12 @@ impl VbcCodegen {
                 .filter(|info| info.id == descriptor.id)
                 .or_else(|| by_id.get(&descriptor.id).copied());
             if let Some(info) = info {
-                functions.insert(crate::module::qualify_module_name(owner, name), info.clone());
+                publish(
+                    verum_common::Text::from(crate::module::qualify_module_name(owner, name)),
+                    info,
+                );
             }
         }
-        functions
     }
 
     /// Export this module's record field layouts (type-name → declared

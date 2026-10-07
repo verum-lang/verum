@@ -2761,16 +2761,21 @@ one module and therefore never seeded",
         // 1-4); the per-stage `pre_register_*` helpers below assign
         // `id = BASE - <stub_index>` from the same constants.
         let is_in_stub_range = |id: u32| -> bool { verum_vbc::stub_ranges::is_stub_id(id) };
-        let new_functions = codegen.export_functions();
+        // The view has already applied source-owner aliases. Clone metadata
+        // only when this publication accepts it; most imports already exist.
+        let new_functions = codegen.export_function_view();
         for (name, info) in new_functions {
             let is_stub = matches!(
-                self.global_function_registry.get(&name),
+                self.global_function_registry.get(name.as_str()),
                 Some(existing) if is_in_stub_range(existing.id.0)
             );
             if is_stub {
-                self.global_function_registry.insert(name, info);
+                self.global_function_registry
+                    .insert(name.into_string(), info.clone());
             } else {
-                self.global_function_registry.entry(name).or_insert(info);
+                self.global_function_registry
+                    .entry(name.into_string())
+                    .or_insert_with(|| info.clone());
             }
         }
 
@@ -2918,3 +2923,7 @@ one module and therefore never seeded",
         Ok(builder.finish())
     }
 }
+
+#[cfg(test)]
+#[path = "../../tests/bootstrap/function_exports.rs"]
+mod function_export_tests;

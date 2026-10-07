@@ -175,3 +175,8 @@ required-features = ["codegen"]
 [[test]]
 name = "global_type_table_consistency_tests"
 required-features = ["codegen"]
+
+[[bench]]
+name = "bootstrap_exports"
+harness = false
+required-features = ["codegen"]
