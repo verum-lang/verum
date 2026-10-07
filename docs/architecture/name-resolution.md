@@ -6,6 +6,9 @@ inventory (every claim below was reproduced on the shipped toolchain, task IDs
 given) plus a survey of prior art, and it defines the model the implementation
 migrates to. The migration stages and their gates are at the end.
 
+The checked array-count implementation and its measured validation boundaries
+are recorded in [checked count owners](checked-count-owners.md).
+
 ## 1. Why this document exists — the measured defect inventory
 
 One architectural deficiency — *name resolution by flat global tables with
