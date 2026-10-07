@@ -115,3 +115,12 @@ fn module_namespace_precedes_type_layout_properties() {
         );
     }
 }
+
+#[test]
+fn forward_module_declaration_owns_its_missing_count() {
+    let source = "module outer { module ns { public const CAP: Int=3; } module inner { module ns; fn measure<T>()->Int {T.size} fn probe()->Int {measure<[Byte; ns.CAP]>()} } }";
+    assert!(
+        !errors(source).is_empty(),
+        "forward module must block outer owner"
+    );
+}

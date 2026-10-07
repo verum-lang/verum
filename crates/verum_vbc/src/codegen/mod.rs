@@ -8216,13 +8216,13 @@ impl VbcCodegen {
     fn collect_count_module_owners(&mut self, items: &[Item], parent: &str) {
         for item in items {
             if !self.should_compile_item(item) { continue; }
-            if let ItemKind::Module(module) = &item.kind
-                && let Some(items) = &module.items
-            {
+            if let ItemKind::Module(module) = &item.kind {
                 let owner = if parent.is_empty() { module.name.name.to_string() }
                     else { format!("{parent}.{}", module.name.name) };
                 self.count_module_owners.declare(&owner);
-                self.collect_count_module_owners(items, &owner);
+                if let Some(items) = &module.items {
+                    self.collect_count_module_owners(items, &owner);
+                }
             }
         }
     }

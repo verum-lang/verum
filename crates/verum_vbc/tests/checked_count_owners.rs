@@ -148,3 +148,25 @@ fn a_module_type_member_keeps_its_layout_property() {
         8
     );
 }
+
+#[test]
+fn forward_module_declaration_owns_its_missing_count() {
+    let origin = Parser::new("module outer; module ns { public const CAP: Int=3; }")
+        .parse_module()
+        .unwrap();
+    let caller = Parser::new("module outer.inner; module ns; fn measure<T>()->Int {T.size} fn probe()->Int {measure<[Byte; ns.CAP]>()}").parse_module().unwrap();
+    assert!(caller.items.iter().any(|item| matches!(&item.kind,
+        verum_ast::ItemKind::Module(module) if module.name.name == "ns" && module.items.is_none()
+    )), "fixture must contain a parsed forward module declaration");
+    let mut codegen = VbcCodegen::new();
+    codegen
+        .collect_unit_declarations(&[&origin, &caller])
+        .unwrap();
+    let error = codegen
+        .compile_unit_items(&[&origin, &caller], ItemFailurePolicy::Strict)
+        .expect_err("forward module must block outer owner");
+    assert!(
+        error.to_string().contains("constant") || error.to_string().contains("array"),
+        "{error}"
+    );
+}
