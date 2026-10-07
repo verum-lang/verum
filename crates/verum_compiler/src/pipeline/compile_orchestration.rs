@@ -1239,6 +1239,8 @@ impl<'s> CompilationPipeline<'s> {
                     self.session,
                 );
 
+                checker.prepare_checked_count_file(&module);
+
                 // Pass 0: Pre-register all inline modules
                 // This enables cross-module imports even when modules are declared after
                 // the modules that import from them.

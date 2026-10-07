@@ -228,6 +228,8 @@ pub struct ConstEvaluator {
     count_values: Map<Text, std::result::Result<verum_ast::checked_const::Scalar, Text>>,
     /// Module ownership comes from declarations, including empty modules.
     count_modules: verum_ast::checked_const::ModuleOwners,
+    /// File-aware callers identify headers explicitly; nested forwards do not.
+    count_file_headers: Map<Span, Text>,
     /// Registry of meta functions available for compile-time calls
     /// Meta system: unified compile-time computation via "meta fn", "meta" parameters, @derive macros, tagged literals, all under single "meta" concept — Section 3.1 - Meta function registry
     functions: Map<Text, MetaFunction>,
@@ -252,6 +254,7 @@ impl ConstEvaluator {
             env: Map::new(),
             count_values: Map::new(),
             count_modules: Default::default(),
+            count_file_headers: Map::new(),
             functions: Map::new(),
             recursion_depth: 0,
             max_depth: MAX_RECURSION_DEPTH,
@@ -303,15 +306,47 @@ impl ConstEvaluator {
         if let Ok(value) = self.eval(expr) {
             self.env.insert(Text::from(name), value);
         }
+        let scope = Self::count_scope(scope);
         self.count_values
             .insert(Text::from(format!("{scope}.{name}")), checked);
+    }
+
+    /// Normalize only the checked-count domain: compiler file paths omit the
+    /// explicit cog prefix, while direct checker scopes may already include it.
+    fn count_scope(scope: &str) -> Text {
+        if scope.is_empty() || scope == "<root>" || scope == "cog" { Text::from("cog") }
+        else if scope.starts_with("cog.") { Text::from(scope) }
+        else { Text::from(format!("cog.{scope}")) }
+    }
+
+    /// Prepare a parsed file under the compiler's already-selected file scope.
+    /// Its first named bodiless declaration is a header, not a child module.
+    pub fn declare_count_file(&mut self, items: &[verum_ast::Item], scope: &str) {
+        if let Some(header) = items.iter().find_map(|item| match &item.kind {
+            verum_ast::ItemKind::Module(module)
+                if module.items.is_none() && !module.name.name.is_empty() => Some(module),
+            _ => None,
+        }) {
+            self.count_file_headers.insert(header.span, header.name.name.clone());
+        }
+        let scope = Self::count_scope(scope);
+        self.count_modules.declare(scope.as_str());
+        for item in items {
+            if let verum_ast::ItemKind::Module(module) = &item.kind {
+                self.declare_count_modules(module, scope.as_str());
+            }
+        }
     }
 
     /// Record the actual source module tree before evaluating its members.
     /// This is separate from value bindings and leaves rich meta lookup intact.
     pub fn declare_count_modules(&mut self, module: &verum_ast::decl::ModuleDecl, parent: &str) {
-        let path = if parent.is_empty() { module.name.name.to_string() }
-            else { format!("{parent}.{}", module.name.name) };
+        if module.items.is_none()
+            && self.count_file_headers.get(&module.span) == Some(&module.name.name) {
+            return;
+        }
+        let parent = Self::count_scope(parent);
+        let path = format!("{parent}.{}", module.name.name);
         self.count_modules.declare(&path);
         if let Some(items) = &module.items {
             for item in items {
@@ -334,6 +369,8 @@ impl ConstEvaluator {
         expr: &Expr,
         scope: &str,
     ) -> Result<verum_ast::checked_const::Scalar> {
+        let scope = Self::count_scope(scope);
+        let scope = scope.as_str();
         verum_ast::checked_const::evaluate(expr, 0, &mut |leaf, _depth| {
             fn name(expr: &Expr, depth: usize) -> Option<Text> {
                 if depth >= 128 {

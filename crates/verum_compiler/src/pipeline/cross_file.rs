@@ -970,6 +970,8 @@ impl<'s> CompilationPipeline<'s> {
             checker.set_current_module_path(current_module_path_str.as_str());
         }
 
+        checker.prepare_checked_count_file(module);
+
         // Sub-pass 0: Pre-register all inline modules
         // This enables cross-module imports even when modules are declared after
         // the modules that import from them.

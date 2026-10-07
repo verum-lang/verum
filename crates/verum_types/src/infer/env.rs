@@ -3041,6 +3041,12 @@ impl TypeChecker {
     // the question, because it does.
 
 
+    /// Publish count owners using the parsed file and its installed file scope.
+    /// Ordinary namespace registration retains its own existing contract.
+    pub fn prepare_checked_count_file(&mut self, module: &verum_ast::Module) {
+        self.const_eval.declare_count_file(&module.items, self.current_module_path.as_str());
+    }
+
     /// Pre-register a module and all nested modules (public interface).
     ///
     /// This is called before any content processing to ensure
@@ -3052,7 +3058,6 @@ impl TypeChecker {
         module: &verum_ast::decl::ModuleDecl,
         parent_path: &str,
     ) {
-        self.const_eval.declare_count_modules(module, parent_path);
         self.pre_register_module(module, parent_path);
     }
 

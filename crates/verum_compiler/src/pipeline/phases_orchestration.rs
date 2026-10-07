@@ -596,6 +596,8 @@ impl<'s> CompilationPipeline<'s> {
             checker.register_protocol_as_context(context_name.clone());
         }
 
+        checker.prepare_checked_count_file(module);
+
         // Multi-pass type checking:
         // Pass -1: Pre-register all inline modules
         // This enables cross-module imports even when modules are declared after

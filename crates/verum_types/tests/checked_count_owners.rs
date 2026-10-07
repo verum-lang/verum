@@ -124,3 +124,60 @@ fn forward_module_declaration_owns_its_missing_count() {
         "forward module must block outer owner"
     );
 }
+
+#[test]
+fn installed_file_scope_keeps_qualified_and_explicit_root_counts() {
+    for header in ["", "module outer.inner;"] {
+        let caller = Parser::new(&format!("{header} const CAP: Int=3;"))
+            .parse_module()
+            .unwrap();
+        let mut checker = TypeChecker::new();
+        checker.register_primitives();
+        // Mirrors file_path_to_module_path for src/outer/inner.vr and the
+        // compiler's module pre-registration, followed by item checking.
+        checker.set_current_module_path("outer.inner");
+        checker.prepare_checked_count_file(&caller);
+        for item in &caller.items {
+            if let ItemKind::Module(decl) = &item.kind {
+                checker.pre_register_module_public(decl, "cog");
+            }
+        }
+        for item in &caller.items {
+            checker.check_item(item).unwrap();
+        }
+        for count in ["outer.inner.CAP", "cog.outer.inner.CAP"] {
+            let syntax = Parser::new(&format!("[Byte; {count}]"))
+                .parse_type()
+                .unwrap();
+            let verum_types::ty::Type::Array { size, .. } = checker.ast_to_type(&syntax).unwrap()
+            else {
+                panic!("array")
+            };
+            assert_eq!(size, Some(3), "{header}: {count}");
+        }
+    }
+}
+
+#[test]
+fn a_later_forward_is_not_mistaken_for_the_file_header() {
+    let ast = Parser::new("module outer.inner; const CAP: Int=3; module outer.inner;")
+        .parse_module()
+        .unwrap();
+    let mut checker = TypeChecker::new();
+    checker.register_primitives();
+    checker.set_current_module_path("outer.inner");
+    checker.prepare_checked_count_file(&ast);
+    for item in &ast.items {
+        checker.check_item(item).unwrap();
+    }
+    for (count, expected) in [("outer.inner.CAP", None), ("cog.outer.inner.CAP", Some(3))] {
+        let syntax = Parser::new(&format!("[Byte; {count}]"))
+            .parse_type()
+            .unwrap();
+        let verum_types::ty::Type::Array { size, .. } = checker.ast_to_type(&syntax).unwrap()
+        else {
+            panic!("array")
+        };
+        assert_eq!(size, expected, "{count}");
+    }
+}
