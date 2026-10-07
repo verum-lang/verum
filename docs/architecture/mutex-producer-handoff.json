@@ -1,0 +1,218 @@
+{
+  "task": "T1602",
+  "status": "FAIL; task remains open",
+  "measured_utc": "2026-10-07T13:15:40.577483+00:00",
+  "scope": "One ordinary interpreter diagnostic separating Result producer return, unwrap, and explicit drop; no implementation change or native execution.",
+  "product": {
+    "engine_commit": "fdad59f06114fd2770f3d53058373764284c7c2e",
+    "schema": "v52-2026-10-05-semantic-formal-parameters",
+    "source_fingerprint_blake3": "def6d3e7b7421caf163b63529b2d0edd4bc2a09ec0004eb9cb89854b1cbae868",
+    "cli": {
+      "path": "/Users/taaliman/.tmp/verum-codex-01a10248/stage14-formal-slots-inline-mount/verum-fdad59f06",
+      "bytes": 495337656,
+      "sha256": "0e488832a40517d260e50947a8788548484c4da931f49b92e4c1c7734858719a"
+    },
+    "artifacts": {
+      "runtime.vbca": {
+        "bytes": 30232754,
+        "sha256": "410ff097b455437cab98b651f7799b3129588820925afe98e0de9c3781530a0f"
+      },
+      "runtime.core_metadata": {
+        "bytes": 78897266,
+        "sha256": "a92bd89e649e102cdc67d7ad0032513d6448d8915e5744127e6cdf1f1e34ebbb"
+      },
+      "runtime.symbol_graph": {
+        "bytes": 5914608,
+        "sha256": "a6678c18498f7519749ca1fdf1d22629b479083f42fa95a15177e8c7acf1c722"
+      }
+    },
+    "hash_verification": "CLI and all three saved artifacts checked before and after; unchanged. The CLI uses its embedded standard library."
+  },
+  "fixture": {
+    "name": "probe.vr",
+    "source": "// Diagnostic only: separate producer return, payload extraction, and explicit cleanup.\nmount core.sync.mutex.{Mutex};\n\nfn main() {\n    let scoped: Mutex<Int> = Mutex.new(17);\n    print(\"before_lock\");\n    let outcome = scoped.lock();\n    print(\"after_lock\");\n    print(scoped.is_locked());\n    let guard = outcome.unwrap();\n    print(\"after_unwrap\");\n    print(scoped.is_locked());\n    drop(guard);\n    print(\"after_drop\");\n    print(scoped.is_locked());\n    print(\"split_lock_complete\");\n}\n",
+    "sha256": "bcbc82fb5dff0a705a4e4675492ba4edf632632a4f60d09e6c771282db71ce5d",
+    "grammar": {
+      "path": "grammar/verum.ebnf",
+      "sha256": "2e67b79c26cfb766c79caa13b5791e8d49b690d710a9a321b44c5df3c694b00e",
+      "review": "Manual authoritative EBNF check before creation; the sole product run also parsed and executed the source.",
+      "rules": {
+        "mount_stmt": [
+          665,
+          673
+        ],
+        "function_def": [
+          922,
+          930
+        ],
+        "postfix_expr_and_call_args": [
+          1832,
+          1856
+        ],
+        "block_expr": [
+          2017,
+          2017
+        ],
+        "let_stmt": [
+          2287,
+          2287
+        ]
+      }
+    }
+  },
+  "oracle": {
+    "expected_stdout": "before_lock\nafter_lock\ntrue\nafter_unwrap\ntrue\nafter_drop\nfalse\nsplit_lock_complete\n",
+    "expected_stdout_sha256": "b7ec8fd53badcce5e9cf932220e95e70e93fc91de9fe4e7676037537d950a55a",
+    "expected_lock_states": [
+      true,
+      true,
+      false
+    ],
+    "observed_stdout": "before_lock\nafter_lock\nfalse\nafter_unwrap\nfalse\nafter_drop\nfalse\nsplit_lock_complete\n",
+    "observed_lock_states": [
+      false,
+      false,
+      false
+    ],
+    "first_wrong_boundary": "after lock() returns, before unwrap() executes"
+  },
+  "execution": {
+    "command": [
+      "/Users/taaliman/.tmp/verum-codex-01a10248/stage14-formal-slots-inline-mount/verum-fdad59f06",
+      "run",
+      "--tier",
+      "interpret",
+      "-Z",
+      "runtime.panic=unwind",
+      "/Users/taaliman/.tmp/verum-codex-01a10248-weft/T1602/stage14-split-lock/probe.vr"
+    ],
+    "cwd": "/Users/taaliman/.tmp/verum-codex-01a10248-weft/T1602/stage14-split-lock",
+    "environment_overrides": {
+      "VERUM_NO_OBJECT_CACHE": "1",
+      "VERUM_TRACE_DROPFN": "1",
+      "VERUM_TRACE_CALLS": "1",
+      "VERUM_DUMP_VBC": "Mutex"
+    },
+    "cleared_inherited_verum_variable_names": [],
+    "invocation_count": 1,
+    "seconds": 115.7,
+    "exit": 0,
+    "timed_out": false,
+    "timeout_seconds": 1200,
+    "log": {
+      "name": "combined.log",
+      "bytes": 52920,
+      "sha256": "b72687568a65f392d7f9290b2509045dc4584e2794e3b212c22451f98618aed5"
+    },
+    "completion_warning": "After split_lock_complete, the script-cache store failed with filesystem Operation not permitted. No retry; runtime completed and product exit was zero."
+  },
+  "evidence": {
+    "lock_body": {
+      "first_log_line": 538,
+      "last_log_line": 563,
+      "lines": [
+        "[vbc-dump] fn 'Mutex.lock' (id=20988, 25 instrs):",
+        "[vbc-dump]   pc=    0  #0    GetF { dst: Reg(1), obj: Reg(0), field_idx: 0 }",
+        "[vbc-dump]   pc=    4  #1    Mov { dst: Reg(3), src: Reg(1) }",
+        "[vbc-dump]   pc=    7  #2    Call { dst: Reg(2), func_id: 20970, args: RegRange { start: Reg(3), count: 1 } }",
+        "[vbc-dump]   pc=   14  #3    New { dst: Reg(2), type_id: 1593, field_count: 1 }",
+        "[vbc-dump]   pc=   19  #4    SetF { obj: Reg(2), field_idx: 0, value: Reg(0) }",
+        "[vbc-dump]   pc=   23  #5    Mov { dst: Reg(4), src: Reg(2) }",
+        "[vbc-dump]   pc=   26  #6    GetF { dst: Reg(5), obj: Reg(0), field_idx: 2 }",
+        "[vbc-dump]   pc=   30  #7    MakeVariantTyped { dst: Reg(6), type_id: 1572, tag: 1, field_count: 0 }",
+        "[vbc-dump]   pc=   37  #8    Mov { dst: Reg(7), src: Reg(6) }",
+        "[vbc-dump]   pc=   40  #9    CallM { dst: Reg(6), receiver: Reg(5), method_id: 37550, args: RegRange { start: Reg(7), count: 1 } }",
+        "[vbc-dump]   pc=   48  #10   JmpNot { cond: Reg(6), offset: 8 }",
+        "[vbc-dump]   pc=   51  #11   MakeVariantTyped { dst: Reg(6), type_id: 516, tag: 1, field_count: 1 }",
+        "[vbc-dump]   pc=   58  #12   Mov { dst: Reg(8), src: Reg(4) }",
+        "[vbc-dump]   pc=   61  #13   Call { dst: Reg(5), func_id: 21040, args: RegRange { start: Reg(8), count: 1 } }",
+        "[vbc-dump]   pc=   68  #14   SetVariantData { variant: Reg(6), field: 0, value: Reg(5) }",
+        "[vbc-dump]   pc=   72  #15   Mov { dst: Reg(5), src: Reg(6) }",
+        "[vbc-dump]   pc=   75  #16   Mov { dst: Reg(1), src: Reg(5) }",
+        "[vbc-dump]   pc=   78  #17   Jmp { offset: 5 }",
+        "[vbc-dump]   pc=   80  #18   MakeVariantTyped { dst: Reg(9), type_id: 516, tag: 0, field_count: 1 }",
+        "[vbc-dump]   pc=   87  #19   SetVariantData { variant: Reg(9), field: 0, value: Reg(4) }",
+        "[vbc-dump]   pc=   91  #20   Mov { dst: Reg(10), src: Reg(9) }",
+        "[vbc-dump]   pc=   94  #21   Mov { dst: Reg(1), src: Reg(10) }",
+        "[vbc-dump]   pc=   97  #22   Mov { dst: Reg(11), src: Reg(1) }",
+        "[vbc-dump]   pc=  100  #23   DropRef { src: Reg(4) }",
+        "[vbc-dump]   pc=  102  #24   Ret { value: Reg(11) }"
+      ]
+    },
+    "guard_drop_body": {
+      "first_log_line": 644,
+      "last_log_line": 650,
+      "lines": [
+        "[vbc-dump] fn 'MutexGuard.drop' (id=20996, 6 instrs):",
+        "[vbc-dump]   pc=    0  #0    GetF { dst: Reg(1), obj: Reg(0), field_idx: 0 }",
+        "[vbc-dump]   pc=    4  #1    GetF { dst: Reg(2), obj: Reg(0), field_idx: 0 }",
+        "[vbc-dump]   pc=    8  #2    GetF { dst: Reg(3), obj: Reg(2), field_idx: 0 }",
+        "[vbc-dump]   pc=   12  #3    Mov { dst: Reg(4), src: Reg(3) }",
+        "[vbc-dump]   pc=   15  #4    Call { dst: Reg(2), func_id: 20974, args: RegRange { start: Reg(4), count: 1 } }",
+        "[vbc-dump]   pc=   22  #5    RetV"
+      ]
+    },
+    "runtime": {
+      "first_log_line": 698,
+      "last_log_line": 722,
+      "lines": [
+        "before_lock",
+        "[trace-call] handler=Call func_id=8394 name='FutexLock.lock' descriptor.id=8394 args.count=1 bytecode_length=33",
+        "[trace-call] handler=Call func_id=8397 name='FutexLock.try_lock' descriptor.id=8397 args.count=1 bytecode_length=64",
+        "[trace-call] handler=Call func_id=27968 name='core.sync.atomic.ordering_to_u8' descriptor.id=27968 args.count=1 bytecode_length=77",
+        "[trace-call] handler=Call func_id=27968 name='core.sync.atomic.ordering_to_u8' descriptor.id=27968 args.count=1 bytecode_length=77",
+        "[trace-call] handler=Call func_id=27968 name='core.sync.atomic.ordering_to_u8' descriptor.id=27968 args.count=1 bytecode_length=77",
+        "[DROPFN] type='MutexGuard' (id=1593) drop_fn_id=14373 resolves_to='MutexGuard.drop'",
+        "[trace-call] handler=Call func_id=8398 name='FutexLock.unlock' descriptor.id=8398 args.count=1 bytecode_length=80",
+        "[trace-call] handler=Call func_id=27968 name='core.sync.atomic.ordering_to_u8' descriptor.id=27968 args.count=1 bytecode_length=77",
+        "after_lock",
+        "[trace-call] handler=Call func_id=8393 name='FutexLock.is_locked' descriptor.id=8393 args.count=1 bytecode_length=34",
+        "[trace-call] handler=Call func_id=27968 name='core.sync.atomic.ordering_to_u8' descriptor.id=27968 args.count=1 bytecode_length=77",
+        "false",
+        "after_unwrap",
+        "[trace-call] handler=Call func_id=8393 name='FutexLock.is_locked' descriptor.id=8393 args.count=1 bytecode_length=34",
+        "[trace-call] handler=Call func_id=27968 name='core.sync.atomic.ordering_to_u8' descriptor.id=27968 args.count=1 bytecode_length=77",
+        "false",
+        "[DROPFN] type='MutexGuard' (id=1593) drop_fn_id=14373 resolves_to='MutexGuard.drop'",
+        "[trace-call] handler=Call func_id=8398 name='FutexLock.unlock' descriptor.id=8398 args.count=1 bytecode_length=80",
+        "[trace-call] handler=Call func_id=27968 name='core.sync.atomic.ordering_to_u8' descriptor.id=27968 args.count=1 bytecode_length=77",
+        "after_drop",
+        "[trace-call] handler=Call func_id=8393 name='FutexLock.is_locked' descriptor.id=8393 args.count=1 bytecode_length=34",
+        "[trace-call] handler=Call func_id=27968 name='core.sync.atomic.ordering_to_u8' descriptor.id=27968 args.count=1 bytecode_length=77",
+        "false",
+        "split_lock_complete"
+      ]
+    }
+  },
+  "interpretation": {
+    "runtime": "MutexGuard.drop and FutexLock.unlock execute before after_lock; is_locked then reports false. Another drop/unlock pair occurs during explicit drop. Unwrap is not the first failing boundary.",
+    "producer": "The captured Mutex.lock body puts named guard r4 into Result payload at dump pc87, emits DropRef r4 at pc100, then returns r11 at pc102. No source-clear operation occurs between payload storage and cleanup.",
+    "limits": [
+      "Dump function IDs precede runtime remapping: MutexGuard.drop20996 in the dump,14373 at runtime.",
+      "The trace contains no caller PC or object address. Dump pc100 is not an executed-PC observation, and these excerpts do not independently establish same-object identity.",
+      "The successful process exit does not change the failed oracle.",
+      "No aggregate cleanup, consuming extraction, by-value-call transfer or native owned Drop repair is demonstrated."
+    ]
+  },
+  "native_boundary": {
+    "rerun": false,
+    "prior_record": "platform-acceptance-2026-10-07-stage13.md",
+    "prior_mutex_observed": [
+      true,
+      true,
+      true
+    ],
+    "prior_mutex_expected": [
+      true,
+      false,
+      false
+    ],
+    "status": "Separate prior native cleanup failure; no new native verdict."
+  },
+  "references": [
+    "platform-acceptance-2026-10-07-stage14.md",
+    "resource-mode-contract.md",
+    "value-copy-contract.md",
+    "native-drop-lifecycle-gap.md"
+  ]
+}
