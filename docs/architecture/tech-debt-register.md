@@ -1,5 +1,33 @@
 # Verum Technical-Debt Register
 
+## Source integration: fixed arrays, checked counts and compiler startup
+
+The integration branch contains the fixed-array receiver correction (T1615),
+checked conditional and lexical counts (T1617/T1626), borrowed bootstrap exports
+(T1622), and indexed archive registration (T1625). At `ce1233a1b`, five selected
+checker/VBC binaries pass **46 tests** across count evaluation, fixed-array
+method receivers and bootstrap exports. The array checkpoint independently
+passed the full VBC library gate (**2063 passed**, one existing ignore); the
+bootstrap checkpoint passed its full gate (**2060 passed**, one existing ignore).
+See the [bootstrap evidence](bootstrap-export-view.md) and
+[archive registration evidence](archive-wanted-leaf-index.md) for measured phase
+improvements and their limits.
+
+The wider type-checker run at `7291e4cde` passed **3908 tests**, with three
+existing ignores and one failure in the legacy free-function `Default` witness
+ambiguity oracle. The same assertion fails when selected alone on the earlier
+`fdad59f06` checker, while passing with neighboring tests; T1629 owns this
+process-order dependency and the intended inference/diagnostic controls.
+The full checker gate is therefore not green. T1627 separately fixes checked
+count lookup that selected a constant from an outer module after a nearer module
+with the same name had already won ownership; its cross-layer validation is
+still in progress. T1628 tracks ordinary relative two-segment expression lookup.
+
+These source results do not update the ordinary CLI/AOT verdicts below. The
+fresh-build and native acceptance boundaries, including retained Mutex/Drop,
+consuming-call and aggregate handoff failures, remain open. T1620 retains array
+versus inferred/contextual List identity; T1621 retains Float32 slice carriers.
+
 ## Fresh interpreter acceptance and retained lifetime failure — stage 14 (2026-10-07)
 
 The ordinary rebuilt CLI passes returned-reference/Once/Supervisor, declaration
