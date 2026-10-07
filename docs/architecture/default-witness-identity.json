@@ -1,0 +1,51 @@
+{
+  "task": "T1629",
+  "baseline_source": "3598ea5a8",
+  "validated_source": "7ae4d39e0bc6d70c6a5835b8746e1d1fbf088c71",
+  "scope": "Type-checker declaration Self identity; no ordinary CLI, backend, or core workaround acceptance",
+  "validation": {
+    "causal_before": {
+      "fresh_process_cases": 18,
+      "failed": 5
+    },
+    "focused_after": {
+      "outer_tests_passed": 8,
+      "fresh_process_cases_passed": 18
+    },
+    "method_order_after": {
+      "target_tests": 7,
+      "serial_target_runs": 1,
+      "parallel_target_runs": 1,
+      "exact_individual_runs": 7,
+      "failed_runs": 0
+    },
+    "full_types": {
+      "test_summaries": 170,
+      "passed": 3910,
+      "failed": 0,
+      "ignored": 3
+    }
+  },
+  "logs": [
+    {
+      "path": "/Users/taaliman/.tmp/verum-codex-01a10248-weft/T1629-identity-causal-before.log",
+      "sha256": "23aff4973eeaaf06cc43f51ad4dd9eb94d6912f6d3e2aac2e1ff8ea1ab9ccd40"
+    },
+    {
+      "path": "/Users/taaliman/.tmp/verum-codex-01a10248-weft/T1629-focused-final.log",
+      "sha256": "2bf1437b80cbba71263952f78bf195bbafade7ad8fa53e193188d3f9d727f478"
+    },
+    {
+      "path": "/Users/taaliman/.tmp/verum-codex-01a10248-weft/T1629-method-order-after.json",
+      "sha256": "de5b7c1ba538362c4ec0c53dce34e034bbe27b691e0d96241f21f4638303e2d6"
+    },
+    {
+      "path": "/Users/taaliman/.tmp/verum-codex-01a10248-weft/T1629-source-gates.log",
+      "sha256": "3ba859445701cb280bae98012597c4a311770a020b25572e322a8efb2213ff00"
+    },
+    {
+      "path": "/Users/taaliman/.tmp/verum-codex-01a10248-weft/T1629-full-types.log",
+      "sha256": "7339cc71fe33f47b71187cd9a56eb39a44f35cf23e5f852919b83cc7d2ba0afe"
+    }
+  ]
+}
