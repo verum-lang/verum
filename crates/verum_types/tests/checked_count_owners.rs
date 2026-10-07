@@ -72,3 +72,31 @@ fn owner_head_shadowing_cannot_fall_through_a_missing_middle_segment() {
         "nearer empty ns must own the missing deep member"
     );
 }
+
+#[test]
+fn a_later_empty_module_still_owns_its_missing_member() {
+    let source = "module outer { module ns { public const CAP: Int = 3; } module inner { fn size<T>()->Int {T.size} fn probe()->Int {size<[Byte; ns.CAP]>()} module ns {} } }";
+    assert!(!errors(source).is_empty());
+}
+
+#[test]
+fn selected_owner_has_the_exact_declared_count() {
+    let source = "module outer { module ns { public const CAP: Int = 3; } module inner { const ns: Int = 9; module ns { public const CAP: Int = 5; } } }";
+    let ast = Parser::new(source).parse_module().unwrap();
+    let mut checker = TypeChecker::new();
+    checker.register_primitives();
+    for item in &ast.items {
+        checker.check_item(item).unwrap();
+    }
+    checker.set_current_module_path("cog.outer.inner");
+    for (count, expected) in [("ns.CAP", 5), ("cog.outer.ns.CAP", 3)] {
+        let syntax = Parser::new(&format!("[Byte; {count}]"))
+            .parse_type()
+            .unwrap();
+        let verum_types::ty::Type::Array { size, .. } = checker.ast_to_type(&syntax).unwrap()
+        else {
+            panic!("array")
+        };
+        assert_eq!(size, Some(expected));
+    }
+}

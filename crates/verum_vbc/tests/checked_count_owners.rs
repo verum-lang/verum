@@ -2,7 +2,10 @@
 #![cfg(feature = "codegen")]
 use verum_common::Shared;
 use verum_fast_parser::Parser;
-use verum_vbc::{codegen::VbcCodegen, interpreter::Interpreter};
+use verum_vbc::{
+    codegen::{ItemFailurePolicy, VbcCodegen},
+    interpreter::Interpreter,
+};
 
 #[test]
 fn selected_count_owners_survive_source_and_wire() {
@@ -42,14 +45,31 @@ fn selected_count_owners_survive_source_and_wire() {
 
 #[test]
 fn empty_nearer_module_refuses_outer_count_and_missing_intermediate_owner() {
-    for count in ["ns.CAP", "ns.deep.CAP", "cog.outer.inner.ns.CAP"] {
-        let source = format!(
-            "module outer {{ module ns {{ public const CAP: Int = 3; module deep {{ public const CAP: Int = 7; }} }} module inner {{ module ns {{}} fn size<T>()->Int {{T.size}} fn probe()->Int {{size<[Byte; {count}]>()}} }} }}"
-        );
-        let ast = Parser::new(&source).parse_module().expect("source grammar");
+    for (count, declaration_after) in [
+        ("ns.CAP", false),
+        ("ns.deep.CAP", false),
+        ("cog.outer.inner.ns.CAP", false),
+        ("ns.CAP", true),
+    ] {
+        // Independent source files put the refusing function directly in the
+        // strict unit producer; legacy nested-item error swallowing is separate.
+        let origin = Parser::new("module outer; module ns { public const CAP: Int = 3; module deep { public const CAP: Int = 7; } }").parse_module().unwrap();
+        let (before, after) = if declaration_after {
+            ("", "module ns {}")
+        } else {
+            ("module ns {}", "")
+        };
+        let caller = Parser::new(&format!("module outer.inner; {before} fn size<T>()->Int {{T.size}} fn probe()->Int {{size<[Byte; {count}]>()}} {after}")).parse_module().unwrap();
+        let mut codegen = VbcCodegen::new();
+        codegen
+            .collect_unit_declarations(&[&origin, &caller])
+            .unwrap();
+        let error = codegen
+            .compile_unit_items(&[&origin, &caller], ItemFailurePolicy::Strict)
+            .expect_err("nearest empty owner must refuse its missing member");
         assert!(
-            VbcCodegen::new().compile_module(&ast).is_err(),
-            "wrong owner accepted: {source}"
+            error.to_string().contains("constant") || error.to_string().contains("array"),
+            "{count}: {error}"
         );
     }
 }

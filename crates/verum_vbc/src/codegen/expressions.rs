@@ -45428,20 +45428,41 @@ impl VbcCodegen {
     }
 
     pub(super) fn constant_integer_binding(&self, name: &str, scope: Option<&str>) -> Option<super::context::FunctionInfo> {
+        let exact = |key: &str| {
+            let (owner, leaf) = key.rsplit_once('.').unwrap_or(("", key));
+            self.declared_count_bindings.get(&(
+                verum_common::Text::from(owner), verum_common::Text::from(leaf),
+            )).cloned().or_else(|| self.ctx.functions.get(key).cloned()
+                .filter(|info| !self.constant_initializers.contains_key(&info.id)))
+        };
         if name.contains('.') {
-            let parts: Vec<String> = name.split('.').map(str::to_string).collect();
-            self.ctx.resolve_qualified_dotted_call_in_scope(&parts, 0, scope)
-                .map(|(_, info)| info)
-        } else {
-            scope.and_then(|scope| {
-                self.ctx.scoped_functions.get(&(scope.to_string(), name.to_string()))
-            }).or_else(|| self.ctx.lookup_function(name)).cloned()
+            // Selecting an owner commits the lookup, including a missing member.
+            // Never send checked count paths through the general suffix ladder.
+            if let Some(key) = self.count_module_owners.member(name, scope.unwrap_or_default(), self.count_root()) {
+                return exact(key.as_str());
+            }
+            let (head, tail) = name.split_once('.')?;
+            if let Some(owner) = self.ctx.module_aliases.get(head) {
+                return exact(&format!("{}.{tail}", owner.join(".")));
+            }
+            return self.ctx.functions.get(name).cloned()
+                .filter(|info| !self.constant_initializers.contains_key(&info.id));
         }
+        let mut anchor = Some(scope.unwrap_or_default());
+        while let Some(owner) = anchor {
+            if let Some(info) = self.declared_count_bindings.get(&(
+                verum_common::Text::from(owner), verum_common::Text::from(name),
+            )) { return Some(info.clone()); }
+            anchor = if owner.is_empty() { None }
+                else { Some(owner.rsplit_once('.').map_or("", |(parent, _)| parent)) };
+        }
+        self.ctx.lookup_function(name).cloned()
+            .filter(|info| !self.constant_initializers.contains_key(&info.id))
     }
 
     pub(super) fn const_eval_i64(&self, expr: &verum_ast::expr::Expr) -> CodegenResult<Option<i64>> {
         self.const_eval_i64_in_scope(
-            expr, self.ctx.current_source_module.as_deref(), None, true,
+            expr, self.current_count_module_scope(), None, true,
             &mut verum_common::Set::new(), &mut verum_common::Map::new(), 0,
         )
     }
@@ -45546,7 +45567,9 @@ impl VbcCodegen {
                 {
                     return Ok(None);
                 }
-                let info = bindings.and_then(|bindings| bindings.get(&verum_common::Text::from(name.as_str()))).cloned()
+                let info = if name.contains('.') {
+                    self.constant_integer_binding(&name, scope)
+                } else { bindings.and_then(|bindings| bindings.get(&verum_common::Text::from(name.as_str()))).cloned()
                     .or_else(|| {
                         (!inspect_runtime_bindings).then(|| {
                             self.module_constant_bindings.get(&(
@@ -45555,7 +45578,7 @@ impl VbcCodegen {
                             )).cloned()
                         }).flatten()
                     })
-                    .or_else(|| self.constant_integer_binding(&name, scope));
+                    .or_else(|| self.constant_integer_binding(&name, scope)) };
                 let Some(info) = info.filter(|info| info.is_const && info.param_count == 0)
                 else { return Ok(None) };
                 // Source initializers retain their scalar type and checked

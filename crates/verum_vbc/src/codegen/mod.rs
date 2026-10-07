@@ -1026,6 +1026,10 @@ pub struct VbcCodegen {
     >,
     /// Module declarations are stable even when a local const shadows a name.
     module_constant_bindings: verum_common::Map<(verum_common::Text, verum_common::Text), FunctionInfo>,
+    /// Checked counts preserve the full declaration scope through nested modules.
+    count_module_owners: verum_ast::checked_const::ModuleOwners,
+    count_module_scope: Option<verum_common::Text>,
+    declared_count_bindings: verum_common::Map<(verum_common::Text, verum_common::Text), FunctionInfo>,
 
     /// VBC-GENERIC-INSTANTIATION: generic-function instantiations discovered at
     /// call sites — `(callee raw codegen FunctionId, [concrete type-arg
@@ -2239,6 +2243,9 @@ impl VbcCodegen {
             pending_constants: Vec::new(),
             constant_initializers: verum_common::Map::new(),
             module_constant_bindings: verum_common::Map::new(),
+            count_module_owners: Default::default(),
+            count_module_scope: None,
+            declared_count_bindings: verum_common::Map::new(),
             pending_specializations: Vec::new(),
             archive_func_name_to_fid: std::collections::HashMap::new(),
             user_xmod_band_by_name: std::collections::HashMap::new(),
@@ -5800,6 +5807,8 @@ impl VbcCodegen {
             ItemKind::Module(mod_decl) => {
                 if let verum_common::Maybe::Some(ref items) = mod_decl.items {
                     let module_name = mod_decl.name.name.to_string();
+                    let count_scope = self.child_count_module_scope(&module_name);
+                    let previous_count_scope = self.count_module_scope.replace(count_scope);
                     let prev_source = self.ctx.current_source_module.clone();
                     self.ctx.current_source_module = Some(module_name);
                     for sub_item in items.iter() {
@@ -5815,6 +5824,7 @@ impl VbcCodegen {
                         }
                     }
                     self.ctx.current_source_module = prev_source;
+                    self.count_module_scope = previous_count_scope;
                 }
             }
             _ => {}
@@ -8182,6 +8192,36 @@ impl VbcCodegen {
         }
     }
 
+    fn count_root(&self) -> &str {
+        if self.config.module_name == "main" { "" } else { &self.config.module_name }
+    }
+
+    fn current_count_module_scope(&self) -> Option<&str> {
+        self.count_module_scope.as_ref().map(|scope| scope.as_str())
+            .or(self.ctx.current_source_module.as_deref())
+            .or_else(|| Some(self.count_root()))
+    }
+
+    fn child_count_module_scope(&self, name: &str) -> verum_common::Text {
+        let parent = self.current_count_module_scope().unwrap_or_else(|| self.count_root());
+        if parent.is_empty() { verum_common::Text::from(name) }
+        else { verum_common::Text::from(format!("{parent}.{name}")) }
+    }
+
+    fn collect_count_module_owners(&mut self, items: &[Item], parent: &str) {
+        for item in items {
+            if !self.should_compile_item(item) { continue; }
+            if let ItemKind::Module(module) = &item.kind
+                && let Some(items) = &module.items
+            {
+                let owner = if parent.is_empty() { module.name.name.to_string() }
+                    else { format!("{parent}.{}", module.name.name) };
+                self.count_module_owners.declare(&owner);
+                self.collect_count_module_owners(items, &owner);
+            }
+        }
+    }
+
     /// Collects every declaration a compilation UNIT contributes.
     ///
     /// A unit is one or more parsed files compiled together: a user's
@@ -8202,11 +8242,13 @@ impl VbcCodegen {
         // siblings arrive as separate units today, and the guard needs
         // to know about a sibling collected in an earlier call.
         for module in files {
-            if let Some(path) =
-                Self::resolve_full_module_path(module, &self.config.module_name)
-            {
-                self.unit_module_paths.insert(path);
+            let owner = Self::resolve_full_module_path(module, &self.config.module_name);
+            if let Some(path) = &owner {
+                self.unit_module_paths.insert(path.clone());
+                self.count_module_owners.declare(path);
             }
+            let owner = owner.unwrap_or_else(|| self.count_root().to_owned());
+            self.collect_count_module_owners(&module.items, &owner);
         }
         // Protocols first: a blanket impl monomorphises onto a concrete
         // implementor at the moment that implementor is collected, so
@@ -9136,6 +9178,9 @@ impl VbcCodegen {
         self.pending_constants.clear();
         self.constant_initializers.clear();
         self.module_constant_bindings.clear();
+        self.count_module_owners = Default::default();
+        self.count_module_scope = None;
+        self.declared_count_bindings.clear();
         // Clear static init function tracking
         self.static_init_functions.clear();
         // Clear pending TLS initializations
@@ -10622,6 +10667,8 @@ impl VbcCodegen {
             ItemKind::Module(mod_decl) => {
                 if let verum_common::Maybe::Some(ref items) = mod_decl.items {
                     let module_name = mod_decl.name.name.to_string();
+                    let count_scope = self.child_count_module_scope(&module_name);
+                    let previous_count_scope = self.count_module_scope.replace(count_scope);
                     let prev_source = self.ctx.current_source_module.clone();
                     self.ctx.current_source_module = Some(module_name);
                     // LENIENT — see parallel arm in compile_item for rationale.
@@ -10634,6 +10681,7 @@ impl VbcCodegen {
                         }
                     }
                     self.ctx.current_source_module = prev_source;
+                    self.count_module_scope = previous_count_scope;
                 }
             }
             // Import declarations register aliased function names
@@ -16977,8 +17025,8 @@ impl VbcCodegen {
         if let Some(expr) = value_expr {
             let mut bindings = verum_common::Map::new();
             for dependency in Self::constant_integer_dependencies(expr) {
-                let info = if dependency.contains(".") {
-                    self.constant_integer_binding(dependency.as_str(), self.ctx.current_source_module.as_deref())
+                let info = if dependency.contains(".") || self.ctx.current_function.is_none() {
+                    self.constant_integer_binding(dependency.as_str(), self.current_count_module_scope())
                 } else if let Some(scope) = &self.ctx.current_source_module {
                     self.ctx.scoped_functions.get(&(scope.clone(), dependency.to_string())).cloned()
                 } else {
@@ -16990,7 +17038,7 @@ impl VbcCodegen {
             }
             self.constant_initializers.insert(id, (
                 expr.clone(),
-                self.ctx.current_source_module.as_deref().map_or(
+                self.current_count_module_scope().map_or(
                     verum_common::Maybe::None,
                     |scope| verum_common::Maybe::Some(verum_common::Text::from(scope)),
                 ),
@@ -17113,6 +17161,10 @@ impl VbcCodegen {
         }
 
         if self.ctx.current_function.is_none() {
+            self.declared_count_bindings.insert((
+                verum_common::Text::from(self.current_count_module_scope().unwrap_or_default()),
+                verum_common::Text::from(name),
+            ), info.clone());
             self.module_constant_bindings.insert((
                 verum_common::Text::from(self.ctx.current_source_module.as_deref().unwrap_or_default()),
                 verum_common::Text::from(name),
@@ -17247,7 +17299,9 @@ impl VbcCodegen {
                 // suppressing an invalid initializer's original diagnostic.
                 let folded_integer = if func_info.return_type_name.as_deref() == Some("Int") {
                     self.const_eval_i64_in_scope(
-                        &expr, queued_source_module.as_deref(),
+                        &expr, self.constant_initializers.get(&func_info.id)
+                            .and_then(|(_, owner, _)| owner.as_ref().map(|owner| owner.as_str()))
+                            .or(queued_source_module.as_deref()),
                         self.constant_initializers.get(&func_info.id).map(|(_, _, bindings)| bindings), false,
                         &mut verum_common::Set::new(), &mut verum_common::Map::new(), 0,
                     )?
@@ -19257,6 +19311,8 @@ impl VbcCodegen {
             ItemKind::Module(mod_decl) => {
                 if let verum_common::Maybe::Some(ref items) = mod_decl.items {
                     let module_name = mod_decl.name.name.to_string();
+                    let count_scope = self.child_count_module_scope(&module_name);
+                    let previous_count_scope = self.count_module_scope.replace(count_scope);
                     let prev_source = self.ctx.current_source_module.clone();
                     self.ctx.current_source_module = Some(module_name);
                     // LENIENT — a single inner-fn compile failure must
@@ -19275,6 +19331,7 @@ impl VbcCodegen {
                         }
                     }
                     self.ctx.current_source_module = prev_source;
+                    self.count_module_scope = previous_count_scope;
                 }
             }
             // Non-function items are handled during declaration collection
