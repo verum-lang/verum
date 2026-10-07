@@ -224,6 +224,8 @@ impl MetaFunction {
 pub struct ConstEvaluator {
     /// Environment mapping variable names to values
     env: Map<Text, ConstValue>,
+    /// Array counts keep their checked domain separate from rich meta values.
+    count_values: Map<Text, std::result::Result<verum_ast::checked_const::Scalar, Text>>,
     /// Registry of meta functions available for compile-time calls
     /// Meta system: unified compile-time computation via "meta fn", "meta" parameters, @derive macros, tagged literals, all under single "meta" concept — Section 3.1 - Meta function registry
     functions: Map<Text, MetaFunction>,
@@ -246,6 +248,7 @@ impl ConstEvaluator {
     pub fn new() -> Self {
         Self {
             env: Map::new(),
+            count_values: Map::new(),
             functions: Map::new(),
             recursion_depth: 0,
             max_depth: MAX_RECURSION_DEPTH,
@@ -269,7 +272,92 @@ impl ConstEvaluator {
 
     /// Bind a variable to a value
     pub fn bind(&mut self, name: impl Into<Text>, value: ConstValue) {
-        self.env.insert(name.into(), value);
+        let name = name.into();
+        let scalar = match &value {
+            ConstValue::Int(value) => i64::try_from(*value)
+                .ok()
+                .map(verum_ast::checked_const::Scalar::Int),
+            ConstValue::UInt(value) => i64::try_from(*value)
+                .ok()
+                .map(verum_ast::checked_const::Scalar::Int),
+            ConstValue::Bool(value) => Some(verum_ast::checked_const::Scalar::Bool(*value)),
+            _ => None,
+        };
+        self.count_values.insert(
+            name.clone(),
+            scalar.ok_or_else(|| Text::from("constant is outside the checked scalar domain")),
+        );
+        self.env.insert(name, value);
+    }
+
+    /// Record both domains from source. Evaluating the checked form before
+    /// binding prevents a wider meta intermediate from hiding i64 overflow.
+    pub fn bind_source(&mut self, name: &str, expr: &Expr, scope: &str) {
+        let checked = self
+            .eval_checked_scalar(expr, scope)
+            .map_err(|error| Text::from(format!("{error}")));
+        // Rich meta evaluation retains its existing environment and semantics.
+        if let Ok(value) = self.eval(expr) {
+            self.env.insert(Text::from(name), value);
+        }
+        self.count_values
+            .insert(Text::from(format!("{scope}.{name}")), checked);
+    }
+
+    /// Checked producer domain used by concrete array lengths, not meta calls.
+    pub fn eval_array_count(&self, expr: &Expr, scope: &str) -> Result<i64> {
+        self.eval_checked_scalar(expr, scope)?
+            .as_i64()
+            .ok_or(ConstEvalError::NotConstant)
+    }
+
+    fn eval_checked_scalar(
+        &self,
+        expr: &Expr,
+        scope: &str,
+    ) -> Result<verum_ast::checked_const::Scalar> {
+        verum_ast::checked_const::evaluate(expr, 0, &mut |leaf, _depth| {
+            fn name(expr: &Expr, depth: usize) -> Option<Text> {
+                if depth >= 128 {
+                    return None;
+                }
+                match &expr.kind {
+                    ExprKind::Path(path) => {
+                        let mut parts = List::new();
+                        for part in &path.segments {
+                            let PathSegment::Name(ident) = part else {
+                                return None;
+                            };
+                            parts.push(ident.name.as_str());
+                        }
+                        Some(Text::from(parts.join(".")))
+                    }
+                    ExprKind::Field { expr, field } => Some(Text::from(format!(
+                        "{}.{}",
+                        name(expr, depth + 1)?,
+                        field.name
+                    ))),
+                    _ => None,
+                }
+            }
+            let Some(name) = name(leaf, 0) else {
+                return Ok(None);
+            };
+            let scoped = Text::from(format!("{scope}.{name}"));
+            match self
+                .count_values
+                .get(&scoped)
+                .or_else(|| self.count_values.get(&name))
+            {
+                Some(Ok(value)) => Ok(Some(*value)),
+                Some(Err(error)) => Err(ConstEvalError::Other(error.clone())),
+                None => Ok(None),
+            }
+        })
+        .map_err(|error| match error {
+            verum_ast::checked_const::EvalError::Resolver(error) => error,
+            error => ConstEvalError::Other(Text::from(format!("checked array count: {error:?}"))),
+        })
     }
 
     /// Get the current value of a variable, if bound
@@ -280,6 +368,7 @@ impl ConstEvaluator {
     /// Unbind a variable (remove from environment)
     pub fn unbind(&mut self, name: &Text) {
         self.env.remove(name);
+        self.count_values.remove(name);
     }
 
     /// Register a meta function for compile-time evaluation

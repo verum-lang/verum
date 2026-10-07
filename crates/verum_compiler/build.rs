@@ -2167,6 +2167,8 @@ fn compute_core_blake3(core_dir: &Path, files: &[(String, Vec<u8>)]) -> String {
         // is the exact failure this list exists to prevent, and the file
         // defining the belief was not on it.
         "crates/verum_ast/src/cfg.rs",
+        // Shared checked scalar rules change folded array counts in the archive.
+        "crates/verum_ast/src/checked_const.rs",
         // `TypeId::well_known_name` (T0190) — the reserved-TypeId →
         // canonical-surface-name table `archive_metadata` renders every
         // descriptor through.  Naming one more reserved id changes the

@@ -119,6 +119,7 @@ use verum_common::List;
 pub mod attr;
 pub mod bitfield;
 pub mod cfg;
+pub mod checked_const;
 pub mod context;
 pub mod decl;
 pub mod expr;

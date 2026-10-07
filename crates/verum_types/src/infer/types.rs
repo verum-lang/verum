@@ -702,10 +702,9 @@ impl TypeChecker {
                 let elem_ty = self.ast_to_type(element)?;
                 // Extract array size via const evaluation if size expression is present
                 let array_size = if let verum_common::Maybe::Some(size_expr) = size {
-                    match self.const_eval.eval(size_expr) {
-                        Ok(const_val) => const_val.as_u128().map(|n| n as usize),
-                        Err(_) => None, // Not a compile-time constant
-                    }
+                    self.const_eval
+                        .eval_array_count(size_expr, self.current_module_path.as_str())
+                        .ok().and_then(|value| usize::try_from(value).ok())
                 } else {
                     None
                 };
@@ -3219,10 +3218,8 @@ fn substitute_refinement_binder(
                     if let Some(size) = size {
                         let length = self
                             .const_eval
-                            .eval(size)
+                            .eval_array_count(size, self.current_module_path.as_str())
                             .ok()
-                            .and_then(|value| value.as_u128())
-                            .and_then(|value| i64::try_from(value).ok())
                             .and_then(|value| usize::try_from(value).ok());
                         if length.is_none() {
                             return Err(TypeError::OtherWithCodeSpanned {

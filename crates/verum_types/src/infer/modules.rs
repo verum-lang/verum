@@ -312,9 +312,9 @@ impl TypeChecker {
 
                 // Evaluate the constant value and bind it to const_eval for later use
                 // This enables compile-time evaluation of expressions using this const
-                if let Ok(const_val) = self.const_eval.eval(&const_decl.value) {
-                    self.const_eval.bind(const_name, const_val);
-                }
+                self.const_eval.bind_source(
+                    const_name, &const_decl.value, self.current_module_path.as_str(),
+                );
 
                 // Add to context
                 self.ctx

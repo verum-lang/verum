@@ -45422,18 +45422,32 @@ impl VbcCodegen {
         bindings: Option<&verum_common::Map<verum_common::Text, super::context::FunctionInfo>>,
         inspect_runtime_bindings: bool,
         active: &mut verum_common::Set<crate::module::FunctionId>,
-        cached: &mut verum_common::Map<crate::module::FunctionId, i64>,
+        cached: &mut verum_common::Map<crate::module::FunctionId, verum_ast::checked_const::Scalar>,
         depth: usize,
     ) -> CodegenResult<Option<i64>> {
-        use verum_ast::expr::{BinOp, ExprKind, UnOp};
-        use verum_ast::literal::LiteralKind;
+        Ok(self.const_eval_scalar_in_scope(expr, scope, bindings, inspect_runtime_bindings, active, cached, depth)?
+            .and_then(verum_ast::checked_const::Scalar::as_i64))
+    }
+
+    fn const_eval_scalar_in_scope(
+        &self,
+        expr: &Expr,
+        scope: Option<&str>,
+        bindings: Option<&verum_common::Map<verum_common::Text, super::context::FunctionInfo>>,
+        inspect_runtime_bindings: bool,
+        active: &mut verum_common::Set<crate::module::FunctionId>,
+        cached: &mut verum_common::Map<crate::module::FunctionId, verum_ast::checked_const::Scalar>,
+        depth: usize,
+    ) -> CodegenResult<Option<verum_ast::checked_const::Scalar>> {
+        use verum_ast::{checked_const::{Scalar, EvalError}, expr::ExprKind};
+        use crate::types::{TypeId, TypeRef};
         let invalid = || CodegenError::with_span(
             super::error::CodegenErrorKind::InvalidLiteral(
                 "constant integer is out of range or has invalid arithmetic".to_string(),
             ),
             expr.span,
         );
-        let checked = |value: Option<i64>| value.map(Some).ok_or_else(invalid);
+        let checked = |value: Option<i64>| value.map(|value| Some(Scalar::Int(value))).ok_or_else(invalid);
         if depth >= 128 {
             return Err(CodegenError::with_span(
                 super::error::CodegenErrorKind::InvalidLiteral(
@@ -45489,14 +45503,9 @@ impl VbcCodegen {
             let ty = self.resolve_declared_associated_types(&ty).unwrap_or(ty);
             return Ok(crate::type_layout::query_with(&ty, query, |id| {
                 self.types.iter().find(|descriptor| descriptor.id == id)
-            }).and_then(|value| i64::try_from(value).ok()));
+            }).and_then(|value| i64::try_from(value).ok()).map(Scalar::Int));
         }
         match &expr.kind {
-            ExprKind::Literal(lit) => match &lit.kind {
-                LiteralKind::Int(n) => checked(i64::try_from(n.value).ok()),
-                _ => Ok(None),
-            },
-            ExprKind::Paren(inner) => self.const_eval_i64_in_scope(inner, scope, bindings, inspect_runtime_bindings, active, cached, depth + 1),
             ExprKind::Path(_) | ExprKind::Field { .. } => {
                 let Some(name) = Self::constant_integer_name(expr) else { return Ok(None) };
                 let root = name.split('.').next().unwrap_or(&name);
@@ -45518,9 +45527,17 @@ impl VbcCodegen {
                     .or_else(|| self.constant_integer_binding(&name, scope));
                 let Some(info) = info.filter(|info| info.is_const && info.param_count == 0)
                 else { return Ok(None) };
-                if let Some(value) = info.intrinsic_name.as_deref()
-                    .and_then(|name| name.strip_prefix("__const_val_"))
+                // Source initializers retain their scalar type and checked
+                // intermediates. A legacy inline integer carrier alone loses
+                // Bool and may have been extracted through an unsupported call.
+                if !self.constant_initializers.contains_key(&info.id)
+                    && let Some(value) = info.intrinsic_name.as_deref()
+                        .and_then(|name| name.strip_prefix("__const_val_"))
                 {
+                    if info.return_type == Some(TypeRef::Concrete(TypeId::BOOL))
+                        || info.return_type_name.as_deref() == Some("Bool") {
+                        return match value {"0" => Ok(Some(Scalar::Bool(false))), "1" => Ok(Some(Scalar::Bool(true))), _ => Err(invalid())};
+                    }
                     return checked(value.parse::<i64>().ok());
                 }
                 if let Some(value) = cached.get(&info.id) {
@@ -45538,7 +45555,7 @@ impl VbcCodegen {
                         verum_common::Maybe::Some(scope) => Some(scope.as_str()),
                         verum_common::Maybe::None => None,
                     };
-                    let result = self.const_eval_i64_in_scope(
+                    let result = self.const_eval_scalar_in_scope(
                         initializer, declaration_scope, Some(declaration_bindings), false, active, cached, depth + 1,
                     );
                     active.remove(&info.id);
@@ -45553,43 +45570,6 @@ impl VbcCodegen {
                     )), expr.span,
                 ))
             }
-            ExprKind::Unary { op: UnOp::Neg, expr: operand } => {
-                if let ExprKind::Literal(lit) = &operand.kind
-                    && let LiteralKind::Int(n) = &lit.kind
-                {
-                    return checked(n.value.checked_neg().and_then(|n| i64::try_from(n).ok()));
-                }
-                match self.const_eval_i64_in_scope(operand, scope, bindings, inspect_runtime_bindings, active, cached, depth + 1)? {
-                    Some(value) => checked(value.checked_neg()),
-                    None => Ok(None),
-                }
-            }
-            ExprKind::Unary { op: UnOp::BitNot, expr: operand } => {
-                Ok(self.const_eval_i64_in_scope(operand, scope, bindings, inspect_runtime_bindings, active, cached, depth + 1)?
-                    .map(|value| !value))
-            }
-            ExprKind::Binary { op, left, right } => {
-                let (Some(l), Some(r)) = (self.const_eval_i64_in_scope(left, scope, bindings, inspect_runtime_bindings, active, cached, depth + 1)?, self.const_eval_i64_in_scope(right, scope, bindings, inspect_runtime_bindings, active, cached, depth + 1)?)
-                else { return Ok(None) };
-                match op {
-                    BinOp::Add => checked(l.checked_add(r)),
-                    BinOp::Sub => checked(l.checked_sub(r)),
-                    BinOp::Mul => checked(l.checked_mul(r)),
-                    BinOp::Div => checked(l.checked_div(r)),
-                    BinOp::Rem => checked(l.checked_rem(r)),
-                    BinOp::BitAnd => Ok(Some(l & r)),
-                    BinOp::BitOr => Ok(Some(l | r)),
-                    BinOp::BitXor => Ok(Some(l ^ r)),
-                    // checked_shl on i64 only validates the shift amount. Widen
-                    // first so converting back also detects discarded value bits.
-                    BinOp::Shl => checked(u32::try_from(r).ok()
-                        .filter(|shift| *shift < i64::BITS)
-                        .and_then(|shift| i64::try_from((l as i128) << shift).ok())),
-                    BinOp::Shr => checked(u32::try_from(r).ok()
-                        .and_then(|shift| l.checked_shr(shift))),
-                    _ => Ok(None),
-                }
-            }
             ExprKind::Call { func, args, .. } => {
                 // offset_of(Type, field) arguments are names, never executed.
                 if Self::expr_ident_name(func).as_deref() != Some("offset_of") || args.len() != 2 {
@@ -45598,9 +45578,21 @@ impl VbcCodegen {
                 let (Some(ty), Some(field)) =
                     (Self::expr_ident_name(&args[0]), Self::expr_ident_name(&args[1]))
                 else { return Ok(None) };
-                Ok(self.abi_field_offset(&ty, &field))
+                Ok(self.abi_field_offset(&ty, &field).map(Scalar::Int))
             }
-            _ => Ok(None),
+            _ => match verum_ast::checked_const::evaluate(expr, depth, &mut |leaf, depth| {
+                self.const_eval_scalar_in_scope(leaf, scope, bindings, inspect_runtime_bindings, active, cached, depth)
+            }) {
+                Ok(value) => Ok(Some(value)),
+                Err(EvalError::Resolver(error)) => Err(error),
+                Err(EvalError::Unsupported(_) | EvalError::Unresolved(_)) => Ok(None),
+                Err(EvalError::InvalidArithmetic(span) | EvalError::InvalidType(span)) => Err(CodegenError::with_span(
+                    super::error::CodegenErrorKind::InvalidLiteral("constant integer is out of range or has invalid arithmetic or type".to_string()), span,
+                )),
+                Err(EvalError::Limit(span)) => Err(CodegenError::with_span(
+                    super::error::CodegenErrorKind::InvalidLiteral("constant integer dependency depth exceeds the evaluation limit".to_string()), span,
+                )),
+            },
         }
     }
 
