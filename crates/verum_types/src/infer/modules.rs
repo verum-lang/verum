@@ -688,7 +688,19 @@ impl TypeChecker {
             MountTreeKind::Path(path) => {
                 let path_str = process_path(path);
                 let has_crate = starts_with_crate(path);
-                // Try inline module resolution for any path
+                // A declared namespace must reach the same whole-module path
+                // as the pipeline's import pre-pass, even without a synthetic
+                // registry entry. Relative paths keep their existing resolver.
+                if path.segments.iter().all(|segment| {
+                    matches!(segment, verum_ast::ty::PathSegment::Name(_)
+                        | verum_ast::ty::PathSegment::Cog)
+                }) && self.inline_module_mount_target(path_str.as_str()).is_some()
+                {
+                    let current_path = self.current_module_path.clone();
+                    let registry = self.module_registry.read().clone();
+                    return self.process_import(import, current_path.as_str(), &registry);
+                }
+                // Try inline module resolution for any item path
                 if let Some((module_key, item_name)) =
                     self.find_inline_module_for_import(path_str.as_str(), has_crate)
                 {
@@ -939,6 +951,29 @@ impl TypeChecker {
         }
     }
 
+    /// Resolve only a registered inline namespace, never a same-leaf suffix.
+    /// Root declarations have a paired short key; nested/file-owned modules
+    /// retain the full path installed by declaration collection.
+    fn inline_module_mount_target(&self, candidate: &str) -> Option<Text> {
+        let has_body = |key: &str| {
+            self.inline_modules
+                .get(&Text::from(key))
+                .is_some_and(|module| module.items.is_some())
+        };
+        if has_body(candidate) {
+            let owner = self.inline_module_declaration_path(candidate);
+            return Some(if has_body(&owner) {
+                owner.into()
+            } else {
+                candidate.into()
+            });
+        }
+        // `module name;` declares an external file, not an inline body. Its
+        // loader/registry remains authoritative even if pre-registration saw it.
+        let rooted: Text = format!("cog.{candidate}").into();
+        has_body(rooted.as_str()).then_some(rooted)
+    }
+
     /// Resolve a dotted path against inline modules, trying all possible splits
     /// between module prefix and item suffix.
     ///
@@ -1166,7 +1201,11 @@ impl TypeChecker {
                 // Track the import source for ambiguity detection
                 // (IMPORT-SOURCE-FUNNEL-1).
                 let name_text = verum_common::Text::from(item_name);
-                let source = verum_common::Text::from(format!("cog.{}", module_name));
+                let source = if module_name.starts_with("cog.") {
+                    Text::from(module_name)
+                } else {
+                    format!("cog.{module_name}").into()
+                };
                 self.record_import_source(name_text, source);
 
                 // Register the item type in the environment
@@ -2088,27 +2127,31 @@ impl TypeChecker {
 
         match &import.tree.kind {
             MountTreeKind::Path(path) => {
-                // Try inline module resolution first (handles same-file module imports)
-                let simple_path = simple_process_path(path);
-                if let Some((module_key, item_name)) = self.find_inline_module_for_import(
-                    simple_path.as_str(),
-                    path_starts_with_crate(path),
-                ) {
-                    if let Ok(()) = self.import_item_from_inline_module(&module_key, &item_name) {
-                        return Ok(());
-                    }
-                }
-
-                // import module.path.item OR import module.path (glob when path is a module)
                 let raw_path = extract_path(path);
                 let is_rel = is_relative_path(path);
                 let full_path = resolve_relative(raw_path.as_str(), is_rel);
                 let full_path_str = full_path.as_str();
+                let inline_target = self.inline_module_mount_target(full_path_str);
 
-                // First, check if the full path resolves to a module in the registry.
+                // A whole declared namespace wins before interpreting its
+                // final segment as an item of the enclosing module.
+                if inline_target.is_none() {
+                    let simple_path = simple_process_path(path);
+                    if let Some((module_key, item_name)) = self.find_inline_module_for_import(
+                        simple_path.as_str(),
+                        path_starts_with_crate(path),
+                    ) {
+                        if let Ok(()) = self.import_item_from_inline_module(&module_key, &item_name) {
+                            return Ok(());
+                        }
+                    }
+                }
+
+                // First, check if the full path resolves to a declared module.
                 // If so, treat `mount module.path;` as a glob import of all public items.
                 // This allows `mount sys.mmio;` to import Register, BarrierKind, etc.
-                let full_normalized = normalize_module_path(full_path_str);
+                let full_normalized = inline_target
+                    .unwrap_or_else(|| normalize_module_path(full_path_str));
                 tracing::debug!(
                     "mount Path: full='{}', normalized='{}'",
                     full_path_str,
@@ -4281,6 +4324,9 @@ impl TypeChecker {
     ) -> Option<Text> {
         if candidate.is_empty() {
             return None;
+        }
+        if let Some(owner) = self.inline_module_mount_target(candidate) {
+            return Some(owner);
         }
         let prefixed = format!("core.{}", candidate);
         let spellings: [&str; 2] = [candidate, prefixed.as_str()];
@@ -10117,6 +10163,14 @@ impl TypeChecker {
         module_path: &Text,
         registry: &verum_modules::ModuleRegistry,
     ) -> Result<()> {
+        if self.inline_modules
+            .get(module_path)
+            .is_some_and(|module| module.items.is_some())
+        {
+            // The outer import entry already installed the cycle guard for
+            // this exact owner. Reuse its declared public surface directly.
+            return self.import_all_from_inline_module_impl(module_path.as_str());
+        }
         // **Audit-driven fundamental fix** — metadata-driven nested
         // glob re-export propagation.  `metadata.module_reexports[X]`
         // captures every `(local_name, source_module)` chain from X's
