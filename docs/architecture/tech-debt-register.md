@@ -1,5 +1,18 @@
 # Verum Technical-Debt Register
 
+## Fresh interpreter acceptance and retained lifetime failure — stage 14 (2026-10-07)
+
+The ordinary rebuilt CLI passes returned-reference/Once/Supervisor, declaration
+properties through inline-module aliases, primitive hash/Map/Set and numeric/List
+storage controls. T1613, T1614 and the bounded T1596 acceptance are complete.
+Atomics, field addresses and root/sibling identity also pass, while both retained
+Mutex checks still release the guard too early. Native Drop, consuming-call and
+aggregate handoff, native packed List/borrowed consumers and numeric AOT completion
+remain open. The [stage-14 record](platform-acceptance-2026-10-07-stage14.md)
+contains exact source snapshots, output oracles and artifact hashes. Source gates
+pass 10603 checks; native execution was not rerun for this revision. Phase-local
+profiles motivate T1622/T1625 compilation optimizations without a speedup claim.
+
 ## Native controls and retained acceptance failures — stage 13 (2026-10-07)
 
 The fresh ordinary CLI passes direct/shared atomic identity, user and primitive

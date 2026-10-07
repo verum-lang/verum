@@ -1,0 +1,429 @@
+{
+  "status": "not accepted",
+  "scope": "fresh ordinary CLI and sequential interpreter acceptance; native results only where recorded",
+  "build": {
+    "engine_commit": "fdad59f06114fd2770f3d53058373764284c7c2e",
+    "seconds": 2654.25,
+    "source_fingerprint_blake3": "def6d3e7b7421caf163b63529b2d0edd4bc2a09ec0004eb9cb89854b1cbae868",
+    "schema": "v52-2026-10-05-semantic-formal-parameters",
+    "artifacts": {
+      "runtime.vbca": {
+        "bytes": 30232754,
+        "sha256": "410ff097b455437cab98b651f7799b3129588820925afe98e0de9c3781530a0f"
+      },
+      "runtime.core_metadata": {
+        "bytes": 78897266,
+        "sha256": "a92bd89e649e102cdc67d7ad0032513d6448d8915e5744127e6cdf1f1e34ebbb"
+      },
+      "runtime.symbol_graph": {
+        "bytes": 5914608,
+        "sha256": "a6678c18498f7519749ca1fdf1d22629b479083f42fa95a15177e8c7acf1c722"
+      }
+    },
+    "cli": {
+      "bytes": 495337656,
+      "sha256": "0e488832a40517d260e50947a8788548484c4da931f49b92e4c1c7734858719a"
+    }
+  },
+  "source_gates": {
+    "parser-types": {
+      "source": "fdad59f06114fd2770f3d53058373764284c7c2e",
+      "scope": "cargo test --locked -p verum_fast_parser -p verum_types --tests --no-fail-fast -- --test-threads=4",
+      "binaries": 292,
+      "passed": 8127,
+      "failed": 0,
+      "ignored": 3,
+      "exit": 0,
+      "log_sha256": "11cf7876d076591b7aba30fb7343f3bd71fde66dc9b44eddfbc2d465b7d2c0f1"
+    },
+    "vbc": {
+      "source": "fdad59f06114fd2770f3d53058373764284c7c2e",
+      "scope": "full verum_vbc library compression,table_dispatch,codegen,ffi plus constant_initializer_errors,semantic_formal_parameters,list_source_storage,structural_generic_calls,generic_layout_witness,named_array_count",
+      "binaries": 7,
+      "passed": 2158,
+      "failed": 0,
+      "ignored": 1,
+      "exit": 0,
+      "results": [
+        {
+          "status": "ok",
+          "passed": 2063,
+          "failed": 0,
+          "ignored": 1,
+          "seconds": 887.85
+        },
+        {
+          "status": "ok",
+          "passed": 7,
+          "failed": 0,
+          "ignored": 0,
+          "seconds": 0.02
+        },
+        {
+          "status": "ok",
+          "passed": 34,
+          "failed": 0,
+          "ignored": 0,
+          "seconds": 0.08
+        },
+        {
+          "status": "ok",
+          "passed": 13,
+          "failed": 0,
+          "ignored": 0,
+          "seconds": 0.86
+        },
+        {
+          "status": "ok",
+          "passed": 21,
+          "failed": 0,
+          "ignored": 0,
+          "seconds": 0.1
+        },
+        {
+          "status": "ok",
+          "passed": 16,
+          "failed": 0,
+          "ignored": 0,
+          "seconds": 0.02
+        },
+        {
+          "status": "ok",
+          "passed": 4,
+          "failed": 0,
+          "ignored": 0,
+          "seconds": 0.03
+        }
+      ],
+      "log_sha256": "d9f955fb4d4cc1ff18d9da1940c2d7156b77849075a6c232964b5666c19cd5c7"
+    },
+    "codegen": {
+      "source": "fdad59f06114fd2770f3d53058373764284c7c2e",
+      "scope": "cargo test --locked -p verum_codegen --lib -- --test-threads=4",
+      "passed": 318,
+      "failed": 0,
+      "ignored": 0,
+      "exit": 0,
+      "log_sha256": "7d5c5fbbef564f03f0f082a658eb68f0244dc7b54b4fbebf9f63d2dd63b2b674"
+    }
+  },
+  "source_snapshots": {
+    "returned-reference-control": {
+      "sha256": "e03fe68943aaf03be6550f25cb7ed85975867a2e11155f0561077d2287b998ce",
+      "source": "// Source acceptance for both tiers. Expected output is in expected-stdout.txt.\n// Uses the actual mounted standard library; no substitute Once/Atomic bodies.\nmount core.sync.once.Once;\nmount core.sync.once.OnceLock;\nmount core.runtime.supervisor.root_supervisor;\n\ntype ReferenceParcel<T> is Missing | Present(T);\ntype ReferenceRecord is { padding: Int, value: Int };\nimplement ReferenceRecord {\n    fn read(&self) -> Int { self.value }\n}\n\nfn projection_borrow<T>(p: &ReferenceParcel<T>) -> ReferenceParcel<&T> {\n    match p {\n        ReferenceParcel.Present(ref value) => ReferenceParcel.Present(value),\n        ReferenceParcel.Missing => ReferenceParcel.Missing,\n    }\n}\nfn projection_project<T>(p: ReferenceParcel<T>) -> T {\n    match p {\n        ReferenceParcel.Present(value) => value,\n        ReferenceParcel.Missing => panic(\"missing reference payload\"),\n    }\n}\nfn projection_first(p: &ReferenceParcel<ReferenceRecord>) -> &ReferenceRecord {\n    projection_project(projection_borrow(p))\n}\nfn projection_forward(p: &ReferenceParcel<ReferenceRecord>) -> &ReferenceRecord {\n    projection_first(p)\n}\nfn projection_scalar(p: &ReferenceParcel<Int>) -> &Int {\n    projection_project(projection_borrow(p))\n}\nfn projection_scalar_forward(p: &ReferenceParcel<Int>) -> &Int { projection_scalar(p) }\nfn projection_value(p: ReferenceParcel<Int>) -> Int { projection_project(p) }\nfn projection_mut(p: &mut ReferenceParcel<Int>) -> &mut Int {\n    match p {\n        ReferenceParcel.Present(ref mut value) => value,\n        ReferenceParcel.Missing => panic(\"missing mutable payload\"),\n    }\n}\nfn projection_mut_forward(p: &mut ReferenceParcel<Int>) -> &mut Int { projection_mut(p) }\nfn projection_write(p: &mut ReferenceParcel<Int>, replacement: Int) {\n    *projection_mut_forward(p) = replacement;\n}\nfn projection_record_mut(p: &mut ReferenceParcel<ReferenceRecord>) -> &mut ReferenceRecord {\n    match p {\n        ReferenceParcel.Present(ref mut value) => value,\n        ReferenceParcel.Missing => panic(\"missing mutable record\"),\n    }\n}\nfn projection_record_mut_forward(p: &mut ReferenceParcel<ReferenceRecord>) -> &mut ReferenceRecord {\n    projection_record_mut(p)\n}\nfn projection_record_write(p: &mut ReferenceParcel<ReferenceRecord>, replacement: Int) {\n    projection_record_mut_forward(p).value = replacement;\n}\n\nstatic mut REFERENCE_ONCE_COUNT: Int = 0;\nstatic mut REFERENCE_SCALAR_COUNT: Int = 0;\nstatic mut REFERENCE_RECORD_COUNT: Int = 0;\nstatic REFERENCE_SCALAR_CELL: OnceLock<Int> = OnceLock.new();\nstatic REFERENCE_RECORD_CELL: OnceLock<ReferenceRecord> = OnceLock.new();\n\nfn reference_scalar_initialize() -> Int {\n    REFERENCE_SCALAR_COUNT = REFERENCE_SCALAR_COUNT + 1;\n    37\n}\nfn reference_record_initialize() -> ReferenceRecord {\n    REFERENCE_RECORD_COUNT = REFERENCE_RECORD_COUNT + 1;\n    ReferenceRecord { padding: 11, value: 73 }\n}\nfn reference_record_accessor() -> &ReferenceRecord {\n    REFERENCE_RECORD_CELL.get_or_init(reference_record_initialize)\n}\nfn reference_record_root() -> &ReferenceRecord { reference_record_accessor() }\n\nfn main() {\n    print(\"reference_projection_begin\");\n    let mut record: ReferenceParcel<ReferenceRecord> = ReferenceParcel.Present(ReferenceRecord { padding: 11, value: 73 });\n    let field = projection_forward(&record).value + 0;\n    let method = projection_forward(&record).read() + 0;\n    let mut scalar: ReferenceParcel<Int> = ReferenceParcel.Present(73);\n    let scalar_before = *projection_scalar_forward(&scalar) + 0;\n    let by_value = projection_value(ReferenceParcel.Present(73)) + 0;\n    projection_write(&mut scalar, 91);\n    let scalar_after = *projection_scalar_forward(&scalar) + 0;\n    projection_record_write(&mut record, 79);\n    let record_after = projection_forward(&record).value + 0;\n    let padding = projection_forward(&record).padding + 0;\n    print(f\"projection field={field} method={method} scalar={scalar_before} value={by_value} mutable={scalar_after} record_mutable={record_after} padding={padding}\");\n    assert_eq(field + 0, 73);\n    assert_eq(method + 0, 73);\n    assert_eq(scalar_before + 0, 73);\n    assert_eq(by_value + 0, 73);\n    assert_eq(scalar_after + 0, 91);\n    assert_eq(record_after + 0, 79);\n    assert_eq(padding + 0, 11);\n\n    print(\"reference_once_begin\");\n    let once = Once.new();\n    once.call_once(|| { REFERENCE_ONCE_COUNT = REFERENCE_ONCE_COUNT + 1; });\n    once.call_once(|| { REFERENCE_ONCE_COUNT = REFERENCE_ONCE_COUNT + 100; });\n    let direct_count = REFERENCE_ONCE_COUNT + 0;\n    let first: &Int = REFERENCE_SCALAR_CELL.get_or_init(reference_scalar_initialize);\n    let second: &Int = REFERENCE_SCALAR_CELL.get_or_init(|| {\n        REFERENCE_SCALAR_COUNT = REFERENCE_SCALAR_COUNT + 100;\n        99\n    });\n    let first_value = *first + 0;\n    let second_value = *second + 0;\n    let scalar_count = REFERENCE_SCALAR_COUNT + 0;\n    let record_first = reference_record_root().read() + 0;\n    let record_second = reference_record_root().read() + 0;\n    let record_count = REFERENCE_RECORD_COUNT + 0;\n    print(f\"once direct_count={direct_count} first={first_value} second={second_value} count={scalar_count} record_first={record_first} record_second={record_second} record_count={record_count}\");\n    assert_eq(direct_count + 0, 1);\n    assert_eq(first_value + 0, 37);\n    assert_eq(second_value + 0, 37);\n    assert_eq(scalar_count + 0, 1);\n    assert_eq(record_first + 0, 73);\n    assert_eq(record_second + 0, 73);\n    assert_eq(record_count + 0, 1);\n\n    print(\"reference_supervisor_begin\");\n    let root = root_supervisor();\n    let again = root_supervisor();\n    let root_id = root.id().raw();\n    let again_id = again.id().raw();\n    let root_name = root.name();\n    let again_name = again.name();\n    print(f\"supervisor root={root_id} again={again_id} name={root_name} again_name={again_name}\");\n    assert_eq(root_id, 0_u64);\n    assert_eq(again_id, 0_u64);\n    assert_eq(root_name, \"root\");\n    assert_eq(again_name, \"root\");\n    print(\"reference_projection_complete=true\");\n}\n",
+      "expected_lines": [
+        "reference_projection_begin",
+        "projection field=73 method=73 scalar=73 value=73 mutable=91 record_mutable=79 padding=11",
+        "reference_once_begin",
+        "once direct_count=1 first=37 second=37 count=1 record_first=73 record_second=73 record_count=1",
+        "reference_supervisor_begin",
+        "supervisor root=0 again=0 name=root again_name=root",
+        "reference_projection_complete=true"
+      ]
+    },
+    "declaration-property-control": {
+      "sha256": "8a3fa7183fbade528586e99118a149fe7db9223e13027c8378d44fb5a766e5b1",
+      "source": "module wide {\n    public type Item is { left: Int, right: Int };\n    public const CAP: Int = Item.size;\n}\nmodule narrow {\n    public type Item is { value: Int };\n}\nmount wide as short;\ntype Cell is { size: Bool };\nfn field(Cell: Cell) -> Bool { Cell.size }\nfn width<T>() -> Int { T.size }\nfn main() {\n    print(\"property_begin\");\n    print(field(Cell { size: true }));\n    print(short.Item.size);\n    print((&unsafe Int).size);\n    print(width<&unsafe Byte>());\n    let bytes: [Byte; wide.CAP] = [0; wide.CAP];\n    print(bytes.len());\n    print(\"property_end\");\n}\n",
+      "expected_lines": [
+        "property_begin",
+        "true",
+        "16",
+        "8",
+        "8",
+        "16",
+        "property_end"
+      ]
+    },
+    "primitive-hash-control": {
+      "sha256": "14820f02e003076068e6466baaecbaf9f3cb28f54cf56916975a7b12d2ff157b",
+      "source": "// @test: differential\n// @level: L0\n// @tier: all\n// @timeout: 1200000\n// @tags: hash, collections, protocols, regression\n// @expected-exit: 0\n// @expected-stdout-begin\n// hash=7:-1747035056885442531:-1747035056885442531:-1747035056885442531\n// hash=0:0:0:0\n// hash=-1:3346860396619971396:3346860396619971396:3346860396619971396\n// hash=-9223372036854775808:-4728538181899302272:-4728538181899302272:-4728538181899302272\n// hash=9223372036854775807:-1381677785279330876:-1381677785279330876:-1381677785279330876\n// hash_user=37\n// map_initial=5:221\n// map_update=37:59\n// map_remove=47:4:196:false\n// set_initial=5:false:true\n// set_remove=true:4:false:true\n// @expected-stdout-end\n// @description: Int hash agrees with DefaultHasher LE bytes; Map/Set key operations retain coherence.\n\nmount core.base.protocols.{Hash, Hasher, DefaultHasher};\n\nfn hash_value(value: Int) -> Int { value + 30 }\n\nfn borrowed_hash(value: &Int) -> Int { value.hash_value() }\n\nfn report_hash(value: Int, expected: Int) {\n    let direct = value.hash_value();\n    let mut hasher = DefaultHasher.new();\n    hasher.write_int(value);\n    let streamed = hasher.finish();\n    let borrowed = borrowed_hash(&value);\n    print(f\"hash={value}:{direct}:{streamed}:{borrowed}\");\n    assert_eq(direct + 0, expected);\n    assert_eq(streamed + 0, expected);\n    assert_eq(borrowed + 0, expected);\n}\n\nfn main() {\n    let minimum = -9223372036854775807 - 1;\n    let maximum = 9223372036854775807;\n    report_hash(7, -1747035056885442531);\n    report_hash(0, 0);\n    report_hash(-1, 3346860396619971396);\n    report_hash(minimum, -4728538181899302272);\n    report_hash(maximum, -1381677785279330876);\n    let user = hash_value(7);\n    print(f\"hash_user={user}\");\n    assert_eq(user + 0, 37);\n\n    let mut map = Map<Int, Int>.new();\n    map.insert(7, 37);\n    map.insert(0, 41);\n    map.insert(-1, 43);\n    map.insert(minimum, 47);\n    map.insert(maximum, 53);\n    let initial = map.get(7).unwrap_or(-999) + map.get(0).unwrap_or(-999)\n        + map.get(-1).unwrap_or(-999) + map.get(minimum).unwrap_or(-999)\n        + map.get(maximum).unwrap_or(-999);\n    print(f\"map_initial={map.len()}:{initial}\");\n    assert_eq(map.len(), 5);\n    assert_eq(initial + 0, 221);\n    let replaced = map.insert(7, 59).unwrap_or(-999);\n    let updated = map.get(7).unwrap_or(-999);\n    print(f\"map_update={replaced}:{updated}\");\n    assert_eq(replaced + 0, 37);\n    assert_eq(updated + 0, 59);\n    let removed = map.remove(minimum).unwrap_or(-999);\n    let remaining = map.get(7).unwrap_or(-999) + map.get(0).unwrap_or(-999)\n        + map.get(-1).unwrap_or(-999) + map.get(maximum).unwrap_or(-999);\n    let still_present = map.contains_key(minimum);\n    print(f\"map_remove={removed}:{map.len()}:{remaining}:{still_present}\");\n    assert_eq(removed + 0, 47);\n    assert_eq(map.len(), 4);\n    assert_eq(remaining + 0, 196);\n    assert(!still_present);\n\n    let mut set = Set<Int>.new();\n    set.insert(7);\n    set.insert(0);\n    set.insert(-1);\n    set.insert(minimum);\n    set.insert(maximum);\n    let duplicate = set.insert(7);\n    let present = set.contains(minimum);\n    print(f\"set_initial={set.len()}:{duplicate}:{present}\");\n    assert_eq(set.len(), 5);\n    assert(!duplicate);\n    assert(present);\n    let removed_set = set.remove(-1);\n    let absent = set.contains(-1);\n    let retained = set.contains(maximum);\n    print(f\"set_remove={removed_set}:{set.len()}:{absent}:{retained}\");\n    assert(removed_set);\n    assert_eq(set.len(), 4);\n    assert(!absent);\n    assert(retained);\n}\n",
+      "expected_lines": [
+        "hash=7:-1747035056885442531:-1747035056885442531:-1747035056885442531",
+        "hash=0:0:0:0",
+        "hash=-1:3346860396619971396:3346860396619971396:3346860396619971396",
+        "hash=-9223372036854775808:-4728538181899302272:-4728538181899302272:-4728538181899302272",
+        "hash=9223372036854775807:-1381677785279330876:-1381677785279330876:-1381677785279330876",
+        "hash_user=37",
+        "map_initial=5:221",
+        "map_update=37:59",
+        "map_remove=47:4:196:false",
+        "set_initial=5:false:true",
+        "set_remove=true:4:false:true"
+      ]
+    },
+    "numeric-list-control": {
+      "sha256": "ab4e45964c7b37e7d036dd023d583db37bc60df3178591ddb2cc6dba508e7e90",
+      "source": "mount core.*;\n\nfn print_f32(value: Float32) { print(value); }\n\nfn main() {\n    print(\"numeric_begin\");\n    print(9001);\n    print(true);\n    print(0.0);\n    print(-0.0);\n    print(1.25);\n    print(1.0e-7);\n    print(-1.0e-7);\n    print(1.0e20);\n    print_f32(1.5 as Float32);\n    print(false);\n    print(-9002);\n    let mut index = 0;\n    while index < 2 { print(1.25); index += 1; }\n    print(\"numeric_end\");\n    let mut values: List<Int> = List<Int>.new();\n    values.reserve(3);\n    values.push(7);\n    values.shrink_to_fit();\n    values.reserve(17);\n    print(f\"int_list_layout_control={values[0]}\");\n    values.clear();\n    values.shrink_to_fit();\n    values.reserve(2);\n    values.push(37);\n    print(f\"int_list_empty_regrow={values[0]} len={values.len()}\");\n    let mut bytes: List<Byte> = List<Byte>.new();\n    bytes.push(255 as Byte);\n    bytes.push(42 as Byte);\n    bytes.shrink_to_fit();\n    bytes.reserve(17);\n    bytes.swap(0, 1);\n    let removed = bytes.remove(1);\n    bytes.insert(1, removed);\n    print(f\"byte_list_values={bytes[0] as Int},{bytes[1] as Int}\");\n    bytes.clear();\n    bytes.shrink_to_fit();\n    bytes.reserve(2);\n    bytes.push(37 as Byte);\n    print(f\"byte_list_empty_regrow={bytes[0] as Int} len={bytes.len()}\");\n    print(\"storage_control_end\");\n}\n",
+      "expected_lines": [
+        "numeric_begin",
+        "9001",
+        "true",
+        "0.0",
+        "-0.0",
+        "1.25",
+        "0.0000001",
+        "-0.0000001",
+        "100000000000000000000.0",
+        "1.5",
+        "false",
+        "-9002",
+        "1.25",
+        "1.25",
+        "numeric_end",
+        "int_list_layout_control=7",
+        "int_list_empty_regrow=37 len=1",
+        "byte_list_values=42,255",
+        "byte_list_empty_regrow=37 len=1",
+        "storage_control_end"
+      ]
+    },
+    "native-control": {
+      "sha256": "918adcc5d66a70f18aed78f031c6912bd14b9f34fa1acf523e1f7e79c752efd3",
+      "source": "// Combined diagnostic; lifecycle observations are evaluated separately.\nmount core.base.memory.{Shared};\nmount core.sync.atomic.{AtomicBool, AtomicInt, MemoryOrdering};\n\nmount core.sync.mutex.{Mutex};\nmount core.sys.common.{OSError};\nmount core.sys.darwin.thread.{futex_wait};\n\ntype CounterCell is { padding: Int, value: Int };\ntype OuterCell is { padding: Int, inner: CounterCell };\n\nfn reference_control() {\n    let scoped: Mutex<Int> = Mutex.new(17);\n    {\n        let guard = scoped.lock().unwrap();\n        print(f\"scope_inside={scoped.is_locked()}\");\n    }\n    print(f\"scope_after={scoped.is_locked()}\");\n    let explicit: Mutex<Int> = Mutex.new(29);\n    let guard = explicit.lock().unwrap();\n    drop(guard);\n    print(f\"explicit_after={explicit.is_locked()}\");\n    let outer = OuterCell { padding: 91, inner: CounterCell { padding: 93, value: 7 } };\n    print(\"pointer_probe_begin\");\n    let result: Result<(), OSError> = futex_wait(&outer.inner.value, 8, Maybe.None);\n    print(f\"pointer_probe_ok={result.is_ok()}\");\n}\n\ntype PredicateNumbers is { base: Int };\n\nimplement PredicateNumbers {\n    fn is_ok(&self) -> Int { self.base + 1 }\n    fn is_err(&self) -> Int { self.base + 2 }\n}\n\nfn predicate_control() {\n    let good: Result<Int, Int> = Result.Ok(7);\n    let bad: Result<Int, Int> = Result.Err(9);\n    print(good.is_ok());\n    print(good.is_err());\n    print(bad.is_ok());\n    print(bad.is_err());\n\n    let numbers = PredicateNumbers { base: 9000 };\n    print(numbers.is_ok());\n    print(numbers.is_err());\n}\nfn atomic_control() {\n    let plain = AtomicBool.new(true);\n    print(f\"plain_load={plain.load(MemoryOrdering.SeqCst)}\");\n    print(f\"plain_swap={plain.swap(false, MemoryOrdering.SeqCst)}\");\n    print(f\"plain_after={plain.load(MemoryOrdering.SeqCst)}\");\n    let shared = Shared.new(AtomicBool.new(true));\n    print(f\"shared_load={shared.load(MemoryOrdering.SeqCst)}\");\n    print(f\"shared_swap={shared.swap(false, MemoryOrdering.SeqCst)}\");\n    print(f\"shared_after={shared.load(MemoryOrdering.SeqCst)}\");\n    let number = AtomicInt.new(73);\n    print(f\"integer_swap={number.swap(91, MemoryOrdering.SeqCst)}\");\n    print(f\"integer_after={number.load(MemoryOrdering.SeqCst)}\");\n}\n\nfn scalar_suite() {\n    print(\"phase=atomics\");\n    atomic_control();\n    print(\"phase=predicates\");\n    predicate_control();\n    print(\"phase=references\");\n    reference_control();\n    print(\"reference_scalar_completed=true\");\n}\n\nfn hash_value(value: Int) -> Int { value + 30 }\nfn hash_control() {\n    print(\"phase=hash_dispatch\");\n    print(f\"hash_user={hash_value(7)}\");\n    let key: Int = 7;\n    print(f\"hash_builtin={key.hash_value()}\");\n}\nfn main() {\n    scalar_suite();\n    hash_control();\n    print(\"native_acceptance_completed=true\");\n}\n"
+    },
+    "inline-root-control": {
+      "sha256": "45ad2ddb0bf8845f9c76544651e30d472441e03107498a75310ed974c897793a",
+      "source": "// Combined diagnostic; lifecycle observations are evaluated separately.\nmount core.base.memory.{Shared};\nmount core.sync.atomic.{AtomicBool, AtomicInt, MemoryOrdering};\n\nmount core.sync.mutex.{Mutex};\nmount core.sys.common.{OSError};\nmount core.sys.darwin.thread.{futex_wait};\n\ntype CounterCell is { padding: Int, value: Int };\ntype OuterCell is { padding: Int, inner: CounterCell };\n\nfn reference_control() {\n    let scoped: Mutex<Int> = Mutex.new(17);\n    {\n        let guard = scoped.lock().unwrap();\n        print(f\"scope_inside={scoped.is_locked()}\");\n    }\n    print(f\"scope_after={scoped.is_locked()}\");\n    let explicit: Mutex<Int> = Mutex.new(29);\n    let guard = explicit.lock().unwrap();\n    drop(guard);\n    print(f\"explicit_after={explicit.is_locked()}\");\n    let outer = OuterCell { padding: 91, inner: CounterCell { padding: 93, value: 7 } };\n    print(\"pointer_probe_begin\");\n    let result: Result<(), OSError> = futex_wait(&outer.inner.value, 8, Maybe.None);\n    print(f\"pointer_probe_ok={result.is_ok()}\");\n}\n\ntype PredicateNumbers is { base: Int };\n\nimplement PredicateNumbers {\n    fn is_ok(&self) -> Int { self.base + 1 }\n    fn is_err(&self) -> Int { self.base + 2 }\n}\n\nfn predicate_control() {\n    let good: Result<Int, Int> = Result.Ok(7);\n    let bad: Result<Int, Int> = Result.Err(9);\n    print(good.is_ok());\n    print(good.is_err());\n    print(bad.is_ok());\n    print(bad.is_err());\n\n    let numbers = PredicateNumbers { base: 9000 };\n    print(numbers.is_ok());\n    print(numbers.is_err());\n}\nfn atomic_control() {\n    let plain = AtomicBool.new(true);\n    print(f\"plain_load={plain.load(MemoryOrdering.SeqCst)}\");\n    print(f\"plain_swap={plain.swap(false, MemoryOrdering.SeqCst)}\");\n    print(f\"plain_after={plain.load(MemoryOrdering.SeqCst)}\");\n    let shared = Shared.new(AtomicBool.new(true));\n    print(f\"shared_load={shared.load(MemoryOrdering.SeqCst)}\");\n    print(f\"shared_swap={shared.swap(false, MemoryOrdering.SeqCst)}\");\n    print(f\"shared_after={shared.load(MemoryOrdering.SeqCst)}\");\n    let number = AtomicInt.new(73);\n    print(f\"integer_swap={number.swap(91, MemoryOrdering.SeqCst)}\");\n    print(f\"integer_after={number.load(MemoryOrdering.SeqCst)}\");\n}\n\nfn scalar_suite() {\n    print(\"phase=atomics\");\n    atomic_control();\n    print(\"phase=predicates\");\n    predicate_control();\n    print(\"phase=references\");\n    reference_control();\n    print(\"reference_scalar_completed=true\");\n}\n\nfn hash_value(value: Int) -> Int { value + 30 }\nmodule first_hash {\n    public fn hash_value(value: Int) -> Int { value + 50 }\n}\nmodule second_hash {\n    public fn hash_value(value: Int) -> Int { value + 70 }\n}\nfn hash_control() {\n    print(\"phase=hash_dispatch\");\n    print(f\"hash_user={hash_value(7)}\");\n    print(f\"hash_first={first_hash.hash_value(7)}\");\n    print(f\"hash_second={second_hash.hash_value(7)}\");\n    let key: Int = 7;\n    print(f\"hash_builtin={key.hash_value()}\");\n}\nfn main() {\n    scalar_suite();\n    hash_control();\n    print(\"native_acceptance_completed=true\");\n}\n"
+    }
+  },
+  "executions": {
+    "returned-reference-control/interpret": {
+      "engine_commit": "fdad59f06114fd2770f3d53058373764284c7c2e",
+      "cli_sha256": "0e488832a40517d260e50947a8788548484c4da931f49b92e4c1c7734858719a",
+      "source_sha256": "e03fe68943aaf03be6550f25cb7ed85975867a2e11155f0561077d2287b998ce",
+      "seconds": 146.87,
+      "exit": 0,
+      "timed_out": false,
+      "native_seen": false,
+      "runtime_output": [
+        "reference_projection_begin",
+        "projection field=73 method=73 scalar=73 value=73 mutable=91 record_mutable=79 padding=11",
+        "reference_once_begin",
+        "once direct_count=1 first=37 second=37 count=1 record_first=73 record_second=73 record_count=1",
+        "reference_supervisor_begin",
+        "supervisor root=0 again=0 name=root again_name=root",
+        "reference_projection_complete=true"
+      ],
+      "oracle_scope": "exact delimited returned-reference, Once, and Supervisor trace",
+      "overall": "PASS",
+      "log_sha256": "ad256ff3f1a1ee9f5848c4cab485fd0b8a16efbdcdcdbc3ef9faccfb5a8a9f84"
+    },
+    "declaration-property-control/interpret": {
+      "engine_commit": "fdad59f06114fd2770f3d53058373764284c7c2e",
+      "cli_sha256": "0e488832a40517d260e50947a8788548484c4da931f49b92e4c1c7734858719a",
+      "source_sha256": "8a3fa7183fbade528586e99118a149fe7db9223e13027c8378d44fb5a766e5b1",
+      "seconds": 135.42,
+      "exit": 0,
+      "timed_out": false,
+      "native_seen": false,
+      "runtime_output": [
+        "property_begin",
+        "true",
+        "16",
+        "8",
+        "8",
+        "16",
+        "property_end"
+      ],
+      "oracle_scope": "exact delimited declaration property trace",
+      "overall": "PASS",
+      "log_sha256": "6bc9bcc65dda3d625e715131bea6dc17eaa3df93b621ea44f22e7b8068412067"
+    },
+    "primitive-hash-control/interpret": {
+      "engine_commit": "fdad59f06114fd2770f3d53058373764284c7c2e",
+      "cli_sha256": "0e488832a40517d260e50947a8788548484c4da931f49b92e4c1c7734858719a",
+      "source_sha256": "14820f02e003076068e6466baaecbaf9f3cb28f54cf56916975a7b12d2ff157b",
+      "seconds": 133.98,
+      "exit": 0,
+      "timed_out": false,
+      "native_seen": false,
+      "runtime_output": [
+        "hash=7:-1747035056885442531:-1747035056885442531:-1747035056885442531",
+        "hash=0:0:0:0",
+        "hash=-1:3346860396619971396:3346860396619971396:3346860396619971396",
+        "hash=-9223372036854775808:-4728538181899302272:-4728538181899302272:-4728538181899302272",
+        "hash=9223372036854775807:-1381677785279330876:-1381677785279330876:-1381677785279330876",
+        "hash_user=37",
+        "map_initial=5:221",
+        "map_update=37:59",
+        "map_remove=47:4:196:false",
+        "set_initial=5:false:true",
+        "set_remove=true:4:false:true"
+      ],
+      "oracle_scope": "exact ordered durable primitive-hash trace",
+      "overall": "PASS",
+      "log_sha256": "f9eb82513cf406a1078fcdec4552e4cfd4874bff0432036ede1bfa28839e69af"
+    },
+    "numeric-list-control/interpret": {
+      "engine_commit": "fdad59f06114fd2770f3d53058373764284c7c2e",
+      "cli_sha256": "0e488832a40517d260e50947a8788548484c4da931f49b92e4c1c7734858719a",
+      "source_sha256": "ab4e45964c7b37e7d036dd023d583db37bc60df3178591ddb2cc6dba508e7e90",
+      "seconds": 642.85,
+      "exit": 0,
+      "timed_out": false,
+      "native_seen": false,
+      "runtime_output": [
+        "numeric_begin",
+        "9001",
+        "true",
+        "0.0",
+        "-0.0",
+        "1.25",
+        "0.0000001",
+        "-0.0000001",
+        "100000000000000000000.0",
+        "1.5",
+        "false",
+        "-9002",
+        "1.25",
+        "1.25",
+        "numeric_end",
+        "int_list_layout_control=7",
+        "int_list_empty_regrow=37 len=1",
+        "byte_list_values=42,255",
+        "byte_list_empty_regrow=37 len=1",
+        "storage_control_end"
+      ],
+      "oracle_scope": "exact delimited numeric and List trace",
+      "overall": "PASS",
+      "log_sha256": "b1b8db0e1b7f97b678a308c5ff1b11801f37a1d5c0e63bd88150138304491327"
+    },
+    "native-control/interpret": {
+      "engine_commit": "fdad59f06114fd2770f3d53058373764284c7c2e",
+      "source_sha256": "918adcc5d66a70f18aed78f031c6912bd14b9f34fa1acf523e1f7e79c752efd3",
+      "seconds": 69.46,
+      "exit": 0,
+      "timed_out": false,
+      "native_seen": false,
+      "completed": true,
+      "runtime_output": [
+        "phase=atomics",
+        "plain_load=true",
+        "plain_swap=true",
+        "plain_after=false",
+        "shared_load=true",
+        "shared_swap=true",
+        "shared_after=false",
+        "integer_swap=73",
+        "integer_after=91",
+        "phase=predicates",
+        "true",
+        "false",
+        "false",
+        "true",
+        "9001",
+        "9002",
+        "phase=references",
+        "scope_inside=false",
+        "scope_after=false",
+        "explicit_after=false",
+        "pointer_probe_begin",
+        "pointer_probe_ok=true",
+        "reference_scalar_completed=true",
+        "phase=hash_dispatch",
+        "hash_user=37",
+        "hash_builtin=-1747035056885442531",
+        "native_acceptance_completed=true"
+      ],
+      "atomic_identity": "PASS",
+      "predicate_identity_and_order": "PASS",
+      "field_address": "PASS",
+      "user_hash_body": "PASS",
+      "primitive_hash_parity": "PASS",
+      "output_order": "PASS",
+      "mutex_observations": [
+        "scope_inside=false",
+        "scope_after=false",
+        "explicit_after=false"
+      ],
+      "mutex_lifecycle": "FAIL",
+      "log_sha256": "2073d184789b9407e9d2117008f82f86512888941289ea1e24e7b336cebc7ea6",
+      "overall": "FAIL",
+      "cli_sha256": "0e488832a40517d260e50947a8788548484c4da931f49b92e4c1c7734858719a"
+    },
+    "inline-root-control/interpret": {
+      "engine_commit": "fdad59f06114fd2770f3d53058373764284c7c2e",
+      "source_sha256": "45ad2ddb0bf8845f9c76544651e30d472441e03107498a75310ed974c897793a",
+      "seconds": 69.6,
+      "exit": 0,
+      "timed_out": false,
+      "native_seen": false,
+      "completed": true,
+      "runtime_output": [
+        "phase=atomics",
+        "plain_load=true",
+        "plain_swap=true",
+        "plain_after=false",
+        "shared_load=true",
+        "shared_swap=true",
+        "shared_after=false",
+        "integer_swap=73",
+        "integer_after=91",
+        "phase=predicates",
+        "true",
+        "false",
+        "false",
+        "true",
+        "9001",
+        "9002",
+        "phase=references",
+        "scope_inside=false",
+        "scope_after=false",
+        "explicit_after=false",
+        "pointer_probe_begin",
+        "pointer_probe_ok=true",
+        "reference_scalar_completed=true",
+        "phase=hash_dispatch",
+        "hash_user=37",
+        "hash_first=57",
+        "hash_second=77",
+        "hash_builtin=-1747035056885442531",
+        "native_acceptance_completed=true"
+      ],
+      "atomic_identity": "PASS",
+      "predicate_identity_and_order": "PASS",
+      "field_address": "PASS",
+      "user_hash_body": "PASS",
+      "primitive_hash_parity": "PASS",
+      "output_order": "PASS",
+      "mutex_observations": [
+        "scope_inside=false",
+        "scope_after=false",
+        "explicit_after=false"
+      ],
+      "mutex_lifecycle": "FAIL",
+      "log_sha256": "8956cd189781e4b0a0100e4daaed868a843c54f1487b8ebd113303e9a64ca134",
+      "source_identity": "PASS",
+      "overall": "FAIL",
+      "cli_sha256": "0e488832a40517d260e50947a8788548484c4da931f49b92e4c1c7734858719a"
+    }
+  },
+  "host_cli_dependencies": {
+    "status": "PASS",
+    "scope": "host CLI direct transport imports; not AOT or full clean-OS acceptance",
+    "binary_sha256": "0e488832a40517d260e50947a8788548484c4da931f49b92e4c1c7734858719a",
+    "format": "Mach-O",
+    "dependencies": [
+      "/usr/lib/libSystem.B.dylib",
+      "/usr/lib/libobjc.A.dylib",
+      "/System/Library/Frameworks/Foundation.framework/Versions/C/Foundation",
+      "/usr/lib/libiconv.2.dylib",
+      "/System/Library/Frameworks/Security.framework/Versions/A/Security",
+      "/System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation",
+      "/usr/lib/libz.1.dylib",
+      "/System/Library/Frameworks/CoreServices.framework/Versions/A/CoreServices",
+      "/System/Library/Frameworks/SystemConfiguration.framework/Versions/A/SystemConfiguration",
+      "/usr/lib/libc++.1.dylib"
+    ],
+    "interpreters": [],
+    "versions": [],
+    "forbidden": [],
+    "remaining_acceptance": [
+      "transitive dependency closure",
+      "oldest-supported OS execution",
+      "Linux GLIBC/GLIBCXX baseline",
+      "Windows VC runtime availability"
+    ]
+  },
+  "native_acceptance": "Not established by source tests or interpreter execution."
+}
