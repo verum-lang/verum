@@ -2615,7 +2615,13 @@ impl ProtocolChecker {
                         name: "default".into(),
                         ty: Type::function(
                             List::new(),                               // Static method, no self parameter
-                            Type::Var(crate::ty::TypeVar::with_id(0)), // Returns Self
+                            // Self is a declaration placeholder, never a live
+                            // inference variable. A fixed id aliases the first
+                            // generic parameter and leaks across later calls.
+                            Type::Named {
+                                path: Path::single(Ident::new("Self", Span::default())),
+                                args: List::new(),
+                            },
                         ),
                         has_default: false,
                         doc: Maybe::Some("Create a default value".into()),
