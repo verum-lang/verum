@@ -3052,6 +3052,7 @@ impl TypeChecker {
         module: &verum_ast::decl::ModuleDecl,
         parent_path: &str,
     ) {
+        self.const_eval.declare_count_modules(module, parent_path);
         self.pre_register_module(module, parent_path);
     }
 

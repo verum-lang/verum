@@ -14,7 +14,56 @@ use crate::{
     stmt::StmtKind,
     ty::PathSegment,
 };
-use verum_common::{List, Text};
+use verum_common::{List, Set, Text};
+
+/// Declared module namespaces used by checked count consumers. Empty modules
+/// are declarations too: their missing members cannot fall through to an outer
+/// namesake. Values are deliberately not used to infer module ownership.
+#[derive(Debug, Default)]
+pub struct ModuleOwners {
+    paths: Set<Text>,
+}
+
+impl ModuleOwners {
+    /// A declared dotted module also declares its enclosing module path.
+    pub fn declare(&mut self, path: &str) {
+        let mut current = Some(path);
+        while let Some(path) = current {
+            self.paths.insert(Text::from(path));
+            current = path.rsplit_once('.').map(|(parent, _)| parent);
+        }
+    }
+
+    /// Select the nearest module HEAD before looking up any written member.
+    /// The caller must query the returned full key exactly, including on a miss.
+    /// `root` is the consumer's canonical spelling of the cog root.
+    pub fn member(&self, name: &str, scope: &str, root: &str) -> Option<Text> {
+        fn joined(base: &str, tail: &str) -> Text {
+            if base.is_empty() {
+                Text::from(tail)
+            } else {
+                Text::from(format!("{base}.{tail}"))
+            }
+        }
+        if let Some(tail) = name.strip_prefix("cog.") {
+            return Some(joined(root, tail));
+        }
+        let (head, tail) = name.split_once('.')?;
+        let mut anchor = Some(scope);
+        while let Some(scope) = anchor {
+            let owner = joined(scope, head);
+            if self.paths.contains(&owner) {
+                return Some(joined(owner.as_str(), tail));
+            }
+            anchor = if scope.is_empty() {
+                None
+            } else {
+                Some(scope.rsplit_once('.').map_or("", |(parent, _)| parent))
+            };
+        }
+        None
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Scalar {

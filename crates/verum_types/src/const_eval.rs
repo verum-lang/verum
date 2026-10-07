@@ -226,6 +226,8 @@ pub struct ConstEvaluator {
     env: Map<Text, ConstValue>,
     /// Array counts keep their checked domain separate from rich meta values.
     count_values: Map<Text, std::result::Result<verum_ast::checked_const::Scalar, Text>>,
+    /// Module ownership comes from declarations, including empty modules.
+    count_modules: verum_ast::checked_const::ModuleOwners,
     /// Registry of meta functions available for compile-time calls
     /// Meta system: unified compile-time computation via "meta fn", "meta" parameters, @derive macros, tagged literals, all under single "meta" concept — Section 3.1 - Meta function registry
     functions: Map<Text, MetaFunction>,
@@ -249,6 +251,7 @@ impl ConstEvaluator {
         Self {
             env: Map::new(),
             count_values: Map::new(),
+            count_modules: Default::default(),
             functions: Map::new(),
             recursion_depth: 0,
             max_depth: MAX_RECURSION_DEPTH,
@@ -304,6 +307,21 @@ impl ConstEvaluator {
             .insert(Text::from(format!("{scope}.{name}")), checked);
     }
 
+    /// Record the actual source module tree before evaluating its members.
+    /// This is separate from value bindings and leaves rich meta lookup intact.
+    pub fn declare_count_modules(&mut self, module: &verum_ast::decl::ModuleDecl, parent: &str) {
+        let path = if parent.is_empty() { module.name.name.to_string() }
+            else { format!("{parent}.{}", module.name.name) };
+        self.count_modules.declare(&path);
+        if let Some(items) = &module.items {
+            for item in items {
+                if let verum_ast::ItemKind::Module(child) = &item.kind {
+                    self.declare_count_modules(child, &path);
+                }
+            }
+        }
+    }
+
     /// Checked producer domain used by concrete array lengths, not meta calls.
     pub fn eval_array_count(&self, expr: &Expr, scope: &str) -> Result<i64> {
         self.eval_checked_scalar(expr, scope)?
@@ -349,10 +367,11 @@ impl ConstEvaluator {
             // missing sibling/owner must never become a same-leaf lookup.
             // Stop at the nearest recorded result even when it is an error;
             // an invalid shadow cannot borrow a valid outer value (T1626).
+            let owner_key = self.count_modules.member(name.as_str(), scope, "cog");
             let mut anchor = Some(scope);
             let resolved = loop {
-                if name.starts_with("cog.") {
-                    break self.count_values.get(&name);
+                if let Some(key) = &owner_key {
+                    break self.count_values.get(key);
                 }
                 let Some(current) = anchor else {
                     break self.count_values.get(&name);

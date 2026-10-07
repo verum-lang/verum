@@ -439,6 +439,7 @@ impl TypeChecker {
     fn check_module(&mut self, module: &verum_ast::decl::ModuleDecl) -> Result<()> {
         // Save current module path
         let saved_path = self.current_module_path.clone();
+        self.const_eval.declare_count_modules(module, saved_path.as_str());
 
         // Build new module path
         let module_name = module.name.name.as_str();
