@@ -1,4 +1,4 @@
-//! Real List value method bodies, independently of native/interpreter method intercepts.
+//! Real List source bodies and the ordinary interpreter method dispatch surface.
 #![cfg(feature = "codegen")]
 use verum_ast::{
     ItemKind,
@@ -14,6 +14,19 @@ fn is_list(ty: &verum_ast::Type) -> bool {
     }
 }
 fn execute(source: &str) -> i64 {
+    execute_with_method_names(source, true)
+}
+
+fn execute_with_method_names(source: &str, rename_methods: bool) -> i64 {
+    try_execute_with_method_names(source, rename_methods)
+        .expect("actual source methods")
+        .as_i64()
+}
+
+fn try_execute_with_method_names(
+    source: &str,
+    rename_methods: bool,
+) -> verum_vbc::interpreter::InterpreterResult<verum_vbc::Value> {
     let mut ast = Parser::new(source).parse_module().expect("caller grammar");
     let mut core = Parser::new(include_str!("../../../core/collections/list.vr"))
         .parse_module()
@@ -53,7 +66,9 @@ fn execute(source: &str) -> i64 {
                 {
                     // Keep the actual source body while avoiding native method
                     // intercepts: these tests exercise the source implementation.
-                    f.name.name = format!("checked_{}", f.name.name).into();
+                    if rename_methods {
+                        f.name.name = format!("checked_{}", f.name.name).into();
+                    }
                     true
                 } else {
                     [
@@ -67,11 +82,12 @@ fn execute(source: &str) -> i64 {
                         "free_buffer",
                         "grow",
                         "next_cap",
+                        "reverse",
                     ]
                     .contains(&f.name.name.as_str())
                 }
             });
-            if let Some(original_pop) = original_pop {
+            if let Some(original_pop) = original_pop.filter(|_| rename_methods) {
                 i.items.push(original_pop);
             }
             true
@@ -177,10 +193,8 @@ fn execute(source: &str) -> i64 {
         .find(|f| vbc.get_string(f.name) == Some("probe"))
         .unwrap()
         .id;
-    verum_vbc::interpreter::Interpreter::new(std::sync::Arc::new(vbc))
+    verum_vbc::interpreter::Interpreter::new(verum_common::Shared::new(vbc).into_arc())
         .execute_function(entry)
-        .expect("actual source methods")
-        .as_i64()
 }
 
 #[test]
@@ -332,5 +346,164 @@ fn source_clear_truncate_release_and_regrow_keep_owner_valid() {
             37,
             "{ty}"
         );
+    }
+}
+
+#[test]
+fn ordinary_byte_methods_preserve_shrink_regrow_remove_insert() {
+    for ty in ["Byte", "Int"] {
+        let source = format!(
+            r#"fn probe()->Int {{
+            let mut values:List<{ty}> = List<{ty}>.new();
+            values.push(255 as {ty}); values.push(42 as {ty});
+            values.shrink_to_fit(); values.reserve(17);
+            values.swap(0,1);
+            let removed=values.remove(1);
+            values.insert(1,removed);
+            let result=(values[0] as Int)*1000+(values[1] as Int);
+            values.clear(); values.shrink_to_fit(); values.reserve(2);
+            values.push(37 as {ty});
+            result+(values[0] as Int)+(values.len()*100000)
+        }}"#
+        );
+        assert_eq!(execute_with_method_names(&source, false), 142292, "{ty}");
+    }
+}
+
+#[test]
+fn ordinary_swap_preserves_byte_owner_fields() {
+    assert_eq!(
+        execute_with_method_names(
+            r#"fn probe()->Int {
+        let mut values:List<Byte> = List<Byte>.new();
+        values.push(255 as Byte); values.push(42 as Byte);
+        values.shrink_to_fit(); values.reserve(17);
+        let pointer=values.ptr as Int;
+        values.swap(0,1);
+        assert(values.len()==2,"swap must preserve length");
+        assert(values.capacity()==19,"swap must preserve capacity");
+        assert(values.ptr as Int==pointer,"swap must preserve backing");
+        (values[0] as Int)*1000+(values[1] as Int)
+    }"#,
+            false
+        ),
+        42255
+    );
+}
+
+#[test]
+fn ordinary_reverse_preserves_packed_and_slot_owners() {
+    for ty in ["Byte", "Int"] {
+        assert_eq!(
+            execute_with_method_names(
+                &format!(
+                    r#"fn probe()->Int {{
+            let mut values:List<{ty}> = List<{ty}>.new();
+            values.shrink_to_fit(); values.reverse();
+            values.push(0 as {ty}); values.push(255 as {ty}); values.push(42 as {ty});
+            values.shrink_to_fit(); values.reserve(17);
+            let pointer=values.ptr as Int;
+            values.reverse();
+            assert(values.len()==3,"reverse must preserve length");
+            assert(values.capacity()==20,"reverse must preserve capacity");
+            assert(values.ptr as Int==pointer,"reverse must preserve backing");
+            (values[0] as Int)*1000000+(values[1] as Int)*1000+(values[2] as Int)
+        }}"#
+                ),
+                false
+            ),
+            42255000,
+            "{ty}"
+        );
+    }
+}
+
+#[test]
+fn ordinary_reordering_preserves_record_handles_and_owner_metadata() {
+    for resize in ["", "values.shrink_to_fit(); values.reserve(17);"] {
+        let source = format!(
+            r#"type Cell is {{x:Int,y:Int,z:Int}};
+        fn probe()->Int {{
+            let mut values:List<Cell> = List<Cell>.new();
+            values.push(Cell{{x:1,y:11,z:111}});
+            values.push(Cell{{x:2,y:37,z:222}});
+            values.push(Cell{{x:3,y:99,z:333}});
+            {resize}
+            let pointer=values.ptr as Int;
+            let capacity=values.capacity();
+            values.swap(0,1);
+            values.swap(1,1);
+            values.reverse();
+            assert(values.len()==3,"reordering must preserve length");
+            assert(values.capacity()==capacity,"reordering must preserve capacity");
+            assert(values.ptr as Int==pointer,"reordering must preserve backing");
+            assert(values[0].x==3 && values[0].z==333,"whole last record");
+            assert(values[1].x==1 && values[1].z==111,"whole first record");
+            assert(values[2].x==2 && values[2].z==222,"whole middle record");
+            values[0].y*1000000+values[1].y*1000+values[2].y
+        }}"#
+        );
+        assert_eq!(
+            execute_with_method_names(&source, false),
+            99011037,
+            "{resize}"
+        );
+    }
+}
+
+#[test]
+fn ordinary_empty_reverse_preserves_null_owner() {
+    for ty in ["Byte", "Int"] {
+        let source = format!(
+            r#"fn probe()->Int {{
+            let mut values:List<{ty}> = List<{ty}>.new();
+            values.shrink_to_fit();
+            assert(values.ptr as Int==0,"released empty backing");
+            values.reverse();
+            assert(values.len()==0,"empty length");
+            assert(values.capacity()==0,"empty capacity");
+            assert(values.ptr as Int==0,"empty backing");
+            37
+        }}"#
+        );
+        assert_eq!(execute_with_method_names(&source, false), 37, "{ty}");
+    }
+}
+
+#[test]
+fn ordinary_reordering_rejects_malformed_owners_before_access() {
+    for ty in ["Byte", "Int"] {
+        for (setup, operation, diagnostic) in [
+            (
+                "values.cap=1;",
+                "values.reverse();",
+                "no live allocation extent",
+            ),
+            (
+                "values.len=1;",
+                "values.reverse();",
+                "range exceeds capacity",
+            ),
+            (
+                "values.len=2;",
+                "values.swap(0,1);",
+                "range exceeds capacity",
+            ),
+            ("", "values.swap(0,0);", "out of bounds"),
+        ] {
+            let source = format!(
+                r#"fn probe()->Int {{
+                let mut values:List<{ty}> = List<{ty}>.new();
+                values.shrink_to_fit(); {setup} {operation} 0
+            }}"#
+            );
+            let error = try_execute_with_method_names(&source, false)
+                .expect_err("malformed owner or empty swap must be refused")
+                .to_string();
+            assert!(
+                error.contains(diagnostic),
+                "{ty}: {setup} {operation}: {error}"
+            );
+        }
     }
 }

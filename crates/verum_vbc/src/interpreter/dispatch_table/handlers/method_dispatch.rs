@@ -11853,16 +11853,8 @@ pub(super) fn dispatch_array_method(
                     operation: "List.swap",
                 });
             }
-            if header.type_id == TypeId::LIST {
-                let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
-                let backing_ptr = unsafe { (*data_ptr.add(2)).as_ptr::<u8>() };
-                let backing_data =
-                    unsafe { backing_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
-                unsafe {
-                    let tmp = *backing_data.add(idx_a);
-                    *backing_data.add(idx_a) = *backing_data.add(idx_b);
-                    *backing_data.add(idx_b) = tmp;
-                }
+            if header.type_id.list_storage_stride().is_some() {
+                super::list_storage::swap(state, receiver, idx_a, idx_b)?;
             } else {
                 let _elem_size = std::mem::size_of::<Value>();
                 let base = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
@@ -11875,22 +11867,8 @@ pub(super) fn dispatch_array_method(
             Ok(Some(Value::unit()))
         }
         "reverse" => {
-            if header.type_id == TypeId::LIST {
-                let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
-                let backing_ptr = unsafe { (*data_ptr.add(2)).as_ptr::<u8>() };
-                let backing_data =
-                    unsafe { backing_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
-                let mut lo = 0usize;
-                let mut hi = if len > 0 { len - 1 } else { 0 };
-                while lo < hi {
-                    unsafe {
-                        let tmp = *backing_data.add(lo);
-                        *backing_data.add(lo) = *backing_data.add(hi);
-                        *backing_data.add(hi) = tmp;
-                    }
-                    lo += 1;
-                    hi -= 1;
-                }
+            if header.type_id.list_storage_stride().is_some() {
+                super::list_storage::reverse(state, receiver, len)?;
             } else {
                 let base = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
                 let mut lo = 0usize;

@@ -91,6 +91,46 @@ impl Storage {
     }
 }
 
+/// Swap initialized elements without changing the owner's length, capacity or
+/// backing. Both ranges are checked before either write, for either encoding.
+pub(super) fn swap(
+    state: &InterpreterState,
+    owner: Value,
+    first: usize,
+    second: usize,
+) -> InterpreterResult<()> {
+    let storage = Storage::resolve(state, owner)?;
+    storage.swap(first, second)
+}
+
+/// Reverse an initialized prefix using the same owner/extent authority as the
+/// source storage intrinsics. Empty owners may legitimately have no backing.
+pub(super) fn reverse(state: &InterpreterState, owner: Value, len: usize) -> InterpreterResult<()> {
+    let storage = Storage::resolve(state, owner)?;
+    let len_i64 = i64::try_from(len).map_err(|_| invalid("List length exceeds Int"))?;
+    storage.range(0, len_i64)?;
+    for first in 0..len / 2 {
+        storage.swap(first, len - first - 1)?;
+    }
+    Ok(())
+}
+
+impl Storage {
+    fn swap(&self, first: usize, second: usize) -> InterpreterResult<()> {
+        let first = i64::try_from(first).map_err(|_| invalid("List index exceeds Int"))?;
+        let second = i64::try_from(second).map_err(|_| invalid("List index exceeds Int"))?;
+        let (a, width) = self.range(first, 1)?;
+        let (b, _) = self.range(second, 1)?;
+        if first != second {
+            // SAFETY: distinct element indices name disjoint, fully checked
+            // storage-width ranges. Byte-wise exchange preserves Value bits
+            // for slot lists and touches exactly one byte for packed lists.
+            unsafe { std::ptr::swap_nonoverlapping(a, b, width) };
+        }
+        Ok(())
+    }
+}
+
 pub(super) fn access(
     state: &mut InterpreterState,
     opcode: u8,
