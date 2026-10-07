@@ -100,3 +100,18 @@ fn selected_owner_has_the_exact_declared_count() {
         assert_eq!(size, Some(expected));
     }
 }
+
+#[test]
+fn module_namespace_precedes_type_layout_properties() {
+    for member in ["public const size: Int = 3;", ""] {
+        let source = format!(
+            "type ns is {{ value: Int }}; module ns {{ {member} }} fn measure<T>()->Int {{T.size}} fn probe()->Int {{measure<[Byte; ns.size]>()}}"
+        );
+        let diagnostics = errors(&source);
+        assert_eq!(
+            diagnostics.is_empty(),
+            !member.is_empty(),
+            "{source}: {diagnostics:?}"
+        );
+    }
+}

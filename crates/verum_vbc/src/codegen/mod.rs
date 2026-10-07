@@ -1030,6 +1030,10 @@ pub struct VbcCodegen {
     count_module_owners: verum_ast::checked_const::ModuleOwners,
     count_module_scope: Option<verum_common::Text>,
     declared_count_bindings: verum_common::Map<(verum_common::Text, verum_common::Text), FunctionInfo>,
+    /// Successfully selected imports retain their actual lexical count scope.
+    /// Kept separate from qualified declaration keys (which mounts do not own).
+    /// Non-constant imports block lookup without cloning callable metadata.
+    scoped_count_imports: verum_common::Map<(verum_common::Text, verum_common::Text), Option<FunctionInfo>>,
 
     /// VBC-GENERIC-INSTANTIATION: generic-function instantiations discovered at
     /// call sites — `(callee raw codegen FunctionId, [concrete type-arg
@@ -2246,6 +2250,7 @@ impl VbcCodegen {
             count_module_owners: Default::default(),
             count_module_scope: None,
             declared_count_bindings: verum_common::Map::new(),
+            scoped_count_imports: verum_common::Map::new(),
             pending_specializations: Vec::new(),
             archive_func_name_to_fid: std::collections::HashMap::new(),
             user_xmod_band_by_name: std::collections::HashMap::new(),
@@ -9181,6 +9186,7 @@ impl VbcCodegen {
         self.count_module_owners = Default::default();
         self.count_module_scope = None;
         self.declared_count_bindings.clear();
+        self.scoped_count_imports.clear();
         // Clear static init function tracking
         self.static_init_functions.clear();
         // Clear pending TLS initializations
@@ -11957,6 +11963,10 @@ impl VbcCodegen {
                 qualified_alias,
             ));
         }
+        self.scoped_count_imports.insert((
+            verum_common::Text::from(self.current_count_module_scope().unwrap_or_default()),
+            verum_common::Text::from(alias_name),
+        ), func_info.is_const.then(|| func_info.clone()));
         self.ctx
             .register_function_authoritative(alias_name.to_string(), func_info);
         // MOUNT-FN-AUTHORITY-1 (T0148): carry the explicit mount intent
@@ -17161,6 +17171,12 @@ impl VbcCodegen {
         }
 
         if self.ctx.current_function.is_none() {
+            // Preserve the existing registry's later-declaration selection;
+            // changing import/declaration precedence globally is separate.
+            self.scoped_count_imports.remove(&(
+                verum_common::Text::from(self.current_count_module_scope().unwrap_or_default()),
+                verum_common::Text::from(name),
+            ));
             self.declared_count_bindings.insert((
                 verum_common::Text::from(self.current_count_module_scope().unwrap_or_default()),
                 verum_common::Text::from(name),

@@ -73,3 +73,78 @@ fn empty_nearer_module_refuses_outer_count_and_missing_intermediate_owner() {
         );
     }
 }
+
+#[test]
+fn module_namespace_precedes_type_layout_properties() {
+    for member in ["public const size: Int = 3;", ""] {
+        let source = format!(
+            "type ns is {{ value: Int }}; module ns {{ {member} }} fn measure<T>()->Int {{T.size}} fn probe()->Int {{measure<[Byte; ns.size]>()}}"
+        );
+        let ast = Parser::new(&source).parse_module().unwrap();
+        let result = VbcCodegen::new().compile_module(&ast);
+        if member.is_empty() {
+            assert!(
+                result.is_err(),
+                "empty module owner borrowed same-name type layout"
+            );
+        } else {
+            let module = result.expect("module constant");
+            let id = module.find_function_by_name("probe").unwrap();
+            assert_eq!(
+                Interpreter::new(Shared::new(module).into_arc())
+                    .execute_function(id)
+                    .unwrap()
+                    .as_i64(),
+                3
+            );
+        }
+    }
+}
+
+#[test]
+fn selected_explicit_constant_import_keeps_its_lexical_owner() {
+    for count in ["CAP", "ALIAS"] {
+        let source = format!(
+            "module remote {{ public const CAP: Int=3; }} module first {{ const CAP: Int=5; mount remote.{{CAP}}; const ALIAS: Int=CAP; fn measure<T>()->Int {{T.size}} fn imported_probe()->Int {{measure<[Byte; {count}]>()}} }} module second {{ const CAP: Int=7; fn measure<T>()->Int {{T.size}} fn local_probe()->Int {{measure<[Byte; CAP]>()}} }}"
+        );
+        let ast = Parser::new(&source).parse_module().unwrap();
+        let module = VbcCodegen::new().compile_module(&ast).unwrap();
+        let bytes = verum_vbc::serialize::serialize_module(&module).unwrap();
+        let module = verum_vbc::deserialize::deserialize_module(&bytes).unwrap();
+        for (name, expected) in [("imported_probe", 3), ("local_probe", 7)] {
+            let id = module
+                .functions
+                .iter()
+                .find(|function| {
+                    module.get_string(function.name).is_some_and(|actual| {
+                        actual == name || actual.ends_with(&format!(".{name}"))
+                    })
+                })
+                .unwrap()
+                .id;
+            assert_eq!(
+                Interpreter::new(Shared::new(module.clone()).into_arc())
+                    .execute_function(id)
+                    .unwrap()
+                    .as_i64(),
+                expected,
+                "{source}: {name}"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_module_type_member_keeps_its_layout_property() {
+    let source = "module ns { public type Item is { value: Int }; } fn measure<T>()->Int {T.size} fn probe()->Int {measure<[Byte; ns.Item.size]>()}";
+    let ast = Parser::new(source).parse_module().unwrap();
+    let module = VbcCodegen::new().compile_module(&ast).unwrap();
+    let id = module.find_function_by_name("probe").unwrap();
+    assert_eq!(
+        Interpreter::new(Shared::new(module).into_arc())
+            .execute_function(id)
+            .unwrap()
+            .as_i64(),
+        8
+    );
+}

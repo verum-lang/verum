@@ -45450,6 +45450,9 @@ impl VbcCodegen {
         }
         let mut anchor = Some(scope.unwrap_or_default());
         while let Some(owner) = anchor {
+            if let Some(info) = self.scoped_count_imports.get(&(
+                verum_common::Text::from(owner), verum_common::Text::from(name),
+            )) { return info.clone(); }
             if let Some(info) = self.declared_count_bindings.get(&(
                 verum_common::Text::from(owner), verum_common::Text::from(name),
             )) { return Some(info.clone()); }
@@ -45510,8 +45513,13 @@ impl VbcCodegen {
 
         let layout_operand = match &expr.kind {
             ExprKind::Field { expr: base, field } => {
-                verum_ast::TypeProperty::from_str(field.name.as_str())
-                    .and_then(|property| self.declaration_property_operand_in_scope(base, scope, inspect_runtime_bindings).map(|ty| (ty, property)))
+                let module_operand = Self::constant_integer_name(base).is_some_and(|name| {
+                    self.count_module_owners.is_module(&name, scope.unwrap_or_default(), self.count_root())
+                });
+                if module_operand { None } else {
+                    verum_ast::TypeProperty::from_str(field.name.as_str())
+                        .and_then(|property| self.declaration_property_operand_in_scope(base, scope, inspect_runtime_bindings).map(|ty| (ty, property)))
+                }
             }
             ExprKind::TypeProperty { ty, property } => Some((ty.clone(), property.clone())),
             _ => None,

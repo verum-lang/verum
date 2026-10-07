@@ -38,9 +38,26 @@ impl ModuleOwners {
     /// The caller must query the returned full key exactly, including on a miss.
     /// `root` is the consumer's canonical spelling of the cog root.
     pub fn member(&self, name: &str, scope: &str, root: &str) -> Option<Text> {
+        name.contains('.')
+            .then(|| self.select_path(name, scope, root))
+            .flatten()
+    }
+
+    /// Distinguish a module operand from a same-spelling type layout operand.
+    /// A type member inside a module remains a type, not a module itself.
+    pub fn is_module(&self, name: &str, scope: &str, root: &str) -> bool {
+        name == "cog"
+            || self
+                .select_path(name, scope, root)
+                .is_some_and(|path| self.paths.contains(&path))
+    }
+
+    fn select_path(&self, name: &str, scope: &str, root: &str) -> Option<Text> {
         fn joined(base: &str, tail: &str) -> Text {
             if base.is_empty() {
                 Text::from(tail)
+            } else if tail.is_empty() {
+                Text::from(base)
             } else {
                 Text::from(format!("{base}.{tail}"))
             }
@@ -48,7 +65,7 @@ impl ModuleOwners {
         if let Some(tail) = name.strip_prefix("cog.") {
             return Some(joined(root, tail));
         }
-        let (head, tail) = name.split_once('.')?;
+        let (head, tail) = name.split_once('.').unwrap_or((name, ""));
         let mut anchor = Some(scope);
         while let Some(scope) = anchor {
             let owner = joined(scope, head);
