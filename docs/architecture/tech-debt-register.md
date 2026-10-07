@@ -13,20 +13,30 @@ See the [bootstrap evidence](bootstrap-export-view.md) and
 [archive registration evidence](archive-wanted-leaf-index.md) for measured phase
 improvements and their limits.
 
-The wider type-checker run at `7291e4cde` passed **3908 tests**, with three
-existing ignores and one failure in the legacy free-function `Default` witness
-ambiguity oracle. The same assertion fails when selected alone on the earlier
-`fdad59f06` checker, while passing with neighboring tests; T1629 owns this
-process-order dependency and the intended inference/diagnostic controls.
-The full checker gate is therefore not green. T1627 separately fixes checked
-count lookup that selected a constant from an outer module after a nearer module
-with the same name had already won ownership; its cross-layer validation is
-still in progress. T1628 tracks ordinary relative two-segment expression lookup.
+The wider type-checker run at `7291e4cde` exposed a process-order dependency
+in the builtin `Default` result: fixed inference variable zero could collide
+with a function's generic parameter. T1629 replaces it with the declaration's
+normal named `Self`, fixing the captured free-function and cross-method failures.
+The immutable fix checkpoint passes **3910 checker tests**, with zero failures
+and three existing ignores, plus 18 fresh-process allocation controls. The
+[Default witness record](default-witness-identity.md) separates that checker
+acceptance from unchanged standard-library workarounds and backend behavior.
+T1627 separately fixes checked count lookup that selected a constant from an
+outer module after a nearer module with the same name had already won ownership;
+its cross-layer validation is still in progress. T1628 tracks ordinary relative
+two-segment expression lookup.
 
 These source results do not update the ordinary CLI/AOT verdicts below. The
 fresh-build and native acceptance boundaries, including retained Mutex/Drop,
 consuming-call and aggregate handoff failures, remain open. T1620 retains array
 versus inferred/contextual List identity; T1621 retains Float32 slice carriers.
+
+A standalone real-stdlib array control also reproduces T1615 on the pinned
+stage-14 CLI: after 526.34 seconds it reaches the first Int-array `swap` and
+fails its bounds assertion (exit 1, no timeout). The later Byte, reference,
+shadow, capture and generic-element oracles are not reached. Its fixed source
+and expected trace are retained for the fresh-build replay; the source fix's
+ordinary CLI/AOT acceptance remains pending.
 
 ## Fresh interpreter acceptance and retained lifetime failure — stage 14 (2026-10-07)
 
