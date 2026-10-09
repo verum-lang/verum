@@ -44,12 +44,19 @@ BOOTSTRAP = REPO / "crates" / "verum_compiler" / "src" / "pipeline" / "stdlib_bo
 NOT_A_PREPASS = {
     "collect_declarations",  # the per-item walk the pre-passes exist to precede
     "should_compile_item",  # a predicate
+    "count_root",  # T1699: borrows the configured root name; no registration
 }
 
 # Every pre-pass, with how the stdlib bake covers it.  "bootstrap" means the
 # bake performs equivalent work (possibly under a different name — record
 # WHICH); "GAP" means it does not, and names the tracking task.
 COVERAGE = {
+    "collect_count_module_owners": (
+        "bootstrap",
+        "T1699: collect_unit_declarations recursively records module owners "
+        "before item collection. collect_all_declarations and "
+        "compile_core_module_from_ast both call that shared collector.",
+    ),
     "declared_field_type_names": (
         "bootstrap",
         "T1519: the shared collector records source-qualified field identities; "
