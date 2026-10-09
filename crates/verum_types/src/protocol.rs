@@ -1518,6 +1518,8 @@ pub struct ProtocolChecker {
     /// Implementation index for fast lookup
     /// Map from (type, protocol) to implementation
     impl_index: Map<(Text, Text), usize>,
+    #[cfg(test)]
+    registration_overlap_comparisons: usize,
     /// Derivable protocols (can be automatically derived)
     derivable: Set<Text>,
     /// Current cog being compiled (for orphan rule checking)
@@ -1710,6 +1712,8 @@ impl ProtocolChecker {
             protocols: Map::new(),
             impls: List::new(),
             impl_index: Map::new(),
+            #[cfg(test)]
+            registration_overlap_comparisons: 0,
             derivable: Set::new(),
             current_crate: Maybe::None,
             type_crates: Map::new(),
@@ -1746,6 +1750,8 @@ impl ProtocolChecker {
             protocols: Map::new(),
             impls: List::new(),
             impl_index: Map::new(),
+            #[cfg(test)]
+            registration_overlap_comparisons: 0,
             derivable: Set::new(),
             current_crate: Maybe::None,
             type_crates: Map::new(),
@@ -5199,6 +5205,8 @@ impl ProtocolChecker {
                 // Current behaviour — both checks are hard errors.
                 self.check_orphan_rule(&impl_)?;
                 for existing_impl in self.impls.iter() {
+                    #[cfg(test)]
+                    { self.registration_overlap_comparisons += 1; }
                     self.check_overlap(&impl_, existing_impl)?
                 }
             }
@@ -5208,6 +5216,8 @@ impl ProtocolChecker {
                 }
                 let mut overlap_warnings = Vec::new();
                 for existing_impl in self.impls.iter() {
+                    #[cfg(test)]
+                    { self.registration_overlap_comparisons += 1; }
                     if let Err(e) = self.check_overlap(&impl_, existing_impl) {
                         overlap_warnings.push(e);
                     }
@@ -17338,3 +17348,7 @@ mod tests {
         ));
     }
 }
+
+#[cfg(test)]
+#[path = "../tests/unit/protocol_registration_work.rs"]
+mod protocol_registration_work;
