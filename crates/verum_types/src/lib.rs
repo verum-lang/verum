@@ -4224,6 +4224,10 @@ pub struct TypeCheckMetrics {
     pub refinement_checks: usize,
     /// Number of protocol checks
     pub protocol_checks: usize,
+    /// Metadata implementations examined while building lazy owner indexes.
+    pub metadata_impl_index_entries: usize,
+    /// Metadata implementations examined by target-specific lazy registration.
+    pub metadata_impl_candidates: usize,
 }
 
 impl TypeCheckMetrics {

@@ -2500,6 +2500,7 @@ impl TypeChecker {
             .map(Self::metadata_declaring_key)
             .unwrap_or_else(|| type_name.clone());
         for impl_desc in metadata.implementations.iter() {
+            self.metrics.metadata_impl_candidates += 1;
             let target_owner = metadata
                 .types
                 .get(&impl_desc.target_type)

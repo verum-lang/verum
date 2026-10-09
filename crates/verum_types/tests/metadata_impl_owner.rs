@@ -238,3 +238,200 @@ fn existing_primitive_target_spelling_is_retained() {
         assert_eq!(target(&checker, "beta.Wrapper"), None);
     }
 }
+
+// T1643: count work in the actual lazy registrar, independent of machine load.
+#[test]
+fn unrelated_metadata_does_not_expand_target_lookup_work() {
+    let mut metadata = metadata(false, false);
+    for i in 0..4096 {
+        let owner = format!("unrelated_{i}");
+        let key = Text::from(format!("{owner}.Wrapper"));
+        metadata.types.insert(key.clone(), wrapper(&owner));
+        let mut implementation = metadata.implementations[0].clone();
+        implementation.target_type = key;
+        implementation
+            .associated_types
+            .insert("Target".into(), "Bool".into());
+        metadata.implementations.push(implementation);
+    }
+    let total = metadata.implementations.len();
+    let mut checker = checker(metadata, false);
+    for name in [
+        "Wrapper",
+        "export.Renamed",
+        "beta.Wrapper",
+        "missing.Wrapper",
+    ] {
+        checker.ensure_stdlib_type_loaded(&name.into(), &mut Default::default());
+    }
+    for i in 0..8 {
+        checker.ensure_stdlib_type_loaded(
+            &format!("unrelated_{i}.Wrapper").into(),
+            &mut Default::default(),
+        );
+    }
+    assert_eq!(
+        target(&checker, "alpha.Wrapper"),
+        Some(verum_types::Type::Int)
+    );
+    assert_eq!(target(&checker, "beta.Wrapper"), None);
+    assert_eq!(target(&checker, "missing.Wrapper"), None);
+    assert_eq!(
+        target(&checker, "unrelated_7.Wrapper"),
+        Some(verum_types::Type::Bool)
+    );
+    assert_eq!(
+        target(&checker, "unrelated_8.Wrapper"),
+        None,
+        "unrequested owner stays lazy"
+    );
+    eprintln!(
+        "metadata impl work: {} candidates, {} index entries",
+        checker.metrics().metadata_impl_candidates,
+        checker.metrics().metadata_impl_index_entries
+    );
+    assert_eq!(
+        checker.metrics().metadata_impl_candidates,
+        10,
+        "only the two requested alias buckets and eight unrelated owners are visited"
+    );
+    assert_eq!(
+        checker.metrics().metadata_impl_index_entries,
+        total,
+        "one construction scans the metadata once"
+    );
+    checker.ensure_stdlib_type_loaded(&"Wrapper".into(), &mut Default::default());
+    checker.ensure_stdlib_type_loaded(&"beta.Wrapper".into(), &mut Default::default());
+    assert_eq!(
+        checker.metrics().metadata_impl_candidates,
+        10,
+        "completed tails do not repeat work"
+    );
+    assert_eq!(checker.metrics().metadata_impl_index_entries, total);
+}
+
+#[test]
+fn replacing_metadata_reloads_completed_tails_and_rebuilds_positions() {
+    let initial = metadata(true, false);
+    let mut checker = checker(initial.clone(), false);
+    checker.ensure_stdlib_type_loaded(&"alpha.Wrapper".into(), &mut Default::default());
+    assert_eq!(
+        target(&checker, "alpha.Wrapper"),
+        Some(verum_types::Type::Int)
+    );
+
+    let mut replacement = initial;
+    let mut foreign = replacement.implementations[0].clone();
+    foreign.target_type = "beta.Wrapper".into();
+    foreign
+        .associated_types
+        .insert("Target".into(), "Bool".into());
+    let mut added = replacement.implementations[0].clone();
+    added.protocol = "Printable".into();
+    added.associated_types = OrderedMap::from_iter([("Printed".into(), "Text".into())]);
+    let mut protocol = replacement
+        .protocols
+        .get(&Text::from("Deref"))
+        .unwrap()
+        .clone();
+    protocol.name = "Printable".into();
+    replacement.protocols.insert("Printable".into(), protocol);
+    replacement.implementations =
+        List::from_iter([foreign, added, replacement.implementations[0].clone()]);
+    checker.set_core_metadata(Arc::new(replacement));
+    checker.ensure_stdlib_type_loaded(&"alpha.Wrapper".into(), &mut Default::default());
+    assert_eq!(
+        checker.protocol_checker.read().try_find_associated_type(
+            &parse_descriptor_type_string("alpha.Wrapper<Int>"),
+            &"Printed".into(),
+        ),
+        Some(verum_types::Type::Text),
+        "new metadata must load new impls for a previously completed owner",
+    );
+    assert_eq!(
+        target(&checker, "beta.Wrapper"),
+        None,
+        "stale position zero must not register the foreign owner"
+    );
+    // Installing metadata is additive: the setter has never removed existing
+    // type/protocol state. This pins only invalidation of derived lookup state.
+    assert_eq!(
+        target(&checker, "alpha.Wrapper"),
+        Some(verum_types::Type::Int)
+    );
+    assert_eq!(checker.metrics().metadata_impl_candidates, 3);
+    assert_eq!(checker.metrics().metadata_impl_index_entries, 4);
+}
+
+#[test]
+fn owner_bucket_keeps_protocol_instantiations_in_declaration_order() {
+    for eager in [false, true] {
+        let mut metadata = metadata(false, false);
+        for descriptor in metadata.types.values_mut() {
+            descriptor.generic_params = List::new();
+        }
+        let mut second = metadata.implementations[0].clone();
+        metadata.implementations[0].protocol_args = List::from_iter(["Int".into()]);
+        metadata.implementations[0]
+            .associated_types
+            .insert("Target".into(), "Text".into());
+        second.protocol_args = List::from_iter(["Bool".into()]);
+        second
+            .associated_types
+            .insert("Target".into(), "Bool".into());
+        metadata.implementations.push(second);
+        let mut checker = checker(metadata, eager);
+        for name in ["export.Renamed", "Wrapper", "alpha.Wrapper"] {
+            checker.ensure_stdlib_type_loaded(&name.into(), &mut Default::default());
+        }
+        let protocols = checker.protocol_checker.read();
+        let receiver = parse_descriptor_type_string("alpha.Wrapper");
+        let implementations = protocols.get_implementations(&receiver);
+        let args: List<List<verum_types::Type>> = implementations
+            .iter()
+            .map(|implementation| implementation.protocol_args.clone())
+            .collect();
+        assert_eq!(
+            args,
+            List::from_iter([
+                List::from_iter([verum_types::Type::Int]),
+                List::from_iter([verum_types::Type::Bool])
+            ]),
+            "eager={eager}"
+        );
+        assert_eq!(
+            implementations[0]
+                .associated_types
+                .get(&Text::from("Target")),
+            Some(&verum_types::Type::Text)
+        );
+        assert_eq!(
+            implementations[1]
+                .associated_types
+                .get(&Text::from("Target")),
+            Some(&verum_types::Type::Bool)
+        );
+        assert!(
+            protocols
+                .get_implementations(&parse_descriptor_type_string("beta.Wrapper"))
+                .is_empty()
+        );
+        assert!(
+            protocols
+                .get_implementations(&parse_descriptor_type_string("missing.Wrapper"))
+                .is_empty()
+        );
+    }
+}
+
+#[test]
+fn metadata_setter_initializes_lookup_for_minimal_checker() {
+    let mut checker = TypeChecker::with_minimal_context();
+    checker.set_core_metadata(Arc::new(metadata(false, false)));
+    checker.ensure_stdlib_type_loaded(&"export.Renamed".into(), &mut Default::default());
+    assert_eq!(
+        target(&checker, "alpha.Wrapper"),
+        Some(verum_types::Type::Int)
+    );
+    assert_eq!(target(&checker, "beta.Wrapper"), None);
+}
