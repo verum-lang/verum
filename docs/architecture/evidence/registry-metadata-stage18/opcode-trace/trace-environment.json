@@ -1,0 +1,17 @@
+{
+  "task": "T1684",
+  "purpose": "Diagnostic rerun of unchanged component to identify the failing interpreter instruction; separate from ordinary acceptance.",
+  "inherited_trace_environment": {
+    "VERUM_TRACE_PC": "text_list",
+    "VERUM_TRACE_PC_DECODE": "1"
+  },
+  "raw_runner_receipt_omits_inherited_trace_flags": true,
+  "evidence_sha256": {
+    "result.json": "e70b34feaf431e949329ef913482a957b8532c3f55c05a1b1d2c3318f4669f6f",
+    "stdout.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderr.log": "98414f50a9b530ce3171666d5cef64f58673eb9e65f4dbdf493de31ebdfd2792"
+  },
+  "observed": "text_list observes list length 2, enters its element loop, then CbgrExtended sub_op 11 (RefListElement) at pc128 fails with index0 length0.",
+  "source_and_cli_unchanged": true,
+  "scope": "Locates the failing opcode; causal repair and ordinary replay require their own acceptance."
+}

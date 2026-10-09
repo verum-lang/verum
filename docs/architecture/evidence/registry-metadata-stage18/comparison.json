@@ -1,0 +1,37 @@
+{
+  "task": "T1666",
+  "related": [
+    "T1676",
+    "T1677",
+    "T1684"
+  ],
+  "registry_candidate": "399cc4156769bfd1df0ca76120da4e84a8d06931",
+  "candidate_status": "unlanded; source and runner unchanged",
+  "previous_language_reader": "3821b1961cd057fd03c9e6d39cbf50609261e4eb",
+  "language_reader": "faabbe696f1ee928f6b3a9bb6c7980ba20577513",
+  "producer_language_commit": "d61c11aa5aeda6eafefe9bb6748115cffeb66946",
+  "producer_artifacts_identical_to_stage16_and_stage17": true,
+  "stage17_and_stage18_archived_artifact_files_rehashed": true,
+  "source_and_project_inputs_identical_to_stage17": true,
+  "candidate_source_files_match_receipt_hashes": true,
+  "schema_and_source_fingerprint_identical": true,
+  "build_log_reports_precompile_cache_hit": true,
+  "previous_diagnostic": "E101: type not found: DecodedDependencyOptions",
+  "previous_diagnostic_present_in_current_stderr": false,
+  "current_error": "Runtime error: VBC execution error: Index out of bounds: index 0 for list of length 0",
+  "status": "failed during fixture execution",
+  "elapsed_seconds": 166.19,
+  "returncode": 1,
+  "timed_out": false,
+  "build_receipt": "build-manifest.json",
+  "build_log": "cli-build.log",
+  "run_receipt": "result.json",
+  "evidence_sha256": {
+    "build-manifest.json": "044c329bb648cc7d356307f11cbab806b900fa82889af44377ad47c0195e11dc",
+    "cli-build.log": "148d1f0d073ea4ba2cefc65f46d34707bc339d38b8a5661d987bb55962e12c84",
+    "result.json": "6657807a058373b5f23f646c97806f0a152375cfa8fe3efff8abe333aba234e7",
+    "stdout.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderr.log": "d6b0450e05792807da229a56f12d7a5f854986bf53913f1436dc01ab7957ed28"
+  },
+  "scope": "Ordinary interpreter component execution with the exact earlier producer artifacts. The former E101 diagnostic is absent, but metadata decoding did not complete. No successful schema/admission, AOT or whole-project acceptance. Diagnostic tracing is recorded separately."
+}

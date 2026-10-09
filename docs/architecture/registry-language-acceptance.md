@@ -541,7 +541,7 @@ and reported a cache hit: the archive, metadata and symbol graph are byte-identi
 to the earlier `d61c11aa5` producer. The unchanged registry metadata candidate
 reported **one compilation error instead of eighteen**; all seventeen map-helper
 argument mismatches disappeared. The forward-declared `DecodedDependencyOptions`
-payload remains T1677, so the fixture still did not execute. The receipt preserves
+payload remained T1677 at that checkpoint, so the fixture did not execute. The receipt preserves
 that failed result and exact input identities. This replay establishes neither
 a fresh bake nor successful metadata runtime, authentication, durable admission,
 installation or AOT execution.
@@ -591,9 +591,9 @@ These are Rust compiler/checker gates using the existing stage17/stage16
 artifact trio with automatic precompilation disabled. The adjacent group
 executes the same hash-pinned test binary directly. Production changes are
 limited to two compiler registration paths; the typechecker, source import
-helper, archive producer and schema are unchanged. Ordinary CLI replay of the
-unchanged registry component remains a separate root-owned gate, as do T1666
-runtime acceptance, AOT, authenticated publication and durable service behavior.
+helper, archive producer and schema are unchanged. The ordinary CLI replay below
+is a separate gate; T1666 runtime acceptance, AOT, authenticated publication and
+durable service behavior retain their own requirements.
 
 The five raw output files preserve their original bytes, including Cargo
 whitespace; only those files are excluded from range whitespace checks.
@@ -603,3 +603,34 @@ The reviewed chain is rebased onto CLI-only integration `f223efbf`. Its complete
 compiler and type-crate trees match the executed `b57ddd40f` source exactly;
 the original tested branch and original evidence chain are retained. This
 identity check does not add a new ordinary CLI or runtime result.
+
+
+### Ordinary metadata runtime boundary — T1666, T1684
+
+The [stage18 reader build](evidence/registry-metadata-stage18/build-manifest.json)
+at `faabbe696` completed in 263.554 seconds with automatic precompilation enabled
+and a cache hit. Its archive, core metadata and symbol graph are byte-identical
+to the earlier `d61c11aa5` producer. The
+[comparison](evidence/registry-metadata-stage18/comparison.json) preserves exact
+source/project parity with stage17 and the unchanged candidate `399cc41`.
+
+The component now compiles and enters the interpreter. The ordinary
+[run receipt](evidence/registry-metadata-stage18/result.json) records exit 1 after
+166.19 seconds, within its deadline; source, project and executable are unchanged.
+The former `DecodedDependencyOptions` E101 error is absent, but execution fails
+with `Index out of bounds: index 0 for list of length 0`. Stdout is empty and the
+metadata fixture does not complete. This result keeps the candidate unlanded.
+
+A separate diagnostic rerun identifies `text_list`'s failing operation. Its
+[original trace](evidence/registry-metadata-stage18/opcode-trace/stderr.log) shows
+length 2, entry into the element loop, and failure at pc128 on `RefListElement`
+(`CbgrExtended` sub-opcode 11). The additional `VERUM_TRACE_PC=text_list` and
+`VERUM_TRACE_PC_DECODE=1` flags are explicitly recorded in the
+[supplemental receipt](evidence/registry-metadata-stage18/opcode-trace/trace-environment.json);
+the unmodified runner receipt omits inherited trace flags. This diagnostic run
+is distinct from the ordinary execution above. T1684 owns the reference-carrier
+investigation and causal controls.
+
+These results establish removal of the component's earlier compilation blocker.
+They do not establish completed metadata decoding, semantic admission, registry
+runtime, authentication, persistence, native execution or deployment.

@@ -1,0 +1,160 @@
+Interpreting /Users/taaliman/.tmp/verum-publication-metadata-0_8pxjhm/src/main.vr
+[pc] verum_registry.protocol.publication_metadata.required_text_list pc=0 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(2), src: Reg(0) }
+[pc] verum_registry.protocol.publication_metadata.required_text_list pc=3 op=0x00 | r1=other r2=ptr(@0xb0b722ae0 tid=3822074112 vtag=65536) r3=other | Mov { dst: Reg(3), src: Reg(1) }
+[pc] verum_registry.protocol.publication_metadata.required_text_list pc=6 op=0x00 | r1=other r2=ptr(@0xb0b722ae0 tid=3822074112 vtag=65536) r3=other | Mov { dst: Reg(4), src: Reg(1) }
+[pc] verum_registry.protocol.publication_metadata.required_text_list pc=9 op=0x5b | r1=other r2=ptr(@0xb0b722ae0 tid=3822074112 vtag=65536) r3=other | Call { dst: Reg(5), func_id: 39098, args: RegRange { start: Reg(2), count: 3 } }
+[pc] verum_registry.protocol.publication_metadata.required_text_list pc=16 op=0x90 | r1=other r2=ptr(@0xb0b722ae0 tid=3822074112 vtag=65536) r3=other | IsVar { dst: Reg(7), value: Reg(5), tag: 0 }
+[pc] verum_registry.protocol.publication_metadata.required_text_list pc=20 op=0x51 | r1=other r2=ptr(@0xb0b722ae0 tid=3822074112 vtag=65536) r3=other | JmpIf { cond: Reg(7), offset: 2 }
+[pc] verum_registry.protocol.publication_metadata.required_text_list pc=25 op=0x91 | r1=other r2=ptr(@0xb0b722ae0 tid=3822074112 vtag=65536) r3=other | AsVar { dst: Reg(6), value: Reg(5), tag: 0 }
+[pc] verum_registry.protocol.publication_metadata.required_text_list pc=29 op=0x00 | r1=other r2=ptr(@0xb0b722ae0 tid=3822074112 vtag=65536) r3=other | Mov { dst: Reg(8), src: Reg(6) }
+[pc] verum_registry.protocol.publication_metadata.required_text_list pc=32 op=0x70 | r1=other r2=ptr(@0xb0b722ae0 tid=3822074112 vtag=65536) r3=other | Ref { dst: Reg(5), src: Reg(8) }
+[pc] verum_registry.protocol.publication_metadata.required_text_list pc=35 op=0x00 | r1=other r2=ptr(@0xb0b722ae0 tid=3822074112 vtag=65536) r3=other | Mov { dst: Reg(9), src: Reg(5) }
+[pc] verum_registry.protocol.publication_metadata.required_text_list pc=38 op=0x00 | r1=other r2=ptr(@0xb0b722ae0 tid=3822074112 vtag=65536) r3=other | Mov { dst: Reg(10), src: Reg(1) }
+[pc] verum_registry.protocol.publication_metadata.required_text_list pc=41 op=0x5b | r1=other r2=ptr(@0xb0b722ae0 tid=3822074112 vtag=65536) r3=other | Call { dst: Reg(5), func_id: 39102, args: RegRange { start: Reg(9), count: 2 } }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=0 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(3), src: Reg(0) }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=3 op=0x5b | r1=other r2=other r3=other | Call { dst: Reg(2), func_id: 12225, args: RegRange { start: Reg(3), count: 1 } }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=9 op=0x90 | r1=other r2=ptr(@0xb0abfc2a0 tid=515 vtag=1) r3=other | IsVar { dst: Reg(5), value: Reg(2), tag: 1 }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=13 op=0x52 | r1=other r2=ptr(@0xb0abfc2a0 tid=515 vtag=1) r3=other | JmpNot { cond: Reg(5), offset: 12 }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=16 op=0x88 | r1=other r2=ptr(@0xb0abfc2a0 tid=515 vtag=1) r3=other | GetVariantData { dst: Reg(5), variant: Reg(2), field: 0 }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=20 op=0x00 | r1=other r2=ptr(@0xb0abfc2a0 tid=515 vtag=1) r3=other | Mov { dst: Reg(6), src: Reg(5) }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=23 op=0x00 | r1=other r2=ptr(@0xb0abfc2a0 tid=515 vtag=1) r3=other | Mov { dst: Reg(4), src: Reg(6) }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=26 op=0x50 | r1=other r2=ptr(@0xb0abfc2a0 tid=515 vtag=1) r3=other | Jmp { offset: 49 }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=77 op=0x00 | r1=other r2=ptr(@0xb0abfc2a0 tid=515 vtag=1) r3=other | Mov { dst: Reg(9), src: Reg(4) }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=80 op=0x1f | r1=other r2=ptr(@0xb0abfc2a0 tid=515 vtag=1) r3=other | SetCallWitness { type_args: [Concrete(TypeId(2131))] }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=86 op=0x5d | r1=other r2=ptr(@0xb0abfc2a0 tid=515 vtag=1) r3=other | CallM { dst: Reg(2), receiver: Reg(9), method_id: 1411765, args: RegRange { start: Reg(0), count: 0 } }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=94 op=0x68 | r1=other r2=int(0) r3=other | NewList { dst: Reg(2), capacity_hint: 0 }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=97 op=0x00 | r1=other r2=ptr(@0xb0abffa20 tid=512 vtag=0) r3=other | Mov { dst: Reg(10), src: Reg(2) }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=100 op=0x02 | r1=other r2=ptr(@0xb0abffa20 tid=512 vtag=0) r3=other | LoadI { dst: Reg(7), value: 0 }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=103 op=0x00 | r1=other r2=ptr(@0xb0abffa20 tid=512 vtag=0) r3=other | Mov { dst: Reg(11), src: Reg(7) }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=106 op=0x1f | r1=other r2=ptr(@0xb0abffa20 tid=512 vtag=0) r3=other | SetCallWitness { type_args: [Concrete(TypeId(2131))] }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=112 op=0x5d | r1=other r2=ptr(@0xb0abffa20 tid=512 vtag=0) r3=other | CallM { dst: Reg(8), receiver: Reg(9), method_id: 1411765, args: RegRange { start: Reg(0), count: 0 } }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=120 op=0x42 | r1=other r2=ptr(@0xb0abffa20 tid=512 vtag=0) r3=other | CmpI { op: Lt, dst: Reg(12), a: Reg(11), b: Reg(8) }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=124 op=0x52 | r1=other r2=ptr(@0xb0abffa20 tid=512 vtag=0) r3=other | JmpNot { cond: Reg(12), offset: 99 }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=227 op=0x06 | r1=other r2=ptr(@0xb0abffa20 tid=512 vtag=0) r3=other | LoadUnit { dst: Reg(13) }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=229 op=0x1f | r1=other r2=ptr(@0xb0abffa20 tid=512 vtag=0) r3=other | MakeVariantTyped { dst: Reg(12), type_id: 516, tag: 0, field_count: 1 }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=236 op=0x87 | r1=other r2=ptr(@0xb0abffa20 tid=512 vtag=0) r3=other | SetVariantData { variant: Reg(12), field: 0, value: Reg(10) }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=240 op=0x00 | r1=other r2=ptr(@0xb0abffa20 tid=512 vtag=0) r3=other | Mov { dst: Reg(16), src: Reg(12) }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=243 op=0x77 | r1=other r2=ptr(@0xb0abffa20 tid=512 vtag=0) r3=other | DropRef { src: Reg(11) }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=245 op=0x77 | r1=other r2=ptr(@0xb0abffa20 tid=512 vtag=0) r3=other | DropRef { src: Reg(10) }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=247 op=0x77 | r1=other r2=ptr(@0xb0abffa20 tid=512 vtag=0) r3=other | DropRef { src: Reg(9) }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=249 op=0x59 | r1=other r2=ptr(@0xb0abffa20 tid=512 vtag=0) r3=other | Ret { value: Reg(16) }
+[pc] verum_registry.protocol.publication_metadata.required_text_list pc=48 op=0x00 | r1=other r2=ptr(@0xb0b722ae0 tid=3822074112 vtag=65536) r3=other | Mov { dst: Reg(7), src: Reg(5) }
+[pc] verum_registry.protocol.publication_metadata.required_text_list pc=51 op=0x77 | r1=other r2=ptr(@0xb0b722ae0 tid=3822074112 vtag=65536) r3=other | DropRef { src: Reg(8) }
+[pc] verum_registry.protocol.publication_metadata.required_text_list pc=53 op=0x59 | r1=other r2=ptr(@0xb0b722ae0 tid=3822074112 vtag=65536) r3=other | Ret { value: Reg(7) }
+[pc] verum_registry.protocol.publication_metadata.required_text_list pc=0 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(2), src: Reg(0) }
+[pc] verum_registry.protocol.publication_metadata.required_text_list pc=3 op=0x00 | r1=other r2=ptr(@0xb0b722ae0 tid=3822074112 vtag=65536) r3=other | Mov { dst: Reg(3), src: Reg(1) }
+[pc] verum_registry.protocol.publication_metadata.required_text_list pc=6 op=0x00 | r1=other r2=ptr(@0xb0b722ae0 tid=3822074112 vtag=65536) r3=other | Mov { dst: Reg(4), src: Reg(1) }
+[pc] verum_registry.protocol.publication_metadata.required_text_list pc=9 op=0x5b | r1=other r2=ptr(@0xb0b722ae0 tid=3822074112 vtag=65536) r3=other | Call { dst: Reg(5), func_id: 39098, args: RegRange { start: Reg(2), count: 3 } }
+[pc] verum_registry.protocol.publication_metadata.required_text_list pc=16 op=0x90 | r1=other r2=ptr(@0xb0b722ae0 tid=3822074112 vtag=65536) r3=other | IsVar { dst: Reg(7), value: Reg(5), tag: 0 }
+[pc] verum_registry.protocol.publication_metadata.required_text_list pc=20 op=0x51 | r1=other r2=ptr(@0xb0b722ae0 tid=3822074112 vtag=65536) r3=other | JmpIf { cond: Reg(7), offset: 2 }
+[pc] verum_registry.protocol.publication_metadata.required_text_list pc=25 op=0x91 | r1=other r2=ptr(@0xb0b722ae0 tid=3822074112 vtag=65536) r3=other | AsVar { dst: Reg(6), value: Reg(5), tag: 0 }
+[pc] verum_registry.protocol.publication_metadata.required_text_list pc=29 op=0x00 | r1=other r2=ptr(@0xb0b722ae0 tid=3822074112 vtag=65536) r3=other | Mov { dst: Reg(8), src: Reg(6) }
+[pc] verum_registry.protocol.publication_metadata.required_text_list pc=32 op=0x70 | r1=other r2=ptr(@0xb0b722ae0 tid=3822074112 vtag=65536) r3=other | Ref { dst: Reg(5), src: Reg(8) }
+[pc] verum_registry.protocol.publication_metadata.required_text_list pc=35 op=0x00 | r1=other r2=ptr(@0xb0b722ae0 tid=3822074112 vtag=65536) r3=other | Mov { dst: Reg(9), src: Reg(5) }
+[pc] verum_registry.protocol.publication_metadata.required_text_list pc=38 op=0x00 | r1=other r2=ptr(@0xb0b722ae0 tid=3822074112 vtag=65536) r3=other | Mov { dst: Reg(10), src: Reg(1) }
+[pc] verum_registry.protocol.publication_metadata.required_text_list pc=41 op=0x5b | r1=other r2=ptr(@0xb0b722ae0 tid=3822074112 vtag=65536) r3=other | Call { dst: Reg(5), func_id: 39102, args: RegRange { start: Reg(9), count: 2 } }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=0 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(3), src: Reg(0) }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=3 op=0x5b | r1=other r2=other r3=other | Call { dst: Reg(2), func_id: 12225, args: RegRange { start: Reg(3), count: 1 } }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=9 op=0x90 | r1=other r2=ptr(@0xb0abff120 tid=515 vtag=1) r3=other | IsVar { dst: Reg(5), value: Reg(2), tag: 1 }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=13 op=0x52 | r1=other r2=ptr(@0xb0abff120 tid=515 vtag=1) r3=other | JmpNot { cond: Reg(5), offset: 12 }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=16 op=0x88 | r1=other r2=ptr(@0xb0abff120 tid=515 vtag=1) r3=other | GetVariantData { dst: Reg(5), variant: Reg(2), field: 0 }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=20 op=0x00 | r1=other r2=ptr(@0xb0abff120 tid=515 vtag=1) r3=other | Mov { dst: Reg(6), src: Reg(5) }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=23 op=0x00 | r1=other r2=ptr(@0xb0abff120 tid=515 vtag=1) r3=other | Mov { dst: Reg(4), src: Reg(6) }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=26 op=0x50 | r1=other r2=ptr(@0xb0abff120 tid=515 vtag=1) r3=other | Jmp { offset: 49 }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=77 op=0x00 | r1=other r2=ptr(@0xb0abff120 tid=515 vtag=1) r3=other | Mov { dst: Reg(9), src: Reg(4) }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=80 op=0x1f | r1=other r2=ptr(@0xb0abff120 tid=515 vtag=1) r3=other | SetCallWitness { type_args: [Concrete(TypeId(2131))] }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=86 op=0x5d | r1=other r2=ptr(@0xb0abff120 tid=515 vtag=1) r3=other | CallM { dst: Reg(2), receiver: Reg(9), method_id: 1411765, args: RegRange { start: Reg(0), count: 0 } }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=94 op=0x68 | r1=other r2=int(0) r3=other | NewList { dst: Reg(2), capacity_hint: 0 }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=97 op=0x00 | r1=other r2=ptr(@0xb0abfcf30 tid=512 vtag=0) r3=other | Mov { dst: Reg(10), src: Reg(2) }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=100 op=0x02 | r1=other r2=ptr(@0xb0abfcf30 tid=512 vtag=0) r3=other | LoadI { dst: Reg(7), value: 0 }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=103 op=0x00 | r1=other r2=ptr(@0xb0abfcf30 tid=512 vtag=0) r3=other | Mov { dst: Reg(11), src: Reg(7) }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=106 op=0x1f | r1=other r2=ptr(@0xb0abfcf30 tid=512 vtag=0) r3=other | SetCallWitness { type_args: [Concrete(TypeId(2131))] }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=112 op=0x5d | r1=other r2=ptr(@0xb0abfcf30 tid=512 vtag=0) r3=other | CallM { dst: Reg(8), receiver: Reg(9), method_id: 1411765, args: RegRange { start: Reg(0), count: 0 } }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=120 op=0x42 | r1=other r2=ptr(@0xb0abfcf30 tid=512 vtag=0) r3=other | CmpI { op: Lt, dst: Reg(12), a: Reg(11), b: Reg(8) }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=124 op=0x52 | r1=other r2=ptr(@0xb0abfcf30 tid=512 vtag=0) r3=other | JmpNot { cond: Reg(12), offset: 99 }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=227 op=0x06 | r1=other r2=ptr(@0xb0abfcf30 tid=512 vtag=0) r3=other | LoadUnit { dst: Reg(13) }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=229 op=0x1f | r1=other r2=ptr(@0xb0abfcf30 tid=512 vtag=0) r3=other | MakeVariantTyped { dst: Reg(12), type_id: 516, tag: 0, field_count: 1 }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=236 op=0x87 | r1=other r2=ptr(@0xb0abfcf30 tid=512 vtag=0) r3=other | SetVariantData { variant: Reg(12), field: 0, value: Reg(10) }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=240 op=0x00 | r1=other r2=ptr(@0xb0abfcf30 tid=512 vtag=0) r3=other | Mov { dst: Reg(16), src: Reg(12) }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=243 op=0x77 | r1=other r2=ptr(@0xb0abfcf30 tid=512 vtag=0) r3=other | DropRef { src: Reg(11) }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=245 op=0x77 | r1=other r2=ptr(@0xb0abfcf30 tid=512 vtag=0) r3=other | DropRef { src: Reg(10) }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=247 op=0x77 | r1=other r2=ptr(@0xb0abfcf30 tid=512 vtag=0) r3=other | DropRef { src: Reg(9) }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=249 op=0x59 | r1=other r2=ptr(@0xb0abfcf30 tid=512 vtag=0) r3=other | Ret { value: Reg(16) }
+[pc] verum_registry.protocol.publication_metadata.required_text_list pc=48 op=0x00 | r1=other r2=ptr(@0xb0b722ae0 tid=3822074112 vtag=65536) r3=other | Mov { dst: Reg(7), src: Reg(5) }
+[pc] verum_registry.protocol.publication_metadata.required_text_list pc=51 op=0x77 | r1=other r2=ptr(@0xb0b722ae0 tid=3822074112 vtag=65536) r3=other | DropRef { src: Reg(8) }
+[pc] verum_registry.protocol.publication_metadata.required_text_list pc=53 op=0x59 | r1=other r2=ptr(@0xb0b722ae0 tid=3822074112 vtag=65536) r3=other | Ret { value: Reg(7) }
+[pc] verum_registry.protocol.publication_metadata.required_text_list pc=0 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(2), src: Reg(0) }
+[pc] verum_registry.protocol.publication_metadata.required_text_list pc=3 op=0x00 | r1=other r2=ptr(@0xb0b722ae0 tid=3822074112 vtag=65536) r3=other | Mov { dst: Reg(3), src: Reg(1) }
+[pc] verum_registry.protocol.publication_metadata.required_text_list pc=6 op=0x00 | r1=other r2=ptr(@0xb0b722ae0 tid=3822074112 vtag=65536) r3=other | Mov { dst: Reg(4), src: Reg(1) }
+[pc] verum_registry.protocol.publication_metadata.required_text_list pc=9 op=0x5b | r1=other r2=ptr(@0xb0b722ae0 tid=3822074112 vtag=65536) r3=other | Call { dst: Reg(5), func_id: 39098, args: RegRange { start: Reg(2), count: 3 } }
+[pc] verum_registry.protocol.publication_metadata.required_text_list pc=16 op=0x90 | r1=other r2=ptr(@0xb0b722ae0 tid=3822074112 vtag=65536) r3=other | IsVar { dst: Reg(7), value: Reg(5), tag: 0 }
+[pc] verum_registry.protocol.publication_metadata.required_text_list pc=20 op=0x51 | r1=other r2=ptr(@0xb0b722ae0 tid=3822074112 vtag=65536) r3=other | JmpIf { cond: Reg(7), offset: 2 }
+[pc] verum_registry.protocol.publication_metadata.required_text_list pc=25 op=0x91 | r1=other r2=ptr(@0xb0b722ae0 tid=3822074112 vtag=65536) r3=other | AsVar { dst: Reg(6), value: Reg(5), tag: 0 }
+[pc] verum_registry.protocol.publication_metadata.required_text_list pc=29 op=0x00 | r1=other r2=ptr(@0xb0b722ae0 tid=3822074112 vtag=65536) r3=other | Mov { dst: Reg(8), src: Reg(6) }
+[pc] verum_registry.protocol.publication_metadata.required_text_list pc=32 op=0x70 | r1=other r2=ptr(@0xb0b722ae0 tid=3822074112 vtag=65536) r3=other | Ref { dst: Reg(5), src: Reg(8) }
+[pc] verum_registry.protocol.publication_metadata.required_text_list pc=35 op=0x00 | r1=other r2=ptr(@0xb0b722ae0 tid=3822074112 vtag=65536) r3=other | Mov { dst: Reg(9), src: Reg(5) }
+[pc] verum_registry.protocol.publication_metadata.required_text_list pc=38 op=0x00 | r1=other r2=ptr(@0xb0b722ae0 tid=3822074112 vtag=65536) r3=other | Mov { dst: Reg(10), src: Reg(1) }
+[pc] verum_registry.protocol.publication_metadata.required_text_list pc=41 op=0x5b | r1=other r2=ptr(@0xb0b722ae0 tid=3822074112 vtag=65536) r3=other | Call { dst: Reg(5), func_id: 39102, args: RegRange { start: Reg(9), count: 2 } }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=0 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(3), src: Reg(0) }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=3 op=0x5b | r1=other r2=other r3=other | Call { dst: Reg(2), func_id: 12225, args: RegRange { start: Reg(3), count: 1 } }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=9 op=0x90 | r1=other r2=ptr(@0xb0abfdf80 tid=515 vtag=1) r3=other | IsVar { dst: Reg(5), value: Reg(2), tag: 1 }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=13 op=0x52 | r1=other r2=ptr(@0xb0abfdf80 tid=515 vtag=1) r3=other | JmpNot { cond: Reg(5), offset: 12 }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=16 op=0x88 | r1=other r2=ptr(@0xb0abfdf80 tid=515 vtag=1) r3=other | GetVariantData { dst: Reg(5), variant: Reg(2), field: 0 }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=20 op=0x00 | r1=other r2=ptr(@0xb0abfdf80 tid=515 vtag=1) r3=other | Mov { dst: Reg(6), src: Reg(5) }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=23 op=0x00 | r1=other r2=ptr(@0xb0abfdf80 tid=515 vtag=1) r3=other | Mov { dst: Reg(4), src: Reg(6) }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=26 op=0x50 | r1=other r2=ptr(@0xb0abfdf80 tid=515 vtag=1) r3=other | Jmp { offset: 49 }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=77 op=0x00 | r1=other r2=ptr(@0xb0abfdf80 tid=515 vtag=1) r3=other | Mov { dst: Reg(9), src: Reg(4) }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=80 op=0x1f | r1=other r2=ptr(@0xb0abfdf80 tid=515 vtag=1) r3=other | SetCallWitness { type_args: [Concrete(TypeId(2131))] }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=86 op=0x5d | r1=other r2=ptr(@0xb0abfdf80 tid=515 vtag=1) r3=other | CallM { dst: Reg(2), receiver: Reg(9), method_id: 1411765, args: RegRange { start: Reg(0), count: 0 } }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=94 op=0x68 | r1=other r2=int(0) r3=other | NewList { dst: Reg(2), capacity_hint: 0 }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=97 op=0x00 | r1=other r2=ptr(@0xb0abfde90 tid=512 vtag=0) r3=other | Mov { dst: Reg(10), src: Reg(2) }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=100 op=0x02 | r1=other r2=ptr(@0xb0abfde90 tid=512 vtag=0) r3=other | LoadI { dst: Reg(7), value: 0 }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=103 op=0x00 | r1=other r2=ptr(@0xb0abfde90 tid=512 vtag=0) r3=other | Mov { dst: Reg(11), src: Reg(7) }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=106 op=0x1f | r1=other r2=ptr(@0xb0abfde90 tid=512 vtag=0) r3=other | SetCallWitness { type_args: [Concrete(TypeId(2131))] }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=112 op=0x5d | r1=other r2=ptr(@0xb0abfde90 tid=512 vtag=0) r3=other | CallM { dst: Reg(8), receiver: Reg(9), method_id: 1411765, args: RegRange { start: Reg(0), count: 0 } }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=120 op=0x42 | r1=other r2=ptr(@0xb0abfde90 tid=512 vtag=0) r3=other | CmpI { op: Lt, dst: Reg(12), a: Reg(11), b: Reg(8) }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=124 op=0x52 | r1=other r2=ptr(@0xb0abfde90 tid=512 vtag=0) r3=other | JmpNot { cond: Reg(12), offset: 99 }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=227 op=0x06 | r1=other r2=ptr(@0xb0abfde90 tid=512 vtag=0) r3=other | LoadUnit { dst: Reg(13) }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=229 op=0x1f | r1=other r2=ptr(@0xb0abfde90 tid=512 vtag=0) r3=other | MakeVariantTyped { dst: Reg(12), type_id: 516, tag: 0, field_count: 1 }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=236 op=0x87 | r1=other r2=ptr(@0xb0abfde90 tid=512 vtag=0) r3=other | SetVariantData { variant: Reg(12), field: 0, value: Reg(10) }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=240 op=0x00 | r1=other r2=ptr(@0xb0abfde90 tid=512 vtag=0) r3=other | Mov { dst: Reg(16), src: Reg(12) }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=243 op=0x77 | r1=other r2=ptr(@0xb0abfde90 tid=512 vtag=0) r3=other | DropRef { src: Reg(11) }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=245 op=0x77 | r1=other r2=ptr(@0xb0abfde90 tid=512 vtag=0) r3=other | DropRef { src: Reg(10) }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=247 op=0x77 | r1=other r2=ptr(@0xb0abfde90 tid=512 vtag=0) r3=other | DropRef { src: Reg(9) }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=249 op=0x59 | r1=other r2=ptr(@0xb0abfde90 tid=512 vtag=0) r3=other | Ret { value: Reg(16) }
+[pc] verum_registry.protocol.publication_metadata.required_text_list pc=48 op=0x00 | r1=other r2=ptr(@0xb0b722ae0 tid=3822074112 vtag=65536) r3=other | Mov { dst: Reg(7), src: Reg(5) }
+[pc] verum_registry.protocol.publication_metadata.required_text_list pc=51 op=0x77 | r1=other r2=ptr(@0xb0b722ae0 tid=3822074112 vtag=65536) r3=other | DropRef { src: Reg(8) }
+[pc] verum_registry.protocol.publication_metadata.required_text_list pc=53 op=0x59 | r1=other r2=ptr(@0xb0b722ae0 tid=3822074112 vtag=65536) r3=other | Ret { value: Reg(7) }
+[pc] verum_registry.protocol.publication_metadata.required_text_list pc=0 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(2), src: Reg(0) }
+[pc] verum_registry.protocol.publication_metadata.required_text_list pc=3 op=0x00 | r1=other r2=ptr(@0xb0afffb90 tid=3822064896 vtag=65792) r3=other | Mov { dst: Reg(3), src: Reg(1) }
+[pc] verum_registry.protocol.publication_metadata.required_text_list pc=6 op=0x00 | r1=other r2=ptr(@0xb0afffb90 tid=3822064896 vtag=65792) r3=other | Mov { dst: Reg(4), src: Reg(1) }
+[pc] verum_registry.protocol.publication_metadata.required_text_list pc=9 op=0x5b | r1=other r2=ptr(@0xb0afffb90 tid=3822064896 vtag=65792) r3=other | Call { dst: Reg(5), func_id: 39098, args: RegRange { start: Reg(2), count: 3 } }
+[pc] verum_registry.protocol.publication_metadata.required_text_list pc=16 op=0x90 | r1=other r2=ptr(@0xb0afffb90 tid=3822064896 vtag=65792) r3=other | IsVar { dst: Reg(7), value: Reg(5), tag: 0 }
+[pc] verum_registry.protocol.publication_metadata.required_text_list pc=20 op=0x51 | r1=other r2=ptr(@0xb0afffb90 tid=3822064896 vtag=65792) r3=other | JmpIf { cond: Reg(7), offset: 2 }
+[pc] verum_registry.protocol.publication_metadata.required_text_list pc=25 op=0x91 | r1=other r2=ptr(@0xb0afffb90 tid=3822064896 vtag=65792) r3=other | AsVar { dst: Reg(6), value: Reg(5), tag: 0 }
+[pc] verum_registry.protocol.publication_metadata.required_text_list pc=29 op=0x00 | r1=other r2=ptr(@0xb0afffb90 tid=3822064896 vtag=65792) r3=other | Mov { dst: Reg(8), src: Reg(6) }
+[pc] verum_registry.protocol.publication_metadata.required_text_list pc=32 op=0x70 | r1=other r2=ptr(@0xb0afffb90 tid=3822064896 vtag=65792) r3=other | Ref { dst: Reg(5), src: Reg(8) }
+[pc] verum_registry.protocol.publication_metadata.required_text_list pc=35 op=0x00 | r1=other r2=ptr(@0xb0afffb90 tid=3822064896 vtag=65792) r3=other | Mov { dst: Reg(9), src: Reg(5) }
+[pc] verum_registry.protocol.publication_metadata.required_text_list pc=38 op=0x00 | r1=other r2=ptr(@0xb0afffb90 tid=3822064896 vtag=65792) r3=other | Mov { dst: Reg(10), src: Reg(1) }
+[pc] verum_registry.protocol.publication_metadata.required_text_list pc=41 op=0x5b | r1=other r2=ptr(@0xb0afffb90 tid=3822064896 vtag=65792) r3=other | Call { dst: Reg(5), func_id: 39102, args: RegRange { start: Reg(9), count: 2 } }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=0 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(3), src: Reg(0) }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=3 op=0x5b | r1=other r2=other r3=other | Call { dst: Reg(2), func_id: 12225, args: RegRange { start: Reg(3), count: 1 } }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=9 op=0x90 | r1=other r2=ptr(@0xb0b24bf00 tid=515 vtag=1) r3=other | IsVar { dst: Reg(5), value: Reg(2), tag: 1 }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=13 op=0x52 | r1=other r2=ptr(@0xb0b24bf00 tid=515 vtag=1) r3=other | JmpNot { cond: Reg(5), offset: 12 }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=16 op=0x88 | r1=other r2=ptr(@0xb0b24bf00 tid=515 vtag=1) r3=other | GetVariantData { dst: Reg(5), variant: Reg(2), field: 0 }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=20 op=0x00 | r1=other r2=ptr(@0xb0b24bf00 tid=515 vtag=1) r3=other | Mov { dst: Reg(6), src: Reg(5) }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=23 op=0x00 | r1=other r2=ptr(@0xb0b24bf00 tid=515 vtag=1) r3=other | Mov { dst: Reg(4), src: Reg(6) }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=26 op=0x50 | r1=other r2=ptr(@0xb0b24bf00 tid=515 vtag=1) r3=other | Jmp { offset: 49 }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=77 op=0x00 | r1=other r2=ptr(@0xb0b24bf00 tid=515 vtag=1) r3=other | Mov { dst: Reg(9), src: Reg(4) }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=80 op=0x1f | r1=other r2=ptr(@0xb0b24bf00 tid=515 vtag=1) r3=other | SetCallWitness { type_args: [Concrete(TypeId(2131))] }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=86 op=0x5d | r1=other r2=ptr(@0xb0b24bf00 tid=515 vtag=1) r3=other | CallM { dst: Reg(2), receiver: Reg(9), method_id: 1411765, args: RegRange { start: Reg(0), count: 0 } }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=94 op=0x68 | r1=other r2=int(2) r3=other | NewList { dst: Reg(2), capacity_hint: 0 }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=97 op=0x00 | r1=other r2=ptr(@0xb0b24b0c0 tid=512 vtag=0) r3=other | Mov { dst: Reg(10), src: Reg(2) }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=100 op=0x02 | r1=other r2=ptr(@0xb0b24b0c0 tid=512 vtag=0) r3=other | LoadI { dst: Reg(7), value: 0 }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=103 op=0x00 | r1=other r2=ptr(@0xb0b24b0c0 tid=512 vtag=0) r3=other | Mov { dst: Reg(11), src: Reg(7) }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=106 op=0x1f | r1=other r2=ptr(@0xb0b24b0c0 tid=512 vtag=0) r3=other | SetCallWitness { type_args: [Concrete(TypeId(2131))] }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=112 op=0x5d | r1=other r2=ptr(@0xb0b24b0c0 tid=512 vtag=0) r3=other | CallM { dst: Reg(8), receiver: Reg(9), method_id: 1411765, args: RegRange { start: Reg(0), count: 0 } }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=120 op=0x42 | r1=other r2=ptr(@0xb0b24b0c0 tid=512 vtag=0) r3=other | CmpI { op: Lt, dst: Reg(12), a: Reg(11), b: Reg(8) }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=124 op=0x52 | r1=other r2=ptr(@0xb0b24b0c0 tid=512 vtag=0) r3=other | JmpNot { cond: Reg(12), offset: 99 }
+[pc] verum_registry.protocol.publication_metadata.text_list pc=128 op=0x78 | r1=other r2=ptr(@0xb0b24b0c0 tid=512 vtag=0) r3=other | CbgrExtended { sub_op: 11, operands: [12, 9, 11] }
+error: Runtime error: VBC execution error: Index out of bounds: index 0 for list of length 0
