@@ -162,7 +162,7 @@ fn compile_with_endian_methods(source: &str, owner: &str) -> VbcModule {
     primitives.items.retain_mut(|item| {
         let ItemKind::Impl(declaration) = &mut item.kind else { return false; };
         if !matches!(&declaration.kind, ImplKind::Inherent(ty)
-            if matches!(&ty.kind, TypeKind::Path(path) if path.segments.last().is_some_and(|segment| segment.ident.name == owner))) {
+            if matches!(&ty.kind, TypeKind::Path(path) if path.last_segment_name() == owner)) {
             return false;
         }
         declaration.items.retain(|item| matches!(&item.kind, ImplItemKind::Function(function)
