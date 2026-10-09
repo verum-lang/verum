@@ -1138,10 +1138,32 @@ impl TypeChecker {
         &mut self,
         metadata: std::sync::Arc<crate::core_metadata::CoreMetadata>,
     ) {
+        self.install_metadata_nominal_identity(&metadata);
         self.core_metadata = Maybe::Some(metadata);
         self.metadata_own_surface = std::cell::RefCell::new(None);
         self.metadata_impls_by_owner = Maybe::None;
         self.stdlib_tail_registered.clear();
+    }
+
+    /// Retain exact metadata bindings and their declaration owners. This is a
+    /// derived snapshot of descriptor facts, not a suffix or visibility lookup.
+    /// Transparent aliases keep their existing argument-substitution authority.
+    fn install_metadata_nominal_identity(&mut self, metadata: &crate::core_metadata::CoreMetadata) {
+        let identities: Map<Text, Text> = metadata.types.iter()
+            .filter(|(_, descriptor)| !matches!(
+                descriptor.kind, crate::core_metadata::TypeDescriptorKind::Alias { .. }
+            ))
+            .map(|(key, descriptor)| (key.clone(), Self::metadata_declaring_key(descriptor)))
+            .collect();
+        self.unifier.set_nominal_identity_resolver(std::sync::Arc::new(move |left, right| {
+            let left_owner = identities.get(&Text::from(left));
+            let right_owner = identities.get(&Text::from(right));
+            // One descriptor also proves its exact declaring key when that
+            // key has no separate entry in older metadata. Two unknown heads
+            // supply no such proof, even if their last segments are equal.
+            (left_owner.is_some() || right_owner.is_some())
+                && left_owner.map_or(left, Text::as_str) == right_owner.map_or(right, Text::as_str)
+        }));
     }
 
     /// Hand stdlib metadata to a TypeChecker constructed via a
@@ -4027,6 +4049,8 @@ impl TypeChecker {
         use crate::protocol::{Protocol, ProtocolImpl, ProtocolMethod};
         use crate::ty::Type;
         use verum_common::span::Span;
+
+        self.install_metadata_nominal_identity(metadata);
 
         // Register types from metadata in source declaration order.
         //

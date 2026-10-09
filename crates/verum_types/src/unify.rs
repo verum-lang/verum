@@ -150,6 +150,12 @@ pub struct Unifier {
     projection_resolver:
         Option<std::sync::Arc<dyn Fn(&Type, &str) -> Option<Type> + Send + Sync>>,
 
+    /// Declaration-backed equivalence for differently spelled nominal heads.
+    /// The metadata loader installs an exact-key snapshot; the unifier must
+    /// never infer ownership from a shared final path segment.
+    nominal_identity_resolver:
+        Option<std::sync::Arc<dyn Fn(&str, &str) -> bool + Send + Sync>>,
+
     /// Type variables that are RIGID: universally quantified parameters of
     /// the function body currently being checked.
     ///
@@ -293,6 +299,7 @@ impl Unifier {
             context_bindings: IndexMap::new(),
             cubical_enabled: true,
             projection_resolver: None,
+            nominal_identity_resolver: None,
             rigid_vars: Map::new(),
         }
     }
@@ -1488,6 +1495,13 @@ impl Unifier {
         resolver: std::sync::Arc<dyn Fn(&Type, &str) -> Option<Type> + Send + Sync>,
     ) {
         self.projection_resolver = Some(resolver);
+    }
+
+    pub(crate) fn set_nominal_identity_resolver(
+        &mut self,
+        resolver: std::sync::Arc<dyn Fn(&str, &str) -> bool + Send + Sync>,
+    ) {
+        self.nominal_identity_resolver = Some(resolver);
     }
 
     pub fn unify(&mut self, t1: &Type, t2: &Type, span: Span) -> Result<Substitution> {
@@ -3344,17 +3358,27 @@ impl Unifier {
             // - Named { path: Map, args } from parsing Map<K, V>
             (Generic { name, args: a1 }, Named { path, args: a2 })
             | (Named { path, args: a2 }, Generic { name, args: a1 }) => {
-                // Extract the last segment from the path for comparison
-                let path_name = path
+                // Source annotations can carry a qualified Generic head while
+                // method metadata carries a Named application. Preserve the
+                // entire path (including opaque dotted identifiers); a bare
+                // spelling is equivalent only when declaration metadata says so.
+                let path_name: Option<Text> = path
                     .segments
-                    .last()
-                    .map(|seg| match seg {
-                        verum_ast::ty::PathSegment::Name(ident) => ident.name.as_str(),
-                        _ => "",
+                    .iter()
+                    .map(|segment| match segment {
+                        verum_ast::ty::PathSegment::Name(ident) => Some(ident.name.as_str()),
+                        _ => None,
                     })
-                    .unwrap_or("");
+                    .collect::<Option<List<_>>>()
+                    .map(|parts| parts.join(".").into());
+                let same_head = path_name.as_ref().is_some_and(|path_name| {
+                    name == path_name
+                        || self.nominal_identity_resolver.as_ref().is_some_and(|resolve| {
+                            resolve(name.as_str(), path_name.as_str())
+                        })
+                });
 
-                if name.as_str() != path_name || a1.len() != a2.len() {
+                if !same_head || a1.len() != a2.len() {
                     return Err(TypeError::Mismatch {
                         expected: t2.to_text(),
                         actual: t1.to_text(),
