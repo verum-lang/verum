@@ -1359,10 +1359,8 @@ impl TypeEnv {
         }
     }
 
-    /// Every binding NAME visible in this environment — current scope
-    /// plus all parent scopes.  Read-only; added for the T0528
-    /// builtin-ambient snapshot, which runs right after
-    /// `register_builtins()` while only the root scope exists.
+    /// Every binding name visible in this environment, including parent scopes.
+    /// This read-only inventory carries no builtin provenance.
     pub fn binding_names(&self) -> Vec<Text> {
         let mut out = Vec::new();
         let mut cur = Some(self);

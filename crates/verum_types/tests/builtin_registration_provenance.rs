@@ -1,7 +1,7 @@
 //! T1693: an existing binding does not become builtin because builtins are registered later.
 use std::sync::Arc;
 use verum_ast::{FileId, ItemKind};
-use verum_common::{List, ResourceDiscipline, Text};
+use verum_common::{List, Maybe, ResourceDiscipline, Text};
 use verum_fast_parser::FastParser;
 use verum_modules::ModuleRegistry;
 use verum_types::{Type, TypeChecker, context::TypeScheme, core_metadata::*};
@@ -83,7 +83,7 @@ fn register(checker: &mut TypeChecker, full: bool) {
     }
 }
 
-fn missing_import(checker: &mut TypeChecker, name: &str) -> Option<Text> {
+fn missing_import(checker: &mut TypeChecker, name: &str) -> Maybe<Text> {
     let source = format!("mount core.not_declared.{{{name}}};");
     let ast = FastParser::new()
         .parse_module_str(&source, FileId::new(40))
