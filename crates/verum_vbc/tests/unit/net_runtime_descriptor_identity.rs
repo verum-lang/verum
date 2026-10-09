@@ -1,6 +1,6 @@
 //! Unix raw and registered resources must share OS descriptor authority (T1708).
 use super::*;
-use std::os::fd::{AsRawFd, FromRawFd, IntoRawFd};
+use std::os::fd::{AsRawFd, FromRawFd, IntoRawFd, OwnedFd};
 use std::thread;
 use std::time::Instant;
 use verum_common::List;
@@ -338,7 +338,16 @@ fn registered_stream_keeps_positive_handle_with_closed_stdin() {
 fn raw_v2_after_stdin_close(exhaust_positive_descriptors: bool) {
     // SAFETY: F_GETFD only queries this child's descriptor table.
     assert_eq!(unsafe { libc::fcntl(0, libc::F_GETFD) }, -1);
-    if exhaust_positive_descriptors {
+    let reserved_descriptor = if exhaust_positive_descriptors {
+        // Rust's socket clone starts at descriptor three. Keep that slot
+        // occupied below the limit so duplication fails with EMFILE, rather
+        // than EINVAL from a requested minimum equal to the limit.
+        // SAFETY: duplicate the child's live stdout into a new owned slot.
+        let fd = unsafe { libc::fcntl(1, libc::F_DUPFD_CLOEXEC, 3) };
+        assert!(fd >= 0, "reserve positive descriptor for exhaustion");
+        // SAFETY: fcntl just transferred this newly duplicated descriptor.
+        let descriptor = unsafe { OwnedFd::from_raw_fd(fd) };
+        assert_eq!(fd, 3, "isolated child must own the first duplicate slot");
         let mut limit = libc::rlimit {
             rlim_cur: 0,
             rlim_max: 0,
@@ -348,12 +357,15 @@ fn raw_v2_after_stdin_close(exhaust_positive_descriptors: bool) {
             unsafe { libc::getrlimit(libc::RLIMIT_NOFILE, &mut limit) },
             0
         );
-        assert!(limit.rlim_max >= 3);
-        limit.rlim_cur = 3;
+        assert!(limit.rlim_max >= 4);
+        limit.rlim_cur = 4;
         // SAFETY: this isolated child lowers only its own soft descriptor limit.
-        // Stdin's zero slot is free; stdout/stderr occupy the positive slots.
+        // Stdin's zero slot is free; owned descriptors one through three are full.
         assert_eq!(unsafe { libc::setrlimit(libc::RLIMIT_NOFILE, &limit) }, 0);
-    }
+        Some(descriptor)
+    } else {
+        None
+    };
     let fd = tcp_listen_v2("127.0.0.1", 0, 8, TCP_LISTEN_FLAG_REUSEPORT);
     // Even the failing old return value zero has an owner before assertions.
     let owner = if fd >= 0 {
@@ -395,6 +407,7 @@ fn raw_v2_after_stdin_close(exhaust_positive_descriptors: bool) {
         "original fd0 leaked"
     );
     drop(owner);
+    drop(reserved_descriptor);
     if fd > 0 {
         // SAFETY: query only; no ownership is reconstructed from a reused fd.
         assert_eq!(
