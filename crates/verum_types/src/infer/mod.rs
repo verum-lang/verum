@@ -1364,11 +1364,10 @@ pub struct TypeChecker {
     /// argument is supplied.
     meta_param_refinements:
         std::collections::HashMap<String, Vec<(usize, verum_ast::expr::Expr)>>,
-    /// T0528 — names the CHECKER ITSELF seeded (primitive types, sized
-    /// integers, builtin/intrinsic/meta functions) before any source or
-    /// archive module was processed.  Union-snapshot taken at the end of
-    /// `register_primitives()` and `register_builtins()`, so both the
-    /// bootstrap and the normal construction path fill it.
+    /// Names the checker itself declares: primitive types, sized integers,
+    /// and builtin/intrinsic/meta functions. Registration helpers record each
+    /// declaration directly; later registration passes must not promote
+    /// unrelated source or archive bindings already present in the context.
     ///
     /// SOLE consumer: the unresolved-mount-item leniency in
     /// `process_import`'s Nested arm.  An explicit `mount m.{X}` whose

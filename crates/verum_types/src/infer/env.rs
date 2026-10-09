@@ -4675,6 +4675,21 @@ impl TypeChecker {
         )
     }
 
+    /// Record builtin provenance only at an actual declaration site. Builtins
+    /// can be registered after source or archive names have entered the context.
+    #[track_caller]
+    fn define_builtin_type(&mut self, name: impl Into<Text>, ty: Type) {
+        let name = name.into();
+        self.builtin_ambient_names.insert(name.clone());
+        self.ctx.define_type(name, ty);
+    }
+
+    fn define_builtin_value(&mut self, name: impl Into<Text>, scheme: TypeScheme) {
+        let name = name.into();
+        self.builtin_ambient_names.insert(name.clone());
+        self.ctx.env.insert(name, scheme);
+    }
+
     /// Register ONLY primitive types - used for stdlib bootstrap mode.
     /// In stdlib bootstrap mode, all other types (List, Map, Maybe, etc.)
     /// come from parsing stdlib .vr files, not from hardcoded registration.
@@ -4698,28 +4713,18 @@ impl TypeChecker {
         // These are language built-ins, not stdlib definitions
         // Core type system: primitive types (Bool, Int, Float, Text, Unit), compound types (Array, Tuple, Record, Function)
         // ============================================================
-        self.ctx
-            .define_type(verum_common::Text::from(WKT::Int.as_str()), Type::Int);
-        self.ctx
-            .define_type(verum_common::Text::from(WKT::Float.as_str()), Type::Float);
-        self.ctx
-            .define_type(verum_common::Text::from(WKT::Bool.as_str()), Type::Bool);
-        self.ctx
-            .define_type(verum_common::Text::from(WKT::Text.as_str()), Type::Text);
-        self.ctx
-            .define_type(verum_common::Text::from(WKT::Char.as_str()), Type::Char);
-        self.ctx
-            .define_type(verum_common::Text::from("Unit"), Type::Unit);
-        self.ctx
-            .define_type(verum_common::Text::from("Never"), Type::Never);
+        self.define_builtin_type(verum_common::Text::from(WKT::Int.as_str()), Type::Int);
+        self.define_builtin_type(verum_common::Text::from(WKT::Float.as_str()), Type::Float);
+        self.define_builtin_type(verum_common::Text::from(WKT::Bool.as_str()), Type::Bool);
+        self.define_builtin_type(verum_common::Text::from(WKT::Text.as_str()), Type::Text);
+        self.define_builtin_type(verum_common::Text::from(WKT::Char.as_str()), Type::Char);
+        self.define_builtin_type(verum_common::Text::from("Unit"), Type::Unit);
+        self.define_builtin_type(verum_common::Text::from("Never"), Type::Never);
         // Lowercase aliases for primitive types (common in tests)
-        self.ctx
-            .define_type(verum_common::Text::from("char"), Type::Char);
-        self.ctx
-            .define_type(verum_common::Text::from("bool"), Type::Bool);
+        self.define_builtin_type(verum_common::Text::from("char"), Type::Char);
+        self.define_builtin_type(verum_common::Text::from("bool"), Type::Bool);
         // Opaque type: abstract type with no known structure (used in verification)
-        self.ctx
-            .define_type(verum_common::Text::from("opaque"), Type::Unknown);
+        self.define_builtin_type(verum_common::Text::from("opaque"), Type::Unknown);
 
         // ============================================================
         // SIZED PRIMITIVE TYPES (Semantic Names - Primary)
@@ -4734,7 +4739,7 @@ impl TypeChecker {
         // ============================================================
         // Signed integers (semantic names) - MUST be distinct Named types for correct method lookup
         // This ensures Int32.to_le_bytes() returns [Byte; 4] not [Byte; 8]
-        self.ctx.define_type(
+        self.define_builtin_type(
             verum_common::Text::from("Int8"),
             Type::Named {
                 path: verum_ast::ty::Path::single(verum_ast::ty::Ident::new(
@@ -4744,7 +4749,7 @@ impl TypeChecker {
                 args: List::new(),
             },
         );
-        self.ctx.define_type(
+        self.define_builtin_type(
             verum_common::Text::from("Int16"),
             Type::Named {
                 path: verum_ast::ty::Path::single(verum_ast::ty::Ident::new(
@@ -4754,7 +4759,7 @@ impl TypeChecker {
                 args: List::new(),
             },
         );
-        self.ctx.define_type(
+        self.define_builtin_type(
             verum_common::Text::from("Int32"),
             Type::Named {
                 path: verum_ast::ty::Path::single(verum_ast::ty::Ident::new(
@@ -4764,7 +4769,7 @@ impl TypeChecker {
                 args: List::new(),
             },
         );
-        self.ctx.define_type(
+        self.define_builtin_type(
             verum_common::Text::from("Int64"),
             Type::Named {
                 path: verum_ast::ty::Path::single(verum_ast::ty::Ident::new(
@@ -4774,7 +4779,7 @@ impl TypeChecker {
                 args: List::new(),
             },
         );
-        self.ctx.define_type(
+        self.define_builtin_type(
             verum_common::Text::from("Int128"),
             Type::Named {
                 path: verum_ast::ty::Path::single(verum_ast::ty::Ident::new(
@@ -4784,7 +4789,7 @@ impl TypeChecker {
                 args: List::new(),
             },
         );
-        self.ctx.define_type(
+        self.define_builtin_type(
             verum_common::Text::from("ISize"),
             Type::Named {
                 path: verum_ast::ty::Path::single(verum_ast::ty::Ident::new(
@@ -4794,7 +4799,7 @@ impl TypeChecker {
                 args: List::new(),
             },
         );
-        self.ctx.define_type(
+        self.define_builtin_type(
             verum_common::Text::from("IntSize"),
             Type::Named {
                 path: verum_ast::ty::Path::single(verum_ast::ty::Ident::new(
@@ -4806,7 +4811,7 @@ impl TypeChecker {
         );
         // Unsigned integers (semantic names) - MUST be distinct Named types for correct method lookup
         // This ensures UInt64.checked_add uses unsigned overflow detection
-        self.ctx.define_type(
+        self.define_builtin_type(
             verum_common::Text::from("UInt8"),
             Type::Named {
                 path: verum_ast::ty::Path::single(verum_ast::ty::Ident::new(
@@ -4816,7 +4821,7 @@ impl TypeChecker {
                 args: List::new(),
             },
         );
-        self.ctx.define_type(
+        self.define_builtin_type(
             verum_common::Text::from("UInt16"),
             Type::Named {
                 path: verum_ast::ty::Path::single(verum_ast::ty::Ident::new(
@@ -4826,7 +4831,7 @@ impl TypeChecker {
                 args: List::new(),
             },
         );
-        self.ctx.define_type(
+        self.define_builtin_type(
             verum_common::Text::from("UInt32"),
             Type::Named {
                 path: verum_ast::ty::Path::single(verum_ast::ty::Ident::new(
@@ -4836,7 +4841,7 @@ impl TypeChecker {
                 args: List::new(),
             },
         );
-        self.ctx.define_type(
+        self.define_builtin_type(
             verum_common::Text::from("UInt64"),
             Type::Named {
                 path: verum_ast::ty::Path::single(verum_ast::ty::Ident::new(
@@ -4846,7 +4851,7 @@ impl TypeChecker {
                 args: List::new(),
             },
         );
-        self.ctx.define_type(
+        self.define_builtin_type(
             verum_common::Text::from("UInt128"),
             Type::Named {
                 path: verum_ast::ty::Path::single(verum_ast::ty::Ident::new(
@@ -4856,7 +4861,7 @@ impl TypeChecker {
                 args: List::new(),
             },
         );
-        self.ctx.define_type(
+        self.define_builtin_type(
             verum_common::Text::from("USize"),
             Type::Named {
                 path: verum_ast::ty::Path::single(verum_ast::ty::Ident::new(
@@ -4866,7 +4871,7 @@ impl TypeChecker {
                 args: List::new(),
             },
         );
-        self.ctx.define_type(
+        self.define_builtin_type(
             verum_common::Text::from("UIntSize"),
             Type::Named {
                 path: verum_ast::ty::Path::single(verum_ast::ty::Ident::new(
@@ -4878,7 +4883,7 @@ impl TypeChecker {
         );
         // Floating point (semantic names) - MUST be distinct Named types for correct method lookup
         // This ensures Float32.to_bits() returns UInt32 not Int, Float64.to_bits() returns UInt64
-        self.ctx.define_type(
+        self.define_builtin_type(
             verum_common::Text::from("Float32"),
             Type::Named {
                 path: verum_ast::ty::Path::single(verum_ast::ty::Ident::new(
@@ -4888,7 +4893,7 @@ impl TypeChecker {
                 args: List::new(),
             },
         );
-        self.ctx.define_type(
+        self.define_builtin_type(
             verum_common::Text::from("Float64"),
             Type::Named {
                 path: verum_ast::ty::Path::single(verum_ast::ty::Ident::new(
@@ -4918,7 +4923,7 @@ impl TypeChecker {
             ("i128", "Int128"),
             ("isize", "ISize"),
         ] {
-            self.ctx.define_type(
+            self.define_builtin_type(
                 verum_common::Text::from(compat),
                 Type::Named {
                     path: verum_ast::ty::Path::single(verum_ast::ty::Ident::new(
@@ -4931,7 +4936,7 @@ impl TypeChecker {
         }
         // Unsigned integers (compat names -> semantic Named types)
         // These map to the same Named types as their semantic equivalents (UInt8, etc.)
-        self.ctx.define_type(
+        self.define_builtin_type(
             verum_common::Text::from("u8"),
             Type::Named {
                 path: verum_ast::ty::Path::single(verum_ast::ty::Ident::new(
@@ -4941,7 +4946,7 @@ impl TypeChecker {
                 args: List::new(),
             },
         );
-        self.ctx.define_type(
+        self.define_builtin_type(
             verum_common::Text::from("u16"),
             Type::Named {
                 path: verum_ast::ty::Path::single(verum_ast::ty::Ident::new(
@@ -4951,7 +4956,7 @@ impl TypeChecker {
                 args: List::new(),
             },
         );
-        self.ctx.define_type(
+        self.define_builtin_type(
             verum_common::Text::from("u32"),
             Type::Named {
                 path: verum_ast::ty::Path::single(verum_ast::ty::Ident::new(
@@ -4961,7 +4966,7 @@ impl TypeChecker {
                 args: List::new(),
             },
         );
-        self.ctx.define_type(
+        self.define_builtin_type(
             verum_common::Text::from("u64"),
             Type::Named {
                 path: verum_ast::ty::Path::single(verum_ast::ty::Ident::new(
@@ -4971,7 +4976,7 @@ impl TypeChecker {
                 args: List::new(),
             },
         );
-        self.ctx.define_type(
+        self.define_builtin_type(
             verum_common::Text::from("u128"),
             Type::Named {
                 path: verum_ast::ty::Path::single(verum_ast::ty::Ident::new(
@@ -4981,7 +4986,7 @@ impl TypeChecker {
                 args: List::new(),
             },
         );
-        self.ctx.define_type(
+        self.define_builtin_type(
             verum_common::Text::from("usize"),
             Type::Named {
                 path: verum_ast::ty::Path::single(verum_ast::ty::Ident::new(
@@ -4995,7 +5000,7 @@ impl TypeChecker {
         // integer aliases. Mapping both to Float erases f32 before source
         // signature checking, method lookup, and narrowing diagnostics.
         for alias in ["f32", "f64"] {
-            self.ctx.define_type(
+            self.define_builtin_type(
                 verum_common::Text::from(alias),
                 Type::Named {
                     path: verum_ast::ty::Path::single(verum_ast::ty::Ident::new(
@@ -5013,7 +5018,7 @@ impl TypeChecker {
         // ============================================================
         // Byte is a distinct type (unsigned 8-bit integer) with its own methods
         // Using Named type so that Byte-specific methods are found
-        self.ctx.define_type(
+        self.define_builtin_type(
             verum_common::Text::from("Byte"),
             Type::Named {
                 path: verum_ast::ty::Path::single(verum_ast::ty::Ident::new(
@@ -5024,8 +5029,7 @@ impl TypeChecker {
             },
         );
         // str is an alias for Text (for compatibility)
-        self.ctx
-            .define_type(verum_common::Text::from("str"), Type::Text);
+        self.define_builtin_type(verum_common::Text::from("str"), Type::Text);
 
         // Short aliases for sized types (used throughout stdlib as canonical names)
         // These map to themselves as Named types (U64, U32, etc.)
@@ -5033,7 +5037,7 @@ impl TypeChecker {
         for name in [
             "U8", "U16", "U32", "U64", "U128", "I8", "I16", "I32", "I64", "I128", "F32", "F64",
         ] {
-            self.ctx.define_type(
+            self.define_builtin_type(
                 verum_common::Text::from(name),
                 Type::Named {
                     path: verum_ast::ty::Path::single(verum_ast::ty::Ident::new(
@@ -5049,7 +5053,7 @@ impl TypeChecker {
         // C FFI TYPE ALIASES
         // Platform-dependent C type equivalents for FFI interop
         // ============================================================
-        self.ctx.define_type(
+        self.define_builtin_type(
             verum_common::Text::from("c_char"),
             Type::Named {
                 path: verum_ast::ty::Path::single(verum_ast::ty::Ident::new(
@@ -5059,7 +5063,7 @@ impl TypeChecker {
                 args: List::new(),
             },
         );
-        self.ctx.define_type(
+        self.define_builtin_type(
             verum_common::Text::from("c_uchar"),
             Type::Named {
                 path: verum_ast::ty::Path::single(verum_ast::ty::Ident::new(
@@ -5069,7 +5073,7 @@ impl TypeChecker {
                 args: List::new(),
             },
         );
-        self.ctx.define_type(
+        self.define_builtin_type(
             verum_common::Text::from("c_short"),
             Type::Named {
                 path: verum_ast::ty::Path::single(verum_ast::ty::Ident::new(
@@ -5079,7 +5083,7 @@ impl TypeChecker {
                 args: List::new(),
             },
         );
-        self.ctx.define_type(
+        self.define_builtin_type(
             verum_common::Text::from("c_ushort"),
             Type::Named {
                 path: verum_ast::ty::Path::single(verum_ast::ty::Ident::new(
@@ -5089,9 +5093,8 @@ impl TypeChecker {
                 args: List::new(),
             },
         );
-        self.ctx
-            .define_type(verum_common::Text::from("c_int"), Type::Int);
-        self.ctx.define_type(
+        self.define_builtin_type(verum_common::Text::from("c_int"), Type::Int);
+        self.define_builtin_type(
             verum_common::Text::from("c_uint"),
             Type::Named {
                 path: verum_ast::ty::Path::single(verum_ast::ty::Ident::new(
@@ -5101,9 +5104,8 @@ impl TypeChecker {
                 args: List::new(),
             },
         );
-        self.ctx
-            .define_type(verum_common::Text::from("c_long"), Type::Int);
-        self.ctx.define_type(
+        self.define_builtin_type(verum_common::Text::from("c_long"), Type::Int);
+        self.define_builtin_type(
             verum_common::Text::from("c_ulong"),
             Type::Named {
                 path: verum_ast::ty::Path::single(verum_ast::ty::Ident::new(
@@ -5113,7 +5115,7 @@ impl TypeChecker {
                 args: List::new(),
             },
         );
-        self.ctx.define_type(
+        self.define_builtin_type(
             verum_common::Text::from("c_longlong"),
             Type::Named {
                 path: verum_ast::ty::Path::single(verum_ast::ty::Ident::new(
@@ -5123,13 +5125,10 @@ impl TypeChecker {
                 args: List::new(),
             },
         );
-        self.ctx
-            .define_type(verum_common::Text::from("c_float"), Type::Float);
-        self.ctx
-            .define_type(verum_common::Text::from("c_double"), Type::Float);
-        self.ctx
-            .define_type(verum_common::Text::from("c_void"), Type::Unit);
-        self.ctx.define_type(
+        self.define_builtin_type(verum_common::Text::from("c_float"), Type::Float);
+        self.define_builtin_type(verum_common::Text::from("c_double"), Type::Float);
+        self.define_builtin_type(verum_common::Text::from("c_void"), Type::Unit);
+        self.define_builtin_type(
             verum_common::Text::from("c_size_t"),
             Type::Named {
                 path: verum_ast::ty::Path::single(verum_ast::ty::Ident::new(
@@ -5139,7 +5138,7 @@ impl TypeChecker {
                 args: List::new(),
             },
         );
-        self.ctx.define_type(
+        self.define_builtin_type(
             verum_common::Text::from("c_ssize_t"),
             Type::Named {
                 path: verum_ast::ty::Path::single(verum_ast::ty::Ident::new(
@@ -5150,7 +5149,7 @@ impl TypeChecker {
             },
         );
         // CString and CStr - opaque types for C string interop
-        self.ctx.define_type(
+        self.define_builtin_type(
             verum_common::Text::from("CString"),
             Type::Named {
                 path: verum_ast::ty::Path::single(verum_ast::ty::Ident::new(
@@ -5160,7 +5159,7 @@ impl TypeChecker {
                 args: List::new(),
             },
         );
-        self.ctx.define_type(
+        self.define_builtin_type(
             verum_common::Text::from("CStr"),
             Type::Named {
                 path: verum_ast::ty::Path::single(verum_ast::ty::Ident::new(
@@ -5171,14 +5170,13 @@ impl TypeChecker {
             },
         );
         // Nat - natural numbers (used in dependent type contexts, alias for Int)
-        self.ctx
-            .define_type(verum_common::Text::from("Nat"), Type::Int);
+        self.define_builtin_type(verum_common::Text::from("Nat"), Type::Int);
 
         // Meta-types for staged metaprogramming
         for meta_type in [
             "@Expr", "@Ident", "@Type", "@Pattern", "@Stmt", "@Item", "@Block",
         ] {
-            self.ctx.define_type(
+            self.define_builtin_type(
                 verum_common::Text::from(meta_type),
                 Type::Named {
                     path: verum_ast::ty::Path::single(verum_ast::ty::Ident::new(
@@ -5191,7 +5189,7 @@ impl TypeChecker {
         }
 
         // Intrinsic types used in dependent types
-        self.ctx.define_type(
+        self.define_builtin_type(
             verum_common::Text::from("intrinsic"),
             Type::Named {
                 path: verum_ast::ty::Path::single(verum_ast::ty::Ident::new(
@@ -5212,7 +5210,7 @@ impl TypeChecker {
         {
             let tv = TypeVar::fresh();
             let fn_ty = Type::function(List::from_iter([Type::Var(tv)]), Type::Int);
-            self.ctx.env.insert(
+            self.define_builtin_value(
                 verum_common::Text::from("size_of"),
                 TypeScheme::poly(List::from_iter([tv]), fn_ty),
             );
@@ -5220,32 +5218,32 @@ impl TypeChecker {
         {
             let tv = TypeVar::fresh();
             let fn_ty = Type::function(List::from_iter([Type::Var(tv)]), Type::Int);
-            self.ctx.env.insert(
+            self.define_builtin_value(
                 verum_common::Text::from("align_of"),
                 TypeScheme::poly(List::from_iter([tv]), fn_ty),
             );
         }
 
         // Panic (never returns)
-        self.ctx.env.insert(
+        self.define_builtin_value(
             verum_common::Text::from("panic"),
             TypeScheme::mono(Type::function(List::from_iter([Type::Text]), Type::Never)),
         );
 
         // Unreachable (never returns)
-        self.ctx.env.insert(
+        self.define_builtin_value(
             verum_common::Text::from("unreachable"),
             TypeScheme::mono(Type::function(List::new(), Type::Never)),
         );
 
         // verum_panic is an alias for panic (used internally in stdlib)
-        self.ctx.env.insert(
+        self.define_builtin_value(
             verum_common::Text::from("verum_panic"),
             TypeScheme::mono(Type::function(List::from_iter([Type::Text]), Type::Never)),
         );
 
         // Args count intrinsic (returns number of program arguments)
-        self.ctx.env.insert(
+        self.define_builtin_value(
             verum_common::Text::from("__verum_args_count"),
             TypeScheme::mono(Type::function(List::new(), Type::Int)),
         );
@@ -5255,7 +5253,7 @@ impl TypeChecker {
         // We don't register it here to avoid conflicts with extern block registration
 
         // Assert intrinsic
-        self.ctx.env.insert(
+        self.define_builtin_value(
             verum_common::Text::from("assert"),
             TypeScheme::mono(Type::function(List::from_iter([Type::Bool]), Type::Unit)),
         );
@@ -5272,7 +5270,7 @@ impl TypeChecker {
         // Memory intrinsics
         // null_ptr<T>() -> &unsafe T
         let t = TypeVar::fresh();
-        self.ctx.env.insert(
+        self.define_builtin_value(
             verum_common::Text::from("null_ptr"),
             TypeScheme::poly(
                 List::from_iter([t]),
@@ -5290,30 +5288,30 @@ impl TypeChecker {
             let drop_t = TypeVar::fresh();
             let drop_params = List::from_iter([Type::Var(drop_t)]);
             let drop_ty = Type::function(drop_params, Type::unit());
-            self.ctx.env.insert(
+            self.define_builtin_value(
                 verum_common::Text::from("drop"),
                 TypeScheme::poly(List::from_iter([drop_t]), drop_ty),
             );
         }
 
         // Time intrinsics
-        self.ctx.env.insert(
+        self.define_builtin_value(
             verum_common::Text::from("verum_time_system_now"),
             TypeScheme::mono(Type::function(List::new(), Type::Int)),
         );
 
-        self.ctx.env.insert(
+        self.define_builtin_value(
             verum_common::Text::from("verum_time_now_ns"),
             TypeScheme::mono(Type::function(List::new(), Type::Int)),
         );
 
-        self.ctx.env.insert(
+        self.define_builtin_value(
             verum_common::Text::from("verum_sleep_ns"),
             TypeScheme::mono(Type::function(List::from_iter([Type::Int]), Type::Unit)),
         );
 
         // File I/O intrinsics
-        self.ctx.env.insert(
+        self.define_builtin_value(
             verum_common::Text::from("verum_file_open"),
             TypeScheme::mono(Type::function(
                 List::from_iter([Type::Text, Type::Int]),
@@ -5321,7 +5319,7 @@ impl TypeChecker {
             )),
         );
 
-        self.ctx.env.insert(
+        self.define_builtin_value(
             verum_common::Text::from("verum_file_read"),
             TypeScheme::mono(Type::function(
                 List::from_iter([Type::Int, Type::Int]),
@@ -5329,7 +5327,7 @@ impl TypeChecker {
             )),
         );
 
-        self.ctx.env.insert(
+        self.define_builtin_value(
             verum_common::Text::from("verum_file_write"),
             TypeScheme::mono(Type::function(
                 List::from_iter([Type::Int, Type::Int]),
@@ -5337,14 +5335,14 @@ impl TypeChecker {
             )),
         );
 
-        self.ctx.env.insert(
+        self.define_builtin_value(
             verum_common::Text::from("verum_file_close"),
             TypeScheme::mono(Type::function(List::from_iter([Type::Int]), Type::Unit)),
         );
 
         // High-level file I/O functions (path-based)
         // file_write(path: Text, content: Text) -> Int
-        self.ctx.env.insert(
+        self.define_builtin_value(
             verum_common::Text::from("file_write"),
             TypeScheme::mono(Type::function(
                 List::from_iter([Type::Text, Type::Text]),
@@ -5352,12 +5350,12 @@ impl TypeChecker {
             )),
         );
         // file_read(path: Text) -> Text
-        self.ctx.env.insert(
+        self.define_builtin_value(
             verum_common::Text::from("file_read"),
             TypeScheme::mono(Type::function(List::from_iter([Type::Text]), Type::Text)),
         );
         // file_append(path: Text, content: Text) -> Int
-        self.ctx.env.insert(
+        self.define_builtin_value(
             verum_common::Text::from("file_append"),
             TypeScheme::mono(Type::function(
                 List::from_iter([Type::Text, Type::Text]),
@@ -5365,34 +5363,34 @@ impl TypeChecker {
             )),
         );
         // file_delete(path: Text) -> Int
-        self.ctx.env.insert(
+        self.define_builtin_value(
             verum_common::Text::from("file_delete"),
             TypeScheme::mono(Type::function(List::from_iter([Type::Text]), Type::Int)),
         );
         // file_exists(path: Text) -> Int
-        self.ctx.env.insert(
+        self.define_builtin_value(
             verum_common::Text::from("file_exists"),
             TypeScheme::mono(Type::function(List::from_iter([Type::Text]), Type::Int)),
         );
 
         // Stdio intrinsics
-        self.ctx.env.insert(
+        self.define_builtin_value(
             verum_common::Text::from("stdlibin_read_line"),
             TypeScheme::mono(Type::function(List::new(), Type::Text)),
         );
 
-        self.ctx.env.insert(
+        self.define_builtin_value(
             verum_common::Text::from("stdlibout_write"),
             TypeScheme::mono(Type::function(List::from_iter([Type::Text]), Type::Unit)),
         );
 
-        self.ctx.env.insert(
+        self.define_builtin_value(
             verum_common::Text::from("stdliberr_write"),
             TypeScheme::mono(Type::function(List::from_iter([Type::Text]), Type::Unit)),
         );
 
         // Atomic/sync intrinsics
-        self.ctx.env.insert(
+        self.define_builtin_value(
             verum_common::Text::from("verum_fence"),
             TypeScheme::mono(Type::function(
                 List::from_iter([Type::Int]), // Ordering as int
@@ -5403,7 +5401,7 @@ impl TypeChecker {
         // Note: compiler_fence is provided by core/sync/atomic.vr as a wrapper
         // that converts Ordering to Int. Don't register it here as an intrinsic.
 
-        self.ctx.env.insert(
+        self.define_builtin_value(
             verum_common::Text::from("verum_compiler_fence"),
             TypeScheme::mono(Type::function(List::from_iter([Type::Int]), Type::Unit)),
         );
@@ -5413,7 +5411,7 @@ impl TypeChecker {
         // but we register them here to ensure they're available during type checking
 
         // 32-bit atomics
-        self.ctx.env.insert(
+        self.define_builtin_value(
             verum_common::Text::from("verum_atomic_load_u32"),
             TypeScheme::mono(Type::function(
                 List::from_iter([
@@ -5427,7 +5425,7 @@ impl TypeChecker {
             )),
         );
 
-        self.ctx.env.insert(
+        self.define_builtin_value(
             verum_common::Text::from("verum_atomic_store_u32"),
             TypeScheme::mono(Type::function(
                 List::from_iter([
@@ -5442,7 +5440,7 @@ impl TypeChecker {
             )),
         );
 
-        self.ctx.env.insert(
+        self.define_builtin_value(
             verum_common::Text::from("verum_atomic_cas_u32"),
             TypeScheme::mono(Type::function(
                 List::from_iter([
@@ -5459,7 +5457,7 @@ impl TypeChecker {
             )),
         );
 
-        self.ctx.env.insert(
+        self.define_builtin_value(
             verum_common::Text::from("verum_atomic_fetch_add_u32"),
             TypeScheme::mono(Type::function(
                 List::from_iter([
@@ -5474,7 +5472,7 @@ impl TypeChecker {
             )),
         );
 
-        self.ctx.env.insert(
+        self.define_builtin_value(
             verum_common::Text::from("verum_atomic_fetch_sub_u32"),
             TypeScheme::mono(Type::function(
                 List::from_iter([
@@ -5489,7 +5487,7 @@ impl TypeChecker {
             )),
         );
 
-        self.ctx.env.insert(
+        self.define_builtin_value(
             verum_common::Text::from("verum_atomic_swap_u32"),
             TypeScheme::mono(Type::function(
                 List::from_iter([
@@ -5505,7 +5503,7 @@ impl TypeChecker {
         );
 
         // 64-bit atomics
-        self.ctx.env.insert(
+        self.define_builtin_value(
             verum_common::Text::from("verum_atomic_load_u64"),
             TypeScheme::mono(Type::function(
                 List::from_iter([
@@ -5519,7 +5517,7 @@ impl TypeChecker {
             )),
         );
 
-        self.ctx.env.insert(
+        self.define_builtin_value(
             verum_common::Text::from("verum_atomic_store_u64"),
             TypeScheme::mono(Type::function(
                 List::from_iter([
@@ -5534,7 +5532,7 @@ impl TypeChecker {
             )),
         );
 
-        self.ctx.env.insert(
+        self.define_builtin_value(
             verum_common::Text::from("verum_atomic_cas_u64"),
             TypeScheme::mono(Type::function(
                 List::from_iter([
@@ -5551,7 +5549,7 @@ impl TypeChecker {
             )),
         );
 
-        self.ctx.env.insert(
+        self.define_builtin_value(
             verum_common::Text::from("verum_atomic_fetch_add_u64"),
             TypeScheme::mono(Type::function(
                 List::from_iter([
@@ -5566,7 +5564,7 @@ impl TypeChecker {
             )),
         );
 
-        self.ctx.env.insert(
+        self.define_builtin_value(
             verum_common::Text::from("verum_atomic_fetch_sub_u64"),
             TypeScheme::mono(Type::function(
                 List::from_iter([
@@ -5581,7 +5579,7 @@ impl TypeChecker {
             )),
         );
 
-        self.ctx.env.insert(
+        self.define_builtin_value(
             verum_common::Text::from("verum_atomic_swap_u64"),
             TypeScheme::mono(Type::function(
                 List::from_iter([
@@ -5597,7 +5595,7 @@ impl TypeChecker {
         );
 
         // Bool atomics
-        self.ctx.env.insert(
+        self.define_builtin_value(
             verum_common::Text::from("verum_atomic_load_bool"),
             TypeScheme::mono(Type::function(
                 List::from_iter([
@@ -5611,7 +5609,7 @@ impl TypeChecker {
             )),
         );
 
-        self.ctx.env.insert(
+        self.define_builtin_value(
             verum_common::Text::from("verum_atomic_store_bool"),
             TypeScheme::mono(Type::function(
                 List::from_iter([
@@ -5626,7 +5624,7 @@ impl TypeChecker {
             )),
         );
 
-        self.ctx.env.insert(
+        self.define_builtin_value(
             verum_common::Text::from("verum_atomic_cas_bool"),
             TypeScheme::mono(Type::function(
                 List::from_iter([
@@ -5645,7 +5643,7 @@ impl TypeChecker {
 
         // Memory allocation intrinsics
         let alloc_t = TypeVar::fresh();
-        self.ctx.env.insert(
+        self.define_builtin_value(
             verum_common::Text::from("verum_alloc"),
             TypeScheme::poly(
                 List::from_iter([alloc_t]),
@@ -5661,7 +5659,7 @@ impl TypeChecker {
 
         // Heap allocation intrinsic (used by collections/deque.vr)
         let heap_alloc_t = TypeVar::fresh();
-        self.ctx.env.insert(
+        self.define_builtin_value(
             verum_common::Text::from("__verum_heap_alloc"),
             TypeScheme::poly(
                 List::from_iter([heap_alloc_t]),
@@ -5676,7 +5674,7 @@ impl TypeChecker {
         );
 
         let forget_t = TypeVar::fresh();
-        self.ctx.env.insert(
+        self.define_builtin_value(
             verum_common::Text::from("forget"),
             TypeScheme::poly(
                 List::from_iter([forget_t]),
@@ -5684,13 +5682,13 @@ impl TypeChecker {
             ),
         );
 
-        self.ctx.env.insert(
+        self.define_builtin_value(
             verum_common::Text::from("verum_time_sleep_ns"),
             TypeScheme::mono(Type::function(List::from_iter([Type::Int]), Type::Unit)),
         );
 
         // Env intrinsics
-        self.ctx.env.insert(
+        self.define_builtin_value(
             verum_common::Text::from("arg"),
             TypeScheme::mono(Type::function(List::from_iter([Type::Int]), Type::Text)),
         );
@@ -5708,7 +5706,7 @@ impl TypeChecker {
 
         // Print intrinsics (verum_ prefix versions used by stdlib)
         // These take raw byte pointer and length, not Text
-        self.ctx.env.insert(
+        self.define_builtin_value(
             verum_common::Text::from("verum_print"),
             TypeScheme::mono(Type::function(
                 List::from_iter([
@@ -5722,7 +5720,7 @@ impl TypeChecker {
             )),
         );
 
-        self.ctx.env.insert(
+        self.define_builtin_value(
             verum_common::Text::from("verum_println"),
             TypeScheme::mono(Type::function(
                 List::from_iter([
@@ -5736,7 +5734,7 @@ impl TypeChecker {
             )),
         );
 
-        self.ctx.env.insert(
+        self.define_builtin_value(
             verum_common::Text::from("verum_eprint"),
             TypeScheme::mono(Type::function(
                 List::from_iter([
@@ -5750,7 +5748,7 @@ impl TypeChecker {
             )),
         );
 
-        self.ctx.env.insert(
+        self.define_builtin_value(
             verum_common::Text::from("verum_eprintln"),
             TypeScheme::mono(Type::function(
                 List::from_iter([
@@ -5765,12 +5763,12 @@ impl TypeChecker {
         );
 
         // Process control intrinsics
-        self.ctx.env.insert(
+        self.define_builtin_value(
             verum_common::Text::from("verum_abort"),
             TypeScheme::mono(Type::function(List::new(), Type::Never)),
         );
 
-        self.ctx.env.insert(
+        self.define_builtin_value(
             verum_common::Text::from("verum_exit"),
             TypeScheme::mono(Type::function(
                 List::from_iter([Type::Int]), // exit code
@@ -5778,7 +5776,7 @@ impl TypeChecker {
             )),
         );
 
-        self.ctx.env.insert(
+        self.define_builtin_value(
             verum_common::Text::from("__verum_exit"),
             TypeScheme::mono(Type::function(
                 List::from_iter([Type::Int]), // exit code
@@ -5789,7 +5787,7 @@ impl TypeChecker {
         // Format args intrinsic (returns formatted string from format string and args)
         // This is a compiler magic function that handles format strings
         let format_args_t = TypeVar::fresh();
-        self.ctx.env.insert(
+        self.define_builtin_value(
             verum_common::Text::from("format_args"),
             TypeScheme::poly(
                 List::from_iter([format_args_t]),
@@ -5808,7 +5806,7 @@ impl TypeChecker {
         // We don't register it here to avoid conflicts with extern block registration
 
         // Boolean operators (as functions for pattern matching)
-        self.ctx.env.insert(
+        self.define_builtin_value(
             verum_common::Text::from("or"),
             TypeScheme::mono(Type::function(
                 List::from_iter([Type::Bool, Type::Bool]),
@@ -5816,7 +5814,7 @@ impl TypeChecker {
             )),
         );
 
-        self.ctx.env.insert(
+        self.define_builtin_value(
             verum_common::Text::from("and"),
             TypeScheme::mono(Type::function(
                 List::from_iter([Type::Bool, Type::Bool]),
@@ -5830,7 +5828,7 @@ impl TypeChecker {
 
         // tls_get_base() -> *mut T
         let tls_base_t = TypeVar::fresh();
-        self.ctx.env.insert(
+        self.define_builtin_value(
             verum_common::Text::from("tls_get_base"),
             TypeScheme::poly(
                 List::from_iter([tls_base_t]),
@@ -5846,7 +5844,7 @@ impl TypeChecker {
 
         // tls_slot_get(slot: UInt8) -> *const T
         let tls_get_t = TypeVar::fresh();
-        self.ctx.env.insert(
+        self.define_builtin_value(
             verum_common::Text::from("tls_slot_get"),
             TypeScheme::poly(
                 List::from_iter([tls_get_t]),
@@ -5862,7 +5860,7 @@ impl TypeChecker {
 
         // tls_slot_set(slot: UInt8, value: *const T)
         let tls_set_t = TypeVar::fresh();
-        self.ctx.env.insert(
+        self.define_builtin_value(
             verum_common::Text::from("tls_slot_set"),
             TypeScheme::poly(
                 List::from_iter([tls_set_t]),
@@ -5880,20 +5878,20 @@ impl TypeChecker {
         );
 
         // tls_slot_clear(slot: UInt8)
-        self.ctx.env.insert(
+        self.define_builtin_value(
             verum_common::Text::from("tls_slot_clear"),
             TypeScheme::mono(Type::function(List::from_iter([Type::Int]), Type::Unit)),
         );
 
         // tls_slot_has(slot: UInt8) -> Bool
-        self.ctx.env.insert(
+        self.define_builtin_value(
             verum_common::Text::from("tls_slot_has"),
             TypeScheme::mono(Type::function(List::from_iter([Type::Int]), Type::Bool)),
         );
 
         // tls_frame_push() -> *const T
         let tls_frame_t = TypeVar::fresh();
-        self.ctx.env.insert(
+        self.define_builtin_value(
             verum_common::Text::from("tls_frame_push"),
             TypeScheme::poly(
                 List::from_iter([tls_frame_t]),
@@ -5908,14 +5906,14 @@ impl TypeChecker {
         );
 
         // tls_frame_pop()
-        self.ctx.env.insert(
+        self.define_builtin_value(
             verum_common::Text::from("tls_frame_pop"),
             TypeScheme::mono(Type::function(List::new(), Type::Unit)),
         );
 
         // tls_read_ptr<T>(offset: Int) -> *const T
         let tls_read_ptr_t = TypeVar::fresh();
-        self.ctx.env.insert(
+        self.define_builtin_value(
             verum_common::Text::from("tls_read_ptr"),
             TypeScheme::poly(
                 List::from_iter([tls_read_ptr_t]),
@@ -5931,7 +5929,7 @@ impl TypeChecker {
 
         // tls_write_ptr<T>(offset: Int, value: *const T)
         let tls_write_ptr_t = TypeVar::fresh();
-        self.ctx.env.insert(
+        self.define_builtin_value(
             verum_common::Text::from("tls_write_ptr"),
             TypeScheme::poly(
                 List::from_iter([tls_write_ptr_t]),
@@ -5949,13 +5947,13 @@ impl TypeChecker {
         );
 
         // tls_read_i32(offset: Int) -> Int32
-        self.ctx.env.insert(
+        self.define_builtin_value(
             verum_common::Text::from("tls_read_i32"),
             TypeScheme::mono(Type::function(List::from_iter([Type::Int]), Type::Int)),
         );
 
         // tls_write_i32(offset: Int, value: Int32)
-        self.ctx.env.insert(
+        self.define_builtin_value(
             verum_common::Text::from("tls_write_i32"),
             TypeScheme::mono(Type::function(
                 List::from_iter([Type::Int, Type::Int]),
@@ -5964,13 +5962,13 @@ impl TypeChecker {
         );
 
         // tls_read_usize(offset: Int) -> Int
-        self.ctx.env.insert(
+        self.define_builtin_value(
             verum_common::Text::from("tls_read_usize"),
             TypeScheme::mono(Type::function(List::from_iter([Type::Int]), Type::Int)),
         );
 
         // tls_write_usize(offset: Int, value: Int)
-        self.ctx.env.insert(
+        self.define_builtin_value(
             verum_common::Text::from("tls_write_usize"),
             TypeScheme::mono(Type::function(
                 List::from_iter([Type::Int, Type::Int]),
@@ -5983,59 +5981,59 @@ impl TypeChecker {
         // ============================================================
 
         // spin_hint()
-        self.ctx.env.insert(
+        self.define_builtin_value(
             verum_common::Text::from("spin_hint"),
             TypeScheme::mono(Type::function(List::new(), Type::Unit)),
         );
 
         // spin_loop_hint() (alias)
-        self.ctx.env.insert(
+        self.define_builtin_value(
             verum_common::Text::from("spin_loop_hint"),
             TypeScheme::mono(Type::function(List::new(), Type::Unit)),
         );
 
         // memory_fence(order: Int)
-        self.ctx.env.insert(
+        self.define_builtin_value(
             verum_common::Text::from("memory_fence"),
             TypeScheme::mono(Type::function(List::from_iter([Type::Int]), Type::Unit)),
         );
 
         // atomic_fence(order: Int)
-        self.ctx.env.insert(
+        self.define_builtin_value(
             verum_common::Text::from("atomic_fence"),
             TypeScheme::mono(Type::function(List::from_iter([Type::Int]), Type::Unit)),
         );
 
         // compiler_fence(order: Int)
-        self.ctx.env.insert(
+        self.define_builtin_value(
             verum_common::Text::from("compiler_fence"),
             TypeScheme::mono(Type::function(List::from_iter([Type::Int]), Type::Unit)),
         );
 
         // Ordering constants
-        self.ctx.env.insert(
+        self.define_builtin_value(
             verum_common::Text::from("ORDERING_RELAXED"),
             TypeScheme::mono(Type::Int),
         );
-        self.ctx.env.insert(
+        self.define_builtin_value(
             verum_common::Text::from("ORDERING_ACQUIRE"),
             TypeScheme::mono(Type::Int),
         );
-        self.ctx.env.insert(
+        self.define_builtin_value(
             verum_common::Text::from("ORDERING_RELEASE"),
             TypeScheme::mono(Type::Int),
         );
-        self.ctx.env.insert(
+        self.define_builtin_value(
             verum_common::Text::from("ORDERING_ACQ_REL"),
             TypeScheme::mono(Type::Int),
         );
-        self.ctx.env.insert(
+        self.define_builtin_value(
             verum_common::Text::from("ORDERING_SEQ_CST"),
             TypeScheme::mono(Type::Int),
         );
 
         // futex_wait(addr: *const UInt32, expected: UInt32, timeout_ns: UInt64) -> Int32
-        self.ctx.env.insert(
+        self.define_builtin_value(
             verum_common::Text::from("futex_wait"),
             TypeScheme::mono(Type::function(
                 List::from_iter([
@@ -6051,7 +6049,7 @@ impl TypeChecker {
         );
 
         // futex_wake(addr: *const UInt32, count: UInt32) -> Int32
-        self.ctx.env.insert(
+        self.define_builtin_value(
             verum_common::Text::from("futex_wake"),
             TypeScheme::mono(Type::function(
                 List::from_iter([
@@ -6066,7 +6064,7 @@ impl TypeChecker {
         );
 
         // futex_wake_one(addr: *const UInt32) -> Int32
-        self.ctx.env.insert(
+        self.define_builtin_value(
             verum_common::Text::from("futex_wake_one"),
             TypeScheme::mono(Type::function(
                 List::from_iter([Type::Pointer {
@@ -6078,7 +6076,7 @@ impl TypeChecker {
         );
 
         // futex_wake_all(addr: *const UInt32) -> Int32
-        self.ctx.env.insert(
+        self.define_builtin_value(
             verum_common::Text::from("futex_wake_all"),
             TypeScheme::mono(Type::function(
                 List::from_iter([Type::Pointer {
@@ -6090,7 +6088,7 @@ impl TypeChecker {
         );
 
         // spinlock_try_lock(lock: *mut UInt32) -> Bool
-        self.ctx.env.insert(
+        self.define_builtin_value(
             verum_common::Text::from("spinlock_try_lock"),
             TypeScheme::mono(Type::function(
                 List::from_iter([Type::Pointer {
@@ -6102,7 +6100,7 @@ impl TypeChecker {
         );
 
         // spinlock_lock(lock: *mut UInt32)
-        self.ctx.env.insert(
+        self.define_builtin_value(
             verum_common::Text::from("spinlock_lock"),
             TypeScheme::mono(Type::function(
                 List::from_iter([Type::Pointer {
@@ -6114,7 +6112,7 @@ impl TypeChecker {
         );
 
         // spinlock_unlock(lock: *mut UInt32)
-        self.ctx.env.insert(
+        self.define_builtin_value(
             verum_common::Text::from("spinlock_unlock"),
             TypeScheme::mono(Type::function(
                 List::from_iter([Type::Pointer {
@@ -6126,7 +6124,7 @@ impl TypeChecker {
         );
 
         // spinlock_is_locked(lock: *const UInt32) -> Bool
-        self.ctx.env.insert(
+        self.define_builtin_value(
             verum_common::Text::from("spinlock_is_locked"),
             TypeScheme::mono(Type::function(
                 List::from_iter([Type::Pointer {
@@ -6138,7 +6136,7 @@ impl TypeChecker {
         );
 
         // atomic_load_u32(addr: *const UInt32, ordering: Int) -> UInt32
-        self.ctx.env.insert(
+        self.define_builtin_value(
             verum_common::Text::from("atomic_load_u32"),
             TypeScheme::mono(Type::function(
                 List::from_iter([
@@ -6153,7 +6151,7 @@ impl TypeChecker {
         );
 
         // atomic_store_u32(addr: *mut UInt32, value: UInt32, ordering: Int)
-        self.ctx.env.insert(
+        self.define_builtin_value(
             verum_common::Text::from("atomic_store_u32"),
             TypeScheme::mono(Type::function(
                 List::from_iter([
@@ -6169,15 +6167,10 @@ impl TypeChecker {
         );
 
         // monotonic_nanos() -> UInt64
-        self.ctx.env.insert(
+        self.define_builtin_value(
             verum_common::Text::from("monotonic_nanos"),
             TypeScheme::mono(Type::function(List::new(), Type::Int)),
         );
-
-        // T0528 — record everything this constructor-time registration
-        // seeded; see `builtin_ambient_names`.  Union semantics: the
-        // normal path calls this again from `register_builtins()`.
-        self.snapshot_builtin_ambient_names();
     }
 
     /// Register built-in types and functions.
@@ -6660,28 +6653,6 @@ impl TypeChecker {
         // Register CBGR type aliases (RawPtr, Epoch, u32) — these are compiler
         // intrinsic types used by core/ stdlib files, not user-defined types.
         self.ctx.add_cbgr_type_aliases();
-
-        // T0528 — see `builtin_ambient_names`.
-        self.snapshot_builtin_ambient_names();
-    }
-
-    /// T0528 — union-snapshot of every name the checker itself has
-    /// registered so far, in BOTH namespaces: `type_defs` keys (the
-    /// primitive and sized-integer types seeded by
-    /// [`Self::register_primitives`]) and the value environment's
-    /// binding names (builtin/intrinsic/meta functions).  Runs while
-    /// only the root scope exists, before any source or archive module
-    /// is processed, so the snapshot is exactly the LANGUAGE-ambient
-    /// universe — never stdlib-loaded names.
-    fn snapshot_builtin_ambient_names(&mut self) {
-        let type_names: Vec<verum_common::Text> =
-            self.ctx.type_defs.keys().cloned().collect();
-        for name in type_names {
-            self.builtin_ambient_names.insert(name);
-        }
-        for name in self.ctx.env.binding_names() {
-            self.builtin_ambient_names.insert(name);
-        }
     }
 }
 
@@ -6910,9 +6881,7 @@ impl TypeChecker {
         let print_params = List::from_iter([Type::Var(print_t)]);
         let print_ty = Type::function(print_params, Type::unit());
         let print_scheme = TypeScheme::poly(List::from_iter([print_t]), print_ty);
-        self.ctx
-            .env
-            .insert(verum_common::Text::from("print"), print_scheme);
+        self.define_builtin_value(verum_common::Text::from("print"), print_scheme);
 
         // Register println function: fn<T>(T) -> Unit
         // Accepts any type for convenience in tests
@@ -6920,9 +6889,7 @@ impl TypeChecker {
         let println_params = List::from_iter([Type::Var(println_t)]);
         let println_ty = Type::function(println_params, Type::unit());
         let println_scheme = TypeScheme::poly(List::from_iter([println_t]), println_ty);
-        self.ctx
-            .env
-            .insert(verum_common::Text::from("println"), println_scheme);
+        self.define_builtin_value(verum_common::Text::from("println"), println_scheme);
 
         // eprint / eprintln: fn<T>(T) -> Unit — the stderr twins of
         // print/println (T0231/T0235). Their poly registration is only
@@ -6942,9 +6909,7 @@ impl TypeChecker {
             let params = List::from_iter([Type::Var(t)]);
             let ty = Type::function(params, Type::unit());
             let scheme = TypeScheme::poly(List::from_iter([t]), ty);
-            self.ctx
-                .env
-                .insert(verum_common::Text::from(io_name), scheme);
+            self.define_builtin_value(verum_common::Text::from(io_name), scheme);
         }
 
         // Register format function: fn<T>(Text, ...) -> Text
@@ -6953,16 +6918,14 @@ impl TypeChecker {
         let format_params = List::from_iter([Type::Var(format_t)]);
         let format_ty = Type::function(format_params, Type::text());
         let format_scheme = TypeScheme::poly(List::from_iter([format_t]), format_ty);
-        self.ctx
-            .env
-            .insert(verum_common::Text::from("format"), format_scheme);
+        self.define_builtin_value(verum_common::Text::from("format"), format_scheme);
 
         // Register assert function: fn assert(Bool) -> Unit
         // Also register with optional message: fn assert(Bool, Text) -> Unit
         // Note: We use a special builtin marker to allow both 1 and 2 arguments
         let assert_params = List::from_iter([Type::bool()]);
         let assert_ty = Type::function(assert_params, Type::unit());
-        self.ctx.env.insert_mono("assert", assert_ty.clone());
+        self.define_builtin_value("assert", TypeScheme::mono(assert_ty.clone()));
 
         // Register assert with message variant: fn assert_msg(Bool, &Text) -> Unit
         // Note: Takes &Text to match stdlib definition in core/panic.vr
@@ -6974,12 +6937,12 @@ impl TypeChecker {
             },
         ]);
         let assert_with_msg_ty = Type::function(assert_with_msg_params, Type::unit());
-        self.ctx.env.insert_mono("assert_msg", assert_with_msg_ty);
+        self.define_builtin_value("assert_msg", TypeScheme::mono(assert_with_msg_ty));
 
         // Register debug_assert function: fn debug_assert(Bool) -> Unit
         let debug_assert_params = List::from_iter([Type::bool()]);
         let debug_assert_ty = Type::function(debug_assert_params, Type::unit());
-        self.ctx.env.insert_mono("debug_assert", debug_assert_ty);
+        self.define_builtin_value("debug_assert", TypeScheme::mono(debug_assert_ty));
 
         // Register debug_assert with message variant: fn debug_assert_msg(Bool, &Text) -> Unit
         // Note: Takes &Text to match stdlib definition in core/panic.vr
@@ -6991,18 +6954,14 @@ impl TypeChecker {
             },
         ]);
         let debug_assert_with_msg_ty = Type::function(debug_assert_with_msg_params, Type::unit());
-        self.ctx
-            .env
-            .insert_mono("debug_assert_msg", debug_assert_with_msg_ty);
+        self.define_builtin_value("debug_assert_msg", TypeScheme::mono(debug_assert_with_msg_ty));
 
         // Register assert_eq function: fn assert_eq<T>(T, T) -> Unit
         let assert_eq_t = TypeVar::fresh();
         let assert_eq_params = List::from_iter([Type::Var(assert_eq_t), Type::Var(assert_eq_t)]);
         let assert_eq_ty = Type::function(assert_eq_params, Type::unit());
         let assert_eq_scheme = TypeScheme::poly(List::from_iter([assert_eq_t]), assert_eq_ty);
-        self.ctx
-            .env
-            .insert(verum_common::Text::from("assert_eq"), assert_eq_scheme);
+        self.define_builtin_value(verum_common::Text::from("assert_eq"), assert_eq_scheme);
 
         // Register assert_eq with message: fn assert_eq<T>(T, T, &Text) -> Unit
         // Note: Takes &Text to match stdlib definition in core/panic.vr
@@ -7018,7 +6977,7 @@ impl TypeChecker {
         let assert_eq_msg_ty = Type::function(assert_eq_msg_params, Type::unit());
         let assert_eq_msg_scheme =
             TypeScheme::poly(List::from_iter([assert_eq_msg_t]), assert_eq_msg_ty);
-        self.ctx.env.insert(
+        self.define_builtin_value(
             verum_common::Text::from("assert_eq_msg"),
             assert_eq_msg_scheme,
         );
@@ -7028,9 +6987,7 @@ impl TypeChecker {
         let assert_ne_params = List::from_iter([Type::Var(assert_ne_t), Type::Var(assert_ne_t)]);
         let assert_ne_ty = Type::function(assert_ne_params, Type::unit());
         let assert_ne_scheme = TypeScheme::poly(List::from_iter([assert_ne_t]), assert_ne_ty);
-        self.ctx
-            .env
-            .insert(verum_common::Text::from("assert_ne"), assert_ne_scheme);
+        self.define_builtin_value(verum_common::Text::from("assert_ne"), assert_ne_scheme);
 
         // Register assert_ne with message: fn assert_ne<T>(T, T, &Text) -> Unit
         // Note: Takes &Text to match stdlib definition in core/panic.vr
@@ -7046,7 +7003,7 @@ impl TypeChecker {
         let assert_ne_msg_ty = Type::function(assert_ne_msg_params, Type::unit());
         let assert_ne_msg_scheme =
             TypeScheme::poly(List::from_iter([assert_ne_msg_t]), assert_ne_msg_ty);
-        self.ctx.env.insert(
+        self.define_builtin_value(
             verum_common::Text::from("assert_ne_msg"),
             assert_ne_msg_scheme,
         );
@@ -7059,7 +7016,7 @@ impl TypeChecker {
         let assert_panics_ty = Type::function(assert_panics_params, Type::unit());
         let assert_panics_scheme =
             TypeScheme::poly(List::from_iter([assert_panics_t]), assert_panics_ty);
-        self.ctx.env.insert(
+        self.define_builtin_value(
             verum_common::Text::from("assert_panics"),
             assert_panics_scheme,
         );
@@ -7077,9 +7034,7 @@ impl TypeChecker {
         let watch_return = Type::Tuple(List::from_iter([watch_sender, watch_receiver]));
         let watch_ty = Type::function(List::from_iter([Type::Var(watch_t)]), watch_return);
         let watch_scheme = TypeScheme::poly(List::from_iter([watch_t]), watch_ty);
-        self.ctx
-            .env
-            .insert(verum_common::Text::from("watch_channel"), watch_scheme);
+        self.define_builtin_value(verum_common::Text::from("watch_channel"), watch_scheme);
 
         // Register panic function: fn panic(&Text) -> Never
         // Note: Takes &Text to match stdlib definition in core/panic.vr
@@ -7088,7 +7043,7 @@ impl TypeChecker {
             mutable: false,
         }]);
         let panic_ty = Type::function(panic_params, Type::never());
-        self.ctx.env.insert_mono("panic", panic_ty);
+        self.define_builtin_value("panic", TypeScheme::mono(panic_ty));
 
         // Register drop function: fn drop<T>(T) -> Unit
         // Takes ownership of a value and drops it
@@ -7096,9 +7051,7 @@ impl TypeChecker {
         let drop_params = List::from_iter([Type::Var(drop_t)]);
         let drop_ty = Type::function(drop_params, Type::unit());
         let drop_scheme = TypeScheme::poly(List::from_iter([drop_t]), drop_ty);
-        self.ctx
-            .env
-            .insert(verum_common::Text::from("drop"), drop_scheme);
+        self.define_builtin_value(verum_common::Text::from("drop"), drop_scheme);
 
         // Register channel function: fn channel<T>() -> (Sender<T>, Receiver<T>)
         // Creates a multi-producer single-consumer channel
@@ -7115,9 +7068,7 @@ impl TypeChecker {
         let channel_return_ty = Type::Tuple(List::from_iter([sender_type, receiver_type]));
         let channel_ty = Type::function(List::new(), channel_return_ty);
         let channel_scheme = TypeScheme::poly(List::from_iter([channel_t]), channel_ty);
-        self.ctx
-            .env
-            .insert(verum_common::Text::from("channel"), channel_scheme);
+        self.define_builtin_value(verum_common::Text::from("channel"), channel_scheme);
 
         // Register transmute function: unsafe fn transmute<T, U>(T) -> U
         // Unsafe type-level cast
@@ -7127,9 +7078,7 @@ impl TypeChecker {
         let transmute_ty = Type::function(transmute_params, Type::Var(transmute_u));
         let transmute_scheme =
             TypeScheme::poly(List::from_iter([transmute_t, transmute_u]), transmute_ty);
-        self.ctx
-            .env
-            .insert(verum_common::Text::from("transmute"), transmute_scheme);
+        self.define_builtin_value(verum_common::Text::from("transmute"), transmute_scheme);
 
         // Heap builtins
         let infinite_loop_t_var = TypeVar::fresh();
@@ -7139,7 +7088,7 @@ impl TypeChecker {
             List::from_iter([infinite_loop_t_var]),
             builtin_infinite_loop_ty,
         );
-        self.ctx.env.insert(
+        self.define_builtin_value(
             verum_common::Text::from("builtin_infinite_loop"),
             builtin_infinite_loop_scheme,
         );
@@ -7157,22 +7106,18 @@ impl TypeChecker {
             List::from_iter([Type::Var(TypeVar::fresh()), Type::Var(TypeVar::fresh())]);
         let offset_of_ty = Type::function(offset_of_params, Type::Int);
         let offset_of_scheme = TypeScheme::mono(offset_of_ty);
-        self.ctx
-            .env
-            .insert(verum_common::Text::from("offset_of"), offset_of_scheme);
+        self.define_builtin_value(verum_common::Text::from("offset_of"), offset_of_scheme);
 
         // static_assert(condition: Bool) -> Unit
         // Compile-time assertion (used in FFI/layout tests)
         let static_assert_params = List::from_iter([Type::bool()]);
         let static_assert_ty = Type::function(static_assert_params, Type::unit());
-        self.ctx.env.insert_mono("static_assert", static_assert_ty);
+        self.define_builtin_value("static_assert", TypeScheme::mono(static_assert_ty));
 
         // static_assert with message: static_assert(Bool, Text) -> Unit
         let static_assert_msg_params = List::from_iter([Type::bool(), Type::text()]);
         let static_assert_msg_ty = Type::function(static_assert_msg_params, Type::unit());
-        self.ctx
-            .env
-            .insert_mono("static_assert_msg", static_assert_msg_ty);
+        self.define_builtin_value("static_assert_msg", TypeScheme::mono(static_assert_msg_ty));
 
         // properties_of(fn) -> PropertySet (for compile-time verification)
         // Returns the computational properties of a function
@@ -7188,15 +7133,13 @@ impl TypeChecker {
             let contains_params = List::from_iter([property_set_ty.clone(), Type::Unknown]);
             let contains_ty = Type::function(contains_params, Type::bool());
             // Register PropertySet.contains method via type scheme
-            self.ctx
-                .env
-                .insert_mono("__PropertySet_contains", contains_ty);
+            self.define_builtin_value("__PropertySet_contains", TypeScheme::mono(contains_ty));
 
             // Register properties_of as fn(any) -> PropertySet
             let props_of_var = TypeVar::fresh();
             let props_of_params = List::from_iter([Type::Var(props_of_var)]);
             let props_of_ty = Type::function(props_of_params, property_set_ty);
-            self.ctx.env.insert_mono("properties_of", props_of_ty);
+            self.define_builtin_value("properties_of", TypeScheme::mono(props_of_ty));
         }
 
         // Computational property names as values (for use with properties_of)
@@ -7217,7 +7160,7 @@ impl TypeChecker {
                 )),
                 args: List::new(),
             };
-            self.ctx.env.insert_mono(prop_name, prop_ty);
+            self.define_builtin_value(prop_name, TypeScheme::mono(prop_ty));
         }
 
         // unreachable(&Text = …) -> Never
@@ -7244,9 +7187,10 @@ impl TypeChecker {
                 inner: Box::new(Type::text()),
                 mutable: false,
             }]);
-            self.ctx
-                .env
-                .insert_mono(name, Type::function(params, Type::never()));
+            self.define_builtin_value(
+                name,
+                TypeScheme::mono(Type::function(params, Type::never())),
+            );
             self.function_required_params
                 .insert(verum_common::Text::from(name), 0);
         }
@@ -7255,84 +7199,72 @@ impl TypeChecker {
         let type_name_t = TypeVar::fresh();
         let type_name_ty = Type::function(List::new(), Type::text());
         let type_name_scheme = TypeScheme::poly(List::from_iter([type_name_t]), type_name_ty);
-        self.ctx
-            .env
-            .insert(verum_common::Text::from("type_name"), type_name_scheme);
+        self.define_builtin_value(verum_common::Text::from("type_name"), type_name_scheme);
 
         // size_of<T>() -> Int (kept for compat even though deprecated)
         let size_of_t = TypeVar::fresh();
         let size_of_ty = Type::function(List::new(), Type::Int);
         let size_of_scheme = TypeScheme::poly(List::from_iter([size_of_t]), size_of_ty);
-        self.ctx
-            .env
-            .insert(verum_common::Text::from("size_of"), size_of_scheme);
+        self.define_builtin_value(verum_common::Text::from("size_of"), size_of_scheme);
 
         // align_of<T>() -> Int (kept for compat even though deprecated)
         let align_of_t = TypeVar::fresh();
         let align_of_ty = Type::function(List::new(), Type::Int);
         let align_of_scheme = TypeScheme::poly(List::from_iter([align_of_t]), align_of_ty);
-        self.ctx
-            .env
-            .insert(verum_common::Text::from("align_of"), align_of_scheme);
+        self.define_builtin_value(verum_common::Text::from("align_of"), align_of_scheme);
 
         // len<T>(T) -> Int — generic length function
         let len_t = TypeVar::fresh();
         let len_params = List::from_iter([Type::Var(len_t)]);
         let len_ty = Type::function(len_params, Type::Int);
         let len_scheme = TypeScheme::poly(List::from_iter([len_t]), len_ty);
-        self.ctx
-            .env
-            .insert(verum_common::Text::from("len"), len_scheme);
+        self.define_builtin_value(verum_common::Text::from("len"), len_scheme);
 
         // drop<T>(T) -> Unit — explicit drop/deallocate
         let drop_t = TypeVar::fresh();
         let drop_params = List::from_iter([Type::Var(drop_t)]);
         let drop_ty = Type::function(drop_params, Type::unit());
         let drop_scheme = TypeScheme::poly(List::from_iter([drop_t]), drop_ty);
-        self.ctx
-            .env
-            .insert(verum_common::Text::from("drop"), drop_scheme);
+        self.define_builtin_value(verum_common::Text::from("drop"), drop_scheme);
 
         // writeln<T>(T) -> Unit — write with newline (common in tests)
         let writeln_t = TypeVar::fresh();
         let writeln_params = List::from_iter([Type::Var(writeln_t)]);
         let writeln_ty = Type::function(writeln_params, Type::unit());
         let writeln_scheme = TypeScheme::poly(List::from_iter([writeln_t]), writeln_ty);
-        self.ctx
-            .env
-            .insert(verum_common::Text::from("writeln"), writeln_scheme);
+        self.define_builtin_value(verum_common::Text::from("writeln"), writeln_scheme);
 
         // char module — register as a type variable to avoid "unbound variable: char"
         let char_t = TypeVar::fresh();
-        self.ctx.env.insert(
+        self.define_builtin_value(
             verum_common::Text::from("char"),
             TypeScheme::mono(Type::Var(char_t)),
         );
 
         // std module stub — many tests use std.sync.Mutex, std.collections, etc.
         let std_t = TypeVar::fresh();
-        self.ctx.env.insert(
+        self.define_builtin_value(
             verum_common::Text::from("std"),
             TypeScheme::mono(Type::Var(std_t)),
         );
 
         // fs module — filesystem operations
         let fs_t = TypeVar::fresh();
-        self.ctx.env.insert(
+        self.define_builtin_value(
             verum_common::Text::from("fs"),
             TypeScheme::mono(Type::Var(fs_t)),
         );
 
         // thread module — threading primitives
         let thread_t = TypeVar::fresh();
-        self.ctx.env.insert(
+        self.define_builtin_value(
             verum_common::Text::from("thread"),
             TypeScheme::mono(Type::Var(thread_t)),
         );
 
         // runtime module — runtime operations
         let runtime_t = TypeVar::fresh();
-        self.ctx.env.insert(
+        self.define_builtin_value(
             verum_common::Text::from("runtime"),
             TypeScheme::mono(Type::Var(runtime_t)),
         );
@@ -7355,7 +7287,7 @@ impl TypeChecker {
             let ret = TypeVar::fresh();
             let fn_ty = Type::function(params, Type::Var(ret));
             let scheme = TypeScheme::poly(List::from_iter([t, ret]), fn_ty);
-            self.ctx.env.insert(verum_common::Text::from(*name), scheme);
+            self.define_builtin_value(verum_common::Text::from(*name), scheme);
         }
 
         // Two-param async functions: fn(A, B) -> R
@@ -7374,7 +7306,7 @@ impl TypeChecker {
                 Type::Var(ret),
             );
             let scheme = TypeScheme::poly(List::from_iter([a, b, ret]), fn_ty);
-            self.ctx.env.insert(verum_common::Text::from(*name), scheme);
+            self.define_builtin_value(verum_common::Text::from(*name), scheme);
         }
 
         // Three-param async functions: fn(A, B, C) -> R
@@ -7389,7 +7321,7 @@ impl TypeChecker {
                 Type::Var(ret),
             );
             let scheme = TypeScheme::poly(List::from_iter([a, b, c, ret]), fn_ty);
-            self.ctx.env.insert(verum_common::Text::from(*name), scheme);
+            self.define_builtin_value(verum_common::Text::from(*name), scheme);
         }
 
         // Variadic/special async functions
@@ -7403,7 +7335,7 @@ impl TypeChecker {
             let ret = TypeVar::fresh();
             let fn_ty = Type::function(params, Type::Var(ret));
             let scheme = TypeScheme::poly(List::from_iter([t, ret]), fn_ty);
-            self.ctx.env.insert(verum_common::Text::from(*name), scheme);
+            self.define_builtin_value(verum_common::Text::from(*name), scheme);
         }
 
         // join builtins with specific arities
@@ -7416,7 +7348,7 @@ impl TypeChecker {
                 List::from_iter([Type::Var(a), Type::Var(b)]),
                 Type::Var(ret),
             );
-            self.ctx.env.insert(
+            self.define_builtin_value(
                 verum_common::Text::from("join2"),
                 TypeScheme::poly(List::from_iter([a, b, ret]), fn_ty),
             );
@@ -7430,7 +7362,7 @@ impl TypeChecker {
                 List::from_iter([Type::Var(a), Type::Var(b), Type::Var(c)]),
                 Type::Var(ret),
             );
-            self.ctx.env.insert(
+            self.define_builtin_value(
                 verum_common::Text::from("join3"),
                 TypeScheme::poly(List::from_iter([a, b, c, ret]), fn_ty),
             );
@@ -7452,7 +7384,7 @@ impl TypeChecker {
                 ]),
                 Type::Var(ret),
             );
-            self.ctx.env.insert(
+            self.define_builtin_value(
                 verum_common::Text::from("join5"),
                 TypeScheme::poly(List::from_iter([a, b, c, d, e, ret]), fn_ty),
             );
@@ -7466,7 +7398,7 @@ impl TypeChecker {
                 List::from_iter([Type::Var(a), Type::Var(b), Type::Var(c)]),
                 Type::Var(ret),
             );
-            self.ctx.env.insert(
+            self.define_builtin_value(
                 verum_common::Text::from("try_join3"),
                 TypeScheme::poly(List::from_iter([a, b, c, ret]), fn_ty),
             );
@@ -7479,7 +7411,7 @@ impl TypeChecker {
                 List::from_iter([Type::Var(a), Type::Var(b)]),
                 Type::Var(ret),
             );
-            self.ctx.env.insert(
+            self.define_builtin_value(
                 verum_common::Text::from("race2"),
                 TypeScheme::poly(List::from_iter([a, b, ret]), fn_ty),
             );
@@ -7493,7 +7425,7 @@ impl TypeChecker {
                 List::from_iter([Type::Var(a), Type::Var(b), Type::Var(c)]),
                 Type::Var(ret),
             );
-            self.ctx.env.insert(
+            self.define_builtin_value(
                 verum_common::Text::from("race3"),
                 TypeScheme::poly(List::from_iter([a, b, c, ret]), fn_ty),
             );
@@ -7502,7 +7434,7 @@ impl TypeChecker {
             let a = TypeVar::fresh();
             let ret = TypeVar::fresh();
             let fn_ty = Type::function(List::from_iter([Type::Var(a)]), Type::Var(ret));
-            self.ctx.env.insert(
+            self.define_builtin_value(
                 verum_common::Text::from("race_all"),
                 TypeScheme::poly(List::from_iter([a, ret]), fn_ty),
             );
@@ -7510,7 +7442,7 @@ impl TypeChecker {
             // set_panic_hook(fn) -> ()
             let a = TypeVar::fresh();
             let fn_ty = Type::function(List::from_iter([Type::Var(a)]), Type::unit());
-            self.ctx.env.insert(
+            self.define_builtin_value(
                 verum_common::Text::from("set_panic_hook"),
                 TypeScheme::poly(List::from_iter([a]), fn_ty),
             );
@@ -7518,7 +7450,7 @@ impl TypeChecker {
             // oneshot() -> (Sender<T>, Receiver<T>)
             let ret = TypeVar::fresh();
             let fn_ty = Type::function(List::new(), Type::Var(ret));
-            self.ctx.env.insert(
+            self.define_builtin_value(
                 verum_common::Text::from("oneshot"),
                 TypeScheme::poly(List::from_iter([ret]), fn_ty),
             );
@@ -7555,7 +7487,7 @@ impl TypeChecker {
             "SystemTime",
         ] {
             let t = TypeVar::fresh();
-            self.ctx.env.insert(
+            self.define_builtin_value(
                 verum_common::Text::from(*name),
                 TypeScheme::mono(Type::Var(t)),
             );
@@ -7582,7 +7514,7 @@ impl TypeChecker {
             let params = List::from_iter([Type::Var(tv_i), Type::Var(tv_a)]);
             let ret = Type::Var(tv_a);
             let ty = Type::function(params, ret);
-            self.ctx.env.insert(
+            self.define_builtin_value(
                 verum_common::Text::from("transport"),
                 TypeScheme::poly(List::from_iter([tv_a, tv_i]), ty),
             );
@@ -7595,7 +7527,7 @@ impl TypeChecker {
             let params = List::from_iter([Type::Var(tv_a), Type::Var(tv_a)]);
             let ret = Type::Var(tv_a);
             let ty = Type::function(params, ret);
-            self.ctx.env.insert(
+            self.define_builtin_value(
                 verum_common::Text::from("hcomp"),
                 TypeScheme::poly(List::from_iter([tv_a]), ty),
             );
@@ -7606,15 +7538,15 @@ impl TypeChecker {
         // with whatever the cubical normalizer expects.
         {
             let interval_tv = TypeVar::fresh();
-            self.ctx.env.insert(
+            self.define_builtin_value(
                 verum_common::Text::from("Interval"),
                 TypeScheme::mono(Type::Var(interval_tv)),
             );
-            self.ctx.env.insert(
+            self.define_builtin_value(
                 verum_common::Text::from("i0"),
                 TypeScheme::mono(Type::Var(interval_tv)),
             );
-            self.ctx.env.insert(
+            self.define_builtin_value(
                 verum_common::Text::from("i1"),
                 TypeScheme::mono(Type::Var(interval_tv)),
             );
@@ -7635,11 +7567,11 @@ impl TypeChecker {
             name: verum_common::Text::from("TokenStream"),
             args: List::new(),
         };
-        self.ctx.define_type(
+        self.define_builtin_type(
             verum_common::Text::from("TokenStream"),
             token_stream_ty.clone(),
         );
-        self.ctx.env.insert(
+        self.define_builtin_value(
             verum_common::Text::from("TokenStream"),
             TypeScheme::mono(token_stream_ty.clone()),
         );
@@ -7649,9 +7581,8 @@ impl TypeChecker {
             name: verum_common::Text::from("Ident"),
             args: List::new(),
         };
-        self.ctx
-            .define_type(verum_common::Text::from("Ident"), ident_ty.clone());
-        self.ctx.env.insert(
+        self.define_builtin_type(verum_common::Text::from("Ident"), ident_ty.clone());
+        self.define_builtin_value(
             verum_common::Text::from("Ident"),
             TypeScheme::mono(ident_ty.clone()),
         );
@@ -7661,9 +7592,8 @@ impl TypeChecker {
             name: verum_common::Text::from("TypeInfo"),
             args: List::new(),
         };
-        self.ctx
-            .define_type(verum_common::Text::from("TypeInfo"), type_info_ty.clone());
-        self.ctx.env.insert(
+        self.define_builtin_type(verum_common::Text::from("TypeInfo"), type_info_ty.clone());
+        self.define_builtin_value(
             verum_common::Text::from("TypeInfo"),
             TypeScheme::mono(type_info_ty.clone()),
         );
@@ -7684,9 +7614,8 @@ impl TypeChecker {
             )),
             args: List::new(),
         };
-        self.ctx
-            .define_type(verum_common::Text::from("UInt"), uint_ty.clone());
-        self.ctx.env.insert(
+        self.define_builtin_type(verum_common::Text::from("UInt"), uint_ty.clone());
+        self.define_builtin_value(
             verum_common::Text::from("UInt"),
             TypeScheme::mono(uint_ty.clone()),
         );
@@ -7696,9 +7625,8 @@ impl TypeChecker {
             name: verum_common::Text::from("Bytes"),
             args: List::new(),
         };
-        self.ctx
-            .define_type(verum_common::Text::from("Bytes"), bytes_ty.clone());
-        self.ctx.env.insert(
+        self.define_builtin_type(verum_common::Text::from("Bytes"), bytes_ty.clone());
+        self.define_builtin_value(
             verum_common::Text::from("Bytes"),
             TypeScheme::mono(bytes_ty.clone()),
         );
@@ -7759,9 +7687,8 @@ impl TypeChecker {
                 name: verum_common::Text::from(*ctx_name),
                 args: List::new(),
             };
-            self.ctx
-                .define_type(verum_common::Text::from(*ctx_name), ctx_ty.clone());
-            self.ctx.env.insert(
+            self.define_builtin_type(verum_common::Text::from(*ctx_name), ctx_ty.clone());
+            self.define_builtin_value(
                 verum_common::Text::from(*ctx_name),
                 TypeScheme::mono(ctx_ty),
             );
@@ -7780,9 +7707,7 @@ impl TypeChecker {
                 // occupant without a second hardcoded name list.
                 self.meta_builtin_names
                     .insert(verum_common::Text::from($name));
-                self.ctx
-                    .env
-                    .insert_mono($name, Type::function($params, $ret));
+                self.define_builtin_value($name, TypeScheme::mono(Type::function($params, $ret)));
             };
         }
         // Generic meta builtin: accepts type parameters (e.g., type_name<Int>())
@@ -7793,7 +7718,7 @@ impl TypeChecker {
                 let tv = TypeVar::fresh();
                 let ty = Type::function($params, $ret);
                 let scheme = TypeScheme::poly(List::from_iter([tv]), ty);
-                self.ctx.env.insert(verum_common::Text::from($name), scheme);
+                self.define_builtin_value(verum_common::Text::from($name), scheme);
             }};
         }
         // T0252: numeric builtins (abs/min/max/clamp) are polymorphic over the
@@ -7808,7 +7733,7 @@ impl TypeChecker {
                 let params: List<Type> =
                     std::iter::repeat(Type::Var(tv)).take($arity).collect();
                 let ty = Type::function(params, Type::Var(tv));
-                self.ctx.env.insert(
+                self.define_builtin_value(
                     verum_common::Text::from($name),
                     TypeScheme::poly(List::from_iter([tv]), ty),
                 );
