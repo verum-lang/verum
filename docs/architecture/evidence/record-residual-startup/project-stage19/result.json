@@ -1,0 +1,39 @@
+{
+  "task": "T1688",
+  "related": "T1687",
+  "language_commit": "22a061ae654af44e752a6d31840614c734773bfa",
+  "cli_sha256": "8213a25e2e4f177f9c5119191c5c8a33ac8e6d6d407e71a9349cca8194643f6a",
+  "build_manifest_sha256": "1a08a3b8c5d25d069f704091db0c9b0e7784ac83487d93eb1c2c8eb56b74fae7",
+  "working_directory": "/private/tmp/verum-record-residual-project",
+  "command": [
+    "/private/tmp/verum-registry-stage19-borrowed-elements/verum-22a061ae6",
+    "run",
+    "--tier",
+    "interpret"
+  ],
+  "environment_overrides": {
+    "NO_COLOR": "1",
+    "VERUM_NO_OBJECT_CACHE": "1",
+    "TMPDIR": "/private/tmp"
+  },
+  "deadline_seconds": 180,
+  "source_fixture_sha256": "5a53892923f88e84300a9133216913bd8300728629c4788893fb952b4d565e2a",
+  "project_inputs": {
+    "src/main.vr": "b0d3bcb3fc01275b8bd714cb29744cb90f6c51513ed70f328670aed7fd3b1116",
+    "verum.toml": "6b370a6c8cbf3e75d3b958b2243e2e3334b937016a8cf2fc652edd67c67c5abb"
+  },
+  "entry_transformation": "Prepend only module residual_probe.main to the unchanged standalone fixture; add cog manifest.",
+  "expected_stdout": "inside:Err\noutside:Err\n",
+  "scope": "Diagnostic comparison of project vs standalone initialization and residual behavior; no full registry acceptance.",
+  "elapsed_seconds": 139.226,
+  "returncode": 1,
+  "timed_out": false,
+  "source_unchanged": true,
+  "cli_unchanged": true,
+  "exact_stdout": false,
+  "logs": {
+    "stdout.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderr.log": "0942ad4f0c6df5a9c3d775b721e7ee297a47cc26691e11ddc5b1bba39568419b"
+  },
+  "status": "failed"
+}

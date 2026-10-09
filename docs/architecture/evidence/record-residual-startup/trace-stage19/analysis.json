@@ -1,0 +1,19 @@
+{
+  "task": "T1688",
+  "receipt_sha256": "f57cd8b25474662ccfc4927e645f5b11771d6c598beb4ec2a0a981eb02a6be28",
+  "runner_sha256": "28d5705afdc3abf2140b348840e022bf0145e1077f6885b6765357d7b09b50c8",
+  "archive_sha256": "6fb275b7346f230a9daa984febc28deced634a5ace38f1b7f4df6c5f0e667e92",
+  "source_declaration": "core/runtime/supervisor.vr: static mut CHILD_ID_COUNTER: AtomicU64 = AtomicU64.new(1);",
+  "observed_initializer": "__tls_init_CHILD_ID_COUNTER",
+  "call_pc": 6,
+  "encoded_call_target": 536870955,
+  "argument_count": 1,
+  "observed_argument": "Int(1)",
+  "resolved_target": {
+    "id": 165,
+    "name": "ArenaPool.new",
+    "bytecode_length": 209
+  },
+  "conclusion": "The ordinary startup path resolves the counter initializer constructor call to an unrelated arena-pool constructor. The trace establishes a wrong call target, not its producer/importer root cause.",
+  "scope": "No main-entry execution, residual result, startup bypass, or production repair."
+}

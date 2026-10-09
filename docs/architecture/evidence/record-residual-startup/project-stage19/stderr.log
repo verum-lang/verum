@@ -1,0 +1,2 @@
+Interpreting /private/tmp/verum-record-residual-project/src/main.vr
+error: Runtime error: VBC global_ctors error: NullPointerAt { op: "opcode 0x62", site: "ArenaPool.new", pc: 27 }

@@ -1,0 +1,38 @@
+{
+  "language_commit": "22a061ae654af44e752a6d31840614c734773bfa",
+  "build_manifest_sha256": "1a08a3b8c5d25d069f704091db0c9b0e7784ac83487d93eb1c2c8eb56b74fae7",
+  "cli_sha256": "8213a25e2e4f177f9c5119191c5c8a33ac8e6d6d407e71a9349cca8194643f6a",
+  "fixture_path": "/private/tmp/verum-record-residual-probe.vr",
+  "fixture_sha256": "5a53892923f88e84300a9133216913bd8300728629c4788893fb952b4d565e2a",
+  "executed_fixture": "/private/tmp/verum-record-residual-stage19-trace/verum-record-residual-probe/verum-record-residual-probe.vr",
+  "command": [
+    "/private/tmp/verum-registry-stage19-borrowed-elements/verum-22a061ae6",
+    "run",
+    "--tier",
+    "interpret",
+    "/private/tmp/verum-record-residual-stage19-trace/verum-record-residual-probe/verum-record-residual-probe.vr"
+  ],
+  "expected_stdout": "inside:Err\noutside:Err\n",
+  "deadline_seconds": 180,
+  "environment_overrides": {
+    "NO_COLOR": "1",
+    "VERUM_NO_OBJECT_CACHE": "1",
+    "TMPDIR": "/private/tmp",
+    "VERUM_TRACE_CALLS": "1",
+    "VERUM_TRACE_PC": "__tls_init_",
+    "VERUM_TRACE_PC_DECODE": "1"
+  },
+  "scope": "Standalone ordinary interpreter fixture; no whole-project, AOT, cryptographic evidence or service acceptance.",
+  "working_directory": "/private/tmp/verum-identified-41s240sl",
+  "elapsed_seconds": 81.156,
+  "returncode": 1,
+  "timed_out": false,
+  "source_unchanged": true,
+  "cli_unchanged": true,
+  "exact_stdout": false,
+  "logs": {
+    "stdout.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderr.log": "49413130524ee59118c2a8f779a0d54c76ff3271ec40e53aa59b8345f1c65341"
+  },
+  "status": "failed"
+}

@@ -1,0 +1,540 @@
+     Running /private/tmp/verum-record-residual-stage19-trace/verum-record-residual-probe/verum-record-residual-probe.vr (interpreter)
+[pc] __tls_init_REGISTRY pc=0 op=0x1f | r1=other r2=other r3=other | MakeVariantTyped { dst: Reg(0), type_id: 515, tag: 0, field_count: 0 }
+[pc] __tls_init_REGISTRY pc=7 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(1), src: Reg(0) }
+[pc] __tls_init_REGISTRY pc=10 op=0x5b | r1=ptr(@0xc8e8d1540 tid=515 vtag=0) r2=other r3=other | Call { dst: Reg(0), func_id: 4290771041, args: RegRange { start: Reg(1), count: 1 } }
+[pc] __tls_init_INIT_ALLOCATOR_INITIALIZED pc=0 op=0x05 | r1=other r2=other r3=other | LoadFalse { dst: Reg(0) }
+[pc] __tls_init_INIT_ALLOCATOR_INITIALIZED pc=2 op=0x02 | r1=other r2=other r3=other | LoadI { dst: Reg(1), value: 1 }
+[pc] __tls_init_INIT_ALLOCATOR_INITIALIZED pc=5 op=0xea | r1=int(1) r2=other r3=other | TlsSet { slot: Reg(1), val: Reg(0) }
+[pc] __tls_init_INIT_ALLOCATOR_INITIALIZED pc=8 op=0xbf | r1=int(1) r2=other r3=other | MemExtended { sub_op: 64, operands: [1, 5, 0] }
+[pc] __tls_init_INIT_ALLOCATOR_INITIALIZED pc=14 op=0xbf | r1=ptr(@0xc5349e630 tid=0 vtag=6907462) r2=other r3=other | MemExtended { sub_op: 27, operands: [1, 0, 8] }
+[pc] __tls_init_INIT_ALLOCATOR_INITIALIZED pc=20 op=0x59 | r1=ptr(@0xc5349e630 tid=0 vtag=6907462) r2=other r3=other | Ret { value: Reg(0) }
+[pc] __tls_init_INIT_CONTEXT_INITIALIZED pc=0 op=0x05 | r1=other r2=other r3=other | LoadFalse { dst: Reg(0) }
+[pc] __tls_init_INIT_CONTEXT_INITIALIZED pc=2 op=0x02 | r1=other r2=other r3=other | LoadI { dst: Reg(1), value: 2 }
+[pc] __tls_init_INIT_CONTEXT_INITIALIZED pc=5 op=0xea | r1=int(2) r2=other r3=other | TlsSet { slot: Reg(1), val: Reg(0) }
+[pc] __tls_init_INIT_CONTEXT_INITIALIZED pc=8 op=0xbf | r1=int(2) r2=other r3=other | MemExtended { sub_op: 64, operands: [1, 4, 0] }
+[pc] __tls_init_INIT_CONTEXT_INITIALIZED pc=14 op=0xbf | r1=ptr(@0xc5349e610 tid=0 vtag=0) r2=other r3=other | MemExtended { sub_op: 27, operands: [1, 0, 8] }
+[pc] __tls_init_INIT_CONTEXT_INITIALIZED pc=20 op=0x59 | r1=ptr(@0xc5349e610 tid=0 vtag=0) r2=other r3=other | Ret { value: Reg(0) }
+[pc] __tls_init_INIT_FULLY_INITIALIZED pc=0 op=0x05 | r1=other r2=other r3=other | LoadFalse { dst: Reg(0) }
+[pc] __tls_init_INIT_FULLY_INITIALIZED pc=2 op=0x02 | r1=other r2=other r3=other | LoadI { dst: Reg(1), value: 3 }
+[pc] __tls_init_INIT_FULLY_INITIALIZED pc=5 op=0xea | r1=int(3) r2=other r3=other | TlsSet { slot: Reg(1), val: Reg(0) }
+[pc] __tls_init_INIT_FULLY_INITIALIZED pc=8 op=0xbf | r1=int(3) r2=other r3=other | MemExtended { sub_op: 64, operands: [1, 7, 0] }
+[pc] __tls_init_INIT_FULLY_INITIALIZED pc=14 op=0xbf | r1=ptr(@0xc5349e5f0 tid=0 vtag=110) r2=other r3=other | MemExtended { sub_op: 27, operands: [1, 0, 8] }
+[pc] __tls_init_INIT_FULLY_INITIALIZED pc=20 op=0x59 | r1=ptr(@0xc5349e5f0 tid=0 vtag=110) r2=other r3=other | Ret { value: Reg(0) }
+[pc] __tls_init_INIT_PANIC_HANDLER_INITIALIZED pc=0 op=0x05 | r1=other r2=other r3=other | LoadFalse { dst: Reg(0) }
+[pc] __tls_init_INIT_PANIC_HANDLER_INITIALIZED pc=2 op=0x02 | r1=other r2=other r3=other | LoadI { dst: Reg(1), value: 4 }
+[pc] __tls_init_INIT_PANIC_HANDLER_INITIALIZED pc=5 op=0xea | r1=int(4) r2=other r3=other | TlsSet { slot: Reg(1), val: Reg(0) }
+[pc] __tls_init_INIT_PANIC_HANDLER_INITIALIZED pc=8 op=0xbf | r1=int(4) r2=other r3=other | MemExtended { sub_op: 64, operands: [1, 6, 0] }
+[pc] __tls_init_INIT_PANIC_HANDLER_INITIALIZED pc=14 op=0xbf | r1=ptr(@0xc5349e5d0 tid=0 vtag=25972) r2=other r3=other | MemExtended { sub_op: 27, operands: [1, 0, 8] }
+[pc] __tls_init_INIT_PANIC_HANDLER_INITIALIZED pc=20 op=0x59 | r1=ptr(@0xc5349e5d0 tid=0 vtag=25972) r2=other r3=other | Ret { value: Reg(0) }
+[pc] __tls_init_INIT_TLS_INITIALIZED pc=0 op=0x05 | r1=other r2=other r3=other | LoadFalse { dst: Reg(0) }
+[pc] __tls_init_INIT_TLS_INITIALIZED pc=2 op=0x02 | r1=other r2=other r3=other | LoadI { dst: Reg(1), value: 5 }
+[pc] __tls_init_INIT_TLS_INITIALIZED pc=5 op=0xea | r1=int(5) r2=other r3=other | TlsSet { slot: Reg(1), val: Reg(0) }
+[pc] __tls_init_INIT_TLS_INITIALIZED pc=8 op=0xbf | r1=int(5) r2=other r3=other | MemExtended { sub_op: 64, operands: [1, 3, 0] }
+[pc] __tls_init_INIT_TLS_INITIALIZED pc=14 op=0xbf | r1=ptr(@0xc5349e5b0 tid=0 vtag=1768121668) r2=other r3=other | MemExtended { sub_op: 27, operands: [1, 0, 8] }
+[pc] __tls_init_INIT_TLS_INITIALIZED pc=20 op=0x59 | r1=ptr(@0xc5349e5b0 tid=0 vtag=1768121668) r2=other r3=other | Ret { value: Reg(0) }
+[pc] __tls_init_PANIC_HANDLER pc=0 op=0x8a | r1=other r2=other r3=other | NewClosure { dst: Reg(0), func_id: 17767, captures: [] }
+[pc] __tls_init_PANIC_HANDLER pc=6 op=0x02 | r1=other r2=other r3=other | LoadI { dst: Reg(1), value: 6 }
+[pc] __tls_init_PANIC_HANDLER pc=9 op=0xea | r1=int(6) r2=other r3=other | TlsSet { slot: Reg(1), val: Reg(0) }
+[pc] __tls_init_PANIC_HANDLER pc=12 op=0xbf | r1=int(6) r2=other r3=other | MemExtended { sub_op: 64, operands: [1, 8, 0] }
+[pc] __tls_init_PANIC_HANDLER pc=18 op=0xbf | r1=ptr(@0xc5349e590 tid=0 vtag=0) r2=other r3=other | MemExtended { sub_op: 27, operands: [1, 0, 8] }
+[pc] __tls_init_PANIC_HANDLER pc=24 op=0x59 | r1=ptr(@0xc5349e590 tid=2391609312 vtag=0) r2=other r3=other | Ret { value: Reg(0) }
+[pc] __tls_init_PROCESS_ARGC pc=0 op=0x02 | r1=other r2=other r3=other | LoadI { dst: Reg(0), value: 0 }
+[pc] __tls_init_PROCESS_ARGC pc=3 op=0x02 | r1=other r2=other r3=other | LoadI { dst: Reg(1), value: 7 }
+[pc] __tls_init_PROCESS_ARGC pc=6 op=0xea | r1=int(7) r2=other r3=other | TlsSet { slot: Reg(1), val: Reg(0) }
+[pc] __tls_init_PROCESS_ARGC pc=9 op=0xbf | r1=int(7) r2=other r3=other | MemExtended { sub_op: 64, operands: [1, 0, 0] }
+[pc] __tls_init_PROCESS_ARGC pc=15 op=0xbf | r1=ptr(@0xc5349e570 tid=0 vtag=29806) r2=other r3=other | MemExtended { sub_op: 27, operands: [1, 0, 8] }
+[pc] __tls_init_PROCESS_ARGC pc=21 op=0x59 | r1=ptr(@0xc5349e570 tid=0 vtag=29806) r2=other r3=other | Ret { value: Reg(0) }
+[pc] __tls_init_PROCESS_ARGV pc=0 op=0x02 | r1=other r2=other r3=other | LoadI { dst: Reg(0), value: 0 }
+[pc] __tls_init_PROCESS_ARGV pc=3 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(1), src: Reg(0) }
+[pc] __tls_init_PROCESS_ARGV pc=6 op=0x02 | r1=int(0) r2=other r3=other | LoadI { dst: Reg(2), value: 8 }
+[pc] __tls_init_PROCESS_ARGV pc=9 op=0xea | r1=int(0) r2=int(8) r3=other | TlsSet { slot: Reg(2), val: Reg(1) }
+[pc] __tls_init_PROCESS_ARGV pc=12 op=0xbf | r1=int(0) r2=int(8) r3=other | MemExtended { sub_op: 64, operands: [2, 1, 0] }
+[pc] __tls_init_PROCESS_ARGV pc=18 op=0xbf | r1=int(0) r2=ptr(@0xc5349e550 tid=0 vtag=0) r3=other | MemExtended { sub_op: 27, operands: [2, 1, 8] }
+[pc] __tls_init_PROCESS_ARGV pc=24 op=0x59 | r1=int(0) r2=ptr(@0xc5349e550 tid=0 vtag=0) r3=other | Ret { value: Reg(1) }
+[pc] __tls_init_PROCESS_ENVIRON pc=0 op=0x02 | r1=other r2=other r3=other | LoadI { dst: Reg(0), value: 0 }
+[pc] __tls_init_PROCESS_ENVIRON pc=3 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(1), src: Reg(0) }
+[pc] __tls_init_PROCESS_ENVIRON pc=6 op=0x02 | r1=int(0) r2=other r3=other | LoadI { dst: Reg(2), value: 9 }
+[pc] __tls_init_PROCESS_ENVIRON pc=9 op=0xea | r1=int(0) r2=int(9) r3=other | TlsSet { slot: Reg(2), val: Reg(1) }
+[pc] __tls_init_PROCESS_ENVIRON pc=12 op=0xbf | r1=int(0) r2=int(9) r3=other | MemExtended { sub_op: 64, operands: [2, 2, 0] }
+[pc] __tls_init_PROCESS_ENVIRON pc=18 op=0xbf | r1=int(0) r2=ptr(@0xc5349e530 tid=0 vtag=0) r3=other | MemExtended { sub_op: 27, operands: [2, 1, 8] }
+[pc] __tls_init_PROCESS_ENVIRON pc=24 op=0x59 | r1=int(0) r2=ptr(@0xc5349e530 tid=0 vtag=0) r3=other | Ret { value: Reg(1) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=0 op=0x02 | r1=other r2=other r3=other | LoadI { dst: Reg(1), value: 64 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=4 op=0x68 | r1=int(64) r2=other r3=other | NewList { dst: Reg(0), capacity_hint: 0 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=7 op=0x02 | r1=int(64) r2=other r3=other | LoadI { dst: Reg(2), value: 0 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=10 op=0x02 | r1=int(64) r2=int(0) r3=other | LoadI { dst: Reg(3), value: 0 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=13 op=0x42 | r1=int(64) r2=int(0) r3=int(0) | CmpI { op: Lt, dst: Reg(4), a: Reg(3), b: Reg(1) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=17 op=0x52 | r1=int(64) r2=int(0) r3=int(0) | JmpNot { cond: Reg(4), offset: 11 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=20 op=0x6f | r1=int(64) r2=int(0) r3=int(0) | Clone { dst: Reg(4), src: Reg(2) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=23 op=0x69 | r1=int(64) r2=int(0) r3=int(0) | ListPush { list: Reg(0), val: Reg(4) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=26 op=0x18 | r1=int(64) r2=int(0) r3=int(0) | UnaryI { op: Inc, dst: Reg(3), src: Reg(3) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=29 op=0x50 | r1=int(64) r2=int(0) r3=int(1) | Jmp { offset: -18 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=13 op=0x42 | r1=int(64) r2=int(0) r3=int(1) | CmpI { op: Lt, dst: Reg(4), a: Reg(3), b: Reg(1) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=17 op=0x52 | r1=int(64) r2=int(0) r3=int(1) | JmpNot { cond: Reg(4), offset: 11 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=20 op=0x6f | r1=int(64) r2=int(0) r3=int(1) | Clone { dst: Reg(4), src: Reg(2) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=23 op=0x69 | r1=int(64) r2=int(0) r3=int(1) | ListPush { list: Reg(0), val: Reg(4) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=26 op=0x18 | r1=int(64) r2=int(0) r3=int(1) | UnaryI { op: Inc, dst: Reg(3), src: Reg(3) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=29 op=0x50 | r1=int(64) r2=int(0) r3=int(2) | Jmp { offset: -18 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=13 op=0x42 | r1=int(64) r2=int(0) r3=int(2) | CmpI { op: Lt, dst: Reg(4), a: Reg(3), b: Reg(1) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=17 op=0x52 | r1=int(64) r2=int(0) r3=int(2) | JmpNot { cond: Reg(4), offset: 11 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=20 op=0x6f | r1=int(64) r2=int(0) r3=int(2) | Clone { dst: Reg(4), src: Reg(2) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=23 op=0x69 | r1=int(64) r2=int(0) r3=int(2) | ListPush { list: Reg(0), val: Reg(4) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=26 op=0x18 | r1=int(64) r2=int(0) r3=int(2) | UnaryI { op: Inc, dst: Reg(3), src: Reg(3) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=29 op=0x50 | r1=int(64) r2=int(0) r3=int(3) | Jmp { offset: -18 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=13 op=0x42 | r1=int(64) r2=int(0) r3=int(3) | CmpI { op: Lt, dst: Reg(4), a: Reg(3), b: Reg(1) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=17 op=0x52 | r1=int(64) r2=int(0) r3=int(3) | JmpNot { cond: Reg(4), offset: 11 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=20 op=0x6f | r1=int(64) r2=int(0) r3=int(3) | Clone { dst: Reg(4), src: Reg(2) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=23 op=0x69 | r1=int(64) r2=int(0) r3=int(3) | ListPush { list: Reg(0), val: Reg(4) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=26 op=0x18 | r1=int(64) r2=int(0) r3=int(3) | UnaryI { op: Inc, dst: Reg(3), src: Reg(3) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=29 op=0x50 | r1=int(64) r2=int(0) r3=int(4) | Jmp { offset: -18 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=13 op=0x42 | r1=int(64) r2=int(0) r3=int(4) | CmpI { op: Lt, dst: Reg(4), a: Reg(3), b: Reg(1) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=17 op=0x52 | r1=int(64) r2=int(0) r3=int(4) | JmpNot { cond: Reg(4), offset: 11 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=20 op=0x6f | r1=int(64) r2=int(0) r3=int(4) | Clone { dst: Reg(4), src: Reg(2) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=23 op=0x69 | r1=int(64) r2=int(0) r3=int(4) | ListPush { list: Reg(0), val: Reg(4) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=26 op=0x18 | r1=int(64) r2=int(0) r3=int(4) | UnaryI { op: Inc, dst: Reg(3), src: Reg(3) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=29 op=0x50 | r1=int(64) r2=int(0) r3=int(5) | Jmp { offset: -18 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=13 op=0x42 | r1=int(64) r2=int(0) r3=int(5) | CmpI { op: Lt, dst: Reg(4), a: Reg(3), b: Reg(1) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=17 op=0x52 | r1=int(64) r2=int(0) r3=int(5) | JmpNot { cond: Reg(4), offset: 11 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=20 op=0x6f | r1=int(64) r2=int(0) r3=int(5) | Clone { dst: Reg(4), src: Reg(2) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=23 op=0x69 | r1=int(64) r2=int(0) r3=int(5) | ListPush { list: Reg(0), val: Reg(4) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=26 op=0x18 | r1=int(64) r2=int(0) r3=int(5) | UnaryI { op: Inc, dst: Reg(3), src: Reg(3) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=29 op=0x50 | r1=int(64) r2=int(0) r3=int(6) | Jmp { offset: -18 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=13 op=0x42 | r1=int(64) r2=int(0) r3=int(6) | CmpI { op: Lt, dst: Reg(4), a: Reg(3), b: Reg(1) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=17 op=0x52 | r1=int(64) r2=int(0) r3=int(6) | JmpNot { cond: Reg(4), offset: 11 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=20 op=0x6f | r1=int(64) r2=int(0) r3=int(6) | Clone { dst: Reg(4), src: Reg(2) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=23 op=0x69 | r1=int(64) r2=int(0) r3=int(6) | ListPush { list: Reg(0), val: Reg(4) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=26 op=0x18 | r1=int(64) r2=int(0) r3=int(6) | UnaryI { op: Inc, dst: Reg(3), src: Reg(3) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=29 op=0x50 | r1=int(64) r2=int(0) r3=int(7) | Jmp { offset: -18 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=13 op=0x42 | r1=int(64) r2=int(0) r3=int(7) | CmpI { op: Lt, dst: Reg(4), a: Reg(3), b: Reg(1) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=17 op=0x52 | r1=int(64) r2=int(0) r3=int(7) | JmpNot { cond: Reg(4), offset: 11 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=20 op=0x6f | r1=int(64) r2=int(0) r3=int(7) | Clone { dst: Reg(4), src: Reg(2) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=23 op=0x69 | r1=int(64) r2=int(0) r3=int(7) | ListPush { list: Reg(0), val: Reg(4) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=26 op=0x18 | r1=int(64) r2=int(0) r3=int(7) | UnaryI { op: Inc, dst: Reg(3), src: Reg(3) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=29 op=0x50 | r1=int(64) r2=int(0) r3=int(8) | Jmp { offset: -18 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=13 op=0x42 | r1=int(64) r2=int(0) r3=int(8) | CmpI { op: Lt, dst: Reg(4), a: Reg(3), b: Reg(1) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=17 op=0x52 | r1=int(64) r2=int(0) r3=int(8) | JmpNot { cond: Reg(4), offset: 11 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=20 op=0x6f | r1=int(64) r2=int(0) r3=int(8) | Clone { dst: Reg(4), src: Reg(2) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=23 op=0x69 | r1=int(64) r2=int(0) r3=int(8) | ListPush { list: Reg(0), val: Reg(4) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=26 op=0x18 | r1=int(64) r2=int(0) r3=int(8) | UnaryI { op: Inc, dst: Reg(3), src: Reg(3) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=29 op=0x50 | r1=int(64) r2=int(0) r3=int(9) | Jmp { offset: -18 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=13 op=0x42 | r1=int(64) r2=int(0) r3=int(9) | CmpI { op: Lt, dst: Reg(4), a: Reg(3), b: Reg(1) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=17 op=0x52 | r1=int(64) r2=int(0) r3=int(9) | JmpNot { cond: Reg(4), offset: 11 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=20 op=0x6f | r1=int(64) r2=int(0) r3=int(9) | Clone { dst: Reg(4), src: Reg(2) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=23 op=0x69 | r1=int(64) r2=int(0) r3=int(9) | ListPush { list: Reg(0), val: Reg(4) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=26 op=0x18 | r1=int(64) r2=int(0) r3=int(9) | UnaryI { op: Inc, dst: Reg(3), src: Reg(3) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=29 op=0x50 | r1=int(64) r2=int(0) r3=int(10) | Jmp { offset: -18 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=13 op=0x42 | r1=int(64) r2=int(0) r3=int(10) | CmpI { op: Lt, dst: Reg(4), a: Reg(3), b: Reg(1) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=17 op=0x52 | r1=int(64) r2=int(0) r3=int(10) | JmpNot { cond: Reg(4), offset: 11 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=20 op=0x6f | r1=int(64) r2=int(0) r3=int(10) | Clone { dst: Reg(4), src: Reg(2) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=23 op=0x69 | r1=int(64) r2=int(0) r3=int(10) | ListPush { list: Reg(0), val: Reg(4) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=26 op=0x18 | r1=int(64) r2=int(0) r3=int(10) | UnaryI { op: Inc, dst: Reg(3), src: Reg(3) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=29 op=0x50 | r1=int(64) r2=int(0) r3=int(11) | Jmp { offset: -18 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=13 op=0x42 | r1=int(64) r2=int(0) r3=int(11) | CmpI { op: Lt, dst: Reg(4), a: Reg(3), b: Reg(1) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=17 op=0x52 | r1=int(64) r2=int(0) r3=int(11) | JmpNot { cond: Reg(4), offset: 11 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=20 op=0x6f | r1=int(64) r2=int(0) r3=int(11) | Clone { dst: Reg(4), src: Reg(2) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=23 op=0x69 | r1=int(64) r2=int(0) r3=int(11) | ListPush { list: Reg(0), val: Reg(4) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=26 op=0x18 | r1=int(64) r2=int(0) r3=int(11) | UnaryI { op: Inc, dst: Reg(3), src: Reg(3) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=29 op=0x50 | r1=int(64) r2=int(0) r3=int(12) | Jmp { offset: -18 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=13 op=0x42 | r1=int(64) r2=int(0) r3=int(12) | CmpI { op: Lt, dst: Reg(4), a: Reg(3), b: Reg(1) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=17 op=0x52 | r1=int(64) r2=int(0) r3=int(12) | JmpNot { cond: Reg(4), offset: 11 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=20 op=0x6f | r1=int(64) r2=int(0) r3=int(12) | Clone { dst: Reg(4), src: Reg(2) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=23 op=0x69 | r1=int(64) r2=int(0) r3=int(12) | ListPush { list: Reg(0), val: Reg(4) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=26 op=0x18 | r1=int(64) r2=int(0) r3=int(12) | UnaryI { op: Inc, dst: Reg(3), src: Reg(3) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=29 op=0x50 | r1=int(64) r2=int(0) r3=int(13) | Jmp { offset: -18 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=13 op=0x42 | r1=int(64) r2=int(0) r3=int(13) | CmpI { op: Lt, dst: Reg(4), a: Reg(3), b: Reg(1) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=17 op=0x52 | r1=int(64) r2=int(0) r3=int(13) | JmpNot { cond: Reg(4), offset: 11 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=20 op=0x6f | r1=int(64) r2=int(0) r3=int(13) | Clone { dst: Reg(4), src: Reg(2) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=23 op=0x69 | r1=int(64) r2=int(0) r3=int(13) | ListPush { list: Reg(0), val: Reg(4) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=26 op=0x18 | r1=int(64) r2=int(0) r3=int(13) | UnaryI { op: Inc, dst: Reg(3), src: Reg(3) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=29 op=0x50 | r1=int(64) r2=int(0) r3=int(14) | Jmp { offset: -18 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=13 op=0x42 | r1=int(64) r2=int(0) r3=int(14) | CmpI { op: Lt, dst: Reg(4), a: Reg(3), b: Reg(1) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=17 op=0x52 | r1=int(64) r2=int(0) r3=int(14) | JmpNot { cond: Reg(4), offset: 11 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=20 op=0x6f | r1=int(64) r2=int(0) r3=int(14) | Clone { dst: Reg(4), src: Reg(2) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=23 op=0x69 | r1=int(64) r2=int(0) r3=int(14) | ListPush { list: Reg(0), val: Reg(4) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=26 op=0x18 | r1=int(64) r2=int(0) r3=int(14) | UnaryI { op: Inc, dst: Reg(3), src: Reg(3) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=29 op=0x50 | r1=int(64) r2=int(0) r3=int(15) | Jmp { offset: -18 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=13 op=0x42 | r1=int(64) r2=int(0) r3=int(15) | CmpI { op: Lt, dst: Reg(4), a: Reg(3), b: Reg(1) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=17 op=0x52 | r1=int(64) r2=int(0) r3=int(15) | JmpNot { cond: Reg(4), offset: 11 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=20 op=0x6f | r1=int(64) r2=int(0) r3=int(15) | Clone { dst: Reg(4), src: Reg(2) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=23 op=0x69 | r1=int(64) r2=int(0) r3=int(15) | ListPush { list: Reg(0), val: Reg(4) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=26 op=0x18 | r1=int(64) r2=int(0) r3=int(15) | UnaryI { op: Inc, dst: Reg(3), src: Reg(3) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=29 op=0x50 | r1=int(64) r2=int(0) r3=int(16) | Jmp { offset: -18 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=13 op=0x42 | r1=int(64) r2=int(0) r3=int(16) | CmpI { op: Lt, dst: Reg(4), a: Reg(3), b: Reg(1) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=17 op=0x52 | r1=int(64) r2=int(0) r3=int(16) | JmpNot { cond: Reg(4), offset: 11 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=20 op=0x6f | r1=int(64) r2=int(0) r3=int(16) | Clone { dst: Reg(4), src: Reg(2) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=23 op=0x69 | r1=int(64) r2=int(0) r3=int(16) | ListPush { list: Reg(0), val: Reg(4) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=26 op=0x18 | r1=int(64) r2=int(0) r3=int(16) | UnaryI { op: Inc, dst: Reg(3), src: Reg(3) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=29 op=0x50 | r1=int(64) r2=int(0) r3=int(17) | Jmp { offset: -18 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=13 op=0x42 | r1=int(64) r2=int(0) r3=int(17) | CmpI { op: Lt, dst: Reg(4), a: Reg(3), b: Reg(1) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=17 op=0x52 | r1=int(64) r2=int(0) r3=int(17) | JmpNot { cond: Reg(4), offset: 11 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=20 op=0x6f | r1=int(64) r2=int(0) r3=int(17) | Clone { dst: Reg(4), src: Reg(2) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=23 op=0x69 | r1=int(64) r2=int(0) r3=int(17) | ListPush { list: Reg(0), val: Reg(4) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=26 op=0x18 | r1=int(64) r2=int(0) r3=int(17) | UnaryI { op: Inc, dst: Reg(3), src: Reg(3) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=29 op=0x50 | r1=int(64) r2=int(0) r3=int(18) | Jmp { offset: -18 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=13 op=0x42 | r1=int(64) r2=int(0) r3=int(18) | CmpI { op: Lt, dst: Reg(4), a: Reg(3), b: Reg(1) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=17 op=0x52 | r1=int(64) r2=int(0) r3=int(18) | JmpNot { cond: Reg(4), offset: 11 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=20 op=0x6f | r1=int(64) r2=int(0) r3=int(18) | Clone { dst: Reg(4), src: Reg(2) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=23 op=0x69 | r1=int(64) r2=int(0) r3=int(18) | ListPush { list: Reg(0), val: Reg(4) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=26 op=0x18 | r1=int(64) r2=int(0) r3=int(18) | UnaryI { op: Inc, dst: Reg(3), src: Reg(3) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=29 op=0x50 | r1=int(64) r2=int(0) r3=int(19) | Jmp { offset: -18 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=13 op=0x42 | r1=int(64) r2=int(0) r3=int(19) | CmpI { op: Lt, dst: Reg(4), a: Reg(3), b: Reg(1) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=17 op=0x52 | r1=int(64) r2=int(0) r3=int(19) | JmpNot { cond: Reg(4), offset: 11 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=20 op=0x6f | r1=int(64) r2=int(0) r3=int(19) | Clone { dst: Reg(4), src: Reg(2) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=23 op=0x69 | r1=int(64) r2=int(0) r3=int(19) | ListPush { list: Reg(0), val: Reg(4) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=26 op=0x18 | r1=int(64) r2=int(0) r3=int(19) | UnaryI { op: Inc, dst: Reg(3), src: Reg(3) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=29 op=0x50 | r1=int(64) r2=int(0) r3=int(20) | Jmp { offset: -18 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=13 op=0x42 | r1=int(64) r2=int(0) r3=int(20) | CmpI { op: Lt, dst: Reg(4), a: Reg(3), b: Reg(1) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=17 op=0x52 | r1=int(64) r2=int(0) r3=int(20) | JmpNot { cond: Reg(4), offset: 11 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=20 op=0x6f | r1=int(64) r2=int(0) r3=int(20) | Clone { dst: Reg(4), src: Reg(2) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=23 op=0x69 | r1=int(64) r2=int(0) r3=int(20) | ListPush { list: Reg(0), val: Reg(4) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=26 op=0x18 | r1=int(64) r2=int(0) r3=int(20) | UnaryI { op: Inc, dst: Reg(3), src: Reg(3) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=29 op=0x50 | r1=int(64) r2=int(0) r3=int(21) | Jmp { offset: -18 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=13 op=0x42 | r1=int(64) r2=int(0) r3=int(21) | CmpI { op: Lt, dst: Reg(4), a: Reg(3), b: Reg(1) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=17 op=0x52 | r1=int(64) r2=int(0) r3=int(21) | JmpNot { cond: Reg(4), offset: 11 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=20 op=0x6f | r1=int(64) r2=int(0) r3=int(21) | Clone { dst: Reg(4), src: Reg(2) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=23 op=0x69 | r1=int(64) r2=int(0) r3=int(21) | ListPush { list: Reg(0), val: Reg(4) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=26 op=0x18 | r1=int(64) r2=int(0) r3=int(21) | UnaryI { op: Inc, dst: Reg(3), src: Reg(3) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=29 op=0x50 | r1=int(64) r2=int(0) r3=int(22) | Jmp { offset: -18 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=13 op=0x42 | r1=int(64) r2=int(0) r3=int(22) | CmpI { op: Lt, dst: Reg(4), a: Reg(3), b: Reg(1) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=17 op=0x52 | r1=int(64) r2=int(0) r3=int(22) | JmpNot { cond: Reg(4), offset: 11 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=20 op=0x6f | r1=int(64) r2=int(0) r3=int(22) | Clone { dst: Reg(4), src: Reg(2) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=23 op=0x69 | r1=int(64) r2=int(0) r3=int(22) | ListPush { list: Reg(0), val: Reg(4) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=26 op=0x18 | r1=int(64) r2=int(0) r3=int(22) | UnaryI { op: Inc, dst: Reg(3), src: Reg(3) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=29 op=0x50 | r1=int(64) r2=int(0) r3=int(23) | Jmp { offset: -18 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=13 op=0x42 | r1=int(64) r2=int(0) r3=int(23) | CmpI { op: Lt, dst: Reg(4), a: Reg(3), b: Reg(1) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=17 op=0x52 | r1=int(64) r2=int(0) r3=int(23) | JmpNot { cond: Reg(4), offset: 11 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=20 op=0x6f | r1=int(64) r2=int(0) r3=int(23) | Clone { dst: Reg(4), src: Reg(2) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=23 op=0x69 | r1=int(64) r2=int(0) r3=int(23) | ListPush { list: Reg(0), val: Reg(4) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=26 op=0x18 | r1=int(64) r2=int(0) r3=int(23) | UnaryI { op: Inc, dst: Reg(3), src: Reg(3) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=29 op=0x50 | r1=int(64) r2=int(0) r3=int(24) | Jmp { offset: -18 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=13 op=0x42 | r1=int(64) r2=int(0) r3=int(24) | CmpI { op: Lt, dst: Reg(4), a: Reg(3), b: Reg(1) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=17 op=0x52 | r1=int(64) r2=int(0) r3=int(24) | JmpNot { cond: Reg(4), offset: 11 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=20 op=0x6f | r1=int(64) r2=int(0) r3=int(24) | Clone { dst: Reg(4), src: Reg(2) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=23 op=0x69 | r1=int(64) r2=int(0) r3=int(24) | ListPush { list: Reg(0), val: Reg(4) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=26 op=0x18 | r1=int(64) r2=int(0) r3=int(24) | UnaryI { op: Inc, dst: Reg(3), src: Reg(3) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=29 op=0x50 | r1=int(64) r2=int(0) r3=int(25) | Jmp { offset: -18 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=13 op=0x42 | r1=int(64) r2=int(0) r3=int(25) | CmpI { op: Lt, dst: Reg(4), a: Reg(3), b: Reg(1) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=17 op=0x52 | r1=int(64) r2=int(0) r3=int(25) | JmpNot { cond: Reg(4), offset: 11 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=20 op=0x6f | r1=int(64) r2=int(0) r3=int(25) | Clone { dst: Reg(4), src: Reg(2) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=23 op=0x69 | r1=int(64) r2=int(0) r3=int(25) | ListPush { list: Reg(0), val: Reg(4) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=26 op=0x18 | r1=int(64) r2=int(0) r3=int(25) | UnaryI { op: Inc, dst: Reg(3), src: Reg(3) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=29 op=0x50 | r1=int(64) r2=int(0) r3=int(26) | Jmp { offset: -18 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=13 op=0x42 | r1=int(64) r2=int(0) r3=int(26) | CmpI { op: Lt, dst: Reg(4), a: Reg(3), b: Reg(1) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=17 op=0x52 | r1=int(64) r2=int(0) r3=int(26) | JmpNot { cond: Reg(4), offset: 11 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=20 op=0x6f | r1=int(64) r2=int(0) r3=int(26) | Clone { dst: Reg(4), src: Reg(2) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=23 op=0x69 | r1=int(64) r2=int(0) r3=int(26) | ListPush { list: Reg(0), val: Reg(4) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=26 op=0x18 | r1=int(64) r2=int(0) r3=int(26) | UnaryI { op: Inc, dst: Reg(3), src: Reg(3) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=29 op=0x50 | r1=int(64) r2=int(0) r3=int(27) | Jmp { offset: -18 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=13 op=0x42 | r1=int(64) r2=int(0) r3=int(27) | CmpI { op: Lt, dst: Reg(4), a: Reg(3), b: Reg(1) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=17 op=0x52 | r1=int(64) r2=int(0) r3=int(27) | JmpNot { cond: Reg(4), offset: 11 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=20 op=0x6f | r1=int(64) r2=int(0) r3=int(27) | Clone { dst: Reg(4), src: Reg(2) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=23 op=0x69 | r1=int(64) r2=int(0) r3=int(27) | ListPush { list: Reg(0), val: Reg(4) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=26 op=0x18 | r1=int(64) r2=int(0) r3=int(27) | UnaryI { op: Inc, dst: Reg(3), src: Reg(3) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=29 op=0x50 | r1=int(64) r2=int(0) r3=int(28) | Jmp { offset: -18 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=13 op=0x42 | r1=int(64) r2=int(0) r3=int(28) | CmpI { op: Lt, dst: Reg(4), a: Reg(3), b: Reg(1) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=17 op=0x52 | r1=int(64) r2=int(0) r3=int(28) | JmpNot { cond: Reg(4), offset: 11 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=20 op=0x6f | r1=int(64) r2=int(0) r3=int(28) | Clone { dst: Reg(4), src: Reg(2) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=23 op=0x69 | r1=int(64) r2=int(0) r3=int(28) | ListPush { list: Reg(0), val: Reg(4) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=26 op=0x18 | r1=int(64) r2=int(0) r3=int(28) | UnaryI { op: Inc, dst: Reg(3), src: Reg(3) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=29 op=0x50 | r1=int(64) r2=int(0) r3=int(29) | Jmp { offset: -18 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=13 op=0x42 | r1=int(64) r2=int(0) r3=int(29) | CmpI { op: Lt, dst: Reg(4), a: Reg(3), b: Reg(1) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=17 op=0x52 | r1=int(64) r2=int(0) r3=int(29) | JmpNot { cond: Reg(4), offset: 11 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=20 op=0x6f | r1=int(64) r2=int(0) r3=int(29) | Clone { dst: Reg(4), src: Reg(2) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=23 op=0x69 | r1=int(64) r2=int(0) r3=int(29) | ListPush { list: Reg(0), val: Reg(4) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=26 op=0x18 | r1=int(64) r2=int(0) r3=int(29) | UnaryI { op: Inc, dst: Reg(3), src: Reg(3) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=29 op=0x50 | r1=int(64) r2=int(0) r3=int(30) | Jmp { offset: -18 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=13 op=0x42 | r1=int(64) r2=int(0) r3=int(30) | CmpI { op: Lt, dst: Reg(4), a: Reg(3), b: Reg(1) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=17 op=0x52 | r1=int(64) r2=int(0) r3=int(30) | JmpNot { cond: Reg(4), offset: 11 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=20 op=0x6f | r1=int(64) r2=int(0) r3=int(30) | Clone { dst: Reg(4), src: Reg(2) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=23 op=0x69 | r1=int(64) r2=int(0) r3=int(30) | ListPush { list: Reg(0), val: Reg(4) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=26 op=0x18 | r1=int(64) r2=int(0) r3=int(30) | UnaryI { op: Inc, dst: Reg(3), src: Reg(3) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=29 op=0x50 | r1=int(64) r2=int(0) r3=int(31) | Jmp { offset: -18 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=13 op=0x42 | r1=int(64) r2=int(0) r3=int(31) | CmpI { op: Lt, dst: Reg(4), a: Reg(3), b: Reg(1) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=17 op=0x52 | r1=int(64) r2=int(0) r3=int(31) | JmpNot { cond: Reg(4), offset: 11 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=20 op=0x6f | r1=int(64) r2=int(0) r3=int(31) | Clone { dst: Reg(4), src: Reg(2) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=23 op=0x69 | r1=int(64) r2=int(0) r3=int(31) | ListPush { list: Reg(0), val: Reg(4) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=26 op=0x18 | r1=int(64) r2=int(0) r3=int(31) | UnaryI { op: Inc, dst: Reg(3), src: Reg(3) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=29 op=0x50 | r1=int(64) r2=int(0) r3=int(32) | Jmp { offset: -18 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=13 op=0x42 | r1=int(64) r2=int(0) r3=int(32) | CmpI { op: Lt, dst: Reg(4), a: Reg(3), b: Reg(1) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=17 op=0x52 | r1=int(64) r2=int(0) r3=int(32) | JmpNot { cond: Reg(4), offset: 11 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=20 op=0x6f | r1=int(64) r2=int(0) r3=int(32) | Clone { dst: Reg(4), src: Reg(2) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=23 op=0x69 | r1=int(64) r2=int(0) r3=int(32) | ListPush { list: Reg(0), val: Reg(4) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=26 op=0x18 | r1=int(64) r2=int(0) r3=int(32) | UnaryI { op: Inc, dst: Reg(3), src: Reg(3) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=29 op=0x50 | r1=int(64) r2=int(0) r3=int(33) | Jmp { offset: -18 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=13 op=0x42 | r1=int(64) r2=int(0) r3=int(33) | CmpI { op: Lt, dst: Reg(4), a: Reg(3), b: Reg(1) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=17 op=0x52 | r1=int(64) r2=int(0) r3=int(33) | JmpNot { cond: Reg(4), offset: 11 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=20 op=0x6f | r1=int(64) r2=int(0) r3=int(33) | Clone { dst: Reg(4), src: Reg(2) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=23 op=0x69 | r1=int(64) r2=int(0) r3=int(33) | ListPush { list: Reg(0), val: Reg(4) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=26 op=0x18 | r1=int(64) r2=int(0) r3=int(33) | UnaryI { op: Inc, dst: Reg(3), src: Reg(3) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=29 op=0x50 | r1=int(64) r2=int(0) r3=int(34) | Jmp { offset: -18 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=13 op=0x42 | r1=int(64) r2=int(0) r3=int(34) | CmpI { op: Lt, dst: Reg(4), a: Reg(3), b: Reg(1) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=17 op=0x52 | r1=int(64) r2=int(0) r3=int(34) | JmpNot { cond: Reg(4), offset: 11 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=20 op=0x6f | r1=int(64) r2=int(0) r3=int(34) | Clone { dst: Reg(4), src: Reg(2) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=23 op=0x69 | r1=int(64) r2=int(0) r3=int(34) | ListPush { list: Reg(0), val: Reg(4) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=26 op=0x18 | r1=int(64) r2=int(0) r3=int(34) | UnaryI { op: Inc, dst: Reg(3), src: Reg(3) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=29 op=0x50 | r1=int(64) r2=int(0) r3=int(35) | Jmp { offset: -18 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=13 op=0x42 | r1=int(64) r2=int(0) r3=int(35) | CmpI { op: Lt, dst: Reg(4), a: Reg(3), b: Reg(1) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=17 op=0x52 | r1=int(64) r2=int(0) r3=int(35) | JmpNot { cond: Reg(4), offset: 11 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=20 op=0x6f | r1=int(64) r2=int(0) r3=int(35) | Clone { dst: Reg(4), src: Reg(2) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=23 op=0x69 | r1=int(64) r2=int(0) r3=int(35) | ListPush { list: Reg(0), val: Reg(4) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=26 op=0x18 | r1=int(64) r2=int(0) r3=int(35) | UnaryI { op: Inc, dst: Reg(3), src: Reg(3) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=29 op=0x50 | r1=int(64) r2=int(0) r3=int(36) | Jmp { offset: -18 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=13 op=0x42 | r1=int(64) r2=int(0) r3=int(36) | CmpI { op: Lt, dst: Reg(4), a: Reg(3), b: Reg(1) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=17 op=0x52 | r1=int(64) r2=int(0) r3=int(36) | JmpNot { cond: Reg(4), offset: 11 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=20 op=0x6f | r1=int(64) r2=int(0) r3=int(36) | Clone { dst: Reg(4), src: Reg(2) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=23 op=0x69 | r1=int(64) r2=int(0) r3=int(36) | ListPush { list: Reg(0), val: Reg(4) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=26 op=0x18 | r1=int(64) r2=int(0) r3=int(36) | UnaryI { op: Inc, dst: Reg(3), src: Reg(3) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=29 op=0x50 | r1=int(64) r2=int(0) r3=int(37) | Jmp { offset: -18 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=13 op=0x42 | r1=int(64) r2=int(0) r3=int(37) | CmpI { op: Lt, dst: Reg(4), a: Reg(3), b: Reg(1) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=17 op=0x52 | r1=int(64) r2=int(0) r3=int(37) | JmpNot { cond: Reg(4), offset: 11 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=20 op=0x6f | r1=int(64) r2=int(0) r3=int(37) | Clone { dst: Reg(4), src: Reg(2) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=23 op=0x69 | r1=int(64) r2=int(0) r3=int(37) | ListPush { list: Reg(0), val: Reg(4) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=26 op=0x18 | r1=int(64) r2=int(0) r3=int(37) | UnaryI { op: Inc, dst: Reg(3), src: Reg(3) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=29 op=0x50 | r1=int(64) r2=int(0) r3=int(38) | Jmp { offset: -18 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=13 op=0x42 | r1=int(64) r2=int(0) r3=int(38) | CmpI { op: Lt, dst: Reg(4), a: Reg(3), b: Reg(1) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=17 op=0x52 | r1=int(64) r2=int(0) r3=int(38) | JmpNot { cond: Reg(4), offset: 11 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=20 op=0x6f | r1=int(64) r2=int(0) r3=int(38) | Clone { dst: Reg(4), src: Reg(2) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=23 op=0x69 | r1=int(64) r2=int(0) r3=int(38) | ListPush { list: Reg(0), val: Reg(4) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=26 op=0x18 | r1=int(64) r2=int(0) r3=int(38) | UnaryI { op: Inc, dst: Reg(3), src: Reg(3) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=29 op=0x50 | r1=int(64) r2=int(0) r3=int(39) | Jmp { offset: -18 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=13 op=0x42 | r1=int(64) r2=int(0) r3=int(39) | CmpI { op: Lt, dst: Reg(4), a: Reg(3), b: Reg(1) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=17 op=0x52 | r1=int(64) r2=int(0) r3=int(39) | JmpNot { cond: Reg(4), offset: 11 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=20 op=0x6f | r1=int(64) r2=int(0) r3=int(39) | Clone { dst: Reg(4), src: Reg(2) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=23 op=0x69 | r1=int(64) r2=int(0) r3=int(39) | ListPush { list: Reg(0), val: Reg(4) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=26 op=0x18 | r1=int(64) r2=int(0) r3=int(39) | UnaryI { op: Inc, dst: Reg(3), src: Reg(3) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=29 op=0x50 | r1=int(64) r2=int(0) r3=int(40) | Jmp { offset: -18 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=13 op=0x42 | r1=int(64) r2=int(0) r3=int(40) | CmpI { op: Lt, dst: Reg(4), a: Reg(3), b: Reg(1) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=17 op=0x52 | r1=int(64) r2=int(0) r3=int(40) | JmpNot { cond: Reg(4), offset: 11 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=20 op=0x6f | r1=int(64) r2=int(0) r3=int(40) | Clone { dst: Reg(4), src: Reg(2) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=23 op=0x69 | r1=int(64) r2=int(0) r3=int(40) | ListPush { list: Reg(0), val: Reg(4) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=26 op=0x18 | r1=int(64) r2=int(0) r3=int(40) | UnaryI { op: Inc, dst: Reg(3), src: Reg(3) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=29 op=0x50 | r1=int(64) r2=int(0) r3=int(41) | Jmp { offset: -18 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=13 op=0x42 | r1=int(64) r2=int(0) r3=int(41) | CmpI { op: Lt, dst: Reg(4), a: Reg(3), b: Reg(1) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=17 op=0x52 | r1=int(64) r2=int(0) r3=int(41) | JmpNot { cond: Reg(4), offset: 11 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=20 op=0x6f | r1=int(64) r2=int(0) r3=int(41) | Clone { dst: Reg(4), src: Reg(2) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=23 op=0x69 | r1=int(64) r2=int(0) r3=int(41) | ListPush { list: Reg(0), val: Reg(4) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=26 op=0x18 | r1=int(64) r2=int(0) r3=int(41) | UnaryI { op: Inc, dst: Reg(3), src: Reg(3) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=29 op=0x50 | r1=int(64) r2=int(0) r3=int(42) | Jmp { offset: -18 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=13 op=0x42 | r1=int(64) r2=int(0) r3=int(42) | CmpI { op: Lt, dst: Reg(4), a: Reg(3), b: Reg(1) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=17 op=0x52 | r1=int(64) r2=int(0) r3=int(42) | JmpNot { cond: Reg(4), offset: 11 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=20 op=0x6f | r1=int(64) r2=int(0) r3=int(42) | Clone { dst: Reg(4), src: Reg(2) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=23 op=0x69 | r1=int(64) r2=int(0) r3=int(42) | ListPush { list: Reg(0), val: Reg(4) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=26 op=0x18 | r1=int(64) r2=int(0) r3=int(42) | UnaryI { op: Inc, dst: Reg(3), src: Reg(3) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=29 op=0x50 | r1=int(64) r2=int(0) r3=int(43) | Jmp { offset: -18 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=13 op=0x42 | r1=int(64) r2=int(0) r3=int(43) | CmpI { op: Lt, dst: Reg(4), a: Reg(3), b: Reg(1) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=17 op=0x52 | r1=int(64) r2=int(0) r3=int(43) | JmpNot { cond: Reg(4), offset: 11 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=20 op=0x6f | r1=int(64) r2=int(0) r3=int(43) | Clone { dst: Reg(4), src: Reg(2) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=23 op=0x69 | r1=int(64) r2=int(0) r3=int(43) | ListPush { list: Reg(0), val: Reg(4) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=26 op=0x18 | r1=int(64) r2=int(0) r3=int(43) | UnaryI { op: Inc, dst: Reg(3), src: Reg(3) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=29 op=0x50 | r1=int(64) r2=int(0) r3=int(44) | Jmp { offset: -18 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=13 op=0x42 | r1=int(64) r2=int(0) r3=int(44) | CmpI { op: Lt, dst: Reg(4), a: Reg(3), b: Reg(1) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=17 op=0x52 | r1=int(64) r2=int(0) r3=int(44) | JmpNot { cond: Reg(4), offset: 11 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=20 op=0x6f | r1=int(64) r2=int(0) r3=int(44) | Clone { dst: Reg(4), src: Reg(2) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=23 op=0x69 | r1=int(64) r2=int(0) r3=int(44) | ListPush { list: Reg(0), val: Reg(4) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=26 op=0x18 | r1=int(64) r2=int(0) r3=int(44) | UnaryI { op: Inc, dst: Reg(3), src: Reg(3) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=29 op=0x50 | r1=int(64) r2=int(0) r3=int(45) | Jmp { offset: -18 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=13 op=0x42 | r1=int(64) r2=int(0) r3=int(45) | CmpI { op: Lt, dst: Reg(4), a: Reg(3), b: Reg(1) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=17 op=0x52 | r1=int(64) r2=int(0) r3=int(45) | JmpNot { cond: Reg(4), offset: 11 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=20 op=0x6f | r1=int(64) r2=int(0) r3=int(45) | Clone { dst: Reg(4), src: Reg(2) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=23 op=0x69 | r1=int(64) r2=int(0) r3=int(45) | ListPush { list: Reg(0), val: Reg(4) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=26 op=0x18 | r1=int(64) r2=int(0) r3=int(45) | UnaryI { op: Inc, dst: Reg(3), src: Reg(3) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=29 op=0x50 | r1=int(64) r2=int(0) r3=int(46) | Jmp { offset: -18 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=13 op=0x42 | r1=int(64) r2=int(0) r3=int(46) | CmpI { op: Lt, dst: Reg(4), a: Reg(3), b: Reg(1) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=17 op=0x52 | r1=int(64) r2=int(0) r3=int(46) | JmpNot { cond: Reg(4), offset: 11 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=20 op=0x6f | r1=int(64) r2=int(0) r3=int(46) | Clone { dst: Reg(4), src: Reg(2) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=23 op=0x69 | r1=int(64) r2=int(0) r3=int(46) | ListPush { list: Reg(0), val: Reg(4) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=26 op=0x18 | r1=int(64) r2=int(0) r3=int(46) | UnaryI { op: Inc, dst: Reg(3), src: Reg(3) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=29 op=0x50 | r1=int(64) r2=int(0) r3=int(47) | Jmp { offset: -18 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=13 op=0x42 | r1=int(64) r2=int(0) r3=int(47) | CmpI { op: Lt, dst: Reg(4), a: Reg(3), b: Reg(1) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=17 op=0x52 | r1=int(64) r2=int(0) r3=int(47) | JmpNot { cond: Reg(4), offset: 11 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=20 op=0x6f | r1=int(64) r2=int(0) r3=int(47) | Clone { dst: Reg(4), src: Reg(2) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=23 op=0x69 | r1=int(64) r2=int(0) r3=int(47) | ListPush { list: Reg(0), val: Reg(4) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=26 op=0x18 | r1=int(64) r2=int(0) r3=int(47) | UnaryI { op: Inc, dst: Reg(3), src: Reg(3) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=29 op=0x50 | r1=int(64) r2=int(0) r3=int(48) | Jmp { offset: -18 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=13 op=0x42 | r1=int(64) r2=int(0) r3=int(48) | CmpI { op: Lt, dst: Reg(4), a: Reg(3), b: Reg(1) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=17 op=0x52 | r1=int(64) r2=int(0) r3=int(48) | JmpNot { cond: Reg(4), offset: 11 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=20 op=0x6f | r1=int(64) r2=int(0) r3=int(48) | Clone { dst: Reg(4), src: Reg(2) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=23 op=0x69 | r1=int(64) r2=int(0) r3=int(48) | ListPush { list: Reg(0), val: Reg(4) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=26 op=0x18 | r1=int(64) r2=int(0) r3=int(48) | UnaryI { op: Inc, dst: Reg(3), src: Reg(3) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=29 op=0x50 | r1=int(64) r2=int(0) r3=int(49) | Jmp { offset: -18 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=13 op=0x42 | r1=int(64) r2=int(0) r3=int(49) | CmpI { op: Lt, dst: Reg(4), a: Reg(3), b: Reg(1) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=17 op=0x52 | r1=int(64) r2=int(0) r3=int(49) | JmpNot { cond: Reg(4), offset: 11 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=20 op=0x6f | r1=int(64) r2=int(0) r3=int(49) | Clone { dst: Reg(4), src: Reg(2) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=23 op=0x69 | r1=int(64) r2=int(0) r3=int(49) | ListPush { list: Reg(0), val: Reg(4) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=26 op=0x18 | r1=int(64) r2=int(0) r3=int(49) | UnaryI { op: Inc, dst: Reg(3), src: Reg(3) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=29 op=0x50 | r1=int(64) r2=int(0) r3=int(50) | Jmp { offset: -18 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=13 op=0x42 | r1=int(64) r2=int(0) r3=int(50) | CmpI { op: Lt, dst: Reg(4), a: Reg(3), b: Reg(1) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=17 op=0x52 | r1=int(64) r2=int(0) r3=int(50) | JmpNot { cond: Reg(4), offset: 11 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=20 op=0x6f | r1=int(64) r2=int(0) r3=int(50) | Clone { dst: Reg(4), src: Reg(2) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=23 op=0x69 | r1=int(64) r2=int(0) r3=int(50) | ListPush { list: Reg(0), val: Reg(4) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=26 op=0x18 | r1=int(64) r2=int(0) r3=int(50) | UnaryI { op: Inc, dst: Reg(3), src: Reg(3) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=29 op=0x50 | r1=int(64) r2=int(0) r3=int(51) | Jmp { offset: -18 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=13 op=0x42 | r1=int(64) r2=int(0) r3=int(51) | CmpI { op: Lt, dst: Reg(4), a: Reg(3), b: Reg(1) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=17 op=0x52 | r1=int(64) r2=int(0) r3=int(51) | JmpNot { cond: Reg(4), offset: 11 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=20 op=0x6f | r1=int(64) r2=int(0) r3=int(51) | Clone { dst: Reg(4), src: Reg(2) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=23 op=0x69 | r1=int(64) r2=int(0) r3=int(51) | ListPush { list: Reg(0), val: Reg(4) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=26 op=0x18 | r1=int(64) r2=int(0) r3=int(51) | UnaryI { op: Inc, dst: Reg(3), src: Reg(3) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=29 op=0x50 | r1=int(64) r2=int(0) r3=int(52) | Jmp { offset: -18 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=13 op=0x42 | r1=int(64) r2=int(0) r3=int(52) | CmpI { op: Lt, dst: Reg(4), a: Reg(3), b: Reg(1) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=17 op=0x52 | r1=int(64) r2=int(0) r3=int(52) | JmpNot { cond: Reg(4), offset: 11 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=20 op=0x6f | r1=int(64) r2=int(0) r3=int(52) | Clone { dst: Reg(4), src: Reg(2) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=23 op=0x69 | r1=int(64) r2=int(0) r3=int(52) | ListPush { list: Reg(0), val: Reg(4) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=26 op=0x18 | r1=int(64) r2=int(0) r3=int(52) | UnaryI { op: Inc, dst: Reg(3), src: Reg(3) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=29 op=0x50 | r1=int(64) r2=int(0) r3=int(53) | Jmp { offset: -18 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=13 op=0x42 | r1=int(64) r2=int(0) r3=int(53) | CmpI { op: Lt, dst: Reg(4), a: Reg(3), b: Reg(1) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=17 op=0x52 | r1=int(64) r2=int(0) r3=int(53) | JmpNot { cond: Reg(4), offset: 11 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=20 op=0x6f | r1=int(64) r2=int(0) r3=int(53) | Clone { dst: Reg(4), src: Reg(2) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=23 op=0x69 | r1=int(64) r2=int(0) r3=int(53) | ListPush { list: Reg(0), val: Reg(4) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=26 op=0x18 | r1=int(64) r2=int(0) r3=int(53) | UnaryI { op: Inc, dst: Reg(3), src: Reg(3) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=29 op=0x50 | r1=int(64) r2=int(0) r3=int(54) | Jmp { offset: -18 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=13 op=0x42 | r1=int(64) r2=int(0) r3=int(54) | CmpI { op: Lt, dst: Reg(4), a: Reg(3), b: Reg(1) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=17 op=0x52 | r1=int(64) r2=int(0) r3=int(54) | JmpNot { cond: Reg(4), offset: 11 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=20 op=0x6f | r1=int(64) r2=int(0) r3=int(54) | Clone { dst: Reg(4), src: Reg(2) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=23 op=0x69 | r1=int(64) r2=int(0) r3=int(54) | ListPush { list: Reg(0), val: Reg(4) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=26 op=0x18 | r1=int(64) r2=int(0) r3=int(54) | UnaryI { op: Inc, dst: Reg(3), src: Reg(3) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=29 op=0x50 | r1=int(64) r2=int(0) r3=int(55) | Jmp { offset: -18 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=13 op=0x42 | r1=int(64) r2=int(0) r3=int(55) | CmpI { op: Lt, dst: Reg(4), a: Reg(3), b: Reg(1) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=17 op=0x52 | r1=int(64) r2=int(0) r3=int(55) | JmpNot { cond: Reg(4), offset: 11 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=20 op=0x6f | r1=int(64) r2=int(0) r3=int(55) | Clone { dst: Reg(4), src: Reg(2) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=23 op=0x69 | r1=int(64) r2=int(0) r3=int(55) | ListPush { list: Reg(0), val: Reg(4) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=26 op=0x18 | r1=int(64) r2=int(0) r3=int(55) | UnaryI { op: Inc, dst: Reg(3), src: Reg(3) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=29 op=0x50 | r1=int(64) r2=int(0) r3=int(56) | Jmp { offset: -18 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=13 op=0x42 | r1=int(64) r2=int(0) r3=int(56) | CmpI { op: Lt, dst: Reg(4), a: Reg(3), b: Reg(1) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=17 op=0x52 | r1=int(64) r2=int(0) r3=int(56) | JmpNot { cond: Reg(4), offset: 11 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=20 op=0x6f | r1=int(64) r2=int(0) r3=int(56) | Clone { dst: Reg(4), src: Reg(2) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=23 op=0x69 | r1=int(64) r2=int(0) r3=int(56) | ListPush { list: Reg(0), val: Reg(4) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=26 op=0x18 | r1=int(64) r2=int(0) r3=int(56) | UnaryI { op: Inc, dst: Reg(3), src: Reg(3) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=29 op=0x50 | r1=int(64) r2=int(0) r3=int(57) | Jmp { offset: -18 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=13 op=0x42 | r1=int(64) r2=int(0) r3=int(57) | CmpI { op: Lt, dst: Reg(4), a: Reg(3), b: Reg(1) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=17 op=0x52 | r1=int(64) r2=int(0) r3=int(57) | JmpNot { cond: Reg(4), offset: 11 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=20 op=0x6f | r1=int(64) r2=int(0) r3=int(57) | Clone { dst: Reg(4), src: Reg(2) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=23 op=0x69 | r1=int(64) r2=int(0) r3=int(57) | ListPush { list: Reg(0), val: Reg(4) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=26 op=0x18 | r1=int(64) r2=int(0) r3=int(57) | UnaryI { op: Inc, dst: Reg(3), src: Reg(3) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=29 op=0x50 | r1=int(64) r2=int(0) r3=int(58) | Jmp { offset: -18 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=13 op=0x42 | r1=int(64) r2=int(0) r3=int(58) | CmpI { op: Lt, dst: Reg(4), a: Reg(3), b: Reg(1) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=17 op=0x52 | r1=int(64) r2=int(0) r3=int(58) | JmpNot { cond: Reg(4), offset: 11 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=20 op=0x6f | r1=int(64) r2=int(0) r3=int(58) | Clone { dst: Reg(4), src: Reg(2) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=23 op=0x69 | r1=int(64) r2=int(0) r3=int(58) | ListPush { list: Reg(0), val: Reg(4) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=26 op=0x18 | r1=int(64) r2=int(0) r3=int(58) | UnaryI { op: Inc, dst: Reg(3), src: Reg(3) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=29 op=0x50 | r1=int(64) r2=int(0) r3=int(59) | Jmp { offset: -18 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=13 op=0x42 | r1=int(64) r2=int(0) r3=int(59) | CmpI { op: Lt, dst: Reg(4), a: Reg(3), b: Reg(1) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=17 op=0x52 | r1=int(64) r2=int(0) r3=int(59) | JmpNot { cond: Reg(4), offset: 11 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=20 op=0x6f | r1=int(64) r2=int(0) r3=int(59) | Clone { dst: Reg(4), src: Reg(2) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=23 op=0x69 | r1=int(64) r2=int(0) r3=int(59) | ListPush { list: Reg(0), val: Reg(4) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=26 op=0x18 | r1=int(64) r2=int(0) r3=int(59) | UnaryI { op: Inc, dst: Reg(3), src: Reg(3) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=29 op=0x50 | r1=int(64) r2=int(0) r3=int(60) | Jmp { offset: -18 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=13 op=0x42 | r1=int(64) r2=int(0) r3=int(60) | CmpI { op: Lt, dst: Reg(4), a: Reg(3), b: Reg(1) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=17 op=0x52 | r1=int(64) r2=int(0) r3=int(60) | JmpNot { cond: Reg(4), offset: 11 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=20 op=0x6f | r1=int(64) r2=int(0) r3=int(60) | Clone { dst: Reg(4), src: Reg(2) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=23 op=0x69 | r1=int(64) r2=int(0) r3=int(60) | ListPush { list: Reg(0), val: Reg(4) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=26 op=0x18 | r1=int(64) r2=int(0) r3=int(60) | UnaryI { op: Inc, dst: Reg(3), src: Reg(3) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=29 op=0x50 | r1=int(64) r2=int(0) r3=int(61) | Jmp { offset: -18 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=13 op=0x42 | r1=int(64) r2=int(0) r3=int(61) | CmpI { op: Lt, dst: Reg(4), a: Reg(3), b: Reg(1) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=17 op=0x52 | r1=int(64) r2=int(0) r3=int(61) | JmpNot { cond: Reg(4), offset: 11 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=20 op=0x6f | r1=int(64) r2=int(0) r3=int(61) | Clone { dst: Reg(4), src: Reg(2) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=23 op=0x69 | r1=int(64) r2=int(0) r3=int(61) | ListPush { list: Reg(0), val: Reg(4) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=26 op=0x18 | r1=int(64) r2=int(0) r3=int(61) | UnaryI { op: Inc, dst: Reg(3), src: Reg(3) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=29 op=0x50 | r1=int(64) r2=int(0) r3=int(62) | Jmp { offset: -18 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=13 op=0x42 | r1=int(64) r2=int(0) r3=int(62) | CmpI { op: Lt, dst: Reg(4), a: Reg(3), b: Reg(1) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=17 op=0x52 | r1=int(64) r2=int(0) r3=int(62) | JmpNot { cond: Reg(4), offset: 11 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=20 op=0x6f | r1=int(64) r2=int(0) r3=int(62) | Clone { dst: Reg(4), src: Reg(2) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=23 op=0x69 | r1=int(64) r2=int(0) r3=int(62) | ListPush { list: Reg(0), val: Reg(4) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=26 op=0x18 | r1=int(64) r2=int(0) r3=int(62) | UnaryI { op: Inc, dst: Reg(3), src: Reg(3) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=29 op=0x50 | r1=int(64) r2=int(0) r3=int(63) | Jmp { offset: -18 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=13 op=0x42 | r1=int(64) r2=int(0) r3=int(63) | CmpI { op: Lt, dst: Reg(4), a: Reg(3), b: Reg(1) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=17 op=0x52 | r1=int(64) r2=int(0) r3=int(63) | JmpNot { cond: Reg(4), offset: 11 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=20 op=0x6f | r1=int(64) r2=int(0) r3=int(63) | Clone { dst: Reg(4), src: Reg(2) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=23 op=0x69 | r1=int(64) r2=int(0) r3=int(63) | ListPush { list: Reg(0), val: Reg(4) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=26 op=0x18 | r1=int(64) r2=int(0) r3=int(63) | UnaryI { op: Inc, dst: Reg(3), src: Reg(3) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=29 op=0x50 | r1=int(64) r2=int(0) r3=int(64) | Jmp { offset: -18 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=13 op=0x42 | r1=int(64) r2=int(0) r3=int(64) | CmpI { op: Lt, dst: Reg(4), a: Reg(3), b: Reg(1) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=17 op=0x52 | r1=int(64) r2=int(0) r3=int(64) | JmpNot { cond: Reg(4), offset: 11 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=31 op=0x02 | r1=int(64) r2=int(0) r3=int(64) | LoadI { dst: Reg(3), value: 10 }
+[pc] __tls_init_SIGNAL_HANDLERS pc=34 op=0xea | r1=int(64) r2=int(0) r3=int(10) | TlsSet { slot: Reg(3), val: Reg(0) }
+[pc] __tls_init_SIGNAL_HANDLERS pc=37 op=0x59 | r1=int(64) r2=int(0) r3=int(10) | Ret { value: Reg(0) }
+[pc] __tls_init_TIMEBASE_DENOM pc=0 op=0x02 | r1=other r2=int(0) r3=int(10) | LoadI { dst: Reg(0), value: 0 }
+[pc] __tls_init_TIMEBASE_DENOM pc=3 op=0x02 | r1=other r2=int(0) r3=int(10) | LoadI { dst: Reg(1), value: 11 }
+[pc] __tls_init_TIMEBASE_DENOM pc=6 op=0xea | r1=int(11) r2=int(0) r3=int(10) | TlsSet { slot: Reg(1), val: Reg(0) }
+[pc] __tls_init_TIMEBASE_DENOM pc=9 op=0xbf | r1=int(11) r2=int(0) r3=int(10) | MemExtended { sub_op: 64, operands: [1, 3, 0] }
+[pc] __tls_init_TIMEBASE_DENOM pc=15 op=0xbf | r1=ptr(@0xc5349e5b0 tid=0 vtag=1768121668) r2=int(0) r3=int(10) | MemExtended { sub_op: 27, operands: [1, 0, 8] }
+[pc] __tls_init_TIMEBASE_DENOM pc=21 op=0x59 | r1=ptr(@0xc5349e5b0 tid=0 vtag=1768121668) r2=int(0) r3=int(10) | Ret { value: Reg(0) }
+[pc] __tls_init_TIMEBASE_INITIALIZED pc=0 op=0x05 | r1=other r2=int(0) r3=int(10) | LoadFalse { dst: Reg(0) }
+[pc] __tls_init_TIMEBASE_INITIALIZED pc=2 op=0x02 | r1=other r2=int(0) r3=int(10) | LoadI { dst: Reg(1), value: 12 }
+[pc] __tls_init_TIMEBASE_INITIALIZED pc=5 op=0xea | r1=int(12) r2=int(0) r3=int(10) | TlsSet { slot: Reg(1), val: Reg(0) }
+[pc] __tls_init_TIMEBASE_INITIALIZED pc=8 op=0xbf | r1=int(12) r2=int(0) r3=int(10) | MemExtended { sub_op: 64, operands: [1, 4, 0] }
+[pc] __tls_init_TIMEBASE_INITIALIZED pc=14 op=0xbf | r1=ptr(@0xc5349e610 tid=0 vtag=0) r2=int(0) r3=int(10) | MemExtended { sub_op: 27, operands: [1, 0, 8] }
+[pc] __tls_init_TIMEBASE_INITIALIZED pc=20 op=0x59 | r1=ptr(@0xc5349e610 tid=0 vtag=0) r2=int(0) r3=int(10) | Ret { value: Reg(0) }
+[pc] __tls_init_TIMEBASE_NUMER pc=0 op=0x02 | r1=other r2=int(0) r3=int(10) | LoadI { dst: Reg(0), value: 0 }
+[pc] __tls_init_TIMEBASE_NUMER pc=3 op=0x02 | r1=other r2=int(0) r3=int(10) | LoadI { dst: Reg(1), value: 13 }
+[pc] __tls_init_TIMEBASE_NUMER pc=6 op=0xea | r1=int(13) r2=int(0) r3=int(10) | TlsSet { slot: Reg(1), val: Reg(0) }
+[pc] __tls_init_TIMEBASE_NUMER pc=9 op=0xbf | r1=int(13) r2=int(0) r3=int(10) | MemExtended { sub_op: 64, operands: [1, 2, 0] }
+[pc] __tls_init_TIMEBASE_NUMER pc=15 op=0xbf | r1=ptr(@0xc5349e530 tid=0 vtag=0) r2=int(0) r3=int(10) | MemExtended { sub_op: 27, operands: [1, 0, 8] }
+[pc] __tls_init_TIMEBASE_NUMER pc=21 op=0x59 | r1=ptr(@0xc5349e530 tid=0 vtag=0) r2=int(0) r3=int(10) | Ret { value: Reg(0) }
+[pc] __tls_init_TLS_KEY pc=0 op=0x02 | r1=other r2=int(0) r3=int(10) | LoadI { dst: Reg(0), value: 0 }
+[pc] __tls_init_TLS_KEY pc=3 op=0x02 | r1=other r2=int(0) r3=int(10) | LoadI { dst: Reg(1), value: 14 }
+[pc] __tls_init_TLS_KEY pc=6 op=0xea | r1=int(14) r2=int(0) r3=int(10) | TlsSet { slot: Reg(1), val: Reg(0) }
+[pc] __tls_init_TLS_KEY pc=9 op=0xbf | r1=int(14) r2=int(0) r3=int(10) | MemExtended { sub_op: 64, operands: [1, 5, 0] }
+[pc] __tls_init_TLS_KEY pc=15 op=0xbf | r1=ptr(@0xc5349e630 tid=0 vtag=6907462) r2=int(0) r3=int(10) | MemExtended { sub_op: 27, operands: [1, 0, 8] }
+[pc] __tls_init_TLS_KEY pc=21 op=0x59 | r1=ptr(@0xc5349e630 tid=0 vtag=6907462) r2=int(0) r3=int(10) | Ret { value: Reg(0) }
+[pc] __tls_init_TLS_KEY_INITIALIZED pc=0 op=0x05 | r1=other r2=int(0) r3=int(10) | LoadFalse { dst: Reg(0) }
+[pc] __tls_init_TLS_KEY_INITIALIZED pc=2 op=0x02 | r1=other r2=int(0) r3=int(10) | LoadI { dst: Reg(1), value: 15 }
+[pc] __tls_init_TLS_KEY_INITIALIZED pc=5 op=0xea | r1=int(15) r2=int(0) r3=int(10) | TlsSet { slot: Reg(1), val: Reg(0) }
+[pc] __tls_init_TLS_KEY_INITIALIZED pc=8 op=0xbf | r1=int(15) r2=int(0) r3=int(10) | MemExtended { sub_op: 64, operands: [1, 6, 0] }
+[pc] __tls_init_TLS_KEY_INITIALIZED pc=14 op=0xbf | r1=ptr(@0xc5349e5d0 tid=0 vtag=25972) r2=int(0) r3=int(10) | MemExtended { sub_op: 27, operands: [1, 0, 8] }
+[pc] __tls_init_TLS_KEY_INITIALIZED pc=20 op=0x59 | r1=ptr(@0xc5349e5d0 tid=0 vtag=25972) r2=int(0) r3=int(10) | Ret { value: Reg(0) }
+[pc] __tls_init_monotonic_nanos$static$timebase_info pc=0 op=0x60 | r1=other r2=int(0) r3=int(10) | New { dst: Reg(0), type_id: 169, field_count: 2 }
+[pc] __tls_init_monotonic_nanos$static$timebase_info pc=5 op=0x02 | r1=other r2=int(0) r3=int(10) | LoadI { dst: Reg(1), value: 0 }
+[pc] __tls_init_monotonic_nanos$static$timebase_info pc=8 op=0x63 | r1=int(0) r2=int(0) r3=int(10) | SetF { obj: Reg(0), field_idx: 0, value: Reg(1) }
+[pc] __tls_init_monotonic_nanos$static$timebase_info pc=12 op=0x02 | r1=int(0) r2=int(0) r3=int(10) | LoadI { dst: Reg(1), value: 0 }
+[pc] __tls_init_monotonic_nanos$static$timebase_info pc=15 op=0x63 | r1=int(0) r2=int(0) r3=int(10) | SetF { obj: Reg(0), field_idx: 1, value: Reg(1) }
+[pc] __tls_init_monotonic_nanos$static$timebase_info pc=19 op=0x02 | r1=int(0) r2=int(0) r3=int(10) | LoadI { dst: Reg(1), value: 16 }
+[pc] __tls_init_monotonic_nanos$static$timebase_info pc=22 op=0xea | r1=int(16) r2=int(0) r3=int(10) | TlsSet { slot: Reg(1), val: Reg(0) }
+[pc] __tls_init_monotonic_nanos$static$timebase_info pc=25 op=0xbf | r1=int(16) r2=int(0) r3=int(10) | MemExtended { sub_op: 64, operands: [1, 0, 0] }
+[pc] __tls_init_monotonic_nanos$static$timebase_info pc=31 op=0xbf | r1=ptr(@0xc5349e570 tid=0 vtag=29806) r2=int(0) r3=int(10) | MemExtended { sub_op: 27, operands: [1, 0, 8] }
+[pc] __tls_init_monotonic_nanos$static$timebase_info pc=37 op=0x59 | r1=ptr(@0xc5349e570 tid=1652986320 vtag=29806) r2=int(0) r3=int(10) | Ret { value: Reg(0) }
+[pc] __tls_init_monotonic_nanos$static$timebase_info pc=0 op=0x60 | r1=other r2=int(0) r3=int(10) | New { dst: Reg(0), type_id: 169, field_count: 2 }
+[pc] __tls_init_monotonic_nanos$static$timebase_info pc=5 op=0x02 | r1=other r2=int(0) r3=int(10) | LoadI { dst: Reg(1), value: 0 }
+[pc] __tls_init_monotonic_nanos$static$timebase_info pc=8 op=0x63 | r1=int(0) r2=int(0) r3=int(10) | SetF { obj: Reg(0), field_idx: 0, value: Reg(1) }
+[pc] __tls_init_monotonic_nanos$static$timebase_info pc=12 op=0x02 | r1=int(0) r2=int(0) r3=int(10) | LoadI { dst: Reg(1), value: 0 }
+[pc] __tls_init_monotonic_nanos$static$timebase_info pc=15 op=0x63 | r1=int(0) r2=int(0) r3=int(10) | SetF { obj: Reg(0), field_idx: 1, value: Reg(1) }
+[pc] __tls_init_monotonic_nanos$static$timebase_info pc=19 op=0x02 | r1=int(0) r2=int(0) r3=int(10) | LoadI { dst: Reg(1), value: 16 }
+[pc] __tls_init_monotonic_nanos$static$timebase_info pc=22 op=0xea | r1=int(16) r2=int(0) r3=int(10) | TlsSet { slot: Reg(1), val: Reg(0) }
+[pc] __tls_init_monotonic_nanos$static$timebase_info pc=25 op=0xbf | r1=int(16) r2=int(0) r3=int(10) | MemExtended { sub_op: 64, operands: [1, 0, 0] }
+[pc] __tls_init_monotonic_nanos$static$timebase_info pc=31 op=0xbf | r1=ptr(@0xc5349e570 tid=1652986320 vtag=29806) r2=int(0) r3=int(10) | MemExtended { sub_op: 27, operands: [1, 0, 8] }
+[pc] __tls_init_monotonic_nanos$static$timebase_info pc=37 op=0x59 | r1=ptr(@0xc5349e570 tid=1652985648 vtag=29806) r2=int(0) r3=int(10) | Ret { value: Reg(0) }
+[pc] __tls_init_monotonic_nanos$static$timebase_initialized pc=0 op=0x05 | r1=other r2=int(0) r3=int(10) | LoadFalse { dst: Reg(0) }
+[pc] __tls_init_monotonic_nanos$static$timebase_initialized pc=2 op=0x02 | r1=other r2=int(0) r3=int(10) | LoadI { dst: Reg(1), value: 17 }
+[pc] __tls_init_monotonic_nanos$static$timebase_initialized pc=5 op=0xea | r1=int(17) r2=int(0) r3=int(10) | TlsSet { slot: Reg(1), val: Reg(0) }
+[pc] __tls_init_monotonic_nanos$static$timebase_initialized pc=8 op=0xbf | r1=int(17) r2=int(0) r3=int(10) | MemExtended { sub_op: 64, operands: [1, 1, 0] }
+[pc] __tls_init_monotonic_nanos$static$timebase_initialized pc=14 op=0xbf | r1=ptr(@0xc5349e550 tid=0 vtag=0) r2=int(0) r3=int(10) | MemExtended { sub_op: 27, operands: [1, 0, 8] }
+[pc] __tls_init_monotonic_nanos$static$timebase_initialized pc=20 op=0x59 | r1=ptr(@0xc5349e550 tid=0 vtag=0) r2=int(0) r3=int(10) | Ret { value: Reg(0) }
+[pc] __tls_init_monotonic_nanos$static$timebase_initialized pc=0 op=0x05 | r1=other r2=int(0) r3=int(10) | LoadFalse { dst: Reg(0) }
+[pc] __tls_init_monotonic_nanos$static$timebase_initialized pc=2 op=0x02 | r1=other r2=int(0) r3=int(10) | LoadI { dst: Reg(1), value: 17 }
+[pc] __tls_init_monotonic_nanos$static$timebase_initialized pc=5 op=0xea | r1=int(17) r2=int(0) r3=int(10) | TlsSet { slot: Reg(1), val: Reg(0) }
+[pc] __tls_init_monotonic_nanos$static$timebase_initialized pc=8 op=0xbf | r1=int(17) r2=int(0) r3=int(10) | MemExtended { sub_op: 64, operands: [1, 1, 0] }
+[pc] __tls_init_monotonic_nanos$static$timebase_initialized pc=14 op=0xbf | r1=ptr(@0xc5349e550 tid=0 vtag=0) r2=int(0) r3=int(10) | MemExtended { sub_op: 27, operands: [1, 0, 8] }
+[pc] __tls_init_monotonic_nanos$static$timebase_initialized pc=20 op=0x59 | r1=ptr(@0xc5349e550 tid=0 vtag=0) r2=int(0) r3=int(10) | Ret { value: Reg(0) }
+[pc] __tls_init_PROCESS_ARGC pc=0 op=0x02 | r1=other r2=int(0) r3=int(10) | LoadI { dst: Reg(0), value: 0 }
+[pc] __tls_init_PROCESS_ARGC pc=3 op=0x02 | r1=other r2=int(0) r3=int(10) | LoadI { dst: Reg(1), value: 7 }
+[pc] __tls_init_PROCESS_ARGC pc=6 op=0xea | r1=int(7) r2=int(0) r3=int(10) | TlsSet { slot: Reg(1), val: Reg(0) }
+[pc] __tls_init_PROCESS_ARGC pc=9 op=0xbf | r1=int(7) r2=int(0) r3=int(10) | MemExtended { sub_op: 64, operands: [1, 0, 0] }
+[pc] __tls_init_PROCESS_ARGC pc=15 op=0xbf | r1=ptr(@0xc5349e570 tid=1652985648 vtag=29806) r2=int(0) r3=int(10) | MemExtended { sub_op: 27, operands: [1, 0, 8] }
+[pc] __tls_init_PROCESS_ARGC pc=21 op=0x59 | r1=ptr(@0xc5349e570 tid=0 vtag=29806) r2=int(0) r3=int(10) | Ret { value: Reg(0) }
+[pc] __tls_init_PROCESS_ARGV pc=0 op=0x02 | r1=other r2=other r3=int(10) | LoadI { dst: Reg(0), value: 0 }
+[pc] __tls_init_PROCESS_ARGV pc=3 op=0x00 | r1=other r2=other r3=int(10) | Mov { dst: Reg(1), src: Reg(0) }
+[pc] __tls_init_PROCESS_ARGV pc=6 op=0x02 | r1=int(0) r2=other r3=int(10) | LoadI { dst: Reg(2), value: 8 }
+[pc] __tls_init_PROCESS_ARGV pc=9 op=0xea | r1=int(0) r2=int(8) r3=int(10) | TlsSet { slot: Reg(2), val: Reg(1) }
+[pc] __tls_init_PROCESS_ARGV pc=12 op=0xbf | r1=int(0) r2=int(8) r3=int(10) | MemExtended { sub_op: 64, operands: [2, 1, 0] }
+[pc] __tls_init_PROCESS_ARGV pc=18 op=0xbf | r1=int(0) r2=ptr(@0xc5349e550 tid=0 vtag=0) r3=int(10) | MemExtended { sub_op: 27, operands: [2, 1, 8] }
+[pc] __tls_init_PROCESS_ARGV pc=24 op=0x59 | r1=int(0) r2=ptr(@0xc5349e550 tid=0 vtag=0) r3=int(10) | Ret { value: Reg(1) }
+[pc] __tls_init_PROCESS_ENVIRON pc=0 op=0x02 | r1=other r2=other r3=int(10) | LoadI { dst: Reg(0), value: 0 }
+[pc] __tls_init_PROCESS_ENVIRON pc=3 op=0x00 | r1=other r2=other r3=int(10) | Mov { dst: Reg(1), src: Reg(0) }
+[pc] __tls_init_PROCESS_ENVIRON pc=6 op=0x02 | r1=int(0) r2=other r3=int(10) | LoadI { dst: Reg(2), value: 9 }
+[pc] __tls_init_PROCESS_ENVIRON pc=9 op=0xea | r1=int(0) r2=int(9) r3=int(10) | TlsSet { slot: Reg(2), val: Reg(1) }
+[pc] __tls_init_PROCESS_ENVIRON pc=12 op=0xbf | r1=int(0) r2=int(9) r3=int(10) | MemExtended { sub_op: 64, operands: [2, 2, 0] }
+[pc] __tls_init_PROCESS_ENVIRON pc=18 op=0xbf | r1=int(0) r2=ptr(@0xc5349e530 tid=0 vtag=0) r3=int(10) | MemExtended { sub_op: 27, operands: [2, 1, 8] }
+[pc] __tls_init_PROCESS_ENVIRON pc=24 op=0x59 | r1=int(0) r2=ptr(@0xc5349e530 tid=0 vtag=0) r3=int(10) | Ret { value: Reg(1) }
+[pc] __tls_init_CHILD_ID_COUNTER pc=0 op=0x02 | r1=other r2=other r3=int(10) | LoadI { dst: Reg(0), value: 1 }
+[pc] __tls_init_CHILD_ID_COUNTER pc=3 op=0x00 | r1=other r2=other r3=int(10) | Mov { dst: Reg(1), src: Reg(0) }
+[pc] __tls_init_CHILD_ID_COUNTER pc=6 op=0x5b | r1=int(1) r2=other r3=int(10) | Call { dst: Reg(0), func_id: 536870955, args: RegRange { start: Reg(1), count: 1 } }
+[trace-call] handler=Call func_id=165 name='ArenaPool.new' descriptor.id=165 args.count=1 bytecode_length=209
+error: VBC global_ctors error: NullPointerAt { op: "opcode 0x62", site: "ArenaPool.new", pc: 27 }

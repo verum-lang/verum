@@ -18,3 +18,16 @@ Its [message-only diagnostic](../registry-metadata-stage19/negative-diagnostic/d
 identifies a document missing `description`; that application observation
 must not be replaced by the failed standalone probe. T1687 owns the
 compiler return-context defect found while inspecting that input.
+
+The [project control](project-stage19/result.json) prepends only a module
+header and supplies a cog manifest. It fails at the same pre-entry point,
+so standalone file selection does not explain the fault.
+
+The [identified initializer trace](trace-stage19/result.json) records its
+extra trace environment and preserves the complete stderr. At
+`__tls_init_CHILD_ID_COUNTER`, a call with `Int(1)` and encoded target
+`536870955` resolves to `ArenaPool.new` (descriptor 165). The source
+initializer in `core/runtime/supervisor.vr` calls `AtomicU64.new(1)`.
+This establishes a wrong startup call target; it does not yet determine
+which producer or importer mapping introduced it. The
+[structured analysis](trace-stage19/analysis.json) records that boundary.
