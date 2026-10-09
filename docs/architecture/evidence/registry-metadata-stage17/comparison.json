@@ -1,0 +1,22 @@
+{
+  "task": "T1635",
+  "related": [
+    "T1676",
+    "T1677",
+    "T1666"
+  ],
+  "registry_candidate": "399cc4156769bfd1df0ca76120da4e84a8d06931",
+  "language_reader": "3821b1961cd057fd03c9e6d39cbf50609261e4eb",
+  "producer_language_commit": "d61c11aa5aeda6eafefe9bb6748115cffeb66946",
+  "producer_artifacts_identical": true,
+  "source_and_project_inputs_identical_to_previous_run": true,
+  "diagnostics_before": 18,
+  "diagnostics_after": 1,
+  "removed_diagnostics": "Seventeen borrowed JSON object to typed map helper argument mismatches.",
+  "remaining_diagnostic": "E101: type not found: DecodedDependencyOptions in the forward variant payload.",
+  "status": "failed before fixture execution",
+  "elapsed_seconds": 75.55,
+  "build_receipt": "build-manifest.json",
+  "run_receipt": "result.json",
+  "scope": "New ordinary compiler reader against the exact earlier producer artifacts. No fresh bake, successful metadata runtime, authenticated publication, storage or AOT acceptance."
+}

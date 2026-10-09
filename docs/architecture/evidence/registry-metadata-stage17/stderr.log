@@ -1,0 +1,13 @@
+Interpreting /Users/taaliman/.tmp/verum-publication-metadata-24xhlwn4/src/main.vr
+2026-10-09T17:21:49.048769Z  WARN Type checking found 1 error(s)
+error<E101>: type not found: DecodedDependencyOptions
+  --> /Users/taaliman/.tmp/verum-publication-metadata-24xhlwn4/src/protocol/publication_metadata.vr:14:16
+   │
+12 │ public type DecodedDependency is
+13 │     | Requirement(Text)
+14 │     | Detailed(DecodedDependencyOptions);
+   │                ^^^^^^^^^^^^^^^^^^^^^^^^
+15 │ 
+16 │ public type DecodedDependencyOptions is {
+   │
+error: Runtime error: compilation failed with 1 error

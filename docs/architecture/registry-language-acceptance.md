@@ -535,11 +535,16 @@ target and `VERUM_NO_AUTO_PRECOMPILE=1`. The receipt retains source/executable/l
 hashes, the initial Rust compile error and its correction, and the original
 baseline before the test-only `List<Text>` representation adjustment.
 
-Ordinary CLI and registry metadata replay remain separate acceptance boundaries.
-The project preflight's forward-reference error is independent of this repair.
-No archive schema or writer changed; a new reader using an existing archive must
-identify that producer artifact explicitly. These checker results do not establish
-fresh-bake, registry authentication, durable admission, installation or AOT success.
+The subsequent [ordinary replay](evidence/registry-metadata-stage17/comparison.json)
+built reader `3821b1961` in 133.827 seconds. Automatic precompilation was enabled
+and reported a cache hit: the archive, metadata and symbol graph are byte-identical
+to the earlier `d61c11aa5` producer. The unchanged registry metadata candidate
+reported **one compilation error instead of eighteen**; all seventeen map-helper
+argument mismatches disappeared. The forward-declared `DecodedDependencyOptions`
+payload remains T1677, so the fixture still did not execute. The receipt preserves
+that failed result and exact input identities. This replay establishes neither
+a fresh bake nor successful metadata runtime, authentication, durable admission,
+installation or AOT execution.
 
 The reviewed chain rebased onto documentation-only main `fae253d0f` with source
 commit `28b59011d`. Its complete type-crate tree is byte-identical to executed
