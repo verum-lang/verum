@@ -1,0 +1,28 @@
+{
+  "source": "b6d0dff764543e856f92ea1bf2de0f6b6ca2d64a",
+  "clean": true,
+  "verified_executables": [
+    {
+      "receipt": "verum-T1704-vbc-source-final",
+      "path": "/Users/taaliman/.tmp/verum-codex-01a10248/native-target/debug/build/verum_vbc/de4cadd627363890/out/array_return_storage-de4cadd627363890",
+      "sha256": "53681b643a086d0dbcf1f0b6497d818008a3e6beaaaa0d71f32175bac0db20c9"
+    },
+    {
+      "receipt": "verum-T1704-vbc-unit-cleanup-fixed",
+      "path": "/Users/taaliman/.tmp/verum-codex-01a10248/native-target/debug/build/verum_vbc/9777a8ed778eb0dc/out/verum_vbc-9777a8ed778eb0dc",
+      "sha256": "7eb60755c02a6d0faf2b8aea04cb6ab77e2ebfd5dd4bd3d00f710cb1a31548f2"
+    },
+    {
+      "receipt": "verum-T1704-native-unit-encapsulated",
+      "path": "/Users/taaliman/.tmp/verum-codex-01a10248/native-target/debug/build/verum_codegen/93b4a239376303b9/out/verum_codegen-93b4a239376303b9",
+      "sha256": "918e74727222734458c578bd65c81447bb24bd9c66337a76961d0852fe178ef9"
+    },
+    {
+      "receipt": "verum-T1704-native-source-cleanup-fixed",
+      "path": "/Users/taaliman/.tmp/verum-codex-01a10248/native-target/debug/build/verum_codegen/1ec042b39b87232b/out/endian_fixed_bytes-1ec042b39b87232b",
+      "sha256": "59a79d4a30b7be89f157e67c35a92499f040b539836b6f86be6e03d1924ded15"
+    }
+  ],
+  "matching_active_build_or_test_processes": [],
+  "target_released_to": "root"
+}

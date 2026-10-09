@@ -1,0 +1,682 @@
+{
+  "source": "b6d0dff764543e856f92ea1bf2de0f6b6ca2d64a",
+  "source_tree": "0b917a6bafd72a5a879eb7ba156c049ca9602990",
+  "entries": {
+    "vbc-source-initial/cargo.jsonl.gz": {
+      "source_path": "/private/tmp/verum-T1704-vbc-source-initial/cargo.jsonl",
+      "source_sha256": "a2381553b0bd5fa08dd9982eedaa6b523a73a55fbb45c375401a2c4e4d441683",
+      "stored_sha256": "d81b910b568ff8c571c49983bca379fc006267426e27a74ea8c6ff94ddb90143",
+      "source_bytes": 185608,
+      "compression": "gzip"
+    },
+    "vbc-source-initial/process.json": {
+      "source_path": "/private/tmp/verum-T1704-vbc-source-initial/process.json",
+      "source_sha256": "53e657c09a933d72da6e286f000ea27ad9c13b5849d56f6c3f919490b3296e30",
+      "stored_sha256": "53e657c09a933d72da6e286f000ea27ad9c13b5849d56f6c3f919490b3296e30",
+      "source_bytes": 36,
+      "compression": null
+    },
+    "vbc-source-initial/result.json": {
+      "source_path": "/private/tmp/verum-T1704-vbc-source-initial/result.json",
+      "source_sha256": "e3bbf7b5215c1437c323779ef3174719931d9db894b4b1d8dd9a410f030321ea",
+      "stored_sha256": "e3bbf7b5215c1437c323779ef3174719931d9db894b4b1d8dd9a410f030321ea",
+      "source_bytes": 58587,
+      "compression": null
+    },
+    "vbc-source-initial/started.json": {
+      "source_path": "/private/tmp/verum-T1704-vbc-source-initial/started.json",
+      "source_sha256": "989b3dbf674d820e32e7f46502923a9cdcfad29ce724c05519ec37cd7c07e46b",
+      "stored_sha256": "989b3dbf674d820e32e7f46502923a9cdcfad29ce724c05519ec37cd7c07e46b",
+      "source_bytes": 57641,
+      "compression": null
+    },
+    "vbc-source-initial/stderr.log.gz": {
+      "source_path": "/private/tmp/verum-T1704-vbc-source-initial/stderr.log",
+      "source_sha256": "7587feac757751b23490dbde77eff78d022bece49cb69da35e7de171e3ec3365",
+      "stored_sha256": "4660e039c53591e88d5e9adde5cb99eb8307639f9d9d7417c45240598f70ae9c",
+      "source_bytes": 437,
+      "compression": "gzip"
+    },
+    "vbc-source-adapted/cargo.jsonl.gz": {
+      "source_path": "/private/tmp/verum-T1704-vbc-source-adapted/cargo.jsonl",
+      "source_sha256": "64cc1071a482df785f193dd367e1e2a41a4391d38aa1d410ea1391790eb34da1",
+      "stored_sha256": "6be5a4a5147dc7a02da329efeef2d7b579f398e4ca1ebeb0eb706f3cc9ec9680",
+      "source_bytes": 179271,
+      "compression": "gzip"
+    },
+    "vbc-source-adapted/process.json": {
+      "source_path": "/private/tmp/verum-T1704-vbc-source-adapted/process.json",
+      "source_sha256": "934f06367fcd62adac48e1c868ae816c87e2d1d0e3498bde3e6afd983e284927",
+      "stored_sha256": "934f06367fcd62adac48e1c868ae816c87e2d1d0e3498bde3e6afd983e284927",
+      "source_bytes": 36,
+      "compression": null
+    },
+    "vbc-source-adapted/result.json": {
+      "source_path": "/private/tmp/verum-T1704-vbc-source-adapted/result.json",
+      "source_sha256": "1ae0febe0ee7dc8c33e89ff681f4d22837840dca46cbff67a2147edd371335bf",
+      "stored_sha256": "1ae0febe0ee7dc8c33e89ff681f4d22837840dca46cbff67a2147edd371335bf",
+      "source_bytes": 59032,
+      "compression": null
+    },
+    "vbc-source-adapted/started.json": {
+      "source_path": "/private/tmp/verum-T1704-vbc-source-adapted/started.json",
+      "source_sha256": "e0494a81cf59c7b2ef69ec18e111973dbc514724aeda06d9f2de2ce82d24f50f",
+      "stored_sha256": "e0494a81cf59c7b2ef69ec18e111973dbc514724aeda06d9f2de2ce82d24f50f",
+      "source_bytes": 57641,
+      "compression": null
+    },
+    "vbc-source-adapted/stderr.log.gz": {
+      "source_path": "/private/tmp/verum-T1704-vbc-source-adapted/stderr.log",
+      "source_sha256": "75403aac4877fdbb0fa764474dbbc4ce6c2973ede1ef7345922fb55fb40f4850",
+      "stored_sha256": "c8e8fe9e247010b744f225e4eb44d3e08aebc7e44695456d9950de4bf15570e0",
+      "source_bytes": 601,
+      "compression": "gzip"
+    },
+    "vbc-proof-initial/cargo.jsonl.gz": {
+      "source_path": "/private/tmp/verum-T1704-vbc-unit/cargo.jsonl",
+      "source_sha256": "4e04b65e465b2248351ff53ea53735faed4edcea6dd7a17a3f32e47829ffcf16",
+      "stored_sha256": "e22f4a0d7ffec51f51850791b563ede6cb56ec620343667cdc1f51d88a064a6a",
+      "source_bytes": 178533,
+      "compression": "gzip"
+    },
+    "vbc-proof-initial/process.json": {
+      "source_path": "/private/tmp/verum-T1704-vbc-unit/process.json",
+      "source_sha256": "a59ca5458c14cac25cc63aa006d445915483c751e350103527ab61bbbbd08696",
+      "stored_sha256": "a59ca5458c14cac25cc63aa006d445915483c751e350103527ab61bbbbd08696",
+      "source_bytes": 36,
+      "compression": null
+    },
+    "vbc-proof-initial/result.json": {
+      "source_path": "/private/tmp/verum-T1704-vbc-unit/result.json",
+      "source_sha256": "23fbe4240d80340a5ddda338963fb5a0d3d767bbf59894bb95f19fddd972bee7",
+      "stored_sha256": "23fbe4240d80340a5ddda338963fb5a0d3d767bbf59894bb95f19fddd972bee7",
+      "source_bytes": 59004,
+      "compression": null
+    },
+    "vbc-proof-initial/started.json": {
+      "source_path": "/private/tmp/verum-T1704-vbc-unit/started.json",
+      "source_sha256": "afd43d4caf6f1dc0a5d2cfa5697f52c8138d593b6ae30a30ec91f5baecd84127",
+      "stored_sha256": "afd43d4caf6f1dc0a5d2cfa5697f52c8138d593b6ae30a30ec91f5baecd84127",
+      "source_bytes": 57632,
+      "compression": null
+    },
+    "vbc-proof-initial/stderr.log.gz": {
+      "source_path": "/private/tmp/verum-T1704-vbc-unit/stderr.log",
+      "source_sha256": "fa85065d0e6f6411643252d61fa08190534d7bef5b1fb25e20291e93c0b5c8c4",
+      "stored_sha256": "f7e7d73a2e6a7ecea7baf7b284ae5c071a453f031e366b0bfcfbb8286d3d47a6",
+      "source_bytes": 581,
+      "compression": "gzip"
+    },
+    "native-proof-initial/cargo.jsonl.gz": {
+      "source_path": "/private/tmp/verum-T1704-native-unit-initial/cargo.jsonl",
+      "source_sha256": "30b335207379531e0c826731ad6238754385e31dc884539c4790713f077c55d7",
+      "stored_sha256": "00527d4dd060db461a3c2897b0fe961e1eac9e68692fc28566d3aab703514b89",
+      "source_bytes": 254761,
+      "compression": "gzip"
+    },
+    "native-proof-initial/process.json": {
+      "source_path": "/private/tmp/verum-T1704-native-unit-initial/process.json",
+      "source_sha256": "b18dbaf39dc24dc1e7a3a30a6ed6bb44d02ec7768ccc849a824d86ac7f55c169",
+      "stored_sha256": "b18dbaf39dc24dc1e7a3a30a6ed6bb44d02ec7768ccc849a824d86ac7f55c169",
+      "source_bytes": 36,
+      "compression": null
+    },
+    "native-proof-initial/result.json": {
+      "source_path": "/private/tmp/verum-T1704-native-unit-initial/result.json",
+      "source_sha256": "657c35a165987e23c0107070e646ab6fd8261b6c681ca56dbd68354a0084df2c",
+      "stored_sha256": "657c35a165987e23c0107070e646ab6fd8261b6c681ca56dbd68354a0084df2c",
+      "source_bytes": 58938,
+      "compression": null
+    },
+    "native-proof-initial/started.json": {
+      "source_path": "/private/tmp/verum-T1704-native-unit-initial/started.json",
+      "source_sha256": "e43d98a5bf4399daa98e191f06e11a8be6d32c4d8a52b351ae77678ec4048a0b",
+      "stored_sha256": "e43d98a5bf4399daa98e191f06e11a8be6d32c4d8a52b351ae77678ec4048a0b",
+      "source_bytes": 57554,
+      "compression": null
+    },
+    "native-proof-initial/stderr.log.gz": {
+      "source_path": "/private/tmp/verum-T1704-native-unit-initial/stderr.log",
+      "source_sha256": "38f15de0c6025abe9bcdfaca6343d0e628d9130b89d1a0923fc7fa99fcc668a4",
+      "stored_sha256": "7d867342277f5b691bd6e6bc46735953875161ae3cbca5241ff1a1beb0b494ff",
+      "source_bytes": 5036,
+      "compression": "gzip"
+    },
+    "native-consumers-initial/cargo.jsonl.gz": {
+      "source_path": "/private/tmp/verum-T1704-native-source-initial/cargo.jsonl",
+      "source_sha256": "0dd1986fd12f49b540bd407717839bf33a07946fc684383684b36f3ecff2a7d6",
+      "stored_sha256": "ee502c6feb1a842ab8d0a89baac5a4fc67a29609ca5e87e9df80e1ea17d58786",
+      "source_bytes": 256972,
+      "compression": "gzip"
+    },
+    "native-consumers-initial/ir/native_dynamic_endian_returns_packed_bytes-source.ll.gz": {
+      "source_path": "/private/tmp/verum-T1704-native-source-initial/ir/native_dynamic_endian_returns_packed_bytes-source.ll",
+      "source_sha256": "8f5b55687da4cf915339e527253f0e94c69e06b3c6f06f8171c2dbfe0f574300",
+      "stored_sha256": "11f9149ec415a4c053f023aaf1eed3b40434fcc4e4b2ea085857c73545f5e3e7",
+      "source_bytes": 2488,
+      "compression": "gzip"
+    },
+    "native-consumers-initial/ir/native_dynamic_endian_returns_packed_bytes-wire.ll.gz": {
+      "source_path": "/private/tmp/verum-T1704-native-source-initial/ir/native_dynamic_endian_returns_packed_bytes-wire.ll",
+      "source_sha256": "8f5b55687da4cf915339e527253f0e94c69e06b3c6f06f8171c2dbfe0f574300",
+      "stored_sha256": "11f9149ec415a4c053f023aaf1eed3b40434fcc4e4b2ea085857c73545f5e3e7",
+      "source_bytes": 2488,
+      "compression": "gzip"
+    },
+    "native-consumers-initial/ir/native_inferred_and_annotated_endian_results_have_the_same_bytes-source.ll.gz": {
+      "source_path": "/private/tmp/verum-T1704-native-source-initial/ir/native_inferred_and_annotated_endian_results_have_the_same_bytes-source.ll",
+      "source_sha256": "038d8627feb45e651f36c324630580255f838a13e6de10df05b39468d1ffd232",
+      "stored_sha256": "b269e4fc539f90754a44e509d9a11b8f953cba73b77dea87ad1469975ccaf135",
+      "source_bytes": 8478,
+      "compression": "gzip"
+    },
+    "native-consumers-initial/ir/native_inferred_and_annotated_endian_results_have_the_same_bytes-wire.ll.gz": {
+      "source_path": "/private/tmp/verum-T1704-native-source-initial/ir/native_inferred_and_annotated_endian_results_have_the_same_bytes-wire.ll",
+      "source_sha256": "038d8627feb45e651f36c324630580255f838a13e6de10df05b39468d1ffd232",
+      "stored_sha256": "b269e4fc539f90754a44e509d9a11b8f953cba73b77dea87ad1469975ccaf135",
+      "source_bytes": 8478,
+      "compression": "gzip"
+    },
+    "native-consumers-initial/ir/native_inline_endian_widths_are_packed-source.ll.gz": {
+      "source_path": "/private/tmp/verum-T1704-native-source-initial/ir/native_inline_endian_widths_are_packed-source.ll",
+      "source_sha256": "513ef7dc8bfa147dbe1cce92de329db5e28cb3301f8e833c96615db4cf1adf1c",
+      "stored_sha256": "40519f64972c3a53c10c61f4dd44d8426e99037748a8c44dbf382c593b908750",
+      "source_bytes": 7649,
+      "compression": "gzip"
+    },
+    "native-consumers-initial/ir/native_inline_endian_widths_are_packed-wire.ll.gz": {
+      "source_path": "/private/tmp/verum-T1704-native-source-initial/ir/native_inline_endian_widths_are_packed-wire.ll",
+      "source_sha256": "513ef7dc8bfa147dbe1cce92de329db5e28cb3301f8e833c96615db4cf1adf1c",
+      "stored_sha256": "40519f64972c3a53c10c61f4dd44d8426e99037748a8c44dbf382c593b908750",
+      "source_bytes": 7649,
+      "compression": "gzip"
+    },
+    "native-consumers-initial/ir/native_list_input_keeps_its_declared_compatibility-source.ll.gz": {
+      "source_path": "/private/tmp/verum-T1704-native-source-initial/ir/native_list_input_keeps_its_declared_compatibility-source.ll",
+      "source_sha256": "74f0c1527cbb6b1200853b7ef8039d9fe6a499b1945fff04b29b60aa167f43af",
+      "stored_sha256": "4338c781fb836c52e26984aa2d3cbdad57385385d46076c501da9b1b84c8fab8",
+      "source_bytes": 78277,
+      "compression": "gzip"
+    },
+    "native-consumers-initial/ir/native_list_input_keeps_its_declared_compatibility-wire.ll.gz": {
+      "source_path": "/private/tmp/verum-T1704-native-source-initial/ir/native_list_input_keeps_its_declared_compatibility-wire.ll",
+      "source_sha256": "74f0c1527cbb6b1200853b7ef8039d9fe6a499b1945fff04b29b60aa167f43af",
+      "stored_sha256": "4338c781fb836c52e26984aa2d3cbdad57385385d46076c501da9b1b84c8fab8",
+      "source_bytes": 78277,
+      "compression": "gzip"
+    },
+    "native-consumers-initial/process.json": {
+      "source_path": "/private/tmp/verum-T1704-native-source-initial/process.json",
+      "source_sha256": "851356d214147f1ea5236e3684e1dc8e9bdefa8aed7e44e621683fa718793fc3",
+      "stored_sha256": "851356d214147f1ea5236e3684e1dc8e9bdefa8aed7e44e621683fa718793fc3",
+      "source_bytes": 36,
+      "compression": null
+    },
+    "native-consumers-initial/result.json": {
+      "source_path": "/private/tmp/verum-T1704-native-source-initial/result.json",
+      "source_sha256": "fca19acaaae86d4607cfc701eed9bb18cafc84ce024a2c8a1f167aea1aab1f13",
+      "stored_sha256": "fca19acaaae86d4607cfc701eed9bb18cafc84ce024a2c8a1f167aea1aab1f13",
+      "source_bytes": 60045,
+      "compression": null
+    },
+    "native-consumers-initial/started.json": {
+      "source_path": "/private/tmp/verum-T1704-native-source-initial/started.json",
+      "source_sha256": "52474bb37dbe380548eb47b06d13b996a8c5abb37f7a7441d35b11922ce40a2e",
+      "stored_sha256": "52474bb37dbe380548eb47b06d13b996a8c5abb37f7a7441d35b11922ce40a2e",
+      "source_bytes": 57553,
+      "compression": null
+    },
+    "native-consumers-initial/stderr.log.gz": {
+      "source_path": "/private/tmp/verum-T1704-native-source-initial/stderr.log",
+      "source_sha256": "b0d75eb1def44ec6032a486514ffc6a1c91778e2977ff1175570243f4d93fc8e",
+      "stored_sha256": "4c92772b86da0b4a800a7742417601523d59c718047adb3cca5d2372ff9c9b49",
+      "source_bytes": 6894,
+      "compression": "gzip"
+    },
+    "classifier-diagnostic/native_fixed_intrinsic_input_preserves_packed_byte_access.stderr.gz": {
+      "source_path": "/private/tmp/verum-T1704-native-classifier-diagnostic/native_fixed_intrinsic_input_preserves_packed_byte_access.stderr",
+      "source_sha256": "c2313f13cd4ee9a826d7be32218e810921367194299928e388fc2d0d64efdcee",
+      "stored_sha256": "490a6ef203977557e2c6bdbef37af5fa91704d9455d39d4c458f70d90f757f31",
+      "source_bytes": 340,
+      "compression": "gzip"
+    },
+    "classifier-diagnostic/native_fixed_intrinsic_input_preserves_packed_byte_access.stdout.gz": {
+      "source_path": "/private/tmp/verum-T1704-native-classifier-diagnostic/native_fixed_intrinsic_input_preserves_packed_byte_access.stdout",
+      "source_sha256": "539f93ee9fb1288458c291fdb8b34060d64b9e3fdfc955960626c4224207bfba",
+      "stored_sha256": "98fbe65d14b66868c5816193ab5926b3622d631768c109a32ef6ed61304a0724",
+      "source_bytes": 275,
+      "compression": "gzip"
+    },
+    "classifier-diagnostic/native_inferred_and_annotated_indexing_preserve_byte_access.stderr.gz": {
+      "source_path": "/private/tmp/verum-T1704-native-classifier-diagnostic/native_inferred_and_annotated_indexing_preserve_byte_access.stderr",
+      "source_sha256": "ba8e063ae13cbd24c31a3391c7fd1e69d1b9e01b6cd591564f1883e13a695358",
+      "stored_sha256": "ff118164a0ebca5d38d8858cefe325bf8732433749f4e2b32d3b55c8d85cbf05",
+      "source_bytes": 342,
+      "compression": "gzip"
+    },
+    "classifier-diagnostic/native_inferred_and_annotated_indexing_preserve_byte_access.stdout.gz": {
+      "source_path": "/private/tmp/verum-T1704-native-classifier-diagnostic/native_inferred_and_annotated_indexing_preserve_byte_access.stdout",
+      "source_sha256": "ad6508c2cf3654735eb2bc96347bb53e73ddf6a529d491bf097a97d50d87666f",
+      "stored_sha256": "db8a4c4c7fc80d998de2c7101d4f669f72814b1aa84948719e7a8cdd81236196",
+      "source_bytes": 279,
+      "compression": "gzip"
+    },
+    "classifier-diagnostic/result.json": {
+      "source_path": "/private/tmp/verum-T1704-native-classifier-diagnostic/result.json",
+      "source_sha256": "41179346e509bded14639835e0de32f6a95f68969c711ebb604f047d226bd872",
+      "stored_sha256": "41179346e509bded14639835e0de32f6a95f68969c711ebb604f047d226bd872",
+      "source_bytes": 1561,
+      "compression": null
+    },
+    "classifier-bodies/cargo.jsonl.gz": {
+      "source_path": "/private/tmp/verum-T1704-native-classifier-bodies/cargo.jsonl",
+      "source_sha256": "8de198da224a7cb060c5ac66a8193fb14bcbc56e44dc6b54448814e3d5083a42",
+      "stored_sha256": "b9ea22aba36efeea2dad9c1bce229b373283eac9996171276e89718bfcac492d",
+      "source_bytes": 256972,
+      "compression": "gzip"
+    },
+    "classifier-bodies/ir/native_dynamic_endian_returns_packed_bytes-source.ll.gz": {
+      "source_path": "/private/tmp/verum-T1704-native-classifier-bodies/ir/native_dynamic_endian_returns_packed_bytes-source.ll",
+      "source_sha256": "8f5b55687da4cf915339e527253f0e94c69e06b3c6f06f8171c2dbfe0f574300",
+      "stored_sha256": "11f9149ec415a4c053f023aaf1eed3b40434fcc4e4b2ea085857c73545f5e3e7",
+      "source_bytes": 2488,
+      "compression": "gzip"
+    },
+    "classifier-bodies/ir/native_dynamic_endian_returns_packed_bytes-wire.ll.gz": {
+      "source_path": "/private/tmp/verum-T1704-native-classifier-bodies/ir/native_dynamic_endian_returns_packed_bytes-wire.ll",
+      "source_sha256": "8f5b55687da4cf915339e527253f0e94c69e06b3c6f06f8171c2dbfe0f574300",
+      "stored_sha256": "11f9149ec415a4c053f023aaf1eed3b40434fcc4e4b2ea085857c73545f5e3e7",
+      "source_bytes": 2488,
+      "compression": "gzip"
+    },
+    "classifier-bodies/ir/native_inferred_and_annotated_endian_results_have_the_same_bytes-source.ll.gz": {
+      "source_path": "/private/tmp/verum-T1704-native-classifier-bodies/ir/native_inferred_and_annotated_endian_results_have_the_same_bytes-source.ll",
+      "source_sha256": "038d8627feb45e651f36c324630580255f838a13e6de10df05b39468d1ffd232",
+      "stored_sha256": "b269e4fc539f90754a44e509d9a11b8f953cba73b77dea87ad1469975ccaf135",
+      "source_bytes": 8478,
+      "compression": "gzip"
+    },
+    "classifier-bodies/ir/native_inferred_and_annotated_endian_results_have_the_same_bytes-wire.ll.gz": {
+      "source_path": "/private/tmp/verum-T1704-native-classifier-bodies/ir/native_inferred_and_annotated_endian_results_have_the_same_bytes-wire.ll",
+      "source_sha256": "038d8627feb45e651f36c324630580255f838a13e6de10df05b39468d1ffd232",
+      "stored_sha256": "b269e4fc539f90754a44e509d9a11b8f953cba73b77dea87ad1469975ccaf135",
+      "source_bytes": 8478,
+      "compression": "gzip"
+    },
+    "classifier-bodies/ir/native_inline_endian_widths_are_packed-source.ll.gz": {
+      "source_path": "/private/tmp/verum-T1704-native-classifier-bodies/ir/native_inline_endian_widths_are_packed-source.ll",
+      "source_sha256": "513ef7dc8bfa147dbe1cce92de329db5e28cb3301f8e833c96615db4cf1adf1c",
+      "stored_sha256": "40519f64972c3a53c10c61f4dd44d8426e99037748a8c44dbf382c593b908750",
+      "source_bytes": 7649,
+      "compression": "gzip"
+    },
+    "classifier-bodies/ir/native_inline_endian_widths_are_packed-wire.ll.gz": {
+      "source_path": "/private/tmp/verum-T1704-native-classifier-bodies/ir/native_inline_endian_widths_are_packed-wire.ll",
+      "source_sha256": "513ef7dc8bfa147dbe1cce92de329db5e28cb3301f8e833c96615db4cf1adf1c",
+      "stored_sha256": "40519f64972c3a53c10c61f4dd44d8426e99037748a8c44dbf382c593b908750",
+      "source_bytes": 7649,
+      "compression": "gzip"
+    },
+    "classifier-bodies/ir/native_list_input_keeps_its_declared_compatibility-source.ll.gz": {
+      "source_path": "/private/tmp/verum-T1704-native-classifier-bodies/ir/native_list_input_keeps_its_declared_compatibility-source.ll",
+      "source_sha256": "74f0c1527cbb6b1200853b7ef8039d9fe6a499b1945fff04b29b60aa167f43af",
+      "stored_sha256": "4338c781fb836c52e26984aa2d3cbdad57385385d46076c501da9b1b84c8fab8",
+      "source_bytes": 78277,
+      "compression": "gzip"
+    },
+    "classifier-bodies/ir/native_list_input_keeps_its_declared_compatibility-wire.ll.gz": {
+      "source_path": "/private/tmp/verum-T1704-native-classifier-bodies/ir/native_list_input_keeps_its_declared_compatibility-wire.ll",
+      "source_sha256": "74f0c1527cbb6b1200853b7ef8039d9fe6a499b1945fff04b29b60aa167f43af",
+      "stored_sha256": "4338c781fb836c52e26984aa2d3cbdad57385385d46076c501da9b1b84c8fab8",
+      "source_bytes": 78277,
+      "compression": "gzip"
+    },
+    "classifier-bodies/process.json": {
+      "source_path": "/private/tmp/verum-T1704-native-classifier-bodies/process.json",
+      "source_sha256": "ec2a5b1b2ab9f0588e28ff0104f5b3627cc269ebc69876e8dfde45d6284d2514",
+      "stored_sha256": "ec2a5b1b2ab9f0588e28ff0104f5b3627cc269ebc69876e8dfde45d6284d2514",
+      "source_bytes": 36,
+      "compression": null
+    },
+    "classifier-bodies/result.json": {
+      "source_path": "/private/tmp/verum-T1704-native-classifier-bodies/result.json",
+      "source_sha256": "ce037b9ee4dbf41e5e09b37cac3bdf2d4cecc40555ca1531cad07662b6ceecfc",
+      "stored_sha256": "ce037b9ee4dbf41e5e09b37cac3bdf2d4cecc40555ca1531cad07662b6ceecfc",
+      "source_bytes": 60048,
+      "compression": null
+    },
+    "classifier-bodies/started.json": {
+      "source_path": "/private/tmp/verum-T1704-native-classifier-bodies/started.json",
+      "source_sha256": "19c3be92ce448dbaade2be027f94b15ef651cd0af7e3fb1e5c29d3e1b2febc71",
+      "stored_sha256": "19c3be92ce448dbaade2be027f94b15ef651cd0af7e3fb1e5c29d3e1b2febc71",
+      "source_bytes": 57556,
+      "compression": null
+    },
+    "classifier-bodies/stderr.log.gz": {
+      "source_path": "/private/tmp/verum-T1704-native-classifier-bodies/stderr.log",
+      "source_sha256": "347490c7706be887143ac68fe0d1ae63ffdc45b5ea3bd671370486b607625899",
+      "stored_sha256": "2df33c85c8e266bcaaa506e44d28686caad8ffcb87a234dbb6f525031f262010",
+      "source_bytes": 45090,
+      "compression": "gzip"
+    },
+    "vbc-proof-cleanup-fixed/cargo.jsonl.gz": {
+      "source_path": "/private/tmp/verum-T1704-vbc-unit-cleanup-fixed/cargo.jsonl",
+      "source_sha256": "bb8adce19b7a3ed3826089d3e6b7323321c64e94f02fb0594fe2bda91481d5a0",
+      "stored_sha256": "03f267e2f64fe44553af53dc467a4bc41174abfcff4d448e28eef05aad6c4f3d",
+      "source_bytes": 178623,
+      "compression": "gzip"
+    },
+    "vbc-proof-cleanup-fixed/process.json": {
+      "source_path": "/private/tmp/verum-T1704-vbc-unit-cleanup-fixed/process.json",
+      "source_sha256": "1391eb184d044e8399ab0c578f76fdce6a5f71c3c27706f2870c38dd00dfd94e",
+      "stored_sha256": "1391eb184d044e8399ab0c578f76fdce6a5f71c3c27706f2870c38dd00dfd94e",
+      "source_bytes": 36,
+      "compression": null
+    },
+    "vbc-proof-cleanup-fixed/result.json": {
+      "source_path": "/private/tmp/verum-T1704-vbc-unit-cleanup-fixed/result.json",
+      "source_sha256": "0de932bd6cce6e91cc24bbf35301557048f4f3699bd13c548506fb9ad686fc59",
+      "stored_sha256": "0de932bd6cce6e91cc24bbf35301557048f4f3699bd13c548506fb9ad686fc59",
+      "source_bytes": 59018,
+      "compression": null
+    },
+    "vbc-proof-cleanup-fixed/started.json": {
+      "source_path": "/private/tmp/verum-T1704-vbc-unit-cleanup-fixed/started.json",
+      "source_sha256": "48bb0d517e547ba59198e07015ce91d9f6f2e3539cbfc694d307c89575477d5d",
+      "stored_sha256": "48bb0d517e547ba59198e07015ce91d9f6f2e3539cbfc694d307c89575477d5d",
+      "source_bytes": 57646,
+      "compression": null
+    },
+    "vbc-proof-cleanup-fixed/stderr.log.gz": {
+      "source_path": "/private/tmp/verum-T1704-vbc-unit-cleanup-fixed/stderr.log",
+      "source_sha256": "9d28645446c8bced04db9aa5f45ddcda98072d7488545f466d3ba40ef8f37b3e",
+      "stored_sha256": "dbab4d6a202ee735cef9379d36a72b57ea84318d17ee3b818d30e65e287a6f6e",
+      "source_bytes": 581,
+      "compression": "gzip"
+    },
+    "native-proof-final/cargo.jsonl.gz": {
+      "source_path": "/private/tmp/verum-T1704-native-unit-encapsulated/cargo.jsonl",
+      "source_sha256": "fb2b94f3895a0059ff66ed62bb64d66c40681523a65f5c2215137abe7e2447dd",
+      "stored_sha256": "b188b6ee8e97a47cefa79d931395b9e38c40d391cd92f3761855871a906f918e",
+      "source_bytes": 252374,
+      "compression": "gzip"
+    },
+    "native-proof-final/process.json": {
+      "source_path": "/private/tmp/verum-T1704-native-unit-encapsulated/process.json",
+      "source_sha256": "47bcdf7acb04f248c366d1b080aa44a49540e11e176235ca7e2c40effa50c33a",
+      "stored_sha256": "47bcdf7acb04f248c366d1b080aa44a49540e11e176235ca7e2c40effa50c33a",
+      "source_bytes": 36,
+      "compression": null
+    },
+    "native-proof-final/result.json": {
+      "source_path": "/private/tmp/verum-T1704-native-unit-encapsulated/result.json",
+      "source_sha256": "f16f917bc7a2dac49b6a1dfd0b28a073a951f6a63b50b412edfbfd46c398cd47",
+      "stored_sha256": "f16f917bc7a2dac49b6a1dfd0b28a073a951f6a63b50b412edfbfd46c398cd47",
+      "source_bytes": 58943,
+      "compression": null
+    },
+    "native-proof-final/started.json": {
+      "source_path": "/private/tmp/verum-T1704-native-unit-encapsulated/started.json",
+      "source_sha256": "1299a2ec65bd6dc472544e846eaf99d3340e41fc32ec554c34d94409c92d84d9",
+      "stored_sha256": "1299a2ec65bd6dc472544e846eaf99d3340e41fc32ec554c34d94409c92d84d9",
+      "source_bytes": 57559,
+      "compression": null
+    },
+    "native-proof-final/stderr.log.gz": {
+      "source_path": "/private/tmp/verum-T1704-native-unit-encapsulated/stderr.log",
+      "source_sha256": "412fefba6ef6a3333dff538ecbf82230eb9267af6c8247326f4b1536d268081f",
+      "stored_sha256": "d6203b5c5c7b6851fefdaa86bd16f26a1d2c06d47a86e6786c521ec63e12998c",
+      "source_bytes": 5036,
+      "compression": "gzip"
+    },
+    "native-consumers-final/cargo.jsonl.gz": {
+      "source_path": "/private/tmp/verum-T1704-native-source-cleanup-fixed/cargo.jsonl",
+      "source_sha256": "a99e1e8896f42bddb95825c27237216b02d0dbf2cb94f93167e8953a37af786d",
+      "stored_sha256": "4dbd063eccbd6854d9e563639182a8fd9e7705ce8e2ed9354af4fd4a596a4e51",
+      "source_bytes": 254012,
+      "compression": "gzip"
+    },
+    "native-consumers-final/ir/native_array_calls_preserve_list_and_packed_bodies_in_both_source_orders-source.ll.gz": {
+      "source_path": "/private/tmp/verum-T1704-native-source-cleanup-fixed/ir/native_array_calls_preserve_list_and_packed_bodies_in_both_source_orders-source.ll",
+      "source_sha256": "755ae6368f07f5c593de20afc6ed1af9f3175aad1d4317afbf741566dd64fe75",
+      "stored_sha256": "a146f8d8e52eeb4215ecb3996e22d67e6dadd456607524123a9d27d0820a43f4",
+      "source_bytes": 26759,
+      "compression": "gzip"
+    },
+    "native-consumers-final/ir/native_array_calls_preserve_list_and_packed_bodies_in_both_source_orders-wire.ll.gz": {
+      "source_path": "/private/tmp/verum-T1704-native-source-cleanup-fixed/ir/native_array_calls_preserve_list_and_packed_bodies_in_both_source_orders-wire.ll",
+      "source_sha256": "755ae6368f07f5c593de20afc6ed1af9f3175aad1d4317afbf741566dd64fe75",
+      "stored_sha256": "a146f8d8e52eeb4215ecb3996e22d67e6dadd456607524123a9d27d0820a43f4",
+      "source_bytes": 26759,
+      "compression": "gzip"
+    },
+    "native-consumers-final/ir/native_dynamic_endian_returns_packed_bytes-source.ll.gz": {
+      "source_path": "/private/tmp/verum-T1704-native-source-cleanup-fixed/ir/native_dynamic_endian_returns_packed_bytes-source.ll",
+      "source_sha256": "8f5b55687da4cf915339e527253f0e94c69e06b3c6f06f8171c2dbfe0f574300",
+      "stored_sha256": "11f9149ec415a4c053f023aaf1eed3b40434fcc4e4b2ea085857c73545f5e3e7",
+      "source_bytes": 2488,
+      "compression": "gzip"
+    },
+    "native-consumers-final/ir/native_dynamic_endian_returns_packed_bytes-wire.ll.gz": {
+      "source_path": "/private/tmp/verum-T1704-native-source-cleanup-fixed/ir/native_dynamic_endian_returns_packed_bytes-wire.ll",
+      "source_sha256": "8f5b55687da4cf915339e527253f0e94c69e06b3c6f06f8171c2dbfe0f574300",
+      "stored_sha256": "11f9149ec415a4c053f023aaf1eed3b40434fcc4e4b2ea085857c73545f5e3e7",
+      "source_bytes": 2488,
+      "compression": "gzip"
+    },
+    "native-consumers-final/ir/native_fixed_intrinsic_input_preserves_packed_byte_access-source.ll.gz": {
+      "source_path": "/private/tmp/verum-T1704-native-source-cleanup-fixed/ir/native_fixed_intrinsic_input_preserves_packed_byte_access-source.ll",
+      "source_sha256": "66b1730d0498637ee82862fafbdfcaed2cdc79253daaf86413fc8c975c7de18b",
+      "stored_sha256": "70f78f77e821f6ad618aa278e471aaae12a0ae637effc34c85e8dcd0213ffb8e",
+      "source_bytes": 27027,
+      "compression": "gzip"
+    },
+    "native-consumers-final/ir/native_fixed_intrinsic_input_preserves_packed_byte_access-wire.ll.gz": {
+      "source_path": "/private/tmp/verum-T1704-native-source-cleanup-fixed/ir/native_fixed_intrinsic_input_preserves_packed_byte_access-wire.ll",
+      "source_sha256": "66b1730d0498637ee82862fafbdfcaed2cdc79253daaf86413fc8c975c7de18b",
+      "stored_sha256": "70f78f77e821f6ad618aa278e471aaae12a0ae637effc34c85e8dcd0213ffb8e",
+      "source_bytes": 27027,
+      "compression": "gzip"
+    },
+    "native-consumers-final/ir/native_inferred_and_annotated_endian_results_have_the_same_bytes-source.ll.gz": {
+      "source_path": "/private/tmp/verum-T1704-native-source-cleanup-fixed/ir/native_inferred_and_annotated_endian_results_have_the_same_bytes-source.ll",
+      "source_sha256": "038d8627feb45e651f36c324630580255f838a13e6de10df05b39468d1ffd232",
+      "stored_sha256": "b269e4fc539f90754a44e509d9a11b8f953cba73b77dea87ad1469975ccaf135",
+      "source_bytes": 8478,
+      "compression": "gzip"
+    },
+    "native-consumers-final/ir/native_inferred_and_annotated_endian_results_have_the_same_bytes-wire.ll.gz": {
+      "source_path": "/private/tmp/verum-T1704-native-source-cleanup-fixed/ir/native_inferred_and_annotated_endian_results_have_the_same_bytes-wire.ll",
+      "source_sha256": "038d8627feb45e651f36c324630580255f838a13e6de10df05b39468d1ffd232",
+      "stored_sha256": "b269e4fc539f90754a44e509d9a11b8f953cba73b77dea87ad1469975ccaf135",
+      "source_bytes": 8478,
+      "compression": "gzip"
+    },
+    "native-consumers-final/ir/native_inferred_and_annotated_indexing_preserve_byte_access-source.ll.gz": {
+      "source_path": "/private/tmp/verum-T1704-native-source-cleanup-fixed/ir/native_inferred_and_annotated_indexing_preserve_byte_access-source.ll",
+      "source_sha256": "61c7fd06daef9bf3c7449b9aba97fdff15bd1998625fd76888295f281aef14d4",
+      "stored_sha256": "227022c9c1a8dbc3fae191993ed7c7f0f087af6c75a94c909886d457d2c249f6",
+      "source_bytes": 21193,
+      "compression": "gzip"
+    },
+    "native-consumers-final/ir/native_inferred_and_annotated_indexing_preserve_byte_access-wire.ll.gz": {
+      "source_path": "/private/tmp/verum-T1704-native-source-cleanup-fixed/ir/native_inferred_and_annotated_indexing_preserve_byte_access-wire.ll",
+      "source_sha256": "61c7fd06daef9bf3c7449b9aba97fdff15bd1998625fd76888295f281aef14d4",
+      "stored_sha256": "227022c9c1a8dbc3fae191993ed7c7f0f087af6c75a94c909886d457d2c249f6",
+      "source_bytes": 21193,
+      "compression": "gzip"
+    },
+    "native-consumers-final/ir/native_inline_endian_widths_are_packed-source.ll.gz": {
+      "source_path": "/private/tmp/verum-T1704-native-source-cleanup-fixed/ir/native_inline_endian_widths_are_packed-source.ll",
+      "source_sha256": "513ef7dc8bfa147dbe1cce92de329db5e28cb3301f8e833c96615db4cf1adf1c",
+      "stored_sha256": "40519f64972c3a53c10c61f4dd44d8426e99037748a8c44dbf382c593b908750",
+      "source_bytes": 7649,
+      "compression": "gzip"
+    },
+    "native-consumers-final/ir/native_inline_endian_widths_are_packed-wire.ll.gz": {
+      "source_path": "/private/tmp/verum-T1704-native-source-cleanup-fixed/ir/native_inline_endian_widths_are_packed-wire.ll",
+      "source_sha256": "513ef7dc8bfa147dbe1cce92de329db5e28cb3301f8e833c96615db4cf1adf1c",
+      "stored_sha256": "40519f64972c3a53c10c61f4dd44d8426e99037748a8c44dbf382c593b908750",
+      "source_bytes": 7649,
+      "compression": "gzip"
+    },
+    "native-consumers-final/ir/native_list_input_keeps_its_declared_compatibility-source.ll.gz": {
+      "source_path": "/private/tmp/verum-T1704-native-source-cleanup-fixed/ir/native_list_input_keeps_its_declared_compatibility-source.ll",
+      "source_sha256": "74f0c1527cbb6b1200853b7ef8039d9fe6a499b1945fff04b29b60aa167f43af",
+      "stored_sha256": "4338c781fb836c52e26984aa2d3cbdad57385385d46076c501da9b1b84c8fab8",
+      "source_bytes": 78277,
+      "compression": "gzip"
+    },
+    "native-consumers-final/ir/native_list_input_keeps_its_declared_compatibility-wire.ll.gz": {
+      "source_path": "/private/tmp/verum-T1704-native-source-cleanup-fixed/ir/native_list_input_keeps_its_declared_compatibility-wire.ll",
+      "source_sha256": "74f0c1527cbb6b1200853b7ef8039d9fe6a499b1945fff04b29b60aa167f43af",
+      "stored_sha256": "4338c781fb836c52e26984aa2d3cbdad57385385d46076c501da9b1b84c8fab8",
+      "source_bytes": 78277,
+      "compression": "gzip"
+    },
+    "native-consumers-final/ir/native_selected_packed_array_access_uses_canonical_wide_registers-source.ll.gz": {
+      "source_path": "/private/tmp/verum-T1704-native-source-cleanup-fixed/ir/native_selected_packed_array_access_uses_canonical_wide_registers-source.ll",
+      "source_sha256": "3210df26a2df8caf515326636348f74c679074c7f03441feb7be1a0ce9a29315",
+      "stored_sha256": "c113f75e0a6e954adab3d95f32fb00fb830de53a64d23a083c33f4558a87f376",
+      "source_bytes": 80683,
+      "compression": "gzip"
+    },
+    "native-consumers-final/ir/native_selected_packed_array_access_uses_canonical_wide_registers-wire.ll.gz": {
+      "source_path": "/private/tmp/verum-T1704-native-source-cleanup-fixed/ir/native_selected_packed_array_access_uses_canonical_wide_registers-wire.ll",
+      "source_sha256": "3210df26a2df8caf515326636348f74c679074c7f03441feb7be1a0ce9a29315",
+      "stored_sha256": "c113f75e0a6e954adab3d95f32fb00fb830de53a64d23a083c33f4558a87f376",
+      "source_bytes": 80683,
+      "compression": "gzip"
+    },
+    "native-consumers-final/ir/native_selected_packed_arrays_preserve_length_and_indexed_mutation-source.ll.gz": {
+      "source_path": "/private/tmp/verum-T1704-native-source-cleanup-fixed/ir/native_selected_packed_arrays_preserve_length_and_indexed_mutation-source.ll",
+      "source_sha256": "cfd2e7981e75b226290213d3baeddeaeec2041e5e85bcc74b3958bf07a4c1c9f",
+      "stored_sha256": "6d150c0a51b43c86eaa00ef53f5c3aaf212d9abd44559781178a34ee7a7d8a87",
+      "source_bytes": 17041,
+      "compression": "gzip"
+    },
+    "native-consumers-final/ir/native_selected_packed_arrays_preserve_length_and_indexed_mutation-wire.ll.gz": {
+      "source_path": "/private/tmp/verum-T1704-native-source-cleanup-fixed/ir/native_selected_packed_arrays_preserve_length_and_indexed_mutation-wire.ll",
+      "source_sha256": "cfd2e7981e75b226290213d3baeddeaeec2041e5e85bcc74b3958bf07a4c1c9f",
+      "stored_sha256": "6d150c0a51b43c86eaa00ef53f5c3aaf212d9abd44559781178a34ee7a7d8a87",
+      "source_bytes": 17041,
+      "compression": "gzip"
+    },
+    "native-consumers-final/ir/native_selected_typed_array_results_keep_integer_and_float_geometry-source.ll.gz": {
+      "source_path": "/private/tmp/verum-T1704-native-source-cleanup-fixed/ir/native_selected_typed_array_results_keep_integer_and_float_geometry-source.ll",
+      "source_sha256": "01678d42cf5ccc80f5757c98e52ad99f612fcd0b3de9c3d8015c91d9aebb47ab",
+      "stored_sha256": "6f0f54e73a194d6c4d525783116b67892cb9ee125b70b984a489c228842f8856",
+      "source_bytes": 18410,
+      "compression": "gzip"
+    },
+    "native-consumers-final/ir/native_selected_typed_array_results_keep_integer_and_float_geometry-wire.ll.gz": {
+      "source_path": "/private/tmp/verum-T1704-native-source-cleanup-fixed/ir/native_selected_typed_array_results_keep_integer_and_float_geometry-wire.ll",
+      "source_sha256": "01678d42cf5ccc80f5757c98e52ad99f612fcd0b3de9c3d8015c91d9aebb47ab",
+      "stored_sha256": "6f0f54e73a194d6c4d525783116b67892cb9ee125b70b984a489c228842f8856",
+      "source_bytes": 18410,
+      "compression": "gzip"
+    },
+    "native-consumers-final/process.json": {
+      "source_path": "/private/tmp/verum-T1704-native-source-cleanup-fixed/process.json",
+      "source_sha256": "c55b11c670098a649b7bc5929495d7a20c10b658e59272fe0770f544cf17e81c",
+      "stored_sha256": "c55b11c670098a649b7bc5929495d7a20c10b658e59272fe0770f544cf17e81c",
+      "source_bytes": 36,
+      "compression": null
+    },
+    "native-consumers-final/result.json": {
+      "source_path": "/private/tmp/verum-T1704-native-source-cleanup-fixed/result.json",
+      "source_sha256": "d861ad4d505c8ec62d230743a1087caf64e1b585871aced0069a8a24eb66ba12",
+      "stored_sha256": "d861ad4d505c8ec62d230743a1087caf64e1b585871aced0069a8a24eb66ba12",
+      "source_bytes": 61872,
+      "compression": null
+    },
+    "native-consumers-final/started.json": {
+      "source_path": "/private/tmp/verum-T1704-native-source-cleanup-fixed/started.json",
+      "source_sha256": "eedbb9047c0fa67449d73ecd33a92e121d805f1b65f6a51975c1971cbc3fd03e",
+      "stored_sha256": "eedbb9047c0fa67449d73ecd33a92e121d805f1b65f6a51975c1971cbc3fd03e",
+      "source_bytes": 57559,
+      "compression": null
+    },
+    "native-consumers-final/stderr.log.gz": {
+      "source_path": "/private/tmp/verum-T1704-native-source-cleanup-fixed/stderr.log",
+      "source_sha256": "8920da28c2acf0a71668806b04a76eaef653e835e3a1e8530d6a7d6776835d37",
+      "stored_sha256": "97ac5abb8581d3625f462eda8014bddde115255e4c9bc59768d1f937b521fa8b",
+      "source_bytes": 5048,
+      "compression": "gzip"
+    },
+    "vbc-source-final/cargo.jsonl.gz": {
+      "source_path": "/private/tmp/verum-T1704-vbc-source-final/cargo.jsonl",
+      "source_sha256": "096ae9498bfba84478e3297dd2f7e2ed1028ff06e9bb6466cf5472915c867699",
+      "stored_sha256": "6735de55a20ca763e73786c2bf3574f8887d5706d06e08df0aa1b726d751fe7b",
+      "source_bytes": 176777,
+      "compression": "gzip"
+    },
+    "vbc-source-final/process.json": {
+      "source_path": "/private/tmp/verum-T1704-vbc-source-final/process.json",
+      "source_sha256": "594e846b2bd2c69e61f637584295bab4d8e7bef91e37b20d1e0a15479653db44",
+      "stored_sha256": "594e846b2bd2c69e61f637584295bab4d8e7bef91e37b20d1e0a15479653db44",
+      "source_bytes": 36,
+      "compression": null
+    },
+    "vbc-source-final/result.json": {
+      "source_path": "/private/tmp/verum-T1704-vbc-source-final/result.json",
+      "source_sha256": "9dea89761d766c8135af6b5e002bcd5102da94d1adddece777a147ad472efc85",
+      "stored_sha256": "9dea89761d766c8135af6b5e002bcd5102da94d1adddece777a147ad472efc85",
+      "source_bytes": 59030,
+      "compression": null
+    },
+    "vbc-source-final/started.json": {
+      "source_path": "/private/tmp/verum-T1704-vbc-source-final/started.json",
+      "source_sha256": "3814d879e95deaf3fbeffc63d9327843a99d778b85d6b787d25b1e61a869627b",
+      "stored_sha256": "3814d879e95deaf3fbeffc63d9327843a99d778b85d6b787d25b1e61a869627b",
+      "source_bytes": 57639,
+      "compression": null
+    },
+    "vbc-source-final/stderr.log.gz": {
+      "source_path": "/private/tmp/verum-T1704-vbc-source-final/stderr.log",
+      "source_sha256": "484f34ef9e81f99a78f0bc19f77f910330f16d3e25971cb5c59286bdc482e8c7",
+      "stored_sha256": "39726dbdc776fe3d46bf2c97aa092af100d60c46442cb1c40d52aa8fb06a3fbc",
+      "source_bytes": 601,
+      "compression": "gzip"
+    },
+    "source-gates/gate.log.gz": {
+      "source_path": "/private/tmp/verum-T1704-source-gates/gate.log",
+      "source_sha256": "602a7ef54f274326156c278db86103e34ad3a0c01d9b2934592ca84dbb67c983",
+      "stored_sha256": "35f1372d8fd720ba76d0388da9756982fc4bfa381dd7bc36955a4357ac4e1688",
+      "source_bytes": 4703,
+      "compression": "gzip"
+    },
+    "source-gates/result.json": {
+      "source_path": "/private/tmp/verum-T1704-source-gates/result.json",
+      "source_sha256": "6f1d44a6a1c23fc9f4866fb5f06599d7c7cad3a43775c4d83f08cd3f9096ba57",
+      "stored_sha256": "6f1d44a6a1c23fc9f4866fb5f06599d7c7cad3a43775c4d83f08cd3f9096ba57",
+      "source_bytes": 455,
+      "compression": null
+    },
+    "run_gate.py": {
+      "source_path": "/private/tmp/verum-T1704-run-gate.py",
+      "source_sha256": "29ad1be76635c6cce9481be32751be16a3968b82139925fa49867dc82eb8571b",
+      "stored_sha256": "29ad1be76635c6cce9481be32751be16a3968b82139925fa49867dc82eb8571b",
+      "source_bytes": 4929,
+      "compression": null
+    },
+    "target-handoff.json": {
+      "source_path": "/private/tmp/verum-T1704-target-handoff.json",
+      "source_sha256": "0dc86fe6fecf25ad69ecc30eeab76b8f654892d8fe5219a3b23ca99430eec23d",
+      "stored_sha256": "0dc86fe6fecf25ad69ecc30eeab76b8f654892d8fe5219a3b23ca99430eec23d",
+      "source_bytes": 1398,
+      "compression": null
+    },
+    "shared-proof-source-identity.json": {
+      "stored_sha256": "f782da7841c1999f74e548c550049c6dcd5f4ae59687c4ed4134b1dee9f5125d",
+      "compression": null
+    },
+    "evidence-reference-gate.log.gz": {
+      "source_path": "/private/tmp/verum-T1704-evidence-reference-gate.log",
+      "source_sha256": "05ea7e5597c5ccf370209c664ae4fc22bd189cefdb6f9e6ba1703e2ea1077043",
+      "stored_sha256": "588e40ae0ce421ff0619ead821253428f66d34269afbd2d68775ede32709bdd8",
+      "source_bytes": 3205,
+      "compression": "gzip"
+    }
+  }
+}
