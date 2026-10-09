@@ -2412,60 +2412,13 @@ impl TypeContext {
     /// Import and re-export system: "mount module.{item1, item2}" for imports, pub use for re-exports, glob imports — Path-based type resolution
     ///
     /// Supports both dot (.) and double-colon (::) separators for qualified paths.
-    /// Resolution strategy:
-    /// 1. Parse the path into module segments and type name
-    /// 2. Try to resolve the module from available module_type_defs
-    /// 3. Look up the type in that module
-    /// 4. Fall back to unqualified lookup if module resolution fails
+    /// Qualified paths require an exact definition; unqualified paths use the
+    /// ordinary lexical lookup. Module-ID lookup remains a separate API.
     pub fn lookup_qualified_type(&self, path: &str) -> Option<&Type> {
-        // Normalize separators: support both "." and "::"
+        // Exact paths are identities, not hints for a leaf-name search. The
+        // module-ID API is separate because an ID alone supplies no path.
         let normalized = path.replace("::", ".");
-
-        // Parse qualified path: split by dots
-        let parts: Vec<&str> = normalized.split('.').collect();
-
-        if parts.len() < 2 {
-            // No qualification - just a simple name
-            return self.lookup_type(path);
-        }
-
-        // Last part is the type name, everything before is the module path
-        let type_name = parts[parts.len() - 1];
-
-        // Try to find a module that matches any suffix of the module path
-        // This handles cases where we have "std.collections.Map" but only "collections" is registered
-        for start_idx in 0..(parts.len() - 1) {
-            // Build module path from parts[start_idx..parts.len()-1]
-            let module_parts: Vec<&str> = parts[start_idx..parts.len() - 1].to_vec();
-            let module_path = module_parts.join(".");
-
-            // Search for a matching module in module_type_defs
-            for ((module_id, name), ty) in &self.module_type_defs {
-                if name.as_str() == type_name {
-                    // Check if this module matches our module path
-                    // For now, we do a simple check - in a full implementation,
-                    // this would use the ModuleRegistry to resolve module paths to IDs
-
-                    // Try looking up the module by path to see if IDs match
-                    if let Option::Some(current_mod) = self.current_module()
-                        && *module_id == current_mod
-                    {
-                        // Found it in current module
-                        return Option::Some(ty);
-                    }
-
-                    // Return the type if we found any match
-                    // In a full implementation with registry access, we'd verify
-                    // the module path actually resolves to this module_id
-                    return Option::Some(ty);
-                }
-            }
-        }
-
-        // Fall back to unqualified lookup
-        // This maintains backward compatibility and handles cases where
-        // the module registry isn't available or the path couldn't be resolved
-        self.lookup_type(type_name)
+        self.lookup_type(&normalized)
     }
 
     /// Get the module ID that defines a type

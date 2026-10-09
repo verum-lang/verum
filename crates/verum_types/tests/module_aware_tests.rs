@@ -153,19 +153,27 @@ fn test_multiple_modules_isolation() {
 }
 
 #[test]
-fn test_qualified_type_lookup_placeholder() {
+fn qualified_type_lookup_requires_the_exact_owner() {
     let mut ctx = TypeContext::new();
+    ctx.define_type("MyType", Type::text());
+    ctx.define_type("alpha.MyType", Type::int());
+    ctx.define_type("beta.MyType", Type::bool());
+    ctx.define_module_type(ModuleId::new(7), "MyType", Type::unit());
 
-    // Define a type normally
-    ctx.define_type("MyType".to_string(), Type::text());
-
-    // The placeholder should fall back to unqualified lookup
-    let result = ctx.lookup_qualified_type("some.module.MyType");
-    assert!(result.is_some());
-
-    // Simple name should work
-    let result2 = ctx.lookup_qualified_type("MyType");
-    assert!(result2.is_some());
+    assert_eq!(
+        ctx.lookup_qualified_type("alpha.MyType"),
+        Some(&Type::int())
+    );
+    assert_eq!(
+        ctx.lookup_qualified_type("beta::MyType"),
+        Some(&Type::bool())
+    );
+    assert!(ctx.lookup_qualified_type("absent.MyType").is_none());
+    assert_eq!(ctx.lookup_qualified_type("MyType"), Some(&Type::text()));
+    assert_eq!(
+        ctx.lookup_module_type(ModuleId::new(7), "MyType"),
+        Some(&Type::unit())
+    );
 }
 
 #[test]
