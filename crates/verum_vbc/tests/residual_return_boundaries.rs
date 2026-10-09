@@ -255,22 +255,30 @@ fn probe() -> Int {
         match work() { Result.Ok(_) => 0, Result.Err(error) => error.code }
     } recover { _ => 99 }
 }
+"#,
+        41,
+    );
+}
 
 #[test]
 fn callable_try_boundary_can_be_called_after_the_outer_handler_ends() {
-    value(r#"
+    value(
+        r#"
 fn probe() -> Int {
     let work = try {
         || -> Result<Int, Failure> { let value = missing()?; Result.Ok(7) }
     } recover { _ => || -> Result<Int, Failure> { Result.Ok(0) } };
     match work() { Result.Ok(_) => 0, Result.Err(error) => error.code }
 }
-"#, 41);
+"#,
+        41,
+    );
 }
 
 #[test]
 fn callable_try_boundary_retains_a_handler_inside_the_closure() {
-    value(r#"
+    value(
+        r#"
 fn probe() -> Int {
     try {
         let work = || -> Result<Int, Failure> {
@@ -280,12 +288,15 @@ fn probe() -> Int {
         match work() { Result.Ok(code) => code, Result.Err(_) => 0 }
     } recover { _ => 99 }
 }
-"#, 42);
+"#,
+        42,
+    );
 }
 
 #[test]
 fn callable_try_boundary_restores_the_enclosing_handler_after_compilation() {
-    value(r#"
+    value(
+        r#"
 fn probe() -> Int {
     try {
         let work = || -> Result<Int, Failure> { Result.Ok(7) };
@@ -293,10 +304,8 @@ fn probe() -> Int {
         0
     } recover { error => error.code + 2 }
 }
-"#, 43);
-}
 "#,
-        41,
+        43,
     );
 }
 
