@@ -1261,7 +1261,7 @@ pub(in super::super) fn handle_get_index(
         let capacity = unsafe { (*header_ptr.add(1)).as_i64() } as usize;
         let entries_ptr = unsafe { (*header_ptr.add(2)).as_ptr::<u8>() };
         let entries_data = unsafe { entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
-        let hash = value_hash(key);
+        let hash = value_hash(key, state);
         let mut map_idx = hash % capacity;
         let start_idx = map_idx;
         loop {
@@ -1270,7 +1270,7 @@ pub(in super::super) fn handle_get_index(
                 state.set_reg(dst, Value::unit());
                 break;
             }
-            if value_eq(entry_key, key) {
+            if value_eq(entry_key, key, state) {
                 let entry_val = unsafe { *entries_data.add(map_idx * 2 + 1) };
                 state.set_reg(dst, entry_val);
                 break;
@@ -1646,7 +1646,7 @@ pub(in super::super) fn handle_set_index(
                 let old_key = unsafe { *old_data.add(i * 2) };
                 if !old_key.is_unit() {
                     let old_val = unsafe { *old_data.add(i * 2 + 1) };
-                    let hash = value_hash(old_key);
+                    let hash = value_hash(old_key, state);
                     let mut idx = hash % new_capacity;
                     loop {
                         let slot_key = unsafe { *new_data.add(idx * 2) };
@@ -1670,7 +1670,7 @@ pub(in super::super) fn handle_set_index(
         }
 
         let entries_data = unsafe { entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
-        let hash = value_hash(key);
+        let hash = value_hash(key, state);
         let mut map_idx = hash % capacity;
         loop {
             let entry_key = unsafe { *entries_data.add(map_idx * 2) };
@@ -1686,7 +1686,7 @@ pub(in super::super) fn handle_set_index(
                 }
                 break;
             }
-            if value_eq(entry_key, key) {
+            if value_eq(entry_key, key, state) {
                 // Update existing
                 unsafe {
                     *entries_data.add(map_idx * 2 + 1) = value;
@@ -2270,17 +2270,47 @@ fn variant_layout(v: &Value) -> Option<(*const u8, u32, u32)> {
     Some((ptr, tag, field_count))
 }
 
+/// A plain record is established by a tracked allocation and its declared
+/// TypeKind, never by the numeric shape of an address or a type-id range.
+/// General equality shares the semantic field-count authority with this path.
+fn record_layout(v: Value, state: &InterpreterState) -> Option<(*const u8, u32, usize, u32)> {
+    if !v.is_regular_ptr() || v.is_nil() {
+        return None;
+    }
+    let ptr = v.as_ptr::<u8>();
+    if !state.heap.contains(ptr.cast::<heap::ObjectHeader>()) {
+        return None;
+    }
+    // SAFETY: the heap owns this allocation and its ObjectHeader.
+    let header = unsafe { heap::ObjectHeader::ref_or_stub(ptr) };
+    let fields = super::string_helpers::record_field_count(state, header)?;
+    Some((ptr, header.type_id.0, fields, header.size))
+}
+
 /// Compute hash for a Value using FNV-1a.
 /// For heap-allocated strings (>6 bytes), hashes the string content
 /// rather than the pointer address to ensure consistent hashing.
 /// For variant heap objects (Maybe / Result / Ordering / any
 /// synthetic-tagged sum-type variant), hashes the tag + payload
 /// values recursively so two semantically-equal variants allocated
-/// at different addresses produce the same hash.
+/// at different addresses produce the same hash. Declared records hash their
+/// nominal type identity and semantic fields, excluding allocator padding.
 #[inline]
-pub(crate) fn value_hash(v: Value) -> usize {
+pub(crate) fn value_hash(v: Value, state: &InterpreterState) -> usize {
+    value_hash_depth(v, state, 0)
+}
+
+// A bounded traversal also supports recursive records without unbounded Rust
+// recursion. Equality uses the same cutoff and identity fallback at that depth.
+const MAX_KEY_DEPTH: usize = 64;
+
+fn value_hash_depth(v: Value, state: &InterpreterState, depth: usize) -> usize {
     const FNV_OFFSET: u64 = 0xcbf29ce484222325;
     const FNV_PRIME: u64 = 0x100000001b3;
+
+    if depth >= MAX_KEY_DEPTH {
+        return v.to_bits() as usize;
+    }
 
     // **Variant fast-path** (closes `Set<Maybe<T>>` / `Set<Result<T>>`
     // / `Map<Maybe<T>, _>` dedup-and-lookup class).  Pre-fix the bit-
@@ -2317,7 +2347,7 @@ pub(crate) fn value_hash(v: Value) -> usize {
         // grounds on primitives.
         for i in 0..(field_count as usize) {
             let inner = unsafe { heap::variant_payload(ptr, i) };
-            let inner_hash = value_hash(inner) as u64;
+            let inner_hash = value_hash_depth(inner, state, depth + 1) as u64;
             // Mix inner hash byte-wise to spread bits through FNV-1a.
             for byte in inner_hash.to_le_bytes() {
                 hash ^= byte as u64;
@@ -2389,6 +2419,26 @@ pub(crate) fn value_hash(v: Value) -> usize {
         return hash as usize;
     }
 
+    if let Some((ptr, type_id, field_count, _)) = record_layout(v, state) {
+        let mut hash = FNV_OFFSET;
+        for byte in [0xCD].into_iter().chain(type_id.to_le_bytes())
+            .chain((field_count as u64).to_le_bytes())
+        {
+            hash ^= byte as u64;
+            hash = hash.wrapping_mul(FNV_PRIME);
+        }
+        for i in 0..field_count {
+            // SAFETY: record_layout bounds declared fields by the tracked
+            // allocation's payload; record slots contain initialized Values.
+            let field = unsafe { *ptr.add(heap::OBJECT_HEADER_SIZE).cast::<Value>().add(i) };
+            for byte in (value_hash_depth(field, state, depth + 1) as u64).to_le_bytes() {
+                hash ^= byte as u64;
+                hash = hash.wrapping_mul(FNV_PRIME);
+            }
+        }
+        return hash as usize;
+    }
+
     // For all other values, hash the raw bits
     let bits = v.to_bits();
     let mut hash = FNV_OFFSET;
@@ -2406,11 +2456,20 @@ pub(crate) fn value_hash(v: Value) -> usize {
 /// For variant heap objects, compares tag + payload values recursively
 /// so two semantically-equal variants allocated at different addresses
 /// compare equal — the (hash, eq) contract that `value_hash` requires.
+/// Declared record keys use the same field-count authority as general equality.
 #[inline]
-pub(crate) fn value_eq(a: Value, b: Value) -> bool {
+pub(crate) fn value_eq(a: Value, b: Value, state: &InterpreterState) -> bool {
+    value_eq_depth(a, b, state, 0)
+}
+
+fn value_eq_depth(a: Value, b: Value, state: &InterpreterState, depth: usize) -> bool {
     // Fast path: identical bits (covers small strings, ints, bools, same-address pointers)
     if a.to_bits() == b.to_bits() {
         return true;
+    }
+
+    if depth >= MAX_KEY_DEPTH {
+        return false; // The identical-bits case above is the cutoff equality.
     }
 
     // Boxed ints compare by decoded value, not by their global-table index bits
@@ -2449,7 +2508,24 @@ pub(crate) fn value_eq(a: Value, b: Value) -> bool {
         for i in 0..(a_fc as usize) {
             let ai = unsafe { heap::variant_payload(a_ptr, i) };
             let bi = unsafe { heap::variant_payload(b_ptr, i) };
-            if !value_eq(ai, bi) {
+            if !value_eq_depth(ai, bi, state, depth + 1) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    if let (Some((a_ptr, a_type, a_fields, a_size)), Some((b_ptr, b_type, b_fields, b_size))) =
+        (record_layout(a, state), record_layout(b, state))
+    {
+        if a_type != b_type || a_fields != b_fields || a_size != b_size {
+            return false;
+        }
+        for i in 0..a_fields {
+            // SAFETY: both layouts are tracked, declaration-bounded records.
+            let a_field = unsafe { *a_ptr.add(heap::OBJECT_HEADER_SIZE).cast::<Value>().add(i) };
+            let b_field = unsafe { *b_ptr.add(heap::OBJECT_HEADER_SIZE).cast::<Value>().add(i) };
+            if !value_eq_depth(a_field, b_field, state, depth + 1) {
                 return false;
             }
         }
@@ -2564,7 +2640,7 @@ pub(in super::super) fn handle_map_get(
     let entries_data = unsafe { entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
 
     // Linear probing lookup
-    let hash = value_hash(key);
+    let hash = value_hash(key, state);
     let mut idx = hash % capacity;
     let start_idx = idx;
 
@@ -2578,7 +2654,7 @@ pub(in super::super) fn handle_map_get(
             return Ok(DispatchResult::Continue);
         }
 
-        if value_eq(entry_key, key) {
+        if value_eq(entry_key, key, state) {
             // Found key
             let entry_val = unsafe { *entries_data.add(idx * 2 + 1) };
             state.set_reg(dst, entry_val);
@@ -2641,7 +2717,7 @@ pub(in super::super) fn handle_map_set(
             let old_key = unsafe { *old_data.add(i * 2) };
             if !old_key.is_unit() {
                 let old_val = unsafe { *old_data.add(i * 2 + 1) };
-                let hash = value_hash(old_key);
+                let hash = value_hash(old_key, state);
                 let mut idx = hash % new_capacity;
                 loop {
                     let slot_key = unsafe { *new_data.add(idx * 2) };
@@ -2669,7 +2745,7 @@ pub(in super::super) fn handle_map_set(
     // Insert or update
     let entries_data = unsafe { entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
 
-    let hash = value_hash(key);
+    let hash = value_hash(key, state);
     let mut idx = hash % capacity;
 
     loop {
@@ -2688,7 +2764,7 @@ pub(in super::super) fn handle_map_set(
             return Ok(DispatchResult::Continue);
         }
 
-        if value_eq(entry_key, key) {
+        if value_eq(entry_key, key, state) {
             // Update existing entry
             unsafe {
                 *entries_data.add(idx * 2 + 1) = val;
@@ -2727,7 +2803,7 @@ pub(in super::super) fn handle_map_contains(
     let entries_data = unsafe { entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
 
     // Linear probing lookup
-    let hash = value_hash(key);
+    let hash = value_hash(key, state);
     let mut idx = hash % capacity;
     let start_idx = idx;
 
@@ -2740,7 +2816,7 @@ pub(in super::super) fn handle_map_contains(
             return Ok(DispatchResult::Continue);
         }
 
-        if value_eq(entry_key, key) {
+        if value_eq(entry_key, key, state) {
             // Found key
             state.set_reg(dst, Value::from_bool(true));
             return Ok(DispatchResult::Continue);
@@ -3118,7 +3194,7 @@ pub(in super::super) fn handle_set_insert(
         for i in 0..capacity {
             let old_elem = unsafe { *old_data.add(i * 2) };
             if !old_elem.is_unit() {
-                let hash = value_hash(old_elem);
+                let hash = value_hash(old_elem, state);
                 let mut idx = hash % new_capacity;
                 loop {
                     let slot = unsafe { *new_data.add(idx * 2) };
@@ -3145,7 +3221,7 @@ pub(in super::super) fn handle_set_insert(
     // Insert element (if not already present)
     let entries_data = unsafe { entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
 
-    let hash = value_hash(elem);
+    let hash = value_hash(elem, state);
     let mut idx = hash % capacity;
     let start_idx = idx;
 
@@ -3164,7 +3240,7 @@ pub(in super::super) fn handle_set_insert(
             return Ok(DispatchResult::Continue);
         }
 
-        if value_eq(slot, elem) {
+        if value_eq(slot, elem, state) {
             // Element already in set - no-op
             return Ok(DispatchResult::Continue);
         }
@@ -3206,7 +3282,7 @@ pub(in super::super) fn handle_set_contains(
     let entries_data = unsafe { entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
 
     // Linear probing lookup
-    let hash = value_hash(elem);
+    let hash = value_hash(elem, state);
     let mut idx = hash % capacity;
     let start_idx = idx;
 
@@ -3219,7 +3295,7 @@ pub(in super::super) fn handle_set_contains(
             return Ok(DispatchResult::Continue);
         }
 
-        if value_eq(slot, elem) {
+        if value_eq(slot, elem, state) {
             // Found element
             state.set_reg(dst, Value::from_bool(true));
             return Ok(DispatchResult::Continue);
@@ -3261,7 +3337,7 @@ pub(in super::super) fn handle_set_remove(
     let entries_data = unsafe { entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
 
     // Find and remove element
-    let hash = value_hash(elem);
+    let hash = value_hash(elem, state);
     let mut idx = hash % capacity;
     let start_idx = idx;
 
@@ -3273,7 +3349,7 @@ pub(in super::super) fn handle_set_remove(
             return Ok(DispatchResult::Continue);
         }
 
-        if value_eq(slot, elem) {
+        if value_eq(slot, elem, state) {
             // Found element - remove it using tombstone-free deletion
             // We need to rehash subsequent elements in the probe chain
             unsafe {
@@ -3293,7 +3369,7 @@ pub(in super::super) fn handle_set_remove(
                 }
 
                 // Reinsert the element
-                let rehash = value_hash(elem_to_rehash);
+                let rehash = value_hash(elem_to_rehash, state);
                 let mut new_idx = rehash % capacity;
                 loop {
                     let new_slot = unsafe { *entries_data.add(new_idx * 2) };

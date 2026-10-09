@@ -211,3 +211,6 @@ pub(super) mod ml_extended;
 pub(super) mod simd_extended;
 pub(super) mod tensor_extended;
 pub(super) mod text_extended;
+
+#[cfg(all(test, feature = "codegen"))]
+mod structural_key_tests;

@@ -422,22 +422,22 @@ fn is_typed_sum_variant(state: &InterpreterState, type_id: u32) -> bool {
         .unwrap_or(false)
 }
 
-/// For a `TypeKind::Record` descriptor id, the DECLARED field count —
-/// `None` when the id is not a record in the module's type table.
-/// Sibling of [`is_typed_sum_variant`]; drives the structural record arm
-/// of `deep_value_eq` (T0273). The declared count is preferred over
-/// `header.size / 8` because the `New` allocator floors zero-field
-/// records at one (uninitialized) slot and the codegen literal floor can
-/// pad past the declared layout — comparing those pad slots would read
-/// garbage (see the `alloc_slots` note in codegen/expressions.rs).
-fn typed_record_field_count(state: &InterpreterState, type_id: u32) -> Option<usize> {
+/// Number of semantic Value fields in a record payload. Both general equality
+/// and collection-key hashing/equality use this declaration-based authority.
+/// Allocator padding is not a field; the synthetic record stamp has no
+/// declaration and uses the producer's stamped payload size instead.
+pub(super) fn record_field_count(
+    state: &InterpreterState,
+    header: &heap::ObjectHeader,
+) -> Option<usize> {
     use crate::types::TypeKind;
-    state
-        .module
-        .types
-        .iter()
-        .find(|td| td.id.0 == type_id)
-        .and_then(|td| matches!(td.kind, TypeKind::Record).then(|| td.fields.len()))
+    let slots = header.size as usize / std::mem::size_of::<Value>();
+    if header.type_id.0 == verum_common::layout::SYNTHETIC_RECORD_TYPE_ID {
+        return Some(slots);
+    }
+    state.module.types.iter()
+        .find(|td| td.id == header.type_id)
+        .and_then(|td| matches!(td.kind, TypeKind::Record).then(|| td.fields.len().min(slots)))
 }
 
 fn deep_value_eq_depth(va: &Value, vb: &Value, state: &InterpreterState, depth: usize) -> bool {
@@ -882,28 +882,12 @@ fn deep_value_eq_depth(va: &Value, vb: &Value, state: &InterpreterState, depth: 
             // `header.size = N*8` stamped by BOTH allocators (`handle_new`
             // and `alloc_record_n_fields`) — the same contract the
             // variant/tuple arms above already rely on.
-            let record_fields = typed_record_field_count(state, type_id_a).or({
-                if type_id_a == verum_common::layout::SYNTHETIC_RECORD_TYPE_ID {
-                    // Runtime-synthesized record (no descriptor): trust the
-                    // stamped payload size.
-                    Some(usize::MAX)
-                } else {
-                    None
-                }
-            });
-            if let Some(declared) = record_fields {
-                let header_a = unsafe { heap::ObjectHeader::ref_or_stub(ptr_a) };
-                let header_b = unsafe { heap::ObjectHeader::ref_or_stub(ptr_b) };
-                let size_a = header_a.size as usize;
-                let size_b = header_b.size as usize;
-                if size_a != size_b {
+            let header_a = unsafe { heap::ObjectHeader::ref_or_stub(ptr_a) };
+            let header_b = unsafe { heap::ObjectHeader::ref_or_stub(ptr_b) };
+            if let Some(field_count) = record_field_count(state, header_a) {
+                if header_a.size != header_b.size {
                     return false;
                 }
-                // Compare the DECLARED fields only, capped by the stamped
-                // payload — `New` floors zero-field records at one
-                // uninitialized slot and the codegen literal floor can pad,
-                // and those slots hold garbage, not fields.
-                let field_count = declared.min(size_a / std::mem::size_of::<Value>());
                 for i in 0..field_count {
                     let fa = unsafe {
                         &*(ptr_a.add(OBJECT_HEADER_SIZE + i * std::mem::size_of::<Value>())

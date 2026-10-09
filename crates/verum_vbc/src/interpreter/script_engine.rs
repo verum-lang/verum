@@ -1154,7 +1154,7 @@ fn build_map_value(
     for (k_owned, v_owned) in entries {
         let key = build_value(interp, k_owned);
         let val = build_value(interp, v_owned);
-        let mut idx = value_hash(key) % cap;
+        let mut idx = value_hash(key, &interp.state) % cap;
         loop {
             // SAFETY: idx < cap; entries backing has cap (key,value) pairs.
             if unsafe { (*entries_data.add(idx * 2)).is_unit() } {

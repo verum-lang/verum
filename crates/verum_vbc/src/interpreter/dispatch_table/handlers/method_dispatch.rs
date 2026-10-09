@@ -7001,7 +7001,7 @@ pub(super) fn dispatch_primitive_method(
                     let mut found = false;
                     for i in 0..len {
                         let elem = get_array_element(state, ptr, header, i)?;
-                        if super::memory_collections::value_eq(elem, needle) {
+                        if super::memory_collections::value_eq(elem, needle, state) {
                             found = true;
                             break;
                         }
@@ -7623,7 +7623,7 @@ pub(super) fn dispatch_primitive_method(
                         return Ok(Some(Value::from_bool(false)));
                     }
                     let entries_data = map_entries_data(header_ptr, capacity);
-                    let hash = value_hash(key);
+                    let hash = value_hash(key, state);
                     let mut idx = hash % capacity;
                     let start = idx;
                     let mut found = false;
@@ -7632,7 +7632,7 @@ pub(super) fn dispatch_primitive_method(
                         if entry_key.is_unit() {
                             break;
                         }
-                        if value_eq(entry_key, key) {
+                        if value_eq(entry_key, key, state) {
                             found = true;
                             break;
                         }
@@ -7697,7 +7697,7 @@ pub(super) fn dispatch_primitive_method(
                         for i in 0..capacity {
                             let old_key = unsafe { *entries_data.add(i * 2) };
                             if !old_key.is_unit() {
-                                let h = value_hash(old_key);
+                                let h = value_hash(old_key, state);
                                 let mut ni = h % new_cap;
                                 loop {
                                     if unsafe { (*new_entries_data.add(ni * 2)).is_unit() } {
@@ -7723,7 +7723,7 @@ pub(super) fn dispatch_primitive_method(
                         }
                     }
 
-                    let hash = value_hash(val);
+                    let hash = value_hash(val, state);
                     let mut idx = hash % capacity;
                     // Track whether the insert observed a brand-new slot
                     // (true) or merged with an existing entry (false). The
@@ -7750,7 +7750,7 @@ pub(super) fn dispatch_primitive_method(
                             inserted = true;
                             break;
                         }
-                        if value_eq(entry_key, val) {
+                        if value_eq(entry_key, val, state) {
                             inserted = false;
                             break; // duplicate
                         }
@@ -7770,7 +7770,7 @@ pub(super) fn dispatch_primitive_method(
                         return Ok(Some(Value::from_bool(false)));
                     }
                     let entries_data = map_entries_data(header_ptr, capacity);
-                    let hash = value_hash(val);
+                    let hash = value_hash(val, state);
                     let mut idx = hash % capacity;
                     let start = idx;
                     let mut found = false;
@@ -7779,7 +7779,7 @@ pub(super) fn dispatch_primitive_method(
                         if entry_key.is_unit() {
                             break;
                         }
-                        if value_eq(entry_key, val) {
+                        if value_eq(entry_key, val, state) {
                             found = true;
                             break;
                         }
@@ -7833,7 +7833,7 @@ pub(super) fn dispatch_primitive_method(
                                     }
                                     let old_val =
                                         unsafe { *old_entries_data.add(i * 2 + 1) };
-                                    let h = value_hash(old_key);
+                                    let h = value_hash(old_key, state);
                                     let mut ni = h % new_cap;
                                     loop {
                                         if unsafe {
@@ -7922,7 +7922,7 @@ pub(super) fn dispatch_primitive_method(
                             let old_key = unsafe { *entries_data.add(i * 2) };
                             if !old_key.is_unit() {
                                 let old_val = unsafe { *entries_data.add(i * 2 + 1) };
-                                let h = value_hash(old_key);
+                                let h = value_hash(old_key, state);
                                 let mut ni = h % new_cap;
                                 loop {
                                     if unsafe { (*new_entries_data.add(ni * 2)).is_unit() } {
@@ -7944,7 +7944,7 @@ pub(super) fn dispatch_primitive_method(
                         }
                     }
 
-                    let hash = value_hash(key);
+                    let hash = value_hash(key, state);
                     let mut idx = hash % capacity;
                     let start = idx;
                     let mut old_value: Option<Value> = None;
@@ -7962,7 +7962,7 @@ pub(super) fn dispatch_primitive_method(
                             }
                             break;
                         }
-                        if value_eq(entry_key, key) {
+                        if value_eq(entry_key, key, state) {
                             // Key exists - replace value
                             old_value = Some(unsafe { *entries_data.add(idx * 2 + 1) });
                             unsafe {
@@ -8023,7 +8023,7 @@ pub(super) fn dispatch_primitive_method(
                         return Ok(Some(none));
                     }
                     let entries_data = map_entries_data(header_ptr, capacity);
-                    let hash = value_hash(key);
+                    let hash = value_hash(key, state);
                     let mut idx = hash % capacity;
                     let start = idx;
                     loop {
@@ -8032,7 +8032,7 @@ pub(super) fn dispatch_primitive_method(
                             let none = make_none_value(state)?;
                             return Ok(Some(none));
                         }
-                        if value_eq(entry_key, key) {
+                        if value_eq(entry_key, key, state) {
                             let val = unsafe { *entries_data.add(idx * 2 + 1) };
                             let some = make_some_value(state, val)?;
                             return Ok(Some(some));
@@ -8091,7 +8091,7 @@ pub(super) fn dispatch_primitive_method(
                             let old_key = unsafe { *entries_data.add(i * 2) };
                             if !old_key.is_unit() {
                                 let old_val = unsafe { *entries_data.add(i * 2 + 1) };
-                                let h = value_hash(old_key);
+                                let h = value_hash(old_key, state);
                                 let mut ni = h % new_cap;
                                 loop {
                                     if unsafe { (*new_entries_data.add(ni * 2)).is_unit() } {
@@ -8140,7 +8140,7 @@ pub(super) fn dispatch_primitive_method(
                         return Ok(Some(none_val));
                     }
                     let entries_data = map_entries_data(header_ptr, capacity);
-                    let hash = value_hash(key);
+                    let hash = value_hash(key, state);
                     let mut idx = hash % capacity;
                     let start = idx;
                     let mut found_value: Option<Value> = None;
@@ -8149,7 +8149,7 @@ pub(super) fn dispatch_primitive_method(
                         if entry_key.is_unit() {
                             break;
                         }
-                        if value_eq(entry_key, key) {
+                        if value_eq(entry_key, key, state) {
                             found_value = Some(unsafe { *entries_data.add(idx * 2 + 1) });
                             // Clear the slot
                             unsafe {
@@ -8168,7 +8168,7 @@ pub(super) fn dispatch_primitive_method(
                                 if jk.is_unit() {
                                     break;
                                 }
-                                let jh = value_hash(jk) % capacity;
+                                let jh = value_hash(jk, state) % capacity;
                                 // Check if j's natural slot is at or before the gap
                                 // (accounting for wraparound)
                                 let should_move = if gap <= j {
@@ -8321,7 +8321,7 @@ pub(super) fn dispatch_primitive_method(
                             let old_key = unsafe { *entries_data.add(i * 2) };
                             if !old_key.is_unit() {
                                 let old_val = unsafe { *entries_data.add(i * 2 + 1) };
-                                let h = value_hash(old_key);
+                                let h = value_hash(old_key, state);
                                 let mut ni = h % new_cap;
                                 loop {
                                     if unsafe { (*new_entries_data.add(ni * 2)).is_unit() } {
@@ -8343,7 +8343,7 @@ pub(super) fn dispatch_primitive_method(
                         }
                     }
 
-                    let hash = value_hash(key);
+                    let hash = value_hash(key, state);
                     let mut idx = hash % capacity;
                     let start = idx;
                     loop {
@@ -8360,7 +8360,7 @@ pub(super) fn dispatch_primitive_method(
                             }
                             return Ok(Some(default_value));
                         }
-                        if value_eq(entry_key, key) {
+                        if value_eq(entry_key, key, state) {
                             // Found - return existing value
                             let existing = unsafe { *entries_data.add(idx * 2 + 1) };
                             return Ok(Some(existing));
@@ -8388,7 +8388,7 @@ pub(super) fn dispatch_primitive_method(
                         return Ok(Some(Value::from_bool(false)));
                     }
                     let entries_data = map_entries_data(header_ptr, capacity);
-                    let hash = value_hash(val);
+                    let hash = value_hash(val, state);
                     let mut idx = hash % capacity;
                     let start = idx;
                     let mut found = false;
@@ -8397,7 +8397,7 @@ pub(super) fn dispatch_primitive_method(
                         if entry_key.is_unit() {
                             break;
                         }
-                        if value_eq(entry_key, val) {
+                        if value_eq(entry_key, val, state) {
                             found = true;
                             // Clear the slot
                             unsafe {
@@ -8416,7 +8416,7 @@ pub(super) fn dispatch_primitive_method(
                                 if jk.is_unit() {
                                     break;
                                 }
-                                let jh = value_hash(jk) % capacity;
+                                let jh = value_hash(jk, state) % capacity;
                                 let should_move = if gap <= j {
                                     jh <= gap || jh > j
                                 } else {
@@ -8507,7 +8507,7 @@ pub(super) fn dispatch_primitive_method(
                             // Check if already in elements
                             let mut dup = false;
                             for existing in &elements {
-                                if value_eq(*existing, k) {
+                                if value_eq(*existing, k, state) {
                                     dup = true;
                                     break;
                                 }
@@ -8536,7 +8536,7 @@ pub(super) fn dispatch_primitive_method(
                     }
                     // Insert all elements
                     for elem in &elements {
-                        let h = value_hash(*elem);
+                        let h = value_hash(*elem, state);
                         let mut ni = h % new_cap;
                         loop {
                             if unsafe { (*new_data.add(ni * 2)).is_unit() } {
@@ -8592,7 +8592,7 @@ pub(super) fn dispatch_primitive_method(
                         let k = unsafe { *self_entries.add(i * 2) };
                         if !k.is_unit() {
                             // Check if k is in other set
-                            let h = value_hash(k);
+                            let h = value_hash(k, state);
                             let mut oi = h % other_cap;
                             let ostart = oi;
                             let mut in_other = false;
@@ -8601,7 +8601,7 @@ pub(super) fn dispatch_primitive_method(
                                 if ok.is_unit() {
                                     break;
                                 }
-                                if value_eq(ok, k) {
+                                if value_eq(ok, k, state) {
                                     in_other = true;
                                     break;
                                 }
@@ -8633,7 +8633,7 @@ pub(super) fn dispatch_primitive_method(
                         }
                     }
                     for elem in &elements {
-                        let h = value_hash(*elem);
+                        let h = value_hash(*elem, state);
                         let mut ni = h % new_cap;
                         loop {
                             if unsafe { (*new_data.add(ni * 2)).is_unit() } {
@@ -8688,7 +8688,7 @@ pub(super) fn dispatch_primitive_method(
                         let k = unsafe { *self_entries.add(i * 2) };
                         if !k.is_unit() {
                             // Check if k is in other set
-                            let h = value_hash(k);
+                            let h = value_hash(k, state);
                             let mut oi = h % other_cap;
                             let ostart = oi;
                             let mut in_other = false;
@@ -8697,7 +8697,7 @@ pub(super) fn dispatch_primitive_method(
                                 if ok.is_unit() {
                                     break;
                                 }
-                                if value_eq(ok, k) {
+                                if value_eq(ok, k, state) {
                                     in_other = true;
                                     break;
                                 }
@@ -8729,7 +8729,7 @@ pub(super) fn dispatch_primitive_method(
                         }
                     }
                     for elem in &elements {
-                        let h = value_hash(*elem);
+                        let h = value_hash(*elem, state);
                         let mut ni = h % new_cap;
                         loop {
                             if unsafe { (*new_data.add(ni * 2)).is_unit() } {
@@ -8786,7 +8786,7 @@ pub(super) fn dispatch_primitive_method(
                     for i in 0..self_cap {
                         let k = unsafe { *self_entries.add(i * 2) };
                         if !k.is_unit() {
-                            let h = value_hash(k);
+                            let h = value_hash(k, state);
                             let mut oi = h % other_cap;
                             let ostart = oi;
                             let mut in_other = false;
@@ -8795,7 +8795,7 @@ pub(super) fn dispatch_primitive_method(
                                 if ok.is_unit() {
                                     break;
                                 }
-                                if value_eq(ok, k) {
+                                if value_eq(ok, k, state) {
                                     in_other = true;
                                     break;
                                 }
@@ -8838,7 +8838,7 @@ pub(super) fn dispatch_primitive_method(
                     for i in 0..other_cap {
                         let k = unsafe { *other_entries.add(i * 2) };
                         if !k.is_unit() {
-                            let h = value_hash(k);
+                            let h = value_hash(k, state);
                             let mut si = h % self_cap;
                             let sstart = si;
                             let mut in_self = false;
@@ -8847,7 +8847,7 @@ pub(super) fn dispatch_primitive_method(
                                 if sk.is_unit() {
                                     break;
                                 }
-                                if value_eq(sk, k) {
+                                if value_eq(sk, k, state) {
                                     in_self = true;
                                     break;
                                 }
@@ -8890,7 +8890,7 @@ pub(super) fn dispatch_primitive_method(
                     for i in 0..self_cap {
                         let k = unsafe { *self_entries.add(i * 2) };
                         if !k.is_unit() {
-                            let h = value_hash(k);
+                            let h = value_hash(k, state);
                             let mut oi = h % other_cap;
                             let ostart = oi;
                             let mut in_other = false;
@@ -8899,7 +8899,7 @@ pub(super) fn dispatch_primitive_method(
                                 if ok.is_unit() {
                                     break;
                                 }
-                                if value_eq(ok, k) {
+                                if value_eq(ok, k, state) {
                                     in_other = true;
                                     break;
                                 }
@@ -8917,7 +8917,7 @@ pub(super) fn dispatch_primitive_method(
                     for i in 0..other_cap {
                         let k = unsafe { *other_entries.add(i * 2) };
                         if !k.is_unit() {
-                            let h = value_hash(k);
+                            let h = value_hash(k, state);
                             let mut si = h % self_cap;
                             let sstart = si;
                             let mut in_self = false;
@@ -8926,7 +8926,7 @@ pub(super) fn dispatch_primitive_method(
                                 if sk.is_unit() {
                                     break;
                                 }
-                                if value_eq(sk, k) {
+                                if value_eq(sk, k, state) {
                                     in_self = true;
                                     break;
                                 }
@@ -8957,7 +8957,7 @@ pub(super) fn dispatch_primitive_method(
                         }
                     }
                     for elem in &elements {
-                        let h = value_hash(*elem);
+                        let h = value_hash(*elem, state);
                         let mut ni = h % new_cap;
                         loop {
                             if unsafe { (*new_data.add(ni * 2)).is_unit() } {
@@ -9008,7 +9008,7 @@ pub(super) fn dispatch_primitive_method(
                     for i in 0..self_cap {
                         let k = unsafe { *self_entries.add(i * 2) };
                         if !k.is_unit() {
-                            let h = value_hash(k);
+                            let h = value_hash(k, state);
                             let mut oi = h % other_cap;
                             let ostart = oi;
                             loop {
@@ -9016,7 +9016,7 @@ pub(super) fn dispatch_primitive_method(
                                 if ok.is_unit() {
                                     break;
                                 }
-                                if value_eq(ok, k) {
+                                if value_eq(ok, k, state) {
                                     disjoint = false;
                                     break;
                                 }
@@ -9237,7 +9237,7 @@ pub(super) fn dispatch_primitive_method(
                         }
                     }
                     for j in 0..kept_keys.len() {
-                        let h = value_hash(kept_keys[j]);
+                        let h = value_hash(kept_keys[j], state);
                         let mut ni = h % new_cap;
                         loop {
                             if unsafe { (*new_data.add(ni * 2)).is_unit() } {
@@ -9425,7 +9425,7 @@ pub(super) fn dispatch_primitive_method(
                         }
                     }
                     for j in 0..keys.len() {
-                        let h = value_hash(keys[j]);
+                        let h = value_hash(keys[j], state);
                         let mut ni = h % new_cap;
                         loop {
                             if unsafe { (*new_data.add(ni * 2)).is_unit() } {
@@ -9460,7 +9460,7 @@ pub(super) fn dispatch_primitive_method(
                         let k = unsafe { *entries_data.add(i * 2) };
                         if !k.is_unit() {
                             let v = unsafe { *entries_data.add(i * 2 + 1) };
-                            if value_eq(v, target) {
+                            if value_eq(v, target, state) {
                                 found = true;
                                 break;
                             }
@@ -10904,7 +10904,7 @@ pub(super) fn build_set_from_values(
     // Probe-insert each element, skipping duplicates.
     let mut live: usize = 0;
     for elem in elements.into_iter() {
-        let hash = value_hash(elem);
+        let hash = value_hash(elem, state);
         let mut idx = hash % initial_cap;
         let start = idx;
         loop {
@@ -10917,7 +10917,7 @@ pub(super) fn build_set_from_values(
                 live += 1;
                 break;
             }
-            if value_eq(slot_key, elem) {
+            if value_eq(slot_key, elem, state) {
                 break; // dedup
             }
             idx = (idx + 1) % initial_cap;
@@ -11623,7 +11623,7 @@ pub(super) fn dispatch_array_method(
             let mut found = false;
             for i in 0..len {
                 let elem = get_array_element(state, ptr, header, i)?;
-                if value_eq(elem, needle) {
+                if value_eq(elem, needle, state) {
                     found = true;
                     break;
                 }
@@ -12117,7 +12117,7 @@ pub(super) fn dispatch_array_method(
                 let needle = resolve_arg_value(state, arg0);
                 for i in 0..len {
                     let elem = get_array_element(state, ptr, header, i)?;
-                    if value_eq(elem, needle) {
+                    if value_eq(elem, needle, state) {
                         let some_val = make_some_value(state, Value::from_i64(i as i64))?;
                         return Ok(Some(some_val));
                     }
@@ -12335,7 +12335,7 @@ pub(super) fn dispatch_array_method(
             let mut prev = unsafe { *backing_data };
             for read_idx in 1..len {
                 let current = unsafe { *backing_data.add(read_idx) };
-                if !value_eq(current, prev) {
+                if !value_eq(current, prev, state) {
                     unsafe {
                         *backing_data.add(write_idx) = current;
                     }
