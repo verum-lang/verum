@@ -205,3 +205,85 @@ fn packed_unsigned_alias_list_return() {
     check_packed_elements("type UnsignedShort is UInt16;", "UnsignedShort",
         "let values: [UInt16; 3] = [32768, 65535, 1];", 2, 32768, 65535, Boundary::ListReturn);
 }
+
+fn check_list_payload(source: &str, expected: &[i64]) {
+    let original = VbcCodegen::with_config(CodegenConfig::new("signed_list_payload"))
+        .compile_module(&Parser::new(source).parse_module().expect("source grammar"))
+        .expect("source lowering");
+    let encoded = verum_vbc::serialize::serialize_module(&original).expect("encode VBC");
+    let decoded = verum_vbc::deserialize::deserialize_module(&encoded).expect("decode VBC");
+    let mut failures: List<Text> = List::new();
+    for (route, module) in [("source", original), ("wire", decoded)] {
+        let make = module.functions.iter()
+            .find(|function| module.get_string(function.name) == Some("signed_list_payload.make"))
+            .expect("exact List producer").id;
+        let mut interpreter = Interpreter::new(Shared::new(module).into_arc());
+        let value = match interpreter.execute_function(make) {
+            Ok(value) => value,
+            Err(error) => { failures.push(format!("{route}: {error}").into()); continue; }
+        };
+        // Inspect the actual boxed payload before any typed index expression
+        // could normalize a still-unsigned element and hide a broken conversion.
+        if !value.is_ptr() || !interpreter.state.heap.contains(value.as_ptr()) {
+            failures.push(format!("{route}: producer did not return an owned List object").into());
+            continue;
+        }
+        let elements = interpreter.state.list_elements(value);
+        let actual = elements.as_ref().and_then(|elements| elements.iter()
+            .map(|value| value.is_int().then(|| value.as_i64())).collect::<Option<List<_>>>());
+        if actual.as_deref() != Some(expected) {
+            failures.push(format!("{route}: expected boxed {expected:?}, got {elements:?}").into());
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn boxed_signed_list_payload_is_already_signed() {
+    check_list_payload("fn make() -> List<Int16> { [-32768, -1, 1] }", &[-32768, -1, 1]);
+}
+
+#[test]
+fn boxed_unsigned_list_payload_keeps_high_bits() {
+    check_list_payload("fn make() -> List<UInt16> { [32768, 65535, 1] }", &[32768, 65535, 1]);
+}
+
+#[test]
+fn packed_signed_byte_list_payload_is_normalized_before_return() {
+    check_list_payload(&format!("fn make() -> List<Int8> {{ {PACKED_SIGNED_BYTE} values }}"), &[-128, -1, 1]);
+}
+
+#[test]
+fn packed_signed_short_list_payload_is_normalized_before_return() {
+    check_list_payload("fn make() -> List<Int16> { let values: [Int16; 3] = [-32768, -1, 1]; values }", &[-32768, -1, 1]);
+}
+
+#[test]
+fn packed_signed_word_list_payload_is_normalized_before_return() {
+    check_list_payload("fn make() -> List<Int32> { let values: [Int32; 3] = [-2147483648, -1, 1]; values }", &[-2147483648, -1, 1]);
+}
+
+#[test]
+fn packed_signed_alias_list_payload_is_normalized_before_return() {
+    check_list_payload("type SignedShort is Int16; fn make() -> List<SignedShort> { let values: [Int16; 3] = [-32768, -1, 1]; values }", &[-32768, -1, 1]);
+}
+
+#[test]
+fn packed_unsigned_alias_list_payload_keeps_high_bits() {
+    check_list_payload("type UnsignedShort is UInt16; fn make() -> List<UnsignedShort> { let values: [UInt16; 3] = [32768, 65535, 1]; values }", &[32768, 65535, 1]);
+}
+
+#[test]
+fn signed_read_before_list_return_keeps_the_packed_producer() {
+    check_list_payload("fn make() -> List<Int16> { let values: [Int16; 3] = [-32768, -1, 1]; let first = values[0]; values }", &[-32768, -1, 1]);
+}
+
+#[test]
+fn named_field_unpack_preserves_signed_payloads() {
+    check_list_payload("type Holder is { values: [Int16; 3] }; fn make() -> List<Int16> { let input: [Int16; 3] = [-32768, -1, 1]; let holder = Holder { values: input }; holder.values }", &[-32768, -1, 1]);
+}
+
+#[test]
+fn shorthand_field_unpack_preserves_signed_payloads() {
+    check_list_payload("type Holder is { values: [Int16; 3] }; fn make() -> List<Int16> { let values: [Int16; 3] = [-32768, -1, 1]; let holder = Holder { values }; holder.values }", &[-32768, -1, 1]);
+}

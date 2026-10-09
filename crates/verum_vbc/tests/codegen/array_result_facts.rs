@@ -275,3 +275,51 @@ fn dynamic_integer_conversion_forgets_only_its_destination() {
         "conversion cannot keep overwritten array proof"
     );
 }
+
+fn sign_extend(dst: Reg, source: Reg, from_bits: u8) -> Instruction {
+    let mut operands = vec![];
+    encode_reg(dst, &mut operands);
+    encode_reg(source, &mut operands);
+    operands.extend([from_bits, 64]);
+    Instruction::ArithExtended {
+        sub_op: crate::instruction::ArithSubOpcode::SextI.to_byte(),
+        operands,
+    }
+}
+
+#[test]
+fn signed_scalar_normalization_preserves_unrelated_storage() {
+    let mut facts = ArrayResultFacts::default();
+    facts.observe(&Instruction::LoadI { dst: Reg(128), value: 3 });
+    facts.observe(&allocation(Reg(270), Reg(128), Reg(257), Some(2)));
+    let packed = facts.get(Reg(270));
+    assert!(packed.is_some());
+    assert!(facts.observe(&sign_extend(Reg(300), Reg(257), 16)));
+    assert_eq!(facts.get(Reg(270)), packed);
+    assert_eq!(facts.get(Reg(300)), None, "semantic normalization is not storage proof");
+}
+
+#[test]
+fn signed_scalar_normalization_invalidates_its_overwritten_destination() {
+    let mut facts = ArrayResultFacts::default();
+    facts.observe(&Instruction::LoadI { dst: Reg(128), value: 3 });
+    facts.observe(&allocation(Reg(270), Reg(128), Reg(257), Some(2)));
+    assert!(facts.observe(&sign_extend(Reg(270), Reg(257), 16)));
+    assert_eq!(facts.get(Reg(270)), None);
+}
+
+#[test]
+fn malformed_scalar_normalization_cannot_preserve_storage_proof() {
+    for operands in [
+        vec![], vec![0x81], vec![1, 0x81], vec![1, 2, 16],
+        vec![1, 2, 16, 64, 0], vec![1, 2, 0, 64], vec![1, 2, 16, 0],
+    ] {
+        let mut facts = ArrayResultFacts::default();
+        facts.observe(&Instruction::LoadI { dst: Reg(128), value: 3 });
+        facts.observe(&allocation(Reg(270), Reg(128), Reg(257), Some(2)));
+        assert!(!facts.observe(&Instruction::ArithExtended {
+            sub_op: crate::instruction::ArithSubOpcode::SextI.to_byte(), operands,
+        }));
+        assert_eq!(facts.get(Reg(270)), None);
+    }
+}
