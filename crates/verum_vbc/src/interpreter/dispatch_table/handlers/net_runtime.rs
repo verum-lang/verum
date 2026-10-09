@@ -2408,3 +2408,7 @@ mod udp_peer_address_tests;
 #[cfg(test)]
 #[path = "../../../../tests/unit/net_runtime_bounded_tcp.rs"]
 mod bounded_tcp_tests;
+
+#[cfg(all(test, unix))]
+#[path = "../../../../tests/unit/net_runtime_descriptor_identity.rs"]
+mod descriptor_identity_tests;
