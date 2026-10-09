@@ -5471,7 +5471,11 @@ pub(super) fn dispatch_primitive_method(
             crate::types::TypeRef::Reference { inner, .. } => (inner.as_ref(), true),
             concrete => (concrete, false),
         };
-        if matches!(receiver_type, crate::types::TypeRef::Concrete(id) if id.is_numeric()) {
+        // PTR also carries the declared pointer-sized integers. Its shared
+        // ID is never used to choose an owner: `fid` came from the exact name.
+        if matches!(receiver_type, crate::types::TypeRef::Concrete(id)
+            if id.is_numeric() || *id == TypeId::PTR)
+        {
             // The outer CallM handler unwraps a borrowed value before retrying
             // a by-value method. Do not pass its encoded reference as an Int.
             if !borrowed && is_cbgr_ref(receiver) {
