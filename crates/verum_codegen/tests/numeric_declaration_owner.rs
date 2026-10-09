@@ -127,8 +127,9 @@ fn native_probe(
         let thread = std::thread::current();
         std::fs::write(
             std::path::Path::new(&directory).join(format!(
-                "{}-{route}.ll",
-                thread.name().unwrap_or("numeric-owner")
+                "{}-{}-{route}.ll",
+                thread.name().unwrap_or("numeric-owner"),
+                owners.join("-")
             )),
             text.as_bytes(),
         )
