@@ -1626,51 +1626,45 @@ impl VbcModule {
             if !name.starts_with("core.") {
                 continue;
             }
-            // **BAND-REAL-DECL-WINS-1 (T1163)** — a REAL declaration
-            // outranks a synthesized intrinsic wrapper of the same leaf
-            // name.
-            //
-            // The lookup below is by BARE LEAF into a global registry, so
-            // two unrelated things can answer to one name:
-            //
-            //     intrinsic  cbgr_dealloc          3 params
-            //                                      (ptr, size, align)
-            //     stdlib     cbgr_dealloc(ptr: &unsafe Byte)   ONE param
-            //                core/mem/allocator.vr:1279
-            //
-            // Four `cbgr_dealloc(self.ptr as &unsafe Byte)` sites in
-            // core/base/memory.vr were bound to a THREE-parameter
-            // wrapper — measured with `VERUM_TRACE_ARITY_FALLBACK=1`:
-            // "call passes 1, definition takes 3", four times. The
-            // mangled name keeps the CALLER's module, so it even reads as
-            // though `core.base.memory` declared it. It does not.
-            //
-            // This site's own comment already names the hazard — a
-            // registration that "could silently capture OTHER modules'
-            // re-export spellings … the loud-to-wrong inversion this leg
-            // must never introduce". A bare-leaf lookup IS that
-            // inversion, arriving before the mangling that guards
-            // against it.
-            //
-            // Exact dotted-suffix match, so `dealloc` cannot claim
-            // `cbgr_dealloc`, and only functions WITH A BODY count — a
-            // forward declaration is not an implementation.
-            {
-                let bare = name.rsplit('.').next().unwrap_or(name.as_str());
-                let dotted_leaf = format!(".{bare}");
-                let real_decl = self.functions.iter().enumerate().find_map(|(i, f)| {
-                    let fname = self.get_string(f.name).unwrap_or("");
-                    (fname.ends_with(dotted_leaf.as_str()) && f.instructions.is_some())
-                        .then_some(FunctionId(i as u32))
+            // T1688: an unresolved spelling may be an imported declaration,
+            // but its leaf cannot identify the owner. In particular, `.new`
+            // must never choose whichever constructor was merged first.
+            // Alias IDs are archive-local; only a carried qualified target and
+            // its exact executable descriptor authorize this fallback. More
+            // than one target intent may be carried for the same alias.
+            if !self.mount_alias_shadowed_by_definition(&name) {
+                let mut has_alias = false;
+                let real_decl = self.mount_aliases.iter().find_map(|(alias, _, target)| {
+                    if self.get_string(*alias) != Some(name.as_str()) {
+                        return None;
+                    }
+                    has_alias = true;
+                    let target = self.get_string(*target)?;
+                    if !target.contains('.') {
+                        return None;
+                    }
+                    self.function_indices_named(target).iter().find_map(|index| {
+                        let function = &self.functions[*index as usize];
+                        (!crate::stub_ranges::is_name_resolved_stub_id(function.id.0)
+                            && (function.bytecode_length > 0
+                                || function.instructions.as_ref().is_some_and(|body| !body.is_empty())))
+                            .then_some(FunctionId(*index))
+                    })
                 });
                 if let Some(real) = real_decl {
                     if trace {
-                        eprintln!(
-                            "[band-wrapper] {name}: real declaration outranks the intrinsic"
-                        );
+                        eprintln!("[band-wrapper] {name}: carried declaration resolves to fn#{}", real.0);
                     }
                     self.resolved_band_map.insert(band_id, real);
                     bound += 1;
+                    continue;
+                }
+                // A declared target with no available body is not a license
+                // to invoke a same-leaf intrinsic with a different signature.
+                if has_alias {
+                    if trace {
+                        eprintln!("[band-wrapper] {name}: carried declaration has no exact body");
+                    }
                     continue;
                 }
             }

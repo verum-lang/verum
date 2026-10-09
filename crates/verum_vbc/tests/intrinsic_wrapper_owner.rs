@@ -155,3 +155,42 @@ fn non_core_name_does_not_acquire_an_intrinsic_wrapper() {
     assert_eq!(module.synthesize_intrinsic_band_wrappers(), 0);
     assert_eq!(module.resolve_band_id(BAND), None);
 }
+
+#[test]
+fn later_exact_carried_target_can_resolve_after_a_missing_intent() {
+    let mut module = VbcModule::new("multiple_intents".into());
+    let actual = constant(&mut module, "core.mem.allocator.cbgr_dealloc", 17, true);
+    let spelling = "core.base.memory.cbgr_dealloc";
+    alias(&mut module, spelling, "core.missing.cbgr_dealloc", actual);
+    alias(&mut module, spelling, "core.mem.allocator.cbgr_dealloc", FunctionId(123456));
+    call(&mut module, spelling, 1);
+    assert_eq!(module.resolve_external_bands().len(), 1);
+    assert_eq!(module.synthesize_intrinsic_band_wrappers(), 1);
+    assert_eq!(module.resolve_band_id(BAND), Some(actual));
+}
+
+#[test]
+fn bare_carried_target_does_not_authorize_a_global_leaf_choice() {
+    let mut module = VbcModule::new("bare_intent".into());
+    constant(&mut module, "cbgr_dealloc", 99, true);
+    let actual = constant(&mut module, "core.mem.allocator.cbgr_dealloc", 17, true);
+    let spelling = "core.base.memory.cbgr_dealloc";
+    alias(&mut module, spelling, "cbgr_dealloc", actual);
+    call(&mut module, spelling, 1);
+    assert_eq!(module.resolve_external_bands().len(), 1);
+    assert_eq!(module.synthesize_intrinsic_band_wrappers(), 0);
+    assert_eq!(module.resolve_band_id(BAND), None);
+}
+
+#[test]
+fn mounted_intrinsic_body_keeps_its_carried_qualified_owner() {
+    let mut module = VbcModule::new("mounted_intrinsic".into());
+    constant(&mut module, "Other.eq", 99, true);
+    let actual = constant(&mut module, "core.intrinsics.arithmetic.eq", 17, true);
+    let spelling = "core.base.primitives.eq";
+    alias(&mut module, spelling, "core.intrinsics.arithmetic.eq", FunctionId(123456));
+    call(&mut module, spelling, 1);
+    assert_eq!(module.resolve_external_bands().len(), 1);
+    assert_eq!(module.synthesize_intrinsic_band_wrappers(), 1);
+    assert_eq!(module.resolve_band_id(BAND), Some(actual));
+}
