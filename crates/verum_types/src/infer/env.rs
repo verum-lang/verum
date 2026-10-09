@@ -10594,7 +10594,7 @@ impl TypeChecker {
                 }
             }
         } else if let Some(metadata) = &self.core_metadata
-            && let Some(descriptor) = metadata.types.get(type_name)
+            && let Some(descriptor) = metadata.types.get(&Text::from(type_name))
         {
             // Generic alias descriptors may retain named parameters without
             // a local parameter record. Their exact metadata entry is still
