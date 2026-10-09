@@ -1698,6 +1698,7 @@ impl VbcModule {
                     })
                     .collect();
                 let desc = FunctionDescriptor {
+                    has_source_body: false,
                     value_uses: None,
                     semantic_params: None,
                     explicit_type_param_ids: Vec::new(),
@@ -4122,6 +4123,7 @@ mod precompile_extension_tests {
         let mut m = make_module();
         // Synthesise a function whose body is at offset 100, length 32.
         let mut desc = FunctionDescriptor {
+            has_source_body: false,
             explicit_type_param_ids: Vec::new(),
             id: FunctionId(0),
             name: m.intern_string("hello"),
@@ -4179,6 +4181,7 @@ mod precompile_extension_tests {
         let mut m = make_module();
         // One placeholder function so the variant lookup has a target.
         let desc = FunctionDescriptor {
+            has_source_body: false,
             explicit_type_param_ids: Vec::new(),
             id: FunctionId(0),
             name: m.intern_string("syscall_x"),
