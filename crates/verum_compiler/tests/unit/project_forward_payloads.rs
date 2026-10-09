@@ -5,7 +5,7 @@ use super::CompilationPipeline;
 use crate::{CompilerOptions, Session, VerifyMode};
 use std::path::PathBuf;
 use tempfile::TempDir;
-use verum_common::{List, Text};
+use verum_common::Text;
 use verum_fast_parser::Parser;
 
 const PAYLOAD: &str = "public type Payload is { value: Int };";
@@ -93,11 +93,13 @@ fn source_phase(source: &str, project_module: bool) -> Verdict {
         pipeline.phase_type_check(&module)
     };
     let mut diagnostics: Text = pipeline.session.format_diagnostics().into();
+    let mut errors = pipeline.session.error_count();
     if let Err(error) = result {
+        errors = errors.max(1);
         diagnostics.push_str(&format!("\n{error:#}"));
     }
     Verdict {
-        errors: pipeline.session.error_count(),
+        errors,
         diagnostics,
     }
 }
