@@ -6027,6 +6027,29 @@ impl TypeChecker {
                     }
 
                     if is_static {
+                        // A method owns its generic scope. Preserve the impl's
+                        // variables even when a method reuses their spelling.
+                        self.ctx.enter_scope();
+                        let mut ordered_vars = impl_type_vars.clone();
+                        let mut method_bounds = List::new();
+                        for generic in &func.generics {
+                            if let verum_ast::ty::GenericParamKind::Type { name, bounds, .. } =
+                                &generic.kind
+                            {
+                                let fresh = TypeVar::fresh();
+                                self.ctx.define_type(name.name.clone(), Type::Var(fresh));
+                                ordered_vars.push(fresh);
+                                method_bounds.push((fresh, bounds));
+                            }
+                        }
+                        let mut method_type_bounds = Map::new();
+                        for (fresh, bounds) in method_bounds {
+                            let extracted = self.extract_type_bounds_from_ast(bounds);
+                            if !extracted.is_empty() {
+                                method_type_bounds.insert(fresh, extracted);
+                            }
+                        }
+
                         // Build function type for static method
                         // Note: We use ast_to_type (not _lenient) since type params are now in scope
                         let param_types: List<Type> = func
@@ -6073,13 +6096,16 @@ impl TypeChecker {
                         let func_ty = Type::function(param_types, final_return_type);
 
                         // Prepare registration for after scope exit
-                        // Create a properly quantified type scheme over the impl's type variables
+                        // Quantify both the impl and method variables in declaration order.
                         let qualified_name = format!("{}.{}", method_owner, func.name.name);
-                        let method_scheme = if impl_type_vars.is_empty() {
-                            TypeScheme::mono(func_ty)
-                        } else {
-                            TypeScheme::poly(impl_type_vars.clone(), func_ty)
-                        };
+                        let mut method_scheme =
+                            self.ctx.generalize_with_vars(func_ty, &ordered_vars);
+                        method_scheme.impl_var_count = impl_type_vars.len();
+                        method_scheme.impl_self_type = self.current_self_type.clone();
+                        if !method_type_bounds.is_empty() {
+                            method_scheme = method_scheme.with_type_bounds(method_type_bounds);
+                        }
+                        self.ctx.exit_scope();
 
                         // Collect for later registration (after scope exit)
                         if crate::ctor_trace_enabled() {
@@ -25374,7 +25400,13 @@ bake to have this verified.",
             // Also check for variant constructors like Maybe<Int>.Some(42)
             let qualified_name = format!("{}.{}", type_name, method_name);
             if let Some(scheme) = self.lookup_static_or_load_from_metadata(&qualified_name) {
-                let constructor_ty = scheme.instantiate();
+                let (constructor_ty, fresh_vars) = scheme.instantiate_with_fresh_vars();
+                let receiver_pattern = scheme.fresh_impl_self_type(&fresh_vars);
+                if let Some(pattern) = &receiver_pattern {
+                    // The impl head is the receiver authority. It can reorder
+                    // or nest variables, and its method may return another type.
+                    self.unifier.unify(pattern, &receiver_ty, span)?;
+                }
 
                 if let Type::Function {
                     params,
@@ -25384,7 +25416,7 @@ bake to have this verified.",
                 {
                     // Pre-check argument compatibility (same as Path block below)
                     let mut args_pre_compatible = true;
-                    if args.len() == params.len() {
+                    if receiver_pattern.is_none() && args.len() == params.len() {
                         for (arg, param_ty) in args.iter().zip(params.iter()) {
                             let resolved_param = self.unifier.apply(param_ty);
                             if let Ok(arg_result) = self.infer_expr(arg, InferMode::Synth) {
@@ -25426,7 +25458,11 @@ bake to have this verified.",
                         // stamped with `line!()` named this one. Guarded on the
                         // heads matching, so a method returning something other
                         // than the receiver type is untouched.
-                        if Self::same_type_head(&resolved_return, &receiver_ty)
+                        // Legacy metadata and variant constructors have no carried
+                        // impl pattern. Preserve their existing inference path here;
+                        // source impl methods already bound the receiver before args.
+                        if receiver_pattern.is_none()
+                            && Self::same_type_head(&resolved_return, &receiver_ty)
                             && self
                                 .unifier
                                 .unify(&resolved_return, &receiver_ty, span)

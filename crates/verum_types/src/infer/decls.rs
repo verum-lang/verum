@@ -5695,6 +5695,7 @@ impl TypeChecker {
                                     // This fixes: implement<T> Wrapper<T> { fn map<U>(...) -> U }
                                     // where U needs to be in scope during signature resolution
                                     let mut method_type_param_names = List::new();
+                                    let mut method_type_vars = List::new();
                                     // CRITICAL: Collect type bounds for function type parameters
                                     let mut method_type_var_bounds: Map<TypeVar, List<Type>> =
                                         Map::new();
@@ -5708,6 +5709,7 @@ impl TypeChecker {
                                             let name_text: Text = name.name.clone();
                                             self.ctx.define_type(name_text.clone(), type_var);
                                             method_type_param_names.push(name_text);
+                                            method_type_vars.push(fresh_var);
 
                                             // Extract type bounds (e.g., F: fn(T) -> U)
                                             if !bounds.is_empty() {
@@ -5761,15 +5763,20 @@ impl TypeChecker {
                                     let qualified_name =
                                         format!("{}.{}", type_name_str, func.name.name);
 
-                                    // CRITICAL FIX: Use generalize_ordered to preserve type parameter order
-                                    // Same fix as for instance methods - ensures correct type variable binding
-                                    let mut ordered_params: List<verum_common::Text> =
-                                        type_param_names.clone();
-                                    for param in &method_type_param_names {
-                                        ordered_params.push(param.clone());
-                                    }
+                                    // Preserve declaration identities before method parameters
+                                    // can shadow the impl's spelling. Receiver substitution
+                                    // follows the declared pattern, not positional return slots.
+                                    let mut ordered_vars: List<TypeVar> = impl_bindings
+                                        .iter()
+                                        .filter_map(|(_, ty)| match ty {
+                                            Type::Var(var) => Some(*var),
+                                            _ => None,
+                                        })
+                                        .collect();
+                                    ordered_vars.extend(method_type_vars);
                                     let mut func_scheme =
-                                        self.ctx.generalize_ordered(func_ty, &ordered_params);
+                                        self.ctx.generalize_with_vars(func_ty, &ordered_vars);
+                                    func_scheme.impl_self_type = Some(self_type.clone());
                                     // Record how many ordered vars are impl-level so method-level params
                                     // (e.g., method's own <U>) aren't bound from receiver type args at call time.
                                     func_scheme.impl_var_count = type_param_names.len();

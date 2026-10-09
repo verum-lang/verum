@@ -269,6 +269,9 @@ impl ModuleContext {
     pub fn apply_substitution(&mut self, subst: &Substitution) {
         for info in self.function_types.values_mut() {
             info.scheme.ty = info.scheme.ty.apply_subst(subst);
+            if let Some(receiver) = &mut info.scheme.impl_self_type {
+                *receiver = receiver.apply_subst(subst);
+            }
         }
 
         // Compose with existing substitution

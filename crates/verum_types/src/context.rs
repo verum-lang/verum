@@ -47,9 +47,14 @@ pub struct TypeScheme {
     /// Number of leading type variables that come from the implement block.
     /// Used for instance methods to distinguish impl-level vars (bound from
     /// receiver type args) from method-level vars (inferred from arguments).
-    /// When 0 (default), all vars are treated as potentially bindable from
-    /// receiver type args (backward compatible).
+    /// A zero count means no leading variable is bound positionally from
+    /// receiver arguments. Static source methods retain their exact pattern below.
     pub impl_var_count: usize,
+    /// Declared implementation receiver using this scheme's type variables.
+    /// This preserves reordered, nested and fixed receiver arguments without
+    /// inferring the implementation relationship from a method's return type.
+    /// None means an ordinary function or metadata without this source fact.
+    pub impl_self_type: Option<Type>,
     /// Method-owned explicit argument slots in declaration order. The stored
     /// TypeVars belong to this scheme, not to the receiver's parameter list.
     /// None means legacy metadata; an empty list is a known nongeneric method.
@@ -66,6 +71,7 @@ impl TypeScheme {
             var_type_bounds: Map::new(),
             var_protocol_bounds: Map::new(),
             impl_var_count: 0,
+            impl_self_type: None,
             explicit_method_vars: None,
         }
     }
@@ -79,6 +85,7 @@ impl TypeScheme {
             var_type_bounds: Map::new(),
             var_protocol_bounds: Map::new(),
             impl_var_count: 0,
+            impl_self_type: None,
             explicit_method_vars: None,
         }
     }
@@ -93,6 +100,7 @@ impl TypeScheme {
             var_type_bounds: Map::new(),
             var_protocol_bounds: Map::new(),
             impl_var_count: 0,
+            impl_self_type: None,
             explicit_method_vars: None,
         }
     }
@@ -112,6 +120,7 @@ impl TypeScheme {
             var_type_bounds,
             var_protocol_bounds: Map::new(),
             impl_var_count: 0,
+            impl_self_type: None,
             explicit_method_vars: None,
         }
     }
@@ -257,6 +266,17 @@ impl TypeScheme {
         (self.ty.apply_subst(&subst), fresh_vars, fresh_implicit)
     }
 
+    /// Rebase the declared receiver with the same substitution as the method.
+    pub(crate) fn fresh_impl_self_type(&self, fresh_vars: &[TypeVar]) -> Option<Type> {
+        self.impl_self_type.as_ref().map(|receiver| {
+            let mut subst = Substitution::new();
+            for (original, fresh) in self.vars.iter().zip(fresh_vars.iter()) {
+                subst.insert(*original, Type::Var(*fresh));
+            }
+            receiver.apply_subst(&subst)
+        })
+    }
+
     /// Rebase declared explicit slots onto this call's fresh instantiation.
     pub(crate) fn fresh_explicit_method_vars(
         &self,
@@ -370,6 +390,11 @@ impl TypeScheme {
     /// Get free type variables in the scheme
     pub fn free_vars(&self) -> Set<TypeVar> {
         let mut vars = self.ty.free_vars();
+        if let Some(receiver) = &self.impl_self_type {
+            for var in receiver.free_vars() {
+                vars.insert(var);
+            }
+        }
         for v in &self.vars {
             vars.remove(v);
         }
