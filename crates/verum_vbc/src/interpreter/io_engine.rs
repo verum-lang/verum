@@ -913,7 +913,7 @@ thread_local! {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::net::{TcpListener, TcpStream};
+    use std::net::TcpListener;
     use std::os::fd::AsRawFd;
 
     #[cfg(any(target_os = "macos", target_os = "linux"))]
