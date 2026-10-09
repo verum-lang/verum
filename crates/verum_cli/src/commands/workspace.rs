@@ -1230,3 +1230,7 @@ pub fn exec(command: Vec<String>) -> Result<()> {
         )))
     }
 }
+
+#[cfg(test)]
+#[path = "../../tests/commands/workspace_publication_manifests.rs"]
+mod publication_manifests;
