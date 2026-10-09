@@ -1,0 +1,67 @@
+{
+  "source_commit": "0ff6e01ba89250737f92815ee8b7261175f9bc03",
+  "command": [
+    "cargo",
+    "test",
+    "--locked",
+    "--offline",
+    "--manifest-path",
+    "/Users/taaliman/.codex/worktrees/returned-reference-summary/verum/Cargo.toml",
+    "-p",
+    "verum_vbc",
+    "--no-default-features",
+    "--features",
+    "compression,table_dispatch,codegen,ffi",
+    "--test",
+    "callable_array_list_conversion",
+    "--",
+    "--test-threads=1",
+    "--nocapture"
+  ],
+  "environment": {
+    "CARGO_TARGET_DIR": "/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target",
+    "CARGO_INCREMENTAL": "0",
+    "CARGO_BUILD_JOBS": "2",
+    "VERUM_NO_AUTO_PRECOMPILE": "1",
+    "VERUM_LLVM_DIR": "/Users/taaliman/projects/oldman/verum-lang/verum/llvm/install",
+    "RUST_MIN_STACK": "16777216"
+  },
+  "timeout_seconds": 1200,
+  "scope": "Thirteen parsed-source through serialized VBC interpreter controls for proved local array to List returns. Review subsequently found detached defer compilation contaminates facts; repair and causal controls pending. No ordinary CLI, fresh archive, AOT or registry acceptance.",
+  "artifacts_before": {
+    "runtime.vbca": "410ff097b455437cab98b651f7799b3129588820925afe98e0de9c3781530a0f",
+    "runtime.core_metadata": "a92bd89e649e102cdc67d7ad0032513d6448d8915e5744127e6cdf1f1e34ebbb",
+    "runtime.symbol_graph": "a6678c18498f7519749ca1fdf1d22629b479083f42fa95a15177e8c7acf1c722",
+    "runtime.vbca.checksum": "c33573118a8c4b635f6c8f727c3784b524f660be57de702365e8d9c14b2f3a8b",
+    "runtime.vbca.schema": "fec20d7b3f8d1b81aff66c6c1181be574963779f7eacaf65660f8ab9127fca87"
+  },
+  "source_paths": {
+    "crates/verum_vbc/src/codegen/array_coercions.rs": "643e325d7a5f816af2bb9f7ac1d358c9e8406a4f6c41083aeb33ef640a30a50e",
+    "crates/verum_vbc/src/codegen/context.rs": "fb88a1b18105d380d14ff6207df1dd26ecba25ba171fdbbecb5119944ded2efd",
+    "crates/verum_vbc/src/codegen/mod.rs": "499698043752f81344a31accd5e5cba3c465b11a1b88ea366c4c338c8cb9693c",
+    "crates/verum_vbc/src/codegen/statements.rs": "b9b895f9628fcbac0b9263cec37410716c46ca7eecaa9f5db345e9ddf6bea93e",
+    "crates/verum_vbc/src/codegen/expressions.rs": "60f5ee206075227bb3c2d3a9ad2a2413d86db812fdaecf0874d8b38872978bec",
+    "crates/verum_vbc/tests/callable_array_list_conversion.rs": "7f09fc31511b5f31165c0af51ad67c0aeafbc2516f4351104fe56aef9ba238c3"
+  },
+  "exit_code": 0,
+  "wall_seconds": 27.217,
+  "failure": null,
+  "source_unchanged": true,
+  "log_sha256": "f614242a49839102f37a40b6a7f74c05f33ab532de59550f857c26d1d09f3001",
+  "source_paths_unchanged": true,
+  "executables": {
+    "/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target/debug/build/verum_vbc/4581c9490e50dfa1/out/callable_array_list_conversion-4581c9490e50dfa1": "ef0c5f2091d21bfe2b0376e2c8de64c66bb7683a82542f518dc1f3f0c7abb641"
+  },
+  "artifacts_after": {
+    "runtime.vbca": "410ff097b455437cab98b651f7799b3129588820925afe98e0de9c3781530a0f",
+    "runtime.core_metadata": "a92bd89e649e102cdc67d7ad0032513d6448d8915e5744127e6cdf1f1e34ebbb",
+    "runtime.symbol_graph": "a6678c18498f7519749ca1fdf1d22629b479083f42fa95a15177e8c7acf1c722",
+    "runtime.vbca.checksum": "c33573118a8c4b635f6c8f727c3784b524f660be57de702365e8d9c14b2f3a8b",
+    "runtime.vbca.schema": "fec20d7b3f8d1b81aff66c6c1181be574963779f7eacaf65660f8ab9127fca87"
+  },
+  "test_results": [
+    "test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s"
+  ],
+  "durable_log": "docs/architecture/evidence/callable-array-list/emitted-results.log.gz",
+  "compressed_log_sha256": "536458555f51fa7901f1a2b2f0532cd0062a1953eb3851230ebaf4908f947836"
+}

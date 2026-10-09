@@ -1,0 +1,346 @@
+{
+  "scope": "Peer-review causal controls and bounded callable conversion repair; no ordinary CLI, native, fresh stdlib or registry acceptance. The explicit-return defer controls verify compile-state isolation, not complete deferred cleanup semantics.",
+  "gates": {
+    "deferred-baseline": {
+      "source_commit": "5585ca614a893c37b0792d7771768f01a0cbfb5c",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "--manifest-path",
+        "/Users/taaliman/.codex/worktrees/returned-reference-summary/verum/Cargo.toml",
+        "-p",
+        "verum_vbc",
+        "--no-default-features",
+        "--features",
+        "compression,table_dispatch,codegen,ffi",
+        "--test",
+        "callable_array_list_conversion",
+        "--",
+        "--test-threads=1",
+        "--nocapture"
+      ],
+      "environment": {
+        "CARGO_TARGET_DIR": "/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target",
+        "CARGO_INCREMENTAL": "0",
+        "CARGO_BUILD_JOBS": "2",
+        "VERUM_NO_AUTO_PRECOMPILE": "1",
+        "VERUM_LLVM_DIR": "/Users/taaliman/projects/oldman/verum-lang/verum/llvm/install",
+        "RUST_MIN_STACK": "16777216"
+      },
+      "timeout_seconds": 1200,
+      "scope": "Parsed source to VBC wire to interpreter callable array/List conversion controls; no typechecker, real stdlib archive, ordinary CLI, automatic bake or AOT acceptance",
+      "artifacts_before": {
+        "runtime.vbca": "410ff097b455437cab98b651f7799b3129588820925afe98e0de9c3781530a0f",
+        "runtime.core_metadata": "a92bd89e649e102cdc67d7ad0032513d6448d8915e5744127e6cdf1f1e34ebbb",
+        "runtime.symbol_graph": "a6678c18498f7519749ca1fdf1d22629b479083f42fa95a15177e8c7acf1c722",
+        "runtime.vbca.checksum": "c33573118a8c4b635f6c8f727c3784b524f660be57de702365e8d9c14b2f3a8b",
+        "runtime.vbca.schema": "fec20d7b3f8d1b81aff66c6c1181be574963779f7eacaf65660f8ab9127fca87"
+      },
+      "source_paths": {
+        "crates/verum_vbc/src/codegen/array_coercions.rs": "7ba9ba7fdd26a77b6cc83a3a327731a880c01448482952cc939b428eb506d305",
+        "crates/verum_vbc/src/codegen/context.rs": "fb88a1b18105d380d14ff6207df1dd26ecba25ba171fdbbecb5119944ded2efd",
+        "crates/verum_vbc/src/codegen/mod.rs": "499698043752f81344a31accd5e5cba3c465b11a1b88ea366c4c338c8cb9693c",
+        "crates/verum_vbc/src/codegen/statements.rs": "b9b895f9628fcbac0b9263cec37410716c46ca7eecaa9f5db345e9ddf6bea93e",
+        "crates/verum_vbc/src/codegen/expressions.rs": "60f5ee206075227bb3c2d3a9ad2a2413d86db812fdaecf0874d8b38872978bec",
+        "crates/verum_vbc/tests/callable_array_list_conversion.rs": "ce828ce75ebde036d40e9721bb8eaa6b5283b3fc47de07e3f3c3755fa15f3c15",
+        "crates/verum_vbc/tests/codegen/array_result_facts.rs": "8306cd06639b217a1e190781471ce4c7cbc50a0da6373cf04326c60838adc7c5"
+      },
+      "exit_code": 101,
+      "wall_seconds": 28.175,
+      "failure": null,
+      "source_unchanged": true,
+      "log_sha256": "ddfc557ae0e3d9b03791af7c17db3510737844f26254d80df517cde180410976",
+      "source_paths_unchanged": true,
+      "executables": {
+        "/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target/debug/build/verum_vbc/4581c9490e50dfa1/out/callable_array_list_conversion-4581c9490e50dfa1": "0a4698dcfc1d3db8d235c7dee71cb07c645632c2a592653a3d3425ed118266e4"
+      },
+      "artifacts_after": {
+        "runtime.vbca": "410ff097b455437cab98b651f7799b3129588820925afe98e0de9c3781530a0f",
+        "runtime.core_metadata": "a92bd89e649e102cdc67d7ad0032513d6448d8915e5744127e6cdf1f1e34ebbb",
+        "runtime.symbol_graph": "a6678c18498f7519749ca1fdf1d22629b479083f42fa95a15177e8c7acf1c722",
+        "runtime.vbca.checksum": "c33573118a8c4b635f6c8f727c3784b524f660be57de702365e8d9c14b2f3a8b",
+        "runtime.vbca.schema": "fec20d7b3f8d1b81aff66c6c1181be574963779f7eacaf65660f8ab9127fca87"
+      },
+      "test_results": [
+        "test result: FAILED. 14 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s"
+      ],
+      "durable_log": "docs/architecture/evidence/callable-array-list/deferred-baseline.log.gz",
+      "compressed_log_sha256": "6552256882cff3dbd4d527a84ba2aa40409d563162093700a1cbef3410b6ff0b",
+      "interpretation": "Initial defer oracle: cleanup call exposes lost packed proof; named-place assignment clones and does not expose false packed proof."
+    },
+    "geometry-baseline": {
+      "source_commit": "5585ca614a893c37b0792d7771768f01a0cbfb5c",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "--manifest-path",
+        "/Users/taaliman/.codex/worktrees/returned-reference-summary/verum/Cargo.toml",
+        "-p",
+        "verum_vbc",
+        "--no-default-features",
+        "--features",
+        "compression,table_dispatch,codegen,ffi",
+        "--lib",
+        "codegen::array_coercions::tests",
+        "--",
+        "--test-threads=1",
+        "--nocapture"
+      ],
+      "environment": {
+        "CARGO_TARGET_DIR": "/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target",
+        "CARGO_INCREMENTAL": "0",
+        "CARGO_BUILD_JOBS": "2",
+        "VERUM_NO_AUTO_PRECOMPILE": "1",
+        "VERUM_LLVM_DIR": "/Users/taaliman/projects/oldman/verum-lang/verum/llvm/install",
+        "RUST_MIN_STACK": "16777216"
+      },
+      "timeout_seconds": 1200,
+      "scope": "Unfiltered VBC library suite with compression,table_dispatch,codegen,ffi; no ordinary CLI, automatic stdlib bake or AOT acceptance. Inherited precompiled artifacts are held unchanged; this does not certify a fresh producer.",
+      "artifacts_before": {
+        "runtime.vbca": "410ff097b455437cab98b651f7799b3129588820925afe98e0de9c3781530a0f",
+        "runtime.core_metadata": "a92bd89e649e102cdc67d7ad0032513d6448d8915e5744127e6cdf1f1e34ebbb",
+        "runtime.symbol_graph": "a6678c18498f7519749ca1fdf1d22629b479083f42fa95a15177e8c7acf1c722",
+        "runtime.vbca.checksum": "c33573118a8c4b635f6c8f727c3784b524f660be57de702365e8d9c14b2f3a8b",
+        "runtime.vbca.schema": "fec20d7b3f8d1b81aff66c6c1181be574963779f7eacaf65660f8ab9127fca87"
+      },
+      "source_paths": {
+        "crates/verum_vbc/src/codegen/array_coercions.rs": "7ba9ba7fdd26a77b6cc83a3a327731a880c01448482952cc939b428eb506d305",
+        "crates/verum_vbc/src/codegen/context.rs": "fb88a1b18105d380d14ff6207df1dd26ecba25ba171fdbbecb5119944ded2efd",
+        "crates/verum_vbc/src/codegen/mod.rs": "499698043752f81344a31accd5e5cba3c465b11a1b88ea366c4c338c8cb9693c",
+        "crates/verum_vbc/src/codegen/statements.rs": "b9b895f9628fcbac0b9263cec37410716c46ca7eecaa9f5db345e9ddf6bea93e",
+        "crates/verum_vbc/src/codegen/expressions.rs": "60f5ee206075227bb3c2d3a9ad2a2413d86db812fdaecf0874d8b38872978bec",
+        "crates/verum_vbc/tests/callable_array_list_conversion.rs": "ce828ce75ebde036d40e9721bb8eaa6b5283b3fc47de07e3f3c3755fa15f3c15",
+        "crates/verum_vbc/tests/codegen/array_result_facts.rs": "8306cd06639b217a1e190781471ce4c7cbc50a0da6373cf04326c60838adc7c5"
+      },
+      "exit_code": 101,
+      "wall_seconds": 18.107,
+      "failure": null,
+      "source_unchanged": true,
+      "log_sha256": "3674ee5eac8145fdd28402f2ba8cfd507a9d6d37751a44ffcc7899541efcc0ea",
+      "source_paths_unchanged": true,
+      "executables": {},
+      "artifacts_after": {
+        "runtime.vbca": "410ff097b455437cab98b651f7799b3129588820925afe98e0de9c3781530a0f",
+        "runtime.core_metadata": "a92bd89e649e102cdc67d7ad0032513d6448d8915e5744127e6cdf1f1e34ebbb",
+        "runtime.symbol_graph": "a6678c18498f7519749ca1fdf1d22629b479083f42fa95a15177e8c7acf1c722",
+        "runtime.vbca.checksum": "c33573118a8c4b635f6c8f727c3784b524f660be57de702365e8d9c14b2f3a8b",
+        "runtime.vbca.schema": "fec20d7b3f8d1b81aff66c6c1181be574963779f7eacaf65660f8ab9127fca87"
+      },
+      "test_results": [],
+      "durable_log": "docs/architecture/evidence/callable-array-list/geometry-baseline.log.gz",
+      "compressed_log_sha256": "ad32522da346821eda35409de6ef42cbb97d01ba5de2d991869a1da7f4b91d6a",
+      "interpretation": "Harness compilation failure from List versus Vec wire buffer API; zero tests executed."
+    },
+    "deferred-move-baseline": {
+      "source_commit": "99d4f68544909c4e4d7698f830622402b00c5ea3",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "--manifest-path",
+        "/Users/taaliman/.codex/worktrees/returned-reference-summary/verum/Cargo.toml",
+        "-p",
+        "verum_vbc",
+        "--no-default-features",
+        "--features",
+        "compression,table_dispatch,codegen,ffi",
+        "--test",
+        "callable_array_list_conversion",
+        "--",
+        "--test-threads=1",
+        "--nocapture"
+      ],
+      "environment": {
+        "CARGO_TARGET_DIR": "/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target",
+        "CARGO_INCREMENTAL": "0",
+        "CARGO_BUILD_JOBS": "2",
+        "VERUM_NO_AUTO_PRECOMPILE": "1",
+        "VERUM_LLVM_DIR": "/Users/taaliman/projects/oldman/verum-lang/verum/llvm/install",
+        "RUST_MIN_STACK": "16777216"
+      },
+      "timeout_seconds": 1200,
+      "scope": "Parsed source to VBC wire to interpreter callable array/List conversion controls; no typechecker, real stdlib archive, ordinary CLI, automatic bake or AOT acceptance",
+      "artifacts_before": {
+        "runtime.vbca": "410ff097b455437cab98b651f7799b3129588820925afe98e0de9c3781530a0f",
+        "runtime.core_metadata": "a92bd89e649e102cdc67d7ad0032513d6448d8915e5744127e6cdf1f1e34ebbb",
+        "runtime.symbol_graph": "a6678c18498f7519749ca1fdf1d22629b479083f42fa95a15177e8c7acf1c722",
+        "runtime.vbca.checksum": "c33573118a8c4b635f6c8f727c3784b524f660be57de702365e8d9c14b2f3a8b",
+        "runtime.vbca.schema": "fec20d7b3f8d1b81aff66c6c1181be574963779f7eacaf65660f8ab9127fca87"
+      },
+      "source_paths": {
+        "crates/verum_vbc/src/codegen/array_coercions.rs": "7ba9ba7fdd26a77b6cc83a3a327731a880c01448482952cc939b428eb506d305",
+        "crates/verum_vbc/src/codegen/context.rs": "fb88a1b18105d380d14ff6207df1dd26ecba25ba171fdbbecb5119944ded2efd",
+        "crates/verum_vbc/src/codegen/mod.rs": "499698043752f81344a31accd5e5cba3c465b11a1b88ea366c4c338c8cb9693c",
+        "crates/verum_vbc/src/codegen/statements.rs": "b9b895f9628fcbac0b9263cec37410716c46ca7eecaa9f5db345e9ddf6bea93e",
+        "crates/verum_vbc/src/codegen/expressions.rs": "60f5ee206075227bb3c2d3a9ad2a2413d86db812fdaecf0874d8b38872978bec",
+        "crates/verum_vbc/tests/callable_array_list_conversion.rs": "fe665a9b105afc110a670cadf5d708c3d51f30ad61303df2f8d99656fff4e3ed",
+        "crates/verum_vbc/tests/codegen/array_result_facts.rs": "3db7a3bad7eb3f3f141d5074b1c31cb29d3033b9139ecdedac1f2a73b3aae92a"
+      },
+      "exit_code": 101,
+      "wall_seconds": 26.208,
+      "failure": null,
+      "source_unchanged": true,
+      "log_sha256": "c416cbb9c0d3e37dfe722b326bff70cd7d9562cdcdfac7ef1b1262be98acba4f",
+      "source_paths_unchanged": true,
+      "executables": {
+        "/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target/debug/build/verum_vbc/4581c9490e50dfa1/out/callable_array_list_conversion-4581c9490e50dfa1": "f06e660d34880b8eb8f9b5234e15fef4d722f88c3e9743c6c37a372ef099da05"
+      },
+      "artifacts_after": {
+        "runtime.vbca": "410ff097b455437cab98b651f7799b3129588820925afe98e0de9c3781530a0f",
+        "runtime.core_metadata": "a92bd89e649e102cdc67d7ad0032513d6448d8915e5744127e6cdf1f1e34ebbb",
+        "runtime.symbol_graph": "a6678c18498f7519749ca1fdf1d22629b479083f42fa95a15177e8c7acf1c722",
+        "runtime.vbca.checksum": "c33573118a8c4b635f6c8f727c3784b524f660be57de702365e8d9c14b2f3a8b",
+        "runtime.vbca.schema": "fec20d7b3f8d1b81aff66c6c1181be574963779f7eacaf65660f8ab9127fca87"
+      },
+      "test_results": [
+        "test result: FAILED. 13 passed; 2 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s"
+      ],
+      "durable_log": "docs/architecture/evidence/callable-array-list/deferred-move-baseline.log.gz",
+      "compressed_log_sha256": "5d521b8d38885f317dacdd645703b19560c57d50889be7db3c44bb7673380187",
+      "interpretation": "Corrected block-result defer oracle exposes false packed proof as 2 instead of 11; 13 pass, 2 fail."
+    },
+    "geometry-causal": {
+      "source_commit": "99d4f68544909c4e4d7698f830622402b00c5ea3",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "--manifest-path",
+        "/Users/taaliman/.codex/worktrees/returned-reference-summary/verum/Cargo.toml",
+        "-p",
+        "verum_vbc",
+        "--no-default-features",
+        "--features",
+        "compression,table_dispatch,codegen,ffi",
+        "--lib",
+        "codegen::array_coercions::tests",
+        "--",
+        "--test-threads=1",
+        "--nocapture"
+      ],
+      "environment": {
+        "CARGO_TARGET_DIR": "/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target",
+        "CARGO_INCREMENTAL": "0",
+        "CARGO_BUILD_JOBS": "2",
+        "VERUM_NO_AUTO_PRECOMPILE": "1",
+        "VERUM_LLVM_DIR": "/Users/taaliman/projects/oldman/verum-lang/verum/llvm/install",
+        "RUST_MIN_STACK": "16777216"
+      },
+      "timeout_seconds": 1200,
+      "scope": "Unfiltered VBC library suite with compression,table_dispatch,codegen,ffi; no ordinary CLI, automatic stdlib bake or AOT acceptance. Inherited precompiled artifacts are held unchanged; this does not certify a fresh producer.",
+      "artifacts_before": {
+        "runtime.vbca": "410ff097b455437cab98b651f7799b3129588820925afe98e0de9c3781530a0f",
+        "runtime.core_metadata": "a92bd89e649e102cdc67d7ad0032513d6448d8915e5744127e6cdf1f1e34ebbb",
+        "runtime.symbol_graph": "a6678c18498f7519749ca1fdf1d22629b479083f42fa95a15177e8c7acf1c722",
+        "runtime.vbca.checksum": "c33573118a8c4b635f6c8f727c3784b524f660be57de702365e8d9c14b2f3a8b",
+        "runtime.vbca.schema": "fec20d7b3f8d1b81aff66c6c1181be574963779f7eacaf65660f8ab9127fca87"
+      },
+      "source_paths": {
+        "crates/verum_vbc/src/codegen/array_coercions.rs": "7ba9ba7fdd26a77b6cc83a3a327731a880c01448482952cc939b428eb506d305",
+        "crates/verum_vbc/src/codegen/context.rs": "fb88a1b18105d380d14ff6207df1dd26ecba25ba171fdbbecb5119944ded2efd",
+        "crates/verum_vbc/src/codegen/mod.rs": "499698043752f81344a31accd5e5cba3c465b11a1b88ea366c4c338c8cb9693c",
+        "crates/verum_vbc/src/codegen/statements.rs": "b9b895f9628fcbac0b9263cec37410716c46ca7eecaa9f5db345e9ddf6bea93e",
+        "crates/verum_vbc/src/codegen/expressions.rs": "60f5ee206075227bb3c2d3a9ad2a2413d86db812fdaecf0874d8b38872978bec",
+        "crates/verum_vbc/tests/callable_array_list_conversion.rs": "fe665a9b105afc110a670cadf5d708c3d51f30ad61303df2f8d99656fff4e3ed",
+        "crates/verum_vbc/tests/codegen/array_result_facts.rs": "3db7a3bad7eb3f3f141d5074b1c31cb29d3033b9139ecdedac1f2a73b3aae92a"
+      },
+      "exit_code": 101,
+      "wall_seconds": 29.241,
+      "failure": null,
+      "source_unchanged": true,
+      "log_sha256": "98d75917f6cbce612305be325aaebcc2684ee2f928b9f07da85eb65867a7d36c",
+      "source_paths_unchanged": true,
+      "executables": {
+        "/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target/debug/build/verum_vbc/9777a8ed778eb0dc/out/verum_vbc-9777a8ed778eb0dc": "48eace0177db8b51497df793e3bb1610bd7f086074122e7b9dadddb4810df937"
+      },
+      "artifacts_after": {
+        "runtime.vbca": "410ff097b455437cab98b651f7799b3129588820925afe98e0de9c3781530a0f",
+        "runtime.core_metadata": "a92bd89e649e102cdc67d7ad0032513d6448d8915e5744127e6cdf1f1e34ebbb",
+        "runtime.symbol_graph": "a6678c18498f7519749ca1fdf1d22629b479083f42fa95a15177e8c7acf1c722",
+        "runtime.vbca.checksum": "c33573118a8c4b635f6c8f727c3784b524f660be57de702365e8d9c14b2f3a8b",
+        "runtime.vbca.schema": "fec20d7b3f8d1b81aff66c6c1181be574963779f7eacaf65660f8ab9127fca87"
+      },
+      "test_results": [
+        "test result: FAILED. 3 passed; 1 failed; 0 ignored; 0 measured; 2076 filtered out; finished in 0.00s"
+      ],
+      "durable_log": "docs/architecture/evidence/callable-array-list/geometry-causal.log.gz",
+      "compressed_log_sha256": "2eed51cab07f44d694dd7e25b44eba3892bbe723add7289368d06bc7856c9513",
+      "interpretation": "Valid harness rejects allocation proof for unsupported float widths; production still accepts 0x81; 3 pass, 1 fail."
+    },
+    "deferred-fixed": {
+      "source_commit": "39a733eeaf74ac4d4c413a29be850929cd240159",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "--manifest-path",
+        "/Users/taaliman/.codex/worktrees/returned-reference-summary/verum/Cargo.toml",
+        "-p",
+        "verum_vbc",
+        "--no-default-features",
+        "--features",
+        "compression,table_dispatch,codegen,ffi",
+        "--test",
+        "callable_array_list_conversion",
+        "--",
+        "--test-threads=1",
+        "--nocapture"
+      ],
+      "environment": {
+        "CARGO_TARGET_DIR": "/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target",
+        "CARGO_INCREMENTAL": "0",
+        "CARGO_BUILD_JOBS": "2",
+        "VERUM_NO_AUTO_PRECOMPILE": "1",
+        "VERUM_LLVM_DIR": "/Users/taaliman/projects/oldman/verum-lang/verum/llvm/install",
+        "RUST_MIN_STACK": "16777216"
+      },
+      "timeout_seconds": 1200,
+      "scope": "Parsed source to VBC wire to interpreter callable array/List conversion controls; no typechecker, real stdlib archive, ordinary CLI, automatic bake or AOT acceptance",
+      "artifacts_before": {
+        "runtime.vbca": "410ff097b455437cab98b651f7799b3129588820925afe98e0de9c3781530a0f",
+        "runtime.core_metadata": "a92bd89e649e102cdc67d7ad0032513d6448d8915e5744127e6cdf1f1e34ebbb",
+        "runtime.symbol_graph": "a6678c18498f7519749ca1fdf1d22629b479083f42fa95a15177e8c7acf1c722",
+        "runtime.vbca.checksum": "c33573118a8c4b635f6c8f727c3784b524f660be57de702365e8d9c14b2f3a8b",
+        "runtime.vbca.schema": "fec20d7b3f8d1b81aff66c6c1181be574963779f7eacaf65660f8ab9127fca87"
+      },
+      "source_paths": {
+        "crates/verum_vbc/src/codegen/array_coercions.rs": "ecfc715b875afe0672e25f30ac7aac75e9ac6a13188261ec1b7d945031b0831d",
+        "crates/verum_vbc/src/codegen/context.rs": "fb88a1b18105d380d14ff6207df1dd26ecba25ba171fdbbecb5119944ded2efd",
+        "crates/verum_vbc/src/codegen/mod.rs": "499698043752f81344a31accd5e5cba3c465b11a1b88ea366c4c338c8cb9693c",
+        "crates/verum_vbc/src/codegen/statements.rs": "6a480e80359fc0cc40c380e490b44c3f2cdb3541b50a177da580a5c916e75931",
+        "crates/verum_vbc/src/codegen/expressions.rs": "60f5ee206075227bb3c2d3a9ad2a2413d86db812fdaecf0874d8b38872978bec",
+        "crates/verum_vbc/tests/callable_array_list_conversion.rs": "fe665a9b105afc110a670cadf5d708c3d51f30ad61303df2f8d99656fff4e3ed",
+        "crates/verum_vbc/tests/codegen/array_result_facts.rs": "5f4d56d95fc37326fac2417827045d80c42afb2556aa49a48c1662d4efb89436"
+      },
+      "exit_code": 0,
+      "wall_seconds": 26.168,
+      "failure": null,
+      "source_unchanged": true,
+      "log_sha256": "49dceac6428481f73196c242edaeef9111da51d440b1f29848eb2cf33ace7981",
+      "source_paths_unchanged": true,
+      "executables": {
+        "/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target/debug/build/verum_vbc/4581c9490e50dfa1/out/callable_array_list_conversion-4581c9490e50dfa1": "b2965883cf1edd970cd4053ab44d44efad567eb1d0c7adf9b0672a739e972b1f"
+      },
+      "artifacts_after": {
+        "runtime.vbca": "410ff097b455437cab98b651f7799b3129588820925afe98e0de9c3781530a0f",
+        "runtime.core_metadata": "a92bd89e649e102cdc67d7ad0032513d6448d8915e5744127e6cdf1f1e34ebbb",
+        "runtime.symbol_graph": "a6678c18498f7519749ca1fdf1d22629b479083f42fa95a15177e8c7acf1c722",
+        "runtime.vbca.checksum": "c33573118a8c4b635f6c8f727c3784b524f660be57de702365e8d9c14b2f3a8b",
+        "runtime.vbca.schema": "fec20d7b3f8d1b81aff66c6c1181be574963779f7eacaf65660f8ab9127fca87"
+      },
+      "test_results": [
+        "test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s"
+      ],
+      "durable_log": "docs/architecture/evidence/callable-array-list/deferred-fixed.log.gz",
+      "compressed_log_sha256": "b975d56405f93745e8208a3a94951c4403ceab9c8012e7164d6b56ea96749336",
+      "interpretation": "Deferred buffer facts now save/reset/restore and float geometry is restricted; all 15 callable controls pass. Geometry unit gate pending."
+    }
+  }
+}

@@ -436,6 +436,8 @@ pub struct CodegenContext {
     /// same-named local belonging to a later sibling block (T1506).
     pub compiled_block_result_types:
         Map<verum_ast::Span, verum_common::Maybe<verum_common::Text>>,
+    /// Emitted result storage is separate from declaration/type hints.
+    pub(super) array_result_facts: super::array_coercions::ArrayResultFacts,
 
     /// Declared element identity of an array/slice local, keyed by binding ID.
     /// Separate from the container's own nominal type: indexed method receivers
@@ -1003,6 +1005,8 @@ pub struct ClosureCompilationContext {
     /// Saved block result facts in the enclosing function's type scope.
     pub compiled_block_result_types:
         Map<verum_ast::Span, verum_common::Maybe<verum_common::Text>>,
+    /// Emitted result storage is separate from declaration/type hints.
+    pub(super) array_result_facts: super::array_coercions::ArrayResultFacts,
     /// The enclosing callable's residual target, independent of expression hints.
     pub function_return_type_name: verum_common::Maybe<verum_common::Text>,
     /// Recovery handlers belong to the enclosing callable's instruction stream.
@@ -1703,6 +1707,7 @@ impl CodegenContext {
             constant_types: HashMap::new(),
             variable_type_names: HashMap::new(),
             compiled_block_result_types: Map::new(),
+            array_result_facts: Default::default(),
             array_element_type_names: HashMap::new(),
             reference_bindings: std::collections::HashSet::new(),
             object_ref_param_regs: std::collections::HashSet::new(),
@@ -2123,6 +2128,7 @@ impl CodegenContext {
 
     /// Defines a label at the current instruction position.
     pub fn define_label(&mut self, name: &str) {
+        self.array_result_facts.clear();
         let pos = self.instructions.len();
         self.labels.insert(name.to_string(), pos);
 
@@ -2181,6 +2187,7 @@ impl CodegenContext {
 
     /// Emits an instruction, recording the current source span for debug info.
     pub fn emit(&mut self, instr: Instruction) {
+        self.array_result_facts.observe(&instr);
         self.registers.value_uses.observe(&instr, self.instructions.len());
         self.instructions.push(instr);
         self.instruction_spans.push(self.current_span);
@@ -2702,6 +2709,7 @@ impl CodegenContext {
         }
         self.variable_type_names.clear();
         self.compiled_block_result_types.clear();
+        self.array_result_facts.clear();
         self.reference_bound_vars.clear();
         self.array_element_type_names.clear();
         // Pillar 1: register-keyed — must not leak across functions (and
@@ -4668,6 +4676,7 @@ impl CodegenContext {
             defer_stack: self.defer_stack.clone(),
             variable_type_names: self.variable_type_names.clone(),
             compiled_block_result_types: self.compiled_block_result_types.clone(),
+            array_result_facts: self.array_result_facts.clone(),
             function_return_type_name: self.function_return_type_name.clone(),
             try_recover_depth: self.try_recover_depth,
             current_return_type_name: self.current_return_type_name.clone(),
@@ -4697,6 +4706,7 @@ impl CodegenContext {
         self.defer_stack = saved.defer_stack;
         self.variable_type_names = saved.variable_type_names;
         self.compiled_block_result_types = saved.compiled_block_result_types;
+        self.array_result_facts = saved.array_result_facts;
         self.reference_bindings = saved.reference_bindings;
         self.byte_array_vars = saved.byte_array_vars;
         self.fixed_array_counts = saved.fixed_array_counts;
@@ -4853,6 +4863,7 @@ impl CodegenContext {
         self.reference_bound_vars.clear();
         self.generic_type_params.clear();
         self.compiled_block_result_types.clear();
+        self.array_result_facts.clear();
         self.generic_type_params_ordered.clear();
         self.current_generic_param_ids.clear();
         self.const_generic_params.clear();

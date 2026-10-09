@@ -18534,6 +18534,7 @@ impl VbcCodegen {
             let compiled = self.compile_expr(expr);
             let uses_named_affine = self.ctx.registers.value_uses.finish_return_use_capture();
             let reg = compiled?.or_internal("return value has no value")?;
+            let reg = self.materialize_list_return(reg)?;
 
             // If the enclosing function's declared return type carries
             // a refinement predicate, emit the runtime Assert before
@@ -25243,7 +25244,7 @@ impl VbcCodegen {
     /// List.  Backs [`packed_local_field_unpack_spec`]; the element width is
     /// the field DECLARATION's, so the read side of the copy is the static
     /// one (never `GetE`, which is the classifier this exists to avoid).
-    fn emit_unpack_packed_into_list(
+    pub(super) fn emit_unpack_packed_into_list(
         &mut self,
         src: Reg,
         elem_size: usize,
@@ -32783,7 +32784,7 @@ impl VbcCodegen {
             captures.iter().map(|(name, _)| name.as_str()),
         );
         // Begin closure function compilation
-        self.ctx.begin_function(&closure_name, &all_params, None);
+        self.ctx.begin_function(&closure_name, &all_params, closure_return_type_ref.clone());
         self.ctx.bind_captured_array_facts(captured_arrays);
 
         // CLOSURE-CAPTURE-TYPE-1: re-instate the captures' types on the
@@ -32938,6 +32939,7 @@ impl VbcCodegen {
 
         // Emit return
         if let Some(reg) = result {
+            let reg = self.materialize_list_return(reg)?;
             self.ctx.emit(Instruction::Ret { value: reg });
         } else {
             self.ctx.emit(Instruction::RetV);

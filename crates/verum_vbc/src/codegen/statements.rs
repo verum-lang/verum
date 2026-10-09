@@ -2054,12 +2054,17 @@ impl VbcCodegen {
 
         // For now, compile to a temp buffer
         let saved_instrs = std::mem::take(&mut self.ctx.instructions);
+        // A deferred body is a separate future instruction stream. Neither its
+        // producers nor the caller's current facts are valid across that gap.
+        let saved_array_facts = std::mem::take(&mut self.ctx.array_result_facts);
 
         // Deferred statements discard their result, including a local block tail.
-        self.compile_expr_with_demand(expr, ResultDemand::Discarded)?;
+        let deferred_result = self.compile_expr_with_demand(expr, ResultDemand::Discarded);
 
-        // Capture the generated instructions
+        // Restore the actual stream even if the deferred body failed to compile.
         let defer_instrs = std::mem::replace(&mut self.ctx.instructions, saved_instrs);
+        self.ctx.array_result_facts = saved_array_facts;
+        deferred_result?;
 
         // Add to defer stack
         self.ctx.add_defer(defer_instrs, is_errdefer);
