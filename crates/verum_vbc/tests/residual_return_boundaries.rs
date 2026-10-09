@@ -246,7 +246,7 @@ fn probe() -> Int {
 }
 
 #[test]
-fn a_nested_closure_does_not_inherit_the_enclosing_try_handler() {
+fn callable_try_boundary_does_not_inherit_the_enclosing_handler() {
     value(
         r#"
 fn probe() -> Int {
@@ -254,6 +254,46 @@ fn probe() -> Int {
         let work = || -> Result<Int, Failure> { let value = missing()?; Result.Ok(7) };
         match work() { Result.Ok(_) => 0, Result.Err(error) => error.code }
     } recover { _ => 99 }
+}
+
+#[test]
+fn callable_try_boundary_can_be_called_after_the_outer_handler_ends() {
+    value(r#"
+fn probe() -> Int {
+    let work = try {
+        || -> Result<Int, Failure> { let value = missing()?; Result.Ok(7) }
+    } recover { _ => || -> Result<Int, Failure> { Result.Ok(0) } };
+    match work() { Result.Ok(_) => 0, Result.Err(error) => error.code }
+}
+"#, 41);
+}
+
+#[test]
+fn callable_try_boundary_retains_a_handler_inside_the_closure() {
+    value(r#"
+fn probe() -> Int {
+    try {
+        let work = || -> Result<Int, Failure> {
+            let code = try { let value = missing()?; 0 } recover { error => error.code };
+            Result.Ok(code + 1)
+        };
+        match work() { Result.Ok(code) => code, Result.Err(_) => 0 }
+    } recover { _ => 99 }
+}
+"#, 42);
+}
+
+#[test]
+fn callable_try_boundary_restores_the_enclosing_handler_after_compilation() {
+    value(r#"
+fn probe() -> Int {
+    try {
+        let work = || -> Result<Int, Failure> { Result.Ok(7) };
+        let value = missing()?;
+        0
+    } recover { error => error.code + 2 }
+}
+"#, 43);
 }
 "#,
         41,
