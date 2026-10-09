@@ -6,12 +6,16 @@ use verum_codegen::llvm::{LoweringConfig, VbcToLlvmLowering};
 use verum_common::{Heap, List, Set, Text};
 use verum_fast_parser::Parser;
 use verum_llvm::{
-    OptimizationLevel, context::Context, memory_buffer::MemoryBuffer,
-    module::Module, targets::{InitializationConfig, Target}, values::AnyValue,
+    OptimizationLevel,
+    context::Context,
+    memory_buffer::MemoryBuffer,
+    module::Module,
+    targets::{InitializationConfig, Target},
+    values::AnyValue,
 };
 use verum_vbc::{
     codegen::VbcCodegen, deserialize::deserialize_module, module::VbcModule,
-    serialize::serialize_module,
+    serialize::serialize_module, types::TypeRef,
 };
 
 thread_local! {
@@ -96,14 +100,24 @@ fn decoded_wire(module: &VbcModule) -> VbcModule {
     wire
 }
 
-fn native_probe(module: &VbcModule, route: &str, owners: &[&str], guard_layout: bool) -> Result<i64, Text> {
+fn native_probe(
+    module: &VbcModule,
+    route: &str,
+    owners: &[&str],
+    guard_layout: bool,
+) -> Result<i64, Text> {
     Target::initialize_native(&InitializationConfig::default()).expect("native target");
     let context = Context::create();
     let mut lowering = VbcToLlvmLowering::new(
-        &context, LoweringConfig::debug("numeric_owner_native").with_debug_info(false),
+        &context,
+        LoweringConfig::debug("numeric_owner_native").with_debug_info(false),
     );
-    lowering.lower_module(module).map_err(|error| Text::from(format!("native lowering: {error:?}")))?;
-    let probe = lowering.module().get_function("probe")
+    lowering
+        .lower_module(module)
+        .map_err(|error| Text::from(format!("native lowering: {error:?}")))?;
+    let probe = lowering
+        .module()
+        .get_function("probe")
         .ok_or_else(|| Text::from("exact native probe is absent"))?;
     let probe_ir = probe.print_to_string();
     let probe_ir = probe_ir.to_str().expect("probe IR UTF8");
@@ -112,59 +126,108 @@ fn native_probe(module: &VbcModule, route: &str, owners: &[&str], guard_layout: 
         std::fs::create_dir_all(&directory).expect("IR evidence directory");
         let thread = std::thread::current();
         std::fs::write(
-            std::path::Path::new(&directory).join(format!("{}-{route}.ll", thread.name().unwrap_or("numeric-owner"))),
+            std::path::Path::new(&directory).join(format!(
+                "{}-{route}.ll",
+                thread.name().unwrap_or("numeric-owner")
+            )),
             text.as_bytes(),
-        ).expect("IR evidence");
+        )
+        .expect("IR evidence");
     }
     if guard_layout {
+        let has_array_result = owners.iter().any(|owner| {
+            module.functions.iter().any(|function| {
+                module.get_string(function.name) == Some(*owner)
+                    && matches!(function.return_type, TypeRef::Array { .. })
+            })
+        });
+        // In these fixtures the array body really allocates packed bytes.
+        // Before T1704, an explicitly typed caller still emits generic
+        // container-header probes on that raw buffer. Body selection alone
+        // does not make those reads safe. Each probe has one result owner,
+        // so a legitimate List reader cannot trip this conservative guard.
+        if has_array_result && (probe_ir.contains("geteu_cv_") || probe_ir.contains("lenlv_cv_")) {
+            return Err(format!("selected packed-array body reaches generic container readers; JIT withheld at the T1704 geometry boundary\n{probe_ir}").into());
+        }
         // These constant source bodies have known List versus packed-array
         // storage. A primitive replacement could hand a raw buffer to a List
         // reader. Refuse to execute that unsafe negative; retain its actual IR.
         // Debug lowering does not inline this direct declared-body call.
         for owner in owners {
             let call = format!("@{owner}(");
-            if !probe_ir.lines().any(|line| line.contains("call ") && line.contains(&call)) {
+            if !probe_ir
+                .lines()
+                .any(|line| line.contains("call ") && line.contains(&call))
+            {
                 return Err(format!("selected body {owner} is absent from probe calls; JIT withheld before an unproved result-layout read\n{probe_ir}").into());
             }
         }
     }
-    let executable = context.create_module_from_ir(MemoryBuffer::create_from_memory_range_copy(
-        text.as_bytes(), "numeric_owner_native",
-    )).map_err(|error| Text::from(format!("reachable IR: {error}")))?;
-    executable.verify().map_err(|error| Text::from(format!("invalid IR: {error}")))?;
-    let engine = executable.create_jit_execution_engine(OptimizationLevel::None)
+    let executable = context
+        .create_module_from_ir(MemoryBuffer::create_from_memory_range_copy(
+            text.as_bytes(),
+            "numeric_owner_native",
+        ))
+        .map_err(|error| Text::from(format!("reachable IR: {error}")))?;
+    executable
+        .verify()
+        .map_err(|error| Text::from(format!("invalid IR: {error}")))?;
+    let engine = executable
+        .create_jit_execution_engine(OptimizationLevel::None)
         .map_err(|error| Text::from(format!("JIT: {error}")))?;
     for name in ["verum_cbgr_allocate", "verum_checked_malloc"] {
-        engine.add_global_mapping(&executable.get_function(name).expect("host allocation declaration"), allocate as *const () as usize);
+        engine.add_global_mapping(
+            &executable
+                .get_function(name)
+                .expect("host allocation declaration"),
+            allocate as *const () as usize,
+        );
     }
     // SAFETY: fixtures declare this exact zero-argument Int function. Source
     // body selection is checked before any container-layout consumer executes.
     let result = unsafe {
-        engine.get_function::<unsafe extern "C" fn() -> i64>("probe")
-            .map_err(|error| Text::from(format!("JIT probe: {error}")))?.call()
+        engine
+            .get_function::<unsafe extern "C" fn() -> i64>("probe")
+            .map_err(|error| Text::from(format!("JIT probe: {error}")))?
+            .call()
     };
     ALLOCATIONS.with(|allocations| allocations.borrow_mut().clear());
     Ok(result)
 }
 
-fn check(text: &str, expected: i64, owners: &[&str], guard_layout: bool) {
+fn check_failures(text: &str, expected: i64, owners: &[&str], guard_layout: bool) -> List<Text> {
     let original = source(text);
     let wire = decoded_wire(&original);
     let mut failures = List::<Text>::new();
     for (route, module) in [("source", &original), ("wire", &wire)] {
         for owner in owners {
-            let descriptor = module.functions.iter()
+            let descriptor = module
+                .functions
+                .iter()
                 .find(|function| module.get_string(function.name) == Some(*owner))
                 .unwrap_or_else(|| panic!("{route}: exact declaration {owner}"));
-            assert!(descriptor.has_source_body, "{route}: {owner} must retain AST body provenance");
-            assert!(descriptor.instructions.as_ref().is_some_and(|body| !body.is_empty()),
-                "{route}: {owner} must have an actual decoded body");
+            assert!(
+                descriptor.has_source_body,
+                "{route}: {owner} must retain AST body provenance"
+            );
+            assert!(
+                descriptor
+                    .instructions
+                    .as_ref()
+                    .is_some_and(|body| !body.is_empty()),
+                "{route}: {owner} must have an actual decoded body"
+            );
         }
         match native_probe(module, route, owners, guard_layout) {
             Ok(actual) if actual == expected => {}
             result => failures.push(format!("{route}: expected {expected}, got {result:?}").into()),
         }
     }
+    failures
+}
+
+fn check(text: &str, expected: i64, owners: &[&str], guard_layout: bool) {
+    let failures = check_failures(text, expected, owners, guard_layout);
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
@@ -185,21 +248,45 @@ implement ISize {
 
 #[test]
 fn static_same_width_owners_keep_declared_array_and_list_contracts() {
-    check(&format!(r#"{DECLARATIONS}
-fn probe() -> Int {{
-    let unsigned: [Byte; 8] = UInt64.to_be_bytes(1);
-    let signed: [Byte; 8] = Int64.to_be_bytes(-1);
-    let mut size = USize.to_be_bytes(1);
-    let mut ssize = ISize.to_be_bytes(-1);
-    size.push(97); ssize.push(101);
-    (unsigned[0] as Int) + (signed[0] as Int) + (size[0] as Int)
-        + (ssize[0] as Int) + size.len() + ssize.len()
-}}
-"#), 132, &["UInt64.to_be_bytes", "Int64.to_be_bytes", "USize.to_be_bytes", "ISize.to_be_bytes"], true);
+    let mut failures = List::<Text>::new();
+    // Keep both owners declared in every module, but isolate each consumer
+    // so its physical-layout guard can distinguish arrays from real Lists.
+    for (owner, body, expected) in [
+        (
+            "UInt64.to_be_bytes",
+            "let bytes: [Byte; 8] = UInt64.to_be_bytes(1); (bytes[0] as Int) * 100 + bytes.len()",
+            1708,
+        ),
+        (
+            "Int64.to_be_bytes",
+            "let bytes: [Byte; 8] = Int64.to_be_bytes(-1); (bytes[0] as Int) * 100 + bytes.len()",
+            2908,
+        ),
+        (
+            "USize.to_be_bytes",
+            "let mut bytes = USize.to_be_bytes(1); bytes.push(97); (bytes[0] as Int) * 100 + bytes.len()",
+            3703,
+        ),
+        (
+            "ISize.to_be_bytes",
+            "let mut bytes = ISize.to_be_bytes(-1); bytes.push(97); (bytes[0] as Int) * 100 + bytes.len()",
+            4303,
+        ),
+    ] {
+        failures.extend(check_failures(
+            &format!("{DECLARATIONS}\nfn probe() -> Int {{ {body} }}"),
+            expected,
+            &[owner],
+            true,
+        ));
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
 fn list_owner(declarations: &str, setup: &str, receiver: &str, owner: &str, expected: i64) {
-    check(&format!(r#"{DECLARATIONS}
+    check(
+        &format!(
+            r#"{DECLARATIONS}
 {declarations}
 fn probe() -> Int {{
     {setup}
@@ -207,49 +294,97 @@ fn probe() -> Int {{
     bytes.push(97);
     (bytes[0] as Int) * 100 + bytes.len()
 }}
-"#), expected, &[owner], true);
+"#
+        ),
+        expected,
+        &[owner],
+        true,
+    );
 }
 
 #[test]
 fn usize_instance_keeps_its_growable_list_body() {
-    list_owner("", "let value: USize = 1;", "value", "USize.to_be_bytes", 3703);
+    list_owner(
+        "",
+        "let value: USize = 1;",
+        "value",
+        "USize.to_be_bytes",
+        3703,
+    );
 }
 
 #[test]
 fn usize_alias_and_cast_keep_the_exact_body() {
-    list_owner("type SizeAlias is USize;", "", "(1 as SizeAlias)", "USize.to_be_bytes", 3703);
+    list_owner(
+        "type SizeAlias is USize;",
+        "",
+        "(1 as SizeAlias)",
+        "USize.to_be_bytes",
+        3703,
+    );
 }
 
 #[test]
 fn isize_instance_keeps_its_growable_list_body() {
-    list_owner("", "let value: ISize = -1;", "value", "ISize.to_be_bytes", 4303);
+    list_owner(
+        "",
+        "let value: ISize = -1;",
+        "value",
+        "ISize.to_be_bytes",
+        4303,
+    );
 }
 
 #[test]
 fn isize_alias_and_cast_keep_the_exact_body() {
-    list_owner("type SizeAlias is ISize;", "", "((-1) as SizeAlias)", "ISize.to_be_bytes", 4303);
+    list_owner(
+        "type SizeAlias is ISize;",
+        "",
+        "((-1) as SizeAlias)",
+        "ISize.to_be_bytes",
+        4303,
+    );
 }
 
 #[test]
 fn uint64_instance_keeps_its_fixed_array_body() {
-    check(&format!(r#"{DECLARATIONS}
+    check(
+        &format!(
+            r#"{DECLARATIONS}
 fn probe() -> Int {{ let value: UInt64 = 1;
     let bytes: [Byte; 8] = value.to_be_bytes(); (bytes[0] as Int) * 100 + bytes.len() }}
-"#), 1708, &["UInt64.to_be_bytes"], true);
+"#
+        ),
+        1708,
+        &["UInt64.to_be_bytes"],
+        true,
+    );
 }
 
 #[test]
 fn int64_instance_keeps_its_fixed_array_body() {
-    check(&format!(r#"{DECLARATIONS}
+    check(
+        &format!(
+            r#"{DECLARATIONS}
 fn probe() -> Int {{ let value: Int64 = -1;
     let bytes: [Byte; 8] = value.to_be_bytes(); (bytes[0] as Int) * 100 + bytes.len() }}
-"#), 2908, &["Int64.to_be_bytes"], true);
+"#
+        ),
+        2908,
+        &["Int64.to_be_bytes"],
+        true,
+    );
 }
 
 #[test]
 fn scalar_numeric_body_wins_over_primitive_method_spelling() {
-    check(r#"
+    check(
+        r#"
 implement USize { fn count_ones(self) -> Int { 37 } }
 fn probe() -> Int { let value: USize = 7; value.count_ones() }
-"#, 37, &["USize.count_ones"], false);
+"#,
+        37,
+        &["USize.count_ones"],
+        false,
+    );
 }
