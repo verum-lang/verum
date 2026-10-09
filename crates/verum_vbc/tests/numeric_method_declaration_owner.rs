@@ -370,3 +370,63 @@ fn probe() -> Int {
         42,
     );
 }
+
+fn derivative_probe(declarations: &str, binding: &str, expression: &str) -> Text {
+    format!(
+        r#"{declarations}
+fn probe() -> Int {{
+    {binding}
+    @vbc(GRAD_BEGIN, value);
+    let primal: Float = {expression};
+    let tape: Int = @vbc(GRAD_END, primal);
+    let derivative: Float = @vbc(GRAD_BACKWARD, tape, 1.0);
+    (derivative * 1000.0) as Int
+}}
+"#,
+    )
+    .into()
+}
+
+#[test]
+fn builtin_float_sine_retains_its_primitive_derivative() {
+    check(
+        &derivative_probe("", "let value: Float = 0.0;", "value.sin()"),
+        1000,
+    );
+}
+
+#[test]
+fn ordinary_function_body_transfers_argument_and_return_tape_nodes() {
+    check(
+        &derivative_probe(
+            "fn squared(value: Float) -> Float { value * value }",
+            "let value: Float = 3.0;",
+            "squared(value)",
+        ),
+        6000,
+    );
+}
+
+#[test]
+fn declared_float_body_owns_its_derivative_instead_of_the_method_name() {
+    check(
+        &derivative_probe(
+            "implement Float { fn sin(self) -> Float { self * self } }",
+            "let value: Float = 3.0;",
+            "value.sin()",
+        ),
+        6000,
+    );
+}
+
+#[test]
+fn declared_float_alias_retains_its_body_derivative() {
+    check(
+        &derivative_probe(
+            "type Scalar is Float; implement Float { fn sin(self) -> Float { self * self } }",
+            "let value: Scalar = 3.0;",
+            "value.sin()",
+        ),
+        6000,
+    );
+}
