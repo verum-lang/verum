@@ -6,6 +6,7 @@ use super::CompilationPipeline;
 use crate::{CompilerOptions, Session, VerifyMode};
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
+use verum_common::Text;
 use verum_modules::cog_resolver::CogResolver;
 
 struct Fixture {
@@ -70,7 +71,7 @@ fn source_directory_loads_the_declared_public_function() {
     pipeline
         .load_external_cog_modules()
         .expect("valid source cog");
-    assert!(pipeline.modules.contains_key("greeting.lib"));
+    assert!(pipeline.modules.contains_key(&Text::from("greeting.lib")));
     let registry = pipeline.session.module_registry();
     let guard = registry.read();
     let module = guard
@@ -87,8 +88,12 @@ fn package_directory_does_not_add_a_src_module_segment() {
     pipeline
         .load_external_cog_modules()
         .expect("valid archive layout");
-    assert!(pipeline.modules.contains_key("greeting.lib"));
-    assert!(!pipeline.modules.contains_key("greeting.src.lib"));
+    assert!(pipeline.modules.contains_key(&Text::from("greeting.lib")));
+    assert!(
+        !pipeline
+            .modules
+            .contains_key(&Text::from("greeting.src.lib"))
+    );
 }
 
 #[test]
