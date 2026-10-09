@@ -144,3 +144,62 @@ executable hashes, counts and the limits of the retained baseline comparison.
 Plain record clone independence remains T1645, and caller mutation of stored
 keys remains T1649. The registry catalog still needs typed project and
 runtime acceptance before its publication guarantee can be claimed.
+
+
+## Imported type ownership — T1212
+
+Explicit source mounts now retain the declaring module in nominal types,
+methods, tuple/newtype constructors and field metadata. Renamed and
+re-exported types retain that same identity. Qualified type lookup and alias
+expansion no longer substitute an unrelated type with the same short name.
+A missing export cannot be supplied by an ambient metadata declaration.
+
+The integrated source at `d1ee93588` passed 11 mounted-owner controls and
+8 module-aware controls. These include conflicting sibling names in both
+registration orders, renamed constructors and missing/private exports.
+The combined full `verum_types --tests` gate passed **3,947 tests across
+173 targets**, with zero failures, zero filtered tests and three existing
+ignored tests in 187.289 seconds. The [gate receipt](evidence/registry-type-ownership-gate.json)
+identifies the source, command and log hash. Explicit generic receiver
+arguments on static calls remain separate work under T1656.
+
+## Protocol registration work — T1655
+
+Registering 1,024 unrelated protocol identities previously called the overlap
+checker 523,776 times. Registration now selects an insertion-ordered bucket
+using exactly the existing protocol identity. The same control makes zero
+unrelated comparisons. Target types and protocol arguments still undergo
+coherence checking; they are not used to exclude candidates.
+
+Eight focused controls preserve same-protocol conflicts, generic overlap,
+specialization, strict orphan refusal, lenient warning order, duplicate
+registration, mode transitions and cloned checker state. The combined full
+source gate above includes these controls. Public `check_coherence` retains
+its existing behavior; this change bounds registration work specifically.
+
+A short profile of the ordinary registry envelope run identified registration
+as a hot path. That interval does not measure its share of total compilation
+time. The passing envelope run used the older `b12135c9f` CLI, which predates
+these ownership and index fixes. A rebuilt ordinary CLI and registry replay
+remain necessary before claiming a product-level performance improvement.
+
+## Publication producer and receipts — T1636
+
+The CLI now emits the bounded v1 binary envelope, preserving the provided
+source metadata and exact archive bytes. It independently checks archive integrity, refuses
+publication redirects and unsupported evidence, and validates the request even
+for dry runs. Success requires a bounded JSON receipt with the exact name,
+version and checksum; malformed, duplicate, unknown-field or mismatched
+receipts are refused.
+
+The final source gate at `82cda7310`, integrated through `bb6285beb`, passed
+13 publication and 5 configured-registry library tests. Each group contains
+one inert child-process entry. The [client gate receipt](evidence/registry-publication-client-gate.json)
+records source, executable, log hashes and unchanged stage14 artifact
+identities. A macOS fixture correction explicitly restores blocking mode on
+accepted HTTP sockets while keeping read/write deadlines (T1654).
+
+These are real loopback HTTP and command-handler controls, not an authenticated
+Verum service roundtrip. Detailed dependency projection remains T1651; actual
+server admission, durable storage, restart and publish-install-run acceptance
+remain required by the [publication contract](cog-publication-protocol.md).

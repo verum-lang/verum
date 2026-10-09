@@ -1,0 +1,134 @@
+{
+  "task": "T1636",
+  "status": "client-and-contract-accepted; real-service gate pending",
+  "source_commit": "82cda73107a48f4db04db62a4d8edb84fcecb12d",
+  "source_base": "b12135c9fda3c024ff5a86ec5638bf83c733d5c1",
+  "final_build_head": "51c1a804d",
+  "final_build_owned_fixture_diff_committed_as": "82cda73107a48f4db04db62a4d8edb84fcecb12d",
+  "producer_commit": "05e679241",
+  "receipt_commit": "51c1a804d",
+  "fixture_task": "T1654",
+  "environment": {
+    "CARGO_INCREMENTAL": "0",
+    "CARGO_BUILD_JOBS": "2",
+    "VERUM_NO_AUTO_PRECOMPILE": "1",
+    "VERUM_LLVM_DIR": "/Users/taaliman/projects/oldman/verum-lang/verum/llvm/install"
+  },
+  "precompiled_runtime_source": "fdad59f06 stage14",
+  "artifacts_verified_unchanged": [
+    {
+      "path": "/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target/precompiled-stdlib/runtime.vbca",
+      "bytes": 30232754,
+      "sha256": "410ff097b455437cab98b651f7799b3129588820925afe98e0de9c3781530a0f"
+    },
+    {
+      "path": "/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target/precompiled-stdlib/runtime.core_metadata",
+      "bytes": 78897266,
+      "sha256": "a92bd89e649e102cdc67d7ad0032513d6448d8915e5744127e6cdf1f1e34ebbb"
+    },
+    {
+      "path": "/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target/precompiled-stdlib/runtime.symbol_graph",
+      "bytes": 5914608,
+      "sha256": "a6678c18498f7519749ca1fdf1d22629b479083f42fa95a15177e8c7acf1c722"
+    }
+  ],
+  "final_test_executable": {
+    "path": "/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target/debug/build/verum_cli/72adbfc0707d7b24/out/verum_cli-72adbfc0707d7b24",
+    "bytes": 447538664,
+    "sha256": "5aca8df9755d0d1fbc671d5fca748e4dc99a8459ef07261f5bedf791d604a8a9"
+  },
+  "final_gates": {
+    "publication": {
+      "passed": 13,
+      "failed": 0,
+      "inert_child_entries": 1
+    },
+    "configured_registry": {
+      "passed": 5,
+      "failed": 0,
+      "inert_child_entries": 1
+    }
+  },
+  "logs": [
+    {
+      "path": "/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/T1636-baseline.log",
+      "sha256": "2d4b092e5155cb7f16d59e2179aa2830ac6b1c2deae557340b91ebd6da6021f5",
+      "test_summary": [
+        "test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 835 filtered out; finished in 3.95s"
+      ],
+      "build_summary": [
+        "Finished `test` profile [unoptimized + debuginfo] target(s) in 2m 28s"
+      ]
+    },
+    {
+      "path": "/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/T1636-producer.log",
+      "sha256": "2ab4d21c689f5b8cd6397190e179e560efe28c987cd5fba4d7c6ec0c10d65ac4",
+      "test_summary": [
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 842 filtered out; finished in 0.01s",
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 842 filtered out; finished in 0.00s",
+        "test result: FAILED. 5 passed; 3 failed; 0 ignored; 0 measured; 835 filtered out; finished in 0.27s"
+      ],
+      "build_summary": [
+        "Finished `test` profile [unoptimized + debuginfo] target(s) in 2m 34s"
+      ]
+    },
+    {
+      "path": "/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/T1636-producer-fixed.log",
+      "sha256": "24d02b1339aecf12eb958f9339e6eccc7b543cece5848b304eea8b16523fab02",
+      "test_summary": [
+        "test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 835 filtered out; finished in 0.21s"
+      ],
+      "build_summary": [
+        "Finished `test` profile [unoptimized + debuginfo] target(s) in 2m 13s"
+      ]
+    },
+    {
+      "path": "/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/T1636-receipts.log",
+      "sha256": "17651724ad6ffdc57c5565c9fd454d9d0e24a1404016d2fe82fd59de1512c98c",
+      "test_summary": [
+        "test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 835 filtered out; finished in 4.31s"
+      ],
+      "build_summary": [
+        "Finished `test` profile [unoptimized + debuginfo] target(s) in 2m 16s"
+      ]
+    },
+    {
+      "path": "/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/T1636-adjacent-downloads.log",
+      "sha256": "cc6e2e66d67514b688535fe937104b6dc6597b16781a449f60f5413aafe81e5f",
+      "test_summary": [
+        "test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 847 filtered out; finished in 0.62s",
+        "test result: FAILED. 4 passed; 1 failed; 0 ignored; 0 measured; 843 filtered out; finished in 0.74s"
+      ],
+      "build_summary": []
+    },
+    {
+      "path": "/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/T1654-publication-final.log",
+      "sha256": "f5f622499a81aac7bb212257d99498b221462f36614c8fc5cf05d34f07d26ea7",
+      "test_summary": [
+        "test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 835 filtered out; finished in 0.28s"
+      ],
+      "build_summary": [
+        "Finished `test` profile [unoptimized + debuginfo] target(s) in 2m 06s"
+      ]
+    },
+    {
+      "path": "/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/T1654-downloads-final.log",
+      "sha256": "4349b4d1abb1c42f16529293c54fb3f558e4130c131e57d53e650239ba556d91",
+      "test_summary": [
+        "test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 843 filtered out; finished in 0.12s"
+      ],
+      "build_summary": []
+    }
+  ],
+  "socket_probe": {
+    "path": "/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/T1654-accepted-socket-probe.json",
+    "sha256": "85e0e19a1d1f3d32c3ff77b14deb093a15ffe48175d395418595fa46bdf3346e"
+  },
+  "boundaries": [
+    "loopback HTTP fixtures and real archive/signing dry-run handler only",
+    "no ordinary CLI run, automatic stdlib bake, AOT or external publication",
+    "opaque binary transport fixture is not a valid archive acceptance test",
+    "server authentication, strict metadata/duplicate decoding, digest/archive validation, durability, restart and actual publish/download roundtrip remain required",
+    "signature/evidence support T1648 and detailed dependency projection T1651 remain separate"
+  ]
+}

@@ -1,0 +1,62 @@
+{
+  "tasks": [
+    "T1655",
+    "T1212"
+  ],
+  "source_commit": "d1ee935884042606f0feb6266d05195bbfe89115",
+  "source_tree": "b0e6dfe81b163b56124e7ec328238a0e0405cc78",
+  "command": [
+    "cargo",
+    "test",
+    "--locked",
+    "--offline",
+    "--manifest-path",
+    "/Users/taaliman/.codex/worktrees/returned-reference-summary/verum/Cargo.toml",
+    "-p",
+    "verum_types",
+    "--tests",
+    "--",
+    "--test-threads=2"
+  ],
+  "environment": {
+    "CARGO_TARGET_DIR": "/Users/taaliman/.tmp/verum-codex-01a10248-types/checker-target",
+    "CARGO_INCREMENTAL": "0",
+    "CARGO_BUILD_JOBS": "2",
+    "VERUM_NO_AUTO_PRECOMPILE": "1"
+  },
+  "timeout_seconds": 900,
+  "status": "passed",
+  "exit_code": 0,
+  "wall_seconds": 187.289,
+  "test_targets": 173,
+  "passed": 3947,
+  "failed": 0,
+  "ignored": 3,
+  "filtered": 0,
+  "log_sha256": "41156ee21c96d7e92381bd94bf04101d9f61f89597441eb8cc34a5573ec130ca",
+  "source_unchanged": true,
+  "worktree_status": "",
+  "scope": "Rust type-system source gate; no rebuilt ordinary CLI, complete registry, interpreter/AOT product or release acceptance.",
+  "registration_controls": {
+    "unrelated_protocols": 1024,
+    "baseline_comparisons": 523776,
+    "indexed_comparisons": 0,
+    "focused_passed": 8,
+    "baseline_log_sha256": "ca079d7142a65780340156d811c862644a86a53273b57dfcc79fcba33eea4ad0",
+    "focused_log_sha256": "a52439bec665aba9e7965f376656bc7989c2872006f20b9f5abfde82726cecbe",
+    "identity": "Exact existing make_protocol_key; target types and protocol arguments remain overlap candidates.",
+    "preserved": "Strict orphan/conflict refusal, lenient warning order, specialization, qualified names, duplicates, Off-to-Strict mode transitions and cloned checker state.",
+    "baseline_source_commit": "61d413aac404739ad5db6dfc063e5e4f98fbde70",
+    "focused_source_commit": "eb77d3544c5fafe241b5bf7c67c887f2cdd034e1"
+  },
+  "mounted_owner_controls": {
+    "passed": 11,
+    "qualified_lookup_controls_passed": 8,
+    "boundaries": "Imported source owners/aliases/constructors and fail-closed qualified lookup. Explicit generic static receiver arguments remain a separate T1656 defect."
+  },
+  "existing_ignored": [
+    "test core_pipeline::tests::test_stdlib_full_typecheck ... ignored, long-running (~220s) stdlib full typecheck; run with: cargo test stdlib_full_typecheck -- --ignored --nocapture",
+    "test too_few_type_arguments_in_a_let_annotation_is_refused ... ignored, T0922: `provided < expected` is blocked on default type parameters. Turning it on refuses 194 uses of `Result<T>` in 31 core/ files, where `Result<T, E>` takes two and the stdlib is written as if `E` defaulted. The grammar has no `= Type` on a type parameter yet. Un-ignore with `type Result<T, E = Error>`.",
+    "test too_few_type_arguments_in_a_signature_is_refused ... ignored, T0922: `provided < expected` is blocked on default type parameters. Turning it on refuses 194 uses of `Result<T>` in 31 core/ files, where `Result<T, E>` takes two and the stdlib is written as if `E` defaulted. The grammar has no `= Type` on a type parameter yet. Un-ignore with `type Result<T, E = Error>`."
+  ]
+}
