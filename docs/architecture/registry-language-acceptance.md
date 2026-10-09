@@ -360,3 +360,9 @@ It does not add or exercise a `workspace publish` CLI route, authentication or
 a registry service. T1639 tracks that interface; T1672 covers the separately
 dispatched workspace management handlers. Ordinary CLI and full registry
 acceptance remain separate.
+
+The reviewed changes rebased onto `3083e0939` as `b22c2ec1b`. The complete
+CLI crate tree, including controls, is byte-identical to tested `b6860b03c`.
+The receipt records the separate compiler/type-checker base changes; the
+original gate does not claim execution of that combined source or an ordinary
+CLI bake. The tested source remains preserved on its named branch.

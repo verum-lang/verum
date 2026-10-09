@@ -286,5 +286,22 @@
     "The actual application/library new handler created a lowercase manifest. T1668 separately tracks scaffold spelling migration.",
     "Other dispatched workspace management commands are outside this change and tracked by T1672.",
     "Case-folded default fixture roots report reduced precedence coverage. An explicitly supplied fixture root must be case-sensitive or fail."
-  ]
+  ],
+  "integration": {
+    "base": "3083e09397a1c40de7c83755fecf21e235e48c4e",
+    "rebased_source_commit": "b22c2ec1b547ad90a06fa008718587a01be8a9b0",
+    "tested_source_branch": "codex/workspace-publication-tested-b686",
+    "original_source_and_evidence_branch": "codex/workspace-publication-pre-rebase",
+    "identical_cli_tree": "e0041251a19b4f03b5e39ba7ef209eac48836eff",
+    "cli_source_and_tests_identical": true,
+    "base_changed_paths": [
+      "CLAUDE.md",
+      "crates/verum_compiler/tests/bootstrap/generic_variant_payloads.rs",
+      "crates/verum_types/src/infer/core.rs",
+      "crates/verum_types/src/infer/env.rs",
+      "crates/verum_types/tests/unit/alias_argument_identity.rs",
+      "docs/architecture/evidence/registry-alias-argument-gate.json"
+    ],
+    "boundary": "The CLI tree is byte-identical to the tested revision. Other compiler/type-checker base changes were not executed by these original filesystem/handler gates; no combined-source ordinary CLI or bake acceptance is inferred."
+  }
 }
