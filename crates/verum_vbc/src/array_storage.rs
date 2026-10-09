@@ -175,6 +175,9 @@ pub fn straight_line_array_return(instructions: &[Instruction]) -> Maybe<ArrayRe
                 | Instruction::JmpCmp { .. }
                 | Instruction::Switch { .. }
                 | Instruction::TryBegin { .. }
+                | Instruction::CtxProvide { .. }
+                | Instruction::Guard { .. }
+                | Instruction::TailCall { .. }
         )
     }) {
         return None;

@@ -72,3 +72,37 @@ fn source_and_decoded_bodies_keep_same_signature_different_storage() {
         }
     }
 }
+
+
+#[test]
+fn inferred_and_annotated_calls_do_not_guess_storage_from_the_signature() {
+    use verum_vbc::instruction::{Instruction, MemSubOpcode};
+    for callee_first in [true, false] {
+        let callee = "fn packed() -> [Byte; 2] { let bytes: [Byte; 2] = [7, 9]; bytes }";
+        let callers = r#"
+fn inferred() -> Byte { let bytes = packed(); bytes[1] }
+fn annotated() -> Byte { let bytes: [Byte; 2] = packed(); bytes[1] }
+"#;
+        let text = if callee_first {
+            verum_common::Text::from(format!("{callee}\n{callers}"))
+        } else {
+            verum_common::Text::from(format!("{callers}\n{callee}"))
+        };
+        let module = VbcCodegen::new()
+            .compile_module(&Parser::new(&text).parse_module().expect("source grammar"))
+            .expect("source lowering");
+        for name in ["inferred", "annotated"] {
+            let body = module.functions.iter()
+                .find(|f| module.get_string(f.name) == Some(name))
+                .and_then(|f| f.instructions.as_deref())
+                .expect("exact caller body");
+            assert!(body.iter().any(|i| matches!(i, Instruction::GetE { .. })),
+                "{name}: source order {callee_first}: {body:?}");
+            assert!(!body.iter().any(|i| matches!(i,
+                Instruction::MemExtended { sub_op, .. }
+                if *sub_op == MemSubOpcode::ByteArrayLoad.to_byte()
+                    || *sub_op == MemSubOpcode::TypedArrayLoad.to_byte())),
+                "{name}: the declaration cannot authorize a packed load");
+        }
+    }
+}

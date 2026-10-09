@@ -469,8 +469,9 @@ impl VbcCodegen {
             Self::element_type_name(&source_type)
         });
 
-        // The existing packed field/call carriers (T1475) also publish AFTER
-        // binding. Wider array fields remain slot-backed; only byte fields pack.
+        // Packed record fields have a separate representation contract. A call's
+        // declared array result is not storage evidence: the selected body can
+        // return either a List or a packed allocation with the same signature.
         let inferred_layout = if ty.is_none() {
             value.and_then(|value| {
                 if let verum_ast::expr::ExprKind::Field { expr: base, field } = &value.kind
@@ -480,12 +481,7 @@ impl VbcCodegen {
                 {
                     return Some((1, is_float, count as usize));
                 }
-                let info = self.call_callee_info(value)?;
-                let crate::types::TypeRef::Array { element, length } = info.return_type? else {
-                    return None;
-                };
-                let (stride, is_float) = self.primitive_array_element_spec(&element)?;
-                (length > 0).then_some((stride, is_float, length as usize))
+                None
             })
         } else {
             None
@@ -497,7 +493,17 @@ impl VbcCodegen {
             if let Some(element) = element_name {
                 self.ctx.set_array_element_type_name(&name.name, element);
             }
-            if let Some((stride, is_float, count)) = inferred_layout {
+            // Both inferred and annotated bindings consume the actual local
+            // producer. Call results stay neutral here: final module assembly
+            // may still replace a same-ID body after this caller is emitted.
+            let emitted_layout = self.ctx.lookup_var(&name.name)
+                .and_then(|binding| self.ctx.array_result_facts.get(binding.reg))
+                .and_then(|fact| match fact {
+                    crate::array_storage::ArrayResultFact::Packed { width, float, count } =>
+                        usize::try_from(count).ok().map(|count| (width, float, count)),
+                    _ => None,
+                });
+            if let Some((stride, is_float, count)) = emitted_layout.or(inferred_layout) {
                 if stride == 1 {
                     self.ctx.mark_byte_array_var(&name.name);
                 } else {
