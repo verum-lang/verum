@@ -63,13 +63,18 @@ fn reachable_ir(module: &Module, root: &str) -> Text {
 
 fn native(module: &VbcModule, check: impl Fn(&verum_llvm::execution_engine::ExecutionEngine)) {
     let wire = deserialize_module(&serialize_module(module).expect("wire")).expect("reload");
-    for module in [module, &wire] {
+    for (route, module) in [("source", module), ("wire", &wire)] {
         Target::initialize_native(&InitializationConfig::default()).expect("native target");
         let context = Context::create();
         let mut lowering = VbcToLlvmLowering::new(&context,
             LoweringConfig::debug("endian_native").with_debug_info(false));
         lowering.lower_module(module).expect("native lowering");
         let text = reachable_ir(lowering.module(), "probe");
+        if let Ok(directory) = std::env::var("VERUM_T1698_IR_DIR") {
+            std::fs::create_dir_all(&directory).expect("IR evidence directory");
+            let thread = std::thread::current();
+            std::fs::write(std::path::Path::new(&directory).join(format!("{}-{route}.ll", thread.name().unwrap_or("endian"))), text.as_bytes()).expect("IR evidence");
+        }
         let executable = context.create_module_from_ir(MemoryBuffer::create_from_memory_range_copy(
             text.as_bytes(), "endian_native")).expect("reachable IR");
         executable.verify().expect("valid IR");
@@ -91,7 +96,7 @@ fn packed_result(body: &str, declarations: &str, expected: &[u8]) {
         ALLOCATIONS.with(|allocations| {
             let allocations = allocations.borrow();
             let allocation = allocations.iter().find(|allocation| allocation.as_ptr() as *const u8 == pointer)
-                .expect("result belongs to live native allocation");
+                .unwrap_or_else(|| panic!("result {pointer:p} outside live allocations {:?}", allocations.iter().map(|value| (value.as_ptr(), value.len())).collect::<List<_>>()));
             assert!(allocation.len() * 8 >= expected.len());
             let bytes = unsafe { std::slice::from_raw_parts(pointer, expected.len()) };
             assert_eq!(bytes, expected, "{body}");

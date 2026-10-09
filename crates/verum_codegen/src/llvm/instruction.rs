@@ -33278,28 +33278,35 @@ fn try_lower_sizedint_method<'ctx>(
             ctx.set_register(dst.0, r.into());
             Ok(true)
         }
-        // ── to_{le,be}_bytes → List<Byte> (canonical AOT list build) ──
+        // The sized declarations return [Byte; N], the same packed byte
+        // payload as NewByteArray. List-returning owners are distinct calls.
         "int32$to_le_bytes" | "uint16$to_le_bytes" | "uint32$to_le_bytes" | "uint64$to_le_bytes"
         | "int32$to_be_bytes" | "uint16$to_be_bytes" | "uint32$to_be_bytes"
         | "uint64$to_be_bytes" => {
-            let le = canon.ends_with("le_bytes");
-            let n = (width / 8) as u64;
-            let runtime = RuntimeLowering::new(ctx.llvm_context());
-            let list_ptr = runtime.lower_new_list(ctx.builder(), ctx.get_module())?;
-            for out_i in 0..n {
-                let src_i = if le { out_i } else { n - 1 - out_i };
-                let shifted = ctx
-                    .builder()
-                    .build_right_shift(v, i64_ty.const_int(8 * src_i, false), false, "siv_tb_shr")
-                    .or_llvm_err()?;
-                let byte = ctx
-                    .builder()
-                    .build_and(shifted, i64_ty.const_int(0xFF, false), "siv_tb_byte")
-                    .or_llvm_err()?;
-                runtime.lower_list_push(ctx.builder(), ctx.get_module(), list_ptr, byte.into())?;
+            let little_endian = canon.ends_with("le_bytes");
+            let count = u64::from(width / 8);
+            let i8_ty = ctx.types().i8_type();
+            let ptr_ty = ctx.types().ptr_type();
+            let allocation_type = ptr_ty.fn_type(&[i64_ty.into()], false);
+            let allocator = super::error::get_or_declare_function(
+                ctx.get_module(), "verum_cbgr_allocate", allocation_type,
+            );
+            let bytes = ctx.builder().build_call(
+                allocator, &[i64_ty.const_int(count, false).into()], "siv_bytes",
+            ).or_llvm_err()?.basic_value_or("endian byte allocation")?.into_pointer_value();
+            for output in 0..count {
+                let input = if little_endian { output } else { count - 1 - output };
+                let shifted = ctx.builder().build_right_shift(
+                    v, i64_ty.const_int(8 * input, false), false, "siv_byte_shift",
+                ).or_llvm_err()?;
+                let byte = ctx.builder().build_int_truncate(shifted, i8_ty, "siv_byte").or_llvm_err()?;
+                // SAFETY: each output index is strictly within the allocation.
+                let slot = unsafe { ctx.builder().build_in_bounds_gep(
+                    i8_ty, bytes, &[i64_ty.const_int(output, false)], "siv_byte_slot",
+                ).or_llvm_err()? };
+                ctx.builder().build_store(slot, byte).or_llvm_err()?;
             }
-            ctx.set_register(dst.0, list_ptr.into());
-            ctx.mark_list_register(dst.0);
+            ctx.set_register(dst.0, bytes.into());
             Ok(true)
         }
         // ── from_{le,be}_bytes → read N bytes, reassemble, extend ──
@@ -33308,49 +33315,17 @@ fn try_lower_sizedint_method<'ctx>(
         | "uint32$from_be_bytes" | "uint64$from_be_bytes" => {
             let le = canon.ends_with("le_bytes");
             let n = (width / 8) as u64;
-            let list_ptr = as_ptr(ctx, ctx.get_register(args.start.0)?, "siv_fb_list")?;
+            let data_ptr = as_ptr(ctx, ctx.get_register(args.start.0)?, "siv_fb_bytes")?;
             let i8_ty = ctx.types().i8_type();
-            let ptr_ty = ctx.types().ptr_type();
-            // data_ptr = *(i64*)(list + LIST_PTR_OFFSET) — the i64-strided backing array.
-            let data_slot = unsafe {
-                ctx.builder()
-                    .build_in_bounds_gep(
-                        i8_ty,
-                        list_ptr,
-                        &[i64_ty.const_int(super::runtime::LIST_PTR_OFFSET, false)],
-                        "siv_fb_dslot",
-                    )
-                    .or_llvm_err()?
-            };
-            let data_int = ctx
-                .builder()
-                .build_load(i64_ty, data_slot, "siv_fb_dint")
-                .or_llvm_err()?
-                .into_int_value();
-            let data_ptr = ctx
-                .builder()
-                .build_int_to_ptr(data_int, ptr_ty, "siv_fb_dptr")
-                .or_llvm_err()?;
             let mut result = i64_ty.const_int(0, false);
             for read_i in 0..n {
-                let elem_ptr = unsafe {
-                    ctx.builder()
-                        .build_in_bounds_gep(
-                            i64_ty,
-                            data_ptr,
-                            &[i64_ty.const_int(read_i, false)],
-                            "siv_fb_eptr",
-                        )
-                        .or_llvm_err()?
-                };
-                let elem = ctx
-                    .builder()
-                    .build_load(i64_ty, elem_ptr, "siv_fb_elem")
-                    .or_llvm_err()?
-                    .into_int_value();
-                let byte = ctx
-                    .builder()
-                    .build_and(elem, i64_ty.const_int(0xFF, false), "siv_fb_byte")
+                // SAFETY: the fixed-array parameter declaration supplies N bytes.
+                let elem_ptr = unsafe { ctx.builder().build_in_bounds_gep(
+                    i8_ty, data_ptr, &[i64_ty.const_int(read_i, false)], "siv_fb_slot",
+                ).or_llvm_err()? };
+                let elem = ctx.builder().build_load(i8_ty, elem_ptr, "siv_fb_byte")
+                    .or_llvm_err()?.into_int_value();
+                let byte = ctx.builder().build_int_z_extend(elem, i64_ty, "siv_fb_widen")
                     .or_llvm_err()?;
                 let dst_pos = if le { read_i } else { n - 1 - read_i };
                 let placed = if dst_pos == 0 {
