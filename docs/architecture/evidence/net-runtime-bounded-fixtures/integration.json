@@ -65,5 +65,13 @@
     "path": "/private/tmp/verum-T1650-bounded-test-executable",
     "sha256": "147e99a5a467a6ce677cdc7c814d4ac152a0c4c4183c78c0dcc4269846220a60",
     "source_commit": "a5610f319043f063eeecb1d18ed6ef0fc5fca5dc"
+  },
+  "source_only_cleanup": {
+    "parent_commit": "216ab2b06aad8f71852d4bc07659585fe25de0fe",
+    "path": "crates/verum_vbc/src/interpreter/dispatch_table/handlers/net_runtime.rs",
+    "change": "Remove the now-unused std::thread import from the legacy inline tests module; executable gates remain pinned to a5610f319. This cleanup is not represented as a new test execution.",
+    "before_sha256": "82b91596c1d09bcea8e8362f5213fa1c11372aae55632c58e97c68d8e0ca193e",
+    "after_sha256": "b61e532491aa19bc2cbea943cc39237df93d2ac4c89f61f2a14b84ef1c65ad16",
+    "external_fixture_unchanged": true
   }
 }

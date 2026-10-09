@@ -1268,7 +1268,6 @@ fn udp_raw_fd(_s: &UdpSocket) -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::thread;
     use std::time::Duration;
 
     #[test]
