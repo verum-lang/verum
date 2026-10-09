@@ -223,6 +223,10 @@ fn positive_handle_with_closed_stdin(kind: &str, test_name: &str) {
         // fd 0 is released. Parent standard descriptors are never touched.
         // SAFETY: the child owns stdin, supplied as /dev/null by its parent.
         assert_eq!(unsafe { libc::close(0) }, 0);
+        if kind == "raw_v2" || kind == "raw_v2_exhausted" {
+            raw_v2_after_stdin_close(kind == "raw_v2_exhausted");
+            std::process::exit(CHILD_COMPLETED);
+        }
         let value = match kind {
             "udp" => NetResource::Udp(UdpSocket::bind("127.0.0.1:0").unwrap()),
             "listener" => NetResource::Listener(TcpListener::bind("127.0.0.1:0").unwrap()),
@@ -326,6 +330,99 @@ fn registered_stream_keeps_positive_handle_with_closed_stdin() {
         concat!(
             module_path!(),
             "::registered_stream_keeps_positive_handle_with_closed_stdin"
+        ),
+    );
+}
+
+// Invoked only inside the explicitly selected child after it closes stdin.
+fn raw_v2_after_stdin_close(exhaust_positive_descriptors: bool) {
+    // SAFETY: F_GETFD only queries this child's descriptor table.
+    assert_eq!(unsafe { libc::fcntl(0, libc::F_GETFD) }, -1);
+    if exhaust_positive_descriptors {
+        let mut limit = libc::rlimit {
+            rlim_cur: 0,
+            rlim_max: 0,
+        };
+        // SAFETY: limit is a valid output pointer to the platform rlimit type.
+        assert_eq!(
+            unsafe { libc::getrlimit(libc::RLIMIT_NOFILE, &mut limit) },
+            0
+        );
+        assert!(limit.rlim_max >= 3);
+        limit.rlim_cur = 3;
+        // SAFETY: this isolated child lowers only its own soft descriptor limit.
+        // Stdin's zero slot is free; stdout/stderr occupy the positive slots.
+        assert_eq!(unsafe { libc::setrlimit(libc::RLIMIT_NOFILE, &limit) }, 0);
+    }
+    let fd = tcp_listen_v2("127.0.0.1", 0, 8, TCP_LISTEN_FLAG_REUSEPORT);
+    // Even the failing old return value zero has an owner before assertions.
+    let owner = if fd >= 0 {
+        // SAFETY: v2 transfers its fresh raw Unix listener to the caller.
+        Some(unsafe { TcpListener::from_raw_fd(i32::try_from(fd).unwrap()) })
+    } else {
+        None
+    };
+    if exhaust_positive_descriptors {
+        assert_eq!(
+            fd,
+            -i64::from(libc::EMFILE),
+            "failed positive duplication must preserve its OS error"
+        );
+        assert!(owner.is_none());
+    } else {
+        assert!(
+            fd > 0,
+            "raw v2 success must be a positive actual descriptor, got {fd}"
+        );
+        let listener = owner.as_ref().unwrap();
+        assert_eq!(i64::from(listener.as_raw_fd()), fd);
+        assert!(
+            resource(fd, |entry| entry.is_none()),
+            "raw v2 must transfer ownership without registering it"
+        );
+        assert_eq!(
+            tcp_local_port(fd),
+            i64::from(listener.local_addr().unwrap().port())
+        );
+        assert!(tcp_local_port(fd) > 0);
+    }
+    // Both the duplicate-success and failure paths must release the original
+    // zero descriptor. No other thread in this child allocates descriptors.
+    // SAFETY: this only queries the child's descriptor table.
+    assert_eq!(
+        unsafe { libc::fcntl(0, libc::F_GETFD) },
+        -1,
+        "original fd0 leaked"
+    );
+    drop(owner);
+    if fd > 0 {
+        // SAFETY: query only; no ownership is reconstructed from a reused fd.
+        assert_eq!(
+            unsafe { libc::fcntl(fd as i32, libc::F_GETFD) },
+            -1,
+            "returned raw listener leaked after owner Drop"
+        );
+    }
+}
+
+#[test]
+fn raw_v2_keeps_positive_handle_with_closed_stdin() {
+    positive_handle_with_closed_stdin(
+        "raw_v2",
+        concat!(
+            module_path!(),
+            "::raw_v2_keeps_positive_handle_with_closed_stdin"
+        ),
+    );
+}
+
+#[test]
+fn raw_v2_reports_duplicate_exhaustion_and_closes_zero() {
+    positive_handle_with_closed_stdin(
+        "raw_v2_exhausted",
+        concat!(
+            module_path!(),
+            "::raw_v2_reports_duplicate_exhaustion_and_closes_zero"
         ),
     );
 }
