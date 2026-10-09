@@ -71,9 +71,18 @@ Reproduce the full source gate with a session-private Cargo target:
 cargo test --locked -p verum_types --tests -- --test-threads=2
 ```
 
-These are bounded-work and semantic results. The rebuilt ordinary CLI must
-still complete the registry project check and record its actual verdict and
-time before claiming an end-to-end improvement.
+An ordinary CLI built at `b12135c9f` completed the same registry `.vr` sources
+in **217.97 seconds**, returning **64 compilation errors**. Its executable
+SHA-256 is `b068627fa0cfa87ec94cfcf0faf9be57351077ced350062f60ccdd7c9223b5f6`.
+The registry repository preserves every input hash and the complete log in
+`tests/evidence/project-check-stage15.json` and its companion `.log` file.
+The previous product timed out at 600 seconds. This establishes a completed
+diagnostic run; it neither establishes registry correctness nor isolates the
+speedup of this change from the other changes in the rebuilt product.
+
+The diagnostics include explicitly mounted registry types resolving to
+standard-library homonyms, tracked by T1212. Registry runtime, publication,
+installation and AOT acceptance remain open.
 
 The CLI library gates above used an isolated target with the separately
 identified stage14 standard-library artifacts and automatic precompilation
