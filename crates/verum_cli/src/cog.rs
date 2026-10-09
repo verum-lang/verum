@@ -708,3 +708,7 @@ mod configured_registry_downloads;
 #[cfg(test)]
 #[path = "../tests/cog/publication_validation.rs"]
 mod publication_validation;
+
+#[cfg(test)]
+#[path = "../tests/cog/publication_dependencies.rs"]
+mod publication_dependencies;
