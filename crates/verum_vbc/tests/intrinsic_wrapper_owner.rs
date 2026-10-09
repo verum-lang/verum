@@ -24,7 +24,7 @@ fn function(module: &mut VbcModule, name: &str, params: usize, instructions: Lis
         default: None,
         type_name: StringId::EMPTY,
     }).collect();
-    descriptor.instructions = decoded.then_some(instructions);
+    descriptor.instructions = decoded.then(|| instructions.into());
     module.add_function(descriptor)
 }
 
