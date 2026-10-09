@@ -265,7 +265,8 @@ source-cog extraction or fresh-consumer acceptance. T1657 covers dependency
 activation and recursive installation, so T1651 remains open for that
 consumer gate. Authenticated service admission, signature support, durability
 and publish-install-run acceptance remain separate. Workspace canonical
-manifest discovery and skipped-member counts are tracked by T1665.
+manifest discovery and member counts are covered by the bounded T1665 handler
+gate below.
 
 ## Bounded host socket controls — T1650
 
@@ -326,3 +327,36 @@ both new direct and umbrella `Map<Text, JsonValue>` checker controls still
 fail. T1664 tracks alias argument substitution at this boundary, retaining
 the failing controls. The archive producer correction is independently
 validated; complete JSON checking and registry runtime acceptance remain open.
+
+## Workspace publication manifest authority — T1665
+
+Workspace publication selects members through the shared `Config` manifest
+authority, preferring `Verum.toml` and accepting legacy `verum.toml`. Upload
+metadata reuses that loaded manifest. Source archives preserve the selected
+manifest bytes under the canonical entry name; a missing manifest now fails
+packaging. Previews and uploads report successful, failed and skipped member
+counts separately. A malformed selected manifest fails instead of falling
+back; a missing member remains an explicit skip and cannot inflate the total.
+
+The [gate receipt](evidence/registry-workspace-publication-gate.json) records
+the causal baseline `9a11d3632` and fixed source `b6860b03c`. On a real
+case-sensitive filesystem, all **11 substantive controls** failed at the
+baseline and passed after the fix; one additional entry only dispatches
+isolated child tests. **Five adjacent dependency-admission controls** passed
+on the same fixed executable. The controls cover canonical and legacy names,
+distinct-file precedence, invalid and absent manifests, exact archive bytes,
+and the actual `new` handler. That handler created `verum.toml` and its project
+was previewed without renaming it. T1668 owns scaffold spelling migration.
+
+The Rust CLI library gate is selected by CI's workspace unit tests. Set
+`VERUM_T1665_FIXTURE_ROOT` to a case-sensitive directory when reproducing the
+full precedence controls; an explicitly supplied case-folded directory fails
+the fixture preflight. The recorded run held the existing stage14 runtime
+artifacts unchanged with automatic precompilation disabled. An initial attempt
+in a different target was stopped before testing when it would rebuild Z3.
+
+This accepts library-handler discovery, preview counts and source packaging.
+It does not add or exercise a `workspace publish` CLI route, authentication or
+a registry service. T1639 tracks that interface; T1672 covers the separately
+dispatched workspace management handlers. Ordinary CLI and full registry
+acceptance remain separate.
