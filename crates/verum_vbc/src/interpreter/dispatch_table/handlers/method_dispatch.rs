@@ -6342,13 +6342,11 @@ pub(super) fn dispatch_primitive_method(
             // Byte conversion methods
             "to_le_bytes" => {
                 let bytes = v.to_le_bytes();
-                let vals: Vec<Value> = bytes.iter().map(|&b| Value::from_i64(b as i64)).collect();
-                return Ok(Some(alloc_list_from_values(state, vals)?));
+                return Ok(Some(super::heap_helpers::alloc_byte_array(state, &bytes)?));
             }
             "to_be_bytes" => {
                 let bytes = v.to_be_bytes();
-                let vals: Vec<Value> = bytes.iter().map(|&b| Value::from_i64(b as i64)).collect();
-                return Ok(Some(alloc_list_from_values(state, vals)?));
+                return Ok(Some(super::heap_helpers::alloc_byte_array(state, &bytes)?));
             }
             "from_le_bytes" | "from_be_bytes" => {
                 // Static-style: Int.from_le_bytes(bytes_list)
@@ -6421,13 +6419,11 @@ pub(super) fn dispatch_primitive_method(
             "int32$MIN" => Value::from_i64(i32::MIN as i64),
             "int32$to_le_bytes" => {
                 let bytes = (v as i32).to_le_bytes();
-                let vals: Vec<Value> = bytes.iter().map(|&b| Value::from_i64(b as i64)).collect();
-                return Ok(Some(alloc_list_from_values(state, vals)?));
+                return Ok(Some(super::heap_helpers::alloc_byte_array(state, &bytes)?));
             }
             "int32$to_be_bytes" => {
                 let bytes = (v as i32).to_be_bytes();
-                let vals: Vec<Value> = bytes.iter().map(|&b| Value::from_i64(b as i64)).collect();
-                return Ok(Some(alloc_list_from_values(state, vals)?));
+                return Ok(Some(super::heap_helpers::alloc_byte_array(state, &bytes)?));
             }
             "int32$from_le_bytes" | "int32$from_be_bytes" => {
                 let list_val = state.get_reg(Reg(args.start.0));
@@ -6494,13 +6490,11 @@ pub(super) fn dispatch_primitive_method(
             "uint64$MIN" => Value::from_i64(u64::MIN as i64),
             "uint64$to_le_bytes" => {
                 let bytes = (v as u64).to_le_bytes();
-                let vals: Vec<Value> = bytes.iter().map(|&b| Value::from_i64(b as i64)).collect();
-                return Ok(Some(alloc_list_from_values(state, vals)?));
+                return Ok(Some(super::heap_helpers::alloc_byte_array(state, &bytes)?));
             }
             "uint64$to_be_bytes" => {
                 let bytes = (v as u64).to_be_bytes();
-                let vals: Vec<Value> = bytes.iter().map(|&b| Value::from_i64(b as i64)).collect();
-                return Ok(Some(alloc_list_from_values(state, vals)?));
+                return Ok(Some(super::heap_helpers::alloc_byte_array(state, &bytes)?));
             }
             "uint64$from_le_bytes" | "uint64$from_be_bytes" => {
                 let list_val = state.get_reg(Reg(args.start.0));
@@ -6550,13 +6544,11 @@ pub(super) fn dispatch_primitive_method(
             // ── UInt32 (u32-width) methods ──
             "uint32$to_le_bytes" => {
                 let bytes = (v as u32).to_le_bytes();
-                let vals: Vec<Value> = bytes.iter().map(|&b| Value::from_i64(b as i64)).collect();
-                return Ok(Some(alloc_list_from_values(state, vals)?));
+                return Ok(Some(super::heap_helpers::alloc_byte_array(state, &bytes)?));
             }
             "uint32$to_be_bytes" => {
                 let bytes = (v as u32).to_be_bytes();
-                let vals: Vec<Value> = bytes.iter().map(|&b| Value::from_i64(b as i64)).collect();
-                return Ok(Some(alloc_list_from_values(state, vals)?));
+                return Ok(Some(super::heap_helpers::alloc_byte_array(state, &bytes)?));
             }
             "uint32$from_le_bytes" | "uint32$from_be_bytes" => {
                 let list_val = state.get_reg(Reg(args.start.0));
@@ -6577,13 +6569,11 @@ pub(super) fn dispatch_primitive_method(
             // ── UInt16 (u16-width) methods ──
             "uint16$to_le_bytes" => {
                 let bytes = (v as u16).to_le_bytes();
-                let vals: Vec<Value> = bytes.iter().map(|&b| Value::from_i64(b as i64)).collect();
-                return Ok(Some(alloc_list_from_values(state, vals)?));
+                return Ok(Some(super::heap_helpers::alloc_byte_array(state, &bytes)?));
             }
             "uint16$to_be_bytes" => {
                 let bytes = (v as u16).to_be_bytes();
-                let vals: Vec<Value> = bytes.iter().map(|&b| Value::from_i64(b as i64)).collect();
-                return Ok(Some(alloc_list_from_values(state, vals)?));
+                return Ok(Some(super::heap_helpers::alloc_byte_array(state, &bytes)?));
             }
             "uint16$from_le_bytes" | "uint16$from_be_bytes" => {
                 let list_val = state.get_reg(Reg(args.start.0));
@@ -6804,13 +6794,11 @@ pub(super) fn dispatch_primitive_method(
             // Byte conversion methods
             "to_le_bytes" => {
                 let bytes = v.to_le_bytes();
-                let vals: Vec<Value> = bytes.iter().map(|&b| Value::from_i64(b as i64)).collect();
-                return Ok(Some(alloc_list_from_values(state, vals)?));
+                return Ok(Some(super::heap_helpers::alloc_byte_array(state, &bytes)?));
             }
             "to_be_bytes" => {
                 let bytes = v.to_be_bytes();
-                let vals: Vec<Value> = bytes.iter().map(|&b| Value::from_i64(b as i64)).collect();
-                return Ok(Some(alloc_list_from_values(state, vals)?));
+                return Ok(Some(super::heap_helpers::alloc_byte_array(state, &bytes)?));
             }
             "from_le_bytes" | "from_be_bytes" => {
                 let list_val = state.get_reg(Reg(args.start.0));
