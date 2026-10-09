@@ -1,0 +1,8 @@
+{
+  "committed_endpoint": "0e1fcb3da6fae4c808c7d54fb954786f428dffc2",
+  "receipt_sha256": "51f720a93505418b8af7ca9432ae6618b72d043ed05569d30b41f64c055d57ad",
+  "tracked_source_hashes_verified": 403,
+  "gate_logs_verified": 5,
+  "behavior_producer": "26d7e0359cc28a5fee81655c0871d11db65788ee",
+  "notes": "Two prose paragraphs clarify interpreter scope and reference-receiver gradient refusal. No fenced examples or protected endian/SHA limitations changed; language integration still pending."
+}

@@ -1,0 +1,10 @@
+{
+  "source_commit": "eded28614bdb81087fcbe94d16f3ddf617069a27",
+  "result_sha256": "5524986298b811df3698e093e20187b9cd8344ed585ac0afd57e602659e7a625",
+  "log_sha256": "ace89f73e9ddd7e8fdc00621dcd709d44ad9c515c3bdae288dc022e3621acf38",
+  "verified_sources": 17,
+  "verified_executables": 1,
+  "artifacts_unchanged": true,
+  "executed_tests": 1,
+  "scope": "Compiler archive registration unit control using real ArchiveBuilder and full/filtered loaders. Explicit recorded test filter; no ordinary CLI, fresh stdlib bake, native/AOT or registry acceptance. Inherited precompiled artifacts must remain unchanged."
+}

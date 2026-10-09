@@ -931,3 +931,15 @@ standard-library bake, AOT, full-library pass or registry-service readiness
 is claimed. Exact source/executable identities, commands, failed and passed
 logs, and unchanged inherited artifacts are recorded in
 [`unix-socket-descriptor-identity/integration.json`](evidence/unix-socket-descriptor-identity/integration.json).
+
+
+### Numeric and socket integration gate
+
+The combined source `f3006f403` completes the unfiltered VBC library run with
+2,084 passes, ten bounded socket timeout failures and the existing T0839 ignore.
+The hang is removed; the remaining network failures stay tracked under T1650.
+All 80 focused numeric, reference, body-presence, wire, Array-to-List and semantic
+formal controls pass. Exact evidence and the failed target-selection attempt
+are retained in the [integration report](evidence/numeric-platform-integration/README.md).
+Fresh ordinary CLI/std-library production, native storage integration and
+registry authentication remain separate acceptance work.

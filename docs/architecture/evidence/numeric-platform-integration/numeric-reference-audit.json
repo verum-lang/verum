@@ -1,0 +1,29 @@
+{
+  "receipt_sha256": "8caf27fdcfc372c60222a5abd8017656e3a80b30100ef3e667d878d63fce94c0",
+  "source_endpoint": "26d7e0359cc28a5fee81655c0871d11db65788ee",
+  "raw_artifacts_verified": 21,
+  "gates_verified": 9,
+  "source_at_commit_hashes_verified": 146,
+  "coverage": {
+    "numeric_source_and_wire": 31,
+    "argument_boundary_units": 3,
+    "callable_array_list_conversion": 15,
+    "descriptor_and_legacy_wire": 4,
+    "bytecode_format": 7,
+    "reference_receivers": 7,
+    "semantic_formals": 16,
+    "distinct_tests": 83,
+    "new_ignores": 0
+  },
+  "production_unchanged_since_tested_repair": "3f6af30d97b5f833c31a2627729a5c3a61e20f47",
+  "full_suite_boundary": {
+    "source": "eded28614bdb81087fcbe94d16f3ddf617069a27",
+    "outcome": "INCOMPLETE: controlled stop after 733.812 seconds; 2072 observed passes, 6 socket failures, 2 socket hangs and 1 existing ignore. No final full-suite success summary.",
+    "tracking_task": "T1650",
+    "attribution": "The socket/environment cause is unresolved; an isolated escalated control later passed while a plain loopback connection probe timed out. No causal attribution to numeric dispatch and no full-green acceptance."
+  },
+  "compiler_boundary": {
+    "source": "eded28614bdb81087fcbe94d16f3ddf617069a27",
+    "outcome": "PASS: one actual ArchiveBuilder full/filtered/legacy registration control, 149.104 seconds. No ordinary bake, native or registry acceptance."
+  }
+}

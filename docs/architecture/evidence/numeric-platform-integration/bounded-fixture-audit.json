@@ -1,0 +1,24 @@
+{
+  "source_endpoint": "778df174f",
+  "manifest_sha256": "7b863809f80ed21eea5e9d20ef2b4a1334725442ebf3e3d2a755a3261fa255b1",
+  "raw_logs_verified": 4,
+  "source_at_commit_hashes_verified": 995,
+  "patches_unchanged": 3,
+  "results": {
+    "baseline": [],
+    "serial": [
+      "test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 2079 filtered out; finished in 1.29s"
+    ],
+    "parallel": [
+      "test result: FAILED. 3 passed; 2 failed; 0 ignored; 0 measured; 2079 filtered out; finished in 0.21s"
+    ],
+    "adjacent": [
+      "test result: FAILED. 15 passed; 3 failed; 0 ignored; 0 measured; 2066 filtered out; finished in 2.06s"
+    ]
+  },
+  "residuals": [
+    "T1708: raw and synthetic descriptors share the same integer namespace; collision check before accept is not atomic.",
+    "Host TCP/UDP timeout cause remains open. A prior Python loopback probe also timed out; retries do not establish acceptance.",
+    "The prior T1701 full gate remains incomplete after controlled termination."
+  ]
+}

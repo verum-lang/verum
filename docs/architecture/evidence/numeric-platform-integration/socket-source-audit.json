@@ -1,0 +1,73 @@
+{
+  "source_endpoint": "f3006f403ab059532cf45917057528683caed650",
+  "manifest_sha256": "128c1f7d0382e9d11b0dd48346c368663062d78ba75c68916978c459c8f2065b",
+  "raw_logs_verified": 9,
+  "unique_source_at_commit_hashes_verified": 1308,
+  "unique_blobs_verified": 332,
+  "retained_executables_verified": 3,
+  "source_only_comments_verified": true,
+  "rebase_owned_sources_verified": 4,
+  "results": {
+    "endpoint-baseline": {
+      "results": [
+        "test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 2087 filtered out; finished in 0.00s"
+      ],
+      "valid_for_acceptance": true
+    },
+    "close-baseline": {
+      "results": [
+        "test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 2087 filtered out; finished in 0.00s"
+      ],
+      "valid_for_acceptance": true
+    },
+    "udp-id-baseline": {
+      "results": [
+        "test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 2087 filtered out; finished in 0.00s"
+      ],
+      "valid_for_acceptance": true
+    },
+    "listener-id-baseline": {
+      "results": [
+        "test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 2087 filtered out; finished in 0.00s"
+      ],
+      "valid_for_acceptance": true
+    },
+    "invalid-zero-harness": {
+      "results": [
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2092 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2092 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2092 filtered out; finished in 0.00s",
+        "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 2089 filtered out; finished in 0.02s"
+      ],
+      "valid_for_acceptance": false
+    },
+    "zero-causal-baseline": {
+      "results": [
+        "test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 2091 filtered out; finished in 0.00s",
+        "test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 2091 filtered out; finished in 0.00s",
+        "test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 2091 filtered out; finished in 0.00s",
+        "test result: FAILED. 0 passed; 3 failed; 0 ignored; 0 measured; 2089 filtered out; finished in 0.02s"
+      ],
+      "valid_for_acceptance": true
+    },
+    "fixed-serial": {
+      "results": [
+        "test result: FAILED. 22 passed; 4 failed; 0 ignored; 0 measured; 2066 filtered out; finished in 8.40s"
+      ],
+      "valid_for_acceptance": true
+    },
+    "fixed-parallel": {
+      "results": [
+        "test result: FAILED. 21 passed; 5 failed; 0 ignored; 0 measured; 2066 filtered out; finished in 4.06s"
+      ],
+      "valid_for_acceptance": true
+    },
+    "fixed-io-engine": {
+      "results": [
+        "test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 2088 filtered out; finished in 1.06s"
+      ],
+      "valid_for_acceptance": true
+    }
+  },
+  "scope": "Unix registered socket identity and newly changed register fd-zero positive-success compatibility only. No ordinary CLI, auto-bake, native/AOT, non-Unix runtime or complete VBC-library/registry-service verdict."
+}

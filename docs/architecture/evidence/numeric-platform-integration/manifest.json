@@ -1,0 +1,58 @@
+{
+  "source": "f3006f403ab059532cf45917057528683caed650",
+  "gates": {
+    "full-vbc": {
+      "results": [
+        "test result: FAILED. 2084 passed; 10 failed; 1 ignored; 0 measured; 0 filtered out; finished in 530.33s"
+      ],
+      "exit_code": 101,
+      "wall_seconds": 561.245,
+      "valid_execution": true
+    },
+    "numeric-focused": {
+      "results": [
+        "test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s",
+        "test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s",
+        "test result: ok. 31 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s",
+        "test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s",
+        "test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 49.332,
+      "valid_execution": true
+    },
+    "invalid-target-selection": {
+      "results": [],
+      "exit_code": 101,
+      "wall_seconds": 1.009,
+      "valid_execution": false
+    }
+  },
+  "files_sha256": {
+    "full-vbc.json": "f05cc071ee0eae050c7aaccc39ece51cee6df3d395d24b7f959265fcc3d63a4d",
+    "full-vbc.log.gz": "18689cc189164c06f72c3eeb8ad09aff5afc99c836055a49e615490fdd370df4",
+    "numeric-focused.json": "0ad4de6e1ea1809e3dd614b9d1d0aa64df86fea0af4b04b8a70e201479b27ace",
+    "numeric-focused.log.gz": "f375f14f98b92770150eabadf188b30f253dc1ecb8dcb74857871259147cd434",
+    "invalid-target-selection.json": "72d5a0cc2187aed133bc0a154eac9bbcb9135396b760eb5736ef67a74d25b20f",
+    "invalid-target-selection.log.gz": "d92db018b325cf5e83d1d75d89cdf95212816417575832077915e94c660ec93a",
+    "socket-source-audit.json": "2edcc341cf6851dd6d0d6c4f7f2f09bb8a1b3e34263c70b79a30f82d9e0e7de9",
+    "numeric-reference-audit.json": "e6b09e97cac0e6af726be3637233c924f470b81034223aec1c9be8f1da51fb86",
+    "compiler-archive-audit.json": "d1096daaa91e00bae892996e3e4c892fe71db00802718500f3a19c8889eaa747",
+    "bounded-fixture-audit.json": "09d2db85cf2866e18b7582c9eae7f96d4bc8bb06e8a316c58d0fbafef5df8480",
+    "website-final-audit.json": "68ada5df263269d592b02676aa5db043b1ebb12642d5f2df10b349373a60a72d"
+  },
+  "compiler_archive_control": "The single real ArchiveBuilder/full+filtered loader control passed at eded28614. The complete verum_compiler tree is byte-identical in this endpoint.",
+  "full_executable": {
+    "path": "/private/tmp/verum-T1708-integrated-full-vbc/verum_vbc-f3006f403",
+    "sha256": "280956e70e22d3194a623a7696c1fdcb22f9fab9b0179b736e7396ce7ca8e565"
+  },
+  "known_residuals": [
+    "T1650: ten bounded TCP/UDP/readiness timeout failures; no complete library pass or host root-cause fix.",
+    "T1709: raw v2 listener fd0; registered socket fd0 is fixed separately.",
+    "T1701/T1704: native storage integration and fresh ordinary CLI/std-library/registry acceptance remain separate.",
+    "T1706: signed-array decoding baseline is held on its separate branch, not repaired by this endpoint."
+  ],
+  "website_endpoint": "0e1fcb3da6fae4c808c7d54fb954786f428dffc2",
+  "scope": "Completed unfiltered VBC run with reported failures plus80 passing focused interpreter/source/wire controls. No fresh archive, current CLI, native/AOT or registry readiness claim."
+}
