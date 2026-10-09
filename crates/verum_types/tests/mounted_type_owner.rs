@@ -320,6 +320,21 @@ fn metadata_homonym_cannot_supply_a_missing_explicit_source_export() {
 }
 
 #[test]
+fn mounted_generic_static_method_rejects_the_wrong_explicit_receiver_argument() {
+    let declaration = "public type Cache<T> is { value: T }; implement<T> Cache<T> { public fn from_value(value: T) -> Cache<T> { Cache { value } } }";
+    let (_, errors) = check(
+        "mount demo.cache.{Cache}; fn probe() -> Int { Cache<Bool>.from_value(37).value }",
+        &[("demo.cache", declaration)],
+        true,
+        false,
+    );
+    assert!(
+        errors.iter().any(|error| error.contains("Mismatch")),
+        "{errors:?}"
+    );
+}
+
+#[test]
 fn tuple_constructors_and_fields_preserve_both_owners() {
     for reverse in [false, true] {
         let modules = if reverse {
