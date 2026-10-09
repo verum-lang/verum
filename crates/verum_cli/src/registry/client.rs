@@ -374,3 +374,7 @@ impl RegistryClient {
         Ok(())
     }
 }
+
+#[cfg(test)]
+#[path = "../../tests/registry/publication_transport.rs"]
+mod publication_transport;
