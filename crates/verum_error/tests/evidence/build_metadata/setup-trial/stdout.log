@@ -1,0 +1,9 @@
+
+running 1 test
+CAPTURED_SHA=eece6a7ce2c1
+CAPTURED_DIRTY=clean
+CAPTURED_TIMESTAMP=1791570756
+test captured_metadata ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

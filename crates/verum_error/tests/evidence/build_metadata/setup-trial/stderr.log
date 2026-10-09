@@ -1,0 +1,46 @@
+   0.056248041s DEBUG prepare_target{force=false package_id=verum_build_metadata_fixture v0.0.0 (/private/tmp/verum-T1683-baseline/linked/crates/build_metadata_fixture) target="verum_build_metadata_fixture"}: cargo::core::compiler::fingerprint: fingerprint at: /private/tmp/verum-T1683-baseline/target/debug/.fingerprint/verum_build_metadata_fixture-269c3ddd2dc933c2/test-lib-verum_build_metadata_fixture
+   0.063046875s DEBUG prepare_target{force=false package_id=verum_build_metadata_fixture v0.0.0 (/private/tmp/verum-T1683-baseline/linked/crates/build_metadata_fixture) target="verum_build_metadata_fixture"}: cargo::core::compiler::fingerprint: old local fingerprints deps "/private/tmp/verum-T1683-baseline/linked/crates/build_metadata_fixture" precalculated="1791570755.278496970s (src/lib.rs)"
+   0.063128125s  INFO prepare_target{force=false package_id=verum_build_metadata_fixture v0.0.0 (/private/tmp/verum-T1683-baseline/linked/crates/build_metadata_fixture) target="verum_build_metadata_fixture"}: cargo::core::compiler::fingerprint: fingerprint error for verum_build_metadata_fixture v0.0.0 (/private/tmp/verum-T1683-baseline/linked/crates/build_metadata_fixture)/Test/TargetInner { name_inferred: true, ..: lib_target("verum_build_metadata_fixture", ["lib"], "/private/tmp/verum-T1683-baseline/linked/crates/build_metadata_fixture/src/lib.rs", Edition2024) }
+   0.063320625s  INFO prepare_target{force=false package_id=verum_build_metadata_fixture v0.0.0 (/private/tmp/verum-T1683-baseline/linked/crates/build_metadata_fixture) target="verum_build_metadata_fixture"}: cargo::core::compiler::fingerprint:     err: failed to read `/private/tmp/verum-T1683-baseline/target/debug/.fingerprint/verum_build_metadata_fixture-269c3ddd2dc933c2/test-lib-verum_build_metadata_fixture`
+
+Caused by:
+    No such file or directory (os error 2)
+   0.064092125s DEBUG prepare_target{force=false package_id=verum_build_metadata_fixture v0.0.0 (/private/tmp/verum-T1683-baseline/linked/crates/build_metadata_fixture) target="build-script-build"}: cargo::core::compiler::fingerprint: fingerprint at: /private/tmp/verum-T1683-baseline/target/debug/.fingerprint/verum_build_metadata_fixture-27e6215313971c8d/run-build-script-build-script-build
+   0.064102750s  INFO prepare_target{force=false package_id=verum_build_metadata_fixture v0.0.0 (/private/tmp/verum-T1683-baseline/linked/crates/build_metadata_fixture) target="build-script-build"}: cargo::core::compiler::fingerprint: fingerprint error for verum_build_metadata_fixture v0.0.0 (/private/tmp/verum-T1683-baseline/linked/crates/build_metadata_fixture)/RunCustomBuild/TargetInner { ..: custom_build_target("build-script-build", "/private/tmp/verum-T1683-baseline/linked/crates/build_metadata_fixture/build.rs", Edition2024) }
+   0.064107666s  INFO prepare_target{force=false package_id=verum_build_metadata_fixture v0.0.0 (/private/tmp/verum-T1683-baseline/linked/crates/build_metadata_fixture) target="build-script-build"}: cargo::core::compiler::fingerprint:     err: failed to read `/private/tmp/verum-T1683-baseline/target/debug/.fingerprint/verum_build_metadata_fixture-27e6215313971c8d/run-build-script-build-script-build`
+
+Caused by:
+    No such file or directory (os error 2)
+   0.064161916s DEBUG prepare_target{force=false package_id=verum_build_metadata_fixture v0.0.0 (/private/tmp/verum-T1683-baseline/linked/crates/build_metadata_fixture) target="build-script-build"}: cargo::core::compiler::fingerprint: fingerprint at: /private/tmp/verum-T1683-baseline/target/debug/.fingerprint/verum_build_metadata_fixture-1c604f0d7ce3141e/build-script-build-script-build
+   0.064169666s  INFO prepare_target{force=false package_id=verum_build_metadata_fixture v0.0.0 (/private/tmp/verum-T1683-baseline/linked/crates/build_metadata_fixture) target="build-script-build"}: cargo::core::compiler::fingerprint: fingerprint error for verum_build_metadata_fixture v0.0.0 (/private/tmp/verum-T1683-baseline/linked/crates/build_metadata_fixture)/Build/TargetInner { ..: custom_build_target("build-script-build", "/private/tmp/verum-T1683-baseline/linked/crates/build_metadata_fixture/build.rs", Edition2024) }
+   0.064174208s  INFO prepare_target{force=false package_id=verum_build_metadata_fixture v0.0.0 (/private/tmp/verum-T1683-baseline/linked/crates/build_metadata_fixture) target="build-script-build"}: cargo::core::compiler::fingerprint:     err: failed to read `/private/tmp/verum-T1683-baseline/target/debug/.fingerprint/verum_build_metadata_fixture-1c604f0d7ce3141e/build-script-build-script-build`
+
+Caused by:
+    No such file or directory (os error 2)
+   0.064256708s DEBUG prepare_target{force=false package_id=verum_build_metadata_fixture v0.0.0 (/private/tmp/verum-T1683-baseline/linked/crates/build_metadata_fixture) target="verum_build_metadata_fixture"}: cargo::core::compiler::fingerprint: fingerprint at: /private/tmp/verum-T1683-baseline/target/debug/.fingerprint/verum_build_metadata_fixture-a3fcf02fed6c187c/lib-verum_build_metadata_fixture
+   0.064270000s  INFO prepare_target{force=false package_id=verum_build_metadata_fixture v0.0.0 (/private/tmp/verum-T1683-baseline/linked/crates/build_metadata_fixture) target="verum_build_metadata_fixture"}: cargo::core::compiler::fingerprint: fingerprint error for verum_build_metadata_fixture v0.0.0 (/private/tmp/verum-T1683-baseline/linked/crates/build_metadata_fixture)/Build/TargetInner { name_inferred: true, ..: lib_target("verum_build_metadata_fixture", ["lib"], "/private/tmp/verum-T1683-baseline/linked/crates/build_metadata_fixture/src/lib.rs", Edition2024) }
+   0.064274750s  INFO prepare_target{force=false package_id=verum_build_metadata_fixture v0.0.0 (/private/tmp/verum-T1683-baseline/linked/crates/build_metadata_fixture) target="verum_build_metadata_fixture"}: cargo::core::compiler::fingerprint:     err: failed to read `/private/tmp/verum-T1683-baseline/target/debug/.fingerprint/verum_build_metadata_fixture-a3fcf02fed6c187c/lib-verum_build_metadata_fixture`
+
+Caused by:
+    No such file or directory (os error 2)
+   Compiling verum_build_metadata_fixture v0.0.0 (/private/tmp/verum-T1683-baseline/linked/crates/build_metadata_fixture)
+warning: output of `xcrun` while finding MacOSX.sdk
+  |
+  = note: xcrun: warning: confstr() failed with code 5: couldn't get path of DARWIN_USER_TEMP_DIR; using /tmp instead
+
+   0.306965750s DEBUG cargo::core::compiler::fingerprint: write fingerprint (b78d956ec93b62c1) : /private/tmp/verum-T1683-baseline/target/debug/.fingerprint/verum_build_metadata_fixture-1c604f0d7ce3141e/build-script-build-script-build
+warning: `verum_build_metadata_fixture` (build script) generated 1 warning
+   1.190751708s DEBUG cargo::core::compiler::fingerprint: new local fingerprints deps "/private/tmp/verum-T1683-baseline/linked/crates/build_metadata_fixture"
+   1.190768791s DEBUG cargo::core::compiler::fingerprint: write fingerprint (3fc1a5cc02773e16) : /private/tmp/verum-T1683-baseline/target/debug/.fingerprint/verum_build_metadata_fixture-27e6215313971c8d/run-build-script-build-script-build
+   1.209659291s DEBUG cargo::core::compiler::fingerprint: write fingerprint (62da9f446a4aa33) : /private/tmp/verum-T1683-baseline/target/debug/.fingerprint/verum_build_metadata_fixture-a3fcf02fed6c187c/lib-verum_build_metadata_fixture
+   1.287342958s DEBUG cargo::core::compiler::fingerprint: write fingerprint (12c962d16577d757) : /private/tmp/verum-T1683-baseline/target/debug/.fingerprint/verum_build_metadata_fixture-269c3ddd2dc933c2/test-lib-verum_build_metadata_fixture
+warning: `verum_build_metadata_fixture` (lib test) generated 1 warning (1 duplicate)
+    Finished `test` profile [unoptimized] target(s) in 1.28s
+     Running unittests src/lib.rs (/private/tmp/verum-T1683-baseline/target/debug/deps/verum_build_metadata_fixture-269c3ddd2dc933c2)
+   Doc-tests verum_build_metadata_fixture
+error: failed to create temporary directory: Custom { kind: PermissionDenied, error: PathError { path: "/Users/taaliman/.tmp/rustdoctestM1mdjQ", err: Os { code: 1, kind: PermissionDenied, message: "Operation not permitted" } } }
+
+error: doctest failed, to rerun pass `-p verum_build_metadata_fixture --doc`
+
+Caused by:
+  process didn't exit successfully: `/Users/taaliman/.rustup/toolchains/stable-aarch64-apple-darwin/bin/rustdoc --edition=2024 --crate-type lib --color auto --crate-name verum_build_metadata_fixture --test crates/build_metadata_fixture/src/lib.rs --test-run-directory /private/tmp/verum-T1683-baseline/linked/crates/build_metadata_fixture --test-args --nocapture --extern verum_build_metadata_fixture=/private/tmp/verum-T1683-baseline/target/debug/deps/libverum_build_metadata_fixture-a3fcf02fed6c187c.rlib -L dependency=/private/tmp/verum-T1683-baseline/target/debug/deps -C embed-bitcode=no --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values())' --error-format human` (exit status: 1)

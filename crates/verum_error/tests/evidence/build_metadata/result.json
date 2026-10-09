@@ -1,0 +1,607 @@
+{
+  "task": "T1683",
+  "source_build_script_sha256": "282b3854a4f7c66ffed81187b835e6852b9f0433d330dba57af4586ef28e038b",
+  "harness_sha256": "f8eedbbbed7aec69f18fa9d5556df40a96c46a73536fd979ec660a102c4c642f",
+  "source_revision": "70ab902f0e642e365a9b2a531376f1d1802a8add",
+  "source_unchanged": true,
+  "environment_overrides": {
+    "CARGO_TARGET_DIR": "/private/tmp/verum-T1683-repro-isolated/target",
+    "CARGO_INCREMENTAL": "0",
+    "CARGO_BUILD_JOBS": "2",
+    "CARGO_PROFILE_DEV_DEBUG": "0",
+    "CARGO_LOG": "cargo::core::compiler::fingerprint=trace",
+    "VERUM_NO_AUTO_PRECOMPILE": "1",
+    "TMPDIR": "/private/tmp/verum-T1683-repro-isolated",
+    "CARGO_TERM_COLOR": "never"
+  },
+  "cargo_version": "cargo 1.95.0 (f2d3ce0bd 2026-03-21)",
+  "rustc_version_on_path": "rustc 1.95.0 (59807616e 2026-04-14)",
+  "observations": [
+    {
+      "name": "linked-first",
+      "working_directory": "/private/tmp/verum-T1683-repro-isolated/linked",
+      "command": [
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "-p",
+        "verum_build_metadata_fixture",
+        "--",
+        "--nocapture"
+      ],
+      "cargo_target_dir": "/private/tmp/verum-T1683-repro-isolated/target/linked",
+      "elapsed_seconds": 2.286,
+      "returncode": 0,
+      "expected_git_sha": "a974b7b1c31b",
+      "expected_git_dirty": "clean",
+      "captured": {
+        "SOURCE_MARKER": "initial",
+        "CAPTURED_SHA": "a974b7b1c31b",
+        "CAPTURED_DIRTY": "clean",
+        "CAPTURED_TIMESTAMP": "1791571405"
+      },
+      "executables": {
+        "debug/deps/verum_build_metadata_fixture-269c3ddd2dc933c2": {
+          "sha256": "e5d884225ba66a1b1c53db2b639b4233556f2c3038987cb071b30a49acb78274",
+          "mtime_ns": 1791571405555316965
+        }
+      },
+      "checks": {
+        "git_sha": true,
+        "git_dirty": true,
+        "compiled_source_marker": true,
+        "test_executable_identified": true,
+        "actual_build_script_unchanged": true,
+        "fixture_inputs_unchanged_during_invocation": true
+      },
+      "fixture_inputs_sha256": {
+        "Cargo.toml": "d6a3e7c9f0b190f92b4caa18e4d1b5a2b3dfce5bf6518c9814658373452730bc",
+        "Cargo.lock": "776498682e9e1a2e8f7544bbad4d8ff2169d75c21bc16dc0f9812eeac053082c",
+        "crates/build_metadata_fixture/Cargo.toml": "791864c9f8755f0d037174557cd963521c0934d9b38e0392cf525d7d15b5f000",
+        "crates/build_metadata_fixture/build.rs": "282b3854a4f7c66ffed81187b835e6852b9f0433d330dba57af4586ef28e038b",
+        "crates/build_metadata_fixture/src/lib.rs": "6f8cb518f01f5bdd3fccc7ba25a4715c14ce532e6d27eea05449c35747082ae4"
+      },
+      "git_marker_kind": "file",
+      "legacy_watch_path_exists": false,
+      "logs": {
+        "linked-first.stdout.log": "901b2654fb81db004fd77b8cb3131805c0d6668fce29e531fa2b65413047a490",
+        "linked-first.stderr.log": "abf94353d2347b72d2012a05a65a685773db22c4f07b380366dae5685d10fcdb"
+      }
+    },
+    {
+      "name": "linked-identical",
+      "working_directory": "/private/tmp/verum-T1683-repro-isolated/linked",
+      "command": [
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "-p",
+        "verum_build_metadata_fixture",
+        "--",
+        "--nocapture"
+      ],
+      "cargo_target_dir": "/private/tmp/verum-T1683-repro-isolated/target/linked",
+      "elapsed_seconds": 0.422,
+      "returncode": 0,
+      "expected_git_sha": "a974b7b1c31b",
+      "expected_git_dirty": "clean",
+      "captured": {
+        "SOURCE_MARKER": "initial",
+        "CAPTURED_SHA": "a974b7b1c31b",
+        "CAPTURED_DIRTY": "clean",
+        "CAPTURED_TIMESTAMP": "1791571406"
+      },
+      "executables": {
+        "debug/deps/verum_build_metadata_fixture-269c3ddd2dc933c2": {
+          "sha256": "8db102e99035a0167a84ba7827df6ff3e5c7c63e7f023e3f71ea9ed17de4d113",
+          "mtime_ns": 1791571407111935868
+        }
+      },
+      "checks": {
+        "git_sha": true,
+        "git_dirty": true,
+        "compiled_source_marker": true,
+        "test_executable_identified": true,
+        "actual_build_script_unchanged": true,
+        "fixture_inputs_unchanged_during_invocation": true,
+        "identical_fixture_inputs": true,
+        "unchanged_executable_reused": false,
+        "unchanged_timestamp": false
+      },
+      "fixture_inputs_sha256": {
+        "Cargo.toml": "d6a3e7c9f0b190f92b4caa18e4d1b5a2b3dfce5bf6518c9814658373452730bc",
+        "Cargo.lock": "776498682e9e1a2e8f7544bbad4d8ff2169d75c21bc16dc0f9812eeac053082c",
+        "crates/build_metadata_fixture/Cargo.toml": "791864c9f8755f0d037174557cd963521c0934d9b38e0392cf525d7d15b5f000",
+        "crates/build_metadata_fixture/build.rs": "282b3854a4f7c66ffed81187b835e6852b9f0433d330dba57af4586ef28e038b",
+        "crates/build_metadata_fixture/src/lib.rs": "6f8cb518f01f5bdd3fccc7ba25a4715c14ce532e6d27eea05449c35747082ae4"
+      },
+      "git_marker_kind": "file",
+      "legacy_watch_path_exists": false,
+      "logs": {
+        "linked-identical.stdout.log": "983279d3064f01dfd1a7c6af25a71955929b8fe98a01db7f54a4ad88d3e4cd1c",
+        "linked-identical.stderr.log": "0b63785cfc3c07cf8ab8020e9faec7c6709b4ff76d0ef05d57734133619d67fb"
+      }
+    },
+    {
+      "name": "ordinary-first",
+      "working_directory": "/private/tmp/verum-T1683-repro-isolated/ordinary",
+      "command": [
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "-p",
+        "verum_build_metadata_fixture",
+        "--",
+        "--nocapture"
+      ],
+      "cargo_target_dir": "/private/tmp/verum-T1683-repro-isolated/target/ordinary",
+      "elapsed_seconds": 0.582,
+      "returncode": 0,
+      "expected_git_sha": "a974b7b1c31b",
+      "expected_git_dirty": "clean",
+      "captured": {
+        "SOURCE_MARKER": "initial",
+        "CAPTURED_SHA": "a974b7b1c31b",
+        "CAPTURED_DIRTY": "clean",
+        "CAPTURED_TIMESTAMP": "1791571407"
+      },
+      "executables": {
+        "debug/deps/verum_build_metadata_fixture-269c3ddd2dc933c2": {
+          "sha256": "fca3aa47ce9d5bfe179d3c7fc8fdae88d9c2fc02229a0643783870437e6580eb",
+          "mtime_ns": 1791571407725249992
+        }
+      },
+      "checks": {
+        "git_sha": true,
+        "git_dirty": true,
+        "compiled_source_marker": true,
+        "test_executable_identified": true,
+        "actual_build_script_unchanged": true,
+        "fixture_inputs_unchanged_during_invocation": true
+      },
+      "fixture_inputs_sha256": {
+        "Cargo.toml": "d6a3e7c9f0b190f92b4caa18e4d1b5a2b3dfce5bf6518c9814658373452730bc",
+        "Cargo.lock": "776498682e9e1a2e8f7544bbad4d8ff2169d75c21bc16dc0f9812eeac053082c",
+        "crates/build_metadata_fixture/Cargo.toml": "791864c9f8755f0d037174557cd963521c0934d9b38e0392cf525d7d15b5f000",
+        "crates/build_metadata_fixture/build.rs": "282b3854a4f7c66ffed81187b835e6852b9f0433d330dba57af4586ef28e038b",
+        "crates/build_metadata_fixture/src/lib.rs": "6f8cb518f01f5bdd3fccc7ba25a4715c14ce532e6d27eea05449c35747082ae4"
+      },
+      "git_marker_kind": "directory",
+      "legacy_watch_path_exists": true,
+      "logs": {
+        "ordinary-first.stdout.log": "797fd8d7d83b6e07be17d981e319e15caf3c58b9ec4022ab4de840d4d60e365f",
+        "ordinary-first.stderr.log": "20c71f5b7b9ecbc097f49bac7834463d5631602992727c3ff1613a681f7410fe"
+      }
+    },
+    {
+      "name": "ordinary-identical",
+      "working_directory": "/private/tmp/verum-T1683-repro-isolated/ordinary",
+      "command": [
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "-p",
+        "verum_build_metadata_fixture",
+        "--",
+        "--nocapture"
+      ],
+      "cargo_target_dir": "/private/tmp/verum-T1683-repro-isolated/target/ordinary",
+      "elapsed_seconds": 0.047,
+      "returncode": 0,
+      "expected_git_sha": "a974b7b1c31b",
+      "expected_git_dirty": "clean",
+      "captured": {
+        "SOURCE_MARKER": "initial",
+        "CAPTURED_SHA": "a974b7b1c31b",
+        "CAPTURED_DIRTY": "clean",
+        "CAPTURED_TIMESTAMP": "1791571407"
+      },
+      "executables": {
+        "debug/deps/verum_build_metadata_fixture-269c3ddd2dc933c2": {
+          "sha256": "fca3aa47ce9d5bfe179d3c7fc8fdae88d9c2fc02229a0643783870437e6580eb",
+          "mtime_ns": 1791571407725249992
+        }
+      },
+      "checks": {
+        "git_sha": true,
+        "git_dirty": true,
+        "compiled_source_marker": true,
+        "test_executable_identified": true,
+        "actual_build_script_unchanged": true,
+        "fixture_inputs_unchanged_during_invocation": true,
+        "identical_fixture_inputs": true,
+        "unchanged_executable_reused": true,
+        "unchanged_timestamp": true
+      },
+      "fixture_inputs_sha256": {
+        "Cargo.toml": "d6a3e7c9f0b190f92b4caa18e4d1b5a2b3dfce5bf6518c9814658373452730bc",
+        "Cargo.lock": "776498682e9e1a2e8f7544bbad4d8ff2169d75c21bc16dc0f9812eeac053082c",
+        "crates/build_metadata_fixture/Cargo.toml": "791864c9f8755f0d037174557cd963521c0934d9b38e0392cf525d7d15b5f000",
+        "crates/build_metadata_fixture/build.rs": "282b3854a4f7c66ffed81187b835e6852b9f0433d330dba57af4586ef28e038b",
+        "crates/build_metadata_fixture/src/lib.rs": "6f8cb518f01f5bdd3fccc7ba25a4715c14ce532e6d27eea05449c35747082ae4"
+      },
+      "git_marker_kind": "directory",
+      "legacy_watch_path_exists": true,
+      "logs": {
+        "ordinary-identical.stdout.log": "797fd8d7d83b6e07be17d981e319e15caf3c58b9ec4022ab4de840d4d60e365f",
+        "ordinary-identical.stderr.log": "56e78bef2d1892621c57258bea72428a728e6609c38f622e600dda69c398841f"
+      }
+    },
+    {
+      "name": "ordinary-source-dirty",
+      "working_directory": "/private/tmp/verum-T1683-repro-isolated/ordinary",
+      "command": [
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "-p",
+        "verum_build_metadata_fixture",
+        "--",
+        "--nocapture"
+      ],
+      "cargo_target_dir": "/private/tmp/verum-T1683-repro-isolated/target/ordinary",
+      "elapsed_seconds": 0.257,
+      "returncode": 0,
+      "expected_git_sha": "a974b7b1c31b",
+      "expected_git_dirty": "dirty",
+      "captured": {
+        "SOURCE_MARKER": "changed",
+        "CAPTURED_SHA": "a974b7b1c31b",
+        "CAPTURED_DIRTY": "clean",
+        "CAPTURED_TIMESTAMP": "1791571407"
+      },
+      "executables": {
+        "debug/deps/verum_build_metadata_fixture-269c3ddd2dc933c2": {
+          "sha256": "575836cb79d79de5a3f11d16d052e01d0ca317e5daeccde4ba19f397ef97efb0",
+          "mtime_ns": 1791571409184733650
+        }
+      },
+      "checks": {
+        "git_sha": true,
+        "git_dirty": false,
+        "compiled_source_marker": true,
+        "test_executable_identified": true,
+        "actual_build_script_unchanged": true,
+        "fixture_inputs_unchanged_during_invocation": true
+      },
+      "fixture_inputs_sha256": {
+        "Cargo.toml": "d6a3e7c9f0b190f92b4caa18e4d1b5a2b3dfce5bf6518c9814658373452730bc",
+        "Cargo.lock": "776498682e9e1a2e8f7544bbad4d8ff2169d75c21bc16dc0f9812eeac053082c",
+        "crates/build_metadata_fixture/Cargo.toml": "791864c9f8755f0d037174557cd963521c0934d9b38e0392cf525d7d15b5f000",
+        "crates/build_metadata_fixture/build.rs": "282b3854a4f7c66ffed81187b835e6852b9f0433d330dba57af4586ef28e038b",
+        "crates/build_metadata_fixture/src/lib.rs": "1137c127c8a4ba64dd0899ecb37fb8d3773c94698b8c1d610e6f5cd67392b7b7"
+      },
+      "git_marker_kind": "directory",
+      "legacy_watch_path_exists": true,
+      "logs": {
+        "ordinary-source-dirty.stdout.log": "8f6caf9512f0d43ca8ad65d42de912ebfa9534184ae99ce149b8139861c6cc7e",
+        "ordinary-source-dirty.stderr.log": "aa2947775296a37d6c540db6c739f98a953bb8ee05a7ae828426150a0bd5f624"
+      }
+    },
+    {
+      "name": "ordinary-committed-source",
+      "working_directory": "/private/tmp/verum-T1683-repro-isolated/ordinary",
+      "command": [
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "-p",
+        "verum_build_metadata_fixture",
+        "--",
+        "--nocapture"
+      ],
+      "cargo_target_dir": "/private/tmp/verum-T1683-repro-isolated/target/ordinary",
+      "elapsed_seconds": 0.044,
+      "returncode": 0,
+      "expected_git_sha": "7ed1b85e96d9",
+      "expected_git_dirty": "clean",
+      "captured": {
+        "SOURCE_MARKER": "changed",
+        "CAPTURED_SHA": "a974b7b1c31b",
+        "CAPTURED_DIRTY": "clean",
+        "CAPTURED_TIMESTAMP": "1791571407"
+      },
+      "executables": {
+        "debug/deps/verum_build_metadata_fixture-269c3ddd2dc933c2": {
+          "sha256": "575836cb79d79de5a3f11d16d052e01d0ca317e5daeccde4ba19f397ef97efb0",
+          "mtime_ns": 1791571409184733650
+        }
+      },
+      "checks": {
+        "git_sha": false,
+        "git_dirty": true,
+        "compiled_source_marker": true,
+        "test_executable_identified": true,
+        "actual_build_script_unchanged": true,
+        "fixture_inputs_unchanged_during_invocation": true
+      },
+      "fixture_inputs_sha256": {
+        "Cargo.toml": "d6a3e7c9f0b190f92b4caa18e4d1b5a2b3dfce5bf6518c9814658373452730bc",
+        "Cargo.lock": "776498682e9e1a2e8f7544bbad4d8ff2169d75c21bc16dc0f9812eeac053082c",
+        "crates/build_metadata_fixture/Cargo.toml": "791864c9f8755f0d037174557cd963521c0934d9b38e0392cf525d7d15b5f000",
+        "crates/build_metadata_fixture/build.rs": "282b3854a4f7c66ffed81187b835e6852b9f0433d330dba57af4586ef28e038b",
+        "crates/build_metadata_fixture/src/lib.rs": "1137c127c8a4ba64dd0899ecb37fb8d3773c94698b8c1d610e6f5cd67392b7b7"
+      },
+      "git_marker_kind": "directory",
+      "legacy_watch_path_exists": true,
+      "logs": {
+        "ordinary-committed-source.stdout.log": "8f6caf9512f0d43ca8ad65d42de912ebfa9534184ae99ce149b8139861c6cc7e",
+        "ordinary-committed-source.stderr.log": "85de6cb6ff39725ac3c3055afc29ceae9aacc5f4b245b6a5243eba16e3724fdf"
+      }
+    },
+    {
+      "name": "ordinary-ref-advance",
+      "working_directory": "/private/tmp/verum-T1683-repro-isolated/ordinary",
+      "command": [
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "-p",
+        "verum_build_metadata_fixture",
+        "--",
+        "--nocapture"
+      ],
+      "cargo_target_dir": "/private/tmp/verum-T1683-repro-isolated/target/ordinary",
+      "elapsed_seconds": 0.044,
+      "returncode": 0,
+      "expected_git_sha": "6d8da114f944",
+      "expected_git_dirty": "clean",
+      "captured": {
+        "SOURCE_MARKER": "changed",
+        "CAPTURED_SHA": "a974b7b1c31b",
+        "CAPTURED_DIRTY": "clean",
+        "CAPTURED_TIMESTAMP": "1791571407"
+      },
+      "executables": {
+        "debug/deps/verum_build_metadata_fixture-269c3ddd2dc933c2": {
+          "sha256": "575836cb79d79de5a3f11d16d052e01d0ca317e5daeccde4ba19f397ef97efb0",
+          "mtime_ns": 1791571409184733650
+        }
+      },
+      "checks": {
+        "git_sha": false,
+        "git_dirty": true,
+        "compiled_source_marker": true,
+        "test_executable_identified": true,
+        "actual_build_script_unchanged": true,
+        "fixture_inputs_unchanged_during_invocation": true
+      },
+      "fixture_inputs_sha256": {
+        "Cargo.toml": "d6a3e7c9f0b190f92b4caa18e4d1b5a2b3dfce5bf6518c9814658373452730bc",
+        "Cargo.lock": "776498682e9e1a2e8f7544bbad4d8ff2169d75c21bc16dc0f9812eeac053082c",
+        "crates/build_metadata_fixture/Cargo.toml": "791864c9f8755f0d037174557cd963521c0934d9b38e0392cf525d7d15b5f000",
+        "crates/build_metadata_fixture/build.rs": "282b3854a4f7c66ffed81187b835e6852b9f0433d330dba57af4586ef28e038b",
+        "crates/build_metadata_fixture/src/lib.rs": "1137c127c8a4ba64dd0899ecb37fb8d3773c94698b8c1d610e6f5cd67392b7b7"
+      },
+      "git_marker_kind": "directory",
+      "legacy_watch_path_exists": true,
+      "logs": {
+        "ordinary-ref-advance.stdout.log": "8f6caf9512f0d43ca8ad65d42de912ebfa9534184ae99ce149b8139861c6cc7e",
+        "ordinary-ref-advance.stderr.log": "a8b0fa00f39a847f435b072080b9de44c5aad8c941198f353eaabc09c6860291"
+      }
+    },
+    {
+      "name": "detached-first",
+      "working_directory": "/private/tmp/verum-T1683-repro-isolated/ordinary",
+      "command": [
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "-p",
+        "verum_build_metadata_fixture",
+        "--",
+        "--nocapture"
+      ],
+      "cargo_target_dir": "/private/tmp/verum-T1683-repro-isolated/target/ordinary",
+      "elapsed_seconds": 0.432,
+      "returncode": 0,
+      "expected_git_sha": "6d8da114f944",
+      "expected_git_dirty": "clean",
+      "captured": {
+        "SOURCE_MARKER": "changed",
+        "CAPTURED_SHA": "6d8da114f944",
+        "CAPTURED_DIRTY": "clean",
+        "CAPTURED_TIMESTAMP": "1791571409"
+      },
+      "executables": {
+        "debug/deps/verum_build_metadata_fixture-269c3ddd2dc933c2": {
+          "sha256": "d4cd7bc004b834f175b8265ebe7d9d4f77d54deec9ca430789ec9343da87fb7f",
+          "mtime_ns": 1791571409901199133
+        }
+      },
+      "checks": {
+        "git_sha": true,
+        "git_dirty": true,
+        "compiled_source_marker": true,
+        "test_executable_identified": true,
+        "actual_build_script_unchanged": true,
+        "fixture_inputs_unchanged_during_invocation": true
+      },
+      "fixture_inputs_sha256": {
+        "Cargo.toml": "d6a3e7c9f0b190f92b4caa18e4d1b5a2b3dfce5bf6518c9814658373452730bc",
+        "Cargo.lock": "776498682e9e1a2e8f7544bbad4d8ff2169d75c21bc16dc0f9812eeac053082c",
+        "crates/build_metadata_fixture/Cargo.toml": "791864c9f8755f0d037174557cd963521c0934d9b38e0392cf525d7d15b5f000",
+        "crates/build_metadata_fixture/build.rs": "282b3854a4f7c66ffed81187b835e6852b9f0433d330dba57af4586ef28e038b",
+        "crates/build_metadata_fixture/src/lib.rs": "1137c127c8a4ba64dd0899ecb37fb8d3773c94698b8c1d610e6f5cd67392b7b7"
+      },
+      "git_marker_kind": "directory",
+      "legacy_watch_path_exists": true,
+      "logs": {
+        "detached-first.stdout.log": "22d5263b9db8adec8d62ade06984f188925b6fadae0efd15ad280159f0e7c696",
+        "detached-first.stderr.log": "31081e22e1f439e37c63f34fd7257b9038c219cf87901450be8f3dca0a1e3305"
+      }
+    },
+    {
+      "name": "detached-identical",
+      "working_directory": "/private/tmp/verum-T1683-repro-isolated/ordinary",
+      "command": [
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "-p",
+        "verum_build_metadata_fixture",
+        "--",
+        "--nocapture"
+      ],
+      "cargo_target_dir": "/private/tmp/verum-T1683-repro-isolated/target/ordinary",
+      "elapsed_seconds": 0.046,
+      "returncode": 0,
+      "expected_git_sha": "6d8da114f944",
+      "expected_git_dirty": "clean",
+      "captured": {
+        "SOURCE_MARKER": "changed",
+        "CAPTURED_SHA": "6d8da114f944",
+        "CAPTURED_DIRTY": "clean",
+        "CAPTURED_TIMESTAMP": "1791571409"
+      },
+      "executables": {
+        "debug/deps/verum_build_metadata_fixture-269c3ddd2dc933c2": {
+          "sha256": "d4cd7bc004b834f175b8265ebe7d9d4f77d54deec9ca430789ec9343da87fb7f",
+          "mtime_ns": 1791571409901199133
+        }
+      },
+      "checks": {
+        "git_sha": true,
+        "git_dirty": true,
+        "compiled_source_marker": true,
+        "test_executable_identified": true,
+        "actual_build_script_unchanged": true,
+        "fixture_inputs_unchanged_during_invocation": true,
+        "identical_fixture_inputs": true,
+        "unchanged_executable_reused": true,
+        "unchanged_timestamp": true
+      },
+      "fixture_inputs_sha256": {
+        "Cargo.toml": "d6a3e7c9f0b190f92b4caa18e4d1b5a2b3dfce5bf6518c9814658373452730bc",
+        "Cargo.lock": "776498682e9e1a2e8f7544bbad4d8ff2169d75c21bc16dc0f9812eeac053082c",
+        "crates/build_metadata_fixture/Cargo.toml": "791864c9f8755f0d037174557cd963521c0934d9b38e0392cf525d7d15b5f000",
+        "crates/build_metadata_fixture/build.rs": "282b3854a4f7c66ffed81187b835e6852b9f0433d330dba57af4586ef28e038b",
+        "crates/build_metadata_fixture/src/lib.rs": "1137c127c8a4ba64dd0899ecb37fb8d3773c94698b8c1d610e6f5cd67392b7b7"
+      },
+      "git_marker_kind": "directory",
+      "legacy_watch_path_exists": true,
+      "logs": {
+        "detached-identical.stdout.log": "22d5263b9db8adec8d62ade06984f188925b6fadae0efd15ad280159f0e7c696",
+        "detached-identical.stderr.log": "4eb0b9196932867a68484e2d2d68390d8265174184b383b1cddc67753abaccb7"
+      }
+    },
+    {
+      "name": "no-git-first",
+      "working_directory": "/private/tmp/verum-T1683-repro-isolated/without-git",
+      "command": [
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "-p",
+        "verum_build_metadata_fixture",
+        "--",
+        "--nocapture"
+      ],
+      "cargo_target_dir": "/private/tmp/verum-T1683-repro-isolated/target/without-git",
+      "elapsed_seconds": 0.575,
+      "returncode": 0,
+      "expected_git_sha": "unknown",
+      "expected_git_dirty": "unknown",
+      "captured": {
+        "SOURCE_MARKER": "changed",
+        "CAPTURED_SHA": "unknown",
+        "CAPTURED_DIRTY": "unknown",
+        "CAPTURED_TIMESTAMP": "1791571411"
+      },
+      "executables": {
+        "debug/deps/verum_build_metadata_fixture-269c3ddd2dc933c2": {
+          "sha256": "f06d907e747331822422fd23ba1aabf034360d16abdb61c5a46bdeab11f55b40",
+          "mtime_ns": 1791571411690525026
+        }
+      },
+      "checks": {
+        "git_sha": true,
+        "git_dirty": true,
+        "compiled_source_marker": true,
+        "test_executable_identified": true,
+        "actual_build_script_unchanged": true,
+        "fixture_inputs_unchanged_during_invocation": true
+      },
+      "fixture_inputs_sha256": {
+        "Cargo.toml": "d6a3e7c9f0b190f92b4caa18e4d1b5a2b3dfce5bf6518c9814658373452730bc",
+        "Cargo.lock": "776498682e9e1a2e8f7544bbad4d8ff2169d75c21bc16dc0f9812eeac053082c",
+        "crates/build_metadata_fixture/Cargo.toml": "791864c9f8755f0d037174557cd963521c0934d9b38e0392cf525d7d15b5f000",
+        "crates/build_metadata_fixture/build.rs": "282b3854a4f7c66ffed81187b835e6852b9f0433d330dba57af4586ef28e038b",
+        "crates/build_metadata_fixture/src/lib.rs": "1137c127c8a4ba64dd0899ecb37fb8d3773c94698b8c1d610e6f5cd67392b7b7"
+      },
+      "git_marker_kind": "absent",
+      "legacy_watch_path_exists": false,
+      "logs": {
+        "no-git-first.stdout.log": "ec164d385016f8c3cec18e7316e685740c9c036569f03ca72d931d8a4698d663",
+        "no-git-first.stderr.log": "c18d1b613b2b5e9c14b9bb4592e1481e821e76374ed3cc270dd0c614a14f9195"
+      }
+    },
+    {
+      "name": "no-git-identical",
+      "working_directory": "/private/tmp/verum-T1683-repro-isolated/without-git",
+      "command": [
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "-p",
+        "verum_build_metadata_fixture",
+        "--",
+        "--nocapture"
+      ],
+      "cargo_target_dir": "/private/tmp/verum-T1683-repro-isolated/target/without-git",
+      "elapsed_seconds": 0.44,
+      "returncode": 0,
+      "expected_git_sha": "unknown",
+      "expected_git_dirty": "unknown",
+      "captured": {
+        "SOURCE_MARKER": "changed",
+        "CAPTURED_SHA": "unknown",
+        "CAPTURED_DIRTY": "unknown",
+        "CAPTURED_TIMESTAMP": "1791571413"
+      },
+      "executables": {
+        "debug/deps/verum_build_metadata_fixture-269c3ddd2dc933c2": {
+          "sha256": "41ab9f5b5c54ca140d6421119eb216579c8c595c1187c65dd65ef537e86ee39f",
+          "mtime_ns": 1791571413255687739
+        }
+      },
+      "checks": {
+        "git_sha": true,
+        "git_dirty": true,
+        "compiled_source_marker": true,
+        "test_executable_identified": true,
+        "actual_build_script_unchanged": true,
+        "fixture_inputs_unchanged_during_invocation": true,
+        "identical_fixture_inputs": true,
+        "unchanged_executable_reused": false,
+        "unchanged_timestamp": false
+      },
+      "fixture_inputs_sha256": {
+        "Cargo.toml": "d6a3e7c9f0b190f92b4caa18e4d1b5a2b3dfce5bf6518c9814658373452730bc",
+        "Cargo.lock": "776498682e9e1a2e8f7544bbad4d8ff2169d75c21bc16dc0f9812eeac053082c",
+        "crates/build_metadata_fixture/Cargo.toml": "791864c9f8755f0d037174557cd963521c0934d9b38e0392cf525d7d15b5f000",
+        "crates/build_metadata_fixture/build.rs": "282b3854a4f7c66ffed81187b835e6852b9f0433d330dba57af4586ef28e038b",
+        "crates/build_metadata_fixture/src/lib.rs": "1137c127c8a4ba64dd0899ecb37fb8d3773c94698b8c1d610e6f5cd67392b7b7"
+      },
+      "git_marker_kind": "absent",
+      "legacy_watch_path_exists": false,
+      "logs": {
+        "no-git-identical.stdout.log": "ed6ebe39884c5e87651746b22318d330234fcfa45254cee61fac12ae60f468a2",
+        "no-git-identical.stderr.log": "f3dacfbc657551795ac4e1e584f6ab638a71e77d1b8a012df0a6c4f48749c161"
+      }
+    }
+  ],
+  "status": "failed",
+  "scope": "Dependency-free Cargo fixture containing the actual build script; no workspace compiler, LLVM, Z3, bake or AOT acceptance."
+}

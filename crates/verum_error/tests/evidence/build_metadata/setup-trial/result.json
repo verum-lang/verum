@@ -1,0 +1,10 @@
+{
+  "status": "failed setup trial; not an acceptance control",
+  "scope": "Initial linked fixture invocation before portable final harness",
+  "reason": "Cargo rustdoc could not create a temporary directory under inherited TMPDIR outside the permitted sandbox.",
+  "original_logs_sha256": {
+    "stdout.log": "0abbdbd5fc6fa29859aec41402a93dc0af6c0dc82258c87df12c4e5ea6593b48",
+    "stderr.log": "eeba09195e9226329285b85833a167f8847e5bb0019ef3dcc42b660e917b57fe"
+  },
+  "superseded_by": "../result.json"
+}
