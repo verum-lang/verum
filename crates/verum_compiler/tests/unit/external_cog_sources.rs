@@ -344,3 +344,60 @@ fn dependency_body_errors_keep_the_physical_source_path() {
         session.format_diagnostics()
     );
 }
+
+fn assert_nested_src_modules_remain_distinct(package_root: bool) {
+    let fixture = Fixture::new();
+    write(
+        &fixture.dependency.join("src/util.vr"),
+        "module greeting.util;\npublic fn outer() -> Int { 40 }\n",
+    );
+    write(
+        &fixture.dependency.join("src/src/util.vr"),
+        "module greeting.src.util;\npublic fn nested() -> Int { 2 }\n",
+    );
+    write(
+        &fixture.consumer.join("src/main.vr"),
+        "module consumer.main;\nmount greeting.util.{outer};\nmount greeting.src.util.{nested};\nfn main() -> Int { outer() + nested() }\n",
+    );
+    let registered_root = if package_root {
+        fixture.dependency.clone()
+    } else {
+        fixture.dependency.join("src")
+    };
+    let mut session = fixture.session(registered_root.clone());
+    let mut pipeline = CompilationPipeline::new_check(&mut session);
+    pipeline
+        .load_external_cog_modules()
+        .expect("the source root and its src submodule must not collide");
+    for name in ["greeting.util", "greeting.src.util"] {
+        assert!(pipeline.modules.contains_key(&Text::from(name)), "{name}");
+    }
+
+    let session = fixture.session(registered_root.clone());
+    let mut loader = session.create_module_loader();
+    for name in ["greeting.util", "greeting.src.util"] {
+        loader
+            .load_module(
+                &verum_modules::ModulePath::from_str(name),
+                verum_modules::ModuleId::new(0),
+            )
+            .expect("lazy loading must use the same module identities");
+    }
+
+    let mut session = fixture.session(registered_root);
+    let result = CompilationPipeline::new_check(&mut session)
+        .check_project()
+        .expect("project checking must preserve nested src module names");
+    assert_eq!(result.user_errors, 0, "{}", session.format_diagnostics());
+    assert_eq!(result.files_checked, 4);
+}
+
+#[test]
+fn package_root_preserves_a_nested_src_module() {
+    assert_nested_src_modules_remain_distinct(true);
+}
+
+#[test]
+fn explicit_source_root_preserves_a_nested_src_module() {
+    assert_nested_src_modules_remain_distinct(false);
+}

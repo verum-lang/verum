@@ -660,7 +660,7 @@ impl<'s> CompilationPipeline<'s> {
                 root.display()
             );
             for file in files {
-                let path: Text = Self::project_module_path_for(&root, name.as_str(), &file).into();
+                let path: Text = Self::source_module_path_for(&root, name.as_str(), &file).into();
                 if let Some(previous) = paths.get(&path) {
                     anyhow::bail!(
                         "E_MODULE_PATH_COLLISION: module '{}' resolves to {} and {}",
@@ -1162,20 +1162,30 @@ impl<'s> CompilationPipeline<'s> {
         project_prefix: &str,
         file_path: &std::path::Path,
     ) -> String {
+        let conventional_root = input_dir.join("src");
+        let source_root = if file_path.starts_with(&conventional_root) {
+            conventional_root.as_path()
+        } else {
+            input_dir
+        };
+        Self::source_module_path_for(source_root, project_prefix, file_path)
+    }
+
+    /// Derive a module name from an already selected source root. Every
+    /// directory below it is a module segment, including one named `src`.
+    fn source_module_path_for(
+        source_root: &Path,
+        project_prefix: &str,
+        file_path: &Path,
+    ) -> String {
         let rel = file_path
             .parent()
-            .and_then(|p| p.strip_prefix(input_dir).ok())
+            .and_then(|p| p.strip_prefix(source_root).ok())
             .unwrap_or(std::path::Path::new(""));
         let mut parts = vec![project_prefix.to_string()];
-        let mut first = true;
         for component in rel.components() {
             if let std::path::Component::Normal(seg) = component {
                 if let Some(sname) = seg.to_str() {
-                    if first && sname == "src" {
-                        first = false;
-                        continue;
-                    }
-                    first = false;
                     parts.push(sname.to_string());
                 }
             }
