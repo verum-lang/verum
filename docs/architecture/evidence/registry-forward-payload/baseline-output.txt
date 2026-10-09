@@ -1,0 +1,176 @@
+   Compiling verum_common v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_common)
+   Compiling verum_error v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_error)
+   Compiling verum_tblgen v21.0.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/llvm/verum_tblgen)
+   Compiling verum_ast v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_ast)
+   Compiling verum_diagnostics v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_diagnostics)
+   Compiling verum_lexer v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_lexer)
+   Compiling verum_mlir_sys v21.0.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/llvm/verum_mlir_sys)
+   Compiling verum_fast_parser v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_fast_parser)
+   Compiling verum_llvm_sys v21.0.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/llvm/verum_llvm_sys)
+   Compiling verum_mlir_macro v21.0.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/llvm/verum_mlir_macro)
+   Compiling verum_modules v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_modules)
+warning: verum_llvm_sys@21.0.0: In file included from /Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/llvm/verum_llvm_sys/src/lld/linker.cpp:7:
+warning: verum_llvm_sys@21.0.0: In file included from /Users/taaliman/projects/oldman/verum-lang/verum/llvm/install/include/lld/Common/CommonLinkerContext.h:22:
+warning: verum_llvm_sys@21.0.0: In file included from /Users/taaliman/projects/oldman/verum-lang/verum/llvm/install/include/lld/Common/ErrorHandler.h:71:
+warning: verum_llvm_sys@21.0.0: In file included from /Users/taaliman/projects/oldman/verum-lang/verum/llvm/install/include/lld/Common/LLVM.h:21:
+warning: verum_llvm_sys@21.0.0: /Users/taaliman/projects/oldman/verum-lang/verum/llvm/install/include/llvm/Support/Casting.h:279:45: warning: unused parameter 'f' [-Wunused-parameter]
+warning: verum_llvm_sys@21.0.0:   279 |   static inline bool isPossible(const From &f) { return true; }
+warning: verum_llvm_sys@21.0.0:       |                                             ^
+warning: verum_llvm_sys@21.0.0: /Users/taaliman/projects/oldman/verum-lang/verum/llvm/install/include/llvm/Support/Casting.h:604:41: warning: unused parameter 't' [-Wunused-parameter]
+warning: verum_llvm_sys@21.0.0:   604 |   static inline bool isPresent(const T &t) { return true; }
+warning: verum_llvm_sys@21.0.0:       |                                         ^
+warning: verum_llvm_sys@21.0.0: In file included from /Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/llvm/verum_llvm_sys/src/lld/linker.cpp:7:
+warning: verum_llvm_sys@21.0.0: In file included from /Users/taaliman/projects/oldman/verum-lang/verum/llvm/install/include/lld/Common/CommonLinkerContext.h:22:
+warning: verum_llvm_sys@21.0.0: In file included from /Users/taaliman/projects/oldman/verum-lang/verum/llvm/install/include/lld/Common/ErrorHandler.h:75:
+warning: verum_llvm_sys@21.0.0: /Users/taaliman/projects/oldman/verum-lang/verum/llvm/install/include/llvm/Support/Error.h:304:24: warning: unused parameter 'V' [-Wunused-parameter]
+warning: verum_llvm_sys@21.0.0:   304 |   void setChecked(bool V) {
+warning: verum_llvm_sys@21.0.0:       |                        ^
+warning: verum_llvm_sys@21.0.0: In file included from /Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/llvm/verum_llvm_sys/src/lld/linker.cpp:7:
+warning: verum_llvm_sys@21.0.0: In file included from /Users/taaliman/projects/oldman/verum-lang/verum/llvm/install/include/lld/Common/CommonLinkerContext.h:23:
+warning: verum_llvm_sys@21.0.0: In file included from /Users/taaliman/projects/oldman/verum-lang/verum/llvm/install/include/lld/Common/Memory.h:24:
+warning: verum_llvm_sys@21.0.0: /Users/taaliman/projects/oldman/verum-lang/verum/llvm/install/include/llvm/Support/Allocator.h:226:31: warning: unused parameter 'Ptr' [-Wunused-parameter]
+warning: verum_llvm_sys@21.0.0:   226 |   void Deallocate(const void *Ptr, size_t Size, size_t /*Alignment*/) {
+warning: verum_llvm_sys@21.0.0:       |                               ^
+warning: verum_llvm_sys@21.0.0: /Users/taaliman/projects/oldman/verum-lang/verum/llvm/install/include/llvm/Support/Allocator.h:226:43: warning: unused parameter 'Size' [-Wunused-parameter]
+warning: verum_llvm_sys@21.0.0:   226 |   void Deallocate(const void *Ptr, size_t Size, size_t /*Alignment*/) {
+warning: verum_llvm_sys@21.0.0:       |                                           ^
+warning: verum_llvm_sys@21.0.0: 5 warnings generated.
+   Compiling verum_protocol_types v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_protocol_types)
+   Compiling cvc5-sys v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/cvc5-sys)
+warning: cvc5-sys@0.1.0: cvc5-sys: no linking mode configured. Enable feature `vendored` to build CVC5 from source, `system` to link system library, or set CVC5_ROOT environment variable.
+   Compiling verum_types v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_types)
+   Compiling verum_kernel v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_kernel)
+   Compiling verum_cbgr v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_cbgr)
+   Compiling verum_mlir v21.0.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/llvm/verum_mlir)
+   Compiling verum_llvm_derive v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/llvm/verum_llvm_derive)
+   Compiling verum_llvm v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/llvm/verum_llvm)
+   Compiling verum_smt v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_smt)
+   Compiling verum_vbc v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_vbc)
+   Compiling verum_compiler v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_compiler)
+warning: verum_compiler@0.1.0: Stdlib default bake: excluded 2 runtime-gated file(s) (sys/embedded.vr, sys/embedded/, sys/no_runtime.vr, sys/no_runtime/)
+warning: verum_compiler@0.1.0: Embedded stdlib: 2560 files, 3440.1KB compressed (from 20573.1KB)
+warning: verum_compiler@0.1.0: Stdlib mount graph: 49379 edges, 133.3KB compressed (from 1672.0KB)
+warning: verum_compiler@0.1.0: Stdlib symbol manifest: 43982 symbols, 204.0KB compressed (from 766.6KB)
+warning: verum_compiler@0.1.0: Stdlib prelude seeds: 38 paths, 956 bytes
+warning: verum_compiler@0.1.0: Embedded precompiled stdlib VBC: 39354.1KB (/Users/taaliman/.tmp/verum-codex-01a10248/native-target/precompiled-stdlib/runtime.vbca)
+warning: verum_compiler@0.1.0: Embedded precompiled stdlib core metadata: 114671.8KB (/Users/taaliman/.tmp/verum-codex-01a10248/native-target/precompiled-stdlib/runtime.core_metadata)
+warning: verum_compiler@0.1.0: Embedded stdlib symbol graph: 5781.7KB (/Users/taaliman/.tmp/verum-codex-01a10248/native-target/precompiled-stdlib/runtime.symbol_graph)
+   Compiling verum_codegen v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_codegen)
+   Compiling verum_verification v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_verification)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2m 04s
+     Running unittests src/lib.rs (/Users/taaliman/.tmp/verum-codex-01a10248/native-target/debug/build/verum_compiler/c6ca94c7409ab771/out/verum_compiler-c6ca94c7409ab771)
+
+running 15 tests
+test pipeline::project_forward_payload_tests::one_file_project_accepts_forward_tuple_payload ... 
+thread 'pipeline::project_forward_payload_tests::one_file_project_accepts_forward_tuple_payload' (4822675) panicked at crates/verum_compiler/src/../tests/unit/project_forward_payloads.rs:73:5:
+assertion `left == right` failed: error<E101>: type not found: Payload
+  --> /Users/taaliman/.tmp/.tmp6F7GlM/src/main.vr:2:38
+  │
+1 │ module fixture.main;
+2 │ public type Envelope is Empty | Data(Payload);
+  │                                      ^^^^^^^
+3 │ public type Payload is { value: Int };
+4 │ fn main() -> Int { 0 }
+  │
+
+  left: 1
+ right: 0
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+test pipeline::project_forward_payload_tests::project_absent_qualified_owner_does_not_borrow_local_payload ... 
+thread 'pipeline::project_forward_payload_tests::project_absent_qualified_owner_does_not_borrow_local_payload' (4822839) panicked at crates/verum_compiler/src/../tests/unit/project_forward_payloads.rs:77:5:
+missing type was accepted
+FAILED
+test pipeline::project_forward_payload_tests::project_forward_tuple_payload_accepts_payload_then_sum_mount ... 
+thread 'pipeline::project_forward_payload_tests::project_forward_tuple_payload_accepts_payload_then_sum_mount' (4823231) panicked at crates/verum_compiler/src/../tests/unit/project_forward_payloads.rs:73:5:
+assertion `left == right` failed: error<E101>: type not found: Payload
+  --> /Users/taaliman/.tmp/.tmpINdLWt/src/model.vr:2:38
+  │
+1 │ module fixture.model;
+2 │ public type Envelope is Empty | Data(Payload);
+  │                                      ^^^^^^^
+3 │ public type Payload is { value: Int };
+  │
+
+  left: 1
+ right: 0
+FAILED
+test pipeline::project_forward_payload_tests::project_forward_tuple_payload_accepts_sum_only_mount ... 
+thread 'pipeline::project_forward_payload_tests::project_forward_tuple_payload_accepts_sum_only_mount' (4823580) panicked at crates/verum_compiler/src/../tests/unit/project_forward_payloads.rs:73:5:
+assertion `left == right` failed: error<E101>: type not found: Payload
+  --> /Users/taaliman/.tmp/.tmpmJP4U9/src/model.vr:2:38
+  │
+1 │ module fixture.model;
+2 │ public type Envelope is Empty | Data(Payload);
+  │                                      ^^^^^^^
+3 │ public type Payload is { value: Int };
+  │
+
+  left: 1
+ right: 0
+FAILED
+test pipeline::project_forward_payload_tests::project_forward_tuple_payload_accepts_sum_then_payload_mount ... 
+thread 'pipeline::project_forward_payload_tests::project_forward_tuple_payload_accepts_sum_then_payload_mount' (4823810) panicked at crates/verum_compiler/src/../tests/unit/project_forward_payloads.rs:73:5:
+assertion `left == right` failed: error<E101>: type not found: Payload
+  --> /Users/taaliman/.tmp/.tmpcj0NPi/src/model.vr:2:38
+  │
+1 │ module fixture.model;
+2 │ public type Envelope is Empty | Data(Payload);
+  │                                      ^^^^^^^
+3 │ public type Payload is { value: Int };
+  │
+
+  left: 1
+ right: 0
+FAILED
+test pipeline::project_forward_payload_tests::project_generic_forward_payload_keeps_arguments ... 
+thread 'pipeline::project_forward_payload_tests::project_generic_forward_payload_keeps_arguments' (4824168) panicked at crates/verum_compiler/src/../tests/unit/project_forward_payloads.rs:73:5:
+assertion `left == right` failed: error<E101>: type not found: Payload
+  --> /Users/taaliman/.tmp/.tmpI9Ztcx/src/model.vr:2:41
+  │
+1 │ module fixture.model;
+2 │ public type Envelope<T> is Empty | Data(Payload<T>); public type Payload<T> is { value: T };
+  │                                         ^^^^^^^
+  │
+
+  left: 1
+ right: 0
+FAILED
+test pipeline::project_forward_payload_tests::project_generic_forward_payload_rejects_wrong_argument ... ok
+test pipeline::project_forward_payload_tests::project_inline_record_variant_accepts_forward_payload ... ok
+test pipeline::project_forward_payload_tests::project_missing_tuple_payload_still_reports_e101 ... ok
+test pipeline::project_forward_payload_tests::project_payload_before_sum_is_the_control ... ok
+test pipeline::project_forward_payload_tests::project_private_payload_cannot_be_explicitly_mounted ... ok
+test pipeline::project_forward_payload_tests::project_same_shaped_foreign_payload_remains_distinct ... ok
+test pipeline::project_forward_payload_tests::source_module_analysis_accepts_forward_tuple_payload ... error<E101>: type not found: Payload
+  --> <unknown file FileId(0)>:1:1
+
+thread 'pipeline::project_forward_payload_tests::source_module_analysis_accepts_forward_tuple_payload' (4828812) panicked at crates/verum_compiler/src/../tests/unit/project_forward_payloads.rs:73:5:
+assertion `left == right` failed: error<E101>: type not found: Payload
+  --> <unknown file FileId(0)>:1:1
+
+compilation failed with 1 error
+  left: 1
+ right: 0
+FAILED
+test pipeline::project_forward_payload_tests::source_module_missing_tuple_payload_still_reports_e101 ... error<E101>: type not found: Payload
+  --> <unknown file FileId(0)>:1:1
+error<E101>: type not found: Payload
+  --> <unknown file FileId(0)>:1:1
+ok
+test pipeline::project_forward_payload_tests::standalone_checker_accepts_the_same_forward_payload ... ok
+
+failures:
+
+failures:
+    pipeline::project_forward_payload_tests::one_file_project_accepts_forward_tuple_payload
+    pipeline::project_forward_payload_tests::project_absent_qualified_owner_does_not_borrow_local_payload
+    pipeline::project_forward_payload_tests::project_forward_tuple_payload_accepts_payload_then_sum_mount
+    pipeline::project_forward_payload_tests::project_forward_tuple_payload_accepts_sum_only_mount
+    pipeline::project_forward_payload_tests::project_forward_tuple_payload_accepts_sum_then_payload_mount
+    pipeline::project_forward_payload_tests::project_generic_forward_payload_keeps_arguments
+    pipeline::project_forward_payload_tests::source_module_analysis_accepts_forward_tuple_payload
+
+test result: FAILED. 8 passed; 7 failed; 0 ignored; 0 measured; 1216 filtered out; finished in 135.61s
+
+error: test failed, to rerun pass `-p verum_compiler --lib`

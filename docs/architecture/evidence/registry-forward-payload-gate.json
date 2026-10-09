@@ -1,0 +1,365 @@
+{
+  "task": "T1677",
+  "status": "Bounded predeclaration repair; broader acceptance remains open under T0811 and root-owned ordinary replay.",
+  "base_commit": "70ab902f0e642e365a9b2a531376f1d1802a8add",
+  "tested_final_source": "b57ddd40f9b5bd16b4af56fd0ab5567de46b8a4b",
+  "compiler_tree": "674695c4b24df4b609abd1b3ec357a57f53b1475",
+  "types_tree": "bad8c50213346c441aac15d9774fa8264d42fc0e",
+  "production_scope": [
+    "CompilationPipeline::check_project predeclares source-module type names before strict body registration.",
+    "CompilationPipeline::analyze_module uses the same existing name prepass before strict body registration."
+  ],
+  "causal_result": "Six forward-reference positives fail before the production change and pass afterward; the independent T0811 qualified-owner oracle fails both versions.",
+  "final_default_accounting": {
+    "passed": 14,
+    "failed": 0,
+    "known_ignored": 1
+  },
+  "known_failure": {
+    "task": "T0811",
+    "test": "project_absent_qualified_owner_does_not_borrow_local_payload",
+    "ignore_reason": "T0811: unresolved qualified type paths are not validated",
+    "assertion": "Actual parsed project must report E101 for absent.Payload, even when local Payload exists.",
+    "separate_ignored_verdict": "FAILED; missing type was accepted.",
+    "resolution": "Oracle retained, not weakened; no qualified-path resolver repair in this slice."
+  },
+  "ci": "Unit job: cargo test --workspace --lib --bins --locked. Known T0811 oracle requires --ignored.",
+  "artifact_provenance": "Tests embed the existing stage17/stage16 producer artifact trio. Hashes and sidecars are unchanged before/after every no-auto-precompile run; no fresh producer or ordinary CLI acceptance is claimed.",
+  "boundaries": [
+    "No Verum source declaration reordering or lenient unknown-name fallback.",
+    "No typechecker, archive producer, schema, source-import helper, VBC or AOT implementation changes.",
+    "No ordinary CLI, automatic precompile, AOT, registry runtime, auth, durability or service acceptance from these Rust gates.",
+    "The T0811 absent-qualified-owner requirement remains unmet, so this evidence does not close all T1677 acceptance."
+  ],
+  "raw_log_whitespace_policy": "Exact raw Cargo output bytes are retained, including trailing whitespace. Only the five listed raw output files are excluded from git diff --check; production code, tests, JSON and prose are checked.",
+  "gates": {
+    "baseline": {
+      "source_commit": "d9394775ec6b485d71d74017b791ce766da5ca65",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "--manifest-path",
+        "/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/Cargo.toml",
+        "-p",
+        "verum_compiler",
+        "--lib",
+        "project_forward_payload_tests::",
+        "--",
+        "--test-threads=1",
+        "--nocapture"
+      ],
+      "environment": {
+        "CARGO_TARGET_DIR": "/Users/taaliman/.tmp/verum-codex-01a10248/native-target",
+        "CARGO_INCREMENTAL": "0",
+        "CARGO_BUILD_JOBS": "2",
+        "VERUM_NO_AUTO_PRECOMPILE": "1",
+        "VERUM_LLVM_DIR": "/Users/taaliman/projects/oldman/verum-lang/verum/llvm/install",
+        "RUST_MIN_STACK": "16777216"
+      },
+      "timeout_seconds": 900,
+      "scope": "Rust compiler parsed-project/source-phase controls; no ordinary CLI, automatic bake or AOT",
+      "artifacts_before": {
+        "runtime.vbca": "6fb275b7346f230a9daa984febc28deced634a5ace38f1b7f4df6c5f0e667e92",
+        "runtime.core_metadata": "f6730833fc38cb3acf2fc27954b674471bde598e56cda57db67de06a84cb358c",
+        "runtime.symbol_graph": "661d9b60537c74ca0cb8be0704ed16e0f24d6a78ab19aedda340ce44d41dcb58",
+        "runtime.vbca.checksum": "f677d0e37c8e35b3f18275a55f48ea01c95a07bf92d6283687ab2495f1573a26",
+        "runtime.vbca.schema": "fec20d7b3f8d1b81aff66c6c1181be574963779f7eacaf65660f8ab9127fca87"
+      },
+      "source_paths": {
+        "crates/verum_compiler/src/pipeline.rs": "7b00cf717ff4ab20ba472b7b5bca48ca46e6db4d43be1b6cc7c1d43bd4804c94",
+        "crates/verum_compiler/src/pipeline/compile_orchestration.rs": "80d93392dafa451058851a6ccc7d3f7943c589125c27ddf7baf4abb4a7964794",
+        "crates/verum_compiler/src/pipeline/cross_file.rs": "3bbb9e6f1321969d7e38a92bcdc1a6057282afda8daf9ae261777f6d7ccd00d3",
+        "crates/verum_compiler/tests/unit/project_forward_payloads.rs": "c6679c4d94e5e31e1c7b68088db474d343df2e1f4a19d16252ec18def21835bc",
+        "crates/verum_types/src/infer/modules.rs": "372f210b60737c9622227141b333b46de1db56d890a972c0caa012036f6c03d7",
+        "crates/verum_types/src/infer/decls.rs": "38387bfcda701e645901a24d9d42219a2ac972a7886c5826a9952f8ec5ac61ec"
+      },
+      "exit_code": 101,
+      "wall_seconds": 264.027,
+      "failure": null,
+      "source_unchanged": true,
+      "log_sha256": "b62ce1651c03605ea4f231bedeab2024f52bff14d4a5c05e3237676bb0b61330",
+      "source_paths_unchanged": true,
+      "executables": {
+        "/Users/taaliman/.tmp/verum-codex-01a10248/native-target/debug/build/verum_compiler/c6ca94c7409ab771/out/verum_compiler-c6ca94c7409ab771": "820f3727c332d73238ad564f3eeb13215a41dc73d9dfaee092a90e6740745c8e"
+      },
+      "artifacts_after": {
+        "runtime.vbca": "6fb275b7346f230a9daa984febc28deced634a5ace38f1b7f4df6c5f0e667e92",
+        "runtime.core_metadata": "f6730833fc38cb3acf2fc27954b674471bde598e56cda57db67de06a84cb358c",
+        "runtime.symbol_graph": "661d9b60537c74ca0cb8be0704ed16e0f24d6a78ab19aedda340ce44d41dcb58",
+        "runtime.vbca.checksum": "f677d0e37c8e35b3f18275a55f48ea01c95a07bf92d6283687ab2495f1573a26",
+        "runtime.vbca.schema": "fec20d7b3f8d1b81aff66c6c1181be574963779f7eacaf65660f8ab9127fca87"
+      },
+      "test_results": [
+        "test result: FAILED. 8 passed; 7 failed; 0 ignored; 0 measured; 1216 filtered out; finished in 135.61s"
+      ],
+      "repository_log": "docs/architecture/evidence/registry-forward-payload/baseline-output.txt"
+    },
+    "predeclaration": {
+      "source_commit": "3370c341dde21812d9e3558d6d7bcbd6505892b3",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "--manifest-path",
+        "/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/Cargo.toml",
+        "-p",
+        "verum_compiler",
+        "--lib",
+        "project_forward_payload_tests::",
+        "--",
+        "--test-threads=1",
+        "--nocapture"
+      ],
+      "environment": {
+        "CARGO_TARGET_DIR": "/Users/taaliman/.tmp/verum-codex-01a10248/native-target",
+        "CARGO_INCREMENTAL": "0",
+        "CARGO_BUILD_JOBS": "2",
+        "VERUM_NO_AUTO_PRECOMPILE": "1",
+        "VERUM_LLVM_DIR": "/Users/taaliman/projects/oldman/verum-lang/verum/llvm/install",
+        "RUST_MIN_STACK": "16777216"
+      },
+      "timeout_seconds": 900,
+      "scope": "Rust compiler parsed-project/source-phase controls; no ordinary CLI, automatic bake or AOT",
+      "artifacts_before": {
+        "runtime.vbca": "6fb275b7346f230a9daa984febc28deced634a5ace38f1b7f4df6c5f0e667e92",
+        "runtime.core_metadata": "f6730833fc38cb3acf2fc27954b674471bde598e56cda57db67de06a84cb358c",
+        "runtime.symbol_graph": "661d9b60537c74ca0cb8be0704ed16e0f24d6a78ab19aedda340ce44d41dcb58",
+        "runtime.vbca.checksum": "f677d0e37c8e35b3f18275a55f48ea01c95a07bf92d6283687ab2495f1573a26",
+        "runtime.vbca.schema": "fec20d7b3f8d1b81aff66c6c1181be574963779f7eacaf65660f8ab9127fca87"
+      },
+      "source_paths": {
+        "crates/verum_compiler/src/pipeline.rs": "7b00cf717ff4ab20ba472b7b5bca48ca46e6db4d43be1b6cc7c1d43bd4804c94",
+        "crates/verum_compiler/src/pipeline/compile_orchestration.rs": "66f63699e116a48282d083262499db6e06ef34a514a27f93a799fdd57c55d529",
+        "crates/verum_compiler/src/pipeline/cross_file.rs": "beb4af82de796b8fefa70a88bc14b4241982a7bf764644dbdb3d540ba35c77af",
+        "crates/verum_compiler/tests/unit/project_forward_payloads.rs": "c6679c4d94e5e31e1c7b68088db474d343df2e1f4a19d16252ec18def21835bc",
+        "crates/verum_types/src/infer/modules.rs": "372f210b60737c9622227141b333b46de1db56d890a972c0caa012036f6c03d7",
+        "crates/verum_types/src/infer/decls.rs": "38387bfcda701e645901a24d9d42219a2ac972a7886c5826a9952f8ec5ac61ec"
+      },
+      "exit_code": 101,
+      "wall_seconds": 260.035,
+      "failure": null,
+      "source_unchanged": true,
+      "log_sha256": "c51247f0d2c1fae666e18636b553d820cc95a2fe7a9091ca32283d45a930e337",
+      "source_paths_unchanged": true,
+      "executables": {
+        "/Users/taaliman/.tmp/verum-codex-01a10248/native-target/debug/build/verum_compiler/c6ca94c7409ab771/out/verum_compiler-c6ca94c7409ab771": "c8a7b055510f2ada8d318da79cf1e491d6124330fafcfa9fb268c5bdc6b14538"
+      },
+      "artifacts_after": {
+        "runtime.vbca": "6fb275b7346f230a9daa984febc28deced634a5ace38f1b7f4df6c5f0e667e92",
+        "runtime.core_metadata": "f6730833fc38cb3acf2fc27954b674471bde598e56cda57db67de06a84cb358c",
+        "runtime.symbol_graph": "661d9b60537c74ca0cb8be0704ed16e0f24d6a78ab19aedda340ce44d41dcb58",
+        "runtime.vbca.checksum": "f677d0e37c8e35b3f18275a55f48ea01c95a07bf92d6283687ab2495f1573a26",
+        "runtime.vbca.schema": "fec20d7b3f8d1b81aff66c6c1181be574963779f7eacaf65660f8ab9127fca87"
+      },
+      "test_results": [
+        "test result: FAILED. 14 passed; 1 failed; 0 ignored; 0 measured; 1216 filtered out; finished in 143.25s"
+      ],
+      "repository_log": "docs/architecture/evidence/registry-forward-payload/predeclaration-output.txt"
+    },
+    "focused": {
+      "source_commit": "b57ddd40f9b5bd16b4af56fd0ab5567de46b8a4b",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "--manifest-path",
+        "/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/Cargo.toml",
+        "-p",
+        "verum_compiler",
+        "--lib",
+        "project_forward_payload_tests::",
+        "--",
+        "--test-threads=1",
+        "--nocapture"
+      ],
+      "environment": {
+        "CARGO_TARGET_DIR": "/Users/taaliman/.tmp/verum-codex-01a10248/native-target",
+        "CARGO_INCREMENTAL": "0",
+        "CARGO_BUILD_JOBS": "2",
+        "VERUM_NO_AUTO_PRECOMPILE": "1",
+        "VERUM_LLVM_DIR": "/Users/taaliman/projects/oldman/verum-lang/verum/llvm/install",
+        "RUST_MIN_STACK": "16777216"
+      },
+      "timeout_seconds": 900,
+      "scope": "Rust compiler parsed-project/source-phase controls; no ordinary CLI, automatic bake or AOT",
+      "artifacts_before": {
+        "runtime.vbca": "6fb275b7346f230a9daa984febc28deced634a5ace38f1b7f4df6c5f0e667e92",
+        "runtime.core_metadata": "f6730833fc38cb3acf2fc27954b674471bde598e56cda57db67de06a84cb358c",
+        "runtime.symbol_graph": "661d9b60537c74ca0cb8be0704ed16e0f24d6a78ab19aedda340ce44d41dcb58",
+        "runtime.vbca.checksum": "f677d0e37c8e35b3f18275a55f48ea01c95a07bf92d6283687ab2495f1573a26",
+        "runtime.vbca.schema": "fec20d7b3f8d1b81aff66c6c1181be574963779f7eacaf65660f8ab9127fca87"
+      },
+      "source_paths": {
+        "crates/verum_compiler/src/pipeline.rs": "7b00cf717ff4ab20ba472b7b5bca48ca46e6db4d43be1b6cc7c1d43bd4804c94",
+        "crates/verum_compiler/src/pipeline/compile_orchestration.rs": "66f63699e116a48282d083262499db6e06ef34a514a27f93a799fdd57c55d529",
+        "crates/verum_compiler/src/pipeline/cross_file.rs": "beb4af82de796b8fefa70a88bc14b4241982a7bf764644dbdb3d540ba35c77af",
+        "crates/verum_compiler/tests/unit/project_forward_payloads.rs": "9e9573370d7bed9ec65d9d90b12602a852001a8218bf0f2d3b7aa5b12ab93d55",
+        "crates/verum_types/src/infer/modules.rs": "372f210b60737c9622227141b333b46de1db56d890a972c0caa012036f6c03d7",
+        "crates/verum_types/src/infer/decls.rs": "38387bfcda701e645901a24d9d42219a2ac972a7886c5826a9952f8ec5ac61ec"
+      },
+      "exit_code": 0,
+      "wall_seconds": 259.064,
+      "failure": null,
+      "source_unchanged": true,
+      "log_sha256": "30d7440df9c9f7bd4c80e40abd067e7b2cd3e97196ebf2ad0610251eab71e79c",
+      "source_paths_unchanged": true,
+      "executables": {
+        "/Users/taaliman/.tmp/verum-codex-01a10248/native-target/debug/build/verum_compiler/c6ca94c7409ab771/out/verum_compiler-c6ca94c7409ab771": "9a9144cfa485e11bd871ab572b14129601d5506bd5b53e27652ff571dd750441"
+      },
+      "artifacts_after": {
+        "runtime.vbca": "6fb275b7346f230a9daa984febc28deced634a5ace38f1b7f4df6c5f0e667e92",
+        "runtime.core_metadata": "f6730833fc38cb3acf2fc27954b674471bde598e56cda57db67de06a84cb358c",
+        "runtime.symbol_graph": "661d9b60537c74ca0cb8be0704ed16e0f24d6a78ab19aedda340ce44d41dcb58",
+        "runtime.vbca.checksum": "f677d0e37c8e35b3f18275a55f48ea01c95a07bf92d6283687ab2495f1573a26",
+        "runtime.vbca.schema": "fec20d7b3f8d1b81aff66c6c1181be574963779f7eacaf65660f8ab9127fca87"
+      },
+      "test_results": [
+        "test result: ok. 14 passed; 0 failed; 1 ignored; 0 measured; 1216 filtered out; finished in 134.77s"
+      ],
+      "repository_log": "docs/architecture/evidence/registry-forward-payload/focused-output.txt"
+    },
+    "known-owner": {
+      "source_commit": "b57ddd40f9b5bd16b4af56fd0ab5567de46b8a4b",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "--manifest-path",
+        "/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/Cargo.toml",
+        "-p",
+        "verum_compiler",
+        "--lib",
+        "project_forward_payload_tests::project_absent_qualified_owner",
+        "--",
+        "--ignored",
+        "--test-threads=1",
+        "--nocapture"
+      ],
+      "environment": {
+        "CARGO_TARGET_DIR": "/Users/taaliman/.tmp/verum-codex-01a10248/native-target",
+        "CARGO_INCREMENTAL": "0",
+        "CARGO_BUILD_JOBS": "2",
+        "VERUM_NO_AUTO_PRECOMPILE": "1",
+        "VERUM_LLVM_DIR": "/Users/taaliman/projects/oldman/verum-lang/verum/llvm/install",
+        "RUST_MIN_STACK": "16777216"
+      },
+      "timeout_seconds": 900,
+      "scope": "Rust compiler parsed-project/source-phase controls; no ordinary CLI, automatic bake or AOT",
+      "artifacts_before": {
+        "runtime.vbca": "6fb275b7346f230a9daa984febc28deced634a5ace38f1b7f4df6c5f0e667e92",
+        "runtime.core_metadata": "f6730833fc38cb3acf2fc27954b674471bde598e56cda57db67de06a84cb358c",
+        "runtime.symbol_graph": "661d9b60537c74ca0cb8be0704ed16e0f24d6a78ab19aedda340ce44d41dcb58",
+        "runtime.vbca.checksum": "f677d0e37c8e35b3f18275a55f48ea01c95a07bf92d6283687ab2495f1573a26",
+        "runtime.vbca.schema": "fec20d7b3f8d1b81aff66c6c1181be574963779f7eacaf65660f8ab9127fca87"
+      },
+      "source_paths": {
+        "crates/verum_compiler/src/pipeline.rs": "7b00cf717ff4ab20ba472b7b5bca48ca46e6db4d43be1b6cc7c1d43bd4804c94",
+        "crates/verum_compiler/src/pipeline/compile_orchestration.rs": "66f63699e116a48282d083262499db6e06ef34a514a27f93a799fdd57c55d529",
+        "crates/verum_compiler/src/pipeline/cross_file.rs": "beb4af82de796b8fefa70a88bc14b4241982a7bf764644dbdb3d540ba35c77af",
+        "crates/verum_compiler/tests/unit/project_forward_payloads.rs": "9e9573370d7bed9ec65d9d90b12602a852001a8218bf0f2d3b7aa5b12ab93d55",
+        "crates/verum_types/src/infer/modules.rs": "372f210b60737c9622227141b333b46de1db56d890a972c0caa012036f6c03d7",
+        "crates/verum_types/src/infer/decls.rs": "38387bfcda701e645901a24d9d42219a2ac972a7886c5826a9952f8ec5ac61ec"
+      },
+      "exit_code": 101,
+      "wall_seconds": 125.48,
+      "failure": null,
+      "source_unchanged": true,
+      "log_sha256": "53a3f0861a47f721239ddd136326ccbfd87a9d12f3d7900d454ef5ea6cf0315f",
+      "source_paths_unchanged": true,
+      "executables": {
+        "/Users/taaliman/.tmp/verum-codex-01a10248/native-target/debug/build/verum_compiler/c6ca94c7409ab771/out/verum_compiler-c6ca94c7409ab771": "9a9144cfa485e11bd871ab572b14129601d5506bd5b53e27652ff571dd750441"
+      },
+      "artifacts_after": {
+        "runtime.vbca": "6fb275b7346f230a9daa984febc28deced634a5ace38f1b7f4df6c5f0e667e92",
+        "runtime.core_metadata": "f6730833fc38cb3acf2fc27954b674471bde598e56cda57db67de06a84cb358c",
+        "runtime.symbol_graph": "661d9b60537c74ca0cb8be0704ed16e0f24d6a78ab19aedda340ce44d41dcb58",
+        "runtime.vbca.checksum": "f677d0e37c8e35b3f18275a55f48ea01c95a07bf92d6283687ab2495f1573a26",
+        "runtime.vbca.schema": "fec20d7b3f8d1b81aff66c6c1181be574963779f7eacaf65660f8ab9127fca87"
+      },
+      "test_results": [
+        "test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 1230 filtered out; finished in 11.97s"
+      ],
+      "repository_log": "docs/architecture/evidence/registry-forward-payload/known-owner-output.txt"
+    },
+    "external-cogs": {
+      "source_commit": "b57ddd40f9b5bd16b4af56fd0ab5567de46b8a4b",
+      "command": [
+        "/Users/taaliman/.tmp/verum-codex-01a10248/native-target/debug/build/verum_compiler/c6ca94c7409ab771/out/verum_compiler-c6ca94c7409ab771",
+        "external_cog_source_tests::",
+        "--test-threads=1",
+        "--nocapture"
+      ],
+      "environment": {
+        "RUST_MIN_STACK": "16777216",
+        "VERUM_NO_AUTO_PRECOMPILE": "1",
+        "CARGO_TARGET_DIR": "/Users/taaliman/.tmp/verum-codex-01a10248/native-target"
+      },
+      "timeout_seconds": 600,
+      "scope": "Direct execution of the hash-pinned Rust compiler test executable, built from unchanged final source. No Cargo invocation, ordinary CLI, bake or AOT.",
+      "executable_built_by": [
+        "cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "--manifest-path",
+        "/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/Cargo.toml",
+        "-p",
+        "verum_compiler",
+        "--lib",
+        "project_forward_payload_tests::project_absent_qualified_owner",
+        "--",
+        "--ignored",
+        "--test-threads=1",
+        "--nocapture"
+      ],
+      "executable_build_receipt": "/private/tmp/verum-T1677-known-owner/result.json",
+      "source_paths": {
+        "crates/verum_compiler/src/pipeline.rs": "7b00cf717ff4ab20ba472b7b5bca48ca46e6db4d43be1b6cc7c1d43bd4804c94",
+        "crates/verum_compiler/src/pipeline/compile_orchestration.rs": "66f63699e116a48282d083262499db6e06ef34a514a27f93a799fdd57c55d529",
+        "crates/verum_compiler/src/pipeline/cross_file.rs": "beb4af82de796b8fefa70a88bc14b4241982a7bf764644dbdb3d540ba35c77af",
+        "crates/verum_compiler/tests/unit/project_forward_payloads.rs": "9e9573370d7bed9ec65d9d90b12602a852001a8218bf0f2d3b7aa5b12ab93d55",
+        "crates/verum_types/src/infer/modules.rs": "372f210b60737c9622227141b333b46de1db56d890a972c0caa012036f6c03d7",
+        "crates/verum_types/src/infer/decls.rs": "38387bfcda701e645901a24d9d42219a2ac972a7886c5826a9952f8ec5ac61ec"
+      },
+      "artifacts_before": {
+        "runtime.vbca": "6fb275b7346f230a9daa984febc28deced634a5ace38f1b7f4df6c5f0e667e92",
+        "runtime.core_metadata": "f6730833fc38cb3acf2fc27954b674471bde598e56cda57db67de06a84cb358c",
+        "runtime.symbol_graph": "661d9b60537c74ca0cb8be0704ed16e0f24d6a78ab19aedda340ce44d41dcb58",
+        "runtime.vbca.checksum": "f677d0e37c8e35b3f18275a55f48ea01c95a07bf92d6283687ab2495f1573a26",
+        "runtime.vbca.schema": "fec20d7b3f8d1b81aff66c6c1181be574963779f7eacaf65660f8ab9127fca87"
+      },
+      "exit_code": 0,
+      "wall_seconds": 107.579,
+      "failure": null,
+      "source_unchanged": true,
+      "log_sha256": "615f31f8e4a68286c63c272cd96db076cb4601aaee8f5cec118ffd78b314ca0f",
+      "executables": {
+        "/Users/taaliman/.tmp/verum-codex-01a10248/native-target/debug/build/verum_compiler/c6ca94c7409ab771/out/verum_compiler-c6ca94c7409ab771": "9a9144cfa485e11bd871ab572b14129601d5506bd5b53e27652ff571dd750441"
+      },
+      "test_results": [
+        "test result: ok. 18 passed; 0 failed; 0 ignored; 0 measured; 1213 filtered out; finished in 107.51s"
+      ],
+      "source_paths_unchanged": true,
+      "artifacts_after": {
+        "runtime.vbca": "6fb275b7346f230a9daa984febc28deced634a5ace38f1b7f4df6c5f0e667e92",
+        "runtime.core_metadata": "f6730833fc38cb3acf2fc27954b674471bde598e56cda57db67de06a84cb358c",
+        "runtime.symbol_graph": "661d9b60537c74ca0cb8be0704ed16e0f24d6a78ab19aedda340ce44d41dcb58",
+        "runtime.vbca.checksum": "f677d0e37c8e35b3f18275a55f48ea01c95a07bf92d6283687ab2495f1573a26",
+        "runtime.vbca.schema": "fec20d7b3f8d1b81aff66c6c1181be574963779f7eacaf65660f8ab9127fca87"
+      },
+      "repository_log": "docs/architecture/evidence/registry-forward-payload/external-cogs-output.txt"
+    }
+  },
+  "target_release": {
+    "target": "/Users/taaliman/.tmp/verum-codex-01a10248/native-target",
+    "source": "b57ddd40f9b5bd16b4af56fd0ab5567de46b8a4b",
+    "active_target_processes": [],
+    "last_gate": "/private/tmp/verum-T1677-external-cogs/result.json",
+    "released": true
+  }
+}

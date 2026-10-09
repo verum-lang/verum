@@ -1,0 +1,23 @@
+
+running 18 tests
+test pipeline::external_cog_source_tests::an_empty_source_cog_is_not_a_successful_load ... ok
+test pipeline::external_cog_source_tests::canonical_manifest_keeps_project_check_and_probe_enabled ... ok
+test pipeline::external_cog_source_tests::colliding_dependency_module_files_are_an_error ... ok
+test pipeline::external_cog_source_tests::dependency_body_errors_keep_the_physical_source_path ... ok
+test pipeline::external_cog_source_tests::dependency_does_not_publish_its_private_function ... ok
+test pipeline::external_cog_source_tests::explicit_source_root_preserves_a_nested_src_module ... ok
+test pipeline::external_cog_source_tests::isolated_project_probe_keeps_dependencies_and_leaves_parent_symbols_alone ... ok
+test pipeline::external_cog_source_tests::malformed_dependency_source_is_an_error ... ok
+test pipeline::external_cog_source_tests::missing_registered_source_directory_is_an_error ... ok
+test pipeline::external_cog_source_tests::module_loader_uses_the_same_package_source_root ... ok
+test pipeline::external_cog_source_tests::package_directory_does_not_add_a_src_module_segment ... ok
+test pipeline::external_cog_source_tests::package_root_preserves_a_nested_src_module ... ok
+test pipeline::external_cog_source_tests::project_check_refuses_a_private_dependency_mount ... ok
+test pipeline::external_cog_source_tests::project_check_uses_the_registered_dependency_signature ... ok
+test pipeline::external_cog_source_tests::reloading_the_same_source_cog_is_idempotent ... ok
+test pipeline::external_cog_source_tests::source_directory_loads_the_declared_public_function ... ok
+test pipeline::external_cog_source_tests::source_loader_leaves_precompiled_cogs_to_the_archive_path ... ok
+test pipeline::external_cog_source_tests::unreadable_text_in_a_dependency_is_a_load_error ... ok
+
+test result: ok. 18 passed; 0 failed; 0 ignored; 0 measured; 1213 filtered out; finished in 107.51s
+

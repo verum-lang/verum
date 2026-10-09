@@ -550,3 +550,51 @@ The reviewed chain rebased onto documentation-only main `fae253d0f` with source
 commit `28b59011d`. Its complete type-crate tree is byte-identical to executed
 `3821b1961`; both original branches and the preceding registry project receipt
 are retained. CI's `unit` and `integration` type-system jobs include these controls.
+
+
+### Forward payload registration in source projects
+
+The bounded T1677 repair declares every local type name before registering
+source-module type bodies in `check_project` and `analyze_module`. It keeps
+strict body registration and its diagnostics. A sum can therefore refer to a
+record declared later in the same module without reordering the source.
+The standalone checker already performed this name prepass.
+
+The [executable receipt](evidence/registry-forward-payload-gate.json) retains
+five complete logs, source and executable hashes, commands, bounds, and
+unchanged embedded artifact hashes. The source baseline is `d9394775e`;
+production predeclaration is `3370c341d`; final tested source is `b57ddd40f`.
+
+| Gate | Observed result |
+| --- | --- |
+| Original parsed project/source-phase controls | 8 passed, 7 failed |
+| Identical controls after predeclaration | 14 passed, 1 failed |
+| Final default controls | 14 passed, 1 known T0811 ignore |
+| Strict T0811 oracle run separately with `--ignored` | 0 passed, 1 failed |
+| Adjacent source-cog/project controls | 18 passed, 0 failed |
+
+The six repaired cases cover one-file project checking, source-module
+analysis, sum-only imports, both explicit sum/payload mount orders, and generic
+payload arguments. Reordered declarations, the standalone checker, and inline
+record variants also pass. Missing unqualified payloads, wrong generic
+arguments, private mounts, and same-shaped payloads from a different declaring
+module remain rejected. The controls run in the unit CI job through
+`cargo test --workspace --lib --bins --locked`.
+
+The qualified-owner requirement remains unmet: `Data(absent.Payload)` is still
+accepted even when `absent` declares nothing. The strict E101 assertion is
+retained with an explicit T0811 ignore marker, and both the original and fixed
+failures are recorded. No qualified-path resolver repair is claimed; T1677's
+broader acceptance remains open alongside T0811.
+
+These are Rust compiler/checker gates using the existing stage17/stage16
+artifact trio with automatic precompilation disabled. The adjacent group
+executes the same hash-pinned test binary directly. Production changes are
+limited to two compiler registration paths; the typechecker, source import
+helper, archive producer and schema are unchanged. Ordinary CLI replay of the
+unchanged registry component remains a separate root-owned gate, as do T1666
+runtime acceptance, AOT, authenticated publication and durable service behavior.
+
+The five raw output files preserve their original bytes, including Cargo
+whitespace; only those files are excluded from range whitespace checks.
+Production code, tests, JSON and this prose remain checked.
