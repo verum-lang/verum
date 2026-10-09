@@ -306,3 +306,15 @@ fn probe() -> Int {
         536148,
     );
 }
+
+#[test]
+fn borrowed_by_value_numeric_method_receives_the_value_not_the_reference_tag() {
+    check(
+        r#"
+implement USize { fn owner_copy(self) -> Int { (self as Int) + 13 } }
+fn read(value: &USize) -> Int { value.owner_copy() }
+fn probe() -> Int { let value: USize = 29; read(&value) }
+"#,
+        42,
+    );
+}

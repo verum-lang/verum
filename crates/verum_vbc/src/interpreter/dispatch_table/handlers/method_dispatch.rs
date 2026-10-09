@@ -5459,9 +5459,12 @@ pub(super) fn dispatch_primitive_method(
     // In particular two declarations can share an integer carrier while one
     // returns a List and the other a packed fixed array.
     if method.contains('.')
-        && (receiver.is_int() || receiver.is_float())
+        && (receiver.is_int() || receiver.is_float() || is_cbgr_ref(receiver))
         && let Some(fid) = state.module.find_function_by_name(method)
         && let Some(function) = state.module.get_function(fid)
+        // The legacy lookup also permits suffixes. Such a match is not an
+        // exact declaration and cannot gain precedence over this receiver.
+        && state.module.get_string(function.name) == Some(method)
         && function.bytecode_length > 0
         && function.params.len() == usize::from(args.count) + 1
         && let Some(parameter) = function.params.first()
