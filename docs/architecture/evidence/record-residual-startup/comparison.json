@@ -1,0 +1,25 @@
+{
+  "task": "T1688",
+  "related": "T1687",
+  "same_fixture_sha256": "5a53892923f88e84300a9133216913bd8300728629c4788893fb952b4d565e2a",
+  "runs": [
+    {
+      "stage": "stage18",
+      "language_commit": "faabbe696f1ee928f6b3a9bb6c7980ba20577513",
+      "elapsed_seconds": 58.299,
+      "returncode": 1,
+      "status": "failed",
+      "exact_stdout": false
+    },
+    {
+      "stage": "stage19",
+      "language_commit": "22a061ae654af44e752a6d31840614c734773bfa",
+      "elapsed_seconds": 62.767,
+      "returncode": 1,
+      "status": "failed",
+      "exact_stdout": false
+    }
+  ],
+  "observed_failure": "VBC global_ctors NullPointerAt: opcode 0x62, ArenaPool.new, pc27",
+  "scope": "Both standalone runs fail before main with empty stdout. The startup failure predates T1684; neither run provides a residual-propagation verdict. No startup bypass or production repair attempted."
+}

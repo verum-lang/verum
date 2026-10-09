@@ -1,0 +1,2 @@
+     Running /private/tmp/verum-record-residual-stage18/verum-record-residual-probe/verum-record-residual-probe.vr (interpreter)
+error: VBC global_ctors error: NullPointerAt { op: "opcode 0x62", site: "ArenaPool.new", pc: 27 }

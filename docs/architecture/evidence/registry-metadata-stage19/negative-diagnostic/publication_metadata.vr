@@ -1,0 +1,276 @@
+// T1666: the production envelope and strict JSON schema form one decode path.
+module verum_registry.tests.publication_metadata;
+
+mount core.encoding.json.JsonErrorKind;
+mount verum_registry.protocol.publication.{EnvelopeError, publication_limits};
+mount verum_registry.protocol.publication_metadata.{
+    DecodedDependency, DecodedDependencyOptions, DecodedSourceMetadata,
+    MetadataError, PublicationDecodeError, decode_source_metadata, decode_publication,
+};
+
+fn baseline() -> Text {
+    """{"name":"codec","version":"1.2.3","description":null,"authors":[],"license":null,"repository":null,"homepage":null,"keywords":[],"categories":[],"readme":null,"dependencies":{},"features":{},"checksum":"0000000000000000000000000000000000000000000000000000000000000000"}"""
+}
+
+fn changed(before: &Text, after: &Text) -> Text {
+    let source = baseline();
+    assert(source.contains(before));
+    source.replace(before, after)
+}
+
+fn dependency_document(specification: &Text) -> Text {
+    changed(&"\"dependencies\":{}", &f"\"dependencies\":{{\"codec\":{specification}}}")
+}
+
+fn decoded(source: &Text) -> DecodedSourceMetadata {
+    match decode_source_metadata(source, 1048576) {
+        Result.Ok(value) => value,
+        Result.Err(_) => panic("source schema positive must decode"),
+    }
+}
+
+fn failure(source: &Text) -> MetadataError {
+    match decode_source_metadata(source, 1048576) {
+        Result.Ok(_) => panic(f"source schema negative was accepted: {source}"),
+        Result.Err(error) => error,
+    }
+}
+
+fn wrong(source: &Text, path: &Text, expected: &Text) {
+    match failure(source) {
+        MetadataError.WrongType(actual_path, actual_type) => {
+            assert_eq(actual_path, path);
+            assert_eq(actual_type, expected);
+        },
+        _ => panic("expected a typed schema refusal"),
+    }
+}
+
+fn expect_unknown(source: &Text, path: &Text) {
+    match failure(source) {
+        MetadataError.UnknownField(actual) => assert_eq(actual, path),
+        _ => panic("expected an unknown field refusal"),
+    }
+}
+
+fn duplicate(source: &Text) {
+    match failure(source) {
+        MetadataError.Syntax(error) => assert(error.kind is JsonErrorKind.DuplicateKey),
+        _ => panic("duplicate key must retain strict parser error"),
+    }
+}
+
+fn options(metadata: &DecodedSourceMetadata) -> DecodedDependencyOptions {
+    match metadata.dependencies.get(&"codec") {
+        Maybe.Some(DecodedDependency.Detailed(value)) => value,
+        _ => panic("expected detailed dependency form"),
+    }
+}
+
+fn schema_values() {
+    let value = decoded(&baseline());
+    assert_eq(value.name_spelling, "codec");
+    assert_eq(value.version_spelling, "1.2.3");
+    assert(value.description is Maybe.None);
+    assert(value.license is Maybe.None);
+    assert(value.repository is Maybe.None);
+    assert(value.homepage is Maybe.None);
+    assert(value.readme is Maybe.None);
+    assert_eq(value.authors.len(), 0);
+    assert_eq(value.keywords.len(), 0);
+    assert_eq(value.categories.len(), 0);
+    assert_eq(value.dependencies.len(), 0);
+    assert_eq(value.features.len(), 0);
+    assert_eq(value.checksum_spelling, "0000000000000000000000000000000000000000000000000000000000000000");
+
+    let source = baseline()
+        .replace(&"\"description\":null", &"\"description\":\"λ codec\"")
+        .replace(&"\"authors\":[]", &"\"authors\":[\"A\",\"B\"]")
+        .replace(&"\"license\":null", &"\"license\":\"MIT\"")
+        .replace(&"\"repository\":null", &"\"repository\":\"https://example.invalid/code\"")
+        .replace(&"\"homepage\":null", &"\"homepage\":\"https://example.invalid\"")
+        .replace(&"\"keywords\":[]", &"\"keywords\":[\"json\"]")
+        .replace(&"\"categories\":[]", &"\"categories\":[\"encoding\"]")
+        .replace(&"\"readme\":null", &"\"readme\":\"source content\"")
+        .replace(&"\"features\":{}", &"\"features\":{\"default\":[\"fast\"],\"fast\":[]}");
+    let full = decoded(&source);
+    match full.description { Maybe.Some(text) => assert_eq(text, "λ codec"), _ => panic("description") }
+    match full.license { Maybe.Some(text) => assert_eq(text, "MIT"), _ => panic("license") }
+    match full.repository { Maybe.Some(text) => assert_eq(text, "https://example.invalid/code"), _ => panic("repository") }
+    match full.homepage { Maybe.Some(text) => assert_eq(text, "https://example.invalid"), _ => panic("homepage") }
+    match full.readme { Maybe.Some(text) => assert_eq(text, "source content"), _ => panic("readme") }
+    assert_eq(full.authors.len(), 2);
+    assert_eq(full.authors[0], "A");
+    assert_eq(full.authors[1], "B");
+    assert_eq(full.keywords[0], "json");
+    assert_eq(full.categories[0], "encoding");
+    match full.features.get(&"default") {
+        Maybe.Some(members) => { assert_eq(members.len(), 1); assert_eq(members[0], "fast"); },
+        _ => panic("default feature members"),
+    }
+    match full.features.get(&"fast") {
+        Maybe.Some(members) => assert_eq(members.len(), 0),
+        _ => panic("empty feature members"),
+    }
+
+    let simple = decoded(&dependency_document(&"\"*\""));
+    match simple.dependencies.get(&"codec") {
+        Maybe.Some(DecodedDependency.Requirement(text)) => assert_eq(text, "*"),
+        _ => panic("simple dependency form was lost"),
+    }
+    let omitted = options(&decoded(&dependency_document(&"""{"version":"^1"}""")));
+    let nulls = options(&decoded(&dependency_document(&"""{"version":"^1","features":null,"optional":null,"default_features":null}""")));
+    assert_eq(omitted.version_spelling, "^1");
+    assert(omitted.features is Maybe.None);
+    assert(omitted.optional is Maybe.None);
+    assert(omitted.default_features is Maybe.None);
+    assert(nulls.features is Maybe.None);
+    assert(nulls.optional is Maybe.None);
+    assert(nulls.default_features is Maybe.None);
+    let explicit = options(&decoded(&dependency_document(&"""{"version":">=1, <3","features":[],"optional":false,"default_features":false}""")));
+    assert_eq(explicit.version_spelling, ">=1, <3");
+    assert(explicit.optional is Maybe.Some(false));
+    assert(explicit.default_features is Maybe.Some(false));
+    match explicit.features { Maybe.Some(values) => assert_eq(values.len(), 0), _ => panic("explicit empty features") }
+    let enabled = options(&decoded(&dependency_document(&"""{"version":"*","features":["decode"],"optional":true,"default_features":true}""")));
+    assert(enabled.optional is Maybe.Some(true));
+    assert(enabled.default_features is Maybe.Some(true));
+    match enabled.features { Maybe.Some(values) => assert_eq(values[0], "decode"), _ => panic("explicit feature") }
+
+    // These are unvalidated source spellings, so shape decoding deliberately
+    // makes no name, semantic version, or archive digest admission claim.
+    let source_only = decoded(&baseline()
+        .replace(&"\"codec\"", &"\"../not-an-admitted-name\"")
+        .replace(&"\"1.2.3\"", &"\"not-an-exact-version\"")
+        .replace(&"0000000000000000000000000000000000000000000000000000000000000000", &"not-a-digest"));
+    assert_eq(source_only.name_spelling, "../not-an-admitted-name");
+    assert_eq(source_only.version_spelling, "not-an-exact-version");
+    assert_eq(source_only.checksum_spelling, "not-a-digest");
+}
+
+fn schema_refusals() {
+    let fields: List<(Text, Text)> = [
+        ("name", "\"codec\""), ("version", "\"1.2.3\""),
+        ("description", "null"), ("authors", "[]"), ("license", "null"),
+        ("repository", "null"), ("homepage", "null"), ("keywords", "[]"),
+        ("categories", "[]"), ("readme", "null"), ("dependencies", "{}"), ("features", "{}"),
+    ];
+    for (key, encoded) in fields {
+        let absent = changed(&f"\"{key}\":{encoded},", &"");
+        match failure(&absent) {
+            MetadataError.MissingField(actual) => assert_eq(actual, key),
+            _ => panic("every top-level field is required"),
+        }
+    }
+    let no_checksum = changed(&",\"checksum\":\"0000000000000000000000000000000000000000000000000000000000000000\"", &"");
+    assert(failure(&no_checksum) is MetadataError.MissingField("checksum"));
+
+    wrong(&"[]", &"$", &"object");
+    wrong(&changed(&"\"name\":\"codec\"", &"\"name\":false"), &"name", &"string");
+    wrong(&changed(&"\"version\":\"1.2.3\"", &"\"version\":1"), &"version", &"string");
+    wrong(&changed(&"\"checksum\":\"0000000000000000000000000000000000000000000000000000000000000000\"", &"\"checksum\":null"), &"checksum", &"string");
+    for key in ["description", "license", "repository", "homepage", "readme"] {
+        wrong(&changed(&f"\"{key}\":null", &f"\"{key}\":1"), &key, &"string or null");
+    }
+    for key in ["authors", "keywords", "categories"] {
+        wrong(&changed(&f"\"{key}\":[]", &f"\"{key}\":null"), &key, &"array of strings");
+        wrong(&changed(&f"\"{key}\":[]", &f"\"{key}\":[false]"), &f"{key}[0]", &"string");
+    }
+    wrong(&changed(&"\"dependencies\":{}", &"\"dependencies\":[]"), &"dependencies", &"object");
+    wrong(&changed(&"\"features\":{}", &"\"features\":[]"), &"features", &"object");
+    wrong(&changed(&"\"features\":{}", &"\"features\":{\"default\":false}"), &"features.default", &"array of strings");
+    wrong(&changed(&"\"features\":{}", &"\"features\":{\"default\":[1]}"), &"features.default[0]", &"string");
+    for key in ["authority", "as_authority", "published_at", "signature", "proofs", "artifacts", "cbgr_profiles", "ipfs_hash", "unknown"] {
+        expect_unknown(&changed(&"\"name\":", &f"\"{key}\":null,\"name\":"), &key);
+    }
+
+    wrong(&dependency_document(&"false"), &"dependencies.codec", &"string or object");
+    assert(failure(&dependency_document(&"{}")) is MetadataError.MissingField("dependencies.codec.version"));
+    wrong(&dependency_document(&"""{"version":null}"""), &"dependencies.codec.version", &"string");
+    wrong(&dependency_document(&"""{"version":"*","features":false}"""), &"dependencies.codec.features", &"array of strings");
+    wrong(&dependency_document(&"""{"version":"*","features":[false]}"""), &"dependencies.codec.features[0]", &"string");
+    wrong(&dependency_document(&"""{"version":"*","optional":"true"}"""), &"dependencies.codec.optional", &"boolean or null");
+    wrong(&dependency_document(&"""{"version":"*","default_features":0}"""), &"dependencies.codec.default_features", &"boolean or null");
+    for key in ["path", "git", "branch", "tag", "rev", "registry", "package", "workspace", "default-features", "optonal"] {
+        expect_unknown(&dependency_document(&f"{{\"version\":\"*\",\"{key}\":null}}"), &f"dependencies.codec.{key}");
+    }
+}
+
+fn strict_parser_boundary() {
+    duplicate(&changed(&"\"name\":\"codec\"", &"\"name\":\"codec\",\"name\":\"other\""));
+    duplicate(&changed(&"\"name\":\"codec\"", &"\"name\":\"codec\",\"\\u006eame\":\"other\""));
+    duplicate(&dependency_document(&"""{"version":"*","\u0076ersion":"^1"}"""));
+    duplicate(&changed(&"\"features\":{}", &"\"features\":{\"default\":[],\"\\u0064efault\":[]}"));
+    let independent = baseline()
+        .replace(&"\"dependencies\":{}", &"\"dependencies\":{\"default\":\"*\"}")
+        .replace(&"\"features\":{}", &"\"features\":{\"default\":[]}");
+    assert_eq(decoded(&independent).dependencies.len(), 1);
+    let escaped = changed(&"\"name\":", &"\"\\u006eame\":");
+    assert_eq(decoded(&escaped).name_spelling, "codec");
+    match decode_source_metadata(&baseline(), 0) {
+        Result.Err(MetadataError.Syntax(error)) => assert(error.kind is JsonErrorKind.DocumentTooLarge),
+        _ => panic("schema decoder must apply its document bound"),
+    }
+    match failure(&(baseline() + " trailing")) {
+        MetadataError.Syntax(error) => assert(error.kind is JsonErrorKind.TrailingGarbage),
+        _ => panic("schema decoder must consume the complete document"),
+    }
+}
+
+fn frame(source: &Text) -> List<Byte> {
+    let bytes = source.as_bytes();
+    let mut result: List<Byte> = List.new();
+    let mut length = bytes.len();
+    let mut width = 0;
+    while width < 4 {
+        result.push((length % 256) as Byte);
+        length = length / 256;
+        width = width + 1;
+    }
+    let mut index = 0;
+    while index < bytes.len() {
+        result.push(bytes[index]);
+        index = index + 1;
+    }
+    for byte in [5_u8, 0_u8, 0_u8, 0_u8, 0_u8, 0_u8, 0_u8, 0_u8] {
+        result.push(byte);
+    }
+    for byte in [31_u8, 139_u8, 0_u8, 255_u8, 13_u8] {
+        result.push(byte);
+    }
+    result
+}
+
+fn envelope_composition() {
+    let source = changed(&"\"description\":null", &"\"description\":\"λ\"");
+    let mut body = frame(&source);
+    let bounds = match publication_limits(source.as_bytes().len(), 5) {
+        Result.Ok(value) => value, _ => panic("fixture bounds"),
+    };
+    let decoded_body = match decode_publication(&body, &bounds) {
+        Result.Ok(value) => value, _ => panic("framing and schema must compose"),
+    };
+    assert_eq(decoded_body.metadata.name_spelling, "codec");
+    match decoded_body.metadata.description { Maybe.Some(value) => assert_eq(value, "λ"), _ => panic("UTF-8 metadata") }
+    assert_eq(decoded_body.archive.len(), 5);
+    assert_eq(decoded_body.archive[0], 31_u8);
+    assert_eq(decoded_body.archive[1], 139_u8);
+    assert_eq(decoded_body.archive[2], 0_u8);
+    assert_eq(decoded_body.archive[3], 255_u8);
+    assert_eq(decoded_body.archive[4], 13_u8);
+    body.push(0_u8);
+    assert(decode_publication(&body, &bounds) is Result.Err(PublicationDecodeError.Envelope(EnvelopeError.TrailingBytes)));
+    let mut invalid_utf8 = frame(&source);
+    invalid_utf8[4] = 255_u8;
+    assert(decode_publication(&invalid_utf8, &bounds) is Result.Err(PublicationDecodeError.Envelope(EnvelopeError.InvalidUtf8)));
+    let malformed = frame(&"[]");
+    assert(decode_publication(&malformed, &bounds) is Result.Err(PublicationDecodeError.Metadata(MetadataError.WrongType("$", "object"))));
+}
+
+fn main() {
+    schema_values();
+    schema_refusals();
+    strict_parser_boundary();
+    envelope_composition();
+    print("publication_metadata: passed");
+}

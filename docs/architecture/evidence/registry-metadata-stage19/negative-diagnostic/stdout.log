@@ -1,0 +1,2 @@
+panic: 
+source schema negative was accepted: {"name":"codec","version":"1.2.3","authors":[],"license":null,"repository":null,"homepage":null,"keywords":[],"categories":[],"readme":null,"dependencies":{},"features":{},"checksum":"0000000000000000000000000000000000000000000000000000000000000000"}
