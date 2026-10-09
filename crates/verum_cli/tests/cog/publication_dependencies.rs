@@ -3,7 +3,7 @@
 
 use super::{create_metadata, publish_with_signing_keys};
 use crate::config::Manifest;
-use crate::error::Result;
+use crate::error::{CliError, Result};
 use crate::registry::CogMetadata;
 use sha2::{Digest, Sha256};
 use std::io::{Read, Write};
@@ -130,6 +130,47 @@ fn invalid_or_duplicate_default_feature_options_are_not_ignored() {
 }
 
 #[test]
+fn unknown_dependency_intent_is_refused_by_manifest_loading() {
+    let project = TempDir::new().unwrap();
+    let manifest_path = project.path().join("verum.toml");
+    for intent in [
+        r#"registry = "private-registry""#,
+        r#"package = "other-codec""#,
+        "workspace = true",
+        r#"fetaures = ["decode"]"#,
+    ] {
+        std::fs::write(
+            &manifest_path,
+            format!(
+                "[cog]\nname = \"dependency-fixture\"\nversion = \"1.2.3\"\n\
+             [dependencies]\ncodec = {{ version = \"1\", {intent} }}\n"
+            ),
+        )
+        .unwrap();
+        let error = Manifest::from_file(&manifest_path).unwrap_err();
+        assert!(
+            matches!(error, CliError::ConfigParse(_)),
+            "{intent}: {error}"
+        );
+    }
+}
+
+#[test]
+fn unknown_registry_intent_refuses_dry_run_and_upload() {
+    child_case("unknown_registry");
+}
+
+#[test]
+fn unknown_package_alias_refuses_dry_run_and_upload() {
+    child_case("unknown_package");
+}
+
+#[test]
+fn unknown_workspace_intent_refuses_dry_run_and_upload() {
+    child_case("unknown_workspace");
+}
+
+#[test]
 fn package_publish_transmits_original_manifest_dependency_options() {
     child_case("upload");
 }
@@ -160,7 +201,7 @@ fn child_case(case: &str) {
         std::str::from_utf8(&result.stderr).unwrap()
     );
     assert!(result.status.success(), "{case}: {output}");
-    if case == "refuse" {
+    if case != "upload" {
         assert!(!output.contains("valid for publishing"), "{output}");
         assert!(!output.contains("Created cog archive"), "{output}");
     }
@@ -178,10 +219,13 @@ fn isolated_dependency_publication() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     listener.set_nonblocking(true).unwrap();
     let registry = format!("http://{}/private", listener.local_addr().unwrap());
-    let dependencies = if case == "refuse" {
-        r#"codec = { path = "../codec" }"#
-    } else {
-        DETAILED
+    let dependencies = match case.as_str() {
+        "refuse" => r#"codec = { path = "../codec" }"#,
+        "unknown_registry" => r#"codec = { version = "1", registry = "private-registry" }"#,
+        "unknown_package" => r#"codec = { version = "1", package = "other-codec" }"#,
+        "unknown_workspace" => r#"codec = { version = "1", workspace = true }"#,
+        "upload" => DETAILED,
+        _ => panic!("unknown publication fixture case: {case}"),
     };
     let manifest_bytes = format!(
         "[cog]\nname = \"{name}\"\nversion = \"1.2.3\"\n\
@@ -197,6 +241,25 @@ fn isolated_dependency_publication() {
     );
     let source_bytes = source.as_bytes();
     std::fs::write(project.path().join("src/lib.vr"), source_bytes).unwrap();
+
+    if case.starts_with("unknown_") {
+        // A mistakenly admitted upload must fail quickly at our own closed
+        // loopback port. Only ConfigParse counts as the required refusal;
+        // a network/receipt error can never make this negative control pass.
+        drop(listener);
+        for dry_run in [true, false] {
+            let result = publish_with_signing_keys(dry_run, true, &[]);
+            let archive_created = archive_path.exists();
+            let _ = std::fs::remove_file(&archive_path);
+            let error = result.unwrap_err();
+            assert!(matches!(error, CliError::ConfigParse(_)), "{case}: {error}");
+            assert!(
+                !archive_created,
+                "{case}: dependency intent vanished before publication"
+            );
+        }
+        return;
+    }
 
     if case == "refuse" {
         let result = publish_with_signing_keys(true, true, &[]);
