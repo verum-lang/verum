@@ -113,7 +113,9 @@ pub const VERSION_MAJOR: u16 = 2;
 /// The 2.20 function tail remains present; older readers must reject these opcodes.
 /// Version 2.22 adds owner-preserving, failure-atomic List storage resize.
 /// Version 2.23 carries optional declaration-owned semantic formal parameters.
-pub const VERSION_MINOR: u16 = 23;
+/// Version 2.24 gives function flag bit 3 declaration-owned body provenance.
+/// Earlier descriptors leave body presence unknown even when they contain RetV.
+pub const VERSION_MINOR: u16 = 24;
 
 /// Minor-version floors for sections whose presence readers gate on.  The
 /// register-type-hints section has been written unconditionally since minor 2,

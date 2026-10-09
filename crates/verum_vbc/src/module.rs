@@ -2554,6 +2554,11 @@ pub struct OptimizationHints {
 /// bytecode location, and optimization hints.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FunctionDescriptor {
+    /// The selected FunctionDecl has a body, including an empty block (v2.24).
+    /// This distinguishes source bodies from emitted forward-declaration stubs;
+    /// it does not prove any return storage, transfer or cleanup convention.
+    #[serde(default)]
+    pub has_source_body: bool,
     /// Body-sealed production facts, without ownership/cleanup authorization.
     #[serde(default)]
     pub value_uses: Option<crate::value_use::ValueUsePlan>,
@@ -2826,6 +2831,7 @@ pub struct RegisterTypeHint {
 impl Default for FunctionDescriptor {
     fn default() -> Self {
         Self {
+            has_source_body: false,
             value_uses: None,
             semantic_params: None,
             id: FunctionId(0),

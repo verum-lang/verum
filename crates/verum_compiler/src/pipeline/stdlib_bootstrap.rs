@@ -1228,6 +1228,7 @@ one module and therefore never seeded",
                             verum_vbc::stub_ranges::STAGE1_BASE - stubs_registered as u32,
                         );
                         let info = FunctionInfo {
+                            has_source_body: false,
                             callable_signature: None,
                             type_param_ids: Vec::new(),
                             explicit_type_param_ids: Vec::new(),
@@ -1364,6 +1365,7 @@ one module and therefore never seeded",
                         }).collect();
                         let parent_names = owner_generics.get(&target_type_name).and_then(|v| v.as_deref()).unwrap_or(&[]);
                         let info = FunctionInfo {
+                            has_source_body: func.body.is_some(),
                             callable_signature: None,
                             type_param_ids: verum_vbc::codegen::VbcCodegen::declared_type_param_ids(func, parent_names, &impl_names),
                             explicit_type_param_ids: verum_vbc::codegen::VbcCodegen::declared_explicit_type_param_ids(func, parent_names, &impl_names),
@@ -1539,6 +1541,7 @@ one module and therefore never seeded",
                             .map(|i| format!("_arg{}", i))
                             .collect();
                         let info = FunctionInfo {
+                            has_source_body: false,
                             callable_signature: None,
                             type_param_ids: Vec::new(),
                             explicit_type_param_ids: Vec::new(),
@@ -1671,6 +1674,7 @@ one module and therefore never seeded",
                         .map(|i| format!("_arg{}", i))
                         .collect();
                     let info = FunctionInfo {
+                        has_source_body: func.body.is_some(),
                         callable_signature: None,
                         type_param_ids: verum_vbc::codegen::VbcCodegen::declared_type_param_ids(func, &[], &[]),
                         explicit_type_param_ids: verum_vbc::codegen::VbcCodegen::declared_explicit_type_param_ids(func, &[], &[]),
@@ -1810,6 +1814,7 @@ one module and therefore never seeded",
                         verum_vbc::stub_ranges::STAGE4_BASE - consts_registered as u32,
                     );
                     let info = FunctionInfo {
+                        has_source_body: false,
                         callable_signature: None,
                         type_param_ids: Vec::new(),
                         explicit_type_param_ids: Vec::new(),
