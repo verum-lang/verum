@@ -1,0 +1,24 @@
+{
+  "task": "T1635",
+  "related": [
+    "T1666",
+    "T1684"
+  ],
+  "registry_candidate": "399cc4156769bfd1df0ca76120da4e84a8d06931",
+  "language_reader": "22a061ae654af44e752a6d31840614c734773bfa",
+  "previous_language_reader": "faabbe696f1ee928f6b3a9bb6c7980ba20577513",
+  "source_and_project_inputs_identical": true,
+  "producer_artifacts_identical": true,
+  "previous_failure": "Index out of bounds: index 0 for list of length 0",
+  "current_failure": "Panic: source schema negative was accepted",
+  "elapsed_seconds": 174.83,
+  "returncode": 1,
+  "scope": "Unchanged fixture passed schema_values before reaching the refusal oracle. Full metadata component remains failed; exact accepted document requires separate diagnosis. No semantic admission, AOT or whole-registry runtime acceptance.",
+  "evidence_sha256": {
+    "build-manifest.json": "1a08a3b8c5d25d069f704091db0c9b0e7784ac83487d93eb1c2c8eb56b74fae7",
+    "cli-build.log": "38ade5cb67644973fb3051d8935fb9e406e8a751221d49aaea98e59b8aa25a54",
+    "result.json": "44e73599ed40dcf2f273a2bdb55af7136b36ea0e3385e2a7196a3b5c3de23175",
+    "stdout.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderr.log": "ab2e937b34417210a8272684957c9c85682ac2c13d2f488db1d31e339fbb10c8"
+  }
+}

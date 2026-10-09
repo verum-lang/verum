@@ -684,3 +684,22 @@ The reviewed chain rebases onto documentation-only main `a14e5c60c` at source
 commit `f25057d18`. Its complete VBC crate tree is byte-identical to tested
 `7d7bd9b0f`; the original tested and evidence branches are retained. Both the
 ordinary failure above and the scoped interpreter result remain recorded.
+
+
+### Metadata replay after borrowed-element repair
+
+The ordinary `22a061ae6` CLI build completed in 245.813 seconds. Automatic
+precompilation reported a cache hit; the producer artifact trio is identical
+to stage18. The unchanged `399cc41` component now passes `schema_values`,
+including nonempty arrays and detailed dependency options. It subsequently
+fails a rejection oracle with `Panic: source schema negative was accepted`.
+The [receipt](evidence/registry-metadata-stage19/result.json) records exit 1
+in 174.83 seconds with unchanged source, project and executable hashes.
+
+The [comparison](evidence/registry-metadata-stage19/comparison.json) preserves
+both failure boundaries. The earlier `RefListElement` crash is absent; the
+accepted document must be isolated separately before attributing the new
+failure to schema validation, input construction or runtime result handling.
+T1666 remains incomplete, and its registry production candidate is unlanded.
+Passing the positive group does not establish complete metadata decoding or
+publication admission.
