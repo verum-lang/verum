@@ -1,0 +1,102 @@
+{
+  "before": "1ee761ddf6bb345277f1dd3ce8df35096e93204a",
+  "old_base": "9b9c04a8a7364d35534a9e15dcfe7d9942c47420",
+  "new_base": "64da75aa9edb8432f30d54ca3466a358c4170d49",
+  "types_tree": "5983409e2b6fd41e3467c6548b295acf84ef7b4b",
+  "types_production_tree": "2e168dd24a80a6a4b4b3d891e88652c5e32ea878",
+  "compiler_control_blob": "c02b2ea6f56aae258732caa7d0518903172b9331",
+  "after": "e5281b6917b0ddabe5e164ef60fed4618785ab64",
+  "checks": {
+    "whole_types_tree_identical": true,
+    "production_types_tree_identical": true,
+    "compiler_control_identical": true
+  },
+  "commit_mapping": [
+    {
+      "original": "f1ae3778e8c05efa9021aec12de444b16c2bdd2d",
+      "integrated": "13786a3f5fc3f5a68b3597a0a3593911cc748a42",
+      "patch_identical": true
+    },
+    {
+      "original": "0d73514916fc107f0de8992e480d090f50ad374a",
+      "integrated": "4044cbe12509128aff23cd251f0bbfc80b58651d",
+      "patch_identical": true
+    },
+    {
+      "original": "00b642ebe1f4b8f7b4e612a550b20fcd7a155a2b",
+      "integrated": "d76659482c1cfb74289751a809308a33c6384bc3",
+      "patch_identical": true
+    },
+    {
+      "original": "61cb66f2d445a8e31927049e9ed3057adde28af6",
+      "integrated": "5957d878f8c470e07e0eeb2fe486ba534ad908ae",
+      "patch_identical": true
+    },
+    {
+      "original": "b01b58a49d6823fea2df9d2c2c378f449afedf9e",
+      "integrated": "5ea3f5c4b0c7cde8e830c509042bc3066a90e6be",
+      "patch_identical": true
+    },
+    {
+      "original": "f72a8bd28221b70e4b6ca7c471dacc6eab028b74",
+      "integrated": "62612ccfbd4a6b9fbe644d0170c523eb2aa998eb",
+      "patch_identical": true
+    },
+    {
+      "original": "1484a00a69b1447084f9ab3e123aaed1c69e3452",
+      "integrated": "2527dd84e22f5dcebe45afdfc196e5102f7afbe1",
+      "patch_identical": true
+    },
+    {
+      "original": "1ee761ddf6bb345277f1dd3ce8df35096e93204a",
+      "integrated": "e5281b6917b0ddabe5e164ef60fed4618785ab64",
+      "patch_identical": true
+    }
+  ],
+  "inherited_delta": "crates/verum_compiler/src/archive_ctx_loader.rs    |   37 +-\n .../tests/archive/symbol_graph_declaring_owner.rs  |  241 +++\n .../archive-inspector-build.json                   | 1951 +++++++++++++++++++\n .../registry-stage20-build/build-manifest.json     |   49 +\n .../evidence/registry-stage20-build/build.py       |   75 +\n .../evidence/registry-stage20-build/cli-build.log  |   58 +\n .../registry-stage20-build/comparison.json         |   27 +\n .../registry-stage20-build/fresh-archive-read.json |   13 +\n .../registry-stage20-build/fresh-archive.log       |   22 +\n .../inspect-alias-archive.rs                       |   25 +\n .../inspect-core-metadata.rs                       |   14 +\n .../metadata-inspector-build.json                  | 1959 ++++++++++++++++++++\n .../registry-stage20-build/metadata-read.json      |   12 +\n .../evidence/registry-stage20-build/metadata.log   |    6 +\n .../registry-stage20-build/old-archive-read.json   |   13 +\n .../registry-stage20-build/old-archive.log         |   22 +\n .../evidence/registry-symbol-graph-owner-gate.json |  262 +++\n .../adjacent-output.txt                            |   13 +\n .../baseline-output.txt                            |   86 +\n .../registry-symbol-graph-owner/fixed-output.txt   |   62 +\n .../wrapper-guard-stop-output.txt                  |    4 +\n docs/architecture/registry-language-acceptance.md  |   52 +\n 22 files changed, 4993 insertions(+), 10 deletions(-)",
+  "inherited_changed_paths": [
+    "crates/verum_compiler/src/archive_ctx_loader.rs",
+    "crates/verum_compiler/tests/archive/symbol_graph_declaring_owner.rs",
+    "docs/architecture/evidence/registry-stage20-build/archive-inspector-build.json",
+    "docs/architecture/evidence/registry-stage20-build/build-manifest.json",
+    "docs/architecture/evidence/registry-stage20-build/build.py",
+    "docs/architecture/evidence/registry-stage20-build/cli-build.log",
+    "docs/architecture/evidence/registry-stage20-build/comparison.json",
+    "docs/architecture/evidence/registry-stage20-build/fresh-archive-read.json",
+    "docs/architecture/evidence/registry-stage20-build/fresh-archive.log",
+    "docs/architecture/evidence/registry-stage20-build/inspect-alias-archive.rs",
+    "docs/architecture/evidence/registry-stage20-build/inspect-core-metadata.rs",
+    "docs/architecture/evidence/registry-stage20-build/metadata-inspector-build.json",
+    "docs/architecture/evidence/registry-stage20-build/metadata-read.json",
+    "docs/architecture/evidence/registry-stage20-build/metadata.log",
+    "docs/architecture/evidence/registry-stage20-build/old-archive-read.json",
+    "docs/architecture/evidence/registry-stage20-build/old-archive.log",
+    "docs/architecture/evidence/registry-symbol-graph-owner-gate.json",
+    "docs/architecture/evidence/registry-symbol-graph-owner/adjacent-output.txt",
+    "docs/architecture/evidence/registry-symbol-graph-owner/baseline-output.txt",
+    "docs/architecture/evidence/registry-symbol-graph-owner/fixed-output.txt",
+    "docs/architecture/evidence/registry-symbol-graph-owner/wrapper-guard-stop-output.txt",
+    "docs/architecture/registry-language-acceptance.md"
+  ],
+  "validation_boundary": "All eight owned patches and all types source/tests are byte-identical to the pre-rebase endpoint. T1692 archive controls retain their original tested source; main adds an independent archive-context owner fix and its evidence. No fresh Cargo or ordinary acceptance is attributed to this rebase.",
+  "tasks": [
+    "T1692",
+    "T1693"
+  ],
+  "gate_receipts": [
+    "registry-record-field-owner-gate.json",
+    "registry-builtin-provenance-gate.json"
+  ],
+  "combined_type_gate": {
+    "receipt": "registry-builtin-provenance-gate.json",
+    "gate": "full-types",
+    "passed": 4002,
+    "failed": 0,
+    "ignored": 3,
+    "filtered": 0,
+    "targets": 176,
+    "tested_source": "f72a8bd28221b70e4b6ca7c471dacc6eab028b74",
+    "later_hygiene": "The final pre-rebase endpoint changes only a production doc comment and the equivalent Maybe alias in the new test helper; its 18 focused controls were rerun and passed, as recorded in the receipt."
+  },
+  "ordinary_acceptance": "Pending a fresh ordinary CLI/project replay after these fixes. The separately recorded stage20 project still used pre-T1692/T1693 source; it cannot establish this integration acceptance."
+}
