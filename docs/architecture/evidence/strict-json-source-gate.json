@@ -1,0 +1,130 @@
+{
+  "task": "T1662",
+  "verdict": "source compilation and archive roundtrip passed; typed and Verum runtime acceptance pending",
+  "tested_source_commit": "932f96294c63b6edb34d6de0725624638eb63844",
+  "production_patch_commit": "4e8156123",
+  "scope": "Complete production JSON module and complete strict/legacy conformance fixtures through source mount declaration loading, VBC codegen and archive serialization/reload. No Verum entry point was interpreted by the final tests.",
+  "source_hashes": {
+    "core/encoding/json.vr": "2cd549c59486a35396f3a061cdb87226f3d6a643d99e706f5d4458ae63b13fb5",
+    "vcs/specs/L2-standard/encoding/json_strict_publication.vr": "34bd0cec8205047ac7d7b2cb0483a32d76e9459762ab1d3e229fb48965e8d0e0",
+    "crates/verum_vbc/tests/strict_json_source.rs": "c47b9eede9659469a891f87cf48b844d188317909cc37c809b9b9dd00dc2f325",
+    "vcs/specs/L2-standard/encoding/json_legacy_source_control.vr": "1b386803ab9b913f491e7a1501ac5925a69dca4066b9682d0fa8e5635fba8a12",
+    "Cargo.lock": "1383eaade9056881958fb1ef023cb8326fdccff1204ad1ad5bcdf9a341be3741"
+  },
+  "source_unchanged": true,
+  "build": {
+    "command": [
+      "rustup",
+      "run",
+      "nightly-2026-08-20",
+      "cargo",
+      "test",
+      "--offline",
+      "--locked",
+      "-p",
+      "verum_vbc",
+      "--no-default-features",
+      "--features",
+      "compression,table_dispatch,codegen,ffi",
+      "--test",
+      "strict_json_source",
+      "--no-run",
+      "--message-format=json"
+    ],
+    "deadline_seconds": 600,
+    "exit_code": 0,
+    "timed_out": false,
+    "elapsed_seconds": 24.219,
+    "stdout_sha256": "bbcf903fca8a5ea60f0f91a04712a5930849a73d96338772a4c36f7ed9843341",
+    "stderr_sha256": "654335adfbaa46fc853174425ea44dad618e7055b10bea2fbb06bea066a57cf1"
+  },
+  "environment_overrides": {
+    "CARGO_TARGET_DIR": "/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target",
+    "CARGO_INCREMENTAL": "0",
+    "CARGO_BUILD_JOBS": "2",
+    "VERUM_NO_AUTO_PRECOMPILE": "1",
+    "VERUM_LLVM_DIR": "/Users/taaliman/projects/oldman/verum-lang/verum/llvm/install",
+    "RUST_MIN_STACK": "16777216"
+  },
+  "executable": "/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target/debug/build/verum_vbc/4783196868a4a719/out/strict_json_source-4783196868a4a719",
+  "executable_sha256": "f9e6ec6f977608f8d5649ada98e087d7a651e13073bc8020af5f3e1986ba0895",
+  "executable_unchanged": true,
+  "source_compilation_controls": [
+    {
+      "name": "strict_json_source_and_controls_compile_with_declared_dependencies",
+      "command": [
+        "/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target/debug/build/verum_vbc/4783196868a4a719/out/strict_json_source-4783196868a4a719",
+        "--exact",
+        "strict_json_source_and_controls_compile_with_declared_dependencies",
+        "--test-threads=1",
+        "--nocapture"
+      ],
+      "deadline_seconds": 180,
+      "exit_code": 0,
+      "timed_out": false,
+      "elapsed_seconds": 30.535,
+      "stdout_sha256": "0fa6b11e4bff6a89062bed33f973b527364a3caa2dc0b483dd5b8a89a997d381",
+      "stderr_sha256": "c2ebea5db981803a85da872b370e84b0c7a84f93ec67e7b62e2082c653a90840",
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0,
+      "filtered": 1
+    },
+    {
+      "name": "legacy_json_control_compiles_with_the_same_declared_dependencies",
+      "command": [
+        "/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target/debug/build/verum_vbc/4783196868a4a719/out/strict_json_source-4783196868a4a719",
+        "--exact",
+        "legacy_json_control_compiles_with_the_same_declared_dependencies",
+        "--test-threads=1",
+        "--nocapture"
+      ],
+      "deadline_seconds": 180,
+      "exit_code": 0,
+      "elapsed_seconds": 28.669,
+      "stdout_sha256": "ae9415023d46d12c8222b70715e4903ac1b6b7e58362be4a9517574dfd5bcd6d",
+      "stderr_sha256": "747bc075cd110dcf2a0bbae070afcef304e68c91262a0c0855e7aff410056cba",
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0,
+      "filtered": 1
+    }
+  ],
+  "raw_wrapper_label_note": "The first raw receipt labels Rust test execution runtime; the final Rust tests only compile and serialize Verum source. That label is not a Verum runtime verdict.",
+  "pinned_artifacts_before": {
+    "/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target/precompiled-stdlib/runtime.core_metadata": "a92bd89e649e102cdc67d7ad0032513d6448d8915e5744127e6cdf1f1e34ebbb",
+    "/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target/precompiled-stdlib/runtime.symbol_graph": "a6678c18498f7519749ca1fdf1d22629b479083f42fa95a15177e8c7acf1c722",
+    "/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target/precompiled-stdlib/runtime.vbca": "410ff097b455437cab98b651f7799b3129588820925afe98e0de9c3781530a0f",
+    "/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target/precompiled-stdlib/runtime.vbca.checksum": "c33573118a8c4b635f6c8f727c3784b524f660be57de702365e8d9c14b2f3a8b",
+    "/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target/precompiled-stdlib/runtime.vbca.schema": "fec20d7b3f8d1b81aff66c6c1181be574963779f7eacaf65660f8ab9127fca87"
+  },
+  "pinned_artifacts_unchanged": true,
+  "failed_harness_controls": [
+    {
+      "source_commit": "419726d61b277adfbad2626e030f9a4d774e8703",
+      "result": "Complete JSON compilation refused undefined Text.with_capacity because dependency declarations were missing. No Verum runtime acceptance.",
+      "receipt_sha256": "926555f1618ccda703400be32ba438eb430972723cbd26339b1a27e32d4a3e5d",
+      "stderr_sha256": "20f0687131bc6b15c012c2dca248115d176be5aeaacd90bd04e7287207867dc5"
+    },
+    {
+      "source_commit": "18d8e725d3d618656e1a00862a06d80fffd8989e",
+      "result": "Complete JSON compilation succeeded, but interpreter execution reached ArrayLen(Unit). Source mounts supplied dependency declarations with one-byte return placeholders.",
+      "executable_sha256": "a6b55402bc46c58b9c46cdf22d4e5c9bc4f4d122065fd0cee4b9e42ffdbc25ac",
+      "receipt_sha256": "be9246ab036b291f8bd9b822d4f1b1dc052dd654fa6a8417e109bfcae6725aa0",
+      "backtrace_sha256": "c1ab7e366f781787bfcadad0907bdd654e7af30da784e74b945645f50dec8786"
+    },
+    {
+      "source_commit": "1e895d02a4061b3b63ad65699b9cc29eb4fa406b",
+      "production_baseline_commit": "75adac0d3",
+      "production_json_sha256": "8f52f57b6aee4c30a2bbcb50b538c7cdd58f110dd4b2f4380dd8d199909eb44f",
+      "result": "Unchanged production baseline plus test-only fixtures reproduces ArrayLen(Unit) while parsing a valid object with ordinary parse. Trace selects Text.with_capacity with bytecode_length=1. This establishes a harness dependency-body gap, not a strict duplicate-policy or ordinary runtime regression.",
+      "receipt_sha256": "680ba95c868379a680778bee8ebb455ae1e90ca7aeb260b8d51335fef21d6451",
+      "trace_and_backtrace_sha256": "539aae01692b71037d4c3a52eeaea35ecf5eac0297df8446e4a91877560e2c0f"
+    }
+  ],
+  "pending_acceptance": [
+    "Execute json_strict_publication.vr with a coherent candidate ordinary CLI and baked dependency bodies.",
+    "Execute json_legacy_source_control.vr on the same pinned CLI.",
+    "Execute the registry source metadata component; separate schema decoding from semantic and durable admission."
+  ]
+}
