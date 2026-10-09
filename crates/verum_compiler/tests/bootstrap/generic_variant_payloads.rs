@@ -363,17 +363,29 @@ fn checker_contract(mounts: &str) {
     let source = json(mounts, "List", "Map");
     let (_, archive) = bootstrap(COLLECTIONS, &source);
     for eager in [false, true] {
-        for (variant, value_type) in [("JsonArray", "List<JsonValue>")] {
+        for (variant, value_type, wrong_types) in [
+            ("JsonArray", "List<JsonValue>", &["Bool"][..]),
+            (
+                "JsonObject",
+                "Map<Text, JsonValue>",
+                &["Bool", "Map<Bool, JsonValue>", "Map<Text, Bool>"][..],
+            ),
+        ] {
             let source = format!(
                 "mount core.encoding.json.{{JsonValue, {variant}}}; fn wrap(value: {value_type})->JsonValue {{ {variant}(value) }}"
             );
+            // Keep the consumer spelling identical for direct and umbrella
+            // producer mounts. T1212's checker authority resolves the nominal
+            // owner; the fixture does not rewrite Map to a qualified alias.
             let good = errors(&archive, &source, eager);
             assert!(good.is_empty(), "{variant} eager={eager}: {good:?}");
-            let wrong = source.replace(value_type, "Bool");
-            assert!(
-                !errors(&archive, &wrong, eager).is_empty(),
-                "wrong payload accepted: {wrong}"
-            );
+            for wrong_type in wrong_types {
+                let wrong = source.replace(value_type, wrong_type);
+                assert!(
+                    !errors(&archive, &wrong, eager).is_empty(),
+                    "wrong payload accepted eager={eager}: {wrong}"
+                );
+            }
         }
     }
 }
