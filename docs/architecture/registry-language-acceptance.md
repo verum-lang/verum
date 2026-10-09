@@ -476,3 +476,35 @@ to the executed candidate. The newer base also contains workspace CLI changes;
 that combined tree was not rebuilt by these controls. Typed registry metadata,
 semantic publication admission, durable storage, the complete registry service,
 and AOT execution remain separate acceptance boundaries.
+
+
+## Fresh registry project replay — T1635
+
+The same ordinary `d61c11aa5` product used for strict JSON completed the
+registry project check in **211.317 seconds with 11 compilation errors**,
+exit `101`, within a 600-second deadline. The
+[receipt](evidence/registry-project-stage16.json) and
+[complete log](evidence/registry-project-stage16.log) retain exact source and
+executable identities; both remained unchanged during checking.
+
+The earlier product reported 64 errors. Every source input in that earlier
+receipt is byte-identical in the new run; a publication-envelope module and
+its fixture were added. The registry repository records this comparison at
+`2035195`, in `tests/evidence/stage16-comparison.json`. Multiple language
+changes separate these products, so the diagnostic reduction does not
+isolate one fix or establish a performance improvement.
+
+Remaining diagnostics concern `Future` versus `JoinHandle`, source protocol
+bounds, `IoResult` pattern checking, HTTP response fields and transducer
+types. Context-declaration warnings also remain. This is a completed failed
+project check, without registry runtime, proofs, AOT or service acceptance.
+
+A separate typed publication-metadata candidate at registry `399cc41`
+failed before execution with 18 errors in 69.97 seconds on the same product.
+Seventeen errors share the borrowed JSON object to typed map helper boundary
+(T1676); the remaining error concerns a forward-declared variant payload in
+project checking (T1677). Record-field diagnostic labels wrap the nested
+helper argument failures; they do not establish incorrect record field
+declarations. The registry's `tests/evidence/publication-metadata-stage16/`
+retains its result and logs. This candidate remains separate from registry
+main, and standalone parser success does not establish metadata admission.
