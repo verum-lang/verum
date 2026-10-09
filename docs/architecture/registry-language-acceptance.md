@@ -78,3 +78,37 @@ time before claiming an end-to-end improvement.
 The CLI library gates above used an isolated target with the separately
 identified stage14 standard-library artifacts and automatic precompilation
 disabled. They did not produce a fresh ordinary CLI or an AOT release.
+
+## Record coordinates in collections — T1644
+
+The registry's publication history uses a record containing the package
+name and exact version. Interpreter collection keys previously hashed
+ordinary records by address, so constructing the same coordinate again
+could miss an existing release. The shared Map/Set helpers now hash and
+compare nominal record identity and declared fields. They ignore allocator
+padding and compare Text content across inline and heap representations.
+Header reads require live allocator ownership; native runtime carriers
+retain their existing representation rules.
+
+Source checkpoint: `a53e9deaa`, integrated through `0330dc2fb`, `786c3edf4`
+and `a536aa4c2`. The focused controls passed **12/12**, with **47/47** related
+existing comparison, copy, hash and ScriptEngine tests passing. The controls
+exercise allocated-equal keys, differing names and versions, bucket
+collisions, growth, removal, nested records and representation boundaries.
+They bypass the type checker and do not establish derive expansion or AOT
+collection semantics.
+
+The full library run remains **incomplete**: 2,071 tests passed, two failed,
+one was ignored and two socket tests were still waiting when the process
+was stopped after 16 minutes 9 seconds. Isolated accept/read tests passed;
+the readiness test failed, and UDP first timed out before passing a retry.
+Those tests exercise host sockets and IoEngine, without calling the changed
+record-key helpers. This call-path separation does not explain the I/O
+failure. T1650 tracks deterministic, bounded socket acceptance; retries do
+not turn the incomplete suite into a pass.
+
+The [gate receipt](evidence/registry-record-key-gate.json) preserves source,
+executable hashes, counts and the limits of the retained baseline comparison.
+Plain record clone independence remains T1645, and caller mutation of stored
+keys remains T1649. The registry catalog still needs typed project and
+runtime acceptance before its publication guarantee can be claimed.

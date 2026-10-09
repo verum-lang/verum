@@ -1,0 +1,127 @@
+{
+  "task": "T1644",
+  "source_checkpoint": "a53e9deaa20fb6bbbd0abf826aaceda06ec06c6f",
+  "integrated_commits": [
+    "0330dc2fb",
+    "786c3edf4",
+    "a536aa4c2"
+  ],
+  "test_executable_sha256": "7487ba947e8a448b76db5b76c17d998dd6e2f83451bf3c6cb5fdf54b8ee0f3f8",
+  "features": [
+    "compression",
+    "table_dispatch",
+    "codegen",
+    "ffi"
+  ],
+  "focused_controls": {
+    "passed": 12,
+    "failed": 0,
+    "scope": "Source to serialized VBC to interpreter plus direct representation controls; type checker and derive expansion bypassed."
+  },
+  "related_existing_tests": {
+    "passed": 47,
+    "failed": 0,
+    "scope": "Comparison, value-copy, hash and ScriptEngine controls."
+  },
+  "full_library": {
+    "status": "incomplete",
+    "passed_before_termination": 2071,
+    "failed_before_termination": 2,
+    "ignored": 1,
+    "unfinished_socket_tests": 2,
+    "elapsed_before_termination": "16m09s",
+    "process_exit_after_termination": 143,
+    "sandbox_permissions": "require_escalated",
+    "log_sha256": "6c787b6cd8c37fc0eeb96695246793f0c958db3a481706909e5e776a64d34f8c",
+    "reported_failures": [
+      "async_accept_round_trip_via_io_engine",
+      "poll_signals_ready_on_pending_connection"
+    ],
+    "unfinished_tests": [
+      "udp_recv_from_returns_peer_address",
+      "async_read_end_to_end_via_io_engine"
+    ]
+  },
+  "isolated_current_runs": [
+    {
+      "test": "interpreter::io_engine::tests::async_accept_round_trip_via_io_engine",
+      "exit_code": 0,
+      "elapsed_seconds": 1.202
+    },
+    {
+      "test": "interpreter::io_engine::tests::poll_signals_ready_on_pending_connection",
+      "exit_code": 101,
+      "elapsed_seconds": 1.043
+    },
+    {
+      "test": "interpreter::dispatch_table::handlers::net_runtime::tests::udp_recv_from_returns_peer_address",
+      "timeout_seconds": 20,
+      "elapsed_seconds": 20.025
+    },
+    {
+      "test": "interpreter::io_engine::tests::async_read_end_to_end_via_io_engine",
+      "exit_code": 0,
+      "elapsed_seconds": 0.768
+    }
+  ],
+  "retained_baseline": {
+    "sha256_before": "620fb687ccabd73c45e0fdf6059706210497c263a09f363d082cd9d28b399d04",
+    "sha256_after": "620fb687ccabd73c45e0fdf6059706210497c263a09f363d082cd9d28b399d04",
+    "source_recorded_by_gate": "fdad59f06114fd2770f3d53058373764284c7c2e",
+    "matching_gate_log_sha256": "d9f955fb4d4cc1ff18d9da1940c2d7156b77849075a6c232964b5666c19cd5c7",
+    "source_provenance_limit": "Gate log records this executable path; the gate did not independently record this libtest executable hash."
+  },
+  "matched_baseline_and_current_retry": [
+    {
+      "label": "fdad59-path",
+      "test": "interpreter::io_engine::tests::poll_signals_ready_on_pending_connection",
+      "exit_code": 0,
+      "elapsed_seconds": 0.137
+    },
+    {
+      "label": "fdad59-path",
+      "test": "interpreter::dispatch_table::handlers::net_runtime::tests::udp_recv_from_returns_peer_address",
+      "exit_code": 0,
+      "elapsed_seconds": 0.006
+    },
+    {
+      "label": "a53-repeat",
+      "test": "interpreter::dispatch_table::handlers::net_runtime::tests::udp_recv_from_returns_peer_address",
+      "exit_code": 0,
+      "elapsed_seconds": 0.006
+    }
+  ],
+  "io_call_path_review": {
+    "unchanged_by_t1644": [
+      "crates/verum_vbc/src/interpreter/io_engine.rs",
+      "crates/verum_vbc/src/interpreter/dispatch_table/handlers/net_runtime.rs"
+    ],
+    "files_sha256": {
+      "crates/verum_vbc/src/interpreter/io_engine.rs": "5268628fc03ff22f59fa592a651a10f9bedac3695fac6b76b4c6b1a509b861c3",
+      "crates/verum_vbc/src/interpreter/dispatch_table/handlers/net_runtime.rs": "b065ab86b16f7263cf1e6a34f7b483bc8dece9400a52ed29ea19aa6fc462580b"
+    },
+    "poll_call_path": [
+      "std::TcpListener::bind + set_nonblocking",
+      "engine_new + submit",
+      "std::TcpStream::connect in spawned thread",
+      "IoEngine::poll -> Session::poll -> libc::kevent -> harvest_kevents",
+      "assert event count > 0 at io_engine.rs:961"
+    ],
+    "udp_call_path": [
+      "udp_bind -> std::UdpSocket::bind + Rust REGISTRY map",
+      "udp_send -> UdpSocket::try_clone + send_to",
+      "udp_recv_from -> UdpSocket::try_clone + blocking recv_from at net_runtime.rs:691",
+      "test calls udp_recv_from at net_runtime.rs:1400"
+    ],
+    "value_hash_or_record_helpers_reached": false,
+    "parallel_interference_claim": "Not established: poll failed and UDP hung in isolated escalated current-source processes as well."
+  },
+  "io_review_limit": "Source call-path review of these tests. Host resource maps are std::collections::HashMap; the later Value-based network adapters are not called. This does not explain root cause of I/O failure.",
+  "followups": {
+    "T1047": "Real Eq/Hash/Clone derive implementations",
+    "T1645": "Plain record clone independence",
+    "T1649": "Caller mutation and stored collection-key ownership",
+    "T1650": "Deterministic bounded host socket acceptance"
+  },
+  "acceptance_limit": "No full-library green verdict, ordinary project, registry publication, AOT or release acceptance follows from these bounded interpreter results."
+}
