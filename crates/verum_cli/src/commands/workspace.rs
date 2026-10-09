@@ -434,16 +434,33 @@ pub fn publish(dry_run: bool) -> Result<()> {
     }
     println!();
 
-    let mut published = List::new();
+    let mut successful = 0usize;
     let mut failed = List::new();
+    let mut skipped = 0usize;
 
     for member in members {
         let member_path = PathBuf::from(member.as_str());
-        let member_config_path = member_path.join("verum.toml");
+        let member_config_path = Config::manifest_path(&member_path);
 
-        if !member_config_path.exists() {
-            ui::warn(&format!("Skipping {} (missing verum.toml)", member));
-            continue;
+        match member_config_path.try_exists() {
+            Ok(false) => {
+                ui::warn(&format!(
+                    "Skipping {} (missing manifest: {})",
+                    member,
+                    member_config_path.display()
+                ));
+                skipped += 1;
+                continue;
+            }
+            Ok(true) => {}
+            Err(error) => {
+                ui::error(&format!(
+                    "Failed to inspect config for {}: {}",
+                    member, error
+                ));
+                failed.push(member.to_string());
+                continue;
+            }
         }
 
         let member_config = match Config::load(&member_path) {
@@ -472,6 +489,7 @@ pub fn publish(dry_run: bool) -> Result<()> {
                 "Would publish {} v{}",
                 member_config.cog.name, member_config.cog.version
             ));
+            successful += 1;
         } else {
             ui::step(&format!(
                 "Publishing {} v{}",
@@ -482,7 +500,7 @@ pub fn publish(dry_run: bool) -> Result<()> {
             match publish_member_to_registry(&member_path, &member_config) {
                 Ok(_) => {
                     ui::success(&format!("Published {}", member_config.cog.name));
-                    published.push(member.to_string());
+                    successful += 1;
                 }
                 Err(e) => {
                     ui::error(&format!(
@@ -496,15 +514,19 @@ pub fn publish(dry_run: bool) -> Result<()> {
     }
 
     println!();
+    ui::step(&format!(
+        "Publication summary: {} {}, {} failed, {} skipped",
+        successful,
+        if dry_run { "ready" } else { "published" },
+        failed.len(),
+        skipped
+    ));
 
     if failed.is_empty() {
         if dry_run {
-            ui::success(&format!("Would publish {} packages", members.len()));
+            ui::success(&format!("Would publish {} packages", successful));
         } else {
-            ui::success(&format!(
-                "Successfully published {} packages",
-                published.len()
-            ));
+            ui::success(&format!("Successfully published {} packages", successful));
         }
         Ok(())
     } else {
@@ -577,17 +599,13 @@ pub fn clean(_all: bool) -> Result<()> {
 // ============================================================================
 
 /// Publish a workspace member to the package registry
-fn publish_member_to_registry(member_path: &Path, _config: &Config) -> Result<()> {
-    use crate::config::Manifest;
+fn publish_member_to_registry(member_path: &Path, manifest: &Config) -> Result<()> {
     use crate::registry::{CogMetadata, RegistryClient, TierArtifacts};
 
-    // Convert Config to Manifest format for publish
-    let manifest_path = member_path.join("verum.toml");
-    let manifest = Manifest::from_file(&manifest_path)?;
-    let dependencies = crate::registry::publication_dependencies::from_manifest(&manifest)?;
+    let dependencies = crate::registry::publication_dependencies::from_manifest(manifest)?;
 
-    // Create package tarball
-    let cog_file = create_member_cog(member_path, &manifest)?;
+    // Reuse the manifest selected and validated by workspace discovery.
+    let cog_file = create_member_cog(member_path, manifest)?;
 
     // Calculate checksum
     let checksum = calculate_member_checksum(&cog_file)?;
@@ -651,11 +669,12 @@ fn create_member_cog(member_path: &Path, manifest: &crate::config::Manifest) -> 
         add_member_directory_to_tar(&mut tar, &src_path, "src")?;
     }
 
-    // Add manifest
-    let manifest_path = member_path.join("verum.toml");
-    if manifest_path.exists() {
-        tar.append_path_with_name(&manifest_path, "verum.toml")?;
-    }
+    // Keep the selected manifest's bytes under the canonical archive entry.
+    // A manifest removed after discovery must fail packaging, not be omitted.
+    tar.append_path_with_name(
+        Config::manifest_path(member_path),
+        Config::MANIFEST_FILENAME,
+    )?;
 
     // Add README if exists
     if member_path.join("README.md").exists() {
