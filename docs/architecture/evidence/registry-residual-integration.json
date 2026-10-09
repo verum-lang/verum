@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "tasks": [
+    "T1687",
+    "T1689"
+  ],
+  "integration_base": "b2f585f9348a94d5b837eadf3dbab5635032ace6",
+  "original_tested_source": "28bb3f3f889cea1c4ca62676b5dec3e70505c7c9",
+  "preserved_tested_ref": "codex/residual-return-tested-28bb",
+  "original_evidence_commit": "2735a69a03a310644130019c6770fc013dd46467",
+  "preserved_evidence_ref": "codex/residual-return-evidence-before-integration",
+  "rebased_chain_endpoint": "ea37b1d54ac12e487ff2294a927ea7a85d2bf202",
+  "codegen_tree_before_and_after": "dd4d2bff4e49277014980336d1836800651414c1",
+  "focused_test_blob_before_and_after": "a4760ac5b7dd30dcab339902d322d6e40ae97efe",
+  "focused_test_sha256": "4af1889c14f414ffce6c372b4fc8ab973326aec943b6ccae21de1cca18d0fd7b",
+  "other_vbc_changes": [
+    "crates/verum_vbc/src/module.rs",
+    "crates/verum_vbc/tests/intrinsic_wrapper_owner.rs"
+  ],
+  "other_vbc_identity": "Both paths are byte-identical to the integrated T1688 parent. No T1687/T1689 codegen source or focused test changed during rebase.",
+  "evidence": "All ten original raw output hashes verified after rebase. The original 85-control and 2075-pass library gates remain attributed to original_tested_source. No new Cargo gate was run after integrating the independently tested T1688 module repair and T1686 checker repair.",
+  "next_acceptance": "Fresh ordinary CLI, archive producer/cache provenance, and unchanged registry metadata replay remain with the coordinating agent; no AOT or authenticated service claim."
+}
