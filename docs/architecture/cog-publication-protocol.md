@@ -92,10 +92,24 @@ CLI must not discard the signature or announce that this request is valid for
 publication. Verified signature and evidence support remains required launch
 work tracked by T1648.
 
-The command's current manifest-to-metadata conversion also flattens detailed
-dependencies. T1651 tracks preserving feature/optional/default-feature options
-and refusing source declarations that the registry cannot represent. Correct
-wire framing alone does not establish faithful project dependency semantics.
+Manifest publication preserves detailed dependency versions, features,
+optional flags and default-feature flags. The manifest key `default-features`
+(also accepted as `default_features`) becomes `default_features` on the wire.
+Absent options remain absent/null; explicit `false` and empty feature lists
+retain their meaning. Every dependency needs a declared, valid version
+requirement, including detailed declarations. An explicitly written `*` is
+preserved; a missing version is never replaced by `*`.
+
+The producer refuses `path`, `git`, `branch`, `tag` and `rev` declarations,
+even when accompanied by a version, before archive/build/signing work. The
+v1 metadata cannot represent those source choices, and there is no implicit
+fallback from a local or Git dependency to a registry release. These checks
+apply to dry runs as well as uploads.
+
+Preserving publication metadata does not establish consumer feature behavior.
+T1657 tracks optional/default-feature activation and recursive installation;
+T1651's fresh-consumer acceptance remains open until that behavior executes
+through the supported consumer path.
 
 ## Limits and allocation
 
