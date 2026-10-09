@@ -206,10 +206,23 @@ fn elements(
         ),
     };
     let module = source(&text);
+    let packed_return = matches!(boundary, Boundary::ArrayReturn)
+        && module
+            .functions
+            .iter()
+            .find(|function| module.get_string(function.name) == Some("make"))
+            .and_then(|function| function.instructions.as_deref())
+            .and_then(verum_vbc::array_storage::straight_line_array_return)
+            .is_some_and(|fact| {
+                matches!(
+                    fact,
+                    verum_vbc::array_storage::ArrayResultFact::Packed { .. }
+                )
+            });
     native_with_ir(
         &module,
         |ir| {
-            if matches!(boundary, Boundary::ArrayReturn) {
+            if packed_return {
                 assert!(
                     !ir.contains("geteu_cv_"),
                     "actual packed result reached an unproved container-header read; JIT withheld\n{ir}"
