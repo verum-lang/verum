@@ -63,13 +63,32 @@ impl RegistryClient {
     /// was TOML-parseable but every call site went through
     /// `default()` which hardcodes the URL.
     pub fn from_manifest() -> Result<Self> {
-        if let Ok(dir) = crate::config::Manifest::find_manifest_dir() {
-            let path = crate::config::Manifest::manifest_path(&dir);
-            if let Ok(manifest) = crate::config::Manifest::from_file(&path) {
-                return Self::new(manifest.registry.index);
-            }
-        }
-        Self::new(super::DEFAULT_REGISTRY)
+        let dir = match crate::config::Manifest::find_manifest_dir() {
+            Ok(dir) => dir,
+            Err(CliError::ProjectNotFound(_)) => return Self::new(super::DEFAULT_REGISTRY),
+            Err(error) => return Err(error),
+        };
+        let path = crate::config::Manifest::manifest_path(&dir);
+        // An unreadable or malformed project must not silently select a public
+        // registry instead of the source its owner intended.
+        let manifest = crate::config::Manifest::from_file(&path)?;
+        Self::new(manifest.registry.index)
+    }
+
+    /// Registry selected for this operation, also recorded in its lockfile.
+    pub fn base_url(&self) -> &str {
+        self.base_url.as_str()
+    }
+
+    /// Source archive endpoint on the same API that supplied its metadata.
+    pub fn download_url(&self, name: &str, version: &str) -> Text {
+        format!(
+            "{}/cogs/{}/{}/download",
+            super::registry_api_url(self.base_url()),
+            name,
+            version
+        )
+        .into()
     }
 
     /// Search for packages
@@ -154,16 +173,11 @@ impl RegistryClient {
 
     /// Download package
     pub fn download(&self, name: &str, version: &str, dest: &Path) -> Result<()> {
-        let url = format!(
-            "{}/cogs/{}/{}/download",
-            super::registry_api_url(self.base_url.as_str()),
-            name,
-            version
-        );
+        let url = self.download_url(name, version);
 
         let response = self
             .client
-            .get(&url)
+            .get(url.as_str())
             .send()
             .map_err(|e| CliError::Network(e.to_string()))?;
 

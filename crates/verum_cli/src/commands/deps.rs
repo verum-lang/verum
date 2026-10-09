@@ -6,9 +6,6 @@ use crate::ui;
 use colored::Colorize;
 use verum_common::{List, Text};
 
-/// Default registry URL for the Verum cog registry.
-static DEFAULT_REGISTRY_URL: &str = "https://vcogs.io";
-
 /// Add a dependency to the project manifest
 ///
 /// # Arguments
@@ -302,7 +299,7 @@ fn update_lockfile(manifest_dir: &std::path::Path, manifest: &Manifest) -> Resul
                     name.clone(),
                     resolved_version.clone(),
                     CogSource::Registry {
-                        registry: DEFAULT_REGISTRY_URL.into(),
+                        registry: client.base_url().into(),
                         version: resolved_version.to_string().into(),
                     },
                     Set::new(),
@@ -321,7 +318,7 @@ fn update_lockfile(manifest_dir: &std::path::Path, manifest: &Manifest) -> Resul
                     name: name.clone(),
                     version: resolved_version.to_string().into(),
                     source: CogSource::Registry {
-                        registry: DEFAULT_REGISTRY_URL.into(),
+                        registry: client.base_url().into(),
                         version: resolved_version.to_string().into(),
                     },
                     checksum: "".into(), // Filled when downloading

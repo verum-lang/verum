@@ -1239,7 +1239,7 @@ fn resolve_registry_dep(
     // selection on this artefact-kind tag.
     if let Some(vbca_path) = vbca_fetcher::try_resolve_registry_vbca(
         &cache_dir,
-        crate::registry::DEFAULT_REGISTRY,
+        client.base_url(),
         name,
         &version,
     ) {
@@ -1247,7 +1247,7 @@ fn resolve_registry_dep(
         let locked = crate::script::lockfile::LockedDep {
             name: name.to_string(),
             version: version.clone(),
-            source: format!("registry-vbca+{}", crate::registry::DEFAULT_REGISTRY),
+            source: format!("registry-vbca+{}", client.base_url()),
             integrity,
         };
         return Ok(ResolvedDepEntry {
@@ -1263,12 +1263,7 @@ fn resolve_registry_dep(
 
     if needs_install {
         let metadata = client.get_metadata(name, &version)?;
-        let url = format!(
-            "{}/cogs/{}/{}/download",
-            crate::registry::DEFAULT_REGISTRY,
-            name,
-            version,
-        );
+        let url = client.download_url(name, &version);
         let _archive =
             cache_manager.download_cog(name, &version, url.as_str(), metadata.checksum.as_str())?;
         cache_manager.extract(&archive_path, &extracted_root)?;
@@ -1279,7 +1274,7 @@ fn resolve_registry_dep(
     let locked = crate::script::lockfile::LockedDep {
         name: name.to_string(),
         version: version.clone(),
-        source: format!("registry+{}", crate::registry::DEFAULT_REGISTRY),
+        source: format!("registry+{}", client.base_url()),
         integrity,
     };
     Ok(ResolvedDepEntry {

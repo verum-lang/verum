@@ -242,11 +242,9 @@ impl CogManager {
         let mut download_tasks = List::new();
 
         for dep in &resolved {
-            let url: Text = format!(
-                "{}/cogs/{}/{}/download",
-                DEFAULT_REGISTRY, dep.name, dep.version
-            )
-            .into();
+            let url = self
+                .registry
+                .download_url(dep.name.as_str(), dep.version.as_str());
 
             download_tasks.push((
                 dep.name.clone(),
@@ -696,7 +694,7 @@ impl CogManager {
                 name: dep.name.clone(),
                 version: dep.version.clone(),
                 source: CogSource::Registry {
-                    registry: DEFAULT_REGISTRY.into(),
+                    registry: self.registry.base_url().into(),
                     version: dep.version.clone(),
                 },
                 checksum: dep.checksum.clone(),

@@ -285,17 +285,12 @@ fn install_from_registry(
     // Download cog
     ui::step("Downloading cog");
     // Get download URL
-    let download_url = format!(
-        "{}/cogs/{}/{}/download",
-        crate::registry::DEFAULT_REGISTRY,
-        name,
-        resolved_version.as_str()
-    );
+    let download_url = client.download_url(name, resolved_version.as_str());
 
     let cog_path = cache_manager.get_or_download(
         name,
         resolved_version.as_str(),
-        &download_url,
+        download_url.as_str(),
         metadata.checksum.as_str(),
     )?;
 
@@ -316,7 +311,7 @@ fn install_from_registry(
 
     // Update lockfile
     ui::step("Updating verum.lock");
-    update_lockfile(name, &metadata)?;
+    update_lockfile(name, &metadata, client.base_url())?;
 
     ui::success(&format!(
         "Installed {} v{}",
@@ -615,7 +610,7 @@ fn update_manifest_dependency(name: &str, version: &str) -> Result<()> {
 }
 
 /// Update lockfile with new cog
-fn update_lockfile(name: &str, metadata: &CogMetadata) -> Result<()> {
+fn update_lockfile(name: &str, metadata: &CogMetadata, registry: &str) -> Result<()> {
     let manifest_dir = Manifest::find_manifest_dir()?;
     let lockfile_path = Manifest::lockfile_path(&manifest_dir);
 
@@ -646,7 +641,7 @@ fn update_lockfile(name: &str, metadata: &CogMetadata) -> Result<()> {
         name: name.into(),
         version: metadata.version.clone(),
         source: crate::registry::CogSource::Registry {
-            registry: crate::registry::DEFAULT_REGISTRY.into(),
+            registry: registry.into(),
             version: metadata.version.clone(),
         },
         checksum: metadata.checksum.clone(),

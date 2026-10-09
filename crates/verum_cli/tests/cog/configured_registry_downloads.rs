@@ -31,6 +31,16 @@ fn archive_failure_stays_on_configured_registry() {
     child_case("archive-failure");
 }
 
+#[test]
+fn malformed_manifest_does_not_select_public_registry() {
+    child_case("invalid-manifest");
+}
+
+#[test]
+fn existing_implicit_registry_defaults_are_preserved() {
+    child_case("defaults");
+}
+
 fn child_case(case: &str) {
     let result = Command::new(std::env::current_exe().expect("test executable"))
         .args(["--exact", CHILD_TEST, "--nocapture"])
@@ -51,6 +61,28 @@ fn isolated_install_case() {
         return;
     };
     let project = TempDir::new().expect("temporary project");
+    if case == "invalid-manifest" || case == "defaults" {
+        std::env::set_current_dir(project.path()).unwrap();
+        let path = project.path().join(Manifest::MANIFEST_FILENAME);
+        if case == "invalid-manifest" {
+            std::fs::write(&path, "[cog\nname = broken").unwrap();
+            assert!(matches!(
+                RegistryClient::from_manifest(),
+                Err(crate::error::CliError::ConfigParse(_))
+            ));
+        } else {
+            assert_eq!(
+                RegistryClient::from_manifest().unwrap().base_url(),
+                crate::registry::DEFAULT_REGISTRY,
+            );
+            std::fs::write(&path, "[cog]\nname = \"consumer\"\nversion = \"0.1.0\"\n").unwrap();
+            assert_eq!(
+                RegistryClient::from_manifest().unwrap().base_url(),
+                crate::config::RegistryConfig::default().index.as_str(),
+            );
+        }
+        return;
+    }
     let cache_dir = TempDir::new().expect("temporary package cache");
     let listener = TcpListener::bind("127.0.0.1:0").expect("loopback fixture");
     listener.set_nonblocking(true).unwrap();
