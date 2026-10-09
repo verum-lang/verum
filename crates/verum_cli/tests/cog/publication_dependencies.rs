@@ -316,7 +316,10 @@ fn isolated_dependency_publication() {
         entries.insert(path.into(), contents);
     }
     assert_eq!(
-        entries[&Text::from("verum.toml")].as_slice(),
+        entries
+            .get(&Text::from("Verum.toml"))
+            .expect("canonical manifest entry in source archive")
+            .as_slice(),
         manifest_bytes.as_bytes()
     );
     assert_eq!(entries[&Text::from("src/lib.vr")].as_slice(), source_bytes);

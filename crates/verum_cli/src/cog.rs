@@ -386,8 +386,8 @@ fn create_cog_tarball(manifest_dir: &Path, manifest: &Manifest) -> Result<PathBu
     let encoder = GzEncoder::new(file, Compression::best());
     let mut archive = Builder::new(encoder);
 
-    // Add manifest, canonicalising the entry name to lowercase even
-    // if the on-disk file is the legacy capitalised form.
+    // Add the manifest under its canonical Verum.toml entry name even
+    // if the on-disk file uses the legacy lowercase spelling.
     archive.append_path_with_name(
         Manifest::manifest_path(&manifest_dir),
         Manifest::MANIFEST_FILENAME,
