@@ -141,7 +141,8 @@ fn register_with_error(res: NetResource, error_status: i64) -> i64 {
 
 /// Public sibling of `register` for cross-module use (e.g.
 /// `interpreter::io_engine::async_accept` registers an accepted
-/// stream via this helper).  Returns the synthetic fd.
+/// stream via this helper). Returns its owned OS descriptor on Unix, an
+/// opaque registered handle elsewhere, or NET_STATUS_IO_ERROR.
 pub fn register_accepted_stream(stream: TcpStream) -> i64 {
     register_with_error(NetResource::Stream(stream), NET_STATUS_IO_ERROR)
 }
@@ -185,8 +186,9 @@ pub const TCP_LISTEN_FLAG_REUSEPORT: i64 = 1 << 0;
 /// cap large values at `/proc/sys/net/core/somaxconn` (or similar).
 ///
 /// Returns:
-/// * `fd > 0` on success — the synthetic FD that other intrinsics
-///  accept (NOT a kernel fd; see module-level docs).
+/// * A raw OS descriptor on Unix, or a registered handle elsewhere.
+///   Current consumers require `fd > 0`; raw Unix descriptor zero remains a
+///   separate compatibility limitation when stdin is closed.
 /// * `-errno` on bind/listen failure — caller maps to IoErrorKind via
 ///  `core/io/protocols.vr::from_raw_os_error`.
 /// * `-EINVAL` (`-22` Linux / `-22` macOS) for argument-validation
@@ -324,7 +326,7 @@ pub fn tcp_listen_v2(host: &str, port: i64, backlog: i64, flags: i64) -> i64 {
 /// The registry tries first, then falls through to `getsockname` if
 /// the fd isn't tracked — single API surface, two backing mechanisms.
 pub fn tcp_local_port(fd: i64) -> i64 {
-    // Fast path: registry lookup for legacy synthetic-fd flows.
+    // Fast path: registry lookup for owned sockets.
     let from_registry = {
         let map = REGISTRY.lock().unwrap();
         match map.get(&fd) {
@@ -373,7 +375,7 @@ pub fn tcp_local_port(fd: i64) -> i64 {
 }
 
 /// Read the connected-peer address of a TCP fd via the registry's
-/// `peer_addr()` (synthetic-fd path) or `getpeername(2)` (real-fd
+/// `peer_addr()` (registered-owner path) or `getpeername(2)` (raw-fd
 /// path). Returns the peer as a `(family, host_str, port)` tuple
 /// where family is 4 or 6. None when the fd isn't tracked or the
 /// kernel call fails. Used by VBC-NET-4 for peer_addr round-trip
@@ -554,7 +556,7 @@ pub fn tcp_send(fd: i64, data: &[u8]) -> i64 {
     {
         use std::os::unix::io::{FromRawFd, IntoRawFd};
         // SAFETY: caller-supplied fd is documented as a real kernel
-        // fd in this fallback branch; the synthetic-fd table missed.
+        // fd in this fallback branch; the registered-owner lookup missed.
         let mut stream = unsafe { TcpStream::from_raw_fd(fd as i32) };
         let result = stream.write_all(data);
         let _surrendered = stream.into_raw_fd();
@@ -755,7 +757,7 @@ pub fn udp_close(fd: i64) -> i64 {
 // Return convention (chosen for ergonomic intrinsic dispatch):
 //
 //  * `tcp_accept_timeout_coop(state, fd, timeout_ms) -> i64`
-//      - >0: accepted synthetic fd
+//      - >0: accepted registered socket handle
 //      - -1: I/O error (registry miss, accept failed)
 //      - -2: timeout
 //      - -3: reactor unhealthy (caller should fall back to blocking)
@@ -1030,8 +1032,8 @@ pub fn tcp_accept_timeout_coop(
     listen_fd: i64,
     timeout_ms: i64,
 ) -> i64 {
-    // Reactor-driven accept loop shared by the registry path (synthetic
-    // fd → cloned listener) and the raw-kernel-fd fallback path.
+    // Reactor-driven accept loop shared by the registered-owner path
+    // (descriptor → cloned listener) and the raw-kernel-fd fallback path.
     fn accept_loop(
         state: &mut crate::interpreter::state::InterpreterState,
         listener: &TcpListener,

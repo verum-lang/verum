@@ -900,3 +900,34 @@ AOT or registry-service result follows from this fixture change. The source,
 executable, exact commands, immutable logs and unchanged inherited artifact
 identities are retained in
 [`net-runtime-bounded-fixtures/integration.json`](evidence/net-runtime-bounded-fixtures/integration.json).
+
+
+### Unix socket descriptor identity
+
+Unix registry entries now use the OS descriptor of their owned listener, TCP
+stream or UDP socket. This gives raw v2 listeners and registered resources one
+descriptor namespace. Registration duplicates a socket which owns descriptor
+zero while that owner is still alive, preserving the positive success-handle
+contract with a real OS descriptor. Non-Unix registered handles are unchanged.
+
+Four isolated baseline processes at `1fcc7ceaa` reproduced endpoint shadowing,
+closing a raw listener removing a live UDP registration, and UDP/listener
+handles differing from their owned descriptors. Three additional isolated
+controls at `7e5191458` demonstrated the initial repair returning zero for
+registered UDP/listener/stream sockets after child stdin was closed. The first
+fd-zero harness attempt selected zero child tests and is retained as invalid;
+it supplies no acceptance evidence.
+
+At `254400263`, all eight descriptor-identity and fd-zero controls pass in
+serial and four-thread groups. The complete groups still fail: serial has
+22 passes and four TCP connection timeouts; parallel has 21 passes, four TCP
+connection timeouts and one UDP timeout. Those TCP failures occur before
+registration. The adjacent four-thread IoEngine readiness/accept/read/write
+group passes all four controls. No retries were used to turn failures green.
+
+The older raw `tcp_listen_v2` descriptor-zero limitation remains separate:
+that path bypasses registration. No non-Unix execution, ordinary CLI, fresh
+standard-library bake, AOT, full-library pass or registry-service readiness
+is claimed. Exact source/executable identities, commands, failed and passed
+logs, and unchanged inherited artifacts are recorded in
+[`unix-socket-descriptor-identity/integration.json`](evidence/unix-socket-descriptor-identity/integration.json).
