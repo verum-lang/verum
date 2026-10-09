@@ -53,7 +53,7 @@ fn calls(module: &VbcModule, entry: verum_vbc::module::FunctionId) -> List<Text>
                 .get_function(verum_vbc::module::FunctionId(*func_id))
                 .and_then(|f| module.get_string(f.name))
                 .map(Into::into),
-            Instruction::CallM { method_id, .. } => module.get_string(*method_id).map(Into::into),
+            Instruction::CallM { method_id, .. } => module.get_string(verum_vbc::module::StringId(*method_id)).map(Into::into),
             _ => None,
         })
         .collect()
