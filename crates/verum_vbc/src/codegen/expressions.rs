@@ -12460,7 +12460,10 @@ impl VbcCodegen {
         let declared = self.extract_expr_type_name(receiver)
             .or_else(|| self.infer_expr_type_name(receiver))?;
         let owner = self.resolve_type_alias(Self::method_receiver_type_name(&declared));
-        if !self.nominal_type_id(&owner)?.is_numeric() {
+        let carrier = self.nominal_type_id(&owner)?;
+        // Pointer-sized integers share PTR in VBC. This only classifies the
+        // carrier; the source name below remains the method-owner authority.
+        if !(carrier.is_numeric() || carrier == crate::types::TypeId::PTR) {
             return None;
         }
         let candidate = if let Some(mounted) = self.mounted_type_path(&owner) {
