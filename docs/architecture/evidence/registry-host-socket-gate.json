@@ -1,0 +1,77 @@
+{
+  "source_commit": "1d7078cb582a2d99d88eb893a4abe475cdb6909f",
+  "source_tree": "8385e6c6ba1e49b1ecc101744bfc1eb27c4468b5",
+  "source_status_before": "",
+  "executable": "/Users/taaliman/.tmp/verum-codex-01a10248/target/debug/build/verum_vbc/9777a8ed778eb0dc/out/verum_vbc-9777a8ed778eb0dc",
+  "executable_sha256_before": "d5675a3a166b777d598379f53c15b469abd085d2edd40a588189bc5f8d1ea553",
+  "scope": "Host IoEngine and UDP fixtures; no ordinary CLI, AOT or original failure-cause claim",
+  "runs": [
+    {
+      "mode": "serial",
+      "command": [
+        "/Users/taaliman/.tmp/verum-codex-01a10248/target/debug/build/verum_vbc/9777a8ed778eb0dc/out/verum_vbc-9777a8ed778eb0dc",
+        "interpreter::io_engine::",
+        "udp_peer_address_tests::",
+        "--test-threads=1",
+        "--nocapture"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "elapsed_seconds": 0.944,
+      "log": "/private/tmp/verum-T1650-sockets-serial.log",
+      "log_sha256": "d759944866d258768acb3050f682bdb7be9bac52cd3e36b75be9efb93da6c59e",
+      "summary": [
+        "test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 2065 filtered out; finished in 0.26s"
+      ]
+    },
+    {
+      "mode": "parallel",
+      "command": [
+        "/Users/taaliman/.tmp/verum-codex-01a10248/target/debug/build/verum_vbc/9777a8ed778eb0dc/out/verum_vbc-9777a8ed778eb0dc",
+        "interpreter::io_engine::",
+        "udp_peer_address_tests::",
+        "--test-threads=4",
+        "--nocapture"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "elapsed_seconds": 0.134,
+      "log": "/private/tmp/verum-T1650-sockets-parallel.log",
+      "log_sha256": "274c8cd9e79bacb40f28a09c50a24200417bcb865a7b6a148c10240912c51d8d",
+      "summary": [
+        "test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 2065 filtered out; finished in 0.11s"
+      ]
+    }
+  ],
+  "source_status_after": "",
+  "executable_sha256_after": "d5675a3a166b777d598379f53c15b469abd085d2edd40a588189bc5f8d1ea553",
+  "task": "T1650",
+  "build": {
+    "command": [
+      "cargo",
+      "test",
+      "--locked",
+      "--offline",
+      "-p",
+      "verum_vbc",
+      "--lib",
+      "--no-default-features",
+      "--features",
+      "compression,table_dispatch,codegen,ffi",
+      "--no-run"
+    ],
+    "environment": {
+      "CARGO_INCREMENTAL": "0",
+      "CARGO_BUILD_JOBS": "2",
+      "VERUM_NO_AUTO_PRECOMPILE": "1"
+    },
+    "log_sha256": "ef288274650db17e86b430e54a3c211f6209ba6f566d9741985fee7494aa2d55"
+  },
+  "review": "Independent source review accepted real accepted-socket endpoint assertions, owned descriptors and fixture deadlines.",
+  "limitations": [
+    "The original incomplete full VBC gate remains recorded separately; these focused passes do not establish its failure cause.",
+    "A confirmed-connection host kqueue control observed readiness with both closed and retained peers, so short peer lifetime alone was not established as the cause.",
+    "Production socket runtime behavior is unchanged. These fixtures check pending readiness and byte transfer, not arrival after polling starts.",
+    "No ordinary CLI, generated AOT or complete registry-service acceptance."
+  ]
+}

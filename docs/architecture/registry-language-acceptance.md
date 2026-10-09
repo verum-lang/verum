@@ -222,3 +222,24 @@ These are real loopback HTTP and command-handler controls, not an authenticated
 Verum service roundtrip. Detailed dependency projection remains T1651; actual
 server admission, durable storage, restart and publish-install-run acceptance
 remain required by the [publication contract](cog-publication-protocol.md).
+
+## Bounded host socket controls — T1650
+
+The five affected TCP/UDP fixtures now own their sockets and bound connection,
+accept, read and write waits. The accepted TCP socket must identify the live
+peer and the listener port; a positive handle alone cannot pass. Readiness
+checks keep a confirmed connection pending, and byte-transfer checks require
+the exact payload. Existing empty-readiness and timeout controls remain.
+
+Source `1d7078cb5` passed all **11 focused controls**, once serially and once
+with four test threads, with zero failures or ignored tests. The
+[receipt](evidence/registry-host-socket-gate.json) preserves commands, source,
+executable and log hashes. CI's workspace unit and VBC test jobs select these
+private library tests.
+
+These changes bound test failures and preserve their socket assertions; they
+do not establish the cause of the earlier incomplete full gate. A separate
+confirmed-connection host control observed readiness with both a closed peer
+and a retained peer, so short peer lifetime alone was not the demonstrated
+cause. Production runtime behavior is unchanged, and T1650 remains open for
+the original failure diagnosis.
