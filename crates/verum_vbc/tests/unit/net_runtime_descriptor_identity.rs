@@ -217,6 +217,7 @@ fn registered_stream_uses_its_owned_os_descriptor() {
 
 fn positive_handle_with_closed_stdin(kind: &str, test_name: &str) {
     const CHILD_ROLE: &str = "VERUM_SOCKET_FD_ZERO_CHILD";
+    const CHILD_COMPLETED: i32 = 41;
     if std::env::var(CHILD_ROLE).as_deref() == Ok(kind) {
         // The test harness is fully initialized in this isolated child before
         // fd 0 is released. Parent standard descriptors are never touched.
@@ -255,10 +256,16 @@ fn positive_handle_with_closed_stdin(kind: &str, test_name: &str) {
             "positive handle must still be an actual owned descriptor"
         );
         socket.close();
-        return;
+        // A zero-test child exits 0; only this executed control can produce
+        // the completion code after checking ownership and closing its socket.
+        std::process::exit(CHILD_COMPLETED);
     }
 
     use std::process::{Command, Stdio};
+    // module_path includes the crate, whereas libtest names are crate-relative.
+    let (_, test_name) = test_name
+        .split_once("::")
+        .expect("crate-qualified test path");
     let mut child = Command::new(std::env::current_exe().unwrap())
         .args([test_name, "--exact", "--test-threads=1", "--nocapture"])
         .env(CHILD_ROLE, kind)
@@ -285,7 +292,7 @@ fn positive_handle_with_closed_stdin(kind: &str, test_name: &str) {
         thread::sleep(Duration::from_millis(1));
     };
     assert!(
-        status.success(),
+        status.code() == Some(CHILD_COMPLETED),
         "isolated {kind} descriptor-zero control failed: {status}"
     );
 }
