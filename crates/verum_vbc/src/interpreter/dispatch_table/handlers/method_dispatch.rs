@@ -400,6 +400,100 @@ fn receiver_is_a_deref_wrapper_for_another_type(
     owner_leaf != recv_leaf
 }
 
+/// A numeric method selected by its exact declaration, before carrier-width
+/// dispatch. Source-body provenance excludes generated forward-declaration RetV.
+#[derive(Clone, Copy)]
+struct DeclaredNumericMethod {
+    function: FunctionId,
+    register_count: u16,
+    borrows_self: bool,
+}
+
+fn declared_numeric_method(
+    state: &InterpreterState,
+    receiver: &Value,
+    method: &str,
+    argument_count: u8,
+) -> Option<DeclaredNumericMethod> {
+    if !method.contains('.')
+        || !(receiver.is_int() || receiver.is_float() || is_cbgr_ref(receiver))
+    {
+        return None;
+    }
+    let fid = state.module.find_function_by_name(method)?;
+    let function = state.module.get_function(fid)?;
+    // The legacy lookup permits suffixes, which cannot establish this owner.
+    if state.module.get_string(function.name) != Some(method)
+        || !function.has_source_body
+        || function.bytecode_length == 0
+        || function.params.len() != usize::from(argument_count) + 1
+    {
+        return None;
+    }
+    let parameter = function.params.first()?;
+    if state.module.get_string(parameter.name) != Some("self") {
+        return None;
+    }
+    let (receiver_type, borrows_self) = match &parameter.type_ref {
+        crate::types::TypeRef::Reference { inner, .. } => (inner.as_ref(), true),
+        concrete => (concrete, false),
+    };
+    // PTR also carries pointer-sized integers; the shared ID establishes no
+    // owner. The function above was selected by its exact declaration name.
+    matches!(receiver_type, crate::types::TypeRef::Concrete(id)
+        if id.is_numeric() || *id == TypeId::PTR)
+        .then_some(DeclaredNumericMethod {
+            function: fid,
+            register_count: function.register_count,
+            borrows_self,
+        })
+}
+
+/// Enter the selected body through an ordinary call frame. Its arithmetic and
+/// normal return own the tape result; builtin method-name tape rules do not run.
+fn enter_declared_numeric_method(
+    state: &mut InterpreterState,
+    target: DeclaredNumericMethod,
+    receiver: Value,
+    receiver_slot: u32,
+    args: &RegRange,
+    dst: Reg,
+    witnesses: Option<Box<[crate::types::TypeRef]>>,
+) -> InterpreterResult<DispatchResult> {
+    let caller_base = state.reg_base();
+    let return_pc = state.pc();
+    let new_base = state.call_stack.push_frame(
+        target.function, target.register_count, return_pc, dst,
+    )?;
+    if let Err(new_top) = state.registers.try_push_frame(target.register_count) {
+        state.call_stack.pop_frame()?;
+        return Err(InterpreterError::StackOverflow {
+            depth: new_top,
+            max_depth: crate::interpreter::registers::MAX_SIZE,
+        });
+    }
+    if let Some(witnesses) = witnesses {
+        state.call_stack.set_generic_witnesses(witnesses);
+    }
+    state.registers.set(new_base, Reg(0), receiver);
+    // A by-value CBGR call copied its referent's slot, not the reference bits.
+    crate::interpreter::autodiff_record::propagate_arg(
+        state, receiver_slot, Reg(0), new_base, Reg(0),
+    );
+    for index in 0..args.count {
+        let source = Reg(args.start.0 + u16::from(index));
+        let destination = Reg(u16::from(index) + 1);
+        let value = state.registers.get(caller_base, source);
+        state.registers.set(new_base, destination, value);
+        crate::interpreter::autodiff_record::propagate_arg(
+            state, caller_base, source, new_base, destination,
+        );
+    }
+    state.set_pc(0);
+    state.record_call();
+    Ok(DispatchResult::Continue)
+}
+
 pub(in super::super) fn handle_call_method(
     state: &mut InterpreterState,
 ) -> InterpreterResult<DispatchResult> {
@@ -667,6 +761,16 @@ pub(in super::super) fn handle_call_method(
         }
     }
 
+    let declared_numeric = declared_numeric_method(state, &receiver, &method_name, args.count);
+    if let Some(target) = declared_numeric
+        && (target.borrows_self || !is_cbgr_ref(&receiver))
+    {
+        let receiver_slot = state.reg_base() + u32::from(receiver_reg.0);
+        return enter_declared_numeric_method(
+            state, target, receiver, receiver_slot, &args, dst, call_witness_sidecar.take(),
+        );
+    }
+
     // Handle CBGR ref-specific methods BEFORE unwrapping. Methods like
     // `can_write`, `can_read`, `capabilities`, `epoch_caps_raw`, `stored_generation`,
     // `is_valid` operate on the reference metadata, not the referent. Unwrapping
@@ -700,8 +804,9 @@ pub(in super::super) fn handle_call_method(
             | "is_valid"
             | "is_epoch_valid"
     );
-    if (is_cbgr_ref(&receiver)
-        || (is_ref_metadata_method && receiver.is_ptr() && !receiver.is_nil()))
+    if declared_numeric.is_none()
+        && (is_cbgr_ref(&receiver)
+            || (is_ref_metadata_method && receiver.is_ptr() && !receiver.is_nil()))
         && let Some(result) = dispatch_primitive_method(state, &receiver, &method_name, &args)?
     {
         tape_float_method(state, &method_name, &receiver, &result, dst, receiver_reg);
@@ -782,6 +887,18 @@ pub(in super::super) fn handle_call_method(
     } else {
         receiver
     };
+
+    if let Some(target) = declared_numeric
+        && (dispatch_receiver.is_int() || dispatch_receiver.is_float())
+    {
+        // Only the by-value CBGR case reaches this point. Reuse the same
+        // absolute referent slot that the established unwrap above read.
+        let (receiver_slot, _) = decode_cbgr_ref(receiver);
+        return enter_declared_numeric_method(
+            state, target, dispatch_receiver, receiver_slot, &args, dst,
+            call_witness_sidecar.take(),
+        );
+    }
 
     // **Text `&mut self` shrink intercepts** — `truncate`, `clear`,
     // `pop`. The user-side bodies write `self.len = boundary` via
@@ -5454,46 +5571,6 @@ pub(super) fn dispatch_primitive_method(
     method: &str,
     args: &RegRange,
 ) -> InterpreterResult<Option<Value>> {
-    // A qualified numeric declaration owns its body and result contract.
-    // Width normalization is only a fallback when no exact body is present.
-    // In particular two declarations can share an integer carrier while one
-    // returns a List and the other a packed fixed array.
-    if method.contains('.')
-        && (receiver.is_int() || receiver.is_float() || is_cbgr_ref(receiver))
-        && let Some(fid) = state.module.find_function_by_name(method)
-        && let Some(function) = state.module.get_function(fid)
-        // The legacy lookup also permits suffixes. Such a match is not an
-        // exact declaration and cannot gain precedence over this receiver.
-        && state.module.get_string(function.name) == Some(method)
-        && function.bytecode_length > 0
-        && function.params.len() == usize::from(args.count) + 1
-        && let Some(parameter) = function.params.first()
-        && state.module.get_string(parameter.name) == Some("self")
-    {
-        let (receiver_type, borrowed) = match &parameter.type_ref {
-            crate::types::TypeRef::Reference { inner, .. } => (inner.as_ref(), true),
-            concrete => (concrete, false),
-        };
-        // PTR also carries the declared pointer-sized integers. Its shared
-        // ID is never used to choose an owner: `fid` came from the exact name.
-        if matches!(receiver_type, crate::types::TypeRef::Concrete(id)
-            if id.is_numeric() || *id == TypeId::PTR)
-        {
-            // The outer CallM handler unwraps a borrowed value before retrying
-            // a by-value method. Do not pass its encoded reference as an Int.
-            if !borrowed && is_cbgr_ref(receiver) {
-                return Ok(None);
-            }
-            let caller_base = state.reg_base();
-            let mut call_args = verum_common::List::new();
-            call_args.push(*receiver);
-            for index in 0..args.count {
-                call_args.push(state.registers.get(caller_base, Reg(args.start.0 + u16::from(index))));
-            }
-            return super::super::call_function_sync(state, fid, &call_args).map(Some);
-        }
-    }
-
     // (removed leftover debug eprintln! that flooded stderr on every method
     // dispatch in debug builds — that noise polluted test stdout/stderr and
     // broke expected-stdout comparisons in the VCS runner.)

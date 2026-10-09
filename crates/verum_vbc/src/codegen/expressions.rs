@@ -12480,7 +12480,8 @@ impl VbcCodegen {
             format!("{owner}.{method}")
         };
         let info = self.ctx.lookup_qualified_function(&candidate)?;
-        (usize::from(info.param_count) == argument_count + 1
+        (info.has_source_body
+            && usize::from(info.param_count) == argument_count + 1
             && info.variant_tag.is_none()
             && info.intrinsic_name.is_none())
             .then_some(candidate)
