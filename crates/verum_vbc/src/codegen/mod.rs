@@ -371,7 +371,7 @@ pub use registers::{RegisterAllocator, RegisterInfo, RegisterKind, RegisterSnaps
 
 use crate::types::CbgrTier;
 use verum_ast::cfg::{CfgEvaluator, TargetConfig};
-use verum_common::Map;
+use verum_common::{Map, Maybe, Text};
 use verum_common::well_known_types::WellKnownType as WKT;
 
 use crate::instruction::{Instruction, Reg};
@@ -1047,6 +1047,12 @@ pub struct VbcCodegen {
     /// Map from type name to TypeId for user-defined types.
     /// Used to emit correct type_id in New instructions for proper Drop dispatch.
     type_name_to_id: std::collections::HashMap<String, crate::types::TypeId>,
+
+    /// Explicit type mounts belong to the declaring source, even when several
+    /// files share one bootstrap unit. Empty entries prevent a source with no
+    /// mounts from inheriting the last sibling's bindings. Keep these tables
+    /// through body compilation, which revisits each source after collection.
+    source_type_mounts: Map<Text, Map<Text, Text>>,
 
     /// SIBLING-IMPL-MATERIALIZATION-1 (#51): per-qualified-name count
     /// of impl-block method registrations.  The FIRST `implement`
@@ -1795,6 +1801,19 @@ impl VbcCodegen {
         }
     }
 
+    /// Select a mount from the current source's retained declaration scope.
+    /// A known source with no such mount must not consult another file's flat
+    /// context table. The fallback supports callers that seed a context without
+    /// collecting source declarations.
+    fn mounted_type_path(&self, name: &str) -> Maybe<&str> {
+        let owner = self.ctx.current_source_module.as_deref()
+            .unwrap_or(&self.config.module_name);
+        match self.source_type_mounts.get(owner) {
+            Some(mounts) => mounts.get(name).map(Text::as_str),
+            None => self.ctx.mounted_types.get(name).map(|path| path.as_str()),
+        }
+    }
+
     /// If `type_name` is a type alias, returns the base type name.
     /// Otherwise, returns the original name.
     ///
@@ -1817,14 +1836,14 @@ impl VbcCodegen {
         // THIS module explicitly mounted the name, the mount path
         // names the intended owner — consult the module-qualified
         // alias key first (`core.io.IoError` → key "io.IoError").
-        if let Some(mount_path) = self.ctx.mounted_types.get(type_name) {
+        if let Some(mount_path) = self.mounted_type_path(type_name) {
             let qualified = mount_path
                 .strip_prefix("core.")
-                .unwrap_or(mount_path.as_str());
+                .unwrap_or(mount_path);
             if let Some(target) = self.type_aliases.get(qualified) {
                 return target.clone();
             }
-            if let Some(target) = self.type_aliases.get(mount_path.as_str()) {
+            if let Some(target) = self.type_aliases.get(mount_path) {
                 return target.clone();
             }
             // T0691 MOUNT-WINS: an explicitly mounted name whose OWNER
@@ -2267,6 +2286,7 @@ impl VbcCodegen {
             sibling_pairing_counters: std::collections::HashMap::new(),
             current_impl_ast_generics: None,
             current_impl_semantic_target: None,
+            source_type_mounts: Map::new(),
             type_name_to_id: {
                 let mut m = std::collections::HashMap::new();
                 use crate::types::TypeId;
@@ -8065,6 +8085,7 @@ impl VbcCodegen {
     /// Inline declarations participate in the same unit prepass as file types.
     /// Every declaring owner has an ID before any field or body refers to it.
     fn claim_declared_type_items(&mut self, items: &[verum_ast::Item], owner: &str) {
+        self.source_type_mounts.entry(owner.into()).or_default();
         for item in items {
             if !self.should_compile_item(item) { continue; }
             match &item.kind {
@@ -8248,6 +8269,9 @@ impl VbcCodegen {
         // to know about a sibling collected in an earlier call.
         for module in files {
             let owner = Self::resolve_full_module_path(module, &self.config.module_name);
+            self.source_type_mounts
+                .entry(owner.as_deref().unwrap_or(&self.config.module_name).into())
+                .or_default();
             if let Some(path) = &owner {
                 self.unit_module_paths.insert(path.clone());
                 self.count_module_owners.declare(path);
@@ -12181,9 +12205,14 @@ impl VbcCodegen {
                         .next()
                         .is_some_and(|c| c.is_ascii_uppercase())
                 {
+                    let mount_path = full_path.join(".");
+                    let owner = self.ctx.current_source_module.as_deref()
+                        .unwrap_or(&self.config.module_name);
+                    self.source_type_mounts.entry(owner.into()).or_default()
+                        .insert(alias_name.as_str().into(), mount_path.as_str().into());
                     self.ctx
                         .mounted_types
-                        .insert(alias_name.clone(), full_path.join("."));
+                        .insert(alias_name.clone(), mount_path);
                     // Task #13: a RENAMING type mount
                     // (`mount X.{Duration as SysDuration}`) must also
                     // land in the plain type-alias table so static-call
@@ -22204,7 +22233,7 @@ impl VbcCodegen {
     /// Resolution order:
     ///  1. `name` itself is authoritative → `None` (no re-key needed).
     ///  2. The compiling module's explicit mount binding
-    ///     (`ctx.mounted_types`): probe the mount path and its
+    ///     (selected by source owner): probe the mount path and its
     ///     right-truncated parents — archive entries bundle submodule
     ///     files under the parent module name, so
     ///     `core.meta.token.Group` typically registers as
@@ -22241,7 +22270,7 @@ impl VbcCodegen {
                 return Some(q);
             }
         }
-        if let Some(path) = self.ctx.mounted_types.get(name) {
+        if let Some(path) = self.mounted_type_path(name) {
             let segs: Vec<&str> = path.split('.').collect();
             if segs.len() >= 2 {
                 let leaf = segs[segs.len() - 1];
@@ -22856,11 +22885,11 @@ impl VbcCodegen {
             });
         if !local
             && !type_name.contains('.')
-            && let Some(path) = self.ctx.mounted_types.get(type_name)
+            && let Some(path) = self.mounted_type_path(type_name)
         {
             if let Some(ty) = self
                 .type_field_type_names
-                .get(&(path.clone(), field_name.to_owned()))
+                .get(&(path.to_owned(), field_name.to_owned()))
             {
                 return Some(ty);
             }

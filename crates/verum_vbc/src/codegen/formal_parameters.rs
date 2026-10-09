@@ -109,7 +109,7 @@ impl VbcCodegen {
         {
             return true;
         }
-        if self.ctx.mounted_types.contains_key(&name) {
+        if self.mounted_type_path(&name).is_some() {
             return self.nominal_type_id(&name).is_some();
         }
         if self

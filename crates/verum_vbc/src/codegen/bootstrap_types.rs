@@ -564,7 +564,7 @@ impl VbcCodegen {
             })
         };
         if !self.local_concrete_types.contains(name)
-            && let Some(mounted) = self.ctx.mounted_types.get(name)
+            && let Some(mounted) = self.mounted_type_path(name)
         {
             return lookup(mounted).or_else(|| lookup(&format!("core.{mounted}")));
         }
