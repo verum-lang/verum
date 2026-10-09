@@ -375,3 +375,144 @@ fn one_file_tuple_constructor_keeps_its_owner_after_both_declaration_passes() {
         assert_return_owner(&mut checker, "identity", "demo.main.Cache");
     }
 }
+
+fn assert_static_receiver_case(declaration: &str, probe: &str, mounted: bool, rejects: bool) {
+    let source = if mounted {
+        Text::from(format!("mount demo.cache.{{Cache}}; {probe}"))
+    } else {
+        Text::from(format!("{declaration} {probe}"))
+    };
+    let modules = [("demo.cache", declaration)];
+    let (_, errors) = check(
+        source.as_str(),
+        if mounted { &modules } else { &[] },
+        true,
+        false,
+    );
+    if rejects {
+        assert!(
+            errors.iter().any(|error| error.contains("Mismatch")),
+            "mounted={mounted}, source={source}: {errors:?}"
+        );
+    } else {
+        assert!(
+            errors.is_empty(),
+            "mounted={mounted}, source={source}: {errors:?}"
+        );
+    }
+}
+
+#[test]
+fn explicit_static_receiver_arguments_are_checked_locally_and_when_mounted() {
+    let declaration = "public type Cache<T> is { value: T }; implement<T> Cache<T> { public fn from_value(value: T) -> Cache<T> { Cache { value } } }";
+    for mounted in [false, true] {
+        assert_static_receiver_case(
+            declaration,
+            "fn probe() -> Int { Cache<Int>.from_value(37).value }",
+            mounted,
+            false,
+        );
+        assert_static_receiver_case(
+            declaration,
+            "fn probe() -> Int { Cache<Bool>.from_value(37).value }",
+            mounted,
+            true,
+        );
+    }
+}
+
+#[test]
+fn static_result_can_deliberately_differ_from_receiver_arguments() {
+    let declaration = "public type Cache<T> is { value: T }; implement<T> Cache<T> { public fn fixed() -> Cache<Int> { Cache { value: 37 } } }";
+    for mounted in [false, true] {
+        assert_static_receiver_case(
+            declaration,
+            "fn probe() -> Int { Cache<Bool>.fixed().value }",
+            mounted,
+            false,
+        );
+    }
+}
+
+#[test]
+fn static_receiver_uses_declared_reordered_impl_arguments() {
+    let declaration = "public type Cache<First, Second> is { first: First, second: Second }; implement<Left, Right> Cache<Right, Left> { public fn from_values(first: Right, second: Left) -> Cache<Right, Left> { Cache { first, second } } }";
+    for mounted in [false, true] {
+        assert_static_receiver_case(
+            declaration,
+            "fn probe() -> Int { Cache<Bool, Int>.from_values(true, 37).second }",
+            mounted,
+            false,
+        );
+        assert_static_receiver_case(
+            declaration,
+            "fn probe() -> Bool { Cache<Bool, Int>.from_values(37, true).second }",
+            mounted,
+            true,
+        );
+    }
+}
+
+#[test]
+fn static_receiver_uses_nested_impl_arguments() {
+    let declaration = "public type Cache<T> is { value: T }; implement<T> Cache<(T, Bool)> { public fn from_value(value: T) -> Cache<(T, Bool)> { Cache { value: (value, true) } } }";
+    for mounted in [false, true] {
+        assert_static_receiver_case(
+            declaration,
+            "fn probe() -> Bool { Cache<(Bool, Bool)>.from_value(true).value.0 }",
+            mounted,
+            false,
+        );
+        assert_static_receiver_case(
+            declaration,
+            "fn probe() -> Int { Cache<(Bool, Bool)>.from_value(37).value.0 }",
+            mounted,
+            true,
+        );
+    }
+}
+
+#[test]
+fn static_method_generic_is_independent_of_the_impl_receiver() {
+    let declaration = "public type Cache<T> is { value: T }; implement<T> Cache<T> { public fn keep<U>(value: U) -> U { value } }";
+    for mounted in [false, true] {
+        assert_static_receiver_case(
+            declaration,
+            "fn probe() -> Int { Cache<Bool>.keep(37) }",
+            mounted,
+            false,
+        );
+    }
+}
+
+#[test]
+fn static_receiver_refuses_the_wrong_fixed_impl_specialization() {
+    let declaration = "public type Cache<T> is { value: T }; implement Cache<Bool> { public fn code() -> Int { 37 } }";
+    for mounted in [false, true] {
+        assert_static_receiver_case(
+            declaration,
+            "fn probe() -> Int { Cache<Bool>.code() }",
+            mounted,
+            false,
+        );
+        assert_static_receiver_case(
+            declaration,
+            "fn probe() -> Int { Cache<Int>.code() }",
+            mounted,
+            true,
+        );
+    }
+}
+
+#[test]
+fn static_receiver_instantiations_do_not_bind_the_declaration() {
+    let declaration = "public type Cache<T> is { value: T }; implement<T> Cache<T> { public fn from_value(value: T) -> Cache<T> { Cache { value } } }";
+    for mounted in [false, true] {
+        assert_static_receiver_case(
+            declaration,
+            "fn probe() -> Int { let first = Cache<Bool>.from_value(true); Cache<Int>.from_value(37).value }",
+            mounted,
+            false,
+        );
+    }
+}
