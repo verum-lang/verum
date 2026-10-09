@@ -398,3 +398,33 @@ CLI crate tree, including controls, is byte-identical to tested `b6860b03c`.
 The receipt records the separate compiler/type-checker base changes; the
 original gate does not claim execution of that combined source or an ordinary
 CLI bake. The tested source remains preserved on its named branch.
+
+## Workspace management manifest authority — T1672
+
+The handlers behind `workspace list`, `add`, `remove` and `exec` use the shared
+manifest authority. Canonical and legacy members are recognized consistently.
+Membership updates persist to the selected workspace manifest, leaving a
+distinct lowercase shadow unchanged. Execution treats a declared member that
+cannot load as a failure; it cannot skip that member and report successful
+execution in zero members. An actually empty workspace retains its behavior.
+
+The [gate receipt](evidence/registry-workspace-management-gate.json) preserves
+the case-sensitive baseline `117bdf2ae`: **10 failing controls**, three passing
+compatibility/refusal controls and two inert subprocess entries. Fixed source
+`e3db15b49` passed **15/15 entries**. Real child commands wrote per-member cwd
+markers, including a controlled command failure; membership assertions reloaded
+the modified manifest and compared untouched shadow bytes. On the same fixed
+executable, **12 publication** and **five dependency** entries also passed.
+Those 32 passing entries contain 29 substantive controls and three inert entries.
+
+These external test modules are selected by CI's workspace unit-test job. For
+complete local precedence coverage, point `VERUM_T1672_FIXTURE_ROOT` at a
+case-sensitive directory; the publication neighbor uses
+`VERUM_T1665_FIXTURE_ROOT`. Explicit case-folded roots are refused. The recorded
+gates retained the pinned stage14 artifacts with automatic baking disabled.
+
+This is executable handler and filesystem acceptance. The CLI dispatch wiring
+was inspected, while clap parsing and an ordinary `verum` binary were not
+executed. Registry/authentication and full platform acceptance remain separate.
+The undispatched workspace build/test/check helpers and the absent publication
+route are outside this four-handler change.

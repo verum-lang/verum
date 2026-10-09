@@ -1,0 +1,246 @@
+{
+  "task": "T1672",
+  "status": "bounded acceptance of workspace list/add/remove/exec library handlers and actual per-member child commands",
+  "source_base": "dceff0915",
+  "baseline_source_commit": "117bdf2aea9195bfed18568c7f5197e6115c5a21",
+  "tested_source_commit": "e3db15b49be6a428c967c19c02d4ccd7553a64a4",
+  "fixture_filesystem": "HFS+ case-sensitive temporary volume; all distinct-name controls exercised",
+  "baseline_observations": [
+    "Canonical-only members were missing in list and were skipped by exec.",
+    "A workspace with one missing member returned success and printed Command completed successfully in all 0 members.",
+    "Add with a canonical-only member failed the lowercase existence probe.",
+    "Add/remove against a canonical root could print success while reloading the canonical manifest still showed unchanged membership.",
+    "The distinct lowercase root was a competing write destination instead of being preserved.",
+    "Three substantive guards already passed: adding/removing legacy projects and refusing a malformed canonical member with a legacy shadow. Two additional passing entries were inert subprocess dispatchers."
+  ],
+  "control_scope": [
+    "Canonical and lowercase list/exec members, missing and malformed configs, and canonical precedence over a valid lowercase shadow.",
+    "Actual child commands write markers under the member cwd. A deliberately failing child verifies error propagation and partial execution behavior.",
+    "Add/remove persisted membership is reloaded through Config, including canonical-only, legacy-only and both-spelling root manifests.",
+    "Invalid member admission leaves exact workspace manifest bytes unchanged; a distinct lowercase shadow also remains byte-identical after successful updates."
+  ],
+  "counts": {
+    "management_entries": 15,
+    "management_substantive": 13,
+    "management_inert": 2,
+    "adjacent_publication_entries": 12,
+    "adjacent_publication_substantive": 11,
+    "adjacent_dependency_entries": 5,
+    "total_passing_entries": 32,
+    "total_substantive": 29
+  },
+  "runs": {
+    "baseline": {
+      "source_commit": "117bdf2aea9195bfed18568c7f5197e6115c5a21",
+      "source_tree": "6a7a1e061d37604feec3787fd9aba42093841c3e",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "-p",
+        "verum_cli",
+        "--lib",
+        "commands::workspace::management_manifests::",
+        "--",
+        "--nocapture",
+        "--test-threads=2"
+      ],
+      "cwd": "/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum",
+      "env_overrides": {
+        "CARGO_TARGET_DIR": "/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target",
+        "CARGO_BUILD_JOBS": "2",
+        "CARGO_INCREMENTAL": "0",
+        "VERUM_NO_AUTO_PRECOMPILE": "1",
+        "VERUM_LLVM_DIR": "/Users/taaliman/projects/oldman/verum-lang/verum/llvm/install",
+        "RUST_MIN_STACK": "16777216",
+        "VERUM_T1672_FIXTURE_ROOT": "/private/tmp/verum-t1665-volume"
+      },
+      "timeout_seconds": 900,
+      "scope": "no-auto-precompile workspace management library handlers and actual child commands; no ordinary CLI dispatch, registry service or AOT acceptance",
+      "precompiled_artifacts_before": {
+        "runtime.vbca": "410ff097b455437cab98b651f7799b3129588820925afe98e0de9c3781530a0f",
+        "runtime.core_metadata": "a92bd89e649e102cdc67d7ad0032513d6448d8915e5744127e6cdf1f1e34ebbb",
+        "runtime.symbol_graph": "a6678c18498f7519749ca1fdf1d22629b479083f42fa95a15177e8c7acf1c722",
+        "runtime.vbca.checksum": "c33573118a8c4b635f6c8f727c3784b524f660be57de702365e8d9c14b2f3a8b",
+        "runtime.vbca.schema": "fec20d7b3f8d1b81aff66c6c1181be574963779f7eacaf65660f8ab9127fca87"
+      },
+      "precompiled_source_checksum": "def6d3e7b7421caf163b63529b2d0edd4bc2a09ec0004eb9cb89854b1cbae868",
+      "precompiled_producer": "Previously verified stage14 fdad59f06; cached artifacts are not regenerated for this source.",
+      "runner_sha256": "e842d61a028423d669de5648ff9beaea345da080828030a95b2135de8a50029d",
+      "log": "/private/tmp/verum-T1672-baseline/gate.log",
+      "exit_code": 101,
+      "stop_reason": null,
+      "elapsed_seconds": 140.559,
+      "source_commit_after": "117bdf2aea9195bfed18568c7f5197e6115c5a21",
+      "source_status_after": "",
+      "precompiled_artifacts_after": {
+        "runtime.vbca": "410ff097b455437cab98b651f7799b3129588820925afe98e0de9c3781530a0f",
+        "runtime.core_metadata": "a92bd89e649e102cdc67d7ad0032513d6448d8915e5744127e6cdf1f1e34ebbb",
+        "runtime.symbol_graph": "a6678c18498f7519749ca1fdf1d22629b479083f42fa95a15177e8c7acf1c722",
+        "runtime.vbca.checksum": "c33573118a8c4b635f6c8f727c3784b524f660be57de702365e8d9c14b2f3a8b",
+        "runtime.vbca.schema": "fec20d7b3f8d1b81aff66c6c1181be574963779f7eacaf65660f8ab9127fca87"
+      },
+      "log_sha256": "420437392d135992a990421540de9ae063a84678add84c5113d125a67653550e",
+      "outer_test_summary": [
+        "FAILED",
+        "5",
+        "10",
+        "0",
+        "0",
+        "881"
+      ],
+      "executable": {
+        "original_path": "/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target/debug/build/verum_cli/72adbfc0707d7b24/out/verum_cli-72adbfc0707d7b24",
+        "preserved_path": "/private/tmp/verum-T1672-baseline/verum_cli_tests",
+        "sha256": "7cda71ea7da73732a36fdc9c0704e32a7c34a55ac13d1abff11b4e3adf536678"
+      },
+      "source_unchanged": true,
+      "artifacts_unchanged": true
+    },
+    "fixed": {
+      "source_commit": "e3db15b49be6a428c967c19c02d4ccd7553a64a4",
+      "source_tree": "392b53215e23081b0d14f2c31d242e8ad3fcfa85",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "-p",
+        "verum_cli",
+        "--lib",
+        "commands::workspace::management_manifests::",
+        "--",
+        "--nocapture",
+        "--test-threads=2"
+      ],
+      "cwd": "/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum",
+      "env_overrides": {
+        "CARGO_TARGET_DIR": "/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target",
+        "CARGO_BUILD_JOBS": "2",
+        "CARGO_INCREMENTAL": "0",
+        "VERUM_NO_AUTO_PRECOMPILE": "1",
+        "VERUM_LLVM_DIR": "/Users/taaliman/projects/oldman/verum-lang/verum/llvm/install",
+        "RUST_MIN_STACK": "16777216",
+        "VERUM_T1672_FIXTURE_ROOT": "/private/tmp/verum-t1665-volume"
+      },
+      "timeout_seconds": 900,
+      "scope": "no-auto-precompile workspace management library handlers and actual child commands; no ordinary CLI dispatch, registry service or AOT acceptance",
+      "precompiled_artifacts_before": {
+        "runtime.vbca": "410ff097b455437cab98b651f7799b3129588820925afe98e0de9c3781530a0f",
+        "runtime.core_metadata": "a92bd89e649e102cdc67d7ad0032513d6448d8915e5744127e6cdf1f1e34ebbb",
+        "runtime.symbol_graph": "a6678c18498f7519749ca1fdf1d22629b479083f42fa95a15177e8c7acf1c722",
+        "runtime.vbca.checksum": "c33573118a8c4b635f6c8f727c3784b524f660be57de702365e8d9c14b2f3a8b",
+        "runtime.vbca.schema": "fec20d7b3f8d1b81aff66c6c1181be574963779f7eacaf65660f8ab9127fca87"
+      },
+      "precompiled_source_checksum": "def6d3e7b7421caf163b63529b2d0edd4bc2a09ec0004eb9cb89854b1cbae868",
+      "precompiled_producer": "Previously verified stage14 fdad59f06; cached artifacts are not regenerated for this source.",
+      "runner_sha256": "e842d61a028423d669de5648ff9beaea345da080828030a95b2135de8a50029d",
+      "log": "/private/tmp/verum-T1672-fixed/gate.log",
+      "exit_code": 0,
+      "stop_reason": null,
+      "elapsed_seconds": 137.629,
+      "source_commit_after": "e3db15b49be6a428c967c19c02d4ccd7553a64a4",
+      "source_status_after": "",
+      "precompiled_artifacts_after": {
+        "runtime.vbca": "410ff097b455437cab98b651f7799b3129588820925afe98e0de9c3781530a0f",
+        "runtime.core_metadata": "a92bd89e649e102cdc67d7ad0032513d6448d8915e5744127e6cdf1f1e34ebbb",
+        "runtime.symbol_graph": "a6678c18498f7519749ca1fdf1d22629b479083f42fa95a15177e8c7acf1c722",
+        "runtime.vbca.checksum": "c33573118a8c4b635f6c8f727c3784b524f660be57de702365e8d9c14b2f3a8b",
+        "runtime.vbca.schema": "fec20d7b3f8d1b81aff66c6c1181be574963779f7eacaf65660f8ab9127fca87"
+      },
+      "log_sha256": "e8010476c11e5ec3d2ddb8977c1962521823000225119170fa7bb4211a8e6217",
+      "outer_test_summary": [
+        "ok",
+        "15",
+        "0",
+        "0",
+        "0",
+        "881"
+      ],
+      "executable": {
+        "original_path": "/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target/debug/build/verum_cli/72adbfc0707d7b24/out/verum_cli-72adbfc0707d7b24",
+        "preserved_path": "/private/tmp/verum-T1672-fixed/verum_cli_tests",
+        "sha256": "6dcf41368c3298bf15b1200858bbd693ba4e8374a71d21746b35c08047aa3002"
+      },
+      "source_unchanged": true,
+      "artifacts_unchanged": true
+    },
+    "adjacent": [
+      {
+        "source_commit": "e3db15b49be6a428c967c19c02d4ccd7553a64a4",
+        "command": [
+          "/private/tmp/verum-T1672-fixed/verum_cli_tests",
+          "commands::workspace::publication_manifests::",
+          "--nocapture",
+          "--test-threads=2"
+        ],
+        "timeout_seconds": 60,
+        "elapsed_seconds": 3.604,
+        "exit_code": 0,
+        "outer_test_summary": [
+          "ok",
+          "12",
+          "0",
+          "0",
+          "0",
+          "884"
+        ],
+        "executable_sha256": "6dcf41368c3298bf15b1200858bbd693ba4e8374a71d21746b35c08047aa3002",
+        "log": "/private/tmp/verum-T1672-adjacent/publication.log",
+        "log_sha256": "55ba71d01dfe38bd1b6e7638e88102aba685920d8649bd69633b7316a1c7e21f",
+        "env_overrides": {
+          "CARGO_TARGET_DIR": "/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target",
+          "CARGO_BUILD_JOBS": "2",
+          "CARGO_INCREMENTAL": "0",
+          "VERUM_NO_AUTO_PRECOMPILE": "1",
+          "VERUM_LLVM_DIR": "/Users/taaliman/projects/oldman/verum-lang/verum/llvm/install",
+          "RUST_MIN_STACK": "16777216",
+          "VERUM_T1672_FIXTURE_ROOT": "/private/tmp/verum-t1665-volume",
+          "VERUM_T1665_FIXTURE_ROOT": "/private/tmp/verum-t1665-volume"
+        }
+      },
+      {
+        "source_commit": "e3db15b49be6a428c967c19c02d4ccd7553a64a4",
+        "command": [
+          "/private/tmp/verum-T1672-fixed/verum_cli_tests",
+          "cog::publication_dependencies::workspace_",
+          "--nocapture",
+          "--test-threads=2"
+        ],
+        "timeout_seconds": 60,
+        "elapsed_seconds": 0.077,
+        "exit_code": 0,
+        "outer_test_summary": [
+          "ok",
+          "5",
+          "0",
+          "0",
+          "0",
+          "891"
+        ],
+        "executable_sha256": "6dcf41368c3298bf15b1200858bbd693ba4e8374a71d21746b35c08047aa3002",
+        "log": "/private/tmp/verum-T1672-adjacent/dependencies.log",
+        "log_sha256": "d5570c5bf37769bb04f508ca8f6a7b6b5e8d54f18d9f0710978214eb5662eb58",
+        "env_overrides": {
+          "CARGO_TARGET_DIR": "/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target",
+          "CARGO_BUILD_JOBS": "2",
+          "CARGO_INCREMENTAL": "0",
+          "VERUM_NO_AUTO_PRECOMPILE": "1",
+          "VERUM_LLVM_DIR": "/Users/taaliman/projects/oldman/verum-lang/verum/llvm/install",
+          "RUST_MIN_STACK": "16777216",
+          "VERUM_T1672_FIXTURE_ROOT": "/private/tmp/verum-t1665-volume",
+          "VERUM_T1665_FIXTURE_ROOT": "/private/tmp/verum-t1665-volume"
+        }
+      }
+    ]
+  },
+  "boundaries": [
+    "The tests call the actual library handlers wired to WorkspaceCommands List/Add/Remove/Exec. They do not execute clap parsing or an ordinary verum binary.",
+    "No registry service, authentication, publication, installation, ordinary CLI build, automatic stdlib bake or AOT run is accepted by this gate.",
+    "The precompiled stage14 artifacts, checksum and schema are independent pinned inputs and remained unchanged.",
+    "Workspace publish is still a separate library handler with no added dispatch route; T1639 retains that work.",
+    "Undispatched workspace build/test/check helper behavior is outside the four-handler scope.",
+    "An empty declared workspace is unchanged. A declared member whose manifest is missing now counts as a failed execution instead of being skipped."
+  ]
+}
