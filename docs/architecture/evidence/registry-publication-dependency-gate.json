@@ -4,20 +4,20 @@
   "tested_source_commit": "4409dc64a1b14fbd847b5e7163a9d675c3705ddd",
   "tested_source_base": "d1ee935884042606f0feb6266d05195bbfe89115",
   "tested_source_branch": "codex/publication-dependencies-tested-4409",
-  "rebased_source_commit": "a57812d4c9a531a31e1e7764d5d67230fcde7beb",
-  "rebase_base": "fa36ceae04de074c5eca9c391518fc3a2a2db1ce",
+  "rebased_source_commit": "7d7d3ca886b80490ace302059fb63b9ce538403d",
+  "rebase_base": "3d83e98c12db6146ae3df9eb65979d3b05c50d78",
   "rebase_equivalence": {
     "all_nine_patches_unchanged": true,
     "range_diff": [
-      "1:  83b2fa74b =  1:  0bb051dfe test(cog): expose lost publication dependency intent (T1651)",
-      " 2:  b67ab0c81 =  2:  8fd897a72 fix(cog): preserve representable publication dependency intent (T1651)",
-      " 3:  62f3392c1 =  3:  0600d546b docs(registry): define publication dependency projection boundaries (T1651)",
-      " 4:  9098465bf =  4:  78f39d32e test(cog): expose ignored dependency source fields (T1651)",
-      " 5:  6938800c9 =  5:  5d36e672e fix(cog): reject unknown detailed dependency fields (T1651)",
-      " 6:  ba4273bec =  6:  abb6e6ea0 test(cog): assert the canonical archive manifest spelling (T1651)",
-      " 7:  eb7cb8815 =  7:  a6eb617d4 test(cog): expose publication admission bypasses (T1651)",
-      " 8:  69deca4ab =  8:  410939e65 fix(cog): validate dependency intent before workspace previews (T1651)",
-      " 9:  4409dc64a =  9:  a57812d4c fix(registry): require dependency versions in publication admission (T1651)"
+      "1:  83b2fa74b =  1:  656d19c2e test(cog): expose lost publication dependency intent (T1651)",
+      " 2:  b67ab0c81 =  2:  40d052102 fix(cog): preserve representable publication dependency intent (T1651)",
+      " 3:  62f3392c1 =  3:  26f46807e docs(registry): define publication dependency projection boundaries (T1651)",
+      " 4:  9098465bf =  4:  83e13238b test(cog): expose ignored dependency source fields (T1651)",
+      " 5:  6938800c9 =  5:  ae8cea9c9 fix(cog): reject unknown detailed dependency fields (T1651)",
+      " 6:  ba4273bec =  6:  17cdf15fe test(cog): assert the canonical archive manifest spelling (T1651)",
+      " 7:  eb7cb8815 =  7:  28665d4e4 test(cog): expose publication admission bypasses (T1651)",
+      " 8:  69deca4ab =  8:  f194476f3 fix(cog): validate dependency intent before workspace previews (T1651)",
+      " 9:  4409dc64a =  9:  7d7d3ca88 fix(registry): require dependency versions in publication admission (T1651)"
     ],
     "owned_file_identities": [
       {
@@ -95,12 +95,15 @@
     ],
     "base_and_tested_to_rebased_changed_paths": [
       "crates/verum_compiler/build.rs",
+      "crates/verum_compiler/src/pipeline/stdlib_bootstrap.rs",
+      "crates/verum_compiler/tests/bootstrap/generic_variant_payloads.rs",
       "crates/verum_types/src/context.rs",
       "crates/verum_types/src/infer/decls.rs",
       "crates/verum_types/src/infer/modules.rs",
       "crates/verum_types/src/infer/patterns.rs",
       "crates/verum_types/src/module_context.rs",
       "crates/verum_types/tests/mounted_type_owner.rs",
+      "crates/verum_vbc/src/codegen/bootstrap_types.rs",
       "crates/verum_vbc/src/interpreter/dispatch_table/handlers/net_runtime.rs",
       "crates/verum_vbc/src/interpreter/io_engine.rs",
       "crates/verum_vbc/tests/unit/io_engine_socket_readiness.rs",
@@ -110,9 +113,10 @@
       "docs/architecture/evidence/registry-source-fingerprint-gate.json",
       "docs/architecture/evidence/registry-static-receiver-gate.json",
       "docs/architecture/evidence/registry-type-ownership-gate.json",
+      "docs/architecture/evidence/registry-variant-payload-gate.json",
       "docs/architecture/registry-language-acceptance.md"
     ],
-    "scope": "All owned CLI source, tests and protocol bytes are identical. The new base changes compiler/type-checker/VBC test sources and documentation; these gates do not claim execution of that combined source. Root owns the fresh ordinary CLI and registry replay."
+    "scope": "All owned CLI source, tests and protocol bytes are identical. The new base changes archive production, compiler/type-checker/VBC sources and tests, and documentation; these gates do not claim execution of that combined source. A fresh ordinary CLI and registry replay remain separate integration acceptance."
   },
   "final_gates": {
     "publication": {
@@ -555,5 +559,11 @@
     "Client HTTP fixture credentials are not proof of server authentication, durable admission, restart behavior or a real publish-download roundtrip; T1636 remains open.",
     "Fresh-consumer optional/default-feature activation and recursive installation remain T1657. Producer fidelity does not close T1651 acceptance.",
     "Workspace canonical-manifest discovery and skipped-member counts were filed separately as T1665; dependency controls isolate the supported lowercase path."
-  ]
+  ],
+  "intermediate_integration": {
+    "base": "fa36ceae04de074c5eca9c391518fc3a2a2db1ce",
+    "code_commit": "a57812d4c9a531a31e1e7764d5d67230fcde7beb",
+    "evidence_commit": "c7ed398b67215c5b48f77f9eb14ee22d669d70e3",
+    "preserved_branch": "codex/publication-dependencies-fa36"
+  }
 }

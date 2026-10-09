@@ -251,9 +251,10 @@ the corresponding data loss and admission failures. An archive-entry fixture
 spelling error was corrected separately and is recorded in the
 [gate receipt](evidence/registry-publication-dependency-gate.json).
 
-The nine patches rebased unchanged onto `fa36ceae0` as `a57812d4c`; all owned
+The nine patches rebased unchanged onto `3d83e98c1` as `7d7d3ca88`; all owned
 CLI source, test and protocol bytes are identical to the tested revision.
-The base also brings compiler, type-checker and VBC test changes. The receipt
+The base also brings archive producer, compiler, type-checker and VBC changes.
+The receipt
 lists that exact difference; the selected gates do not claim execution of
 the combined source. They used the separately identified stage14 artifacts
 with automatic precompilation disabled. A fresh ordinary CLI and registry
