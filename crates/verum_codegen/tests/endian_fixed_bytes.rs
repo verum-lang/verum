@@ -117,7 +117,18 @@ fn native_with_ir(
             &context,
             LoweringConfig::debug("endian_native").with_debug_info(false),
         );
-        lowering.lower_module(module).expect("native lowering");
+        lowering.lower_module(module).unwrap_or_else(|error| {
+            for function in &module.functions {
+                if function.has_source_body {
+                    eprintln!(
+                        "{route} body {:?}: {:?}",
+                        module.get_string(function.name),
+                        function.instructions
+                    );
+                }
+            }
+            panic!("{route}: native lowering: {error:?}")
+        });
         let probe_ir = lowering
             .module()
             .get_function("probe")
