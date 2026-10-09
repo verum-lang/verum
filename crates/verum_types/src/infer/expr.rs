@@ -10218,15 +10218,9 @@ impl TypeChecker {
                 // desugar is a consumer of X's impls, so it pre-arms
                 // the same ensure-then-resolve authority. Idempotent,
                 // no-op for user-defined and already-loaded types.
-                {
-                    let leaf: verum_common::Text = type_name
-                        .as_str()
-                        .rsplit('.')
-                        .next()
-                        .unwrap_or(type_name.as_str())
-                        .into();
-                    self.ensure_stdlib_type_loaded_transitive(&leaf);
-                }
+                // The receiver already carries its declaring owner. Loading
+                // only the leaf can supply a sibling record's fields instead.
+                self.ensure_stdlib_type_loaded_transitive(&type_name);
 
                 let struct_key = format!("__struct_fields_{}", type_name);
                 let field_name = verum_common::Text::from(field.name.as_str());

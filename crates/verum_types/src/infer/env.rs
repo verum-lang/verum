@@ -2428,13 +2428,14 @@ impl TypeChecker {
 
     /// Does `ty` directly define a field named `field_name`?
     /// Used by the auto-deref cascade in assignment-target field
-    /// resolution — we only need a structural lookup, not full
-    /// unification.
-    fn type_has_field(&self, ty: &Type, field_name: &Text) -> bool {
+    /// resolution. Load the exact nominal field map before deciding whether
+    /// a Deref target is needed; an unloaded map is not an absent field.
+    fn type_has_field(&mut self, ty: &Type, field_name: &Text) -> bool {
         match ty {
             Type::Record(fields) => fields.contains_key(field_name),
             Type::Named { path, .. } => {
                 let type_name = self.path_to_string(path);
+                self.ensure_stdlib_type_loaded_transitive(&type_name);
                 let struct_key = format!("__struct_fields_{}", type_name);
                 matches!(
                     self.ctx.lookup_type(struct_key.as_str()),

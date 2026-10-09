@@ -6,7 +6,7 @@ use verum_ast::{FileId, ItemKind};
 use verum_common::{List, Set, Text};
 use verum_fast_parser::FastParser;
 use verum_types::{
-    Type, TypeChecker,
+    TypeChecker,
     core_metadata::{CoreMetadata, TypeDescriptorKind},
 };
 use verum_vbc::{
