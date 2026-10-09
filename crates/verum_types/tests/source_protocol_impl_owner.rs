@@ -212,3 +212,197 @@ fn unrelated_same_name_type_does_not_inherit_source_impl() {
         "{errors:?}"
     );
 }
+
+#[test]
+fn local_source_impl_keeps_its_owner_before_body_checking() {
+    let source = format!(
+        "{PROVIDER} fn locate<S: Source>(source: &S) -> Int {{ source.value() }} fn probe(source: &RegistrySource) -> Int {{ locate(source) }}"
+    );
+    let (checker, errors) = check(&source, &[]);
+    assert!(errors.is_empty(), "{errors:?}");
+    assert_registered_owner(&checker, "demo.main.RegistrySource");
+    assert_registered_owner(&checker, "demo.main.GitSource");
+}
+
+#[test]
+fn renamed_reexported_target_retains_its_original_declaration_owner() {
+    let adapter = r#"
+        public mount demo.model.{RegistrySource as Upstream};
+        public type Source is protocol { type Reference; fn value(&self) -> Int; };
+        implement Source for Upstream {
+            type Reference = Int;
+            fn value(&self) -> Int { self.revision }
+        }
+    "#;
+    let consumer = r#"
+        mount demo.adapter.{Source, Upstream as Mounted};
+        fn locate<S: Source>(source: &S) -> Int { source.value() }
+        fn probe(source: &Mounted) -> Int { locate(source) }
+    "#;
+    let (checker, errors) = check(
+        consumer,
+        &[
+            (
+                "demo.model",
+                "public type RegistrySource is { revision: Int };",
+            ),
+            ("demo.adapter", adapter),
+        ],
+    );
+    assert!(errors.is_empty(), "{errors:?}");
+    assert_registered_owner(&checker, "demo.model.RegistrySource");
+    let table = checker.protocol_checker.read();
+    for false_owner in [
+        "Upstream",
+        "Mounted",
+        "demo.adapter.Upstream",
+        "demo.main.Mounted",
+    ] {
+        assert!(
+            table
+                .find_impl(&named(false_owner), &path("Source"))
+                .is_none(),
+            "invented owner {false_owner}"
+        );
+    }
+}
+
+#[test]
+fn local_impl_for_imported_alias_or_qualified_target_keeps_foreign_owner() {
+    for target in ["Mounted", "demo.model.RegistrySource"] {
+        let source = format!(
+            r#"
+            mount demo.model.{{RegistrySource as Mounted}};
+            public type Source is protocol {{ type Reference; fn value(&self) -> Int; }};
+            fn locate<S: Source>(source: &S) -> Int {{ source.value() }}
+            fn probe(source: &Mounted) -> Int {{ locate(source) }}
+            implement Source for {target} {{
+                type Reference = Int;
+                fn value(&self) -> Int {{ self.revision }}
+            }}
+        "#
+        );
+        let (checker, errors) = check(
+            &source,
+            &[(
+                "demo.model",
+                "public type RegistrySource is { revision: Int };",
+            )],
+        );
+        assert!(errors.is_empty(), "{target}: {errors:?}");
+        assert_registered_owner(&checker, "demo.model.RegistrySource");
+        assert!(
+            checker
+                .protocol_checker
+                .read()
+                .find_impl(&named("demo.main.Mounted"), &path("Source"))
+                .is_none()
+        );
+    }
+}
+
+#[test]
+fn generic_source_target_keeps_reordered_parameter_bindings() {
+    let provider = r#"
+        public type Source is protocol { type Reference; fn value(&self) -> Int; };
+        public type Pair<First, Second> is { first: First, second: Second };
+        implement<Left, Right> Source for Pair<Right, Left> {
+            type Reference = Left;
+            fn value(&self) -> Int { 7 }
+        }
+    "#;
+    let consumer = r#"
+        mount demo.source.{Source, Pair};
+        fn locate<S: Source>(source: &S) -> Int { source.value() }
+        fn probe(source: &Pair<Int, Bool>) -> Int { locate(source) }
+    "#;
+    let (checker, errors) = check(consumer, &[("demo.source", provider)]);
+    assert!(errors.is_empty(), "{errors:?}");
+    let target = Type::Named {
+        path: path("demo.source.Pair"),
+        args: [Type::Int, Type::Bool].into_iter().collect(),
+    };
+    let table = checker.protocol_checker.read();
+    let (implementation, substitution) = table
+        .find_impl_with_substitution(&target, &path("Source"))
+        .expect("generic implementation");
+    let Type::Named { args, .. } = &implementation.for_type else {
+        panic!("nominal target required")
+    };
+    let [Type::Var(right), Type::Var(left)] = args.as_slice() else {
+        panic!("declared parameter variables required: {args:?}")
+    };
+    assert_ne!(left, right);
+    assert_eq!(
+        substitution.get(&Text::from(format!("T{}", right.id()))),
+        Some(&Type::Int)
+    );
+    assert_eq!(
+        substitution.get(&Text::from(format!("T{}", left.id()))),
+        Some(&Type::Bool)
+    );
+    assert_eq!(
+        implementation
+            .associated_types
+            .get(&Text::from("Reference")),
+        Some(&Type::Var(*left))
+    );
+    assert!(implementation.methods.contains_key(&Text::from("value")));
+}
+
+#[test]
+fn source_protocol_argument_identity_is_preserved() {
+    let provider = r#"
+        public type Source<Argument> is protocol { fn value(&self) -> Int; };
+        public type RegistrySource is { revision: Int };
+        implement Source<Int> for RegistrySource { fn value(&self) -> Int { self.revision } }
+    "#;
+    let (checker, errors) = check(
+        "mount demo.source.{Source, RegistrySource};",
+        &[("demo.source", provider)],
+    );
+    assert!(errors.is_empty(), "{errors:?}");
+    let table = checker.protocol_checker.read();
+    let target = named("demo.source.RegistrySource");
+    assert!(table.implements_instantiation(&target, &path("Source"), &[Type::Int]));
+    assert!(!table.implements_instantiation(&target, &path("Source"), &[Type::Bool]));
+}
+
+#[test]
+fn genuine_blanket_target_remains_a_type_parameter() {
+    let provider = r#"
+        public type Source is protocol { fn value(&self) -> Int; };
+        implement<ElementType> Source for ElementType { fn value(&self) -> Int { 7 } }
+    "#;
+    let (checker, errors) = check(
+        "mount demo.source.{Source}; fn probe<S: Source>(source: &S) -> Int { source.value() } fn integer(value: &Int) -> Int { probe(value) }",
+        &[("demo.source", provider)],
+    );
+    assert!(errors.is_empty(), "{errors:?}");
+    let table = checker.protocol_checker.read();
+    let implementation = table
+        .find_impl(&Type::Int, &path("Source"))
+        .expect("blanket applies to Int");
+    assert!(matches!(implementation.for_type, Type::Var(_)));
+}
+
+#[test]
+fn source_registration_does_not_relax_coherence_for_another_declaration() {
+    let (checker, errors) = check(
+        "mount demo.source.{Source, RegistrySource};",
+        &[("demo.source", PROVIDER)],
+    );
+    assert!(errors.is_empty(), "{errors:?}");
+    let mut table = checker.protocol_checker.write();
+    let mut other = table
+        .find_impl(&named("demo.source.RegistrySource"), &path("Source"))
+        .expect("actual imported implementation")
+        .clone();
+    other.span = Span::new(other.span.start + 1, other.span.end + 1, other.span.file_id);
+    let before = table.all_implementations().len();
+    assert!(matches!(
+        table.register_impl(other),
+        Err(verum_types::protocol::CoherenceError::OverlappingImplementations { .. })
+    ));
+    assert_eq!(table.all_implementations().len(), before);
+}
