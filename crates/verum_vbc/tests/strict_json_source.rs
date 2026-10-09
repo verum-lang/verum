@@ -1,18 +1,17 @@
-//! T1662: execute the production JSON source, without a stale baked JSON body.
+//! T1662: compile the complete production JSON source and conformance controls.
 //!
-//! This pins the parser algorithm through VBC codegen, archive round-trip and
-//! interpretation. The normal typed/baked import gate is the accompanying VCS
-//! fixture and remains a separate acceptance boundary.
+//! The mount loader supplies dependency declarations, not their runtime bodies.
+//! This gate establishes source codegen and archive round-trip only. Execute the
+//! accompanying VCS fixtures with a coherent baked stdlib for runtime acceptance.
 #![cfg(feature = "codegen")]
 
-use verum_common::{List, Shared};
+use verum_common::List;
 use verum_fast_parser::Parser;
 use verum_vbc::codegen::{ItemFailurePolicy, VbcCodegen};
-use verum_vbc::interpreter::Interpreter;
 
 #[test]
-fn strict_json_runtime_controls_use_the_complete_production_module() {
-    execute_source_control(
+fn strict_json_source_and_controls_compile_with_declared_dependencies() {
+    compile_source_control(
         include_str!("../../../vcs/specs/L2-standard/encoding/json_strict_publication.vr"),
         &[
             "core.encoding.json.parse_strict",
@@ -23,8 +22,8 @@ fn strict_json_runtime_controls_use_the_complete_production_module() {
 }
 
 #[test]
-fn legacy_json_positive_uses_the_same_complete_source_environment() {
-    execute_source_control(
+fn legacy_json_control_compiles_with_the_same_declared_dependencies() {
+    compile_source_control(
         include_str!("../../../vcs/specs/L2-standard/encoding/json_legacy_source_control.vr"),
         &[
             "core.encoding.json.parse",
@@ -33,7 +32,7 @@ fn legacy_json_positive_uses_the_same_complete_source_environment() {
     );
 }
 
-fn execute_source_control(caller: &str, selected_parsers: &[&str]) {
+fn compile_source_control(caller: &str, selected_parsers: &[&str]) {
     let json = Parser::new(include_str!("../../../core/encoding/json.vr"))
         .parse_module()
         .expect("production JSON grammar");
@@ -50,7 +49,7 @@ fn execute_source_control(caller: &str, selected_parsers: &[&str]) {
             concat!(env!("CARGO_MANIFEST_DIR"), "/../../core/encoding/json.vr"),
             concat!(env!("CARGO_MANIFEST_DIR"), "/../../core"),
         )
-        .expect("complete production JSON source and mounted dependencies");
+        .expect("complete production JSON source and mounted dependency declarations");
     codegen
         .collect_unit_declarations(&[&caller])
         .expect("complete caller declarations");
@@ -60,8 +59,8 @@ fn execute_source_control(caller: &str, selected_parsers: &[&str]) {
     let mut module = codegen.finalize_module().expect("source VBC");
     module.resolve_protocol_dispatch();
 
-    // Inspect exact selected descriptors, including nonempty bodies, before
-    // executing. A forward declaration from an older archive cannot qualify.
+    // Inspect exact selected source descriptors. The mount loader's one-byte
+    // return placeholders cannot qualify as compiled parser implementations.
     for &expected in selected_parsers {
         let candidates: List<_> = module
             .functions
@@ -70,7 +69,7 @@ fn execute_source_control(caller: &str, selected_parsers: &[&str]) {
             .collect();
         assert_eq!(candidates.len(), 1, "exact source descriptor {expected}");
         let function = candidates[0];
-        assert!(function.bytecode_length > 0, "source body {expected}");
+        assert!(function.bytecode_length > 1, "source body {expected}");
         eprintln!("source parser: {expected}, id={:?}", function.id);
     }
 
@@ -87,14 +86,10 @@ fn execute_source_control(caller: &str, selected_parsers: &[&str]) {
         .collect();
     assert_eq!(entries.len(), 1, "one fixture entry point");
     let entry = entries[0];
-    assert!(entry.bytecode_length > 0, "fixture main has a body");
+    assert!(entry.bytecode_length > 1, "fixture main has a body");
     eprintln!(
         "fixture entry: {:?}, id={:?}",
         module.get_string(entry.name),
         entry.id
     );
-    let entry_id = entry.id;
-    Interpreter::new(Shared::new(module).into_arc())
-        .execute_function(entry_id)
-        .expect("strict/compatibility assertions must execute successfully");
 }
