@@ -9,6 +9,7 @@
 // Strict JSON per RFC 8259. Provides:
 //  JsonValue — the algebraic data type for a parsed JSON document
 //  parse(text) -> Result<JsonValue, JsonError>
+//  parse_strict(text, max_bytes) -> Result<JsonValue, JsonError>
 //  stringify(value) -> Text // compact
 //  stringify_pretty(v) -> Text // 2-space indent
 //
@@ -90,7 +91,10 @@ public type JsonErrorKind is
     | StringTooLong
     | ArrayTooLarge
     | ObjectTooLarge
-    | TrailingGarbage;
+    | TrailingGarbage
+    | DuplicateKey
+    | DocumentTooLarge
+    | InvalidLimit;
 
 fn json_error_kind_name(k: &JsonErrorKind) -> Text {
     match k {
@@ -104,6 +108,9 @@ fn json_error_kind_name(k: &JsonErrorKind) -> Text {
         ArrayTooLarge    => "ArrayTooLarge".clone(),
         ObjectTooLarge   => "ObjectTooLarge".clone(),
         TrailingGarbage  => "TrailingGarbage".clone(),
+        DuplicateKey     => "DuplicateKey".clone(),
+        DocumentTooLarge => "DocumentTooLarge".clone(),
+        InvalidLimit     => "InvalidLimit".clone(),
     }
 }
 
@@ -114,6 +121,8 @@ fn json_error_kind_tag(k: &JsonErrorKind) -> Int {
         InvalidUnicode   => 4,  DepthLimit      => 5,
         StringTooLong    => 6,  ArrayTooLarge   => 7,
         ObjectTooLarge   => 8,  TrailingGarbage => 9,
+        DuplicateKey     => 10, DocumentTooLarge => 11,
+        InvalidLimit     => 12,
     }
 }
 
@@ -189,10 +198,14 @@ type Parser is {
     line: Int,
     column: Int,
     depth: Int,
+    reject_duplicate_keys: Bool,
 };
 
 fn new_parser(bytes: &[Byte]) -> Parser {
-    Parser { bytes: bytes, pos: 0, line: 1, column: 1, depth: 0 }
+    Parser {
+        bytes: bytes, pos: 0, line: 1, column: 1, depth: 0,
+        reject_duplicate_keys: false,
+    }
 }
 
 fn mk_err(p: &Parser, kind: JsonErrorKind, msg: &Text) -> JsonError {
@@ -381,15 +394,40 @@ public fn json_object(fields: Map<Text, JsonValue>) -> JsonValue {
 // Parser — public entry points
 // =============================================================================
 
-// Parse a full JSON document. Rejects trailing garbage.
+// Parse a full JSON document. Rejects trailing garbage and preserves the
+// established last-value-wins handling of duplicate object keys.
 public fn parse(source: &Text) -> Result<JsonValue, JsonError> {
     let bytes = source.as_bytes();
     let mut p = new_parser(bytes);
-    skip_ws(&mut p);
-    let value = parse_value_impl(&mut p)?;
-    skip_ws(&mut p);
+    parse_document(&mut p)
+}
+
+/// Parse one bounded document, refusing repeated decoded object keys.
+///
+/// `max_bytes` counts the complete UTF-8 source, including whitespace and
+/// escapes. The bound is checked before allocating JSON strings or containers.
+/// Negative bounds are invalid; zero permits no nonempty JSON document.
+/// Existing nesting, string and collection limits also apply. Byte callers
+/// must validate UTF-8 when constructing Text; decode_bytes remains lossy.
+public fn parse_strict(source: &Text, max_bytes: Int) -> Result<JsonValue, JsonError> {
+    let bytes = source.as_bytes();
+    let mut p = new_parser(bytes);
+    if max_bytes < 0 {
+        return Result.Err(mk_err(&p, InvalidLimit, &"JSON document byte limit must be non-negative"));
+    }
+    if bytes.len() > max_bytes {
+        return Result.Err(mk_err(&p, DocumentTooLarge, &"JSON document exceeds its byte limit"));
+    }
+    p.reject_duplicate_keys = true;
+    parse_document(&mut p)
+}
+
+fn parse_document(p: &mut Parser) -> Result<JsonValue, JsonError> {
+    skip_ws(p);
+    let value = parse_value_impl(p)?;
+    skip_ws(p);
     if p.pos < p.bytes.len() {
-        return Result.Err(mk_err(&p, TrailingGarbage, &"unexpected content after JSON value"));
+        return Result.Err(mk_err(p, TrailingGarbage, &"unexpected content after JSON value"));
     }
     Result.Ok(value)
 }
@@ -510,7 +548,19 @@ fn parse_object(p: &mut Parser) -> Result<JsonValue, JsonError> {
     }
     loop {
         skip_ws(p);
+        let key_line = p.line;
+        let key_column = p.column;
         let key = parse_string_raw(p)?;
+        // Compare after escape decoding, before insertion can discard evidence.
+        // Each object owns its map, so equal keys in sibling objects are valid.
+        if p.reject_duplicate_keys && fields.contains_key(&key) {
+            return Result.Err(JsonError {
+                kind: DuplicateKey,
+                line: key_line,
+                column: key_column,
+                message: f"duplicate object key: {key}",
+            });
+        }
         skip_ws(p);
         expect_byte(p, 0x3A_u8, &"expected ':' after key")?;   // ':'
         skip_ws(p);

@@ -1,0 +1,128 @@
+// @test: run-interpreter
+// @level: L2
+// @tier: 0
+// @tags: json, registry, duplicate-keys, bounds, T1662
+// @description: Production JSON strict parsing preserves duplicate evidence and legacy behavior.
+// @expected-stdout: strict-json: ok
+// @expected-exit: 0
+// @timeout: 180000
+
+mount core.encoding.json.{JsonValue, JsonErrorKind, parse, parse_strict, parse_value, decode};
+
+fn strict_ok(source: &Text) -> JsonValue {
+    match parse_strict(source, source.len()) {
+        Result.Ok(value) => value,
+        Result.Err(error) => panic(f"strict positive failed: {error}"),
+    }
+}
+
+fn expect_error(source: &Text, max_bytes: Int, expected: JsonErrorKind) {
+    match parse_strict(source, max_bytes) {
+        Result.Ok(_) => panic("strict input unexpectedly accepted"),
+        Result.Err(error) => assert(error.kind == expected),
+    }
+}
+
+fn field_int(value: &JsonValue, key: &Text) -> Int {
+    let fields = value.as_object().unwrap();
+    fields.get(key).unwrap().as_int().unwrap()
+}
+
+fn nested_arrays(depth: Int, leaf: &Text) -> Text {
+    let mut source = Text.new();
+    let mut i = 0;
+    while i < depth {
+        source.push_str("[");
+        i = i + 1;
+    }
+    source.push_str(leaf);
+    i = 0;
+    while i < depth {
+        source.push_str("]");
+        i = i + 1;
+    }
+    source
+}
+
+fn main() {
+    let unique = strict_ok(&"""{"name":"codec","version":"1.2.3","features":{"default":["fast"]},"dependencies":{"utf8":{"version":"^1","optional":false}}}""");
+    let fields = unique.as_object().unwrap();
+    assert(fields.len() + 0 == 4);
+    assert(fields.get(&"name").unwrap().as_string().unwrap() == "codec");
+    let dependencies = fields.get(&"dependencies").unwrap().as_object().unwrap();
+    let utf8 = dependencies.get(&"utf8").unwrap().as_object().unwrap();
+    assert(!utf8.get(&"optional").unwrap().as_bool().unwrap());
+    let features = fields.get(&"features").unwrap().as_object().unwrap();
+    let defaults = features.get(&"default").unwrap().as_array().unwrap();
+    assert(defaults.len() + 0 == 1);
+    assert(defaults[0].as_string().unwrap() == "fast");
+
+    let siblings = strict_ok(&"""{"left":{"x":1},"right":{"x":2}}""");
+    let objects = siblings.as_object().unwrap();
+    assert(field_int(objects.get(&"left").unwrap(), &"x") == 1);
+    assert(field_int(objects.get(&"right").unwrap(), &"x") == 2);
+    let escaped = strict_ok(&"""{"\u006eame":7,"name2":8}""");
+    assert(field_int(&escaped, &"name") == 7);
+    strict_ok(&"""{"value":"\"name\":1,\"name\":2"}""");
+    strict_ok(&"[true,false,null,1.5]");
+    strict_ok(&"true");
+
+    let duplicates = [
+        """{"name":"one","name":"two"}""",
+        """{"name":"same","name":"same"}""",
+        """{"name":1,"\u006eame":2}""",
+        """{"outer":{"x":1,"\u0078":2}}""",
+        """{"items":[{"v":1,"v":2}]}""",
+        """{"a\/b":1,"a/b":2}""",
+        """{"\uD834\uDD1E":1,"𝄞":2}""",
+    ];
+    for source in duplicates.iter() {
+        expect_error(source, source.len(), JsonErrorKind.DuplicateKey);
+    }
+    let positioned = "{\"name\":1,\n \"\\u006eame\":2}";
+    match parse_strict(&positioned, positioned.len()) {
+        Result.Err(error) => {
+            assert(error.kind == JsonErrorKind.DuplicateKey);
+            assert(error.line + 0 == 2);
+            assert(error.column + 0 == 2);
+            assert(error.message == "duplicate object key: name");
+        },
+        Result.Ok(_) => panic("escaped duplicate lost its evidence"),
+    }
+
+    // Limits count source bytes, not decoded characters or JSON value bytes.
+    let utf8_text = "\"é\"";
+    assert(utf8_text.len() + 0 == 4);
+    match parse_strict(&utf8_text, 4) {
+        Result.Ok(value) => assert(value.as_string().unwrap() == "é"),
+        Result.Err(_) => panic("exact UTF-8 byte bound refused"),
+    }
+    expect_error(&utf8_text, 3, JsonErrorKind.DocumentTooLarge);
+    expect_error(&" null ", 4, JsonErrorKind.DocumentTooLarge);
+    expect_error(&"{", 0, JsonErrorKind.DocumentTooLarge);
+    expect_error(&"null", -1, JsonErrorKind.InvalidLimit);
+    expect_error(&"", 0, JsonErrorKind.UnexpectedEof);
+    expect_error(&"[", 1, JsonErrorKind.UnexpectedEof);
+    expect_error(&"null false", 10, JsonErrorKind.TrailingGarbage);
+    expect_error(&"""{"a":"\uD800"}""", 64, JsonErrorKind.UnexpectedChar);
+
+    // The strict path uses the same 256-container depth cap as parse/decode.
+    let at_depth = nested_arrays(255, &"{}");
+    strict_ok(&at_depth);
+    let over_depth = nested_arrays(256, &"{}");
+    expect_error(&over_depth, over_depth.len(), JsonErrorKind.DepthLimit);
+
+    // Existing full and single-value entry points retain their documented result.
+    let repeated = """{"a":1,"\u0061":2}""";
+    let parsed = parse(&repeated).unwrap();
+    let decoded = decode(&repeated).unwrap();
+    assert(field_int(&parsed, &"a") == 2);
+    assert(field_int(&decoded, &"a") == 2);
+    let streaming = parse_value(&"""{"a":1,"a":2} trailing""").unwrap();
+    assert(field_int(&streaming, &"a") == 2);
+    match parse(&over_depth) {
+        Result.Err(error) => assert(error.kind == JsonErrorKind.DepthLimit),
+        Result.Ok(_) => panic("ordinary parser lost its depth limit"),
+    }
+    print("strict-json: ok");
+}
