@@ -1,0 +1,82 @@
+{
+  "task": "T1661",
+  "control": "Exact production compute_core_blake3 function compiled from each committed source; isolated fixture changes one input at a time. No automatic bake or ordinary product run.",
+  "results": [
+    {
+      "revision": "75adac0d387f8d2a195e71ebcc5bc852f28709a8",
+      "production_function_sha256": "da1c63bef5500bf99b796d3c4c4ccf9b234e796c9c9eef712d863a557600630d",
+      "executable_sha256": "ed3d6c644483e8ecb937ee8b30ffe2d76cdff3b024dab6dd2470ef424402a95a",
+      "schema": "v52-2026-10-05-semantic-formal-parameters",
+      "deterministic_repeat": true,
+      "deltas": {
+        "crates/verum_types/src/infer/modules.rs": {
+          "changed_digest": false,
+          "restored_digest": true,
+          "rerun_declared": false
+        },
+        "crates/verum_modules/src/lib.rs": {
+          "changed_digest": false,
+          "restored_digest": true,
+          "rerun_declared": false
+        },
+        "crates/verum_modules/src/exports.rs": {
+          "changed_digest": false,
+          "restored_digest": true,
+          "rerun_declared": false
+        },
+        "crates/verum_vbc/src/codegen/bootstrap_types.rs": {
+          "changed_digest": true,
+          "restored_digest": true,
+          "rerun_declared": true
+        },
+        "docs/unrelated-fingerprint-control.md": {
+          "changed_digest": false,
+          "restored_digest": true,
+          "rerun_declared": false
+        }
+      },
+      "elapsed_seconds": 0.491
+    },
+    {
+      "revision": "fa0524e491f9f2e92c8169d6c14b04c198570dc6",
+      "production_function_sha256": "382b188e6f1648f739589dc009353eb81323fdfc4c7dd606f036600b13b401cb",
+      "executable_sha256": "b48fb452db2dfd76c94153cf2111e345f253d5c9b350194ef1f7ab1b1136b314",
+      "schema": "v52-2026-10-05-semantic-formal-parameters",
+      "deterministic_repeat": true,
+      "deltas": {
+        "crates/verum_types/src/infer/modules.rs": {
+          "changed_digest": true,
+          "restored_digest": true,
+          "rerun_declared": true
+        },
+        "crates/verum_modules/src/lib.rs": {
+          "changed_digest": true,
+          "restored_digest": true,
+          "rerun_declared": true
+        },
+        "crates/verum_modules/src/exports.rs": {
+          "changed_digest": true,
+          "restored_digest": true,
+          "rerun_declared": true
+        },
+        "crates/verum_vbc/src/codegen/bootstrap_types.rs": {
+          "changed_digest": true,
+          "restored_digest": true,
+          "rerun_declared": true
+        },
+        "docs/unrelated-fingerprint-control.md": {
+          "changed_digest": false,
+          "restored_digest": true,
+          "rerun_declared": false
+        }
+      },
+      "elapsed_seconds": 0.504
+    }
+  ],
+  "runner_sha256": "3f9815b110172c774e059d24375562e8da1ab8fd6f5346b7e70a0680c19ec8db",
+  "method": "Extract the unmodified final compute_core_blake3 item and schema constant from each committed build.rs, compile with the existing blake3 library, and vary one isolated fixture file. Repeat unchanged inputs and restore every mutation. This is a manual causal control, not a newly configured CI gate.",
+  "limits": [
+    "No complete automatic bake or ordinary CLI executed in this control.",
+    "The source-authority selectors are direct dependencies of T1653; this change does not claim an exhaustive audit of every precompiler dependency."
+  ]
+}

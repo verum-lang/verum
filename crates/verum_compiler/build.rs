@@ -1811,9 +1811,9 @@ fn symbol_count(files: &[(String, Vec<u8>)]) -> usize {
 /// startup with a misleading bincode error (e.g. "invalid u8 while
 /// decoding bool, expected 0 or 1, found 16").
 ///
-/// The cache key composition is `blake3(SCHEMA_VERSION || core_files)`,
-/// so source-only changes invalidate as before AND schema changes
-/// invalidate independently of source.  Format: free-form ASCII;
+/// The cache key covers the schema, curated compiler/metadata producer
+/// sources and core files. A change to any of these inputs invalidates
+/// the cached bake.  Format: free-form ASCII;
 /// readable strings make `git log` of this constant tell the story.
 const PRECOMPILE_SCHEMA_VERSION: &str =
     // v52: source-owned semantic formal parameters require the VBC2.23 tail.

@@ -243,3 +243,19 @@ confirmed-connection host control observed readiness with both a closed peer
 and a retained peer, so short peer lifetime alone was not the demonstrated
 cause. Production runtime behavior is unchanged, and T1650 remains open for
 the original failure diagnosis.
+
+## Archive cache source authority — T1661
+
+The archive producer now consults the checker's source-export walk and the
+module registry's canonical/export selectors. Their three source files are
+therefore inputs to the automatic-bake fingerprint and Cargo's rerun list.
+A future resolver change must rebuild the archive it helps describe.
+
+A [causal fingerprint control](evidence/registry-source-fingerprint-gate.json)
+compiled the actual fingerprint function from baseline `75adac0d3` and fixed
+source `fa0524e49`. Each of the three selector changes was invisible to the
+baseline and invalidated the fixed digest. An existing codegen input
+invalidated both; an unrelated document changed neither. Repeated inputs
+and restored files reproduced the same digest. This control validates cache
+dependency selection; a fresh ordinary bake and registry replay remain
+separate acceptance steps.
