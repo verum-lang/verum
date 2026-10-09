@@ -129,7 +129,7 @@ fn execute_both(source: &str, expected: i64) {
             .find(|f| module.get_string(f.name) == Some("probe"))
             .expect("exact probe")
             .id;
-        let actual = Interpreter::new(Shared::new(module))
+        let actual = Interpreter::new(Shared::new(module).into_arc())
             .execute_function(entry)
             .unwrap_or_else(|error| panic!("{route}: {error}"));
         assert_eq!(actual.as_i64(), expected, "{route}");
@@ -207,7 +207,7 @@ fn interpreter_array_call_bounds_are_actual_allocation_bounds() {
                 .find(|f| module.get_string(f.name) == Some("probe"))
                 .unwrap()
                 .id;
-            let error = Interpreter::new(Shared::new(module))
+            let error = Interpreter::new(Shared::new(module).into_arc())
                 .execute_function(entry)
                 .expect_err("outside returned allocation");
             assert!(
