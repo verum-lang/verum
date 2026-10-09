@@ -560,6 +560,16 @@ fn probe() -> Int {
     (derivative * 1000.0) as Int
 }
 "#);
+    let entry = source.functions.iter()
+        .find(|f| source.get_string(f.name) == Some("numeric_owner.probe"))
+        .expect("exact gradient probe").id;
+    assert_eq!(calls(&source, entry).iter()
+        .filter(|call| call.as_str() == "CallM Float.sin").count(), 2,
+        "both same-value method calls must remain in the emitted probe");
+    check_receiver_gradient_refusal(source);
+}
+
+fn check_receiver_gradient_refusal(source: VbcModule) {
     let mut failures = List::<Text>::new();
     for (phase, module) in [("source", source.clone()), ("wire", roundtrip(&source))] {
         let entry = module.functions.iter()
@@ -573,4 +583,27 @@ fn probe() -> Int {
         }
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn returned_float_reference_runs_its_declared_body_outside_gradient_scopes() {
+    for (parameter, body) in [("self", "self * self"), ("&self", "(*self) * (*self)")] {
+        check(&format!(r#"
+implement Float {{ fn sin({parameter}) -> Float {{ {body} }} }}
+fn borrowed(value: Float) -> &Float {{ &value }}
+fn probe() -> Int {{
+    let reference: &Float = borrowed(3.0);
+    (reference.sin() * 1000.0) as Int
+}}
+"#), 9000);
+    }
+}
+
+#[test]
+fn borrowed_float_self_refuses_an_unproved_dereference_tape_transfer() {
+    check_receiver_gradient_refusal(compile(&derivative_probe(
+        "implement Float { fn sin(&self) -> Float { (*self) * (*self) } }",
+        "let value: Float = 3.0; let borrowed = &value;",
+        "borrowed.sin()",
+    )));
 }
