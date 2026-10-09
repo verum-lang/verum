@@ -1316,6 +1316,9 @@ impl VbcCodegen {
                 _ => this.extract_base_type_name(ty),
             }
         }
+        if let (Some(ty), Some(value)) = (ty, value) {
+            self.set_closure_signature_hint(value, ty);
+        }
         let saved_return_type = if let Some(ty) = ty {
             extract_let_variant_hint(self, ty)
                 // T0701 (return-only method witnesses): annotations with

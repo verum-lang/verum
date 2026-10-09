@@ -484,6 +484,10 @@ pub struct CodegenContext {
     /// own entry, keeping sibling and nested callback contexts separate.
     pub closure_param_type_hints: Map<verum_ast::Span, verum_common::List<Option<crate::types::TypeRef>>>,
 
+    /// Complete declared callback returns, claimed by the exact closure node.
+    /// These authorize residual conversion; variant-disambiguation hints do not.
+    pub closure_return_type_hints: Map<verum_ast::Span, verum_common::Text>,
+
     /// Current match scrutinee type name for resolving variant patterns.
     ///
     /// When compiling `match expr { V6(x) => ... }`, we need to know if V6 refers to
@@ -1195,7 +1199,7 @@ pub struct FunctionInfo {
     /// `false`, so the disambiguation is structural, not heuristic.
     pub is_transparent_wrapper: bool,
 
-    /// For each parameter, the *return-type simple-name* of that
+    /// For each parameter, the complete return-type spelling of that
     /// parameter's function-type signature, when the parameter is
     /// callable (i.e. its declared type is `fn(...) -> X`, or a
     /// generic-param whose bound resolves to `fn(...) -> X`).
@@ -1704,6 +1708,7 @@ impl CodegenContext {
             object_ref_param_regs: std::collections::HashSet::new(),
             last_function_variable_types: HashMap::new(),
             closure_param_type_hints: Map::new(),
+            closure_return_type_hints: Map::new(),
             match_scrutinee_type: None,
             match_tuple_element_types: None,
             pending_let_tuple_types: None,
@@ -4817,6 +4822,7 @@ impl CodegenContext {
         self.return_type = None;
         self.function_return_type_name = None;
         self.try_recover_depth = 0;
+        self.closure_return_type_hints.clear();
         self.constants.clear();
         self.strings.clear();
         self.string_intern.clear();

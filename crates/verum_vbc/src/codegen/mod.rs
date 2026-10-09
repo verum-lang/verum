@@ -23159,8 +23159,8 @@ impl VbcCodegen {
         args
     }
 
-    /// For a parameter of declared type `ty`, return the *simple
-    /// name* of the closure-arg's return type IF the parameter is
+    /// For a parameter of declared type `ty`, return the complete
+    /// spelling of the closure-arg's return type IF the parameter is
     /// callable.  Two shapes are recognised:
     ///
     ///   * **Direct function type**: `f: fn(...) -> X` —
@@ -23184,15 +23184,14 @@ impl VbcCodegen {
     ) -> Option<String> {
         use verum_ast::ty::{GenericParamKind, PathSegment, TypeBoundKind, TypeKind};
 
-        // Helper: extract the simple base name of a Function type's
-        // return type.  Strips generic args (`ReduceResult<R>` → `"ReduceResult"`).
+        // T1687: residual conversion needs the error argument too. A base-only
+        // variant hint cannot authorize Result<_, Inner> -> Result<_, Outer>.
         let return_name_of_fn = |return_ty: &verum_ast::ty::Type| -> Option<String> {
             let raw = Self::extract_type_name_from_ast(return_ty);
-            let base = raw.split('<').next().unwrap_or(&raw).trim().to_string();
-            if base.is_empty() || base == "()" {
+            if raw.is_empty() || raw == "()" {
                 None
             } else {
-                Some(base)
+                Some(raw)
             }
         };
 

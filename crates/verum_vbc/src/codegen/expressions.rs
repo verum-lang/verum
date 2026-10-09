@@ -3770,6 +3770,9 @@ impl VbcCodegen {
             }
             _ => None,
         };
+        if let Some(hint) = target_type_hint.as_deref() {
+            self.set_closure_signature_hint_from_name(value, hint);
+        }
         let saved_assign_rt = target_type_hint.map(|hint| {
             let base = hint.split('<').next().unwrap_or(&hint).to_string();
             self.ctx.push_disambig_context(Some(base))
@@ -8085,6 +8088,7 @@ impl VbcCodegen {
                     ) && let Some(Some(ret_name)) =
                         func_info.param_closure_return_type_names.get(i)
                     {
+                        self.set_closure_return_type_hint(arg, ret_name);
                         Some(self.ctx.push_disambig_context(Some(ret_name.clone())))
                     } else {
                         func_info
@@ -15525,6 +15529,7 @@ impl VbcCodegen {
                     && let Some(Some(ret_name)) =
                         fi.param_closure_return_type_names.get(i + 1)
                 {
+                    self.set_closure_return_type_hint(arg, ret_name);
                     Some(self.ctx.push_disambig_context(Some(ret_name.clone())))
                 } else {
                     None
@@ -18039,6 +18044,7 @@ impl VbcCodegen {
                     && let Some(Some(ret_name)) =
                         func_info.param_closure_return_type_names.get(i)
                 {
+                    self.set_closure_return_type_hint(arg, ret_name);
                     Some(self.ctx.push_disambig_context(Some(ret_name.clone())))
                 } else {
                     None
@@ -25835,6 +25841,12 @@ impl VbcCodegen {
                     self.push_field_type_context(&variant_type_name, &field.name.name);
 
                 let value_reg = if let Some(ref v) = field.value {
+                    if matches!(v.kind, ExprKind::Closure { .. } | ExprKind::Paren(_))
+                        && let Some(hint) = self.field_type_name(&variant_type_name, &field.name.name)
+                        .map(verum_common::Text::from)
+                    {
+                        self.set_closure_signature_hint_from_name(v, hint.as_str());
+                    }
                     self.compile_expr(v)?
                         .or_internal("field value has no value")?
                 } else {
@@ -26056,6 +26068,12 @@ impl VbcCodegen {
                 let saved_field_type = self.push_field_type_context(&type_name, &field.name.name);
 
                 let value_reg = if let Some(ref v) = field.value {
+                    if matches!(v.kind, ExprKind::Closure { .. } | ExprKind::Paren(_))
+                        && let Some(hint) = self.field_type_name(&type_name, &field.name.name)
+                        .map(verum_common::Text::from)
+                    {
+                        self.set_closure_signature_hint_from_name(v, hint.as_str());
+                    }
                     // PACKED-FIELD-INIT-DYNCOUNT-1 (#37): a field DECLARED as
                     // a fixed-size primitive array (`buffer: [Byte; SIZE]`)
                     // initialised with an array literal/repeat must be a
@@ -32335,6 +32353,38 @@ impl VbcCodegen {
         self.ctx.closure_param_type_hints.entry(arg.span).or_insert(hints);
     }
 
+    /// Record a declaration-owned return for this closure, without giving a
+    /// field/argument hint authority over any other callable in its body.
+    fn set_closure_return_type_hint(&mut self, expr: &Expr, return_type: &str) {
+        match &expr.kind {
+            ExprKind::Paren(inner) => self.set_closure_return_type_hint(inner, return_type),
+            ExprKind::Closure { .. } if expr.span.start != 0 || expr.span.end != 0 => {
+                self.ctx.closure_return_type_hints.insert(expr.span, return_type.into());
+            }
+            _ => {}
+        }
+    }
+
+    pub(super) fn set_closure_signature_hint(&mut self, expr: &Expr, ty: &verum_ast::ty::Type) {
+        if let verum_ast::ty::TypeKind::Function { return_type, .. } = &ty.kind
+            && let Some(name) = self.extract_type_name(return_type)
+        {
+            self.set_closure_return_type_hint(expr, &name);
+        }
+    }
+
+    fn set_closure_signature_hint_from_name(&mut self, expr: &Expr, name: &str) {
+        match &expr.kind {
+            ExprKind::Paren(inner) => self.set_closure_signature_hint_from_name(inner, name),
+            ExprKind::Closure { .. } => {
+                if let Ok(ty) = verum_fast_parser::Parser::new(name).parse_type() {
+                    self.set_closure_signature_hint(expr, &ty);
+                }
+            }
+            _ => {}
+        }
+    }
+
     /// Compiles a closure expression.
     ///
     /// Closures are compiled by:
@@ -32357,6 +32407,7 @@ impl VbcCodegen {
         // Claim only this closure's contextual signature; sibling callbacks
         // and closures compiled inside the receiver keep their own entries.
         let elem_hints = hint_key.and_then(|key| self.ctx.closure_param_type_hints.remove(&key));
+        let return_hint = hint_key.and_then(|key| self.ctx.closure_return_type_hints.remove(&key));
         // Step 1: Extract parameter info for the closure
         // For simple ident patterns, use the name directly
         // For complex patterns (tuple, etc.), generate synthetic names
@@ -32468,6 +32519,7 @@ impl VbcCodegen {
             &complex_patterns,
             body,
             return_type,
+            return_hint,
             signature_is_plain,
         )?;
 
@@ -32566,6 +32618,7 @@ impl VbcCodegen {
         complex_patterns: &[(usize, &verum_ast::Pattern)],
         body: &Expr,
         return_type_ast: Option<&verum_ast::ty::Type>,
+        return_hint: verum_common::Maybe<verum_common::Text>,
         signature_is_plain: bool,
     ) -> CodegenResult<u32> {
         // Generate unique name for closure function
@@ -32764,15 +32817,14 @@ impl VbcCodegen {
         }
 
         // T1687: freeze the closure's own return boundary before compiling
-        // nested field/argument/initializer expressions. An explicit signature
-        // keeps its full generic arguments; otherwise a known body type takes
-        // precedence over the incoming contextual closure return hint.
+        // nested field/argument/initializer expressions. Complete explicit or
+        // contextual callable signatures precede body inference. The general
+        // expression hint may describe an unrelated enclosing field or return.
         self.ctx.function_return_type_name = return_type_ast
-            .map(|ty| self.type_to_simple_name(ty))
-            .or_else(|| self.extract_expr_type_name(body))
-            .or_else(|| self.infer_expr_type_name(body))
-            .or_else(|| self.ctx.current_return_type_name.clone())
-            .map(Into::into);
+            .and_then(|ty| self.extract_type_name(ty)).map(Into::into)
+            .or(return_hint)
+            .or_else(|| self.extract_expr_type_name(body).map(Into::into))
+            .or_else(|| self.infer_expr_type_name(body).map(Into::into));
 
         // Pin `current_return_type_name` to the closure's declared return
         // type (if present) so that a bare variant constructor in the body
