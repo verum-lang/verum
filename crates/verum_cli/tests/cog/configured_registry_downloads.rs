@@ -330,7 +330,7 @@ fn isolated_install_case() {
             "GET /private/api/v1/cogs/fixture/1.2.3 HTTP/1.1"
         );
         assert!(
-            requests[2..].iter().all(|request| request.as_str()
+            requests.iter().skip(2).all(|request| request.as_str()
                 == "GET /private/api/v1/security/vulnerabilities/fixture/1.2.3 HTTP/1.1"),
             "unavailable advisories must prevent the download: {requests:?}"
         );
