@@ -24,15 +24,19 @@ fn strict_json_runtime_controls_use_the_complete_production_module() {
     // Keep modules and their declaration owners intact. No AST item filtering,
     // parser copy, source rewriting or native JSON replacement is involved.
     let mut codegen = VbcCodegen::new();
-    codegen.register_builtin_variants();
-    codegen.register_stdlib_constants();
-    codegen.register_stdlib_intrinsics();
     codegen
-        .collect_unit_declarations(&[&json, &caller])
-        .expect("complete JSON and caller declarations");
+        .compile_module_with_mounts(
+            &json,
+            concat!(env!("CARGO_MANIFEST_DIR"), "/../../core/encoding/json.vr"),
+            concat!(env!("CARGO_MANIFEST_DIR"), "/../../core"),
+        )
+        .expect("complete production JSON source and mounted dependencies");
     codegen
-        .compile_unit_items(&[&json, &caller], ItemFailurePolicy::Strict)
-        .expect("complete production JSON source bodies");
+        .collect_unit_declarations(&[&caller])
+        .expect("complete caller declarations");
+    codegen
+        .compile_unit_items(&[&caller], ItemFailurePolicy::Strict)
+        .expect("complete runtime control bodies");
     let mut module = codegen.finalize_module().expect("source VBC");
     module.resolve_protocol_dispatch();
 
