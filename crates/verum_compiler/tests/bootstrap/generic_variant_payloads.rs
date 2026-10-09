@@ -507,3 +507,51 @@ fn declared_generic_variant_exact_cog_dependency_retains_its_descriptor() {
         assert_payload(module, "JsonArray", TypeRef::Concrete(internal.id));
     }
 }
+
+#[test]
+fn declared_generic_variant_map_head_with_primitive_arguments_checks() {
+    let (_, archive) = bootstrap(
+        COLLECTIONS,
+        "mount collections.Map; public type JsonValue is JsonObject(Map<Text, Int>);",
+    );
+    for eager in [false, true] {
+        let source = "mount core.encoding.json.{JsonValue, JsonObject}; fn wrap(value: Map<Text, Int>)->JsonValue { JsonObject(value) }";
+        let diagnostics = errors(&archive, source, eager);
+        assert!(
+            diagnostics.is_empty(),
+            "primitive Map eager={eager}: {diagnostics:?}"
+        );
+    }
+}
+
+#[test]
+fn declared_generic_variant_recursive_argument_without_container_checks() {
+    let (_, archive) = bootstrap(
+        &[],
+        "public type JsonValue is JsonNull | JsonSelf(JsonValue);",
+    );
+    for eager in [false, true] {
+        let source = "mount core.encoding.json.{JsonValue, JsonSelf}; fn wrap(value: JsonValue)->JsonValue { JsonSelf(value) }";
+        let diagnostics = errors(&archive, source, eager);
+        assert!(
+            diagnostics.is_empty(),
+            "recursive value eager={eager}: {diagnostics:?}"
+        );
+    }
+}
+
+#[test]
+fn declared_generic_variant_nonbuiltin_head_with_primitive_argument_checks() {
+    let (_, archive) = bootstrap(
+        &[("alpha", "public type Wrapper<T> is { value: T };")],
+        "mount alpha.Wrapper; public type JsonValue is JsonObject(Wrapper<Int>);",
+    );
+    for eager in [false, true] {
+        let source = "mount core.encoding.json.{JsonValue, JsonObject}; mount alpha.Wrapper; fn wrap(value: Wrapper<Int>)->JsonValue { JsonObject(value) }";
+        let diagnostics = errors(&archive, source, eager);
+        assert!(
+            diagnostics.is_empty(),
+            "nonbuiltin head eager={eager}: {diagnostics:?}"
+        );
+    }
+}
