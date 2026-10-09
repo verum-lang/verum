@@ -154,7 +154,7 @@ pub struct Unifier {
     /// The metadata loader installs an exact-key snapshot; the unifier must
     /// never infer ownership from a shared final path segment.
     nominal_identity_resolver:
-        Option<std::sync::Arc<dyn Fn(&str, &str) -> bool + Send + Sync>>,
+        Maybe<std::sync::Arc<dyn Fn(&str, &str) -> bool + Send + Sync>>,
 
     /// Type variables that are RIGID: universally quantified parameters of
     /// the function body currently being checked.
@@ -3362,14 +3362,14 @@ impl Unifier {
                 // method metadata carries a Named application. Preserve the
                 // entire path (including opaque dotted identifiers); a bare
                 // spelling is equivalent only when declaration metadata says so.
-                let path_name: Option<Text> = path
+                let path_name: Maybe<verum_common::Text> = path
                     .segments
                     .iter()
                     .map(|segment| match segment {
                         verum_ast::ty::PathSegment::Name(ident) => Some(ident.name.as_str()),
                         _ => None,
                     })
-                    .collect::<Option<List<_>>>()
+                    .collect::<Maybe<List<_>>>()
                     .map(|parts| parts.join(".").into());
                 let same_head = path_name.as_ref().is_some_and(|path_name| {
                     name == path_name

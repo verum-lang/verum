@@ -1149,10 +1149,12 @@ impl TypeChecker {
     /// derived snapshot of descriptor facts, not a suffix or visibility lookup.
     /// Transparent aliases keep their existing argument-substitution authority.
     fn install_metadata_nominal_identity(&mut self, metadata: &crate::core_metadata::CoreMetadata) {
-        let identities: Map<Text, Text> = metadata.types.iter()
-            .filter(|(_, descriptor)| !matches!(
-                descriptor.kind, crate::core_metadata::TypeDescriptorKind::Alias { .. }
-            ))
+        let identities: Map<Text, Text> = metadata
+            .types
+            .iter()
+            .filter(|(_, descriptor)| {
+                !matches!(descriptor.kind, crate::core_metadata::TypeDescriptorKind::Alias { .. })
+            })
             .map(|(key, descriptor)| (key.clone(), Self::metadata_declaring_key(descriptor)))
             .collect();
         self.unifier.set_nominal_identity_resolver(std::sync::Arc::new(move |left, right| {
