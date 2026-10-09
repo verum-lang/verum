@@ -13988,3 +13988,7 @@ mod builtin_protection_pin_tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "../../tests/unit/alias_argument_identity.rs"]
+mod alias_argument_identity_tests;
