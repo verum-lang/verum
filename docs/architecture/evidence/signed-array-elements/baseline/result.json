@@ -1,0 +1,59 @@
+{
+  "source_commit": "96938c34db09437ba575840ab5fa15695f6b6da4",
+  "command": [
+    "cargo",
+    "test",
+    "--locked",
+    "--offline",
+    "--manifest-path",
+    "/Users/taaliman/.codex/worktrees/returned-reference-summary/verum/Cargo.toml",
+    "-p",
+    "verum_vbc",
+    "--no-default-features",
+    "--features",
+    "compression,table_dispatch,codegen,ffi",
+    "--test",
+    "signed_array_elements",
+    "--",
+    "--test-threads=2"
+  ],
+  "environment": {
+    "CARGO_TARGET_DIR": "/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target",
+    "CARGO_INCREMENTAL": "0",
+    "CARGO_BUILD_JOBS": "2",
+    "VERUM_NO_AUTO_PRECOMPILE": "1",
+    "VERUM_LLVM_DIR": "/Users/taaliman/projects/oldman/verum-lang/verum/llvm/install",
+    "RUST_MIN_STACK": "16777216"
+  },
+  "timeout_seconds": 1200,
+  "scope": "T1706 signed fixed-array and List-return element causal baseline; source and decoded-wire interpreter controls; no production fix, ordinary CLI, automatic bake, native/AOT or registry acceptance",
+  "artifacts_before": {
+    "runtime.vbca": "410ff097b455437cab98b651f7799b3129588820925afe98e0de9c3781530a0f",
+    "runtime.core_metadata": "a92bd89e649e102cdc67d7ad0032513d6448d8915e5744127e6cdf1f1e34ebbb",
+    "runtime.symbol_graph": "a6678c18498f7519749ca1fdf1d22629b479083f42fa95a15177e8c7acf1c722",
+    "runtime.vbca.checksum": "c33573118a8c4b635f6c8f727c3784b524f660be57de702365e8d9c14b2f3a8b",
+    "runtime.vbca.schema": "fec20d7b3f8d1b81aff66c6c1181be574963779f7eacaf65660f8ab9127fca87"
+  },
+  "source_paths": {
+    "crates/verum_vbc/tests/signed_array_elements.rs": "308ffe516d6a42c9763158f5f45d602ff3835c5b1e026baeec584309a660c427"
+  },
+  "exit_code": 101,
+  "wall_seconds": 30.228,
+  "failure": null,
+  "source_unchanged": true,
+  "log_sha256": "b9aa7a9c53c89ede69c32ce72fd40833b88045b93a7371a05854e44e3caec569",
+  "source_paths_unchanged": true,
+  "executables": {
+    "/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target/debug/build/verum_vbc/9a7c3e98a2791af0/out/signed_array_elements-9a7c3e98a2791af0": "da4681a6ecee70d7544e8934404c583f1c51e72a529f1d56df2498f10912c150"
+  },
+  "artifacts_after": {
+    "runtime.vbca": "410ff097b455437cab98b651f7799b3129588820925afe98e0de9c3781530a0f",
+    "runtime.core_metadata": "a92bd89e649e102cdc67d7ad0032513d6448d8915e5744127e6cdf1f1e34ebbb",
+    "runtime.symbol_graph": "a6678c18498f7519749ca1fdf1d22629b479083f42fa95a15177e8c7acf1c722",
+    "runtime.vbca.checksum": "c33573118a8c4b635f6c8f727c3784b524f660be57de702365e8d9c14b2f3a8b",
+    "runtime.vbca.schema": "fec20d7b3f8d1b81aff66c6c1181be574963779f7eacaf65660f8ab9127fca87"
+  },
+  "test_results": [
+    "test result: FAILED. 13 passed; 7 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s"
+  ]
+}

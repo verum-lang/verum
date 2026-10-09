@@ -1,0 +1,19 @@
+{
+  "task": "T1706",
+  "source_commit": "96938c34db09437ba575840ab5fa15695f6b6da4",
+  "production_src_tree": "1042d665dffb8f800e2b76daf5d9b2258e4a162c",
+  "scope": "T1706 signed fixed-array and List-return element causal baseline; source and decoded-wire interpreter controls; no production fix, ordinary CLI, automatic bake, native/AOT or registry acceptance",
+  "result": "13 passed; 7 failed; 0 ignored. Every control executes source and separately decoded VBC.",
+  "findings": [
+    "Int16 and Int32 minima zero-extend during local indexing, array returns and List returns.",
+    "Int8 array return selects ByteArrayLoad for a non-byte-array carrier. This is a distinct storage selection failure.",
+    "All nine unsigned controls, signed Int8 local/List return and two signed Int16 alias controls pass. Passing aliases do not prove packed signed loads; these shapes may select List storage.",
+    "Each probe stops at its first failed indexed assertion; failing minima do not establish whether the later minus-one and positive checks execute."
+  ],
+  "files": {
+    "gate.log.gz": "62c1f5dda22d70f23d7b4c0584ecb92a97f574fc4be7026c7bcbb484cc1a171a",
+    "result.json": "31d0876a54699f7971b7bf46e216ae7e03063b696a558fb583f01819f9bf4959"
+  },
+  "raw_log_sha256": "b9aa7a9c53c89ede69c32ce72fd40833b88045b93a7371a05854e44e3caec569",
+  "status": "Measured baseline only. No production fix or native acceptance."
+}
