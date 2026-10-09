@@ -1195,8 +1195,10 @@ impl LanguageProfile {
     }
 }
 
+// Unknown source, alias or option fields must survive neither parsing nor
+// publication as an implicitly different dependency.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(untagged)]
+#[serde(untagged, deny_unknown_fields)]
 pub enum Dependency {
     Simple(Text),
     Detailed {

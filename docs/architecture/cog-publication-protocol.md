@@ -100,6 +100,11 @@ retain their meaning. Every dependency needs a declared, valid version
 requirement, including detailed declarations. An explicitly written `*` is
 preserved; a missing version is never replaced by `*`.
 
+Unknown fields in detailed dependencies are refused when the manifest is
+read, including unsupported `registry`, `package` and `workspace` fields.
+Source selection, package aliases and workspace inheritance require explicit
+support; the parser must not discard those declarations before publication.
+
 The producer refuses `path`, `git`, `branch`, `tag` and `rev` declarations,
 even when accompanied by a version, before archive/build/signing work. The
 v1 metadata cannot represent those source choices, and there is no implicit
