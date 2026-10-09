@@ -1,5 +1,5 @@
 //! Recycled callee slots must not retain an unrelated previous argument's tape.
-use super::propagate_arg;
+use super::{propagate_arg, propagate_arg_from_slot};
 use crate::instruction::Reg;
 use crate::interpreter::{autodiff::TensorId, state::InterpreterState};
 use crate::module::VbcModule;
@@ -22,4 +22,13 @@ fn tracked_argument_replaces_a_recycled_callee_node() {
     state.grad_reg_nodes.insert(20, (TensorId(7), 3.0_f64.to_bits()));
     propagate_arg(&mut state, 0, Reg(1), 20, Reg(0));
     assert_eq!(state.grad_reg_nodes.get(&20), Some(&(TensorId(9), 3.0_f64.to_bits())));
+}
+
+#[test]
+fn unknown_register_origin_clears_a_recycled_callee_node() {
+    let mut state = InterpreterState::new(Shared::new(VbcModule::new("tape_boundary".into())).into_arc());
+    state.grad_recording = true;
+    state.grad_reg_nodes.insert(20, (TensorId(7), 3.0_f64.to_bits()));
+    propagate_arg_from_slot(&mut state, None, 20);
+    assert!(!state.grad_reg_nodes.contains_key(&20), "a pointer without register provenance cannot inherit an earlier node");
 }

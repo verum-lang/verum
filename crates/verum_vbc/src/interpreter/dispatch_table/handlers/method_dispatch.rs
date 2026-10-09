@@ -407,6 +407,7 @@ struct DeclaredNumericMethod {
     function: FunctionId,
     register_count: u16,
     borrows_self: bool,
+    float_self: bool,
 }
 
 fn declared_numeric_method(
@@ -446,6 +447,7 @@ fn declared_numeric_method(
             function: fid,
             register_count: function.register_count,
             borrows_self,
+            float_self: matches!(receiver_type, crate::types::TypeRef::Concrete(id) if id.is_float()),
         })
 }
 
@@ -455,7 +457,7 @@ fn enter_declared_numeric_method(
     state: &mut InterpreterState,
     target: DeclaredNumericMethod,
     receiver: Value,
-    receiver_slot: u32,
+    receiver_slot: Option<u32>,
     args: &RegRange,
     dst: Reg,
     witnesses: Option<Box<[crate::types::TypeRef]>>,
@@ -477,9 +479,16 @@ fn enter_declared_numeric_method(
     }
     state.registers.set(new_base, Reg(0), receiver);
     // A by-value CBGR call copied its referent's slot, not the reference bits.
-    crate::interpreter::autodiff_record::propagate_arg(
-        state, receiver_slot, Reg(0), new_base, Reg(0),
+    // ThinRef/interior pointers have no register-origin proof, and a borrowed
+    // self still needs a dereference-to-tape transfer before it can carry AD.
+    crate::interpreter::autodiff_record::propagate_arg_from_slot(
+        state, receiver_slot, new_base,
     );
+    if target.float_self && receiver_slot.is_none() {
+        crate::interpreter::autodiff_record::note_unsupported(
+            state, "numeric method receiver provenance is unavailable",
+        );
+    }
     for index in 0..args.count {
         let source = Reg(args.start.0 + u16::from(index));
         let destination = Reg(u16::from(index) + 1);
@@ -765,7 +774,8 @@ pub(in super::super) fn handle_call_method(
     if let Some(target) = declared_numeric
         && (target.borrows_self || !is_cbgr_ref(&receiver))
     {
-        let receiver_slot = state.reg_base() + u32::from(receiver_reg.0);
+        let receiver_slot = (!target.borrows_self)
+            .then_some(state.reg_base() + u32::from(receiver_reg.0));
         return enter_declared_numeric_method(
             state, target, receiver, receiver_slot, &args, dst, call_witness_sidecar.take(),
         );
@@ -888,14 +898,24 @@ pub(in super::super) fn handle_call_method(
         receiver
     };
 
+    // Declaration identity is independent of the reference carrier. Retry only
+    // after the established unwrap has exposed an actual numeric value, so a
+    // returned ThinRef or tracked interior pointer cannot bypass its body.
+    let declared_numeric = declared_numeric.or_else(|| {
+        declared_numeric_method(state, &dispatch_receiver, &method_name, args.count)
+    });
     if let Some(target) = declared_numeric
         && (dispatch_receiver.is_int() || dispatch_receiver.is_float())
     {
-        // Only the by-value CBGR case reaches this point. Reuse the same
-        // absolute referent slot that the established unwrap above read.
-        let (receiver_slot, _) = decode_cbgr_ref(receiver);
+        let receiver_slot = if !target.borrows_self && is_cbgr_ref(&receiver) {
+            // Only a register-encoded reference proves an absolute tape slot.
+            Some(decode_cbgr_ref(receiver).0)
+        } else {
+            None
+        };
+        let argument_receiver = if target.borrows_self { receiver } else { dispatch_receiver };
         return enter_declared_numeric_method(
-            state, target, dispatch_receiver, receiver_slot, &args, dst,
+            state, target, argument_receiver, receiver_slot, &args, dst,
             call_witness_sidecar.take(),
         );
     }
