@@ -1,0 +1,26 @@
+// @test: run-interpreter
+// @level: L2
+// @tier: 0
+// @timeout: 180000
+// @expected-stdout: legacy-json: ok
+// @expected-exit: 0
+// @description: Legacy JSON positive for the strict parser environment control.
+
+mount core.encoding.json.{JsonValue, parse};
+
+fn main() {
+    let value = match parse(&"""{"name":"codec","count":7}""") {
+        Result.Ok(value) => value,
+        Result.Err(_) => panic("legacy JSON positive must parse"),
+    };
+    let fields = match value.as_object() {
+        Maybe.Some(fields) => fields,
+        Maybe.None => panic("legacy JSON object"),
+    };
+    assert_eq(fields.len(), 2);
+    match fields.get(&"count") {
+        Maybe.Some(JsonValue.JsonInt(count)) => assert_eq(count, 7),
+        _ => panic("legacy JSON integer"),
+    }
+    print("legacy-json: ok");
+}

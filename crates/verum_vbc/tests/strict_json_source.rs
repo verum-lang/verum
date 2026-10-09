@@ -12,14 +12,34 @@ use verum_vbc::interpreter::Interpreter;
 
 #[test]
 fn strict_json_runtime_controls_use_the_complete_production_module() {
+    execute_source_control(
+        include_str!("../../../vcs/specs/L2-standard/encoding/json_strict_publication.vr"),
+        &[
+            "core.encoding.json.parse_strict",
+            "core.encoding.json.parse_document",
+            "core.encoding.json.parse_object",
+        ],
+    );
+}
+
+#[test]
+fn legacy_json_positive_uses_the_same_complete_source_environment() {
+    execute_source_control(
+        include_str!("../../../vcs/specs/L2-standard/encoding/json_legacy_source_control.vr"),
+        &[
+            "core.encoding.json.parse",
+            "core.encoding.json.parse_object",
+        ],
+    );
+}
+
+fn execute_source_control(caller: &str, selected_parsers: &[&str]) {
     let json = Parser::new(include_str!("../../../core/encoding/json.vr"))
         .parse_module()
         .expect("production JSON grammar");
-    let caller = Parser::new(include_str!(
-        "../../../vcs/specs/L2-standard/encoding/json_strict_publication.vr"
-    ))
-    .parse_module()
-    .expect("runtime control grammar");
+    let caller = Parser::new(caller)
+        .parse_module()
+        .expect("runtime control grammar");
 
     // Keep modules and their declaration owners intact. No AST item filtering,
     // parser copy, source rewriting or native JSON replacement is involved.
@@ -42,11 +62,7 @@ fn strict_json_runtime_controls_use_the_complete_production_module() {
 
     // Inspect exact selected descriptors, including nonempty bodies, before
     // executing. A forward declaration from an older archive cannot qualify.
-    for expected in [
-        "core.encoding.json.parse_strict",
-        "core.encoding.json.parse_document",
-        "core.encoding.json.parse_object",
-    ] {
+    for &expected in selected_parsers {
         let candidates: List<_> = module
             .functions
             .iter()
