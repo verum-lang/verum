@@ -16,6 +16,10 @@ use verum_vbc::{
 
 const COLLECTIONS: &[(&str, &str)] = &[
     (
+        "core.base.primitives",
+        "implement USize { public fn identity(self) -> USize { self } }",
+    ),
+    (
         "core.collections.list",
         "public type List<T> is { value: T };",
     ),
@@ -341,9 +345,8 @@ fn declared_generic_variant_local_shadow_and_missing_owner_never_select_a_strang
     }
 }
 
-#[test]
-fn declared_generic_variant_metadata_drives_checker_acceptance_and_refusal() {
-    let source = json("mount collections.{List, Map};", "List", "Map");
+fn checker_contract(mounts: &str) {
+    let source = json(mounts, "List", "Map");
     let (_, archive) = bootstrap(COLLECTIONS, &source);
     for eager in [false, true] {
         for (variant, value_type) in [
@@ -372,4 +375,43 @@ fn declared_generic_variant_genuine_usize_payload_remains_usize() {
         payload(&metadata(&archive), "JsonCount").as_slice(),
         &["USize"]
     );
+}
+
+#[test]
+fn declared_generic_variant_direct_metadata_drives_checker_acceptance_and_refusal() {
+    checker_contract("mount core.collections.list.List; mount core.collections.map.Map;");
+}
+
+#[test]
+fn declared_generic_variant_umbrella_metadata_drives_checker_acceptance_and_refusal() {
+    checker_contract("mount collections.{List, Map};");
+}
+
+#[test]
+fn declared_generic_variant_broken_or_private_reexport_never_borrows_parent_identity() {
+    for declarations in [
+        [
+            ("broken", "public type List<T> is { parent: T };"),
+            ("broken.exports", "public mount broken.missing.List;"),
+        ],
+        [
+            ("broken", "type List<T> is { hidden: T };"),
+            ("broken.exports", "public mount broken.List;"),
+        ],
+    ] {
+        let mut prior: List<_> = COLLECTIONS.iter().copied().collect();
+        prior.extend(declarations);
+        let source = json("mount broken.exports.List;", "List", "Map");
+        let (module, _) = bootstrap(&prior, &source);
+        assert!(
+            matches!(
+                field(&module, "JsonArray").declaration_type,
+                Some(TypeRef::Instantiated {
+                    base: TypeId::PTR,
+                    ..
+                })
+            ),
+            "an invalid re-export must stay unresolved, not select a parent or private declaration"
+        );
+    }
 }
