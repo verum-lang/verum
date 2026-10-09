@@ -23158,15 +23158,37 @@ fn lower_arith_extended<'ctx>(
 
         // ==== Type Conversions ====
         Some(ArithSubOpcode::SextI) => {
-            if operands.len() < 2 {
-                return Ok(());
+            let mut cursor = 0;
+            let dst = read_reg_varlen(operands, &mut cursor)?;
+            let src = read_reg_varlen(operands, &mut cursor)?;
+            let Some([from_bits, to_bits]) = operands.get(cursor..) else {
+                return Err(LlvmLoweringError::internal(
+                    "SextI requires source and target widths",
+                ));
+            };
+            if !matches!(from_bits, 8 | 16 | 32 | 64)
+                || !matches!(to_bits, 8 | 16 | 32 | 64)
+                || from_bits > to_bits
+            {
+                return Err(LlvmLoweringError::internal(
+                    "SextI has unsupported integer widths",
+                ));
             }
-            let dst = op_reg(operands, 0);
-            let a = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "a")?;
-            let result = ctx
-                .builder()
-                .build_int_s_extend(a, i64_ty, "sext")
-                .or_llvm_err()?;
+            let value = as_i64(ctx, ctx.get_register(src)?, "sext_source")?;
+            // Values occupy i64 registers even when a packed load zero-extended
+            // a narrow payload. Recover its declared source width before sext.
+            let result = if *from_bits == 64 {
+                value
+            } else {
+                let source_type = ctx.llvm_context().custom_width_int_type(u32::from(*from_bits));
+                let narrow = ctx
+                    .builder()
+                    .build_int_truncate(value, source_type, "sext_narrow")
+                    .or_llvm_err()?;
+                ctx.builder()
+                    .build_int_s_extend(narrow, i64_ty, "sext")
+                    .or_llvm_err()?
+            };
             ctx.set_register(dst, result.into());
             Ok(())
         }
