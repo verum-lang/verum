@@ -272,7 +272,7 @@ fn json_metadata() -> CoreMetadata {
     serde_json::from_slice(&serde_json::to_vec(&metadata).unwrap()).unwrap()
 }
 
-fn source_errors(value: &str, eager: bool) -> Vec<String> {
+fn source_errors(value: &str, eager: bool) -> List<Text> {
     let mut checker = checker(json_metadata(), eager);
     checker.set_current_module_path("consumer");
     let source = format!(
@@ -295,22 +295,27 @@ fn source_errors(value: &str, eager: bool) -> Vec<String> {
                 .expect("source signature");
         }
     }
-    let mut errors: Vec<String> = ast
+    let mut errors: List<Text> = ast
         .items
         .iter()
-        .filter_map(|item| checker.check_item(item).err().map(|e| format!("{e:?}")))
+        .filter_map(|item| {
+            checker
+                .check_item(item)
+                .err()
+                .map(|e| Text::from(format!("{e:?}")))
+        })
         .collect();
     errors.extend(
         checker
             .take_deferred_errors()
             .into_iter()
-            .map(|e| format!("{e:?}")),
+            .map(|e| Text::from(format!("{e:?}"))),
     );
     errors.extend(
         checker
             .diagnostic_sources()
             .iter()
-            .map(|e| format!("{e:?}")),
+            .map(|e| Text::from(format!("{e:?}"))),
     );
     errors
 }
