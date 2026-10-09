@@ -1372,44 +1372,6 @@ mod tests {
         assert_eq!(tcp_local_port(999_999), -1);
     }
 
-    /// VBC-NET-AUDIT-1 — peer is reported alongside the recv'd
-    /// payload (was dropped pre-fix).  Smoke test: bind two
-    /// sockets, send from one to the other, verify the recv'd
-    /// peer matches the sender's local addr.
-    #[test]
-    fn udp_recv_from_returns_peer_address() {
-        let recv_fd = udp_bind(0);
-        assert!(recv_fd > 0);
-        let recv_port = {
-            let map = REGISTRY.lock().unwrap();
-            match map.get(&recv_fd) {
-                Some(NetResource::Udp(s)) => s.local_addr().unwrap().port(),
-                _ => panic!("recv socket missing"),
-            }
-        };
-        let send_fd = udp_bind(0);
-        assert!(send_fd > 0);
-        let send_port = {
-            let map = REGISTRY.lock().unwrap();
-            match map.get(&send_fd) {
-                Some(NetResource::Udp(s)) => s.local_addr().unwrap().port(),
-                _ => panic!("send socket missing"),
-            }
-        };
-        assert_eq!(udp_send(send_fd, b"ping", "127.0.0.1", recv_port as i64), 4);
-        let recv = udp_recv_from(recv_fd, 64).expect("recv");
-        assert_eq!(recv.0, "ping");
-        let (family, host, port) = recv.1.expect("peer reported");
-        assert_eq!(family, 4);
-        // Sender's local addr is what the kernel reports as peer.
-        assert_eq!(port, send_port as i64);
-        // Sender bound to 0.0.0.0 → kernel typically reports 127.0.0.1
-        // for loopback delivery on macOS/Linux.
-        assert!(host == "127.0.0.1" || host == "0.0.0.0", "peer host: {}", host);
-        assert_eq!(udp_close(recv_fd), 0);
-        assert_eq!(udp_close(send_fd), 0);
-    }
-
     /// VBC-NET-RT-1 — proof that the lock-drop discipline works.
     /// Two TCP connections in flight: one is parked in `tcp_recv`
     /// (the listener never sends), the other completes a full
@@ -2541,3 +2503,7 @@ fn intercept_tcp_read(
         &[Value::from_i64(n)],
     )?))
 }
+
+#[cfg(test)]
+#[path = "../../../../tests/unit/udp_peer_address.rs"]
+mod udp_peer_address_tests;

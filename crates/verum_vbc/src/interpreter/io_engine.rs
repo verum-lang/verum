@@ -942,68 +942,6 @@ mod tests {
         assert_eq!(engine_destroy(h), 0);
     }
 
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
-    #[test]
-    fn poll_signals_ready_on_pending_connection() {
-        let h = engine_new(64);
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        listener.set_nonblocking(true).unwrap();
-        let port = listener.local_addr().unwrap().port();
-        let fd = listener.as_raw_fd() as i64;
-        assert_eq!(submit(h, fd, FLAG_READ as i64), 0);
-        // Connect from a bg thread to make the listener readable.
-        let handle = std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_millis(30));
-            let _s = TcpStream::connect(("127.0.0.1", port)).unwrap();
-            std::thread::sleep(Duration::from_millis(50));
-        });
-        let n = poll(h, 16, 1_000_000_000); // 1 s
-        assert!(n > 0, "expected event, got {n}");
-        assert_eq!(is_ready(h, fd, FLAG_READ as i64), 1);
-        assert_eq!(take_ready(h, fd, FLAG_READ as i64), 1);
-        // After consume, is_ready returns 0.
-        assert_eq!(is_ready(h, fd, FLAG_READ as i64), 0);
-        handle.join().unwrap();
-        assert_eq!(remove(h, fd), 0);
-        assert_eq!(engine_destroy(h), 0);
-    }
-
-    /// VBC-IO-ENGINE-1 — `async_accept` end-to-end: bind, register
-    /// listen_fd in a fresh IoEngine session, kick a connect from
-    /// a bg thread, drive `async_accept` and verify the returned
-    /// synthetic fd is valid + addressable through net_runtime.
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
-    #[test]
-    fn async_accept_round_trip_via_io_engine() {
-        use super::super::dispatch_table::handlers::net_runtime::{
-            tcp_close, tcp_connect, tcp_listen_v2, tcp_local_port,
-            NET_STATUS_TIMEOUT,
-        };
-        let h = engine_new(8);
-        assert!(h > 0);
-        let listen_fd = tcp_listen_v2("127.0.0.1", 0, 8, 0);
-        assert!(listen_fd > 0);
-        let port = tcp_local_port(listen_fd);
-        // Spawn a connector after a small delay so async_accept
-        // has a chance to register interest before the SYN arrives.
-        let bg = std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_millis(40));
-            let cfd = tcp_connect("127.0.0.1", port);
-            assert!(cfd > 0);
-            std::thread::sleep(Duration::from_millis(50));
-            tcp_close(cfd);
-        });
-        let server_fd = async_accept(h, listen_fd, 1_500_000_000); // 1.5s
-        assert!(
-            server_fd > 0 && server_fd != NET_STATUS_TIMEOUT,
-            "async_accept returned {server_fd}"
-        );
-        bg.join().unwrap();
-        assert_eq!(tcp_close(server_fd), 0);
-        assert_eq!(tcp_close(listen_fd), 0);
-        assert_eq!(engine_destroy(h), 0);
-    }
-
     /// VBC-IO-ENGINE-1 — `async_accept` returns NET_STATUS_TIMEOUT
     /// when no client connects within the deadline.
     #[cfg(any(target_os = "macos", target_os = "linux"))]
@@ -1022,91 +960,6 @@ mod tests {
         assert_eq!(r, NET_STATUS_TIMEOUT);
         assert!(elapsed >= Duration::from_millis(80) && elapsed < Duration::from_secs(2));
         assert_eq!(tcp_close(listen_fd), 0);
-        assert_eq!(engine_destroy(h), 0);
-    }
-
-    /// VBC-IO-ENGINE-2 — `async_read` end-to-end. Bind a
-    /// listener, accept a connection, kick the peer to send 13
-    /// bytes, then drive `async_read` against the server-side
-    /// TcpStream's raw fd — verify the bytes land in the
-    /// caller-supplied buffer.
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
-    #[test]
-    fn async_read_end_to_end_via_io_engine() {
-        let h = engine_new(8);
-        assert!(h > 0);
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let port = listener.local_addr().unwrap().port();
-
-        // Background: connect + send 13 bytes.
-        let bg = std::thread::spawn(move || {
-            let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
-            std::thread::sleep(Duration::from_millis(20));
-            use std::io::Write;
-            s.write_all(b"hello, world!").unwrap();
-            std::thread::sleep(Duration::from_millis(80));
-        });
-
-        // Accept the connection synchronously to get the server-
-        // side raw fd.
-        let (stream, _) = listener.accept().unwrap();
-        let server_fd = stream.as_raw_fd() as i64;
-        // Drop the std wrapper but keep the raw fd alive — the
-        // caller (us) now owns the fd lifecycle for the test.
-        std::mem::forget(stream);
-
-        let mut buf = [0u8; 32];
-        let n = async_read(
-            h,
-            server_fd,
-            buf.as_mut_ptr() as i64,
-            buf.len() as i64,
-            1_000_000_000, // 1s
-        );
-        assert_eq!(n, 13, "expected 13 bytes, got {n}");
-        assert_eq!(&buf[..13], b"hello, world!");
-
-        bg.join().unwrap();
-        unsafe { libc::close(server_fd as libc::c_int) };
-        assert_eq!(engine_destroy(h), 0);
-    }
-
-    /// VBC-IO-ENGINE-2 — `async_write` end-to-end. Symmetric to
-    /// the read test: server writes via `async_write`, peer reads
-    /// the bytes synchronously.
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
-    #[test]
-    fn async_write_end_to_end_via_io_engine() {
-        let h = engine_new(8);
-        assert!(h > 0);
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let port = listener.local_addr().unwrap().port();
-
-        // Background: connect + read 7 bytes.
-        let bg = std::thread::spawn(move || {
-            use std::io::Read;
-            let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
-            let mut got = [0u8; 7];
-            s.read_exact(&mut got).unwrap();
-            assert_eq!(&got, b"VERUM!\n");
-        });
-
-        let (stream, _) = listener.accept().unwrap();
-        let server_fd = stream.as_raw_fd() as i64;
-        std::mem::forget(stream);
-
-        let payload: &[u8] = b"VERUM!\n";
-        let n = async_write(
-            h,
-            server_fd,
-            payload.as_ptr() as i64,
-            payload.len() as i64,
-            1_000_000_000, // 1s
-        );
-        assert_eq!(n, 7, "expected 7 bytes written, got {n}");
-
-        bg.join().unwrap();
-        unsafe { libc::close(server_fd as libc::c_int) };
         assert_eq!(engine_destroy(h), 0);
     }
 
@@ -1171,3 +1024,7 @@ mod tests {
         assert_eq!(engine_destroy(h2), 0);
     }
 }
+
+#[cfg(all(test, any(target_os = "macos", target_os = "linux")))]
+#[path = "../../tests/unit/io_engine_socket_readiness.rs"]
+mod socket_readiness_tests;
