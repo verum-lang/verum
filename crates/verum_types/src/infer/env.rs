@@ -10535,7 +10535,7 @@ impl TypeChecker {
                     if args.is_empty() {
                         return Some(alias_target.clone());
                     }
-                    return Some(self.substitute_type_args(alias_target, args));
+                    return Some(self.substitute_with_params(name.as_str(), alias_target, args));
                 }
                 // Fallback: look up the type definition table directly by name
                 if let Some(def) = self.ctx.lookup_type(name.as_str()) {
@@ -10563,7 +10563,7 @@ impl TypeChecker {
                     if args.is_empty() {
                         return Some(alias_target.clone());
                     }
-                    return Some(self.substitute_type_args(alias_target, args));
+                    return Some(self.substitute_with_params(type_name.as_str(), alias_target, args));
                 }
                 // Fallback: look up the type definition table directly by name
                 if let Some(def) = self.ctx.lookup_type(type_name.as_str()) {
@@ -10580,284 +10580,40 @@ impl TypeChecker {
         }
     }
 
-    /// Substitute type arguments into a type definition using the __type_params_ registry.
-    /// This handles multi-character parameter names (In, Out, etc.) that the heuristic
-    /// substitute_type_args cannot resolve.
+    /// Instantiate only the slots owned by this exact declaration. Metadata
+    /// templates record their minted variables when registered; source aliases
+    /// also retain parameter names, including unused or reordered parameters.
     fn substitute_with_params(&self, type_name: &str, def: &Type, args: &[Type]) -> Type {
-        // First try to look up the type parameter record to build a name->index mapping
-        let params_key = format!("__type_params_{}", type_name);
-        if let Some(Type::Record(param_record)) = self.ctx.lookup_type(&params_key) {
-            // The param_record maps parameter names to their types (usually Named types)
-            // We use the order of keys to determine parameter positions
-            let param_names: Vec<&verum_common::Text> = param_record.keys().collect();
-            if !param_names.is_empty() && param_names.len() >= args.len() {
-                // Build a substitution: replace each Named(param_name) with the corresponding arg
-                let substituted = self.substitute_by_param_names(def, &param_names, args);
-                return substituted;
+        let mut parameters: Map<Text, Type> = Map::new();
+        let params_key = format!("__type_params_{type_name}");
+        if let Some(Type::Record(declared)) = self.ctx.lookup_type(&params_key) {
+            for ((name, parameter), argument) in declared.iter().zip(args.iter()) {
+                parameters.insert(name.clone(), argument.clone());
+                if let Type::Var(variable) = parameter {
+                    parameters.insert(format!("T{}", variable.id()).into(), argument.clone());
+                }
+            }
+        } else if let Some(metadata) = &self.core_metadata
+            && let Some(descriptor) = metadata.types.get(type_name)
+        {
+            // Generic alias descriptors may retain named parameters without
+            // a local parameter record. Their exact metadata entry is still
+            // declaration authority; a same-leaf search would not be.
+            for (parameter, argument) in descriptor.generic_params.iter().zip(args.iter()) {
+                parameters.insert(parameter.name.clone(), argument.clone());
             }
         }
-        // Fall back to heuristic substitution
-        self.substitute_type_args(def, args)
-    }
-
-    /// Substitute Named type parameters by matching parameter names to argument positions.
-    fn substitute_by_param_names(
-        &self,
-        ty: &Type,
-        param_names: &[&verum_common::Text],
-        args: &[Type],
-    ) -> Type {
-        match ty {
-            Type::Named {
-                path,
-                args: named_args,
-            } if named_args.is_empty() => {
-                if let Some(ident) = path.as_ident() {
-                    let name = ident.name.as_str();
-                    for (i, pname) in param_names.iter().enumerate() {
-                        if pname.as_str() == name {
-                            if let Some(replacement) = args.get(i) {
-                                return replacement.clone();
-                            }
-                        }
-                    }
-                }
-                ty.clone()
-            }
-            Type::Named {
-                path,
-                args: named_args,
-            } => {
-                let new_args: List<Type> = named_args
-                    .iter()
-                    .map(|a| self.substitute_by_param_names(a, param_names, args))
-                    .collect();
-                Type::Named {
-                    path: path.clone(),
-                    args: new_args,
+        let order_key = format!("__type_var_order_{type_name}");
+        if let Some(Type::Tuple(slots)) = self.ctx.lookup_type(&order_key) {
+            for (slot, argument) in slots.iter().zip(args.iter()) {
+                if let Type::Var(variable) = slot {
+                    parameters.insert(format!("T{}", variable.id()).into(), argument.clone());
                 }
             }
-            Type::Generic {
-                name,
-                args: generic_args,
-            } => {
-                let new_args: List<Type> = generic_args
-                    .iter()
-                    .map(|a| self.substitute_by_param_names(a, param_names, args))
-                    .collect();
-                Type::Generic {
-                    name: name.clone(),
-                    args: new_args,
-                }
-            }
-            Type::Record(fields) => {
-                let mut new_fields = indexmap::IndexMap::new();
-                for (key, val) in fields {
-                    new_fields.insert(
-                        key.clone(),
-                        self.substitute_by_param_names(val, param_names, args),
-                    );
-                }
-                Type::Record(new_fields)
-            }
-            Type::Variant(variants) => {
-                let mut new_variants = indexmap::IndexMap::new();
-                for (key, val) in variants {
-                    new_variants.insert(
-                        key.clone(),
-                        self.substitute_by_param_names(val, param_names, args),
-                    );
-                }
-                Type::Variant(new_variants)
-            }
-            Type::Function {
-                params,
-                return_type,
-                contexts,
-                properties,
-                type_params,
-            } => {
-                let new_params: List<Type> = params
-                    .iter()
-                    .map(|p| self.substitute_by_param_names(p, param_names, args))
-                    .collect();
-                let new_return = self.substitute_by_param_names(return_type, param_names, args);
-                Type::Function {
-                    params: new_params,
-                    return_type: Box::new(new_return),
-                    contexts: contexts.clone(),
-                    properties: properties.clone(),
-                    type_params: type_params.clone(),
-                }
-            }
-            Type::Tuple(elements) => {
-                let new_elements: List<Type> = elements
-                    .iter()
-                    .map(|e| self.substitute_by_param_names(e, param_names, args))
-                    .collect();
-                Type::Tuple(new_elements)
-            }
-            Type::Reference { inner, mutable } => Type::Reference {
-                inner: Box::new(self.substitute_by_param_names(inner, param_names, args)),
-                mutable: *mutable,
-            },
-            _ => ty.clone(),
         }
-    }
-
-    /// Substitute type arguments into a type definition.
-    /// Replaces type parameters (T, E, etc.) with concrete types.
-    fn substitute_type_args(&self, def: &Type, args: &[Type]) -> Type {
-        // Use substitute_single_type_arg which handles all type forms recursively
-        self.substitute_single_type_arg(def, args)
-    }
-
-    /// Substitute type parameters in a single type.
-    /// Uses the __type_params_ registry to find the parameter positions.
-    fn substitute_single_type_arg(&self, ty: &Type, args: &[Type]) -> Type {
-        match ty {
-            // Type parameter as Var: use index-based substitution
-            Type::Var(var) => {
-                let var_name = format!("{:?}", var);
-                if var_name.contains("T") || var_name.contains("0") {
-                    args.first().cloned().unwrap_or_else(|| ty.clone())
-                } else if var_name.contains("E") || var_name.contains("1") {
-                    args.get(1).cloned().unwrap_or_else(|| ty.clone())
-                } else {
-                    ty.clone()
-                }
-            }
-            // Type parameter as Named (single-segment, no args) - common for non-variant aliases
-            // E.g., in `type IoResult<T> is Result<T, StreamError>`, T is stored as Named("T")
-            Type::Named {
-                path,
-                args: named_args,
-            } if named_args.is_empty() => {
-                if let Some(ident) = path.as_ident() {
-                    let param_name = ident.name.as_str();
-                    // Common parameter name patterns: T=0, E=1, A=0, B=1, K=0, V=1
-                    let idx = match param_name {
-                        "T" | "A" | "K" | "Item" | "Self" => Some(0),
-                        "E" | "B" | "V" | "U" => Some(1),
-                        "R" | "C" | "W" => Some(2),
-                        _ => {
-                            // Try single uppercase letter as positional (A=0, B=1, C=2, ...)
-                            if param_name.len() == 1
-                                && param_name
-                                    .chars()
-                                    .next()
-                                    .is_some_and(|c| c.is_ascii_uppercase())
-                            {
-                                Some((param_name.as_bytes()[0] - b'A') as usize)
-                            } else {
-                                None
-                            }
-                        }
-                    };
-                    if let Some(i) = idx {
-                        if let Some(replacement) = args.get(i) {
-                            return replacement.clone();
-                        }
-                    }
-                }
-                // Not a type parameter - recurse into args
-                let new_args: List<Type> = named_args
-                    .iter()
-                    .map(|a| self.substitute_single_type_arg(a, args))
-                    .collect();
-                Type::Named {
-                    path: path.clone(),
-                    args: new_args,
-                }
-            }
-            // Named types with args - recurse
-            Type::Named {
-                path,
-                args: named_args,
-            } => {
-                let new_args: List<Type> = named_args
-                    .iter()
-                    .map(|a| self.substitute_single_type_arg(a, args))
-                    .collect();
-                Type::Named {
-                    path: path.clone(),
-                    args: new_args,
-                }
-            }
-            // Recurse into compound types
-            Type::Generic {
-                name,
-                args: inner_args,
-            } => {
-                // Check if this is a type parameter (no args, single name)
-                if inner_args.is_empty() {
-                    let param_name = name.as_str();
-                    let idx = match param_name {
-                        "T" | "A" | "K" | "Item" => Some(0),
-                        "E" | "B" | "V" | "U" => Some(1),
-                        "R" | "C" | "W" => Some(2),
-                        _ => {
-                            if param_name.len() == 1
-                                && param_name
-                                    .chars()
-                                    .next()
-                                    .is_some_and(|c| c.is_ascii_uppercase())
-                            {
-                                Some((param_name.as_bytes()[0] - b'A') as usize)
-                            } else {
-                                None
-                            }
-                        }
-                    };
-                    if let Some(i) = idx {
-                        if let Some(replacement) = args.get(i) {
-                            return replacement.clone();
-                        }
-                    }
-                }
-                let new_args: List<Type> = inner_args
-                    .iter()
-                    .map(|a| self.substitute_single_type_arg(a, args))
-                    .collect();
-                Type::Generic {
-                    name: name.clone(),
-                    args: new_args,
-                }
-            }
-            // Recurse into Variant types
-            Type::Variant(variants) => {
-                let new_variants: indexmap::IndexMap<Text, Type> = variants
-                    .iter()
-                    .map(|(k, v)| (k.clone(), self.substitute_single_type_arg(v, args)))
-                    .collect();
-                Type::Variant(new_variants)
-            }
-            // Recurse into Record types
-            Type::Record(fields) => {
-                let new_fields: indexmap::IndexMap<Text, Type> = fields
-                    .iter()
-                    .map(|(k, v)| (k.clone(), self.substitute_single_type_arg(v, args)))
-                    .collect();
-                Type::Record(new_fields)
-            }
-            // Recurse into Tuple types
-            Type::Tuple(elems) => {
-                let new_elems: List<Type> = elems
-                    .iter()
-                    .map(|e| self.substitute_single_type_arg(e, args))
-                    .collect();
-                Type::Tuple(new_elems)
-            }
-            // Recurse into Reference types
-            Type::Reference { inner, mutable } => {
-                let new_inner = self.substitute_single_type_arg(inner, args);
-                Type::Reference {
-                    inner: Box::new(new_inner),
-                    mutable: *mutable,
-                }
-            }
-            _ => ty.clone(),
-        }
+        // No free-variable scan or name heuristic: an unrecorded variable may
+        // belong to a nested foreign type, and an absent parameter may be phantom.
+        self.substitute_type_params(def, &parameters.into_iter().collect())
     }
 
     /// Recursively search an expression for a Try (?) operator and extract its error type.

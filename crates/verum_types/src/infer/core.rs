@@ -1370,6 +1370,33 @@ impl TypeChecker {
         }
     }
 
+    /// Preserve the variables minted for a nominal metadata template in its
+    /// declaration order. Alias and variant payloads have their own parameter
+    /// registration paths and must not borrow this template's variables.
+    fn register_metadata_nominal_parameter_slots(
+        &mut self,
+        key: &Text,
+        descriptor: &crate::core_metadata::TypeDescriptor,
+        ty: &Type,
+    ) {
+        use crate::core_metadata::TypeDescriptorKind;
+        if matches!(
+            descriptor.kind,
+            TypeDescriptorKind::Alias { .. } | TypeDescriptorKind::Variant { .. }
+        ) {
+            return;
+        }
+        if let Type::Generic { name, args } = ty
+            && name == &Self::metadata_declaring_key(descriptor)
+            && args.len() == descriptor.generic_params.len()
+        {
+            self.ctx.define_type(
+                format!("__type_var_order_{key}"),
+                Type::Tuple(args.clone()),
+            );
+        }
+    }
+
     fn register_metadata_resource_discipline(&mut self, descriptor: &crate::core_metadata::TypeDescriptor) {
         self.affine_tracker.register_resource_discipline(
             Self::metadata_declaring_key(descriptor), descriptor.resource_discipline,
@@ -1615,6 +1642,7 @@ impl TypeChecker {
             // Convert + register this single type.  Mirror of the body
             // of `load_stdlib_from_metadata` reduced to one entry.
             let ty = self.type_descriptor_to_type(&type_desc);
+            self.register_metadata_nominal_parameter_slots(name, type_desc, &ty);
             self.ctx.define_type(name.clone(), ty.clone());
             self.ctx.env.insert(name.clone(), TypeScheme::mono(ty.clone()));
 
@@ -2150,11 +2178,13 @@ impl TypeChecker {
         }
 
         let ty = self.type_descriptor_to_type(&desc);
+        self.register_metadata_nominal_parameter_slots(&owning_key, &desc, &ty);
         self.ctx.define_type(owning_key.clone(), ty.clone());
         if owning_key != direct_key {
             // Publish under the mount-path key too so subsequent
             // probes (this fn + `lookup_type_mount_scoped`'s direct
             // qualified probe) fast-path.
+            self.register_metadata_nominal_parameter_slots(&direct_key, &desc, &ty);
             self.ctx.define_type(direct_key.clone(), ty.clone());
         }
 
@@ -4025,6 +4055,7 @@ impl TypeChecker {
             self.register_metadata_resource_discipline(type_desc);
             // Convert core_metadata::TypeDescriptor to Type
             let ty = self.type_descriptor_to_type(type_desc);
+            self.register_metadata_nominal_parameter_slots(name, type_desc, &ty);
             self.ctx.define_type(name.clone(), ty.clone());
             // Also register in the type environment so type names can be resolved
             // (e.g., `List<Int>` needs "List" in env, not just in type_defs)
