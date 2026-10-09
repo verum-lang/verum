@@ -62,6 +62,15 @@ old commit history came from it).
     your scratchpad); never trust binaries in the shared `target/`.
   - Never run two AOT test suites concurrently on this machine.
 
+## Editor analysis
+
+Set `VERUM_NO_AUTO_PRECOMPILE=1` in Rust Analyzer's
+`rust-analyzer.cargo.extraEnv` workspace setting. Local `.vscode/settings.json`
+files are ignored by Git; preserve their other settings when adding this.
+Editor checks should not start a release precompiler against the mutable
+integration checkout. Ordinary terminal CLI builds still use automatic
+baking. An editor check does not validate a fresh standard-library artifact.
+
 ## CRITICAL: Verum Grammar Specification
 
 **AUTHORITATIVE SOURCE**: `grammar/verum.ebnf` - The ONLY source of truth for Verum syntax.
