@@ -85,3 +85,42 @@ fn alias_arguments_missing_qualified_owner_does_not_borrow_bare_template() {
         assert_eq!(checker.expand_type_alias(&parse_type("beta.Pair<Text, Bool>")), None);
     }
 }
+
+#[test]
+fn alias_arguments_order_registry_preserves_phantom_and_foreign_variables() {
+    let mut checker = TypeChecker::new();
+    let first_created = Type::Var(TypeVar::fresh());
+    let second_created = Type::Var(TypeVar::fresh());
+    let phantom = Type::Var(TypeVar::fresh());
+    let foreign = Type::Var(TypeVar::fresh());
+    let target = Type::Tuple(List::from_iter([
+        first_created.clone(), second_created.clone(), foreign.clone(),
+    ]));
+    checker.ctx.define_alias("alpha.Select", target);
+    // Declaration order differs from allocation and occurrence order. The
+    // first slot is phantom; a nested foreign variable is not a parameter.
+    checker.ctx.define_type("__type_var_order_alpha.Select", Type::Tuple(
+        List::from_iter([phantom, second_created, first_created]),
+    ));
+    let expected = Type::Tuple(List::from_iter([Type::Text, Type::Bool, foreign]));
+    for application in [
+        parse_type("alpha.Select<Int, Bool, Text>"),
+        Type::Generic { name: "alpha.Select".into(),
+            args: List::from_iter([Type::Int, Type::Bool, Type::Text]) },
+    ] {
+        assert_eq!(checker.expand_type_alias(&application), Some(expected.clone()));
+    }
+}
+
+#[test]
+fn alias_arguments_absent_registry_never_guesses_variable_positions() {
+    let mut checker = TypeChecker::new();
+    let variable = Type::Var(TypeVar::fresh());
+    let target = Type::Tuple(List::from_iter([variable.clone()]));
+    checker.ctx.define_alias("alpha.Select", target.clone());
+    // A sibling's bare slot table is not authority for the qualified alias.
+    checker.ctx.define_type("__type_var_order_Select", Type::Tuple(
+        List::from_iter([variable]),
+    ));
+    assert_eq!(checker.expand_type_alias(&parse_type("alpha.Select<Int>")), Some(target));
+}
