@@ -63,6 +63,17 @@ fn calls(module: &VbcModule, entry: verum_vbc::module::FunctionId) -> List<Text>
 
 fn check(source: &str, expected: i64) {
     let module = compile(source);
+    for function in &module.functions {
+        if function.bytecode_length > 0
+            && let Some(name) = module.get_string(function.name)
+            && name.ends_with(".to_be_bytes")
+        {
+            eprintln!(
+                "declared body {name}: {:?}",
+                function.params.first().map(|p| &p.type_ref)
+            );
+        }
+    }
     let mut failures = List::<Text>::new();
     for (phase, module) in [("source", module.clone()), ("wire", roundtrip(&module))] {
         let entry = module
@@ -276,6 +287,7 @@ fn unrelated_qualified_suffix_cannot_replace_a_builtin_declaration() {
     check(
         r#"
 module foreign {
+    type USize is { marker: Int };
     implement USize { public fn to_be_bytes(self) -> List<Byte> { [37, 41] } }
 }
 type SizeAlias is USize;
