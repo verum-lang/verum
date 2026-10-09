@@ -37,6 +37,20 @@ fn source(source: &str) -> VbcModule {
         .expect("source VBC")
 }
 
+fn decoded_wire(module: &VbcModule) -> VbcModule {
+    let mut wire = deserialize_module(&serialize_module(module).expect("wire")).expect("reload");
+    // The native API consumes decoded bodies, as does the real archive loader.
+    for function in &mut wire.functions {
+        let start = function.bytecode_offset as usize;
+        let end = start + function.bytecode_length as usize;
+        let mut instructions = verum_vbc::bytecode::decode_instructions(&wire.bytecode[start..end])
+            .expect("decode body");
+        verum_vbc::bytecode::jump_offsets_to_instr_indices(&mut instructions);
+        function.instructions = Some(instructions);
+    }
+    wire
+}
+
 fn reachable_ir(module: &Module, root: &str) -> Text {
     let mut text = Text::new();
     let full = module.print_to_string();
@@ -95,16 +109,7 @@ fn native_with_ir(
     check_ir: impl Fn(&str),
     check: impl Fn(&verum_llvm::execution_engine::ExecutionEngine),
 ) {
-    let mut wire = deserialize_module(&serialize_module(module).expect("wire")).expect("reload");
-    // The native API consumes decoded bodies, as does the real archive loader.
-    for function in &mut wire.functions {
-        let start = function.bytecode_offset as usize;
-        let end = start + function.bytecode_length as usize;
-        let mut instructions = verum_vbc::bytecode::decode_instructions(&wire.bytecode[start..end])
-            .expect("decode body");
-        verum_vbc::bytecode::jump_offsets_to_instr_indices(&mut instructions);
-        function.instructions = Some(instructions);
-    }
+    let wire = decoded_wire(module);
     for (route, module) in [("source", module), ("wire", &wire)] {
         Target::initialize_native(&InitializationConfig::default()).expect("native target");
         let context = Context::create();
@@ -590,5 +595,56 @@ fn native_fixed_array_parameters_require_an_actual_argument_contract() {
             ),
             "{source_text}"
         );
+    }
+}
+
+#[test]
+fn native_array_refusal_is_scoped_to_reachable_program_helpers() {
+    assert_ne!(
+        std::env::var("VERUM_NO_REACHABILITY_LOWERING").as_deref(),
+        Ok("1"),
+        "this control requires normal program reachability, not the diagnostic opt-out"
+    );
+    for (called, entry) in [
+        (false, "fn main() -> Int { 41 }"),
+        (
+            true,
+            "fn main() -> Int { array_read([7 as Byte, 9 as Byte]) }",
+        ),
+    ] {
+        let module = source(&format!(
+            "fn array_read(bytes: [Byte; 2]) -> Int {{ bytes[1] as Int }} {entry}"
+        ));
+        let wire = decoded_wire(&module);
+        for (route, module) in [("source", &module), ("wire", &wire)] {
+            let helper = module.find_function_by_name("array_read").expect("helper");
+            let reachability = verum_vbc::reachability::analyze(module);
+            assert_eq!(
+                reachability.reachable_ids.contains(&helper.0),
+                called,
+                "{route}: the unchanged helper's call edge must be the causal difference"
+            );
+            let context = Context::create();
+            let mut lowering = VbcToLlvmLowering::new(
+                &context,
+                LoweringConfig::debug("reachable_array_refusal").with_debug_info(false),
+            );
+            let result = lowering.lower_module(module);
+            if called {
+                assert!(
+                    matches!(
+                        result,
+                        Err(verum_codegen::llvm::LlvmLoweringError::UnprovenArrayStorage(_))
+                    ),
+                    "{route}: a required unproved array consumer must refuse: {result:?}"
+                );
+            } else {
+                result.unwrap_or_else(|error| {
+                    panic!("{route}: an unreachable helper blocked the independent main: {error:?}")
+                });
+                let entry = lowering.module().get_function("main").expect("native main");
+                assert!(entry.count_basic_blocks() > 0, "{route}: main has a body");
+            }
+        }
     }
 }

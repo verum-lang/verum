@@ -147,3 +147,40 @@ fn unknown_native_control_flow_cannot_authorize_array_call_reads() {
         .call_result(Reg(0), Some(ArrayResultFact::List))
         .unwrap();
 }
+
+#[test]
+fn indexed_store_preserves_the_straight_line_selected_result() {
+    let call = Instruction::Call {
+        dst: Reg(270),
+        func_id: 42,
+        args: verum_vbc::instruction::RegRange {
+            start: Reg(0),
+            count: 0,
+        },
+    };
+    let store = Instruction::SetE {
+        arr: Reg(270),
+        idx: Reg(128),
+        value: Reg(257),
+    };
+    let read = Instruction::GetE {
+        dst: Reg(300),
+        arr: Reg(270),
+        idx: Reg(128),
+    };
+    let mut storage = ArrayStorage::for_body(&[call.clone(), store.clone(), read]);
+    let fact = ArrayResultFact::Packed {
+        width: 1,
+        float: false,
+        count: 2,
+    };
+    storage.begin_instruction(&call);
+    storage
+        .call_result(Reg(270), Some(fact))
+        .expect("straight-line mutation");
+    storage.finish_instruction(&call).unwrap();
+    storage.begin_instruction(&store);
+    storage.finish_instruction(&store).unwrap();
+    assert_eq!(storage.get(Reg(270)), Some(fact));
+    assert!(storage.is_array(Reg(270)));
+}
