@@ -500,3 +500,7 @@ pub(crate) fn unary_float_tape_op(sub_op: u8) -> Option<TapeOp> {
         _ => return None,
     })
 }
+
+#[cfg(test)]
+#[path = "../../tests/interpreter/argument_tape_boundary.rs"]
+mod call_boundary_tests;

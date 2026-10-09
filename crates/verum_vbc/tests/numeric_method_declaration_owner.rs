@@ -454,3 +454,123 @@ fn declared_numeric_body_transfers_explicit_argument_tape_nodes() {
         2000,
     );
 }
+
+const RETURNED_SIZE_REFERENCE: &str = r#"
+implement USize { fn to_be_bytes(self) -> List<Byte> { [37, 41] } }
+fn borrowed() -> &USize { let value: USize = 29; &value }
+"#;
+
+#[test]
+fn returned_numeric_reference_is_a_retained_thinref() {
+    let source = compile(RETURNED_SIZE_REFERENCE);
+    for (phase, module) in [("source", source.clone()), ("wire", roundtrip(&source))] {
+        let entry = module.functions.iter()
+            .find(|f| module.get_string(f.name) == Some("numeric_owner.borrowed"))
+            .expect("exact borrowed producer").id;
+        let mut interpreter = Interpreter::new(Shared::new(module).into_arc());
+        let value = interpreter.execute_function(entry).expect("returned numeric reference");
+        assert!(value.is_thin_ref(), "{phase}: {value:?}");
+        let reference = value.as_thin_ref();
+        assert!(interpreter.state.escape_cells.iter()
+            .any(|cell| cell.get().cast::<u8>() == reference.ptr),
+            "{phase}: returned reference must be owned by the escape-cell roster");
+        // SAFETY: the live interpreter owns the matching initialized Value cell.
+        let referent = unsafe { *reference.ptr.cast::<verum_vbc::value::Value>() };
+        assert!(referent.is_int(), "{phase}: {referent:?}");
+        assert_eq!(referent.as_i64(), 29, "{phase}");
+    }
+}
+
+#[test]
+fn returned_thinref_keeps_the_declared_numeric_method() {
+    let source = format!(r#"{RETURNED_SIZE_REFERENCE}
+fn probe() -> Int {{
+    let value: &USize = borrowed();
+    value.to_be_bytes().len()
+}}
+"#);
+    let module = compile(&source);
+    let entry = module.functions.iter()
+        .find(|f| module.get_string(f.name) == Some("numeric_owner.probe"))
+        .expect("exact probe");
+    let start = entry.bytecode_offset as usize;
+    let end = start + entry.bytecode_length as usize;
+    let instructions = verum_vbc::bytecode::decode_instructions(&module.bytecode[start..end])
+        .expect("probe instructions");
+    assert!(instructions.iter().any(|i| matches!(i, Instruction::CallM { method_id, .. }
+        if module.get_string(verum_vbc::StringId(*method_id)) == Some("USize.to_be_bytes"))),
+        "{instructions:?}");
+    assert!(!instructions.iter().any(|i| matches!(i, Instruction::Deref { .. })
+        || matches!(i, Instruction::MemExtended { sub_op, .. }
+            if *sub_op == verum_vbc::instruction::MemSubOpcode::DerefValue as u8)),
+        "the implicit receiver must reach CallM without an inserted dereference: {instructions:?}");
+    check(&source, 2);
+}
+
+#[test]
+fn explicitly_dereferenced_returned_numeric_reference_keeps_its_body() {
+    check(&format!(r#"{RETURNED_SIZE_REFERENCE}
+fn probe() -> Int {{
+    let value: &USize = borrowed();
+    (*value).to_be_bytes().len()
+}}
+"#), 2);
+}
+
+#[test]
+fn returned_interior_numeric_reference_keeps_the_declared_method() {
+    check(r#"
+type Holder is { value: USize };
+implement USize { fn to_be_bytes(self) -> List<Byte> { [37, 41] } }
+fn borrowed(owner: &Holder) -> &USize { &owner.value }
+fn probe() -> Int {
+    let owner = Holder { value: 29 };
+    let value: &USize = borrowed(&owner);
+    value.to_be_bytes().len()
+}
+"#, 2);
+}
+
+#[test]
+fn returned_thinref_preserves_a_declared_reference_self_carrier() {
+    check(r#"
+implement USize { fn to_be_bytes(&self) -> List<Byte> { [(*self as Byte), 41] } }
+fn borrowed() -> &USize { let value: USize = 29; &value }
+fn probe() -> Int {
+    let value: &USize = borrowed();
+    let bytes = value.to_be_bytes();
+    (bytes[0] as Int) * 100 + bytes.len()
+}
+"#, 2902);
+}
+
+#[test]
+fn a_returned_float_reference_refuses_unproved_gradient_provenance_after_slot_reuse() {
+    let source = compile(r#"
+implement Float { fn sin(self) -> Float { self * self } }
+fn borrowed(value: Float) -> &Float { &value }
+fn probe() -> Int {
+    let value: Float = 3.0;
+    @vbc(GRAD_BEGIN, value);
+    let reference: &Float = borrowed(value);
+    let previous: Float = value.sin();
+    let primal: Float = reference.sin();
+    let tape: Int = @vbc(GRAD_END, primal);
+    let derivative: Float = @vbc(GRAD_BACKWARD, tape, 1.0);
+    (derivative * 1000.0) as Int
+}
+"#);
+    let mut failures = List::<Text>::new();
+    for (phase, module) in [("source", source.clone()), ("wire", roundtrip(&source))] {
+        let entry = module.functions.iter()
+            .find(|f| module.get_string(f.name) == Some("numeric_owner.probe"))
+            .expect("exact gradient probe").id;
+        let result = Interpreter::new(Shared::new(module).into_arc()).execute_function(entry);
+        if !matches!(&result, Err(error) if error.to_string().contains("autodiff:")
+            && error.to_string().contains("receiver provenance"))
+        {
+            failures.push(format!("{phase}: expected explicit unsupported receiver provenance, got {result:?}").into());
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
