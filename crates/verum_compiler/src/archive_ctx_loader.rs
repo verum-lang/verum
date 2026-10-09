@@ -42,7 +42,7 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::OnceLock;
-use verum_common::{List, Map};
+use verum_common::{List, Map, Maybe, Text};
 
 use verum_vbc::archive::VbcArchive;
 use verum_vbc::codegen::{CodegenContext, FunctionInfo};
@@ -1624,7 +1624,7 @@ impl SymbolGraph {
                 .get(idx as usize)
                 .map(|e| e.name.as_str())
                 .unwrap_or("");
-            for ModuleFunction { name, callees } in view.functions {
+            for ModuleFunction { name, origin_module, callees } in view.functions {
                 // **Spelling completeness** (T0277 leg B part 2): a
                 // caller's edge records the callee under the spelling
                 // THE CALLER KNEW — commonly the fully-ROOTED canonical
@@ -1638,13 +1638,22 @@ impl SymbolGraph {
                 // Register the canonical spelling as a first-class
                 // node: same module, SAME edge row so the BFS can
                 // continue THROUGH the callee's own edges.
-                let canonical = merge_module_and_simple_name(entry_name, &name);
-                if canonical.as_str() != name && seen.insert(canonical.clone()) {
-                    funcs.push(EncodedFunction {
-                        name: canonical,
-                        module: idx,
-                        callees: callees.clone(),
-                    });
+                // T0691: an umbrella entry is not the declaring file.
+                // Carry the descriptor's owner into the exact-name index
+                // with its own edges; keep legacy entry/raw spellings and
+                // leave the bare-leaf indexes below unchanged.
+                for owner in [Some(entry_name), origin_module.as_ref().map(Text::as_str)]
+                    .into_iter()
+                    .flatten()
+                {
+                    let canonical = merge_module_and_simple_name(owner, &name);
+                    if canonical.as_str() != name && seen.insert(canonical.clone()) {
+                        funcs.push(EncodedFunction {
+                            name: canonical,
+                            module: idx,
+                            callees: callees.clone(),
+                        });
+                    }
                 }
                 // The leaf and prefix indexes carry the DESCRIPTOR
                 // spelling only.  Indexing the canonical alias too
@@ -2116,6 +2125,7 @@ impl SymbolGraph {
 /// Per-function summary for graph construction.
 struct ModuleFunction {
     name: String,
+    origin_module: Maybe<Text>,
     callees: Vec<String>,
 }
 
@@ -2279,7 +2289,10 @@ fn scan_module_symbols(module: &VbcModule) -> ModuleSymbolView {
                 }
             }
         }
-        functions.push(ModuleFunction { name, callees });
+        let origin_module = fn_desc.origin_module
+            .and_then(|id| module.strings.get(id))
+            .map(Text::from);
+        functions.push(ModuleFunction { name, origin_module, callees });
     }
     ModuleSymbolView { functions }
 }
