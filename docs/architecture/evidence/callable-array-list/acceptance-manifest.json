@@ -1,0 +1,181 @@
+{
+  "tested_language_commit": "31713d3c3047aa1e4e449a494f323c28e702d7e3",
+  "tested_vbc_tree": "2560309dafc82e75bbc0dd4c7da5579e4f54cefb",
+  "files": [
+    {
+      "original": "/private/tmp/verum-T1700-proof-fixed/result.json",
+      "retained": "docs/architecture/evidence/callable-array-list/proof-fixed.json",
+      "original_sha256": "26bb02ce31c60aa1212c0d255e142ea612f6ec0400ad003280ffeb2986c22d0b",
+      "retained_sha256": "26bb02ce31c60aa1212c0d255e142ea612f6ec0400ad003280ffeb2986c22d0b",
+      "gzip": false
+    },
+    {
+      "original": "/private/tmp/verum-T1700-proof-fixed/gate.log",
+      "retained": "docs/architecture/evidence/callable-array-list/proof-fixed.log.gz",
+      "original_sha256": "57a781d6664c2cf08015f34bb79909ec85fafb1559531c5d09dca012750f00a4",
+      "retained_sha256": "8f3e5a4178ca4a02e436e16964801c20c67c3634e7bd32296c75a8ecab4bb08b",
+      "gzip": true
+    },
+    {
+      "original": "/private/tmp/verum-T1700-full-vbc/result.json",
+      "retained": "docs/architecture/evidence/callable-array-list/full-vbc.json",
+      "original_sha256": "75ff2c6f7701044b999bec1e6cad61953857f48f3f28893247c3baf0115e6e12",
+      "retained_sha256": "75ff2c6f7701044b999bec1e6cad61953857f48f3f28893247c3baf0115e6e12",
+      "gzip": false
+    },
+    {
+      "original": "/private/tmp/verum-T1700-full-vbc/gate.log",
+      "retained": "docs/architecture/evidence/callable-array-list/full-vbc.log.gz",
+      "original_sha256": "fd34de442c3ddffa30380e7bd8aca8a8b3f7be34ab710dab7681034beee0b4d4",
+      "retained_sha256": "6b1bec305b6deca4e51c8b3381723959685f6d552dd27266245e4e530de0f5a4",
+      "gzip": true
+    },
+    {
+      "original": "/private/tmp/verum-T1700-adjacent/result.json",
+      "retained": "docs/architecture/evidence/callable-array-list/adjacent.json",
+      "original_sha256": "43d17069917800149c516bb4ebcb83886182be72b7aecff66c8e782a0e88813b",
+      "retained_sha256": "43d17069917800149c516bb4ebcb83886182be72b7aecff66c8e782a0e88813b",
+      "gzip": false
+    },
+    {
+      "original": "/private/tmp/verum-T1700-adjacent/gate.log",
+      "retained": "docs/architecture/evidence/callable-array-list/adjacent.log.gz",
+      "original_sha256": "8095dd3a4b02c5c76f0068675509d16bcb09a5e1d8eb23b964bfbd76ba7fc5ad",
+      "retained_sha256": "6ac144bc6a71cc5b725d6bcdbad43c840e8811e8cd3ffe3aa97eb5afaf75c816",
+      "gzip": true
+    },
+    {
+      "original": "/private/tmp/verum-T1700-native-local/result.json",
+      "retained": "docs/architecture/evidence/callable-array-list/native/result.json",
+      "original_sha256": "099f55bf1523df5912ca5e608265e281a0ff7d0a593b204d801aa01e83d4dc0b",
+      "retained_sha256": "099f55bf1523df5912ca5e608265e281a0ff7d0a593b204d801aa01e83d4dc0b",
+      "gzip": false
+    },
+    {
+      "original": "/private/tmp/verum-T1700-native-local/cargo.jsonl",
+      "retained": "docs/architecture/evidence/callable-array-list/native/cargo.jsonl.gz",
+      "original_sha256": "68f92181c59e247d64f9c2ab400ef12cf0edfec43d901cc9c953b02da7e8726c",
+      "retained_sha256": "f441e2c2dd347be5470dbb2eca9d2145425f2dbc7f14acb64ecbc4eaafb2167c",
+      "gzip": true
+    },
+    {
+      "original": "/private/tmp/verum-T1700-native-local/stderr.log",
+      "retained": "docs/architecture/evidence/callable-array-list/native/stderr.log.gz",
+      "original_sha256": "439d27b1a33611e75cdacf57211884de27095eb6d45f4cb3708434a71ee7c858",
+      "retained_sha256": "fd5125a01242d7970138d71ddb2275b9e3a532d2da2571020bad2a00fecf41da",
+      "gzip": true
+    },
+    {
+      "original": "/private/tmp/verum-T1700-native-local/ir/explicit_packed_return_materializes_native_list-wire.ll",
+      "retained": "docs/architecture/evidence/callable-array-list/native/ir/explicit_packed_return_materializes_native_list-wire.ll.gz",
+      "original_sha256": "655a56a2f82ab1ca13fdf0a266d4d9d089c8907c4a2999aa9801cb070bbf8d6f",
+      "retained_sha256": "dc398902bc21b150c7abd4e9066d2bc4ad0bb4a80fce07a9fd61c56f3d757709",
+      "gzip": true
+    },
+    {
+      "original": "/private/tmp/verum-T1700-native-local/ir/list_backed_array_call_is_not_reinterpreted_natively-wire.ll",
+      "retained": "docs/architecture/evidence/callable-array-list/native/ir/list_backed_array_call_is_not_reinterpreted_natively-wire.ll.gz",
+      "original_sha256": "279f949b23d7282430b0e732d1686c4bc4d873948f923fb56a7f7d82d093e0ef",
+      "retained_sha256": "0bbd17d52f5c56060fa07755c0cc9617ce4af7fd3be73b351cf00ff0e72d5337",
+      "gzip": true
+    },
+    {
+      "original": "/private/tmp/verum-T1700-native-local/ir/floating_packed_return_keeps_native_values-source.ll",
+      "retained": "docs/architecture/evidence/callable-array-list/native/ir/floating_packed_return_keeps_native_values-source.ll.gz",
+      "original_sha256": "4ff15f4507ce2af4dd6d327eb2c10eec08400e4e245d00169f10529e17867d72",
+      "retained_sha256": "36bcada7871f46c6d1bbf918872aa2fabd7d2d2060a2f8bb3bb11430421baaf8",
+      "gzip": true
+    },
+    {
+      "original": "/private/tmp/verum-T1700-native-local/ir/nonbyte_packed_return_keeps_native_element_width-wire.ll",
+      "retained": "docs/architecture/evidence/callable-array-list/native/ir/nonbyte_packed_return_keeps_native_element_width-wire.ll.gz",
+      "original_sha256": "16c73f69a6d9c1bd0d48c0a6f443cea79c04a2f74a46f9c77fe4865705246643",
+      "retained_sha256": "34b394a782990877c6983f32141f6266179daf990d03b965de68e78945d2683e",
+      "gzip": true
+    },
+    {
+      "original": "/private/tmp/verum-T1700-native-local/ir/packed_byte_tail_materializes_growable_native_list-wire.ll",
+      "retained": "docs/architecture/evidence/callable-array-list/native/ir/packed_byte_tail_materializes_growable_native_list-wire.ll.gz",
+      "original_sha256": "1707eb95eef33832b80be02bb004aefe58e6e81c68d08e973b929bea40ca385f",
+      "retained_sha256": "e942d8feaf6a67e979f34e6e74a34a0afec06d73079cb80ce8887cf8f389456a",
+      "gzip": true
+    },
+    {
+      "original": "/private/tmp/verum-T1700-native-local/ir/empty_packed_return_grows_in_native_code-source.ll",
+      "retained": "docs/architecture/evidence/callable-array-list/native/ir/empty_packed_return_grows_in_native_code-source.ll.gz",
+      "original_sha256": "10ac73b3b08d2de2d1d236f2c502b53ee4f6cb047b4fd9be43d00da89a0050b3",
+      "retained_sha256": "091b63cff93cfd60b2bd6823f3c7187f19d1eb948f55cbcd952056b0873a051b",
+      "gzip": true
+    },
+    {
+      "original": "/private/tmp/verum-T1700-native-local/ir/packed_byte_tail_materializes_growable_native_list-source.ll",
+      "retained": "docs/architecture/evidence/callable-array-list/native/ir/packed_byte_tail_materializes_growable_native_list-source.ll.gz",
+      "original_sha256": "1707eb95eef33832b80be02bb004aefe58e6e81c68d08e973b929bea40ca385f",
+      "retained_sha256": "e942d8feaf6a67e979f34e6e74a34a0afec06d73079cb80ce8887cf8f389456a",
+      "gzip": true
+    },
+    {
+      "original": "/private/tmp/verum-T1700-native-local/ir/explicit_packed_return_materializes_native_list-source.ll",
+      "retained": "docs/architecture/evidence/callable-array-list/native/ir/explicit_packed_return_materializes_native_list-source.ll.gz",
+      "original_sha256": "655a56a2f82ab1ca13fdf0a266d4d9d089c8907c4a2999aa9801cb070bbf8d6f",
+      "retained_sha256": "dc398902bc21b150c7abd4e9066d2bc4ad0bb4a80fce07a9fd61c56f3d757709",
+      "gzip": true
+    },
+    {
+      "original": "/private/tmp/verum-T1700-native-local/ir/nonbyte_packed_return_keeps_native_element_width-source.ll",
+      "retained": "docs/architecture/evidence/callable-array-list/native/ir/nonbyte_packed_return_keeps_native_element_width-source.ll.gz",
+      "original_sha256": "16c73f69a6d9c1bd0d48c0a6f443cea79c04a2f74a46f9c77fe4865705246643",
+      "retained_sha256": "34b394a782990877c6983f32141f6266179daf990d03b965de68e78945d2683e",
+      "gzip": true
+    },
+    {
+      "original": "/private/tmp/verum-T1700-native-local/ir/empty_packed_return_grows_in_native_code-wire.ll",
+      "retained": "docs/architecture/evidence/callable-array-list/native/ir/empty_packed_return_grows_in_native_code-wire.ll.gz",
+      "original_sha256": "10ac73b3b08d2de2d1d236f2c502b53ee4f6cb047b4fd9be43d00da89a0050b3",
+      "retained_sha256": "091b63cff93cfd60b2bd6823f3c7187f19d1eb948f55cbcd952056b0873a051b",
+      "gzip": true
+    },
+    {
+      "original": "/private/tmp/verum-T1700-native-local/ir/list_backed_array_call_is_not_reinterpreted_natively-source.ll",
+      "retained": "docs/architecture/evidence/callable-array-list/native/ir/list_backed_array_call_is_not_reinterpreted_natively-source.ll.gz",
+      "original_sha256": "279f949b23d7282430b0e732d1686c4bc4d873948f923fb56a7f7d82d093e0ef",
+      "retained_sha256": "0bbd17d52f5c56060fa07755c0cc9617ce4af7fd3be73b351cf00ff0e72d5337",
+      "gzip": true
+    },
+    {
+      "original": "/private/tmp/verum-T1700-native-local/ir/floating_packed_return_keeps_native_values-wire.ll",
+      "retained": "docs/architecture/evidence/callable-array-list/native/ir/floating_packed_return_keeps_native_values-wire.ll.gz",
+      "original_sha256": "4ff15f4507ce2af4dd6d327eb2c10eec08400e4e245d00169f10529e17867d72",
+      "retained_sha256": "36bcada7871f46c6d1bbf918872aa2fabd7d2d2060a2f8bb3bb11430421baaf8",
+      "gzip": true
+    },
+    {
+      "original": "/private/tmp/run_verum_T1700_gate.py",
+      "retained": "docs/architecture/evidence/callable-array-list/final_runner.py",
+      "original_sha256": "042be2a64959e0be904a316596e43e71ac103e129929b74406df07a4668542b8",
+      "retained_sha256": "042be2a64959e0be904a316596e43e71ac103e129929b74406df07a4668542b8",
+      "gzip": false
+    },
+    {
+      "original": "/private/tmp/verum-T1700-run-native.py",
+      "retained": "docs/architecture/evidence/callable-array-list/native/run_gate.py",
+      "original_sha256": "ed2e01d6f9446e4b8f93c896ad868eda0a4dce06e1e49698c69ccea777b3e377",
+      "retained_sha256": "ed2e01d6f9446e4b8f93c896ad868eda0a4dce06e1e49698c69ccea777b3e377",
+      "gzip": false
+    },
+    {
+      "original": "/private/tmp/verum-T1700-acceptance-audit.json",
+      "retained": "docs/architecture/evidence/callable-array-list/acceptance-audit.json",
+      "original_sha256": "aa71fe869358601ce67dd217d431f9d81b99706069afeb3b66dee29a17f4dae6",
+      "retained_sha256": "aa71fe869358601ce67dd217d431f9d81b99706069afeb3b66dee29a17f4dae6",
+      "gzip": false
+    },
+    {
+      "original": "/private/tmp/verum-T1705-root-audit.json",
+      "retained": "docs/architecture/evidence/callable-array-list/website-audit.json",
+      "original_sha256": "cd2452ab41216960e6e3c20eea33dcb68d68064445901c1fb2eff937c9dc97c6",
+      "retained_sha256": "cd2452ab41216960e6e3c20eea33dcb68d68064445901c1fb2eff937c9dc97c6",
+      "gzip": false
+    }
+  ]
+}
