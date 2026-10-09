@@ -1518,6 +1518,9 @@ pub struct ProtocolChecker {
     /// Implementation index for fast lookup
     /// Map from (type, protocol) to implementation
     impl_index: Map<(Text, Text), usize>,
+    /// Insertion-ordered overlap candidates for each exact protocol identity.
+    /// Arguments stay in `check_overlap`: generic arguments can still overlap.
+    impls_by_protocol: Map<Text, List<usize>>,
     #[cfg(test)]
     registration_overlap_comparisons: usize,
     /// Derivable protocols (can be automatically derived)
@@ -1712,6 +1715,7 @@ impl ProtocolChecker {
             protocols: Map::new(),
             impls: List::new(),
             impl_index: Map::new(),
+            impls_by_protocol: Map::new(),
             #[cfg(test)]
             registration_overlap_comparisons: 0,
             derivable: Set::new(),
@@ -1750,6 +1754,7 @@ impl ProtocolChecker {
             protocols: Map::new(),
             impls: List::new(),
             impl_index: Map::new(),
+            impls_by_protocol: Map::new(),
             #[cfg(test)]
             registration_overlap_comparisons: 0,
             derivable: Set::new(),
@@ -5200,26 +5205,37 @@ impl ProtocolChecker {
     ///  * `Off`: both checks are skipped entirely.
     #[track_caller]
     pub fn register_impl(&mut self, impl_: ProtocolImpl) -> Result<(), CoherenceError> {
+        // Use the same identity as check_overlap, without narrowing by target
+        // type or protocol arguments: either can contain overlapping variables.
+        let protocol_identity = self.make_protocol_key(&impl_.protocol);
         match self.coherence_mode {
             CoherenceMode::Strict => {
                 // Current behaviour — both checks are hard errors.
                 self.check_orphan_rule(&impl_)?;
-                for existing_impl in self.impls.iter() {
-                    #[cfg(test)]
-                    { self.registration_overlap_comparisons += 1; }
-                    self.check_overlap(&impl_, existing_impl)?
+                if let Some(candidates) = self.impls_by_protocol.get(&protocol_identity) {
+                    for &index in candidates {
+                        #[cfg(test)]
+                        {
+                            self.registration_overlap_comparisons += 1;
+                        }
+                        self.check_overlap(&impl_, &self.impls[index])?;
+                    }
                 }
             }
             CoherenceMode::Lenient => {
                 if let Err(e) = self.check_orphan_rule(&impl_) {
                     self.coherence_warnings.push(e);
                 }
-                let mut overlap_warnings = Vec::new();
-                for existing_impl in self.impls.iter() {
-                    #[cfg(test)]
-                    { self.registration_overlap_comparisons += 1; }
-                    if let Err(e) = self.check_overlap(&impl_, existing_impl) {
-                        overlap_warnings.push(e);
+                let mut overlap_warnings = List::new();
+                if let Some(candidates) = self.impls_by_protocol.get(&protocol_identity) {
+                    for &index in candidates {
+                        #[cfg(test)]
+                        {
+                            self.registration_overlap_comparisons += 1;
+                        }
+                        if let Err(e) = self.check_overlap(&impl_, &self.impls[index]) {
+                            overlap_warnings.push(e);
+                        }
                     }
                 }
                 self.coherence_warnings.extend(overlap_warnings);
@@ -5275,6 +5291,12 @@ impl ProtocolChecker {
 
         let idx = self.impls.len();
         self.impl_index.insert(key, idx);
+        // Populate in every mode, including Off, so a later mode change or
+        // cloned checker sees every admitted implementation exactly once.
+        self.impls_by_protocol
+            .entry(protocol_identity)
+            .or_default()
+            .push(idx);
         self.impls.push(impl_);
 
         // Invalidate implementation cache since we added a new impl
