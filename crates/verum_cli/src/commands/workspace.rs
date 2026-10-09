@@ -572,6 +572,7 @@ fn publish_member_to_registry(member_path: &Path, _config: &Config) -> Result<()
     // Convert Config to Manifest format for publish
     let manifest_path = member_path.join("verum.toml");
     let manifest = Manifest::from_file(&manifest_path)?;
+    let dependencies = crate::registry::publication_dependencies::from_manifest(&manifest)?;
 
     // Create package tarball
     let cog_file = create_member_cog(member_path, &manifest)?;
@@ -591,23 +592,7 @@ fn publish_member_to_registry(member_path: &Path, _config: &Config) -> Result<()
         keywords: manifest.cog.keywords.clone(),
         categories: manifest.cog.categories.clone(),
         readme: load_member_readme(member_path),
-        dependencies: manifest
-            .dependencies
-            .iter()
-            .map(|(k, v)| {
-                let spec = match v {
-                    crate::config::Dependency::Simple(ver) => {
-                        crate::registry::types::DependencySpec::Simple(ver.clone())
-                    }
-                    crate::config::Dependency::Detailed { version, .. } => {
-                        crate::registry::types::DependencySpec::Simple(
-                            version.clone().unwrap_or_else(|| "*".into()),
-                        )
-                    }
-                };
-                (k.clone(), spec)
-            })
-            .collect(),
+        dependencies,
         features: manifest.features.clone(),
         artifacts: TierArtifacts::default(),
         proofs: None,

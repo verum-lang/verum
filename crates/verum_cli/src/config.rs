@@ -1208,6 +1208,8 @@ pub enum Dependency {
         rev: Option<Text>,
         features: Option<List<Text>>,
         optional: Option<bool>,
+        #[serde(rename = "default-features", alias = "default_features")]
+        default_features: Option<bool>,
     },
 }
 

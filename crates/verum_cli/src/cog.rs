@@ -65,8 +65,9 @@ fn publish_with_signing_keys(
     let manifest_path = Manifest::manifest_path(&manifest_dir);
     let manifest = Manifest::from_file(&manifest_path)?;
 
-    // Validate manifest
+    // Refuse unrepresentable dependencies before archive/build/signing work.
     manifest.validate()?;
+    crate::registry::publication_dependencies::from_manifest(&manifest)?;
 
     ui::info(&format!(
         "Publishing {} v{}",
@@ -484,21 +485,7 @@ fn create_metadata(
     checksum: String,
     signature: Option<crate::registry::CogSignature>,
 ) -> Result<CogMetadata> {
-    use crate::config::Dependency;
-
-    let mut dependencies = Map::new();
-    for (name, dep) in manifest.dependencies.iter() {
-        let version = match dep {
-            Dependency::Simple(v) => v.clone(),
-            Dependency::Detailed { version, .. } => {
-                version.clone().unwrap_or_else(|| Text::from("*"))
-            }
-        };
-        dependencies.insert(
-            name.clone(),
-            crate::registry::DependencySpec::Simple(version),
-        );
-    }
+    let dependencies = crate::registry::publication_dependencies::from_manifest(manifest)?;
 
     let mut features = Map::new();
     for (name, feature_deps) in manifest.features.iter() {

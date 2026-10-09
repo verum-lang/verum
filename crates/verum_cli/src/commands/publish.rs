@@ -29,8 +29,9 @@ pub fn publish(options: PublishOptions) -> Result<()> {
     let manifest_path = Manifest::manifest_path(&manifest_dir);
     let manifest = Manifest::from_file(&manifest_path)?;
 
-    // Validate manifest
+    // Refuse unrepresentable dependencies before archive/build/signing work.
     manifest.validate()?;
+    crate::registry::publication_dependencies::from_manifest(&manifest)?;
 
     ui::info(&format!(
         "Publishing {} v{}",
@@ -629,23 +630,7 @@ fn create_metadata(
         keywords: manifest.cog.keywords.clone(),
         categories: manifest.cog.categories.clone(),
         readme,
-        dependencies: manifest
-            .dependencies
-            .iter()
-            .map(|(k, v)| {
-                let dep_spec = match v {
-                    crate::config::Dependency::Simple(ver) => {
-                        crate::registry::types::DependencySpec::Simple(ver.clone())
-                    }
-                    crate::config::Dependency::Detailed { version, .. } => {
-                        crate::registry::types::DependencySpec::Simple(
-                            version.clone().unwrap_or_else(|| "*".into()),
-                        )
-                    }
-                };
-                (k.clone(), dep_spec)
-            })
-            .collect(),
+        dependencies: crate::registry::publication_dependencies::from_manifest(manifest)?,
         features: manifest.features.clone(),
         artifacts,
         proofs,
@@ -1087,8 +1072,9 @@ pub fn publish_multi_platform(options: MultiPlatformPublishOptions) -> Result<()
     let manifest_path = Manifest::manifest_path(&manifest_dir);
     let manifest = Manifest::from_file(&manifest_path)?;
 
-    // Validate manifest
+    // Refuse unrepresentable dependencies before archive/build/signing work.
     manifest.validate()?;
+    crate::registry::publication_dependencies::from_manifest(&manifest)?;
 
     ui::info(&format!(
         "Publishing {} v{} to {} target(s)",

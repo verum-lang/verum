@@ -172,6 +172,7 @@ fn create_registry_dependency(options: &AddOptions) -> Result<Dependency> {
                 Some(options.features.clone())
             },
             optional: if options.optional { Some(true) } else { None },
+            default_features: None,
         })
     }
 }
@@ -191,6 +192,7 @@ fn create_git_dependency(git_url: Text, options: &AddOptions) -> Dependency {
             Some(options.features.clone())
         },
         optional: if options.optional { Some(true) } else { None },
+        default_features: None,
     }
 }
 
@@ -209,6 +211,7 @@ fn create_path_dependency(path: PathBuf, options: &AddOptions) -> Dependency {
             Some(options.features.clone())
         },
         optional: if options.optional { Some(true) } else { None },
+        default_features: None,
     }
 }
 
@@ -227,6 +230,7 @@ fn create_ipfs_dependency(ipfs_hash: Text, options: &AddOptions) -> Result<Depen
             Some(options.features.clone())
         },
         optional: if options.optional { Some(true) } else { None },
+        default_features: None,
     })
 }
 

@@ -95,6 +95,41 @@ fn omitted_or_invalid_dependency_versions_are_refused() {
 }
 
 #[test]
+fn manifest_default_feature_options_survive_serialization() {
+    for field in ["default-features", "default_features"] {
+        let source = format!(
+            "[cog]\nname = \"dependency-fixture\"\nversion = \"1.2.3\"\n\
+             [dependencies]\ncodec = {{ version = \"^1.2\", {field} = false }}\n"
+        );
+        let manifest: Manifest = toml::from_str(&source).unwrap();
+        let saved = toml::to_string(&manifest).unwrap();
+        let document: toml::Value = toml::from_str(&saved).unwrap();
+        assert_eq!(
+            document["dependencies"]["codec"]["default-features"].as_bool(),
+            Some(false)
+        );
+        let reloaded: Manifest = toml::from_str(&saved).unwrap();
+        let published = create_metadata(&reloaded, "0".repeat(64), None).unwrap();
+        let json = serde_json::to_value(&published.dependencies).unwrap();
+        assert_eq!(json["codec"]["default_features"], false);
+    }
+}
+
+#[test]
+fn invalid_or_duplicate_default_feature_options_are_not_ignored() {
+    for options in [
+        r#"default-features = "false""#,
+        "default-features = false, default_features = true",
+    ] {
+        let source = format!(
+            "[cog]\nname = \"dependency-fixture\"\nversion = \"1.2.3\"\n\
+             [dependencies]\ncodec = {{ version = \"^1.2\", {options} }}\n"
+        );
+        assert!(toml::from_str::<Manifest>(&source).is_err(), "{options}");
+    }
+}
+
+#[test]
 fn package_publish_transmits_original_manifest_dependency_options() {
     child_case("upload");
 }
@@ -156,7 +191,11 @@ fn isolated_dependency_publication() {
     );
     std::fs::write(project.path().join("verum.toml"), &manifest_bytes).unwrap();
     std::fs::create_dir(project.path().join("src")).unwrap();
-    let source_bytes = b"module dependency_publication.lib;\npublic fn answer() -> Int { 42 }\n";
+    let source = format!(
+        "module {}.lib;\npublic fn answer() -> Int {{ 42 }}\n",
+        name.replace('-', "_")
+    );
+    let source_bytes = source.as_bytes();
     std::fs::write(project.path().join("src/lib.vr"), source_bytes).unwrap();
 
     if case == "refuse" {

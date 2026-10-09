@@ -372,8 +372,9 @@ impl CogManager {
         let manifest_path = Manifest::manifest_path(&self.work_dir);
         let manifest = Manifest::from_file(&manifest_path)?;
 
-        // Validate manifest
+        // Refuse unrepresentable dependencies before archive/signing work.
         manifest.validate()?;
+        crate::registry::publication_dependencies::from_manifest(&manifest)?;
 
         // Check git status if not allowing dirty
         if !allow_dirty {
@@ -826,31 +827,7 @@ impl CogManager {
             keywords: manifest.cog.keywords.clone(),
             categories: manifest.cog.categories.clone(),
             readme: None,
-            dependencies: manifest
-                .dependencies
-                .iter()
-                .map(|(k, v)| {
-                    (
-                        k.clone(),
-                        match v {
-                            crate::config::Dependency::Simple(s) => {
-                                DependencySpec::Simple(s.clone())
-                            }
-                            crate::config::Dependency::Detailed {
-                                version,
-                                features,
-                                optional,
-                                ..
-                            } => DependencySpec::Detailed {
-                                version: version.clone(),
-                                features: features.clone(),
-                                optional: *optional,
-                                default_features: None,
-                            },
-                        },
-                    )
-                })
-                .collect(),
+            dependencies: crate::registry::publication_dependencies::from_manifest(manifest)?,
             features: manifest.features.clone(),
             artifacts: TierArtifacts::default(),
             proofs: None,
