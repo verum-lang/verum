@@ -1816,6 +1816,8 @@ fn symbol_count(files: &[(String, Vec<u8>)]) -> usize {
 /// the cached bake.  Format: free-form ASCII;
 /// readable strings make `git log` of this constant tell the story.
 const PRECOMPILE_SCHEMA_VERSION: &str =
+    // v53: VBC2.24 carries source body presence; a legacy RetV stub cannot
+    // establish declaration authority, even under an explicit stale fallback.
     // v52: source-owned semantic formal parameters require the VBC2.23 tail.
     // v50: List storage access opcodes require VBC2.21, including the v20 receipt tail.
     // Do not reuse a last-good archive with only the previous memory family.
@@ -1835,7 +1837,7 @@ const PRECOMPILE_SCHEMA_VERSION: &str =
     // cache — measured: the scan was added, the build reported
     // "precompile cache HIT", and the new field stayed empty while the
     // reader had nothing to read. Bumping here is what invalidates it.
-    "v52-2026-10-05-semantic-formal-parameters";
+    "v53-declared-function-bodies";
 
 /// T3: blake3 hash of every `core/**/*.vr` file's content, sorted
 /// by relative path, mixed with [`PRECOMPILE_SCHEMA_VERSION`].
