@@ -366,7 +366,12 @@ fn a_null_thin_reference_is_refused_before_reading_a_container_header() {
         let error = element_interpreter(register_layers)
             .execute_function_with_args(FunctionId(0), &[Value::from_thin_ref(ThinRef::null())])
             .expect_err("null ThinRef must be refused");
-        assert!(matches!(error, InterpreterError::NullPointer), "{error:?}");
+        // The public dispatcher enriches the handler's NullPointer with the
+        // failing opcode; require that diagnostic at element-reference access.
+        assert!(
+            matches!(&error, InterpreterError::NullPointerAt { op, .. } if op == "opcode 0x78"),
+            "{error:?}"
+        );
     }
 }
 
