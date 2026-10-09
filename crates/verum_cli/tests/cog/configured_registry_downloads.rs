@@ -1,4 +1,4 @@
-//! T1634: the install flow must keep metadata, archive and lockfile on one registry.
+//! T1634/T1673: keep install requests on one registry and require an actual advisory report.
 //!
 //! Run each cwd/proxy-sensitive case in a fresh test process. The proxy is a
 //! loopback refusal fixture, so an accidental public-registry URL is observable
@@ -41,6 +41,54 @@ fn existing_implicit_registry_defaults_are_preserved() {
     child_case("defaults");
 }
 
+const ADVISORY_CASES: &[&str] = &[
+    "empty",
+    "nonempty",
+    "401",
+    "403",
+    "404",
+    "429",
+    "500",
+    "503",
+    "malformed",
+    "wrong-package",
+    "wrong-version",
+    "transport",
+];
+
+#[test]
+fn advisory_client_distinguishes_reports_from_unavailable_data() {
+    for case in ADVISORY_CASES {
+        child_case(&format!("direct-advisory-{case}"));
+    }
+}
+
+#[test]
+fn unavailable_advisories_stop_install_before_download_or_project_mutation() {
+    for case in ADVISORY_CASES {
+        child_case(&format!("install-advisory-{case}"));
+    }
+}
+
+fn advisory_response(case: &str) -> (&'static str, &'static [u8], bool) {
+    let empty = &b"{\"package\":\"fixture\",\"version\":\"1.2.3\",\"vulnerabilities\":[]}"[..];
+    match case {
+        "empty" => ("200 OK", empty, false),
+        "nonempty" => ("200 OK", br#"{"package":"fixture","version":"1.2.3","vulnerabilities":[{"id":"FIXTURE-1","severity":"high","title":"Fixture advisory","description":"fixture vulnerability detail","patched_versions":["1.2.4"]}]}"#, false),
+        "401" => ("401 Unauthorized", empty, false),
+        "403" => ("403 Forbidden", empty, false),
+        "404" => ("404 Not Found", empty, false),
+        "429" => ("429 Too Many Requests", empty, false),
+        "500" => ("500 Internal Server Error", empty, false),
+        "503" => ("503 Service Unavailable", empty, false),
+        "malformed" => ("200 OK", b"{not a report", false),
+        "wrong-package" => ("200 OK", br#"{"package":"other","version":"1.2.3","vulnerabilities":[]}"#, false),
+        "wrong-version" => ("200 OK", br#"{"package":"fixture","version":"9.9.9","vulnerabilities":[]}"#, false),
+        "transport" => ("200 OK", empty, true),
+        _ => panic!("unknown advisory fixture {case}"),
+    }
+}
+
 fn child_case(case: &str) {
     let result = Command::new(std::env::current_exe().expect("test executable"))
         .args(["--exact", CHILD_TEST, "--nocapture"])
@@ -53,6 +101,23 @@ fn child_case(case: &str) {
         std::str::from_utf8(&result.stdout).unwrap_or("non-UTF-8 stdout"),
         std::str::from_utf8(&result.stderr).unwrap_or("non-UTF-8 stderr"),
     );
+    if let Some(advisory) = case.strip_prefix("install-advisory-") {
+        let stdout = std::str::from_utf8(&result.stdout).unwrap();
+        let stderr = std::str::from_utf8(&result.stderr).unwrap();
+        let output = format!("{stdout}\n{stderr}");
+        assert_eq!(
+            output.contains("No known vulnerabilities"),
+            advisory == "empty",
+            "only a valid empty report supports the clean message: {case}: {output}"
+        );
+        if advisory == "nonempty" {
+            assert!(output.contains("fixture vulnerability detail"), "{output}");
+            assert!(output.contains("Installed"), "{output}");
+        } else if advisory != "empty" {
+            assert!(!output.contains("Downloading cog"), "{output}");
+            assert!(!output.contains("Installed"), "{output}");
+        }
+    }
 }
 
 #[test]
@@ -126,6 +191,14 @@ fn isolated_install_case() {
     });
     let metadata: Text = serde_json::to_string(&metadata).unwrap().into();
     let archive_failure = case == "archive-failure";
+    let direct_advisory = case.starts_with("direct-advisory-");
+    let advisory_case = case
+        .strip_prefix("direct-advisory-")
+        .or_else(|| case.strip_prefix("install-advisory-"));
+    let advisory_unavailable =
+        advisory_case.is_some_and(|kind| kind != "empty" && kind != "nonempty");
+    let (advisory_status, advisory_body, disconnect) =
+        advisory_response(advisory_case.unwrap_or("empty"));
     let (stop, stopping) = mpsc::channel();
     let worker = thread::spawn(move || {
         let mut requests: List<Text> = List::new();
@@ -151,18 +224,43 @@ fn isolated_install_case() {
                             .any(|line| line.to_ascii_lowercase().starts_with("authorization:")),
                         "install must not send publish credentials: {first}",
                     );
+                    if disconnect
+                        && first
+                            == "GET /private/api/v1/security/vulnerabilities/fixture/1.2.3 HTTP/1.1"
+                    {
+                        // A real peer closes without a response; the client must
+                        // propagate transport failure, never synthesize a report.
+                        continue;
+                    }
                     let (status, content_type, body) = match first {
-                        "GET /private/api/v1/cogs/fixture/latest HTTP/1.1" =>
-                            ("200 OK", "application/json", &b"{\"version\":\"1.2.3\"}"[..]),
-                        "GET /private/api/v1/cogs/fixture/1.2.3 HTTP/1.1" =>
-                            ("200 OK", "application/json", metadata.as_bytes()),
-                        "GET /private/api/v1/security/vulnerabilities/fixture/1.2.3 HTTP/1.1" =>
-                            ("200 OK", "application/json", &b"{\"package\":\"fixture\",\"version\":\"1.2.3\",\"vulnerabilities\":[]}"[..]),
-                        "GET /private/api/v1/cogs/fixture/1.2.3/download HTTP/1.1" if archive_failure =>
-                            ("503 Service Unavailable", "text/plain", &b"archive unavailable"[..]),
-                        "GET /private/api/v1/cogs/fixture/1.2.3/download HTTP/1.1" =>
-                            ("200 OK", "application/octet-stream", ARCHIVE),
-                        _ => ("502 Bad Gateway", "text/plain", &b"unexpected registry destination"[..]),
+                        "GET /private/api/v1/cogs/fixture/latest HTTP/1.1" => (
+                            "200 OK",
+                            "application/json",
+                            &b"{\"version\":\"1.2.3\"}"[..],
+                        ),
+                        "GET /private/api/v1/cogs/fixture/1.2.3 HTTP/1.1" => {
+                            ("200 OK", "application/json", metadata.as_bytes())
+                        }
+                        "GET /private/api/v1/security/vulnerabilities/fixture/1.2.3 HTTP/1.1" => {
+                            (advisory_status, "application/json", advisory_body)
+                        }
+                        "GET /private/api/v1/cogs/fixture/1.2.3/download HTTP/1.1"
+                            if archive_failure =>
+                        {
+                            (
+                                "503 Service Unavailable",
+                                "text/plain",
+                                &b"archive unavailable"[..],
+                            )
+                        }
+                        "GET /private/api/v1/cogs/fixture/1.2.3/download HTTP/1.1" => {
+                            ("200 OK", "application/octet-stream", ARCHIVE)
+                        }
+                        _ => (
+                            "502 Bad Gateway",
+                            "text/plain",
+                            &b"unexpected registry destination"[..],
+                        ),
                     };
                     let header = format!(
                         "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
@@ -184,9 +282,63 @@ fn isolated_install_case() {
     });
     let client = RegistryClient::from_manifest().expect("configured client");
     let cache = CacheManager::new(cache_dir.path().to_path_buf()).unwrap();
+    if direct_advisory {
+        let report = client.check_vulnerabilities("fixture", "1.2.3");
+        stop.send(()).unwrap();
+        let requests = worker.join().expect("fixture worker");
+        assert!(!requests.is_empty());
+        assert!(requests.iter().all(|request| request.as_str()
+            == "GET /private/api/v1/security/vulnerabilities/fixture/1.2.3 HTTP/1.1"));
+        if advisory_unavailable {
+            let error = report.expect_err("unavailable or unrelated data is not a report");
+            match advisory_case.unwrap() {
+                "transport" => assert!(matches!(error, crate::error::CliError::Network(_))),
+                "malformed" | "wrong-package" | "wrong-version" => {
+                    assert!(matches!(error, crate::error::CliError::Registry(_)))
+                }
+                status => assert!(error.to_string().contains(status), "{error}"),
+            }
+        } else {
+            let report = report.expect("valid advisory report");
+            assert_eq!(report.package.as_str(), "fixture");
+            assert_eq!(report.version.as_str(), "1.2.3");
+            assert_eq!(
+                report.vulnerabilities.len(),
+                usize::from(advisory_case == Some("nonempty"))
+            );
+            if advisory_case == Some("nonempty") {
+                assert_eq!(report.vulnerabilities[0].id.as_str(), "FIXTURE-1");
+            }
+        }
+        return;
+    }
     let result = install_from_registry("fixture", None, &client, &cache);
     stop.send(()).unwrap();
     let requests = worker.join().expect("fixture worker");
+    if advisory_unavailable {
+        assert!(
+            result.is_err(),
+            "advisory failure must stop installation: {advisory_case:?}"
+        );
+        assert!(requests.len() >= 3);
+        assert_eq!(
+            requests[0].as_str(),
+            "GET /private/api/v1/cogs/fixture/latest HTTP/1.1"
+        );
+        assert_eq!(
+            requests[1].as_str(),
+            "GET /private/api/v1/cogs/fixture/1.2.3 HTTP/1.1"
+        );
+        assert!(
+            requests[2..].iter().all(|request| request.as_str()
+                == "GET /private/api/v1/security/vulnerabilities/fixture/1.2.3 HTTP/1.1"),
+            "unavailable advisories must prevent the download: {requests:?}"
+        );
+        assert_eq!(std::fs::read(&manifest_path).unwrap(), before);
+        assert!(!Manifest::lockfile_path(project.path()).exists());
+        assert!(!cache.get_cog_path("fixture", "1.2.3").exists());
+        return;
+    }
     assert_eq!(
         requests.iter().map(Text::as_str).collect::<List<_>>(),
         List::from(
