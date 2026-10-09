@@ -387,6 +387,31 @@ impl TypeChecker {
         result
     }
 
+    /// Tuple/newtype constructors return the same nominal declaration that
+    /// owns their field metadata, and are reachable through its exact path.
+    fn register_declared_tuple_constructor(
+        &mut self,
+        name: &verum_common::Text,
+        params: List<Type>,
+        span: Span,
+    ) {
+        let owner = self.declared_type_key(name.as_str());
+        let nominal = Type::Named {
+            path: verum_ast::ty::Path::new(
+                owner.as_str().split('.')
+                    .map(|part| {
+                        verum_ast::ty::PathSegment::Name(verum_ast::Ident::new(part, span))
+                    })
+                    .collect(),
+                span,
+            ),
+            args: List::new(),
+        };
+        let constructor = Type::function(params, nominal);
+        self.ctx.env.insert_mono(name.as_str(), constructor.clone());
+        self.ctx.env.insert_mono(owner, constructor);
+    }
+
     /// Inner body of register_type_declaration that may return early with errors.
     /// This is separated from register_type_declaration_inner to ensure proper cleanup
     /// of types_being_registered on both success and failure paths.
@@ -645,13 +670,11 @@ impl TypeChecker {
                     self.define_type_in_current_module(type_name.clone(), newtype_ty.clone());
 
                     // Store inner type as Unit for coercion checks
-                    let inner_key = format!("__newtype_inner_{}", type_name);
-                    self.ctx.define_type(inner_key, Type::Unit);
+                    self.define_declared_type_metadata("__newtype_inner_", type_name.as_str(), Type::Unit);
 
                     // Register constructor that takes no arguments: Signal: fn() -> Signal
                     // This allows both `Signal()` and `()` coercion via newtype rules
-                    let constructor_ty = Type::function(List::new(), newtype_ty);
-                    self.ctx.env.insert_mono(type_name.as_str(), constructor_ty);
+                    self.register_declared_tuple_constructor(&type_name, List::new(), type_decl.span);
                 } else if resolved_types.len() == 1 {
                     // Single-element "tuple" is a newtype with constructor
                     // type UserId is (Int); should allow UserId(42)
@@ -669,13 +692,10 @@ impl TypeChecker {
                     self.define_type_in_current_module(type_name.clone(), newtype_ty.clone());
 
                     // Store inner type for field access (.0)
-                    let inner_key = format!("__newtype_inner_{}", type_name);
-                    self.ctx.define_type(inner_key, inner_type.clone());
+                    self.define_declared_type_metadata("__newtype_inner_", type_name.as_str(), inner_type.clone());
 
                     // Register constructor function: UserId: fn(Int) -> UserId
-                    let constructor_ty =
-                        Type::function(vec![inner_type].into_iter().collect(), newtype_ty);
-                    self.ctx.env.insert_mono(type_name.as_str(), constructor_ty);
+                    self.register_declared_tuple_constructor(&type_name, vec![inner_type].into_iter().collect(), type_decl.span);
                 } else {
                     // Multi-element tuple: create Named type with constructor
                     let named_tuple_ty = Type::Named {
@@ -685,13 +705,10 @@ impl TypeChecker {
                     self.define_type_in_current_module(type_name.clone(), named_tuple_ty.clone());
 
                     // Store tuple fields for field access (.0, .1, .2)
-                    let tuple_fields_key = format!("__tuple_fields_{}", type_name);
-                    self.ctx
-                        .define_type(tuple_fields_key, Type::Tuple(resolved_types.clone()));
+                    self.define_declared_type_metadata("__tuple_fields_", type_name.as_str(), Type::Tuple(resolved_types.clone()));
 
                     // Register constructor function: Color: fn(Int, Int, Int) -> Color
-                    let constructor_ty = Type::function(resolved_types, named_tuple_ty);
-                    self.ctx.env.insert_mono(type_name.as_str(), constructor_ty);
+                    self.register_declared_tuple_constructor(&type_name, resolved_types, type_decl.span);
                 }
             }
             TypeDeclBody::Newtype(inner_type) => {
@@ -708,14 +725,11 @@ impl TypeChecker {
                 self.define_type_in_current_module(type_name.clone(), newtype_ty.clone());
 
                 // Store the inner type for field access (.0)
-                let inner_key = format!("__newtype_inner_{}", type_name);
-                self.ctx.define_type(inner_key, inner_resolved.clone());
+                self.define_declared_type_metadata("__newtype_inner_", type_name.as_str(), inner_resolved.clone());
 
                 // Register a constructor function: UserId: fn(Int) -> UserId
                 // This allows UserId(42) syntax
-                let constructor_ty =
-                    Type::function(vec![inner_resolved].into_iter().collect(), newtype_ty);
-                self.ctx.env.insert_mono(type_name.as_str(), constructor_ty);
+                self.register_declared_tuple_constructor(&type_name, vec![inner_resolved].into_iter().collect(), type_decl.span);
             }
             TypeDeclBody::Protocol(_) => self.register_protocol_type_body(type_decl, &type_name)?,
             TypeDeclBody::Unit => {
@@ -729,8 +743,7 @@ impl TypeChecker {
 
                 // Store inner type as Unit for newtype coercion checks
                 // This allows `let s: Signal = ();` without explicit wrapping
-                let inner_key = format!("__newtype_inner_{}", type_name);
-                self.ctx.define_type(inner_key, Type::Unit);
+                self.define_declared_type_metadata("__newtype_inner_", type_name.as_str(), Type::Unit);
 
                 // GENERIC unit type (`type Phantom<T> is ();`, ERROR 13 of
                 // the ambiguous_types spec, T0585): the VALUE use
@@ -2858,13 +2871,10 @@ impl TypeChecker {
                     self.define_type_in_current_module(type_name.clone(), newtype_ty.clone());
 
                     // Store inner type for field access (.0)
-                    let inner_key = format!("__newtype_inner_{}", type_name);
-                    self.ctx.define_type(inner_key, inner_type.clone());
+                    self.define_declared_type_metadata("__newtype_inner_", type_name.as_str(), inner_type.clone());
 
                     // Register constructor function: UserId: fn(Int) -> UserId
-                    let constructor_ty =
-                        Type::function(vec![inner_type].into_iter().collect(), newtype_ty);
-                    self.ctx.env.insert_mono(type_name.as_str(), constructor_ty);
+                    self.register_declared_tuple_constructor(&type_name, vec![inner_type].into_iter().collect(), type_decl.span);
                 } else {
                     // Multi-element tuple: create Named type with constructor
                     let named_tuple_ty = Type::Named {
@@ -2874,13 +2884,10 @@ impl TypeChecker {
                     self.define_type_in_current_module(type_name.clone(), named_tuple_ty.clone());
 
                     // Store tuple fields for field access (.0, .1, .2)
-                    let tuple_fields_key = format!("__tuple_fields_{}", type_name);
-                    self.ctx
-                        .define_type(tuple_fields_key, Type::Tuple(resolved_types.clone()));
+                    self.define_declared_type_metadata("__tuple_fields_", type_name.as_str(), Type::Tuple(resolved_types.clone()));
 
                     // Register constructor function: Color: fn(Int, Int, Int) -> Color
-                    let constructor_ty = Type::function(resolved_types, named_tuple_ty);
-                    self.ctx.env.insert_mono(type_name.as_str(), constructor_ty);
+                    self.register_declared_tuple_constructor(&type_name, resolved_types, type_decl.span);
                 }
             }
             TypeDeclBody::Newtype(inner_type) => {
@@ -2896,13 +2903,10 @@ impl TypeChecker {
                 self.define_type_in_current_module(type_name.clone(), newtype_ty.clone());
 
                 // Store the inner type for field access (.0)
-                let inner_key = format!("__newtype_inner_{}", type_name);
-                self.ctx.define_type(inner_key, inner_resolved.clone());
+                self.define_declared_type_metadata("__newtype_inner_", type_name.as_str(), inner_resolved.clone());
 
                 // Register a constructor function: UserId: fn(Int) -> UserId
-                let constructor_ty =
-                    Type::function(vec![inner_resolved].into_iter().collect(), newtype_ty);
-                self.ctx.env.insert_mono(type_name.as_str(), constructor_ty);
+                self.register_declared_tuple_constructor(&type_name, vec![inner_resolved].into_iter().collect(), type_decl.span);
             }
             TypeDeclBody::Protocol(_) => self.resolve_protocol_type_body(type_decl, type_name)?,
             TypeDeclBody::Unit => {
@@ -2914,8 +2918,7 @@ impl TypeChecker {
                 self.define_type_in_current_module(type_name.clone(), ty);
 
                 // Store inner type as Unit for newtype coercion checks
-                let inner_key = format!("__newtype_inner_{}", type_name);
-                self.ctx.define_type(inner_key, Type::Unit);
+                self.define_declared_type_metadata("__newtype_inner_", type_name.as_str(), Type::Unit);
             }
             TypeDeclBody::SigmaTuple(types) => {
                 // Dependent pair / sigma type - similar to Tuple but with named components
