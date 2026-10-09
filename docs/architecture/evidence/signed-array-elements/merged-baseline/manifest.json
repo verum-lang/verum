@@ -1,0 +1,44 @@
+{
+  "task": "T1706",
+  "source": "46f24f253d2400875fcdc1bf98117a6e64ddb58f",
+  "outcome": "16 passed, 11 failed, 0 ignored; source and decoded wire each exercised; no production repair",
+  "wall_seconds": 22.147,
+  "old_baseline": "docs/architecture/evidence/signed-array-elements/baseline/manifest.json",
+  "findings": [
+    "The original Int8 ArrayReturn control now passes on merged T1704 storage handling. Six original Int16/Int32 local/Array/List cases still zero-extend.",
+    "Three forced-packed Int8 cases and two forced-packed signed-alias cases fail by sign. Both forced-packed unsigned-alias cases pass. All seven actual producer width/count assertions pass; these alias controls exercise packed storage."
+  ],
+  "raw_files": {
+    "gate.log": {
+      "path": "docs/architecture/evidence/signed-array-elements/merged-baseline/gate.log.gz",
+      "raw_sha256": "6a9f3cfb4f7a93a3969eb0e6f92e9cc730124085ba0fafdada3215ac15b06f97",
+      "gzip_sha256": "fe1281cc4de5869d81f7d012b149aa765cd7d9d4e7ce75e0cf9064606b0d85f9"
+    },
+    "result.json": {
+      "path": "docs/architecture/evidence/signed-array-elements/merged-baseline/result.json.gz",
+      "raw_sha256": "27055ce68713408bdefda6641f9ff60f2912c1a5f717a89cb0f336786f12922a",
+      "gzip_sha256": "b9cfbee4f05458a0de4a929f3c6834cbcd9188e78204ec0d07fd4730f69e5c0f"
+    },
+    "started.json": {
+      "path": "docs/architecture/evidence/signed-array-elements/merged-baseline/started.json.gz",
+      "raw_sha256": "91252747090521fb83c363e7dae539774c94a59941793cbce9faf08d859d0c3a",
+      "gzip_sha256": "ad6e74741f99d90c6867857aec83efc5040e98fc64a359c215c8ea397026099e"
+    },
+    "target-handoff.json": {
+      "path": "docs/architecture/evidence/signed-array-elements/merged-baseline/target-handoff.json.gz",
+      "raw_sha256": "6ace94493cfb7d8e1e0b04f6944ecccd7b3f5ff16aa6b6fe6ba93efede19045d",
+      "gzip_sha256": "7fe40ca22ea61cbee90ede6b2b12abfc4107e73bc3021c1c0ae72959bba738d4"
+    },
+    "process.json": {
+      "path": "docs/architecture/evidence/signed-array-elements/merged-baseline/process.json.gz",
+      "raw_sha256": "f269dc1fa6d2e5dc35c816e491ed0b55aac25e4059af8f1337352fe60ebcea9d",
+      "gzip_sha256": "45b6fe934020658e739bcc1f00ede41e4237c6636881565349d8e629400de6b6"
+    }
+  },
+  "verified_source_hash_count": 339,
+  "runner_sha256": "1634f0af83d67698d00f9e67dc942848de3471d463a5a81a5147275ec45bcc02",
+  "limitations": [
+    "No additional build was run after this single assigned baseline. Client target released to root with unchanged artifacts and retained executable.",
+    "No native, fresh ordinary CLI, AOT or registry acceptance."
+  ]
+}
