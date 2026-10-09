@@ -430,3 +430,27 @@ fn declared_float_alias_retains_its_body_derivative() {
         6000,
     );
 }
+
+#[test]
+fn declared_float_body_reads_the_referent_tape_node_through_cbgr() {
+    check(
+        &derivative_probe(
+            "implement Float { fn sin(self) -> Float { self * self } }",
+            "let value: Float = 3.0; let borrowed = &value;",
+            "borrowed.sin()",
+        ),
+        6000,
+    );
+}
+
+#[test]
+fn declared_numeric_body_transfers_explicit_argument_tape_nodes() {
+    check(
+        &derivative_probe(
+            "implement Float { fn scale(self, factor: Float) -> Float { self * factor } }",
+            "let value: Float = 3.0; let receiver: Float = 2.0;",
+            "receiver.scale(value)",
+        ),
+        2000,
+    );
+}
