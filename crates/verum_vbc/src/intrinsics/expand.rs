@@ -447,9 +447,9 @@ fn expand_sequence(
                 0x45 // CMemmove
             };
             let mut operands = Vec::<u8>::new();
-            write_reg(&mut operands, args[0].0);
-            write_reg(&mut operands, args[1].0);
-            write_reg(&mut operands, args[2].0);
+            crate::encoding::encode_reg(args[0], &mut operands);
+            crate::encoding::encode_reg(args[1], &mut operands);
+            crate::encoding::encode_reg(args[2], &mut operands);
             e.emit(Instruction::FfiExtended { sub_op, operands });
             e.emit(Instruction::Mov {
                 dst: dest,
@@ -458,9 +458,9 @@ fn expand_sequence(
         }
         InlineSequenceId::Memset if args.len() >= 3 => {
             let mut operands = Vec::<u8>::new();
-            write_reg(&mut operands, args[0].0);
-            write_reg(&mut operands, args[1].0);
-            write_reg(&mut operands, args[2].0);
+            crate::encoding::encode_reg(args[0], &mut operands);
+            crate::encoding::encode_reg(args[1], &mut operands);
+            crate::encoding::encode_reg(args[2], &mut operands);
             e.emit(Instruction::FfiExtended {
                 sub_op: 0x44, // CMemset
                 operands,
@@ -473,9 +473,9 @@ fn expand_sequence(
         InlineSequenceId::Memcmp if args.len() >= 3 => {
             let mut operands = Vec::<u8>::new();
             crate::encoding::encode_reg(dest, &mut operands);
-            write_reg(&mut operands, args[0].0);
-            write_reg(&mut operands, args[1].0);
-            write_reg(&mut operands, args[2].0);
+            crate::encoding::encode_reg(args[0], &mut operands);
+            crate::encoding::encode_reg(args[1], &mut operands);
+            crate::encoding::encode_reg(args[2], &mut operands);
             e.emit(Instruction::FfiExtended {
                 sub_op: 0x46, // CMemcmp
                 operands,
@@ -494,8 +494,8 @@ fn expand_sequence(
             };
             let mut operands = Vec::<u8>::new();
             crate::encoding::encode_reg(dest, &mut operands);
-            write_reg(&mut operands, args[0].0);
-            write_reg(&mut operands, args[1].0);
+            crate::encoding::encode_reg(args[0], &mut operands);
+            crate::encoding::encode_reg(args[1], &mut operands);
             e.emit(Instruction::MemExtended { sub_op, operands });
         }
         InlineSequenceId::CheckedAdd
@@ -512,8 +512,8 @@ fn expand_sequence(
             };
             let mut operands = Vec::<u8>::new();
             crate::encoding::encode_reg(dest, &mut operands);
-            write_reg(&mut operands, args[0].0);
-            write_reg(&mut operands, args[1].0);
+            crate::encoding::encode_reg(args[0], &mut operands);
+            crate::encoding::encode_reg(args[1], &mut operands);
             e.emit(Instruction::ArithExtended { sub_op, operands });
         }
         InlineSequenceId::OverflowingAdd
@@ -528,8 +528,8 @@ fn expand_sequence(
             };
             let mut operands = Vec::<u8>::new();
             crate::encoding::encode_reg(dest, &mut operands);
-            write_reg(&mut operands, args[0].0);
-            write_reg(&mut operands, args[1].0);
+            crate::encoding::encode_reg(args[0], &mut operands);
+            crate::encoding::encode_reg(args[1], &mut operands);
             e.emit(Instruction::ArithExtended { sub_op, operands });
         }
         InlineSequenceId::AtomicFetchAdd
@@ -733,8 +733,8 @@ fn expand_sequence(
         InlineSequenceId::MakeSlice if args.len() >= 2 => {
             let mut operands = Vec::with_capacity(7);
             crate::encoding::encode_reg(dest, &mut operands);
-            write_reg(&mut operands, args[0].0);
-            write_reg(&mut operands, args[1].0);
+            crate::encoding::encode_reg(args[0], &mut operands);
+            crate::encoding::encode_reg(args[1], &mut operands);
             operands.push(byte_width);
             e.emit(Instruction::CbgrExtended {
                 sub_op: crate::instruction::CbgrSubOpcode::RefSliceRaw as u8,
