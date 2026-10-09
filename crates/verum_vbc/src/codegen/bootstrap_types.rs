@@ -304,7 +304,15 @@ impl VbcCodegen {
                 }
             }
             let resolved = if name.contains('.') {
-                resolve_export(&name)
+                resolve_export(&name).or_else(|| {
+                    // The source callback adds type re-exports. An already
+                    // exact archive declaration (including standalone
+                    // protocols) keeps the original import contract on a miss.
+                    // Never broaden this to a same-leaf lookup.
+                    (catalog.contains_key(&name)
+                        || catalog.contains_key(&format!("core.{name}")))
+                        .then(|| Text::from(name.as_str()))
+                })
             } else {
                 Some(Text::from(name.as_str()))
             };
