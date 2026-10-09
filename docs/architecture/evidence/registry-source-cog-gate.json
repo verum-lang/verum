@@ -1,0 +1,70 @@
+{
+  "task": "T1637",
+  "source_commit": "900a5f03086068a5d8be269c3e65b6ae80d97228",
+  "source_tree": "5bac26bd7795397baad5c1a215cf9a3452c9e3b9",
+  "message_only_amendment_with_identical_tree": "de61e13e471ad79fdb751fa3d206ba722c9054a7",
+  "integrated_through": "e2bde39a7",
+  "gates": [
+    {
+      "label": "source-cogs",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "-p",
+        "verum_compiler",
+        "--lib",
+        "external_cog_source_tests::",
+        "--",
+        "--test-threads=1",
+        "--nocapture"
+      ],
+      "returncode": 0,
+      "elapsed_seconds": 263.683,
+      "passed": 18,
+      "failed": 0,
+      "ignored": 0,
+      "log_sha256": "891f1c81070203070a64dd3691b07272a559ccf86c2eef56a2c80e0c527f64ab"
+    },
+    {
+      "label": "project-paths",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "-p",
+        "verum_compiler",
+        "--test",
+        "multi_file_project_runs",
+        "--",
+        "--test-threads=1"
+      ],
+      "returncode": 0,
+      "elapsed_seconds": 102.971,
+      "passed": 5,
+      "failed": 0,
+      "ignored": 0,
+      "log_sha256": "3225fef4c6109708eeab7cc3bf915ab55831bd69e6f41cf1b950323c4e4fd9cc"
+    }
+  ],
+  "artifact_producer": "fdad59f06114fd2770f3d53058373764284c7c2e",
+  "artifacts_sha256": {
+    "runtime.vbca": "410ff097b455437cab98b651f7799b3129588820925afe98e0de9c3781530a0f",
+    "runtime.core_metadata": "a92bd89e649e102cdc67d7ad0032513d6448d8915e5744127e6cdf1f1e34ebbb",
+    "runtime.symbol_graph": "a6678c18498f7519749ca1fdf1d22629b479083f42fa95a15177e8c7acf1c722"
+  },
+  "artifacts_unchanged": true,
+  "environment": {
+    "VERUM_NO_AUTO_PRECOMPILE": "1",
+    "CARGO_INCREMENTAL": "0",
+    "CARGO_BUILD_JOBS": "2"
+  },
+  "limits": [
+    "Library and integration gates use identified existing stage14 artifacts; no ordinary CLI or AOT release was produced.",
+    "Registered source-cog loading and checking are exercised; package extraction, installation and manifest/lock transactions remain open.",
+    "Restricted visibility authorities remain T1023; these controls establish public imports and private cross-cog refusal.",
+    "Hyphenated/scoped cog names, transitive dependencies and a real publish-install-run flow remain unaccepted."
+  ]
+}

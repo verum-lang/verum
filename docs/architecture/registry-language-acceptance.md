@@ -88,6 +88,29 @@ The CLI library gates above used an isolated target with the separately
 identified stage14 standard-library artifacts and automatic precompilation
 disabled. They did not produce a fresh ordinary CLI or an AOT release.
 
+## Registered source-cog checking — T1637
+
+Project checking now inventories registered source dependencies, carries the
+resolver into its isolated checker session and checks dependency bodies.
+Eager and lazy loading select the same package source root and module names,
+including a nested directory named `src`. Missing, unreadable, malformed or
+colliding modules produce errors. Cross-cog imports respect public exports;
+loading a dependency no longer exports every private declaration.
+
+Source checkpoints through `900a5f030`, integrated through `e2bde39a7`.
+The final gates passed **18/18** source-cog controls and **5/5** project-path
+controls. Before the final path correction, the earlier implementation also
+passed all **210** `verum_modules` integration tests. The source-cog controls
+are included in CI's workspace `--lib --bins` unit job. The
+[gate receipt](evidence/registry-source-cog-gate.json) records final source,
+commands, logs and unchanged stage14 artifact hashes.
+
+This is the compiler portion of installation. Archive extraction,
+transactional manifest/lock updates, transitive installation and the actual
+publish-install-run flow remain open. Restricted visibility authorities
+such as `public(cog)` remain T1023; hyphenated and scoped dependency names
+also need acceptance. These checks do not establish complete installation.
+
 ## Record coordinates in collections — T1644
 
 The registry's publication history uses a record containing the package
