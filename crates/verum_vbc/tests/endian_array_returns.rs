@@ -71,9 +71,23 @@ fn full_primitive_source_declarations_preserve_byte_array_elements() {
     let functions = codegen.export_functions();
     for (owner, length) in [("Int", 8), ("UInt64", 8), ("UInt32", 4), ("UInt16", 2)] {
         for method in ["to_be_bytes", "to_le_bytes"] {
-            let name = format!("core.base.primitives.{owner}.{method}");
+            let name = format!("{owner}.{method}");
             let info = functions.get(&name).unwrap_or_else(|| panic!("exact declaration {name}"));
             assert_eq!(info.return_type, Some(TypeRef::Array { element: Box::new(TypeRef::Concrete(TypeId::U8)), length }), "{name}");
         }
+    }
+}
+
+#[test]
+fn another_sources_byte_mount_cannot_retype_primitive_array_returns() {
+    let foreign = Parser::new("module foreign; public type Byte is { marker: Int };").parse_module().unwrap();
+    let mounted = Parser::new("module unrelated; mount foreign.Byte; fn holder(value: [Byte; 8]) -> [Byte; 8] { value }").parse_module().unwrap();
+    let primitive = Parser::new("module core.base.primitives; implement UInt64 { public fn to_be_bytes(self) -> [Byte; 8] { to_be_bytes_8(self) } }").parse_module().unwrap();
+    for files in [[&foreign, &mounted, &primitive], [&primitive, &mounted, &foreign]] {
+        let mut codegen = VbcCodegen::with_config(CodegenConfig::new("core.base"));
+        codegen.collect_unit_declarations(&files).expect("whole source unit declarations");
+        let functions = codegen.export_functions();
+        let result = &functions.get("UInt64.to_be_bytes").expect("declared primitive method").return_type;
+        assert_eq!(*result, Some(TypeRef::Array { element: Box::new(TypeRef::Concrete(TypeId::U8)), length: 8 }));
     }
 }
