@@ -993,6 +993,7 @@ impl TypeChecker {
             function_param_names: Map::new(),
             function_param_classifications: Map::new(),
             core_metadata: Maybe::None,
+            metadata_impls_by_owner: Maybe::None,
             stdlib_tail_registered: Set::new(),
             lazy_resolver: None,
             session_registry: None,
@@ -1084,10 +1085,7 @@ impl TypeChecker {
         // lookup sites via `lookup_static_or_load_from_metadata` —
         // the eager 30k-scheme scan this constructor used to run
         // cost ~150 ms release / ~420 ms debug per cold start.
-        checker.core_metadata = Maybe::Some(metadata);
-        // GLOB-OWN-SURFACE (T0969): the index is derived from this
-        // handle; replacing the handle invalidates it.
-        checker.metadata_own_surface = std::cell::RefCell::new(None);
+        checker.install_core_metadata(metadata);
         checker
     }
 
@@ -1133,6 +1131,19 @@ impl TypeChecker {
         }
     }
 
+    /// Install a metadata snapshot and invalidate derived indexes and load tails.
+    /// Registration remains additive: already installed declarations/protocols
+    /// are retained, but a new snapshot can contribute impls to completed names.
+    fn install_core_metadata(
+        &mut self,
+        metadata: std::sync::Arc<crate::core_metadata::CoreMetadata>,
+    ) {
+        self.core_metadata = Maybe::Some(metadata);
+        self.metadata_own_surface = std::cell::RefCell::new(None);
+        self.metadata_impls_by_owner = Maybe::None;
+        self.stdlib_tail_registered.clear();
+    }
+
     /// Hand stdlib metadata to a TypeChecker constructed via a
     /// non-`new_with_core` path (e.g.
     /// [`with_shared_methods`](Self::with_shared_methods) or
@@ -1153,10 +1164,7 @@ impl TypeChecker {
         metadata: std::sync::Arc<crate::core_metadata::CoreMetadata>,
     ) {
         self.register_coercion_markers_from_metadata(&metadata);
-        self.core_metadata = Maybe::Some(metadata);
-        // GLOB-OWN-SURFACE (T0969): the index is derived from this
-        // handle; replacing the handle invalidates it.
-        self.metadata_own_surface = std::cell::RefCell::new(None);
+        self.install_core_metadata(metadata);
     }
 
     /// Eager construction — registers every type/protocol/function
@@ -1170,10 +1178,7 @@ impl TypeChecker {
     ) -> Self {
         let mut checker = Self::with_minimal_context();
         checker.load_stdlib_from_metadata(&metadata);
-        checker.core_metadata = Maybe::Some(metadata);
-        // GLOB-OWN-SURFACE (T0969): the index is derived from this
-        // handle; replacing the handle invalidates it.
-        checker.metadata_own_surface = std::cell::RefCell::new(None);
+        checker.install_core_metadata(metadata);
         checker
     }
 
@@ -1856,7 +1861,7 @@ impl TypeChecker {
         // the impl list comes from `metadata.implementations`, not a
         // hardcoded mapping.  Adding `Foldable` / `Functor` / etc.
         // implementations to a stdlib type works identically.
-        let proto_deps = self.register_stdlib_impls_for_target(name, &metadata);
+        let proto_deps = self.register_stdlib_impls_for_target(name);
         for proto_name in proto_deps {
             pending.push(proto_name);
         }
@@ -2487,35 +2492,46 @@ impl TypeChecker {
         }
     }
 
-    pub(super) fn register_stdlib_impls_for_target(
-        &mut self,
-        type_name: &Text,
-        metadata: &crate::core_metadata::CoreMetadata,
-    ) -> Vec<Text> {
+    fn register_stdlib_impls_for_target(&mut self, type_name: &Text) -> Vec<Text> {
         use crate::protocol::ProtocolImpl;
         let mut proto_deps: Vec<Text> = Vec::new();
+        // Take both descriptors and index positions from the installed snapshot;
+        // accepting an unrelated metadata argument could reuse stale positions.
+        let Maybe::Some(metadata) = self.core_metadata.clone() else {
+            return proto_deps;
+        };
         let requested_owner = metadata
             .types
             .get(type_name)
             .map(Self::metadata_declaring_key)
             .unwrap_or_else(|| type_name.clone());
-        for impl_desc in metadata.implementations.iter() {
-            self.metrics.metadata_impl_candidates += 1;
-            let target_owner = metadata
-                .types
-                .get(&impl_desc.target_type)
-                .map(Self::metadata_declaring_key)
-                .unwrap_or_else(|| impl_desc.target_type.clone());
-            if target_owner != requested_owner {
-                continue;
+        let index = self.metadata_impls_by_owner.get_or_insert_with(|| {
+            let mut index: Map<Text, List<usize>> = Map::new();
+            for (position, implementation) in metadata.implementations.iter().enumerate() {
+                self.metrics.metadata_impl_index_entries += 1;
+                let owner = metadata
+                    .types
+                    .get(&implementation.target_type)
+                    .map(Self::metadata_declaring_key)
+                    .unwrap_or_else(|| implementation.target_type.clone());
+                index.entry(owner).or_default().push(position);
             }
+            index
+        });
+        // Clone only this ordered bucket so registration can borrow self mutably.
+        // Alias spellings share a bucket only when their descriptors prove the
+        // same declaring owner; no simple-name or suffix fallback participates.
+        let candidates = index.get(&requested_owner).cloned().unwrap_or_default();
+        for position in candidates {
+            self.metrics.metadata_impl_candidates += 1;
+            let impl_desc = &metadata.implementations[position];
             if impl_desc.protocol.as_str().is_empty() {
                 continue;
             }
             // Make sure the protocol body is registered so we can
             // pull its method-signature map.  Idempotent — a no-op
             // when this protocol was already loaded earlier.
-            self.register_stdlib_protocol_for_name(&impl_desc.protocol, metadata);
+            self.register_stdlib_protocol_for_name(&impl_desc.protocol, &metadata);
 
             // Idempotent guard: skip if THIS IMPL — this protocol
             // INSTANTIATION for this target type — was already
@@ -2558,7 +2574,7 @@ impl TypeChecker {
             let protocol_args = Self::parse_impl_protocol_args(impl_desc);
             {
                 let pc = self.protocol_checker.read();
-                if Self::metadata_impl_target_keys(&impl_desc.target_type, metadata)
+                if Self::metadata_impl_target_keys(&impl_desc.target_type, &metadata)
                     .iter()
                     .all(|key| {
                         let target = Type::Named {
@@ -2694,7 +2710,7 @@ impl TypeChecker {
                         .collect::<Vec<_>>()
                 );
             }
-            self.register_metadata_impl(protocol_impl, &impl_desc.target_type, metadata);
+            self.register_metadata_impl(protocol_impl, &impl_desc.target_type, &metadata);
             proto_deps.push(impl_desc.protocol.clone());
         }
         proto_deps
@@ -3937,6 +3953,7 @@ impl TypeChecker {
             function_param_names: Map::new(),
             function_param_classifications: Map::new(),
             core_metadata: Maybe::None,
+            metadata_impls_by_owner: Maybe::None,
             stdlib_tail_registered: Set::new(),
             lazy_resolver: None,
             session_registry: None,

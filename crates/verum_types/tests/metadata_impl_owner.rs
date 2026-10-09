@@ -367,6 +367,22 @@ fn replacing_metadata_reloads_completed_tails_and_rebuilds_positions() {
 fn owner_bucket_keeps_protocol_instantiations_in_declaration_order() {
     for eager in [false, true] {
         let mut metadata = metadata(false, false);
+        let mut protocol = metadata.protocols.remove(&"Deref".into()).unwrap();
+        protocol.name = "Select".into();
+        protocol.generic_params = List::from_iter([GenericParam {
+            name: "Input".into(),
+            bounds: List::new(),
+            default: Maybe::None,
+            type_bounds: List::new(),
+            pid: Maybe::Some(0),
+        }]);
+        protocol.associated_types = List::from_iter([AssociatedTypeDescriptor {
+            name: "Target".into(),
+            bounds: List::new(),
+            default: Maybe::None,
+        }]);
+        metadata.protocols.insert("Select".into(), protocol);
+        metadata.implementations[0].protocol = "Select".into();
         for descriptor in metadata.types.values_mut() {
             descriptor.generic_params = List::new();
         }
@@ -385,6 +401,14 @@ fn owner_bucket_keeps_protocol_instantiations_in_declaration_order() {
             checker.ensure_stdlib_type_loaded(&name.into(), &mut Default::default());
         }
         let protocols = checker.protocol_checker.read();
+        assert_eq!(
+            protocols
+                .get_protocol(&"Select".into())
+                .unwrap()
+                .type_params
+                .len(),
+            1
+        );
         let receiver = parse_descriptor_type_string("alpha.Wrapper");
         let implementations = protocols.get_implementations(&receiver);
         let args: List<List<verum_types::Type>> = implementations

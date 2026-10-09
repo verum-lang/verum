@@ -4243,12 +4243,16 @@ impl TypeCheckMetrics {
              - Unifications: {}\n\
              - Refinement checks: {}\n\
              - Protocol checks: {}\n\
+             - Metadata impl index entries: {}\n\
+             - Metadata impl candidates: {}\n\
              - Time: {} μs ({:.2} ms)",
             self.synth_count,
             self.check_count,
             self.unify_count,
             self.refinement_checks,
             self.protocol_checks,
+            self.metadata_impl_index_entries,
+            self.metadata_impl_candidates,
             self.time_us,
             self.time_us as f64 / 1000.0
         )

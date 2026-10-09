@@ -1212,6 +1212,10 @@ pub struct TypeChecker {
     /// can hand it off without paying the 15ms cost of a 3MB deep
     /// clone.  Reads dereference the `Arc` transparently.
     core_metadata: Maybe<std::sync::Arc<crate::core_metadata::CoreMetadata>>,
+    /// Lazy exact-owner buckets for the installed immutable metadata snapshot.
+    /// Values are positions in its implementation list, in declaration order.
+    /// Replacing metadata invalidates this index and completed registration tails.
+    metadata_impls_by_owner: Maybe<Map<Text, List<usize>>>,
     /// Names whose always-run stdlib registration tail has already executed.
     ///
     /// `ensure_stdlib_type_loaded` is called **66_846 times** while checking a
