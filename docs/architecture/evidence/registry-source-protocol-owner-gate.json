@@ -459,5 +459,45 @@
       "source anchor files and function symbols exist",
       "git diff --cached --check"
     ]
+  },
+  "integration": {
+    "base": "525eaa815f2b813c18798f88a860611723f2836a",
+    "original_endpoint": "1ba168f8b005741d6444c3f150c4967261086140",
+    "preserved_original_branch": "codex/source-protocol-owner-pre-rebase-1ba",
+    "rebased_endpoint_before_receipt_note": "fc1a54a9cfad99e39320239dc0098945c2d57cdc",
+    "commits": [
+      {
+        "original": "313fe6b36d8a3e21cec0ae7d8f88a69dc8b3c55c",
+        "rebased": "45925a5eabc94b7ae882fa9efb736b8687e9b9d7",
+        "patch_sha256": "bbde2f702bba39ba8e4376afb99df7a1f6588d94d86f20052d654eae8cbae73e"
+      },
+      {
+        "original": "d6409e8fc3d7eae82782cca437c784578fd0282d",
+        "rebased": "3200324b5d9a8bba6e847b8e219a33f6f0bc094f",
+        "patch_sha256": "a1dc20e05da3a7cf4ec6e2c2a55d93297841113e107020fdb4e6960d0d637533"
+      },
+      {
+        "original": "08cb5cdf95d6310d8e1cd6ea5747c71286f474a6",
+        "rebased": "53931e691295aef3a2e17813d3087a3cf1144655",
+        "patch_sha256": "a10f9be261249d944d358716133babae3ec51cb45e740cd4b84b8a4fd61c5fed"
+      },
+      {
+        "original": "ee80c3843a48237858d590243d004ec20db155e4",
+        "rebased": "9c0d96b7c618e8291aa22935ea0de4eb3e19e1cd",
+        "patch_sha256": "f7041a9279d67dd40df44638ef61c5abe552079ad4171c4d34d8d9985a0eeed4"
+      },
+      {
+        "original": "1ba168f8b005741d6444c3f150c4967261086140",
+        "rebased": "fc1a54a9cfad99e39320239dc0098945c2d57cdc",
+        "patch_sha256": "af6a94b6b43f64297f50cd4ca908c40b74094bdb73f5a64aa15dd870a1cc2c1e"
+      }
+    ],
+    "production_type_source_tree_before_and_after": "8c0e2872dd83941424d9ac471cea866e3a2daed2",
+    "whole_type_crate_tree_before_and_after": "0dab5fe784be2f36ec8429a9950c1da70b01a5e8",
+    "all_five_commit_patches_byte_identical": true,
+    "receipt_byte_identical_before_this_integration_note": true,
+    "all_recorded_final_source_hashes_and_six_gate_log_hashes_verified": true,
+    "range_diff": "1:  313fe6b36 = 1:  45925a5ea test(types): expose source protocol target owner mismatch (T1686)\n2:  d6409e8fc = 2:  3200324b5 fix(types): reuse complete source impl owner registration (T1686)\n3:  08cb5cdf9 = 3:  53931e691 test(types): cover source impl aliases and protocol arguments (T1686)\n4:  ee80c3843 = 4:  9c0d96b7c test(types): preserve explicit foreign bindings in source impl prepass (T1686)\n5:  1ba168f8b = 5:  fc1a54a9c docs(types): preserve source implementation owner gate (T1686)",
+    "validation_boundary": "No Cargo rerun after this rebase. The complete type crate and all five patches are byte-identical; the original test and source attributions above remain authoritative. Ordinary registry replay remains pending."
   }
 }
