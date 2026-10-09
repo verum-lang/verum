@@ -1,0 +1,26 @@
+   Compiling verum_error v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_error)
+   Compiling verum_cbgr v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_cbgr)
+   Compiling verum_vbc v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_vbc)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 23.25s
+     Running tests/residual_return_boundaries.rs (/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target/debug/build/verum_vbc/100bb0821b89efdb/out/residual_return_boundaries-100bb0821b89efdb)
+
+running 16 tests
+test a_call_argument_hint_cannot_change_the_residual_target ... ok
+test a_callback_annotation_keeps_its_own_return_target ... ok
+test a_maybe_function_still_converts_a_result_error_to_none ... ok
+test a_maybe_record_field_cannot_convert_the_enclosing_result_error_to_none ... ok
+test a_plain_try_block_catches_the_field_error_locally ... ok
+test a_recover_block_catches_the_field_error_locally ... ok
+test a_result_function_still_converts_a_maybe_residual ... ok
+test a_successful_nullable_field_is_distinct_from_a_missing_field ... ok
+test a_successful_present_field_keeps_its_payload ... ok
+test an_annotated_initializer_cannot_change_the_residual_target ... ok
+test an_explicit_closure_owns_its_result_target ... ok
+test an_inferred_closure_owns_its_result_target ... ok
+test declared_error_conversion_keeps_the_full_function_return_type ... ok
+test nested_closure_compilation_restores_the_outer_residual_target ... ok
+test nested_record_hints_cannot_change_the_residual_target ... ok
+test propagation_before_record_construction_preserves_the_error ... ok
+
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.08s
+

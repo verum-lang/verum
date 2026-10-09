@@ -1,0 +1,14 @@
+   Compiling verum_error v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_error)
+   Compiling verum_cbgr v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_cbgr)
+   Compiling verum_vbc v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_vbc)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 46.97s
+     Running tests/residual_return_boundaries.rs (/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target/debug/build/verum_vbc/100bb0821b89efdb/out/residual_return_boundaries-100bb0821b89efdb)
+
+running 4 tests
+test callable_try_boundary_can_be_called_after_the_outer_handler_ends ... ok
+test callable_try_boundary_does_not_inherit_the_enclosing_handler ... ok
+test callable_try_boundary_restores_the_enclosing_handler_after_compilation ... ok
+test callable_try_boundary_retains_a_handler_inside_the_closure ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 16 filtered out; finished in 0.03s
+

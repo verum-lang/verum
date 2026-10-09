@@ -1,0 +1,119 @@
+   Compiling verum_error v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_error)
+   Compiling verum_cbgr v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_cbgr)
+   Compiling verum_vbc v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_vbc)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 52.15s
+     Running tests/block_result_lifetime.rs (/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target/debug/build/verum_vbc/0144c80224bafa56/out/block_result_lifetime-0144c80224bafa56)
+
+running 15 tests
+test deferred_block_tail_is_discarded ... ok
+test discarded_borrowed_tail_does_not_drop_its_referent ... ok
+test discarded_forwarding_expressions_keep_scope_cleanup ... ok
+test discarded_loop_break_value_keeps_its_local_cleanup ... ok
+test discarded_parent_still_consumes_condition_and_call_argument_values ... ok
+test discarded_raw_tail_does_not_drop_its_referent ... ok
+test discarded_try_and_recover_tails_keep_cleanup ... ok
+test explicit_drop_of_a_returned_local_runs_once ... ok
+test finally_discards_its_tail_while_the_try_result_stays_live ... ok
+test loop_body_tails_are_discarded_on_each_iteration ... ok
+test nested_block_tails_remain_live_until_the_receiving_scope_ends ... ok
+test returning_a_local_transfers_its_drop_obligation_to_the_caller ... ok
+test returning_one_local_preserves_reverse_drop_order_for_other_locals ... ok
+test used_forwarding_results_keep_the_selected_local_alive ... ok
+test used_loop_break_value_transfers_its_local_tail ... ok
+
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s
+
+     Running tests/callable_producer_identity.rs (/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target/debug/build/verum_vbc/bc542d8828a76875/out/callable_producer_identity-bc542d8828a76875)
+
+running 29 tests
+test ambiguous_legacy_parameter_names_do_not_invent_scope_ownership ... ok
+test annotated_nominal_parameter_reaches_closure_descriptor ... ok
+test async_callable_is_not_certified_as_an_ordinary_function ... ok
+test callable_identity_survives_a_binding_and_multiple_method_results ... ok
+test callable_identity_survives_the_following_generic_method ... ok
+test callable_parameter_identity_survives_serialized_declaration_and_shadow ... ok
+test callback_value_executes_with_the_same_proven_nominal_signature ... ok
+test caller_generic_annotation_stays_generic_despite_same_named_nominal ... ok
+test closure_result_is_inferred_in_its_parameter_scope ... ok
+test contextual_callback_slots_are_independent ... ok
+test declared_callable_argument_types_contextualize_lambda_without_adapter_name ... ok
+test empty_parameter_name_cannot_alias_nonempty_string_slot_zero ... ok
+test equal_offsets_in_distinct_source_files_keep_callback_contexts_separate ... ok
+test explicit_primitive_closure_signature_remains_exact ... ok
+test function_owner_argument_preserves_full_signature ... ok
+test method_shadow_callable_keeps_its_owner_binding_in_the_result ... ok
+test nested_nominal_annotation_keeps_all_type_arguments ... ok
+test overlong_explicit_roster_does_not_partially_certify_a_callable_result ... ok
+test proven_callable_signature_binds_the_declared_method_parameter ... ok
+test reference_annotation_is_preserved_in_parameter_and_result ... ok
+test self_annotation_keeps_existing_abi_type_even_without_callable_proof ... ok
+test sibling_callback_values_bind_distinct_return_and_callable_slots ... ok
+test sibling_closures_keep_distinct_nominal_parameter_and_result_types ... ok
+test static_callable_parameters_do_not_skip_a_receiver_slot ... ok
+test static_callable_result_uses_parameter_zero_in_the_following_chain ... ok
+test tuple_owner_argument_is_one_contextual_parameter ... ok
+test unknown_callable_in_chain_cannot_bind_an_unrelated_nominal_f ... ok
+test unrelated_same_named_method_cannot_supply_callback_context ... ok
+test untyped_callable_abi_fallback_is_not_a_generic_binding ... ok
+
+test result: ok. 29 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s
+
+     Running tests/catch_unwind_closure_pin.rs (/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target/debug/build/verum_vbc/6ab84dabd9cf431d/out/catch_unwind_closure_pin-6ab84dabd9cf431d)
+
+running 7 tests
+test catch_unwind_catches_builtin_assert_failure ... ok
+test catch_unwind_catches_builtin_unreachable ... ok
+test catch_unwind_catches_panic_from_heap_closure ... ok
+test catch_unwind_passes_through_normal_return ... ok
+test catch_unwind_unwinds_frames_on_caught_panic ... ok
+test func_ref_callable_still_accepted ... ok
+test non_closure_heap_argument_is_declined_not_misread ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/nested_variant_payload_types.rs (/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target/debug/build/verum_vbc/1963e598c96d44fa/out/nested_variant_payload_types-1963e598c96d44fa)
+
+running 6 tests
+test a_different_nested_variant_still_takes_the_fallback ... ok
+test nested_context_is_restored_for_the_next_payload ... ok
+test nested_err_payload_uses_the_error_argument ... ok
+test nested_int_match_result_carries_int_and_formats_as_int ... ok
+test nested_record_binding_uses_its_own_field_layout ... ok
+test nested_record_match_result_preserves_nominal_identity ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests/residual_return_boundaries.rs (/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target/debug/build/verum_vbc/100bb0821b89efdb/out/residual_return_boundaries-100bb0821b89efdb)
+
+running 28 tests
+test a_call_argument_hint_cannot_change_the_residual_target ... ok
+test a_callback_annotation_keeps_its_own_return_target ... ok
+test a_maybe_function_still_converts_a_result_error_to_none ... ok
+test a_maybe_record_field_cannot_convert_the_enclosing_result_error_to_none ... ok
+test a_plain_try_block_catches_the_field_error_locally ... ok
+test a_recover_block_catches_the_field_error_locally ... ok
+test a_result_function_still_converts_a_maybe_residual ... ok
+test a_successful_nullable_field_is_distinct_from_a_missing_field ... ok
+test a_successful_present_field_keeps_its_payload ... ok
+test an_annotated_initializer_cannot_change_the_residual_target ... ok
+test an_explicit_closure_owns_its_result_target ... ok
+test an_inferred_closure_owns_its_result_target ... ok
+test callable_try_boundary_can_be_called_after_the_outer_handler_ends ... ok
+test callable_try_boundary_does_not_inherit_the_enclosing_handler ... ok
+test callable_try_boundary_restores_the_enclosing_handler_after_compilation ... ok
+test callable_try_boundary_retains_a_handler_inside_the_closure ... ok
+test contextual_residual_keeps_sibling_callback_signatures_independent ... ok
+test contextual_residual_preserves_an_explicit_closure_error_conversion ... ok
+test contextual_residual_uses_full_callable_assignment_signature ... ok
+test contextual_residual_uses_full_callable_record_field_signature ... ok
+test contextual_residual_uses_full_callback_parameter_signature ... ok
+test contextual_residual_uses_full_instance_callback_signature ... ok
+test contextual_residual_uses_full_let_callable_signature ... ok
+test contextual_residual_uses_full_static_callback_signature ... ok
+test declared_error_conversion_keeps_the_full_function_return_type ... ok
+test nested_closure_compilation_restores_the_outer_residual_target ... ok
+test nested_record_hints_cannot_change_the_residual_target ... ok
+test propagation_before_record_construction_preserves_the_error ... ok
+
+test result: ok. 28 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.13s
+

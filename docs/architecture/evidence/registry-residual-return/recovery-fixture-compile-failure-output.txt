@@ -1,0 +1,14 @@
+   Compiling verum_error v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_error)
+   Compiling verum_cbgr v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_cbgr)
+   Compiling verum_vbc v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_vbc)
+error[E0765]: unterminated double quote string
+   --> crates/verum_vbc/tests/residual_return_boundaries.rs:326:1
+    |
+326 | / "#,
+327 | |         83,
+328 | |     );
+329 | | }
+    | |__^
+
+For more information about this error, try `rustc --explain E0765`.
+error: could not compile `verum_vbc` (test "residual_return_boundaries") due to 1 previous error

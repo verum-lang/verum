@@ -1,0 +1,44 @@
+   Compiling verum_error v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_error)
+   Compiling verum_cbgr v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_cbgr)
+   Compiling verum_vbc v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_vbc)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 30.80s
+     Running tests/residual_return_boundaries.rs (/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target/debug/build/verum_vbc/100bb0821b89efdb/out/residual_return_boundaries-100bb0821b89efdb)
+
+running 4 tests
+test contextual_residual_preserves_an_explicit_closure_error_conversion ... 
+thread 'contextual_residual_preserves_an_explicit_closure_error_conversion' (5146078) panicked at crates/verum_vbc/tests/residual_return_boundaries.rs:68:5:
+assertion `left == right` failed
+  left: 41
+ right: 141
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+test contextual_residual_uses_full_callable_record_field_signature ... 
+thread 'contextual_residual_uses_full_callable_record_field_signature' (5146079) panicked at crates/verum_vbc/tests/residual_return_boundaries.rs:68:5:
+assertion `left == right` failed
+  left: 41
+ right: 141
+FAILED
+test contextual_residual_uses_full_callback_parameter_signature ... 
+thread 'contextual_residual_uses_full_callback_parameter_signature' (5146080) panicked at crates/verum_vbc/tests/residual_return_boundaries.rs:68:5:
+assertion `left == right` failed
+  left: 41
+ right: 141
+FAILED
+test contextual_residual_uses_full_let_callable_signature ... 
+thread 'contextual_residual_uses_full_let_callable_signature' (5146081) panicked at crates/verum_vbc/tests/residual_return_boundaries.rs:68:5:
+assertion `left == right` failed
+  left: 41
+ right: 141
+FAILED
+
+failures:
+
+failures:
+    contextual_residual_preserves_an_explicit_closure_error_conversion
+    contextual_residual_uses_full_callable_record_field_signature
+    contextual_residual_uses_full_callback_parameter_signature
+    contextual_residual_uses_full_let_callable_signature
+
+test result: FAILED. 0 passed; 4 failed; 0 ignored; 0 measured; 20 filtered out; finished in 0.04s
+
+error: test failed, to rerun pass `-p verum_vbc --test residual_return_boundaries`

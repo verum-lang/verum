@@ -703,3 +703,44 @@ failure to schema validation, input construction or runtime result handling.
 T1666 remains incomplete, and its registry production candidate is unlanded.
 Passing the positive group does not establish complete metadata decoding or
 publication admission.
+
+## Callable residual return boundaries (T1687, T1689)
+
+A required nullable field in the publication metadata component reached an
+incorrect success result. Record construction temporarily selected the field's
+`Maybe` type for variant disambiguation; `?` reused that expression hint as its
+function return target and called the `Result`-to-`Maybe` residual conversion.
+The resulting `None` carried tag zero, which the caller interpreted as `Ok`.
+
+VBC code generation now keeps the enclosing callable's complete return type
+separate from field, argument and initializer hints. Closures obtain residual
+authority from their own explicit signature, the declaration of that exact
+callback expression, or their own inferred body type. Contextual callback
+returns retain their error arguments across typed lets, fields, assignments,
+free calls, static calls and instance calls. The independently tracked T1689
+repair saves and restores recovery depth at callable boundaries: compiling a
+closure inside `try/recover` does not give its body the creator's handler.
+
+The parsed-source regression is serialized and deserialized before interpreter
+execution. Its local conversion methods expose wrong dispatch without an
+injected standard-library archive. The initial T1687 controls measured six
+passes and eleven failures, including the separately identified T1689 failure.
+T1689's expanded baseline measured two passes and two failures; its isolated
+repair passed all four. Additional T1687 controls exposed lost error conversion
+in explicit and contextual closure signatures, then in a later assignment.
+The final focused and neighboring gate passed all 85 controls, including 28
+residual/recovery cases, without ignored or filtered tests.
+
+The unfiltered `verum_vbc` library gate with `compression,table_dispatch,codegen,ffi`
+completed in 726.37 seconds: 2,075 passed, zero failed and one ignored, with no
+filtered tests. Test execution took 698.19 seconds.
+The existing ignored coverage-report control remains tracked by T0839.
+
+The exact commands, source and executable identities, intermediate failures and
+verbatim output are retained in the
+[residual-boundary receipt](evidence/registry-residual-return-gate.json) and
+[callable-recovery receipt](evidence/registry-callable-recovery-gate.json).
+Inherited precompiled artifact bytes remained unchanged during these isolated
+tests. This does not certify a fresh standard-library producer, an ordinary CLI
+replay, AOT behavior, the full registry project, or authenticated durable
+publication. T1666 remains the separate metadata/service acceptance boundary.
