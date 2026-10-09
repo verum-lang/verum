@@ -2493,8 +2493,26 @@ one module and therefore never seeded",
         // registry. Import only this source unit's dependency closure.
         let mut prior_modules: Vec<_> = self.compiled_stdlib_modules.values().collect();
         prior_modules.sort_by(|a, b| a.name.cmp(&b.name));
-        codegen.import_bootstrap_nominal_dependencies(ast_modules, &prior_modules)
-            .map_err(|error| anyhow::anyhow!("importing nominal dependencies for {}: {}", module.name, error))?;
+        // Source exports, including re-export aliases, choose the declaring
+        // descriptor. Archive bundle names are not namespace authority.
+        let source_registry = self.session.module_registry();
+        let source_registry = source_registry.read();
+        let source_resolver = verum_types::TypeChecker::new();
+        codegen.import_bootstrap_nominal_dependencies_with_resolver(
+            ast_modules, &prior_modules, |written| {
+                let (owner, name) = written.rsplit_once('.')?;
+                let (declaration, declared_owner) = source_resolver.resolve_public_source_type(
+                    owner, name, &source_registry,
+                )?;
+                let source = source_registry.get_by_path_aliased(&declared_owner)?;
+                let owner = VbcCodegen::resolve_full_module_path(&source.ast, &declared_owner)
+                    .unwrap_or_else(|| declared_owner.to_string());
+                Some(Text::from(verum_vbc::module::qualify_module_name(
+                    &owner, declaration.name.name.as_str(),
+                )))
+            },
+        ).map_err(|error| anyhow::anyhow!("importing nominal dependencies for {}: {}", module.name, error))?;
+        drop(source_registry);
 
         // Three-pass compilation within the module (cross-file two-phase collection)
         // ONE collector, the same one a user compile uses (T0692).

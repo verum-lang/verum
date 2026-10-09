@@ -7319,6 +7319,24 @@ impl TypeChecker {
         None
     }
 
+    /// Resolve a public source type to its declaring module for archive producers.
+    /// Uses the checker's existing re-export walk without changing checker state.
+    /// Every hop must be exported; a missing target cannot borrow a parent's
+    /// same-named declaration. The ordinary checker retains its legacy fallback.
+    pub fn resolve_public_source_type(
+        &self,
+        module_path: &str,
+        type_name: &str,
+        registry: &verum_modules::ModuleRegistry,
+    ) -> Option<(verum_ast::decl::TypeDecl, Text)> {
+        let module = self.get_module_with_path_aliases(module_path, registry)?;
+        let mut visited = std::collections::HashSet::new();
+        self.find_type_declaration_with_source_module_inner(
+            &module.ast, type_name, &Text::from(module.path.to_string()), registry,
+            &mut visited, true,
+        )
+    }
+
     /// Find a type declaration and its source module, following re-export chains if needed.
     ///
     /// Returns both the type declaration and the module path where it was defined.
@@ -7350,6 +7368,7 @@ impl TypeChecker {
             current_module_path,
             registry,
             &mut visited,
+            false,
         )
     }
 
@@ -7361,6 +7380,7 @@ impl TypeChecker {
         current_module_path: &Text,
         registry: &verum_modules::ModuleRegistry,
         visited: &mut std::collections::HashSet<(Text, Text)>,
+        require_exported_source: bool,
     ) -> Option<(verum_ast::decl::TypeDecl, Text)> {
         use verum_ast::ItemKind;
         use verum_ast::decl::{MountTreeKind, Visibility as AstVisibility};
@@ -7376,6 +7396,16 @@ impl TypeChecker {
         let key = (current_module_path.clone(), Text::from(type_name));
         if !visited.insert(key) {
             return None;
+        }
+
+        if require_exported_source {
+            let module = self.get_module_with_path_aliases(current_module_path, registry)?;
+            let export = module.exports.get(&Text::from(type_name))?;
+            if export.kind != verum_modules::ExportKind::Type
+                || export.visibility != verum_ast::Visibility::Public
+            {
+                return None;
+            }
         }
 
         // First, try to find the type declaration directly in this module
@@ -7530,11 +7560,12 @@ impl TypeChecker {
                                 &verum_common::Text::from(source_path.as_str()),
                                 registry,
                                 visited,
+                                require_exported_source,
                             )
                         {
                             return Some((decl, final_path));
                         }
-                    } else {
+                    } else if !require_exported_source {
                         // FALLBACK: Module not found in registry. This can happen when:
                         // 1. A re-export points to a submodule (e.g., .ops) that exists as a file
                         //  (ops.vr) within the parent module directory, but isn't registered as

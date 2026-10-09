@@ -8,7 +8,7 @@ use crate::module::{FunctionDescriptor, FunctionId, VbcModule};
 use crate::types::{TypeDescriptor, TypeId, TypeRef};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use verum_ast::{ItemKind, MountTree, MountTreeKind, Visitor};
-use verum_common::Map;
+use verum_common::{Map, Text};
 
 pub(super) fn identity(module: &VbcModule, ty: &TypeDescriptor) -> Option<String> {
     let name = module.strings.get(ty.name)?;
@@ -203,6 +203,21 @@ impl VbcCodegen {
         sources: &[&verum_ast::Module],
         available: &[&VbcModule],
     ) -> CodegenResult<usize> {
+        self.import_bootstrap_nominal_dependencies_with_resolver(
+            sources, available, |name| Some(Text::from(name)),
+        )
+    }
+
+    /// Resolve written type export paths through the caller's source module
+    /// authority before selecting descriptors. Resolutions are carried into
+    /// the same ID table used by field and declaration TypeRefs; source text
+    /// is never substituted for a lost ID after serialization.
+    pub fn import_bootstrap_nominal_dependencies_with_resolver(
+        &mut self,
+        sources: &[&verum_ast::Module],
+        available: &[&VbcModule],
+        resolve_export: impl Fn(&str) -> Option<Text>,
+    ) -> CodegenResult<usize> {
         let mut catalog = BTreeMap::<String, (usize, usize)>::new();
         let mut functions = BTreeMap::<String, (usize, usize)>::new();
         let mut source_keys = HashMap::new();
@@ -275,6 +290,7 @@ impl VbcCodegen {
             }
         }
         let mut selected = BTreeSet::new();
+        let mut resolved_exports = Map::<Text, Text>::new();
         let mut function_sites = BTreeSet::new();
         for name in names {
             // Free-function roots require a written module path or an exact
@@ -287,16 +303,25 @@ impl VbcCodegen {
                     function_sites.insert(site);
                 }
             }
-            let key = if catalog.contains_key(&name) {
-                Some(name.clone())
-            } else if catalog.contains_key(&format!("core.{name}")) {
-                Some(format!("core.{name}"))
-            } else if !name.contains('.') {
-                bare.get(&name).cloned().flatten()
+            let resolved = if name.contains('.') {
+                resolve_export(&name)
+            } else {
+                Some(Text::from(name.as_str()))
+            };
+            let Some(resolved) = resolved else { continue; };
+            let key = if catalog.contains_key(resolved.as_str()) {
+                Some(resolved.to_string())
+            } else if catalog.contains_key(&format!("core.{resolved}")) {
+                Some(format!("core.{resolved}"))
+            } else if !resolved.contains('.') {
+                bare.get(resolved.as_str()).cloned().flatten()
             } else {
                 None
             };
             if let Some(key) = key {
+                if name.contains('.') {
+                    resolved_exports.insert(name.into(), Text::from(key.as_str()));
+                }
                 selected.insert(key);
             }
         }
@@ -363,6 +388,11 @@ impl VbcCodegen {
                         .copied()
                         .filter(|id| {
                             id.well_known_name() == Some(leaf)
+                                // Reserved carriers belong to their declared
+                                // source owner, never to an unrelated same leaf.
+                                && verum_common::well_known_types::WellKnownType::from_name(leaf)
+                                    .and_then(|known| known.canonical_archive_modules().first().copied())
+                                    == key.rsplit_once('.').map(|(owner, _)| owner)
                                 // A same-named nominal is not a scalar. Genuine
                                 // scalar carriers were selected above by kind+ID.
                                 && TypeId::from_well_known_scalar_name(leaf).is_none()
@@ -381,6 +411,11 @@ impl VbcCodegen {
                 self.type_name_to_id.insert(short.to_owned(), id);
             }
             target_ids.insert(key.clone(), id);
+        }
+        for (written, declared) in resolved_exports {
+            if let Some(id) = target_ids.get(declared.as_str()) {
+                self.type_name_to_id.insert(written.into_string(), *id);
+            }
         }
         let maps: Vec<HashMap<u32, u32>> = available
             .iter()

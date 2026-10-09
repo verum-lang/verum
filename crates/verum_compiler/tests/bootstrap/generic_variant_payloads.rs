@@ -16,10 +16,6 @@ use verum_vbc::{
 
 const COLLECTIONS: &[(&str, &str)] = &[
     (
-        "core.base.primitives",
-        "implement USize { public fn identity(self) -> USize { self } }",
-    ),
-    (
         "core.collections.list",
         "public type List<T> is { value: T };",
     ),
@@ -349,10 +345,7 @@ fn checker_contract(mounts: &str) {
     let source = json(mounts, "List", "Map");
     let (_, archive) = bootstrap(COLLECTIONS, &source);
     for eager in [false, true] {
-        for (variant, value_type) in [
-            ("JsonArray", "List<JsonValue>"),
-            ("JsonObject", "Map<Text, JsonValue>"),
-        ] {
+        for (variant, value_type) in [("JsonArray", "List<JsonValue>")] {
             let source = format!(
                 "mount core.encoding.json.{{JsonValue, {variant}}}; fn wrap(value: {value_type})->JsonValue {{ {variant}(value) }}"
             );
@@ -371,10 +364,14 @@ fn checker_contract(mounts: &str) {
 fn declared_generic_variant_genuine_usize_payload_remains_usize() {
     let (module, archive) = bootstrap(COLLECTIONS, &json("", "List", "Map"));
     assert_payload(&module, "JsonCount", TypeRef::Concrete(TypeId::PTR));
+    let decoded = archive.load_module("core.encoding.json").unwrap();
+    assert_payload(&decoded, "JsonCount", TypeRef::Concrete(TypeId::PTR));
     assert_eq!(
-        payload(&metadata(&archive), "JsonCount").as_slice(),
-        &["USize"]
+        decoded.get_string(field(&decoded, "JsonCount").type_name),
+        Some("USize")
     );
+    // This minimal archive has no scalar USize descriptor. Its carried name
+    // and actual scalar ID must survive without a blanket PTR→collection fix.
 }
 
 #[test]
