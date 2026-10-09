@@ -242,5 +242,17 @@
     "Workspace publish is still a separate library handler with no added dispatch route; T1639 retains that work.",
     "Undispatched workspace build/test/check helper behavior is outside the four-handler scope.",
     "An empty declared workspace is unchanged. A declared member whose manifest is missing now counts as a failed execution instead of being skipped."
-  ]
+  ],
+  "integration": {
+    "base": "5f8f9e8eaee778e6e9d491ab92b22293ce6b3d5c",
+    "rebased_source_commit": "844551f9ae8deb19bbfc24733fdeb9235fd43923",
+    "tested_source_branch": "codex/workspace-management-tested-e3db",
+    "original_source_and_evidence_branch": "codex/workspace-management-pre-rebase",
+    "identical_cli_tree": "c952d3d53dde0fdcace1fe2a60a1d5200c22751a",
+    "cli_source_and_tests_identical": true,
+    "base_changed_paths": [
+      "docs/architecture/registry-language-acceptance.md"
+    ],
+    "boundary": "The rebase base changes acceptance prose only. All CLI source and controls are byte-identical to the executed original. The gate remains a no-auto-precompile library-handler acceptance, not ordinary CLI or service acceptance."
+  }
 }

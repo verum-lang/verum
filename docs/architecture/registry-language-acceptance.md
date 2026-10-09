@@ -428,3 +428,8 @@ was inspected, while clap parsing and an ordinary `verum` binary were not
 executed. Registry/authentication and full platform acceptance remain separate.
 The undispatched workspace build/test/check helpers and the absent publication
 route are outside this four-handler change.
+
+The chain rebased onto documentation-only main `5f8f9e8ea` as `844551f9a`.
+The complete CLI source and test tree remains byte-identical to executed
+`e3db15b49`, whose named branch is retained. Both workspace gate receipts and
+the earlier alias-consumer acceptance are preserved.
