@@ -8371,3 +8371,7 @@ mod bootstrap_glue_tests;
 #[cfg(test)]
 #[path = "../tests/archive/wanted_leaf_index.rs"]
 mod wanted_leaf_index_tests;
+
+#[cfg(test)]
+#[path = "../tests/archive/symbol_graph_declaring_owner.rs"]
+mod symbol_graph_declaring_owner_tests;
