@@ -230,10 +230,19 @@ pub fn search(query: &str, limit: usize) -> Result<()> {
 /// # }
 /// ```
 pub fn install(name: &str, version: Option<Text>) -> Result<()> {
+    let client = RegistryClient::from_manifest()?;
+    let cache = CacheManager::new(CacheManager::default_cache_dir()?)?;
+    install_from_registry(name, version, &client, &cache)
+}
+
+fn install_from_registry(
+    name: &str,
+    version: Option<Text>,
+    client: &RegistryClient,
+    cache_manager: &CacheManager,
+) -> Result<()> {
     let version_str = version.as_ref().map(|v| v.as_str()).unwrap_or("latest");
     ui::step(&format!("Installing {} {}", name.cyan(), version_str));
-
-    let client = RegistryClient::from_manifest()?;
 
     // Resolve version
     let resolved_version = if let Some(ref v) = version {
@@ -275,9 +284,6 @@ pub fn install(name: &str, version: Option<Text>) -> Result<()> {
 
     // Download cog
     ui::step("Downloading cog");
-    let cache_dir = CacheManager::default_cache_dir()?;
-    let cache_manager = CacheManager::new(cache_dir)?;
-
     // Get download URL
     let download_url = format!(
         "{}/cogs/{}/{}/download",
@@ -680,3 +686,7 @@ mod tests {
         assert_eq!(checksum.len(), 64); // SHA-256 produces 64 hex chars
     }
 }
+
+#[cfg(test)]
+#[path = "../tests/cog/configured_registry_downloads.rs"]
+mod configured_registry_downloads;
