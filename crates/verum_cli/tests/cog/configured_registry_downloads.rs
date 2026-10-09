@@ -60,7 +60,14 @@ fn isolated_install_case() {
     // SAFETY: this fresh subprocess runs only this test. Set its transport
     // configuration before constructing clients or starting the HTTP worker.
     unsafe {
-        for key in ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"] {
+        for key in [
+            "HTTP_PROXY",
+            "HTTPS_PROXY",
+            "ALL_PROXY",
+            "http_proxy",
+            "https_proxy",
+            "all_proxy",
+        ] {
             std::env::set_var(key, origin.as_str());
         }
         std::env::set_var("NO_PROXY", "127.0.0.1,localhost");
@@ -76,7 +83,7 @@ fn isolated_install_case() {
     )
     .unwrap();
     let before = std::fs::read(&manifest_path).unwrap();
-    let checksum: Text = format!("{:x}", Sha256::digest(ARCHIVE)).into();
+    let checksum: Text = hex::encode(Sha256::digest(ARCHIVE)).into();
     let metadata = serde_json::json!({
         "name": "fixture", "version": "1.2.3", "description": null,
         "authors": [], "license": null, "repository": null, "homepage": null,
@@ -93,12 +100,17 @@ fn isolated_install_case() {
         loop {
             match listener.accept() {
                 Ok((mut stream, _)) => {
-                    stream.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+                    stream
+                        .set_read_timeout(Some(Duration::from_secs(3)))
+                        .unwrap();
                     let request = read_request(&mut stream);
-                    let first = request.lines().next().unwrap_or("");
+                    let first = request.as_str().lines().next().unwrap_or("");
                     requests.push(first.into());
                     assert!(
-                        !request.lines().any(|line| line.to_ascii_lowercase().starts_with("authorization:")),
+                        !request
+                            .as_str()
+                            .lines()
+                            .any(|line| line.to_ascii_lowercase().starts_with("authorization:")),
                         "install must not send publish credentials: {first}",
                     );
                     let (status, content_type, body) = match first {
@@ -139,23 +151,35 @@ fn isolated_install_case() {
     let requests = worker.join().expect("fixture worker");
     assert_eq!(
         requests.iter().map(Text::as_str).collect::<List<_>>(),
-        List::from([
-            "GET /private/api/v1/cogs/fixture/latest HTTP/1.1",
-            "GET /private/api/v1/cogs/fixture/1.2.3 HTTP/1.1",
-            "GET /private/api/v1/security/vulnerabilities/fixture/1.2.3 HTTP/1.1",
-            "GET /private/api/v1/cogs/fixture/1.2.3/download HTTP/1.1",
-        ]),
+        List::from(
+            &[
+                "GET /private/api/v1/cogs/fixture/latest HTTP/1.1",
+                "GET /private/api/v1/cogs/fixture/1.2.3 HTTP/1.1",
+                "GET /private/api/v1/security/vulnerabilities/fixture/1.2.3 HTTP/1.1",
+                "GET /private/api/v1/cogs/fixture/1.2.3/download HTTP/1.1",
+            ][..]
+        ),
         "metadata and artifact must stay on the selected registry; result: {result:?}",
     );
     if archive_failure {
-        assert!(result.is_err(), "a failed archive transfer must fail installation");
+        assert!(
+            result.is_err(),
+            "a failed archive transfer must fail installation"
+        );
         assert_eq!(std::fs::read(&manifest_path).unwrap(), before);
         assert!(!Manifest::lockfile_path(project.path()).exists());
     } else {
         result.expect("install from selected registry");
-        assert_eq!(std::fs::read(cache.get_cog_path("fixture", "1.2.3")).unwrap(), ARCHIVE);
+        assert_eq!(
+            std::fs::read(cache.get_cog_path("fixture", "1.2.3")).unwrap(),
+            ARCHIVE
+        );
         let lock = Lockfile::from_file(&Manifest::lockfile_path(project.path())).unwrap();
-        let entry = lock.packages.iter().find(|entry| entry.name.as_str() == "fixture").unwrap();
+        let entry = lock
+            .packages
+            .iter()
+            .find(|entry| entry.name.as_str() == "fixture")
+            .unwrap();
         assert!(
             matches!(&entry.source, CogSource::Registry { registry, version }
                 if registry == &configured && version.as_str() == "1.2.3"),
