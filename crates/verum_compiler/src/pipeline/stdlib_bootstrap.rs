@@ -2953,3 +2953,7 @@ mod generic_variant_payload_tests;
 #[cfg(test)]
 #[path = "../../tests/bootstrap/qualified_record_assignment.rs"]
 mod qualified_record_assignment_tests;
+
+#[cfg(test)]
+#[path = "../../tests/bootstrap/alias_declaring_scope.rs"]
+mod alias_declaring_scope_tests;
