@@ -435,6 +435,7 @@ check-rings-census: ## Report the core/ inter-module dependency graph (never fai
 	python3 scripts/ci/check_core_rings.py --census
 
 check-internal-refs: ## Gate: no references to the internal/ directory in tracked files
+	python3 scripts/ci/tests/test_internal_reference_gate.py
 	bash scripts/ci/check_no_internal_refs.sh
 	python3 scripts/ci/check_spec_citation_names.py --self-test
 	python3 scripts/ci/check_spec_citation_names.py
