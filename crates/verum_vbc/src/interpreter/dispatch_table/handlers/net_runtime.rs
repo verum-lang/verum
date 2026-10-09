@@ -1272,39 +1272,6 @@ mod tests {
     use std::time::Duration;
 
     #[test]
-    fn tcp_listen_accept_send_recv_round_trip() {
-        // Server side — use tcp_listen_v2 with REUSEPORT (flag bit 0)
-        // and explicit 127.0.0.1 host so we don't bind to 0.0.0.0
-        // (v1 `tcp_listen` defaults).  REUSEPORT lets parallel test
-        // runs / TIME_WAIT lingerers re-bind without the prior
-        // `EADDRINUSE` hang that surfaced when the same port was
-        // recycled fast across consecutive `cargo test` invocations.
-        let listen_fd = tcp_listen_v2("127.0.0.1", 0, 128, 1);
-        assert!(listen_fd > 0, "tcp_listen_v2 returned {listen_fd}");
-        let port = tcp_local_port(listen_fd);
-        assert!(port > 0 && port <= 65535, "expected valid port, got {port}");
-        // Spawn a client
-        let client = thread::spawn(move || {
-            // Tiny sleep so accept() is reached first deterministically.
-            thread::sleep(Duration::from_millis(20));
-            let cfd = tcp_connect("127.0.0.1", port);
-            assert!(cfd > 0);
-            assert_eq!(tcp_send(cfd, b"hello"), 5);
-            let resp = tcp_recv(cfd, 64).unwrap();
-            assert_eq!(resp, "world");
-            assert_eq!(tcp_close(cfd), 0);
-        });
-        let conn_fd = tcp_accept(listen_fd);
-        assert!(conn_fd > 0);
-        let req = tcp_recv(conn_fd, 64).unwrap();
-        assert_eq!(req, "hello");
-        assert_eq!(tcp_send(conn_fd, b"world"), 5);
-        assert_eq!(tcp_close(conn_fd), 0);
-        client.join().unwrap();
-        assert_eq!(tcp_close(listen_fd), 0);
-    }
-
-    #[test]
     fn close_unknown_fd_returns_minus_one() {
         assert_eq!(tcp_close(999_999), -1);
     }
@@ -1370,75 +1337,6 @@ mod tests {
     #[test]
     fn tcp_local_port_unknown_fd_returns_minus_one() {
         assert_eq!(tcp_local_port(999_999), -1);
-    }
-
-    /// VBC-NET-RT-1 — proof that the lock-drop discipline works.
-    /// Two TCP connections in flight: one is parked in `tcp_recv`
-    /// (the listener never sends), the other completes a full
-    /// send + recv round-trip.  Pre-fix the second op blocked on
-    /// the REGISTRY mutex held by the first; post-fix it completes
-    /// in milliseconds.  100 ms timeout proves we don't serialise.
-    #[test]
-    fn concurrent_recv_does_not_block_unrelated_send() {
-        // Listener that NEVER sends — used to park a recv.
-        let parker_listen = tcp_listen_v2("127.0.0.1", 0, 8, 1);
-        assert!(parker_listen > 0);
-        let parker_port = tcp_local_port(parker_listen);
-        // Listener that echoes — used for the unrelated round-trip.
-        let echo_listen = tcp_listen_v2("127.0.0.1", 0, 8, 1);
-        assert!(echo_listen > 0);
-        let echo_port = tcp_local_port(echo_listen);
-
-        // Park a recv on the first stream in a background thread.
-        let parker = thread::spawn(move || {
-            let cfd = tcp_connect("127.0.0.1", parker_port);
-            assert!(cfd > 0);
-            // This recv will block forever (the server never replies).
-            // We only care that it doesn't hold the REGISTRY mutex.
-            let _ = tcp_recv(cfd, 64);
-            // Unreachable in normal test flow; main thread closes
-            // the listener which causes the connection to drop and
-            // recv to return with EOF/None.
-            let _ = tcp_close(cfd);
-        });
-        // Accept the parker connection (so its recv has something to wait on).
-        let parker_conn = tcp_accept(parker_listen);
-        assert!(parker_conn > 0);
-        // Give the parker thread a moment to enter recv().
-        thread::sleep(Duration::from_millis(50));
-
-        // NOW the canary: an unrelated round-trip must complete fast.
-        let echo_done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let echo_done_clone = echo_done.clone();
-        let echo_client = thread::spawn(move || {
-            let cfd = tcp_connect("127.0.0.1", echo_port);
-            assert!(cfd > 0);
-            assert_eq!(tcp_send(cfd, b"ping"), 4);
-            let resp = tcp_recv(cfd, 64).unwrap();
-            assert_eq!(resp, "pong");
-            assert_eq!(tcp_close(cfd), 0);
-            echo_done_clone.store(true, std::sync::atomic::Ordering::SeqCst);
-        });
-        let echo_conn = tcp_accept(echo_listen);
-        assert!(echo_conn > 0);
-        let req = tcp_recv(echo_conn, 64).unwrap();
-        assert_eq!(req, "ping");
-        assert_eq!(tcp_send(echo_conn, b"pong"), 4);
-        assert_eq!(tcp_close(echo_conn), 0);
-        echo_client.join().unwrap();
-        assert!(
-            echo_done.load(std::sync::atomic::Ordering::SeqCst),
-            "echo round-trip did not complete — REGISTRY lock contention?"
-        );
-
-        // Cleanup parker.
-        assert_eq!(tcp_close(parker_conn), 0);
-        assert_eq!(tcp_close(parker_listen), 0);
-        // Parker thread will unblock on EOF; join with timeout
-        // semantics via a simple sleep + status check is overkill
-        // here — `tcp_close` of the conn breaks the recv.
-        let _ = parker.join();
-        assert_eq!(tcp_close(echo_listen), 0);
     }
 
     // VBC-NET-RT-2 ----------------------------------------------------------
@@ -2507,3 +2405,7 @@ fn intercept_tcp_read(
 #[cfg(test)]
 #[path = "../../../../tests/unit/udp_peer_address.rs"]
 mod udp_peer_address_tests;
+
+#[cfg(test)]
+#[path = "../../../../tests/unit/net_runtime_bounded_tcp.rs"]
+mod bounded_tcp_tests;
