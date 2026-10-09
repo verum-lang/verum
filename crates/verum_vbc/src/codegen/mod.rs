@@ -57,6 +57,7 @@ pub mod registers;
 mod bootstrap_types;
 mod expressions;
 mod array_coercions;
+mod array_elements;
 mod parsed_field_types;
 mod associated_types;
 mod statements;
@@ -22973,7 +22974,17 @@ impl VbcCodegen {
     /// `PACKED-FIELD-ONE-REPRESENTATION-1` (T1463) needs it to size the
     /// normalising unpack loop, and treats `0` as "not normalisable".
     fn field_array_spec(&self, type_name: &str, field_name: &str) -> Option<(usize, bool, u64)> {
-        use crate::types::TypeRef;
+        match self.field_array_type(type_name, field_name)? {
+            TypeRef::Array { element, length } => self
+                .primitive_array_element_spec(element)
+                .map(|(sz, is_float)| (sz, is_float, *length)),
+            _ => None,
+        }
+    }
+
+    /// The exact field declaration supplies element semantics independently of
+    /// whether its current value is packed or a boxed List.
+    fn field_array_type(&self, type_name: &str, field_name: &str) -> Option<&TypeRef> {
         // Mirror resolve_field_index_impl's key discipline: strip generic
         // args, and re-key a non-authoritative simple name to its
         // module-qualified registration before the descriptor lookup.
@@ -22998,12 +23009,7 @@ impl VbcCodegen {
                 .get(fd.name.0 as usize)
                 .is_some_and(|s| s == field_name)
         })?;
-        match &fd.type_ref {
-            TypeRef::Array { element, length } => self
-                .primitive_array_element_spec(element)
-                .map(|(sz, is_float)| (sz, is_float, *length)),
-            _ => None,
-        }
+        Some(&fd.type_ref)
     }
 
     /// `(elem_size, is_float)` for a PRIMITIVE array-element `TypeRef`, or

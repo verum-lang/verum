@@ -1,7 +1,7 @@
 //! Emission-derived array storage facts shared by VBC codegen and native lowering.
 //! This module describes actual producers, not semantic array types or ownership.
 use crate::encoding::decode_reg;
-use crate::instruction::{Instruction, MemSubOpcode, Reg};
+use crate::instruction::{ArithSubOpcode, Instruction, MemSubOpcode, Reg};
 use verum_common::{Map, Maybe};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -132,6 +132,31 @@ impl ArrayResultFacts {
                         },
                     );
                 }
+            }
+            I::ArithExtended { sub_op, operands }
+                if ArithSubOpcode::from_byte(*sub_op) == Some(ArithSubOpcode::SextI) =>
+            {
+                // A validated scalar conversion overwrites only its result;
+                // it supplies no physical storage or integer-constant proof.
+                let mut cursor = 0;
+                let mut registers = [Reg(0); 2];
+                for register in &mut registers {
+                    let start = cursor;
+                    let Ok(decoded) = decode_reg(operands, &mut cursor) else {
+                        self.clear();
+                        return false;
+                    };
+                    if cursor - start != if decoded.0 < 128 { 1 } else { 2 } {
+                        self.clear();
+                        return false;
+                    }
+                    *register = decoded;
+                }
+                if !matches!(operands.get(cursor..), Some([8 | 16 | 32 | 64, 64])) {
+                    self.clear();
+                    return false;
+                }
+                self.forget(registers[0]);
             }
             I::LoadK { dst, .. }
             | I::LoadF { dst, .. }
