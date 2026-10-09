@@ -435,9 +435,9 @@ pub(super) fn record_field_count(
     if header.type_id.0 == verum_common::layout::SYNTHETIC_RECORD_TYPE_ID {
         return Some(slots);
     }
-    state.module.types.iter()
-        .find(|td| td.id == header.type_id)
-        .and_then(|td| matches!(td.kind, TypeKind::Record).then(|| td.fields.len().min(slots)))
+    let index = state.module.type_index_by_id(header.type_id)?;
+    let descriptor = &state.module.types[index];
+    matches!(descriptor.kind, TypeKind::Record).then(|| descriptor.fields.len().min(slots))
 }
 
 fn deep_value_eq_depth(va: &Value, vb: &Value, state: &InterpreterState, depth: usize) -> bool {

@@ -2226,10 +2226,30 @@ pub(in super::super) fn handle_list_pop(
     Ok(DispatchResult::Continue)
 }
 
+/// Header access for collection keys requires an allocator-owned object.
+/// A pointer field can instead be a raw buffer or a reference; its payload
+/// bytes never establish a heap-object representation.
+fn key_object_header(v: Value, state: &InterpreterState) -> Option<&heap::ObjectHeader> {
+    if !v.is_regular_ptr() {
+        return None;
+    }
+    let ptr = v.as_ptr::<heap::ObjectHeader>();
+    if !state.heap.contains(ptr) {
+        return None;
+    }
+    // SAFETY: this allocator owns the live ObjectHeader at ptr.
+    Some(unsafe { &*ptr })
+}
+
+fn key_is_heap_text(v: Value, state: &InterpreterState) -> bool {
+    key_object_header(v, state).is_some()
+        && super::string_helpers::is_heap_string(&v)
+}
+
 /// Detect whether a value is a heap-allocated variant object.
 /// Variants live at type IDs:
 ///   * `0x8000+tag` (synthetic, untyped MakeVariant)
-///   * `MAYBE=515` / `RESULT=516` / `ORDERING=517` (typed)
+///   * canonical `MAYBE` / `RESULT` / `ORDERING` identities (typed)
 ///
 /// Both layouts begin with the canonical `(tag:u32, field_count:u32)`
 /// pair at `VARIANT_TAG_OFFSET` followed by `field_count` `Value`
@@ -2238,22 +2258,13 @@ pub(in super::super) fn handle_list_pop(
 /// semantically-equal variants like `Some(1)` allocated separately)
 /// to tag+payload-recursive hashing/equality.
 #[inline]
-fn variant_layout(v: &Value) -> Option<(*const u8, u32, u32)> {
-    if !v.is_ptr() || v.is_nil() {
-        return None;
-    }
+fn variant_layout(v: &Value, state: &InterpreterState) -> Option<(*const u8, u32, u32)> {
+    let header = key_object_header(*v, state)?;
     let ptr = v.as_ptr::<u8>();
-    if ptr.is_null() {
-        return None;
-    }
-    // SAFETY: any non-null pointer in a well-formed value points to
-    // a heap allocation whose header we can read.  Misaligned /
-    // sentinel pointers return a stub header via `ref_or_stub`.
-    let header = unsafe { heap::ObjectHeader::ref_or_stub(ptr) };
     let type_id = header.type_id.0;
     let is_well_known = type_id == crate::types::TypeId::MAYBE.0
         || type_id == crate::types::TypeId::RESULT.0
-        || type_id == 517 /* ORDERING — see TypeId well-known range */;
+        || type_id == TypeId::ORDERING.0;
     let is_synthetic = verum_common::layout::is_synthetic_variant_type_id(type_id);
     if !is_well_known && !is_synthetic {
         return None;
@@ -2267,6 +2278,9 @@ fn variant_layout(v: &Value) -> Option<(*const u8, u32, u32)> {
         return None;
     }
     let (tag, field_count) = unsafe { heap::variant_header_pair(ptr) };
+    if field_count as usize > (header.size as usize - 8) / std::mem::size_of::<Value>() {
+        return None;
+    }
     Some((ptr, tag, field_count))
 }
 
@@ -2274,15 +2288,15 @@ fn variant_layout(v: &Value) -> Option<(*const u8, u32, u32)> {
 /// TypeKind, never by the numeric shape of an address or a type-id range.
 /// General equality shares the semantic field-count authority with this path.
 fn record_layout(v: Value, state: &InterpreterState) -> Option<(*const u8, u32, usize, u32)> {
-    if !v.is_regular_ptr() || v.is_nil() {
+    let header = key_object_header(v, state)?;
+    // These canonical runtime bands carry native representations. A stdlib
+    // declaration may describe the same type without describing that storage
+    // (for example Shared's native [refcount, value] carrier). The same band
+    // authority excludes native objects from declared-record drop glue.
+    if header.type_id.is_semantic_type() || header.type_id.is_meta_type() {
         return None;
     }
     let ptr = v.as_ptr::<u8>();
-    if !state.heap.contains(ptr.cast::<heap::ObjectHeader>()) {
-        return None;
-    }
-    // SAFETY: the heap owns this allocation and its ObjectHeader.
-    let header = unsafe { heap::ObjectHeader::ref_or_stub(ptr) };
     let fields = super::string_helpers::record_field_count(state, header)?;
     Some((ptr, header.type_id.0, fields, header.size))
 }
@@ -2323,7 +2337,7 @@ fn value_hash_depth(v: Value, state: &InterpreterState, depth: usize) -> usize {
     // payload), so the value-hash MUST be structural too —
     // otherwise the (hash, eq) pair violates the equivalence
     // contract that Map/Set's bucket walk depends on.
-    if let Some((ptr, tag, field_count)) = variant_layout(&v) {
+    if let Some((ptr, tag, field_count)) = variant_layout(&v, state) {
         let mut hash = FNV_OFFSET;
         // Mix in a variant discriminator so variants don't collide
         // with integers / strings.
@@ -2359,7 +2373,7 @@ fn value_hash_depth(v: Value, state: &InterpreterState, depth: usize) -> usize {
     // final leg); a BYTE_SLICE byte view carries `{ptr, len}` raw
     // slots.  Both classify as `is_heap_string`, so resolve the byte
     // range through the matching typed reader.
-    if super::string_helpers::is_heap_string(&v) {
+    if key_is_heap_text(v, state) {
         let ptr = v.as_ptr::<u8>();
         let (bytes_ptr, len): (*const u8, usize) =
             if let Some((p, l)) = heap::value_as_byte_slice(&v) {
@@ -2477,8 +2491,8 @@ fn value_eq_depth(a: Value, b: Value, state: &InterpreterState, depth: usize) ->
 
     // Text storage is not its identity: short Text can also be heap-backed,
     // for example when supplied by a runtime byte producer.
-    let a_is_text = a.is_small_string() || super::string_helpers::is_heap_string(&a);
-    let b_is_text = b.is_small_string() || super::string_helpers::is_heap_string(&b);
+    let a_is_text = a.is_small_string() || key_is_heap_text(a, state);
+    let b_is_text = b.is_small_string() || key_is_heap_text(b, state);
     if a_is_text && b_is_text {
         return text_content_eq(&a, &b);
     }
@@ -2489,8 +2503,8 @@ fn value_eq_depth(a: Value, b: Value, state: &InterpreterState, depth: usize) ->
     // fast-path).  Two heap variants compare equal iff their type
     // ids, tags, field counts AND each payload Value all compare
     // equal recursively.
-    let a_v = variant_layout(&a);
-    let b_v = variant_layout(&b);
+    let a_v = variant_layout(&a, state);
+    let b_v = variant_layout(&b, state);
     if let (Some((a_ptr, a_tag, a_fc)), Some((b_ptr, b_tag, b_fc))) = (a_v, b_v) {
         // Require type-id parity so e.g. Maybe.None (tag=0) doesn't
         // accidentally compare equal to Result.Ok (tag=0) — both

@@ -213,4 +213,5 @@ pub(super) mod tensor_extended;
 pub(super) mod text_extended;
 
 #[cfg(all(test, feature = "codegen"))]
+#[path = "../../../../tests/unit/structural_key_tests.rs"]
 mod structural_key_tests;

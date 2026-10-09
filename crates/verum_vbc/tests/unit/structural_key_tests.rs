@@ -327,3 +327,138 @@ fn probe() -> Int {{
         15
     );
 }
+
+#[test]
+fn record_raw_pointer_fields_keep_identity_despite_header_like_bytes() {
+    let mut module = VbcModule::default();
+    module.types.push(TypeDescriptor {
+        id: TypeId(9001),
+        kind: TypeKind::Record,
+        fields: [FieldDescriptor::default()].into_iter().collect(),
+        ..TypeDescriptor::default()
+    });
+    let mut state = InterpreterState::new(Arc::new(module));
+    // Raw buffers may legally contain any bytes, including an apparent Text
+    // header. These are aligned initialized bytes, but not tracked objects.
+    fn raw_text_shaped_bytes() -> [u64; 6] {
+        let mut bytes = [0u64; 6];
+        let ptr = bytes.as_mut_ptr().cast::<u8>();
+        // SAFETY: the aligned buffer holds a 24-byte header plus three Values.
+        unsafe {
+            ptr.cast::<heap::ObjectHeader>()
+                .write(heap::ObjectHeader::new(TypeId::TEXT, 0, 24));
+            let slots = ptr.add(heap::OBJECT_HEADER_SIZE).cast::<Value>();
+            for i in 0..3 {
+                slots.add(i).write(Value::from_i64(0));
+            }
+        }
+        bytes
+    }
+    let mut bytes_a = raw_text_shaped_bytes();
+    let mut bytes_b = raw_text_shaped_bytes();
+    let raw_a = Value::from_ptr(bytes_a.as_mut_ptr().cast::<u8>());
+    let raw_b = Value::from_ptr(bytes_b.as_mut_ptr().cast::<u8>());
+    let first = record(&mut state, TypeId(9001), &[raw_a]);
+    let same_pointer = record(&mut state, TypeId(9001), &[raw_a]);
+    let other_pointer = record(&mut state, TypeId(9001), &[raw_b]);
+    assert!(
+        !value_eq(first, other_pointer, &state),
+        "raw payload bytes are not type evidence"
+    );
+    assert!(value_eq(first, same_pointer, &state));
+    let hash = value_hash(first, &state);
+    assert_eq!(hash, value_hash(same_pointer, &state));
+    bytes_a[0] = 0; // Changing raw contents cannot change a pointer-valued key.
+    assert_eq!(bytes_a[0], 0);
+    assert_eq!(hash, value_hash(first, &state));
+    assert!(value_eq(first, same_pointer, &state));
+}
+
+#[test]
+fn native_shared_descriptor_does_not_make_refcount_a_key_field() {
+    let mut module = VbcModule::default();
+    module.types.push(TypeDescriptor {
+        id: TypeId(9001),
+        kind: TypeKind::Record,
+        fields: [FieldDescriptor::default()].into_iter().collect(),
+        ..TypeDescriptor::default()
+    });
+    // An archive can contain the stdlib Shared declaration, while the
+    // interpreter's native carrier still has [refcount, inner] storage.
+    module.types.push(TypeDescriptor {
+        id: TypeId::SHARED,
+        kind: TypeKind::Record,
+        fields: [
+            FieldDescriptor::default(),
+            FieldDescriptor::default(),
+            FieldDescriptor::default(),
+        ]
+        .into_iter()
+        .collect(),
+        ..TypeDescriptor::default()
+    });
+    let mut state = InterpreterState::new(Arc::new(module));
+    let shared = record(
+        &mut state,
+        TypeId::SHARED,
+        &[Value::from_i64(1), Value::from_i64(42)],
+    );
+    let key = record(&mut state, TypeId(9001), &[shared]);
+    let same = record(&mut state, TypeId(9001), &[shared]);
+    let hash = value_hash(key, &state);
+    let alias = super::memory_collections::value_copy(&mut state, shared).expect("Shared copy");
+    assert_eq!(shared.to_bits(), alias.to_bits());
+    let refcount = unsafe {
+        *shared
+            .as_ptr::<u8>()
+            .add(heap::OBJECT_HEADER_SIZE)
+            .cast::<Value>()
+    };
+    assert_eq!(refcount.as_i64(), 2, "the control must change the refcount");
+    assert!(value_eq(key, same, &state));
+    assert_eq!(
+        hash,
+        value_hash(key, &state),
+        "native bookkeeping is not a record field"
+    );
+    assert_eq!(hash, value_hash(same, &state));
+}
+
+#[test]
+fn native_range_and_ordering_keep_their_canonical_key_representations() {
+    let mut module = VbcModule::default();
+    module.types.push(TypeDescriptor {
+        id: TypeId::RANGE,
+        kind: TypeKind::Record,
+        fields: [FieldDescriptor::default(), FieldDescriptor::default()]
+            .into_iter()
+            .collect(),
+        ..TypeDescriptor::default()
+    });
+    let mut state = InterpreterState::new(Arc::new(module));
+    // RANGE used to be mistaken for Ordering by a stale literal 517. Its
+    // Value-encoded bounds must never be read as a variant tag/field count.
+    let range = record(
+        &mut state,
+        TypeId::RANGE,
+        &[Value::from_i64(1), Value::from_i64(42)],
+    );
+    let _ = value_hash(range, &state);
+    fn ordering(state: &mut InterpreterState, tag: u32) -> Value {
+        let object = state.heap.alloc(TypeId::ORDERING, 8).expect("Ordering");
+        let ptr = object.as_ptr() as *mut u8;
+        // SAFETY: a nullary typed variant has a tag/count pair and no payload.
+        unsafe {
+            let pair = ptr.add(heap::OBJECT_HEADER_SIZE).cast::<u32>();
+            pair.write(tag);
+            pair.add(1).write(0);
+        }
+        Value::from_ptr(ptr)
+    }
+    let equal_a = ordering(&mut state, 1);
+    let equal_b = ordering(&mut state, 1);
+    let less = ordering(&mut state, 0);
+    assert!(value_eq(equal_a, equal_b, &state));
+    assert_eq!(value_hash(equal_a, &state), value_hash(equal_b, &state));
+    assert!(!value_eq(equal_a, less, &state));
+}
