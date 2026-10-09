@@ -60,7 +60,7 @@ pub(crate) fn from_manifest(manifest: &Manifest) -> Result<Map<Text, DependencyS
     Ok(dependencies)
 }
 
-fn validate_version(name: &Text, version: &Text) -> Result<()> {
+pub(super) fn validate_version(name: &Text, version: &Text) -> Result<()> {
     VersionReq::parse(version.as_str()).map_err(|error| {
         CliError::Custom(format!(
             "Cannot publish dependency '{name}': invalid version requirement '{version}': {error}"

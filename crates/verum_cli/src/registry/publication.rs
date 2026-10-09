@@ -172,6 +172,20 @@ fn validate_metadata(metadata: &CogMetadata) -> Result<()> {
             "Invalid publication metadata: checksum must be lowercase SHA-256 hex".into(),
         ));
     }
+    for (name, dependency) in &metadata.dependencies {
+        let version = match dependency {
+            DependencySpec::Simple(version) => Some(version),
+            DependencySpec::Detailed { version, .. } => version.as_ref(),
+        }
+        .ok_or_else(|| {
+            CliError::Registry(format!(
+                "Invalid publication metadata: dependency '{name}' requires an explicit version requirement"
+            ))
+        })?;
+        super::publication_dependencies::validate_version(name, version).map_err(|error| {
+            CliError::Registry(format!("Invalid publication metadata: {error}"))
+        })?;
+    }
     if metadata.signature.is_some()
         || metadata.proofs.is_some()
         || metadata.cbgr_profiles.is_some()

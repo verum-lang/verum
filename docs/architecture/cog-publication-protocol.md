@@ -56,11 +56,19 @@ The object contains exactly these fields. Optional values are explicitly
 | `features` | object | Feature names mapped to arrays of feature/dependency names |
 | `checksum` | string | Lowercase, 64-digit SHA-256 hex of the exact archive bytes |
 
-A dependency specification is either a version-requirement string or an
-object whose only fields are `version` (string or null), `features` (array of
-strings or null), `optional` (boolean or null) and `default_features` (boolean
-or null). Omitted fields in this detailed dependency form have their normal
-optional meaning. The top-level publication fields are all required.
+A dependency specification is either a valid version-requirement string or
+an object whose only fields are `version` (required string), `features` (array
+of strings or null), `optional` (boolean or null) and `default_features`
+(boolean or null). Every dependency requires an explicit, valid semantic
+version requirement; missing or null versions are refused. An explicit `*`
+is valid. The other detailed fields may be omitted with their normal optional
+meaning. The top-level publication fields are all required.
+
+The general Rust `DependencySpec` type retains an optional version for
+read-side compatibility. That representation does not permit versionless
+publication: the shared publication validator enforces the rule for direct
+metadata callers as well as manifest-based commands. The server must
+independently enforce it when admitting a publication.
 
 Unknown fields are refused. In particular, `as_authority`, `authority`,
 `published_at`, `artifacts`, `proofs`, `cbgr_profiles`, `signature`,
@@ -78,10 +86,11 @@ decoder. Object ordering and insignificant JSON whitespace have no semantic
 meaning. These metadata bytes are not claimed to be canonical JSON or a
 signature payload.
 
-The client validates the name, exact version and checksum shape, bounds
-serialization, reads bounded archive bytes and recomputes SHA-256 before
-sending. The server independently validates the complete metadata schema,
-archive format, declared digest and archive manifest coordinate before any
+The client validates the name, exact cog version, dependency requirements and
+checksum shape, bounds serialization, reads bounded archive bytes and
+recomputes SHA-256 before sending. The server independently validates the
+complete metadata schema, archive format, declared digest and archive
+manifest coordinate before any
 publication mutation. Malformed metadata is a `400` error; a well-formed
 checksum that does not match the archive is a distinct `422` error.
 
@@ -109,7 +118,7 @@ The producer refuses `path`, `git`, `branch`, `tag` and `rev` declarations,
 even when accompanied by a version, before archive/build/signing work. The
 v1 metadata cannot represent those source choices, and there is no implicit
 fallback from a local or Git dependency to a registry release. These checks
-apply to dry runs as well as uploads.
+apply to package and workspace dry runs as well as uploads.
 
 Preserving publication metadata does not establish consumer feature behavior.
 T1657 tracks optional/default-feature activation and recursive installation;
