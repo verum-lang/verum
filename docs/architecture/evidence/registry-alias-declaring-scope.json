@@ -1,0 +1,501 @@
+{
+  "task": "T1694",
+  "scope": "Retained explicit type-mount authority by current declaring source owner. Actual parsed multi-file bootstrap, archive wire and canonical alias metadata controls; no alias text replacement, scalar coercion or unknown-owner leniency.",
+  "causal_baseline_receipt": "docs/architecture/evidence/registry-alias-declaring-scope-baseline.json",
+  "tested_source": "c4e33fa29bd39662d475396eae698011fa972783",
+  "production_source": "3c4c719428da6cb52a30653270dd1290ff8a4eb7",
+  "vbc_tree": "d288499f9d75ce4bb594cb1afa708803f3bac4c8",
+  "source_boundary": "A retained owner table contains explicit empty scopes as well as bindings. Collection and later body compilation select it via current_source_module. The old flat context table is only a compatibility fallback for a context with no collected source scope. Existing type identity fallback rules are unchanged.",
+  "artifact_boundary": "The inherited stage14 fdad59f06 runtime archive/metadata/graph/checksum/schema are byte-identical before and after every run. These tests construct their own small source-driven archives; they do not freshly produce the standard-library artifact set.",
+  "remaining_boundaries": [
+    "T1697: inline-only bootstrap nominal dependency discovery remains open, with the negative retained below.",
+    "T0811: explicit missing-owner controls refuse selecting a known nominal head but do not claim strict source rejection by lenient bootstrap.",
+    "Fresh ordinary stdlib production, decoded core.io.protocols.IoResult verification and unchanged registry replay remain separate; no CLI/AOT/service acceptance is claimed.",
+    "T0691 full shared-symbol artifact acceptance, T1691 origin StringId remapping and TLS late-root closure remain separate."
+  ],
+  "raw_log_policy": "All listed raw output files retain their exact bytes, including Cargo trailing spaces/blank EOF. Exclude only these exact raw logs from diff --check; code,JSON and prose retain normal whitespace checking.",
+  "gates": [
+    {
+      "source_commit": "4ef826fe7f04fcd02efa938c1e9372ab2007da38",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "--manifest-path",
+        "/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/Cargo.toml",
+        "-p",
+        "verum_compiler",
+        "--lib",
+        "alias_declaring_scope_tests::delayed_function_bodies",
+        "--",
+        "--test-threads=1",
+        "--nocapture"
+      ],
+      "environment": {
+        "CARGO_TARGET_DIR": "/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target",
+        "CARGO_INCREMENTAL": "0",
+        "CARGO_BUILD_JOBS": "2",
+        "VERUM_NO_AUTO_PRECOMPILE": "1",
+        "VERUM_LLVM_DIR": "/Users/taaliman/projects/oldman/verum-lang/verum/llvm/install",
+        "RUST_MIN_STACK": "16777216",
+        "VERUM_TRACE_RTC": "1",
+        "VERUM_TRACE_PTRFALL": "1"
+      },
+      "timeout_seconds": 600,
+      "scope": "T1694 parsed multi-file sources -> production bootstrap compiler -> archive wire -> metadata alias identity controls. Production source unchanged for this causal baseline. No ordinary CLI, automatic bake, AOT or full service acceptance.",
+      "artifacts_before": {
+        "runtime.vbca": "410ff097b455437cab98b651f7799b3129588820925afe98e0de9c3781530a0f",
+        "runtime.core_metadata": "a92bd89e649e102cdc67d7ad0032513d6448d8915e5744127e6cdf1f1e34ebbb",
+        "runtime.symbol_graph": "a6678c18498f7519749ca1fdf1d22629b479083f42fa95a15177e8c7acf1c722",
+        "runtime.vbca.checksum": "c33573118a8c4b635f6c8f727c3784b524f660be57de702365e8d9c14b2f3a8b",
+        "runtime.vbca.schema": "fec20d7b3f8d1b81aff66c6c1181be574963779f7eacaf65660f8ab9127fca87"
+      },
+      "source_paths": {
+        "crates/verum_compiler/src/pipeline/stdlib_bootstrap.rs": "de403b9e0d97320e12b644462a50d5d2d55f90e44e2e8ddfd8f0708280ff7609",
+        "crates/verum_compiler/src/archive_metadata.rs": "ea54df04f9bd0043521e4bfbda9f66a2b93dbc6cf0e195e372c61c65feffa9c3",
+        "crates/verum_compiler/tests/bootstrap/alias_declaring_scope.rs": "e593bb3f52c612a11afe240a99abe4e10f2d335faee1c602b97e03af617069c1",
+        "crates/verum_vbc/src/codegen/mod.rs": "542d18384f9da9b03391778e68959ef652fb1fbf061e1e3d5d69c7cdc360b6ec",
+        "crates/verum_vbc/src/codegen/context.rs": "1b65b65c8565c6b6730ce4b9fa68dfc885a4408f6084a3cdef9f1e935bfa8a54",
+        "crates/verum_vbc/src/codegen/bootstrap_types.rs": "bb3c67143bcb7e3fcd5bd58096a77cf90cc7c8056906f3264304dea1760c42f7",
+        "crates/verum_common/src/well_known_types.rs": "95f89cc6eddb8954f05bc6d74e55df9df7ca9151fdfaa6c3dba749bb76df310d"
+      },
+      "installed_llvm_version": "21.1.8",
+      "native_dependency_boundary": "Existing LLVM installation and warm native solver outputs only; local LLVM C/C++ wrapper recompilation is permitted. Fresh Z3/CVC5, LLVM toolchain or stdlib producer builds are refused.",
+      "exit_code": 0,
+      "wall_seconds": 194.749,
+      "failure": null,
+      "source_unchanged": true,
+      "log_sha256": "bd234503494b22c5ace47c557c9e33b046b97ee83a11d8a95aa389b6ac53865d",
+      "source_paths_unchanged": true,
+      "executables": {
+        "/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target/debug/build/verum_compiler/c6ca94c7409ab771/out/verum_compiler-c6ca94c7409ab771": "051e7bcbf94da8a2222b5ef288aa1977eb353142ea4cedbe50b182b2875e8a59"
+      },
+      "artifacts_after": {
+        "runtime.vbca": "410ff097b455437cab98b651f7799b3129588820925afe98e0de9c3781530a0f",
+        "runtime.core_metadata": "a92bd89e649e102cdc67d7ad0032513d6448d8915e5744127e6cdf1f1e34ebbb",
+        "runtime.symbol_graph": "a6678c18498f7519749ca1fdf1d22629b479083f42fa95a15177e8c7acf1c722",
+        "runtime.vbca.checksum": "c33573118a8c4b635f6c8f727c3784b524f660be57de702365e8d9c14b2f3a8b",
+        "runtime.vbca.schema": "fec20d7b3f8d1b81aff66c6c1181be574963779f7eacaf65660f8ab9127fca87"
+      },
+      "test_results": [
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1249 filtered out; finished in 0.07s"
+      ],
+      "durable_log": "docs/architecture/evidence/registry-alias-declaring-scope/body-baseline-output.txt",
+      "verdict": "Delayed bodies retain both source-owned signatures and an actual call to their own helper before the repair. This positive is a non-regression control, not the causal red."
+    },
+    {
+      "source_commit": "7d76f9384f0b9c2f37310d09375b741a0c2f4a9f",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "--manifest-path",
+        "/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/Cargo.toml",
+        "-p",
+        "verum_compiler",
+        "--lib",
+        "alias_declaring_scope_tests::",
+        "--",
+        "--test-threads=1",
+        "--nocapture"
+      ],
+      "environment": {
+        "CARGO_TARGET_DIR": "/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target",
+        "CARGO_INCREMENTAL": "0",
+        "CARGO_BUILD_JOBS": "2",
+        "VERUM_NO_AUTO_PRECOMPILE": "1",
+        "VERUM_LLVM_DIR": "/Users/taaliman/projects/oldman/verum-lang/verum/llvm/install",
+        "RUST_MIN_STACK": "16777216",
+        "VERUM_TRACE_RTC": "1",
+        "VERUM_TRACE_PTRFALL": "1"
+      },
+      "timeout_seconds": 600,
+      "scope": "T1694 parsed multi-file sources -> production bootstrap compiler -> archive wire -> metadata alias identity controls. Frozen source-owner mount repair; causal baseline recorded separately. No ordinary CLI, automatic bake, AOT or full service acceptance.",
+      "artifacts_before": {
+        "runtime.vbca": "410ff097b455437cab98b651f7799b3129588820925afe98e0de9c3781530a0f",
+        "runtime.core_metadata": "a92bd89e649e102cdc67d7ad0032513d6448d8915e5744127e6cdf1f1e34ebbb",
+        "runtime.symbol_graph": "a6678c18498f7519749ca1fdf1d22629b479083f42fa95a15177e8c7acf1c722",
+        "runtime.vbca.checksum": "c33573118a8c4b635f6c8f727c3784b524f660be57de702365e8d9c14b2f3a8b",
+        "runtime.vbca.schema": "fec20d7b3f8d1b81aff66c6c1181be574963779f7eacaf65660f8ab9127fca87"
+      },
+      "source_paths": {
+        "crates/verum_compiler/src/pipeline/stdlib_bootstrap.rs": "de403b9e0d97320e12b644462a50d5d2d55f90e44e2e8ddfd8f0708280ff7609",
+        "crates/verum_compiler/src/archive_metadata.rs": "ea54df04f9bd0043521e4bfbda9f66a2b93dbc6cf0e195e372c61c65feffa9c3",
+        "crates/verum_compiler/tests/bootstrap/alias_declaring_scope.rs": "e593bb3f52c612a11afe240a99abe4e10f2d335faee1c602b97e03af617069c1",
+        "crates/verum_vbc/src/codegen/mod.rs": "bcd257f1d402dd74aa134229bcffe945514ed5638a47689410b97fe0e886f3bf",
+        "crates/verum_vbc/src/codegen/context.rs": "1b65b65c8565c6b6730ce4b9fa68dfc885a4408f6084a3cdef9f1e935bfa8a54",
+        "crates/verum_vbc/src/codegen/expressions.rs": "d81b18e9ab206349e88857ff5120cba6ccfc40923e6a966812886e2e1da9ad55",
+        "crates/verum_vbc/src/codegen/formal_parameters.rs": "11279393475505a07413a50ca345b9b3be6b9c5567377a45487780113e36fdd7",
+        "crates/verum_vbc/src/codegen/bootstrap_types.rs": "2f2ae43fe77ceb1293839576f43e1dc8ebb426334010d4ec58f26ab4ee10adae",
+        "crates/verum_common/src/well_known_types.rs": "95f89cc6eddb8954f05bc6d74e55df9df7ca9151fdfaa6c3dba749bb76df310d"
+      },
+      "installed_llvm_version": "21.1.8",
+      "native_dependency_boundary": "Existing LLVM installation and warm native solver outputs only; local LLVM C/C++ wrapper recompilation is permitted. Fresh Z3/CVC5, LLVM toolchain or stdlib producer builds are refused.",
+      "exit_code": 101,
+      "wall_seconds": 40.167,
+      "failure": null,
+      "source_unchanged": true,
+      "log_sha256": "19c722a3c7a53eb50986430c41c0707513711298994ccce6b184d3ac577f70ab",
+      "source_paths_unchanged": true,
+      "executables": {},
+      "artifacts_after": {
+        "runtime.vbca": "410ff097b455437cab98b651f7799b3129588820925afe98e0de9c3781530a0f",
+        "runtime.core_metadata": "a92bd89e649e102cdc67d7ad0032513d6448d8915e5744127e6cdf1f1e34ebbb",
+        "runtime.symbol_graph": "a6678c18498f7519749ca1fdf1d22629b479083f42fa95a15177e8c7acf1c722",
+        "runtime.vbca.checksum": "c33573118a8c4b635f6c8f727c3784b524f660be57de702365e8d9c14b2f3a8b",
+        "runtime.vbca.schema": "fec20d7b3f8d1b81aff66c6c1181be574963779f7eacaf65660f8ab9127fca87"
+      },
+      "test_results": [],
+      "durable_log": "docs/architecture/evidence/registry-alias-declaring-scope/producer-build-refusal-output.txt",
+      "verdict": "Two semantic Map<Text,...> get calls used str keys; Rust E0308 stopped this build before tests. The next source commit changes only the key representation."
+    },
+    {
+      "source_commit": "3c4c719428da6cb52a30653270dd1290ff8a4eb7",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "--manifest-path",
+        "/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/Cargo.toml",
+        "-p",
+        "verum_compiler",
+        "--lib",
+        "alias_declaring_scope_tests::",
+        "--",
+        "--test-threads=1",
+        "--nocapture"
+      ],
+      "environment": {
+        "CARGO_TARGET_DIR": "/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target",
+        "CARGO_INCREMENTAL": "0",
+        "CARGO_BUILD_JOBS": "2",
+        "VERUM_NO_AUTO_PRECOMPILE": "1",
+        "VERUM_LLVM_DIR": "/Users/taaliman/projects/oldman/verum-lang/verum/llvm/install",
+        "RUST_MIN_STACK": "16777216",
+        "VERUM_TRACE_RTC": "1",
+        "VERUM_TRACE_PTRFALL": "1"
+      },
+      "timeout_seconds": 600,
+      "scope": "T1694 parsed multi-file sources -> production bootstrap compiler -> archive wire -> metadata alias identity controls. Frozen source-owner mount repair; causal baseline recorded separately. No ordinary CLI, automatic bake, AOT or full service acceptance.",
+      "artifacts_before": {
+        "runtime.vbca": "410ff097b455437cab98b651f7799b3129588820925afe98e0de9c3781530a0f",
+        "runtime.core_metadata": "a92bd89e649e102cdc67d7ad0032513d6448d8915e5744127e6cdf1f1e34ebbb",
+        "runtime.symbol_graph": "a6678c18498f7519749ca1fdf1d22629b479083f42fa95a15177e8c7acf1c722",
+        "runtime.vbca.checksum": "c33573118a8c4b635f6c8f727c3784b524f660be57de702365e8d9c14b2f3a8b",
+        "runtime.vbca.schema": "fec20d7b3f8d1b81aff66c6c1181be574963779f7eacaf65660f8ab9127fca87"
+      },
+      "source_paths": {
+        "crates/verum_compiler/src/pipeline/stdlib_bootstrap.rs": "de403b9e0d97320e12b644462a50d5d2d55f90e44e2e8ddfd8f0708280ff7609",
+        "crates/verum_compiler/src/archive_metadata.rs": "ea54df04f9bd0043521e4bfbda9f66a2b93dbc6cf0e195e372c61c65feffa9c3",
+        "crates/verum_compiler/tests/bootstrap/alias_declaring_scope.rs": "e593bb3f52c612a11afe240a99abe4e10f2d335faee1c602b97e03af617069c1",
+        "crates/verum_vbc/src/codegen/mod.rs": "1297fec9a325b02028ac9e30545840b49806330952f2acb6cea5c35ad2a86e39",
+        "crates/verum_vbc/src/codegen/context.rs": "1b65b65c8565c6b6730ce4b9fa68dfc885a4408f6084a3cdef9f1e935bfa8a54",
+        "crates/verum_vbc/src/codegen/expressions.rs": "d81b18e9ab206349e88857ff5120cba6ccfc40923e6a966812886e2e1da9ad55",
+        "crates/verum_vbc/src/codegen/formal_parameters.rs": "11279393475505a07413a50ca345b9b3be6b9c5567377a45487780113e36fdd7",
+        "crates/verum_vbc/src/codegen/bootstrap_types.rs": "2f2ae43fe77ceb1293839576f43e1dc8ebb426334010d4ec58f26ab4ee10adae",
+        "crates/verum_common/src/well_known_types.rs": "95f89cc6eddb8954f05bc6d74e55df9df7ca9151fdfaa6c3dba749bb76df310d"
+      },
+      "installed_llvm_version": "21.1.8",
+      "native_dependency_boundary": "Existing LLVM installation and warm native solver outputs only; local LLVM C/C++ wrapper recompilation is permitted. Fresh Z3/CVC5, LLVM toolchain or stdlib producer builds are refused.",
+      "exit_code": 0,
+      "wall_seconds": 193.872,
+      "failure": null,
+      "source_unchanged": true,
+      "log_sha256": "14cf7cdff5ee815cc0cbb0e10d003892340007c617e2a4e7289eec72a9e0c47c",
+      "source_paths_unchanged": true,
+      "executables": {
+        "/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target/debug/build/verum_compiler/c6ca94c7409ab771/out/verum_compiler-c6ca94c7409ab771": "bf36921eaf4a49a594e65ec2ee8f5971748cc48d9c6c6ec95a90fbe25e2f43f3"
+      },
+      "artifacts_after": {
+        "runtime.vbca": "410ff097b455437cab98b651f7799b3129588820925afe98e0de9c3781530a0f",
+        "runtime.core_metadata": "a92bd89e649e102cdc67d7ad0032513d6448d8915e5744127e6cdf1f1e34ebbb",
+        "runtime.symbol_graph": "a6678c18498f7519749ca1fdf1d22629b479083f42fa95a15177e8c7acf1c722",
+        "runtime.vbca.checksum": "c33573118a8c4b635f6c8f727c3784b524f660be57de702365e8d9c14b2f3a8b",
+        "runtime.vbca.schema": "fec20d7b3f8d1b81aff66c6c1181be574963779f7eacaf65660f8ab9127fca87"
+      },
+      "test_results": [
+        "test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 1237 filtered out; finished in 0.71s"
+      ],
+      "durable_log": "docs/architecture/evidence/registry-alias-declaring-scope/producer-fixed-intermediate-output.txt",
+      "verdict": "The original twelve alias controls plus delayed body control pass:13 passed,0 failed,0 ignored. Both original producer failures are repaired."
+    },
+    {
+      "source_commit": "e78f650c9fc03af7e340e84bdac1d76872b0381b",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "--manifest-path",
+        "/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/Cargo.toml",
+        "-p",
+        "verum_compiler",
+        "--lib",
+        "alias_declaring_scope_tests::",
+        "--",
+        "--test-threads=1",
+        "--nocapture"
+      ],
+      "environment": {
+        "CARGO_TARGET_DIR": "/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target",
+        "CARGO_INCREMENTAL": "0",
+        "CARGO_BUILD_JOBS": "2",
+        "VERUM_NO_AUTO_PRECOMPILE": "1",
+        "VERUM_LLVM_DIR": "/Users/taaliman/projects/oldman/verum-lang/verum/llvm/install",
+        "RUST_MIN_STACK": "16777216",
+        "VERUM_TRACE_RTC": "1",
+        "VERUM_TRACE_PTRFALL": "1"
+      },
+      "timeout_seconds": 600,
+      "scope": "T1694 parsed multi-file sources -> production bootstrap compiler -> archive wire -> metadata alias identity controls. Frozen source-owner mount repair; causal baseline recorded separately. No ordinary CLI, automatic bake, AOT or full service acceptance.",
+      "artifacts_before": {
+        "runtime.vbca": "410ff097b455437cab98b651f7799b3129588820925afe98e0de9c3781530a0f",
+        "runtime.core_metadata": "a92bd89e649e102cdc67d7ad0032513d6448d8915e5744127e6cdf1f1e34ebbb",
+        "runtime.symbol_graph": "a6678c18498f7519749ca1fdf1d22629b479083f42fa95a15177e8c7acf1c722",
+        "runtime.vbca.checksum": "c33573118a8c4b635f6c8f727c3784b524f660be57de702365e8d9c14b2f3a8b",
+        "runtime.vbca.schema": "fec20d7b3f8d1b81aff66c6c1181be574963779f7eacaf65660f8ab9127fca87"
+      },
+      "source_paths": {
+        "crates/verum_compiler/src/pipeline/stdlib_bootstrap.rs": "de403b9e0d97320e12b644462a50d5d2d55f90e44e2e8ddfd8f0708280ff7609",
+        "crates/verum_compiler/src/archive_metadata.rs": "ea54df04f9bd0043521e4bfbda9f66a2b93dbc6cf0e195e372c61c65feffa9c3",
+        "crates/verum_compiler/tests/bootstrap/alias_declaring_scope.rs": "3f4997c89c3d66220ac156d3e0536087452e1c39ec5bb09b696296c23b63dc90",
+        "crates/verum_vbc/src/codegen/mod.rs": "1297fec9a325b02028ac9e30545840b49806330952f2acb6cea5c35ad2a86e39",
+        "crates/verum_vbc/src/codegen/context.rs": "1b65b65c8565c6b6730ce4b9fa68dfc885a4408f6084a3cdef9f1e935bfa8a54",
+        "crates/verum_vbc/src/codegen/expressions.rs": "d81b18e9ab206349e88857ff5120cba6ccfc40923e6a966812886e2e1da9ad55",
+        "crates/verum_vbc/src/codegen/formal_parameters.rs": "11279393475505a07413a50ca345b9b3be6b9c5567377a45487780113e36fdd7",
+        "crates/verum_vbc/src/codegen/bootstrap_types.rs": "2f2ae43fe77ceb1293839576f43e1dc8ebb426334010d4ec58f26ab4ee10adae",
+        "crates/verum_common/src/well_known_types.rs": "95f89cc6eddb8954f05bc6d74e55df9df7ca9151fdfaa6c3dba749bb76df310d"
+      },
+      "installed_llvm_version": "21.1.8",
+      "native_dependency_boundary": "Existing LLVM installation and warm native solver outputs only; local LLVM C/C++ wrapper recompilation is permitted. Fresh Z3/CVC5, LLVM toolchain or stdlib producer builds are refused.",
+      "exit_code": 101,
+      "wall_seconds": 190.925,
+      "failure": null,
+      "source_unchanged": true,
+      "log_sha256": "712d7a0a1efe3504902480fa220e7e5994dba50319c5e78e7581f588a9ee4a0c",
+      "source_paths_unchanged": true,
+      "executables": {
+        "/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target/debug/build/verum_compiler/c6ca94c7409ab771/out/verum_compiler-c6ca94c7409ab771": "d35c957f9cd563c172f32a49de9a46b14564c670e19f62c94c03472eea05f75e"
+      },
+      "artifacts_after": {
+        "runtime.vbca": "410ff097b455437cab98b651f7799b3129588820925afe98e0de9c3781530a0f",
+        "runtime.core_metadata": "a92bd89e649e102cdc67d7ad0032513d6448d8915e5744127e6cdf1f1e34ebbb",
+        "runtime.symbol_graph": "a6678c18498f7519749ca1fdf1d22629b479083f42fa95a15177e8c7acf1c722",
+        "runtime.vbca.checksum": "c33573118a8c4b635f6c8f727c3784b524f660be57de702365e8d9c14b2f3a8b",
+        "runtime.vbca.schema": "fec20d7b3f8d1b81aff66c6c1181be574963779f7eacaf65660f8ab9127fca87"
+      },
+      "test_results": [
+        "test result: FAILED. 13 passed; 1 failed; 0 ignored; 0 measured; 1237 filtered out; finished in 0.60s"
+      ],
+      "durable_log": "docs/architecture/evidence/registry-alias-declaring-scope/inline-discovery-negative-output.txt",
+      "verdict": "13 passed,1 failed. The new inline-only foreign mount does not import a foreign descriptor, so this negative stops before the owner-lookup oracle. Separate OPEN T1697 owns inline-only bootstrap dependency discovery; it is not repaired here."
+    },
+    {
+      "source_commit": "c4e33fa29bd39662d475396eae698011fa972783",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "--manifest-path",
+        "/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/Cargo.toml",
+        "-p",
+        "verum_compiler",
+        "--lib",
+        "alias_declaring_scope_tests::",
+        "--",
+        "--test-threads=1",
+        "--nocapture"
+      ],
+      "environment": {
+        "CARGO_TARGET_DIR": "/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target",
+        "CARGO_INCREMENTAL": "0",
+        "CARGO_BUILD_JOBS": "2",
+        "VERUM_NO_AUTO_PRECOMPILE": "1",
+        "VERUM_LLVM_DIR": "/Users/taaliman/projects/oldman/verum-lang/verum/llvm/install",
+        "RUST_MIN_STACK": "16777216",
+        "VERUM_TRACE_RTC": "1",
+        "VERUM_TRACE_PTRFALL": "1"
+      },
+      "timeout_seconds": 600,
+      "scope": "T1694 parsed multi-file sources -> production bootstrap compiler -> archive wire -> metadata alias identity controls. Frozen source-owner mount repair; causal baseline recorded separately. No ordinary CLI, automatic bake, AOT or full service acceptance.",
+      "artifacts_before": {
+        "runtime.vbca": "410ff097b455437cab98b651f7799b3129588820925afe98e0de9c3781530a0f",
+        "runtime.core_metadata": "a92bd89e649e102cdc67d7ad0032513d6448d8915e5744127e6cdf1f1e34ebbb",
+        "runtime.symbol_graph": "a6678c18498f7519749ca1fdf1d22629b479083f42fa95a15177e8c7acf1c722",
+        "runtime.vbca.checksum": "c33573118a8c4b635f6c8f727c3784b524f660be57de702365e8d9c14b2f3a8b",
+        "runtime.vbca.schema": "fec20d7b3f8d1b81aff66c6c1181be574963779f7eacaf65660f8ab9127fca87"
+      },
+      "source_paths": {
+        "crates/verum_compiler/src/pipeline/stdlib_bootstrap.rs": "de403b9e0d97320e12b644462a50d5d2d55f90e44e2e8ddfd8f0708280ff7609",
+        "crates/verum_compiler/src/archive_metadata.rs": "ea54df04f9bd0043521e4bfbda9f66a2b93dbc6cf0e195e372c61c65feffa9c3",
+        "crates/verum_compiler/tests/bootstrap/alias_declaring_scope.rs": "14dfe8b34cb4640beefc3a716cb8e3300e4f07c9691396104fb1aacecdd88640",
+        "crates/verum_vbc/src/codegen/mod.rs": "1297fec9a325b02028ac9e30545840b49806330952f2acb6cea5c35ad2a86e39",
+        "crates/verum_vbc/src/codegen/context.rs": "1b65b65c8565c6b6730ce4b9fa68dfc885a4408f6084a3cdef9f1e935bfa8a54",
+        "crates/verum_vbc/src/codegen/expressions.rs": "d81b18e9ab206349e88857ff5120cba6ccfc40923e6a966812886e2e1da9ad55",
+        "crates/verum_vbc/src/codegen/formal_parameters.rs": "11279393475505a07413a50ca345b9b3be6b9c5567377a45487780113e36fdd7",
+        "crates/verum_vbc/src/codegen/bootstrap_types.rs": "2f2ae43fe77ceb1293839576f43e1dc8ebb426334010d4ec58f26ab4ee10adae",
+        "crates/verum_common/src/well_known_types.rs": "95f89cc6eddb8954f05bc6d74e55df9df7ca9151fdfaa6c3dba749bb76df310d"
+      },
+      "installed_llvm_version": "21.1.8",
+      "native_dependency_boundary": "Existing LLVM installation and warm native solver outputs only; local LLVM C/C++ wrapper recompilation is permitted. Fresh Z3/CVC5, LLVM toolchain or stdlib producer builds are refused.",
+      "exit_code": 0,
+      "wall_seconds": 179.295,
+      "failure": null,
+      "source_unchanged": true,
+      "log_sha256": "0f9cdc2b6b80a0d146b12e4621155ee9c0ed0edfa88de88c58a200ff3eca71b3",
+      "source_paths_unchanged": true,
+      "executables": {
+        "/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target/debug/build/verum_compiler/c6ca94c7409ab771/out/verum_compiler-c6ca94c7409ab771": "b4e30e996383075422ddbb2a95eb3b8783e53c35645c4021de89d0f083d34676"
+      },
+      "artifacts_after": {
+        "runtime.vbca": "410ff097b455437cab98b651f7799b3129588820925afe98e0de9c3781530a0f",
+        "runtime.core_metadata": "a92bd89e649e102cdc67d7ad0032513d6448d8915e5744127e6cdf1f1e34ebbb",
+        "runtime.symbol_graph": "a6678c18498f7519749ca1fdf1d22629b479083f42fa95a15177e8c7acf1c722",
+        "runtime.vbca.checksum": "c33573118a8c4b635f6c8f727c3784b524f660be57de702365e8d9c14b2f3a8b",
+        "runtime.vbca.schema": "fec20d7b3f8d1b81aff66c6c1181be574963779f7eacaf65660f8ab9127fca87"
+      },
+      "test_results": [
+        "test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 1237 filtered out; finished in 0.64s"
+      ],
+      "durable_log": "docs/architecture/evidence/registry-alias-declaring-scope/focused-final-output.txt",
+      "verdict": "14 passed,0 failed,0 ignored. The inline owner and known-empty sibling scopes pass both file orders once a real source alias explicitly makes the foreign catalog dependency reachable. That prerequisite is part of the fixture, not a product change or a claim that T1697 passes."
+    },
+    {
+      "source_commit": "c4e33fa29bd39662d475396eae698011fa972783",
+      "command": [
+        "/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target/debug/build/verum_compiler/c6ca94c7409ab771/out/verum_compiler-c6ca94c7409ab771",
+        "pipeline::stdlib_bootstrap::",
+        "--test-threads=1",
+        "--nocapture"
+      ],
+      "environment": {
+        "CARGO_TARGET_DIR": "/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target",
+        "CARGO_INCREMENTAL": "0",
+        "CARGO_BUILD_JOBS": "2",
+        "VERUM_NO_AUTO_PRECOMPILE": "1",
+        "VERUM_LLVM_DIR": "/Users/taaliman/projects/oldman/verum-lang/verum/llvm/install",
+        "RUST_MIN_STACK": "16777216",
+        "VERUM_TRACE_RTC": "1",
+        "VERUM_TRACE_PTRFALL": "1"
+      },
+      "timeout_seconds": 120,
+      "scope": "T1694 adjacent compiler bootstrap controls executed directly through the pinned test binary from the focused gate; no rebuild. No ordinary CLI, automatic bake, AOT or full service acceptance.",
+      "reused_executable_sha256": "b4e30e996383075422ddbb2a95eb3b8783e53c35645c4021de89d0f083d34676",
+      "artifacts_before": {
+        "runtime.vbca": "410ff097b455437cab98b651f7799b3129588820925afe98e0de9c3781530a0f",
+        "runtime.core_metadata": "a92bd89e649e102cdc67d7ad0032513d6448d8915e5744127e6cdf1f1e34ebbb",
+        "runtime.symbol_graph": "a6678c18498f7519749ca1fdf1d22629b479083f42fa95a15177e8c7acf1c722",
+        "runtime.vbca.checksum": "c33573118a8c4b635f6c8f727c3784b524f660be57de702365e8d9c14b2f3a8b",
+        "runtime.vbca.schema": "fec20d7b3f8d1b81aff66c6c1181be574963779f7eacaf65660f8ab9127fca87"
+      },
+      "source_paths": {
+        "crates/verum_compiler/src/pipeline/stdlib_bootstrap.rs": "de403b9e0d97320e12b644462a50d5d2d55f90e44e2e8ddfd8f0708280ff7609",
+        "crates/verum_compiler/src/archive_metadata.rs": "ea54df04f9bd0043521e4bfbda9f66a2b93dbc6cf0e195e372c61c65feffa9c3",
+        "crates/verum_compiler/tests/bootstrap/alias_declaring_scope.rs": "14dfe8b34cb4640beefc3a716cb8e3300e4f07c9691396104fb1aacecdd88640",
+        "crates/verum_compiler/tests/bootstrap/generic_variant_payloads.rs": "d0c93d808973698cf44d0cd1fc840fe3dbe4958b07f68687877cd6f9337fb637",
+        "crates/verum_compiler/tests/bootstrap/function_exports.rs": "8d2b33e92dbaccd4011a71dcbc1550a2c1959279fc91dabd5a97fcc1b5526cfe",
+        "crates/verum_vbc/src/codegen/mod.rs": "1297fec9a325b02028ac9e30545840b49806330952f2acb6cea5c35ad2a86e39",
+        "crates/verum_vbc/src/codegen/context.rs": "1b65b65c8565c6b6730ce4b9fa68dfc885a4408f6084a3cdef9f1e935bfa8a54",
+        "crates/verum_vbc/src/codegen/expressions.rs": "d81b18e9ab206349e88857ff5120cba6ccfc40923e6a966812886e2e1da9ad55",
+        "crates/verum_vbc/src/codegen/formal_parameters.rs": "11279393475505a07413a50ca345b9b3be6b9c5567377a45487780113e36fdd7",
+        "crates/verum_vbc/src/codegen/bootstrap_types.rs": "2f2ae43fe77ceb1293839576f43e1dc8ebb426334010d4ec58f26ab4ee10adae",
+        "crates/verum_common/src/well_known_types.rs": "95f89cc6eddb8954f05bc6d74e55df9df7ca9151fdfaa6c3dba749bb76df310d"
+      },
+      "installed_llvm_version": "21.1.8",
+      "native_dependency_boundary": "Existing LLVM installation and warm native solver outputs only; local LLVM C/C++ wrapper recompilation is permitted. Fresh Z3/CVC5, LLVM toolchain or stdlib producer builds are refused.",
+      "exit_code": 0,
+      "wall_seconds": 2.016,
+      "failure": null,
+      "source_unchanged": true,
+      "log_sha256": "28c33b66d748a8123874038c491c748edd0be88f852ea614c0f6f93f56e26a85",
+      "source_paths_unchanged": true,
+      "executables": {
+        "/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target/debug/build/verum_compiler/c6ca94c7409ab771/out/verum_compiler-c6ca94c7409ab771": "b4e30e996383075422ddbb2a95eb3b8783e53c35645c4021de89d0f083d34676"
+      },
+      "artifacts_after": {
+        "runtime.vbca": "410ff097b455437cab98b651f7799b3129588820925afe98e0de9c3781530a0f",
+        "runtime.core_metadata": "a92bd89e649e102cdc67d7ad0032513d6448d8915e5744127e6cdf1f1e34ebbb",
+        "runtime.symbol_graph": "a6678c18498f7519749ca1fdf1d22629b479083f42fa95a15177e8c7acf1c722",
+        "runtime.vbca.checksum": "c33573118a8c4b635f6c8f727c3784b524f660be57de702365e8d9c14b2f3a8b",
+        "runtime.vbca.schema": "fec20d7b3f8d1b81aff66c6c1181be574963779f7eacaf65660f8ab9127fca87"
+      },
+      "test_results": [
+        "test result: ok. 30 passed; 0 failed; 0 ignored; 0 measured; 1221 filtered out; finished in 1.16s"
+      ],
+      "durable_log": "docs/architecture/evidence/registry-alias-declaring-scope/bootstrap-adjacent-output.txt",
+      "verdict": "30 passed,0 failed,0 ignored, including the14 focused controls,15 generic variant/bootstrap identity controls and1 function-publication control. The exact focused executable was reused without a rebuild."
+    },
+    {
+      "source_commit": "c4e33fa29bd39662d475396eae698011fa972783",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "--manifest-path",
+        "/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/Cargo.toml",
+        "-p",
+        "verum_vbc",
+        "--lib",
+        "--no-default-features",
+        "--features",
+        "compression,table_dispatch,codegen,ffi"
+      ],
+      "environment": {
+        "CARGO_TARGET_DIR": "/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target",
+        "CARGO_INCREMENTAL": "0",
+        "CARGO_BUILD_JOBS": "2",
+        "VERUM_NO_AUTO_PRECOMPILE": "1",
+        "VERUM_LLVM_DIR": "/Users/taaliman/projects/oldman/verum-lang/verum/llvm/install",
+        "RUST_MIN_STACK": "16777216"
+      },
+      "timeout_seconds": 1200,
+      "scope": "T1694 required unfiltered VBC codegen library gate on frozen source-owner mount repair; source/bootstrap focused gates are recorded separately. No ordinary CLI, automatic bake, AOT or full service acceptance.",
+      "artifacts_before": {
+        "runtime.vbca": "410ff097b455437cab98b651f7799b3129588820925afe98e0de9c3781530a0f",
+        "runtime.core_metadata": "a92bd89e649e102cdc67d7ad0032513d6448d8915e5744127e6cdf1f1e34ebbb",
+        "runtime.symbol_graph": "a6678c18498f7519749ca1fdf1d22629b479083f42fa95a15177e8c7acf1c722",
+        "runtime.vbca.checksum": "c33573118a8c4b635f6c8f727c3784b524f660be57de702365e8d9c14b2f3a8b",
+        "runtime.vbca.schema": "fec20d7b3f8d1b81aff66c6c1181be574963779f7eacaf65660f8ab9127fca87"
+      },
+      "source_paths": {
+        "crates/verum_compiler/src/pipeline/stdlib_bootstrap.rs": "de403b9e0d97320e12b644462a50d5d2d55f90e44e2e8ddfd8f0708280ff7609",
+        "crates/verum_compiler/src/archive_metadata.rs": "ea54df04f9bd0043521e4bfbda9f66a2b93dbc6cf0e195e372c61c65feffa9c3",
+        "crates/verum_compiler/tests/bootstrap/alias_declaring_scope.rs": "14dfe8b34cb4640beefc3a716cb8e3300e4f07c9691396104fb1aacecdd88640",
+        "crates/verum_vbc/src/codegen/mod.rs": "1297fec9a325b02028ac9e30545840b49806330952f2acb6cea5c35ad2a86e39",
+        "crates/verum_vbc/src/codegen/context.rs": "1b65b65c8565c6b6730ce4b9fa68dfc885a4408f6084a3cdef9f1e935bfa8a54",
+        "crates/verum_vbc/src/codegen/expressions.rs": "d81b18e9ab206349e88857ff5120cba6ccfc40923e6a966812886e2e1da9ad55",
+        "crates/verum_vbc/src/codegen/formal_parameters.rs": "11279393475505a07413a50ca345b9b3be6b9c5567377a45487780113e36fdd7",
+        "crates/verum_vbc/src/codegen/bootstrap_types.rs": "2f2ae43fe77ceb1293839576f43e1dc8ebb426334010d4ec58f26ab4ee10adae",
+        "crates/verum_common/src/well_known_types.rs": "95f89cc6eddb8954f05bc6d74e55df9df7ca9151fdfaa6c3dba749bb76df310d"
+      },
+      "installed_llvm_version": "21.1.8",
+      "native_dependency_boundary": "Existing LLVM installation and warm native solver outputs only; local LLVM C/C++ wrapper recompilation is permitted. Fresh Z3/CVC5, LLVM toolchain or stdlib producer builds are refused.",
+      "exit_code": 0,
+      "wall_seconds": 618.737,
+      "failure": null,
+      "source_unchanged": true,
+      "log_sha256": "5d8b7a35d4377370a82f8b57b485183a76cde6acddf56429d9a9305f2c85f298",
+      "source_paths_unchanged": true,
+      "executables": {
+        "/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target/debug/build/verum_vbc/9777a8ed778eb0dc/out/verum_vbc-9777a8ed778eb0dc": "853c9a53931cafc6abb5f38542eb70b849dd8afbe94b699ab3abeb745893434f"
+      },
+      "artifacts_after": {
+        "runtime.vbca": "410ff097b455437cab98b651f7799b3129588820925afe98e0de9c3781530a0f",
+        "runtime.core_metadata": "a92bd89e649e102cdc67d7ad0032513d6448d8915e5744127e6cdf1f1e34ebbb",
+        "runtime.symbol_graph": "a6678c18498f7519749ca1fdf1d22629b479083f42fa95a15177e8c7acf1c722",
+        "runtime.vbca.checksum": "c33573118a8c4b635f6c8f727c3784b524f660be57de702365e8d9c14b2f3a8b",
+        "runtime.vbca.schema": "fec20d7b3f8d1b81aff66c6c1181be574963779f7eacaf65660f8ab9127fca87"
+      },
+      "test_results": [
+        "test result: ok. 2075 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 589.00s"
+      ],
+      "durable_log": "docs/architecture/evidence/registry-alias-declaring-scope/full-vbc-output.txt",
+      "verdict": "Required unfiltered VBC codegen library gate with compression,table_dispatch,codegen,ffi; inherited T0839 ignore remains explicitly counted. This is not an ordinary CLI,AOT or full-service gate."
+    }
+  ]
+}

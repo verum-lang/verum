@@ -835,3 +835,42 @@ links all six exact receipts, losslessly compressed logs, the unchanged
 standalone fixture and its runners. It binds them to the existing fresh
 build manifest. Timings identify individual runs rather than a performance
 comparison between different components.
+
+## Declaring-source bootstrap alias identity (T1694)
+
+Bootstrap combined several source files into one codegen unit while retaining
+their explicit type mounts in a shared table. An earlier sibling's nonexistent
+`core.Result` mount redirected an unmounted `IoResult<T>` alias to the pointer
+carrier; a valid foreign `Result` mount redirected it to the foreign declaration.
+The parsed-source baseline reproduced both failures, with ten other controls
+passing.
+
+Type-mount lookup now selects a retained table for the current declaring owner.
+Known empty file and inline-module scopes are recorded, and the same table
+remains available when function bodies compile after declaration collection.
+The existing flat context table serves contexts without a collected source
+scope. Alias rendering and nominal fallback rules are unchanged.
+
+Fourteen focused controls pass on source `c4e33fa29`, covering both source
+orders, exact and umbrella mounts, genuine root re-exports, local shadows,
+generic arguments, scalar aliases, delayed function signatures and actual
+helper calls. The inline-owner control explicitly supplies its foreign
+dependency through a real top-level source alias: inline-only bootstrap
+dependency discovery still fails and is tracked as T1697. The original failing
+inline checkpoint and its output are retained alongside the passing scope test.
+
+The adjacent bootstrap set passes all thirty controls through the same pinned
+compiler test executable. The required unfiltered VBC library gate with
+`compression,table_dispatch,codegen,ffi` passes 2,075 tests, with zero failures
+and the existing T0839 ignore. Exact commands, source and executable hashes,
+intermediate build refusals and verbatim logs are in the
+[owner-scope receipt](evidence/registry-alias-declaring-scope.json), with the
+original red controls in its linked baseline receipt.
+
+These gates construct small source-driven archives. The inherited stage14
+stdlib archive, metadata, graph, checksum and schema bytes remain unchanged.
+Fresh ordinary stdlib production, inspection of `core.io.protocols.IoResult`,
+registry replay and AOT acceptance remain separate. Explicit missing-owner
+controls establish refusal to select a known nominal head; strict rejection by
+lenient bootstrap remains part of T0811. This slice does not close T0691's
+broader artifact acceptance, origin-string remapping or late TLS-root closure.

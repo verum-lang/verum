@@ -1,0 +1,138 @@
+
+running 30 tests
+test pipeline::stdlib_bootstrap::alias_declaring_scope_tests::alias_keeps_declared_generic_slot_and_local_error_identity ... [RTC] type_name=IoResult body_kind=Alias
+[RTC-emit] IoResult id=20 target_ref=Instantiated { base: TypeId(516), args: [Generic(TypeParamId(0)), Concrete(TypeId(19))] }
+alias fixture.protocols.IoResult: target=Some(Instantiated { base: TypeId(516), args: [Generic(TypeParamId(0)), Concrete(TypeId(19))] }), carried=Some("Result<T, Fault>")
+alias fixture.protocols.IoResult: target=Some(Instantiated { base: TypeId(516), args: [Generic(TypeParamId(0)), Concrete(TypeId(19))] }), carried=Some("Result<T, Fault>")
+ok
+test pipeline::stdlib_bootstrap::alias_declaring_scope_tests::delayed_function_bodies_keep_their_declaring_mounts_and_call_signatures ... ok
+test pipeline::stdlib_bootstrap::alias_declaring_scope_tests::exact_and_umbrella_mounts_resolve_in_their_declaring_file ... [RTC] type_name=IoResult body_kind=Alias
+[RTC-emit] IoResult id=19 target_ref=Instantiated { base: TypeId(516), args: [Generic(TypeParamId(0)), Concrete(TypeId(2))] }
+alias fixture.protocols.IoResult: target=Some(Instantiated { base: TypeId(516), args: [Generic(TypeParamId(0)), Concrete(TypeId(2))] }), carried=Some("Result<T, Int>")
+alias fixture.protocols.IoResult: target=Some(Instantiated { base: TypeId(516), args: [Generic(TypeParamId(0)), Concrete(TypeId(2))] }), carried=Some("Result<T, Int>")
+[RTC] type_name=IoResult body_kind=Alias
+[RTC-emit] IoResult id=19 target_ref=Instantiated { base: TypeId(516), args: [Generic(TypeParamId(0)), Concrete(TypeId(2))] }
+alias fixture.protocols.IoResult: target=Some(Instantiated { base: TypeId(516), args: [Generic(TypeParamId(0)), Concrete(TypeId(2))] }), carried=Some("Result<T, Int>")
+alias fixture.protocols.IoResult: target=Some(Instantiated { base: TypeId(516), args: [Generic(TypeParamId(0)), Concrete(TypeId(2))] }), carried=Some("Result<T, Int>")
+ok
+test pipeline::stdlib_bootstrap::alias_declaring_scope_tests::exact_mounts_to_same_leaf_declarations_keep_both_owners_in_both_orders ... [RTC] type_name=IoResult body_kind=Alias
+[RTC-emit] IoResult id=21 target_ref=Instantiated { base: TypeId(516), args: [Generic(TypeParamId(0)), Concrete(TypeId(2))] }
+alias fixture.protocols.IoResult: target=Some(Instantiated { base: TypeId(516), args: [Generic(TypeParamId(0)), Concrete(TypeId(2))] }), carried=Some("Result<T, Int>")
+alias fixture.foreign_consumer.ForeignAlias: target=Some(Instantiated { base: TypeId(19), args: [Generic(TypeParamId(0)), Concrete(TypeId(1))] }), carried=Some("Result<T, Bool>")
+alias fixture.protocols.IoResult: target=Some(Instantiated { base: TypeId(516), args: [Generic(TypeParamId(0)), Concrete(TypeId(2))] }), carried=Some("Result<T, Int>")
+alias fixture.foreign_consumer.ForeignAlias: target=Some(Instantiated { base: TypeId(19), args: [Generic(TypeParamId(0)), Concrete(TypeId(1))] }), carried=Some("Result<T, Bool>")
+[RTC] type_name=IoResult body_kind=Alias
+[RTC-emit] IoResult id=20 target_ref=Instantiated { base: TypeId(516), args: [Generic(TypeParamId(0)), Concrete(TypeId(2))] }
+alias fixture.protocols.IoResult: target=Some(Instantiated { base: TypeId(516), args: [Generic(TypeParamId(0)), Concrete(TypeId(2))] }), carried=Some("Result<T, Int>")
+alias fixture.foreign_consumer.ForeignAlias: target=Some(Instantiated { base: TypeId(19), args: [Generic(TypeParamId(0)), Concrete(TypeId(1))] }), carried=Some("Result<T, Bool>")
+alias fixture.protocols.IoResult: target=Some(Instantiated { base: TypeId(516), args: [Generic(TypeParamId(0)), Concrete(TypeId(2))] }), carried=Some("Result<T, Int>")
+alias fixture.foreign_consumer.ForeignAlias: target=Some(Instantiated { base: TypeId(19), args: [Generic(TypeParamId(0)), Concrete(TypeId(1))] }), carried=Some("Result<T, Bool>")
+ok
+test pipeline::stdlib_bootstrap::alias_declaring_scope_tests::foreign_same_leaf_mount_is_local_to_its_declaring_file ... [RTC] type_name=IoResult body_kind=Alias
+[RTC-emit] IoResult id=21 target_ref=Instantiated { base: TypeId(516), args: [Generic(TypeParamId(0)), Concrete(TypeId(2))] }
+alias fixture.foreign_consumer.ForeignAlias: target=Some(Instantiated { base: TypeId(19), args: [Generic(TypeParamId(0)), Concrete(TypeId(1))] }), carried=Some("Result<T, Bool>")
+alias fixture.protocols.IoResult: target=Some(Instantiated { base: TypeId(516), args: [Generic(TypeParamId(0)), Concrete(TypeId(2))] }), carried=Some("Result<T, Int>")
+alias fixture.foreign_consumer.ForeignAlias: target=Some(Instantiated { base: TypeId(19), args: [Generic(TypeParamId(0)), Concrete(TypeId(1))] }), carried=Some("Result<T, Bool>")
+alias fixture.protocols.IoResult: target=Some(Instantiated { base: TypeId(516), args: [Generic(TypeParamId(0)), Concrete(TypeId(2))] }), carried=Some("Result<T, Int>")
+[RTC] type_name=IoResult body_kind=Alias
+[RTC-emit] IoResult id=20 target_ref=Instantiated { base: TypeId(516), args: [Generic(TypeParamId(0)), Concrete(TypeId(2))] }
+alias fixture.foreign_consumer.ForeignAlias: target=Some(Instantiated { base: TypeId(19), args: [Generic(TypeParamId(0)), Concrete(TypeId(1))] }), carried=Some("Result<T, Bool>")
+alias fixture.protocols.IoResult: target=Some(Instantiated { base: TypeId(516), args: [Generic(TypeParamId(0)), Concrete(TypeId(2))] }), carried=Some("Result<T, Int>")
+alias fixture.foreign_consumer.ForeignAlias: target=Some(Instantiated { base: TypeId(19), args: [Generic(TypeParamId(0)), Concrete(TypeId(1))] }), carried=Some("Result<T, Bool>")
+alias fixture.protocols.IoResult: target=Some(Instantiated { base: TypeId(516), args: [Generic(TypeParamId(0)), Concrete(TypeId(2))] }), carried=Some("Result<T, Int>")
+ok
+test pipeline::stdlib_bootstrap::alias_declaring_scope_tests::genuine_usize_alias_remains_a_scalar_carrier ... alias fixture.protocols.Address: target=Some(Concrete(TypeId(14))), carried=Some("USize")
+alias fixture.protocols.Address: target=Some(Concrete(TypeId(14))), carried=Some("USize")
+ok
+test pipeline::stdlib_bootstrap::alias_declaring_scope_tests::inline_owners_keep_explicit_and_empty_mount_scopes_in_both_file_orders ... [RTC] type_name=IoResult body_kind=Alias
+[RTC-emit] IoResult id=23 target_ref=Instantiated { base: TypeId(516), args: [Generic(TypeParamId(0)), Concrete(TypeId(2))] }
+alias selected.Selected: target=Some(Instantiated { base: TypeId(19), args: [Generic(TypeParamId(0)), Concrete(TypeId(1))] }), carried=Some("Result<T, Bool>")
+alias untouched.Plain: target=Some(Instantiated { base: TypeId(516), args: [Generic(TypeParamId(0)), Concrete(TypeId(2))] }), carried=Some("Result<T, Int>")
+alias fixture.protocols.IoResult: target=Some(Instantiated { base: TypeId(516), args: [Generic(TypeParamId(0)), Concrete(TypeId(2))] }), carried=Some("Result<T, Int>")
+alias selected.Selected: target=Some(Instantiated { base: TypeId(19), args: [Generic(TypeParamId(0)), Concrete(TypeId(1))] }), carried=Some("Result<T, Bool>")
+alias untouched.Plain: target=Some(Instantiated { base: TypeId(516), args: [Generic(TypeParamId(0)), Concrete(TypeId(2))] }), carried=Some("Result<T, Int>")
+alias fixture.protocols.IoResult: target=Some(Instantiated { base: TypeId(516), args: [Generic(TypeParamId(0)), Concrete(TypeId(2))] }), carried=Some("Result<T, Int>")
+[RTC] type_name=IoResult body_kind=Alias
+[RTC-emit] IoResult id=20 target_ref=Instantiated { base: TypeId(516), args: [Generic(TypeParamId(0)), Concrete(TypeId(2))] }
+alias selected.Selected: target=Some(Instantiated { base: TypeId(19), args: [Generic(TypeParamId(0)), Concrete(TypeId(1))] }), carried=Some("Result<T, Bool>")
+alias untouched.Plain: target=Some(Instantiated { base: TypeId(516), args: [Generic(TypeParamId(0)), Concrete(TypeId(2))] }), carried=Some("Result<T, Int>")
+alias fixture.protocols.IoResult: target=Some(Instantiated { base: TypeId(516), args: [Generic(TypeParamId(0)), Concrete(TypeId(2))] }), carried=Some("Result<T, Int>")
+alias selected.Selected: target=Some(Instantiated { base: TypeId(19), args: [Generic(TypeParamId(0)), Concrete(TypeId(1))] }), carried=Some("Result<T, Bool>")
+alias untouched.Plain: target=Some(Instantiated { base: TypeId(516), args: [Generic(TypeParamId(0)), Concrete(TypeId(2))] }), carried=Some("Result<T, Int>")
+alias fixture.protocols.IoResult: target=Some(Instantiated { base: TypeId(516), args: [Generic(TypeParamId(0)), Concrete(TypeId(2))] }), carried=Some("Result<T, Int>")
+ok
+test pipeline::stdlib_bootstrap::alias_declaring_scope_tests::local_generic_declaration_shadows_a_sibling_mount_in_both_orders ... [RTC] type_name=IoResult body_kind=Alias
+[RTC-emit] IoResult id=21 target_ref=Instantiated { base: TypeId(20), args: [Generic(TypeParamId(0)), Concrete(TypeId(2))] }
+alias fixture.protocols.IoResult: target=Some(Instantiated { base: TypeId(20), args: [Generic(TypeParamId(0)), Concrete(TypeId(2))] }), carried=Some("Result<T, Int>")
+alias fixture.protocols.IoResult: target=Some(Instantiated { base: TypeId(20), args: [Generic(TypeParamId(0)), Concrete(TypeId(2))] }), carried=Some("Result<T, Int>")
+[RTC] type_name=IoResult body_kind=Alias
+[RTC-emit] IoResult id=21 target_ref=Instantiated { base: TypeId(20), args: [Generic(TypeParamId(0)), Concrete(TypeId(2))] }
+alias fixture.protocols.IoResult: target=Some(Instantiated { base: TypeId(20), args: [Generic(TypeParamId(0)), Concrete(TypeId(2))] }), carried=Some("Result<T, Int>")
+alias fixture.protocols.IoResult: target=Some(Instantiated { base: TypeId(20), args: [Generic(TypeParamId(0)), Concrete(TypeId(2))] }), carried=Some("Result<T, Int>")
+ok
+test pipeline::stdlib_bootstrap::alias_declaring_scope_tests::missing_owner_mount_never_borrows_a_known_generic_head ... [RTC] type_name=IoResult body_kind=Alias
+[ptrfall] name=Result module=fixture impl=-
+[RTC-emit] IoResult id=19 target_ref=Instantiated { base: TypeId(14), args: [Generic(TypeParamId(0)), Concrete(TypeId(2))] }
+alias fixture.protocols.IoResult: target=Some(Instantiated { base: TypeId(14), args: [Generic(TypeParamId(0)), Concrete(TypeId(2))] }), carried=Some("Result<T, Int>")
+alias fixture.protocols.IoResult: target=Some(Instantiated { base: TypeId(14), args: [Generic(TypeParamId(0)), Concrete(TypeId(2))] }), carried=Some("Result<T, Int>")
+ok
+test pipeline::stdlib_bootstrap::alias_declaring_scope_tests::missing_root_mount_in_earlier_sibling_cannot_retarget_alias ... [RTC] type_name=IoResult body_kind=Alias
+[RTC-emit] IoResult id=19 target_ref=Instantiated { base: TypeId(516), args: [Generic(TypeParamId(0)), Concrete(TypeId(2))] }
+alias fixture.protocols.IoResult: target=Some(Instantiated { base: TypeId(516), args: [Generic(TypeParamId(0)), Concrete(TypeId(2))] }), carried=Some("Result<T, Int>")
+alias fixture.protocols.IoResult: target=Some(Instantiated { base: TypeId(516), args: [Generic(TypeParamId(0)), Concrete(TypeId(2))] }), carried=Some("Result<T, Int>")
+ok
+test pipeline::stdlib_bootstrap::alias_declaring_scope_tests::missing_root_mount_in_later_sibling_cannot_retarget_alias ... [RTC] type_name=IoResult body_kind=Alias
+[RTC-emit] IoResult id=19 target_ref=Instantiated { base: TypeId(516), args: [Generic(TypeParamId(0)), Concrete(TypeId(2))] }
+alias fixture.protocols.IoResult: target=Some(Instantiated { base: TypeId(516), args: [Generic(TypeParamId(0)), Concrete(TypeId(2))] }), carried=Some("Result<T, Int>")
+alias fixture.protocols.IoResult: target=Some(Instantiated { base: TypeId(516), args: [Generic(TypeParamId(0)), Concrete(TypeId(2))] }), carried=Some("Result<T, Int>")
+ok
+test pipeline::stdlib_bootstrap::alias_declaring_scope_tests::unmounted_alias_keeps_canonical_head_with_unrelated_same_leaf_available ... [RTC] type_name=IoResult body_kind=Alias
+[RTC-emit] IoResult id=19 target_ref=Instantiated { base: TypeId(516), args: [Generic(TypeParamId(0)), Concrete(TypeId(2))] }
+alias fixture.protocols.IoResult: target=Some(Instantiated { base: TypeId(516), args: [Generic(TypeParamId(0)), Concrete(TypeId(2))] }), carried=Some("Result<T, Int>")
+alias fixture.protocols.IoResult: target=Some(Instantiated { base: TypeId(516), args: [Generic(TypeParamId(0)), Concrete(TypeId(2))] }), carried=Some("Result<T, Int>")
+ok
+test pipeline::stdlib_bootstrap::alias_declaring_scope_tests::valid_root_reexport_in_sibling_preserves_both_file_orders ... [RTC] type_name=IoResult body_kind=Alias
+[RTC-emit] IoResult id=19 target_ref=Instantiated { base: TypeId(516), args: [Generic(TypeParamId(0)), Concrete(TypeId(2))] }
+alias fixture.protocols.IoResult: target=Some(Instantiated { base: TypeId(516), args: [Generic(TypeParamId(0)), Concrete(TypeId(2))] }), carried=Some("Result<T, Int>")
+alias fixture.protocols.IoResult: target=Some(Instantiated { base: TypeId(516), args: [Generic(TypeParamId(0)), Concrete(TypeId(2))] }), carried=Some("Result<T, Int>")
+[RTC] type_name=IoResult body_kind=Alias
+[RTC-emit] IoResult id=19 target_ref=Instantiated { base: TypeId(516), args: [Generic(TypeParamId(0)), Concrete(TypeId(2))] }
+alias fixture.protocols.IoResult: target=Some(Instantiated { base: TypeId(516), args: [Generic(TypeParamId(0)), Concrete(TypeId(2))] }), carried=Some("Result<T, Int>")
+alias fixture.protocols.IoResult: target=Some(Instantiated { base: TypeId(516), args: [Generic(TypeParamId(0)), Concrete(TypeId(2))] }), carried=Some("Result<T, Int>")
+ok
+test pipeline::stdlib_bootstrap::alias_declaring_scope_tests::valid_root_reexport_resolves_in_its_own_declaring_file ... [RTC] type_name=IoResult body_kind=Alias
+[RTC-emit] IoResult id=19 target_ref=Instantiated { base: TypeId(516), args: [Generic(TypeParamId(0)), Concrete(TypeId(2))] }
+alias fixture.protocols.IoResult: target=Some(Instantiated { base: TypeId(516), args: [Generic(TypeParamId(0)), Concrete(TypeId(2))] }), carried=Some("Result<T, Int>")
+alias fixture.protocols.IoResult: target=Some(Instantiated { base: TypeId(516), args: [Generic(TypeParamId(0)), Concrete(TypeId(2))] }), carried=Some("Result<T, Int>")
+ok
+test pipeline::stdlib_bootstrap::function_export_tests::source_publication_replaces_stubs_and_keeps_existing_real_entries ... ok
+test pipeline::stdlib_bootstrap::generic_variant_payload_tests::declared_generic_variant_broken_or_private_reexport_never_borrows_parent_identity ... [ptrfall] name=List module=core.encoding.json impl=-
+[ptrfall] name=List module=core.encoding.json impl=-
+[ptrfall] name=List module=core.encoding.json impl=-
+[ptrfall] name=List module=core.encoding.json impl=-
+ok
+test pipeline::stdlib_bootstrap::generic_variant_payload_tests::declared_generic_variant_direct_metadata_drives_checker_acceptance_and_refusal ... ok
+test pipeline::stdlib_bootstrap::generic_variant_payload_tests::declared_generic_variant_exact_cog_dependency_retains_its_descriptor ... ok
+test pipeline::stdlib_bootstrap::generic_variant_payload_tests::declared_generic_variant_exact_owners_survive_bootstrap_and_wire ... ok
+test pipeline::stdlib_bootstrap::generic_variant_payload_tests::declared_generic_variant_foreign_same_leaf_is_not_a_builtin ... source descriptor core.collections.list.List: TypeId(19)
+source descriptor core.collections.map.Map: TypeId(19)
+source descriptor foreign.collections.List: TypeId(19)
+source descriptor foreign.collections.Map: TypeId(20)
+ok
+test pipeline::stdlib_bootstrap::generic_variant_payload_tests::declared_generic_variant_genuine_usize_payload_remains_usize ... ok
+test pipeline::stdlib_bootstrap::generic_variant_payload_tests::declared_generic_variant_local_shadow_and_missing_owner_never_select_a_stranger ... [ptrfall] name=List module=core.encoding.json impl=-
+[ptrfall] name=List module=core.encoding.json impl=-
+[ptrfall] name=Map module=core.encoding.json impl=-
+[ptrfall] name=Map module=core.encoding.json impl=-
+ok
+test pipeline::stdlib_bootstrap::generic_variant_payload_tests::declared_generic_variant_map_head_with_primitive_arguments_checks ... ok
+test pipeline::stdlib_bootstrap::generic_variant_payload_tests::declared_generic_variant_mount_aliases_keep_declared_identity ... ok
+test pipeline::stdlib_bootstrap::generic_variant_payload_tests::declared_generic_variant_nonbuiltin_export_uses_the_same_source_authority ... ok
+test pipeline::stdlib_bootstrap::generic_variant_payload_tests::declared_generic_variant_nonbuiltin_head_with_primitive_argument_checks ... ok
+test pipeline::stdlib_bootstrap::generic_variant_payload_tests::declared_generic_variant_recursive_argument_without_container_checks ... ok
+test pipeline::stdlib_bootstrap::generic_variant_payload_tests::declared_generic_variant_renamed_reexport_chains_preserve_identity ... ok
+test pipeline::stdlib_bootstrap::generic_variant_payload_tests::declared_generic_variant_umbrella_and_short_mounts_survive_bootstrap_and_wire ... ok
+test pipeline::stdlib_bootstrap::generic_variant_payload_tests::declared_generic_variant_umbrella_metadata_drives_checker_acceptance_and_refusal ... ok
+
+test result: ok. 30 passed; 0 failed; 0 ignored; 0 measured; 1221 filtered out; finished in 1.16s
+
