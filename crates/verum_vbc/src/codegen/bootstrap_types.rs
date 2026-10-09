@@ -306,8 +306,8 @@ impl VbcCodegen {
             let resolved = if name.contains('.') {
                 resolve_export(&name).or_else(|| {
                     // The source callback adds type re-exports. An already
-                    // exact archive declaration (including standalone
-                    // protocols) keeps the original import contract on a miss.
+                    // exact archive declaration (including restricted
+                    // exports) keeps the original import contract on a miss.
                     // Never broaden this to a same-leaf lookup.
                     (catalog.contains_key(&name)
                         || catalog.contains_key(&format!("core.{name}")))
@@ -396,8 +396,11 @@ impl VbcCodegen {
                         .copied()
                         .filter(|id| {
                             id.well_known_name() == Some(leaf)
-                                // Reserved carriers belong to their declared
-                                // source owner, never to an unrelated same leaf.
+                                // This legacy ABI allocation guard is separate
+                                // from export resolution above. Even canonical
+                                // source descriptors have module-local IDs; only
+                                // their declaring owner may complete a reserved
+                                // carrier, never an unrelated same-leaf type.
                                 && verum_common::well_known_types::WellKnownType::from_name(leaf)
                                     .and_then(|known| known.canonical_archive_modules().first().copied())
                                     == key.rsplit_once('.').map(|(owner, _)| owner)
