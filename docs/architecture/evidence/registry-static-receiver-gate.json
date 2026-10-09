@@ -1,0 +1,94 @@
+{
+  "task": "T1656",
+  "source_commit": "a5c6cd03a53939029d6b45b8ef45cd58c4d51cbd",
+  "source_tree": "8358b7e9d2aab31be196c738073d5751e9406bdb",
+  "rebased_source_commit": "f3ab060c31bf2b2d249e8c554007db700f9377fd",
+  "rebase_base": "90fc28ff4363d5ab1f792ecc9e32f335e72105d8",
+  "rebase_equivalence": {
+    "changed_paths": [
+      "docs/architecture/evidence/registry-publication-client-gate.json",
+      "docs/architecture/evidence/registry-type-ownership-gate.json",
+      "docs/architecture/registry-language-acceptance.md"
+    ],
+    "crates_tree_before": "9273e8426b3fbb6416d45c5e0281cb3af359f928",
+    "crates_tree_after": "9273e8426b3fbb6416d45c5e0281cb3af359f928",
+    "result": "Only acceptance documentation changed; compiler, runtime and test sources are identical. No unchanged-source test rerun was performed for the rebase."
+  },
+  "command": [
+    "rustup",
+    "run",
+    "nightly-2026-08-20",
+    "cargo",
+    "test",
+    "--offline",
+    "--locked",
+    "-p",
+    "verum_types",
+    "--tests",
+    "--no-fail-fast",
+    "--",
+    "--test-threads=2"
+  ],
+  "environment": {
+    "CARGO_TARGET_DIR": "/Users/taaliman/.tmp/verum-codex-01a10248-types/checker-target",
+    "CARGO_BUILD_JOBS": "2",
+    "CARGO_INCREMENTAL": "0",
+    "RUST_MIN_STACK": "16777216"
+  },
+  "timeout_seconds": 600,
+  "status": "passed",
+  "exit_code": 0,
+  "wall_seconds": 186.491,
+  "test_targets": 173,
+  "passed": 3957,
+  "failed": 0,
+  "ignored": 3,
+  "filtered": 0,
+  "log_sha256": "150b81d437574a499890117881a5a6d326f5cd749ccf4e04007948708df73ae9",
+  "source_unchanged": true,
+  "worktree_status": "",
+  "baseline": {
+    "source_commit": "c41fd471cfb1b8fd823183c5c7cb3bf2f70a4e25",
+    "command": [
+      "rustup",
+      "run",
+      "nightly-2026-08-20",
+      "cargo",
+      "test",
+      "--offline",
+      "--locked",
+      "-p",
+      "verum_types",
+      "--test",
+      "mounted_type_owner",
+      "--",
+      "--test-threads=1",
+      "--nocapture"
+    ],
+    "passed": 13,
+    "failed": 6,
+    "ignored": 0,
+    "wall_seconds": 17.14,
+    "log_sha256": "c334de8d41d26b6e7ef11ea68ccbe2d3ad3f5e188ad014b14e0d77e7b3ef2e50",
+    "finding": "Local and mounted calls ignored explicit receiver constraints; fixed, reordered and nested impl heads were accepted with incompatible arguments. Imported method generics also failed to resolve."
+  },
+  "controls": {
+    "source": "crates/verum_types/tests/mounted_type_owner.rs",
+    "owner_and_receiver_tests": 21,
+    "preserved": [
+      "Exact mounted nominal owners",
+      "Correct and incompatible explicit receiver arguments",
+      "Reordered and nested impl patterns",
+      "Fixed specialization and repeated impl variables",
+      "Independent and shadowed method generics",
+      "Fresh call instantiations",
+      "Method results deliberately different from the receiver"
+    ]
+  },
+  "existing_ignored": [
+    "test core_pipeline::tests::test_stdlib_full_typecheck ... ignored, long-running (~220s) stdlib full typecheck; run with: cargo test stdlib_full_typecheck -- --ignored --nocapture",
+    "test too_few_type_arguments_in_a_let_annotation_is_refused ... ignored, T0922: `provided < expected` is blocked on default type parameters. Turning it on refuses 194 uses of `Result<T>` in 31 core/ files, where `Result<T, E>` takes two and the stdlib is written as if `E` defaulted. The grammar has no `= Type` on a type parameter yet. Un-ignore with `type Result<T, E = Error>`.",
+    "test too_few_type_arguments_in_a_signature_is_refused ... ignored, T0922: `provided < expected` is blocked on default type parameters. Turning it on refuses 194 uses of `Result<T>` in 31 core/ files, where `Result<T, E>` takes two and the stdlib is written as if `E` defaulted. The grammar has no `= Type` on a type parameter yet. Un-ignore with `type Result<T, E = Error>`."
+  ],
+  "scope": "Rust source type-checker acceptance for declared implementation receiver patterns. Metadata without a carried impl pattern and variant constructors retain their existing inference paths. No ordinary registry CLI replay, interpreter/AOT product or release acceptance."
+}

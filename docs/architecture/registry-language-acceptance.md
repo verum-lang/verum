@@ -161,7 +161,26 @@ The combined full `verum_types --tests` gate passed **3,947 tests across
 173 targets**, with zero failures, zero filtered tests and three existing
 ignored tests in 187.289 seconds. The [gate receipt](evidence/registry-type-ownership-gate.json)
 identifies the source, command and log hash. Explicit generic receiver
-arguments on static calls remain separate work under T1656.
+arguments are covered by the separate T1656 source gate below.
+
+## Declared static receiver arguments — T1656
+
+Static calls on source-defined types now bind the declared implementation
+receiver before checking arguments. Reordered, nested, repeated and fixed
+receiver arguments remain constraints. Method generics keep their own
+identity, including when they shadow an implementation parameter, and a
+method may deliberately return a different type.
+
+Tested source `a5c6cd03a` passed the full `verum_types --tests` gate:
+**3,957 tests across 173 targets**, zero failures, zero filtered tests and
+three existing ignored tests in 186.491 seconds. The
+[gate receipt](evidence/registry-static-receiver-gate.json) preserves that
+original source and proves compiler/test source identity after the
+documentation-only rebase to `f3ab060c3`.
+
+Metadata without a carried implementation pattern and variant constructors
+retain their existing inference paths. Ordinary registry replay and
+interpreter/AOT acceptance remain separate gates.
 
 ## Protocol registration work — T1655
 
