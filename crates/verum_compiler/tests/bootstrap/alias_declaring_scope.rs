@@ -153,8 +153,11 @@ fn assert_canonical(files: &[(&str, &str)], root_reexport: bool) {
         );
     }
     let metadata = crate::archive_metadata::archive_to_core_metadata(&archive);
-    let TypeDescriptorKind::Alias { target } =
-        &metadata.types[&Text::from("fixture.protocols.IoResult")].kind
+    let TypeDescriptorKind::Alias { target } = &metadata
+        .types
+        .get(&Text::from("fixture.protocols.IoResult"))
+        .expect("qualified alias metadata")
+        .kind
     else {
         panic!("metadata must retain the alias declaration");
     };
