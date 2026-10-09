@@ -1375,7 +1375,11 @@ impl<'s> CompilationPipeline<'s> {
                 // Signal transition to user code phase
                 checker.set_user_code_phase();
 
-                // Pass 1: Register type declarations
+                // Pass 1: Declare every local name before resolving any body.
+                // A variant may carry a sibling record declared later in this
+                // source module, just as on the standalone checker path.
+                // Body registration stays strict for genuinely absent names.
+                checker.register_all_type_names(&module.items);
                 // ALIAS-VS-MARKER scope (#41).
                 checker.set_alias_scope_from_items(&module.items);
                 for item in &module.items {

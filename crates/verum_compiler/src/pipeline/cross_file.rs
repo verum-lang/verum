@@ -1128,8 +1128,10 @@ impl<'s> CompilationPipeline<'s> {
         // Signal transition to user code phase
         checker.set_user_code_phase();
 
-        // Sub-pass 2: Register all type declarations first
-        // This ensures types are available when checking functions that reference them
+        // Sub-pass 2: Declare every local name before resolving any body,
+        // including later sibling types used as variant payloads (T1677).
+        // Keep the existing strict body registration and diagnostics below.
+        checker.register_all_type_names(&module.items);
         // ALIAS-VS-MARKER scope (#41).
         checker.set_alias_scope_from_items(&module.items);
         for item in &module.items {
