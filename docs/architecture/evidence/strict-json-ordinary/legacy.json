@@ -1,0 +1,51 @@
+{
+  "case": "legacy",
+  "language_product_commit": "d61c11aa5aeda6eafefe9bb6748115cffeb66946",
+  "build_manifest_sha256": "82cca4a768c500b617323b69739ed142cf112d4ed18a6b9d4f39d9082101e626",
+  "cli_sha256": "be7e003a387c7bf26aea47abe8279f72ca605868b913faa14ceabced34f19e4e",
+  "cli_bytes": 545095608,
+  "schema": "v52-2026-10-05-semantic-formal-parameters",
+  "source_fingerprint_blake3": "e2b9a03d21d00dba67cd0b85530b00297d4ea84a5e88f5367c3858b4c077fabf",
+  "artifacts": {
+    "runtime.vbca": {
+      "bytes": 40298641,
+      "sha256": "6fb275b7346f230a9daa984febc28deced634a5ace38f1b7f4df6c5f0e667e92"
+    },
+    "runtime.core_metadata": {
+      "bytes": 117423935,
+      "sha256": "f6730833fc38cb3acf2fc27954b674471bde598e56cda57db67de06a84cb358c"
+    },
+    "runtime.symbol_graph": {
+      "bytes": 5920484,
+      "sha256": "661d9b60537c74ca0cb8be0704ed16e0f24d6a78ab19aedda340ce44d41dcb58"
+    }
+  },
+  "environment_overrides": {
+    "TMPDIR": "/private/tmp",
+    "VERUM_NO_OBJECT_CACHE": "1"
+  },
+  "scope": "Ordinary typed interpreter execution of the committed JSON conformance fixture; no AOT or whole-registry claim.",
+  "command": [
+    "/private/tmp/verum-registry-stage16-strict-json/verum-d61c11aa5",
+    "run",
+    "--tier",
+    "interpret",
+    "/Users/taaliman/.codex/worktrees/returned-reference-summary/verum/vcs/specs/L2-standard/encoding/json_legacy_source_control.vr"
+  ],
+  "working_directory": "/Users/taaliman/.codex/worktrees/returned-reference-summary/verum",
+  "deadline_seconds": 180,
+  "expected_stdout": "legacy-json: ok\n",
+  "inputs": {
+    "/Users/taaliman/.codex/worktrees/returned-reference-summary/verum/core/encoding/json.vr": "2cd549c59486a35396f3a061cdb87226f3d6a643d99e706f5d4458ae63b13fb5",
+    "/Users/taaliman/.codex/worktrees/returned-reference-summary/verum/vcs/specs/L2-standard/encoding/json_legacy_source_control.vr": "1b386803ab9b913f491e7a1501ac5925a69dca4066b9682d0fa8e5635fba8a12"
+  },
+  "status": "passed",
+  "elapsed_seconds": 65.058,
+  "process_returncode": 0,
+  "timed_out": false,
+  "source_unchanged": true,
+  "cli_unchanged": true,
+  "exact_stdout": true,
+  "stdout_sha256": "25e2895596eed0b99391daa42ade4e1279c1b9d402b5b22fa8fb76ab6c4f4b19",
+  "stderr_sha256": "d50bd768108ae61418b0392d9c5c3e04d01fc2d0d604fafdda94a4315e8f243f"
+}

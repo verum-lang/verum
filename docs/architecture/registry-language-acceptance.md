@@ -354,11 +354,10 @@ records the causal failures, passing gates, artifact identities and
 byte-equivalent integration of the owned source and tests.
 
 These are source-library gates using unchanged, separately identified
-standard-library artifacts with automatic precompilation disabled. Fresh
-ordinary standard-library/CLI JSON checking, the whole registry project check
-and registry runtime acceptance remain pending; the candidate is still baking.
-The passing fixtures do not establish an ordinary product replay, AOT or
-native execution.
+standard-library artifacts with automatic precompilation disabled. The later
+strict and legacy JSON controls below execute the ordinary typed interpreter
+with freshly baked standard-library bodies. Whole-registry and AOT acceptance
+remain separate from those bounded parser results.
 
 ## Workspace publication manifest authority — T1665
 
@@ -433,3 +432,47 @@ The chain rebased onto documentation-only main `5f8f9e8ea` as `844551f9a`.
 The complete CLI source and test tree remains byte-identical to executed
 `e3db15b49`, whose named branch is retained. Both workspace gate receipts and
 the earlier alias-consumer acceptance are preserved.
+
+
+## Strict publication JSON decoding — T1662
+
+`core.encoding.json.parse_strict` reuses the production parser with an explicit
+UTF-8 document byte bound. It refuses repeated decoded object keys before Map
+insertion loses the earlier occurrence, including escaped spellings in nested
+objects and arrays. Objects retain independent key scopes. The existing depth,
+string and collection limits remain shared with the ordinary parser, whose
+`parse`, `decode` and `parse_value` entry points retain their duplicate behavior.
+
+The [runtime receipt](evidence/strict-json-runtime-gate.json) retains the exact
+[ordinary build](evidence/strict-json-ordinary/build-manifest.json), its log and
+both runtime results. Candidate `d61c11aa5` built with automatic standard-library
+precompilation in 1,713.896 seconds. On that pinned CLI, the strict conformance
+fixture passed in **108.499 seconds** and the separate legacy positive passed in
+**65.058 seconds**, each within its 180-second deadline with exit `0`, exact
+stdout, unchanged source inputs and unchanged executable. The retained archive,
+metadata and symbol-graph hashes identify the baked bodies used by that product.
+
+The strict fixture exercises unique values, nested and escaped duplicates,
+sibling object scopes, duplicate name/location diagnostics, UTF-8 byte bounds,
+negative bounds, depth boundaries, malformed/trailing input and legacy last-wins
+compatibility. The separate legacy fixture checks an ordinary object and exact
+integer payload. Reproduce these controls from the matching source checkout:
+
+```sh
+verum run --tier interpret vcs/specs/L2-standard/encoding/json_strict_publication.vr
+verum run --tier interpret vcs/specs/L2-standard/encoding/json_legacy_source_control.vr
+```
+
+The earlier [source gate](evidence/strict-json-source-gate.json) passed two
+compilation/archive controls without interpreting their Verum entry points.
+It also preserves the failed mount-loader attempts: missing declarations first,
+then a one-byte `Text.with_capacity` placeholder that failed at `ArrayLen(Unit)`
+in both strict and unchanged legacy trials. Those failed harness results remain
+part of the record; the ordinary runs use the complete baked dependency bodies.
+
+The integration on `8ee11bfb8` preserves the original branches and records each
+replayed commit. Its JSON module and all three owned test files are byte-identical
+to the executed candidate. The newer base also contains workspace CLI changes;
+that combined tree was not rebuilt by these controls. Typed registry metadata,
+semantic publication admission, durable storage, the complete registry service,
+and AOT execution remain separate acceptance boundaries.

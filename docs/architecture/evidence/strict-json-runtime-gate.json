@@ -1,0 +1,153 @@
+{
+  "task": "T1662",
+  "verdict": "Bounded strict JSON and legacy compatibility fixtures passed through the ordinary typed interpreter with freshly baked standard-library bodies.",
+  "scope": "Existing production parser, strict full-document entry point, and the two committed conformance fixtures. No AOT, whole-registry, authenticated publication, durable storage or service acceptance.",
+  "ordinary_build": {
+    "receipt": "strict-json-ordinary/build-manifest.json",
+    "source_commit": "d61c11aa5aeda6eafefe9bb6748115cffeb66946",
+    "source_tree": "72306ee8c9dd7fa7827e0bb0fcf81d70c8e077fb",
+    "elapsed_seconds": 1713.896,
+    "automatic_precompile": true,
+    "cli_sha256": "be7e003a387c7bf26aea47abe8279f72ca605868b913faa14ceabced34f19e4e",
+    "artifact_hashes_rechecked_when_recording": true
+  },
+  "runtime_controls": [
+    {
+      "case": "strict",
+      "receipt": "strict-json-ordinary/strict.json",
+      "elapsed_seconds": 108.499,
+      "deadline_seconds": 180,
+      "exit_code": 0,
+      "exact_stdout": "strict-json: ok\n"
+    },
+    {
+      "case": "legacy",
+      "receipt": "strict-json-ordinary/legacy.json",
+      "elapsed_seconds": 65.058,
+      "deadline_seconds": 180,
+      "exit_code": 0,
+      "exact_stdout": "legacy-json: ok\n"
+    }
+  ],
+  "covered_controls": [
+    "unique object and scalar positives; nested typed JSON values",
+    "duplicate decoded keys at top level, inside objects and arrays, including escaped ASCII, slash and surrogate-pair spellings",
+    "independent sibling object keys; duplicate diagnostic decoded name and source position",
+    "UTF-8 byte-bound equality and overflow; negative bound and empty/truncated input",
+    "shared 256-container depth boundary, malformed surrogate and trailing garbage refusal",
+    "legacy parse/decode last-wins object semantics and parse_value trailing-input compatibility",
+    "separate ordinary parse positive with an exact integer payload"
+  ],
+  "source_compilation_gate": {
+    "receipt": "strict-json-source-gate.json",
+    "receipt_sha256": "b2b6148f02be57dfb2c82717f5ff338c3223e347f87b61d29e4ab02bf827e7a2",
+    "tested_source_commit": "932f96294c63b6edb34d6de0725624638eb63844",
+    "controls_passed": 2,
+    "scope": "Complete JSON and strict/legacy fixture code generation plus archive roundtrip; this source gate did not execute a Verum entry point."
+  },
+  "failed_mount_loader_trials": {
+    "retained_in": "strict-json-source-gate.json#failed_harness_controls",
+    "source_commits": [
+      "419726d61b277adfbad2626e030f9a4d774e8703",
+      "18d8e725d3d618656e1a00862a06d80fffd8989e",
+      "1e895d02a4061b3b63ad65699b9cc29eb4fa406b"
+    ],
+    "conclusion": "The first attempt lacked dependency declarations. The next strict and unchanged legacy attempts selected a one-byte Text.with_capacity return placeholder and failed at ArrayLen(Unit). These remain failed harness trials; they are not strict duplicate-policy regressions and are not relabeled as passes."
+  },
+  "integration": {
+    "base_commit": "8ee11bfb860a5e042d646c66657bd05eac72e3b3",
+    "pre_evidence_commit": "3008abffdfbfb3b070fd6beb3723154d1fb5017c",
+    "pre_evidence_tree": "a2bce1143ef0b96ae5810acde540c75527091d1a",
+    "branch": "codex/strict-json-runtime-integration",
+    "preserved_source_branch": {
+      "branch": "codex/strict-publication-json",
+      "head": "13ee182055a3ad09ac1aa939e02c173e24e569b6"
+    },
+    "preserved_legacy_baseline_branch": {
+      "branch": "codex/strict-json-legacy-baseline",
+      "head": "1e895d02a4061b3b63ad65699b9cc29eb4fa406b"
+    },
+    "cherry_picks": [
+      {
+        "original": "4e8156123f9d31438c70bdc35f72cf6f18225d5c",
+        "integrated": "0aec2171d2674c9a000b190b5f0de624e98bb9a1"
+      },
+      {
+        "original": "419726d61b277adfbad2626e030f9a4d774e8703",
+        "integrated": "c1ac00e56717ef20870a36df8a7c8f96756f59ca"
+      },
+      {
+        "original": "18d8e725d3d618656e1a00862a06d80fffd8989e",
+        "integrated": "2849b6af282de9e4db7f3b59f390b7e43853dcdc"
+      },
+      {
+        "original": "a27e16198b948ca0a229b0925f272256d0da3abd",
+        "integrated": "369b9501ff7a9ec0bfacde5ec977840e5384efb4"
+      },
+      {
+        "original": "932f96294c63b6edb34d6de0725624638eb63844",
+        "integrated": "566a151d90a58d24d247e1b68af32bff01aff7b9"
+      },
+      {
+        "original": "13ee182055a3ad09ac1aa939e02c173e24e569b6",
+        "integrated": "3008abffdfbfb3b070fd6beb3723154d1fb5017c"
+      }
+    ],
+    "json_and_controls_byte_identical_to_executed_candidate": {
+      "core/encoding/json.vr": "2cd549c59486a35396f3a061cdb87226f3d6a643d99e706f5d4458ae63b13fb5",
+      "crates/verum_vbc/tests/strict_json_source.rs": "c47b9eede9659469a891f87cf48b844d188317909cc37c809b9b9dd00dc2f325",
+      "vcs/specs/L2-standard/encoding/json_strict_publication.vr": "34bd0cec8205047ac7d7b2cb0483a32d76e9459762ab1d3e229fb48965e8d0e0",
+      "vcs/specs/L2-standard/encoding/json_legacy_source_control.vr": "1b386803ab9b913f491e7a1501ac5925a69dca4066b9682d0fa8e5635fba8a12"
+    },
+    "candidate_to_pre_evidence_paths": [
+      "M\tcrates/verum_cli/src/commands/workspace.rs",
+      "A\tcrates/verum_cli/tests/commands/workspace_management_manifests.rs",
+      "A\tcrates/verum_cli/tests/commands/workspace_publication_manifests.rs",
+      "A\tdocs/architecture/evidence/registry-workspace-management-gate.json",
+      "A\tdocs/architecture/evidence/registry-workspace-publication-gate.json",
+      "A\tdocs/architecture/evidence/strict-json-source-gate.json",
+      "M\tdocs/architecture/registry-language-acceptance.md"
+    ],
+    "boundary": "The newer integration base adds workspace CLI source/tests and acceptance documentation. The JSON source and controls match the executed candidate byte for byte. This combined integration tree was not rebuilt or executed by these runtime controls."
+  },
+  "retained_evidence": {
+    "strict-json-ordinary/build-manifest.json": {
+      "sha256": "82cca4a768c500b617323b69739ed142cf112d4ed18a6b9d4f39d9082101e626",
+      "bytes": 1667
+    },
+    "strict-json-ordinary/build.log": {
+      "sha256": "8bfa8ac2f616b238e7d7dceea7c48942fa7be809d89db760ed4e8ed90ee02e81",
+      "bytes": 7557
+    },
+    "strict-json-ordinary/strict.stdout.log": {
+      "sha256": "9da5a2d7133b02cb41d156516988afc085435622a5003aafff3aa18eb2c2b32a",
+      "bytes": 16
+    },
+    "strict-json-ordinary/strict.stderr.log": {
+      "sha256": "061f264c9582f71ca7515452dd3316327716accc4a36248359956ee267fd6891",
+      "bytes": 151
+    },
+    "strict-json-ordinary/strict.json": {
+      "sha256": "a5f550cfbb3447d0356cc1b7ab4ff8a1a1aacde171f1bfa14b862be1b7776d02",
+      "bytes": 2285
+    },
+    "strict-json-ordinary/legacy.stdout.log": {
+      "sha256": "25e2895596eed0b99391daa42ade4e1279c1b9d402b5b22fa8fb76ab6c4f4b19",
+      "bytes": 16
+    },
+    "strict-json-ordinary/legacy.stderr.log": {
+      "sha256": "d50bd768108ae61418b0392d9c5c3e04d01fc2d0d604fafdda94a4315e8f243f",
+      "bytes": 154
+    },
+    "strict-json-ordinary/legacy.json": {
+      "sha256": "b2931a154b51c569cff22769917ef2a6c5d101b67ea6d38d12ffcf2351c7ceed",
+      "bytes": 2290
+    }
+  },
+  "remaining_acceptance": [
+    "typed registry publication-metadata component",
+    "semantic name/version/digest/archive admission and publisher authorization",
+    "durable publication, complete registry service and publish-install-run flow",
+    "AOT and other backend acceptance"
+  ]
+}
