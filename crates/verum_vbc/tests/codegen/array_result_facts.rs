@@ -127,3 +127,87 @@ fn drop_glue_cannot_preserve_other_storage_proofs() {
     facts.observe(&Instruction::DropRef { src: Reg(1) });
     assert_eq!(facts.get(Reg(270)), None);
 }
+
+#[test]
+fn completed_body_summary_distinguishes_list_and_packed_returns() {
+    use super::straight_line_array_return;
+    let list = [
+        Instruction::NewList {
+            dst: Reg(270),
+            capacity_hint: 2,
+        },
+        Instruction::Mov {
+            dst: Reg(300),
+            src: Reg(270),
+        },
+        Instruction::Ret { value: Reg(300) },
+    ];
+    let packed = [
+        Instruction::LoadI {
+            dst: Reg(128),
+            value: 2,
+        },
+        allocation(Reg(270), Reg(128), Reg(257), None),
+        Instruction::Mov {
+            dst: Reg(300),
+            src: Reg(270),
+        },
+        Instruction::Ret { value: Reg(300) },
+    ];
+    assert_eq!(
+        straight_line_array_return(&list),
+        Some(ArrayResultFact::List)
+    );
+    assert_eq!(
+        straight_line_array_return(&packed),
+        Some(ArrayResultFact::Packed {
+            width: 1,
+            float: false,
+            count: 2,
+        })
+    );
+}
+
+#[test]
+fn parameter_unknown_call_and_mixed_returns_have_no_storage_summary() {
+    use super::straight_line_array_return;
+    assert_eq!(straight_line_array_return(&[]), None);
+    assert_eq!(
+        straight_line_array_return(&[Instruction::Ret { value: Reg(0) }]),
+        None
+    );
+    assert_eq!(
+        straight_line_array_return(&[
+            Instruction::Call {
+                dst: Reg(2),
+                func_id: 31,
+                args: crate::instruction::RegRange {
+                    start: Reg(0),
+                    count: 0
+                }
+            },
+            Instruction::Ret { value: Reg(2) },
+        ]),
+        None
+    );
+    assert_eq!(
+        straight_line_array_return(&[
+            Instruction::JmpIf {
+                cond: Reg(0),
+                offset: 3
+            },
+            Instruction::NewList {
+                dst: Reg(1),
+                capacity_hint: 2
+            },
+            Instruction::Ret { value: Reg(1) },
+            Instruction::LoadI {
+                dst: Reg(128),
+                value: 2
+            },
+            allocation(Reg(270), Reg(128), Reg(257), None),
+            Instruction::Ret { value: Reg(270) },
+        ]),
+        None
+    );
+}
