@@ -12,6 +12,7 @@ pub mod lockfile_v3;
 pub mod mirror;
 pub mod pubgrub_resolver;
 pub mod publication;
+mod publication_receipt;
 pub mod resolver;
 pub mod resolver_errors;
 pub mod sat_resolver;

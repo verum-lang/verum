@@ -1,6 +1,7 @@
 // Cog registry HTTP client: package fetching, publishing, authentication
 
 use super::publication::{PUBLICATION_CONTENT_TYPE, PublicationLimits, encode_publication};
+use super::publication_receipt::verify_publication_receipt;
 use super::types::*;
 use crate::error::{CliError, Result};
 use reqwest::blocking::Client;
@@ -235,14 +236,7 @@ impl RegistryClient {
             .send()
             .map_err(|e| CliError::Network(e.to_string()))?;
 
-        if !response.status().is_success() {
-            return Err(CliError::Registry(format!(
-                "Publish failed: {}",
-                response.status()
-            )));
-        }
-
-        Ok(())
+        verify_publication_receipt(response, manifest)
     }
 
     /// Check for vulnerabilities
@@ -409,3 +403,7 @@ fn publication_client_builder() -> reqwest::blocking::ClientBuilder {
 #[cfg(test)]
 #[path = "../../tests/registry/publication_transport.rs"]
 mod publication_transport;
+
+#[cfg(test)]
+#[path = "../../tests/registry/publication_receipts.rs"]
+mod publication_receipts;

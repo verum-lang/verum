@@ -19,7 +19,17 @@ const DESCRIPTION: &str = "metadata-must-survive-publication-\u{03bb}";
 
 #[test]
 fn publish_transmits_metadata_alongside_archive() {
-    let (result, request) = publish_to_fixture(&metadata(), "201 Created", &[], "");
+    let expected = metadata();
+    let receipt = serde_json::to_string(&serde_json::json!({
+        "name": expected.name, "version": expected.version, "checksum": expected.checksum,
+    }))
+    .unwrap();
+    let (result, request) = publish_to_fixture(
+        &expected,
+        "201 Created",
+        receipt.as_bytes(),
+        "Content-Type: application/json\r\n",
+    );
     result.expect("fixture HTTP response");
     assert_eq!(
         request.request_line.as_str(),
@@ -197,7 +207,7 @@ fn publication_does_not_follow_redirects() {
     );
 }
 
-fn metadata() -> CogMetadata {
+pub(super) fn metadata() -> CogMetadata {
     serde_json::from_value(serde_json::json!({
         "name": "fixture", "version": "1.2.3", "description": DESCRIPTION,
         "authors": [], "license": null, "repository": null, "homepage": null,
@@ -251,11 +261,24 @@ fn assert_rejected_without_http(
     );
 }
 
-fn publish_to_fixture(
+pub(super) fn publish_to_fixture(
     metadata: &CogMetadata,
     status: &str,
     response_body: &[u8],
     extra_headers: &str,
+) -> (Result<()>, CapturedRequest) {
+    let response_header: Text = format!(
+        "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n{extra_headers}\r\n",
+        response_body.len()
+    )
+    .into();
+    publish_to_response(metadata, response_header.as_str(), response_body)
+}
+
+pub(super) fn publish_to_response(
+    metadata: &CogMetadata,
+    response_header: &str,
+    response_body: &[u8],
 ) -> (Result<()>, CapturedRequest) {
     let project = TempDir::new().expect("temporary package");
     let archive = project.path().join("fixture-1.2.3.vr");
@@ -263,11 +286,7 @@ fn publish_to_fixture(
     let listener = TcpListener::bind("127.0.0.1:0").expect("loopback listener");
     listener.set_nonblocking(true).unwrap();
     let base_url: Text = format!("http://{}/private", listener.local_addr().unwrap()).into();
-    let response_header: Text = format!(
-        "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n{extra_headers}\r\n",
-        response_body.len()
-    )
-    .into();
+    let response_header: Text = response_header.into();
     let response_body: List<u8> = response_body.iter().copied().collect();
     // TLS/proxy initialization is outside the fixture's connection deadline.
     let client = client(base_url)
@@ -292,14 +311,23 @@ fn publish_to_fixture(
             .unwrap();
         let request = capture_request(&mut stream);
         stream.write_all(response_header.as_bytes()).unwrap();
-        stream.write_all(response_body.as_slice()).unwrap();
+        if let Err(error) = stream.write_all(response_body.as_slice()) {
+            // Rejected status/headers can close the connection before the body.
+            assert!(
+                matches!(
+                    error.kind(),
+                    std::io::ErrorKind::BrokenPipe | std::io::ErrorKind::ConnectionReset
+                ),
+                "fixture response write: {error}"
+            );
+        }
         request
     });
     let result = client.publish(metadata, &archive, "fixture-publish-token");
     (result, worker.join().expect("request capture"))
 }
 
-struct CapturedRequest {
+pub(super) struct CapturedRequest {
     request_line: Text,
     headers: Map<Text, Text>,
     body: List<u8>,
