@@ -6,7 +6,7 @@ use verum_fast_parser::Parser;
 use verum_vbc::{
     codegen::{CodegenConfig, VbcCodegen},
     deserialize::deserialize_module,
-    interpreter::{Interpreter, heap::ObjectHeader},
+    interpreter::{Interpreter, ObjectHeader},
     module::VbcModule,
     serialize::serialize_module,
     types::{TypeId, TypeRef},
