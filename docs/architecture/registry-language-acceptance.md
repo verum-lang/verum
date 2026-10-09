@@ -499,6 +499,18 @@ bounds, `IoResult` pattern checking, HTTP response fields and transducer
 types. Context-declaration warnings also remain. This is a completed failed
 project check, without registry runtime, proofs, AOT or service acceptance.
 
+The later ordinary `faabbe696` reader completed the same project check with
+**9 errors in 216.409 seconds**, exit 101. Its
+[receipt](evidence/registry-project-stage18.json) and
+[raw log](evidence/registry-project-stage18.log) retain unchanged source and CLI
+hashes. Every stage16 source input remains identical; three standalone
+handle-control fixtures were added outside `src`. The remaining diagnostics
+cover four source-protocol bounds, two async handle uses, two `IoResult`
+patterns and an HTTP response field. Multiple language changes separate the
+products, so this comparison does not isolate one repair. The registry still
+fails project checking. The exact raw log retains diagnostic whitespace and is
+excluded from whitespace checking; this prose and the receipt remain checked.
+
 A separate typed publication-metadata candidate at registry `399cc41`
 failed before execution with 18 errors in 69.97 seconds on the same product.
 Seventeen errors share the borrowed JSON object to typed map helper boundary

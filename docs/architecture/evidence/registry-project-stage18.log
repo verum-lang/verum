@@ -1,0 +1,124 @@
+    Checking verum-registry v0.1.0 (/private/tmp/verum-registry-t1635)
+2026-10-09T18:57:32.328248Z  WARN Context: Context 'Clock' in function 'import_slice' has no matching context declaration
+2026-10-09T18:57:32.328343Z  WARN Context: Context 'Clock' declared in 'using' clause but never used in function 'import_slice'
+2026-10-09T18:57:32.329663Z  WARN Context: Context 'Storage' in function 'write_down' has no matching context declaration
+2026-10-09T18:57:32.329676Z  WARN Context: Context 'Storage' declared in 'using' clause but never used in function 'write_down'
+2026-10-09T18:57:32.329680Z  WARN Context: Context 'Clock' in function 'ingest' has no matching context declaration
+2026-10-09T18:57:32.329684Z  WARN Context: Context 'Storage' in function 'ingest' has no matching context declaration
+2026-10-09T18:57:32.329687Z  WARN Context: Context 'Clock' declared in 'using' clause but never used in function 'ingest'
+2026-10-09T18:57:32.329691Z  WARN Context: Context 'Clock' in function 'ingest_volatile' has no matching context declaration
+2026-10-09T18:57:32.329694Z  WARN Context: Context 'Clock' declared in 'using' clause but never used in function 'ingest_volatile'
+2026-10-09T18:57:32.331201Z  WARN Context: Context 'Clock' in function 'route_publish' has no matching context declaration
+2026-10-09T18:57:32.331208Z  WARN Context: Context 'NodeIdentity' in function 'route_publish' has no matching context declaration
+2026-10-09T18:57:32.331212Z  WARN Context: Context 'Uplink' in function 'route_publish' has no matching context declaration
+2026-10-09T18:57:32.331215Z  WARN Context: Context 'Uplink' declared in 'using' clause but never used in function 'route_publish'
+2026-10-09T18:57:32.331218Z  WARN Context: Context 'NodeIdentity' declared in 'using' clause but never used in function 'route_publish'
+2026-10-09T18:57:32.331221Z  WARN Context: Context 'Clock' declared in 'using' clause but never used in function 'route_publish'
+2026-10-09T18:57:32.331224Z  WARN Context: Context 'Clock' in function 'serve_forever' has no matching context declaration
+2026-10-09T18:57:32.331227Z  WARN Context: Context 'NodeIdentity' in function 'serve_forever' has no matching context declaration
+2026-10-09T18:57:32.331230Z  WARN Context: Context 'Uplink' in function 'serve_forever' has no matching context declaration
+2026-10-09T18:57:32.331233Z  WARN Context: Context 'Uplink' declared in 'using' clause but never used in function 'serve_forever'
+2026-10-09T18:57:32.331236Z  WARN Context: Context 'NodeIdentity' declared in 'using' clause but never used in function 'serve_forever'
+2026-10-09T18:57:32.331239Z  WARN Context: Context 'Clock' declared in 'using' clause but never used in function 'serve_forever'
+2026-10-09T18:57:32.332152Z  WARN Context: Context 'Clock' in function 'store' has no matching context declaration
+2026-10-09T18:57:32.332158Z  WARN Context: Context 'Uplink' in function 'lookup' has no matching context declaration
+2026-10-09T18:57:32.333553Z  WARN Context: Context 'Clock' in function 'horizon_for' has no matching context declaration
+2026-10-09T18:57:32.346061Z  WARN Context: Context 'Clock' in function 'publish' has no matching context declaration
+2026-10-09T18:57:32.346106Z  WARN Context: Context 'NodeIdentity' in function 'publish' has no matching context declaration
+2026-10-09T18:57:32.346113Z  WARN Context: Context 'Uplink' in function 'publish' has no matching context declaration
+2026-10-09T18:57:32.346119Z  WARN Context: Context 'Clock' declared in 'using' clause but never used in function 'publish'
+2026-10-09T18:57:32.346123Z  WARN Context: Context 'Uplink' declared in 'using' clause but never used in function 'publish'
+2026-10-09T18:57:32.347190Z  WARN Context: Context 'Clock' in function 'restore' has no matching context declaration
+2026-10-09T18:57:32.347204Z  WARN Context: Context 'Clock' declared in 'using' clause but never used in function 'restore'
+2026-10-09T18:57:32.356660Z  WARN Context: Context 'Clock' in function 'dated_note' has no matching context declaration
+2026-10-09T18:57:32.356687Z  WARN Context: Context 'NodeIdentity' in function 'dated_note' has no matching context declaration
+2026-10-09T18:57:32.356704Z  WARN Context: Context 'Clock' in function 'publish_route_scene' has no matching context declaration
+2026-10-09T18:57:32.356708Z  WARN Context: Context 'NodeIdentity' in function 'publish_route_scene' has no matching context declaration
+2026-10-09T18:57:32.356711Z  WARN Context: Context 'Uplink' in function 'publish_route_scene' has no matching context declaration
+2026-10-09T18:57:32.356714Z  WARN Context: Context 'Clock' in function 'resolve_route_scene' has no matching context declaration
+2026-10-09T18:57:32.356717Z  WARN Context: Context 'NodeIdentity' in function 'resolve_route_scene' has no matching context declaration
+2026-10-09T18:57:32.356720Z  WARN Context: Context 'Uplink' in function 'resolve_route_scene' has no matching context declaration
+2026-10-09T18:57:32.356723Z  WARN Context: Context 'Clock' in function 'get_resolve' has no matching context declaration
+2026-10-09T18:57:32.356726Z  WARN Context: Context 'NodeIdentity' in function 'get_resolve' has no matching context declaration
+2026-10-09T18:57:32.356729Z  WARN Context: Context 'Uplink' in function 'get_resolve' has no matching context declaration
+2026-10-09T18:57:32.356731Z  WARN Context: Context 'NodeIdentity' declared in 'using' clause but never used in function 'get_resolve'
+2026-10-09T18:57:32.356734Z  WARN Context: Context 'Clock' declared in 'using' clause but never used in function 'get_resolve'
+2026-10-09T18:57:32.356737Z  WARN Context: Context 'Uplink' declared in 'using' clause but never used in function 'get_resolve'
+2026-10-09T18:57:32.356739Z  WARN Context: Context 'Clock' in function 'get_search' has no matching context declaration
+2026-10-09T18:57:32.356742Z  WARN Context: Context 'NodeIdentity' in function 'get_search' has no matching context declaration
+2026-10-09T18:57:32.356744Z  WARN Context: Context 'Uplink' in function 'get_search' has no matching context declaration
+2026-10-09T18:57:32.356747Z  WARN Context: Context 'Uplink' declared in 'using' clause but never used in function 'get_search'
+2026-10-09T18:57:32.356749Z  WARN Context: Context 'Clock' declared in 'using' clause but never used in function 'get_search'
+2026-10-09T18:57:32.356752Z  WARN Context: Context 'NodeIdentity' declared in 'using' clause but never used in function 'get_search'
+2026-10-09T18:57:32.356754Z  WARN Context: Context 'Clock' in function 'post' has no matching context declaration
+2026-10-09T18:57:32.356756Z  WARN Context: Context 'NodeIdentity' in function 'post' has no matching context declaration
+2026-10-09T18:57:32.356759Z  WARN Context: Context 'Uplink' in function 'post' has no matching context declaration
+2026-10-09T18:57:32.356761Z  WARN Context: Context 'Clock' declared in 'using' clause but never used in function 'post'
+2026-10-09T18:57:32.356764Z  WARN Context: Context 'Uplink' declared in 'using' clause but never used in function 'post'
+2026-10-09T18:57:32.356766Z  WARN Context: Context 'NodeIdentity' declared in 'using' clause but never used in function 'post'
+2026-10-09T19:01:06.048399Z  WARN Type checking found 9 error(s)
+
+error<E405>: type `verum_registry.protocol.source.RegistrySource` does not implement `Source`, required by this call's bound
+  --> /private/tmp/verum-registry-t1635/src/main.vr:916:5
+    │
+914 │     // The same call site, two implementations. It is generic over the
+915 │     // protocol, so a third source needs no edit here.
+916 │     locate(&"from-registry", &reg, &"serde");
+    │     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+917 │     locate(&"from-git", &git, &"vendored-tool");
+918 │     locate(&"missing", &reg, &"nowhere");
+    │
+error<E405>: type `verum_registry.protocol.source.GitSource` does not implement `Source`, required by this call's bound
+  --> /private/tmp/verum-registry-t1635/src/main.vr:917:5
+    │
+915 │     // protocol, so a third source needs no edit here.
+916 │     locate(&"from-registry", &reg, &"serde");
+917 │     locate(&"from-git", &git, &"vendored-tool");
+    │     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+918 │     locate(&"missing", &reg, &"nowhere");
+919 │     locate(&"unreachable", &dark, &"anything");
+    │
+error<E405>: type `verum_registry.protocol.source.RegistrySource` does not implement `Source`, required by this call's bound
+  --> /private/tmp/verum-registry-t1635/src/main.vr:918:5
+    │
+916 │     locate(&"from-registry", &reg, &"serde");
+917 │     locate(&"from-git", &git, &"vendored-tool");
+918 │     locate(&"missing", &reg, &"nowhere");
+    │     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+919 │     locate(&"unreachable", &dark, &"anything");
+920 │ 
+    │
+error<E405>: type `verum_registry.protocol.source.GitSource` does not implement `Source`, required by this call's bound
+  --> /private/tmp/verum-registry-t1635/src/main.vr:919:5
+    │
+917 │     locate(&"from-git", &git, &"vendored-tool");
+918 │     locate(&"missing", &reg, &"nowhere");
+919 │     locate(&"unreachable", &dark, &"anything");
+    │     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+920 │ 
+921 │     // A CONFIGURED LIST, which is where generics stop. The three
+    │
+error: Pattern expects a variant type, but scrutinee has type IoResult<Text> at /private/tmp/verum-registry-t1635/src/main.vr:1024:17
+  --> <no source location attached to this diagnostic>
+error<E400>: Type mismatch: expected 'core.async.future.Future<Ok(verum_registry.protocol.evidence.Verified) | Err(SignatureCoversOtherManifest(Unit) | ProofCoversOtherManifest(Unit) | ProofFromWrongLog(Text) | EmptyLog(Unit))>', found 'JoinHandle<Ok(verum_registry.protocol.evidence.Verified) | Err(SignatureCoversOtherManifest(Unit) | ProofCoversOtherManifest(Unit) | ProofFromWrongLog(Text) | EmptyLog(Unit))>'
+  --> /private/tmp/verum-registry-t1635/src/node/slice.vr:188:22
+    │
+186 │         let expected = item.log_id.clone();
+187 │         names.push(item.manifest.name.0.clone());
+188 │         pending.push(spawn(async {
+    │                      ^
+189 │             verify(m, &sig, &prf, who, role, &expected)
+190 │         }));
+191 │     }
+192 │ 
+    │
+error: Pattern expects a variant type, but scrutinee has type core.async.future.Future<Ok(verum_registry.protocol.evidence.Verified) | Err(SignatureCoversOtherManifest(Unit) | ProofCoversOtherManifest(Unit) | ProofFromWrongLog(Text) | EmptyLog(Unit))> at /private/tmp/verum-registry-t1635/src/node/slice.vr:201:13
+  --> <no source location attached to this diagnostic>
+error: field 'body' not found in type 'core.net.http.Response'
+  --> <no source location attached to this diagnostic>
+error: Pattern expects a variant type, but scrutinee has type IoResult<Text> at /private/tmp/verum-registry-t1635/src/node/ambient.vr:132:13
+  --> <no source location attached to this diagnostic>
+
+error: compilation failed with 9 errors
+
+error: compilation failed with 9 errors
