@@ -497,5 +497,49 @@
       "durable_log": "docs/architecture/evidence/registry-alias-declaring-scope/full-vbc-output.txt",
       "verdict": "Required unfiltered VBC codegen library gate with compression,table_dispatch,codegen,ffi; inherited T0839 ignore remains explicitly counted. This is not an ordinary CLI,AOT or full-service gate."
     }
-  ]
+  ],
+  "integration": {
+    "base": "25c35ecbb3245400106ebc71d5f8f265ca3661f3",
+    "rebased_endpoint_before_this_evidence_update": "e7acbf7219e8cb13c1e1ab57b6a9ca7a76334ed8",
+    "preserved_tested_ref": "codex/bootstrap-alias-tested-c4e33fa29",
+    "preserved_pre_rebase_ref": "codex/bootstrap-alias-evidence-fedbeb179",
+    "identical_complete_vbc_tree": "d288499f9d75ce4bb594cb1afa708803f3bac4c8",
+    "identical_focused_source_sha256": "14dfe8b34cb4640beefc3a716cb8e3300e4f07c9691396104fb1aacecdd88640",
+    "compiler_difference_from_tested": "Only the accepted upstream qualified_record_assignment test-module registration differs in stdlib_bootstrap.rs; its production implementation and archive_metadata.rs are identical. Upstream typechecker changes have separate T1692/T1693 receipts. No post-rebase Cargo/CLI run is claimed.",
+    "conflict_resolution": "Preserved both test-module registrations and appended the exact T1694 acceptance section after the complete upstream document.",
+    "source_checks": {
+      "internal_references": {
+        "command": [
+          "make",
+          "check-internal-refs"
+        ],
+        "exit_code": 0,
+        "details": "Three reference-gate controls pass; forbidden-directory and memory references pass; spec citation names match the existing33-name roster. The separate website checkout is absent in this worktree."
+      },
+      "prepass_parity_current": {
+        "command": [
+          "python3",
+          "scripts/ci/check_bake_prepass_parity.py"
+        ],
+        "exit_code": 1,
+        "stdout": "check_bake_prepass_parity: FAILED\n\n  UNCLASSIFIED pre-pass `collect_count_module_owners` in collect_all_declarations.\n    The stdlib bake does NOT call collect_all_declarations, so this\n    pass is probably inert for the shipped archive. Verify whether\n    compile_core_module_from_ast covers it, then add it to COVERAGE\n    in check_bake_prepass_parity.py with the verdict and the reason.\n  UNCLASSIFIED pre-pass `count_root` in collect_all_declarations.\n    The stdlib bake does NOT call collect_all_declarations, so this\n    pass is probably inert for the shipped archive. Verify whether\n    compile_core_module_from_ast covers it, then add it to COVERAGE\n    in check_bake_prepass_parity.py with the verdict and the reason.\n"
+      },
+      "prepass_parity_untouched_parent": {
+        "base": "25c35ecbb",
+        "command": [
+          "python3",
+          "/private/tmp/verum-T1694-prepass-base25c/scripts/ci/check_bake_prepass_parity.py"
+        ],
+        "exit_code": 1,
+        "source_hashes": {
+          "scripts/ci/check_bake_prepass_parity.py": "9d791c8a9d084e76575b6e8d33d48ba14bef3d4f3bbba21cb444f94e58c101b7",
+          "crates/verum_vbc/src/codegen/mod.rs": "542d18384f9da9b03391778e68959ef652fb1fbf061e1e3d5d69c7cdc360b6ec",
+          "crates/verum_compiler/src/pipeline/stdlib_bootstrap.rs": "958b897ed8883e90b75f81c847d1971ea1503d9ce4ff30484ee9ff0ea38a3eaf"
+        },
+        "stdout": "check_bake_prepass_parity: FAILED\n\n  UNCLASSIFIED pre-pass `collect_count_module_owners` in collect_all_declarations.\n    The stdlib bake does NOT call collect_all_declarations, so this\n    pass is probably inert for the shipped archive. Verify whether\n    compile_core_module_from_ast covers it, then add it to COVERAGE\n    in check_bake_prepass_parity.py with the verdict and the reason.\n  UNCLASSIFIED pre-pass `count_root` in collect_all_declarations.\n    The stdlib bake does NOT call collect_all_declarations, so this\n    pass is probably inert for the shipped archive. Verify whether\n    compile_core_module_from_ast covers it, then add it to COVERAGE\n    in check_bake_prepass_parity.py with the verdict and the reason.\n",
+        "scope": "Read-only exact parent source staged in a temporary three-file fixture; no code alteration or Cargo invocation."
+      },
+      "verdict": "Prepass classification failure is byte-for-byte the same on untouched parent25c35ecbb and rebased T1694 source. No classifier repair or complete source-gate acceptance is claimed."
+    }
+  }
 }
