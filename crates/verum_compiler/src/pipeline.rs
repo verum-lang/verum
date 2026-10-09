@@ -106,6 +106,10 @@ mod macros;
 pub use macros::reset_test_isolation;
 mod llvm_lowering;
 mod loading;
+
+#[cfg(test)]
+#[path = "../tests/unit/external_cog_sources.rs"]
+mod external_cog_source_tests;
 mod mlir;
 mod native_codegen;
 mod phase0;
