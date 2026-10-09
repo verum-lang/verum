@@ -110,6 +110,9 @@ mod loading;
 #[cfg(test)]
 #[path = "../tests/unit/external_cog_sources.rs"]
 mod external_cog_source_tests;
+#[cfg(test)]
+#[path = "../tests/unit/project_forward_payloads.rs"]
+mod project_forward_payload_tests;
 mod mlir;
 mod native_codegen;
 mod phase0;
