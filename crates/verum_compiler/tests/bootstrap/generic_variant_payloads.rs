@@ -453,3 +453,18 @@ fn declared_generic_variant_nonbuiltin_export_uses_the_same_source_authority() {
         );
     }
 }
+
+#[test]
+fn declared_generic_variant_exact_protocol_dependency_retains_its_descriptor() {
+    let (module, archive) = bootstrap(
+        &[(
+            "alpha",
+            "public protocol Observable { fn observe(self) -> Int; }",
+        )],
+        "public type JsonValue is JsonArray(alpha.Observable);",
+    );
+    for module in [&module, &archive.load_module("core.encoding.json").unwrap()] {
+        let protocol = ty(module, "alpha", "Observable");
+        assert_payload(module, "JsonArray", TypeRef::Concrete(protocol.id));
+    }
+}
