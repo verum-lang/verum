@@ -1808,8 +1808,8 @@ impl VbcCodegen {
     fn mounted_type_path(&self, name: &str) -> Maybe<&str> {
         let owner = self.ctx.current_source_module.as_deref()
             .unwrap_or(&self.config.module_name);
-        match self.source_type_mounts.get(owner) {
-            Some(mounts) => mounts.get(name).map(Text::as_str),
+        match self.source_type_mounts.get(&Text::from(owner)) {
+            Some(mounts) => mounts.get(&Text::from(name)).map(Text::as_str),
             None => self.ctx.mounted_types.get(name).map(|path| path.as_str()),
         }
     }
