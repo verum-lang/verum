@@ -258,7 +258,19 @@ impl TypeChecker {
                         }
                     }
                 }
-                // Not a type parameter - create Named type
+                // Use the ordinary namespace authority when it preserves a
+                // nominal head. This carries the declaring owner through local
+                // names, mounts and aliases; the current module alone is not
+                // necessarily the owner of an implement target.
+                if let Ok(resolved) = self.resolve_qualified_type(path, ast_ty.span) {
+                    if matches!(
+                        resolved,
+                        Type::Named { .. } | Type::Generic { .. } | Type::Var(_)
+                    ) {
+                        return Ok(resolved);
+                    }
+                }
+                // Keep structural alias bodies out of implementation keys.
                 Ok(Type::Named {
                     path: path.clone(),
                     args: List::new(),

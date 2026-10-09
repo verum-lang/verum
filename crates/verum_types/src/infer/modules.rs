@@ -3356,6 +3356,7 @@ impl TypeChecker {
             self.preregister_module_function_signatures(
                 &module_info.ast,
                 resolved_module_path.as_str(),
+                registry,
             );
 
             // Find the exported item
@@ -8967,6 +8968,7 @@ impl TypeChecker {
         &mut self,
         ast: &verum_ast::Module,
         module_path: &str,
+        registry: &verum_modules::ModuleRegistry,
     ) {
         use verum_ast::ItemKind;
 
@@ -9050,7 +9052,7 @@ impl TypeChecker {
         // CRITICAL: Also register blanket protocol impls from this module.
         // Blanket impls like `implement<T, U: From<T>> Into<U> for T` apply globally
         // and must be registered when ANY item from the module is imported.
-        self.register_module_blanket_impls(ast, module_path);
+        self.register_module_blanket_impls_with_registry(ast, module_path, Some(registry));
 
         // CRITICAL: Also import inherent impl methods for primitive types.
         // Modules like core.primitives define `implement Int { ... }` blocks that
@@ -9389,6 +9391,68 @@ impl TypeChecker {
     /// registered unless explicitly imported. This caused `iter.next()` to fail
     /// with "no method named `next` found" for iterator types.
     pub fn register_module_blanket_impls(&mut self, ast: &verum_ast::Module, module_path: &str) {
+        self.register_module_blanket_impls_with_registry(ast, module_path, None);
+    }
+
+    /// Resolve exported nominal targets through the ordinary source importer,
+    /// which installs their complete impls. A separate prepass entry would
+    /// otherwise retain a bare target and empty methods after the real import.
+    /// Returns true when this source target is handled, including an outer
+    /// import that will finish registering it after the current recursion.
+    fn register_exported_source_impl_target(
+        &mut self,
+        ast: &verum_ast::Module,
+        module_path: &str,
+        for_type: &verum_ast::ty::Type,
+        registry: &verum_modules::ModuleRegistry,
+        targets: &mut Set<Text>,
+    ) -> bool {
+        let base = match &for_type.kind {
+            verum_ast::ty::TypeKind::Generic { base, .. } => base.as_ref(),
+            _ => for_type,
+        };
+        let verum_ast::ty::TypeKind::Path(path) = &base.kind else {
+            return false;
+        };
+        let Some(name) = path.as_ident() else {
+            return false;
+        };
+        if targets.contains(&name.name) {
+            return true;
+        }
+        if self.resolve_public_source_type(module_path, name.as_str(), registry).is_none() {
+            return false;
+        }
+        let Some(module) = self.get_module_with_path_aliases(module_path, registry) else {
+            return false;
+        };
+        targets.insert(name.name.clone());
+        let owner = Text::from(module_path);
+        let key = (owner.clone(), name.name.clone());
+        if self.imports_in_progress.contains(&key) {
+            return true;
+        }
+        self.imports_in_progress.insert(key.clone());
+        let imported = self.import_type_export(
+            &module, name.as_str(), name.as_str(), &owner, registry, None, module.id,
+        );
+        self.imports_in_progress.remove(&key);
+        if let Err(error) = imported {
+            self.deferred_soundness_errors.push(error);
+        } else if let Err(error) = self.import_impl_blocks_for_type_in_module(
+            ast, name.as_str(), Some(module_path),
+        ) {
+            self.deferred_soundness_errors.push(error);
+        }
+        true
+    }
+
+    fn register_module_blanket_impls_with_registry(
+        &mut self,
+        ast: &verum_ast::Module,
+        module_path: &str,
+        registry: Option<&verum_modules::ModuleRegistry>,
+    ) {
         use verum_ast::ItemKind;
         use verum_ast::decl::ImplKind;
 
@@ -9413,6 +9477,7 @@ impl TypeChecker {
         // We must load the actual stdlib protocol definitions to get correct method signatures.
         self.ensure_stdlib_protocols_loaded(ast);
 
+        let mut source_targets = Set::new();
         for item in &ast.items {
             if let ItemKind::Impl(impl_decl) = &item.kind {
                 if let ImplKind::Protocol {
@@ -9421,6 +9486,15 @@ impl TypeChecker {
                 {
                     // Check if this is a blanket impl (for_type is a type parameter)
                     let is_blanket = self.is_blanket_impl_for_type(for_type, &impl_decl.generics);
+
+                    if !is_blanket
+                        && let Some(registry) = registry
+                        && self.register_exported_source_impl_target(
+                            ast, module_path, for_type, registry, &mut source_targets,
+                        )
+                    {
+                        continue;
+                    }
 
                     // Check if this is a generic impl (for_type uses type parameters from generics)
                     let is_generic_impl = !impl_decl.generics.is_empty();
@@ -10355,7 +10429,9 @@ impl TypeChecker {
         if let Some(module_info) = registry.get_by_path(module_path.as_str()) {
             // Pre-register all function signatures to enable forward references
             // within the imported module itself
-            self.preregister_module_function_signatures(&module_info.ast, module_path.as_str());
+            self.preregister_module_function_signatures(
+                &module_info.ast, module_path.as_str(), registry,
+            );
 
             // Import all public exports.
             // Sort names for deterministic import order — ExportTable uses HashMap

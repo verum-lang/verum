@@ -119,6 +119,10 @@ fn assert_registered_owner(checker: &TypeChecker, owner: &str) {
     );
     let implementation = qualified.expect("source implementation must use the declaration owner");
     assert_eq!(format!("{}", implementation.for_type), owner);
+    assert!(
+        implementation.methods.contains_key(&Text::from("value")),
+        "complete source methods must be retained"
+    );
     assert_eq!(
         implementation
             .associated_types
