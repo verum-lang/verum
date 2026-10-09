@@ -112,3 +112,48 @@ fn probe() -> Int { let input: List<Byte> = [1, 2];
     assert_eq(xs.len(), 3); assert_eq(xs[0], 1); assert_eq(xs[2], 3); 1 }
 "#);
 }
+
+// A declared fixed array is not physical packed-storage proof. These callees
+// intentionally use the existing List-backed literal producer for the same type.
+#[test]
+fn an_inferred_array_call_backed_by_a_list_is_not_reinterpreted() {
+    runs(r#"
+fn array_value() -> [Byte; 2] { [11 as Byte, 12 as Byte] }
+fn make() -> List<Byte> { let xs = array_value(); xs }
+fn probe() -> Int { let mut xs = make(); xs.push(13 as Byte);
+    assert_eq(xs.len(), 3); assert_eq(xs[0], 11); assert_eq(xs[2], 13); 1 }
+"#);
+}
+
+#[test]
+fn replacing_a_packed_binding_does_not_reuse_its_old_storage_fact() {
+    runs(r#"
+fn array_value() -> [Byte; 2] { [11 as Byte, 12 as Byte] }
+fn make() -> List<Byte> {
+    let mut xs: [Byte; 2] = [1, 2]; xs = array_value(); xs
+}
+fn probe() -> Int { let mut xs = make(); xs.push(13 as Byte);
+    assert_eq(xs.len(), 3); assert_eq(xs[0], 11); assert_eq(xs[2], 13); 1 }
+"#);
+}
+
+#[test]
+fn nested_blocks_preserve_the_actual_packed_result_move() {
+    runs(r#"
+fn make() -> List<Byte> { { let xs: [Byte; 2] = [4, 5]; xs } }
+fn probe() -> Int { let mut xs = make(); xs.push(6 as Byte);
+    assert_eq(xs.len(), 3); assert_eq(xs[0], 4); assert_eq(xs[2], 6); 1 }
+"#);
+}
+
+#[test]
+fn temporary_register_reuse_does_not_make_a_list_packed() {
+    runs(r#"
+fn make() -> List<Byte> {
+    { let xs: [Byte; 2] = [4, 5]; }
+    let xs: List<Byte> = [7, 8]; xs
+}
+fn probe() -> Int { let mut xs = make(); xs.push(9 as Byte);
+    assert_eq(xs.len(), 3); assert_eq(xs[0], 7); assert_eq(xs[2], 9); 1 }
+"#);
+}
