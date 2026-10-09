@@ -2340,11 +2340,8 @@ fn value_hash_depth(v: Value, state: &InterpreterState, depth: usize) -> usize {
             hash ^= byte as u64;
             hash = hash.wrapping_mul(FNV_PRIME);
         }
-        // Payload values — recursive hash of each Value in the
-        // payload area.  Recursion depth is bounded by user-program
-        // type depth; pathological deep variants (a Maybe of a
-        // Maybe of a Maybe …) are rare and the recursion eventually
-        // grounds on primitives.
+        // Payload values share the record-key recursion bound and
+        // identity fallback, including recursive variant/record graphs.
         for i in 0..(field_count as usize) {
             let inner = unsafe { heap::variant_payload(ptr, i) };
             let inner_hash = value_hash_depth(inner, state, depth + 1) as u64;
@@ -2450,9 +2447,7 @@ fn value_hash_depth(v: Value, state: &InterpreterState, depth: usize) -> usize {
 }
 
 /// Check if two Values are equal for map key comparison.
-/// For heap strings, compares string content rather than pointer addresses.
-/// Small strings (≤6 bytes) are inline in the NaN-box and use bitwise equality.
-/// A small string (≤6 bytes) can never equal a heap string (>6 bytes).
+/// Text compares by content across inline and heap representations.
 /// For variant heap objects, compares tag + payload values recursively
 /// so two semantically-equal variants allocated at different addresses
 /// compare equal — the (hash, eq) contract that `value_hash` requires.
@@ -2480,9 +2475,12 @@ fn value_eq_depth(a: Value, b: Value, state: &InterpreterState, depth: usize) ->
         return a.as_i64() == b.as_i64();
     }
 
-    // Heap string comparison: two different allocations may hold the same content
-    if super::string_helpers::is_heap_string(&a) && super::string_helpers::is_heap_string(&b) {
-        return heap_string_content_eq(&a, &b);
+    // Text storage is not its identity: short Text can also be heap-backed,
+    // for example when supplied by a runtime byte producer.
+    let a_is_text = a.is_small_string() || super::string_helpers::is_heap_string(&a);
+    let b_is_text = b.is_small_string() || super::string_helpers::is_heap_string(&b);
+    if a_is_text && b_is_text {
+        return text_content_eq(&a, &b);
     }
 
     // **Variant structural equality** (closes `Set<Maybe<T>>` /
@@ -2535,23 +2533,39 @@ fn value_eq_depth(a: Value, b: Value, state: &InterpreterState, depth: usize) ->
     false
 }
 
-/// Compare the content of two heap-allocated strings by value —
-/// canonical TEXT records and BYTE_SLICE byte views (ARCH-P5).
+/// Compare Text bytes across inline values, canonical heap records, and byte
+/// views. The inline storage stays live until both byte slices are compared.
 #[inline]
-fn heap_string_content_eq(a: &Value, b: &Value) -> bool {
-    let (a_ptr, a_len) = text_value_bytes_and_len(a);
-    let (b_ptr, b_len) = text_value_bytes_and_len(b);
-    if a_len != b_len {
-        return false;
-    }
-    if a_len == 0 {
-        return true;
-    }
-    if a_ptr.is_null() || b_ptr.is_null() {
-        return false;
-    }
-    let a_bytes = unsafe { std::slice::from_raw_parts(a_ptr, a_len) };
-    let b_bytes = unsafe { std::slice::from_raw_parts(b_ptr, b_len) };
+fn text_content_eq(a: &Value, b: &Value) -> bool {
+    let inline_a = a.is_small_string().then(|| a.as_small_string());
+    let inline_b = b.is_small_string().then(|| b.as_small_string());
+    let a_bytes = if let Some(inline) = &inline_a {
+        inline.as_str().as_bytes()
+    } else {
+        let (ptr, len) = text_value_bytes_and_len(a);
+        if len == 0 {
+            &[]
+        } else if ptr.is_null() {
+            return false;
+        } else {
+            // SAFETY: the caller established a Text/byte-view representation;
+            // its producer guarantees len initialized bytes at ptr.
+            unsafe { std::slice::from_raw_parts(ptr, len) }
+        }
+    };
+    let b_bytes = if let Some(inline) = &inline_b {
+        inline.as_str().as_bytes()
+    } else {
+        let (ptr, len) = text_value_bytes_and_len(b);
+        if len == 0 {
+            &[]
+        } else if ptr.is_null() {
+            return false;
+        } else {
+            // SAFETY: same representation contract as a_bytes above.
+            unsafe { std::slice::from_raw_parts(ptr, len) }
+        }
+    };
     a_bytes == b_bytes
 }
 

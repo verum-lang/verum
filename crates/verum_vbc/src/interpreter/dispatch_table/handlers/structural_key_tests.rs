@@ -255,3 +255,75 @@ fn probe(left: Int, right: Int) -> Int {
         15
     );
 }
+
+#[test]
+fn record_text_fields_are_equal_across_inline_and_heap_storage() {
+    let mut module = VbcModule::default();
+    module.types.push(TypeDescriptor {
+        id: TypeId(9001),
+        kind: TypeKind::Record,
+        fields: [FieldDescriptor::default()].into_iter().collect(),
+        ..TypeDescriptor::default()
+    });
+    let mut state = InterpreterState::new(Arc::new(module));
+    let inline = Value::from_small_string("1.0.0").expect("inline version");
+    let text = state.heap.alloc_text(b"1.0.0").expect("heap version");
+    let heap = Value::from_ptr(text.as_ptr() as *mut u8);
+    let first = record(&mut state, TypeId(9001), &[inline]);
+    let equal = record(&mut state, TypeId(9001), &[heap]);
+    assert!(deep_value_eq(&first, &equal, &state));
+    assert_eq!(value_hash(first, &state), value_hash(equal, &state));
+    assert!(value_eq(first, equal, &state));
+    assert!(value_eq(equal, first, &state));
+}
+
+#[test]
+fn nested_record_keys_survive_map_growth() {
+    assert_eq!(
+        run(r#"
+type Part is { number: Int };
+type Key is { part: Part };
+fn key(number: Int) -> Key { Key { part: Part { number: number } } }
+fn probe() -> Int {
+    let mut values: Map<Key, Int> = Map.new();
+    let mut i = 0;
+    while i < 48 { values.insert(key(i), i + 100); i = i + 1; }
+    let mut found = 0;
+    i = 0;
+    while i < 48 {
+        match values.get(key(i)) {
+            Maybe.Some(value) => { if value == i + 100 { found = found + 1; } },
+            Maybe.None => {},
+        }
+        i = i + 1;
+    }
+    found
+}
+"#),
+        48
+    );
+}
+
+#[test]
+fn set_record_keys_deduplicate_and_remove_by_value() {
+    assert_eq!(
+        run(&format!(
+            r#"{COORDINATE}
+fn probe() -> Int {{
+    let mut keys: Set<ReleaseCoordinate> = Set.new();
+    keys.insert(coordinate("@acme/tool", "1.0.0"));
+    keys.insert(coordinate("@acme/tool", "1.0.0"));
+    keys.insert(coordinate("@acme/tool", "2.0.0"));
+    let mut flags = 0;
+    if keys.len() == 2 {{ flags = flags + 1; }}
+    if keys.contains(coordinate("@acme/tool", "1.0.0")) {{ flags = flags + 2; }}
+    keys.remove(coordinate("@acme/tool", "1.0.0"));
+    if !keys.contains(coordinate("@acme/tool", "1.0.0")) {{ flags = flags + 4; }}
+    if keys.contains(coordinate("@acme/tool", "2.0.0")) {{ flags = flags + 8; }}
+    flags
+}}
+"#
+        )),
+        15
+    );
+}
