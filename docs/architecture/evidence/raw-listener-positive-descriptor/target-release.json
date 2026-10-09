@@ -1,0 +1,16 @@
+{
+  "target": "/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target",
+  "released": true,
+  "active_build_test_processes": [],
+  "source_commit": "f8a6c82ebe6b4e9dc5b1eff17e347e21c8496876",
+  "fixed_executable": "/private/tmp/verum-T1709-fixed-executable",
+  "fixed_executable_sha256": "1d7b30bb0ba10c8a4ff216e5d150a6bf1298eac6cfe68917c9e6c227742d50ec",
+  "artifacts_after": {
+    "runtime.vbca": "410ff097b455437cab98b651f7799b3129588820925afe98e0de9c3781530a0f",
+    "runtime.core_metadata": "a92bd89e649e102cdc67d7ad0032513d6448d8915e5744127e6cdf1f1e34ebbb",
+    "runtime.symbol_graph": "a6678c18498f7519749ca1fdf1d22629b479083f42fa95a15177e8c7acf1c722",
+    "runtime.vbca.checksum": "c33573118a8c4b635f6c8f727c3784b524f660be57de702365e8d9c14b2f3a8b",
+    "runtime.vbca.schema": "fec20d7b3f8d1b81aff66c6c1181be574963779f7eacaf65660f8ab9127fca87"
+  },
+  "scope": "T1709 gates ended; no subsequent Cargo or test process will use this target without new explicit authorization."
+}

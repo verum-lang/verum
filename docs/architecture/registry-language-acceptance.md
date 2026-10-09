@@ -925,10 +925,10 @@ connection timeouts and one UDP timeout. Those TCP failures occur before
 registration. The adjacent four-thread IoEngine readiness/accept/read/write
 group passes all four controls. No retries were used to turn failures green.
 
-The older raw `tcp_listen_v2` descriptor-zero limitation remains separate:
-that path bypasses registration. No non-Unix execution, ordinary CLI, fresh
-standard-library bake, AOT, full-library pass or registry-service readiness
-is claimed. Exact source/executable identities, commands, failed and passed
+That checkpoint excludes the older raw `tcp_listen_v2` descriptor-zero path,
+which bypasses registration; its subsequent repair is recorded below. No
+non-Unix execution, ordinary CLI, fresh standard-library bake, AOT,
+full-library pass or registry-service readiness is claimed. Exact source/executable identities, commands, failed and passed
 logs, and unchanged inherited artifacts are recorded in
 [`unix-socket-descriptor-identity/integration.json`](evidence/unix-socket-descriptor-identity/integration.json).
 
@@ -943,3 +943,41 @@ formal controls pass. Exact evidence and the failed target-selection attempt
 are retained in the [integration report](evidence/numeric-platform-integration/README.md).
 Fresh ordinary CLI/std-library production, native storage integration and
 registry authentication remain separate acceptance work.
+
+### Positive raw listener descriptors
+
+The Unix raw-v2 listener now preserves the same positive success-handle
+contract as registered sockets. A listener created as descriptor zero remains
+owned while it is duplicated; successful duplication transfers the real
+positive descriptor and closes the original. Failure closes the original and
+returns the actual negative OS error. Registered listeners share this ownership
+helper. Non-Unix behavior and socket I/O are unchanged.
+
+Two process-isolated controls at `c29836a5d` fail against original production:
+the ordinary case returns zero, and descriptor exhaustion also returns zero
+instead of `-EMFILE`. Each child closes only its own stdin. The exhaustion child
+owns descriptor three and lowers its soft descriptor limit to four; parent
+standard descriptors and limits remain unchanged. The child must return a
+specific completion status after assertions and cleanup, preventing a
+zero-test invocation from supplying acceptance.
+
+The byte-identical controls pass at `f8a6c82eb`. All ten descriptor-identity
+controls pass both serially and with four threads on the same executable; six
+existing raw-v2 bind and argument-validation controls also pass with four
+threads. Both the original zero descriptor and the transferred descriptor are
+checked closed after their respective owned lifetimes.
+
+The initial Cargo filter selected zero tests and is retained as build evidence
+only. An intermediate exhaustion fixture used a limit equal to Rust's minimum
+duplication descriptor and received `EINVAL`; its failed expectation is retained.
+The corrected fixture was measured against original production before the
+unchanged repair was restored. The
+[`raw-listener-positive-descriptor/integration.json`](evidence/raw-listener-positive-descriptor/integration.json)
+receipt links every attempt, exact commands, source/executable hashes and
+losslessly compressed logs. Inherited standard-library artifact bytes remain
+unchanged.
+
+These are focused host-runtime controls on macOS. They do not retry or resolve
+the separately recorded TCP/UDP traffic timeouts, and do not establish other
+platform, ordinary CLI, fresh-producer, AOT, complete-library or authenticated
+registry-service acceptance.
