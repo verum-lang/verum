@@ -221,9 +221,50 @@ identities. A macOS fixture correction explicitly restores blocking mode on
 accepted HTTP sockets while keeping read/write deadlines (T1654).
 
 These are real loopback HTTP and command-handler controls, not an authenticated
-Verum service roundtrip. Detailed dependency projection remains T1651; actual
-server admission, durable storage, restart and publish-install-run acceptance
-remain required by the [publication contract](cog-publication-protocol.md).
+Verum service roundtrip. The T1651 producer gates below cover dependency
+projection. Actual server admission, durable storage, restart and
+publish-install-run acceptance remain required by the
+[publication contract](cog-publication-protocol.md).
+
+## Publication dependency intent — T1651
+
+All four manifest-based metadata producers now share one dependency
+projection. Detailed versions, feature lists, optional flags and default-feature
+flags retain their declared values. Explicit wildcard requirements remain
+valid; missing versions are never replaced with a wildcard. Path/Git source
+declarations, including versioned hybrids, are refused before archive work.
+Unknown dependency fields such as `registry`, `package` and `workspace` are
+refused during manifest loading instead of being discarded.
+
+Workspace publication previews use the same projection. Direct metadata
+callers also require valid, explicit dependency versions at shared publication
+admission, before opening the archive or sending HTTP. The general read-side
+dependency type remains compatible; a missing or null version is not valid
+publication metadata.
+
+Tested source `4409dc64a` passed **34 publication**, **5 configured-registry**
+and **4 configuration-profile** entries. Three entries are inert subprocess
+dispatchers. The publication controls include the actual package handler,
+exact original manifest/source bytes in its gzip-tar, option preservation,
+workspace dry runs and direct API refusals. Preserved causal baselines show
+the corresponding data loss and admission failures. An archive-entry fixture
+spelling error was corrected separately and is recorded in the
+[gate receipt](evidence/registry-publication-dependency-gate.json).
+
+The nine patches rebased unchanged onto `fa36ceae0` as `a57812d4c`; all owned
+CLI source, test and protocol bytes are identical to the tested revision.
+The base also brings compiler, type-checker and VBC test changes. The receipt
+lists that exact difference; the selected gates do not claim execution of
+the combined source. They used the separately identified stage14 artifacts
+with automatic precompilation disabled. A fresh ordinary CLI and registry
+replay remain required.
+
+The configured-registry fixture still downloads opaque bytes; this is not
+source-cog extraction or fresh-consumer acceptance. T1657 covers dependency
+activation and recursive installation, so T1651 remains open for that
+consumer gate. Authenticated service admission, signature support, durability
+and publish-install-run acceptance remain separate. Workspace canonical
+manifest discovery and skipped-member counts are tracked by T1665.
 
 ## Bounded host socket controls — T1650
 

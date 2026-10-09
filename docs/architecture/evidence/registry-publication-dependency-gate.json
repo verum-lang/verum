@@ -1,0 +1,559 @@
+{
+  "task": "T1651",
+  "status": "Publication producer gates passed; authenticated service and fresh-consumer acceptance remain open",
+  "tested_source_commit": "4409dc64a1b14fbd847b5e7163a9d675c3705ddd",
+  "tested_source_base": "d1ee935884042606f0feb6266d05195bbfe89115",
+  "tested_source_branch": "codex/publication-dependencies-tested-4409",
+  "rebased_source_commit": "a57812d4c9a531a31e1e7764d5d67230fcde7beb",
+  "rebase_base": "fa36ceae04de074c5eca9c391518fc3a2a2db1ce",
+  "rebase_equivalence": {
+    "all_nine_patches_unchanged": true,
+    "range_diff": [
+      "1:  83b2fa74b =  1:  0bb051dfe test(cog): expose lost publication dependency intent (T1651)",
+      " 2:  b67ab0c81 =  2:  8fd897a72 fix(cog): preserve representable publication dependency intent (T1651)",
+      " 3:  62f3392c1 =  3:  0600d546b docs(registry): define publication dependency projection boundaries (T1651)",
+      " 4:  9098465bf =  4:  78f39d32e test(cog): expose ignored dependency source fields (T1651)",
+      " 5:  6938800c9 =  5:  5d36e672e fix(cog): reject unknown detailed dependency fields (T1651)",
+      " 6:  ba4273bec =  6:  abb6e6ea0 test(cog): assert the canonical archive manifest spelling (T1651)",
+      " 7:  eb7cb8815 =  7:  a6eb617d4 test(cog): expose publication admission bypasses (T1651)",
+      " 8:  69deca4ab =  8:  410939e65 fix(cog): validate dependency intent before workspace previews (T1651)",
+      " 9:  4409dc64a =  9:  a57812d4c fix(registry): require dependency versions in publication admission (T1651)"
+    ],
+    "owned_file_identities": [
+      {
+        "path": "crates/verum_cli/src/cog.rs",
+        "bytes": 20752,
+        "sha256": "e63bb6e4ce6fecbe5588e2a1af48538126bbecd70424002629804e8fc1eb48cb",
+        "identical_at_tested_and_rebased_source": true
+      },
+      {
+        "path": "crates/verum_cli/src/cog_manager.rs",
+        "bytes": 30528,
+        "sha256": "74de2518c830046c35d81a74b2b486b362c83a74d7ca84cc57213ce16754ad69",
+        "identical_at_tested_and_rebased_source": true
+      },
+      {
+        "path": "crates/verum_cli/src/commands/add.rs",
+        "bytes": 15470,
+        "sha256": "b8fa38d91443663784669e9df26bb9a3d69b9fbf8a5902751daaf5d73d553071",
+        "identical_at_tested_and_rebased_source": true
+      },
+      {
+        "path": "crates/verum_cli/src/commands/publish.rs",
+        "bytes": 54375,
+        "sha256": "f558b9254a2fc28da9ea6a0236bd1014df1c3ea5140f439f3f75a42e31c370d0",
+        "identical_at_tested_and_rebased_source": true
+      },
+      {
+        "path": "crates/verum_cli/src/commands/workspace.rs",
+        "bytes": 37950,
+        "sha256": "c48b0150bffef3670d189157a5fe4dcc2c177439e93bc164f5622602d4679b28",
+        "identical_at_tested_and_rebased_source": true
+      },
+      {
+        "path": "crates/verum_cli/src/config.rs",
+        "bytes": 75697,
+        "sha256": "53a0fd681ed99bf70c3869154d2fedc540b9f60f46204838e0e76ddca3c20a6b",
+        "identical_at_tested_and_rebased_source": true
+      },
+      {
+        "path": "crates/verum_cli/src/registry/mod.rs",
+        "bytes": 2812,
+        "sha256": "6fa4fe084db97290fcd2ae69b904eee8edfbce654789aed20ae3d93aa84e0a8b",
+        "identical_at_tested_and_rebased_source": true
+      },
+      {
+        "path": "crates/verum_cli/src/registry/publication.rs",
+        "bytes": 8245,
+        "sha256": "62fbba8a65c1ca7f1e9fc2780dbf7e877b47d79d92558edce56a824ac7133652",
+        "identical_at_tested_and_rebased_source": true
+      },
+      {
+        "path": "crates/verum_cli/src/registry/publication_dependencies.rs",
+        "bytes": 2746,
+        "sha256": "b71edf70982f4cc65d5b84ad154539fb9b76effb92163e6aad1ca1c775a45b51",
+        "identical_at_tested_and_rebased_source": true
+      },
+      {
+        "path": "crates/verum_cli/tests/cog/publication_dependencies.rs",
+        "bytes": 18868,
+        "sha256": "fe228ab7f2b74bc386ba7ad44e105fab109ce1892a84fd71a09cec3eb58b7524",
+        "identical_at_tested_and_rebased_source": true
+      },
+      {
+        "path": "crates/verum_cli/tests/registry/publication_transport.rs",
+        "bytes": 17064,
+        "sha256": "31549f625e87df63d25c368b14cf27321be40eb5bc98090a26ffc87bd7d519e2",
+        "identical_at_tested_and_rebased_source": true
+      },
+      {
+        "path": "docs/architecture/cog-publication-protocol.md",
+        "bytes": 12714,
+        "sha256": "3a2966c9ffd6910c6bfba23044492ca99177db0a4d1f885b7c1e9f22e1230a6c",
+        "identical_at_tested_and_rebased_source": true
+      }
+    ],
+    "base_and_tested_to_rebased_changed_paths": [
+      "crates/verum_compiler/build.rs",
+      "crates/verum_types/src/context.rs",
+      "crates/verum_types/src/infer/decls.rs",
+      "crates/verum_types/src/infer/modules.rs",
+      "crates/verum_types/src/infer/patterns.rs",
+      "crates/verum_types/src/module_context.rs",
+      "crates/verum_types/tests/mounted_type_owner.rs",
+      "crates/verum_vbc/src/interpreter/dispatch_table/handlers/net_runtime.rs",
+      "crates/verum_vbc/src/interpreter/io_engine.rs",
+      "crates/verum_vbc/tests/unit/io_engine_socket_readiness.rs",
+      "crates/verum_vbc/tests/unit/udp_peer_address.rs",
+      "docs/architecture/evidence/registry-host-socket-gate.json",
+      "docs/architecture/evidence/registry-publication-client-gate.json",
+      "docs/architecture/evidence/registry-source-fingerprint-gate.json",
+      "docs/architecture/evidence/registry-static-receiver-gate.json",
+      "docs/architecture/evidence/registry-type-ownership-gate.json",
+      "docs/architecture/registry-language-acceptance.md"
+    ],
+    "scope": "All owned CLI source, tests and protocol bytes are identical. The new base changes compiler/type-checker/VBC test sources and documentation; these gates do not claim execution of that combined source. Root owns the fresh ordinary CLI and registry replay."
+  },
+  "final_gates": {
+    "publication": {
+      "passed": 34,
+      "failed": 0,
+      "inert_child_entries": 2
+    },
+    "configured_registry": {
+      "passed": 5,
+      "failed": 0,
+      "inert_child_entries": 1
+    },
+    "configuration_profiles": {
+      "passed": 4,
+      "failed": 0,
+      "inert_child_entries": 0
+    },
+    "total_selected_entries": 43,
+    "total_inert_child_entries": 3,
+    "final_executable": {
+      "path": "/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target/debug/build/verum_cli/72adbfc0707d7b24/out/verum_cli-72adbfc0707d7b24",
+      "bytes": 449035096,
+      "sha256": "fcf7fafb39384b9fa3b94c3584ed4dbd9cff6afa215ac32a9853c17daf8d4a19"
+    }
+  },
+  "precompiled_runtime_source": "fdad59f06 stage14",
+  "precompiled_schema": "v52-2026-10-05-semantic-formal-parameters",
+  "precompiled_source_checksum": "def6d3e7b7421caf163b63529b2d0edd4bc2a09ec0004eb9cb89854b1cbae868",
+  "precompiled_artifacts_verified_unchanged": [
+    {
+      "path": "/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target/precompiled-stdlib/runtime.vbca",
+      "bytes": 30232754,
+      "sha256": "410ff097b455437cab98b651f7799b3129588820925afe98e0de9c3781530a0f"
+    },
+    {
+      "path": "/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target/precompiled-stdlib/runtime.core_metadata",
+      "bytes": 78897266,
+      "sha256": "a92bd89e649e102cdc67d7ad0032513d6448d8915e5744127e6cdf1f1e34ebbb"
+    },
+    {
+      "path": "/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target/precompiled-stdlib/runtime.symbol_graph",
+      "bytes": 5914608,
+      "sha256": "a6678c18498f7519749ca1fdf1d22629b479083f42fa95a15177e8c7acf1c722"
+    }
+  ],
+  "runs": [
+    {
+      "label": "baseline-options",
+      "source_commit": "83b2fa74b47a2cc91ae721ac5df323f5969b358f",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "-p",
+        "verum_cli",
+        "--lib",
+        "cog::publication_dependencies::",
+        "--",
+        "--nocapture",
+        "--test-threads=2"
+      ],
+      "cwd": "/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum",
+      "environment_overrides": {
+        "CARGO_TARGET_DIR": "/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target",
+        "CARGO_BUILD_JOBS": "2",
+        "CARGO_INCREMENTAL": "0",
+        "VERUM_NO_AUTO_PRECOMPILE": "1",
+        "VERUM_LLVM_DIR": "/Users/taaliman/projects/oldman/verum-lang/verum/llvm/install"
+      },
+      "timeout_seconds": 900,
+      "elapsed_seconds": 134.58,
+      "exit_code": 101,
+      "timed_out": false,
+      "source_and_artifacts_unchanged": true,
+      "executable": {
+        "path": "/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target/debug/build/verum_cli/72adbfc0707d7b24/out/verum_cli-72adbfc0707d7b24",
+        "bytes": 447927880,
+        "sha256": "dc3cfcd2f3dc69183f82b2c971d26728a3817c1fe3fc2fbd5c5411604fba4796"
+      },
+      "log": {
+        "path": "/private/tmp/verum-T1651-baseline-options/cargo.log",
+        "bytes": 13778,
+        "sha256": "de91fffa8a6af4d288d9f4e899be6c7ca823ce15ba1d17bef1156c7c04977454"
+      },
+      "passed": 1,
+      "failed": 6,
+      "ignored": 0,
+      "final_test_summary": "test result: FAILED. 1 passed; 6 failed; 0 ignored; 0 measured; 848 filtered out; finished in 0.03s",
+      "finding": "Six intended failures demonstrate option erasure, implicit wildcard substitution and false dry-run success; the sole passing entry is the inert child runner.",
+      "receipt": {
+        "path": "/private/tmp/verum-T1651-baseline-options/result.json",
+        "sha256": "511de6a5dcec47d10237f9d8fc0ddd6d89584ee833800e9500480d10a5c4c562"
+      },
+      "reported_outer_failures": [
+        "cog::publication_dependencies::detailed_manifest_dependencies_reach_publication_metadata",
+        "cog::publication_dependencies::explicit_wildcards_and_unset_dependency_options_remain_distinct",
+        "cog::publication_dependencies::omitted_or_invalid_dependency_versions_are_refused",
+        "cog::publication_dependencies::package_publish_transmits_original_manifest_dependency_options",
+        "cog::publication_dependencies::unrepresentable_dependency_sources_are_not_registry_wildcards",
+        "cog::publication_dependencies::unsupported_dependency_dry_run_refuses_before_archive_creation"
+      ],
+      "preserved_executable": {
+        "path": "/private/tmp/verum-T1651-baseline-options/verum_cli_tests",
+        "bytes": 447927880,
+        "sha256": "dc3cfcd2f3dc69183f82b2c971d26728a3817c1fe3fc2fbd5c5411604fba4796"
+      }
+    },
+    {
+      "label": "baseline-unknown-fields",
+      "source_commit": "9098465bf57b85efd4dc2d18455d9db108ad181a",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "-p",
+        "verum_cli",
+        "--lib",
+        "cog::publication_dependencies::",
+        "--",
+        "--nocapture",
+        "--test-threads=2"
+      ],
+      "cwd": "/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum",
+      "environment_overrides": {
+        "CARGO_TARGET_DIR": "/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target",
+        "CARGO_BUILD_JOBS": "2",
+        "CARGO_INCREMENTAL": "0",
+        "VERUM_NO_AUTO_PRECOMPILE": "1",
+        "VERUM_LLVM_DIR": "/Users/taaliman/projects/oldman/verum-lang/verum/llvm/install"
+      },
+      "timeout_seconds": 900,
+      "elapsed_seconds": 137.188,
+      "exit_code": 101,
+      "timed_out": false,
+      "source_and_artifacts_unchanged": true,
+      "executable": {
+        "path": "/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target/debug/build/verum_cli/72adbfc0707d7b24/out/verum_cli-72adbfc0707d7b24",
+        "bytes": 448936696,
+        "sha256": "7764179060f50a01999b6507d1af1ab7f3840714134b341f812202d065d07e80"
+      },
+      "log": {
+        "path": "/private/tmp/verum-T1651-baseline-unknown-fields/cargo.log",
+        "bytes": 20511,
+        "sha256": "8ef386a8c8db5914bbdba922e80ba3e3088116113bf096de6808f11d9735dc2f"
+      },
+      "passed": 8,
+      "failed": 5,
+      "ignored": 0,
+      "final_test_summary": "test result: FAILED. 8 passed; 5 failed; 0 ignored; 0 measured; 848 filtered out; finished in 0.08s",
+      "finding": "Four intended failures demonstrate ignored registry/package/workspace intent. The fifth is a fixture expectation error: the successful real archive uses canonical Verum.toml, but the fixture expected lowercase.",
+      "receipt": {
+        "path": "/private/tmp/verum-T1651-baseline-unknown-fields/result.json",
+        "sha256": "e031e4892e073c5758df279fed098594d8ffc70fc0d3efaf394698452a6d8d7d"
+      },
+      "reported_outer_failures": [
+        "cog::publication_dependencies::package_publish_transmits_original_manifest_dependency_options",
+        "cog::publication_dependencies::unknown_dependency_intent_is_refused_by_manifest_loading",
+        "cog::publication_dependencies::unknown_package_alias_refuses_dry_run_and_upload",
+        "cog::publication_dependencies::unknown_registry_intent_refuses_dry_run_and_upload",
+        "cog::publication_dependencies::unknown_workspace_intent_refuses_dry_run_and_upload"
+      ],
+      "preserved_executable": {
+        "path": "/private/tmp/verum-T1651-baseline-unknown-fields/verum_cli_tests",
+        "bytes": 448936696,
+        "sha256": "7764179060f50a01999b6507d1af1ab7f3840714134b341f812202d065d07e80"
+      }
+    },
+    {
+      "label": "intermediate-manifest",
+      "source_commit": "6938800c97ac6ba8e1dd9afeffd47970064b5e5e",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "-p",
+        "verum_cli",
+        "--lib",
+        "cog::publication_dependencies::",
+        "--",
+        "--nocapture",
+        "--test-threads=2"
+      ],
+      "cwd": "/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum",
+      "environment_overrides": {
+        "CARGO_TARGET_DIR": "/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target",
+        "CARGO_BUILD_JOBS": "2",
+        "CARGO_INCREMENTAL": "0",
+        "VERUM_NO_AUTO_PRECOMPILE": "1",
+        "VERUM_LLVM_DIR": "/Users/taaliman/projects/oldman/verum-lang/verum/llvm/install"
+      },
+      "timeout_seconds": 900,
+      "elapsed_seconds": 141.923,
+      "exit_code": 101,
+      "timed_out": false,
+      "source_and_artifacts_unchanged": true,
+      "executable": {
+        "path": "/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target/debug/build/verum_cli/72adbfc0707d7b24/out/verum_cli-72adbfc0707d7b24",
+        "bytes": 448936728,
+        "sha256": "ec3458d382adc5d7b9538a6595ffb7d216143bbd730ed8b994f51baff1fc7240"
+      },
+      "log": {
+        "path": "/private/tmp/verum-T1651-intermediate-manifest/cargo.log",
+        "bytes": 10059,
+        "sha256": "6d9f204e386be81f2a8abaa9e5dd087409c06cf9090c71216455963af826a73f"
+      },
+      "passed": 12,
+      "failed": 1,
+      "ignored": 0,
+      "final_test_summary": "test result: FAILED. 12 passed; 1 failed; 0 ignored; 0 measured; 848 filtered out; finished in 9.77s",
+      "finding": "All twelve other entries passed. The sole failure was the same archive-entry fixture spelling, corrected separately in ba4273bec without changing archive behavior.",
+      "receipt": {
+        "path": "/private/tmp/verum-T1651-intermediate-manifest/result.json",
+        "sha256": "660ac8fdf7f542a733a8e61747f7bf480c21f6c225f6ac397b7a23f4bc2b86a7"
+      },
+      "reported_outer_failures": [
+        "cog::publication_dependencies::package_publish_transmits_original_manifest_dependency_options"
+      ],
+      "preserved_executable": {
+        "path": "/private/tmp/verum-T1651-intermediate-manifest/verum_cli_tests",
+        "bytes": 448936728,
+        "sha256": "ec3458d382adc5d7b9538a6595ffb7d216143bbd730ed8b994f51baff1fc7240"
+      }
+    },
+    {
+      "label": "baseline-admission",
+      "source_commit": "eb7cb8815620e0e04f493a198a11526e9ed5c9c4",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "-p",
+        "verum_cli",
+        "--lib",
+        "publication",
+        "--",
+        "--nocapture",
+        "--test-threads=2"
+      ],
+      "cwd": "/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum",
+      "environment_overrides": {
+        "CARGO_TARGET_DIR": "/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target",
+        "CARGO_BUILD_JOBS": "2",
+        "CARGO_INCREMENTAL": "0",
+        "VERUM_NO_AUTO_PRECOMPILE": "1",
+        "VERUM_LLVM_DIR": "/Users/taaliman/projects/oldman/verum-lang/verum/llvm/install"
+      },
+      "timeout_seconds": 900,
+      "elapsed_seconds": 137.749,
+      "exit_code": 101,
+      "timed_out": false,
+      "source_and_artifacts_unchanged": true,
+      "executable": {
+        "path": "/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target/debug/build/verum_cli/72adbfc0707d7b24/out/verum_cli-72adbfc0707d7b24",
+        "bytes": 449017016,
+        "sha256": "e90b3510f52b8f0ca60e0144a34bc05ce4167d18164999fbd2db0c3aad00c25c"
+      },
+      "log": {
+        "path": "/private/tmp/verum-T1651-baseline-admission/cargo.log",
+        "bytes": 16067,
+        "sha256": "949b444d884165b75af585bc7ce361315f88092b8aa2d901301f2abe5940457e"
+      },
+      "passed": 28,
+      "failed": 6,
+      "ignored": 0,
+      "final_test_summary": "test result: FAILED. 28 passed; 6 failed; 0 ignored; 0 measured; 835 filtered out; finished in 1.56s",
+      "finding": "The original thirteen manifest entries and existing publication neighbors passed after the fixture correction. Four actual workspace previews falsely succeeded; two direct API controls reached archive I/O instead of rejecting invalid/missing dependency requirements.",
+      "receipt": {
+        "path": "/private/tmp/verum-T1651-baseline-admission/result.json",
+        "sha256": "6eef559e62fa2e11dc864a9964dba9c8c488adba8e8bd16d4252e245d80050d1"
+      },
+      "reported_outer_failures": [
+        "cog::publication_dependencies::workspace_dependency_dry_run_refuses_git_with_version",
+        "cog::publication_dependencies::workspace_dependency_dry_run_refuses_invalid_semver",
+        "cog::publication_dependencies::workspace_dependency_dry_run_refuses_path_with_version",
+        "cog::publication_dependencies::workspace_dependency_dry_run_requires_a_declared_version",
+        "registry::client::publication_transport::direct_publication_rejects_invalid_dependency_versions",
+        "registry::client::publication_transport::direct_publication_requires_declared_dependency_versions"
+      ],
+      "preserved_executable": {
+        "path": "/private/tmp/verum-T1651-baseline-admission/verum_cli_tests",
+        "bytes": 449017016,
+        "sha256": "e90b3510f52b8f0ca60e0144a34bc05ce4167d18164999fbd2db0c3aad00c25c"
+      }
+    },
+    {
+      "label": "final-publication",
+      "source_commit": "4409dc64a1b14fbd847b5e7163a9d675c3705ddd",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "-p",
+        "verum_cli",
+        "--lib",
+        "publication",
+        "--",
+        "--nocapture",
+        "--test-threads=2"
+      ],
+      "cwd": "/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum",
+      "environment_overrides": {
+        "CARGO_TARGET_DIR": "/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target",
+        "CARGO_BUILD_JOBS": "2",
+        "CARGO_INCREMENTAL": "0",
+        "VERUM_NO_AUTO_PRECOMPILE": "1",
+        "VERUM_LLVM_DIR": "/Users/taaliman/projects/oldman/verum-lang/verum/llvm/install"
+      },
+      "timeout_seconds": 900,
+      "elapsed_seconds": 126.821,
+      "exit_code": 0,
+      "timed_out": false,
+      "source_and_artifacts_unchanged": true,
+      "executable": {
+        "path": "/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target/debug/build/verum_cli/72adbfc0707d7b24/out/verum_cli-72adbfc0707d7b24",
+        "bytes": 449035096,
+        "sha256": "fcf7fafb39384b9fa3b94c3584ed4dbd9cff6afa215ac32a9853c17daf8d4a19"
+      },
+      "log": {
+        "path": "/private/tmp/verum-T1651-final-publication/cargo.log",
+        "bytes": 11041,
+        "sha256": "54092d590bab63c341622872c50610c33a44c7f7d45925def7f9b77ba415b71c"
+      },
+      "passed": 34,
+      "failed": 0,
+      "ignored": 0,
+      "final_test_summary": "test result: ok. 34 passed; 0 failed; 0 ignored; 0 measured; 835 filtered out; finished in 0.23s",
+      "finding": "All publication producer, workspace preview, direct metadata, signing dry-run, framing and receipt controls passed. Includes two inert child runner entries.",
+      "receipt": {
+        "path": "/private/tmp/verum-T1651-final-publication/result.json",
+        "sha256": "19138c86049b2bc8259ad92b62a9a5eb65d6391bf211ef0206781b43200b0f54"
+      },
+      "preserved_executable": {
+        "path": "/private/tmp/verum-T1651-final-publication/verum_cli_tests",
+        "bytes": 449035096,
+        "sha256": "fcf7fafb39384b9fa3b94c3584ed4dbd9cff6afa215ac32a9853c17daf8d4a19"
+      }
+    },
+    {
+      "label": "adjacent-configured-registry",
+      "source_commit": "4409dc64a1b14fbd847b5e7163a9d675c3705ddd",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "-p",
+        "verum_cli",
+        "--lib",
+        "configured_registry",
+        "--",
+        "--nocapture",
+        "--test-threads=2"
+      ],
+      "cwd": "/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum",
+      "environment_overrides": {
+        "CARGO_TARGET_DIR": "/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target",
+        "CARGO_BUILD_JOBS": "2",
+        "CARGO_INCREMENTAL": "0",
+        "VERUM_NO_AUTO_PRECOMPILE": "1",
+        "VERUM_LLVM_DIR": "/Users/taaliman/projects/oldman/verum-lang/verum/llvm/install"
+      },
+      "timeout_seconds": 900,
+      "elapsed_seconds": 126.501,
+      "exit_code": 0,
+      "timed_out": false,
+      "source_and_artifacts_unchanged": true,
+      "executable": {
+        "path": "/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target/debug/build/verum_cli/72adbfc0707d7b24/out/verum_cli-72adbfc0707d7b24",
+        "bytes": 449035096,
+        "sha256": "fcf7fafb39384b9fa3b94c3584ed4dbd9cff6afa215ac32a9853c17daf8d4a19"
+      },
+      "log": {
+        "path": "/private/tmp/verum-T1651-adjacent-configured-registry/cargo.log",
+        "bytes": 8081,
+        "sha256": "c04d9b81924fc9e5557dcef8c0f3929f12a7744734926409ac7d7badcf1e7eff"
+      },
+      "passed": 5,
+      "failed": 0,
+      "ignored": 0,
+      "final_test_summary": "test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 864 filtered out; finished in 0.07s",
+      "finding": "Configured-origin metadata/download/lockfile and malformed-manifest controls passed. Includes one inert child entry; the download fixture supplies opaque bytes and does not establish source-cog extraction.",
+      "receipt": {
+        "path": "/private/tmp/verum-T1651-adjacent-configured-registry/result.json",
+        "sha256": "86605ebd6719b9e3cf726413a5ed336db836bee98f7e556cce184943fbe02c17"
+      },
+      "preserved_executable": {
+        "path": "/private/tmp/verum-T1651-adjacent-configured-registry/verum_cli_tests",
+        "bytes": 449035096,
+        "sha256": "fcf7fafb39384b9fa3b94c3584ed4dbd9cff6afa215ac32a9853c17daf8d4a19"
+      }
+    },
+    {
+      "label": "adjacent-config",
+      "source_commit": "4409dc64a1b14fbd847b5e7163a9d675c3705ddd",
+      "command": [
+        "/private/tmp/verum-T1651-final-publication/verum_cli_tests",
+        "config::",
+        "--nocapture",
+        "--test-threads=2"
+      ],
+      "cwd": "/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum",
+      "environment_overrides": {
+        "RUST_MIN_STACK": "16777216"
+      },
+      "timeout_seconds": 60,
+      "elapsed_seconds": 3.26,
+      "exit_code": 0,
+      "timed_out": false,
+      "source_and_artifacts_unchanged": true,
+      "executable": {
+        "path": "/private/tmp/verum-T1651-final-publication/verum_cli_tests",
+        "bytes": 449035096,
+        "sha256": "fcf7fafb39384b9fa3b94c3584ed4dbd9cff6afa215ac32a9853c17daf8d4a19"
+      },
+      "log": {
+        "path": "/private/tmp/verum-T1651-adjacent-config/test.log",
+        "bytes": 468,
+        "sha256": "bd0954925c351360db69dd305025bcae691964678b11b4bf71890513d4c40c0f"
+      },
+      "passed": 4,
+      "failed": 0,
+      "ignored": 0,
+      "final_test_summary": "test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 865 filtered out; finished in 0.00s",
+      "finding": "Four configuration-profile controls passed directly from the same final executable without rebuilding.",
+      "receipt": {
+        "path": "/private/tmp/verum-T1651-adjacent-config/result.json",
+        "sha256": "736904e4e063b60b55cf0957c58fb513dcc174802286cd25076f7e9e14d4d03b"
+      }
+    }
+  ],
+  "boundaries": [
+    "The real package publication handler builds a gzip-tar and the loopback control checks exact original manifest/source bytes plus dependency options.",
+    "The direct transport and configured-registry download fixtures use opaque archive bytes; they do not establish archive validation or extraction.",
+    "No ordinary CLI, automatic standard-library bake, AOT, live registry or external publication was run.",
+    "Client HTTP fixture credentials are not proof of server authentication, durable admission, restart behavior or a real publish-download roundtrip; T1636 remains open.",
+    "Fresh-consumer optional/default-feature activation and recursive installation remain T1657. Producer fidelity does not close T1651 acceptance.",
+    "Workspace canonical-manifest discovery and skipped-member counts were filed separately as T1665; dependency controls isolate the supported lowercase path."
+  ]
+}
