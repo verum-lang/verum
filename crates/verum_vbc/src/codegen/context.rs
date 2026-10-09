@@ -164,7 +164,12 @@ pub struct CodegenContext {
     /// Return type of current function (for type checking).
     pub return_type: Option<TypeRef>,
 
-    /// Return type name of current function (for variant disambiguation).
+    /// Full return type of the callable currently being compiled. The `?`
+    /// residual target belongs to this boundary, never to an initializer hint.
+    /// Nested callable compilation saves/restores this independently of hints.
+    pub function_return_type_name: verum_common::Maybe<verum_common::Text>,
+
+    /// Expected expression type (initially the function's return type).
     /// When a variant name collides with a stdlib variant (e.g., "Lt" exists in both
     /// user-defined "Ordering" and stdlib "GeneralCategory"), this is used to prefer
     /// the variant whose parent type matches the function's return type.
@@ -994,6 +999,8 @@ pub struct ClosureCompilationContext {
     /// Saved block result facts in the enclosing function's type scope.
     pub compiled_block_result_types:
         Map<verum_ast::Span, verum_common::Maybe<verum_common::Text>>,
+    /// The enclosing callable's residual target, independent of expression hints.
+    pub function_return_type_name: verum_common::Maybe<verum_common::Text>,
     /// T0701: the let-annotation / return-context stash.  Closure
     /// compilation runs begin_function/end_function INSIDE an
     /// expression, and end_function nulls this channel — the sidecar's
@@ -1661,6 +1668,7 @@ impl CodegenContext {
             current_function: None,
             in_function: false,
             return_type: None,
+            function_return_type_name: None,
             current_return_type_name: None,
             current_return_type_full: None,
             current_impl_type_name: None,
@@ -2718,6 +2726,8 @@ impl CodegenContext {
         self.current_function = Some(name.to_string());
         self.in_function = true;
         self.return_type = return_type;
+        self.function_return_type_name = self.lookup_function(name)
+            .and_then(|function| function.return_type_name.clone()).map(Into::into);
         self.current_impl_type_name = None;
         self.suspend_point_count = 0; // Reset for generators
 
@@ -2734,6 +2744,7 @@ impl CodegenContext {
         self.current_function = None;
         self.in_function = false;
         self.return_type = None;
+        self.function_return_type_name = None;
         self.current_return_type_name = None;
         self.current_return_type_full = None;
         self.current_return_type_inner = None;
@@ -4647,6 +4658,7 @@ impl CodegenContext {
             defer_stack: self.defer_stack.clone(),
             variable_type_names: self.variable_type_names.clone(),
             compiled_block_result_types: self.compiled_block_result_types.clone(),
+            function_return_type_name: self.function_return_type_name.clone(),
             current_return_type_name: self.current_return_type_name.clone(),
             current_return_type_full: self.current_return_type_full.clone(),
             reference_bindings: self.reference_bindings.clone(),
@@ -4664,6 +4676,7 @@ impl CodegenContext {
     /// labels, forward_jumps, loop_stack, and defer_stack.
     pub fn restore_closure_context(&mut self, saved: ClosureCompilationContext) {
         self.label_counter = saved.label_counter;
+        self.function_return_type_name = saved.function_return_type_name;
         self.current_return_type_name = saved.current_return_type_name;
         self.current_return_type_full = saved.current_return_type_full;
         self.labels = saved.labels;
@@ -4795,6 +4808,7 @@ impl CodegenContext {
         self.current_function = None;
         self.in_function = false;
         self.return_type = None;
+        self.function_return_type_name = None;
         self.constants.clear();
         self.strings.clear();
         self.string_intern.clear();

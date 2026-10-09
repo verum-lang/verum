@@ -19721,6 +19721,12 @@ impl VbcCodegen {
         // When a variant name collides (e.g., "Lt" in both user's "Ordering" and
         // stdlib's "GeneralCategory"), this allows preferring the correct parent type.
         self.ctx.current_return_type_name = func_info.return_type_name.clone();
+        // T1687: the selected declaration, including its error arguments,
+        // owns `?` propagation even while expression hints change below.
+        self.ctx.function_return_type_name = func_info.return_type_name.as_ref().map(|name| {
+            impl_type_name.map_or_else(|| name.clone(), |owner|
+                Self::substitute_self_in_type_name(name, owner)).into()
+        });
         // Inner generics of the return type drive variant disambiguation
         // for `Err(InnerVariant(...))` inside `Result<_, E>` returners
         // and the equivalent `Some(InnerVariant(...))` inside

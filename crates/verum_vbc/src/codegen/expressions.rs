@@ -26870,7 +26870,7 @@ impl VbcCodegen {
             // propagation.
             let outer_base: Option<String> = self
                 .ctx
-                .current_return_type_name
+                .function_return_type_name
                 .as_deref()
                 .map(|n| {
                     let stripped = n.split('<').next().unwrap_or(n).trim();
@@ -26900,7 +26900,7 @@ impl VbcCodegen {
                 None
             };
             let outer_err_arg: Option<String> =
-                err_arg_of(self.ctx.current_return_type_name.clone().as_deref());
+                err_arg_of(self.ctx.function_return_type_name.as_deref());
             let result_err_args_agree = match (&inner_err_arg, &outer_err_arg) {
                 (Some(a), Some(b)) => a == b,
                 _ => true,
@@ -26916,7 +26916,7 @@ impl VbcCodegen {
                     "[try-trace] fn={:?} inner_ty={:?} outer_rtn={:?} outer_base={:?} is_res={} is_maybe={} err_args=({:?},{:?}) same={}",
                     self.ctx.current_function,
                     type_name,
-                    self.ctx.current_return_type_name,
+                    self.ctx.function_return_type_name,
                     outer_base,
                     is_result_type,
                     is_maybe_type,
@@ -32762,6 +32762,17 @@ impl VbcCodegen {
                 self.ctx.reference_bindings.insert(name.clone());
             }
         }
+
+        // T1687: freeze the closure's own return boundary before compiling
+        // nested field/argument/initializer expressions. An explicit signature
+        // keeps its full generic arguments; otherwise a known body type takes
+        // precedence over the incoming contextual closure return hint.
+        self.ctx.function_return_type_name = return_type_ast
+            .map(|ty| self.type_to_simple_name(ty))
+            .or_else(|| self.extract_expr_type_name(body))
+            .or_else(|| self.infer_expr_type_name(body))
+            .or_else(|| self.ctx.current_return_type_name.clone())
+            .map(Into::into);
 
         // Pin `current_return_type_name` to the closure's declared return
         // type (if present) so that a bare variant constructor in the body
