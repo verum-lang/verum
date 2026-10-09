@@ -1001,6 +1001,8 @@ pub struct ClosureCompilationContext {
         Map<verum_ast::Span, verum_common::Maybe<verum_common::Text>>,
     /// The enclosing callable's residual target, independent of expression hints.
     pub function_return_type_name: verum_common::Maybe<verum_common::Text>,
+    /// Recovery handlers belong to the enclosing callable's instruction stream.
+    pub try_recover_depth: u32,
     /// T0701: the let-annotation / return-context stash.  Closure
     /// compilation runs begin_function/end_function INSIDE an
     /// expression, and end_function nulls this channel — the sidecar's
@@ -2728,6 +2730,8 @@ impl CodegenContext {
         self.return_type = return_type;
         self.function_return_type_name = self.lookup_function(name)
             .and_then(|function| function.return_type_name.clone()).map(Into::into);
+        // T1689: a nested callable cannot throw through its creator's handler.
+        self.try_recover_depth = 0;
         self.current_impl_type_name = None;
         self.suspend_point_count = 0; // Reset for generators
 
@@ -2745,6 +2749,7 @@ impl CodegenContext {
         self.in_function = false;
         self.return_type = None;
         self.function_return_type_name = None;
+        self.try_recover_depth = 0;
         self.current_return_type_name = None;
         self.current_return_type_full = None;
         self.current_return_type_inner = None;
@@ -4659,6 +4664,7 @@ impl CodegenContext {
             variable_type_names: self.variable_type_names.clone(),
             compiled_block_result_types: self.compiled_block_result_types.clone(),
             function_return_type_name: self.function_return_type_name.clone(),
+            try_recover_depth: self.try_recover_depth,
             current_return_type_name: self.current_return_type_name.clone(),
             current_return_type_full: self.current_return_type_full.clone(),
             reference_bindings: self.reference_bindings.clone(),
@@ -4677,6 +4683,7 @@ impl CodegenContext {
     pub fn restore_closure_context(&mut self, saved: ClosureCompilationContext) {
         self.label_counter = saved.label_counter;
         self.function_return_type_name = saved.function_return_type_name;
+        self.try_recover_depth = saved.try_recover_depth;
         self.current_return_type_name = saved.current_return_type_name;
         self.current_return_type_full = saved.current_return_type_full;
         self.labels = saved.labels;
@@ -4809,6 +4816,7 @@ impl CodegenContext {
         self.in_function = false;
         self.return_type = None;
         self.function_return_type_name = None;
+        self.try_recover_depth = 0;
         self.constants.clear();
         self.strings.clear();
         self.string_intern.clear();
