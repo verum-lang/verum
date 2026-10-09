@@ -34,8 +34,8 @@ struct FunctionDoc {
     description: Text,
     /// CBGR cost: "~15ns per check"
     cbgr_cost: Option<Text>,
-    /// Verification status: "Proven" | "Runtime" | "Unverified"
-    verification_status: Text,
+    /// Declared verification annotations, never proof results.
+    verification_annotations: List<Text>,
     /// Time complexity: "O(n)", "O(log n)", etc.
     time_complexity: Option<Text>,
     /// Space complexity: "O(1)", "O(n)", etc.
@@ -201,7 +201,19 @@ fn extract_functions_from_ast(
             let mut space_complexity = None;
             let mut performance_notes = List::new();
             let mut examples = List::new();
-            let mut verification_status = Text::from("Unverified");
+            // Parsing records requested verification only. This command does
+            // not run a verifier or consume source-bound proof evidence.
+            let verification_annotations = func
+                .attributes
+                .iter()
+                .filter(|attr| matches!(attr.name.as_str(), "verify" | "proven"))
+                .map(|attr| {
+                    content
+                        .get(attr.span.start as usize..attr.span.end as usize)
+                        .map(Text::from)
+                        .unwrap_or_else(|| format!("@{}", attr.name).into())
+                })
+                .collect();
 
             // Process doc attributes
             for attr in &item.attributes {
@@ -211,8 +223,6 @@ fn extract_functions_from_ast(
                     if let Some(ref args) = attr.args {
                         description.push_str(&format!("{:?}", args));
                     }
-                } else if attr_name == "verify" || attr_name == "proven" {
-                    verification_status = Text::from("Proven");
                 } else if attr_name == "cost" {
                     cbgr_cost = Some(Text::from("~1.5ns per CBGR check (measured)"));
                 } else if attr_name == "time" {
@@ -301,7 +311,7 @@ fn extract_functions_from_ast(
                 signature,
                 description,
                 cbgr_cost,
-                verification_status,
+                verification_annotations,
                 time_complexity,
                 space_complexity,
                 performance_notes,
@@ -334,7 +344,7 @@ fn extract_functions(content: &str, include_private: bool) -> List<FunctionDoc> 
             let mut space_complexity = None;
             let mut performance_notes = List::new();
             let mut examples = List::new();
-            let mut verification_status = Text::from("Unverified");
+            let verification_annotations = List::new();
 
             for i in (0..idx).rev().take(20) {
                 let doc_line = lines[i].trim();
@@ -352,8 +362,6 @@ fn extract_functions(content: &str, include_private: bool) -> List<FunctionDoc> 
                         performance_notes.push(Text::from(content));
                     } else if content.starts_with("Example:") || content.starts_with("```") {
                         examples.push(Text::from(content));
-                    } else if content.starts_with("Verified:") || content.starts_with("@verify") {
-                        verification_status = Text::from("Proven");
                     } else if !content.is_empty() {
                         if !description.is_empty() {
                             description.push_str(" ");
@@ -372,7 +380,7 @@ fn extract_functions(content: &str, include_private: bool) -> List<FunctionDoc> 
                 signature,
                 description,
                 cbgr_cost,
-                verification_status,
+                verification_annotations,
                 time_complexity,
                 space_complexity,
                 performance_notes,
@@ -468,17 +476,16 @@ fn generate_file_doc(path: &Path, functions: &[FunctionDoc]) -> Result<Text> {
             escape_html(func.signature.as_str())
         ));
 
-        // Verification badge
-        let badge_class = match func.verification_status.as_str() {
-            "Proven" => "badge-proven",
-            "Runtime" => "badge-runtime",
-            _ => "badge-unverified",
-        };
-        html.push_str(&format!(
-            "<span class=\"badge {}\">{}</span>\n",
-            badge_class,
-            escape_html(func.verification_status.as_str())
-        ));
+        // Source annotations express intent. A checked result requires proof
+        // evidence bound to this declaration, which this generator does not load.
+        html.push_str("<span class=\"badge badge-unverified\">Unverified</span>\n");
+        html.push_str("<p>Proof evidence was not evaluated for this documentation.</p>\n");
+        for annotation in &func.verification_annotations {
+            html.push_str(&format!(
+                "<p><strong>Declared verification:</strong> <code>{}</code></p>\n",
+                escape_html(annotation.as_str())
+            ));
+        }
 
         // Description
         if !func.description.is_empty() {
@@ -594,7 +601,7 @@ fn generate_index(
     html.push_str("<p>This documentation includes comprehensive cost annotations:</p>\n");
     html.push_str("<ul>\n");
     html.push_str("<li><strong>CBGR Cost:</strong> Runtime overhead for reference checks (~1.5ns per check)</li>\n");
-    html.push_str("<li><strong>Verification Status:</strong> Proven (0ns), Runtime checked, or Unverified</li>\n");
+    html.push_str("<li><strong>Verification:</strong> Source annotations describe requested checks. Proof evidence is not evaluated; declarations are shown as Unverified.</li>\n");
     html.push_str("<li><strong>Complexity:</strong> Time and space complexity analysis</li>\n");
     html.push_str("<li><strong>Performance:</strong> Detailed performance characteristics</li>\n");
     html.push_str("</ul>\n");
@@ -652,16 +659,6 @@ h2 {
     font-size: 12px;
     font-weight: bold;
     margin: 10px 0;
-}
-
-.badge-proven {
-    background: #27ae60;
-    color: white;
-}
-
-.badge-runtime {
-    background: #f39c12;
-    color: white;
 }
 
 .badge-unverified {
@@ -745,3 +742,7 @@ fn open_in_browser(path: &Path) -> Result<()> {
 
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "../../tests/doc/verification_evidence.rs"]
+mod verification_evidence;
