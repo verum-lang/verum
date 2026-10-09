@@ -1,0 +1,54 @@
+   Compiling verum_error v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_error)
+   Compiling verum_cbgr v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_cbgr)
+   Compiling verum_vbc v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_vbc)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 25.11s
+     Running tests/borrowed_list_element_references.rs (/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target/debug/build/verum_vbc/d87f1de4682c549a/out/borrowed_list_element_references-d87f1de4682c549a)
+
+running 14 tests
+test a_borrowed_record_element_updates_the_original_list ... 
+thread 'a_borrowed_record_element_updates_the_original_list' (4983178) panicked at crates/verum_vbc/tests/borrowed_list_element_references.rs:116:32:
+source must execute: IndexOutOfBounds { index: 1, length: 0 }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+test a_borrowed_variant_element_updates_the_original_list ... 
+thread 'a_borrowed_variant_element_updates_the_original_list' (4983179) panicked at crates/verum_vbc/tests/borrowed_list_element_references.rs:116:32:
+source must execute: IndexOutOfBounds { index: 1, length: 0 }
+FAILED
+test a_direct_list_element_borrow_reads_the_selected_element ... ok
+test a_direct_list_refuses_an_index_at_its_length ... ok
+test a_record_payload_returned_through_maybe_keeps_length_and_value_indexing ... ok
+test a_record_payload_returned_through_maybe_supports_element_borrowing ... 
+thread 'a_record_payload_returned_through_maybe_supports_element_borrowing' (4983183) panicked at crates/verum_vbc/tests/borrowed_list_element_references.rs:116:32:
+source must execute: IndexOutOfBounds { index: 1, length: 0 }
+FAILED
+test a_returned_record_list_refuses_an_index_at_its_actual_length ... 
+thread 'a_returned_record_list_refuses_an_index_at_its_actual_length' (4983184) panicked at crates/verum_vbc/tests/borrowed_list_element_references.rs:124:5:
+expected index 3 for length 3, got IndexOutOfBounds { index: 3, length: 0 }
+FAILED
+test a_returned_variant_list_refuses_a_negative_index_with_its_actual_length ... 
+thread 'a_returned_variant_list_refuses_a_negative_index_with_its_actual_length' (4983185) panicked at crates/verum_vbc/tests/borrowed_list_element_references.rs:124:5:
+expected index -1 for length 3, got IndexOutOfBounds { index: -1, length: 0 }
+FAILED
+test a_variant_payload_returned_through_maybe_keeps_length_and_value_indexing ... ok
+test a_variant_payload_returned_through_maybe_supports_element_borrowing ... 
+thread 'a_variant_payload_returned_through_maybe_supports_element_borrowing' (4983187) panicked at crates/verum_vbc/tests/borrowed_list_element_references.rs:116:32:
+source must execute: IndexOutOfBounds { index: 1, length: 0 }
+FAILED
+test an_absent_variant_does_not_invent_a_list_reference ... ok
+test an_empty_returned_list_refuses_element_borrowing ... ok
+test an_empty_returned_list_retains_zero_length ... ok
+test an_ordinary_list_reference_can_be_forwarded_to_element_borrowing ... ok
+
+failures:
+
+failures:
+    a_borrowed_record_element_updates_the_original_list
+    a_borrowed_variant_element_updates_the_original_list
+    a_record_payload_returned_through_maybe_supports_element_borrowing
+    a_returned_record_list_refuses_an_index_at_its_actual_length
+    a_returned_variant_list_refuses_a_negative_index_with_its_actual_length
+    a_variant_payload_returned_through_maybe_supports_element_borrowing
+
+test result: FAILED. 8 passed; 6 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s
+
+error: test failed, to rerun pass `-p verum_vbc --test borrowed_list_element_references`

@@ -634,3 +634,41 @@ investigation and causal controls.
 These results establish removal of the component's earlier compilation blocker.
 They do not establish completed metadata decoding, semantic admission, registry
 runtime, authentication, persistence, native execution or deployment.
+
+
+### Borrowed collection element references
+
+T1684 repairs the interpreter consumer of a borrowed collection. A list stored
+in a record or variant can be returned through `Maybe<&List<T>>`; its reference
+addresses a value slot rather than the collection header. `RefListElement` now
+uses the existing receiver resolver before choosing a layout, retaining null
+reference rejection and the existing bounds and storage rules.
+
+The [causal receipt](evidence/registry-borrowed-list-element-gate.json) preserves
+three complete logs, source/executable hashes, commands and unchanged target
+artifact hashes. Baseline `35c2a5fb5` passed eight controls and failed six:
+ordinary indexing and length worked, but borrowing returned payload elements
+reported an empty list. The first fixed run repaired those six cases; its one
+failure was a new test expecting the raw null error instead of the dispatcher's
+contextual `NullPointerAt` diagnostic. A test-only correction retains the exact
+failing opcode requirement.
+
+Final tested source `7d7bd9b0f` passes all 16 focused controls and 50 adjacent
+reference/list controls, with no failed or ignored tests. The tests cover
+returned record/variant references, forwarding, mutation of the original list,
+absent and empty cases, exact bounds errors, and direct/layered ThinRef inputs.
+Parsed-source controls execute serialized VBC and assert the actual reference
+and indexing opcodes. CI's VBC integration gate selects the new test binary.
+
+The production change is confined to one interpreter handler. Code generation,
+standard-library source, metadata/schema and registry fixtures are unchanged.
+These Rust tests do not consume the cached standard-library archive or establish
+ordinary CLI, AOT, authenticated publication or durable service acceptance.
+Root-owned replay of the unchanged metadata component remains the next gate.
+The three raw output files retain their original bytes and are the only files
+excluded from this evidence slice's range whitespace check.
+
+The reviewed chain rebases onto documentation-only main `a14e5c60c` at source
+commit `f25057d18`. Its complete VBC crate tree is byte-identical to tested
+`7d7bd9b0f`; the original tested and evidence branches are retained. Both the
+ordinary failure above and the scoped interpreter result remain recorded.

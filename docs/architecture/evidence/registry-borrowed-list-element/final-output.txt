@@ -1,0 +1,118 @@
+   Compiling verum_error v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_error)
+   Compiling verum_cbgr v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_cbgr)
+   Compiling verum_vbc v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_vbc)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 30.13s
+     Running tests/a_value_slot_pointer_derefs_to_its_element.rs (/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target/debug/build/verum_vbc/34b8c0140329ed34/out/a_value_slot_pointer_derefs_to_its_element-34b8c0140329ed34)
+
+running 5 tests
+test a_bool_element_reads_back_as_that_bool ... ok
+test a_float_element_reads_back_as_that_float ... ok
+test a_null_address_is_refused ... ok
+test an_int_element_reads_back_as_that_int ... ok
+test the_sub_opcode_byte_is_pinned ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/borrowed_list_element_references.rs (/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target/debug/build/verum_vbc/d87f1de4682c549a/out/borrowed_list_element_references-d87f1de4682c549a)
+
+running 16 tests
+test a_borrowed_record_element_updates_the_original_list ... ok
+test a_borrowed_variant_element_updates_the_original_list ... ok
+test a_direct_list_element_borrow_reads_the_selected_element ... ok
+test a_direct_list_refuses_an_index_at_its_length ... ok
+test a_null_thin_reference_is_refused_before_reading_a_container_header ... ok
+test a_record_payload_returned_through_maybe_keeps_length_and_value_indexing ... ok
+test a_record_payload_returned_through_maybe_supports_element_borrowing ... ok
+test a_returned_record_list_refuses_an_index_at_its_actual_length ... ok
+test a_returned_variant_list_refuses_a_negative_index_with_its_actual_length ... ok
+test a_thin_reference_and_register_chain_reach_the_same_element ... ok
+test a_variant_payload_returned_through_maybe_keeps_length_and_value_indexing ... ok
+test a_variant_payload_returned_through_maybe_supports_element_borrowing ... ok
+test an_absent_variant_does_not_invent_a_list_reference ... ok
+test an_empty_returned_list_refuses_element_borrowing ... ok
+test an_empty_returned_list_retains_zero_length ... ok
+test an_ordinary_list_reference_can_be_forwarded_to_element_borrowing ... ok
+
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s
+
+     Running tests/list_source_storage.rs (/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target/debug/build/verum_vbc/01f241ac5de9085f/out/list_source_storage-01f241ac5de9085f)
+
+running 13 tests
+test fallible_source_resize_preserves_owner_and_reports_the_declared_error ... ok
+test ordinary_byte_methods_preserve_shrink_regrow_remove_insert ... ok
+test ordinary_empty_reverse_preserves_null_owner ... ok
+test ordinary_reordering_preserves_record_handles_and_owner_metadata ... ok
+test ordinary_reordering_rejects_malformed_owners_before_access ... ok
+test ordinary_reverse_preserves_packed_and_slot_owners ... ok
+test ordinary_swap_preserves_byte_owner_fields ... ok
+test packed_and_slot_source_methods_preserve_values_and_capacity ... ok
+test rejected_resize_and_heap_allocation_failure_preserve_the_owner ... ok
+test source_clear_truncate_release_and_regrow_keep_owner_valid ... ok
+test source_constructors_use_the_owner_storage_instead_of_element_layout ... ok
+test source_empty_pop_and_swap_remove_last_do_not_read_empty_storage ... ok
+test source_moves_record_values_as_slots ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.14s
+
+     Running tests/list_storage_access.rs (/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target/debug/build/verum_vbc/ce82aa584ff1ac72/out/list_storage_access-ce82aa584ff1ac72)
+
+running 7 tests
+test byte_and_value_slot_reads_and_writes_agree ... ok
+test foreign_nominal_cannot_supply_a_storage_address ... ok
+test invalid_ranges_are_refused_before_memory_access ... ok
+test overlapping_moves_preserve_both_directions ... ok
+test public_unsafe_declarations_preserve_slot_values ... ok
+test record_and_float_values_are_not_reinterpreted_as_raw_inline_bytes ... ok
+test zero_length_move_accepts_empty_storage_without_dereferencing_null ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s
+
+     Running tests/list_storage_query.rs (/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target/debug/build/verum_vbc/66a6cfa921d9bc83/out/list_storage_query-66a6cfa921d9bc83)
+
+running 6 tests
+test foreign_record_cannot_supply_a_storage_layout ... ok
+test query_roundtrip_preserves_the_following_call_boundary ... ok
+test record_storage_is_not_inline_record_layout ... ok
+test storage_identity_domain_does_not_include_unknown_or_scalar_types ... ok
+test unsupported_memory_wire_tag_is_refused ... ok
+test value_slots_and_packed_bytes_keep_distinct_encodings ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/record_variant_reference_bindings.rs (/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target/debug/build/verum_vbc/2fd310f4333016df/out/record_variant_reference_bindings-2fd310f4333016df)
+
+running 4 tests
+test a_value_binding_does_not_alias_the_variant_payload ... ok
+test immutable_record_variant_binding_reads_the_field ... ok
+test mutable_record_variant_binding_writes_through_the_second_field ... ok
+test tuple_variant_reference_binding_keeps_working ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/reference_method_receiver.rs (/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target/debug/build/verum_vbc/73f5cd65f1b2daf2/out/reference_method_receiver-73f5cd65f1b2daf2)
+
+running 7 tests
+test direct_text_reference_keeps_the_pointee_method_owner ... ok
+test explicit_reference_deref_in_a_payload_still_keeps_wrapper_methods ... ok
+test method_return_reference_payload_keeps_text_identity ... ok
+test optional_text_reference_payload_dispatches_in_a_match_guard ... ok
+test parentheses_preserve_a_reference_payload_method_owner ... ok
+test reference_payload_forwards_only_when_the_wrapper_lacks_the_method ... ok
+test reference_payload_keeps_wrapper_own_method_precedence ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+     Running tests/slice_reference_inputs.rs (/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target/debug/build/verum_vbc/c88cb0353a7fa746/out/slice_reference_inputs-c88cb0353a7fa746)
+
+running 8 tests
+test empty_source_allows_an_empty_subslice ... ok
+test empty_subslice_at_the_end_is_valid ... ok
+test mutable_subslice_writes_into_the_original_collection ... ok
+test subslice_of_a_borrowed_collection_reads_its_elements ... ok
+test subslice_of_an_existing_slice_preserves_its_offset ... ok
+test subslice_preserves_packed_byte_stride ... ok
+test subslice_rejects_negative_start_and_reversed_ranges ... ok
+test subslice_rejects_out_of_bounds_before_exposing_a_pointer ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
