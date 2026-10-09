@@ -214,3 +214,111 @@ fn registered_stream_uses_its_owned_os_descriptor() {
     assert_eq!(registered.fd(), registered.actual_fd());
     registered.close();
 }
+
+fn positive_handle_with_closed_stdin(kind: &str, test_name: &str) {
+    const CHILD_ROLE: &str = "VERUM_SOCKET_FD_ZERO_CHILD";
+    if std::env::var(CHILD_ROLE).as_deref() == Ok(kind) {
+        // The test harness is fully initialized in this isolated child before
+        // fd 0 is released. Parent standard descriptors are never touched.
+        // SAFETY: the child owns stdin, supplied as /dev/null by its parent.
+        assert_eq!(unsafe { libc::close(0) }, 0);
+        let value = match kind {
+            "udp" => NetResource::Udp(UdpSocket::bind("127.0.0.1:0").unwrap()),
+            "listener" => NetResource::Listener(TcpListener::bind("127.0.0.1:0").unwrap()),
+            "stream" => {
+                // SAFETY: socket creates a fresh owned TCP descriptor.
+                let fd = unsafe { libc::socket(libc::AF_INET, libc::SOCK_STREAM, 0) };
+                assert!(fd >= 0);
+                // SAFETY: fd is this child's live TCP socket and has no other owner.
+                NetResource::Stream(unsafe { TcpStream::from_raw_fd(fd) })
+            }
+            _ => unreachable!(),
+        };
+        let initial_fd = match &value {
+            NetResource::Listener(socket) => socket.as_raw_fd(),
+            NetResource::Stream(socket) => socket.as_raw_fd(),
+            NetResource::Udp(socket) => socket.as_raw_fd(),
+        };
+        assert_eq!(
+            initial_fd, 0,
+            "isolated setup must exercise descriptor zero"
+        );
+        let socket = RegisteredSocket(Some(register(value)));
+        assert!(
+            socket.fd() > 0,
+            "{kind}: public success handle must stay positive, got {}",
+            socket.fd()
+        );
+        assert_eq!(
+            socket.fd(),
+            socket.actual_fd(),
+            "positive handle must still be an actual owned descriptor"
+        );
+        socket.close();
+        return;
+    }
+
+    use std::process::{Command, Stdio};
+    let mut child = Command::new(std::env::current_exe().unwrap())
+        .args([test_name, "--exact", "--test-threads=1", "--nocapture"])
+        .env(CHILD_ROLE, kind)
+        .env("RUST_BACKTRACE", "0")
+        .stdin(Stdio::null())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .expect("start isolated descriptor-zero control");
+    let deadline = Instant::now() + DEADLINE;
+    let status = loop {
+        if let Some(status) = child.try_wait().expect("inspect isolated child status") {
+            break status;
+        }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let cleanup = Instant::now() + DEADLINE;
+            while child.try_wait().expect("reap killed child").is_none() && Instant::now() < cleanup
+            {
+                thread::sleep(Duration::from_millis(1));
+            }
+            panic!("isolated {kind} descriptor-zero control exceeded deadline");
+        }
+        thread::sleep(Duration::from_millis(1));
+    };
+    assert!(
+        status.success(),
+        "isolated {kind} descriptor-zero control failed: {status}"
+    );
+}
+
+#[test]
+fn registered_udp_keeps_positive_handle_with_closed_stdin() {
+    positive_handle_with_closed_stdin(
+        "udp",
+        concat!(
+            module_path!(),
+            "::registered_udp_keeps_positive_handle_with_closed_stdin"
+        ),
+    );
+}
+
+#[test]
+fn registered_listener_keeps_positive_handle_with_closed_stdin() {
+    positive_handle_with_closed_stdin(
+        "listener",
+        concat!(
+            module_path!(),
+            "::registered_listener_keeps_positive_handle_with_closed_stdin"
+        ),
+    );
+}
+
+#[test]
+fn registered_stream_keeps_positive_handle_with_closed_stdin() {
+    positive_handle_with_closed_stdin(
+        "stream",
+        concat!(
+            module_path!(),
+            "::registered_stream_keeps_positive_handle_with_closed_stdin"
+        ),
+    );
+}
