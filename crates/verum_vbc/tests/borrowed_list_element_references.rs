@@ -3,14 +3,15 @@
 #![cfg(feature = "codegen")]
 
 use std::sync::Arc;
-use verum_common::Text;
+use verum_common::{List, Text};
 use verum_fast_parser::Parser;
 use verum_vbc::bytecode::decode_instructions;
 use verum_vbc::codegen::{CodegenConfig, VbcCodegen};
-use verum_vbc::instruction::{CbgrSubOpcode, Instruction};
+use verum_vbc::instruction::{CbgrSubOpcode, Instruction, Reg};
 use verum_vbc::interpreter::{Interpreter, InterpreterError};
-use verum_vbc::module::VbcModule;
-use verum_vbc::value::Value;
+use verum_vbc::module::{FunctionDescriptor, FunctionId, VbcModule};
+use verum_vbc::types::{StringId, TypeId};
+use verum_vbc::value::{Capabilities, ThinRef, Value};
 
 const ENV: &str = r#"
 type Holder is { marker: Int, values: List<Int> };
@@ -320,4 +321,79 @@ fn probe() -> Int {
         -1,
         3,
     );
+}
+
+fn element_interpreter(register_layers: usize) -> Interpreter {
+    let mut module = VbcModule::new("element_reference_opcode".into());
+    let mut instructions = List::new();
+    let mut receiver = Reg(0);
+    for layer in 0..register_layers {
+        let next = Reg(4 + layer as u16);
+        instructions.push(Instruction::Ref {
+            dst: next,
+            src: receiver,
+        });
+        receiver = next;
+    }
+    instructions.push(Instruction::LoadI {
+        dst: Reg(1),
+        value: 0,
+    });
+    let operands: List<u8> = [2, receiver.0 as u8, 1].into_iter().collect();
+    instructions.push(Instruction::CbgrExtended {
+        sub_op: CbgrSubOpcode::RefListElement as u8,
+        operands: operands.into(),
+    });
+    instructions.push(Instruction::Deref {
+        dst: Reg(3),
+        ref_reg: Reg(2),
+    });
+    instructions.push(Instruction::Ret { value: Reg(3) });
+    for instruction in &instructions {
+        verum_vbc::bytecode::encode_instruction(instruction, &mut module.bytecode);
+    }
+    let mut function = FunctionDescriptor::new(StringId::EMPTY);
+    function.id = FunctionId(0);
+    function.register_count = 4 + register_layers as u16;
+    function.bytecode_length = module.bytecode.len() as u32;
+    module.functions.push(function);
+    Interpreter::new(Arc::new(module))
+}
+
+#[test]
+fn a_null_thin_reference_is_refused_before_reading_a_container_header() {
+    for register_layers in [0, 2] {
+        let error = element_interpreter(register_layers)
+            .execute_function_with_args(FunctionId(0), &[Value::from_thin_ref(ThinRef::null())])
+            .expect_err("null ThinRef must be refused");
+        assert!(matches!(error, InterpreterError::NullPointer), "{error:?}");
+    }
+}
+
+#[test]
+fn a_thin_reference_and_register_chain_reach_the_same_element() {
+    for register_layers in [0, 2] {
+        let mut interpreter = element_interpreter(register_layers);
+        let array = interpreter
+            .state
+            .heap
+            .alloc_array(TypeId::INT, 1)
+            .expect("inline array");
+        // SAFETY: the live allocation has one initialized Value slot, and the
+        // local carrier slot remains alive until this interpreter call returns.
+        unsafe {
+            *array.data_ptr().cast::<Value>() = Value::from_i64(37);
+        }
+        let mut slot = Value::from_ptr(array.as_ptr().cast::<u8>());
+        let reference = Value::from_thin_ref(ThinRef::new(
+            (&mut slot as *mut Value).cast::<u8>(),
+            0,
+            0,
+            Capabilities::FULL,
+        ));
+        let result = interpreter
+            .execute_function_with_args(FunctionId(0), &[reference])
+            .expect("ThinRef/register chain element");
+        assert_eq!(result.as_i64(), 37);
+    }
 }

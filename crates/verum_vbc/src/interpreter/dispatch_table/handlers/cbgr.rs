@@ -1979,19 +1979,18 @@ fn cbgr_extended_body(
             let list_val = state.get_reg(list_reg);
             let index = state.get_reg(index_reg).as_i64();
 
-            // Auto-deref CBGR register-based reference, like SetE/GetE do.
-            let list_val = if is_cbgr_ref(&list_val) {
-                let (abs_index, _gen) = decode_cbgr_ref(list_val);
-                state.registers.get_absolute(abs_index)
-            } else if list_val.is_thin_ref() {
-                let thin_ref = list_val.as_thin_ref();
-                if thin_ref.ptr.is_null() {
-                    return Err(InterpreterError::NullPointer);
-                }
-                unsafe { *(thin_ref.ptr as *const Value) }
-            } else {
-                list_val
-            };
+            // T1684: a returned record/variant payload borrow addresses a
+            // Value slot, not the collection header. Resolve the same carrier
+            // as method/field receivers before inspecting its layout; a private
+            // register/thin-only peel made len() and &values[index] disagree.
+            // The shared authority follows register chains, then one value-cell
+            // or ThinRef hop, and preserves bridge-allocation provenance.
+            let list_val = super::cbgr_helpers::resolve_receiver(state, list_val);
+            // The shared resolver preserves a null ThinRef; this operation has
+            // always refused it before attempting any container header read.
+            if list_val.is_thin_ref() && list_val.as_thin_ref().ptr.is_null() {
+                return Err(InterpreterError::NullPointer);
+            }
 
             // FATREF-INTERIOR-REF-1 (#51 unification tail): the slice
             // representation is now uniformly a FatRef, so
