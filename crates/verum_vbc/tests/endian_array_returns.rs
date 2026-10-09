@@ -124,12 +124,12 @@ fn ordinary_lists_remain_mutable_lists() {
 #[test]
 fn dynamic_fixed_widths_and_float_bits_have_exact_byte_carriers() {
     for (ty, value, expected) in [
-        ("UInt16", "0x0102", &[1,2][..]),
-        ("UInt32", "0x01020304", &[1,2,3,4][..]),
         ("Int32", "0x01020304", &[1,2,3,4][..]),
+        ("Int32", "-2", &[255,255,255,254][..]),
         ("Int", "0x0102030405060708", &[1,2,3,4,5,6,7,8][..]),
         ("UInt64", "0xFEDCBA9876543210", &[254,220,186,152,118,84,50,16][..]),
         ("Float", "1.5", &[63,248,0,0,0,0,0,0][..]),
+        ("Float", "-0.0", &[128,0,0,0,0,0,0,0][..]),
     ] {
         let big = format!("module endian_arrays; fn probe() -> [Byte; {}] {{ let number: {ty} = {value}; number.to_be_bytes() }}", expected.len());
         assert_packed_bytes(compile_source(&big), expected);
@@ -148,5 +148,59 @@ fn fixed_endian_array_bounds_use_declared_byte_length() {
         let entry = module.functions.iter().find(|f| module.get_string(f.name) == Some("endian_arrays.probe")).unwrap().id;
         assert!(matches!(Interpreter::new(Arc::new(module)).execute_function(entry),
             Err(verum_vbc::interpreter::InterpreterError::IndexOutOfBounds { index: 8, length: 8 })));
+    }
+}
+
+// These widths use real stdlib bodies instead of primitive dynamic handlers.
+// Keep the selected method declarations/bodies unchanged; this component does
+// not claim that every method in the complete primitives unit is executable.
+fn compile_with_endian_methods(source: &str, owner: &str) -> VbcModule {
+    use verum_ast::{ItemKind, decl::{ImplItemKind, ImplKind}, ty::TypeKind};
+    let mut ast = Parser::new(source).parse_module().expect("probe grammar");
+    let mut primitives = Parser::new(include_str!("../../../core/base/primitives.vr"))
+        .parse_module().expect("actual primitive grammar");
+    primitives.items.retain_mut(|item| {
+        let ItemKind::Impl(declaration) = &mut item.kind else { return false; };
+        if !matches!(&declaration.kind, ImplKind::Inherent(ty)
+            if matches!(&ty.kind, TypeKind::Path(path) if path.segments.last().is_some_and(|segment| segment.ident.name == owner))) {
+            return false;
+        }
+        declaration.items.retain(|item| matches!(&item.kind, ImplItemKind::Function(function)
+            if ["to_le_bytes", "to_be_bytes", "from_le_bytes", "from_be_bytes"].contains(&function.name.name.as_str())));
+        !declaration.items.is_empty()
+    });
+    assert_eq!(primitives.items.len(), 1, "exact source owner {owner}");
+    ast.items.extend(primitives.items);
+    VbcCodegen::with_config(CodegenConfig::new("endian_arrays"))
+        .compile_module(&ast).expect("actual method codegen")
+}
+
+#[test]
+fn actual_narrow_and_float32_methods_produce_fixed_bytes() {
+    for (owner, value, expected) in [
+        ("UInt16", "0x0102", &[1,2][..]),
+        ("UInt32", "0x01020304", &[1,2,3,4][..]),
+        ("Int16", "-2", &[255,254][..]),
+        ("Float32", "-0.0", &[128,0,0,0][..]),
+    ] {
+        for endian in ["be", "le"] {
+            let source = format!("module endian_arrays; fn probe() -> [Byte; {}] {{ let number: {owner} = {value}; number.to_{endian}_bytes() }}", expected.len());
+            let mut bytes: verum_common::List<u8> = expected.iter().copied().collect();
+            if endian == "le" { bytes.reverse(); }
+            assert_packed_bytes(compile_with_endian_methods(&source, owner), &bytes);
+        }
+    }
+}
+
+#[test]
+fn actual_float32_roundtrip_preserves_negative_zero_bits() {
+    for endian in ["be", "le"] {
+        let source = format!("module endian_arrays; fn probe() -> Int {{ let number: Float32 = -0.0; let bytes = number.to_{endian}_bytes(); let decoded = Float32.from_{endian}_bytes(bytes); f32_to_bits(decoded) as Int }}");
+        let module = compile_with_endian_methods(&source, "Float32");
+        let wire = deserialize_module(&serialize_module(&module).unwrap()).unwrap();
+        for module in [module, wire] {
+            let entry = module.functions.iter().find(|function| module.get_string(function.name) == Some("endian_arrays.probe")).unwrap().id;
+            assert_eq!(Interpreter::new(Arc::new(module)).execute_function(entry).expect("Float32 roundtrip").as_i64(), 0x80000000);
+        }
     }
 }

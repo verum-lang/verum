@@ -16,13 +16,16 @@ use verum_vbc::{
 };
 
 fn assert_bytes(module: VbcModule, expected: &[u8]) {
-    let wire = deserialize_module(&serialize_module(&module).expect("serialize")).expect("deserialize");
+    let mut wire = deserialize_module(&serialize_module(&module).expect("serialize")).expect("deserialize");
+    // Band relocation is assembly state, reconstructed after wire loading.
+    wire.resolve_external_bands();
+    wire.synthesize_intrinsic_band_wrappers();
     for (route, module) in [("source", module), ("serialized", wire)] {
         let entry = module.functions.iter().find(|function|
             module.get_string(function.name) == Some("endian_expansion.probe")
         ).expect("exact entry").id;
         let mut interpreter = Interpreter::new(Arc::new(module));
-        let value = interpreter.execute_function(entry).expect("execute endian producer");
+        let value = interpreter.execute_function(entry).unwrap_or_else(|error| panic!("{route}: {error}"));
         assert!(value.is_ptr(), "{route}: byte array pointer");
         // The returned object remains live in this interpreter. Validate its
         // header before reading the packed bytes promised by the declaration.
