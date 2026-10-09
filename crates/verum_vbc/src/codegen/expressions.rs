@@ -12449,6 +12449,39 @@ impl VbcCodegen {
         None
     }
 
+    /// A numeric carrier does not identify its source method owner. Prefer an
+    /// exact registered declaration before the width-only dispatch fallback.
+    fn declared_numeric_receiver_method(
+        &self,
+        receiver: &Expr,
+        method: &str,
+        argument_count: usize,
+    ) -> Option<String> {
+        let declared = self.extract_expr_type_name(receiver)
+            .or_else(|| self.infer_expr_type_name(receiver))?;
+        let owner = self.resolve_type_alias(Self::method_receiver_type_name(&declared));
+        if !self.nominal_type_id(&owner)?.is_numeric() {
+            return None;
+        }
+        let candidate = if let Some(mounted) = self.mounted_type_path(&owner) {
+            // A mount names the declaration. Equal scalar IDs are not proof
+            // that another owner with the same storage width is its alias.
+            format!("{mounted}.{method}")
+        } else if !owner.contains('.')
+            && let Some(module) = self.ctx.current_source_module.as_ref()
+            && self.ctx.lookup_qualified_function(&format!("{module}.{owner}.{method}")).is_some()
+        {
+            format!("{module}.{owner}.{method}")
+        } else {
+            format!("{owner}.{method}")
+        };
+        let info = self.ctx.lookup_qualified_function(&candidate)?;
+        (usize::from(info.param_count) == argument_count + 1
+            && info.variant_tag.is_none()
+            && info.intrinsic_name.is_none())
+            .then_some(candidate)
+    }
+
     /// Reference bindings already carry their pointee's nominal name. A
     /// built-in `*reference` preserves that name instead of invoking Deref.
     fn is_reference_binding_operand(&self, expr: &Expr) -> bool {
@@ -15600,7 +15633,11 @@ impl VbcCodegen {
         // Check receiver type to prefix method name for correct dispatch.
         // For primitive types (Byte, Int32, UInt64), use type$ prefix.
         // For named struct types (MapFlags, MemProt, etc.), use Type:: prefix.
-        let effective_method_name = if let ExprKind::Path(path) = &receiver.kind
+        let effective_method_name = if let Some(declared) = self.declared_numeric_receiver_method(
+            receiver, method.name.as_str(), args.len(),
+        ) {
+            declared
+        } else if let ExprKind::Path(path) = &receiver.kind
             && path.segments.len() == 1
         {
             match &path.segments[0] {
