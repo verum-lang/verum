@@ -7330,7 +7330,7 @@ impl TypeChecker {
         registry: &verum_modules::ModuleRegistry,
     ) -> Option<(verum_ast::decl::TypeDecl, Text)> {
         let module = self.get_module_with_path_aliases(module_path, registry)?;
-        let mut visited = std::collections::HashSet::new();
+        let mut visited = Set::new();
         self.find_type_declaration_with_source_module_inner(
             &module.ast, type_name, &Text::from(module.path.to_string()), registry,
             &mut visited, true,
@@ -7361,7 +7361,7 @@ impl TypeChecker {
         // the same AST) terminate with None instead of blowing the stack.
         // See also: `resolve_export_kind_with_reexports` (343fc3a8) which uses
         // the same pattern for the sibling kind-resolution walk.
-        let mut visited: std::collections::HashSet<(Text, Text)> = std::collections::HashSet::new();
+        let mut visited = Set::new();
         self.find_type_declaration_with_source_module_inner(
             ast,
             type_name,
@@ -7379,7 +7379,7 @@ impl TypeChecker {
         type_name: &str,
         current_module_path: &Text,
         registry: &verum_modules::ModuleRegistry,
-        visited: &mut std::collections::HashSet<(Text, Text)>,
+        visited: &mut Set<(Text, Text)>,
         require_exported_source: bool,
     ) -> Option<(verum_ast::decl::TypeDecl, Text)> {
         use verum_ast::ItemKind;

@@ -277,6 +277,24 @@ fn declared_generic_variant_foreign_same_leaf_is_not_a_builtin() {
     )]);
     let source = json("mount foreign.collections.{List, Map};", "List", "Map");
     let (module, archive) = bootstrap(&prior, &source);
+    let declared = archive.load_module("foreign.collections").unwrap();
+    assert_ne!(
+        ty(&declared, "foreign.collections", "List").id,
+        TypeId::LIST
+    );
+    assert_ne!(ty(&declared, "foreign.collections", "Map").id, TypeId::MAP);
+    for (owner, leaf) in [
+        ("core.collections.list", "List"),
+        ("core.collections.map", "Map"),
+        ("foreign.collections", "List"),
+        ("foreign.collections", "Map"),
+    ] {
+        let declared = archive.load_module(owner).unwrap();
+        eprintln!(
+            "source descriptor {owner}.{leaf}: {:?}",
+            ty(&declared, owner, leaf).id
+        );
+    }
     for module in [&module, &archive.load_module("core.encoding.json").unwrap()] {
         let list = ty(module, "foreign.collections", "List").id;
         let map = ty(module, "foreign.collections", "Map").id;
@@ -362,7 +380,12 @@ fn checker_contract(mounts: &str) {
 
 #[test]
 fn declared_generic_variant_genuine_usize_payload_remains_usize() {
-    let (module, archive) = bootstrap(COLLECTIONS, &json("", "List", "Map"));
+    let mut prior: List<_> = COLLECTIONS.iter().copied().collect();
+    prior.push((
+        "core.base.primitives",
+        "public type ScalarMarker is protocol {}; implement ScalarMarker for USize {}",
+    ));
+    let (module, archive) = bootstrap(&prior, &json("", "List", "Map"));
     assert_payload(&module, "JsonCount", TypeRef::Concrete(TypeId::PTR));
     let decoded = archive.load_module("core.encoding.json").unwrap();
     assert_payload(&decoded, "JsonCount", TypeRef::Concrete(TypeId::PTR));
@@ -370,8 +393,12 @@ fn declared_generic_variant_genuine_usize_payload_remains_usize() {
         decoded.get_string(field(&decoded, "JsonCount").type_name),
         Some("USize")
     );
-    // This minimal archive has no scalar USize descriptor. Its carried name
-    // and actual scalar ID must survive without a blanket PTR→collection fix.
+    // A real source protocol impl emits the scalar descriptor; no hand-built
+    // descriptor or carried-name override supplies this metadata expectation.
+    assert_eq!(
+        payload(&metadata(&archive), "JsonCount").as_slice(),
+        &["USize"]
+    );
 }
 
 #[test]
@@ -455,16 +482,16 @@ fn declared_generic_variant_nonbuiltin_export_uses_the_same_source_authority() {
 }
 
 #[test]
-fn declared_generic_variant_exact_protocol_dependency_retains_its_descriptor() {
+fn declared_generic_variant_exact_cog_dependency_retains_its_descriptor() {
     let (module, archive) = bootstrap(
-        &[(
-            "alpha",
-            "public protocol Observable { fn observe(self) -> Int; }",
-        )],
-        "public type JsonValue is JsonArray(alpha.Observable);",
+        &[("core.alpha", "public(cog) type Internal is { value: Int };")],
+        "public type JsonValue is JsonArray(core.alpha.Internal);",
     );
+    // This exact declaration is already in the bootstrap catalog, while the
+    // public-export-only resolver deliberately declines restricted exports.
+    // Keep the producer dependency; this does not bypass checker visibility.
     for module in [&module, &archive.load_module("core.encoding.json").unwrap()] {
-        let protocol = ty(module, "alpha", "Observable");
-        assert_payload(module, "JsonArray", TypeRef::Concrete(protocol.id));
+        let internal = ty(module, "core.alpha", "Internal");
+        assert_payload(module, "JsonArray", TypeRef::Concrete(internal.id));
     }
 }
