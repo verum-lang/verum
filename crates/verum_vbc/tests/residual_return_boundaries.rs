@@ -336,3 +336,64 @@ fn probe() -> Int { match build() { Result.Ok(_) => 0, Result.Err(error) => erro
         83,
     );
 }
+
+#[test]
+fn contextual_residual_uses_full_let_callable_signature() {
+    value(
+        r#"
+fn probe() -> Int {
+    let work: fn() -> Result<Built, ConvertedFailure> = || {
+        Result.Ok(Built { value: missing()? })
+    };
+    match work() { Result.Ok(_) => 0, Result.Err(error) => error.code }
+}
+"#,
+        141,
+    );
+}
+
+#[test]
+fn contextual_residual_uses_full_callback_parameter_signature() {
+    value(
+        r#"
+fn invoke(work: fn() -> Result<Built, ConvertedFailure>) -> Result<Built, ConvertedFailure> {
+    work()
+}
+fn probe() -> Int {
+    match invoke(|| { Result.Ok(Built { value: missing()? }) }) {
+        Result.Ok(_) => 0, Result.Err(error) => error.code,
+    }
+}
+"#,
+        141,
+    );
+}
+
+#[test]
+fn contextual_residual_uses_full_callable_record_field_signature() {
+    value(
+        r#"
+type Task is { work: fn() -> Result<Built, ConvertedFailure> };
+fn probe() -> Int {
+    let task = Task { work: || { Result.Ok(Built { value: missing()? }) } };
+    match (task.work)() { Result.Ok(_) => 0, Result.Err(error) => error.code }
+}
+"#,
+        141,
+    );
+}
+
+#[test]
+fn contextual_residual_preserves_an_explicit_closure_error_conversion() {
+    value(
+        r#"
+fn probe() -> Int {
+    let work = || -> Result<Built, ConvertedFailure> {
+        Result.Ok(Built { value: missing()? })
+    };
+    match work() { Result.Ok(_) => 0, Result.Err(error) => error.code }
+}
+"#,
+        141,
+    );
+}
