@@ -1,0 +1,13 @@
+
+running 8 tests
+test archive_ctx_loader::tests::merge_canonical_name_synthesis ... ok
+test archive_ctx_loader::wanted_leaf_index_tests::borrowed_leaf_buckets_preserve_the_original_candidate_order ... ok
+test archive_ctx_loader::bootstrap_glue_tests::missing_qualified_glue_does_not_borrow_an_ancestor_or_sibling ... ok
+test archive_ctx_loader::bootstrap_glue_tests::named_external_glue_is_kept_by_exact_declaring_file_identity ... ok
+test archive_ctx_loader::wanted_leaf_index_tests::real_constructor_descriptors_keep_bare_and_qualified_variant_aliases ... ok
+test archive_ctx_loader::wanted_leaf_index_tests::alias_prefixes_require_whole_segments_in_both_directions ... ok
+test archive_ctx_loader::wanted_leaf_index_tests::methods_do_not_claim_free_slots_and_descriptor_only_variants_stay_qualified ... ok
+test archive_ctx_loader::wanted_leaf_index_tests::same_leaf_archive_owners_and_bare_first_wins_survive_both_module_orders ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 1229 filtered out; finished in 0.01s
+

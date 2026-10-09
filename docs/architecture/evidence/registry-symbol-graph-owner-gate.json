@@ -1,0 +1,262 @@
+{
+  "schema_version": 1,
+  "task": "T0691",
+  "scope": "Bounded declaring-owner carry into SymbolGraph nodes and callee edges, preserving existing aliases. Global one-artifact/all-phases acceptance remains open.",
+  "integration_base": "9b9c04a8a7364d35534a9e15dcfe7d9942c47420",
+  "baseline_source_commit": "9f6976179029a432fadc1f3e53a43ac74e4e3574",
+  "tested_source_commit": "3e492c5de345310562508f6483b88aad54edf490",
+  "production_path": "crates/verum_compiler/src/archive_ctx_loader.rs",
+  "test_path": "crates/verum_compiler/tests/archive/symbol_graph_declaring_owner.rs",
+  "ci_selection": ".github/workflows/ci.yml unit-tests: cargo test --workspace --lib --bins --locked",
+  "baseline_result": "Six selected controls: two pass, four fail. Missing declared nodes, missing owner-specific same-umbrella nodes, missing encoded-sidecar lookup and absent transitive call reachability.",
+  "fixed_result": "All six selected controls pass, no ignores; eight exact adjacent archive qualification/keep-set/alias controls pass using the same final executable. Remaining compiler tests were filtered, not run.",
+  "guard_refusal": "First attempt stopped before tests on Compiling verum_llvm_sys. Verified unchanged wrapper source and existing LLVM21.1.8; retry allowed local wrappers against that installation while refusing actual LLVM bootstrap, fresh Z3/CVC5 and stdlib producer. The stopped attempt is not a test verdict.",
+  "artifact_provenance": "Inherited private-target precompiled archive, metadata, symbol graph and sidecars stayed byte-identical. Synthetic archives are independently serialized and loaded by each new control; no embedded stdlib artifact is used as their semantic fixture.",
+  "normal_bake_invalidation": "verum_compiler/build.rs compute_core_blake3 already includes archive_ctx_loader.rs and symbol_graph_baked.rs. The graph wire layout is unchanged; normal bake must regenerate content for the changed scanner. No fresh published sidecar was produced by these gates.",
+  "remaining_boundaries": [
+    "T0691 broader one-symbol-artifact across all phases remains open",
+    "T1461 late TLS-root dependency closure remains separate",
+    "T1691 archive function origin StringId remapping remains separate",
+    "Legacy raw-name first-wins and local-id callee naming are unchanged",
+    "No whole-service startup, ordinary CLI, AOT or fresh stdlib producer verdict"
+  ],
+  "raw_log_policy": "Four named verbatim output files preserve original whitespace; only these files are excluded from diff whitespace checks. Code, JSON and prose remain checked.",
+  "runs": {
+    "wrapper-guard-stop": {
+      "source_commit": "9f6976179029a432fadc1f3e53a43ac74e4e3574",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "--manifest-path",
+        "/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/Cargo.toml",
+        "-p",
+        "verum_compiler",
+        "--lib",
+        "symbol_graph_declaring_owner_tests::",
+        "--",
+        "--nocapture"
+      ],
+      "environment": {
+        "CARGO_TARGET_DIR": "/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target",
+        "CARGO_INCREMENTAL": "0",
+        "CARGO_BUILD_JOBS": "2",
+        "VERUM_NO_AUTO_PRECOMPILE": "1",
+        "VERUM_LLVM_DIR": "/Users/taaliman/projects/oldman/verum-lang/verum/llvm/install",
+        "RUST_MIN_STACK": "16777216"
+      },
+      "timeout_seconds": 600,
+      "scope": "Synthetic serialized archive -> SymbolGraph scan/build -> encoded sidecar/readback controls. No ordinary CLI, automatic bake, AOT, TLS root closure, consumer StringId remap, or global T0691 acceptance.",
+      "artifacts_before": {
+        "runtime.vbca": "410ff097b455437cab98b651f7799b3129588820925afe98e0de9c3781530a0f",
+        "runtime.core_metadata": "a92bd89e649e102cdc67d7ad0032513d6448d8915e5744127e6cdf1f1e34ebbb",
+        "runtime.symbol_graph": "a6678c18498f7519749ca1fdf1d22629b479083f42fa95a15177e8c7acf1c722",
+        "runtime.vbca.checksum": "c33573118a8c4b635f6c8f727c3784b524f660be57de702365e8d9c14b2f3a8b",
+        "runtime.vbca.schema": "fec20d7b3f8d1b81aff66c6c1181be574963779f7eacaf65660f8ab9127fca87"
+      },
+      "source_paths": {
+        "crates/verum_compiler/src/archive_ctx_loader.rs": "03471fa5b51e7abc52794c75e8cd599f946d9364cfd1383294ba2551810c9733",
+        "crates/verum_compiler/src/symbol_graph_baked.rs": "ae856a88ae136ecb0427db6c1e01165ca25513730b03ad095ceecd8830f04c61",
+        "crates/verum_compiler/tests/archive/symbol_graph_declaring_owner.rs": "c0a58d70b705d9ff909785b79af3c92b46963b42778b7b699f5d97392e72e418"
+      },
+      "exit_code": -15,
+      "wall_seconds": 4.027,
+      "failure": "refused native solver/toolchain or stdlib producer rebuild",
+      "source_unchanged": true,
+      "log_sha256": "5c5b6c5bdb380743eb34b17b6a73eb024a1728146888d97053a4cf3a6830a026",
+      "source_paths_unchanged": true,
+      "executables": {},
+      "artifacts_after": {
+        "runtime.vbca": "410ff097b455437cab98b651f7799b3129588820925afe98e0de9c3781530a0f",
+        "runtime.core_metadata": "a92bd89e649e102cdc67d7ad0032513d6448d8915e5744127e6cdf1f1e34ebbb",
+        "runtime.symbol_graph": "a6678c18498f7519749ca1fdf1d22629b479083f42fa95a15177e8c7acf1c722",
+        "runtime.vbca.checksum": "c33573118a8c4b635f6c8f727c3784b524f660be57de702365e8d9c14b2f3a8b",
+        "runtime.vbca.schema": "fec20d7b3f8d1b81aff66c6c1181be574963779f7eacaf65660f8ab9127fca87"
+      },
+      "test_results": [],
+      "verbatim_log": "registry-symbol-graph-owner/wrapper-guard-stop-output.txt"
+    },
+    "baseline": {
+      "source_commit": "9f6976179029a432fadc1f3e53a43ac74e4e3574",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "--manifest-path",
+        "/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/Cargo.toml",
+        "-p",
+        "verum_compiler",
+        "--lib",
+        "symbol_graph_declaring_owner_tests::",
+        "--",
+        "--nocapture"
+      ],
+      "environment": {
+        "CARGO_TARGET_DIR": "/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target",
+        "CARGO_INCREMENTAL": "0",
+        "CARGO_BUILD_JOBS": "2",
+        "VERUM_NO_AUTO_PRECOMPILE": "1",
+        "VERUM_LLVM_DIR": "/Users/taaliman/projects/oldman/verum-lang/verum/llvm/install",
+        "RUST_MIN_STACK": "16777216"
+      },
+      "timeout_seconds": 600,
+      "scope": "Synthetic serialized archive -> SymbolGraph scan/build -> encoded sidecar/readback controls. No ordinary CLI, automatic bake, AOT, TLS root closure, consumer StringId remap, or global T0691 acceptance.",
+      "artifacts_before": {
+        "runtime.vbca": "410ff097b455437cab98b651f7799b3129588820925afe98e0de9c3781530a0f",
+        "runtime.core_metadata": "a92bd89e649e102cdc67d7ad0032513d6448d8915e5744127e6cdf1f1e34ebbb",
+        "runtime.symbol_graph": "a6678c18498f7519749ca1fdf1d22629b479083f42fa95a15177e8c7acf1c722",
+        "runtime.vbca.checksum": "c33573118a8c4b635f6c8f727c3784b524f660be57de702365e8d9c14b2f3a8b",
+        "runtime.vbca.schema": "fec20d7b3f8d1b81aff66c6c1181be574963779f7eacaf65660f8ab9127fca87"
+      },
+      "source_paths": {
+        "crates/verum_compiler/src/archive_ctx_loader.rs": "03471fa5b51e7abc52794c75e8cd599f946d9364cfd1383294ba2551810c9733",
+        "crates/verum_compiler/src/symbol_graph_baked.rs": "ae856a88ae136ecb0427db6c1e01165ca25513730b03ad095ceecd8830f04c61",
+        "crates/verum_compiler/tests/archive/symbol_graph_declaring_owner.rs": "c0a58d70b705d9ff909785b79af3c92b46963b42778b7b699f5d97392e72e418"
+      },
+      "installed_llvm_version": "21.1.8",
+      "native_dependency_boundary": "Existing LLVM installation and warm native solver outputs only; local LLVM C/C++ wrapper recompilation is permitted. Fresh Z3/CVC5, LLVM toolchain or stdlib producer builds are refused.",
+      "exit_code": 101,
+      "wall_seconds": 112.477,
+      "failure": null,
+      "source_unchanged": true,
+      "log_sha256": "30a5797bbd084f76a9a46c6e7e5bbf482d04274baba2404c97b4e5172f950066",
+      "source_paths_unchanged": true,
+      "executables": {
+        "/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target/debug/build/verum_compiler/c6ca94c7409ab771/out/verum_compiler-c6ca94c7409ab771": "13e8a90cae8c27b50eb1d3f8b1cb98c986c7c19fbf94426e5a33e113e2117555"
+      },
+      "artifacts_after": {
+        "runtime.vbca": "410ff097b455437cab98b651f7799b3129588820925afe98e0de9c3781530a0f",
+        "runtime.core_metadata": "a92bd89e649e102cdc67d7ad0032513d6448d8915e5744127e6cdf1f1e34ebbb",
+        "runtime.symbol_graph": "a6678c18498f7519749ca1fdf1d22629b479083f42fa95a15177e8c7acf1c722",
+        "runtime.vbca.checksum": "c33573118a8c4b635f6c8f727c3784b524f660be57de702365e8d9c14b2f3a8b",
+        "runtime.vbca.schema": "fec20d7b3f8d1b81aff66c6c1181be574963779f7eacaf65660f8ab9127fca87"
+      },
+      "test_results": [
+        "test result: FAILED. 2 passed; 4 failed; 0 ignored; 0 measured; 1231 filtered out; finished in 0.01s"
+      ],
+      "verbatim_log": "registry-symbol-graph-owner/baseline-output.txt"
+    },
+    "fixed": {
+      "source_commit": "3e492c5de345310562508f6483b88aad54edf490",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "--manifest-path",
+        "/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/Cargo.toml",
+        "-p",
+        "verum_compiler",
+        "--lib",
+        "symbol_graph_declaring_owner_tests::",
+        "--",
+        "--nocapture"
+      ],
+      "environment": {
+        "CARGO_TARGET_DIR": "/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target",
+        "CARGO_INCREMENTAL": "0",
+        "CARGO_BUILD_JOBS": "2",
+        "VERUM_NO_AUTO_PRECOMPILE": "1",
+        "VERUM_LLVM_DIR": "/Users/taaliman/projects/oldman/verum-lang/verum/llvm/install",
+        "RUST_MIN_STACK": "16777216"
+      },
+      "timeout_seconds": 600,
+      "scope": "Synthetic serialized archive -> SymbolGraph scan/build -> encoded sidecar/readback controls. No ordinary CLI, automatic bake, AOT, TLS root closure, consumer StringId remap, or global T0691 acceptance.",
+      "artifacts_before": {
+        "runtime.vbca": "410ff097b455437cab98b651f7799b3129588820925afe98e0de9c3781530a0f",
+        "runtime.core_metadata": "a92bd89e649e102cdc67d7ad0032513d6448d8915e5744127e6cdf1f1e34ebbb",
+        "runtime.symbol_graph": "a6678c18498f7519749ca1fdf1d22629b479083f42fa95a15177e8c7acf1c722",
+        "runtime.vbca.checksum": "c33573118a8c4b635f6c8f727c3784b524f660be57de702365e8d9c14b2f3a8b",
+        "runtime.vbca.schema": "fec20d7b3f8d1b81aff66c6c1181be574963779f7eacaf65660f8ab9127fca87"
+      },
+      "source_paths": {
+        "crates/verum_compiler/src/archive_ctx_loader.rs": "79c6585e914a402efb6950fc2cf2bb95d870c53023891103ea810285b20a624c",
+        "crates/verum_compiler/src/symbol_graph_baked.rs": "ae856a88ae136ecb0427db6c1e01165ca25513730b03ad095ceecd8830f04c61",
+        "crates/verum_compiler/tests/archive/symbol_graph_declaring_owner.rs": "c0a58d70b705d9ff909785b79af3c92b46963b42778b7b699f5d97392e72e418"
+      },
+      "installed_llvm_version": "21.1.8",
+      "native_dependency_boundary": "Existing LLVM installation and warm native solver outputs only; local LLVM C/C++ wrapper recompilation is permitted. Fresh Z3/CVC5, LLVM toolchain or stdlib producer builds are refused.",
+      "exit_code": 0,
+      "wall_seconds": 113.434,
+      "failure": null,
+      "source_unchanged": true,
+      "log_sha256": "bca7eab6215ce506c9836a46a223486629698b41f2f0b175af8d4f5b06fe46f4",
+      "source_paths_unchanged": true,
+      "executables": {
+        "/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target/debug/build/verum_compiler/c6ca94c7409ab771/out/verum_compiler-c6ca94c7409ab771": "b94a52e8e8e387b53f7b4db4121aaa252da30be2e4c3afeb3064a73454748751"
+      },
+      "artifacts_after": {
+        "runtime.vbca": "410ff097b455437cab98b651f7799b3129588820925afe98e0de9c3781530a0f",
+        "runtime.core_metadata": "a92bd89e649e102cdc67d7ad0032513d6448d8915e5744127e6cdf1f1e34ebbb",
+        "runtime.symbol_graph": "a6678c18498f7519749ca1fdf1d22629b479083f42fa95a15177e8c7acf1c722",
+        "runtime.vbca.checksum": "c33573118a8c4b635f6c8f727c3784b524f660be57de702365e8d9c14b2f3a8b",
+        "runtime.vbca.schema": "fec20d7b3f8d1b81aff66c6c1181be574963779f7eacaf65660f8ab9127fca87"
+      },
+      "test_results": [
+        "test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 1231 filtered out; finished in 0.01s"
+      ],
+      "verbatim_log": "registry-symbol-graph-owner/fixed-output.txt"
+    },
+    "adjacent": {
+      "source_commit": "3e492c5de345310562508f6483b88aad54edf490",
+      "command": [
+        "/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target/debug/build/verum_compiler/c6ca94c7409ab771/out/verum_compiler-c6ca94c7409ab771",
+        "--exact",
+        "archive_ctx_loader::tests::merge_canonical_name_synthesis",
+        "archive_ctx_loader::bootstrap_glue_tests::named_external_glue_is_kept_by_exact_declaring_file_identity",
+        "archive_ctx_loader::bootstrap_glue_tests::missing_qualified_glue_does_not_borrow_an_ancestor_or_sibling",
+        "archive_ctx_loader::wanted_leaf_index_tests::borrowed_leaf_buckets_preserve_the_original_candidate_order",
+        "archive_ctx_loader::wanted_leaf_index_tests::same_leaf_archive_owners_and_bare_first_wins_survive_both_module_orders",
+        "archive_ctx_loader::wanted_leaf_index_tests::alias_prefixes_require_whole_segments_in_both_directions",
+        "archive_ctx_loader::wanted_leaf_index_tests::methods_do_not_claim_free_slots_and_descriptor_only_variants_stay_qualified",
+        "archive_ctx_loader::wanted_leaf_index_tests::real_constructor_descriptors_keep_bare_and_qualified_variant_aliases",
+        "--nocapture"
+      ],
+      "environment": {
+        "CARGO_TARGET_DIR": "/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target",
+        "CARGO_INCREMENTAL": "0",
+        "CARGO_BUILD_JOBS": "2",
+        "VERUM_NO_AUTO_PRECOMPILE": "1",
+        "VERUM_LLVM_DIR": "/Users/taaliman/projects/oldman/verum-lang/verum/llvm/install",
+        "RUST_MIN_STACK": "16777216"
+      },
+      "timeout_seconds": 60,
+      "scope": "Eight exact adjacent archive qualification, keep-set and alias controls using the already-built final compiler test executable. No Cargo/build/automatic bake/AOT invocation.",
+      "exit_code": 0,
+      "wall_seconds": 0.026,
+      "executables": {
+        "/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target/debug/build/verum_compiler/c6ca94c7409ab771/out/verum_compiler-c6ca94c7409ab771": "b94a52e8e8e387b53f7b4db4121aaa252da30be2e4c3afeb3064a73454748751"
+      },
+      "source_paths": {
+        "crates/verum_compiler/src/archive_ctx_loader.rs": "79c6585e914a402efb6950fc2cf2bb95d870c53023891103ea810285b20a624c",
+        "crates/verum_compiler/src/symbol_graph_baked.rs": "ae856a88ae136ecb0427db6c1e01165ca25513730b03ad095ceecd8830f04c61",
+        "crates/verum_compiler/tests/archive/symbol_graph_declaring_owner.rs": "c0a58d70b705d9ff909785b79af3c92b46963b42778b7b699f5d97392e72e418"
+      },
+      "source_paths_unchanged": true,
+      "log_sha256": "81d6eb337518611ca6d123da6edeccde0e011f07fb4b4e21aaae1e11eae40ec5",
+      "test_results": [
+        "test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 1229 filtered out; finished in 0.01s"
+      ],
+      "passed_controls": [
+        "archive_ctx_loader::tests::merge_canonical_name_synthesis",
+        "archive_ctx_loader::wanted_leaf_index_tests::borrowed_leaf_buckets_preserve_the_original_candidate_order",
+        "archive_ctx_loader::bootstrap_glue_tests::missing_qualified_glue_does_not_borrow_an_ancestor_or_sibling",
+        "archive_ctx_loader::bootstrap_glue_tests::named_external_glue_is_kept_by_exact_declaring_file_identity",
+        "archive_ctx_loader::wanted_leaf_index_tests::real_constructor_descriptors_keep_bare_and_qualified_variant_aliases",
+        "archive_ctx_loader::wanted_leaf_index_tests::alias_prefixes_require_whole_segments_in_both_directions",
+        "archive_ctx_loader::wanted_leaf_index_tests::methods_do_not_claim_free_slots_and_descriptor_only_variants_stay_qualified",
+        "archive_ctx_loader::wanted_leaf_index_tests::same_leaf_archive_owners_and_bare_first_wins_survive_both_module_orders"
+      ],
+      "artifacts_after": {
+        "runtime.vbca": "410ff097b455437cab98b651f7799b3129588820925afe98e0de9c3781530a0f",
+        "runtime.core_metadata": "a92bd89e649e102cdc67d7ad0032513d6448d8915e5744127e6cdf1f1e34ebbb",
+        "runtime.symbol_graph": "a6678c18498f7519749ca1fdf1d22629b479083f42fa95a15177e8c7acf1c722",
+        "runtime.vbca.checksum": "c33573118a8c4b635f6c8f727c3784b524f660be57de702365e8d9c14b2f3a8b",
+        "runtime.vbca.schema": "fec20d7b3f8d1b81aff66c6c1181be574963779f7eacaf65660f8ab9127fca87"
+      },
+      "verbatim_log": "registry-symbol-graph-owner/adjacent-output.txt"
+    }
+  }
+}

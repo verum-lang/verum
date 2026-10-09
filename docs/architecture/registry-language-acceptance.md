@@ -744,3 +744,31 @@ Inherited precompiled artifact bytes remained unchanged during these isolated
 tests. This does not certify a fresh standard-library producer, an ordinary CLI
 replay, AOT behavior, the full registry project, or authenticated durable
 publication. T1666 remains the separate metadata/service acceptance boundary.
+
+## Archive graph declaring-owner carry (T0691)
+
+The archive symbol scanner discarded `FunctionDescriptor.origin_module` before
+constructing the call graph. A `Counter.new` descriptor declared in `beta.owner`
+but stored in umbrella entry `beta` therefore had no `beta.owner.Counter.new`
+node. An exact call to that name could not traverse its callee edges.
+
+The scanner now carries that declaring module into the graph's exact-name
+index, including the function's own callee row. Existing descriptor and entry
+spellings remain available, and the bare-leaf and prefix indexes retain their
+previous membership. Serialized synthetic archives cover same-leaf siblings
+in both discovery orders, two declarers in one umbrella, transitive calls,
+encoded sidecar readback, absent origins and already-promoted names.
+
+The causal baseline measured two passing and four failing controls. The repair
+passes all six, and eight adjacent archive qualification, keep-set and alias
+controls pass through the same compiler test executable. The exact commands,
+source and executable hashes, stopped wrapper-guard attempt, and verbatim logs
+are retained in the [graph-owner receipt](evidence/registry-symbol-graph-owner-gate.json).
+
+These tests establish the synthetic archive and graph boundary. The inherited
+stdlib artifact bytes stayed unchanged; a fresh published sidecar and complete
+startup were not tested. The normal bake fingerprint already includes the
+scanner, so its change invalidates the prior graph content without changing
+the wire layout. T0691's broader shared-symbol-artifact acceptance remains
+open. Late TLS-root dependency closure belongs to T1461; consumer string-pool
+remapping of function origins is tracked separately by T1691.

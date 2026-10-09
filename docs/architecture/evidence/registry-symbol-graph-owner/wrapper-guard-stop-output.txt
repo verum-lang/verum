@@ -1,0 +1,4 @@
+   Compiling verum_error v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_error)
+   Compiling verum_tblgen v21.0.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/llvm/verum_tblgen)
+   Compiling verum_modules v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_modules)
+   Compiling verum_llvm_sys v21.0.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/llvm/verum_llvm_sys)
