@@ -62,7 +62,15 @@ fn reachable_ir(module: &Module, root: &str) -> Text {
 }
 
 fn native(module: &VbcModule, check: impl Fn(&verum_llvm::execution_engine::ExecutionEngine)) {
-    let wire = deserialize_module(&serialize_module(module).expect("wire")).expect("reload");
+    let mut wire = deserialize_module(&serialize_module(module).expect("wire")).expect("reload");
+    // The native API consumes decoded bodies, as does the real archive loader.
+    for function in &mut wire.functions {
+        let start = function.bytecode_offset as usize;
+        let end = start + function.bytecode_length as usize;
+        let mut instructions = verum_vbc::bytecode::decode_instructions(&wire.bytecode[start..end]).expect("decode body");
+        verum_vbc::bytecode::jump_offsets_to_instr_indices(&mut instructions);
+        function.instructions = Some(instructions);
+    }
     for (route, module) in [("source", module), ("wire", &wire)] {
         Target::initialize_native(&InitializationConfig::default()).expect("native target");
         let context = Context::create();
@@ -163,5 +171,24 @@ fn native_dynamic_from_bytes_reads_the_packed_input() {
                 assert_eq!(actual, expected, "{owner} {endian}");
             });
         }
+    }
+}
+
+#[test]
+fn native_inferred_and_annotated_indexing_preserve_byte_access() {
+    for binding in ["let bytes =", "let bytes: [Byte; 8] ="] {
+        let module = source(&format!("{U64_METHOD} fn probe() -> Int {{ let value: UInt64 = 0x0102030405060708; {binding} value.to_be_bytes(); bytes[7] as Int }}"));
+        let probe = module.functions.iter().find(|function| module.get_string(function.name) == Some("probe")).unwrap();
+        // Refuse to run a known unsafe generic container read on a packed
+        // allocation. This pins the producer/consumer selection before JIT;
+        // once selected correctly, the real native read must return byte8.
+        assert!(!probe.instructions.as_ref().unwrap().iter().any(|instruction| matches!(instruction,
+            verum_vbc::instruction::Instruction::GetE { .. }
+        )), "{binding}: fixed endian producer lost byte access before native lowering");
+        native(&module, |engine| {
+            // SAFETY: the source function has no parameters and returns Int.
+            let value = unsafe { engine.get_function::<unsafe extern "C" fn() -> i64>("probe").unwrap().call() };
+            assert_eq!(value, 8, "{binding}");
+        });
     }
 }
