@@ -155,7 +155,10 @@ fn metadata(archive: &VbcArchive) -> CoreMetadata {
 }
 
 fn payload(metadata: &CoreMetadata, name: &str) -> List<Text> {
-    let desc = &metadata.types[&Text::from("core.encoding.json.JsonValue")];
+    let desc = metadata
+        .types
+        .get(&Text::from("core.encoding.json.JsonValue"))
+        .unwrap();
     let TypeDescriptorKind::Variant { cases } = &desc.kind else {
         panic!("variant descriptor")
     };
