@@ -313,6 +313,7 @@ fn malformed_scalar_normalization_cannot_preserve_storage_proof() {
     for operands in [
         vec![], vec![0x81], vec![1, 0x81], vec![1, 2, 16],
         vec![1, 2, 16, 64, 0], vec![1, 2, 0, 64], vec![1, 2, 16, 0],
+        vec![0x80, 1, 2, 16, 64], vec![1, 0x80, 2, 16, 64],
     ] {
         let mut facts = ArrayResultFacts::default();
         facts.observe(&Instruction::LoadI { dst: Reg(128), value: 3 });

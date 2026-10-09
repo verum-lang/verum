@@ -287,3 +287,29 @@ fn named_field_unpack_preserves_signed_payloads() {
 fn shorthand_field_unpack_preserves_signed_payloads() {
     check_list_payload("type Holder is { values: [Int16; 3] }; fn make() -> List<Int16> { let values: [Int16; 3] = [-32768, -1, 1]; let holder = Holder { values }; holder.values }", &[-32768, -1, 1]);
 }
+
+#[test]
+fn generic_element_named_like_a_primitive_does_not_gain_signed_normalization() {
+    let parsed = Parser::new("fn read<Int16>(values: List<Int16>) -> Int16 { values[0] }")
+        .parse_module().expect("generic source grammar");
+    let original = VbcCodegen::with_config(CodegenConfig::new("generic_element_owner"))
+        .compile_module(&parsed).expect("generic source lowering");
+    let wire = verum_vbc::deserialize::deserialize_module(
+        &verum_vbc::serialize::serialize_module(&original).expect("encode generic VBC")
+    ).expect("decode generic VBC");
+    for (route, module) in [("source", original), ("wire", wire)] {
+        let function = module.functions.iter().find(|function|
+            module.get_string(function.name) == Some("generic_element_owner.read"))
+            .expect("exact generic reader");
+        let start = function.bytecode_offset as usize;
+        let instructions = verum_vbc::bytecode::decode_instructions(
+            &module.bytecode[start..start + function.bytecode_length as usize]
+        ).expect("decode actual generic reader");
+        assert!(instructions.iter().any(|instruction| matches!(instruction,
+            verum_vbc::instruction::Instruction::GetE { .. })), "{route}: no element reader");
+        assert!(!instructions.iter().any(|instruction| matches!(instruction,
+            verum_vbc::instruction::Instruction::ArithExtended { sub_op, .. }
+                if *sub_op == verum_vbc::instruction::ArithSubOpcode::SextI.to_byte()
+        )), "{route}: a generic parameter acquired primitive sign semantics");
+    }
+}
