@@ -1,0 +1,36 @@
+{
+  "task": "T1704",
+  "source_commit": "fa6bf9a613da39d9fd1adbff353f3ec417249b02",
+  "files": [
+    {
+      "path": "README.md",
+      "bytes": 3108,
+      "sha256": "7eee24b9f6e0ad47840bc3f654f43cd787cdd8caef17770dcba79ca6a378a992"
+    },
+    {
+      "path": "incoming-builtin-allocation-delta.patch",
+      "bytes": 5779,
+      "sha256": "e38f9937e5840f5e08d153ba115dd528242965a9e3fef83a0ff696061a19ba61"
+    },
+    {
+      "path": "removed-synchronous-intercept.patch",
+      "bytes": 2427,
+      "sha256": "60eb8ebc2ddbd6d43e9aa940ed58ed86b846ae00d86dc3a977ae1b616f9a7e4a"
+    },
+    {
+      "path": "source-gates.json",
+      "bytes": 931,
+      "sha256": "5e43bf0373a8cdff6266a60e19c9a3ebcaf575d9e80a84302f56801259bda329"
+    },
+    {
+      "path": "source-gates.log",
+      "bytes": 4703,
+      "sha256": "005e1c20827fe6004f1b43a272d0abc5604ae90d2e67a576ea2b0e8e7e3c86cc"
+    },
+    {
+      "path": "source-identity.json",
+      "bytes": 30983,
+      "sha256": "42e69062b99e16b5ced106515ed40b3c5366e96ae04cff0cbf0b2a606493d06b"
+    }
+  ]
+}

@@ -1,0 +1,31 @@
+{
+  "task": "T1704",
+  "scope": "Source-only merged integration checks; no Cargo, CLI, LLVM execution, JIT or AOT run.",
+  "source_commit": "fa6bf9a613da39d9fd1adbff353f3ec417249b02",
+  "source_tree": "512ad85f3be46e40f82b14477da16a7531540588",
+  "parents": [
+    "9ad15cfb5c2aab6e4d121205467a0e72b4e3f580",
+    "f3006f403ab059532cf45917057528683caed650"
+  ],
+  "command": [
+    "make",
+    "check-per-register-privacy",
+    "check-internal-refs",
+    "check-panic-surface",
+    "check-early-return-tenants",
+    "check-dup-emitters"
+  ],
+  "environment_overrides": {
+    "PYTHONDONTWRITEBYTECODE": "1"
+  },
+  "timeout_seconds": 120,
+  "timed_out": false,
+  "exit_code": 0,
+  "elapsed_seconds": 24.31,
+  "log": "source-gates.log",
+  "log_sha256": "005e1c20827fe6004f1b43a272d0abc5604ae90d2e67a576ea2b0e8e7e3c86cc",
+  "clean_before": true,
+  "clean_after": true,
+  "source_commit_unchanged": true,
+  "source_tree_unchanged": true
+}

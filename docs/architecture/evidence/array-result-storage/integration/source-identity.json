@@ -1,0 +1,727 @@
+{
+  "task": "T1704",
+  "scope": "Read-only merged-source identity audit; no executable validation.",
+  "source_commit": "fa6bf9a613da39d9fd1adbff353f3ec417249b02",
+  "source_tree": "512ad85f3be46e40f82b14477da16a7531540588",
+  "first_parent": "9ad15cfb5c2aab6e4d121205467a0e72b4e3f580",
+  "second_parent": "f3006f403ab059532cf45917057528683caed650",
+  "merge_base": "31713d3c3047aa1e4e449a494f323c28e702d7e3",
+  "preserved_branch": {
+    "name": "codex/sha256-consuming-receiver",
+    "commit": "9ad15cfb5c2aab6e4d121205467a0e72b4e3f580"
+  },
+  "manual_combination_paths": [
+    "crates/verum_vbc/src/codegen/expressions.rs",
+    "crates/verum_vbc/src/interpreter/dispatch_table/handlers/method_dispatch.rs"
+  ],
+  "checks": {
+    "all_other_changed_rust_files_exactly_match_a_parent": true,
+    "method_dispatch_exact_incoming_plus_twelve_builtin_allocation_replacements": true,
+    "expressions_exact_incoming_plus_held_fixed_endian_expansion": true,
+    "native_source_and_selected_tests_exact_held_parent": true,
+    "superseded_synchronous_numeric_intercept_absent": true
+  },
+  "changed_rust_files": [
+    {
+      "path": "crates/verum_codegen/src/llvm/array_storage.rs",
+      "held_sha256": "6b6e026b00b6178cf10e9e9791223d0070498357cd231917fd78a5d3d40cf5dc",
+      "incoming_sha256": null,
+      "merged_sha256": "6b6e026b00b6178cf10e9e9791223d0070498357cd231917fd78a5d3d40cf5dc",
+      "equals_held": true,
+      "equals_incoming": false
+    },
+    {
+      "path": "crates/verum_codegen/src/llvm/context.rs",
+      "held_sha256": "ca1998d2bd6eb47f9e8595f1baa664bea9bf956aee9c191dfba8a990e40efc88",
+      "incoming_sha256": "4b56d77492377046b519fd1c84d781e7847c871d6492c3db2200ccc742e01514",
+      "merged_sha256": "ca1998d2bd6eb47f9e8595f1baa664bea9bf956aee9c191dfba8a990e40efc88",
+      "equals_held": true,
+      "equals_incoming": false
+    },
+    {
+      "path": "crates/verum_codegen/src/llvm/error.rs",
+      "held_sha256": "e1b1099838e0b73a454596396539031ab1cdc33c69640c0c7141ea31cd0dfe5e",
+      "incoming_sha256": "c1ee685f13b3f07a2ce4ff0663c4aedb5c46c89a1cfec376badf8ff575dfa823",
+      "merged_sha256": "e1b1099838e0b73a454596396539031ab1cdc33c69640c0c7141ea31cd0dfe5e",
+      "equals_held": true,
+      "equals_incoming": false
+    },
+    {
+      "path": "crates/verum_codegen/src/llvm/instruction.rs",
+      "held_sha256": "01046cf150e291874e2d72cda6b02f4846b6d5c36542f0c84a7cb8a4bddf4256",
+      "incoming_sha256": "7bbf0418ba5081ddcab11142e9a9026ab21b0a07e36033627894c7e45498e80c",
+      "merged_sha256": "01046cf150e291874e2d72cda6b02f4846b6d5c36542f0c84a7cb8a4bddf4256",
+      "equals_held": true,
+      "equals_incoming": false
+    },
+    {
+      "path": "crates/verum_codegen/src/llvm/mod.rs",
+      "held_sha256": "5228ff1401e7187536e66789833651ca5c0d8e8ee35f9eb8d749581c53fb1fbc",
+      "incoming_sha256": "174db70b8175954f6feca8f4e9e17094e1e195c3ec1a03b4488c29eb5e108f91",
+      "merged_sha256": "5228ff1401e7187536e66789833651ca5c0d8e8ee35f9eb8d749581c53fb1fbc",
+      "equals_held": true,
+      "equals_incoming": false
+    },
+    {
+      "path": "crates/verum_codegen/src/llvm/vbc_lowering.rs",
+      "held_sha256": "b1f864695066d1a65d7ed35d50136a4315ad12e650c2f4dbce271b8772f7ac28",
+      "incoming_sha256": "a1d978c23bd441e060f05bfa534db0df2f5f20cce14def3db65a8b73f13332cc",
+      "merged_sha256": "b1f864695066d1a65d7ed35d50136a4315ad12e650c2f4dbce271b8772f7ac28",
+      "equals_held": true,
+      "equals_incoming": false
+    },
+    {
+      "path": "crates/verum_codegen/tests/endian_fixed_bytes.rs",
+      "held_sha256": "0ce98a137b172f8014abcb128eae12e00bacd157e69a4a0a583705c41f7dfbcb",
+      "incoming_sha256": null,
+      "merged_sha256": "0ce98a137b172f8014abcb128eae12e00bacd157e69a4a0a583705c41f7dfbcb",
+      "equals_held": true,
+      "equals_incoming": false
+    },
+    {
+      "path": "crates/verum_codegen/tests/unit/array_storage.rs",
+      "held_sha256": "ae1aac5434fc3f5be100bfe1ba100e89cdb68cc8dc73ee044300b2fe5d072db5",
+      "incoming_sha256": null,
+      "merged_sha256": "ae1aac5434fc3f5be100bfe1ba100e89cdb68cc8dc73ee044300b2fe5d072db5",
+      "equals_held": true,
+      "equals_incoming": false
+    },
+    {
+      "path": "crates/verum_compiler/build.rs",
+      "held_sha256": "fe9f86e908f59b6661b9723e010a96e87342b6ba48049f629fff15cb9e0cc5d8",
+      "incoming_sha256": "8ef8ff8f92d1ecdb388267d958a7e3df17dd92fd213552d6af7e51b8afc01bba",
+      "merged_sha256": "8ef8ff8f92d1ecdb388267d958a7e3df17dd92fd213552d6af7e51b8afc01bba",
+      "equals_held": false,
+      "equals_incoming": true
+    },
+    {
+      "path": "crates/verum_compiler/src/archive_ctx_loader.rs",
+      "held_sha256": "2b92588fa6f29aebcdc4c7165e8b43b4804c1de2a86c7bd81078a06ed0f97f5e",
+      "incoming_sha256": "0bfca59382166fa9f3ef7a8473f99d52063c77f35373a567684180b2a3818266",
+      "merged_sha256": "0bfca59382166fa9f3ef7a8473f99d52063c77f35373a567684180b2a3818266",
+      "equals_held": false,
+      "equals_incoming": true
+    },
+    {
+      "path": "crates/verum_compiler/src/pipeline/stdlib_bootstrap.rs",
+      "held_sha256": "c11be9ed4a79da0d3b554a4e3f84e5a9fc0904dd7913fb3c2b098af56c9ef799",
+      "incoming_sha256": "c11be9ed4a79da0d3b554a4e3f84e5a9fc0904dd7913fb3c2b098af56c9ef799",
+      "merged_sha256": "c11be9ed4a79da0d3b554a4e3f84e5a9fc0904dd7913fb3c2b098af56c9ef799",
+      "equals_held": true,
+      "equals_incoming": true
+    },
+    {
+      "path": "crates/verum_compiler/tests/archive/declared_function_bodies.rs",
+      "held_sha256": null,
+      "incoming_sha256": "92bd04034d553643cefd617e2262e40cfc08e578d481f2891c8ca8f3bbf4e3ae",
+      "merged_sha256": "92bd04034d553643cefd617e2262e40cfc08e578d481f2891c8ca8f3bbf4e3ae",
+      "equals_held": false,
+      "equals_incoming": true
+    },
+    {
+      "path": "crates/verum_vbc/src/array_storage.rs",
+      "held_sha256": "96aacc7f4a688ab463e069442216a5851a402ec63b0d0ea981b2e40912eb9d2c",
+      "incoming_sha256": null,
+      "merged_sha256": "96aacc7f4a688ab463e069442216a5851a402ec63b0d0ea981b2e40912eb9d2c",
+      "equals_held": true,
+      "equals_incoming": false
+    },
+    {
+      "path": "crates/verum_vbc/src/codegen/array_coercions.rs",
+      "held_sha256": "39e3d55bdd36732fbf3a7a6ef5d8be94622cc17a27685f0dd0784ab00bd885ae",
+      "incoming_sha256": "ecfc715b875afe0672e25f30ac7aac75e9ac6a13188261ec1b7d945031b0831d",
+      "merged_sha256": "39e3d55bdd36732fbf3a7a6ef5d8be94622cc17a27685f0dd0784ab00bd885ae",
+      "equals_held": true,
+      "equals_incoming": false
+    },
+    {
+      "path": "crates/verum_vbc/src/codegen/context.rs",
+      "held_sha256": "26e15b71681d0211ae5525700a89ad2f33933dfa46dd7978133660870cb7b6b8",
+      "incoming_sha256": "26e15b71681d0211ae5525700a89ad2f33933dfa46dd7978133660870cb7b6b8",
+      "merged_sha256": "26e15b71681d0211ae5525700a89ad2f33933dfa46dd7978133660870cb7b6b8",
+      "equals_held": true,
+      "equals_incoming": true
+    },
+    {
+      "path": "crates/verum_vbc/src/codegen/expressions.rs",
+      "held_sha256": "e774375bcb0f3849c5845591f874e4fcfaa96f44a5654fc2df317fa24b9afb9a",
+      "incoming_sha256": "55546e87c03d95a88553fd66b61a9efa78276035e7428318cf833639da05a7be",
+      "merged_sha256": "d601e503b2d865f41adae7cbdb3f520aa6fdc00a877667f0f69c057ecc3bfc14",
+      "equals_held": false,
+      "equals_incoming": false
+    },
+    {
+      "path": "crates/verum_vbc/src/codegen/mod.rs",
+      "held_sha256": "295f6f95d586d5be288d0504743cf9ef1c21f4f2af03c7064bc7400d78cb56f0",
+      "incoming_sha256": "295f6f95d586d5be288d0504743cf9ef1c21f4f2af03c7064bc7400d78cb56f0",
+      "merged_sha256": "295f6f95d586d5be288d0504743cf9ef1c21f4f2af03c7064bc7400d78cb56f0",
+      "equals_held": true,
+      "equals_incoming": true
+    },
+    {
+      "path": "crates/verum_vbc/src/codegen/statements.rs",
+      "held_sha256": "7302ec95c0c1554744d4365f6e21f438039a78c831ab16d629d004c2b8d18756",
+      "incoming_sha256": "6a480e80359fc0cc40c380e490b44c3f2cdb3541b50a177da580a5c916e75931",
+      "merged_sha256": "7302ec95c0c1554744d4365f6e21f438039a78c831ab16d629d004c2b8d18756",
+      "equals_held": true,
+      "equals_incoming": false
+    },
+    {
+      "path": "crates/verum_vbc/src/codegen/tests_comprehensive.rs",
+      "held_sha256": "3307c5f7022def3d1299204fccfac083eb2f68c8954aaeee11fe3b2b7678f911",
+      "incoming_sha256": "3307c5f7022def3d1299204fccfac083eb2f68c8954aaeee11fe3b2b7678f911",
+      "merged_sha256": "3307c5f7022def3d1299204fccfac083eb2f68c8954aaeee11fe3b2b7678f911",
+      "equals_held": true,
+      "equals_incoming": true
+    },
+    {
+      "path": "crates/verum_vbc/src/deserialize.rs",
+      "held_sha256": "2e91b4870d2ac146c6b54dbcb09e71fa48abf0c537408b23a26cbefe8c8569bc",
+      "incoming_sha256": "2e91b4870d2ac146c6b54dbcb09e71fa48abf0c537408b23a26cbefe8c8569bc",
+      "merged_sha256": "2e91b4870d2ac146c6b54dbcb09e71fa48abf0c537408b23a26cbefe8c8569bc",
+      "equals_held": true,
+      "equals_incoming": true
+    },
+    {
+      "path": "crates/verum_vbc/src/format.rs",
+      "held_sha256": "0793d53a5ebfd8937ebcfff0144a8b285537c256953e1db7c7f504a9b8b13325",
+      "incoming_sha256": "0793d53a5ebfd8937ebcfff0144a8b285537c256953e1db7c7f504a9b8b13325",
+      "merged_sha256": "0793d53a5ebfd8937ebcfff0144a8b285537c256953e1db7c7f504a9b8b13325",
+      "equals_held": true,
+      "equals_incoming": true
+    },
+    {
+      "path": "crates/verum_vbc/src/interpreter/autodiff_record.rs",
+      "held_sha256": "dc79ce432c1d9bbdfc32464381a94838ae45f9d44f760c8d1ef4e99b850a93b2",
+      "incoming_sha256": "de34b5616bfe05d6fdbdcf0a9041e8ca258da6a5eb02e0d89dd275e7ee664db2",
+      "merged_sha256": "de34b5616bfe05d6fdbdcf0a9041e8ca258da6a5eb02e0d89dd275e7ee664db2",
+      "equals_held": false,
+      "equals_incoming": true
+    },
+    {
+      "path": "crates/verum_vbc/src/interpreter/dispatch_table/handlers/heap_helpers.rs",
+      "held_sha256": "e874660f2529710e16ad21e6d5121af848db77804e81752d8cc282fe23007eb5",
+      "incoming_sha256": "74e50c30c1d322ae0ebe43b079f8d3a905b179d11a7b0d130a436f661bab1d48",
+      "merged_sha256": "e874660f2529710e16ad21e6d5121af848db77804e81752d8cc282fe23007eb5",
+      "equals_held": true,
+      "equals_incoming": false
+    },
+    {
+      "path": "crates/verum_vbc/src/interpreter/dispatch_table/handlers/method_dispatch.rs",
+      "held_sha256": "9a185082454a8e1ef13c3f619fb3c417777412d4ba034981b9bdb515b0c1801a",
+      "incoming_sha256": "5af15bd3a033ebabbfcde18cf0ac7b46014e6c026221dc9f70f9bf8751a24a18",
+      "merged_sha256": "32368fd7e8243fb3446d37d543ac3b27b92c28381a93bbd6c4f4f71fe0f8acd6",
+      "equals_held": false,
+      "equals_incoming": false
+    },
+    {
+      "path": "crates/verum_vbc/src/interpreter/dispatch_table/handlers/net_runtime.rs",
+      "held_sha256": "d5e4cb08e1b26e68ed9bd00150556718aa094cb5a789688ffb311d1fb647c787",
+      "incoming_sha256": "f67d7fe3436cbcfe6cce5de1f9662d54ac7b04d252e31c467b660195ef5199a4",
+      "merged_sha256": "f67d7fe3436cbcfe6cce5de1f9662d54ac7b04d252e31c467b660195ef5199a4",
+      "equals_held": false,
+      "equals_incoming": true
+    },
+    {
+      "path": "crates/verum_vbc/src/interpreter/io_engine.rs",
+      "held_sha256": "5ffdda314b29730251fbdf8c706285b52fd0f9f2efae6223a78f53c752474c2b",
+      "incoming_sha256": "f4eb364e97666347444375f8030e191c1c1c1f45197ba5de686a4897fc6e7920",
+      "merged_sha256": "f4eb364e97666347444375f8030e191c1c1c1f45197ba5de686a4897fc6e7920",
+      "equals_held": false,
+      "equals_incoming": true
+    },
+    {
+      "path": "crates/verum_vbc/src/intrinsics/expand.rs",
+      "held_sha256": "2913bcf981da1def1c01ee8d74934f88e84d8d0bbbf458f236a0c5710e282ec3",
+      "incoming_sha256": "5dbd754ad33926a55682e397a55487e948e5c99f8905eebbde3f766e3497cb97",
+      "merged_sha256": "2913bcf981da1def1c01ee8d74934f88e84d8d0bbbf458f236a0c5710e282ec3",
+      "equals_held": true,
+      "equals_incoming": false
+    },
+    {
+      "path": "crates/verum_vbc/src/lib.rs",
+      "held_sha256": "ed21a6ab654953da45d32cf42eb15048ee821075c850c0c93f70fa160338581a",
+      "incoming_sha256": "b6789ba9ed8f8beee03f3b1c9caea0c940a385992886c1965cef5a8bd0e4b457",
+      "merged_sha256": "ed21a6ab654953da45d32cf42eb15048ee821075c850c0c93f70fa160338581a",
+      "equals_held": true,
+      "equals_incoming": false
+    },
+    {
+      "path": "crates/verum_vbc/src/linker.rs",
+      "held_sha256": "843bb38615a46c694d11a6e7a5497c46ce5edcb288365694d1db240e2e590b6d",
+      "incoming_sha256": "843bb38615a46c694d11a6e7a5497c46ce5edcb288365694d1db240e2e590b6d",
+      "merged_sha256": "843bb38615a46c694d11a6e7a5497c46ce5edcb288365694d1db240e2e590b6d",
+      "equals_held": true,
+      "equals_incoming": true
+    },
+    {
+      "path": "crates/verum_vbc/src/module.rs",
+      "held_sha256": "d34cd7676ae06ed9f5114526f35d3cf9ccd2214cd04064fe940c2341efbc0661",
+      "incoming_sha256": "d34cd7676ae06ed9f5114526f35d3cf9ccd2214cd04064fe940c2341efbc0661",
+      "merged_sha256": "d34cd7676ae06ed9f5114526f35d3cf9ccd2214cd04064fe940c2341efbc0661",
+      "equals_held": true,
+      "equals_incoming": true
+    },
+    {
+      "path": "crates/verum_vbc/src/serialize.rs",
+      "held_sha256": "b9d8f45150151b306be3d63a770fd93e730352781422db7b62d958610186509b",
+      "incoming_sha256": "b9d8f45150151b306be3d63a770fd93e730352781422db7b62d958610186509b",
+      "merged_sha256": "b9d8f45150151b306be3d63a770fd93e730352781422db7b62d958610186509b",
+      "equals_held": true,
+      "equals_incoming": true
+    },
+    {
+      "path": "crates/verum_vbc/src/tests.rs",
+      "held_sha256": "1cf8fb79f0dde197d3f46a17884c214600730dc0a29bfa2dab8935fd7f650704",
+      "incoming_sha256": "1cf8fb79f0dde197d3f46a17884c214600730dc0a29bfa2dab8935fd7f650704",
+      "merged_sha256": "1cf8fb79f0dde197d3f46a17884c214600730dc0a29bfa2dab8935fd7f650704",
+      "equals_held": true,
+      "equals_incoming": true
+    },
+    {
+      "path": "crates/verum_vbc/tests/array_return_storage.rs",
+      "held_sha256": "5b40b1e1ba27fcdb07b0912b901150cc86e0d72088a1af792d670fb5610d3412",
+      "incoming_sha256": null,
+      "merged_sha256": "5b40b1e1ba27fcdb07b0912b901150cc86e0d72088a1af792d670fb5610d3412",
+      "equals_held": true,
+      "equals_incoming": false
+    },
+    {
+      "path": "crates/verum_vbc/tests/codegen/array_result_facts.rs",
+      "held_sha256": "abd24aa03afffec8c85a75d8f5afba1e37528da6334045a6b4f053264fe87c7c",
+      "incoming_sha256": "5f4d56d95fc37326fac2417827045d80c42afb2556aa49a48c1662d4efb89436",
+      "merged_sha256": "abd24aa03afffec8c85a75d8f5afba1e37528da6334045a6b4f053264fe87c7c",
+      "equals_held": true,
+      "equals_incoming": false
+    },
+    {
+      "path": "crates/verum_vbc/tests/consuming_receiver_after_mutation.rs",
+      "held_sha256": "afff6cbe7d12c4da5439c4042aaa2c3cb2e77a9806f3624e62e52f1173098f6b",
+      "incoming_sha256": null,
+      "merged_sha256": "afff6cbe7d12c4da5439c4042aaa2c3cb2e77a9806f3624e62e52f1173098f6b",
+      "equals_held": true,
+      "equals_incoming": false
+    },
+    {
+      "path": "crates/verum_vbc/tests/declared_function_bodies.rs",
+      "held_sha256": "131ce1994efd7be82c9be2c05e233913d6135d0d6d66024c9b8998f456be56fc",
+      "incoming_sha256": "3171b2660082a95aac3e3a1a52e1d3e8db0b41e0a3a739987f51f9a375bba250",
+      "merged_sha256": "3171b2660082a95aac3e3a1a52e1d3e8db0b41e0a3a739987f51f9a375bba250",
+      "equals_held": false,
+      "equals_incoming": true
+    },
+    {
+      "path": "crates/verum_vbc/tests/endian_array_returns.rs",
+      "held_sha256": "df024f210ac436630903eb59819bf5bb5a1ae9027b4d972fd2da5e1d23476a32",
+      "incoming_sha256": null,
+      "merged_sha256": "df024f210ac436630903eb59819bf5bb5a1ae9027b4d972fd2da5e1d23476a32",
+      "equals_held": true,
+      "equals_incoming": false
+    },
+    {
+      "path": "crates/verum_vbc/tests/endian_intrinsic_expansion.rs",
+      "held_sha256": "2847d352ad908c8f60fe9c0bef67cc9d4a27902c3f124f60b9cf9bc84d1ca125",
+      "incoming_sha256": null,
+      "merged_sha256": "2847d352ad908c8f60fe9c0bef67cc9d4a27902c3f124f60b9cf9bc84d1ca125",
+      "equals_held": true,
+      "equals_incoming": false
+    },
+    {
+      "path": "crates/verum_vbc/tests/endian_source_owners.rs",
+      "held_sha256": "ea3e1808c6b5e0e4f3f726f3e4a86d213afcb1d43b209ba441498190abc5fb0a",
+      "incoming_sha256": null,
+      "merged_sha256": "ea3e1808c6b5e0e4f3f726f3e4a86d213afcb1d43b209ba441498190abc5fb0a",
+      "equals_held": true,
+      "equals_incoming": false
+    },
+    {
+      "path": "crates/verum_vbc/tests/interpreter/argument_tape_boundary.rs",
+      "held_sha256": null,
+      "incoming_sha256": "9d45f0ed265ab9ea42447b86b671d26ba83c1d89093ce77b923d429868921797",
+      "merged_sha256": "9d45f0ed265ab9ea42447b86b671d26ba83c1d89093ce77b923d429868921797",
+      "equals_held": false,
+      "equals_incoming": true
+    },
+    {
+      "path": "crates/verum_vbc/tests/numeric_method_declaration_owner.rs",
+      "held_sha256": null,
+      "incoming_sha256": "aba22c50f8ed65b8fcadff5cd7ac4b7cd2bfdab4c540ac33d6f7b06bfdd49cee",
+      "merged_sha256": "aba22c50f8ed65b8fcadff5cd7ac4b7cd2bfdab4c540ac33d6f7b06bfdd49cee",
+      "equals_held": false,
+      "equals_incoming": true
+    },
+    {
+      "path": "crates/verum_vbc/tests/unit/net_runtime_bounded_tcp.rs",
+      "held_sha256": null,
+      "incoming_sha256": "5f18aa2da1e5d2fcbd89e2d5afc8c6fac534928dcf27818dd3924d3fd0182175",
+      "merged_sha256": "5f18aa2da1e5d2fcbd89e2d5afc8c6fac534928dcf27818dd3924d3fd0182175",
+      "equals_held": false,
+      "equals_incoming": true
+    },
+    {
+      "path": "crates/verum_vbc/tests/unit/net_runtime_descriptor_identity.rs",
+      "held_sha256": null,
+      "incoming_sha256": "35e3d1b48668b9a1a0e34f57eb740b7c22cdd4655e8e161e1ef962c2d7275534",
+      "merged_sha256": "35e3d1b48668b9a1a0e34f57eb740b7c22cdd4655e8e161e1ef962c2d7275534",
+      "equals_held": false,
+      "equals_incoming": true
+    }
+  ],
+  "native_held_identity_files": [
+    {
+      "path": "crates/verum_codegen/src/error.rs",
+      "sha256": "8f124d7e76970d61c304ba5d3d6f3d0deab4ea5066b3df2fcbe96823d4b7410f",
+      "equals_held": true
+    },
+    {
+      "path": "crates/verum_codegen/src/lib.rs",
+      "sha256": "690ac32f34ed3e360fd967fef60a51af5288ec3707eefc023ae8f485dca22862",
+      "equals_held": true
+    },
+    {
+      "path": "crates/verum_codegen/src/link.rs",
+      "sha256": "fca0b6e34d38bb34f69bda12ada31794ed2ca5c7f396d4eaf12a900aaa9221c2",
+      "equals_held": true
+    },
+    {
+      "path": "crates/verum_codegen/src/llvm/array_storage.rs",
+      "sha256": "6b6e026b00b6178cf10e9e9791223d0070498357cd231917fd78a5d3d40cf5dc",
+      "equals_held": true
+    },
+    {
+      "path": "crates/verum_codegen/src/llvm/asm.rs",
+      "sha256": "93d2e05ee03e3b011fb7fb4c2cc4480d082ca9f623ad91df69e7ecc4029725a8",
+      "equals_held": true
+    },
+    {
+      "path": "crates/verum_codegen/src/llvm/bitfield.rs",
+      "sha256": "7e85d858cd66223b000fd7dd2392639311bca084640a500465256bb87e0b85bb",
+      "equals_held": true
+    },
+    {
+      "path": "crates/verum_codegen/src/llvm/cbgr.rs",
+      "sha256": "a8776378746fdfe09104826b6cf7ce7663d1e4095f816eb0a2605bee783578e7",
+      "equals_held": true
+    },
+    {
+      "path": "crates/verum_codegen/src/llvm/context.rs",
+      "sha256": "ca1998d2bd6eb47f9e8595f1baa664bea9bf956aee9c191dfba8a990e40efc88",
+      "equals_held": true
+    },
+    {
+      "path": "crates/verum_codegen/src/llvm/error.rs",
+      "sha256": "e1b1099838e0b73a454596396539031ab1cdc33c69640c0c7141ea31cd0dfe5e",
+      "equals_held": true
+    },
+    {
+      "path": "crates/verum_codegen/src/llvm/ffi.rs",
+      "sha256": "ac3322b6c22b928cdbe130fff93edd979d1c4403fa8ce9065d60a12266adfe28",
+      "equals_held": true
+    },
+    {
+      "path": "crates/verum_codegen/src/llvm/float_format.LICENSE-Boost",
+      "sha256": "c9bff75738922193e67fa726fa225535870d2aa1059f91452c411736284ad566",
+      "equals_held": true
+    },
+    {
+      "path": "crates/verum_codegen/src/llvm/float_format.rs",
+      "sha256": "b95e0b22d950f20defba3e068c4037b64f9aaf439f4771b1d092229938f5975d",
+      "equals_held": true
+    },
+    {
+      "path": "crates/verum_codegen/src/llvm/float_format_tables.rs",
+      "sha256": "10d5606957e0fb3955ee5f5fd2aa4a247a53f047f84c15a49ef30216a79c28d3",
+      "equals_held": true
+    },
+    {
+      "path": "crates/verum_codegen/src/llvm/instruction.rs",
+      "sha256": "01046cf150e291874e2d72cda6b02f4846b6d5c36542f0c84a7cb8a4bddf4256",
+      "equals_held": true
+    },
+    {
+      "path": "crates/verum_codegen/src/llvm/interrupt.rs",
+      "sha256": "b6ebeeceae9e86f5a0aaf274305e98ab3768ef2213c8df3c2f8acc6e5621a435",
+      "equals_held": true
+    },
+    {
+      "path": "crates/verum_codegen/src/llvm/metal_ir.rs",
+      "sha256": "51d2a12c8c8eb13b0768667410ab284d73438a197275e028cf10ec0bdaa4af53",
+      "equals_held": true
+    },
+    {
+      "path": "crates/verum_codegen/src/llvm/mmio.rs",
+      "sha256": "9bb5cbb4a50d56453f85bcead5be70739cf84e7b3b453d24e5913c51e8886735",
+      "equals_held": true
+    },
+    {
+      "path": "crates/verum_codegen/src/llvm/mod.rs",
+      "sha256": "5228ff1401e7187536e66789833651ca5c0d8e8ee35f9eb8d749581c53fb1fbc",
+      "equals_held": true
+    },
+    {
+      "path": "crates/verum_codegen/src/llvm/native_call.rs",
+      "sha256": "7322851fa403d3ab41d70602e53c039853122f3614039980500b26c926871fa3",
+      "equals_held": true
+    },
+    {
+      "path": "crates/verum_codegen/src/llvm/output.rs",
+      "sha256": "1404d525ce986ea6b43afe4418df050849fffd69d7e43c494778dc2cd88067e2",
+      "equals_held": true
+    },
+    {
+      "path": "crates/verum_codegen/src/llvm/permissions.rs",
+      "sha256": "96bfc7bf0f01adba1a913786973aef7082baa41247d99a09fcf866265e392d6a",
+      "equals_held": true
+    },
+    {
+      "path": "crates/verum_codegen/src/llvm/platform_ir.rs",
+      "sha256": "c2ea3c0cb856ed7ffbb88eb312a6666546d2f9f872b25e92cabe7ebcd6dba514",
+      "equals_held": true
+    },
+    {
+      "path": "crates/verum_codegen/src/llvm/register_types.rs",
+      "sha256": "4162ad1576cd8c9cb20341668930b34ca5b390e24aef783e43fd63ea12f53ca6",
+      "equals_held": true
+    },
+    {
+      "path": "crates/verum_codegen/src/llvm/return_representation.rs",
+      "sha256": "ec8fc8ed4e800e9db06505f2f1382526ac4fc5308c822591be66bbebab355935",
+      "equals_held": true
+    },
+    {
+      "path": "crates/verum_codegen/src/llvm/runtime.rs",
+      "sha256": "2aeda201ab323e835c6c216bbb4fca6d9278b896f4adc66ca2cca426ddaed6f2",
+      "equals_held": true
+    },
+    {
+      "path": "crates/verum_codegen/src/llvm/runtime/list_storage.rs",
+      "sha256": "e504164a85229cc741fff7366639273d12626a47ecfeea2e258ead2e74251b3b",
+      "equals_held": true
+    },
+    {
+      "path": "crates/verum_codegen/src/llvm/simd.rs",
+      "sha256": "b246108d3d7596382be5c9e60edaa21079fb9c790fda7d0a60e705f5c3795863",
+      "equals_held": true
+    },
+    {
+      "path": "crates/verum_codegen/src/llvm/slice_cell.rs",
+      "sha256": "be872de92043e9a830d3a8e8c4a71ee5568095895d57861e5a417e47fa535fb2",
+      "equals_held": true
+    },
+    {
+      "path": "crates/verum_codegen/src/llvm/symbols.rs",
+      "sha256": "9a7d01bbfb172e7c7ff87391b2c51f144f461935e8ee45b5b0f46d3458eeb6a3",
+      "equals_held": true
+    },
+    {
+      "path": "crates/verum_codegen/src/llvm/syscall_registry.rs",
+      "sha256": "e18f5dcf5d5425caba43fc1c64ce0d7eb20eceaa662ee9ed193d83488a27a389",
+      "equals_held": true
+    },
+    {
+      "path": "crates/verum_codegen/src/llvm/target_triple.rs",
+      "sha256": "7afd4d6da860d225ad670a07bb0afe104b3aba5c4950f0c90c57e49b4b61368d",
+      "equals_held": true
+    },
+    {
+      "path": "crates/verum_codegen/src/llvm/tensor_ir.rs",
+      "sha256": "bb2919c094b15a76f9df0e9512fb9e978579ba16aa951a4d3e6f8f01299e5f1b",
+      "equals_held": true
+    },
+    {
+      "path": "crates/verum_codegen/src/llvm/types.rs",
+      "sha256": "980ffdd2c18e85fefceeead389c3acee4f21594a6ee3c740ee87c001b582fbf4",
+      "equals_held": true
+    },
+    {
+      "path": "crates/verum_codegen/src/llvm/unicode_data.rs",
+      "sha256": "dae33e5900c16f02660293a99ae5afdb6156030ffcdcdebb80ff020d9ff7501c",
+      "equals_held": true
+    },
+    {
+      "path": "crates/verum_codegen/src/llvm/vbc_lowering.rs",
+      "sha256": "b1f864695066d1a65d7ed35d50136a4315ad12e650c2f4dbce271b8772f7ac28",
+      "equals_held": true
+    },
+    {
+      "path": "crates/verum_codegen/src/llvm/well_known_types.rs",
+      "sha256": "e0aab3e6fc7e3979a07bf1498abcd74e1f049e15cd63c8c4829293f653169bdd",
+      "equals_held": true
+    },
+    {
+      "path": "crates/verum_codegen/src/llvm/windows_abi.rs",
+      "sha256": "506efb6d212d059e7475e1152d0a1e667a1506adb581ac6142fcbb5c130c5196",
+      "equals_held": true
+    },
+    {
+      "path": "crates/verum_codegen/src/mlir/aot/compiler.rs",
+      "sha256": "f4e8ae2cdee40bf31b57d2c8fe0a22bec7f20f6602b20a9170d045e796047daf",
+      "equals_held": true
+    },
+    {
+      "path": "crates/verum_codegen/src/mlir/aot/llvm_backend.rs",
+      "sha256": "8273bd1d95668ede309dfcc5577b9ae412411fbbd7b9ecd95319075283075b83",
+      "equals_held": true
+    },
+    {
+      "path": "crates/verum_codegen/src/mlir/aot/mod.rs",
+      "sha256": "543b791cd6cfae1038ab4595b2022531b0a02b9db85fbef8663d0b314b5a38b2",
+      "equals_held": true
+    },
+    {
+      "path": "crates/verum_codegen/src/mlir/context.rs",
+      "sha256": "251e242705e0d2869a49fcdc9aeaff2927d81cb49682b50e73f2b33cec02e802",
+      "equals_held": true
+    },
+    {
+      "path": "crates/verum_codegen/src/mlir/dialect/async_state.rs",
+      "sha256": "9f7b2276c2a8c0d68af177ac47b9d536fe882cdfd78291be302253eedb002fea",
+      "equals_held": true
+    },
+    {
+      "path": "crates/verum_codegen/src/mlir/dialect/builders.rs",
+      "sha256": "fb2283c999cb0fb884275938750551696dfe67fc9ce9ed4ad63c11720e9ca6c3",
+      "equals_held": true
+    },
+    {
+      "path": "crates/verum_codegen/src/mlir/dialect/cbgr.rs",
+      "sha256": "1281675666927474365844d4d6c547df1d2a9192a04fb8c89150f4a66fc38335",
+      "equals_held": true
+    },
+    {
+      "path": "crates/verum_codegen/src/mlir/dialect/closure.rs",
+      "sha256": "697c00642fff389e390bb8373dc41cb8fe97222e9e007a3136307d826a30a40b",
+      "equals_held": true
+    },
+    {
+      "path": "crates/verum_codegen/src/mlir/dialect/context_system.rs",
+      "sha256": "07630f0cb120e8a36c750e26dace2876305489ddffa9568c737b2a9798d5ae3c",
+      "equals_held": true
+    },
+    {
+      "path": "crates/verum_codegen/src/mlir/dialect/mod.rs",
+      "sha256": "8cdfd67799a21d0f367008fb160773ae4f89042646d9b9250086b37f7c359be3",
+      "equals_held": true
+    },
+    {
+      "path": "crates/verum_codegen/src/mlir/dialect/ops.rs",
+      "sha256": "e6b1d9be828b7ba92e924fdee4bf89292a077564aa5a509f453e0e23a9667e07",
+      "equals_held": true
+    },
+    {
+      "path": "crates/verum_codegen/src/mlir/dialect/types.rs",
+      "sha256": "ff27495473c681bc512330a6f18f885d05188619c153e3d456739ef0c1d15fcd",
+      "equals_held": true
+    },
+    {
+      "path": "crates/verum_codegen/src/mlir/error.rs",
+      "sha256": "b4a8846b99c599b2a8d091cc5e3742fd022adfbdc73f15da00d9bf422677655f",
+      "equals_held": true
+    },
+    {
+      "path": "crates/verum_codegen/src/mlir/gpu_binary.rs",
+      "sha256": "ee48c3b95302c29be5a78b5f267908afb0784b4b436af889c8ef57b5d8408b2b",
+      "equals_held": true
+    },
+    {
+      "path": "crates/verum_codegen/src/mlir/jit/engine.rs",
+      "sha256": "dd41098e2a0f2f55cc7caf2e9ecf9992b1c07fddbd88ea6f1fead586bb1e5a6c",
+      "equals_held": true
+    },
+    {
+      "path": "crates/verum_codegen/src/mlir/jit/hot_reload.rs",
+      "sha256": "62c137a7be0caaced976c3a81087c03412ad2b70f00d25fa412338ecf769d155",
+      "equals_held": true
+    },
+    {
+      "path": "crates/verum_codegen/src/mlir/jit/incremental.rs",
+      "sha256": "24a6691b7ff2b2484b6ad25cbf48d180d1755552438d8c06a42e2d4d093ce62f",
+      "equals_held": true
+    },
+    {
+      "path": "crates/verum_codegen/src/mlir/jit/mod.rs",
+      "sha256": "cd54de5b80cfb83de4ff433e95b3dd0a98302477678ee1cd777b08f825f33c31",
+      "equals_held": true
+    },
+    {
+      "path": "crates/verum_codegen/src/mlir/jit/repl.rs",
+      "sha256": "024e4c4269d4358715feaf1321c23222854e11343f057d7e264f77c4fbd39a94",
+      "equals_held": true
+    },
+    {
+      "path": "crates/verum_codegen/src/mlir/jit/symbol_resolver.rs",
+      "sha256": "9b2ad9182f879d82ad0e4dd4ac4336285796288e8e7c7a7f9be35b33a1ab0843",
+      "equals_held": true
+    },
+    {
+      "path": "crates/verum_codegen/src/mlir/mod.rs",
+      "sha256": "57a598e69743b9155f29be2695e7b3e598221a903bc1c7cf02b2fda1475a09c6",
+      "equals_held": true
+    },
+    {
+      "path": "crates/verum_codegen/src/mlir/passes/cbgr_elimination.rs",
+      "sha256": "1e34f949d3c774e747c629c82ff487a67c5b3b68dc2c6f6134d391aeccda8fba",
+      "equals_held": true
+    },
+    {
+      "path": "crates/verum_codegen/src/mlir/passes/context_mono.rs",
+      "sha256": "e52c6fda28bbb3692a88f0babba3f86dca1033ff7befac0e15a1e244f6eb1db9",
+      "equals_held": true
+    },
+    {
+      "path": "crates/verum_codegen/src/mlir/passes/gpu_pipeline.rs",
+      "sha256": "f847c436efce468f8481a5fd3ea143edf5940a6d245d2dd309a750e351d32faf",
+      "equals_held": true
+    },
+    {
+      "path": "crates/verum_codegen/src/mlir/passes/llvm_lowering.rs",
+      "sha256": "e9b3c13fff6a6f0d7b917e8ad8c894c8fb95c8f442188c471d51be059d62d0dc",
+      "equals_held": true
+    },
+    {
+      "path": "crates/verum_codegen/src/mlir/passes/mod.rs",
+      "sha256": "fac45ca6bb90228f3ef93d427c15eb58f58ad31f4e1a1e96bb73ac4d267dd186",
+      "equals_held": true
+    },
+    {
+      "path": "crates/verum_codegen/src/mlir/passes/pipeline.rs",
+      "sha256": "b5412f3a0ca0225c7c47949acd0bbc8cb7ae34925140d764cc34f2e5bc678ab1",
+      "equals_held": true
+    },
+    {
+      "path": "crates/verum_codegen/src/mlir/passes/refinement_propagation.rs",
+      "sha256": "e98960267cf9e3b538bbbda3d7c700d278cd2013418002215de47eb07719c407",
+      "equals_held": true
+    },
+    {
+      "path": "crates/verum_codegen/src/mlir/vbc_lowering.rs",
+      "sha256": "85cb81dc1ee2892f1c1675633484f080a59bfe8d85b25e1bfbd3062730da281e",
+      "equals_held": true
+    },
+    {
+      "path": "crates/verum_codegen/src/passes/mod.rs",
+      "sha256": "f36ad387b164dd8b899b7e07d56f38ceb503ad29b6f75740de3398598cbefe30",
+      "equals_held": true
+    },
+    {
+      "path": "crates/verum_codegen/src/passes/tensor_fusion.rs",
+      "sha256": "0a545334ecf42397730891bdd0635d23cbca99a09ec1013d6be132756030c382",
+      "equals_held": true
+    },
+    {
+      "path": "crates/verum_codegen/src/proof_export.rs",
+      "sha256": "94d7505799541b375217b9a02a3c6882ddd5d79446d561a0b98ce2b24e349f57",
+      "equals_held": true
+    },
+    {
+      "path": "crates/verum_codegen/tests/endian_fixed_bytes.rs",
+      "sha256": "0ce98a137b172f8014abcb128eae12e00bacd157e69a4a0a583705c41f7dfbcb",
+      "equals_held": true
+    },
+    {
+      "path": "crates/verum_codegen/tests/unit/array_storage.rs",
+      "sha256": "ae1aac5434fc3f5be100bfe1ba100e89cdb68cc8dc73ee044300b2fe5d072db5",
+      "equals_held": true
+    }
+  ]
+}

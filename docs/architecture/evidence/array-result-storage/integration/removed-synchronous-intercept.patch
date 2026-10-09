@@ -1,0 +1,46 @@
+--- a/crates/verum_vbc/src/interpreter/dispatch_table/handlers/method_dispatch.rs
++++ b/crates/verum_vbc/src/interpreter/dispatch_table/handlers/method_dispatch.rs
+@@ -5454,43 +5454,6 @@
+     method: &str,
+     args: &RegRange,
+ ) -> InterpreterResult<Option<Value>> {
+-    // A qualified numeric declaration owns its body and result contract.
+-    // Width normalization is only a fallback when no exact body is present.
+-    // In particular two declarations can share an integer carrier while one
+-    // returns a List and the other a packed fixed array.
+-    if method.contains('.')
+-        && (receiver.is_int() || receiver.is_float())
+-        && let Some(fid) = state.module.find_function_by_name(method)
+-        && let Some(function) = state.module.get_function(fid)
+-        && function.bytecode_length > 0
+-        && function.params.len() == usize::from(args.count) + 1
+-        && let Some(parameter) = function.params.first()
+-        && state.module.get_string(parameter.name) == Some("self")
+-    {
+-        let (receiver_type, borrowed) = match &parameter.type_ref {
+-            crate::types::TypeRef::Reference { inner, .. } => (inner.as_ref(), true),
+-            concrete => (concrete, false),
+-        };
+-        // PTR also carries the declared pointer-sized integers. Its shared
+-        // ID is never used to choose an owner: `fid` came from the exact name.
+-        if matches!(receiver_type, crate::types::TypeRef::Concrete(id)
+-            if id.is_numeric() || *id == TypeId::PTR)
+-        {
+-            // The outer CallM handler unwraps a borrowed value before retrying
+-            // a by-value method. Do not pass its encoded reference as an Int.
+-            if !borrowed && is_cbgr_ref(receiver) {
+-                return Ok(None);
+-            }
+-            let caller_base = state.reg_base();
+-            let mut call_args = verum_common::List::new();
+-            call_args.push(*receiver);
+-            for index in 0..args.count {
+-                call_args.push(state.registers.get(caller_base, Reg(args.start.0 + u16::from(index))));
+-            }
+-            return super::super::call_function_sync(state, fid, &call_args).map(Some);
+-        }
+-    }
+-
+     // (removed leftover debug eprintln! that flooded stderr on every method
+     // dispatch in debug builds — that noise polluted test stdout/stderr and
+     // broke expected-stdout comparisons in the VCS runner.)
