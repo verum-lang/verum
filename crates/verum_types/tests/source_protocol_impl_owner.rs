@@ -179,38 +179,87 @@ fn source_impl_targets_do_not_depend_on_mount_order() {
 
 #[test]
 fn unrelated_same_name_type_does_not_inherit_source_impl() {
-    let consumer = r#"
-        mount demo.source.{Source, RegistrySource};
-        mount demo.foreign.{RegistrySource as ForeignSource};
-        fn locate<S: Source>(source: &S) -> Int { source.value() }
-        fn reject(source: &ForeignSource) -> Int { locate(source) }
-    "#;
-    let (checker, errors) = check(
-        consumer,
-        &[
-            ("demo.source", PROVIDER),
-            (
-                "demo.foreign",
-                "public type RegistrySource is { revision: Int };",
-            ),
-        ],
-    );
-    assert!(
-        checker
-            .protocol_checker
-            .read()
-            .find_impl(&named("demo.foreign.RegistrySource"), &path("Source"))
-            .is_none()
-    );
-    assert_eq!(
-        errors.len(),
-        1,
-        "expected only the foreign bound refusal: {errors:?}"
-    );
-    assert!(
-        errors[0].contains("E405") && errors[0].contains("demo.foreign.RegistrySource"),
-        "{errors:?}"
-    );
+    for reverse in [false, true] {
+        let mounts = if reverse {
+            "mount demo.foreign.{RegistrySource as ForeignSource}; mount demo.source.{Source, RegistrySource};"
+        } else {
+            "mount demo.source.{Source, RegistrySource}; mount demo.foreign.{RegistrySource as ForeignSource};"
+        };
+        let consumer = format!(
+            r#"
+            {mounts}
+            fn locate<S: Source>(source: &S) -> Int {{ source.value() }}
+            fn reject(source: &ForeignSource) -> Int {{ locate(source) }}
+        "#
+        );
+        let (checker, errors) = check(
+            &consumer,
+            &[
+                ("demo.source", PROVIDER),
+                (
+                    "demo.foreign",
+                    "public type RegistrySource is { revision: Int };",
+                ),
+            ],
+        );
+        assert!(
+            checker
+                .protocol_checker
+                .read()
+                .find_impl(&named("demo.foreign.RegistrySource"), &path("Source"))
+                .is_none()
+        );
+        assert_eq!(
+            errors.len(),
+            1,
+            "reverse={reverse}: expected only the foreign bound refusal: {errors:?}"
+        );
+        assert!(
+            errors[0].contains("E405") && errors[0].contains("demo.foreign.RegistrySource"),
+            "reverse={reverse}: {errors:?}"
+        );
+    }
+}
+
+#[test]
+fn early_source_impl_loading_does_not_reroute_an_explicit_foreign_binding() {
+    for reverse in [false, true] {
+        let mounts = if reverse {
+            "mount demo.foreign.{RegistrySource}; mount demo.source.{Source};"
+        } else {
+            "mount demo.source.{Source}; mount demo.foreign.{RegistrySource};"
+        };
+        let consumer = format!(
+            r#"
+            {mounts}
+            fn locate<S: Source>(source: &S) -> Int {{ source.value() }}
+            fn reject(source: &RegistrySource) -> Int {{ locate(source) }}
+        "#
+        );
+        let (checker, errors) = check(
+            &consumer,
+            &[
+                ("demo.source", PROVIDER),
+                (
+                    "demo.foreign",
+                    "public type RegistrySource is { revision: Int };",
+                ),
+            ],
+        );
+        assert_registered_owner(&checker, "demo.source.RegistrySource");
+        assert!(
+            checker
+                .protocol_checker
+                .read()
+                .find_impl(&named("demo.foreign.RegistrySource"), &path("Source"))
+                .is_none()
+        );
+        assert_eq!(errors.len(), 1, "reverse={reverse}: {errors:?}");
+        assert!(
+            errors[0].contains("E405") && errors[0].contains("demo.foreign.RegistrySource"),
+            "source prepass changed the explicit receiver binding: reverse={reverse}: {errors:?}"
+        );
+    }
 }
 
 #[test]
