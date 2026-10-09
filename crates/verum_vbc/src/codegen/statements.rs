@@ -748,6 +748,9 @@ impl VbcCodegen {
                 match &t.kind {
                     // Simple path type: Point, Ordering
                     TypeKind::Path(path) => extract_from_path(path),
+                    // T1687: later assignments need the same declared callback
+                    // return (including error arguments) as the initializer.
+                    TypeKind::Function { .. } => Some(Self::extract_type_name_from_ast(t)),
                     // Generic type: Maybe<Int>, Result<T, E>, List<T>
                     // Extract full type including generics for proper type tracking
                     TypeKind::Generic { base, args } => {
