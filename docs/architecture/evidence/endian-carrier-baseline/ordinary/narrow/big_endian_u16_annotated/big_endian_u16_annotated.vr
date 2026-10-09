@@ -1,0 +1,10 @@
+fn main() {
+    let number: UInt16 = 0x0102_u16;
+    let actual: [Byte; 2] = number.to_be_bytes();
+    let mut index = 0;
+    while index < 2 {
+        assert_eq(actual[index], (index+1) as Byte);
+        index = index+1;
+    }
+    print("big_endian_u16_annotated:passed");
+}

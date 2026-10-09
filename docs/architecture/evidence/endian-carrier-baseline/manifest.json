@@ -1,0 +1,1022 @@
+{
+  "task": "T1698",
+  "related": [
+    "T1694",
+    "T1700",
+    "T1701",
+    "T1703",
+    "T1704"
+  ],
+  "checkpoint": "949b9cc72d9608dfee5ccd59d7cb0170608e73cf",
+  "scope": "Failure evidence and bounded component checkpoints only; ordinary repaired SHA-256/auth and AOT acceptance remain pending. Machine paths are historical provenance, not reproducible dependencies. Gzip files are lossless copies; byte and hash fields refer to the exact original and saved bytes.",
+  "files": [
+    {
+      "path": "ordinary/sha256/verum-sha256-digest-probe/result.json",
+      "source_path": "/private/tmp/verum-T1698-sha256-ordinary-trace/verum-sha256-digest-probe/result.json",
+      "source_bytes": 1645,
+      "source_sha256": "39713832e5e5567d34ac417dbbba06a58473fbfb8920fd879752cdb15e2b7213",
+      "saved_sha256": "39713832e5e5567d34ac417dbbba06a58473fbfb8920fd879752cdb15e2b7213",
+      "gzip": false
+    },
+    {
+      "path": "ordinary/sha256/verum-sha256-digest-probe/started.json",
+      "source_path": "/private/tmp/verum-T1698-sha256-ordinary-trace/verum-sha256-digest-probe/started.json",
+      "source_bytes": 1303,
+      "source_sha256": "b1c68852902e756474e1e55bc19958bbbf7eabed53a6c4f803ffd2acea20a992",
+      "saved_sha256": "b1c68852902e756474e1e55bc19958bbbf7eabed53a6c4f803ffd2acea20a992",
+      "gzip": false
+    },
+    {
+      "path": "ordinary/sha256/verum-sha256-digest-probe/stderr.log.gz",
+      "source_path": "/private/tmp/verum-T1698-sha256-ordinary-trace/verum-sha256-digest-probe/stderr.log",
+      "source_bytes": 283420,
+      "source_sha256": "53a79c8ce9a2c50120069620b563beee396ef5dfcba265f5d096866499bf53f1",
+      "saved_sha256": "7f3532a61d25b0887714168646430569bc970a74794c19aa2d2b9276c9682d28",
+      "gzip": true
+    },
+    {
+      "path": "ordinary/sha256/verum-sha256-digest-probe/stdout.log.gz",
+      "source_path": "/private/tmp/verum-T1698-sha256-ordinary-trace/verum-sha256-digest-probe/stdout.log",
+      "source_bytes": 13,
+      "source_sha256": "9d973085134732c00491fa4078d180b111f029e83529973b891e21927356047b",
+      "saved_sha256": "07fea3139028df357e2c5cd071b031f508d9063c19295c3a5964d51f4f93de06",
+      "gzip": true
+    },
+    {
+      "path": "ordinary/sha256/verum-sha256-digest-probe/verum-sha256-digest-probe.vr",
+      "source_path": "/private/tmp/verum-T1698-sha256-ordinary-trace/verum-sha256-digest-probe/verum-sha256-digest-probe.vr",
+      "source_bytes": 653,
+      "source_sha256": "2247db7228b7007afc94c111ab88e885b1e5202fbc306ace0b24b19571f8f38f",
+      "saved_sha256": "2247db7228b7007afc94c111ab88e885b1e5202fbc306ace0b24b19571f8f38f",
+      "gzip": false
+    },
+    {
+      "path": "ordinary/endian/big_endian_annotated/big_endian_annotated.vr",
+      "source_path": "/private/tmp/verum-T1698-endian-ordinary-trace/big_endian_annotated/big_endian_annotated.vr",
+      "source_bytes": 316,
+      "source_sha256": "98925e9bfe0a7bc19da90b4723d3c2c370ba31a3505f787a9f0c5e56d1e4adc2",
+      "saved_sha256": "98925e9bfe0a7bc19da90b4723d3c2c370ba31a3505f787a9f0c5e56d1e4adc2",
+      "gzip": false
+    },
+    {
+      "path": "ordinary/endian/big_endian_annotated/result.json",
+      "source_path": "/private/tmp/verum-T1698-endian-ordinary-trace/big_endian_annotated/result.json",
+      "source_bytes": 1645,
+      "source_sha256": "d4c3928437df307b33f1cf05512a1176ba0de9a940c9a77d808523fa97a4f9e8",
+      "saved_sha256": "d4c3928437df307b33f1cf05512a1176ba0de9a940c9a77d808523fa97a4f9e8",
+      "gzip": false
+    },
+    {
+      "path": "ordinary/endian/big_endian_annotated/started.json",
+      "source_path": "/private/tmp/verum-T1698-endian-ordinary-trace/big_endian_annotated/started.json",
+      "source_bytes": 1304,
+      "source_sha256": "66f70543cef2543e9277b7bec32e1b50616a2c9dcd75231c487fa7cd78449b5b",
+      "saved_sha256": "66f70543cef2543e9277b7bec32e1b50616a2c9dcd75231c487fa7cd78449b5b",
+      "gzip": false
+    },
+    {
+      "path": "ordinary/endian/big_endian_annotated/stderr.log.gz",
+      "source_path": "/private/tmp/verum-T1698-endian-ordinary-trace/big_endian_annotated/stderr.log",
+      "source_bytes": 22551,
+      "source_sha256": "77ebf21b30d1b7b4159c23094fbe2f41cad0a4fd01000d687a4e5c49ea801b08",
+      "saved_sha256": "ace667ff5738f25f3618b12bb531a90ecec25f8aca6d4eed29a2393dae8eb654",
+      "gzip": true
+    },
+    {
+      "path": "ordinary/endian/big_endian_annotated/stdout.log.gz",
+      "source_path": "/private/tmp/verum-T1698-endian-ordinary-trace/big_endian_annotated/stdout.log",
+      "source_bytes": 28,
+      "source_sha256": "d41b04bb5a02dcd0b9a63d576f831d3ed0d4515105fd45e5cf4f3931d1006898",
+      "saved_sha256": "962ba241cd90625ffbe3f57091f9fafe711da1f2e068a535831aba8e274eda73",
+      "gzip": true
+    },
+    {
+      "path": "ordinary/endian/big_endian_inferred/big_endian_inferred.vr",
+      "source_path": "/private/tmp/verum-T1698-endian-ordinary-trace/big_endian_inferred/big_endian_inferred.vr",
+      "source_bytes": 304,
+      "source_sha256": "368144c7035d8e2b0673aacc10dfcd93b0be99eff4f1a412e1a9275c189670f8",
+      "saved_sha256": "368144c7035d8e2b0673aacc10dfcd93b0be99eff4f1a412e1a9275c189670f8",
+      "gzip": false
+    },
+    {
+      "path": "ordinary/endian/big_endian_inferred/result.json",
+      "source_path": "/private/tmp/verum-T1698-endian-ordinary-trace/big_endian_inferred/result.json",
+      "source_bytes": 1640,
+      "source_sha256": "fd4e85a3c36bf2b8b870ecc8f2a7b4ce75f3e36d49d68068da99953f6f4df650",
+      "saved_sha256": "fd4e85a3c36bf2b8b870ecc8f2a7b4ce75f3e36d49d68068da99953f6f4df650",
+      "gzip": false
+    },
+    {
+      "path": "ordinary/endian/big_endian_inferred/started.json",
+      "source_path": "/private/tmp/verum-T1698-endian-ordinary-trace/big_endian_inferred/started.json",
+      "source_bytes": 1298,
+      "source_sha256": "8c4450c25e96d7df8ac6aa1e8bdf8e04360a2cdd1e78b0265e9e40c13d8ecab2",
+      "saved_sha256": "8c4450c25e96d7df8ac6aa1e8bdf8e04360a2cdd1e78b0265e9e40c13d8ecab2",
+      "gzip": false
+    },
+    {
+      "path": "ordinary/endian/big_endian_inferred/stderr.log.gz",
+      "source_path": "/private/tmp/verum-T1698-endian-ordinary-trace/big_endian_inferred/stderr.log",
+      "source_bytes": 1244,
+      "source_sha256": "abea5d4e0aeb85162bd59567b4361f3fff8bbc2d6061b1a07d578b5850beef98",
+      "saved_sha256": "22fa72da689aed6f4c42df1a0760b6623e7eac9440264b297132a62ebc9b2377",
+      "gzip": true
+    },
+    {
+      "path": "ordinary/endian/big_endian_inferred/stdout.log.gz",
+      "source_path": "/private/tmp/verum-T1698-endian-ordinary-trace/big_endian_inferred/stdout.log",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "saved_sha256": "9ceffb7310338057cfe71a4ae1e2c98d2c485d81cdef906532a801f457a38d64",
+      "gzip": true
+    },
+    {
+      "path": "ordinary/endian/literal_bytes/literal_bytes.vr",
+      "source_path": "/private/tmp/verum-T1698-endian-ordinary-trace/literal_bytes/literal_bytes.vr",
+      "source_bytes": 281,
+      "source_sha256": "61abbd4bdf3fb3e798b8414002290307fa3687da4932a8b1e5f515c1c8059a1c",
+      "saved_sha256": "61abbd4bdf3fb3e798b8414002290307fa3687da4932a8b1e5f515c1c8059a1c",
+      "gzip": false
+    },
+    {
+      "path": "ordinary/endian/literal_bytes/result.json",
+      "source_path": "/private/tmp/verum-T1698-endian-ordinary-trace/literal_bytes/result.json",
+      "source_bytes": 1602,
+      "source_sha256": "a1406f3fbcccacbd705cf92c7b9f9ed6629fdab9076b0968951e566dd575089c",
+      "saved_sha256": "a1406f3fbcccacbd705cf92c7b9f9ed6629fdab9076b0968951e566dd575089c",
+      "gzip": false
+    },
+    {
+      "path": "ordinary/endian/literal_bytes/started.json",
+      "source_path": "/private/tmp/verum-T1698-endian-ordinary-trace/literal_bytes/started.json",
+      "source_bytes": 1262,
+      "source_sha256": "03b3844a351f625f9896c690110ccfc423ef4792ec4a6dd2b38cf957c3ee67c1",
+      "saved_sha256": "03b3844a351f625f9896c690110ccfc423ef4792ec4a6dd2b38cf957c3ee67c1",
+      "gzip": false
+    },
+    {
+      "path": "ordinary/endian/literal_bytes/stderr.log.gz",
+      "source_path": "/private/tmp/verum-T1698-endian-ordinary-trace/literal_bytes/stderr.log",
+      "source_bytes": 19697,
+      "source_sha256": "ffd311cae525e1277750e4d434a7eafcf6d2616350a54b30986fff6352d5c4c2",
+      "saved_sha256": "5639280e087010b0239819abd4a562fba9a5c05d0884779605f0e254e557eb20",
+      "gzip": true
+    },
+    {
+      "path": "ordinary/endian/literal_bytes/stdout.log.gz",
+      "source_path": "/private/tmp/verum-T1698-endian-ordinary-trace/literal_bytes/stdout.log",
+      "source_bytes": 21,
+      "source_sha256": "afa52f460b1e7addd260a7eeeedccadc15e71bb0a3fe61c6526da68510fc72f1",
+      "saved_sha256": "dc73ce8c091a3177102118087d48aa791cf8c2bc9ddb65f77cbd48a70edf87cf",
+      "gzip": true
+    },
+    {
+      "path": "ordinary/endian/little_endian_annotated/little_endian_annotated.vr",
+      "source_path": "/private/tmp/verum-T1698-endian-ordinary-trace/little_endian_annotated/little_endian_annotated.vr",
+      "source_bytes": 319,
+      "source_sha256": "3276779070e949760e5d9baa14f307c2c1d60ac693ab73dd32583ba3985e9072",
+      "saved_sha256": "3276779070e949760e5d9baa14f307c2c1d60ac693ab73dd32583ba3985e9072",
+      "gzip": false
+    },
+    {
+      "path": "ordinary/endian/little_endian_annotated/result.json",
+      "source_path": "/private/tmp/verum-T1698-endian-ordinary-trace/little_endian_annotated/result.json",
+      "source_bytes": 1662,
+      "source_sha256": "1d44bf7caeca6c002877d50dcd3061ebd8e57db543c512b9de71c85a1cb70229",
+      "saved_sha256": "1d44bf7caeca6c002877d50dcd3061ebd8e57db543c512b9de71c85a1cb70229",
+      "gzip": false
+    },
+    {
+      "path": "ordinary/endian/little_endian_annotated/started.json",
+      "source_path": "/private/tmp/verum-T1698-endian-ordinary-trace/little_endian_annotated/started.json",
+      "source_bytes": 1322,
+      "source_sha256": "361b189d013878ea5a3610b97803458c73e07591ebd98a2b8b498a2d44b8dc25",
+      "saved_sha256": "361b189d013878ea5a3610b97803458c73e07591ebd98a2b8b498a2d44b8dc25",
+      "gzip": false
+    },
+    {
+      "path": "ordinary/endian/little_endian_annotated/stderr.log.gz",
+      "source_path": "/private/tmp/verum-T1698-endian-ordinary-trace/little_endian_annotated/stderr.log",
+      "source_bytes": 22688,
+      "source_sha256": "74d025698b3f4c0572d7d2e14202533de713c9ee86e38fe9a5ad12dc3f46100c",
+      "saved_sha256": "ff24339e70d9c2b35b86e0d315c40c584e6529b040f5ee89986d00bbd99221a5",
+      "gzip": true
+    },
+    {
+      "path": "ordinary/endian/little_endian_annotated/stdout.log.gz",
+      "source_path": "/private/tmp/verum-T1698-endian-ordinary-trace/little_endian_annotated/stdout.log",
+      "source_bytes": 31,
+      "source_sha256": "929a182d09f91564d737e48511f076a40f784450a64527ebf22d25b5c34ab3d4",
+      "saved_sha256": "12cbfdeeb8554b46b55f32f4a6567e8d7b17b34e38119ea0dd760eedee8156ae",
+      "gzip": true
+    },
+    {
+      "path": "ordinary/narrow/big_endian_u16_annotated/big_endian_u16_annotated.vr",
+      "source_path": "/private/tmp/verum-T1698-narrow-endian-ordinary-trace/big_endian_u16_annotated/big_endian_u16_annotated.vr",
+      "source_bytes": 276,
+      "source_sha256": "cd83479d6b60e311c0ce11e4c9696236589247bb60ed31faf2316f6b54d14e55",
+      "saved_sha256": "cd83479d6b60e311c0ce11e4c9696236589247bb60ed31faf2316f6b54d14e55",
+      "gzip": false
+    },
+    {
+      "path": "ordinary/narrow/big_endian_u16_annotated/result.json",
+      "source_path": "/private/tmp/verum-T1698-narrow-endian-ordinary-trace/big_endian_u16_annotated/result.json",
+      "source_bytes": 1682,
+      "source_sha256": "74e844eb6eeec525f6c41cde59995e0c1d67851081e07fccf89ecd68e899718d",
+      "saved_sha256": "74e844eb6eeec525f6c41cde59995e0c1d67851081e07fccf89ecd68e899718d",
+      "gzip": false
+    },
+    {
+      "path": "ordinary/narrow/big_endian_u16_annotated/started.json",
+      "source_path": "/private/tmp/verum-T1698-narrow-endian-ordinary-trace/big_endian_u16_annotated/started.json",
+      "source_bytes": 1342,
+      "source_sha256": "b3b16bb7a5d5fd9466c6fd7902bae65486a3340477243ac0dd4c61be84fd2760",
+      "saved_sha256": "b3b16bb7a5d5fd9466c6fd7902bae65486a3340477243ac0dd4c61be84fd2760",
+      "gzip": false
+    },
+    {
+      "path": "ordinary/narrow/big_endian_u16_annotated/stderr.log.gz",
+      "source_path": "/private/tmp/verum-T1698-narrow-endian-ordinary-trace/big_endian_u16_annotated/stderr.log",
+      "source_bytes": 6969,
+      "source_sha256": "79fc823bcdff406f0543cc7443dda67111431b1779a32aa4ead79ab483443c0f",
+      "saved_sha256": "759b6a43b299ca4d20398db880931700c891024fa8fdaa16d9c20f83da1f8c7b",
+      "gzip": true
+    },
+    {
+      "path": "ordinary/narrow/big_endian_u16_annotated/stdout.log.gz",
+      "source_path": "/private/tmp/verum-T1698-narrow-endian-ordinary-trace/big_endian_u16_annotated/stdout.log",
+      "source_bytes": 32,
+      "source_sha256": "80b66897753145005165540be6fb2c914333f991a975b8bdcf0e7fec42251057",
+      "saved_sha256": "921c036f6dd53f9dfc1f9ddb90086e5a8010f5a5a118551a336718c4d95aebb7",
+      "gzip": true
+    },
+    {
+      "path": "ordinary/narrow/big_endian_u32_annotated/big_endian_u32_annotated.vr",
+      "source_path": "/private/tmp/verum-T1698-narrow-endian-ordinary-trace/big_endian_u32_annotated/big_endian_u32_annotated.vr",
+      "source_bytes": 280,
+      "source_sha256": "37731cb3d9b971bd60ecb2f94eb00e047b10f711243cbd3970f7e0e88b5ceafb",
+      "saved_sha256": "37731cb3d9b971bd60ecb2f94eb00e047b10f711243cbd3970f7e0e88b5ceafb",
+      "gzip": false
+    },
+    {
+      "path": "ordinary/narrow/big_endian_u32_annotated/result.json",
+      "source_path": "/private/tmp/verum-T1698-narrow-endian-ordinary-trace/big_endian_u32_annotated/result.json",
+      "source_bytes": 1682,
+      "source_sha256": "b80c8db9beffa68e243f77b4f8ab7a64e37c3294d6c4f60984d8dcee3245e261",
+      "saved_sha256": "b80c8db9beffa68e243f77b4f8ab7a64e37c3294d6c4f60984d8dcee3245e261",
+      "gzip": false
+    },
+    {
+      "path": "ordinary/narrow/big_endian_u32_annotated/started.json",
+      "source_path": "/private/tmp/verum-T1698-narrow-endian-ordinary-trace/big_endian_u32_annotated/started.json",
+      "source_bytes": 1342,
+      "source_sha256": "7e97e0afe228ecf17d48f742e4ca7fe0786f95dd2cabf00eef43189beaba34a0",
+      "saved_sha256": "7e97e0afe228ecf17d48f742e4ca7fe0786f95dd2cabf00eef43189beaba34a0",
+      "gzip": false
+    },
+    {
+      "path": "ordinary/narrow/big_endian_u32_annotated/stderr.log.gz",
+      "source_path": "/private/tmp/verum-T1698-narrow-endian-ordinary-trace/big_endian_u32_annotated/stderr.log",
+      "source_bytes": 11653,
+      "source_sha256": "7590ca7911889262cdda5e515769e21e638556e9eff9f4bc3f0a80105d3942a1",
+      "saved_sha256": "18fb4f6c14dd3bf8361438a456efc6fc4ed25bf6c8f78e5587574c2731de3700",
+      "gzip": true
+    },
+    {
+      "path": "ordinary/narrow/big_endian_u32_annotated/stdout.log.gz",
+      "source_path": "/private/tmp/verum-T1698-narrow-endian-ordinary-trace/big_endian_u32_annotated/stdout.log",
+      "source_bytes": 32,
+      "source_sha256": "d63563ae58df098ce736addc2fbf61dad52a6cdbc1f080e79375a4c2f31ca80f",
+      "saved_sha256": "e8daa9cbe7fc0ae3c0590adaa5c20586d375885325fa31041adb82ce5c9367b1",
+      "gzip": true
+    },
+    {
+      "path": "ordinary/aot/big_endian_inferred.vr",
+      "source_path": "/private/tmp/verum-T1698-endian-inferred-aot/big_endian_inferred.vr",
+      "source_bytes": 304,
+      "source_sha256": "368144c7035d8e2b0673aacc10dfcd93b0be99eff4f1a412e1a9275c189670f8",
+      "saved_sha256": "368144c7035d8e2b0673aacc10dfcd93b0be99eff4f1a412e1a9275c189670f8",
+      "gzip": false
+    },
+    {
+      "path": "ordinary/aot/dynamic-libraries.log.gz",
+      "source_path": "/private/tmp/verum-T1698-endian-inferred-aot/dynamic-libraries.log",
+      "source_bytes": 163,
+      "source_sha256": "ed333e210b6624e1abd087431e3d7f0a21470bf85ef22e81cb9a19c90d50f425",
+      "saved_sha256": "689859423c73231980be19828cd6821d78fb6da43f5181888cebb7ee6e6611f2",
+      "gzip": true
+    },
+    {
+      "path": "ordinary/aot/file.log.gz",
+      "source_path": "/private/tmp/verum-T1698-endian-inferred-aot/file.log",
+      "source_bytes": 110,
+      "source_sha256": "1330091c1cdde3b98ff068a74e54a4787d5ccda82c3e143d86a93da9d9a40b97",
+      "saved_sha256": "a63bcc7047bd3c66d5a0010d4fec15c3ee77e28749a22393c4bd07bdbc597542",
+      "gzip": true
+    },
+    {
+      "path": "ordinary/aot/result.json",
+      "source_path": "/private/tmp/verum-T1698-endian-inferred-aot/result.json",
+      "source_bytes": 2245,
+      "source_sha256": "edb2b8d97e083293028ea61056e96b6a8546559fe02f22a7a1447b093e93707e",
+      "saved_sha256": "edb2b8d97e083293028ea61056e96b6a8546559fe02f22a7a1447b093e93707e",
+      "gzip": false
+    },
+    {
+      "path": "ordinary/aot/started.json",
+      "source_path": "/private/tmp/verum-T1698-endian-inferred-aot/started.json",
+      "source_bytes": 1177,
+      "source_sha256": "7afacd11f613bc6f509a77c6286eb66ddd098a62951a0a804a0abfa3b18f1446",
+      "saved_sha256": "7afacd11f613bc6f509a77c6286eb66ddd098a62951a0a804a0abfa3b18f1446",
+      "gzip": false
+    },
+    {
+      "path": "ordinary/aot/stderr.log.gz",
+      "source_path": "/private/tmp/verum-T1698-endian-inferred-aot/stderr.log",
+      "source_bytes": 682611,
+      "source_sha256": "90b6407c60467409fb7a3c3210aef23fe480e22ac5d3830d129a324dd9b76aa6",
+      "saved_sha256": "e138dd00b24e6994307a804a2eef0cee01af6a62de8975aee4dadcf5cba0ae6e",
+      "gzip": true
+    },
+    {
+      "path": "ordinary/aot/stdout.log.gz",
+      "source_path": "/private/tmp/verum-T1698-endian-inferred-aot/stdout.log",
+      "source_bytes": 50,
+      "source_sha256": "f286c8918be0244b54e3f4c0ee0e9fed207be87e14476ebe78fce8e737f24f8c",
+      "saved_sha256": "eb65f6c80fddd57cab9fd11bf6ebf920d9ebfbef0e5f2ecd2bce2a9977cb0265",
+      "gzip": true
+    },
+    {
+      "path": "ordinary/aot/undefined-symbols.log.gz",
+      "source_path": "/private/tmp/verum-T1698-endian-inferred-aot/undefined-symbols.log",
+      "source_bytes": 139,
+      "source_sha256": "1ad09afad884d14f7139fa508a1744d059bef8059b324477010fcb1512d316f7",
+      "saved_sha256": "ebd4d919d26d52f03252c3aa1b4c1bf203057f2c4ddeb88f1afbcb9c54ee465e",
+      "gzip": true
+    },
+    {
+      "path": "ordinary/aot/big_endian_inferred.gz",
+      "source_path": "/private/tmp/verum-T1698-endian-inferred-aot/target/debug/big_endian_inferred",
+      "source_bytes": 88896,
+      "source_sha256": "af1792e76845608114765778ff2ab3095b10e65cccbf613882defe5e00cc4e19",
+      "saved_sha256": "e1fa60266baa348f2aa7e415b7ccfed868113a33fe4eb9ab72ab9fca27f6f81f",
+      "gzip": true
+    },
+    {
+      "path": "ordinary/original-summary.json",
+      "source_path": "/private/tmp/verum-T1698-ordinary-summary.json",
+      "source_bytes": 3528,
+      "source_sha256": "33c250707072803066d0e64c8ae41539cb58cc41247954797941169020d37a58",
+      "saved_sha256": "33c250707072803066d0e64c8ae41539cb58cc41247954797941169020d37a58",
+      "gzip": false
+    },
+    {
+      "path": "ordinary/build-manifest.json",
+      "source_path": "/private/tmp/verum-registry-stage20-callable-boundaries/build-manifest.json",
+      "source_bytes": 1683,
+      "source_sha256": "9e2884dfe1d7f3078b81e7b0b20eaf2ebf25c97fbf9c365412d0df3162040943",
+      "saved_sha256": "9e2884dfe1d7f3078b81e7b0b20eaf2ebf25c97fbf9c365412d0df3162040943",
+      "gzip": false
+    },
+    {
+      "path": "rust/receiver-baseline/cargo.jsonl.gz",
+      "source_path": "/private/tmp/verum-T1698-receiver-baseline/cargo.jsonl",
+      "source_bytes": 176729,
+      "source_sha256": "54ed680cec4cb114e107d6956d6cb775a18ac2f4c8e89cc2ceb234e91fd8aa37",
+      "saved_sha256": "63eed340a5efeef9ca2db67876476c283223beb4a5d9a26e88edcdefb45695c2",
+      "gzip": true
+    },
+    {
+      "path": "rust/receiver-baseline/result.json",
+      "source_path": "/private/tmp/verum-T1698-receiver-baseline/result.json",
+      "source_bytes": 1385,
+      "source_sha256": "281d71dd9c4d95ae59f7a68a51789aa41df9d2edeca112050f740487d9d668e0",
+      "saved_sha256": "281d71dd9c4d95ae59f7a68a51789aa41df9d2edeca112050f740487d9d668e0",
+      "gzip": false
+    },
+    {
+      "path": "rust/receiver-baseline/started.json",
+      "source_path": "/private/tmp/verum-T1698-receiver-baseline/started.json",
+      "source_bytes": 771,
+      "source_sha256": "c078f44df22f0426006a2aaa1159ef7eda675cd4dd24aeb78a3b815008073eac",
+      "saved_sha256": "c078f44df22f0426006a2aaa1159ef7eda675cd4dd24aeb78a3b815008073eac",
+      "gzip": false
+    },
+    {
+      "path": "rust/receiver-baseline/stderr.log.gz",
+      "source_path": "/private/tmp/verum-T1698-receiver-baseline/stderr.log",
+      "source_bytes": 627,
+      "source_sha256": "e442f8d672398d0c30bc2398db7c5e6f2f34bfe9d12733cfad2dbd9201c7aa30",
+      "saved_sha256": "17403c4f618d408341592047d213ace4d69057602718d491b6bfd9f67fbe5db7",
+      "gzip": true
+    },
+    {
+      "path": "rust/endian-baseline/cargo.jsonl.gz",
+      "source_path": "/private/tmp/verum-T1698-endian-baseline/cargo.jsonl",
+      "source_bytes": 180491,
+      "source_sha256": "830426f2873d0b909ad1156592eafdf5735775c17cedf1c47299f4336038b965",
+      "saved_sha256": "a5ba6bbf36807842ffc1c112ac1c243c616e4cc0bac274e83dd3956ab0afd449",
+      "gzip": true
+    },
+    {
+      "path": "rust/endian-baseline/result.json",
+      "source_path": "/private/tmp/verum-T1698-endian-baseline/result.json",
+      "source_bytes": 1621,
+      "source_sha256": "4603631e3515fca9538917854f211d6f73b01d82853c4205b97f3b986f574f35",
+      "saved_sha256": "4603631e3515fca9538917854f211d6f73b01d82853c4205b97f3b986f574f35",
+      "gzip": false
+    },
+    {
+      "path": "rust/endian-baseline/stderr.log.gz",
+      "source_path": "/private/tmp/verum-T1698-endian-baseline/stderr.log",
+      "source_bytes": 495,
+      "source_sha256": "204a7624ccdcebcb60732f0869cf3f76e50e874569c7f378fb59e2a0799ba3d6",
+      "saved_sha256": "940efd9c002388bbdfe4eca03bbfce9d476fcba990dde392e28db6d5b878c547",
+      "gzip": true
+    },
+    {
+      "path": "rust/endian-baseline-corrected/cargo.jsonl.gz",
+      "source_path": "/private/tmp/verum-T1698-endian-baseline-corrected/cargo.jsonl",
+      "source_bytes": 178234,
+      "source_sha256": "eaae17a008e6c52792ddbcb26c1b342c6c4f61a338998508508cae3bb9e2b903",
+      "saved_sha256": "21b167233599730c9b01e1d38c27c7833b0b39ff11d8cb42cac28e0501ea4630",
+      "gzip": true
+    },
+    {
+      "path": "rust/endian-baseline-corrected/result.json",
+      "source_path": "/private/tmp/verum-T1698-endian-baseline-corrected/result.json",
+      "source_bytes": 1871,
+      "source_sha256": "a1c1defec8397d179b9ce62db09eca4bcae31015d52e3ccdd9594869d636abe5",
+      "saved_sha256": "a1c1defec8397d179b9ce62db09eca4bcae31015d52e3ccdd9594869d636abe5",
+      "gzip": false
+    },
+    {
+      "path": "rust/endian-baseline-corrected/stderr.log.gz",
+      "source_path": "/private/tmp/verum-T1698-endian-baseline-corrected/stderr.log",
+      "source_bytes": 2021,
+      "source_sha256": "5093e67572ebc0379bee91dc5f7ccfa53c1ca61fe616f0b362f67c457fbaea73",
+      "saved_sha256": "53e45599677f00a96bf8ff2a7df709bb28b7824ebfa2f076e2d325adf445a4dd",
+      "gzip": true
+    },
+    {
+      "path": "rust/endian-owner-baseline/cargo.jsonl.gz",
+      "source_path": "/private/tmp/verum-T1698-endian-owner-baseline/cargo.jsonl",
+      "source_bytes": 177153,
+      "source_sha256": "e7d17f8de907ca1f775b396239662425f892aa21e1824070d4b0dc9e4ea26f03",
+      "saved_sha256": "2ba55e872f7b37eafce2b340ca5ebaf1751215027e2baebe4cbee707239fca46",
+      "gzip": true
+    },
+    {
+      "path": "rust/endian-owner-baseline/result.json",
+      "source_path": "/private/tmp/verum-T1698-endian-owner-baseline/result.json",
+      "source_bytes": 1531,
+      "source_sha256": "0313202714fd63a2847a4748bb3ff447dbcd61e728c6de8a4eeb6981a52d141d",
+      "saved_sha256": "0313202714fd63a2847a4748bb3ff447dbcd61e728c6de8a4eeb6981a52d141d",
+      "gzip": false
+    },
+    {
+      "path": "rust/endian-owner-baseline/stderr.log.gz",
+      "source_path": "/private/tmp/verum-T1698-endian-owner-baseline/stderr.log",
+      "source_bytes": 2199,
+      "source_sha256": "320c6510fcb4ce039e55f087c63424ea9d557eaf56ad44928a1b470a861bfb13",
+      "saved_sha256": "3ec04abeb244f53be58faf4ff061259978336045e4223497916a18684401071d",
+      "gzip": true
+    },
+    {
+      "path": "rust/endian-carrier-repair/cargo.jsonl.gz",
+      "source_path": "/private/tmp/verum-T1698-endian-carrier-repair/cargo.jsonl",
+      "source_bytes": 176897,
+      "source_sha256": "7cddef1214bbbd34b1b307bd64162bc5de072935b5e4d58a43fa574b52ab3f1b",
+      "saved_sha256": "7233961e70f9a2717b09754fdb70db63b251b6ff1bbc558769bc8e18c4b4be14",
+      "gzip": true
+    },
+    {
+      "path": "rust/endian-carrier-repair/result.json",
+      "source_path": "/private/tmp/verum-T1698-endian-carrier-repair/result.json",
+      "source_bytes": 1531,
+      "source_sha256": "45da77a028792d9e37976eb1cc83c1ca25a5d95c8fb59e539295ad558395317f",
+      "saved_sha256": "45da77a028792d9e37976eb1cc83c1ca25a5d95c8fb59e539295ad558395317f",
+      "gzip": false
+    },
+    {
+      "path": "rust/endian-carrier-repair/stderr.log.gz",
+      "source_path": "/private/tmp/verum-T1698-endian-carrier-repair/stderr.log",
+      "source_bytes": 1139,
+      "source_sha256": "0a96940f8a198f40b26b47fcf2231aac0f5f5ffec9ae67cc665706627dab2575",
+      "saved_sha256": "08d3d042faa57461be3267cef59a7803618c7e906ab0db76697cdbbb082bfcc4",
+      "gzip": true
+    },
+    {
+      "path": "rust/endian-consumers-before-mount-fix/cargo.jsonl.gz",
+      "source_path": "/private/tmp/verum-T1698-endian-consumers-before-mount-fix/cargo.jsonl",
+      "source_bytes": 178819,
+      "source_sha256": "4eed62d86d51646b5aba865fe2117b33d20ab97305ead39e7a26610b8823054e",
+      "saved_sha256": "60eba651bba267d9d4f74cbcd23cb0c95bb61622122c3058993d9e1823cda9d9",
+      "gzip": true
+    },
+    {
+      "path": "rust/endian-consumers-before-mount-fix/result.json",
+      "source_path": "/private/tmp/verum-T1698-endian-consumers-before-mount-fix/result.json",
+      "source_bytes": 1823,
+      "source_sha256": "73a590d095fb06bee6bfcac026e9a198c9f8a64f7342e53d048316b25b7e8d13",
+      "saved_sha256": "73a590d095fb06bee6bfcac026e9a198c9f8a64f7342e53d048316b25b7e8d13",
+      "gzip": false
+    },
+    {
+      "path": "rust/endian-consumers-before-mount-fix/stderr.log.gz",
+      "source_path": "/private/tmp/verum-T1698-endian-consumers-before-mount-fix/stderr.log",
+      "source_bytes": 2636,
+      "source_sha256": "df9dd516c05019ed67667f4b09eaf929a64e7631a6f711d51ad1179a2e2ac1dc",
+      "saved_sha256": "9fc44a19de2013294202d00cb8b08e0dfd2a41622803ae72413b5bf066277c2a",
+      "gzip": true
+    },
+    {
+      "path": "rust/endian-owners-after-mount-fix/cargo.jsonl.gz",
+      "source_path": "/private/tmp/verum-T1698-endian-owners-after-mount-fix/cargo.jsonl",
+      "source_bytes": 176563,
+      "source_sha256": "d9043331d044c8c14d6c409d9cd80a1a301eafcdb0f5fbe1a21bbee314a8cefd",
+      "saved_sha256": "fcfee79b448e1e7ea350fca1f46e56a464fe1d0bfd6f32b486012b365608ed9b",
+      "gzip": true
+    },
+    {
+      "path": "rust/endian-owners-after-mount-fix/result.json",
+      "source_path": "/private/tmp/verum-T1698-endian-owners-after-mount-fix/result.json",
+      "source_bytes": 1531,
+      "source_sha256": "737178c8fad25f3176fa7b98b4c9463c93a209d70d4ba5f5adc84cda8b538345",
+      "saved_sha256": "737178c8fad25f3176fa7b98b4c9463c93a209d70d4ba5f5adc84cda8b538345",
+      "gzip": false
+    },
+    {
+      "path": "rust/endian-owners-after-mount-fix/stderr.log.gz",
+      "source_path": "/private/tmp/verum-T1698-endian-owners-after-mount-fix/stderr.log",
+      "source_bytes": 1139,
+      "source_sha256": "59163b4a281720928c1703fbe1fe58ccdbbafb79c3f88d8e7053d8b56eea5c21",
+      "saved_sha256": "ebd63194c21d3f91a14c1dc43363090c023620239a51ad37c126a9cdb3337e34",
+      "gzip": true
+    },
+    {
+      "path": "rust/endian-source-identity/cargo.jsonl.gz",
+      "source_path": "/private/tmp/verum-T1698-endian-source-identity/cargo.jsonl",
+      "source_bytes": 178398,
+      "source_sha256": "37d09bb62a2231010e7089a98ab2e70afdcedb3f30df809b4e46f4bbc2ec3ccc",
+      "saved_sha256": "6f72734dacb30fffb0d5ece91a85d6bf975d021cb3ad98d365df2a78c7672a03",
+      "gzip": true
+    },
+    {
+      "path": "rust/endian-source-identity/result.json",
+      "source_path": "/private/tmp/verum-T1698-endian-source-identity/result.json",
+      "source_bytes": 1893,
+      "source_sha256": "027d8a3a30624b3f038a5a61e40b27430438b36b982deda6543bc78344e85940",
+      "saved_sha256": "027d8a3a30624b3f038a5a61e40b27430438b36b982deda6543bc78344e85940",
+      "gzip": false
+    },
+    {
+      "path": "rust/endian-source-identity/stderr.log.gz",
+      "source_path": "/private/tmp/verum-T1698-endian-source-identity/stderr.log",
+      "source_bytes": 27690,
+      "source_sha256": "a5e25b2dd19f8c46a71c476c9b63599844f2601847a318042b5d848cf3b285de",
+      "saved_sha256": "3f5dc1b4991311dd577a9644d736e498ed1c2ca42e4b42e2448675076eadc516",
+      "gzip": true
+    },
+    {
+      "path": "rust/archive-inspection/result.json",
+      "source_path": "/private/tmp/verum-T1698-archive-inspection/result.json",
+      "source_bytes": 987,
+      "source_sha256": "7f78a0db46d93662c081856776edaf28cd6b48b00122bda9e8f199a95c44afc9",
+      "saved_sha256": "7f78a0db46d93662c081856776edaf28cd6b48b00122bda9e8f199a95c44afc9",
+      "gzip": false
+    },
+    {
+      "path": "rust/archive-inspection/stderr.log.gz",
+      "source_path": "/private/tmp/verum-T1698-archive-inspection/stderr.log",
+      "source_bytes": 284,
+      "source_sha256": "e48b901dd124f04ba8eda9bf533db46e10f543b435ef5ea9e40d895ce40c14a4",
+      "saved_sha256": "ef9bfdbcb032b12f6158b2e2e960d19f3cc8393b583881585a48bd7bf1252623",
+      "gzip": true
+    },
+    {
+      "path": "rust/archive-inspection/stdout.log.gz",
+      "source_path": "/private/tmp/verum-T1698-archive-inspection/stdout.log",
+      "source_bytes": 238,
+      "source_sha256": "9989787dbd825fc04f002e0cb715abb95fbebd2805d239adb168517029b848b7",
+      "saved_sha256": "b921b4227e4e47b303ca8ad4a80031b0ade81ea5a75e09eedfe6cf2828aef3f5",
+      "gzip": true
+    },
+    {
+      "path": "rust/expansion-baseline/cargo.jsonl.gz",
+      "source_path": "/private/tmp/verum-T1698-expansion-baseline/cargo.jsonl",
+      "source_bytes": 176735,
+      "source_sha256": "7b15d11bea94eb8126d77fcaa3e07a6f52a4f531c37b78efbee284ff0ca4d25b",
+      "saved_sha256": "0746a49498be856db683848b99db51f085893ef5faa1e39dcb1c30ee8a3ba6a7",
+      "gzip": true
+    },
+    {
+      "path": "rust/expansion-baseline/result.json",
+      "source_path": "/private/tmp/verum-T1698-expansion-baseline/result.json",
+      "source_bytes": 1543,
+      "source_sha256": "a1233d3586219c5277266fadcb8a68d8a80b8cb7085e855923940efe284644e8",
+      "saved_sha256": "a1233d3586219c5277266fadcb8a68d8a80b8cb7085e855923940efe284644e8",
+      "gzip": false
+    },
+    {
+      "path": "rust/expansion-baseline/stderr.log.gz",
+      "source_path": "/private/tmp/verum-T1698-expansion-baseline/stderr.log",
+      "source_bytes": 1517,
+      "source_sha256": "9105aa0a792b9ff2e403b94e9c7c5a416ad64e6ff87cb7890b5e8e71f8cf701b",
+      "saved_sha256": "1cd94338ee5f0569776f8ddfa85204198e327e73d147fc865d6a540aadc33e3f",
+      "gzip": true
+    },
+    {
+      "path": "rust/expansion-repair/cargo.jsonl.gz",
+      "source_path": "/private/tmp/verum-T1698-expansion-repair/cargo.jsonl",
+      "source_bytes": 216354,
+      "source_sha256": "460b9a0fec3131c8a8b18ba9063ed0f6657375fc9b78d56980f43c8b3c5b02f3",
+      "saved_sha256": "eb4be00cfdfbab8e8e5d3107e611b32cc5ab6567af3beb4fca3dd6e9d84775a0",
+      "gzip": true
+    },
+    {
+      "path": "rust/expansion-repair/result.json",
+      "source_path": "/private/tmp/verum-T1698-expansion-repair/result.json",
+      "source_bytes": 1285,
+      "source_sha256": "4d67f5e366edd86709b8c3ff28685c61d88954c29c36a870bd2fdc782ae50226",
+      "saved_sha256": "4d67f5e366edd86709b8c3ff28685c61d88954c29c36a870bd2fdc782ae50226",
+      "gzip": false
+    },
+    {
+      "path": "rust/expansion-repair/stderr.log.gz",
+      "source_path": "/private/tmp/verum-T1698-expansion-repair/stderr.log",
+      "source_bytes": 414,
+      "source_sha256": "3453a7eeb347128e280419b6a01556c748e787b5ba07039f91127d39089d9f49",
+      "saved_sha256": "b4280c431fbd4d9e16429e02cea946d891e4d55b058c23f78ca2b9da4a866e2e",
+      "gzip": true
+    },
+    {
+      "path": "rust/expansion-corrected/cargo.jsonl.gz",
+      "source_path": "/private/tmp/verum-T1698-expansion-corrected/cargo.jsonl",
+      "source_bytes": 176615,
+      "source_sha256": "ad0bc7b867c3e879f7359aed14e9f95afebf7c0589b75ada25ef4979f368c4f8",
+      "saved_sha256": "f76266497f5d11274a3a69921523829a6ff6ab984a8eb6a177076198c0b7325a",
+      "gzip": true
+    },
+    {
+      "path": "rust/expansion-corrected/result.json",
+      "source_path": "/private/tmp/verum-T1698-expansion-corrected/result.json",
+      "source_bytes": 1542,
+      "source_sha256": "821503fdd2b05313a2f32f6da4cd47e2495f3d01763d503a7fd1dd9abde0718e",
+      "saved_sha256": "821503fdd2b05313a2f32f6da4cd47e2495f3d01763d503a7fd1dd9abde0718e",
+      "gzip": false
+    },
+    {
+      "path": "rust/expansion-corrected/stderr.log.gz",
+      "source_path": "/private/tmp/verum-T1698-expansion-corrected/stderr.log",
+      "source_bytes": 1385,
+      "source_sha256": "ec4d92e71e3f1bd246431c6e0901d176f07091cd935112e3cbcd6aac343c8d57",
+      "saved_sha256": "6fce00ef436301c0ecee5ef0dee377ccc78fb0fc17e9641d4c1ba455243a2573",
+      "gzip": true
+    },
+    {
+      "path": "rust/expansion-widths/cargo.jsonl.gz",
+      "source_path": "/private/tmp/verum-T1698-expansion-widths/cargo.jsonl",
+      "source_bytes": 179101,
+      "source_sha256": "179e379279692fc6ebbd7bf18055f7d6a9b3eed02cc68af1e878c0ea08c2d4a1",
+      "saved_sha256": "66e275d717c25f499606f8a303cc53d22c415dfad9c12e12bffa93dc68493736",
+      "gzip": true
+    },
+    {
+      "path": "rust/expansion-widths/result.json",
+      "source_path": "/private/tmp/verum-T1698-expansion-widths/result.json",
+      "source_bytes": 1585,
+      "source_sha256": "cbdf2b182e2837ae9470a7474282bec11c68e3d6654fd766a91c548264e21960",
+      "saved_sha256": "cbdf2b182e2837ae9470a7474282bec11c68e3d6654fd766a91c548264e21960",
+      "gzip": false
+    },
+    {
+      "path": "rust/expansion-widths/stderr.log.gz",
+      "source_path": "/private/tmp/verum-T1698-expansion-widths/stderr.log",
+      "source_bytes": 495,
+      "source_sha256": "204a7624ccdcebcb60732f0869cf3f76e50e874569c7f378fb59e2a0799ba3d6",
+      "saved_sha256": "940efd9c002388bbdfe4eca03bbfce9d476fcba990dde392e28db6d5b878c547",
+      "gzip": true
+    },
+    {
+      "path": "rust/expansion-widths-corrected/cargo.jsonl.gz",
+      "source_path": "/private/tmp/verum-T1698-expansion-widths-corrected/cargo.jsonl",
+      "source_bytes": 178899,
+      "source_sha256": "a5d4ca78f1df7e6be5e3952da43906818fa6fa71dc4b87c6c871b8af785fec99",
+      "saved_sha256": "a1be2359da3890f1bd7bb565a4e3bd4246e08d834f105a06b0b021a6d9b2e06b",
+      "gzip": true
+    },
+    {
+      "path": "rust/expansion-widths-corrected/result.json",
+      "source_path": "/private/tmp/verum-T1698-expansion-widths-corrected/result.json",
+      "source_bytes": 1835,
+      "source_sha256": "80cb3c429c4f25f21a8f63a71bb6296a8eaa8a1de969e3ce4ed656c934100415",
+      "saved_sha256": "80cb3c429c4f25f21a8f63a71bb6296a8eaa8a1de969e3ce4ed656c934100415",
+      "gzip": false
+    },
+    {
+      "path": "rust/expansion-widths-corrected/stderr.log.gz",
+      "source_path": "/private/tmp/verum-T1698-expansion-widths-corrected/stderr.log",
+      "source_bytes": 1438,
+      "source_sha256": "c183bf320f98824fbf44f8d48e5108932ab75b22cfcfad6a8fbd10b6ae11b5f6",
+      "saved_sha256": "fd9d6056bbcf71205cde029f42f8e359b23831a6e1b9e9762eb405496b92ad05",
+      "gzip": true
+    },
+    {
+      "path": "rust/narrow-owner-split/cargo.jsonl.gz",
+      "source_path": "/private/tmp/verum-T1698-narrow-owner-split/cargo.jsonl",
+      "source_bytes": 180731,
+      "source_sha256": "05993b98da2a0f9aeef702f99f0d7f6ef916190bae80b783ab9fe1de78f61908",
+      "saved_sha256": "b07e609afdbfc54046e684b4b1858ba2e6733ba2be28b33825fe07774154a415",
+      "gzip": true
+    },
+    {
+      "path": "rust/narrow-owner-split/result.json",
+      "source_path": "/private/tmp/verum-T1698-narrow-owner-split/result.json",
+      "source_bytes": 2153,
+      "source_sha256": "68c8f68cd8e077092c181056ba205bcf893750ad8790718c8c76863ed0193f57",
+      "saved_sha256": "68c8f68cd8e077092c181056ba205bcf893750ad8790718c8c76863ed0193f57",
+      "gzip": false
+    },
+    {
+      "path": "rust/narrow-owner-split/stderr.log.gz",
+      "source_path": "/private/tmp/verum-T1698-narrow-owner-split/stderr.log",
+      "source_bytes": 1644,
+      "source_sha256": "aee1cce7bfae07c907c8c7fb6293caa8f4d82e245ff93f95b55f1b2530f340b6",
+      "saved_sha256": "8f09f3208b4717d54c96bbf857f272d0c2d21d339a2aa597c97edf43c8adc9f0",
+      "gzip": true
+    },
+    {
+      "path": "rust/native-baseline/cargo.jsonl.gz",
+      "source_path": "/private/tmp/verum-T1698-native-baseline/cargo.jsonl",
+      "source_bytes": 255323,
+      "source_sha256": "fb9c2e6bee82b002bfd680ad0e0df6eee7d8df6f828d94fc9c08ff6e60627203",
+      "saved_sha256": "012eacc8a9027c4f8969900f18d2a77c7d68d066f16c1ad22ca8b2dc616212e4",
+      "gzip": true
+    },
+    {
+      "path": "rust/native-baseline/result.json",
+      "source_path": "/private/tmp/verum-T1698-native-baseline/result.json",
+      "source_bytes": 1466,
+      "source_sha256": "49ebdb23059d3198707f2b702d869c61e999c3ec20b8f6ae1f4c51838a0de989",
+      "saved_sha256": "49ebdb23059d3198707f2b702d869c61e999c3ec20b8f6ae1f4c51838a0de989",
+      "gzip": false
+    },
+    {
+      "path": "rust/native-baseline/stderr.log.gz",
+      "source_path": "/private/tmp/verum-T1698-native-baseline/stderr.log",
+      "source_bytes": 6756,
+      "source_sha256": "0bfa0ca276479f80a16f47b35c25b52f84b693e646d04455b6c02f3a6e567413",
+      "saved_sha256": "23026b6657ef7ba192f7568b508fe7275bb37684e0a23efafcb6c51d3b469d7d",
+      "gzip": true
+    },
+    {
+      "path": "rust/native-baseline-corrected/cargo.jsonl.gz",
+      "source_path": "/private/tmp/verum-T1698-native-baseline-corrected/cargo.jsonl",
+      "source_bytes": 255321,
+      "source_sha256": "bf46572894e63ce8a42db97209ce7bfe7fff00b924123b21ac7321a9d988e9c5",
+      "saved_sha256": "ba3f699e7665caf6134e3a5e260276672eb90ad81165056f1d5982bcaf4b1ead",
+      "gzip": true
+    },
+    {
+      "path": "rust/native-baseline-corrected/result.json",
+      "source_path": "/private/tmp/verum-T1698-native-baseline-corrected/result.json",
+      "source_bytes": 1466,
+      "source_sha256": "ccdb12918680f217721058bb1b0357e50228e900e827cd9fa16b2b2d5c4817de",
+      "saved_sha256": "ccdb12918680f217721058bb1b0357e50228e900e827cd9fa16b2b2d5c4817de",
+      "gzip": false
+    },
+    {
+      "path": "rust/native-baseline-corrected/stderr.log.gz",
+      "source_path": "/private/tmp/verum-T1698-native-baseline-corrected/stderr.log",
+      "source_bytes": 6287,
+      "source_sha256": "206be20dcafbeef8143d450aba609f967514509b37ea32c3b625424737fedba8",
+      "saved_sha256": "1792add34a79da51f55b2199891310d17d6dc7738679aa9923997343188fae73",
+      "gzip": true
+    },
+    {
+      "path": "rust/native-paired-repair/cargo.jsonl.gz",
+      "source_path": "/private/tmp/verum-T1698-native-paired-repair/cargo.jsonl",
+      "source_bytes": 255321,
+      "source_sha256": "24731adc8a96af02a19f824a9c3ef8dcb86dffbe1961dfb0e3cf1ae93c39364b",
+      "saved_sha256": "977b3cac7561acf8b144f38469c3328fd10c5e92c3056d9fe081722579a3b98e",
+      "gzip": true
+    },
+    {
+      "path": "rust/native-paired-repair/ir/native_dynamic_endian_returns_packed_bytes-source.ll.gz",
+      "source_path": "/private/tmp/verum-T1698-native-paired-repair/ir/native_dynamic_endian_returns_packed_bytes-source.ll",
+      "source_bytes": 3248,
+      "source_sha256": "3519b8799db7311b5333a04c03e101b3deac4f84e139d55a59815b7c4a24db61",
+      "saved_sha256": "95766dca3e5a7946a8ab26ccca0c7a510f351c942ecea97bc8dbaa4fc9296600",
+      "gzip": true
+    },
+    {
+      "path": "rust/native-paired-repair/ir/native_dynamic_endian_returns_packed_bytes-wire.ll.gz",
+      "source_path": "/private/tmp/verum-T1698-native-paired-repair/ir/native_dynamic_endian_returns_packed_bytes-wire.ll",
+      "source_bytes": 919,
+      "source_sha256": "8cd0bda329c128c259cc5cc7e410c6da301a6109ff38e969150bef375cb017d7",
+      "saved_sha256": "a2c71a71a819fb5e42872ca91da03457624adfb96723da7591f716a50438d02d",
+      "gzip": true
+    },
+    {
+      "path": "rust/native-paired-repair/ir/native_dynamic_from_bytes_reads_the_packed_input-source.ll.gz",
+      "source_path": "/private/tmp/verum-T1698-native-paired-repair/ir/native_dynamic_from_bytes_reads_the_packed_input-source.ll",
+      "source_bytes": 3648,
+      "source_sha256": "a90527375346467b6dbfe999968df187cc9878a817a49b159e6bcb6d149da152",
+      "saved_sha256": "7414a904ab3f03bcf0ec580325811c10ac9eb60e162904e0bd349281c3a7234a",
+      "gzip": true
+    },
+    {
+      "path": "rust/native-paired-repair/ir/native_dynamic_from_bytes_reads_the_packed_input-wire.ll.gz",
+      "source_path": "/private/tmp/verum-T1698-native-paired-repair/ir/native_dynamic_from_bytes_reads_the_packed_input-wire.ll",
+      "source_bytes": 925,
+      "source_sha256": "3c973739b7a15644573a071a6195d85b5f3700cb04561026a7eb70f4c01cfb0a",
+      "saved_sha256": "ea598aa48c8dce7c75366584d181bba48af3ab623bf36d68f42813e03e6a5bde",
+      "gzip": true
+    },
+    {
+      "path": "rust/native-paired-repair/ir/native_inferred_and_annotated_endian_results_have_the_same_bytes-source.ll.gz",
+      "source_path": "/private/tmp/verum-T1698-native-paired-repair/ir/native_inferred_and_annotated_endian_results_have_the_same_bytes-source.ll",
+      "source_bytes": 3360,
+      "source_sha256": "416d6a95e0c7ca3ee6d61277f982f101765692d5b7eb6ce3236b13203f441871",
+      "saved_sha256": "0e84a34d89937d392206b0fa8552d08dca8645111f87ee511628aa5bc88c1919",
+      "gzip": true
+    },
+    {
+      "path": "rust/native-paired-repair/ir/native_inferred_and_annotated_endian_results_have_the_same_bytes-wire.ll.gz",
+      "source_path": "/private/tmp/verum-T1698-native-paired-repair/ir/native_inferred_and_annotated_endian_results_have_the_same_bytes-wire.ll",
+      "source_bytes": 919,
+      "source_sha256": "8cd0bda329c128c259cc5cc7e410c6da301a6109ff38e969150bef375cb017d7",
+      "saved_sha256": "a2c71a71a819fb5e42872ca91da03457624adfb96723da7591f716a50438d02d",
+      "gzip": true
+    },
+    {
+      "path": "rust/native-paired-repair/ir/native_inline_endian_widths_are_packed-source.ll.gz",
+      "source_path": "/private/tmp/verum-T1698-native-paired-repair/ir/native_inline_endian_widths_are_packed-source.ll",
+      "source_bytes": 3353,
+      "source_sha256": "40a72e2394aee60a1d84855f750b5d05a62da7f244b9f3a21d2b34178b4526b8",
+      "saved_sha256": "acbfc90971c7987c0e6eba50f281d1878bf70a1c628ec1a5c9a359c305dac1f2",
+      "gzip": true
+    },
+    {
+      "path": "rust/native-paired-repair/ir/native_inline_endian_widths_are_packed-wire.ll.gz",
+      "source_path": "/private/tmp/verum-T1698-native-paired-repair/ir/native_inline_endian_widths_are_packed-wire.ll",
+      "source_bytes": 919,
+      "source_sha256": "8cd0bda329c128c259cc5cc7e410c6da301a6109ff38e969150bef375cb017d7",
+      "saved_sha256": "a2c71a71a819fb5e42872ca91da03457624adfb96723da7591f716a50438d02d",
+      "gzip": true
+    },
+    {
+      "path": "rust/native-paired-repair/result.json",
+      "source_path": "/private/tmp/verum-T1698-native-paired-repair/result.json",
+      "source_bytes": 1544,
+      "source_sha256": "0e705663cc2fdcd40988fa4741d6bd99417097ae111f124f68612a827459cd7a",
+      "saved_sha256": "0e705663cc2fdcd40988fa4741d6bd99417097ae111f124f68612a827459cd7a",
+      "gzip": false
+    },
+    {
+      "path": "rust/native-paired-repair/stderr.log.gz",
+      "source_path": "/private/tmp/verum-T1698-native-paired-repair/stderr.log",
+      "source_bytes": 6072,
+      "source_sha256": "8b1286c1948cc595c140f0a7a2333902a1c36a42c107d4963343cbe36fc2be28",
+      "saved_sha256": "d082ba89b7236a06bdc0864a02dff70489088d45e81045f60d6edb081b67067f",
+      "gzip": true
+    },
+    {
+      "path": "rust/native-decoded-repair/cargo.jsonl.gz",
+      "source_path": "/private/tmp/verum-T1698-native-decoded-repair/cargo.jsonl",
+      "source_bytes": 255233,
+      "source_sha256": "911d209bf491c63bb70c5cd397abc9f0f22bfdcd061ee895945589eea8a48327",
+      "saved_sha256": "471edec58ace0ad0645daf6c62cac22d4c5d31ead1d7a39a68f14f0919041940",
+      "gzip": true
+    },
+    {
+      "path": "rust/native-decoded-repair/ir/native_dynamic_endian_returns_packed_bytes-source.ll.gz",
+      "source_path": "/private/tmp/verum-T1698-native-decoded-repair/ir/native_dynamic_endian_returns_packed_bytes-source.ll",
+      "source_bytes": 2488,
+      "source_sha256": "8f5b55687da4cf915339e527253f0e94c69e06b3c6f06f8171c2dbfe0f574300",
+      "saved_sha256": "11f9149ec415a4c053f023aaf1eed3b40434fcc4e4b2ea085857c73545f5e3e7",
+      "gzip": true
+    },
+    {
+      "path": "rust/native-decoded-repair/ir/native_dynamic_endian_returns_packed_bytes-wire.ll.gz",
+      "source_path": "/private/tmp/verum-T1698-native-decoded-repair/ir/native_dynamic_endian_returns_packed_bytes-wire.ll",
+      "source_bytes": 2488,
+      "source_sha256": "8f5b55687da4cf915339e527253f0e94c69e06b3c6f06f8171c2dbfe0f574300",
+      "saved_sha256": "11f9149ec415a4c053f023aaf1eed3b40434fcc4e4b2ea085857c73545f5e3e7",
+      "gzip": true
+    },
+    {
+      "path": "rust/native-decoded-repair/ir/native_dynamic_from_bytes_reads_the_packed_input-source.ll.gz",
+      "source_path": "/private/tmp/verum-T1698-native-decoded-repair/ir/native_dynamic_from_bytes_reads_the_packed_input-source.ll",
+      "source_bytes": 2633,
+      "source_sha256": "689c7c899d12d5537472551a31f9033c570bfaafb18353ec39f7a08cd752bf4b",
+      "saved_sha256": "90c3097a6d9ddf7475db1b12a060943d74443fee8515ffbe8e767800b45c1a4a",
+      "gzip": true
+    },
+    {
+      "path": "rust/native-decoded-repair/ir/native_dynamic_from_bytes_reads_the_packed_input-wire.ll.gz",
+      "source_path": "/private/tmp/verum-T1698-native-decoded-repair/ir/native_dynamic_from_bytes_reads_the_packed_input-wire.ll",
+      "source_bytes": 2633,
+      "source_sha256": "689c7c899d12d5537472551a31f9033c570bfaafb18353ec39f7a08cd752bf4b",
+      "saved_sha256": "90c3097a6d9ddf7475db1b12a060943d74443fee8515ffbe8e767800b45c1a4a",
+      "gzip": true
+    },
+    {
+      "path": "rust/native-decoded-repair/ir/native_inferred_and_annotated_endian_results_have_the_same_bytes-source.ll.gz",
+      "source_path": "/private/tmp/verum-T1698-native-decoded-repair/ir/native_inferred_and_annotated_endian_results_have_the_same_bytes-source.ll",
+      "source_bytes": 3360,
+      "source_sha256": "416d6a95e0c7ca3ee6d61277f982f101765692d5b7eb6ce3236b13203f441871",
+      "saved_sha256": "0e84a34d89937d392206b0fa8552d08dca8645111f87ee511628aa5bc88c1919",
+      "gzip": true
+    },
+    {
+      "path": "rust/native-decoded-repair/ir/native_inferred_and_annotated_endian_results_have_the_same_bytes-wire.ll.gz",
+      "source_path": "/private/tmp/verum-T1698-native-decoded-repair/ir/native_inferred_and_annotated_endian_results_have_the_same_bytes-wire.ll",
+      "source_bytes": 3360,
+      "source_sha256": "416d6a95e0c7ca3ee6d61277f982f101765692d5b7eb6ce3236b13203f441871",
+      "saved_sha256": "0e84a34d89937d392206b0fa8552d08dca8645111f87ee511628aa5bc88c1919",
+      "gzip": true
+    },
+    {
+      "path": "rust/native-decoded-repair/ir/native_inferred_and_annotated_indexing_preserve_byte_access-source.ll.gz",
+      "source_path": "/private/tmp/verum-T1698-native-decoded-repair/ir/native_inferred_and_annotated_indexing_preserve_byte_access-source.ll",
+      "source_bytes": 3775,
+      "source_sha256": "9efd29daaa4c0f5a7ac8d11f24bbb2c7dc0a4b4e7509134693ba4f9500f460a8",
+      "saved_sha256": "fd2fd74b65dc1395ddb70e292c3ff35f6be501823b9cd580710c39bcb218659f",
+      "gzip": true
+    },
+    {
+      "path": "rust/native-decoded-repair/ir/native_inferred_and_annotated_indexing_preserve_byte_access-wire.ll.gz",
+      "source_path": "/private/tmp/verum-T1698-native-decoded-repair/ir/native_inferred_and_annotated_indexing_preserve_byte_access-wire.ll",
+      "source_bytes": 3775,
+      "source_sha256": "9efd29daaa4c0f5a7ac8d11f24bbb2c7dc0a4b4e7509134693ba4f9500f460a8",
+      "saved_sha256": "fd2fd74b65dc1395ddb70e292c3ff35f6be501823b9cd580710c39bcb218659f",
+      "gzip": true
+    },
+    {
+      "path": "rust/native-decoded-repair/ir/native_inline_endian_widths_are_packed-source.ll.gz",
+      "source_path": "/private/tmp/verum-T1698-native-decoded-repair/ir/native_inline_endian_widths_are_packed-source.ll",
+      "source_bytes": 7649,
+      "source_sha256": "513ef7dc8bfa147dbe1cce92de329db5e28cb3301f8e833c96615db4cf1adf1c",
+      "saved_sha256": "40519f64972c3a53c10c61f4dd44d8426e99037748a8c44dbf382c593b908750",
+      "gzip": true
+    },
+    {
+      "path": "rust/native-decoded-repair/ir/native_inline_endian_widths_are_packed-wire.ll.gz",
+      "source_path": "/private/tmp/verum-T1698-native-decoded-repair/ir/native_inline_endian_widths_are_packed-wire.ll",
+      "source_bytes": 7649,
+      "source_sha256": "513ef7dc8bfa147dbe1cce92de329db5e28cb3301f8e833c96615db4cf1adf1c",
+      "saved_sha256": "40519f64972c3a53c10c61f4dd44d8426e99037748a8c44dbf382c593b908750",
+      "gzip": true
+    },
+    {
+      "path": "rust/native-decoded-repair/result.json",
+      "source_path": "/private/tmp/verum-T1698-native-decoded-repair/result.json",
+      "source_bytes": 1545,
+      "source_sha256": "ee1c4597a668f09237f20abe6f873b70c72d601d78651e757474118f5ad55b77",
+      "saved_sha256": "ee1c4597a668f09237f20abe6f873b70c72d601d78651e757474118f5ad55b77",
+      "gzip": false
+    },
+    {
+      "path": "rust/native-decoded-repair/stderr.log.gz",
+      "source_path": "/private/tmp/verum-T1698-native-decoded-repair/stderr.log",
+      "source_bytes": 5512,
+      "source_sha256": "0b366cec273daf6e45fd3d93e547e29ef76506f4ce8d17efd50ec5da05477b3f",
+      "saved_sha256": "bd5921b488510ececd8a847b7bcd8230e72b3fb540e2704a0b0e0fbae6b1b480",
+      "gzip": true
+    },
+    {
+      "path": "fixtures/archive-diagnostic.rs.txt",
+      "source_path": "/private/tmp/verum-T1698-archive-diagnostic.rs",
+      "source_bytes": 715,
+      "source_sha256": "9bee9c87b4439ddef94f84343ccb8fcc49be6d9ce55021552202d460c2e78596",
+      "saved_sha256": "9bee9c87b4439ddef94f84343ccb8fcc49be6d9ce55021552202d460c2e78596",
+      "gzip": false
+    },
+    {
+      "path": "fixtures/source-owner-controls.rs.txt",
+      "source_path": "/Users/taaliman/.codex/worktrees/registry-record-map-keys/verum/crates/verum_vbc/tests/endian_source_owners.rs",
+      "source_bytes": 2351,
+      "source_sha256": "5957aa0d491468590724acc6b752bf00d25af1bbcda7beb0c5ee035c84be22ee",
+      "saved_sha256": "5957aa0d491468590724acc6b752bf00d25af1bbcda7beb0c5ee035c84be22ee",
+      "gzip": false
+    },
+    {
+      "path": "fixtures/run-focused.py.txt",
+      "source_path": "/private/tmp/verum-T1698-run-focused.py",
+      "source_bytes": 2301,
+      "source_sha256": "492dedc4148b1f6144ede7fcba6640b99ee89772fc65149a04738218a31ca891",
+      "saved_sha256": "492dedc4148b1f6144ede7fcba6640b99ee89772fc65149a04738218a31ca891",
+      "gzip": false
+    },
+    {
+      "path": "fixtures/run-native.py.txt",
+      "source_path": "/private/tmp/verum-T1698-run-native.py",
+      "source_bytes": 2296,
+      "source_sha256": "719680c0c3f282fd7c89fa4aadde496d409a1c9d311c1a560fc450b6b53bebdc",
+      "saved_sha256": "719680c0c3f282fd7c89fa4aadde496d409a1c9d311c1a560fc450b6b53bebdc",
+      "gzip": false
+    }
+  ]
+}

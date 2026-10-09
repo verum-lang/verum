@@ -1,0 +1,43 @@
+{
+  "source": "d592c2801fbf1d455baa8c3c7c90ac57bf284153",
+  "command": [
+    "cargo",
+    "test",
+    "--offline",
+    "--locked",
+    "--no-fail-fast",
+    "-p",
+    "verum_codegen",
+    "--test",
+    "endian_fixed_bytes",
+    "--message-format=json",
+    "--",
+    "--nocapture",
+    "--test-threads=1"
+  ],
+  "cwd": "/Users/taaliman/.codex/worktrees/registry-record-map-keys/verum",
+  "environment_overrides": {
+    "CARGO_TARGET_DIR": "/Users/taaliman/.tmp/verum-codex-01a10248/native-target",
+    "CARGO_BUILD_JOBS": "2",
+    "CARGO_INCREMENTAL": "0",
+    "VERUM_NO_AUTO_PRECOMPILE": "1",
+    "VERUM_LLVM_DIR": "/Users/taaliman/projects/oldman/verum-lang/verum/llvm/install",
+    "VERUM_T1698_ARCHIVE": "/private/tmp/verum-registry-stage20-callable-boundaries/artifacts/runtime.vbca"
+  },
+  "deadline_seconds": 600,
+  "temporary_diagnostic_sha256": null,
+  "returncode": 101,
+  "timed_out": false,
+  "elapsed_seconds": 39.745,
+  "source_after": "d592c2801fbf1d455baa8c3c7c90ac57bf284153",
+  "executables": [
+    {
+      "path": "/Users/taaliman/.tmp/verum-codex-01a10248/native-target/debug/build/verum_codegen/1ec042b39b87232b/out/endian_fixed_bytes-1ec042b39b87232b",
+      "sha256": "b8e83d524d7de710ecfebe1af784e4fc39714d9f35e44ed1dabc7e4330c128c0"
+    }
+  ],
+  "logs_sha256": {
+    "cargo.jsonl": "bf46572894e63ce8a42db97209ce7bfe7fff00b924123b21ac7321a9d988e9c5",
+    "stderr.log": "206be20dcafbeef8143d450aba609f967514509b37ea32c3b625424737fedba8"
+  }
+}

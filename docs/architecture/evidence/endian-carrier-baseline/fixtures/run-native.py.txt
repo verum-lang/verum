@@ -1,0 +1,26 @@
+import hashlib,json,os,pathlib,signal,subprocess,sys,time
+root=pathlib.Path('/Users/taaliman/.codex/worktrees/registry-record-map-keys/verum')
+out=pathlib.Path(sys.argv[1]);out.mkdir(parents=True,exist_ok=False)
+env_overrides={'CARGO_TARGET_DIR':'/Users/taaliman/.tmp/verum-codex-01a10248/native-target','CARGO_BUILD_JOBS':'2','CARGO_INCREMENTAL':'0','VERUM_NO_AUTO_PRECOMPILE':'1','VERUM_LLVM_DIR':'/Users/taaliman/projects/oldman/verum-lang/verum/llvm/install','VERUM_T1698_ARCHIVE':'/private/tmp/verum-registry-stage20-callable-boundaries/artifacts/runtime.vbca'}
+env_overrides['VERUM_T1698_IR_DIR']=str(out/'ir')
+cmd=['cargo','test','--offline','--locked','--no-fail-fast','-p','verum_codegen']
+for target in sys.argv[2:]:cmd+=['--test',target]
+cmd+=['--message-format=json','--','--nocapture','--test-threads=1']
+sha=lambda p:hashlib.sha256(pathlib.Path(p).read_bytes()).hexdigest()
+source=subprocess.check_output(['git','rev-parse','HEAD'],cwd=root,text=True).strip()
+r={'source':source,'command':cmd,'cwd':str(root),'environment_overrides':env_overrides,'deadline_seconds':600}
+r['temporary_diagnostic_sha256']=sha(root/'crates/verum_vbc/tests/t1698_archive_diagnostic.rs') if (root/'crates/verum_vbc/tests/t1698_archive_diagnostic.rs').exists() else None
+start=time.monotonic();timeout=False
+with (out/'cargo.jsonl').open('w') as stdout,(out/'stderr.log').open('w') as stderr:
+ p=subprocess.Popen(cmd,cwd=root,env=os.environ|env_overrides,stdout=stdout,stderr=stderr,start_new_session=True)
+ try:p.wait(timeout=600)
+ except subprocess.TimeoutExpired:timeout=True;os.killpg(p.pid,signal.SIGTERM);p.wait(timeout=15)
+r.update(returncode=p.returncode,timed_out=timeout,elapsed_seconds=round(time.monotonic()-start,3),source_after=subprocess.check_output(['git','rev-parse','HEAD'],cwd=root,text=True).strip())
+r['executables']=[]
+for line in (out/'cargo.jsonl').read_text().splitlines():
+ try:item=json.loads(line)
+ except:continue
+ if item.get('reason')=='compiler-artifact' and item.get('executable'):
+  exe=item['executable'];r['executables'].append({'path':exe,'sha256':sha(exe)})
+r['logs_sha256']={n:sha(out/n) for n in ['cargo.jsonl','stderr.log']}
+(out/'result.json').write_text(json.dumps(r,indent=2)+'\n');print(json.dumps(r,indent=2));print((out/'stderr.log').read_text()[-15000:])

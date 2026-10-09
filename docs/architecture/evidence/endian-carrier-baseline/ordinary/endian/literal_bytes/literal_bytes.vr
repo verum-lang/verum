@@ -1,0 +1,10 @@
+fn main() {
+    let actual: [Byte; 8] = [1_u8,2_u8,3_u8,4_u8,5_u8,6_u8,7_u8,8_u8];
+    assert_eq(actual[7], 8_u8);
+    let mut index = 0;
+    while index < 8 {
+        assert_eq(actual[index], (index+1) as Byte);
+        index = index+1;
+    }
+    print("literal_bytes:passed");
+}

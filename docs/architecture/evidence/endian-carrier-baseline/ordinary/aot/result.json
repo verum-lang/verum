@@ -1,0 +1,51 @@
+{
+  "language_commit": "9b9c04a8a7364d35534a9e15dcfe7d9942c47420",
+  "build_manifest_sha256": "9e2884dfe1d7f3078b81e7b0b20eaf2ebf25c97fbf9c365412d0df3162040943",
+  "cli_sha256": "ebb60204de9bf5b7895f43a30cc50fcdc82427734bfe4807948834cb98577426",
+  "fixture_sha256": "368144c7035d8e2b0673aacc10dfcd93b0be99eff4f1a412e1a9275c189670f8",
+  "original_fixture": "/private/tmp/verum-T1698-endian-fixtures/big_endian_inferred.vr",
+  "executed_fixture": "/private/tmp/verum-T1698-endian-inferred-aot/big_endian_inferred.vr",
+  "command": [
+    "/private/tmp/verum-registry-stage20-callable-boundaries/verum-9b9c04a8a",
+    "run",
+    "--tier",
+    "aot",
+    "/private/tmp/verum-T1698-endian-inferred-aot/big_endian_inferred.vr"
+  ],
+  "working_directory": "/private/tmp/verum-T1698-endian-inferred-aot/working-directory",
+  "expected_stdout": "big_endian_inferred:passed\n",
+  "deadline_seconds": 600,
+  "environment_overrides": {
+    "NO_COLOR": "1",
+    "VERUM_NO_OBJECT_CACHE": "1",
+    "TMPDIR": "/private/tmp"
+  },
+  "scope": "One ordinary standalone AOT fixture. Import inspection does not prove absence of statically linked libc or platform-wide conformance.",
+  "elapsed_seconds": 176.859,
+  "returncode": 255,
+  "timed_out": false,
+  "native_artifact": {
+    "path": "/private/tmp/verum-T1698-endian-inferred-aot/target/debug/big_endian_inferred",
+    "bytes": 88896,
+    "sha256": "af1792e76845608114765778ff2ab3095b10e65cccbf613882defe5e00cc4e19",
+    "file_exit_code": 0,
+    "dynamic-libraries_exit_code": 0,
+    "undefined-symbols_exit_code": 0
+  },
+  "checks": {
+    "exit_zero": false,
+    "within_deadline": true,
+    "exact_stdout": false,
+    "source_unchanged": true,
+    "executable_unchanged": true,
+    "native_artifact_retained": true
+  },
+  "status": "failed",
+  "logs": {
+    "dynamic-libraries.log": "ed333e210b6624e1abd087431e3d7f0a21470bf85ef22e81cb9a19c90d50f425",
+    "file.log": "1330091c1cdde3b98ff068a74e54a4787d5ccda82c3e143d86a93da9d9a40b97",
+    "stderr.log": "90b6407c60467409fb7a3c3210aef23fe480e22ac5d3830d129a324dd9b76aa6",
+    "stdout.log": "f286c8918be0244b54e3f4c0ee0e9fed207be87e14476ebe78fce8e737f24f8c",
+    "undefined-symbols.log": "1ad09afad884d14f7139fa508a1744d059bef8059b324477010fcb1512d316f7"
+  }
+}
