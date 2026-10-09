@@ -7,7 +7,7 @@ use verum_common::Shared;
 
 #[test]
 fn untracked_argument_clears_a_recycled_callee_node_with_the_same_value() {
-    let mut state = InterpreterState::new(Shared::new(VbcModule::new("tape_boundary")).into_arc());
+    let mut state = InterpreterState::new(Shared::new(VbcModule::new("tape_boundary".into())).into_arc());
     state.grad_recording = true;
     state.grad_reg_nodes.insert(20, (TensorId(7), 3.0_f64.to_bits()));
     propagate_arg(&mut state, 0, Reg(1), 20, Reg(0));
@@ -16,7 +16,7 @@ fn untracked_argument_clears_a_recycled_callee_node_with_the_same_value() {
 
 #[test]
 fn tracked_argument_replaces_a_recycled_callee_node() {
-    let mut state = InterpreterState::new(Shared::new(VbcModule::new("tape_boundary")).into_arc());
+    let mut state = InterpreterState::new(Shared::new(VbcModule::new("tape_boundary".into())).into_arc());
     state.grad_recording = true;
     state.grad_reg_nodes.insert(1, (TensorId(9), 3.0_f64.to_bits()));
     state.grad_reg_nodes.insert(20, (TensorId(7), 3.0_f64.to_bits()));
