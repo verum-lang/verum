@@ -455,6 +455,18 @@ pub fn publish(dry_run: bool) -> Result<()> {
             }
         };
 
+        // Validate the same dependency projection before either a preview or
+        // an upload can claim the member is publishable.
+        if let Err(error) = crate::registry::publication_dependencies::from_manifest(&member_config)
+        {
+            ui::error(&format!(
+                "Failed to publish {}: {}",
+                member_config.cog.name, error
+            ));
+            failed.push(member.to_string());
+            continue;
+        }
+
         if dry_run {
             ui::step(&format!(
                 "Would publish {} v{}",
