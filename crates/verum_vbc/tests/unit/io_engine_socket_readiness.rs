@@ -1,6 +1,6 @@
 //! Bounded host fixtures for real IoEngine readiness and byte transfer (T1650).
 use super::super::dispatch_table::handlers::net_runtime::{
-    tcp_close, tcp_listen_v2, tcp_local_port,
+    tcp_close, tcp_listen_v2, tcp_local_port, tcp_peer_addr,
 };
 use super::*;
 use std::io::{Read, Write};
@@ -90,11 +90,18 @@ fn async_accept_round_trip_via_io_engine() {
     let listener = RuntimeSocket::checked(tcp_listen_v2("127.0.0.1", 0, 8, 0), "listen");
     let port = tcp_local_port(listener.0);
     assert!((1..=65535).contains(&port), "listener port: {port}");
-    let _peer = connect(SocketAddr::from(([127, 0, 0, 1], port as u16)));
-    let _accepted = RuntimeSocket::checked(
+    let peer = connect(SocketAddr::from(([127, 0, 0, 1], port as u16)));
+    let accepted = RuntimeSocket::checked(
         async_accept(engine.0, listener.0, 1_500_000_000),
         "async accept",
     );
+    let peer_endpoint = peer.local_addr().unwrap();
+    let (family, host, peer_port) =
+        tcp_peer_addr(accepted.0).expect("accepted socket must report its connected peer");
+    assert_eq!(family, 4);
+    assert_eq!(host, "127.0.0.1");
+    assert_eq!(peer_port, peer_endpoint.port() as i64);
+    assert_eq!(tcp_local_port(accepted.0), port);
 }
 
 #[test]
