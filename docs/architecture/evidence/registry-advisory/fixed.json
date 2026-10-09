@@ -1,0 +1,77 @@
+{
+  "source_commit": "09ad327fa8ad262e2af1090469189536546e2747",
+  "source_tree": "d70183f9116ca6cb2b74d39a47f090527dcf4511",
+  "command": [
+    "cargo",
+    "test",
+    "--locked",
+    "--offline",
+    "-p",
+    "verum_cli",
+    "--lib",
+    "cog::configured_registry_downloads",
+    "--",
+    "--nocapture",
+    "--test-threads=2"
+  ],
+  "cwd": "/Users/taaliman/.codex/worktrees/returned-reference-summary/verum",
+  "env_overrides": {
+    "CARGO_TARGET_DIR": "/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target",
+    "CARGO_BUILD_JOBS": "1",
+    "CARGO_INCREMENTAL": "0",
+    "VERUM_NO_AUTO_PRECOMPILE": "1",
+    "VERUM_LLVM_DIR": "/Users/taaliman/projects/oldman/verum-lang/verum/llvm/install",
+    "RUST_MIN_STACK": "16777216"
+  },
+  "timeout_seconds": 900,
+  "scope": "no-auto-precompile actual RegistryClient HTTP requests and install_from_registry handler in isolated subprocesses with loopback fixtures; no ordinary CLI dispatch, live registry service or AOT acceptance",
+  "precompiled_artifacts_before": {
+    "runtime.vbca": "410ff097b455437cab98b651f7799b3129588820925afe98e0de9c3781530a0f",
+    "runtime.core_metadata": "a92bd89e649e102cdc67d7ad0032513d6448d8915e5744127e6cdf1f1e34ebbb",
+    "runtime.symbol_graph": "a6678c18498f7519749ca1fdf1d22629b479083f42fa95a15177e8c7acf1c722",
+    "runtime.vbca.checksum": "c33573118a8c4b635f6c8f727c3784b524f660be57de702365e8d9c14b2f3a8b",
+    "runtime.vbca.schema": "fec20d7b3f8d1b81aff66c6c1181be574963779f7eacaf65660f8ab9127fca87"
+  },
+  "precompiled_source_checksum": "def6d3e7b7421caf163b63529b2d0edd4bc2a09ec0004eb9cb89854b1cbae868",
+  "precompiled_producer": "Previously verified stage14 fdad59f06; cached artifacts are not regenerated for this source.",
+  "runner_sha256": "7e0d90c9ed7648c5fb25463ad3502551b9cb57fbc2e3fbb9ba8e3101d6b462db",
+  "log": "/private/tmp/verum-T1673-fixed/gate.log",
+  "exit_code": 0,
+  "stop_reason": null,
+  "elapsed_seconds": 336.388,
+  "source_commit_after": "09ad327fa8ad262e2af1090469189536546e2747",
+  "source_status_after": "",
+  "precompiled_artifacts_after": {
+    "runtime.vbca": "410ff097b455437cab98b651f7799b3129588820925afe98e0de9c3781530a0f",
+    "runtime.core_metadata": "a92bd89e649e102cdc67d7ad0032513d6448d8915e5744127e6cdf1f1e34ebbb",
+    "runtime.symbol_graph": "a6678c18498f7519749ca1fdf1d22629b479083f42fa95a15177e8c7acf1c722",
+    "runtime.vbca.checksum": "c33573118a8c4b635f6c8f727c3784b524f660be57de702365e8d9c14b2f3a8b",
+    "runtime.vbca.schema": "fec20d7b3f8d1b81aff66c6c1181be574963779f7eacaf65660f8ab9127fca87"
+  },
+  "log_sha256": "a2c50863bde6018da00a427782c68a9dd66585c3f49b5d94b652291b99acde4a",
+  "test_summaries": [
+    [
+      "ok",
+      "7",
+      "0",
+      "0",
+      "0",
+      "891"
+    ]
+  ],
+  "outer_test_summary": [
+    "ok",
+    "7",
+    "0",
+    "0",
+    "0",
+    "891"
+  ],
+  "executable": {
+    "original_path": "/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target/debug/build/verum_cli/72adbfc0707d7b24/out/verum_cli-72adbfc0707d7b24",
+    "preserved_path": "/private/tmp/verum-T1673-fixed/verum_cli_tests",
+    "sha256": "36ba19e17e93f8f3884c2f71c14ec883081012d7231e69037de5db1a43ceaba2"
+  },
+  "source_unchanged": true,
+  "artifacts_unchanged": true
+}

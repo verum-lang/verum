@@ -1,0 +1,73 @@
+{
+  "task": "T1673",
+  "scope": "Actual RegistryClient and install_from_registry handler with isolated loopback HTTP requests; no ordinary CLI argument dispatch, production registry, signed advisory authenticity, or AOT claim.",
+  "policy": "Advisory HTTP failure, transport failure, malformed JSON or mismatched release identity returns an error before archive download and project dependency/lockfile updates. A valid empty report alone prints the clean message. A valid nonempty report preserves warnings and the existing continue-install policy.",
+  "cases_per_boundary": [
+    "empty 200",
+    "nonempty 200",
+    "401",
+    "403",
+    "404",
+    "429",
+    "500",
+    "503",
+    "malformed 200",
+    "wrong package",
+    "wrong version",
+    "transport disconnect"
+  ],
+  "boundaries": [
+    "direct RegistryClient advisory request",
+    "install_from_registry with selected registry"
+  ],
+  "advisory_cases": 24,
+  "test_accounting": "7 outer test entries: 4 existing routing/configuration controls, 2 matrices with 12 advisory cases each, and 1 subprocess entry which is inert in the parent. All pass on the fix.",
+  "baseline": "The first attempt failed to compile the test because List has no range index. After correcting only the test iteration, the client and install matrices both failed at HTTP401: an empty report was synthesized, the clean message printed, archive downloaded, and manifest/lockfile updated. The fixed run completes every matrix case.",
+  "mutation_boundary": "The install handler refuses unavailable data with original manifest bytes, absent new lockfile and absent package archive; the HTTP fixture confirms no download. CacheManager construction may create an empty directory before the handler.",
+  "artifact_boundary": "Rust-only tests use pinned previously produced stdlib files with automatic baking disabled. Their unchanged hashes are recorded; this is not an ordinary compiler or stdlib runtime test.",
+  "ci": "The tests are attached to cog.rs under cfg(test) and execute in the workspace lib/bins unit job.",
+  "runs": {
+    "baseline": {
+      "receipt": "registry-advisory/baseline.json",
+      "log": "registry-advisory/baseline.log",
+      "source_commit": "a9ed2cef87c4d037037f8d9b605bc8fb79555963",
+      "exit_code": 101,
+      "seconds": 137.524,
+      "test_summary": null,
+      "log_sha256": "bf3b5db21ff7027970dcd97e7f947c297429ac005015071e75c82b0759629748"
+    },
+    "baseline-corrected": {
+      "receipt": "registry-advisory/baseline-corrected.json",
+      "log": "registry-advisory/baseline-corrected.log",
+      "source_commit": "f58e0d0f3f95e46c412515597f4052eb95ad9d6e",
+      "exit_code": 101,
+      "seconds": 325.329,
+      "test_summary": [
+        "FAILED",
+        "5",
+        "2",
+        "0",
+        "0",
+        "891"
+      ],
+      "log_sha256": "7ea6c34439a6b1cfcd52d9b6f4a51d51405c48a47c6eaf7abd5f7257edc8559d"
+    },
+    "fixed": {
+      "receipt": "registry-advisory/fixed.json",
+      "log": "registry-advisory/fixed.log",
+      "source_commit": "09ad327fa8ad262e2af1090469189536546e2747",
+      "exit_code": 0,
+      "seconds": 336.388,
+      "test_summary": [
+        "ok",
+        "7",
+        "0",
+        "0",
+        "0",
+        "891"
+      ],
+      "log_sha256": "a2c50863bde6018da00a427782c68a9dd66585c3f49b5d94b652291b99acde4a"
+    }
+  },
+  "raw_log_whitespace": "fixed.log preserves the exact captured final blank line; only this raw log is excluded from the whitespace gate. All code, JSON and other raw logs pass."
+}
