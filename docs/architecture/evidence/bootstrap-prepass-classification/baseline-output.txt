@@ -1,0 +1,40 @@
+test_current_sources_are_classified (__main__.BakePrepassBoundaryTests.test_current_sources_are_classified) ... FAIL
+test_direct_bootstrap_collector_is_refused (__main__.BakePrepassBoundaryTests.test_direct_bootstrap_collector_is_refused) ... ok
+test_new_grouped_collector_is_refused (__main__.BakePrepassBoundaryTests.test_new_grouped_collector_is_refused) ... ok
+test_new_shared_collector_is_refused (__main__.BakePrepassBoundaryTests.test_new_shared_collector_is_refused) ... ok
+test_removed_prepass_leaves_a_stale_entry (__main__.BakePrepassBoundaryTests.test_removed_prepass_leaves_a_stale_entry) ... FAIL
+
+======================================================================
+FAIL: test_current_sources_are_classified (__main__.BakePrepassBoundaryTests.test_current_sources_are_classified)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/scripts/ci/tests/test_bake_prepass_parity.py", line 48, in test_current_sources_are_classified
+    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+AssertionError: 1 != 0 : check_bake_prepass_parity: FAILED
+
+  UNCLASSIFIED pre-pass `collect_count_module_owners` in collect_all_declarations.
+    The stdlib bake does NOT call collect_all_declarations, so this
+    pass is probably inert for the shipped archive. Verify whether
+    compile_core_module_from_ast covers it, then add it to COVERAGE
+    in check_bake_prepass_parity.py with the verdict and the reason.
+  UNCLASSIFIED pre-pass `count_root` in collect_all_declarations.
+    The stdlib bake does NOT call collect_all_declarations, so this
+    pass is probably inert for the shipped archive. Verify whether
+    compile_core_module_from_ast covers it, then add it to COVERAGE
+    in check_bake_prepass_parity.py with the verdict and the reason.
+
+
+======================================================================
+FAIL: test_removed_prepass_leaves_a_stale_entry (__main__.BakePrepassBoundaryTests.test_removed_prepass_leaves_a_stale_entry)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/scripts/ci/tests/test_bake_prepass_parity.py", line 73, in test_removed_prepass_leaves_a_stale_entry
+    self.assert_refused("STALE COVERAGE entry `collect_count_module_owners`")
+  File "/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/scripts/ci/tests/test_bake_prepass_parity.py", line 44, in assert_refused
+    self.assertIn(diagnostic, result.stdout)
+AssertionError: 'STALE COVERAGE entry `collect_count_module_owners`' not found in 'check_bake_prepass_parity: FAILED\n\n  UNCLASSIFIED pre-pass `count_root` in collect_all_declarations.\n    The stdlib bake does NOT call collect_all_declarations, so this\n    pass is probably inert for the shipped archive. Verify whether\n    compile_core_module_from_ast covers it, then add it to COVERAGE\n    in check_bake_prepass_parity.py with the verdict and the reason.\n'
+
+----------------------------------------------------------------------
+Ran 5 tests in 0.128s
+
+FAILED (failures=2)

@@ -1,0 +1,53 @@
+make: warning: confstr() failed with code 5: couldn't get path of DARWIN_USER_TEMP_DIR; using /tmp instead
+python3 scripts/ci/tests/test_internal_reference_gate.py
+...
+----------------------------------------------------------------------
+Ran 3 tests in 1.668s
+
+OK
+bash scripts/ci/check_no_internal_refs.sh
+git: warning: confstr() failed with code 5: couldn't get path of DARWIN_USER_TEMP_DIR; using /tmp instead
+git: warning: confstr() failed with code 5: couldn't get path of DARWIN_USER_TEMP_DIR; using /tmp instead
+check-internal-refs: OK
+check-spec-citations: 0 of 4 `Spec: docs/…` citations resolve to no file (baseline 0)
+git: warning: confstr() failed with code 5: couldn't get path of DARWIN_USER_TEMP_DIR; using /tmp instead
+check-memory-refs: OK (baseline 0)
+python3 scripts/ci/check_spec_citation_names.py --self-test
+[ok] self-test: roster holds 33 name(s); a same-size swap is reported; an external citation is not a filename
+python3 scripts/ci/check_spec_citation_names.py
+note: the sibling `website` checkout is absent, so a citation that resolves to a site page cannot be recognised here and would be reported as dangling.
+check-spec-citation-names: 767 citation(s) name a document no tracked file provides, over 33 name(s) (33 on the roster)
+       356x  sqlite-native.md  e.g. core/database/sqlite/native/alter/delta.vr
+        59x  cbgr-implementation.md  e.g. core/intrinsics/runtime/cbgr.vr
+        54x  04-memory-model.md  e.g. vcs/specs/L0-critical/memory-safety/buffer_overflow_comprehensive.vr
+        47x  new-arch-spec.md  e.g. core/async/executor.vr
+        40x  40-terminal-tui-architecture.md  e.g. core/mod.vr
+        33x  05-syntax-grammar.md  e.g. core/intrinsics/arithmetic.vr
+        26x  verum-ext-2.md  e.g. core/math/giry.vr
+        24x  math-spec.md  e.g. core/math/advanced.vr
+        19x  improvements.md  e.g. core/async/nursery.vr
+        16x  16-context-system.md  e.g. core/context/error.vr
+        16x  20-error-handling.md  e.g. core/runtime/recovery.vr
+         9x  17-meta-system.md  e.g. core/intrinsics/type_info.vr
+         8x  audit1.md  e.g. core/collections/btree.vr
+         8x  10-concurrency-model.md  e.g. core/runtime/task_queue.vr
+         8x  03-type-system.md  e.g. crates/verum_compiler/examples/binary_tree.vr
+         6x  observability.md  e.g. core/async/diagnostics.vr
+         6x  13-formal-proofs.md  e.g. core/math/algebra.vr
+         5x  26-unified-execution-architecture.md  e.g. core/runtime/env.vr
+         4x  database.md  e.g. core/database/mysql/transaction.vr
+         4x  new-features.md  e.g. vcs/specs/L0-critical/parser/expressions/destructuring_assignment.vr
+         3x  mimalloc-allocator-plan.md  e.g. core/mem/heap.vr
+         3x  meta-audit.md  e.g. core/meta/contexts.vr
+         2x  metrics-architecture.md  e.g. core/metrics/mod.vr
+         2x  SPIFFE.md  e.g. core/security/spiffe/mod.vr
+         1x  14-module-system.md  e.g. core/async/io_protocols.vr
+         1x  tracing-architecture.md  e.g. core/mod.vr
+         1x  RUNTIME_CONSOLIDATION_PLAN.md  e.g. core/net/mod.vr
+         1x  SPIFFE-ID.md  e.g. core/security/spiffe/id.vr
+         1x  02-introduction.md  e.g. crates/verum_compiler/examples/hello_world.vr
+         1x  verification-architecture.md  e.g. crates/verum_kernel/src/errors.rs
+         1x  tls-quic.md  e.g. crates/verum_types/src/infer/env.rs
+         1x  02-core-semantics.md  e.g. vcs/specs/L0-critical/parser/expressions/literals/tagged_literals_interpolation.vr
+         1x  18-advanced-protocols.md  e.g. vcs/specs/L1-core/types/protocols/default_associated_types.vr
+[ok] spec-citation names: roster exact

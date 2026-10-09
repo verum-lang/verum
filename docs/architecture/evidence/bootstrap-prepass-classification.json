@@ -1,0 +1,102 @@
+{
+  "task": "T1699",
+  "scope": "Source CI roster and source-mutation controls only; no Rust compilation, runtime, ordinary CLI, AOT or fresh stdlib artifact verdict.",
+  "parent_commit": "d0d51e262d97f93cbdda9d1e45084ef8c290594a",
+  "inherited_failure": {
+    "source_commit": "25c35ecbb",
+    "durable_receipt": "docs/architecture/evidence/registry-alias-declaring-scope.json",
+    "receipt_key": "integration.source_checks",
+    "diagnostics": [
+      "UNCLASSIFIED collect_count_module_owners",
+      "UNCLASSIFIED count_root"
+    ],
+    "unchanged": "The T1694 receipt and all nine raw logs remain byte-identical to d0d51e262."
+  },
+  "classification_evidence": {
+    "read_only": "VbcCodegen::count_root takes &self and returns an empty root for main or a borrow of config.module_name. It performs no registration or mutation.",
+    "prepass": "VbcCodegen::collect_count_module_owners recursively declares inline and forward module owners in count_module_owners, respecting should_compile_item.",
+    "shared_path": "collect_unit_declarations invokes collect_count_module_owners for each file item before protocols, grouped prepasses and collect_declarations.",
+    "source_entry": "collect_all_declarations delegates to collect_unit_declarations(&[module]); compile_module, compile_module_with_mounts and compile_additional_module also call the shared collector.",
+    "bootstrap_entry": "compile_core_module_from_ast calls collect_unit_declarations(ast_modules) before pending imports and bodies.",
+    "classification": "Only count_root is added to NOT_A_PREPASS. collect_count_module_owners is a named COVERAGE entry with the shared path rationale; no name-prefix exemption."
+  },
+  "results": {
+    "baseline": "3 passed / 2 failed: current sources are unclassified; removing the owner collector cannot detect its missing coverage entry.",
+    "fixed": "5 passed / 0 failed through the real Make recipe; production gate classifies 7 prepasses.",
+    "retained_refusals": [
+      "new collector in shared entry",
+      "new collector in grouped prepasses",
+      "removed owner collector leaves stale coverage",
+      "direct bootstrap collection bypass"
+    ],
+    "adjacent": "check-internal-refs passed, including 3 reference controls and existing citation roster."
+  },
+  "gates": {
+    "baseline": {
+      "source_commit": "a84ea192dc0ca8ee42142e9af0b35cc9d7bfaa6e",
+      "command": [
+        "/Users/taaliman/.pyenv/versions/3.12.8/bin/python3",
+        "/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/scripts/ci/tests/test_bake_prepass_parity.py",
+        "-v"
+      ],
+      "timeout_seconds": 60,
+      "wall_seconds": 0.18911033400218002,
+      "exit_code": 1,
+      "python_version": "3.12.8 (main, Jan 13 2025, 20:49:22) [Clang 19.1.6 ]",
+      "source_sha256": {
+        "scripts/ci/check_bake_prepass_parity.py": "9d791c8a9d084e76575b6e8d33d48ba14bef3d4f3bbba21cb444f94e58c101b7",
+        "scripts/ci/tests/test_bake_prepass_parity.py": "958fbb47410a2dfc34dfff10c18f75a2af72f26bb34c77572f09f84b677369bb",
+        "Makefile": "aef4195f28c640e32e93e0d0f03b58be4e75c4948c637252fbd296d0d21346cd",
+        "crates/verum_vbc/src/codegen/mod.rs": "1297fec9a325b02028ac9e30545840b49806330952f2acb6cea5c35ad2a86e39",
+        "crates/verum_compiler/src/pipeline/stdlib_bootstrap.rs": "d468dfe48d706e4fd02cb5b93f51af6c46cfd1559431f0474ae2e69eda2872ab"
+      },
+      "output_sha256": "4c0fd3b05a03fb4ff323c07583ca966111c0d2094467ce3f52628e2f32bed95a",
+      "output_path": "docs/architecture/evidence/bootstrap-prepass-classification/baseline-output.txt"
+    },
+    "fixed": {
+      "source_commit": "19d89f0958ac20c60cebddf45a9a37fac496ac81",
+      "command": [
+        "make",
+        "-C",
+        "/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum",
+        "check-bake-prepass-parity"
+      ],
+      "timeout_seconds": 60,
+      "wall_seconds": 0.19711774997995235,
+      "exit_code": 0,
+      "python_version": "3.12.8 (main, Jan 13 2025, 20:49:22) [Clang 19.1.6 ]",
+      "source_sha256": {
+        "scripts/ci/check_bake_prepass_parity.py": "6ff51e1b2815d373d67d68085bd9206ec8706d206aa9a716e519007a5496db48",
+        "scripts/ci/tests/test_bake_prepass_parity.py": "958fbb47410a2dfc34dfff10c18f75a2af72f26bb34c77572f09f84b677369bb",
+        "Makefile": "aef4195f28c640e32e93e0d0f03b58be4e75c4948c637252fbd296d0d21346cd",
+        "crates/verum_vbc/src/codegen/mod.rs": "1297fec9a325b02028ac9e30545840b49806330952f2acb6cea5c35ad2a86e39",
+        "crates/verum_compiler/src/pipeline/stdlib_bootstrap.rs": "d468dfe48d706e4fd02cb5b93f51af6c46cfd1559431f0474ae2e69eda2872ab"
+      },
+      "output_sha256": "70965ff7d63800ca0936d6d88616abde9ff33bd2ee4299d55a9adf772c1a2f0b",
+      "output_path": "docs/architecture/evidence/bootstrap-prepass-classification/fixed-output.txt"
+    },
+    "adjacent": {
+      "source_commit": "19d89f0958ac20c60cebddf45a9a37fac496ac81",
+      "command": [
+        "make",
+        "-C",
+        "/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum",
+        "check-internal-refs"
+      ],
+      "timeout_seconds": 60,
+      "wall_seconds": 4.994601917016553,
+      "exit_code": 0,
+      "python_version": "3.12.8 (main, Jan 13 2025, 20:49:22) [Clang 19.1.6 ]",
+      "source_sha256": {
+        "scripts/ci/check_bake_prepass_parity.py": "6ff51e1b2815d373d67d68085bd9206ec8706d206aa9a716e519007a5496db48",
+        "scripts/ci/tests/test_bake_prepass_parity.py": "958fbb47410a2dfc34dfff10c18f75a2af72f26bb34c77572f09f84b677369bb",
+        "Makefile": "aef4195f28c640e32e93e0d0f03b58be4e75c4948c637252fbd296d0d21346cd",
+        "crates/verum_vbc/src/codegen/mod.rs": "1297fec9a325b02028ac9e30545840b49806330952f2acb6cea5c35ad2a86e39",
+        "crates/verum_compiler/src/pipeline/stdlib_bootstrap.rs": "d468dfe48d706e4fd02cb5b93f51af6c46cfd1559431f0474ae2e69eda2872ab"
+      },
+      "output_sha256": "dce5e7bc3079f57ea29f4339d77367c81f0e40b0b125617a4fe1b68ce5163c98",
+      "output_path": "docs/architecture/evidence/bootstrap-prepass-classification/adjacent-output.txt"
+    }
+  },
+  "whitespace": "The three raw output files are preserved verbatim; code, JSON and prose are checked separately from any raw-log trailing whitespace."
+}

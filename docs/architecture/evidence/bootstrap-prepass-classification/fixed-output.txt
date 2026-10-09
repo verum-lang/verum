@@ -1,0 +1,9 @@
+make: warning: confstr() failed with code 5: couldn't get path of DARWIN_USER_TEMP_DIR; using /tmp instead
+python3 scripts/ci/tests/test_bake_prepass_parity.py
+.....
+----------------------------------------------------------------------
+Ran 5 tests in 0.129s
+
+OK
+python3 scripts/ci/check_bake_prepass_parity.py
+check_bake_prepass_parity: OK — 7 pre-pass(es) classified
