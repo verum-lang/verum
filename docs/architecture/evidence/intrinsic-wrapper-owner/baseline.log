@@ -1,0 +1,36 @@
+   Compiling verum_ast v0.1.0 (/Users/taaliman/.codex/worktrees/returned-reference-summary/verum/crates/verum_ast)
+   Compiling verum_error v0.1.0 (/Users/taaliman/.codex/worktrees/returned-reference-summary/verum/crates/verum_error)
+   Compiling verum_diagnostics v0.1.0 (/Users/taaliman/.codex/worktrees/returned-reference-summary/verum/crates/verum_diagnostics)
+   Compiling verum_lexer v0.1.0 (/Users/taaliman/.codex/worktrees/returned-reference-summary/verum/crates/verum_lexer)
+   Compiling verum_cbgr v0.1.0 (/Users/taaliman/.codex/worktrees/returned-reference-summary/verum/crates/verum_cbgr)
+   Compiling verum_fast_parser v0.1.0 (/Users/taaliman/.codex/worktrees/returned-reference-summary/verum/crates/verum_fast_parser)
+   Compiling verum_vbc v0.1.0 (/Users/taaliman/.codex/worktrees/returned-reference-summary/verum/crates/verum_vbc)
+error[E0308]: mismatched types
+  --> crates/verum_vbc/tests/intrinsic_wrapper_owner.rs:27:49
+   |
+27 |     descriptor.instructions = decoded.then_some(instructions);
+   |                                       --------- ^^^^^^^^^^^^ expected `Vec<Instruction>`, found `List<Instruction>`
+   |                                       |
+   |                                       arguments to this method are incorrect
+   |
+   = note: expected struct `Vec<Instruction>`
+              found struct `verum_common::List<Instruction>`
+help: the return type of this call is `verum_common::List<Instruction>` due to the type of the argument passed
+  --> crates/verum_vbc/tests/intrinsic_wrapper_owner.rs:27:31
+   |
+27 |     descriptor.instructions = decoded.then_some(instructions);
+   |                               ^^^^^^^^^^^^^^^^^^------------^
+   |                                                 |
+   |                                                 this argument influences the return type of `then_some`
+note: method defined here
+  --> /Users/taaliman/.rustup/toolchains/nightly-2026-08-20-aarch64-apple-darwin/lib/rustlib/src/rust/library/core/src/bool.rs:36:18
+   |
+36 |     pub const fn then_some<T: [const] Destruct>(self, t: T) -> Option<T> {
+   |                  ^^^^^^^^^
+help: try using a conversion method
+   |
+27 |     descriptor.instructions = decoded.then_some(instructions.to_vec());
+   |                                                             +++++++++
+
+For more information about this error, try `rustc --explain E0308`.
+error: could not compile `verum_vbc` (test "intrinsic_wrapper_owner") due to 1 previous error

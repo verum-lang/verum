@@ -1,0 +1,225 @@
+{
+  "task": "T1688",
+  "status": "Pending-band owner repair passed assembled-module and library controls; ordinary startup replay pending",
+  "tested_commit": "c00ea7e51d3904c8b3c67cdd9d92f9d6ad34851c",
+  "inputs_sha256": {
+    "crates/verum_vbc/src/module.rs": "3f74b9d44ee8017992384550bd40ee3d35d6346ddf245848412fabb9675db09e",
+    "crates/verum_vbc/tests/intrinsic_wrapper_owner.rs": "3260a4f9c1bfc88d148d13e5fe31feeb4e36f2dc5398cea5942737c2cce84046"
+  },
+  "root_cause": "synthesize_intrinsic_band_wrappers used the first executable descriptor ending with the same bare leaf, before checking intrinsic eligibility. The preserved ordinary trace resolves AtomicU64.new(1) as ArenaPool.new(1).",
+  "repair": "Only exact qualified target spellings carried by mount aliases can select a real declaration during fallback. Archive-local numeric IDs do not authorize selection. All target intents are considered in order; absent or bare intents remain unresolved. Existing unaliased intrinsic synthesis remains available.",
+  "ordinary_baseline": "docs/architecture/evidence/record-residual-startup/trace-stage19/analysis.json",
+  "controls": [
+    "Unrelated constructor and intrinsic-name methods never capture pending calls",
+    "Actual named missing-callee interpreter error; correct declared constructor dispatch",
+    "Explicit canonical aliases override same-leaf and archive-ID collisions",
+    "Encoded-only body, multiple alias intents and repeat-map compatibility",
+    "Missing or bare declared alias targets remain unresolved",
+    "Mounted canonical intrinsic body, exact local definition and non-core refusal"
+  ],
+  "gates": {
+    "baseline": {
+      "command": [
+        "cargo",
+        "+nightly-2026-08-20",
+        "test",
+        "--offline",
+        "--locked",
+        "--manifest-path",
+        "/Users/taaliman/.codex/worktrees/returned-reference-summary/verum/Cargo.toml",
+        "-p",
+        "verum_vbc",
+        "--no-default-features",
+        "--features",
+        "compression,table_dispatch,codegen,ffi",
+        "--test",
+        "intrinsic_wrapper_owner",
+        "--",
+        "--test-threads=1",
+        "--nocapture"
+      ],
+      "cwd": "/Users/taaliman/.codex/worktrees/returned-reference-summary/verum",
+      "head": "0f363286fb5d542989d39dea9c2397f71c4eaf88",
+      "environment": {
+        "CARGO_TARGET_DIR": "/Users/taaliman/.tmp/verum-codex-01a10248/native-target",
+        "CARGO_BUILD_JOBS": "2",
+        "CARGO_INCREMENTAL": "0",
+        "VERUM_NO_AUTO_PRECOMPILE": "1",
+        "RUST_MIN_STACK": "16777216"
+      },
+      "inputs_before": {
+        "crates/verum_vbc/src/module.rs": "7b0b21d7079ae85ab3afaa4b3d194d674935196aff4551156c8c7b2822f32fd9",
+        "crates/verum_vbc/tests/intrinsic_wrapper_owner.rs": "b0ce4a6573583688ca6fb3a03b6662fed5849d7a68c08bd385ee7e243b0f4939"
+      },
+      "timeout_seconds": 600,
+      "returncode": 101,
+      "timed_out": false,
+      "elapsed_seconds": 57.175,
+      "inputs_after": {
+        "crates/verum_vbc/src/module.rs": "7b0b21d7079ae85ab3afaa4b3d194d674935196aff4551156c8c7b2822f32fd9",
+        "crates/verum_vbc/tests/intrinsic_wrapper_owner.rs": "b0ce4a6573583688ca6fb3a03b6662fed5849d7a68c08bd385ee7e243b0f4939"
+      },
+      "inputs_unchanged": true,
+      "log_sha256": "e1a389a57ff449bf942c7e98ab76faf05623c7868166c363161df5360cea3a2b",
+      "durable_log": "docs/architecture/evidence/intrinsic-wrapper-owner/baseline.log",
+      "test_summaries": []
+    },
+    "baseline-compiled": {
+      "command": [
+        "cargo",
+        "+nightly-2026-08-20",
+        "test",
+        "--offline",
+        "--locked",
+        "--manifest-path",
+        "/Users/taaliman/.codex/worktrees/returned-reference-summary/verum/Cargo.toml",
+        "-p",
+        "verum_vbc",
+        "--no-default-features",
+        "--features",
+        "compression,table_dispatch,codegen,ffi",
+        "--test",
+        "intrinsic_wrapper_owner",
+        "--",
+        "--test-threads=1",
+        "--nocapture"
+      ],
+      "cwd": "/Users/taaliman/.codex/worktrees/returned-reference-summary/verum",
+      "head": "c3021068483c2a37a946fe6e50305b424f52a61b",
+      "environment": {
+        "CARGO_TARGET_DIR": "/Users/taaliman/.tmp/verum-codex-01a10248/native-target",
+        "CARGO_BUILD_JOBS": "2",
+        "CARGO_INCREMENTAL": "0",
+        "VERUM_NO_AUTO_PRECOMPILE": "1",
+        "RUST_MIN_STACK": "16777216"
+      },
+      "inputs_before": {
+        "crates/verum_vbc/src/module.rs": "7b0b21d7079ae85ab3afaa4b3d194d674935196aff4551156c8c7b2822f32fd9",
+        "crates/verum_vbc/tests/intrinsic_wrapper_owner.rs": "284c561e9ad5d7d6fa9c481406cc614e740a0a16d183fa146f66b2960f99010a"
+      },
+      "timeout_seconds": 600,
+      "returncode": 101,
+      "timed_out": false,
+      "elapsed_seconds": 48.063,
+      "inputs_after": {
+        "crates/verum_vbc/src/module.rs": "7b0b21d7079ae85ab3afaa4b3d194d674935196aff4551156c8c7b2822f32fd9",
+        "crates/verum_vbc/tests/intrinsic_wrapper_owner.rs": "284c561e9ad5d7d6fa9c481406cc614e740a0a16d183fa146f66b2960f99010a"
+      },
+      "inputs_unchanged": true,
+      "log_sha256": "a67ab552fd0b9294abc7ea82be470edf34f37a65d34948074bbd29af47b4657c",
+      "durable_log": "docs/architecture/evidence/intrinsic-wrapper-owner/baseline-compiled.log",
+      "test_summaries": [
+        "test result: FAILED. 3 passed; 5 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s"
+      ]
+    },
+    "repaired": {
+      "command": [
+        "cargo",
+        "+nightly-2026-08-20",
+        "test",
+        "--offline",
+        "--locked",
+        "--manifest-path",
+        "/Users/taaliman/.codex/worktrees/returned-reference-summary/verum/Cargo.toml",
+        "-p",
+        "verum_vbc",
+        "--no-default-features",
+        "--features",
+        "compression,table_dispatch,codegen,ffi",
+        "--test",
+        "intrinsic_wrapper_owner",
+        "--test",
+        "xmod_band_resolution_pins",
+        "--test",
+        "fn_lookup_index_matches_the_scan",
+        "--",
+        "--test-threads=1",
+        "--nocapture"
+      ],
+      "cwd": "/Users/taaliman/.codex/worktrees/returned-reference-summary/verum",
+      "head": "c00ea7e51d3904c8b3c67cdd9d92f9d6ad34851c",
+      "environment": {
+        "CARGO_TARGET_DIR": "/Users/taaliman/.tmp/verum-codex-01a10248/native-target",
+        "CARGO_BUILD_JOBS": "2",
+        "CARGO_INCREMENTAL": "0",
+        "VERUM_NO_AUTO_PRECOMPILE": "1",
+        "RUST_MIN_STACK": "16777216"
+      },
+      "inputs_before": {
+        "crates/verum_vbc/src/module.rs": "3f74b9d44ee8017992384550bd40ee3d35d6346ddf245848412fabb9675db09e",
+        "crates/verum_vbc/tests/intrinsic_wrapper_owner.rs": "3260a4f9c1bfc88d148d13e5fe31feeb4e36f2dc5398cea5942737c2cce84046"
+      },
+      "timeout_seconds": 600,
+      "returncode": 0,
+      "timed_out": false,
+      "elapsed_seconds": 49.275,
+      "inputs_after": {
+        "crates/verum_vbc/src/module.rs": "3f74b9d44ee8017992384550bd40ee3d35d6346ddf245848412fabb9675db09e",
+        "crates/verum_vbc/tests/intrinsic_wrapper_owner.rs": "3260a4f9c1bfc88d148d13e5fe31feeb4e36f2dc5398cea5942737c2cce84046"
+      },
+      "inputs_unchanged": true,
+      "log_sha256": "41c930adfdedb36820b6b7f9357b8e10e64044ff1ea8dc32a01fea92992f1b2f",
+      "durable_log": "docs/architecture/evidence/intrinsic-wrapper-owner/repaired.log",
+      "test_summaries": [
+        "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s",
+        "test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s",
+        "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s"
+      ]
+    },
+    "module-library": {
+      "command": [
+        "cargo",
+        "+nightly-2026-08-20",
+        "test",
+        "--offline",
+        "--locked",
+        "--manifest-path",
+        "/Users/taaliman/.codex/worktrees/returned-reference-summary/verum/Cargo.toml",
+        "-p",
+        "verum_vbc",
+        "--no-default-features",
+        "--features",
+        "compression,table_dispatch,codegen,ffi",
+        "--lib",
+        "module::precompile_extension_tests",
+        "--",
+        "--test-threads=1",
+        "--nocapture"
+      ],
+      "cwd": "/Users/taaliman/.codex/worktrees/returned-reference-summary/verum",
+      "head": "c00ea7e51d3904c8b3c67cdd9d92f9d6ad34851c",
+      "environment": {
+        "CARGO_TARGET_DIR": "/Users/taaliman/.tmp/verum-codex-01a10248/native-target",
+        "CARGO_BUILD_JOBS": "2",
+        "CARGO_INCREMENTAL": "0",
+        "VERUM_NO_AUTO_PRECOMPILE": "1",
+        "RUST_MIN_STACK": "16777216"
+      },
+      "inputs_before": {
+        "crates/verum_vbc/src/module.rs": "3f74b9d44ee8017992384550bd40ee3d35d6346ddf245848412fabb9675db09e",
+        "crates/verum_vbc/tests/intrinsic_wrapper_owner.rs": "3260a4f9c1bfc88d148d13e5fe31feeb4e36f2dc5398cea5942737c2cce84046"
+      },
+      "timeout_seconds": 600,
+      "returncode": 0,
+      "timed_out": false,
+      "elapsed_seconds": 54.168,
+      "inputs_after": {
+        "crates/verum_vbc/src/module.rs": "3f74b9d44ee8017992384550bd40ee3d35d6346ddf245848412fabb9675db09e",
+        "crates/verum_vbc/tests/intrinsic_wrapper_owner.rs": "3260a4f9c1bfc88d148d13e5fe31feeb4e36f2dc5398cea5942737c2cce84046"
+      },
+      "inputs_unchanged": true,
+      "log_sha256": "41aedba49c736d24af171cd6ce67d45df21a72e2a26668742d13166c681eb25a",
+      "durable_log": "docs/architecture/evidence/intrinsic-wrapper-owner/module-library.log",
+      "test_summaries": [
+        "test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 2072 filtered out; finished in 0.01s"
+      ]
+    }
+  },
+  "limits": [
+    "The first baseline attempt failed to compile because the new harness passed List to an existing Vec field. It establishes no production result; the test-only conversion correction preceded the measured 3-pass/5-fail baseline.",
+    "The final focused gate passed 11 new controls plus 6 existing resolution controls. Library coverage here selects module::precompile_extension_tests, not the full VBC library.",
+    "The earlier ranked name resolver and the intrinsic registry leaf lookup are unchanged. This is a pending-band fallback correction, not universal qualified-name or intrinsic authority conformance.",
+    "The frozen archive carries a bare allocator alias target and lacks canonical graph coverage for the AtomicU64 initializer dependency. Those imports require separate producer/dependency work. Existing lenient TLS behavior is unchanged; reaching main alone would not prove all statics initialized.",
+    "No fresh ordinary CLI, registry runtime, AOT or deployment acceptance is attributed to these Rust tests."
+  ]
+}

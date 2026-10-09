@@ -1,0 +1,39 @@
+   Compiling verum_error v0.1.0 (/Users/taaliman/.codex/worktrees/returned-reference-summary/verum/crates/verum_error)
+   Compiling verum_cbgr v0.1.0 (/Users/taaliman/.codex/worktrees/returned-reference-summary/verum/crates/verum_cbgr)
+   Compiling verum_vbc v0.1.0 (/Users/taaliman/.codex/worktrees/returned-reference-summary/verum/crates/verum_vbc)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 45.31s
+     Running tests/fn_lookup_index_matches_the_scan.rs (/Users/taaliman/.tmp/verum-codex-01a10248/native-target/debug/build/verum_vbc/91956fc8e6dab10e/out/fn_lookup_index_matches_the_scan-91956fc8e6dab10e)
+
+running 3 tests
+test a_function_added_after_the_index_is_still_found ... ok
+test a_suffix_match_always_shares_the_probes_last_segment ... ok
+test the_indexed_answers_equal_the_scanned_ones ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/intrinsic_wrapper_owner.rs (/Users/taaliman/.tmp/verum-codex-01a10248/native-target/debug/build/verum_vbc/da9528ee102df78c/out/intrinsic_wrapper_owner-da9528ee102df78c)
+
+running 11 tests
+test bare_carried_target_does_not_authorize_a_global_leaf_choice ... ok
+test carried_alias_accepts_encoded_body_without_decoded_instructions ... ok
+test carried_alias_uses_canonical_body_not_same_leaf_or_archive_local_id ... ok
+test declared_constructor_still_resolves_before_wrapper_fallback ... ok
+test exact_declaration_outranks_intrinsic_even_with_same_leaf_elsewhere ... ok
+test later_exact_carried_target_can_resolve_after_a_missing_intent ... ok
+test missing_constructor_never_uses_another_types_new ... ok
+test missing_declared_alias_body_is_not_replaced_by_a_different_arity_intrinsic ... ok
+test mounted_intrinsic_body_keeps_its_carried_qualified_owner ... ok
+test non_core_name_does_not_acquire_an_intrinsic_wrapper ... ok
+test unrelated_method_cannot_capture_a_genuine_intrinsic_wrapper ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/xmod_band_resolution_pins.rs (/Users/taaliman/.tmp/verum-codex-01a10248/native-target/debug/build/verum_vbc/903b7d0f236ed5ae/out/xmod_band_resolution_pins-903b7d0f236ed5ae)
+
+running 3 tests
+test band_reference_resolves_through_the_one_authority ... ok
+test orphaned_band_call_dies_loud_naming_the_qualified_callee ... ok
+test orphaned_band_call_in_tls_ctor_stays_lenient ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+

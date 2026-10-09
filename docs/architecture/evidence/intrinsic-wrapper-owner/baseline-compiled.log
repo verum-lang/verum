@@ -1,0 +1,54 @@
+   Compiling verum_error v0.1.0 (/Users/taaliman/.codex/worktrees/returned-reference-summary/verum/crates/verum_error)
+   Compiling verum_cbgr v0.1.0 (/Users/taaliman/.codex/worktrees/returned-reference-summary/verum/crates/verum_cbgr)
+   Compiling verum_vbc v0.1.0 (/Users/taaliman/.codex/worktrees/returned-reference-summary/verum/crates/verum_vbc)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 45.57s
+     Running tests/intrinsic_wrapper_owner.rs (/Users/taaliman/.tmp/verum-codex-01a10248/native-target/debug/build/verum_vbc/da9528ee102df78c/out/intrinsic_wrapper_owner-da9528ee102df78c)
+
+running 8 tests
+test carried_alias_accepts_encoded_body_without_decoded_instructions ... 
+thread 'carried_alias_accepts_encoded_body_without_decoded_instructions' (5204924) panicked at crates/verum_vbc/tests/intrinsic_wrapper_owner.rs:120:5:
+assertion `left == right` failed
+  left: Some(FunctionId(2))
+ right: Some(FunctionId(0))
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+test carried_alias_uses_canonical_body_not_same_leaf_or_archive_local_id ... 
+thread 'carried_alias_uses_canonical_body_not_same_leaf_or_archive_local_id' (5204925) panicked at crates/verum_vbc/tests/intrinsic_wrapper_owner.rs:107:5:
+assertion `left == right` failed
+  left: Some(FunctionId(0))
+ right: Some(FunctionId(1))
+FAILED
+test declared_constructor_still_resolves_before_wrapper_fallback ... ok
+test exact_declaration_outranks_intrinsic_even_with_same_leaf_elsewhere ... ok
+test missing_constructor_never_uses_another_types_new ... 
+thread 'missing_constructor_never_uses_another_types_new' (5204928) panicked at crates/verum_vbc/tests/intrinsic_wrapper_owner.rs:65:9:
+assertion `left == right` failed: core.sync.atomic.AtomicU64.new
+  left: 1
+ right: 0
+FAILED
+test missing_declared_alias_body_is_not_replaced_by_a_different_arity_intrinsic ... 
+thread 'missing_declared_alias_body_is_not_replaced_by_a_different_arity_intrinsic' (5204929) panicked at crates/verum_vbc/tests/intrinsic_wrapper_owner.rs:135:5:
+assertion `left == right` failed
+  left: 1
+ right: 0
+FAILED
+test non_core_name_does_not_acquire_an_intrinsic_wrapper ... ok
+test unrelated_method_cannot_capture_a_genuine_intrinsic_wrapper ... 
+thread 'unrelated_method_cannot_capture_a_genuine_intrinsic_wrapper' (5204931) panicked at crates/verum_vbc/tests/intrinsic_wrapper_owner.rs:93:5:
+assertion `left == right` failed
+  left: Some("Other.eq")
+ right: Some("__band_wrapper$core$base$primitives$eq")
+FAILED
+
+failures:
+
+failures:
+    carried_alias_accepts_encoded_body_without_decoded_instructions
+    carried_alias_uses_canonical_body_not_same_leaf_or_archive_local_id
+    missing_constructor_never_uses_another_types_new
+    missing_declared_alias_body_is_not_replaced_by_a_different_arity_intrinsic
+    unrelated_method_cannot_capture_a_genuine_intrinsic_wrapper
+
+test result: FAILED. 3 passed; 5 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+error: test failed, to rerun pass `-p verum_vbc --test intrinsic_wrapper_owner`

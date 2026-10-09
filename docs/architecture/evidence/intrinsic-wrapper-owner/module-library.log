@@ -1,0 +1,14 @@
+   Compiling verum_error v0.1.0 (/Users/taaliman/.codex/worktrees/returned-reference-summary/verum/crates/verum_error)
+   Compiling verum_cbgr v0.1.0 (/Users/taaliman/.codex/worktrees/returned-reference-summary/verum/crates/verum_cbgr)
+   Compiling verum_vbc v0.1.0 (/Users/taaliman/.codex/worktrees/returned-reference-summary/verum/crates/verum_vbc)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 52.54s
+     Running unittests src/lib.rs (/Users/taaliman/.tmp/verum-codex-01a10248/native-target/debug/build/verum_vbc/9777a8ed778eb0dc/out/verum_vbc-9777a8ed778eb0dc)
+
+running 4 tests
+test module::precompile_extension_tests::band_wrapper_synthesis_binds_registry_intrinsics_only ... ok
+test module::precompile_extension_tests::defaults_are_empty ... ok
+test module::precompile_extension_tests::universal_function_resolves_via_descriptor ... ok
+test module::precompile_extension_tests::variant_table_overrides_descriptor ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 2072 filtered out; finished in 0.01s
+
