@@ -323,10 +323,42 @@ seconds including Cargo. Private-target standard-library artifacts remained
 unchanged; these gates did not rebuild the ordinary CLI.
 
 Integration with the source-owner fixes exposed a separate consumer defect:
-both new direct and umbrella `Map<Text, JsonValue>` checker controls still
-fail. T1664 tracks alias argument substitution at this boundary, retaining
-the failing controls. The archive producer correction is independently
-validated; complete JSON checking and registry runtime acceptance remain open.
+at `412b0425e`, both direct and umbrella `Map<Text, JsonValue>` checker controls
+failed despite the corrected archive payload identity. That historical
+baseline is preserved in the T1664 receipt below; the consumer fix now passes
+those unchanged controls. The producer gate above retains its original source
+and scope.
+
+## Archived generic payload checking — T1664
+
+Alias expansion previously selected argument zero for every anonymous type
+variable by inspecting its debug text. This changed `Map<Text, JsonValue>`
+into `Map<Text, Text>` on the consumer recovery path. Substitution now uses
+parameter names and ordered variable slots owned by the exact declaration.
+Metadata nominal templates record the variables minted during registration;
+unused and reordered parameters retain their positions, and unrelated nested
+variables are not substituted. Missing slot metadata does not trigger a
+free-variable scan or a same-leaf owner lookup. The existing normalization
+fallback and unifier nominal-name comparison are unchanged.
+
+At frozen source `6117e6bb5`, all **5 alias-slot controls** and **15
+source-to-archive-to-metadata-to-checker controls** passed. The original direct
+and umbrella `Map<Text, JsonValue>` positives and wrong `Bool`, key and value
+refusals remain unchanged and pass in both lazy and eager loading modes. The
+slot controls separately cover exact owners, reordered and phantom parameters,
+foreign variables and absent slot metadata. The full `verum_types --tests`
+gate passed **3,962 tests across 173 targets**, with zero failures, zero
+filtered tests and three pre-existing ignores. The
+[alias argument gate receipt](evidence/registry-alias-argument-gate.json)
+records the causal failures, passing gates, artifact identities and
+byte-equivalent integration of the owned source and tests.
+
+These are source-library gates using unchanged, separately identified
+standard-library artifacts with automatic precompilation disabled. Fresh
+ordinary standard-library/CLI JSON checking, the whole registry project check
+and registry runtime acceptance remain pending; the candidate is still baking.
+The passing fixtures do not establish an ordinary product replay, AOT or
+native execution.
 
 ## Workspace publication manifest authority — T1665
 
