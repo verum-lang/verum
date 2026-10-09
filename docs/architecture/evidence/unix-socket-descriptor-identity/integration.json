@@ -159,5 +159,36 @@
     "/private/tmp/verum-T1708-baseline-executable": "d115cd63448063b7cb5df75c64db647111def0ce68c90aeaff65767b0185ecad",
     "/private/tmp/verum-T1708-zero-baseline-executable": "7cb4cff0882c016f56daec89f566f79443b4d82420fa984dc6e45ca55f429b07",
     "/private/tmp/verum-T1708-fixed-executable": "e18bc1906a9fb1674d3d8e83a0e31ff7c04af67508ea0ea5227080894963d3f9"
+  },
+  "rebase": {
+    "integration_base": "778df174f60aa87281622bf463801027125810b0",
+    "pre_rebase_endpoint": "1fef3e758982eec74f4866fba709acffebf950f4",
+    "rebased_source_endpoint": "9d6fb0b6b25b9ffaccad1d5642f7dc7067d48cb3",
+    "tested_source": "254400263dd6dcbf7f33884d985a9f625f92653e",
+    "source_paths_byte_identical_to_pre_rebase": {
+      "crates/verum_vbc/src/interpreter/dispatch_table/handlers/net_runtime.rs": "f67d7fe3436cbcfe6cce5de1f9662d54ac7b04d252e31c467b660195ef5199a4",
+      "crates/verum_vbc/src/interpreter/io_engine.rs": "f4eb364e97666347444375f8030e191c1c1c1f45197ba5de686a4897fc6e7920",
+      "crates/verum_vbc/tests/unit/net_runtime_descriptor_identity.rs": "35e3d1b48668b9a1a0e34f57eb740b7c22cdd4655e8e161e1ef962c2d7275534",
+      "crates/verum_vbc/tests/unit/net_runtime_bounded_tcp.rs": "5f18aa2da1e5d2fcbd89e2d5afc8c6fac534928dcf27818dd3924d3fd0182175"
+    },
+    "tested_net_runtime_noncomment_lines_identical": true,
+    "interpretation": "The four owned networking/fixture paths are byte-identical across rebase. The tested source differs only by explicitly recorded comments in net_runtime.rs. Other VBC differences are root-reviewed T1701 integration; the combined source has not yet run the complete VBC library gate.",
+    "additional_changed_vbc_paths_from_integration": [
+      "crates/verum_vbc/src/codegen/context.rs",
+      "crates/verum_vbc/src/codegen/expressions.rs",
+      "crates/verum_vbc/src/codegen/mod.rs",
+      "crates/verum_vbc/src/codegen/tests_comprehensive.rs",
+      "crates/verum_vbc/src/deserialize.rs",
+      "crates/verum_vbc/src/format.rs",
+      "crates/verum_vbc/src/interpreter/autodiff_record.rs",
+      "crates/verum_vbc/src/interpreter/dispatch_table/handlers/method_dispatch.rs",
+      "crates/verum_vbc/src/linker.rs",
+      "crates/verum_vbc/src/module.rs",
+      "crates/verum_vbc/src/serialize.rs",
+      "crates/verum_vbc/src/tests.rs",
+      "crates/verum_vbc/tests/declared_function_bodies.rs",
+      "crates/verum_vbc/tests/interpreter/argument_tape_boundary.rs",
+      "crates/verum_vbc/tests/numeric_method_declaration_owner.rs"
+    ]
   }
 }
