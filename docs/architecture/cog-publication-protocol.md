@@ -92,6 +92,11 @@ CLI must not discard the signature or announce that this request is valid for
 publication. Verified signature and evidence support remains required launch
 work tracked by T1648.
 
+The command's current manifest-to-metadata conversion also flattens detailed
+dependencies. T1651 tracks preserving feature/optional/default-feature options
+and refusing source declarations that the registry cannot represent. Correct
+wire framing alone does not establish faithful project dependency semantics.
+
 ## Limits and allocation
 
 | Data | Default client limit | Protocol ceiling |
@@ -132,8 +137,12 @@ An exact retry with the same source metadata, archive bytes and authorized
 principal may return the existing receipt. Changing metadata or archive bytes
 at an existing immutable name/version coordinate yields `409`; changing the
 coordinate's recorded authority cannot silently replace its provenance.
-Transport JSON member order is irrelevant to an identical retry. This rule
-does not define a canonical serialization or bless placeholder digest,
+Transport JSON member order is irrelevant to an identical retry. An existing
+catalog that compares only archive digests cannot establish this condition:
+the admission transaction must store and compare the full validated source
+metadata and authenticated principal, while retaining the original server
+timestamp and provenance. This rule does not define a canonical serialization
+or bless placeholder digest,
 signature or log-proof implementations as cryptographic evidence.
 
 ## Success receipt and errors
