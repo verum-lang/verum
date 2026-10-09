@@ -200,3 +200,17 @@ fn registered_listener_uses_its_owned_os_descriptor() {
     assert!(tcp_local_port(listener.fd()) > 0);
     listener.close();
 }
+
+#[test]
+fn registered_stream_uses_its_owned_os_descriptor() {
+    // No peer or loopback traffic is needed to check registry ownership.
+    // SAFETY: socket creates a fresh TCP descriptor owned by this fixture.
+    let fd = unsafe { libc::socket(libc::AF_INET, libc::SOCK_STREAM, 0) };
+    assert!(fd >= 0, "create owned TCP socket");
+    // SAFETY: fd is the live TCP socket just created, with no other owner.
+    let stream = unsafe { TcpStream::from_raw_fd(fd) };
+    let registered = RegisteredSocket(Some(register_accepted_stream(stream)));
+    assert_eq!(registered.fd(), i64::from(fd));
+    assert_eq!(registered.fd(), registered.actual_fd());
+    registered.close();
+}

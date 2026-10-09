@@ -5,12 +5,12 @@
 //! for all of them — script-mode + interpreter-mode networking was
 //! a documentation-only feature.
 //!
-//! Resource model: a thread-local `HashMap<i64, Resource>` keyed by a
-//! synthetic file-descriptor number. The number is a small monotonic
-//! counter (starts at 1) — NOT a kernel fd, so we never hand the
-//! value to a syscall, only to other intrinsics. `__tcp_close_raw`
-//! removes the entry; `Drop` of the resource closes the underlying
-//! socket.
+//! Resource model: a process-wide registry owns registered sockets. On Unix
+//! its keys are the sockets' actual OS descriptors, matching raw listeners
+//! returned by `tcp_listen_v2` and the syscall-facing standard-library ABI.
+//! Distinct live sockets therefore cannot share a key. On non-Unix targets
+//! the registered-only paths retain opaque monotonic handles. `__tcp_close_raw`
+//! removes a registered owner; its `Drop` closes the underlying socket.
 //!
 //! The contract is the one declared in `core/sys/raw.vr`:
 //!  * `__tcp_listen_raw(port: Int) -> Int` — bind 0.0.0.0:port, listen.
@@ -37,6 +37,7 @@
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream, UdpSocket};
+#[cfg(not(unix))]
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{LazyLock, Mutex};
 use std::time::Duration;
@@ -57,10 +58,9 @@ enum NetResource {
 // return DISTINCT instances per worker, so a `tcp_send(fd)` issued
 // on a different thread than the original `tcp_connect` would NOT
 // find the fd.  Production server systems MUST share the registry
-// across all workers.  `LazyLock<Mutex<HashMap>>` is the chosen
-// primitive: process-wide, predictable latency under contention,
-// zero external deps.  The fd allocator uses an `AtomicI64` +
-// `fetch_add(1, Relaxed)` — fully lock-free.
+// across all workers. `LazyLock<Mutex<HashMap>>` coordinates ownership.
+// Unix keys come from the owned OS descriptor, so they cannot shadow a
+// different live raw descriptor. Non-Unix handles use an atomic counter.
 //
 // **Lock-drop discipline (architectural invariant)**: the REGISTRY
 // mutex is NEVER held across blocking I/O.  Two patterns achieve
@@ -88,13 +88,24 @@ enum NetResource {
 // (refcounted file-table entry).  No use-after-free.
 static REGISTRY: LazyLock<Mutex<HashMap<i64, NetResource>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
+#[cfg(not(unix))]
 static NEXT_FD: AtomicI64 = AtomicI64::new(1);
 
+#[cfg(not(unix))]
 fn alloc_fd() -> i64 {
     NEXT_FD.fetch_add(1, Ordering::Relaxed)
 }
 
 fn register(res: NetResource) -> i64 {
+    // The public Unix API also accepts raw descriptors. Registry ownership
+    // cannot introduce a second integer namespace over those same values.
+    #[cfg(unix)]
+    let fd = match &res {
+        NetResource::Listener(listener) => listener_raw_fd(listener),
+        NetResource::Stream(stream) => stream_raw_fd(stream),
+        NetResource::Udp(socket) => udp_raw_fd(socket),
+    };
+    #[cfg(not(unix))]
     let fd = alloc_fd();
     REGISTRY.lock().unwrap().insert(fd, res);
     fd
@@ -281,7 +292,8 @@ pub fn tcp_listen_v2(host: &str, port: i64, backlog: i64, flags: i64) -> i64 {
 /// (`crates/verum_codegen/src/llvm/runtime.rs`).
 ///
 /// **Legacy registry fallback**: pre-#25 listeners that were
-/// `register()`-ed with a synthetic fd still hit the registry path.
+/// registered listeners still hit the registry path (opaque handles on
+/// non-Unix, owned OS descriptors on Unix).
 /// The registry tries first, then falls through to `getsockname` if
 /// the fd isn't tracked — single API surface, two backing mechanisms.
 pub fn tcp_local_port(fd: i64) -> i64 {
@@ -401,8 +413,8 @@ pub fn tcp_peer_addr(fd: i64) -> Option<(u8, String, i64)> {
 }
 
 pub fn tcp_accept(listen_fd: i64) -> i64 {
-    // Pull the listener out of the registry briefly so we don't hold
-    // a RefCell borrow across the (potentially blocking) accept call.
+    // Pull the listener out of the registry briefly so we do not hold
+    // the registry mutex across the (potentially blocking) accept call.
     let listener: Option<TcpListener> = {
         let mut map = REGISTRY.lock().unwrap();
         match map.remove(&listen_fd) {
@@ -416,7 +428,7 @@ pub fn tcp_accept(listen_fd: i64) -> i64 {
         }
     };
     if let Some(listener) = listener {
-        // Synthetic-fd path (legacy `__tcp_listen_raw`).
+        // Registered-listener path (`__tcp_listen_raw`).
         let result = listener.accept();
         {
             REGISTRY.lock().unwrap()
@@ -434,9 +446,8 @@ pub fn tcp_accept(listen_fd: i64) -> i64 {
     // enough to call accept(2), then immediately surrender ownership
     // back via `into_raw_fd()` to keep the listener alive (`TcpListener::Drop`
     // would close the kernel fd otherwise). The accepted connection's
-    // stream is registered in REGISTRY so subsequent recv/send/close
-    // continue through the existing synthetic-fd machinery without
-    // change.
+    // stream is registered under its own OS descriptor so subsequent
+    // recv/send/close share the same descriptor authority.
     //
 
     // Cross-platform: Unix uses FromRawFd; Windows uses FromRawSocket.
@@ -489,7 +500,7 @@ pub fn tcp_connect(host: &str, port: i64) -> i64 {
 }
 
 pub fn tcp_send(fd: i64, data: &[u8]) -> i64 {
-    // Synthetic-fd registry path: clone the stream out of the
+    // Registered-stream path: clone the stream out of the
     // registry under the lock, then drop the lock before the
     // (potentially blocking) write_all.  Concurrent send/recv on
     // OTHER fds proceed in parallel.  See "Lock-drop discipline"
@@ -548,7 +559,7 @@ pub fn tcp_recv(fd: i64, max_len: i64) -> Option<String> {
     }
     let cap = max_len.min(1 << 20) as usize; // hard-cap 1 MiB / call.
     let mut buf = vec![0_u8; cap];
-    // Synthetic-fd registry path: clone-and-go (lock dropped
+    // Registered-stream path: clone-and-go (lock dropped
     // before the blocking read).
     let clone_result: Option<TcpStream> = {
         let map = REGISTRY.lock().unwrap();
@@ -591,7 +602,7 @@ pub fn tcp_recv(fd: i64, max_len: i64) -> Option<String> {
 }
 
 pub fn tcp_close(fd: i64) -> i64 {
-    // Legacy synthetic-fd path: drop from registry, std::net Drop runs.
+    // Registered owner: remove it and close its socket through std::net Drop.
     let registry_hit = {
         let mut map = REGISTRY.lock().unwrap();
         map.remove(&fd).is_some()
@@ -733,7 +744,7 @@ pub fn udp_close(fd: i64) -> i64 {
 //      - bytes_written or negative status as above.
 //
 //  * `tcp_connect_timeout(host, port, timeout_ms) -> i64`
-//      - synthetic fd or negative status.  Connect-timeout has no
+//      - registered socket handle or negative status. Connect-timeout has no
 //        coop variant today: every intrinsic dispatch site for it
 //        runs at script-startup before the task scheduler has any
 //        ready peers to pump.
@@ -1029,7 +1040,7 @@ pub fn tcp_accept_timeout_coop(
         }
     }
 
-    // Registry path: a synthetic fd backed by a tracked TcpListener.
+    // Registry path: this descriptor has an owned TcpListener.
     let cloned: Option<TcpListener> = {
         let map = REGISTRY.lock().unwrap();
         match map.get(&listen_fd) {
