@@ -303,6 +303,8 @@ pub(super) fn publish_to_response(
                 Err(error) => panic!("fixture accept failed: {error}"),
             }
         };
+        // A read timeout does not clear inherited O_NONBLOCK on Darwin.
+        stream.set_nonblocking(false).unwrap();
         stream
             .set_read_timeout(Some(Duration::from_secs(5)))
             .unwrap();

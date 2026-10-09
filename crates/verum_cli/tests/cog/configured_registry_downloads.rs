@@ -132,6 +132,12 @@ fn isolated_install_case() {
         loop {
             match listener.accept() {
                 Ok((mut stream, _)) => {
+                    // Darwin can inherit the listener's nonblocking mode.
+                    // These bounded request reads require blocking streams.
+                    stream.set_nonblocking(false).unwrap();
+                    stream
+                        .set_write_timeout(Some(Duration::from_secs(3)))
+                        .unwrap();
                     stream
                         .set_read_timeout(Some(Duration::from_secs(3)))
                         .unwrap();
