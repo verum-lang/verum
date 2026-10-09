@@ -3,7 +3,14 @@
 Companion to `registry-federated-design.md`, which states the principles.
 This document states the **rules**: what a node answers, what a client
 may conclude from an answer, and what is refused. It is written to be
-implementable without further decisions.
+an implementation contract. The transport model below still needs a
+shared authenticated archive-upload contract with the CLI (T1636).
+
+The current reference node's digest text, signer name and tree-size fields
+model evidence relationships. They do not implement the cryptographic
+verification required by §2. Acceptance requires real signed content,
+durable archive storage and client verification; type names alone do not
+establish those properties.
 
 A term in **bold** on first use is defined here and used precisely
 thereafter.
@@ -215,10 +222,13 @@ obligation on the module that implements it, in the sense of
 * the cache module declares that a cached answer keeps the attribution it
   was fetched with.
 
-These are stated as theorems with their closure obligations, so that a
-claim the code stops honouring is a build failure rather than a stale
-comment. `verum arch check --strict` is the gate; an unmet obligation is
-an audit finding, a false claim is a compile error.
+These properties require theorem obligations and corresponding compiler
+and runtime controls. Architectural annotation validation and theorem
+verification are distinct checks: `verum arch check --strict` cannot
+establish a proof merely from an annotation. A release gate must account
+for every obligation and refuse missing results, invocation errors and
+unclosed required proofs. A deliberately false theorem must fail the
+same verification path used for acceptance.
 
 ---
 
@@ -240,8 +250,9 @@ Named so that their absence is a decision:
 ## 8. The wire
 
 A client that publishes to a node, or asks one a question, does so over
-HTTP. This section fixes the three routes and the one body format, so
-that "a node" means the same thing to a publisher and to a mirror.
+HTTP. This section describes the current model routes and policy body.
+The shared CLI/service upload, authentication and download contract still
+needs reconciliation before launch; these routes alone are insufficient.
 
 ### 8.1 Routes
 
@@ -249,7 +260,7 @@ that "a node" means the same thing to a publisher and to a mirror.
 |---|---|---|
 | `GET /search[?name=&from=]` | none | what the node holds |
 | `GET /resolve?name=<pkg>` | none | which configured source has it |
-| `POST /publish` | Clock, NodeIdentity, Uplink | acceptance or a refusal |
+| `POST /publish` | Clock, NodeIdentity | acceptance or a refusal; local history is independent of uplink availability |
 
 The clause set of `/search` is a CONJUNCTION and nothing else, matching
 §1: `?name=X&from=Y` means both. There is no disjunction on the wire
@@ -263,7 +274,9 @@ moment.
 
 ### 8.2 The publish body
 
-One JSON object, four members, all required:
+The current domain-model wire format uses one JSON object with four
+required members. It describes policy inputs; it is not yet the final
+source-archive upload protocol used by the developer CLI:
 
 ```json
 {
@@ -278,6 +291,13 @@ One JSON object, four members, all required:
 owns. An id says WHO is publishing; a pattern says WHAT they may
 publish (§1). Conflating them is how a registry ends up letting anyone
 who can spell a scope publish into it.
+
+This field is a request, not authentication evidence. The service must bind
+the authenticated principal to the permitted authority and name scope
+before granting publication rights. Archive bytes, metadata and their
+integrity binding must survive the same request framing on the client and
+server. The CLI currently speaks `/api/v1/cogs/...` while the model routes
+use `/publish` and `/resolve`; reconciliation is a launch requirement.
 
 **A missing or ill-typed member is a refusal that NAMES the member** —
 `missing field: signature.signer` — never a default. The alternative is

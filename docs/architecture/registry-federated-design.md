@@ -1,17 +1,18 @@
 # Verum Registry — a federated protocol with a reference implementation
 
-**Status**: design, owner-mandated 2026-08-25. Supersedes the
-exploratory prototype under the internal registry tree (that tree is
-reference material for domain vocabulary — TUF, sigstore, sumdb,
-advisories, passkeys — not a starting point).
+**Status**: implementation contract. The registry is the primary delivery
+application for the language platform. Its release gate is an authenticated
+publish-to-install flow against a real node; the requirements below are
+not a claim that the current service implements them all.
 
 ## 0. The one-sentence thesis
 
-The registry is **a protocol plus a reference node**, not a service:
-the same binary runs the official index and an enterprise's private
-one, a client cannot tell which it is talking to, and every capability
-the node has is **computed from its own code** by the compiler — the
-architecture is a build artefact, not a diagram.
+The registry combines a protocol, a deployable node and developer tooling.
+The same binary must serve the official index and an enterprise's private
+one through explicit configuration and trust anchors. Its architectural
+contracts and generated specifications must describe the code that runs,
+with verification results tied to the source and tool build that produced
+them.
 
 ## 1. What this must demonstrate
 
@@ -33,7 +34,7 @@ row names the domain problem first.
 | A cache layer must not accidentally perform IO, an audit path must not be fallible in a way that loses records | **Computational properties** (`Pure` / `IO` / `Async` / `Fallible`) | the property set is inferred and enforced at the layer boundary; drift is a compile error, not a code review note |
 | The transparency log's core claim — append-only, no rewrite — is worth proving, not testing | **SMT verification** on the log's insert/verify pair | monotonicity and inclusion-proof soundness are exactly the shape solvers are good at |
 | Wire types (manifests, index rows, protocol frames) must serialise identically on both ends of a federation | **`@derive` + macros** over one type definition | one declaration, two directions, no hand-written codec drift |
-| A private node must never widen its own authority silently after deployment | **ATS-V**: computed Shape, pinned on trust-domain edges, `arch diff` in CI | see §4 |
+| A private node must never widen its own authority silently after deployment | **ATS-V**: computed Shape, pinned on trust-domain edges, capability comparison in CI | see §4 |
 
 ## 2. Federation is the architecture, not a feature
 
@@ -88,13 +89,20 @@ Three consequences the implementation owes:
 1. `verum arch query` answers "what may this path do?" over the
    registry's own corpus — the first real test of the vocabulary at
    scale.
-2. `verum arch diff` runs in the registry's CI: a change that widens
+2. A capability comparison runs in the registry's CI: a change that widens
    the capability surface (a handler that gains `Network(Outbound)`,
    a cache that gains `Write(File)`) fails review by exit code, with
    the widening named.
 3. The physical-enforcement layer applies where the platform allows:
    a node's declared surface becomes its syscall allow-list, so a
    compromised handler cannot exceed what its Shape claims.
+
+The proposed `arch diff` interface is not currently implemented. The
+registry's `arch-check = "strict"` manifest setting also has no consuming
+CLI configuration field. Neither can stand in for an executable gate.
+An architecture gate must demonstrate both an accepted contract and a
+refused widening. Similarly, an `@verify` annotation requests verification;
+generated documentation may claim a proof only from a verification result.
 
 ## 5. Development discipline — the registry is a proving ground
 
@@ -112,20 +120,34 @@ trustworthy iterator surface. Without those, a language defect reaches
 the registry as "the service behaves oddly" instead of "the compiler
 refused, here, for this reason".
 
-## 6. Shape of the work
+## 6. Delivery acceptance
 
-Phase A — this document plus the protocol specification: resolution
-and name authority, federation handshake, verification chain, the
-export/import slice format.
+The first working slice is one source cog published to a configured local
+node and consumed from a fresh project. It must exercise:
 
-Phase B — reference node: domain core (types carrying their invariants)
-→ storage protocol with two implementations → the federation path
-(proxy, cache, offline) → publication (linear tokens, transparency log)
-→ the HTTP surface.
+1. Authentication and scope authorization before any publication mutation.
+2. Validated archive bytes and an immutable name/version coordinate,
+   committed durably before acknowledgement.
+3. Exact-version metadata and download from the same selected registry,
+   with verified integrity and that source recorded in the lockfile.
+4. Installation, module mounting and execution of the cog's exported
+   function in a project with an empty cache.
+5. The same behavior after a node restart, plus refusal of conflicting
+   retries, corrupt bytes, invalid credentials and interrupted writes.
 
-Phase C — enterprise packaging: deployment topology, trust
-configuration, air-gap procedures, upgrade discipline for a node that
-must stay compatible with an official index that keeps moving.
+Keep positive and negative controls beside the implementation. Capture the
+registry source identity, CLI identity, output and stored state. A
+successful download is not evidence that a project can mount the package;
+an in-memory catalog is not evidence of restart durability.
 
-Each phase closes with the language defects it exposed either fixed or
-filed — that list is a deliverable of the phase, not a side effect.
+Develop language support in parallel with this flow. Retain each valid
+registry program that exposes a compiler or runtime defect as a regression,
+and validate it through the ordinary whole-project path after the repair.
+Low-level tests identify causes; release acceptance also requires the
+developer-facing commands and separate interpreter/AOT results.
+
+Federation, air-gap transfer, compiled-cog delivery and enterprise packaging
+extend this accepted publication path. Their trust and provenance rules
+remain requirements throughout development. Commit bounded improvements
+frequently in both repositories and integrate them onto `main` after their
+stated checks pass.
