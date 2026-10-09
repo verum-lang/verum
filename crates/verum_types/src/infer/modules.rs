@@ -2941,15 +2941,16 @@ impl TypeChecker {
                     // returns None for anything but a real non-const free fn,
                     // so types/consts still take the normal early-return.
                     let bind_name = local_name.unwrap_or(item_name);
-                    // T0661 rib order: an ambient meta builtin is not a
-                    // real occupant (see the archive-only gate below).
-                    if (self.ctx.env.lookup(&Text::from(bind_name)).is_none()
-                        || self.meta_builtin_names.contains(&Text::from(bind_name)))
-                        && let Some((scheme, resolved_key)) = self
-                            .resolve_function_via_metadata_reexports(module_path.as_str(), item_name)
+                    // Only a resolution from the requested module proves
+                    // this mount exists. An ambient value or type with the
+                    // same short name cannot supply a missing export.
+                    let mut value_bound_from_metadata = false;
+                    if let Some((scheme, resolved_key)) = self
+                        .resolve_function_via_metadata_reexports(module_path.as_str(), item_name)
                     {
                         self.insert_fn_scheme_guarded(bind_name, scheme);
                         self.record_mount_binding(bind_name, &resolved_key);
+                        value_bound_from_metadata = true;
                     }
 
                     // A MOUNTED CONST IS BOUND BY ITS MOUNT, NOT BY AMBIENT
@@ -2973,7 +2974,7 @@ impl TypeChecker {
                     // entries carrying `is_const` (see FunctionDescriptor), so
                     // the binding is the static one's twin: qualified key,
                     // descriptor type, bound under `bind_name`.
-                    if self.ctx.env.lookup(&Text::from(bind_name)).is_none()
+                    if !value_bound_from_metadata
                         && let Maybe::Some(md) = &self.core_metadata.clone()
                     {
                         let ckey: Text =
@@ -2987,6 +2988,7 @@ impl TypeChecker {
                             self.ctx
                                 .env
                                 .insert(bind_name, crate::context::TypeScheme::mono(ty));
+                            value_bound_from_metadata = true;
                         }
                     }
 
@@ -3030,21 +3032,14 @@ impl TypeChecker {
                     // `core.configuration.format`'s. The rename arm below
                     // already refuses to accept that (T1369, 2026-09-10); the
                     // plain form accepted it because THIS gate returned early.
-                    // Contested names now fall through to the same qualified
-                    // publication. A name declared once is untouched.
+                    // Every metadata fallback must resolve through the
+                    // requested module, including names declared only once.
                     let contested = self.mounted_type_name_is_contested(
                         item_name,
                         module_path.as_str(),
                     );
-                    let type_bound_from_metadata = if self
-                        .ctx
-                        .lookup_type(bind_name)
-                        .is_some()
-                        && !contested
-                    {
-                        true
-                    } else {
-                        self.ensure_mounted_type_loaded_qualified(
+                    let type_bound_from_metadata = self
+                        .ensure_mounted_type_loaded_qualified(
                             item_name,
                             module_path.as_str(),
                         )
@@ -3102,8 +3097,7 @@ impl TypeChecker {
                             self.ctx.define_type(bind_name, ty);
                             true
                         })
-                        .unwrap_or(false)
-                    };
+                        .unwrap_or(false);
                     if std::env::var("VERUM_TRACE_TASK21").is_ok() {
                         eprintln!(
                             "[task21] gate early-return: mod='{}' item='{}' bound_after={}",
@@ -3131,9 +3125,8 @@ impl TypeChecker {
                     //  * transitive imports (span=None) keep the
                     //    lenient skip — later passes surface unresolved
                     //    names at their use sites;
-                    //  * an env binding installed above (metadata
-                    //    free-fn) or pre-existing means the name IS
-                    //    resolved — no error;
+                    //  * an exact metadata type/value resolution above
+                    //    proves this source exports the requested name;
                     //  * `stdlib_single_file_mode` mirrors the in-body
                     //    E401's opt-out;
                     //  * @cfg'd-out items never reach here: the export
@@ -3142,7 +3135,7 @@ impl TypeChecker {
                     //    visibility), so a linux-only item still
                     //    export-resolves when checking on macOS.
                     if let Some(span) = import_span
-                        && self.ctx.env.lookup(&Text::from(bind_name)).is_none()
+                        && !value_bound_from_metadata
                         && !type_bound_from_metadata
                         && !self.stdlib_single_file_mode
                     {
@@ -4874,13 +4867,34 @@ impl TypeChecker {
                                 if register_name != true_name {
                                     use verum_ast::ty::{Ident, Path};
                                     let alias_target = Type::Named {
-                                        path: Path::single(Ident::new(true_name, Span::dummy())),
+                                        path: Path::new(
+                                            format!("{}.{}", source_module_path, true_name)
+                                                .split('.')
+                                                .map(|part| {
+                                                    verum_ast::ty::PathSegment::Name(Ident::new(
+                                                        part,
+                                                        Span::dummy(),
+                                                    ))
+                                                })
+                                                .collect(),
+                                            Span::dummy(),
+                                        ),
                                         args: List::new(),
                                     };
                                     self.ctx.define_type(
                                         verum_common::Text::from(register_name),
                                         alias_target,
                                     );
+                                    // A tuple/newtype also exports a constructor
+                                    // value. Bind the exact source constructor,
+                                    // never the last same-named ambient value.
+                                    let constructor_key =
+                                        format!("{}.{}", source_module_path, true_name);
+                                    if let Some(constructor) =
+                                        self.ctx.env.lookup(&constructor_key).cloned()
+                                    {
+                                        self.ctx.env.insert(register_name, constructor);
+                                    }
                                 }
 
                                 // CRITICAL FIX: Also import implement block methods for the type.
@@ -4910,7 +4924,7 @@ impl TypeChecker {
                                         registry,
                                     ) && let Err(e) = self.import_impl_blocks_for_type_in_module(
                                         &source_module.ast,
-                                        item_name,
+                                        true_name,
                                         Some(&src_path),
                                     ) {
                                         tracing::debug!(
@@ -4925,7 +4939,7 @@ impl TypeChecker {
                                     let direct_path = resolved_module_path.as_str().to_string();
                                     if let Err(e) = self.import_impl_blocks_for_type_in_module(
                                         &module_info.ast,
-                                        item_name,
+                                        true_name,
                                         Some(&direct_path),
                                     ) {
                                         tracing::debug!(
@@ -6006,7 +6020,7 @@ impl TypeChecker {
                             .unwrap_or(false);
                         if takes_by_value {
                             self.self_by_value_methods.insert((
-                                verum_common::Text::from(type_name),
+                                method_owner.clone(),
                                 verum_common::Text::from(func.name.name.as_str()),
                             ));
                         }
@@ -6074,6 +6088,16 @@ impl TypeChecker {
                                 qualified_name
                             );
                         }
+                        // Generic static syntax resolves through the same
+                        // owner bucket as ordinary source impl registration.
+                        self.inherent_methods
+                            .write()
+                            .entry(method_owner.clone())
+                            .or_default()
+                            .insert(
+                                format!("$static${}", func.name.name).into(),
+                                method_scheme.clone(),
+                            );
                         static_method_registrations.push((qualified_name.clone(), method_scheme));
 
                         tracing::debug!(
@@ -25239,7 +25263,10 @@ bake to have this verified.",
             let method_name = method.name.as_str();
 
             // Extract base type name for method lookup
-            let type_name = self.type_to_name(&receiver_ty).to_string();
+            let type_name = self
+                .get_exact_type_name(&receiver_ty)
+                .unwrap_or_else(|| self.type_to_name(&receiver_ty))
+                .to_string();
 
             // Try to look up the method via protocol_checker.
             // Use lookup_all_protocol_methods to handle multiple parameterized protocol impls

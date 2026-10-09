@@ -10550,29 +10550,28 @@ impl TypeChecker {
                 None
             }
             Type::Named { path, args } => {
-                // Extract the type name from the path
-                let type_name = path.segments.last().and_then(|seg| match seg {
-                    verum_ast::ty::PathSegment::Name(ident) => Some(ident.name.as_str()),
-                    _ => None,
-                })?;
+                // Alias expansion must preserve a resolved nominal owner.
+                // Looking up only the leaf can turn a sibling declaration
+                // into whichever same-named type was registered last.
+                let type_name = self.path_to_string(path);
 
                 // Cycle detection: if we're already expanding this type, stop
                 let _cycle_guard = TypeResolutionCycleGuard::try_enter(type_name.to_string())?;
 
                 // First try the alias table
-                if let Some(alias_target) = self.ctx.resolve_alias(type_name) {
+                if let Some(alias_target) = self.ctx.resolve_alias(type_name.as_str()) {
                     if args.is_empty() {
                         return Some(alias_target.clone());
                     }
                     return Some(self.substitute_type_args(alias_target, args));
                 }
                 // Fallback: look up the type definition table directly by name
-                if let Some(def) = self.ctx.lookup_type(type_name) {
+                if let Some(def) = self.ctx.lookup_type(type_name.as_str()) {
                     if matches!(def, Type::Record(_) | Type::Variant(_)) {
                         if args.is_empty() {
                             return Some(def.clone());
                         }
-                        return Some(self.substitute_with_params(type_name, def, args));
+                        return Some(self.substitute_with_params(type_name.as_str(), def, args));
                     }
                 }
                 None
