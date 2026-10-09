@@ -4817,7 +4817,13 @@ impl TypeChecker {
                             if is_explicit {
                                 self.in_explicit_import_registration = true;
                             }
-                            let reg_result = self.register_type_declaration(&type_decl);
+                            // A mount binds a declaration from its source module; it
+                            // must not publish a new nominal type under the consumer.
+                            // Use the same owner scope as the imported impl blocks.
+                            let reg_result = self.register_type_declaration_in_module(
+                                &type_decl,
+                                source_module_path.as_str(),
+                            );
                             // Reset flag after registration completes (success or failure)
                             if is_explicit {
                                 self.in_explicit_import_registration = false;
@@ -5897,9 +5903,18 @@ impl TypeChecker {
             // Extract self-type args for specialization tracking.
             // For `implement<T> Register<T, ReadOnly>`, this captures [Var(T), Named(ReadOnly)].
             // Used to filter method availability during method lookup.
+            // Method keys must carry the same resolved nominal owner as the
+            // imported receiver. The source spelling alone collides with a
+            // sibling's API and cannot serve an exact-owner static lookup.
+            let mut method_owner = Text::from(type_name);
             let impl_self_type_args: List<Type> = if let Some(for_type) = for_type {
                 // Use ast_to_type_lenient since type params are now in scope
                 let self_type = self.ast_to_type_lenient(for_type);
+                match &self_type {
+                    Type::Named { path, .. } => method_owner = self.path_to_string(path),
+                    Type::Generic { name, .. } => method_owner = name.clone(),
+                    _ => {}
+                }
                 let args = match &self_type {
                     Type::Named { args, .. } | Type::Generic { args, .. } => args.clone(),
                         // ARRAY-ITER-CONCRETIZE-1: surface the element as
@@ -5941,7 +5956,7 @@ impl TypeChecker {
                 if let ImplItemKind::Const { name, ty, .. } = &item.kind {
                     // Build the constant type
                     let const_type = self.ast_to_type(ty).unwrap_or(Type::Int);
-                    let qualified_name = format!("{}.{}", type_name, name.name);
+                    let qualified_name = format!("{}.{}", method_owner, name.name);
                     let const_scheme = if impl_type_vars.is_empty() {
                         TypeScheme::mono(const_type)
                     } else {
@@ -6045,7 +6060,7 @@ impl TypeChecker {
 
                         // Prepare registration for after scope exit
                         // Create a properly quantified type scheme over the impl's type variables
-                        let qualified_name = format!("{}.{}", type_name, func.name.name);
+                        let qualified_name = format!("{}.{}", method_owner, func.name.name);
                         let method_scheme = if impl_type_vars.is_empty() {
                             TypeScheme::mono(func_ty)
                         } else {
@@ -6142,7 +6157,7 @@ impl TypeChecker {
                             func.is_generator,
                         );
                         let method_ty = Type::function(param_types, final_return_type);
-                        let type_name_text = verum_common::Text::from(type_name);
+                        let type_name_text = method_owner.clone();
                         let method_name_text = verum_common::Text::from(func.name.name.as_str());
 
                         // CRITICAL: Use generalize_ordered to preserve type parameter order
