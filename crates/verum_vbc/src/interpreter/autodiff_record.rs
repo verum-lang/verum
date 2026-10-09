@@ -253,24 +253,44 @@ pub(crate) fn propagate_arg(
     callee_base: u32,
     dst: Reg,
 ) {
+    propagate_arg_from_slot(
+        state,
+        Some(caller_base + u32::from(src.0)),
+        callee_base + u32::from(dst.0),
+    );
+}
+
+/// Transfers an argument whose absolute source slot is known, or clears a
+/// recycled callee slot when the argument has no tracked register origin.
+/// A heap/reference address is never interpreted as a register identity.
+#[inline(always)]
+pub(crate) fn propagate_arg_from_slot(
+    state: &mut InterpreterState,
+    source: Option<u32>,
+    destination: u32,
+) {
     if !state.grad_recording {
         return;
     }
-    propagate_arg_cold(state, caller_base, src, callee_base, dst);
+    propagate_arg_cold(state, source, destination);
 }
 
 #[cold]
 #[inline(never)]
 fn propagate_arg_cold(
     state: &mut InterpreterState,
-    caller_base: u32,
-    src: Reg,
-    callee_base: u32,
-    dst: Reg,
+    source: Option<u32>,
+    destination: u32,
 ) {
-    let from = caller_base + src.0 as u32;
-    if let Some(entry) = state.grad_reg_nodes.get(&from).copied() {
-        state.grad_reg_nodes.insert(callee_base + dst.0 as u32, entry);
+    match source.and_then(|slot| state.grad_reg_nodes.get(&slot).copied()) {
+        Some(entry) => {
+            state.grad_reg_nodes.insert(destination, entry);
+        }
+        None => {
+            // Equal value bits cannot establish identity with an earlier
+            // invocation that happened to occupy this callee slot.
+            state.grad_reg_nodes.remove(&destination);
+        }
     }
 }
 
@@ -500,3 +520,7 @@ pub(crate) fn unary_float_tape_op(sub_op: u8) -> Option<TapeOp> {
         _ => return None,
     })
 }
+
+#[cfg(test)]
+#[path = "../../tests/interpreter/argument_tape_boundary.rs"]
+mod call_boundary_tests;

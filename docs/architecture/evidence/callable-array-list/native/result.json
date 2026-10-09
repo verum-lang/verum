@@ -1,0 +1,81 @@
+{
+  "source": "31713d3c3047aa1e4e449a494f323c28e702d7e3",
+  "command": [
+    "cargo",
+    "test",
+    "--offline",
+    "--locked",
+    "--no-fail-fast",
+    "-p",
+    "verum_codegen",
+    "--test",
+    "callable_array_list_conversion",
+    "--message-format=json",
+    "--",
+    "--nocapture",
+    "--test-threads=1"
+  ],
+  "cwd": "/Users/taaliman/.codex/worktrees/returned-reference-summary/verum",
+  "environment_overrides": {
+    "CARGO_TARGET_DIR": "/Users/taaliman/.tmp/verum-codex-01a10248/native-target",
+    "CARGO_BUILD_JOBS": "2",
+    "CARGO_INCREMENTAL": "0",
+    "VERUM_NO_AUTO_PRECOMPILE": "1",
+    "VERUM_LLVM_DIR": "/Users/taaliman/projects/oldman/verum-lang/verum/llvm/install",
+    "RUST_MIN_STACK": "16777216",
+    "VERUM_T1700_IR_DIR": "/private/tmp/verum-T1700-native-local/ir"
+  },
+  "deadline_seconds": 600,
+  "source_paths": {
+    "crates/verum_vbc/src/codegen/array_coercions.rs": "ecfc715b875afe0672e25f30ac7aac75e9ac6a13188261ec1b7d945031b0831d",
+    "crates/verum_vbc/src/codegen/context.rs": "fb88a1b18105d380d14ff6207df1dd26ecba25ba171fdbbecb5119944ded2efd",
+    "crates/verum_vbc/src/codegen/mod.rs": "499698043752f81344a31accd5e5cba3c465b11a1b88ea366c4c338c8cb9693c",
+    "crates/verum_vbc/src/codegen/expressions.rs": "60f5ee206075227bb3c2d3a9ad2a2413d86db812fdaecf0874d8b38872978bec",
+    "crates/verum_vbc/src/codegen/statements.rs": "6a480e80359fc0cc40c380e490b44c3f2cdb3541b50a177da580a5c916e75931",
+    "crates/verum_codegen/tests/callable_array_list_conversion.rs": "c8636824229349693e6242c008388460ce3ddcfa9e90611073bb2a2108e40886"
+  },
+  "scope": "Parsed source and decoded serialized VBC through production LLVM lowering and JIT; bounded host allocation substrate. No ordinary CLI/AOT, fresh standard-library archive, allocator lifecycle, no-libc or registry acceptance.",
+  "artifacts_before": {
+    "runtime.vbca": "8569748c802eb09c42c79e1d6f58d431e9e3d09266d22e89436ba942fad999ff",
+    "runtime.core_metadata": "f6730833fc38cb3acf2fc27954b674471bde598e56cda57db67de06a84cb358c",
+    "runtime.symbol_graph": "e7cd3fda19f45fcbfba63cddcc331aa5dff0e1740a015367935faf41268ea238",
+    "runtime.vbca.checksum": "d88cf714a17aa600409e43b001aaf45c9be588b0bde2dbce35264513d309f957",
+    "runtime.vbca.schema": "fec20d7b3f8d1b81aff66c6c1181be574963779f7eacaf65660f8ab9127fca87"
+  },
+  "returncode": 0,
+  "timed_out": false,
+  "elapsed_seconds": 39.07,
+  "source_after": "31713d3c3047aa1e4e449a494f323c28e702d7e3",
+  "executables": [
+    {
+      "path": "/Users/taaliman/.tmp/verum-codex-01a10248/native-target/debug/build/verum_codegen/4a126ec36c5e4ab5/out/callable_array_list_conversion-4a126ec36c5e4ab5",
+      "sha256": "986c140d461d551bcb04241867ef6a421499da8c4fb2872329a785d5701df8fb"
+    }
+  ],
+  "logs_sha256": {
+    "cargo.jsonl": "68f92181c59e247d64f9c2ab400ef12cf0edfec43d901cc9c953b02da7e8726c",
+    "stderr.log": "439d27b1a33611e75cdacf57211884de27095eb6d45f4cb3708434a71ee7c858"
+  },
+  "source_paths_unchanged": true,
+  "artifacts_after": {
+    "runtime.vbca": "8569748c802eb09c42c79e1d6f58d431e9e3d09266d22e89436ba942fad999ff",
+    "runtime.core_metadata": "f6730833fc38cb3acf2fc27954b674471bde598e56cda57db67de06a84cb358c",
+    "runtime.symbol_graph": "e7cd3fda19f45fcbfba63cddcc331aa5dff0e1740a015367935faf41268ea238",
+    "runtime.vbca.checksum": "d88cf714a17aa600409e43b001aaf45c9be588b0bde2dbce35264513d309f957",
+    "runtime.vbca.schema": "fec20d7b3f8d1b81aff66c6c1181be574963779f7eacaf65660f8ab9127fca87"
+  },
+  "ir_sha256": {
+    "ir/explicit_packed_return_materializes_native_list-wire.ll": "655a56a2f82ab1ca13fdf0a266d4d9d089c8907c4a2999aa9801cb070bbf8d6f",
+    "ir/list_backed_array_call_is_not_reinterpreted_natively-wire.ll": "279f949b23d7282430b0e732d1686c4bc4d873948f923fb56a7f7d82d093e0ef",
+    "ir/floating_packed_return_keeps_native_values-source.ll": "4ff15f4507ce2af4dd6d327eb2c10eec08400e4e245d00169f10529e17867d72",
+    "ir/nonbyte_packed_return_keeps_native_element_width-wire.ll": "16c73f69a6d9c1bd0d48c0a6f443cea79c04a2f74a46f9c77fe4865705246643",
+    "ir/packed_byte_tail_materializes_growable_native_list-wire.ll": "1707eb95eef33832b80be02bb004aefe58e6e81c68d08e973b929bea40ca385f",
+    "ir/empty_packed_return_grows_in_native_code-source.ll": "10ac73b3b08d2de2d1d236f2c502b53ee4f6cb047b4fd9be43d00da89a0050b3",
+    "ir/packed_byte_tail_materializes_growable_native_list-source.ll": "1707eb95eef33832b80be02bb004aefe58e6e81c68d08e973b929bea40ca385f",
+    "ir/explicit_packed_return_materializes_native_list-source.ll": "655a56a2f82ab1ca13fdf0a266d4d9d089c8907c4a2999aa9801cb070bbf8d6f",
+    "ir/nonbyte_packed_return_keeps_native_element_width-source.ll": "16c73f69a6d9c1bd0d48c0a6f443cea79c04a2f74a46f9c77fe4865705246643",
+    "ir/empty_packed_return_grows_in_native_code-wire.ll": "10ac73b3b08d2de2d1d236f2c502b53ee4f6cb047b4fd9be43d00da89a0050b3",
+    "ir/list_backed_array_call_is_not_reinterpreted_natively-source.ll": "279f949b23d7282430b0e732d1686c4bc4d873948f923fb56a7f7d82d093e0ef",
+    "ir/floating_packed_return_keeps_native_values-wire.ll": "4ff15f4507ce2af4dd6d327eb2c10eec08400e4e245d00169f10529e17867d72"
+  }
+}

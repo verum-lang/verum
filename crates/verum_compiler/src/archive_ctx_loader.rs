@@ -8394,3 +8394,7 @@ mod wanted_leaf_index_tests;
 #[cfg(test)]
 #[path = "../tests/archive/symbol_graph_declaring_owner.rs"]
 mod symbol_graph_declaring_owner_tests;
+
+#[cfg(test)]
+#[path = "../tests/archive/declared_function_bodies.rs"]
+mod declared_function_bodies;

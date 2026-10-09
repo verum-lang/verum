@@ -874,3 +874,60 @@ registry replay and AOT acceptance remain separate. Explicit missing-owner
 controls establish refusal to select a known nominal head; strict rejection by
 lenient bootstrap remains part of T0811. This slice does not close T0691's
 broader artifact acceptance, origin-string remapping or late TLS-root closure.
+
+
+### Bounded TCP fixture reporting
+
+The two previously unbounded `net_runtime` TCP tests now use explicit connect,
+accept, socket-I/O and worker-completion deadlines. They retain the runtime's
+real listen/accept/send/receive operations and require the silent receiver to
+remain pending while the unrelated exchange completes. Owned listener and
+stream guards close descriptors during failures; a separate injected-unwind
+control exercises worker shutdown and registry cleanup. Production networking
+behavior is unchanged.
+
+At source `a5610f319`, five serial controls passed. Four-thread execution of the
+same executable completed with three passes and two explicit raw/synthetic
+descriptor collisions. The adjacent four-thread `net_runtime` group completed
+with fifteen passes and three failures: two descriptor collisions and the
+existing bounded UDP receive timeout. These are failed parallel gates, not
+retries reclassified as acceptance. T1708 tracks the descriptor namespace
+conflict; its pre-accept fixture check does not eliminate the allocation race.
+
+The original T1701 full run still ended by controlled termination after
+733.812 seconds; no complete library, ordinary CLI, fresh standard-library,
+AOT or registry-service result follows from this fixture change. The source,
+executable, exact commands, immutable logs and unchanged inherited artifact
+identities are retained in
+[`net-runtime-bounded-fixtures/integration.json`](evidence/net-runtime-bounded-fixtures/integration.json).
+
+
+### Unix socket descriptor identity
+
+Unix registry entries now use the OS descriptor of their owned listener, TCP
+stream or UDP socket. This gives raw v2 listeners and registered resources one
+descriptor namespace. Registration duplicates a socket which owns descriptor
+zero while that owner is still alive, preserving the positive success-handle
+contract with a real OS descriptor. Non-Unix registered handles are unchanged.
+
+Four isolated baseline processes at `1fcc7ceaa` reproduced endpoint shadowing,
+closing a raw listener removing a live UDP registration, and UDP/listener
+handles differing from their owned descriptors. Three additional isolated
+controls at `7e5191458` demonstrated the initial repair returning zero for
+registered UDP/listener/stream sockets after child stdin was closed. The first
+fd-zero harness attempt selected zero child tests and is retained as invalid;
+it supplies no acceptance evidence.
+
+At `254400263`, all eight descriptor-identity and fd-zero controls pass in
+serial and four-thread groups. The complete groups still fail: serial has
+22 passes and four TCP connection timeouts; parallel has 21 passes, four TCP
+connection timeouts and one UDP timeout. Those TCP failures occur before
+registration. The adjacent four-thread IoEngine readiness/accept/read/write
+group passes all four controls. No retries were used to turn failures green.
+
+The older raw `tcp_listen_v2` descriptor-zero limitation remains separate:
+that path bypasses registration. No non-Unix execution, ordinary CLI, fresh
+standard-library bake, AOT, full-library pass or registry-service readiness
+is claimed. Exact source/executable identities, commands, failed and passed
+logs, and unchanged inherited artifacts are recorded in
+[`unix-socket-descriptor-identity/integration.json`](evidence/unix-socket-descriptor-identity/integration.json).

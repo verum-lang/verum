@@ -1,0 +1,77 @@
+{
+  "task": "T1650",
+  "tested_source": "a5610f319043f063eeecb1d18ed6ef0fc5fca5dc",
+  "base": "ca26684baeda7168fbb7e363a4cc1c9ef1dd1bc1",
+  "scope": "Test-fixture bound and cleanup only. Production networking code unchanged. No root cause resolution, ordinary CLI, fresh bake, native/AOT, registry launch, or complete full-library pass.",
+  "results": {
+    "baseline": {
+      "receipt": "baseline-result.json",
+      "receipt_sha256": "2238a090f7b0c31c5500f282ce41a469e9dacceb42bf14957eadafb5af94c2d0",
+      "raw_log_sha256": "9f8a210f3095188b90b328fcaacfb6a3636d1a3c27cf547f8ba90d3019fc0247",
+      "compressed_log": "baseline-output.txt.gz",
+      "compressed_log_sha256": "77795975131e3cb743b0242a475bd241862b88be0e62c95c285cc8c6f71a18a2",
+      "source_commit": "eded28614bdb81087fcbe94d16f3ddf617069a27",
+      "exit_code": -15,
+      "wall_seconds": 733.812,
+      "test_results": []
+    },
+    "serial": {
+      "receipt": "serial-result.json",
+      "receipt_sha256": "f45a15e21c138549cc109617957abd40df3d74a5ad7b684419ded3d2b59cc081",
+      "raw_log_sha256": "b12ee9ea3813462045bcec147101e03fd50103b200f5a7ded0c72f942d5164c0",
+      "compressed_log": "serial-output.txt.gz",
+      "compressed_log_sha256": "fd518cf527fde431e1a7d4d24d077248499730d820f5055bd97068f27045b9b8",
+      "source_commit": "a5610f319043f063eeecb1d18ed6ef0fc5fca5dc",
+      "exit_code": 0,
+      "wall_seconds": 33.229,
+      "test_results": [
+        "test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 2079 filtered out; finished in 1.29s"
+      ]
+    },
+    "parallel": {
+      "receipt": "parallel-result.json",
+      "receipt_sha256": "bfb311efd38dfb3155ba10dd11a53c8051285761dfb36107ae9eed684578eacf",
+      "raw_log_sha256": "24c902d43ab2a4e5289c2aeef25d1b1d97ca320e4a677a768e9892de58317dd8",
+      "compressed_log": "parallel-output.txt.gz",
+      "compressed_log_sha256": "991d10603b93fe0ff7454e8864d8827d01e4715d4cfa90a6e657a4279446c49b",
+      "source_commit": "a5610f319043f063eeecb1d18ed6ef0fc5fca5dc",
+      "exit_code": 101,
+      "wall_seconds": 0.249,
+      "test_results": [
+        "test result: FAILED. 3 passed; 2 failed; 0 ignored; 0 measured; 2079 filtered out; finished in 0.21s"
+      ]
+    },
+    "adjacent": {
+      "receipt": "adjacent-result.json",
+      "receipt_sha256": "70b855b16e4f47c7e3cb61ff30c2a1bb633fb61c7b43e171d6995ae06b7369a9",
+      "raw_log_sha256": "c2304b3105829e018a1b500a5c4eff98bd8e00d30655b0d0845503eb498fd0d2",
+      "compressed_log": "adjacent-output.txt.gz",
+      "compressed_log_sha256": "3d51be297f8a3c7c1d0140571f957cacb5d1837449f28254972e99679efc9ae6",
+      "source_commit": "a5610f319043f063eeecb1d18ed6ef0fc5fca5dc",
+      "exit_code": 101,
+      "wall_seconds": 2.11,
+      "test_results": [
+        "test result: FAILED. 15 passed; 3 failed; 0 ignored; 0 measured; 2066 filtered out; finished in 2.06s"
+      ]
+    }
+  },
+  "residuals": [
+    "T1708: raw and synthetic descriptors share the same integer namespace; collision check before accept is not atomic.",
+    "Host TCP/UDP timeout cause remains open. A prior Python loopback probe also timed out; retries do not establish acceptance.",
+    "The prior T1701 full gate remains incomplete after controlled termination."
+  ],
+  "verification": "All four raw-log hashes, all compressed-log round trips, all three frozen VBC source manifests, and all three before/after artifact manifests were independently rechecked before commit.",
+  "retained_executable": {
+    "path": "/private/tmp/verum-T1650-bounded-test-executable",
+    "sha256": "147e99a5a467a6ce677cdc7c814d4ac152a0c4c4183c78c0dcc4269846220a60",
+    "source_commit": "a5610f319043f063eeecb1d18ed6ef0fc5fca5dc"
+  },
+  "source_only_cleanup": {
+    "parent_commit": "216ab2b06aad8f71852d4bc07659585fe25de0fe",
+    "path": "crates/verum_vbc/src/interpreter/dispatch_table/handlers/net_runtime.rs",
+    "change": "Remove the now-unused std::thread import from the legacy inline tests module; executable gates remain pinned to a5610f319. This cleanup is not represented as a new test execution.",
+    "before_sha256": "82b91596c1d09bcea8e8362f5213fa1c11372aae55632c58e97c68d8e0ca193e",
+    "after_sha256": "b61e532491aa19bc2cbea943cc39237df93d2ac4c89f61f2a14b84ef1c65ad16",
+    "external_fixture_unchanged": true
+  }
+}

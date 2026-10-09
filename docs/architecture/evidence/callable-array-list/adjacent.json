@@ -1,0 +1,77 @@
+{
+  "source_commit": "31713d3c3047aa1e4e449a494f323c28e702d7e3",
+  "command": [
+    "cargo",
+    "test",
+    "--locked",
+    "--offline",
+    "--manifest-path",
+    "/Users/taaliman/.codex/worktrees/returned-reference-summary/verum/Cargo.toml",
+    "-p",
+    "verum_vbc",
+    "--no-default-features",
+    "--features",
+    "compression,table_dispatch,codegen,ffi",
+    "--test",
+    "residual_return_boundaries",
+    "--test",
+    "affine_return_handoff",
+    "--test",
+    "a_primitive_array_field_has_one_representation",
+    "--test",
+    "fixed_array_method_dispatch",
+    "--",
+    "--test-threads=1"
+  ],
+  "environment": {
+    "CARGO_TARGET_DIR": "/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target",
+    "CARGO_INCREMENTAL": "0",
+    "CARGO_BUILD_JOBS": "2",
+    "VERUM_NO_AUTO_PRECOMPILE": "1",
+    "VERUM_LLVM_DIR": "/Users/taaliman/projects/oldman/verum-lang/verum/llvm/install",
+    "RUST_MIN_STACK": "16777216"
+  },
+  "timeout_seconds": 1200,
+  "scope": "Parsed source to VBC wire to interpreter callable array/List conversion controls; no typechecker, real stdlib archive, ordinary CLI, automatic bake or AOT acceptance",
+  "artifacts_before": {
+    "runtime.vbca": "410ff097b455437cab98b651f7799b3129588820925afe98e0de9c3781530a0f",
+    "runtime.core_metadata": "a92bd89e649e102cdc67d7ad0032513d6448d8915e5744127e6cdf1f1e34ebbb",
+    "runtime.symbol_graph": "a6678c18498f7519749ca1fdf1d22629b479083f42fa95a15177e8c7acf1c722",
+    "runtime.vbca.checksum": "c33573118a8c4b635f6c8f727c3784b524f660be57de702365e8d9c14b2f3a8b",
+    "runtime.vbca.schema": "fec20d7b3f8d1b81aff66c6c1181be574963779f7eacaf65660f8ab9127fca87"
+  },
+  "source_paths": {
+    "crates/verum_vbc/src/codegen/array_coercions.rs": "ecfc715b875afe0672e25f30ac7aac75e9ac6a13188261ec1b7d945031b0831d",
+    "crates/verum_vbc/src/codegen/context.rs": "fb88a1b18105d380d14ff6207df1dd26ecba25ba171fdbbecb5119944ded2efd",
+    "crates/verum_vbc/src/codegen/mod.rs": "499698043752f81344a31accd5e5cba3c465b11a1b88ea366c4c338c8cb9693c",
+    "crates/verum_vbc/src/codegen/statements.rs": "6a480e80359fc0cc40c380e490b44c3f2cdb3541b50a177da580a5c916e75931",
+    "crates/verum_vbc/src/codegen/expressions.rs": "60f5ee206075227bb3c2d3a9ad2a2413d86db812fdaecf0874d8b38872978bec",
+    "crates/verum_vbc/tests/callable_array_list_conversion.rs": "fe665a9b105afc110a670cadf5d708c3d51f30ad61303df2f8d99656fff4e3ed",
+    "crates/verum_vbc/tests/codegen/array_result_facts.rs": "5f4d56d95fc37326fac2417827045d80c42afb2556aa49a48c1662d4efb89436"
+  },
+  "exit_code": 0,
+  "wall_seconds": 33.265,
+  "failure": null,
+  "source_unchanged": true,
+  "log_sha256": "8095dd3a4b02c5c76f0068675509d16bcb09a5e1d8eb23b964bfbd76ba7fc5ad",
+  "source_paths_unchanged": true,
+  "executables": {
+    "/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target/debug/build/verum_vbc/24ee9845cae66b5a/out/a_primitive_array_field_has_one_representation-24ee9845cae66b5a": "5f8edf069096de64395428768841bbf75e1efd418c795b4ebf5af8a5659db127",
+    "/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target/debug/build/verum_vbc/a292bc2d8b1f40f8/out/affine_return_handoff-a292bc2d8b1f40f8": "82d008ea8a5e3039df1ac93eac07659706fc8942c0995e0a6c934e78a60d1f45",
+    "/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target/debug/build/verum_vbc/e1ad8a0135e48ae0/out/fixed_array_method_dispatch-e1ad8a0135e48ae0": "37b99ea3caec3be1c56dcd8953bd0af28458c8634b9246330eb83b4724b97bb7",
+    "/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target/debug/build/verum_vbc/100bb0821b89efdb/out/residual_return_boundaries-100bb0821b89efdb": "e871e565678149447bdbc238051dd1a803c5833a2d2eb31369db2e9a95938c62"
+  },
+  "artifacts_after": {
+    "runtime.vbca": "410ff097b455437cab98b651f7799b3129588820925afe98e0de9c3781530a0f",
+    "runtime.core_metadata": "a92bd89e649e102cdc67d7ad0032513d6448d8915e5744127e6cdf1f1e34ebbb",
+    "runtime.symbol_graph": "a6678c18498f7519749ca1fdf1d22629b479083f42fa95a15177e8c7acf1c722",
+    "runtime.vbca.checksum": "c33573118a8c4b635f6c8f727c3784b524f660be57de702365e8d9c14b2f3a8b",
+    "runtime.vbca.schema": "fec20d7b3f8d1b81aff66c6c1181be574963779f7eacaf65660f8ab9127fca87"
+  },
+  "test_results": [
+    "test result: ok. 17 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s",
+    "test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s",
+    "test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.35s",
+    "test result: ok. 28 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.12s"
+  ]
+}

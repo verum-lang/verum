@@ -1,0 +1,194 @@
+{
+  "task": "T1708",
+  "tested_fixed_source": "254400263dd6dcbf7f33884d985a9f625f92653e",
+  "baseline_source": "1fcc7ceaa22a79c3ddc2d671ec8cb558bd41e7e6",
+  "zero_causal_source": "7e5191458333b60d9c2cbcc710dd50730d161af7",
+  "scope": "Unix registered socket identity and newly changed register fd-zero positive-success compatibility only. No ordinary CLI, auto-bake, native/AOT, non-Unix runtime or complete VBC-library/registry-service verdict.",
+  "results": {
+    "endpoint-baseline": {
+      "receipt": "endpoint-baseline-result.json",
+      "receipt_sha256": "5e08ef72e972e3e325f73c25a9d44f600bc5e29da3ba86d087b23f1b06ed2c49",
+      "compressed_log": "endpoint-baseline-output.txt.gz",
+      "compressed_log_sha256": "69390845f66ccc424b935b36db5d45bb9a4f2adb6e15679d294965fb6f6f9b7d",
+      "raw_log_sha256": "53c932cbb6574386ac83c0925c67350db296d2a11b9e706b67ec624b88c06e57",
+      "source_commit": "1fcc7ceaa22a79c3ddc2d671ec8cb558bd41e7e6",
+      "exit_code": 101,
+      "wall_seconds": 31.227,
+      "test_results": [
+        "test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 2087 filtered out; finished in 0.00s"
+      ],
+      "valid_for_acceptance": true
+    },
+    "close-baseline": {
+      "receipt": "close-baseline-result.json",
+      "receipt_sha256": "045af3c23e1b47cec25f1b6db13819092b4eb43d4de7c2f9839f08a3899ba797",
+      "compressed_log": "close-baseline-output.txt.gz",
+      "compressed_log_sha256": "cf3da75ed2f28ab7ce54e5be40501b3a2f0acc70080b8b2694088afb78d87d32",
+      "raw_log_sha256": "fa6e9805591d50fcd13efc54356eb6c8902f11778f5d807c75ca681e730f47f8",
+      "source_commit": "1fcc7ceaa22a79c3ddc2d671ec8cb558bd41e7e6",
+      "exit_code": 101,
+      "wall_seconds": 0.006,
+      "test_results": [
+        "test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 2087 filtered out; finished in 0.00s"
+      ],
+      "valid_for_acceptance": true
+    },
+    "udp-id-baseline": {
+      "receipt": "udp-id-baseline-result.json",
+      "receipt_sha256": "a9310ef5d65e9e34ea44f314e685fb6edbcb89fbee3cdf4580c47b9f9f14c85f",
+      "compressed_log": "udp-id-baseline-output.txt.gz",
+      "compressed_log_sha256": "567e6f225d4a49f523cd0cfd8b66684360b1f886a4f7d6bc3d51a0fe473b932e",
+      "raw_log_sha256": "d8575746da59b3618bd773f32b3dafe5574599280c840013ad4e2b729b4364f7",
+      "source_commit": "1fcc7ceaa22a79c3ddc2d671ec8cb558bd41e7e6",
+      "exit_code": 101,
+      "wall_seconds": 0.012,
+      "test_results": [
+        "test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 2087 filtered out; finished in 0.00s"
+      ],
+      "valid_for_acceptance": true
+    },
+    "listener-id-baseline": {
+      "receipt": "listener-id-baseline-result.json",
+      "receipt_sha256": "9c997defe57e47d0b5ab18f7f26115130bb487d6073f5e344eec6f383899f05a",
+      "compressed_log": "listener-id-baseline-output.txt.gz",
+      "compressed_log_sha256": "34de384e93a9845a525ae1ad31b512d509c8669afc8805510ff0f19445d2bc9c",
+      "raw_log_sha256": "5506d0e1a88dd2842543c970cd4cb2fb8be307f27c71bc11f5d4b3d56bec2c87",
+      "source_commit": "1fcc7ceaa22a79c3ddc2d671ec8cb558bd41e7e6",
+      "exit_code": 101,
+      "wall_seconds": 0.007,
+      "test_results": [
+        "test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 2087 filtered out; finished in 0.00s"
+      ],
+      "valid_for_acceptance": true
+    },
+    "invalid-zero-harness": {
+      "receipt": "invalid-zero-harness-result.json",
+      "receipt_sha256": "264cfbce616c36cab2f78f480266e428794d550034659797bb5182190e157ab8",
+      "compressed_log": "invalid-zero-harness-output.txt.gz",
+      "compressed_log_sha256": "5fad29fa105200884244be400042af0b5e76476f77c2028aeab2de4308da0b18",
+      "raw_log_sha256": "6526e92ad27292c0338ddd5386e11c1afb54c954608a71c69f38047c68e3d6b2",
+      "source_commit": "61203adb0684499864b2d77898e9dfc0eb5b1747",
+      "exit_code": 0,
+      "wall_seconds": 30.221,
+      "test_results": [
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2092 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2092 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2092 filtered out; finished in 0.00s",
+        "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 2089 filtered out; finished in 0.02s"
+      ],
+      "valid_for_acceptance": false
+    },
+    "zero-causal-baseline": {
+      "receipt": "zero-causal-baseline-result.json",
+      "receipt_sha256": "7a44785f1bc7c8b3a5ee117a1afbde13e86321684ac7d4633c967fd85876b77d",
+      "compressed_log": "zero-causal-baseline-output.txt.gz",
+      "compressed_log_sha256": "bcb8ad78dc2bbb3ab1fab095f87872ac35288f41111a57100e63c350c20fefc2",
+      "raw_log_sha256": "d83286f5f3ef06fe56c4007e1e565edcab061102e870be74ed2e373a983fda1e",
+      "source_commit": "7e5191458333b60d9c2cbcc710dd50730d161af7",
+      "exit_code": 101,
+      "wall_seconds": 32.232,
+      "test_results": [
+        "test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 2091 filtered out; finished in 0.00s",
+        "test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 2091 filtered out; finished in 0.00s",
+        "test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 2091 filtered out; finished in 0.00s",
+        "test result: FAILED. 0 passed; 3 failed; 0 ignored; 0 measured; 2089 filtered out; finished in 0.02s"
+      ],
+      "valid_for_acceptance": true
+    },
+    "fixed-serial": {
+      "receipt": "fixed-serial-result.json",
+      "receipt_sha256": "e153afbaf2a28c9f2477ab409230550a90d1b30b1f69b8bf24a232fd2bf26d57",
+      "compressed_log": "fixed-serial-output.txt.gz",
+      "compressed_log_sha256": "3ef4ec3f992c3d5fc715fb1a8c76a71cf7895139c273cd2c823810025bf7a0fd",
+      "raw_log_sha256": "13cb976e03acfd97fab31e0ed6f9301b3a62a12214f74746864b227bd07d9e6d",
+      "source_commit": "254400263dd6dcbf7f33884d985a9f625f92653e",
+      "exit_code": 101,
+      "wall_seconds": 39.307,
+      "test_results": [
+        "test result: FAILED. 22 passed; 4 failed; 0 ignored; 0 measured; 2066 filtered out; finished in 8.40s"
+      ],
+      "valid_for_acceptance": true
+    },
+    "fixed-parallel": {
+      "receipt": "fixed-parallel-result.json",
+      "receipt_sha256": "be8039adfc4c4202f3934a21ae014ebd9467b6f7ef35166c3ccd5012b8f907e0",
+      "compressed_log": "fixed-parallel-output.txt.gz",
+      "compressed_log_sha256": "8b307b674b3ce1d9c6de3e27286fd89ce03fa4c4661ff8adf79f24db0cba86e2",
+      "raw_log_sha256": "f36dc41bd6bcaef8bfee1772b1030fdc7f00f371ef511fba40bebee3271cf181",
+      "source_commit": "254400263dd6dcbf7f33884d985a9f625f92653e",
+      "exit_code": 101,
+      "wall_seconds": 4.073,
+      "test_results": [
+        "test result: FAILED. 21 passed; 5 failed; 0 ignored; 0 measured; 2066 filtered out; finished in 4.06s"
+      ],
+      "valid_for_acceptance": true
+    },
+    "fixed-io-engine": {
+      "receipt": "fixed-io-engine-result.json",
+      "receipt_sha256": "54062f591a66526da79ea640e63c9cd933ea82d54e552eda758bf48c790ff22f",
+      "compressed_log": "fixed-io-engine-output.txt.gz",
+      "compressed_log_sha256": "971cfc7da1f00868b756695c5d72a770a602e0a6e7b3d1f2b576d946d96e6011",
+      "raw_log_sha256": "eb393f434e328f2f92665516684892f78f2693b591ca764ba3af4c599cf8c251",
+      "source_commit": "254400263dd6dcbf7f33884d985a9f625f92653e",
+      "exit_code": 0,
+      "wall_seconds": 1.109,
+      "test_results": [
+        "test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 2088 filtered out; finished in 1.06s"
+      ],
+      "valid_for_acceptance": true
+    }
+  },
+  "causal_controls": "The four original baseline controls were four distinct test processes on the same executable. In particular raw endpoint and raw close each start with the old counter at1; the old multi-test sequence is not used as causal acceptance. Final fixed serial and parallel groups contain the same original controls plus stream ownership and three genuinely process-isolated fd0 controls.",
+  "invalid_attempt": "The first fd0 harness included the crate prefix in --exact and ran zero child tests. Its apparent outer pass is invalid. Corrected source uses crate-relative selectors and requires child completion status41 after assertions and explicit socket cleanup.",
+  "fixed_outcome": "All8 deterministic namespace/fd0 controls pass in serial and parallel groups. The complete serial26 group fails22pass/4TCP-connect-timeout; complete parallel26 group fails21pass/4TCP-connect-timeout+1UDP-timeout. Adjacent parallel IoEngine4pass. No retry-as-acceptance.",
+  "residuals": [
+    "T1650 host network timeouts persist and are not attributed to the registry identity repair; TCP timeout paths return before register().",
+    "Raw Unix tcp_listen_v2 descriptor-zero compatibility predates this change and is not covered or fixed.",
+    "Non-Unix token logic is retained but not executed here.",
+    "The fd0 clone-failure branch preserves ordinary -1 versus timeout/IoEngine -4 conventions; resource exhaustion was not injected."
+  ],
+  "source_only_comment_cleanup": {
+    "path": "crates/verum_vbc/src/interpreter/dispatch_table/handlers/net_runtime.rs",
+    "before_sha256": "d22c5609e3cbef494d9eca8b2219ad7b71359401cbb88e0eb0ae1477a2698999",
+    "after_sha256": "f67d7fe3436cbcfe6cce5de1f9662d54ac7b04d252e31c467b660195ef5199a4",
+    "all_noncomment_lines_identical": true,
+    "reason": "Current comments now describe actual owned descriptors; explicitly retain the raw-v2 fd0 limitation. The executed source remains254400263."
+  },
+  "verification": "Nine exact raw-log/compressed-log pairs and artifact before/after manifests rechecked; each distinct complete VBC source manifest rehashed from its frozen Git commit. Comment-only cleanup leaves every noncomment source line and both fixture files unchanged.",
+  "retained_executables": {
+    "/private/tmp/verum-T1708-baseline-executable": "d115cd63448063b7cb5df75c64db647111def0ce68c90aeaff65767b0185ecad",
+    "/private/tmp/verum-T1708-zero-baseline-executable": "7cb4cff0882c016f56daec89f566f79443b4d82420fa984dc6e45ca55f429b07",
+    "/private/tmp/verum-T1708-fixed-executable": "e18bc1906a9fb1674d3d8e83a0e31ff7c04af67508ea0ea5227080894963d3f9"
+  },
+  "rebase": {
+    "integration_base": "778df174f60aa87281622bf463801027125810b0",
+    "pre_rebase_endpoint": "1fef3e758982eec74f4866fba709acffebf950f4",
+    "rebased_source_endpoint": "9d6fb0b6b25b9ffaccad1d5642f7dc7067d48cb3",
+    "tested_source": "254400263dd6dcbf7f33884d985a9f625f92653e",
+    "source_paths_byte_identical_to_pre_rebase": {
+      "crates/verum_vbc/src/interpreter/dispatch_table/handlers/net_runtime.rs": "f67d7fe3436cbcfe6cce5de1f9662d54ac7b04d252e31c467b660195ef5199a4",
+      "crates/verum_vbc/src/interpreter/io_engine.rs": "f4eb364e97666347444375f8030e191c1c1c1f45197ba5de686a4897fc6e7920",
+      "crates/verum_vbc/tests/unit/net_runtime_descriptor_identity.rs": "35e3d1b48668b9a1a0e34f57eb740b7c22cdd4655e8e161e1ef962c2d7275534",
+      "crates/verum_vbc/tests/unit/net_runtime_bounded_tcp.rs": "5f18aa2da1e5d2fcbd89e2d5afc8c6fac534928dcf27818dd3924d3fd0182175"
+    },
+    "tested_net_runtime_noncomment_lines_identical": true,
+    "interpretation": "The four owned networking/fixture paths are byte-identical across rebase. The tested source differs only by explicitly recorded comments in net_runtime.rs. Other VBC differences are root-reviewed T1701 integration; the combined source has not yet run the complete VBC library gate.",
+    "additional_changed_vbc_paths_from_integration": [
+      "crates/verum_vbc/src/codegen/context.rs",
+      "crates/verum_vbc/src/codegen/expressions.rs",
+      "crates/verum_vbc/src/codegen/mod.rs",
+      "crates/verum_vbc/src/codegen/tests_comprehensive.rs",
+      "crates/verum_vbc/src/deserialize.rs",
+      "crates/verum_vbc/src/format.rs",
+      "crates/verum_vbc/src/interpreter/autodiff_record.rs",
+      "crates/verum_vbc/src/interpreter/dispatch_table/handlers/method_dispatch.rs",
+      "crates/verum_vbc/src/linker.rs",
+      "crates/verum_vbc/src/module.rs",
+      "crates/verum_vbc/src/serialize.rs",
+      "crates/verum_vbc/src/tests.rs",
+      "crates/verum_vbc/tests/declared_function_bodies.rs",
+      "crates/verum_vbc/tests/interpreter/argument_tape_boundary.rs",
+      "crates/verum_vbc/tests/numeric_method_declaration_owner.rs"
+    ]
+  }
+}

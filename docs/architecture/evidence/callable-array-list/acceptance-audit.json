@@ -1,0 +1,12 @@
+{
+  "native_source": "31713d3c3047aa1e4e449a494f323c28e702d7e3",
+  "native_source_hashes_verified": 6,
+  "native_logs_verified": 2,
+  "native_ir_files_verified": 12,
+  "native_wall_seconds": 39.07,
+  "unit_source": "2880d5135df57b1babd86ae454fb0033a1ca0bf7",
+  "unit_results": [
+    "test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 2076 filtered out; finished in 0.00s"
+  ],
+  "limitations": "Parsed source and decoded serialized VBC through production LLVM lowering and JIT; bounded host allocation substrate. No ordinary CLI/AOT, fresh standard-library archive, allocator lifecycle, no-libc or registry acceptance."
+}

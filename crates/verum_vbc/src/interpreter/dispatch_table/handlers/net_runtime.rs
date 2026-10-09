@@ -5,12 +5,12 @@
 //! for all of them — script-mode + interpreter-mode networking was
 //! a documentation-only feature.
 //!
-//! Resource model: a thread-local `HashMap<i64, Resource>` keyed by a
-//! synthetic file-descriptor number. The number is a small monotonic
-//! counter (starts at 1) — NOT a kernel fd, so we never hand the
-//! value to a syscall, only to other intrinsics. `__tcp_close_raw`
-//! removes the entry; `Drop` of the resource closes the underlying
-//! socket.
+//! Resource model: a process-wide registry owns registered sockets. On Unix
+//! its keys are the sockets' actual OS descriptors, matching raw listeners
+//! returned by `tcp_listen_v2` and the syscall-facing standard-library ABI.
+//! Distinct live sockets therefore cannot share a key. On non-Unix targets
+//! the registered-only paths retain opaque monotonic handles. `__tcp_close_raw`
+//! removes a registered owner; its `Drop` closes the underlying socket.
 //!
 //! The contract is the one declared in `core/sys/raw.vr`:
 //!  * `__tcp_listen_raw(port: Int) -> Int` — bind 0.0.0.0:port, listen.
@@ -37,6 +37,7 @@
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream, UdpSocket};
+#[cfg(not(unix))]
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{LazyLock, Mutex};
 use std::time::Duration;
@@ -57,10 +58,9 @@ enum NetResource {
 // return DISTINCT instances per worker, so a `tcp_send(fd)` issued
 // on a different thread than the original `tcp_connect` would NOT
 // find the fd.  Production server systems MUST share the registry
-// across all workers.  `LazyLock<Mutex<HashMap>>` is the chosen
-// primitive: process-wide, predictable latency under contention,
-// zero external deps.  The fd allocator uses an `AtomicI64` +
-// `fetch_add(1, Relaxed)` — fully lock-free.
+// across all workers. `LazyLock<Mutex<HashMap>>` coordinates ownership.
+// Unix keys come from the owned OS descriptor, so they cannot shadow a
+// different live raw descriptor. Non-Unix handles use an atomic counter.
 //
 // **Lock-drop discipline (architectural invariant)**: the REGISTRY
 // mutex is NEVER held across blocking I/O.  Two patterns achieve
@@ -88,13 +88,52 @@ enum NetResource {
 // (refcounted file-table entry).  No use-after-free.
 static REGISTRY: LazyLock<Mutex<HashMap<i64, NetResource>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
+#[cfg(not(unix))]
 static NEXT_FD: AtomicI64 = AtomicI64::new(1);
 
+#[cfg(not(unix))]
 fn alloc_fd() -> i64 {
     NEXT_FD.fetch_add(1, Ordering::Relaxed)
 }
 
 fn register(res: NetResource) -> i64 {
+    register_with_error(res, -1)
+}
+
+fn register_with_error(res: NetResource, error_status: i64) -> i64 {
+    // The public raw APIs require positive success handles. If stdin was
+    // closed, a valid socket can own descriptor zero. Duplicate while zero
+    // is still owned, so the replacement is a real positive OS descriptor.
+    // A failed duplicate drops the input owner and reports the caller's I/O
+    // error convention; it never publishes zero or invents a handle offset.
+    #[cfg(unix)]
+    let res = match match &res {
+        NetResource::Listener(listener) if listener_raw_fd(listener) == 0 => {
+            listener.try_clone().map(NetResource::Listener)
+        }
+        NetResource::Stream(stream) if stream_raw_fd(stream) == 0 => {
+            stream.try_clone().map(NetResource::Stream)
+        }
+        NetResource::Udp(socket) if udp_raw_fd(socket) == 0 => {
+            socket.try_clone().map(NetResource::Udp)
+        }
+        _ => Ok(res),
+    } {
+        Ok(resource) => resource,
+        Err(_) => return error_status,
+    };
+    #[cfg(not(unix))]
+    let _ = error_status;
+
+    // The public Unix API also accepts raw descriptors. Registry ownership
+    // cannot introduce a second integer namespace over those same values.
+    #[cfg(unix)]
+    let fd = match &res {
+        NetResource::Listener(listener) => listener_raw_fd(listener),
+        NetResource::Stream(stream) => stream_raw_fd(stream),
+        NetResource::Udp(socket) => udp_raw_fd(socket),
+    };
+    #[cfg(not(unix))]
     let fd = alloc_fd();
     REGISTRY.lock().unwrap().insert(fd, res);
     fd
@@ -102,9 +141,10 @@ fn register(res: NetResource) -> i64 {
 
 /// Public sibling of `register` for cross-module use (e.g.
 /// `interpreter::io_engine::async_accept` registers an accepted
-/// stream via this helper).  Returns the synthetic fd.
+/// stream via this helper). Returns its owned OS descriptor on Unix, an
+/// opaque registered handle elsewhere, or NET_STATUS_IO_ERROR.
 pub fn register_accepted_stream(stream: TcpStream) -> i64 {
-    register(NetResource::Stream(stream))
+    register_with_error(NetResource::Stream(stream), NET_STATUS_IO_ERROR)
 }
 
 // =============================================================================
@@ -146,8 +186,9 @@ pub const TCP_LISTEN_FLAG_REUSEPORT: i64 = 1 << 0;
 /// cap large values at `/proc/sys/net/core/somaxconn` (or similar).
 ///
 /// Returns:
-/// * `fd > 0` on success — the synthetic FD that other intrinsics
-///  accept (NOT a kernel fd; see module-level docs).
+/// * A raw OS descriptor on Unix, or a registered handle elsewhere.
+///   Current consumers require `fd > 0`; raw Unix descriptor zero remains a
+///   separate compatibility limitation when stdin is closed.
 /// * `-errno` on bind/listen failure — caller maps to IoErrorKind via
 ///  `core/io/protocols.vr::from_raw_os_error`.
 /// * `-EINVAL` (`-22` Linux / `-22` macOS) for argument-validation
@@ -280,12 +321,12 @@ pub fn tcp_listen_v2(host: &str, port: i64, backlog: i64, flags: i64) -> i64 {
 /// `verum_tcp_local_port` LLVM helper provides
 /// (`crates/verum_codegen/src/llvm/runtime.rs`).
 ///
-/// **Legacy registry fallback**: pre-#25 listeners that were
-/// `register()`-ed with a synthetic fd still hit the registry path.
+/// Registered listeners use the registry path: opaque handles on non-Unix
+/// targets and owned OS descriptors on Unix.
 /// The registry tries first, then falls through to `getsockname` if
 /// the fd isn't tracked — single API surface, two backing mechanisms.
 pub fn tcp_local_port(fd: i64) -> i64 {
-    // Fast path: registry lookup for legacy synthetic-fd flows.
+    // Fast path: registry lookup for owned sockets.
     let from_registry = {
         let map = REGISTRY.lock().unwrap();
         match map.get(&fd) {
@@ -334,7 +375,7 @@ pub fn tcp_local_port(fd: i64) -> i64 {
 }
 
 /// Read the connected-peer address of a TCP fd via the registry's
-/// `peer_addr()` (synthetic-fd path) or `getpeername(2)` (real-fd
+/// `peer_addr()` (registered-owner path) or `getpeername(2)` (raw-fd
 /// path). Returns the peer as a `(family, host_str, port)` tuple
 /// where family is 4 or 6. None when the fd isn't tracked or the
 /// kernel call fails. Used by VBC-NET-4 for peer_addr round-trip
@@ -401,8 +442,8 @@ pub fn tcp_peer_addr(fd: i64) -> Option<(u8, String, i64)> {
 }
 
 pub fn tcp_accept(listen_fd: i64) -> i64 {
-    // Pull the listener out of the registry briefly so we don't hold
-    // a RefCell borrow across the (potentially blocking) accept call.
+    // Pull the listener out of the registry briefly so we do not hold
+    // the registry mutex across the (potentially blocking) accept call.
     let listener: Option<TcpListener> = {
         let mut map = REGISTRY.lock().unwrap();
         match map.remove(&listen_fd) {
@@ -416,7 +457,7 @@ pub fn tcp_accept(listen_fd: i64) -> i64 {
         }
     };
     if let Some(listener) = listener {
-        // Synthetic-fd path (legacy `__tcp_listen_raw`).
+        // Registered-listener path (`__tcp_listen_raw`).
         let result = listener.accept();
         {
             REGISTRY.lock().unwrap()
@@ -434,9 +475,8 @@ pub fn tcp_accept(listen_fd: i64) -> i64 {
     // enough to call accept(2), then immediately surrender ownership
     // back via `into_raw_fd()` to keep the listener alive (`TcpListener::Drop`
     // would close the kernel fd otherwise). The accepted connection's
-    // stream is registered in REGISTRY so subsequent recv/send/close
-    // continue through the existing synthetic-fd machinery without
-    // change.
+    // stream is registered under its own OS descriptor so subsequent
+    // recv/send/close share the same descriptor authority.
     //
 
     // Cross-platform: Unix uses FromRawFd; Windows uses FromRawSocket.
@@ -489,7 +529,7 @@ pub fn tcp_connect(host: &str, port: i64) -> i64 {
 }
 
 pub fn tcp_send(fd: i64, data: &[u8]) -> i64 {
-    // Synthetic-fd registry path: clone the stream out of the
+    // Registered-stream path: clone the stream out of the
     // registry under the lock, then drop the lock before the
     // (potentially blocking) write_all.  Concurrent send/recv on
     // OTHER fds proceed in parallel.  See "Lock-drop discipline"
@@ -516,7 +556,7 @@ pub fn tcp_send(fd: i64, data: &[u8]) -> i64 {
     {
         use std::os::unix::io::{FromRawFd, IntoRawFd};
         // SAFETY: caller-supplied fd is documented as a real kernel
-        // fd in this fallback branch; the synthetic-fd table missed.
+        // fd in this fallback branch; the registered-owner lookup missed.
         let mut stream = unsafe { TcpStream::from_raw_fd(fd as i32) };
         let result = stream.write_all(data);
         let _surrendered = stream.into_raw_fd();
@@ -548,7 +588,7 @@ pub fn tcp_recv(fd: i64, max_len: i64) -> Option<String> {
     }
     let cap = max_len.min(1 << 20) as usize; // hard-cap 1 MiB / call.
     let mut buf = vec![0_u8; cap];
-    // Synthetic-fd registry path: clone-and-go (lock dropped
+    // Registered-stream path: clone-and-go (lock dropped
     // before the blocking read).
     let clone_result: Option<TcpStream> = {
         let map = REGISTRY.lock().unwrap();
@@ -591,7 +631,7 @@ pub fn tcp_recv(fd: i64, max_len: i64) -> Option<String> {
 }
 
 pub fn tcp_close(fd: i64) -> i64 {
-    // Legacy synthetic-fd path: drop from registry, std::net Drop runs.
+    // Registered owner: remove it and close its socket through std::net Drop.
     let registry_hit = {
         let mut map = REGISTRY.lock().unwrap();
         map.remove(&fd).is_some()
@@ -717,7 +757,7 @@ pub fn udp_close(fd: i64) -> i64 {
 // Return convention (chosen for ergonomic intrinsic dispatch):
 //
 //  * `tcp_accept_timeout_coop(state, fd, timeout_ms) -> i64`
-//      - >0: accepted synthetic fd
+//      - >0: accepted registered socket handle
 //      - -1: I/O error (registry miss, accept failed)
 //      - -2: timeout
 //      - -3: reactor unhealthy (caller should fall back to blocking)
@@ -733,7 +773,7 @@ pub fn udp_close(fd: i64) -> i64 {
 //      - bytes_written or negative status as above.
 //
 //  * `tcp_connect_timeout(host, port, timeout_ms) -> i64`
-//      - synthetic fd or negative status.  Connect-timeout has no
+//      - registered socket handle or negative status. Connect-timeout has no
 //        coop variant today: every intrinsic dispatch site for it
 //        runs at script-startup before the task scheduler has any
 //        ready peers to pump.
@@ -992,8 +1032,8 @@ pub fn tcp_accept_timeout_coop(
     listen_fd: i64,
     timeout_ms: i64,
 ) -> i64 {
-    // Reactor-driven accept loop shared by the registry path (synthetic
-    // fd → cloned listener) and the raw-kernel-fd fallback path.
+    // Reactor-driven accept loop shared by the registered-owner path
+    // (descriptor → cloned listener) and the raw-kernel-fd fallback path.
     fn accept_loop(
         state: &mut crate::interpreter::state::InterpreterState,
         listener: &TcpListener,
@@ -1019,7 +1059,9 @@ pub fn tcp_accept_timeout_coop(
             // `accept` on a non-blocking listener returns the connected
             // stream directly — no sockaddr_storage decoding needed.
             match listener.accept() {
-                Ok((stream, _peer)) => return register(NetResource::Stream(stream)),
+                Ok((stream, _peer)) => {
+                    return register_with_error(NetResource::Stream(stream), NET_STATUS_IO_ERROR);
+                }
                 Err(e) => match e.kind() {
                     std::io::ErrorKind::WouldBlock => continue,
                     std::io::ErrorKind::Interrupted => continue,
@@ -1029,7 +1071,7 @@ pub fn tcp_accept_timeout_coop(
         }
     }
 
-    // Registry path: a synthetic fd backed by a tracked TcpListener.
+    // Registry path: this descriptor has an owned TcpListener.
     let cloned: Option<TcpListener> = {
         let map = REGISTRY.lock().unwrap();
         match map.get(&listen_fd) {
@@ -1212,7 +1254,9 @@ pub fn tcp_connect_timeout(host: &str, port: i64, timeout_ms: i64) -> i64 {
     };
     for addr in addrs {
         match TcpStream::connect_timeout(&addr, dur) {
-            Ok(stream) => return register(NetResource::Stream(stream)),
+            Ok(stream) => {
+                return register_with_error(NetResource::Stream(stream), NET_STATUS_IO_ERROR);
+            }
             Err(e) if e.kind() == std::io::ErrorKind::TimedOut => return NET_STATUS_TIMEOUT,
             Err(_) => continue,
         }
@@ -1268,41 +1312,7 @@ fn udp_raw_fd(_s: &UdpSocket) -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::thread;
     use std::time::Duration;
-
-    #[test]
-    fn tcp_listen_accept_send_recv_round_trip() {
-        // Server side — use tcp_listen_v2 with REUSEPORT (flag bit 0)
-        // and explicit 127.0.0.1 host so we don't bind to 0.0.0.0
-        // (v1 `tcp_listen` defaults).  REUSEPORT lets parallel test
-        // runs / TIME_WAIT lingerers re-bind without the prior
-        // `EADDRINUSE` hang that surfaced when the same port was
-        // recycled fast across consecutive `cargo test` invocations.
-        let listen_fd = tcp_listen_v2("127.0.0.1", 0, 128, 1);
-        assert!(listen_fd > 0, "tcp_listen_v2 returned {listen_fd}");
-        let port = tcp_local_port(listen_fd);
-        assert!(port > 0 && port <= 65535, "expected valid port, got {port}");
-        // Spawn a client
-        let client = thread::spawn(move || {
-            // Tiny sleep so accept() is reached first deterministically.
-            thread::sleep(Duration::from_millis(20));
-            let cfd = tcp_connect("127.0.0.1", port);
-            assert!(cfd > 0);
-            assert_eq!(tcp_send(cfd, b"hello"), 5);
-            let resp = tcp_recv(cfd, 64).unwrap();
-            assert_eq!(resp, "world");
-            assert_eq!(tcp_close(cfd), 0);
-        });
-        let conn_fd = tcp_accept(listen_fd);
-        assert!(conn_fd > 0);
-        let req = tcp_recv(conn_fd, 64).unwrap();
-        assert_eq!(req, "hello");
-        assert_eq!(tcp_send(conn_fd, b"world"), 5);
-        assert_eq!(tcp_close(conn_fd), 0);
-        client.join().unwrap();
-        assert_eq!(tcp_close(listen_fd), 0);
-    }
 
     #[test]
     fn close_unknown_fd_returns_minus_one() {
@@ -1370,75 +1380,6 @@ mod tests {
     #[test]
     fn tcp_local_port_unknown_fd_returns_minus_one() {
         assert_eq!(tcp_local_port(999_999), -1);
-    }
-
-    /// VBC-NET-RT-1 — proof that the lock-drop discipline works.
-    /// Two TCP connections in flight: one is parked in `tcp_recv`
-    /// (the listener never sends), the other completes a full
-    /// send + recv round-trip.  Pre-fix the second op blocked on
-    /// the REGISTRY mutex held by the first; post-fix it completes
-    /// in milliseconds.  100 ms timeout proves we don't serialise.
-    #[test]
-    fn concurrent_recv_does_not_block_unrelated_send() {
-        // Listener that NEVER sends — used to park a recv.
-        let parker_listen = tcp_listen_v2("127.0.0.1", 0, 8, 1);
-        assert!(parker_listen > 0);
-        let parker_port = tcp_local_port(parker_listen);
-        // Listener that echoes — used for the unrelated round-trip.
-        let echo_listen = tcp_listen_v2("127.0.0.1", 0, 8, 1);
-        assert!(echo_listen > 0);
-        let echo_port = tcp_local_port(echo_listen);
-
-        // Park a recv on the first stream in a background thread.
-        let parker = thread::spawn(move || {
-            let cfd = tcp_connect("127.0.0.1", parker_port);
-            assert!(cfd > 0);
-            // This recv will block forever (the server never replies).
-            // We only care that it doesn't hold the REGISTRY mutex.
-            let _ = tcp_recv(cfd, 64);
-            // Unreachable in normal test flow; main thread closes
-            // the listener which causes the connection to drop and
-            // recv to return with EOF/None.
-            let _ = tcp_close(cfd);
-        });
-        // Accept the parker connection (so its recv has something to wait on).
-        let parker_conn = tcp_accept(parker_listen);
-        assert!(parker_conn > 0);
-        // Give the parker thread a moment to enter recv().
-        thread::sleep(Duration::from_millis(50));
-
-        // NOW the canary: an unrelated round-trip must complete fast.
-        let echo_done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let echo_done_clone = echo_done.clone();
-        let echo_client = thread::spawn(move || {
-            let cfd = tcp_connect("127.0.0.1", echo_port);
-            assert!(cfd > 0);
-            assert_eq!(tcp_send(cfd, b"ping"), 4);
-            let resp = tcp_recv(cfd, 64).unwrap();
-            assert_eq!(resp, "pong");
-            assert_eq!(tcp_close(cfd), 0);
-            echo_done_clone.store(true, std::sync::atomic::Ordering::SeqCst);
-        });
-        let echo_conn = tcp_accept(echo_listen);
-        assert!(echo_conn > 0);
-        let req = tcp_recv(echo_conn, 64).unwrap();
-        assert_eq!(req, "ping");
-        assert_eq!(tcp_send(echo_conn, b"pong"), 4);
-        assert_eq!(tcp_close(echo_conn), 0);
-        echo_client.join().unwrap();
-        assert!(
-            echo_done.load(std::sync::atomic::Ordering::SeqCst),
-            "echo round-trip did not complete — REGISTRY lock contention?"
-        );
-
-        // Cleanup parker.
-        assert_eq!(tcp_close(parker_conn), 0);
-        assert_eq!(tcp_close(parker_listen), 0);
-        // Parker thread will unblock on EOF; join with timeout
-        // semantics via a simple sleep + status check is overkill
-        // here — `tcp_close` of the conn breaks the recv.
-        let _ = parker.join();
-        assert_eq!(tcp_close(echo_listen), 0);
     }
 
     // VBC-NET-RT-2 ----------------------------------------------------------
@@ -2507,3 +2448,11 @@ fn intercept_tcp_read(
 #[cfg(test)]
 #[path = "../../../../tests/unit/udp_peer_address.rs"]
 mod udp_peer_address_tests;
+
+#[cfg(test)]
+#[path = "../../../../tests/unit/net_runtime_bounded_tcp.rs"]
+mod bounded_tcp_tests;
+
+#[cfg(all(test, unix))]
+#[path = "../../../../tests/unit/net_runtime_descriptor_identity.rs"]
+mod descriptor_identity_tests;

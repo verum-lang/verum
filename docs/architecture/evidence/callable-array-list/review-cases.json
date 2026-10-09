@@ -99,7 +99,7 @@
         "RUST_MIN_STACK": "16777216"
       },
       "timeout_seconds": 1200,
-      "scope": "Unfiltered VBC library suite with compression,table_dispatch,codegen,ffi; no ordinary CLI, automatic stdlib bake or AOT acceptance. Inherited precompiled artifacts are held unchanged; this does not certify a fresh producer.",
+      "scope": "Filtered VBC producer-proof unit gate; exact command and execution result below. No full-library, ordinary CLI, fresh archive or native acceptance.",
       "artifacts_before": {
         "runtime.vbca": "410ff097b455437cab98b651f7799b3129588820925afe98e0de9c3781530a0f",
         "runtime.core_metadata": "a92bd89e649e102cdc67d7ad0032513d6448d8915e5744127e6cdf1f1e34ebbb",
@@ -233,7 +233,7 @@
         "RUST_MIN_STACK": "16777216"
       },
       "timeout_seconds": 1200,
-      "scope": "Unfiltered VBC library suite with compression,table_dispatch,codegen,ffi; no ordinary CLI, automatic stdlib bake or AOT acceptance. Inherited precompiled artifacts are held unchanged; this does not certify a fresh producer.",
+      "scope": "Filtered VBC producer-proof unit gate; exact command and execution result below. No full-library, ordinary CLI, fresh archive or native acceptance.",
       "artifacts_before": {
         "runtime.vbca": "410ff097b455437cab98b651f7799b3129588820925afe98e0de9c3781530a0f",
         "runtime.core_metadata": "a92bd89e649e102cdc67d7ad0032513d6448d8915e5744127e6cdf1f1e34ebbb",

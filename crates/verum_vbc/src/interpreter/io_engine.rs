@@ -53,7 +53,7 @@
 //!  * `async_accept(engine, listen_fd, timeout_ns) -> i64` — submit
 //!    listen_fd for read-readiness, poll, accept once ready,
 //!    register accepted stream in net_runtime REGISTRY, return the
-//!    synthetic fd (or NET_STATUS_TIMEOUT / NET_STATUS_IO_ERROR
+//!    owned OS descriptor (or NET_STATUS_TIMEOUT / NET_STATUS_IO_ERROR
 //!    on failure).
 
 use std::collections::HashMap;
@@ -686,8 +686,8 @@ pub fn socket_get_error(_fd: i64) -> i64 {
 
 /// Submit `listen_fd` for read-readiness on the IoEngine session,
 /// poll up to `timeout_ns`, accept once ready, and register the
-/// accepted stream in `net_runtime` REGISTRY.  Returns the synthetic
-/// fd of the registered stream, or a negative status code:
+/// accepted stream in `net_runtime` REGISTRY. Returns the owned OS
+/// descriptor of the registered stream, or a negative status code:
 ///  * NET_STATUS_TIMEOUT  (-2): poll timed out before any event
 ///  * NET_STATUS_REACTOR_ERROR (-3): IoEngine handle invalid
 ///  * NET_STATUS_IO_ERROR (-4): accept syscall failed
@@ -739,7 +739,7 @@ pub fn async_accept(engine: i64, listen_fd: i64, timeout_ns: i64) -> i64 {
     }
     // Register the accepted stream in the net_runtime REGISTRY so
     // downstream tcp_send / tcp_recv / tcp_close intrinsics can
-    // address it via synthetic fd.
+    // address the same owned OS descriptor.
     use std::os::unix::io::FromRawFd;
     let stream = unsafe { std::net::TcpStream::from_raw_fd(conn_fd) };
     net_runtime::register_accepted_stream(stream)

@@ -41,12 +41,10 @@ fn source_declarations_distinguish_empty_expression_and_forward_bodies() {
         let function = descriptor(&module, name);
         assert!(function.bytecode_length > 0, "{name} contains emitted code");
         assert_eq!(function.has_source_body, expected, "{name}");
-        let mut registrations = 0;
-        for info in functions.values().filter(|info| info.id == function.id) {
-            assert_eq!(info.has_source_body, expected, "registration {name}");
-            registrations += 1;
-        }
-        assert!(registrations > 0, "registered source declaration {name}");
+        // Final module IDs are compacted independently of the codegen registry.
+        // Resolve the same declaration by its exact export key in each table.
+        let info = functions.get(name).unwrap_or_else(|| panic!("registration {name}"));
+        assert_eq!(info.has_source_body, expected, "registration {name}");
     }
 }
 
