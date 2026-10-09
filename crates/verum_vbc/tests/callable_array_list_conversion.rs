@@ -157,3 +157,31 @@ fn probe() -> Int { let mut xs = make(); xs.push(9 as Byte);
     assert_eq(xs.len(), 3); assert_eq(xs[0], 7); assert_eq(xs[2], 9); 1 }
 "#);
 }
+
+#[test]
+fn deferred_packed_assignment_does_not_relabel_the_current_list() {
+    runs(r#"
+fn array_value() -> [Byte; 2] { [11 as Byte, 12 as Byte] }
+fn make() -> List<Byte> {
+    let mut xs = array_value();
+    defer { let replacement: [Byte; 2] = [1, 2]; xs = replacement; }
+    return xs;
+}
+fn probe() -> Int { let mut xs = make(); xs.push(13 as Byte);
+    assert_eq(xs.len(), 3); assert_eq(xs[0], 11); assert_eq(xs[1], 12); 1 }
+"#);
+}
+
+#[test]
+fn deferred_call_does_not_erase_the_current_packed_producer() {
+    runs(r#"
+fn cleanup() -> Int { 7 }
+fn make() -> List<Byte> {
+    let xs: [Byte; 2] = [4, 5];
+    defer { cleanup(); }
+    return xs;
+}
+fn probe() -> Int { let mut xs = make(); xs.push(6 as Byte);
+    assert_eq(xs.len(), 3); assert_eq(xs[0], 4); assert_eq(xs[1], 5); 1 }
+"#);
+}

@@ -109,3 +109,7 @@ impl VbcCodegen {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "../../tests/codegen/array_result_facts.rs"]
+mod tests;
