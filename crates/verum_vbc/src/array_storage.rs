@@ -166,10 +166,17 @@ impl ArrayResultFacts {
 /// remain unproved. No last-emitted-wins rule crosses a control-flow join. Calls
 /// clear facts, but a subsequent independent allocation can establish a result.
 pub fn straight_line_array_return(instructions: &[Instruction]) -> Maybe<ArrayResultFact> {
-    if instructions
-        .iter()
-        .any(|instruction| instruction.opcode().is_branch())
-    {
+    if instructions.iter().any(|instruction| {
+        matches!(
+            instruction,
+            Instruction::Jmp { .. }
+                | Instruction::JmpIf { .. }
+                | Instruction::JmpNot { .. }
+                | Instruction::JmpCmp { .. }
+                | Instruction::Switch { .. }
+                | Instruction::TryBegin { .. }
+        )
+    }) {
         return None;
     }
     let mut facts = ArrayResultFacts::default();
