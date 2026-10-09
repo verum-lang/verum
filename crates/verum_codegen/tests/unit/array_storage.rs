@@ -184,3 +184,47 @@ fn indexed_store_preserves_the_straight_line_selected_result() {
     assert_eq!(storage.get(Reg(270)), Some(fact));
     assert!(storage.is_array(Reg(270)));
 }
+
+#[test]
+fn caller_cleanup_allows_prior_access_but_discards_every_storage_fact() {
+    let call = Instruction::Call {
+        dst: Reg(270),
+        func_id: 42,
+        args: verum_vbc::instruction::RegRange {
+            start: Reg(0),
+            count: 0,
+        },
+    };
+    let read = Instruction::GetE {
+        dst: Reg(300),
+        arr: Reg(270),
+        idx: Reg(128),
+    };
+    let cleanup = Instruction::DropRef { src: Reg(1) };
+    let mut storage = ArrayStorage::for_body(&[
+        call.clone(),
+        read.clone(),
+        cleanup.clone(),
+        Instruction::Ret { value: Reg(300) },
+    ]);
+    let fact = ArrayResultFact::Packed {
+        width: 1,
+        float: false,
+        count: 2,
+    };
+    storage.begin_instruction(&call);
+    storage
+        .call_result(Reg(270), Some(fact))
+        .expect("cleanup is not a local branch");
+    storage.finish_instruction(&call).unwrap();
+    storage.begin_instruction(&read);
+    storage.finish_instruction(&read).unwrap();
+    assert_eq!(storage.get(Reg(270)), Some(fact));
+    storage.begin_instruction(&cleanup);
+    storage.finish_instruction(&cleanup).unwrap();
+    assert_eq!(storage.get(Reg(270)), None, "user drop glue discards proof");
+    assert!(
+        storage.is_array(Reg(270)),
+        "a later unknown read must still refuse"
+    );
+}

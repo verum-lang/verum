@@ -150,6 +150,7 @@ impl ArrayResultFacts {
             | I::Not { dst, .. }
             | I::CvtIF { dst, .. }
             | I::CvtFI { dst, .. }
+            | I::CvtToI { dst, .. }
             | I::GetE { dst, .. }
             | I::Len { dst, .. } => self.forget(*dst),
             // Dropping can invoke user glue, with the same unknown side effects

@@ -70,6 +70,10 @@ impl ArrayStorage {
             Instruction::Call { .. }
             | Instruction::CallG { .. }
             | Instruction::CallM { .. }
+            // Destruction can run user glue, just like a call, but it does not
+            // branch within this VBC body. Instruction transfer still discards
+            // every fact at DropRef; a later read needs a fresh producer proof.
+            | Instruction::DropRef { .. }
             | Instruction::Ret { .. }
             | Instruction::RetV => true,
             _ => probe.observe(instruction),
