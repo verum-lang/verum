@@ -123,7 +123,9 @@ refused, here, for this reason".
 ## 6. Delivery acceptance
 
 The first working slice is one source cog published to a configured local
-node and consumed from a fresh project. It must exercise:
+node and consumed from a fresh project. The byte envelope, source metadata,
+authentication boundary and acknowledgement are specified by
+[Cog Publication Protocol v1](cog-publication-protocol.md). It must exercise:
 
 1. Authentication and scope authorization before any publication mutation.
 2. Validated archive bytes and an immutable name/version coordinate,
