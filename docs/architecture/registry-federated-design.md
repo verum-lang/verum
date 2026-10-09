@@ -97,9 +97,9 @@ Three consequences the implementation owes:
    a node's declared surface becomes its syscall allow-list, so a
    compromised handler cannot exceed what its Shape claims.
 
-The proposed `arch diff` interface is not currently implemented. The
-registry's `arch-check = "strict"` manifest setting also has no consuming
-CLI configuration field. Neither can stand in for an executable gate.
+The proposed `arch diff` interface is not currently implemented. An
+`arch-check = "strict"` manifest setting also has no consuming CLI
+configuration field. Neither can stand in for an executable gate.
 An architecture gate must demonstrate both an accepted contract and a
 refused widening. Similarly, an `@verify` annotation requests verification;
 generated documentation may claim a proof only from a verification result.
