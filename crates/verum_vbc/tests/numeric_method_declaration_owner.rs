@@ -192,3 +192,117 @@ fn probe() -> Int {
         173703,
     );
 }
+
+#[test]
+fn signed_alias_and_parentheses_keep_the_declared_target() {
+    check(
+        &format!(
+            r#"{DECLARATIONS}
+type SignedSize is ISize;
+type SignedAlias is SignedSize;
+fn probe() -> Int {{
+    let value: SignedAlias = -1;
+    let mut bytes = (value).to_be_bytes();
+    bytes.push(97);
+    (bytes[0] as Int) * 100 + bytes.len()
+}}
+"#,
+        ),
+        4303,
+    );
+}
+
+#[test]
+fn reversed_declaration_order_keeps_same_width_owners_separate() {
+    check(
+        r#"
+implement ISize { public fn to_be_bytes(self) -> List<Byte> { [43, 47] } }
+implement Int64 {
+    public fn to_be_bytes(self) -> [Byte; 8] { let bytes: [Byte; 8] = [29; 8]; bytes }
+}
+implement USize { public fn to_be_bytes(self) -> List<Byte> { [37, 41] } }
+implement UInt64 {
+    public fn to_be_bytes(self) -> [Byte; 8] { let bytes: [Byte; 8] = [17; 8]; bytes }
+}
+fn probe() -> Int {
+    let unsigned: UInt64 = 1;
+    let signed: Int64 = -1;
+    let size: USize = 1;
+    let ssize: ISize = -1;
+    let a = unsigned.to_be_bytes();
+    let b = signed.to_be_bytes();
+    let mut c = size.to_be_bytes();
+    let mut d = ssize.to_be_bytes();
+    c.push(97);
+    d.push(101);
+    (a[0] as Int) + (b[0] as Int) + (c[0] as Int)
+        + (d[0] as Int) + c.len() + d.len()
+}
+"#,
+        132,
+    );
+}
+
+#[test]
+fn borrowed_value_can_call_its_declared_by_value_method() {
+    check(
+        &format!(
+            r#"{DECLARATIONS}
+fn read(value: &USize) -> Int {{
+    let bytes = value.to_be_bytes();
+    (bytes[0] as Int) * 100 + bytes.len()
+}}
+fn probe() -> Int {{ let value: USize = 29; read(&value) }}
+"#,
+        ),
+        3702,
+    );
+}
+
+#[test]
+fn declared_reference_receiver_keeps_its_reference_carrier() {
+    check(
+        r#"
+implement USize { fn owner_read(&self) -> Int { (*self as Int) + 13 } }
+fn read(value: &USize) -> Int { value.owner_read() }
+fn probe() -> Int { let value: USize = 29; read(&value) }
+"#,
+        42,
+    );
+}
+
+#[test]
+fn unrelated_qualified_suffix_cannot_replace_a_builtin_declaration() {
+    check(
+        r#"
+module foreign {
+    implement USize { public fn to_be_bytes(self) -> List<Byte> { [37, 41] } }
+}
+type SizeAlias is USize;
+fn probe() -> Int { (1 as SizeAlias).to_be_bytes().len() }
+"#,
+        8,
+    );
+}
+
+#[test]
+fn float_declarations_keep_their_own_width_and_body() {
+    check(
+        r#"
+implement Float32 {
+    public fn to_be_bytes(self) -> [Byte; 4] { let bytes: [Byte; 4] = [53; 4]; bytes }
+}
+implement Float64 {
+    public fn to_be_bytes(self) -> [Byte; 8] { let bytes: [Byte; 8] = [61; 8]; bytes }
+}
+fn probe() -> Int {
+    let narrow: Float32 = 1.0 as Float32;
+    let wide: Float64 = 1.0;
+    let a = narrow.to_be_bytes();
+    let b = wide.to_be_bytes();
+    (a[0] as Int) * 10000 + (b[0] as Int) * 100 + a.len() * 10 + b.len()
+}
+"#,
+        536148,
+    );
+}
