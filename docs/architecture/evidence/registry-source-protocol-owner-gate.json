@@ -1,0 +1,463 @@
+{
+  "task": "T1686",
+  "purpose": "Preserve declaring-owner identity and complete methods when importing source protocol implementation targets",
+  "status": "Checker source gates passed; fresh ordinary registry replay pending",
+  "source_base": "a14e5c60c5bd559a356471024d561b06283a9cef",
+  "source_endpoint_before_rebase": "ee80c3843a48237858d590243d004ec20db155e4",
+  "source_commits_before_rebase": [
+    {
+      "commit": "313fe6b36d8a3e21cec0ae7d8f88a69dc8b3c55c",
+      "subject": "test(types): expose source protocol target owner mismatch (T1686)"
+    },
+    {
+      "commit": "d6409e8fc3d7eae82782cca437c784578fd0282d",
+      "subject": "fix(types): reuse complete source impl owner registration (T1686)"
+    },
+    {
+      "commit": "08cb5cdf95d6310d8e1cd6ea5747c71286f474a6",
+      "subject": "test(types): cover source impl aliases and protocol arguments (T1686)"
+    },
+    {
+      "commit": "ee80c3843a48237858d590243d004ec20db155e4",
+      "subject": "test(types): preserve explicit foreign bindings in source impl prepass (T1686)"
+    }
+  ],
+  "production_source_tree": "8c0e2872dd83941424d9ac471cea866e3a2daed2",
+  "source_inputs_sha256": {
+    "crates/verum_types/src/infer/modules.rs": "59d6befb8d41897e0a0933557bc3800b7b60e1a19af628a7afd1db2ad12f640f",
+    "crates/verum_types/src/infer/types.rs": "2481c4150195d03793515cd474e9248b6a43117a384483030bae8ec562203a54",
+    "crates/verum_types/tests/source_protocol_impl_owner.rs": "146c1a0944000fedbe65c941560b40235698aa7a4792e12a831b25761ec9772a"
+  },
+  "product_failure_baseline": {
+    "registry_commit": "9561ce0aeae6d212a0be7841f91b34a7e86b47d0",
+    "registry_tree": "a8d70fa8e6807db0dda1636c01f3bfd3457235ab",
+    "language_product_commit": "faabbe696f1ee928f6b3a9bb6c7980ba20577513",
+    "cli_sha256": "bb4ea411ab107ebc0426a0161d6c974df4d6ee1a209f14df9b21ac37e82c72d4",
+    "schema": "v52-2026-10-05-semantic-formal-parameters",
+    "build_manifest_sha256": "044c329bb648cc7d356307f11cbab806b900fa82889af44377ad47c0195e11dc",
+    "source_fingerprint_blake3": "e2b9a03d21d00dba67cd0b85530b00297d4ea84a5e88f5367c3858b4c077fabf",
+    "command": [
+      "verum",
+      "check"
+    ],
+    "elapsed_seconds": 216.409,
+    "process_returncode": 101,
+    "source_unchanged": true,
+    "cli_unchanged": true,
+    "log_sha256": "9b71e5bac496ba5486102e2620675ccdb78083bfb378d9783ad060d9687e88d0",
+    "diagnostic_scope": "Nine project errors, including four E405 Source bounds at src/main.vr 916-919; runtime was not reached.",
+    "result_path": "/private/tmp/verum-registry-stage18-whole-project/result.json"
+  },
+  "root_causes": [
+    "ast_to_type_for_protocol_impl retained the bare source target path after imported declarations had acquired their canonical declaring owner. Exact protocol lookup correctly refused the mismatched target.",
+    "The early module implementation prepass also registered bare nominal targets with empty method maps. Correcting only later receiver conversion left a duplicate incomplete entry."
+  ],
+  "repair": [
+    "Receiver conversion uses existing qualified type resolution when it retains a nominal head or a registered parameter. Structural alias bodies are not converted into implementation keys.",
+    "The source import prepass resolves exported named targets through the existing public source export walk and ordinary type/complete-implementation importer. The original declaration owner survives mounts and renamed re-exports; the current module is not invented as owner.",
+    "The recursion guard lets an in-progress ordinary import complete its implementation entry. Errors from the complete importer remain deferred soundness errors. Genuine type-parameter blanket implementations keep their existing path."
+  ],
+  "source_anchors": {
+    "receiver_conversion": "crates/verum_types/src/infer/types.rs::ast_to_type_for_protocol_impl",
+    "source_prepass": "crates/verum_types/src/infer/modules.rs::register_exported_source_impl_target",
+    "complete_importer": "crates/verum_types/src/infer/modules.rs::import_impl_blocks_for_type_in_module",
+    "tests": "crates/verum_types/tests/source_protocol_impl_owner.rs"
+  },
+  "controls": [
+    "Actual parsed ModuleRegistry exports, source imports and generic bound calls; both provider mount orders.",
+    "Actual implementation table contains the qualified declaration owner, associated type and value method, and contains no competing bare target.",
+    "Local declaration, renamed re-export and local implementation of an imported alias or qualified target preserve the original owner.",
+    "Reordered generic receiver parameters, exact generic protocol arguments and genuine type-parameter blanket implementation remain distinct.",
+    "A foreign same-name type remains refused with E405 in both mount orders, including when it is the explicit bare binding and only Source is mounted from the provider.",
+    "ProtocolChecker still refuses a second overlapping declaration; no blanket suppression or relaxed coherence policy was introduced."
+  ],
+  "gates": {
+    "baseline-targets": {
+      "command": [
+        "cargo",
+        "+nightly-2026-08-20",
+        "test",
+        "--offline",
+        "--locked",
+        "--manifest-path",
+        "/Users/taaliman/.codex/worktrees/registry-metadata-lookup/verum/Cargo.toml",
+        "-p",
+        "verum_types",
+        "--test",
+        "source_protocol_impl_owner",
+        "--",
+        "--test-threads=1",
+        "--nocapture"
+      ],
+      "cwd": "/Users/taaliman/.codex/worktrees/registry-metadata-lookup/verum",
+      "head": "a14e5c60c5bd559a356471024d561b06283a9cef",
+      "environment": {
+        "CARGO_TARGET_DIR": "/Users/taaliman/.tmp/verum-codex-01a10248-types/checker-target",
+        "CARGO_BUILD_JOBS": "2",
+        "CARGO_INCREMENTAL": "0",
+        "VERUM_NO_AUTO_PRECOMPILE": "1",
+        "RUST_MIN_STACK": "16777216"
+      },
+      "inputs_before": {
+        "crates/verum_types/src/infer/types.rs": "c772e153bce33019e0e341dc9fabcb6da117e79f35da9996da61544410ad39f5",
+        "crates/verum_types/tests/source_protocol_impl_owner.rs": "05ccbc2e61d5ba2a6a7746797b4ae70ba5da29ec07a53a530305a5bc32a3f420"
+      },
+      "timeout_seconds": 600,
+      "returncode": 101,
+      "timed_out": false,
+      "elapsed_seconds": 18.464,
+      "inputs_after": {
+        "crates/verum_types/src/infer/types.rs": "c772e153bce33019e0e341dc9fabcb6da117e79f35da9996da61544410ad39f5",
+        "crates/verum_types/tests/source_protocol_impl_owner.rs": "05ccbc2e61d5ba2a6a7746797b4ae70ba5da29ec07a53a530305a5bc32a3f420"
+      },
+      "inputs_unchanged": true,
+      "log_sha256": "027a63cc7bffb6e1a749c824f196a5af11566fedc12a6c9ecc977784aa3f246e",
+      "log_path": "/private/tmp/verum-T1686/baseline-targets/gate.log",
+      "result_path": "/private/tmp/verum-T1686/baseline-targets/result.json",
+      "totals": {
+        "passed": 1,
+        "failed": 2,
+        "ignored": 0
+      },
+      "completed_test_targets": 1,
+      "test_summaries": [
+        "test result: FAILED. 1 passed; 2 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s"
+      ],
+      "implementation_table": [
+        "registration demo.source.RegistrySource: bare=Some(\"RegistrySource\"), qualified=None",
+        "registration demo.source.GitSource: bare=Some(\"GitSource\"), qualified=None"
+      ],
+      "fixture_committed_as": "313fe6b36d8a3e21cec0ae7d8f88a69dc8b3c55c",
+      "attribution": "Unchanged a14e5c60c production with the uncommitted parsed-source regression later committed as 313fe6b36."
+    },
+    "fixed-initial": {
+      "command": [
+        "cargo",
+        "+nightly-2026-08-20",
+        "test",
+        "--offline",
+        "--locked",
+        "--manifest-path",
+        "/Users/taaliman/.codex/worktrees/registry-metadata-lookup/verum/Cargo.toml",
+        "-p",
+        "verum_types",
+        "--test",
+        "source_protocol_impl_owner",
+        "--",
+        "--test-threads=1",
+        "--nocapture"
+      ],
+      "cwd": "/Users/taaliman/.codex/worktrees/registry-metadata-lookup/verum",
+      "head": "313fe6b36d8a3e21cec0ae7d8f88a69dc8b3c55c",
+      "environment": {
+        "CARGO_TARGET_DIR": "/Users/taaliman/.tmp/verum-codex-01a10248-types/checker-target",
+        "CARGO_BUILD_JOBS": "2",
+        "CARGO_INCREMENTAL": "0",
+        "VERUM_NO_AUTO_PRECOMPILE": "1",
+        "RUST_MIN_STACK": "16777216"
+      },
+      "inputs_before": {
+        "crates/verum_types/src/infer/types.rs": "6f46b81f57efc01790dfe4692e61feb9fe140e8356a952d3237b9f4df7aa272a",
+        "crates/verum_types/tests/source_protocol_impl_owner.rs": "05ccbc2e61d5ba2a6a7746797b4ae70ba5da29ec07a53a530305a5bc32a3f420"
+      },
+      "timeout_seconds": 600,
+      "returncode": 101,
+      "timed_out": false,
+      "elapsed_seconds": 18.494,
+      "inputs_after": {
+        "crates/verum_types/src/infer/types.rs": "6f46b81f57efc01790dfe4692e61feb9fe140e8356a952d3237b9f4df7aa272a",
+        "crates/verum_types/tests/source_protocol_impl_owner.rs": "05ccbc2e61d5ba2a6a7746797b4ae70ba5da29ec07a53a530305a5bc32a3f420"
+      },
+      "inputs_unchanged": true,
+      "log_sha256": "402a1231c74b2b9bd5fd3099ff48ee09fb1d02f0a72a917f8014a3acb0db581a",
+      "log_path": "/private/tmp/verum-T1686/fixed-initial/gate.log",
+      "result_path": "/private/tmp/verum-T1686/fixed-initial/result.json",
+      "totals": {
+        "passed": 1,
+        "failed": 2,
+        "ignored": 0
+      },
+      "completed_test_targets": 1,
+      "test_summaries": [
+        "test result: FAILED. 1 passed; 2 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s"
+      ],
+      "implementation_table": [
+        "registration demo.source.RegistrySource: bare=Some(\"RegistrySource\"), qualified=Some(\"demo.source.RegistrySource\")",
+        "registration demo.source.GitSource: bare=Some(\"GitSource\"), qualified=Some(\"demo.source.GitSource\")"
+      ],
+      "attribution": "Intermediate receiver conversion only: bound calls pass, but the strict no-bare-duplicate controls still fail. Not a successful gate.",
+      "preserved_source": "/private/tmp/verum-T1686/fixed-initial/types.rs"
+    },
+    "fixed-prepass-compile": {
+      "command": [
+        "cargo",
+        "+nightly-2026-08-20",
+        "test",
+        "--offline",
+        "--locked",
+        "--manifest-path",
+        "/Users/taaliman/.codex/worktrees/registry-metadata-lookup/verum/Cargo.toml",
+        "-p",
+        "verum_types",
+        "--test",
+        "source_protocol_impl_owner",
+        "--",
+        "--test-threads=1",
+        "--nocapture"
+      ],
+      "cwd": "/Users/taaliman/.codex/worktrees/registry-metadata-lookup/verum",
+      "head": "313fe6b36d8a3e21cec0ae7d8f88a69dc8b3c55c",
+      "environment": {
+        "CARGO_TARGET_DIR": "/Users/taaliman/.tmp/verum-codex-01a10248-types/checker-target",
+        "CARGO_BUILD_JOBS": "2",
+        "CARGO_INCREMENTAL": "0",
+        "VERUM_NO_AUTO_PRECOMPILE": "1",
+        "RUST_MIN_STACK": "16777216"
+      },
+      "inputs_before": {
+        "crates/verum_types/src/infer/modules.rs": "b3e48d1ddb40c8c939c59501561530125b644bb74a3963cc1486f21ab80cf654",
+        "crates/verum_types/src/infer/types.rs": "2481c4150195d03793515cd474e9248b6a43117a384483030bae8ec562203a54",
+        "crates/verum_types/tests/source_protocol_impl_owner.rs": "78784fb3471e729a6b380eb1d954361632a9b71841114b6218f140d244366cfb"
+      },
+      "timeout_seconds": 600,
+      "returncode": 0,
+      "timed_out": false,
+      "elapsed_seconds": 24.245,
+      "inputs_after": {
+        "crates/verum_types/src/infer/modules.rs": "b3e48d1ddb40c8c939c59501561530125b644bb74a3963cc1486f21ab80cf654",
+        "crates/verum_types/src/infer/types.rs": "2481c4150195d03793515cd474e9248b6a43117a384483030bae8ec562203a54",
+        "crates/verum_types/tests/source_protocol_impl_owner.rs": "78784fb3471e729a6b380eb1d954361632a9b71841114b6218f140d244366cfb"
+      },
+      "inputs_unchanged": true,
+      "log_sha256": "74c405c1dc7d3e7bb746b0861dcbc2dab8d3bdeb4e9919a2b666bcd3d03c1b9d",
+      "log_path": "/private/tmp/verum-T1686/fixed-prepass-compile/gate.log",
+      "result_path": "/private/tmp/verum-T1686/fixed-prepass-compile/result.json",
+      "totals": {
+        "passed": 3,
+        "failed": 0,
+        "ignored": 0
+      },
+      "completed_test_targets": 1,
+      "test_summaries": [
+        "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s"
+      ],
+      "implementation_table": [
+        "registration demo.source.RegistrySource: bare=None, qualified=Some(\"demo.source.RegistrySource\")",
+        "registration demo.source.GitSource: bare=None, qualified=Some(\"demo.source.GitSource\")"
+      ],
+      "attribution": "Initial complete-import repair before helper extraction. The final extracted production helper was then tested by adjacent and full-types."
+    },
+    "adjacent": {
+      "command": [
+        "cargo",
+        "+nightly-2026-08-20",
+        "test",
+        "--offline",
+        "--locked",
+        "--manifest-path",
+        "/Users/taaliman/.codex/worktrees/registry-metadata-lookup/verum/Cargo.toml",
+        "-p",
+        "verum_types",
+        "--test",
+        "source_protocol_impl_owner",
+        "--test",
+        "mounted_type_owner",
+        "--test",
+        "metadata_impl_owner",
+        "--test",
+        "coherence_tests",
+        "--",
+        "--test-threads=1",
+        "--nocapture"
+      ],
+      "cwd": "/Users/taaliman/.codex/worktrees/registry-metadata-lookup/verum",
+      "head": "d6409e8fc3d7eae82782cca437c784578fd0282d",
+      "environment": {
+        "CARGO_TARGET_DIR": "/Users/taaliman/.tmp/verum-codex-01a10248-types/checker-target",
+        "CARGO_BUILD_JOBS": "2",
+        "CARGO_INCREMENTAL": "0",
+        "VERUM_NO_AUTO_PRECOMPILE": "1",
+        "RUST_MIN_STACK": "16777216"
+      },
+      "inputs_before": {
+        "crates/verum_types/src/infer/modules.rs": "59d6befb8d41897e0a0933557bc3800b7b60e1a19af628a7afd1db2ad12f640f",
+        "crates/verum_types/src/infer/types.rs": "2481c4150195d03793515cd474e9248b6a43117a384483030bae8ec562203a54",
+        "crates/verum_types/tests/source_protocol_impl_owner.rs": "cf874fadbd33d5b804fb109a0d307a88e706b6bd04270ac928ba8ba687d038e8"
+      },
+      "timeout_seconds": 600,
+      "returncode": 0,
+      "timed_out": false,
+      "elapsed_seconds": 32.328,
+      "inputs_after": {
+        "crates/verum_types/src/infer/modules.rs": "59d6befb8d41897e0a0933557bc3800b7b60e1a19af628a7afd1db2ad12f640f",
+        "crates/verum_types/src/infer/types.rs": "2481c4150195d03793515cd474e9248b6a43117a384483030bae8ec562203a54",
+        "crates/verum_types/tests/source_protocol_impl_owner.rs": "cf874fadbd33d5b804fb109a0d307a88e706b6bd04270ac928ba8ba687d038e8"
+      },
+      "inputs_unchanged": true,
+      "log_sha256": "5046fec52100bc4a25fe3a57c8ded6404aeffcd647de73c0f93117cad035aa0b",
+      "log_path": "/private/tmp/verum-T1686/adjacent/gate.log",
+      "result_path": "/private/tmp/verum-T1686/adjacent/result.json",
+      "totals": {
+        "passed": 60,
+        "failed": 0,
+        "ignored": 0
+      },
+      "completed_test_targets": 4,
+      "test_summaries": [
+        "test result: ok. 20 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s",
+        "test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s",
+        "test result: ok. 21 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s",
+        "test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s"
+      ],
+      "implementation_table": [
+        "registration demo.source.RegistrySource: bare=None, qualified=Some(\"demo.source.RegistrySource\")",
+        "registration demo.source.GitSource: bare=None, qualified=Some(\"demo.source.GitSource\")"
+      ],
+      "fixture_committed_as": "08cb5cdf95d6310d8e1cd6ea5747c71286f474a6",
+      "attribution": "Committed d6409e8fc production plus expanded controls later committed as 08cb5cdf9."
+    },
+    "full-types": {
+      "command": [
+        "cargo",
+        "+nightly-2026-08-20",
+        "test",
+        "--offline",
+        "--locked",
+        "--manifest-path",
+        "/Users/taaliman/.codex/worktrees/registry-metadata-lookup/verum/Cargo.toml",
+        "-p",
+        "verum_types",
+        "--tests",
+        "--",
+        "--test-threads=1",
+        "--nocapture"
+      ],
+      "cwd": "/Users/taaliman/.codex/worktrees/registry-metadata-lookup/verum",
+      "head": "08cb5cdf95d6310d8e1cd6ea5747c71286f474a6",
+      "environment": {
+        "CARGO_TARGET_DIR": "/Users/taaliman/.tmp/verum-codex-01a10248-types/checker-target",
+        "CARGO_BUILD_JOBS": "2",
+        "CARGO_INCREMENTAL": "0",
+        "VERUM_NO_AUTO_PRECOMPILE": "1",
+        "RUST_MIN_STACK": "16777216"
+      },
+      "inputs_before": {
+        "crates/verum_types/src/infer/modules.rs": "59d6befb8d41897e0a0933557bc3800b7b60e1a19af628a7afd1db2ad12f640f",
+        "crates/verum_types/src/infer/types.rs": "2481c4150195d03793515cd474e9248b6a43117a384483030bae8ec562203a54",
+        "crates/verum_types/tests/source_protocol_impl_owner.rs": "cf874fadbd33d5b804fb109a0d307a88e706b6bd04270ac928ba8ba687d038e8"
+      },
+      "timeout_seconds": 600,
+      "returncode": 0,
+      "timed_out": false,
+      "elapsed_seconds": 230.296,
+      "inputs_after": {
+        "crates/verum_types/src/infer/modules.rs": "59d6befb8d41897e0a0933557bc3800b7b60e1a19af628a7afd1db2ad12f640f",
+        "crates/verum_types/src/infer/types.rs": "2481c4150195d03793515cd474e9248b6a43117a384483030bae8ec562203a54",
+        "crates/verum_types/tests/source_protocol_impl_owner.rs": "cf874fadbd33d5b804fb109a0d307a88e706b6bd04270ac928ba8ba687d038e8"
+      },
+      "inputs_unchanged": true,
+      "log_sha256": "99ffa111721945b8eb2c0e8115eccba068a43ee999d524b84e29e8a303b7da6b",
+      "log_path": "/private/tmp/verum-T1686/full-types/gate.log",
+      "result_path": "/private/tmp/verum-T1686/full-types/result.json",
+      "totals": {
+        "passed": 3983,
+        "failed": 0,
+        "ignored": 3
+      },
+      "completed_test_targets": 174,
+      "existing_ignores": [
+        "core_pipeline::tests::test_stdlib_full_typecheck ... ignored, long-running (~220s) stdlib full typecheck; run with: cargo test stdlib_full_typecheck -- --ignored --nocapture",
+        "too_few_type_arguments_in_a_let_annotation_is_refused ... ignored, T0922: `provided < expected` is blocked on default type parameters. Turning it on refuses 194 uses of `Result<T>` in 31 core/ files, where `Result<T, E>` takes two and the stdlib is written as if `E` defaulted. The grammar has no `= Type` on a type parameter yet. Un-ignore with `type Result<T, E = Error>`.",
+        "too_few_type_arguments_in_a_signature_is_refused ... ignored, T0922: `provided < expected` is blocked on default type parameters. Turning it on refuses 194 uses of `Result<T>` in 31 core/ files, where `Result<T, E>` takes two and the stdlib is written as if `E` defaulted. The grammar has no `= Type` on a type parameter yet. Un-ignore with `type Result<T, E = Error>`."
+      ],
+      "preserved_branch": "codex/source-protocol-owner-tested-08cb5"
+    },
+    "final-order-controls": {
+      "command": [
+        "cargo",
+        "+nightly-2026-08-20",
+        "test",
+        "--offline",
+        "--locked",
+        "--manifest-path",
+        "/Users/taaliman/.codex/worktrees/registry-metadata-lookup/verum/Cargo.toml",
+        "-p",
+        "verum_types",
+        "--test",
+        "source_protocol_impl_owner",
+        "--",
+        "--test-threads=1",
+        "--nocapture"
+      ],
+      "cwd": "/Users/taaliman/.codex/worktrees/registry-metadata-lookup/verum",
+      "head": "08cb5cdf95d6310d8e1cd6ea5747c71286f474a6",
+      "environment": {
+        "CARGO_TARGET_DIR": "/Users/taaliman/.tmp/verum-codex-01a10248-types/checker-target",
+        "CARGO_BUILD_JOBS": "2",
+        "CARGO_INCREMENTAL": "0",
+        "VERUM_NO_AUTO_PRECOMPILE": "1",
+        "RUST_MIN_STACK": "16777216"
+      },
+      "inputs_before": {
+        "crates/verum_types/src/infer/modules.rs": "59d6befb8d41897e0a0933557bc3800b7b60e1a19af628a7afd1db2ad12f640f",
+        "crates/verum_types/src/infer/types.rs": "2481c4150195d03793515cd474e9248b6a43117a384483030bae8ec562203a54",
+        "crates/verum_types/tests/source_protocol_impl_owner.rs": "146c1a0944000fedbe65c941560b40235698aa7a4792e12a831b25761ec9772a"
+      },
+      "timeout_seconds": 600,
+      "returncode": 0,
+      "timed_out": false,
+      "elapsed_seconds": 23.821,
+      "inputs_after": {
+        "crates/verum_types/src/infer/modules.rs": "59d6befb8d41897e0a0933557bc3800b7b60e1a19af628a7afd1db2ad12f640f",
+        "crates/verum_types/src/infer/types.rs": "2481c4150195d03793515cd474e9248b6a43117a384483030bae8ec562203a54",
+        "crates/verum_types/tests/source_protocol_impl_owner.rs": "146c1a0944000fedbe65c941560b40235698aa7a4792e12a831b25761ec9772a"
+      },
+      "inputs_unchanged": true,
+      "log_sha256": "ed8b1e6f2047761bf9c308e42d89990ceda3ff460c5402a72c50b5ba765c344a",
+      "log_path": "/private/tmp/verum-T1686/final-order-controls/gate.log",
+      "result_path": "/private/tmp/verum-T1686/final-order-controls/result.json",
+      "totals": {
+        "passed": 11,
+        "failed": 0,
+        "ignored": 0
+      },
+      "completed_test_targets": 1,
+      "test_summaries": [
+        "test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.09s"
+      ],
+      "implementation_table": [
+        "registration demo.source.RegistrySource: bare=None, qualified=Some(\"demo.source.RegistrySource\")",
+        "registration demo.source.GitSource: bare=None, qualified=Some(\"demo.source.GitSource\")"
+      ],
+      "fixture_committed_as": "ee80c3843a48237858d590243d004ec20db155e4",
+      "attribution": "Unchanged fully tested production, with test-only foreign-binding mount-order controls later committed as ee80c3843.",
+      "executable": {
+        "path": "/Users/taaliman/.tmp/verum-codex-01a10248-types/checker-target/debug/build/verum_types/3a7556486c61c102/out/source_protocol_impl_owner-3a7556486c61c102",
+        "sha256": "703ff2764ef830db03f29938b0ec84918826b87f23a23f99dcd68b4a657d0ec3",
+        "identity_boundary": "Hashed after this final focused run, before any later Cargo invocation; not attributed to earlier runs that reused this output path."
+      }
+    }
+  },
+  "validation_boundary": [
+    "The full suite was run on frozen 08cb5cdf9; the final focused run adds only tests, with identical production input hashes. No full rerun is attributed to the later test-only commit.",
+    "Historical executable output paths were reused by Cargo. Earlier gates retain source hashes and complete log hashes; the final executable hash is not retroactively attributed to earlier runs.",
+    "The source prepass correction covers exported named nominal targets. These controls do not establish universal private-type import behavior or a new protocol namespace policy.",
+    "No ordinary CLI, standard-library bake, registry runtime, deployment, proof sweep or generated-AOT acceptance was run by this task. The four original product E405 calls still require a fresh ordinary registry check."
+  ],
+  "ci_coverage": "The integration job in .github/workflows/ci.yml includes verum_types --tests, including the new source_protocol_impl_owner target.",
+  "hygiene_gate": {
+    "command": [
+      "make",
+      "check-internal-refs"
+    ],
+    "returncode": 0,
+    "elapsed_seconds": 5.863,
+    "log_sha256": "3ba859445701cb280bae98012597c4a311770a020b25572e322a8efb2213ff00",
+    "additional_checks": [
+      "JSON parsing",
+      "recorded source input hashes match final source",
+      "source anchor files and function symbols exist",
+      "git diff --cached --check"
+    ]
+  }
+}
