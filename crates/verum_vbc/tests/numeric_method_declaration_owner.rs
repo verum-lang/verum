@@ -12,13 +12,13 @@ use verum_vbc::module::VbcModule;
 // byte conversion intrinsic or array-to-List coercion is involved.
 const DECLARATIONS: &str = r#"
 implement UInt64 {
-    public fn to_be_bytes(self) -> [Byte; 8] { [17; 8] }
+    public fn to_be_bytes(self) -> [Byte; 8] { let bytes: [Byte; 8] = [17; 8]; bytes }
 }
 implement USize {
     public fn to_be_bytes(self) -> List<Byte> { [37, 41] }
 }
 implement Int64 {
-    public fn to_be_bytes(self) -> [Byte; 8] { [29; 8] }
+    public fn to_be_bytes(self) -> [Byte; 8] { let bytes: [Byte; 8] = [29; 8]; bytes }
 }
 implement ISize {
     public fn to_be_bytes(self) -> List<Byte> { [43, 47] }
@@ -52,8 +52,10 @@ fn calls(module: &VbcModule, entry: verum_vbc::module::FunctionId) -> List<Text>
             Instruction::Call { func_id, .. } | Instruction::CallG { func_id, .. } => module
                 .get_function(verum_vbc::module::FunctionId(*func_id))
                 .and_then(|f| module.get_string(f.name))
-                .map(Into::into),
-            Instruction::CallM { method_id, .. } => module.get_string(verum_vbc::StringId(*method_id)).map(Into::into),
+                .map(|name| format!("Call#{func_id} {name}").into()),
+            Instruction::CallM { method_id, .. } => module
+                .get_string(verum_vbc::StringId(*method_id))
+                .map(|name| format!("CallM {name}").into()),
             _ => None,
         })
         .collect()
@@ -171,5 +173,22 @@ fn probe() -> Int {{
 "#
         ),
         1729,
+    );
+}
+
+#[test]
+fn typed_fixed_array_and_list_return_carriers_are_independently_valid() {
+    check(
+        r#"
+fn fixed() -> [Byte; 8] { let bytes: [Byte; 8] = [17; 8]; bytes }
+fn flexible() -> List<Byte> { [37, 41] }
+fn probe() -> Int {
+    let a = fixed();
+    let mut b = flexible();
+    b.push(97);
+    (a[0] as Int) * 10000 + (b[0] as Int) * 100 + b.len()
+}
+"#,
+        173703,
     );
 }
