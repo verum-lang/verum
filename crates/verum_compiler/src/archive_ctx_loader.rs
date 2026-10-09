@@ -598,6 +598,7 @@ fn register_module(
             );
         }
         let info = FunctionInfo {
+            has_source_body: fn_desc.has_source_body,
             callable_signature: None,
             type_param_ids: fn_desc.type_params.iter().map(|p| p.id).collect(),
             explicit_type_param_ids: fn_desc.explicit_type_param_ids.clone(),
@@ -778,6 +779,7 @@ fn register_module(
             };
             let param_names: Vec<String> = (0..arity).map(|i| format!("_{}", i)).collect();
             let info = FunctionInfo {
+                has_source_body: false,
                 callable_signature: None,
                 type_param_ids: Vec::new(),
                 explicit_type_param_ids: Vec::new(),
@@ -901,6 +903,7 @@ fn register_module(
             .map(|f| type_ref_simple_name(&f.type_ref, module).unwrap_or_default())
             .collect();
         let info = FunctionInfo {
+            has_source_body: false,
             callable_signature: None,
             type_param_ids: Vec::new(),
             explicit_type_param_ids: Vec::new(),
@@ -6425,6 +6428,7 @@ fn register_module_filtered(
             );
         }
         let info = FunctionInfo {
+            has_source_body: fn_desc.has_source_body,
             callable_signature: None,
             type_param_ids: fn_desc.type_params.iter().map(|p| p.id).collect(),
             explicit_type_param_ids: fn_desc.explicit_type_param_ids.clone(),
@@ -6870,6 +6874,7 @@ fn register_module_filtered(
             };
             let param_names: Vec<String> = (0..arity).map(|i| format!("_{}", i)).collect();
             let info = FunctionInfo {
+                has_source_body: false,
                 callable_signature: None,
                 type_param_ids: Vec::new(),
                 explicit_type_param_ids: Vec::new(),
@@ -6958,6 +6963,7 @@ fn register_module_filtered(
             .map(|f| type_ref_simple_name(&f.type_ref, module).unwrap_or_default())
             .collect();
         let info = FunctionInfo {
+            has_source_body: false,
             callable_signature: None,
             type_param_ids: Vec::new(),
             explicit_type_param_ids: Vec::new(),

@@ -1100,6 +1100,9 @@ pub struct CanonicalFnEntry {
 /// Information about a function.
 #[derive(Debug, Clone, Default)]
 pub struct FunctionInfo {
+    /// True only when the selected declaration has a source body, including {}.
+    /// Synthetic bytecode and legacy descriptors do not establish this fact.
+    pub has_source_body: bool,
     /// Proven user-visible closure signature, excluding its hidden environment.
     /// None means unknown, independently of the descriptor's legacy ABI defaults.
     pub callable_signature: Option<TypeRef>,

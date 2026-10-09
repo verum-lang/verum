@@ -6740,6 +6740,7 @@ impl VbcCodegen {
                 );
             }
             let info = FunctionInfo {
+                has_source_body: false,
                 callable_signature: None,
                 type_param_ids: Vec::new(),
                 explicit_type_param_ids: Vec::new(),
@@ -17929,6 +17930,7 @@ impl VbcCodegen {
             );
         }
         let info = FunctionInfo {
+            has_source_body: false,
             callable_signature: None,
             type_param_ids: Vec::new(),
             explicit_type_param_ids: Vec::new(),
@@ -32696,6 +32698,7 @@ impl VbcCodegen {
 
         // Register the closure function
         let info = super::FunctionInfo {
+            has_source_body: false,
             callable_signature: None,
             type_param_ids: Vec::new(),
             explicit_type_param_ids: Vec::new(),
@@ -34067,6 +34070,7 @@ impl VbcCodegen {
 
         let param_names: Vec<String> = capture_names.iter().map(|(n, _)| n.clone()).collect();
         let info = super::FunctionInfo {
+            has_source_body: false,
             callable_signature: None,
             type_param_ids: Vec::new(),
             explicit_type_param_ids: Vec::new(),
@@ -43307,6 +43311,7 @@ impl VbcCodegen {
 
         // Register the generator function
         let info = super::FunctionInfo {
+            has_source_body: false,
             callable_signature: None,
             type_param_ids: Vec::new(),
             explicit_type_param_ids: Vec::new(),

@@ -645,7 +645,8 @@ impl Serializer {
         // Flags
         let flags = (desc.is_inline_candidate as u8)
             | ((desc.is_generic as u8) << 1)
-            | ((desc.is_generator as u8) << 2);
+            | ((desc.is_generator as u8) << 2)
+            | ((desc.has_source_body as u8) << 3);
         self.output.push(flags);
 
         // Properties

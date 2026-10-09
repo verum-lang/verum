@@ -1402,6 +1402,9 @@ impl<'a> Deserializer<'a> {
  let is_inline_candidate = flags & 0x01 != 0;
  let is_generic = flags & 0x02 != 0;
  let is_generator = flags & 0x04 != 0;
+ // Bit 3 carried no declaration authority before v2.24.
+ let has_source_body = self.header.as_ref().is_some_and(|h| h.version_minor >= 24)
+     && flags & 0x08 != 0;
 
  let properties = PropertySet::from_bits_truncate(decode_u16(self.data, &mut self.offset)?);
 
@@ -1716,6 +1719,7 @@ impl<'a> Deserializer<'a> {
      }
  } else { None };
  Ok(FunctionDescriptor {
+ has_source_body,
  semantic_params,
  value_uses,
  explicit_type_param_ids,
