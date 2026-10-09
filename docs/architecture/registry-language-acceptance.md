@@ -598,3 +598,8 @@ runtime acceptance, AOT, authenticated publication and durable service behavior.
 The five raw output files preserve their original bytes, including Cargo
 whitespace; only those files are excluded from range whitespace checks.
 Production code, tests, JSON and this prose remain checked.
+
+The reviewed chain is rebased onto CLI-only integration `f223efbf`. Its complete
+compiler and type-crate trees match the executed `b57ddd40f` source exactly;
+the original tested branch and original evidence chain are retained. This
+identity check does not add a new ordinary CLI or runtime result.

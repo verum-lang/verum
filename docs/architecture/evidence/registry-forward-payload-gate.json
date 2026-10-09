@@ -361,5 +361,17 @@
     "active_target_processes": [],
     "last_gate": "/private/tmp/verum-T1677-external-cogs/result.json",
     "released": true
+  },
+  "integration": {
+    "base": "f223efbf4762c9d303c415c8666e5c4dadc4fbba",
+    "rebased_source_commit": "c30ba89d28da2365daf456c8bf87a35a8f4a6c6e",
+    "tested_source_commit": "b57ddd40f9b5bd16b4af56fd0ab5567de46b8a4b",
+    "identical_crate_trees": {
+      "crates/verum_compiler": "674695c4b24df4b609abd1b3ec357a57f53b1475",
+      "crates/verum_types": "bad8c50213346c441aac15d9774fa8264d42fc0e"
+    },
+    "preserved_tested_branch": "codex/project-forward-tested-b57",
+    "preserved_original_chain": "codex/project-forward-pre-rebase",
+    "validation": "Rebase adds disjoint CLI source/evidence ancestry; complete compiler and type crate trees equal the executed source. No additional Cargo or ordinary CLI run claimed."
   }
 }
