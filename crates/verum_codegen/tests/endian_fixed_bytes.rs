@@ -6,12 +6,16 @@ use verum_codegen::llvm::{LoweringConfig, VbcToLlvmLowering};
 use verum_common::{Heap, List, Set, Text};
 use verum_fast_parser::Parser;
 use verum_llvm::{
-    OptimizationLevel, context::Context, memory_buffer::MemoryBuffer, module::Module,
-    targets::{InitializationConfig, Target}, values::AnyValue,
+    OptimizationLevel,
+    context::Context,
+    memory_buffer::MemoryBuffer,
+    module::Module,
+    targets::{InitializationConfig, Target},
+    values::AnyValue,
 };
 use verum_vbc::{
-    codegen::VbcCodegen, deserialize::deserialize_module,
-    module::VbcModule, serialize::serialize_module,
+    codegen::VbcCodegen, deserialize::deserialize_module, module::VbcModule,
+    serialize::serialize_module,
 };
 
 thread_local! {
@@ -28,7 +32,8 @@ extern "C" fn allocate(size: u64) -> *mut u64 {
 }
 
 fn source(source: &str) -> VbcModule {
-    VbcCodegen::new().compile_module(&Parser::new(source).parse_module().expect("grammar"))
+    VbcCodegen::new()
+        .compile_module(&Parser::new(source).parse_module().expect("grammar"))
         .expect("source VBC")
 }
 
@@ -36,23 +41,43 @@ fn reachable_ir(module: &Module, root: &str) -> Text {
     let mut text = Text::new();
     let full = module.print_to_string();
     for line in full.to_str().expect("IR UTF8").lines() {
-        if line.starts_with("target ") || line.starts_with("attributes #")
-            || (line.starts_with('%') && line.contains(" = type ")) {
-            text.push_str(line); text.push('\n');
+        if line.starts_with("target ")
+            || line.starts_with("attributes #")
+            || (line.starts_with('%') && line.contains(" = type "))
+        {
+            text.push_str(line);
+            text.push('\n');
         }
     }
-    text.push_str("declare ptr @verum_cbgr_allocate(i64)\ndeclare ptr @verum_checked_malloc(i64)\n");
+    text.push_str(
+        "declare ptr @verum_cbgr_allocate(i64)\ndeclare ptr @verum_checked_malloc(i64)\n",
+    );
     let mut pending: List<Text> = [Text::from(root)].into_iter().collect();
-    let mut seen: Set<Text> = [Text::from("verum_cbgr_allocate"), Text::from("verum_checked_malloc")].into_iter().collect();
+    let mut seen: Set<Text> = [
+        Text::from("verum_cbgr_allocate"),
+        Text::from("verum_checked_malloc"),
+    ]
+    .into_iter()
+    .collect();
     while let Some(name) = pending.pop() {
-        if !seen.insert(name.clone()) { continue; }
-        let item = if let Some(function) = module.get_function(&name) { function.print_to_string() }
-            else if let Some(global) = module.get_global(&name) { global.print_to_string() }
-            else { continue; };
+        if !seen.insert(name.clone()) {
+            continue;
+        }
+        let item = if let Some(function) = module.get_function(&name) {
+            function.print_to_string()
+        } else if let Some(global) = module.get_global(&name) {
+            global.print_to_string()
+        } else {
+            continue;
+        };
         let item = item.to_str().expect("IR item");
-        text.push_str(item); text.push('\n');
+        text.push_str(item);
+        text.push('\n');
         for tail in item.split('@').skip(1) {
-            let name = tail.split(|ch: char| !ch.is_ascii_alphanumeric() && !"_.$".contains(ch)).next().unwrap();
+            let name = tail
+                .split(|ch: char| !ch.is_ascii_alphanumeric() && !"_.$".contains(ch))
+                .next()
+                .unwrap();
             if module.get_function(name).is_some() || module.get_global(name).is_some() {
                 pending.push(Text::from(name));
             }
@@ -62,33 +87,64 @@ fn reachable_ir(module: &Module, root: &str) -> Text {
 }
 
 fn native(module: &VbcModule, check: impl Fn(&verum_llvm::execution_engine::ExecutionEngine)) {
+    native_with_ir(module, |_| {}, check);
+}
+
+fn native_with_ir(
+    module: &VbcModule,
+    check_ir: impl Fn(&str),
+    check: impl Fn(&verum_llvm::execution_engine::ExecutionEngine),
+) {
     let mut wire = deserialize_module(&serialize_module(module).expect("wire")).expect("reload");
     // The native API consumes decoded bodies, as does the real archive loader.
     for function in &mut wire.functions {
         let start = function.bytecode_offset as usize;
         let end = start + function.bytecode_length as usize;
-        let mut instructions = verum_vbc::bytecode::decode_instructions(&wire.bytecode[start..end]).expect("decode body");
+        let mut instructions = verum_vbc::bytecode::decode_instructions(&wire.bytecode[start..end])
+            .expect("decode body");
         verum_vbc::bytecode::jump_offsets_to_instr_indices(&mut instructions);
         function.instructions = Some(instructions);
     }
     for (route, module) in [("source", module), ("wire", &wire)] {
         Target::initialize_native(&InitializationConfig::default()).expect("native target");
         let context = Context::create();
-        let mut lowering = VbcToLlvmLowering::new(&context,
-            LoweringConfig::debug("endian_native").with_debug_info(false));
+        let mut lowering = VbcToLlvmLowering::new(
+            &context,
+            LoweringConfig::debug("endian_native").with_debug_info(false),
+        );
         lowering.lower_module(module).expect("native lowering");
+        let probe_ir = lowering
+            .module()
+            .get_function("probe")
+            .expect("probe")
+            .print_to_string();
+        check_ir(probe_ir.to_str().expect("probe IR UTF8"));
         let text = reachable_ir(lowering.module(), "probe");
         if let Ok(directory) = std::env::var("VERUM_T1698_IR_DIR") {
             std::fs::create_dir_all(&directory).expect("IR evidence directory");
             let thread = std::thread::current();
-            std::fs::write(std::path::Path::new(&directory).join(format!("{}-{route}.ll", thread.name().unwrap_or("endian"))), text.as_bytes()).expect("IR evidence");
+            std::fs::write(
+                std::path::Path::new(&directory)
+                    .join(format!("{}-{route}.ll", thread.name().unwrap_or("endian"))),
+                text.as_bytes(),
+            )
+            .expect("IR evidence");
         }
-        let executable = context.create_module_from_ir(MemoryBuffer::create_from_memory_range_copy(
-            text.as_bytes(), "endian_native")).expect("reachable IR");
+        let executable = context
+            .create_module_from_ir(MemoryBuffer::create_from_memory_range_copy(
+                text.as_bytes(),
+                "endian_native",
+            ))
+            .expect("reachable IR");
         executable.verify().expect("valid IR");
-        let engine = executable.create_jit_execution_engine(OptimizationLevel::None).expect("JIT");
+        let engine = executable
+            .create_jit_execution_engine(OptimizationLevel::None)
+            .expect("JIT");
         for name in ["verum_cbgr_allocate", "verum_checked_malloc"] {
-            engine.add_global_mapping(&executable.get_function(name).unwrap(), allocate as *const () as usize);
+            engine.add_global_mapping(
+                &executable.get_function(name).unwrap(),
+                allocate as *const () as usize,
+            );
         }
         check(&engine);
         ALLOCATIONS.with(|allocations| allocations.borrow_mut().clear());
@@ -96,15 +152,33 @@ fn native(module: &VbcModule, check: impl Fn(&verum_llvm::execution_engine::Exec
 }
 
 fn packed_result(body: &str, declarations: &str, expected: &[u8]) {
-    let module = source(&format!("{declarations} fn probe() -> [Byte; {}] {{ {body} }}", expected.len()));
+    let module = source(&format!(
+        "{declarations} fn probe() -> [Byte; {}] {{ {body} }}",
+        expected.len()
+    ));
     native(&module, |engine| {
         // SAFETY: the source function accepts no arguments and returns a pointer
         // slot. Only inspect a verified live fixture allocation of enough bytes.
-        let pointer = unsafe { engine.get_function::<unsafe extern "C" fn() -> *const u8>("probe").unwrap().call() };
+        let pointer = unsafe {
+            engine
+                .get_function::<unsafe extern "C" fn() -> *const u8>("probe")
+                .unwrap()
+                .call()
+        };
         ALLOCATIONS.with(|allocations| {
             let allocations = allocations.borrow();
-            let allocation = allocations.iter().find(|allocation| allocation.as_ptr() as *const u8 == pointer)
-                .unwrap_or_else(|| panic!("result {pointer:p} outside live allocations {:?}", allocations.iter().map(|value| (value.as_ptr(), value.len())).collect::<List<_>>()));
+            let allocation = allocations
+                .iter()
+                .find(|allocation| allocation.as_ptr() as *const u8 == pointer)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "result {pointer:p} outside live allocations {:?}",
+                        allocations
+                            .iter()
+                            .map(|value| (value.as_ptr(), value.len()))
+                            .collect::<List<_>>()
+                    )
+                });
             assert!(allocation.len() * 8 >= expected.len());
             let bytes = unsafe { std::slice::from_raw_parts(pointer, expected.len()) };
             assert_eq!(bytes, expected, "{body}");
@@ -117,13 +191,23 @@ const U64_METHOD: &str = "implement UInt64 { fn to_be_bytes(self) -> [Byte; 8] {
 #[test]
 fn native_dynamic_endian_returns_packed_bytes() {
     for (owner, value, expected) in [
-        ("UInt64", "0x0102030405060708", &[1,2,3,4,5,6,7,8][..]),
-        ("Int32", "-2", &[255,255,255,254][..]),
+        (
+            "UInt64",
+            "0x0102030405060708",
+            &[1, 2, 3, 4, 5, 6, 7, 8][..],
+        ),
+        ("Int32", "-2", &[255, 255, 255, 254][..]),
     ] {
         for endian in ["be", "le"] {
             let mut bytes: List<u8> = expected.iter().copied().collect();
-            if endian == "le" { bytes.reverse(); }
-            packed_result(&format!("let value: {owner} = {value}; value.to_{endian}_bytes()"), "", &bytes);
+            if endian == "le" {
+                bytes.reverse();
+            }
+            packed_result(
+                &format!("let value: {owner} = {value}; value.to_{endian}_bytes()"),
+                "",
+                &bytes,
+            );
         }
     }
 }
@@ -131,7 +215,13 @@ fn native_dynamic_endian_returns_packed_bytes() {
 #[test]
 fn native_inferred_and_annotated_endian_results_have_the_same_bytes() {
     for binding in ["let bytes =", "let bytes: [Byte; 8] ="] {
-        packed_result(&format!("let value: UInt64 = 0x0102030405060708; {binding} value.to_be_bytes(); bytes"), U64_METHOD, &[1,2,3,4,5,6,7,8]);
+        packed_result(
+            &format!(
+                "let value: UInt64 = 0x0102030405060708; {binding} value.to_be_bytes(); bytes"
+            ),
+            U64_METHOD,
+            &[1, 2, 3, 4, 5, 6, 7, 8],
+        );
     }
 }
 
@@ -139,37 +229,35 @@ fn native_inferred_and_annotated_endian_results_have_the_same_bytes() {
 fn native_inline_endian_widths_are_packed() {
     for width in [2, 4, 8] {
         for endian in ["be", "le"] {
-            let mut expected: List<u8> = (9-width..=8).collect();
-            if endian == "le" { expected.reverse(); }
-            packed_result(&format!("to_{endian}_bytes_{width}(0x0102030405060708)"), "", &expected);
+            let mut expected: List<u8> = (9 - width..=8).collect();
+            if endian == "le" {
+                expected.reverse();
+            }
+            packed_result(
+                &format!("to_{endian}_bytes_{width}(0x0102030405060708)"),
+                "",
+                &expected,
+            );
         }
     }
 }
 
 #[test]
-fn native_dynamic_from_bytes_reads_the_packed_input() {
+fn native_dynamic_from_bytes_refuses_an_unproved_array_parameter() {
     for (owner, width) in [("UInt64", 8), ("Int32", 4)] {
         for endian in ["be", "le"] {
-            let module = source(&format!("fn probe(bytes: [Byte; {width}]) -> {owner} {{ {owner}.from_{endian}_bytes(bytes) }}"));
-            native(&module, |engine| {
-                // The first width bytes are the real fixed-array argument.
-                // Guard storage makes the old accidental List-field probe safe:
-                // it reaches a live zero-valued decoy instead of dereferencing
-                // arbitrary bytes. The decoy is outside the declared array.
-                let decoy = [0u64; 8];
-                let mut guarded = [0u64; 16];
-                let raw = guarded.as_mut_ptr() as *mut u8;
-                let bytes = if width == 8 { &[1,2,3,4,5,6,7,8][..] } else { &[255,255,255,254][..] };
-                let expected = if width == 8 { 0x0102030405060708i64 } else { -2 };
-                let mut ordered: List<u8> = bytes.iter().copied().collect();
-                if endian == "le" { ordered.reverse(); }
-                unsafe { std::ptr::copy_nonoverlapping(ordered.as_ptr(), raw, width); }
-                guarded[(verum_codegen::llvm::runtime::LIST_PTR_OFFSET / 8) as usize] = decoy.as_ptr() as u64;
-                // SAFETY: the source takes one fixed byte-array pointer slot;
-                // both the argument and guard remain live throughout the call.
-                let actual = unsafe { engine.get_function::<unsafe extern "C" fn(*const u8) -> i64>("probe").unwrap().call(raw) };
-                assert_eq!(actual, expected, "{owner} {endian}");
-            });
+            let module = source(&format!(
+                "fn probe(bytes: [Byte; {width}]) -> {owner} {{ {owner}.from_{endian}_bytes(bytes) }}"
+            ));
+            let context = Context::create();
+            let mut lowering = VbcToLlvmLowering::new(
+                &context,
+                LoweringConfig::debug("endian_parameter_refusal").with_debug_info(false),
+            );
+            assert!(matches!(
+                lowering.lower_module(&module),
+                Err(verum_codegen::llvm::LlvmLoweringError::UnprovenArrayStorage(_))
+            ));
         }
     }
 }
@@ -177,46 +265,330 @@ fn native_dynamic_from_bytes_reads_the_packed_input() {
 #[test]
 fn native_inferred_and_annotated_indexing_preserve_byte_access() {
     for binding in ["let bytes =", "let bytes: [Byte; 8] ="] {
-        let module = source(&format!("{U64_METHOD} fn probe() -> Int {{ let value: UInt64 = 0x0102030405060708; {binding} value.to_be_bytes(); bytes[7] as Int }}"));
-        let probe = module.functions.iter().find(|function| module.get_string(function.name) == Some("probe")).unwrap();
-        // Refuse to run a known unsafe generic container read on a packed
-        // allocation. This pins the producer/consumer selection before JIT;
-        // once selected correctly, the real native read must return byte8.
-        assert!(!probe.instructions.as_ref().unwrap().iter().any(|instruction| matches!(instruction,
-            verum_vbc::instruction::Instruction::GetE { .. }
-        )), "{binding}: fixed endian producer lost byte access before native lowering");
-        native(&module, |engine| {
-            // SAFETY: the source function has no parameters and returns Int.
-            let value = unsafe { engine.get_function::<unsafe extern "C" fn() -> i64>("probe").unwrap().call() };
-            assert_eq!(value, 8, "{binding}");
-        });
+        let module = source(&format!(
+            "{U64_METHOD} fn probe() -> Int {{ let value: UInt64 = 0x0102030405060708; {binding} value.to_be_bytes(); bytes[7] as Int }}"
+        ));
+        native_with_ir(
+            &module,
+            |ir| {
+                assert!(
+                    ir.contains("array_storage_in_bounds") && ir.contains("ba_load_ptr"),
+                    "{binding}: selected native producer did not authorize a checked byte load"
+                );
+                assert!(
+                    !ir.contains("geteu"),
+                    "{binding}: generic header probe remains"
+                );
+            },
+            |engine| {
+                // SAFETY: the source function has no parameters and returns Int.
+                let value = unsafe {
+                    engine
+                        .get_function::<unsafe extern "C" fn() -> i64>("probe")
+                        .unwrap()
+                        .call()
+                };
+                assert_eq!(value, 8, "{binding}");
+            },
+        );
     }
 }
 
 #[test]
 fn native_fixed_intrinsic_input_preserves_packed_byte_access() {
-    let module = source("fn probe() -> Int { let bytes: [Byte;8] = [1,2,3,4,5,6,7,8]; from_be_bytes_8(bytes) }");
-    let probe = module.functions.iter().find(|function| module.get_string(function.name) == Some("probe")).unwrap();
-    // This local is emitted by NewByteArray in the same callable. The generic
-    // container load cannot read that raw native payload; refuse before JIT.
-    assert!(!probe.instructions.as_ref().unwrap().iter().any(|instruction| matches!(instruction,
-        verum_vbc::instruction::Instruction::GetE { .. }
-    )), "fixed intrinsic input lost its proven packed producer");
-    native(&module, |engine| {
-        // SAFETY: source probe is zero-argument and returns one Int slot.
-        let value = unsafe { engine.get_function::<unsafe extern "C" fn() -> i64>("probe").unwrap().call() };
-        assert_eq!(value, 0x0102030405060708);
-    });
+    let module = source(
+        "fn probe() -> Int { let bytes: [Byte;8] = [1,2,3,4,5,6,7,8]; from_be_bytes_8(bytes) }",
+    );
+    native_with_ir(
+        &module,
+        |ir| {
+            assert!(ir.contains("array_storage_in_bounds") && ir.contains("ba_load_ptr"));
+            assert!(
+                !ir.contains("geteu"),
+                "packed input still uses a generic header probe"
+            );
+        },
+        |engine| {
+            // SAFETY: source probe is zero-argument and returns one Int slot.
+            let value = unsafe {
+                engine
+                    .get_function::<unsafe extern "C" fn() -> i64>("probe")
+                    .unwrap()
+                    .call()
+            };
+            assert_eq!(value, 0x0102030405060708);
+        },
+    );
 }
 
 #[test]
 fn native_list_input_keeps_its_declared_compatibility() {
     // The source library's pointer-sized methods accept List<Byte> and delegate
     // to these intrinsics. Keep that producer distinct from packed fixed bytes.
-    let module = source("fn probe() -> Int { let bytes: List<Byte> = [1 as Byte,2 as Byte,3 as Byte,4 as Byte,5 as Byte,6 as Byte,7 as Byte,8 as Byte]; from_be_bytes_8(bytes) }");
+    let module = source(
+        "fn probe() -> Int { let bytes: List<Byte> = [1 as Byte,2 as Byte,3 as Byte,4 as Byte,5 as Byte,6 as Byte,7 as Byte,8 as Byte]; from_be_bytes_8(bytes) }",
+    );
     native(&module, |engine| {
         // SAFETY: source probe is zero-argument and returns one Int slot.
-        let value = unsafe { engine.get_function::<unsafe extern "C" fn() -> i64>("probe").unwrap().call() };
+        let value = unsafe {
+            engine
+                .get_function::<unsafe extern "C" fn() -> i64>("probe")
+                .unwrap()
+                .call()
+        };
         assert_eq!(value, 0x0102030405060708);
     });
+}
+
+#[test]
+fn native_array_calls_preserve_list_and_packed_bodies_in_both_source_orders() {
+    for callee_first in [true, false] {
+        for binding in ["let bytes =", "let bytes: [Byte; 2] ="] {
+            for (body, packed) in [
+                ("let bytes: [Byte; 2] = [7, 9]; bytes", true),
+                ("[7 as Byte, 9 as Byte]", false),
+            ] {
+                let callee = format!("fn selected() -> [Byte; 2] {{ {body} }}");
+                let caller =
+                    format!("fn probe() -> Int {{ {binding} selected(); bytes[1] as Int }}");
+                let text = if callee_first {
+                    format!("{callee} {caller}")
+                } else {
+                    format!("{caller} {callee}")
+                };
+                native_with_ir(
+                    &source(&text),
+                    |ir| {
+                        assert_eq!(
+                            ir.contains("ba_load_ptr"),
+                            packed,
+                            "{binding}, order {callee_first}"
+                        );
+                        if packed {
+                            assert!(!ir.contains("geteu"));
+                        }
+                    },
+                    |engine| {
+                        // SAFETY: this exact source declares zero parameters and Int.
+                        let actual = unsafe {
+                            engine
+                                .get_function::<unsafe extern "C" fn() -> i64>("probe")
+                                .unwrap()
+                                .call()
+                        };
+                        assert_eq!(actual, 9);
+                    },
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn native_unproved_array_calls_refuse_before_any_jit_execution() {
+    for (declarations, call) in [
+        (
+            "fn source_array() -> [Byte; 2] { let bytes: [Byte; 2] = [7, 9]; bytes } fn selected() -> [Byte; 2] { source_array() }",
+            "selected()",
+        ),
+        (
+            "fn selected(bytes: [Byte; 2]) -> [Byte; 2] { bytes }",
+            "selected([7 as Byte, 9 as Byte])",
+        ),
+        (
+            "fn selected(flag: Bool) -> [Byte; 2] { if flag { let bytes: [Byte; 2] = [7, 9]; bytes } else { [7 as Byte, 9 as Byte] } }",
+            "selected(true)",
+        ),
+    ] {
+        let module = source(&format!(
+            "{declarations} fn probe() -> Int {{ let bytes = {call}; bytes[1] as Int }}"
+        ));
+        let context = Context::create();
+        let mut lowering = VbcToLlvmLowering::new(
+            &context,
+            LoweringConfig::debug("array_refusal").with_debug_info(false),
+        );
+        assert!(
+            matches!(
+                lowering.lower_module(&module),
+                Err(verum_codegen::llvm::LlvmLoweringError::UnprovenArrayStorage(_))
+            ),
+            "{call}"
+        );
+    }
+}
+
+#[test]
+fn native_colliding_array_bodies_do_not_gain_a_second_selection_rule() {
+    let mut module = source(
+        "fn selected() -> [Byte; 2] { let bytes: [Byte; 2] = [7, 9]; bytes } fn probe() -> Int { let bytes = selected(); bytes[1] as Int }",
+    );
+    let mut duplicate = module
+        .functions
+        .iter()
+        .find(|f| module.get_string(f.name) == Some("selected"))
+        .unwrap()
+        .clone();
+    duplicate.id =
+        verum_vbc::module::FunctionId(module.functions.iter().map(|f| f.id.0).max().unwrap() + 1);
+    module.functions.push(duplicate);
+    let context = Context::create();
+    let mut lowering = VbcToLlvmLowering::new(
+        &context,
+        LoweringConfig::debug("array_collision").with_debug_info(false),
+    );
+    assert!(matches!(
+        lowering.lower_module(&module),
+        Err(verum_codegen::llvm::LlvmLoweringError::UnprovenArrayStorage(_))
+    ));
+}
+
+#[test]
+fn native_loop_over_an_array_call_is_explicitly_pending() {
+    let module = source(
+        r#"
+fn selected() -> [Byte; 2] { let bytes: [Byte; 2] = [7, 9]; bytes }
+fn probe() -> Int {
+    let bytes = selected();
+    let mut index = 0;
+    let mut total = 0;
+    while index < 2 { total = total + bytes[index] as Int; index = index + 1; }
+    total
+}
+"#,
+    );
+    let context = Context::create();
+    let mut lowering = VbcToLlvmLowering::new(
+        &context,
+        LoweringConfig::debug("array_loop_refusal").with_debug_info(false),
+    );
+    assert!(matches!(
+        lowering.lower_module(&module),
+        Err(verum_codegen::llvm::LlvmLoweringError::UnprovenArrayStorage(_))
+    ));
+}
+
+#[test]
+fn native_selected_packed_arrays_preserve_length_and_indexed_mutation() {
+    let module = source(
+        r#"
+fn selected() -> [Byte; 2] { let bytes: [Byte; 2] = [7, 9]; bytes }
+fn probe() -> Int {
+    let mut bytes = selected();
+    bytes[1] = 11;
+    (bytes[1] as Int) + bytes.len()
+}
+"#,
+    );
+    native_with_ir(
+        &module,
+        |ir| {
+            assert!(ir.contains("ba_store_ptr") && ir.contains("ba_load_ptr"));
+            assert!(!ir.contains("geteu") && !ir.contains("len_hdr_tid"));
+        },
+        |engine| {
+            // SAFETY: the exact source function has no parameters and returns Int.
+            let actual = unsafe {
+                engine
+                    .get_function::<unsafe extern "C" fn() -> i64>("probe")
+                    .unwrap()
+                    .call()
+            };
+            assert_eq!(actual, 13);
+        },
+    );
+}
+
+#[test]
+fn native_selected_packed_array_access_uses_canonical_wide_registers() {
+    let mut text = Text::from(
+        "fn selected() -> [Byte; 2] { let bytes: [Byte; 2] = [7, 9]; bytes } fn probe() -> Int {",
+    );
+    for index in 0..270 {
+        text.push_str(&format!("let pressure{index} = {index};\n"));
+    }
+    text.push_str("let bytes: [Byte; 2] = selected(); bytes[1] as Int }");
+    let module = source(&text);
+    let body = module
+        .functions
+        .iter()
+        .find(|f| module.get_string(f.name) == Some("probe"))
+        .and_then(|f| f.instructions.as_deref())
+        .unwrap();
+    assert!(body.iter().any(|instruction| matches!(instruction,
+        verum_vbc::instruction::Instruction::GetE { arr, .. } if arr.0 >= 256)));
+    native_with_ir(
+        &module,
+        |ir| {
+            assert!(ir.contains("ba_load_ptr") && !ir.contains("geteu"));
+        },
+        |engine| {
+            // SAFETY: the exact source function has no parameters and returns Int.
+            let actual = unsafe {
+                engine
+                    .get_function::<unsafe extern "C" fn() -> i64>("probe")
+                    .unwrap()
+                    .call()
+            };
+            assert_eq!(actual, 9);
+        },
+    );
+}
+
+#[test]
+fn native_selected_typed_array_results_keep_integer_and_float_geometry() {
+    native(
+        &source(
+            "fn selected() -> [UInt32; 2] { let values: [UInt32; 2] = [1, 65539]; values } fn probe() -> Int { let values = selected(); values[1] as Int }",
+        ),
+        |engine| {
+            // SAFETY: the exact source function has no parameters and returns Int.
+            let actual = unsafe {
+                engine
+                    .get_function::<unsafe extern "C" fn() -> i64>("probe")
+                    .unwrap()
+                    .call()
+            };
+            assert_eq!(actual, 65539);
+        },
+    );
+    native(
+        &source(
+            "fn selected() -> [Float; 2] { let values: [Float; 2] = [1.25, -0.5]; values } fn probe() -> Float { let values = selected(); values[1] }",
+        ),
+        |engine| {
+            // SAFETY: the exact source function has no parameters and returns Float.
+            let actual = unsafe {
+                engine
+                    .get_function::<unsafe extern "C" fn() -> f64>("probe")
+                    .unwrap()
+                    .call()
+            };
+            assert_eq!(actual, -0.5);
+        },
+    );
+}
+
+#[test]
+fn native_fixed_array_parameters_require_an_actual_argument_contract() {
+    for source_text in [
+        "fn read(bytes: [Byte; 2]) -> Int { bytes[1] as Int } fn probe() -> Int { let bytes: [Byte; 2] = [7, 9]; read(bytes) }",
+        "fn read(bytes: [Byte; 2]) -> Int { bytes[1] as Int } fn probe() -> Int { read([7 as Byte, 9 as Byte]) }",
+        "fn read(bytes: &[Byte; 2]) -> Int { bytes[1] as Int } fn probe() -> Int { let bytes: [Byte; 2] = [7, 9]; read(&bytes) }",
+        "fn read(bytes: [Byte; 2]) -> Int { bytes[1] as Int } fn forwarded(bytes: [Byte; 2]) -> Int { read(bytes) } fn probe() -> Int { let bytes: [Byte; 2] = [7, 9]; forwarded(bytes) }",
+    ] {
+        let module = source(source_text);
+        let context = Context::create();
+        let mut lowering = VbcToLlvmLowering::new(
+            &context,
+            LoweringConfig::debug("array_parameter_refusal").with_debug_info(false),
+        );
+        assert!(
+            matches!(
+                lowering.lower_module(&module),
+                Err(verum_codegen::llvm::LlvmLoweringError::UnprovenArrayStorage(_))
+            ),
+            "{source_text}"
+        );
+    }
 }
