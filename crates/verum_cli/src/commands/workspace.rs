@@ -30,14 +30,14 @@ pub fn list() -> Result<()> {
     let mut rows: Vec<List<Text>> = Vec::new();
     for (idx, member) in members.iter().enumerate() {
         let member_path = PathBuf::from(member.as_str());
-        let member_config_path = member_path.join("verum.toml");
+        let member_config_path = Config::manifest_path(&member_path);
 
-        if !member_config_path.exists() {
+        if !member_config_path.try_exists()? {
             rows.push(List::from(vec![
                 format!("{}", idx + 1).into(),
                 member.clone(),
                 "❌".into(),
-                "Missing verum.toml".into(),
+                "Missing manifest".into(),
             ]));
             continue;
         }
@@ -1025,10 +1025,13 @@ fn run_test(test: &Test, _nocapture: bool) -> Result<()> {
 /// Add a new member to the workspace
 pub fn add(path: Text) -> Result<()> {
     let config_path = PathBuf::from(".");
+    let manifest_path = Config::manifest_path(&config_path);
     let mut config = Config::load(&config_path)?;
 
     let workspace = config.workspace.as_mut().ok_or_else(|| {
-        CliError::Custom("Not a workspace. Add [workspace] section to verum.toml first.".into())
+        CliError::Custom(
+            "Not a workspace. Add a [workspace] section to the project manifest first.".into(),
+        )
     })?;
 
     // Normalize the path
@@ -1059,7 +1062,7 @@ pub fn add(path: Text) -> Result<()> {
         )));
     }
 
-    // Verify the member directory exists and has a verum.toml
+    // Verify the member directory exists.
     let member_full_path = config_path.join(&normalized_path);
     if !member_full_path.exists() {
         return Err(CliError::Custom(format!(
@@ -1068,23 +1071,14 @@ pub fn add(path: Text) -> Result<()> {
         )));
     }
 
-    let member_config_path = member_full_path.join("verum.toml");
-    if !member_config_path.exists() {
-        return Err(CliError::Custom(format!(
-            "Directory '{}' does not contain a verum.toml file",
-            normalized_path
-        )));
-    }
-
-    // Validate the member's config
+    // Load and validate the member through the shared manifest authority.
     let member_config = Config::load(&member_full_path)?;
     member_config.validate()?;
 
     // Add the member
     workspace.members.push(normalized_path.clone().into());
 
-    // Save the updated config
-    let manifest_path = config_path.join("verum.toml");
+    // Update the same workspace manifest that discovery selected.
     config.to_file(&manifest_path)?;
 
     ui::success(&format!(
@@ -1098,6 +1092,7 @@ pub fn add(path: Text) -> Result<()> {
 /// Remove a member from the workspace
 pub fn remove(name: Text) -> Result<()> {
     let config_path = PathBuf::from(".");
+    let manifest_path = Config::manifest_path(&config_path);
     let mut config = Config::load(&config_path)?;
 
     let workspace = config
@@ -1134,8 +1129,7 @@ pub fn remove(name: Text) -> Result<()> {
                 ));
             }
 
-            // Save the updated config
-            let manifest_path = config_path.join("verum.toml");
+            // Update the same workspace manifest that discovery selected.
             config.to_file(&manifest_path)?;
 
             ui::success(&format!("Removed '{}' from workspace", removed_member));
@@ -1173,13 +1167,8 @@ pub fn exec(command: Vec<String>) -> Result<()> {
 
     for member in members {
         let member_path = PathBuf::from(member.as_str());
-        let member_config_path = member_path.join("verum.toml");
-
-        if !member_config_path.exists() {
-            ui::warn(&format!("Skipping {} (missing verum.toml)", member));
-            continue;
-        }
-
+        // A declared member that cannot load is a failed execution, including
+        // a missing manifest. It must not yield success without running anything.
         let member_config = match Config::load(&member_path) {
             Ok(cfg) => cfg,
             Err(e) => {
