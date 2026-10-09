@@ -2949,3 +2949,7 @@ mod function_export_tests;
 #[cfg(test)]
 #[path = "../../tests/bootstrap/generic_variant_payloads.rs"]
 mod generic_variant_payload_tests;
+
+#[cfg(test)]
+#[path = "../../tests/bootstrap/qualified_record_assignment.rs"]
+mod qualified_record_assignment_tests;
