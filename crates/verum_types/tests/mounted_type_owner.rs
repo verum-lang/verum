@@ -1,7 +1,7 @@
 //! T1212: explicit source mounts preserve nominal ownership across homonyms.
 use std::sync::Arc;
 use verum_ast::{FileId, ItemKind};
-use verum_common::{List, Maybe, ResourceDiscipline};
+use verum_common::{List, Maybe, ResourceDiscipline, Text};
 use verum_fast_parser::FastParser;
 use verum_modules::{
     ModuleId, ModuleInfo, ModulePath, ModuleRegistry, extract_exports_from_module,
@@ -54,7 +54,7 @@ fn check(
     modules: &[(&str, &str)],
     metadata: bool,
     eager: bool,
-) -> (TypeChecker, Vec<String>) {
+) -> (TypeChecker, List<Text>) {
     let mut checker = if metadata {
         if eager {
             TypeChecker::new_with_core_eager(foreign_metadata())
@@ -94,11 +94,11 @@ fn check(
         .expect("consumer grammar");
     // Match the ordinary project pass: metadata preloading precedes mounts.
     checker.register_stdlib_types_for_module(&ast);
-    let mut errors = Vec::new();
+    let mut errors = List::new();
     for item in &ast.items {
         if let ItemKind::Mount(import) = &item.kind {
             if let Err(error) = checker.process_import(import, "demo.main", &registry) {
-                errors.push(format!("{error:?}"));
+                errors.push(format!("{error:?}").into());
             }
         }
     }
@@ -110,25 +110,25 @@ fn check(
             _ => continue,
         };
         if let Err(error) = result {
-            errors.push(format!("{error:?}"));
+            errors.push(format!("{error:?}").into());
         }
     }
     for item in &ast.items {
         if let Err(error) = checker.check_item(item) {
-            errors.push(format!("{error:?}"));
+            errors.push(format!("{error:?}").into());
         }
     }
     errors.extend(
         checker
             .take_deferred_errors()
             .into_iter()
-            .map(|error| format!("{error:?}")),
+            .map(|error| Text::from(format!("{error:?}"))),
     );
     errors.extend(
         checker
             .diagnostic_sources()
             .iter()
-            .map(|error| format!("{error:?}")),
+            .map(|error| Text::from(format!("{error:?}"))),
     );
     (checker, errors)
 }
@@ -153,7 +153,7 @@ fn assert_return_owner(checker: &mut TypeChecker, function: &str, expected: &str
             verum_ast::ty::PathSegment::Name(ident) => ident.name.as_str(),
             _ => panic!("unexpected nominal owner: {path:?}"),
         })
-        .collect::<Vec<_>>()
+        .collect::<List<_>>()
         .join(".");
     assert_eq!(actual, expected, "{signature:?}");
 }
