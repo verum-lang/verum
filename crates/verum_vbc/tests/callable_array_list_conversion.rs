@@ -164,7 +164,7 @@ fn deferred_packed_assignment_does_not_relabel_the_current_list() {
 fn array_value() -> [Byte; 2] { [11 as Byte, 12 as Byte] }
 fn make() -> List<Byte> {
     let mut xs = array_value();
-    defer { let replacement: [Byte; 2] = [1, 2]; xs = replacement; }
+    defer { xs = { let replacement: [Byte; 2] = [1, 2]; replacement }; }
     return xs;
 }
 fn probe() -> Int { let mut xs = make(); xs.push(13 as Byte);

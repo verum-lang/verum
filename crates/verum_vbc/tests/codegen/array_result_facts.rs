@@ -2,10 +2,10 @@
 use super::{ArrayResultFact, ArrayResultFacts};
 use crate::encoding::encode_reg;
 use crate::instruction::{Instruction, MemSubOpcode, Reg};
-use verum_common::List;
 
 fn allocation(dst: Reg, count: Reg, init: Reg, geometry: Option<u8>) -> Instruction {
-    let mut operands = List::new();
+    // The canonical wire encoder and MemExtended operand API take this buffer.
+    let mut operands = vec![];
     encode_reg(dst, &mut operands);
     encode_reg(count, &mut operands);
     if let Some(encoded) = geometry { operands.push(encoded); }
