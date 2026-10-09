@@ -1,0 +1,168 @@
+{
+  "task": "T1709",
+  "base_commit": "f3006f403ab059532cf45917057528683caed650",
+  "tested_source": "f8a6c82ebe6b4e9dc5b1eff17e347e21c8496876",
+  "causal_baseline_source": "c29836a5d2ccfbdd41284ae74d23dd4a876347e0",
+  "scope": "Host Unix raw-v2 listener positive descriptor ownership and duplication-error cleanup. Focused Rust runtime tests on macOS; no ordinary CLI, automatic standard-library bake, native/AOT, other-host execution, full VBC pass or registry-service verdict.",
+  "production_behavior": "A listener owning fd0 stays owned through try_clone. A successful duplicate is transferred as its actual positive OS descriptor, with the original closed. A failed duplicate closes the input owner and returns its actual negative OS error. Registered listener normalization uses the same helper; non-Unix behavior and socket I/O are unchanged.",
+  "causality": {
+    "baseline_production_identical_to_integration_base": true,
+    "corrected_baseline_and_final_fixture_identical": true,
+    "final_production_identical_to_initial_repair": true,
+    "tested_production_sha256": "67c9e10dd84d69a01658f4f1773438d507c89ef6caac06c37284300bd3148274",
+    "tested_fixture_sha256": "0924b923077e1d99af33c6c2254119ec922081815db6dea91d8f51adfa725e6c"
+  },
+  "fixture_authority": "Each fd0 test starts a fresh exact-test child and requires exit41 after assertions and cleanup. Only the child closes stdin or lowers its descriptor limit. The exhaustion child owns fd3, then lowers soft RLIMIT_NOFILE to4: bind can own0, and a duplicate with minimum3 fails EMFILE. No parent standard descriptor/limit changes or connect/read/accept traffic.",
+  "results": {
+    "build-only": {
+      "receipt": "build-only-result.json",
+      "receipt_sha256": "4c8ee24e82a946a0ccff7fc0680ba224497ca765b47c342808b74f717545d867",
+      "compressed_log": "build-only-output.txt.gz",
+      "compressed_log_sha256": "e5591db0f6a3b112b3b6568abfadbcf9a261400e05a47874863a9b839467a242",
+      "raw_log_sha256": "45a938e8f7e15e719ead2f99a0bf4f6c00add1fe3ac0aeabb5f69435d02a9f6b",
+      "source_commit": "14dc61e0446db1e6f1f9be9310d6f4151dca8887",
+      "exit_code": 0,
+      "wall_seconds": 30.247,
+      "test_results": [
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2097 filtered out; finished in 0.00s"
+      ],
+      "classification": "invalid-zero-selection"
+    },
+    "initial-causal": {
+      "receipt": "initial-causal-result.json",
+      "receipt_sha256": "d8d0628fb3171a87bbfae3a7d105b78d861402773f6ffdd8785f552ef47273cd",
+      "compressed_log": "initial-causal-output.txt.gz",
+      "compressed_log_sha256": "dc99b5d4c29e8f1bd6e780e128c54f5630e4365a2343f6c224688834f9245cbc",
+      "raw_log_sha256": "dba25c35c99473363d139492c02a3b16686dcd866bf1e5c8d79ff9952e4b0f0d",
+      "source_commit": "14dc61e0446db1e6f1f9be9310d6f4151dca8887",
+      "exit_code": 101,
+      "wall_seconds": 0.021,
+      "test_results": [
+        "test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 2096 filtered out; finished in 0.00s",
+        "test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 2096 filtered out; finished in 0.00s",
+        "test result: FAILED. 0 passed; 2 failed; 0 ignored; 0 measured; 2095 filtered out; finished in 0.01s"
+      ],
+      "classification": "diagnostic-invalid-exhaustion-setup"
+    },
+    "initial-fixed": {
+      "receipt": "initial-fixed-result.json",
+      "receipt_sha256": "63f27b180ed059bd29e207ceba8c74b1390c822fc10e3eda76f4ff698f004930",
+      "compressed_log": "initial-fixed-output.txt.gz",
+      "compressed_log_sha256": "6b0adedfbb7e67a14c5e98e327aa17328c74fe466a8bf9148d049d3ca44cf3ff",
+      "raw_log_sha256": "c6ff0701af089e9b3f1d86a418db807012632069bee3530298314e5c11ba6829",
+      "source_commit": "88550f6928849bb61961093e046670241853fa43",
+      "exit_code": 101,
+      "wall_seconds": 32.213,
+      "test_results": [
+        "test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 2096 filtered out; finished in 0.00s",
+        "test result: FAILED. 9 passed; 1 failed; 0 ignored; 0 measured; 2087 filtered out; finished in 0.02s"
+      ],
+      "classification": "diagnostic-invalid-exhaustion-expectation"
+    },
+    "corrected-causal": {
+      "receipt": "corrected-causal-result.json",
+      "receipt_sha256": "86fc8df833003dce75df216292b6b95a755871ad7ff9024c94e487feba1e9bec",
+      "compressed_log": "corrected-causal-output.txt.gz",
+      "compressed_log_sha256": "d4d8bf3900ec048b271bd10d8b493bf85ba3b18f5310cd45d33d7a60f313ac24",
+      "raw_log_sha256": "d14e98de7544e590b3d686e162512a14e5c511ed836b31e0267fb2de55bfad05",
+      "source_commit": "c29836a5d2ccfbdd41284ae74d23dd4a876347e0",
+      "exit_code": 101,
+      "wall_seconds": 31.236,
+      "test_results": [
+        "test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 2096 filtered out; finished in 0.00s",
+        "test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 2096 filtered out; finished in 0.00s",
+        "test result: FAILED. 0 passed; 2 failed; 0 ignored; 0 measured; 2095 filtered out; finished in 0.01s"
+      ],
+      "classification": "causal-baseline"
+    },
+    "fixed-serial": {
+      "receipt": "fixed-serial-result.json",
+      "receipt_sha256": "69cc36d53c806cead50ec52337c8c0541775f391b5471ec237d118639f883e33",
+      "compressed_log": "fixed-serial-output.txt.gz",
+      "compressed_log_sha256": "03662b3d16bd82c336fa71a70a955fb918c0c9769cbb263754e153664e8f5a11",
+      "raw_log_sha256": "7915c9256aa283c4756f333e28c5cfec03b7adaabfd38729c8676f688c9159cd",
+      "source_commit": "f8a6c82ebe6b4e9dc5b1eff17e347e21c8496876",
+      "exit_code": 0,
+      "wall_seconds": 27.194,
+      "test_results": [
+        "test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 2087 filtered out; finished in 0.02s"
+      ],
+      "classification": "focused-acceptance"
+    },
+    "fixed-parallel": {
+      "receipt": "fixed-parallel-result.json",
+      "receipt_sha256": "b7481e120fff9d18de58325d6c824de72b22abe258e3017cd0579519b42e8a65",
+      "compressed_log": "fixed-parallel-output.txt.gz",
+      "compressed_log_sha256": "4b460ebbb781e7d3fe72d1abf363511a2c79867f32ebac7172fb2f749c43348e",
+      "raw_log_sha256": "cc549cda196bb9800a783c28dd70298e8e05b20ef0275bd9dfde048bad48534f",
+      "source_commit": "f8a6c82ebe6b4e9dc5b1eff17e347e21c8496876",
+      "exit_code": 0,
+      "wall_seconds": 0.024,
+      "test_results": [
+        "test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 2087 filtered out; finished in 0.01s"
+      ],
+      "classification": "focused-acceptance"
+    },
+    "fixed-listen-v2": {
+      "receipt": "fixed-listen-v2-result.json",
+      "receipt_sha256": "7fa84b32bacafe852a43e202c8473755f095403109a78b685ad62353c81c0945",
+      "compressed_log": "fixed-listen-v2-output.txt.gz",
+      "compressed_log_sha256": "e8567adf5fa840a1b38b517d8bc8406b076251ad78e5189eca59bf17954a28b7",
+      "raw_log_sha256": "c1d224950e11e673db5f9579989d729d94700009c7c4951023b47dbd7983ee06",
+      "source_commit": "f8a6c82ebe6b4e9dc5b1eff17e347e21c8496876",
+      "exit_code": 0,
+      "wall_seconds": 0.006,
+      "test_results": [
+        "test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 2091 filtered out; finished in 0.00s"
+      ],
+      "classification": "adjacent-acceptance"
+    }
+  },
+  "retained_attempts": "The initial Cargo filter matched zero tests and is not acceptance. Corrected selection exposed fd0 but the first exhaustion setup used limit3, equal to Rust clone minimum3; EINVAL was correctly preserved by production. The corrected owned-fd3/limit4 fixture was separately committed and executed against original production, where both controls failed, before the byte-identical production repair was restored. Neither intermediate failure was erased or counted as final acceptance.",
+  "final_outcome": "10/10 descriptor controls serial; same executable10/10 four-thread; six existing raw-v2 bind/validation controls6/6 four-thread. All inherited archive/metadata/graph/checksum/schema bytes unchanged. No host loopback timeout retry campaign.",
+  "residuals": [
+    "T1650 bounded host TCP/UDP timeouts remain separate; these gates do not exercise traffic.",
+    "Non-Unix, Linux and other Unix hosts were not executed here.",
+    "No full-library, ordinary CLI, fresh producer, AOT or registry authenticated publication acceptance follows from these focused controls."
+  ],
+  "verification": {
+    "exact_logs_rehashed": 7,
+    "source_manifest_files_verified_by_commit": {
+      "14dc61e0446db1e6f1f9be9310d6f4151dca8887": 330,
+      "88550f6928849bb61961093e046670241853fa43": 330,
+      "c29836a5d2ccfbdd41284ae74d23dd4a876347e0": 330,
+      "f8a6c82ebe6b4e9dc5b1eff17e347e21c8496876": 330
+    },
+    "all_artifact_before_after_manifests_identical": true,
+    "retained_executables": {
+      "/private/tmp/verum-T1709-baseline-executable": "6253711198cb315a39291da87689457e44b57b47b40fe14b649fdeebcb5a7ea4",
+      "/private/tmp/verum-T1709-corrected-baseline-executable": "e07b43bb8bb6aa6ced68d3f7accd56936ec4c5a64802f5df9fe46afb812c2276",
+      "/private/tmp/verum-T1709-fixed-executable": "1d7b30bb0ba10c8a4ff216e5d150a6bf1298eac6cfe68917c9e6c227742d50ec"
+    }
+  },
+  "supporting_receipts": {
+    "fixture-correction.json": "1fa8bf2d3119a6a93b2403ae16b265b0fcd0ddf437d64a18a1fcddc22c75acc4",
+    "target-release.json": "15aaa59d51ff4453e028ff030b34fea0ead2d97bbe2ced7d4e77985f43f39eca",
+    "build-only-exclusion.json": "e36ca1d970004f445d8d36b54742be0720fce92cb0f4d72f28d364e178c4e741"
+  },
+  "integration_source_audit": {
+    "base_commit": "f3006f403ab059532cf45917057528683caed650",
+    "tested_source": "f8a6c82ebe6b4e9dc5b1eff17e347e21c8496876",
+    "changed_crate_paths": [
+      "crates/verum_vbc/src/interpreter/dispatch_table/handlers/net_runtime.rs",
+      "crates/verum_vbc/tests/unit/net_runtime_descriptor_identity.rs"
+    ],
+    "owned_paths_sha256": {
+      "crates/verum_vbc/src/interpreter/dispatch_table/handlers/net_runtime.rs": "67c9e10dd84d69a01658f4f1773438d507c89ef6caac06c37284300bd3148274",
+      "crates/verum_vbc/tests/unit/net_runtime_descriptor_identity.rs": "0924b923077e1d99af33c6c2254119ec922081815db6dea91d8f51adfa725e6c"
+    },
+    "unchanged_subtrees": {
+      "crates/verum_vbc/src/codegen": "a4f7b7ae5b8a36ec2e3647cea8849558a866ab84",
+      "crates/verum_codegen": "70c949243fac6d118b65edf35b44c3b936a78d60",
+      "crates/verum_compiler": "4fe2cfe2b7a8727c462832c9eb58eaf4490b24e8",
+      "crates/verum_types": "5983409e2b6fd41e3467c6548b295acf84ef7b4b"
+    },
+    "tested_complete_vbc_tree": "e770070a11df797a23374ee5e2a9b157e76fdb4b",
+    "interpretation": "Only the two listed runtime/fixture paths differ from f300 integration. Every other VBC path, including all bytecode/numeric/codegen tests, is unchanged; native codegen, compiler and typechecker subtrees are byte-identical. Evidence/prose do not change the tested source."
+  }
+}

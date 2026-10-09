@@ -1,0 +1,7 @@
+{
+  "scope": "The Cargo command compiled source 14dc61e04 but its misspelled filter selected zero tests. This is not baseline acceptance. The same executable was then used for the two actual failing controls recorded separately.",
+  "valid_test_acceptance": false,
+  "corrected_gate": "/private/tmp/verum-T1709-raw-v2-causal-baseline/result.json",
+  "retained_executable": "/private/tmp/verum-T1709-baseline-executable",
+  "executable_sha256": "6253711198cb315a39291da87689457e44b57b47b40fe14b649fdeebcb5a7ea4"
+}

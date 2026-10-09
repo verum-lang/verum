@@ -1,0 +1,9 @@
+{
+  "baseline_source": "c29836a5d2ccfbdd41284ae74d23dd4a876347e0",
+  "original_production_source": "14dc61e0446db1e6f1f9be9310d6f4151dca8887",
+  "preserved_repair": "88550f6928849bb61961093e046670241853fa43",
+  "corrected_fixture_source": "7f2e4c41a",
+  "production_byte_identical": true,
+  "corrected_fixture_byte_identical": true,
+  "fixture_correction": "A positive owned duplicate occupies fd3 before RLIMIT_NOFILE is lowered to4 in the exact child. Rust std uses fcntl F_DUPFD_CLOEXEC with minimum3. The original softlimit3 makes that minimum invalid and returns EINVAL; the corrected setup makes a valid minimum with no free positive slot return EMFILE. Parent descriptors and limits are unchanged."
+}
