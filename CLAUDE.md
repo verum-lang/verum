@@ -304,6 +304,20 @@ quoting either anywhere a reader will act on it. The gate
 - One implementation per feature
 
 ### Documentation
+
+Changes to public syntax, standard-library APIs, CLI behavior or registry
+workflows include reviewing and updating the affected pages in the sibling
+`website` repository as part of the same work item. Follow that repository's
+`CLAUDE.md` and run its required freshness, internal-artefact, link and strict
+production-build gates before committing documentation.
+
+Check examples against the grammar and actual APIs. Execute changed examples
+when claiming runnable behavior; retain the tested source and tool identity in
+engineering evidence. Public pages describe current behavior and limitations,
+without dated status labels or an implementation history. Commit validated
+language, registry and website changes in small increments in their respective
+repositories.
+
 ```rust
 // SAFETY: [reason] - required for unsafe blocks
 // Spec: <spec-name> §section - for spec-tied code (logical name, never a path)
