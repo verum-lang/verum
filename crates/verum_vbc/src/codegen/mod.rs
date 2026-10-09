@@ -56,6 +56,7 @@ pub mod registers;
 
 mod bootstrap_types;
 mod expressions;
+mod array_coercions;
 mod parsed_field_types;
 mod associated_types;
 mod statements;
@@ -20373,6 +20374,7 @@ impl VbcCodegen {
                         .map_err(|e| e.with_context(format!("in function {}", lookup_name)))?;
                     // Return the block result if present (implicit return)
                     if let Some(reg) = result {
+                        let reg = self.materialize_list_return(reg)?;
                         self.emit_return_refinement_assert(
                             reg,
                             func.return_type.as_ref(),
@@ -20387,6 +20389,7 @@ impl VbcCodegen {
                         .map_err(|e| e.with_context(format!("in function {}", lookup_name)))?;
                     // Return the expression result
                     if let Some(reg) = result {
+                        let reg = self.materialize_list_return(reg)?;
                         self.emit_return_refinement_assert(
                             reg,
                             func.return_type.as_ref(),
