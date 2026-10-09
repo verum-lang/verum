@@ -401,7 +401,12 @@ fn delayed_function_bodies_keep_their_declaring_mounts_and_call_signatures() {
 fn inline_owners_keep_explicit_and_empty_mount_scopes_in_both_file_orders() {
     let mounted = (
         "fixture.inline_mounts",
-        r#"public module selected {
+        // The bootstrap dependency importer currently scans only top-level
+        // mounts. Keep its actual foreign descriptor reachable independently
+        // of the inline mount so this control tests declaring-owner lookup.
+        r#"mount foreign.result.Result;
+        public type OuterDependency<T> is Result<T, Bool>;
+        public module selected {
             mount foreign.result.Result;
             public type Selected<T> is Result<T, Bool>;
         }"#,
