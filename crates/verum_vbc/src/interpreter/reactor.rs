@@ -902,22 +902,6 @@ mod tests {
 
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     #[test]
-    fn writable_signalled_for_fresh_socket() {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let port = listener.local_addr().unwrap().port();
-        let _accept_thread = std::thread::spawn(move || {
-            let (_s, _) = listener.accept().unwrap();
-            std::thread::sleep(Duration::from_millis(100));
-        });
-        let stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
-        stream.set_nonblocking(true).unwrap();
-        let fd = stream.as_raw_fd() as i64;
-        let r = wait_writable(fd, Duration::from_secs(2));
-        assert_eq!(r, WaitOutcome::Ready);
-    }
-
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
-    #[test]
     fn many_concurrent_waits_dont_serialise() {
         // Bind 16 listeners.  Spawn 16 threads, each parks on its
         // listener for 200ms then times out.  If shard contention
@@ -952,3 +936,8 @@ mod tests {
         drop(listeners);
     }
 }
+
+
+#[cfg(all(test, any(target_os = "macos", target_os = "linux")))]
+#[path = "../../tests/unit/reactor_socket_readiness.rs"]
+mod socket_readiness_tests;
