@@ -216,7 +216,12 @@ fn check_list_payload(source: &str, expected: &[i64]) {
     for (route, module) in [("source", original), ("wire", decoded)] {
         let make = module.functions.iter()
             .find(|function| module.get_string(function.name) == Some("signed_list_payload.make"))
-            .expect("exact List producer").id;
+            .expect("exact List producer");
+        let start = make.bytecode_offset as usize;
+        let instructions = verum_vbc::bytecode::decode_instructions(
+            &module.bytecode[start..start + make.bytecode_length as usize]
+        ).expect("independent List producer decode");
+        let make = make.id;
         let mut interpreter = Interpreter::new(Shared::new(module).into_arc());
         let value = match interpreter.execute_function(make) {
             Ok(value) => value,
@@ -232,7 +237,7 @@ fn check_list_payload(source: &str, expected: &[i64]) {
         let actual = elements.as_ref().and_then(|elements| elements.iter()
             .map(|value| value.is_int().then(|| value.as_i64())).collect::<Option<List<_>>>());
         if actual.as_deref() != Some(expected) {
-            failures.push(format!("{route}: expected boxed {expected:?}, got {elements:?}").into());
+            failures.push(format!("{route}: expected boxed {expected:?}, got {elements:?}; producer: {instructions:?}").into());
         }
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));

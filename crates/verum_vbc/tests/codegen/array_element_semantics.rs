@@ -35,7 +35,7 @@ fn canonical_signed_ids_do_not_make_width_or_generic_ids_signed() {
 #[test]
 fn parsed_alias_chain_uses_the_exact_declaration_target() {
     let parsed = Parser::new(
-        "type SignedShort is Int16; type Indirect is SignedShort; type UnsignedShort is UInt16;",
+        "module element_owner; type SignedShort is Int16; type Indirect is SignedShort; type UnsignedShort is UInt16;",
     )
     .parse_module()
     .expect("grammar");
@@ -59,7 +59,7 @@ fn parsed_alias_chain_uses_the_exact_declaration_target() {
 
 #[test]
 fn same_spelled_record_is_not_a_signed_primitive() {
-    let parsed = Parser::new("type Int16 is { value: Int };")
+    let parsed = Parser::new("module foreign; type Int16 is { value: Int };")
         .parse_module()
         .expect("grammar");
     let mut codegen = VbcCodegen::with_config(CodegenConfig::new("foreign"));
