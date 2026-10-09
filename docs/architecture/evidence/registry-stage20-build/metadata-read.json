@@ -1,0 +1,12 @@
+{
+  "command": [
+    "/private/tmp/verum-core-metadata-native-inspection/inspect",
+    "/private/tmp/verum-registry-stage18-forward-payload/artifacts/runtime.core_metadata"
+  ],
+  "metadata_sha256": "f6730833fc38cb3acf2fc27954b674471bde598e56cda57db67de06a84cb358c",
+  "inspector_sha256": "8776cd03aba47bce4b566bb9b84f964354a4221279607245c2b9ecd1c8fdcf92",
+  "exit_code": 0,
+  "seconds": 4.547,
+  "log_sha256": "4ad62ff208874a18a4b4916b007d3f9d287a2b87e9488d4e3000aa807c99a4f3",
+  "boundary": "Complete current Rust CoreMetadata/bincode decode of pinned old producer metadata; no fresh stage20 verdict."
+}

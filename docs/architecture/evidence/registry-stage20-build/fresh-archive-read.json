@@ -1,0 +1,13 @@
+{
+  "command": [
+    "/private/tmp/verum-alias-archive-native-inspection/inspect",
+    "/private/tmp/verum-registry-stage20-callable-boundaries/artifacts/runtime.vbca"
+  ],
+  "archive_sha256": "8569748c802eb09c42c79e1d6f58d431e9e3d09266d22e89436ba942fad999ff",
+  "inspector_sha256": "76f0edb0cf273e8f1e16c24f7c76daa135d0e08f9baa693a13e72842bfe74e22",
+  "build_manifest_sha256": "9e2884dfe1d7f3078b81e7b0b20eaf2ebf25c97fbf9c365412d0df3162040943",
+  "exit_code": 0,
+  "seconds": 1.383,
+  "log_sha256": "f081e2ca2da7ae9854076058d5732e1522bcf3ad1d38e61662a09b037e0a30d8",
+  "boundary": "Read-only production decoder; no language compilation or execution."
+}

@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "task": "T1635",
+  "source_commit": "9b9c04a8a7364d35534a9e15dcfe7d9942c47420",
+  "fresh_automatic_producer": true,
+  "build_seconds": 1623.092,
+  "cli_sha256": "ebb60204de9bf5b7895f43a30cc50fcdc82427734bfe4807948834cb98577426",
+  "predecessor_comparison": "Archive and symbol graph changed; complete metadata bytes are identical to the earlier d61c11aa5 producer reused by faabbe696.",
+  "io_alias_finding": "The production archive decoder finds IoResult in22 entries, including declaring core.io: instantiated base14/PTR resolves to core.base.primitives.USize, while carried source text remains Result<T,StreamError>. All22 alias rows are byte-identical across old and fresh archives. Complete CoreMetadata/bincode decode confirms the invalid qualified alias RHS.",
+  "field_finding": "Complete Rust metadata decode contains public core.net.http.Response.body:List<UInt8>; this artifact does not substantiate a missing producer field.",
+  "boundary": "Read-only artifact audits and CLI build only. Registry runtime and whole-project checks are separate. T0691 source at103a60778 is later than this frozen build and is not included.",
+  "files": {
+    "archive-inspector-build.json": "7d94908e9e94283ffbde4cc2a3700fb52d394cff9e8c0fd24179b0d83eb8d174",
+    "build-manifest.json": "9e2884dfe1d7f3078b81e7b0b20eaf2ebf25c97fbf9c365412d0df3162040943",
+    "build.py": "ff56226dde4462f0470f5f92274e1a7c979fe0a9333c235283f346139d9810ae",
+    "cli-build.log": "0c1db83f187ce13a1e0521d463b88378864cc5b7ee2821f3cebc0cb59db32911",
+    "fresh-archive-read.json": "091b3d3dcaecc6e500329ff6fd6d19f36ca61cf072453b1269f10bd8ccdc3c52",
+    "fresh-archive.log": "f081e2ca2da7ae9854076058d5732e1522bcf3ad1d38e61662a09b037e0a30d8",
+    "inspect-alias-archive.rs": "fa0b4421e2ed475ca3142556faa04c8d6175d4eea13142944b44baeb70cd9cb5",
+    "inspect-core-metadata.rs": "63cccc98ded21b305bbca62accb9c161e6053b770cc34104971031884471b2e7",
+    "metadata-inspector-build.json": "882c97e618a1bdc67a77f6e8e9af26006794429180bc8876828991028854b577",
+    "metadata-read.json": "559e0a643e384a984fab2855c6cb89b4fbbdc3fd02c9c2120031684dab1d92d0",
+    "metadata.log": "4ad62ff208874a18a4b4916b007d3f9d287a2b87e9488d4e3000aa807c99a4f3",
+    "old-archive-read.json": "bcc9c0ffbe87c114a87ca1a7c20f98da5c4d52b489b721d9c378425ba5c59a00",
+    "old-archive.log": "f081e2ca2da7ae9854076058d5732e1522bcf3ad1d38e61662a09b037e0a30d8"
+  }
+}

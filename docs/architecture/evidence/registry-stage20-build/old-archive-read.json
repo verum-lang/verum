@@ -1,0 +1,13 @@
+{
+  "command": [
+    "/private/tmp/verum-alias-archive-native-inspection/inspect",
+    "/private/tmp/verum-registry-stage18-forward-payload/artifacts/runtime.vbca"
+  ],
+  "archive_sha256": "6fb275b7346f230a9daa984febc28deced634a5ace38f1b7f4df6c5f0e667e92",
+  "inspector_sha256": "76f0edb0cf273e8f1e16c24f7c76daa135d0e08f9baa693a13e72842bfe74e22",
+  "build_manifest_sha256": "044c329bb648cc7d356307f11cbab806b900fa82889af44377ad47c0195e11dc",
+  "exit_code": 0,
+  "seconds": 1.787,
+  "log_sha256": "f081e2ca2da7ae9854076058d5732e1522bcf3ad1d38e61662a09b037e0a30d8",
+  "boundary": "Read-only production decoder; no language compilation or execution."
+}

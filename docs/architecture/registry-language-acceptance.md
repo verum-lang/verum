@@ -772,3 +772,27 @@ scanner, so its change invalidates the prior graph content without changing
 the wire layout. T0691's broader shared-symbol-artifact acceptance remains
 open. Late TLS-root dependency closure belongs to T1461; consumer string-pool
 remapping of function origins is tracked separately by T1691.
+
+## Fresh callable-boundary product and metadata audit (T1635)
+
+The ordinary CLI built from frozen `9b9c04a8a` completed in 1,623.092
+seconds with automatic standard-library regeneration. The
+[build receipt](evidence/registry-stage20-build/build-manifest.json) and
+[build log](evidence/registry-stage20-build/cli-build.log) identify a fresh
+producer and executable; no last-good fallback was reported. The later
+T0691 graph-owner change at `103a60778` is outside this product.
+
+The archive and symbol graph changed, but the entire type-metadata sidecar
+is byte-identical to the preceding producer. Read-only inspectors use the
+production Rust archive and `CoreMetadata` decoders. All 22 archived
+`IoResult` copies, including the declaring `core.io` entry, retain an
+instantiated base of `TypeId(14)` that names `USize`, despite carrying source
+spelling `Result<T, StreamError>`. The metadata therefore publishes the
+wrong alias target. The old and fresh archive audit rows are identical.
+`core.net.http.Response` still contains its public `body: List<UInt8>` field.
+The [comparison and inspector identities](evidence/registry-stage20-build/comparison.json)
+preserve these artifact findings separately from project execution.
+
+This build and artifact audit do not establish registry component,
+whole-project, startup or AOT acceptance. Those require the identified
+product's separate executable checks.
