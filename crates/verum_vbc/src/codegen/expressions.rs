@@ -38042,7 +38042,6 @@ impl VbcCodegen {
             // Both endian intrinsics declare a fixed [Byte; N] result. Emit
             // the same packed carrier as a source byte-array literal (T1698).
             InlineSequenceId::ToLeBytes | InlineSequenceId::ToBeBytes => {
-                let width = byte_width as usize;
                 let input = if !args.is_empty() { args[0] } else { dest };
                 let preserved = (input == dest).then(|| {
                     let saved = self.ctx.alloc_temp();
@@ -38050,39 +38049,16 @@ impl VbcCodegen {
                     saved
                 });
                 let src = preserved.unwrap_or(input);
-                let index = self.ctx.alloc_temp();
-                let byte = self.ctx.alloc_temp();
-                let shifted = self.ctx.alloc_temp();
-                let mask = self.ctx.alloc_temp();
-                self.ctx.emit(Instruction::LoadI { dst: index, value: width as i64 });
-                self.ctx.emit(Instruction::LoadI { dst: byte, value: 0 });
-                self.ctx.emit(Instruction::MemExtended {
-                    sub_op: crate::instruction::MemSubOpcode::NewByteArray.to_byte(),
-                    operands: [dest.0 as u8, index.0 as u8, byte.0 as u8].into(),
-                });
-                self.ctx.emit(Instruction::LoadI { dst: mask, value: 0xFF });
-                for output in 0..width {
-                    let input_byte = if seq_id == InlineSequenceId::ToLeBytes {
-                        output
-                    } else {
-                        width - 1 - output
-                    };
-                    self.ctx.emit(Instruction::LoadI {
-                        dst: index, value: (input_byte * 8) as i64,
-                    });
-                    self.ctx.emit(Instruction::Bitwise {
-                        op: BitwiseOp::Shr, dst: shifted, a: src, b: index,
-                    });
-                    self.ctx.emit(Instruction::Bitwise {
-                        op: BitwiseOp::And, dst: byte, a: shifted, b: mask,
-                    });
-                    self.ctx.emit(Instruction::LoadI { dst: index, value: output as i64 });
-                    self.ctx.emit(Instruction::MemExtended {
-                        sub_op: crate::instruction::MemSubOpcode::ByteArrayStore.to_byte(),
-                        operands: [dest.0 as u8, index.0 as u8, byte.0 as u8].into(),
-                    });
+                let temporaries = [
+                    self.ctx.alloc_temp(), self.ctx.alloc_temp(),
+                    self.ctx.alloc_temp(), self.ctx.alloc_temp(),
+                ];
+                for instruction in crate::intrinsics::expand::fixed_endian_bytes(
+                    src, dest, byte_width, seq_id == InlineSequenceId::ToLeBytes, temporaries,
+                ) {
+                    self.ctx.emit(instruction);
                 }
-                for reg in [mask, shifted, byte, index] { self.ctx.free_temp(reg); }
+                for reg in temporaries.into_iter().rev() { self.ctx.free_temp(reg); }
                 if let Some(saved) = preserved { self.ctx.free_temp(saved); }
             }
 
