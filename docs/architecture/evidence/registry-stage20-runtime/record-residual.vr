@@ -1,0 +1,25 @@
+type Built is { value: Maybe<Text> };
+
+fn missing() -> Result<Maybe<Text>, Text> {
+    Result.Err("missing")
+}
+
+fn inside() -> Result<Built, Text> {
+    Result.Ok(Built { value: missing()? })
+}
+
+fn outside() -> Result<Built, Text> {
+    let value = missing()?;
+    Result.Ok(Built { value: value })
+}
+
+fn main() {
+    match inside() {
+        Result.Ok(_) => print("inside:Ok"),
+        Result.Err(error) => { assert_eq(error, "missing"); print("inside:Err"); },
+    }
+    match outside() {
+        Result.Ok(_) => print("outside:Ok"),
+        Result.Err(error) => { assert_eq(error, "missing"); print("outside:Err"); },
+    }
+}

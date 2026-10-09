@@ -1,0 +1,35 @@
+{
+  "language_commit": "9b9c04a8a7364d35534a9e15dcfe7d9942c47420",
+  "build_manifest_sha256": "9e2884dfe1d7f3078b81e7b0b20eaf2ebf25c97fbf9c365412d0df3162040943",
+  "cli_sha256": "ebb60204de9bf5b7895f43a30cc50fcdc82427734bfe4807948834cb98577426",
+  "fixture_path": "/private/tmp/verum-record-residual-probe.vr",
+  "fixture_sha256": "5a53892923f88e84300a9133216913bd8300728629c4788893fb952b4d565e2a",
+  "executed_fixture": "/private/tmp/verum-record-residual-stage20/verum-record-residual-probe/verum-record-residual-probe.vr",
+  "command": [
+    "/private/tmp/verum-registry-stage20-callable-boundaries/verum-9b9c04a8a",
+    "run",
+    "--tier",
+    "interpret",
+    "/private/tmp/verum-record-residual-stage20/verum-record-residual-probe/verum-record-residual-probe.vr"
+  ],
+  "expected_stdout": "inside:Err\noutside:Err\n",
+  "deadline_seconds": 180,
+  "environment_overrides": {
+    "NO_COLOR": "1",
+    "VERUM_NO_OBJECT_CACHE": "1",
+    "TMPDIR": "/private/tmp"
+  },
+  "scope": "Standalone ordinary interpreter fixture; no whole-project, AOT, cryptographic evidence or service acceptance.",
+  "working_directory": "/private/tmp/verum-identified-9u3rx5nx",
+  "elapsed_seconds": 59.487,
+  "returncode": 0,
+  "timed_out": false,
+  "source_unchanged": true,
+  "cli_unchanged": true,
+  "exact_stdout": true,
+  "logs": {
+    "stdout.log": "347a565c5d63941b8df0706e1ca908e85e7ef48b666db64f7d46636f34f65b37",
+    "stderr.log": "16d27798446454b4df2e255cb8b903457ce5166fd8ff110a3957c980c3bfdf54"
+  },
+  "status": "passed"
+}

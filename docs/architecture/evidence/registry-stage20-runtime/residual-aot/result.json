@@ -1,0 +1,51 @@
+{
+  "language_commit": "9b9c04a8a7364d35534a9e15dcfe7d9942c47420",
+  "build_manifest_sha256": "9e2884dfe1d7f3078b81e7b0b20eaf2ebf25c97fbf9c365412d0df3162040943",
+  "cli_sha256": "ebb60204de9bf5b7895f43a30cc50fcdc82427734bfe4807948834cb98577426",
+  "fixture_sha256": "5a53892923f88e84300a9133216913bd8300728629c4788893fb952b4d565e2a",
+  "original_fixture": "/private/tmp/verum-record-residual-probe.vr",
+  "executed_fixture": "/private/tmp/verum-record-residual-stage20-aot/verum-record-residual-probe.vr",
+  "command": [
+    "/private/tmp/verum-registry-stage20-callable-boundaries/verum-9b9c04a8a",
+    "run",
+    "--tier",
+    "aot",
+    "/private/tmp/verum-record-residual-stage20-aot/verum-record-residual-probe.vr"
+  ],
+  "working_directory": "/private/tmp/verum-record-residual-stage20-aot/working-directory",
+  "expected_stdout": "inside:Err\noutside:Err\n",
+  "deadline_seconds": 600,
+  "environment_overrides": {
+    "NO_COLOR": "1",
+    "VERUM_NO_OBJECT_CACHE": "1",
+    "TMPDIR": "/private/tmp"
+  },
+  "scope": "One ordinary standalone AOT fixture. Import inspection does not prove absence of statically linked libc or platform-wide conformance.",
+  "elapsed_seconds": 214.233,
+  "returncode": 0,
+  "timed_out": false,
+  "native_artifact": {
+    "path": "/private/tmp/verum-record-residual-stage20-aot/target/debug/verum-record-residual-probe",
+    "bytes": 53672,
+    "sha256": "1893199d99e1abb1ad1ecea315595010a092a0ee846842b2a94e5dd3a52785b5",
+    "file_exit_code": 0,
+    "dynamic-libraries_exit_code": 0,
+    "undefined-symbols_exit_code": 0
+  },
+  "checks": {
+    "exit_zero": true,
+    "within_deadline": true,
+    "exact_stdout": true,
+    "source_unchanged": true,
+    "executable_unchanged": true,
+    "native_artifact_retained": true
+  },
+  "status": "passed",
+  "logs": {
+    "dynamic-libraries.log": "b8fe3126dda2dcfc9606dbdbfd953d7016fd2eb26c71e151bc52348c24fa69ca",
+    "file.log": "eb80f172589b682e116a989b62cd48de24533e0f827839b61abb8baec9659962",
+    "stderr.log": "08617ee9360ff79438fd0f3adf3aa71fe854f2b27588abde08d9750d145a9c73",
+    "stdout.log": "347a565c5d63941b8df0706e1ca908e85e7ef48b666db64f7d46636f34f65b37",
+    "undefined-symbols.log": "dfa3a33da067cd9594655a5a162a874387a37abb454668030faa9987bd8fa447"
+  }
+}

@@ -1,0 +1,167 @@
+{
+  "task": "T1635",
+  "language_product_commit": "9b9c04a8a7364d35534a9e15dcfe7d9942c47420",
+  "build_manifest": "../registry-stage20-build/build-manifest.json",
+  "build_manifest_sha256": "9e2884dfe1d7f3078b81e7b0b20eaf2ebf25c97fbf9c365412d0df3162040943",
+  "cli_sha256": "ebb60204de9bf5b7895f43a30cc50fcdc82427734bfe4807948834cb98577426",
+  "cases": {
+    "metadata-original": {
+      "receipt": "metadata-original/result.json",
+      "status": "passed",
+      "elapsed_seconds": 210.71,
+      "returncode": 0
+    },
+    "metadata-lazy": {
+      "receipt": "metadata-lazy/result.json",
+      "status": "passed",
+      "elapsed_seconds": 213.26,
+      "returncode": 0
+    },
+    "whole-project": {
+      "receipt": "whole-project/result.json",
+      "status": "failed",
+      "elapsed_seconds": 218.477,
+      "returncode": 101
+    },
+    "residual-interpreter": {
+      "receipt": "residual-interpreter/result.json",
+      "status": "passed",
+      "elapsed_seconds": 59.487,
+      "returncode": 0
+    },
+    "residual-constructor-trace": {
+      "receipt": "residual-constructor-trace/result.json",
+      "status": "passed",
+      "elapsed_seconds": 1.388,
+      "returncode": 0
+    },
+    "residual-aot": {
+      "receipt": "residual-aot/result.json",
+      "status": "passed",
+      "elapsed_seconds": 214.233,
+      "returncode": 0
+    }
+  },
+  "retained_files": {
+    "metadata-original/result.json": {
+      "sha256": "167d3abcec13524f2db619d85c20e74d32312a24a93abbbff9fe4186ed1fd1f9"
+    },
+    "metadata-original/stdout.log.gz": {
+      "sha256": "c4977bb5a717e76bec6f82957b87dfdc5282b7ccf33e93e8a724e33db5a795fb",
+      "decompressed_sha256": "b7309ae13ce11747d197e71ab474f5d5217ba3daac7b3fdf481a1d2ac7f5f590",
+      "encoding": "gzip; decompression restores the exact original log bytes"
+    },
+    "metadata-original/stderr.log.gz": {
+      "sha256": "9bee39f34555442a25e550c49c0764eb9f8da7d52723ad1d648a1b141c487f0d",
+      "decompressed_sha256": "cd4a1d19b5a7bb24db367ac0c58f4a4c4ded01889b9c490ee40bc5dfb6d3d4b4",
+      "encoding": "gzip; decompression restores the exact original log bytes"
+    },
+    "metadata-lazy/result.json": {
+      "sha256": "34e7b591d033681497222fee7d31881ee7ace8eb599d6a01d3feb4876adc1bf6"
+    },
+    "metadata-lazy/stdout.log.gz": {
+      "sha256": "c4977bb5a717e76bec6f82957b87dfdc5282b7ccf33e93e8a724e33db5a795fb",
+      "decompressed_sha256": "b7309ae13ce11747d197e71ab474f5d5217ba3daac7b3fdf481a1d2ac7f5f590",
+      "encoding": "gzip; decompression restores the exact original log bytes"
+    },
+    "metadata-lazy/stderr.log.gz": {
+      "sha256": "43f2502bbeb7cf6c511a6b5a5a02f7ee763742a1ffc24f0ab0b425f32b5534f5",
+      "decompressed_sha256": "836cb9137d089d27fb0b8865cbe531bf723cad83afb13eb06553099d80fffe8c",
+      "encoding": "gzip; decompression restores the exact original log bytes"
+    },
+    "whole-project/result.json": {
+      "sha256": "f999a2ba960ca5ce9403723d07690467b0a1f4624d22f3180024865f7192865b"
+    },
+    "whole-project/check.log.gz": {
+      "sha256": "dc5b725c9bcffc6f619a2569360d657f8ab5559963cfb67c272843a71176b0d1",
+      "decompressed_sha256": "10d0fe6f7aa74168feeb39f286e99fc2dc356826923b510b3e7cae884f54e5e7",
+      "encoding": "gzip; decompression restores the exact original log bytes"
+    },
+    "residual-interpreter/result.json": {
+      "sha256": "ffd33169bc6b44e9fa952b3d867a9d6bc20ff6e49921f78ccd40bfa2ed5cb524"
+    },
+    "residual-interpreter/stdout.log.gz": {
+      "sha256": "a0969d1335e0fe5c029381262b411eaf549749e1c43a3a104946cebbfc780508",
+      "decompressed_sha256": "347a565c5d63941b8df0706e1ca908e85e7ef48b666db64f7d46636f34f65b37",
+      "encoding": "gzip; decompression restores the exact original log bytes"
+    },
+    "residual-interpreter/stderr.log.gz": {
+      "sha256": "b39a7b83064ba38e67b48e6656c0446e9ffd538a63e763896190263ebd0cdbe3",
+      "decompressed_sha256": "16d27798446454b4df2e255cb8b903457ce5166fd8ff110a3957c980c3bfdf54",
+      "encoding": "gzip; decompression restores the exact original log bytes"
+    },
+    "residual-constructor-trace/result.json": {
+      "sha256": "7b5d0c7d6161f9ecfc3d6bc75a857d7d76a924dfbad224a52dcab73be11702e6"
+    },
+    "residual-constructor-trace/stdout.log.gz": {
+      "sha256": "a0969d1335e0fe5c029381262b411eaf549749e1c43a3a104946cebbfc780508",
+      "decompressed_sha256": "347a565c5d63941b8df0706e1ca908e85e7ef48b666db64f7d46636f34f65b37",
+      "encoding": "gzip; decompression restores the exact original log bytes"
+    },
+    "residual-constructor-trace/stderr.log.gz": {
+      "sha256": "f65740e20075b92f0fa78f089daac5199b918e67257a239460ee7e55a2ffbb3f",
+      "decompressed_sha256": "367c9d1c4e13081dae4c5f229cfdf79959e5e4d2f7a4e2a1d7c51cd4d7bfc2fb",
+      "encoding": "gzip; decompression restores the exact original log bytes"
+    },
+    "residual-aot/result.json": {
+      "sha256": "c1b55ec6cfb97d852569321f3cee19e3046a9be7b58c36027c7951b1cecfd459"
+    },
+    "residual-aot/dynamic-libraries.log.gz": {
+      "sha256": "6bae6a3a585a9cd2e9d0f419b59d341668638fce34890d971ec3ba4c7784d9e0",
+      "decompressed_sha256": "b8fe3126dda2dcfc9606dbdbfd953d7016fd2eb26c71e151bc52348c24fa69ca",
+      "encoding": "gzip; decompression restores the exact original log bytes"
+    },
+    "residual-aot/file.log.gz": {
+      "sha256": "1be7cfb1ee5060eed4963791225915b9040a64eb1c185ec5e00f82ed6305c403",
+      "decompressed_sha256": "eb80f172589b682e116a989b62cd48de24533e0f827839b61abb8baec9659962",
+      "encoding": "gzip; decompression restores the exact original log bytes"
+    },
+    "residual-aot/stderr.log.gz": {
+      "sha256": "591db59723f4e327e53f13cd6aa832a15a77618f7babf7fc66f85fb66a0eca2c",
+      "decompressed_sha256": "08617ee9360ff79438fd0f3adf3aa71fe854f2b27588abde08d9750d145a9c73",
+      "encoding": "gzip; decompression restores the exact original log bytes"
+    },
+    "residual-aot/stdout.log.gz": {
+      "sha256": "a0969d1335e0fe5c029381262b411eaf549749e1c43a3a104946cebbfc780508",
+      "decompressed_sha256": "347a565c5d63941b8df0706e1ca908e85e7ef48b666db64f7d46636f34f65b37",
+      "encoding": "gzip; decompression restores the exact original log bytes"
+    },
+    "residual-aot/undefined-symbols.log.gz": {
+      "sha256": "b132db053bca6fff5100703ed068658726576c46808fd41d80c5816a0e465ba4",
+      "decompressed_sha256": "dfa3a33da067cd9594655a5a162a874387a37abb454668030faa9987bd8fa447",
+      "encoding": "gzip; decompression restores the exact original log bytes"
+    },
+    "record-residual.vr": {
+      "sha256": "5a53892923f88e84300a9133216913bd8300728629c4788893fb952b4d565e2a"
+    },
+    "run-interpreter.py": {
+      "sha256": "b0ab309ac2d89efb06da8bd638144f19f18a8e473cc54bb53785dc683f8fc056"
+    },
+    "run-constructor-trace.py": {
+      "sha256": "64cc6aeae2538b3e2e2746544d51e251c7108473efa4e7b64073bd9e339ee4c2"
+    },
+    "run-aot.py": {
+      "sha256": "872be97617b4f571a841de65252388424d026dd08f9b259662d78fad45e11706"
+    },
+    "check-project.py": {
+      "sha256": "9a18204c0ddebf6b2170ddfbdf7f104a1f8a9738d6ae6fc0c781096bd8ed08e9"
+    }
+  },
+  "retained_native_artifact": {
+    "path": "/private/tmp/verum-record-residual-stage20-aot/target/debug/verum-record-residual-probe",
+    "bytes": 53672,
+    "sha256": "1893199d99e1abb1ad1ecea315595010a092a0ee846842b2a94e5dd3a52785b5",
+    "file_exit_code": 0,
+    "dynamic-libraries_exit_code": 0,
+    "undefined-symbols_exit_code": 0
+  },
+  "metadata_acceptance": {
+    "original_registry_commit": "399cc4156769bfd1df0ca76120da4e84a8d06931",
+    "lazy_registry_commit": "24bc45543d2396f5bfd4ccf9b9f84056f5f10237",
+    "integrated_registry_commit": "7f11d28d80503a8cd364c743a0dfb9225c247dd0",
+    "boundary": "Strict source metadata and envelope interpreter components only; no authenticated or durable admission."
+  },
+  "whole_project_boundary": "Five compile errors remain: qualified HTTP response field assignment; two IoResult patterns; two async handle errors. Four prior Source protocol-bound errors are absent. No full-project success or runtime verdict.",
+  "trace_boundary": "The residual constructor trace reports cached VBC and skipped unresolved TLS initializers, including core.sync.atomic.AtomicU64.new. Reaching main does not establish successful static initialization. T1461, T0691 and T1691 remain separate.",
+  "native_boundary": "One explicit --tier aot macOS arm64 fixture and its retained executable pass. Imports name only libSystem.B.dylib, the documented macOS system-ABI exception. This does not prove absence of statically linked libc or full platform/runtime conformance."
+}

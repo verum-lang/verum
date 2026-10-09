@@ -796,3 +796,42 @@ preserve these artifact findings separately from project execution.
 This build and artifact audit do not establish registry component,
 whole-project, startup or AOT acceptance. Those require the identified
 product's separate executable checks.
+
+
+## Ordinary metadata, project and residual replay (T1635)
+
+The fresh `9b9c04a8a` product passes the unchanged original publication
+metadata component at registry `399cc415` in 210.71 seconds and the separately
+identified lazy-error candidate at `24bc4554` in 213.26 seconds. Both print
+exactly `publication_metadata: passed`, with unchanged source and executable
+hashes. The accepted implementation is integrated in registry `7f11d28`.
+This closes the bounded metadata components, without claiming authentication,
+semantic archive admission, durable publication or installation.
+
+The same product's ordinary argument-less registry check exits with five
+errors in 218.477 seconds. The four earlier `Source` protocol-bound errors
+are absent. A qualified HTTP response field assignment, two `IoResult`
+patterns and two async-handle errors remain. The registry source comparison
+and current check are also retained in registry `4540691`. Later language
+field/provenance fixes are outside the executable used for this check.
+
+The standalone record-residual fixture passes unchanged in the interpreter
+and with explicit `--tier aot`, printing `inside:Err` and `outside:Err`.
+The native run takes 214.233 seconds and retains a 53,672-byte macOS arm64
+executable. Its dynamic dependency inspection names only
+`/usr/lib/libSystem.B.dylib`, the documented macOS system-ABI exception.
+This fixture does not establish the full runtime or cross-platform AOT
+no-libc invariant; import inspection alone cannot exclude static copies.
+
+An additional constructor trace reaches the same assertions using cached VBC.
+It reports the exact unresolved `core.sync.atomic.AtomicU64.new` callee and
+skips that TLS initializer under the existing lenient policy. The earlier
+wrong `ArenaPool.new` dispatch is absent, but successful main execution does
+not prove successful static initialization. Late TLS dependency closure,
+graph ownership and origin-string remapping remain separate work items.
+
+The [runtime comparison](evidence/registry-stage20-runtime/comparison.json)
+links all six exact receipts, losslessly compressed logs, the unchanged
+standalone fixture and its runners. It binds them to the existing fresh
+build manifest. Timings identify individual runs rather than a performance
+comparison between different components.

@@ -1,0 +1,68 @@
+{
+  "task": "T1666",
+  "component": "metadata",
+  "scope": "Run the exact publication framing and typed source-metadata modules in an isolated interpreter project.\n\nThis component checks envelope composition and strict JSON schema decoding; it does not establish semantic name/version/checksum admission, archive validity, authentication, persistence, AOT, or whole-registry acceptance.",
+  "source_inputs": {
+    "src/protocol/publication.vr": "a76e24d9ef9086bd81d665d3113f60e8949bdac6b6b5bb6be2087781b5047516",
+    "src/protocol/publication_metadata.vr": "558a1a0de43bebdca1f5f2bc718786feb3a32e8a45a212f3d4001dffc0b88148",
+    "tests/publication_metadata.vr": "da97742d7844cd9de7da326ef352276c8b686079ca824f6793c116c8a241efa6",
+    "tests/publication_metadata.expected": "b7309ae13ce11747d197e71ab474f5d5217ba3daac7b3fdf481a1d2ac7f5f590",
+    "tools/run_publication_envelope.py": "eb299fc9669912912e4c3ca8aa8c28c1a8e1c8ac14dc0461e592c56233036e42"
+  },
+  "project_inputs": {
+    "src/protocol/publication.vr": "a76e24d9ef9086bd81d665d3113f60e8949bdac6b6b5bb6be2087781b5047516",
+    "src/protocol/publication_metadata.vr": "558a1a0de43bebdca1f5f2bc718786feb3a32e8a45a212f3d4001dffc0b88148",
+    "src/main.vr": "6668379486257e3482884c064b4a744f0909f6049d07ac97040cc386975eb155",
+    "verum.toml": "1d99c409b02e7bdb88b9765716721b42e2360e7ecd55f9bbe2a4b18213f97ab2"
+  },
+  "entry_transformation": "Only replace the fixture's module header with verum_registry.main.",
+  "cli_sha256": "ebb60204de9bf5b7895f43a30cc50fcdc82427734bfe4807948834cb98577426",
+  "expected_cli_sha256": "ebb60204de9bf5b7895f43a30cc50fcdc82427734bfe4807948834cb98577426",
+  "language_source_commit_supplied": "9b9c04a8a7364d35534a9e15dcfe7d9942c47420",
+  "identity_boundary": "The executable hash is measured; its source commit is supplied by the operator.",
+  "command": [
+    "/private/tmp/verum-registry-stage20-callable-boundaries/verum-9b9c04a8a",
+    "run",
+    "--tier",
+    "interpret"
+  ],
+  "working_directory": "/Users/taaliman/.tmp/verum-publication-metadata-qrscnkqw",
+  "environment_overrides": {
+    "NO_COLOR": "1",
+    "VERUM_NO_OBJECT_CACHE": "1",
+    "TMPDIR": "/Users/taaliman/.tmp"
+  },
+  "deadline_seconds": 600.0,
+  "status": "passed",
+  "checks": {
+    "exit_zero": true,
+    "within_deadline": true,
+    "exact_stdout": true,
+    "source_unchanged": true,
+    "project_unchanged": true,
+    "executable_unchanged": true
+  },
+  "elapsed_seconds": 213.26,
+  "returncode": 0,
+  "timed_out": false,
+  "interrupted": false,
+  "runner_error": null,
+  "source_inputs_after": {
+    "src/protocol/publication.vr": "a76e24d9ef9086bd81d665d3113f60e8949bdac6b6b5bb6be2087781b5047516",
+    "src/protocol/publication_metadata.vr": "558a1a0de43bebdca1f5f2bc718786feb3a32e8a45a212f3d4001dffc0b88148",
+    "tests/publication_metadata.vr": "da97742d7844cd9de7da326ef352276c8b686079ca824f6793c116c8a241efa6",
+    "tests/publication_metadata.expected": "b7309ae13ce11747d197e71ab474f5d5217ba3daac7b3fdf481a1d2ac7f5f590",
+    "tools/run_publication_envelope.py": "eb299fc9669912912e4c3ca8aa8c28c1a8e1c8ac14dc0461e592c56233036e42"
+  },
+  "project_inputs_after": {
+    "src/main.vr": "6668379486257e3482884c064b4a744f0909f6049d07ac97040cc386975eb155",
+    "src/protocol/publication.vr": "a76e24d9ef9086bd81d665d3113f60e8949bdac6b6b5bb6be2087781b5047516",
+    "src/protocol/publication_metadata.vr": "558a1a0de43bebdca1f5f2bc718786feb3a32e8a45a212f3d4001dffc0b88148",
+    "verum.toml": "1d99c409b02e7bdb88b9765716721b42e2360e7ecd55f9bbe2a4b18213f97ab2"
+  },
+  "cli_sha256_after": "ebb60204de9bf5b7895f43a30cc50fcdc82427734bfe4807948834cb98577426",
+  "logs": {
+    "stdout.log": "b7309ae13ce11747d197e71ab474f5d5217ba3daac7b3fdf481a1d2ac7f5f590",
+    "stderr.log": "836cb9137d089d27fb0b8865cbe531bf723cad83afb13eb06553099d80fffe8c"
+  }
+}
