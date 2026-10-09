@@ -540,3 +540,8 @@ The project preflight's forward-reference error is independent of this repair.
 No archive schema or writer changed; a new reader using an existing archive must
 identify that producer artifact explicitly. These checker results do not establish
 fresh-bake, registry authentication, durable admission, installation or AOT success.
+
+The reviewed chain rebased onto documentation-only main `fae253d0f` with source
+commit `28b59011d`. Its complete type-crate tree is byte-identical to executed
+`3821b1961`; both original branches and the preceding registry project receipt
+are retained. CI's `unit` and `integration` type-system jobs include these controls.

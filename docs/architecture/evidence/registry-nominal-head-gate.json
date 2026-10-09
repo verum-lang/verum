@@ -400,5 +400,26 @@
     "cargo_gate_exited": true,
     "release_allowed": true,
     "last_tested_source": "3821b1961cd057fd03c9e6d39cbf50609261e4eb"
+  },
+  "integration": {
+    "base": "fae253d0f",
+    "reviewed_endpoint": "7679fb2a1",
+    "rebased_source": "28b59011d",
+    "tested_source": "3821b1961cd057fd03c9e6d39cbf50609261e4eb",
+    "tested_and_rebased_type_crate_tree": "bad8c50213346c441aac15d9774fa8264d42fc0e",
+    "source_byte_identical": true,
+    "retained_branches": [
+      "codex/declared-generic-tested-3821",
+      "codex/declared-generic-pre-rebase"
+    ],
+    "parent_changes": "Documentation only: retained registry project stage16 receipt/log and acceptance section.",
+    "replayed_commits": {
+      "76cee1bad": "6a20997a8",
+      "51443c2e2": "19bd886ca",
+      "f6bebba54": "aa94a1da3",
+      "3821b1961": "28b59011d",
+      "87f865de3": "7679fb2a1"
+    },
+    "ci_gate": "ci.yml unit (--lib --bins) and integration (cargo test --locked --tests -p verum_types) include the linked unit controls."
   }
 }
