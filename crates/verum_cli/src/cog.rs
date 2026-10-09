@@ -278,7 +278,8 @@ fn install_from_registry(
     // Get package metadata
     let metadata = client.get_metadata(name, resolved_version.as_str())?;
 
-    // Check for vulnerabilities
+    // A missing advisory verdict stops installation before the archive or
+    // project state changes. Only an actual report can support a clean result.
     ui::info("Checking for vulnerabilities...");
     let vuln_report = client.check_vulnerabilities(name, resolved_version.as_str())?;
     if !vuln_report.vulnerabilities.is_empty() {

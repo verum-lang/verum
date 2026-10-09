@@ -239,7 +239,11 @@ impl RegistryClient {
         verify_publication_receipt(response, manifest)
     }
 
-    /// Check for vulnerabilities
+    /// Obtain an advisory report for exactly the requested release.
+    ///
+    /// Unavailable or unrelated advisory data is an error, never evidence of
+    /// an empty report. Callers must decide how to handle that failure before
+    /// downloading artifacts or mutating the project.
     pub fn check_vulnerabilities(&self, name: &str, version: &str) -> Result<VulnerabilityReport> {
         let url = format!(
             "{}/security/vulnerabilities/{}/{}",
@@ -255,17 +259,24 @@ impl RegistryClient {
             .map_err(|e| CliError::Network(e.to_string()))?;
 
         if !response.status().is_success() {
-            // No vulnerabilities found
-            return Ok(VulnerabilityReport {
-                package: name.into(),
-                version: version.into(),
-                vulnerabilities: List::new(),
-            });
+            return Err(CliError::Registry(format!(
+                "Vulnerability check failed for {} {}: {}",
+                name,
+                version,
+                response.status()
+            )));
         }
 
-        response
-            .json()
-            .map_err(|e| CliError::Registry(format!("Failed to parse vulnerability report: {}", e)))
+        let report: VulnerabilityReport = response.json().map_err(|e| {
+            CliError::Registry(format!("Failed to parse vulnerability report: {}", e))
+        })?;
+        if report.package.as_str() != name || report.version.as_str() != version {
+            return Err(CliError::Registry(format!(
+                "Vulnerability report does not match requested cog {} {}",
+                name, version
+            )));
+        }
+        Ok(report)
     }
 
     /// Get package index
