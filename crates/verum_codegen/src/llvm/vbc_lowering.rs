@@ -3095,9 +3095,11 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
         // When user and stdlib functions share a name, the arity-suffixed LLVM
         // function can only be found via func_id, not by name.
         ctx.set_func_id_map(Arc::new(self.functions.clone()));
-        ctx.array_returns = self.array_returns.clone();
-        ctx.array_storage = super::array_storage::ArrayStorage::for_body(&vbc_func.instructions);
-        ctx.array_storage.check_parameters(&vbc_func.descriptor.params)?;
+        ctx.initialize_array_storage(
+            self.array_returns.clone(),
+            &vbc_func.instructions,
+            &vbc_func.descriptor.params,
+        )?;
 
         // Set function ID base for merged stdlib modules.
         // Call func_ids in merged bytecode are relative to the source module;
@@ -3390,7 +3392,7 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                 );
 
                 if matches!(effective_type, TypeRef::Array { .. }) {
-                    ctx.array_storage.mark_array(verum_vbc::instruction::Reg(reg));
+                    ctx.mark_array_value(verum_vbc::instruction::Reg(reg));
                 }
                 if is_text {
                     ctx.mark_text_register(reg);
@@ -3670,7 +3672,7 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                     // A fixed-array parameter has no physical argument proof.
                     // Keep that uncertainty explicit until call adaptation owns it.
                     TypeRef::Array { element, .. } => {
-                        ctx.array_storage.mark_array(verum_vbc::instruction::Reg(reg));
+                        ctx.mark_array_value(verum_vbc::instruction::Reg(reg));
                         ctx.set_generic_type_args(reg, vec![(**element).clone()]);
                     }
                     TypeRef::Concrete(tid) if *tid == TypeId::LIST => {
@@ -3872,7 +3874,7 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                             // The reference annotation alone does not prove that
                             // a selected caller materialized a slice descriptor.
                             TypeRef::Array { .. } => {
-                                ctx.array_storage.mark_array(verum_vbc::instruction::Reg(reg));
+                                ctx.mark_array_value(verum_vbc::instruction::Reg(reg));
                             }
                             _ => {}
                         }
@@ -4678,7 +4680,7 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                         let _ = ctx.builder().build_unconditional_branch(block);
                     }
                     ctx.position_at_end(block);
-                    ctx.array_storage.clear_at_join();
+                    ctx.clear_array_storage_at_join();
                     _current_block_start_idx = instr_idx;
                 }
             }

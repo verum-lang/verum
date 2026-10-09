@@ -2486,9 +2486,9 @@ pub fn lower_instruction<'ctx>(
     ctx.increment_instruction_count();
 
     ctx.check_register_writes()?;
-    ctx.array_storage.begin_instruction(instr);
+    ctx.begin_array_storage_instruction(instr);
     lower_instruction_impl(ctx, instr)?;
-    ctx.array_storage.finish_instruction(instr)?;
+    ctx.finish_array_storage_instruction(instr)?;
     ctx.check_register_writes()
 }
 
@@ -14961,10 +14961,9 @@ fn lower_call<'ctx>(
         ctx.set_register(dst.0, ret_val);
         // Track register types based on function return type
         mark_register_from_return_type(ctx, dst.0, &func_desc.return_type);
-        if matches!(func_desc.return_type, TypeRef::Array { .. }) {
-            let storage = ctx.array_returns.get(&llvm_fn).copied();
-            ctx.array_storage.call_result(dst, storage)?;
-        }
+        ctx.record_selected_array_call(
+            dst, llvm_fn, matches!(func_desc.return_type, TypeRef::Array { .. }),
+        )?;
         // After the return-type marks, so it is not overwritten by them.
         restore_interior_element_mark(ctx, dst.0, ret_ref_kind);
         // task #39/#35: a generic fn returning a bare type param T (e.g.
@@ -21943,10 +21942,9 @@ fn lower_call_method<'ctx>(
             if let Some(ref ret_type) = resolved_return_type {
                 mark_register_from_return_type(ctx, dst.0, ret_type);
             }
-            let storage = ctx.array_returns.get(&llvm_fn).copied();
-            if storage.is_some() || matches!(resolved_return_type, Some(TypeRef::Array { .. })) {
-                ctx.array_storage.call_result(dst, storage)?;
-            }
+            ctx.record_selected_array_call(
+                dst, llvm_fn, matches!(resolved_return_type, Some(TypeRef::Array { .. })),
+            )?;
             // After the return-type marks, so it is not overwritten.
             restore_interior_element_mark(ctx, dst.0, ret_ref_kind);
             // MAYBE-EXTRACT-OBJ-TYPE-1 (#29): a payload extractor
@@ -33318,9 +33316,7 @@ fn try_lower_sizedint_method<'ctx>(
                 ctx.builder().build_store(slot, byte).or_llvm_err()?;
             }
             ctx.set_register(dst.0, bytes.into());
-            ctx.array_storage.call_result(dst, Some(ArrayResultFact::Packed {
-                width: 1, float: false, count,
-            }))?;
+            ctx.record_packed_byte_result(dst, count)?;
             Ok(true)
         }
         // ── from_{le,be}_bytes → read N bytes, reassemble, extend ──
@@ -33329,7 +33325,7 @@ fn try_lower_sizedint_method<'ctx>(
         | "uint32$from_be_bytes" | "uint64$from_be_bytes" => {
             let le = canon.ends_with("le_bytes");
             let n = (width / 8) as u64;
-            if !matches!(ctx.array_storage.get(args.start),
+            if !matches!(ctx.array_storage_fact(args.start),
                 Some(ArrayResultFact::Packed { width: 1, float: false, count }) if count == n)
             {
                 return Err(LlvmLoweringError::UnprovenArrayStorage(
@@ -38278,7 +38274,7 @@ fn lower_get_element<'ctx>(
     arr: Reg,
     idx: Reg,
 ) -> Result<()> {
-    match ctx.array_storage.get(arr) {
+    match ctx.array_storage_fact(arr) {
         Some(ArrayResultFact::Packed { width, float, count }) => {
             // Count/geometry come from the selected allocation, never TypeRef.
             // Use the existing typed load lowering and canonical wide-register
@@ -38296,7 +38292,7 @@ fn lower_get_element<'ctx>(
             return lower_mem_extended(ctx, op.to_byte(), &operands);
         }
         Some(ArrayResultFact::List) => {}
-        _ if ctx.array_storage.is_array(arr) => {
+        _ if ctx.is_array_value(arr) => {
             return Err(LlvmLoweringError::UnprovenArrayStorage(
                 format!("GetE r{} has no selected array storage in {}", arr.0, ctx.function_name()).into(),
             ));
@@ -38434,7 +38430,7 @@ fn lower_set_element<'ctx>(
     idx: Reg,
     value: Reg,
 ) -> Result<()> {
-    match ctx.array_storage.get(arr) {
+    match ctx.array_storage_fact(arr) {
         Some(ArrayResultFact::Packed { width, float, count }) => {
             check_packed_array_index(ctx, idx, count)?;
             let mut operands = vec![];
@@ -38449,7 +38445,7 @@ fn lower_set_element<'ctx>(
             return lower_mem_extended(ctx, op.to_byte(), &operands);
         }
         Some(ArrayResultFact::List) => {}
-        _ if ctx.array_storage.is_array(arr) => {
+        _ if ctx.is_array_value(arr) => {
             return Err(LlvmLoweringError::UnprovenArrayStorage(
                 format!("SetE r{} has no selected array storage in {}", arr.0, ctx.function_name()).into(),
             ));
@@ -38563,13 +38559,13 @@ fn lower_len<'ctx>(
     arr: Reg,
     type_hint: u8,
 ) -> Result<()> {
-    match ctx.array_storage.get(arr) {
+    match ctx.array_storage_fact(arr) {
         Some(ArrayResultFact::Packed { count, .. }) => {
             ctx.set_register(dst.0, ctx.types().i64_type().const_int(count, false).into());
             return Ok(());
         }
         Some(ArrayResultFact::List) => {}
-        _ if ctx.array_storage.is_array(arr) => {
+        _ if ctx.is_array_value(arr) => {
             return Err(LlvmLoweringError::UnprovenArrayStorage(
                 format!("Len r{} has no selected array storage in {}", arr.0, ctx.function_name()).into(),
             ));
@@ -40357,7 +40353,7 @@ fn mark_register_from_return_type<'ctx>(
         // An array type preserves element identity but does not determine its
         // physical storage. The actual selected producer supplies that proof.
         TypeRef::Array { element, .. } => {
-            ctx.array_storage.mark_array(Reg(reg));
+            ctx.mark_array_value(Reg(reg));
             ctx.set_generic_type_args(reg, vec![(**element).clone()]);
             if let TypeRef::Concrete(elem_tid) = element.as_ref() {
                 if *elem_tid == TypeId::TEXT {

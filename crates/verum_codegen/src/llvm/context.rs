@@ -5,7 +5,7 @@
 
 use std::collections::HashMap;
 
-use verum_common::{Map, Set, Shared, Text};
+use verum_common::{Map, Maybe, Set, Shared, Text};
 use verum_llvm::values::BasicValue;
 use verum_llvm::basic_block::BasicBlock;
 use verum_llvm::builder::Builder;
@@ -13,7 +13,11 @@ use verum_llvm::context::Context;
 use verum_llvm::module::Module;
 use verum_llvm::types::BasicTypeEnum;
 use verum_llvm::values::{BasicValueEnum, FunctionValue, IntValue, PointerValue};
-use verum_vbc::module::VbcModule;
+use verum_vbc::{
+    array_storage::ArrayResultFact,
+    instruction::{Instruction, Reg},
+    module::{ParamDescriptor, VbcModule},
+};
 
 /// Exception handler info for structured exception handling.
 #[derive(Debug, Clone)]
@@ -214,8 +218,8 @@ pub struct FunctionContext<'a, 'ctx> {
     func_id_map: Option<Arc<HashMap<u32, FunctionValue<'ctx>>>>,
 
     /// Final executable source-body summaries, keyed by the actual native target.
-    pub(super) array_returns: Shared<super::array_storage::ArrayReturns<'ctx>>,
-    pub(super) array_storage: super::array_storage::ArrayStorage,
+    array_returns: Shared<super::array_storage::ArrayReturns<'ctx>>,
+    array_storage: super::array_storage::ArrayStorage,
 
     /// LLVM builder for instruction generation.
     builder: Builder<'ctx>,
@@ -2778,6 +2782,66 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
                 .copied()
                 .ok_or_else(|| LlvmLoweringError::InvalidRegister(reg))
         }
+    }
+
+    /// Install the completed selected-body contracts once at function setup.
+    pub(super) fn initialize_array_storage(
+        &mut self,
+        returns: Shared<super::array_storage::ArrayReturns<'ctx>>,
+        body: &[Instruction],
+        parameters: &[ParamDescriptor],
+    ) -> Result<()> {
+        self.array_returns = returns;
+        self.array_storage = super::array_storage::ArrayStorage::for_body(body);
+        self.array_storage.check_parameters(parameters)
+    }
+
+    /// Snapshot instruction inputs before native helpers overwrite registers.
+    pub(super) fn begin_array_storage_instruction(&mut self, instruction: &Instruction) {
+        self.array_storage.begin_instruction(instruction);
+    }
+
+    /// Apply exactly one transfer after the native instruction was emitted.
+    pub(super) fn finish_array_storage_instruction(&mut self, instruction: &Instruction) -> Result<()> {
+        self.array_storage.finish_instruction(instruction)
+    }
+
+    pub(super) fn clear_array_storage_at_join(&mut self) {
+        self.array_storage.clear_at_join();
+    }
+
+    pub(super) fn array_storage_fact(&self, register: Reg) -> Maybe<ArrayResultFact> {
+        self.array_storage.get(register)
+    }
+
+    pub(super) fn is_array_value(&self, register: Reg) -> bool {
+        self.array_storage.is_array(register)
+    }
+
+    /// Preserve uncertainty without authorizing a physical memory access.
+    pub(super) fn mark_array_value(&mut self, register: Reg) {
+        self.array_storage.mark_array(register);
+    }
+
+    /// Only the actual native target selects a source-body return proof.
+    pub(super) fn record_selected_array_call(
+        &mut self,
+        destination: Reg,
+        target: FunctionValue<'ctx>,
+        declared_array: bool,
+    ) -> Result<()> {
+        let fact = self.array_returns.get(&target).copied();
+        if fact.is_some() || declared_array {
+            self.array_storage.call_result(destination, fact)?;
+        }
+        Ok(())
+    }
+
+    /// Called by the primitive emitter after allocating exactly `count` bytes.
+    pub(super) fn record_packed_byte_result(&mut self, destination: Reg, count: u64) -> Result<()> {
+        self.array_storage.call_result(destination, Some(ArrayResultFact::Packed {
+            width: 1, float: false, count,
+        }))
     }
 
     /// Propagate a failure recorded by the legacy infallible set_register API.
