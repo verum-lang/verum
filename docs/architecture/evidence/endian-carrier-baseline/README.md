@@ -53,3 +53,8 @@ fixtures are unchanged, including their historical machine paths. Rust test
 source identities are the recorded commits; the active fixtures live under the
 VBC and codegen crate test directories. Scratch runner copies document the exact
 bounded Cargo invocations and are provenance, not portable project tooling.
+
+The later combined owner integration and its remaining native refusals are
+recorded in [integration-checkpoint.md](integration-checkpoint.md). It supersedes
+the earlier Float32 failure for that bounded component gate and retains the
+original failure evidence unchanged.
