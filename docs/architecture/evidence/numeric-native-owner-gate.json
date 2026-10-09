@@ -1,0 +1,723 @@
+{
+  "task": "T1701",
+  "prior_receipt": "docs/architecture/evidence/numeric-reference-dispatch-gate.json",
+  "scope": "Actual parsed Verum source and independently decoded serialized VBC through production LLVM lowering and bounded host JIT. No fresh stdlib bake, ordinary CLI, AOT executable, allocator lifecycle, no-libc or registry acceptance.",
+  "preserved_interpreter_candidate": "26d7e0359cc28a5fee81655c0871d11db65788ee",
+  "isolated_native_test_branch": "52c1d6887bb97ceb15f5738f7f22c6063097e042",
+  "storage_integration_base": "fa6bf9a613da39d9fd1adbff353f3ec417249b02",
+  "tested_combined_source": "cad9e0420c2f2fefb20ffec00ab92b11cb411177",
+  "new_native_owner_production_repair": false,
+  "findings": [
+    "The initial native control process stopped with SIGSEGV on its first Int64 fixed-array consumer. Retained LLVM IR selects the exact Int64 source body and allocates eight packed bytes, but the caller reads generic container metadata from that raw buffer. This is incomplete execution and does not establish an owner-selection failure.",
+    "The bounded guard retains the same positive expectations and reports a failure before JIT when a packed-array fixture reaches generic container readers. Source and wire are attempted independently. USize/ISize List mutation through instance and alias/cast routes, and the scalar count_ones marker, pass on the isolated candidate.",
+    "The guarded baseline has five passing outer tests and three failing outer tests. The static test isolates all four competing declaration owners: its two List subcases pass, while its two fixed-array subcases remain red at the geometry guard."
+  ],
+  "controls": [
+    "Every module contains competing USize/UInt64 and ISize/Int64 declarations. Descriptors retain AST-owned has_source_body through wire decode.",
+    "USize and ISize source methods return distinct growable Lists; UInt64 and Int64 source methods return distinct fixed packed arrays. Static, instance, cast and alias routes retain the declared owner.",
+    "The scalar USize.count_ones body returns a marker distinct from the primitive population count.",
+    "The adjacent native endian/storage suite runs unchanged on the combined source."
+  ],
+  "limitations": [
+    "The host JIT allocator is a bounded fixture substrate, not runtime memory-management acceptance.",
+    "Early static subcases shared an IR filename in the guarded baseline, so its standalone static IR files contain only the final subcase; failed array IR remains verbatim in stderr. The follow-up test commit gives every owner a distinct IR filename for the integrated gate.",
+    "No bodyless-forward, borrowed numeric receiver, native AD, 128-bit, or native-endian acceptance is added by these eight owner tests."
+  ],
+  "gates": {
+    "native-owner-incomplete-baseline": {
+      "source": "2d0e69aad90aa313bc41d95c6289073fe877b0a8",
+      "tree": "0e7c1eb54155326f7adfbddb6c868080b2bf0050",
+      "cwd": "/Users/taaliman/.codex/worktrees/registry-metadata-lookup/verum",
+      "command": [
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "--no-fail-fast",
+        "-p",
+        "verum_codegen",
+        "--test",
+        "numeric_declaration_owner",
+        "--message-format=json",
+        "--",
+        "--nocapture",
+        "--test-threads=1"
+      ],
+      "environment_overrides": {
+        "CARGO_TARGET_DIR": "/Users/taaliman/.tmp/verum-codex-01a10248/native-target",
+        "CARGO_BUILD_JOBS": "2",
+        "CARGO_INCREMENTAL": "0",
+        "VERUM_NO_AUTO_PRECOMPILE": "1",
+        "VERUM_LLVM_DIR": "/Users/taaliman/projects/oldman/verum-lang/verum/llvm/install",
+        "RUST_MIN_STACK": "16777216",
+        "VERUM_T1701_NATIVE_IR_DIR": "/private/tmp/verum-T1701-native-owner-baseline/ir"
+      },
+      "deadline_seconds": 600,
+      "artifacts_before": {
+        "runtime.vbca": "8569748c802eb09c42c79e1d6f58d431e9e3d09266d22e89436ba942fad999ff",
+        "runtime.core_metadata": "f6730833fc38cb3acf2fc27954b674471bde598e56cda57db67de06a84cb358c",
+        "runtime.symbol_graph": "e7cd3fda19f45fcbfba63cddcc331aa5dff0e1740a015367935faf41268ea238",
+        "runtime.vbca.checksum": "d88cf714a17aa600409e43b001aaf45c9be588b0bde2dbce35264513d309f957",
+        "runtime.vbca.schema": "fec20d7b3f8d1b81aff66c6c1181be574963779f7eacaf65660f8ab9127fca87"
+      },
+      "artifact_directory": "/Users/taaliman/.tmp/verum-codex-01a10248/native-target/precompiled-stdlib",
+      "rustc": "rustc 1.100.0-nightly (f7d782a3b 2026-08-19)",
+      "cargo": "cargo 1.100.0-nightly (514c56dd7 2026-08-19)",
+      "scope": "Focused T1701 parsed source and independently decoded wire through production LLVM lowering/JIT. Container execution is guarded by exact selected source-body calls; guard failures retain IR and are not JIT execution acceptance. No ordinary CLI, automatic stdlib baking, AOT executable, no-libc, crypto/registry acceptance.",
+      "runner_sha256": "7953f2862a46d3f7385501b736f21ceed90795d013f46d78b30603bb3e560bfb",
+      "returncode": 101,
+      "failure": null,
+      "elapsed_seconds": 67.567,
+      "source_after": "2d0e69aad90aa313bc41d95c6289073fe877b0a8",
+      "source_paths_unchanged": true,
+      "clean_after": true,
+      "artifacts_after": {
+        "runtime.vbca": "8569748c802eb09c42c79e1d6f58d431e9e3d09266d22e89436ba942fad999ff",
+        "runtime.core_metadata": "f6730833fc38cb3acf2fc27954b674471bde598e56cda57db67de06a84cb358c",
+        "runtime.symbol_graph": "e7cd3fda19f45fcbfba63cddcc331aa5dff0e1740a015367935faf41268ea238",
+        "runtime.vbca.checksum": "d88cf714a17aa600409e43b001aaf45c9be588b0bde2dbce35264513d309f957",
+        "runtime.vbca.schema": "fec20d7b3f8d1b81aff66c6c1181be574963779f7eacaf65660f8ab9127fca87"
+      },
+      "executables": [
+        {
+          "path": "/Users/taaliman/.tmp/verum-codex-01a10248/native-target/debug/build/verum_codegen/ca8d69779eec778f/out/numeric_declaration_owner-ca8d69779eec778f",
+          "sha256": "b680db431eaee2663049a783e74ffd7972df9e16ad9a68aa561a98cb980063ab",
+          "size_bytes": 95757208,
+          "target": "numeric_declaration_owner",
+          "fresh": false
+        }
+      ],
+      "logs_sha256": {
+        "cargo.jsonl": "d0c1a78e2ce5128801d46783d7a386164d0f12962299265c42c954b26d1cf529",
+        "stderr.log": "acd9b42d0a4beb02793e135fcccd96e15dad6e4473ce45609140670bf9120d97"
+      },
+      "test_results": [],
+      "ir_sha256": {
+        "ir/int64_instance_keeps_its_fixed_array_body-source.ll": "742da2b39af4e91692f153d934f3daecdb96e8cb8c2e73d255e9f9a650de8534"
+      },
+      "verified_source_hash_count": 435
+    },
+    "native-owner-guarded-baseline": {
+      "source": "c493b255ab4d42fa1e07b900cd7c5f2793065e08",
+      "tree": "c08273b72681b4a95dc948a8fe4a793279f8490f",
+      "cwd": "/Users/taaliman/.codex/worktrees/registry-metadata-lookup/verum",
+      "command": [
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "--no-fail-fast",
+        "-p",
+        "verum_codegen",
+        "--test",
+        "numeric_declaration_owner",
+        "--message-format=json",
+        "--",
+        "--nocapture",
+        "--test-threads=1"
+      ],
+      "environment_overrides": {
+        "CARGO_TARGET_DIR": "/Users/taaliman/.tmp/verum-codex-01a10248/native-target",
+        "CARGO_BUILD_JOBS": "2",
+        "CARGO_INCREMENTAL": "0",
+        "VERUM_NO_AUTO_PRECOMPILE": "1",
+        "VERUM_LLVM_DIR": "/Users/taaliman/projects/oldman/verum-lang/verum/llvm/install",
+        "RUST_MIN_STACK": "16777216",
+        "VERUM_T1701_NATIVE_IR_DIR": "/private/tmp/verum-T1701-native-owner-guarded-baseline/ir"
+      },
+      "deadline_seconds": 600,
+      "artifacts_before": {
+        "runtime.vbca": "8569748c802eb09c42c79e1d6f58d431e9e3d09266d22e89436ba942fad999ff",
+        "runtime.core_metadata": "f6730833fc38cb3acf2fc27954b674471bde598e56cda57db67de06a84cb358c",
+        "runtime.symbol_graph": "e7cd3fda19f45fcbfba63cddcc331aa5dff0e1740a015367935faf41268ea238",
+        "runtime.vbca.checksum": "d88cf714a17aa600409e43b001aaf45c9be588b0bde2dbce35264513d309f957",
+        "runtime.vbca.schema": "fec20d7b3f8d1b81aff66c6c1181be574963779f7eacaf65660f8ab9127fca87"
+      },
+      "artifact_directory": "/Users/taaliman/.tmp/verum-codex-01a10248/native-target/precompiled-stdlib",
+      "rustc": "rustc 1.100.0-nightly (f7d782a3b 2026-08-19)",
+      "cargo": "cargo 1.100.0-nightly (514c56dd7 2026-08-19)",
+      "scope": "Focused T1701 parsed source and independently decoded wire through production LLVM lowering/JIT. Container execution is guarded by exact selected source-body calls; guard failures retain IR and are not JIT execution acceptance. No ordinary CLI, automatic stdlib baking, AOT executable, no-libc, crypto/registry acceptance.",
+      "runner_sha256": "7953f2862a46d3f7385501b736f21ceed90795d013f46d78b30603bb3e560bfb",
+      "returncode": 101,
+      "failure": null,
+      "elapsed_seconds": 61.542,
+      "source_after": "c493b255ab4d42fa1e07b900cd7c5f2793065e08",
+      "source_paths_unchanged": true,
+      "clean_after": true,
+      "artifacts_after": {
+        "runtime.vbca": "8569748c802eb09c42c79e1d6f58d431e9e3d09266d22e89436ba942fad999ff",
+        "runtime.core_metadata": "f6730833fc38cb3acf2fc27954b674471bde598e56cda57db67de06a84cb358c",
+        "runtime.symbol_graph": "e7cd3fda19f45fcbfba63cddcc331aa5dff0e1740a015367935faf41268ea238",
+        "runtime.vbca.checksum": "d88cf714a17aa600409e43b001aaf45c9be588b0bde2dbce35264513d309f957",
+        "runtime.vbca.schema": "fec20d7b3f8d1b81aff66c6c1181be574963779f7eacaf65660f8ab9127fca87"
+      },
+      "executables": [
+        {
+          "path": "/Users/taaliman/.tmp/verum-codex-01a10248/native-target/debug/build/verum_codegen/ca8d69779eec778f/out/numeric_declaration_owner-ca8d69779eec778f",
+          "sha256": "c1fc9a3542e36bb9f0efd49de5e53a3171d03fbd31212c360f8a8082523912be",
+          "size_bytes": 95760392,
+          "target": "numeric_declaration_owner",
+          "fresh": false
+        }
+      ],
+      "logs_sha256": {
+        "cargo.jsonl": "b1fa96f35c022438b7b1c5573b6e28e6ad6501430114849816e864f645d9535a",
+        "stderr.log": "29b9886aade42d3f2b09258974c842ed864c413780731b47bab2863d1980bc62"
+      },
+      "test_results": [
+        "test result: FAILED. 5 passed; 3 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.43s"
+      ],
+      "ir_sha256": {
+        "ir/isize_instance_keeps_its_growable_list_body-source.ll": "27885325bb269ad6e8ac3fb2bca8529bcfb52cf00ac289692488037888078338",
+        "ir/isize_alias_and_cast_keep_the_exact_body-source.ll": "f4a1e9e3a0d01aef2cc6e80ca495bdbbab576100196a50456e8f212b79c00e5b",
+        "ir/int64_instance_keeps_its_fixed_array_body-source.ll": "742da2b39af4e91692f153d934f3daecdb96e8cb8c2e73d255e9f9a650de8534",
+        "ir/uint64_instance_keeps_its_fixed_array_body-wire.ll": "ac93ffe931a38c42a735419ba05da6fe002d5945237a4ce5c853b60eccf5fd02",
+        "ir/static_same_width_owners_keep_declared_array_and_list_contracts-wire.ll": "136fbe816b5bb3f5390781070a8fa748341c0390fc37e0d6a24f8c3b9add5a6b",
+        "ir/usize_alias_and_cast_keep_the_exact_body-source.ll": "900f4f452144c2b51d322c80a090cc9dfc48ea5279bec09a4e7682297331bdbb",
+        "ir/usize_instance_keeps_its_growable_list_body-source.ll": "62aa3b59b9f059d0f41d427a40f1a0f99129d3e50b55966bc3af09fc75da51b9",
+        "ir/scalar_numeric_body_wins_over_primitive_method_spelling-source.ll": "a6f532dfe23372221fba08f29c65d7b106331b7b9bc1e1b8e52d008fc2d01347",
+        "ir/int64_instance_keeps_its_fixed_array_body-wire.ll": "742da2b39af4e91692f153d934f3daecdb96e8cb8c2e73d255e9f9a650de8534",
+        "ir/isize_alias_and_cast_keep_the_exact_body-wire.ll": "f4a1e9e3a0d01aef2cc6e80ca495bdbbab576100196a50456e8f212b79c00e5b",
+        "ir/static_same_width_owners_keep_declared_array_and_list_contracts-source.ll": "136fbe816b5bb3f5390781070a8fa748341c0390fc37e0d6a24f8c3b9add5a6b",
+        "ir/uint64_instance_keeps_its_fixed_array_body-source.ll": "ac93ffe931a38c42a735419ba05da6fe002d5945237a4ce5c853b60eccf5fd02",
+        "ir/isize_instance_keeps_its_growable_list_body-wire.ll": "27885325bb269ad6e8ac3fb2bca8529bcfb52cf00ac289692488037888078338",
+        "ir/scalar_numeric_body_wins_over_primitive_method_spelling-wire.ll": "a6f532dfe23372221fba08f29c65d7b106331b7b9bc1e1b8e52d008fc2d01347",
+        "ir/usize_alias_and_cast_keep_the_exact_body-wire.ll": "900f4f452144c2b51d322c80a090cc9dfc48ea5279bec09a4e7682297331bdbb",
+        "ir/usize_instance_keeps_its_growable_list_body-wire.ll": "62aa3b59b9f059d0f41d427a40f1a0f99129d3e50b55966bc3af09fc75da51b9"
+      },
+      "verified_source_hash_count": 435
+    },
+    "native-owner-storage-integration": {
+      "source": "cad9e0420c2f2fefb20ffec00ab92b11cb411177",
+      "tree": "75ca03db11b128a60484fd0d17a628129a02613f",
+      "cwd": "/Users/taaliman/.codex/worktrees/registry-metadata-lookup/verum",
+      "command": [
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "--no-fail-fast",
+        "-p",
+        "verum_codegen",
+        "--test",
+        "numeric_declaration_owner",
+        "--test",
+        "endian_fixed_bytes",
+        "--message-format=json",
+        "--",
+        "--nocapture",
+        "--test-threads=1"
+      ],
+      "environment_overrides": {
+        "CARGO_TARGET_DIR": "/Users/taaliman/.tmp/verum-codex-01a10248/native-target",
+        "CARGO_BUILD_JOBS": "2",
+        "CARGO_INCREMENTAL": "0",
+        "VERUM_NO_AUTO_PRECOMPILE": "1",
+        "VERUM_LLVM_DIR": "/Users/taaliman/projects/oldman/verum-lang/verum/llvm/install",
+        "RUST_MIN_STACK": "16777216",
+        "VERUM_T1701_NATIVE_IR_DIR": "/private/tmp/verum-T1701-native-owner-storage-integration/ir",
+        "VERUM_T1698_IR_DIR": "/private/tmp/verum-T1701-native-owner-storage-integration/ir"
+      },
+      "deadline_seconds": 600,
+      "artifacts_before": {
+        "runtime.vbca": "8569748c802eb09c42c79e1d6f58d431e9e3d09266d22e89436ba942fad999ff",
+        "runtime.core_metadata": "f6730833fc38cb3acf2fc27954b674471bde598e56cda57db67de06a84cb358c",
+        "runtime.symbol_graph": "e7cd3fda19f45fcbfba63cddcc331aa5dff0e1740a015367935faf41268ea238",
+        "runtime.vbca.checksum": "d88cf714a17aa600409e43b001aaf45c9be588b0bde2dbce35264513d309f957",
+        "runtime.vbca.schema": "fec20d7b3f8d1b81aff66c6c1181be574963779f7eacaf65660f8ab9127fca87"
+      },
+      "artifact_directory": "/Users/taaliman/.tmp/verum-codex-01a10248/native-target/precompiled-stdlib",
+      "rustc": "rustc 1.100.0-nightly (f7d782a3b 2026-08-19)",
+      "cargo": "cargo 1.100.0-nightly (514c56dd7 2026-08-19)",
+      "scope": "Focused T1701 parsed source and independently decoded wire through production LLVM lowering/JIT. Container execution is guarded by exact selected source-body calls; guard failures retain IR and are not JIT execution acceptance. No ordinary CLI, automatic stdlib baking, AOT executable, no-libc, crypto/registry acceptance.",
+      "runner_sha256": "2979cce2aa9145603c4819f082d63938821069585f0f14f22fbf25f76cc2a7fb",
+      "returncode": 0,
+      "failure": null,
+      "elapsed_seconds": 47.493,
+      "source_after": "cad9e0420c2f2fefb20ffec00ab92b11cb411177",
+      "source_paths_unchanged": true,
+      "clean_after": true,
+      "artifacts_after": {
+        "runtime.vbca": "8569748c802eb09c42c79e1d6f58d431e9e3d09266d22e89436ba942fad999ff",
+        "runtime.core_metadata": "f6730833fc38cb3acf2fc27954b674471bde598e56cda57db67de06a84cb358c",
+        "runtime.symbol_graph": "e7cd3fda19f45fcbfba63cddcc331aa5dff0e1740a015367935faf41268ea238",
+        "runtime.vbca.checksum": "d88cf714a17aa600409e43b001aaf45c9be588b0bde2dbce35264513d309f957",
+        "runtime.vbca.schema": "fec20d7b3f8d1b81aff66c6c1181be574963779f7eacaf65660f8ab9127fca87"
+      },
+      "executables": [
+        {
+          "path": "/Users/taaliman/.tmp/verum-codex-01a10248/native-target/debug/build/verum_codegen/ca8d69779eec778f/out/numeric_declaration_owner-ca8d69779eec778f",
+          "sha256": "ee500bc6842abc9d09d3cd9274bec48ba582835db75e697c8381c525ef85497f",
+          "size_bytes": 95866648,
+          "target": "numeric_declaration_owner",
+          "fresh": false
+        },
+        {
+          "path": "/Users/taaliman/.tmp/verum-codex-01a10248/native-target/debug/build/verum_codegen/1ec042b39b87232b/out/endian_fixed_bytes-1ec042b39b87232b",
+          "sha256": "e539d2cc6a9de6e69970c31163e6cfc030211f6c0e584e985d5de037226cec3b",
+          "size_bytes": 96034592,
+          "target": "endian_fixed_bytes",
+          "fresh": false
+        }
+      ],
+      "logs_sha256": {
+        "cargo.jsonl": "89bc0af44353bc674f5fb13fda275c597104d2515454f163b5b2e080c934bb7e",
+        "stderr.log": "68c43cea79e519ec2b619a312b9a65f1a20cc66dd32aa6c3367e7343cafad9eb"
+      },
+      "test_results": [
+        "test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.04s",
+        "test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.43s"
+      ],
+      "ir_sha256": {
+        "ir/usize_alias_and_cast_keep_the_exact_body-USize.to_be_bytes-wire.ll": "900f4f452144c2b51d322c80a090cc9dfc48ea5279bec09a4e7682297331bdbb",
+        "ir/scalar_numeric_body_wins_over_primitive_method_spelling-USize.count_ones-source.ll": "a6f532dfe23372221fba08f29c65d7b106331b7b9bc1e1b8e52d008fc2d01347",
+        "ir/int64_instance_keeps_its_fixed_array_body-Int64.to_be_bytes-source.ll": "c1a8c7de794ddce7033c7716b572a5f3b5d3525e7bea7050aab085485be984f2",
+        "ir/native_inline_endian_widths_are_packed-source.ll": "513ef7dc8bfa147dbe1cce92de329db5e28cb3301f8e833c96615db4cf1adf1c",
+        "ir/native_inferred_and_annotated_endian_results_have_the_same_bytes-source.ll": "038d8627feb45e651f36c324630580255f838a13e6de10df05b39468d1ffd232",
+        "ir/static_same_width_owners_keep_declared_array_and_list_contracts-UInt64.to_be_bytes-source.ll": "6eec78010528019a414f530bef2bacb2b289cf9a8dc9c3de7fa72007ad2d37f2",
+        "ir/usize_instance_keeps_its_growable_list_body-USize.to_be_bytes-wire.ll": "62aa3b59b9f059d0f41d427a40f1a0f99129d3e50b55966bc3af09fc75da51b9",
+        "ir/native_inline_endian_widths_are_packed-wire.ll": "513ef7dc8bfa147dbe1cce92de329db5e28cb3301f8e833c96615db4cf1adf1c",
+        "ir/native_dynamic_endian_returns_packed_bytes-wire.ll": "8f5b55687da4cf915339e527253f0e94c69e06b3c6f06f8171c2dbfe0f574300",
+        "ir/usize_instance_keeps_its_growable_list_body-USize.to_be_bytes-source.ll": "62aa3b59b9f059d0f41d427a40f1a0f99129d3e50b55966bc3af09fc75da51b9",
+        "ir/uint64_instance_keeps_its_fixed_array_body-UInt64.to_be_bytes-source.ll": "f51636cbd220da90e975b676d61991b7432342ef75fa8ff8bd039dafa102e014",
+        "ir/native_list_input_keeps_its_declared_compatibility-wire.ll": "74f0c1527cbb6b1200853b7ef8039d9fe6a499b1945fff04b29b60aa167f43af",
+        "ir/native_inferred_and_annotated_indexing_preserve_byte_access-source.ll": "61c7fd06daef9bf3c7449b9aba97fdff15bd1998625fd76888295f281aef14d4",
+        "ir/native_selected_packed_arrays_preserve_length_and_indexed_mutation-source.ll": "cfd2e7981e75b226290213d3baeddeaeec2041e5e85bcc74b3958bf07a4c1c9f",
+        "ir/native_list_input_keeps_its_declared_compatibility-source.ll": "74f0c1527cbb6b1200853b7ef8039d9fe6a499b1945fff04b29b60aa167f43af",
+        "ir/static_same_width_owners_keep_declared_array_and_list_contracts-ISize.to_be_bytes-source.ll": "136fbe816b5bb3f5390781070a8fa748341c0390fc37e0d6a24f8c3b9add5a6b",
+        "ir/native_fixed_intrinsic_input_preserves_packed_byte_access-source.ll": "66b1730d0498637ee82862fafbdfcaed2cdc79253daaf86413fc8c975c7de18b",
+        "ir/isize_alias_and_cast_keep_the_exact_body-ISize.to_be_bytes-source.ll": "f4a1e9e3a0d01aef2cc6e80ca495bdbbab576100196a50456e8f212b79c00e5b",
+        "ir/native_selected_packed_array_access_uses_canonical_wide_registers-wire.ll": "3210df26a2df8caf515326636348f74c679074c7f03441feb7be1a0ce9a29315",
+        "ir/native_array_calls_preserve_list_and_packed_bodies_in_both_source_orders-source.ll": "755ae6368f07f5c593de20afc6ed1af9f3175aad1d4317afbf741566dd64fe75",
+        "ir/native_inferred_and_annotated_indexing_preserve_byte_access-wire.ll": "61c7fd06daef9bf3c7449b9aba97fdff15bd1998625fd76888295f281aef14d4",
+        "ir/int64_instance_keeps_its_fixed_array_body-Int64.to_be_bytes-wire.ll": "c1a8c7de794ddce7033c7716b572a5f3b5d3525e7bea7050aab085485be984f2",
+        "ir/static_same_width_owners_keep_declared_array_and_list_contracts-ISize.to_be_bytes-wire.ll": "136fbe816b5bb3f5390781070a8fa748341c0390fc37e0d6a24f8c3b9add5a6b",
+        "ir/usize_alias_and_cast_keep_the_exact_body-USize.to_be_bytes-source.ll": "900f4f452144c2b51d322c80a090cc9dfc48ea5279bec09a4e7682297331bdbb",
+        "ir/static_same_width_owners_keep_declared_array_and_list_contracts-USize.to_be_bytes-source.ll": "ec5bbdbc4b6a5741612601246cd9d6d92f5faa98d551ffe88900752ecead9dc5",
+        "ir/isize_instance_keeps_its_growable_list_body-ISize.to_be_bytes-wire.ll": "27885325bb269ad6e8ac3fb2bca8529bcfb52cf00ac289692488037888078338",
+        "ir/native_array_calls_preserve_list_and_packed_bodies_in_both_source_orders-wire.ll": "755ae6368f07f5c593de20afc6ed1af9f3175aad1d4317afbf741566dd64fe75",
+        "ir/scalar_numeric_body_wins_over_primitive_method_spelling-USize.count_ones-wire.ll": "a6f532dfe23372221fba08f29c65d7b106331b7b9bc1e1b8e52d008fc2d01347",
+        "ir/static_same_width_owners_keep_declared_array_and_list_contracts-USize.to_be_bytes-wire.ll": "ec5bbdbc4b6a5741612601246cd9d6d92f5faa98d551ffe88900752ecead9dc5",
+        "ir/static_same_width_owners_keep_declared_array_and_list_contracts-Int64.to_be_bytes-source.ll": "f77587351e0c5a345eba5a85aacc2ad0d4069733eec5cd888b97b969367e4ea4",
+        "ir/native_fixed_intrinsic_input_preserves_packed_byte_access-wire.ll": "66b1730d0498637ee82862fafbdfcaed2cdc79253daaf86413fc8c975c7de18b",
+        "ir/native_dynamic_endian_returns_packed_bytes-source.ll": "8f5b55687da4cf915339e527253f0e94c69e06b3c6f06f8171c2dbfe0f574300",
+        "ir/isize_instance_keeps_its_growable_list_body-ISize.to_be_bytes-source.ll": "27885325bb269ad6e8ac3fb2bca8529bcfb52cf00ac289692488037888078338",
+        "ir/native_selected_packed_array_access_uses_canonical_wide_registers-source.ll": "3210df26a2df8caf515326636348f74c679074c7f03441feb7be1a0ce9a29315",
+        "ir/native_selected_packed_arrays_preserve_length_and_indexed_mutation-wire.ll": "cfd2e7981e75b226290213d3baeddeaeec2041e5e85bcc74b3958bf07a4c1c9f",
+        "ir/uint64_instance_keeps_its_fixed_array_body-UInt64.to_be_bytes-wire.ll": "f51636cbd220da90e975b676d61991b7432342ef75fa8ff8bd039dafa102e014",
+        "ir/static_same_width_owners_keep_declared_array_and_list_contracts-Int64.to_be_bytes-wire.ll": "f77587351e0c5a345eba5a85aacc2ad0d4069733eec5cd888b97b969367e4ea4",
+        "ir/static_same_width_owners_keep_declared_array_and_list_contracts-UInt64.to_be_bytes-wire.ll": "6eec78010528019a414f530bef2bacb2b289cf9a8dc9c3de7fa72007ad2d37f2",
+        "ir/native_selected_typed_array_results_keep_integer_and_float_geometry-source.ll": "01678d42cf5ccc80f5757c98e52ad99f612fcd0b3de9c3d8015c91d9aebb47ab",
+        "ir/native_selected_typed_array_results_keep_integer_and_float_geometry-wire.ll": "01678d42cf5ccc80f5757c98e52ad99f612fcd0b3de9c3d8015c91d9aebb47ab",
+        "ir/native_inferred_and_annotated_endian_results_have_the_same_bytes-wire.ll": "038d8627feb45e651f36c324630580255f838a13e6de10df05b39468d1ffd232",
+        "ir/isize_alias_and_cast_keep_the_exact_body-ISize.to_be_bytes-wire.ll": "f4a1e9e3a0d01aef2cc6e80ca495bdbbab576100196a50456e8f212b79c00e5b"
+      },
+      "verified_source_hash_count": 446
+    }
+  },
+  "raw_evidence": {
+    "native-owner-incomplete-baseline": {
+      "started.json": {
+        "path": "docs/architecture/evidence/numeric-declaration-owner/native-owner-incomplete-baseline.started.json.gz",
+        "uncompressed_sha256": "e0585136afa9b08f74d6c8fd256c4b58fe532f11ec0b3eaa58255669ee46b3d0",
+        "gzip_sha256": "c5b4d78b8286bb335e145ad0316d54d988efd76c1d738a90e744ea64126095aa"
+      },
+      "result.json": {
+        "path": "docs/architecture/evidence/numeric-declaration-owner/native-owner-incomplete-baseline.result.json.gz",
+        "uncompressed_sha256": "8133a1fde916e954d9d7bd5b04b12c02d9fc0d31e1d5eac4970bb4f245ab3d68",
+        "gzip_sha256": "b1220c45cfaf0d0c88327897fd3b3cc4822f6874761808f97313f9270bd4e9be"
+      },
+      "process.json": {
+        "path": "docs/architecture/evidence/numeric-declaration-owner/native-owner-incomplete-baseline.process.json.gz",
+        "uncompressed_sha256": "21f9eb699408d6f3b3133ce2cd6fb02a4c7b5aa4f1f6e052776ffe9462c6e17a",
+        "gzip_sha256": "c7b156541aedbe1b041df852618255241bd46482a54e94fa4b11fb657a86a56d"
+      },
+      "cargo.jsonl": {
+        "path": "docs/architecture/evidence/numeric-declaration-owner/native-owner-incomplete-baseline.cargo.jsonl.gz",
+        "uncompressed_sha256": "d0c1a78e2ce5128801d46783d7a386164d0f12962299265c42c954b26d1cf529",
+        "gzip_sha256": "67d1a8c5f26f9a799bd3e653fa4850dc5d37015c5796b97fc592022dca33f078"
+      },
+      "stderr.log": {
+        "path": "docs/architecture/evidence/numeric-declaration-owner/native-owner-incomplete-baseline.stderr.log.gz",
+        "uncompressed_sha256": "acd9b42d0a4beb02793e135fcccd96e15dad6e4473ce45609140670bf9120d97",
+        "gzip_sha256": "b5a3c728c1c7cd99288e952963c34d998ca054760e57e8ca5c363e09f9415994"
+      },
+      "ir/int64_instance_keeps_its_fixed_array_body-source.ll": {
+        "path": "docs/architecture/evidence/numeric-declaration-owner/native-owner-incomplete-baseline.ir.int64_instance_keeps_its_fixed_array_body-source.ll.gz",
+        "uncompressed_sha256": "742da2b39af4e91692f153d934f3daecdb96e8cb8c2e73d255e9f9a650de8534",
+        "gzip_sha256": "dce5cbb7efd245f514329a5ea02066ca152022ac911fa5be59a43c240cfd12e3"
+      }
+    },
+    "native-owner-guarded-baseline": {
+      "started.json": {
+        "path": "docs/architecture/evidence/numeric-declaration-owner/native-owner-guarded-baseline.started.json.gz",
+        "uncompressed_sha256": "c82cc5df10e89fe9ba5ddd879bd5dd932a12b2053c65ab40e5d721ba7c9fbc37",
+        "gzip_sha256": "79be8ae9cee29a9700f6de288a0a3bcbf697facdb57c05362ddf9f2a58c268e0"
+      },
+      "result.json": {
+        "path": "docs/architecture/evidence/numeric-declaration-owner/native-owner-guarded-baseline.result.json.gz",
+        "uncompressed_sha256": "3383bafd93d49b7381481cbb60364b09b9c93dc71c7a85297b7a6b6eabb838e7",
+        "gzip_sha256": "7a9c6139841cd100fed2553e79d25ab16a97561258b7c4956b7e2a92edf03f1b"
+      },
+      "process.json": {
+        "path": "docs/architecture/evidence/numeric-declaration-owner/native-owner-guarded-baseline.process.json.gz",
+        "uncompressed_sha256": "73a4c03bb4e1c0f65078eaa338eac56d893aa7829ae71b7e914a4da809b12435",
+        "gzip_sha256": "1fdfb18d6db87785f2edf18317a918d0405051dca1df188bb5f63c46a737aa78"
+      },
+      "cargo.jsonl": {
+        "path": "docs/architecture/evidence/numeric-declaration-owner/native-owner-guarded-baseline.cargo.jsonl.gz",
+        "uncompressed_sha256": "b1fa96f35c022438b7b1c5573b6e28e6ad6501430114849816e864f645d9535a",
+        "gzip_sha256": "aa86d98d15b69bd16b342c4b37bb052f3e2a4cb7eee3acb1da612ea176970c94"
+      },
+      "stderr.log": {
+        "path": "docs/architecture/evidence/numeric-declaration-owner/native-owner-guarded-baseline.stderr.log.gz",
+        "uncompressed_sha256": "29b9886aade42d3f2b09258974c842ed864c413780731b47bab2863d1980bc62",
+        "gzip_sha256": "d61fd5256485ae1b78e0e7878e974fe507fbd162a61a4b2325d4ba471ecb5a3c"
+      },
+      "retained-executable.json": {
+        "path": "docs/architecture/evidence/numeric-declaration-owner/native-owner-guarded-baseline.retained-executable.json.gz",
+        "uncompressed_sha256": "a969a29241e03ed71b3a0db1fe01b3ad5e171d2c5ddd3d420b77f8c007b1a2e0",
+        "gzip_sha256": "9d8acba8f973a14e9bc52b591402b3055709eeb7726c68dd61b1a71b590de71f"
+      },
+      "ir/int64_instance_keeps_its_fixed_array_body-source.ll": {
+        "path": "docs/architecture/evidence/numeric-declaration-owner/native-owner-guarded-baseline.ir.int64_instance_keeps_its_fixed_array_body-source.ll.gz",
+        "uncompressed_sha256": "742da2b39af4e91692f153d934f3daecdb96e8cb8c2e73d255e9f9a650de8534",
+        "gzip_sha256": "dce5cbb7efd245f514329a5ea02066ca152022ac911fa5be59a43c240cfd12e3"
+      },
+      "ir/int64_instance_keeps_its_fixed_array_body-wire.ll": {
+        "path": "docs/architecture/evidence/numeric-declaration-owner/native-owner-guarded-baseline.ir.int64_instance_keeps_its_fixed_array_body-wire.ll.gz",
+        "uncompressed_sha256": "742da2b39af4e91692f153d934f3daecdb96e8cb8c2e73d255e9f9a650de8534",
+        "gzip_sha256": "dce5cbb7efd245f514329a5ea02066ca152022ac911fa5be59a43c240cfd12e3"
+      },
+      "ir/isize_alias_and_cast_keep_the_exact_body-source.ll": {
+        "path": "docs/architecture/evidence/numeric-declaration-owner/native-owner-guarded-baseline.ir.isize_alias_and_cast_keep_the_exact_body-source.ll.gz",
+        "uncompressed_sha256": "f4a1e9e3a0d01aef2cc6e80ca495bdbbab576100196a50456e8f212b79c00e5b",
+        "gzip_sha256": "4fc20ae07083c51159ccffac57deea3a8655f54128d1f060aa3aaaab04d27003"
+      },
+      "ir/isize_alias_and_cast_keep_the_exact_body-wire.ll": {
+        "path": "docs/architecture/evidence/numeric-declaration-owner/native-owner-guarded-baseline.ir.isize_alias_and_cast_keep_the_exact_body-wire.ll.gz",
+        "uncompressed_sha256": "f4a1e9e3a0d01aef2cc6e80ca495bdbbab576100196a50456e8f212b79c00e5b",
+        "gzip_sha256": "4fc20ae07083c51159ccffac57deea3a8655f54128d1f060aa3aaaab04d27003"
+      },
+      "ir/isize_instance_keeps_its_growable_list_body-source.ll": {
+        "path": "docs/architecture/evidence/numeric-declaration-owner/native-owner-guarded-baseline.ir.isize_instance_keeps_its_growable_list_body-source.ll.gz",
+        "uncompressed_sha256": "27885325bb269ad6e8ac3fb2bca8529bcfb52cf00ac289692488037888078338",
+        "gzip_sha256": "7dac6b5cd8671476112f92c27180e698dbfdc3afb585df2d58697966664e97d4"
+      },
+      "ir/isize_instance_keeps_its_growable_list_body-wire.ll": {
+        "path": "docs/architecture/evidence/numeric-declaration-owner/native-owner-guarded-baseline.ir.isize_instance_keeps_its_growable_list_body-wire.ll.gz",
+        "uncompressed_sha256": "27885325bb269ad6e8ac3fb2bca8529bcfb52cf00ac289692488037888078338",
+        "gzip_sha256": "7dac6b5cd8671476112f92c27180e698dbfdc3afb585df2d58697966664e97d4"
+      },
+      "ir/scalar_numeric_body_wins_over_primitive_method_spelling-source.ll": {
+        "path": "docs/architecture/evidence/numeric-declaration-owner/native-owner-guarded-baseline.ir.scalar_numeric_body_wins_over_primitive_method_spelling-source.ll.gz",
+        "uncompressed_sha256": "a6f532dfe23372221fba08f29c65d7b106331b7b9bc1e1b8e52d008fc2d01347",
+        "gzip_sha256": "dbbab2835eb598536f528987399862730fbaf8d1a5911a04f010345c19a47826"
+      },
+      "ir/scalar_numeric_body_wins_over_primitive_method_spelling-wire.ll": {
+        "path": "docs/architecture/evidence/numeric-declaration-owner/native-owner-guarded-baseline.ir.scalar_numeric_body_wins_over_primitive_method_spelling-wire.ll.gz",
+        "uncompressed_sha256": "a6f532dfe23372221fba08f29c65d7b106331b7b9bc1e1b8e52d008fc2d01347",
+        "gzip_sha256": "dbbab2835eb598536f528987399862730fbaf8d1a5911a04f010345c19a47826"
+      },
+      "ir/static_same_width_owners_keep_declared_array_and_list_contracts-source.ll": {
+        "path": "docs/architecture/evidence/numeric-declaration-owner/native-owner-guarded-baseline.ir.static_same_width_owners_keep_declared_array_and_list_contracts-source.ll.gz",
+        "uncompressed_sha256": "136fbe816b5bb3f5390781070a8fa748341c0390fc37e0d6a24f8c3b9add5a6b",
+        "gzip_sha256": "10abaca20dfe48594f046c8d8fa879c2cb14f5723008f41e3a1208ecbeeca237"
+      },
+      "ir/static_same_width_owners_keep_declared_array_and_list_contracts-wire.ll": {
+        "path": "docs/architecture/evidence/numeric-declaration-owner/native-owner-guarded-baseline.ir.static_same_width_owners_keep_declared_array_and_list_contracts-wire.ll.gz",
+        "uncompressed_sha256": "136fbe816b5bb3f5390781070a8fa748341c0390fc37e0d6a24f8c3b9add5a6b",
+        "gzip_sha256": "10abaca20dfe48594f046c8d8fa879c2cb14f5723008f41e3a1208ecbeeca237"
+      },
+      "ir/uint64_instance_keeps_its_fixed_array_body-source.ll": {
+        "path": "docs/architecture/evidence/numeric-declaration-owner/native-owner-guarded-baseline.ir.uint64_instance_keeps_its_fixed_array_body-source.ll.gz",
+        "uncompressed_sha256": "ac93ffe931a38c42a735419ba05da6fe002d5945237a4ce5c853b60eccf5fd02",
+        "gzip_sha256": "5f57e73fbeee822a7ee12ce01d2e3fc5979e8a861e85c9eb5f9a1b9ad59338f3"
+      },
+      "ir/uint64_instance_keeps_its_fixed_array_body-wire.ll": {
+        "path": "docs/architecture/evidence/numeric-declaration-owner/native-owner-guarded-baseline.ir.uint64_instance_keeps_its_fixed_array_body-wire.ll.gz",
+        "uncompressed_sha256": "ac93ffe931a38c42a735419ba05da6fe002d5945237a4ce5c853b60eccf5fd02",
+        "gzip_sha256": "5f57e73fbeee822a7ee12ce01d2e3fc5979e8a861e85c9eb5f9a1b9ad59338f3"
+      },
+      "ir/usize_alias_and_cast_keep_the_exact_body-source.ll": {
+        "path": "docs/architecture/evidence/numeric-declaration-owner/native-owner-guarded-baseline.ir.usize_alias_and_cast_keep_the_exact_body-source.ll.gz",
+        "uncompressed_sha256": "900f4f452144c2b51d322c80a090cc9dfc48ea5279bec09a4e7682297331bdbb",
+        "gzip_sha256": "00f0738b6a44551c215933367ab8c585eac96fc5edef2ecaf19c6446d0770d09"
+      },
+      "ir/usize_alias_and_cast_keep_the_exact_body-wire.ll": {
+        "path": "docs/architecture/evidence/numeric-declaration-owner/native-owner-guarded-baseline.ir.usize_alias_and_cast_keep_the_exact_body-wire.ll.gz",
+        "uncompressed_sha256": "900f4f452144c2b51d322c80a090cc9dfc48ea5279bec09a4e7682297331bdbb",
+        "gzip_sha256": "00f0738b6a44551c215933367ab8c585eac96fc5edef2ecaf19c6446d0770d09"
+      },
+      "ir/usize_instance_keeps_its_growable_list_body-source.ll": {
+        "path": "docs/architecture/evidence/numeric-declaration-owner/native-owner-guarded-baseline.ir.usize_instance_keeps_its_growable_list_body-source.ll.gz",
+        "uncompressed_sha256": "62aa3b59b9f059d0f41d427a40f1a0f99129d3e50b55966bc3af09fc75da51b9",
+        "gzip_sha256": "f86936c46d45d7dda85333d5d93c1211b992b55cd8809ca455845cb72327fcb4"
+      },
+      "ir/usize_instance_keeps_its_growable_list_body-wire.ll": {
+        "path": "docs/architecture/evidence/numeric-declaration-owner/native-owner-guarded-baseline.ir.usize_instance_keeps_its_growable_list_body-wire.ll.gz",
+        "uncompressed_sha256": "62aa3b59b9f059d0f41d427a40f1a0f99129d3e50b55966bc3af09fc75da51b9",
+        "gzip_sha256": "f86936c46d45d7dda85333d5d93c1211b992b55cd8809ca455845cb72327fcb4"
+      }
+    },
+    "native-owner-storage-integration": {
+      "started.json": {
+        "path": "docs/architecture/evidence/numeric-declaration-owner/native-owner-storage-integration.started.json.gz",
+        "uncompressed_sha256": "7c969e12fc983a6436722d399e8f8b0bd33f9ef4a8ad7c585135d372dec7462c",
+        "gzip_sha256": "df216425f1cee479b5bd301f69e27dd164fc2dd9fee2406a7ed41e043cb6d756"
+      },
+      "result.json": {
+        "path": "docs/architecture/evidence/numeric-declaration-owner/native-owner-storage-integration.result.json.gz",
+        "uncompressed_sha256": "d951b2ef6bcaeec924b7e748f1e76810894334290884c3ece93d3db6320bfc6a",
+        "gzip_sha256": "eed308a18945f6d9f5293ed5ccfb2ce768f6eabba8fcb3f41bf1f4d4444498c7"
+      },
+      "process.json": {
+        "path": "docs/architecture/evidence/numeric-declaration-owner/native-owner-storage-integration.process.json.gz",
+        "uncompressed_sha256": "83fe31e17cce73e21a27064361937289ed05085dfe0cb0ac1e1cd9b706d6a34c",
+        "gzip_sha256": "ce1f43b7924b794d8adfa49e4f45e0a97f9f39de6559fe199c232af4560c53d9"
+      },
+      "cargo.jsonl": {
+        "path": "docs/architecture/evidence/numeric-declaration-owner/native-owner-storage-integration.cargo.jsonl.gz",
+        "uncompressed_sha256": "89bc0af44353bc674f5fb13fda275c597104d2515454f163b5b2e080c934bb7e",
+        "gzip_sha256": "50d9970de2af2c79bac50bac65971bd189f96bb0a656dca5b938139fd1058627"
+      },
+      "stderr.log": {
+        "path": "docs/architecture/evidence/numeric-declaration-owner/native-owner-storage-integration.stderr.log.gz",
+        "uncompressed_sha256": "68c43cea79e519ec2b619a312b9a65f1a20cc66dd32aa6c3367e7343cafad9eb",
+        "gzip_sha256": "d199989df47d633d7362cc7fed9b5377ae2b5bcfd55fbf36a36193883b5b6116"
+      },
+      "retained-executable.json": {
+        "path": "docs/architecture/evidence/numeric-declaration-owner/native-owner-storage-integration.retained-executable.json.gz",
+        "uncompressed_sha256": "a68e4995a2c3dc4a961b5ae5151aaaa121b094d7afb18760ba045ebf7feeaa00",
+        "gzip_sha256": "bab13cf54eb8277322f1715cebf8d6155f87288e283b9f809e79775c66ef826b"
+      },
+      "target-handoff.json": {
+        "path": "docs/architecture/evidence/numeric-declaration-owner/native-owner-storage-integration.target-handoff.json.gz",
+        "uncompressed_sha256": "389b82f7c7d48e8e12fd9f52198afea86dd0adb4012dbad4ec0fa739a8c489cb",
+        "gzip_sha256": "68d8d37b586c3f31dc7167907e9e7cb327f2da6569e23224ebca3acb743e4414"
+      },
+      "ir/int64_instance_keeps_its_fixed_array_body-Int64.to_be_bytes-source.ll": {
+        "path": "docs/architecture/evidence/numeric-declaration-owner/native-owner-storage-integration.ir.int64_instance_keeps_its_fixed_array_body-Int64.to_be_bytes-source.ll.gz",
+        "uncompressed_sha256": "c1a8c7de794ddce7033c7716b572a5f3b5d3525e7bea7050aab085485be984f2",
+        "gzip_sha256": "889ad9b8eabf176fdde5a4bc8005def7ff56defdf51ec2132574fd6d5b09fe52"
+      },
+      "ir/int64_instance_keeps_its_fixed_array_body-Int64.to_be_bytes-wire.ll": {
+        "path": "docs/architecture/evidence/numeric-declaration-owner/native-owner-storage-integration.ir.int64_instance_keeps_its_fixed_array_body-Int64.to_be_bytes-wire.ll.gz",
+        "uncompressed_sha256": "c1a8c7de794ddce7033c7716b572a5f3b5d3525e7bea7050aab085485be984f2",
+        "gzip_sha256": "889ad9b8eabf176fdde5a4bc8005def7ff56defdf51ec2132574fd6d5b09fe52"
+      },
+      "ir/isize_alias_and_cast_keep_the_exact_body-ISize.to_be_bytes-source.ll": {
+        "path": "docs/architecture/evidence/numeric-declaration-owner/native-owner-storage-integration.ir.isize_alias_and_cast_keep_the_exact_body-ISize.to_be_bytes-source.ll.gz",
+        "uncompressed_sha256": "f4a1e9e3a0d01aef2cc6e80ca495bdbbab576100196a50456e8f212b79c00e5b",
+        "gzip_sha256": "4fc20ae07083c51159ccffac57deea3a8655f54128d1f060aa3aaaab04d27003"
+      },
+      "ir/isize_alias_and_cast_keep_the_exact_body-ISize.to_be_bytes-wire.ll": {
+        "path": "docs/architecture/evidence/numeric-declaration-owner/native-owner-storage-integration.ir.isize_alias_and_cast_keep_the_exact_body-ISize.to_be_bytes-wire.ll.gz",
+        "uncompressed_sha256": "f4a1e9e3a0d01aef2cc6e80ca495bdbbab576100196a50456e8f212b79c00e5b",
+        "gzip_sha256": "4fc20ae07083c51159ccffac57deea3a8655f54128d1f060aa3aaaab04d27003"
+      },
+      "ir/isize_instance_keeps_its_growable_list_body-ISize.to_be_bytes-source.ll": {
+        "path": "docs/architecture/evidence/numeric-declaration-owner/native-owner-storage-integration.ir.isize_instance_keeps_its_growable_list_body-ISize.to_be_bytes-source.ll.gz",
+        "uncompressed_sha256": "27885325bb269ad6e8ac3fb2bca8529bcfb52cf00ac289692488037888078338",
+        "gzip_sha256": "7dac6b5cd8671476112f92c27180e698dbfdc3afb585df2d58697966664e97d4"
+      },
+      "ir/isize_instance_keeps_its_growable_list_body-ISize.to_be_bytes-wire.ll": {
+        "path": "docs/architecture/evidence/numeric-declaration-owner/native-owner-storage-integration.ir.isize_instance_keeps_its_growable_list_body-ISize.to_be_bytes-wire.ll.gz",
+        "uncompressed_sha256": "27885325bb269ad6e8ac3fb2bca8529bcfb52cf00ac289692488037888078338",
+        "gzip_sha256": "7dac6b5cd8671476112f92c27180e698dbfdc3afb585df2d58697966664e97d4"
+      },
+      "ir/native_array_calls_preserve_list_and_packed_bodies_in_both_source_orders-source.ll": {
+        "path": "docs/architecture/evidence/numeric-declaration-owner/native-owner-storage-integration.ir.native_array_calls_preserve_list_and_packed_bodies_in_both_source_orders-source.ll.gz",
+        "uncompressed_sha256": "755ae6368f07f5c593de20afc6ed1af9f3175aad1d4317afbf741566dd64fe75",
+        "gzip_sha256": "a146f8d8e52eeb4215ecb3996e22d67e6dadd456607524123a9d27d0820a43f4"
+      },
+      "ir/native_array_calls_preserve_list_and_packed_bodies_in_both_source_orders-wire.ll": {
+        "path": "docs/architecture/evidence/numeric-declaration-owner/native-owner-storage-integration.ir.native_array_calls_preserve_list_and_packed_bodies_in_both_source_orders-wire.ll.gz",
+        "uncompressed_sha256": "755ae6368f07f5c593de20afc6ed1af9f3175aad1d4317afbf741566dd64fe75",
+        "gzip_sha256": "a146f8d8e52eeb4215ecb3996e22d67e6dadd456607524123a9d27d0820a43f4"
+      },
+      "ir/native_dynamic_endian_returns_packed_bytes-source.ll": {
+        "path": "docs/architecture/evidence/numeric-declaration-owner/native-owner-storage-integration.ir.native_dynamic_endian_returns_packed_bytes-source.ll.gz",
+        "uncompressed_sha256": "8f5b55687da4cf915339e527253f0e94c69e06b3c6f06f8171c2dbfe0f574300",
+        "gzip_sha256": "11f9149ec415a4c053f023aaf1eed3b40434fcc4e4b2ea085857c73545f5e3e7"
+      },
+      "ir/native_dynamic_endian_returns_packed_bytes-wire.ll": {
+        "path": "docs/architecture/evidence/numeric-declaration-owner/native-owner-storage-integration.ir.native_dynamic_endian_returns_packed_bytes-wire.ll.gz",
+        "uncompressed_sha256": "8f5b55687da4cf915339e527253f0e94c69e06b3c6f06f8171c2dbfe0f574300",
+        "gzip_sha256": "11f9149ec415a4c053f023aaf1eed3b40434fcc4e4b2ea085857c73545f5e3e7"
+      },
+      "ir/native_fixed_intrinsic_input_preserves_packed_byte_access-source.ll": {
+        "path": "docs/architecture/evidence/numeric-declaration-owner/native-owner-storage-integration.ir.native_fixed_intrinsic_input_preserves_packed_byte_access-source.ll.gz",
+        "uncompressed_sha256": "66b1730d0498637ee82862fafbdfcaed2cdc79253daaf86413fc8c975c7de18b",
+        "gzip_sha256": "70f78f77e821f6ad618aa278e471aaae12a0ae637effc34c85e8dcd0213ffb8e"
+      },
+      "ir/native_fixed_intrinsic_input_preserves_packed_byte_access-wire.ll": {
+        "path": "docs/architecture/evidence/numeric-declaration-owner/native-owner-storage-integration.ir.native_fixed_intrinsic_input_preserves_packed_byte_access-wire.ll.gz",
+        "uncompressed_sha256": "66b1730d0498637ee82862fafbdfcaed2cdc79253daaf86413fc8c975c7de18b",
+        "gzip_sha256": "70f78f77e821f6ad618aa278e471aaae12a0ae637effc34c85e8dcd0213ffb8e"
+      },
+      "ir/native_inferred_and_annotated_endian_results_have_the_same_bytes-source.ll": {
+        "path": "docs/architecture/evidence/numeric-declaration-owner/native-owner-storage-integration.ir.native_inferred_and_annotated_endian_results_have_the_same_bytes-source.ll.gz",
+        "uncompressed_sha256": "038d8627feb45e651f36c324630580255f838a13e6de10df05b39468d1ffd232",
+        "gzip_sha256": "b269e4fc539f90754a44e509d9a11b8f953cba73b77dea87ad1469975ccaf135"
+      },
+      "ir/native_inferred_and_annotated_endian_results_have_the_same_bytes-wire.ll": {
+        "path": "docs/architecture/evidence/numeric-declaration-owner/native-owner-storage-integration.ir.native_inferred_and_annotated_endian_results_have_the_same_bytes-wire.ll.gz",
+        "uncompressed_sha256": "038d8627feb45e651f36c324630580255f838a13e6de10df05b39468d1ffd232",
+        "gzip_sha256": "b269e4fc539f90754a44e509d9a11b8f953cba73b77dea87ad1469975ccaf135"
+      },
+      "ir/native_inferred_and_annotated_indexing_preserve_byte_access-source.ll": {
+        "path": "docs/architecture/evidence/numeric-declaration-owner/native-owner-storage-integration.ir.native_inferred_and_annotated_indexing_preserve_byte_access-source.ll.gz",
+        "uncompressed_sha256": "61c7fd06daef9bf3c7449b9aba97fdff15bd1998625fd76888295f281aef14d4",
+        "gzip_sha256": "227022c9c1a8dbc3fae191993ed7c7f0f087af6c75a94c909886d457d2c249f6"
+      },
+      "ir/native_inferred_and_annotated_indexing_preserve_byte_access-wire.ll": {
+        "path": "docs/architecture/evidence/numeric-declaration-owner/native-owner-storage-integration.ir.native_inferred_and_annotated_indexing_preserve_byte_access-wire.ll.gz",
+        "uncompressed_sha256": "61c7fd06daef9bf3c7449b9aba97fdff15bd1998625fd76888295f281aef14d4",
+        "gzip_sha256": "227022c9c1a8dbc3fae191993ed7c7f0f087af6c75a94c909886d457d2c249f6"
+      },
+      "ir/native_inline_endian_widths_are_packed-source.ll": {
+        "path": "docs/architecture/evidence/numeric-declaration-owner/native-owner-storage-integration.ir.native_inline_endian_widths_are_packed-source.ll.gz",
+        "uncompressed_sha256": "513ef7dc8bfa147dbe1cce92de329db5e28cb3301f8e833c96615db4cf1adf1c",
+        "gzip_sha256": "40519f64972c3a53c10c61f4dd44d8426e99037748a8c44dbf382c593b908750"
+      },
+      "ir/native_inline_endian_widths_are_packed-wire.ll": {
+        "path": "docs/architecture/evidence/numeric-declaration-owner/native-owner-storage-integration.ir.native_inline_endian_widths_are_packed-wire.ll.gz",
+        "uncompressed_sha256": "513ef7dc8bfa147dbe1cce92de329db5e28cb3301f8e833c96615db4cf1adf1c",
+        "gzip_sha256": "40519f64972c3a53c10c61f4dd44d8426e99037748a8c44dbf382c593b908750"
+      },
+      "ir/native_list_input_keeps_its_declared_compatibility-source.ll": {
+        "path": "docs/architecture/evidence/numeric-declaration-owner/native-owner-storage-integration.ir.native_list_input_keeps_its_declared_compatibility-source.ll.gz",
+        "uncompressed_sha256": "74f0c1527cbb6b1200853b7ef8039d9fe6a499b1945fff04b29b60aa167f43af",
+        "gzip_sha256": "4338c781fb836c52e26984aa2d3cbdad57385385d46076c501da9b1b84c8fab8"
+      },
+      "ir/native_list_input_keeps_its_declared_compatibility-wire.ll": {
+        "path": "docs/architecture/evidence/numeric-declaration-owner/native-owner-storage-integration.ir.native_list_input_keeps_its_declared_compatibility-wire.ll.gz",
+        "uncompressed_sha256": "74f0c1527cbb6b1200853b7ef8039d9fe6a499b1945fff04b29b60aa167f43af",
+        "gzip_sha256": "4338c781fb836c52e26984aa2d3cbdad57385385d46076c501da9b1b84c8fab8"
+      },
+      "ir/native_selected_packed_array_access_uses_canonical_wide_registers-source.ll": {
+        "path": "docs/architecture/evidence/numeric-declaration-owner/native-owner-storage-integration.ir.native_selected_packed_array_access_uses_canonical_wide_registers-source.ll.gz",
+        "uncompressed_sha256": "3210df26a2df8caf515326636348f74c679074c7f03441feb7be1a0ce9a29315",
+        "gzip_sha256": "c113f75e0a6e954adab3d95f32fb00fb830de53a64d23a083c33f4558a87f376"
+      },
+      "ir/native_selected_packed_array_access_uses_canonical_wide_registers-wire.ll": {
+        "path": "docs/architecture/evidence/numeric-declaration-owner/native-owner-storage-integration.ir.native_selected_packed_array_access_uses_canonical_wide_registers-wire.ll.gz",
+        "uncompressed_sha256": "3210df26a2df8caf515326636348f74c679074c7f03441feb7be1a0ce9a29315",
+        "gzip_sha256": "c113f75e0a6e954adab3d95f32fb00fb830de53a64d23a083c33f4558a87f376"
+      },
+      "ir/native_selected_packed_arrays_preserve_length_and_indexed_mutation-source.ll": {
+        "path": "docs/architecture/evidence/numeric-declaration-owner/native-owner-storage-integration.ir.native_selected_packed_arrays_preserve_length_and_indexed_mutation-source.ll.gz",
+        "uncompressed_sha256": "cfd2e7981e75b226290213d3baeddeaeec2041e5e85bcc74b3958bf07a4c1c9f",
+        "gzip_sha256": "6d150c0a51b43c86eaa00ef53f5c3aaf212d9abd44559781178a34ee7a7d8a87"
+      },
+      "ir/native_selected_packed_arrays_preserve_length_and_indexed_mutation-wire.ll": {
+        "path": "docs/architecture/evidence/numeric-declaration-owner/native-owner-storage-integration.ir.native_selected_packed_arrays_preserve_length_and_indexed_mutation-wire.ll.gz",
+        "uncompressed_sha256": "cfd2e7981e75b226290213d3baeddeaeec2041e5e85bcc74b3958bf07a4c1c9f",
+        "gzip_sha256": "6d150c0a51b43c86eaa00ef53f5c3aaf212d9abd44559781178a34ee7a7d8a87"
+      },
+      "ir/native_selected_typed_array_results_keep_integer_and_float_geometry-source.ll": {
+        "path": "docs/architecture/evidence/numeric-declaration-owner/native-owner-storage-integration.ir.native_selected_typed_array_results_keep_integer_and_float_geometry-source.ll.gz",
+        "uncompressed_sha256": "01678d42cf5ccc80f5757c98e52ad99f612fcd0b3de9c3d8015c91d9aebb47ab",
+        "gzip_sha256": "6f0f54e73a194d6c4d525783116b67892cb9ee125b70b984a489c228842f8856"
+      },
+      "ir/native_selected_typed_array_results_keep_integer_and_float_geometry-wire.ll": {
+        "path": "docs/architecture/evidence/numeric-declaration-owner/native-owner-storage-integration.ir.native_selected_typed_array_results_keep_integer_and_float_geometry-wire.ll.gz",
+        "uncompressed_sha256": "01678d42cf5ccc80f5757c98e52ad99f612fcd0b3de9c3d8015c91d9aebb47ab",
+        "gzip_sha256": "6f0f54e73a194d6c4d525783116b67892cb9ee125b70b984a489c228842f8856"
+      },
+      "ir/scalar_numeric_body_wins_over_primitive_method_spelling-USize.count_ones-source.ll": {
+        "path": "docs/architecture/evidence/numeric-declaration-owner/native-owner-storage-integration.ir.scalar_numeric_body_wins_over_primitive_method_spelling-USize.count_ones-source.ll.gz",
+        "uncompressed_sha256": "a6f532dfe23372221fba08f29c65d7b106331b7b9bc1e1b8e52d008fc2d01347",
+        "gzip_sha256": "dbbab2835eb598536f528987399862730fbaf8d1a5911a04f010345c19a47826"
+      },
+      "ir/scalar_numeric_body_wins_over_primitive_method_spelling-USize.count_ones-wire.ll": {
+        "path": "docs/architecture/evidence/numeric-declaration-owner/native-owner-storage-integration.ir.scalar_numeric_body_wins_over_primitive_method_spelling-USize.count_ones-wire.ll.gz",
+        "uncompressed_sha256": "a6f532dfe23372221fba08f29c65d7b106331b7b9bc1e1b8e52d008fc2d01347",
+        "gzip_sha256": "dbbab2835eb598536f528987399862730fbaf8d1a5911a04f010345c19a47826"
+      },
+      "ir/static_same_width_owners_keep_declared_array_and_list_contracts-ISize.to_be_bytes-source.ll": {
+        "path": "docs/architecture/evidence/numeric-declaration-owner/native-owner-storage-integration.ir.static_same_width_owners_keep_declared_array_and_list_contracts-ISize.to_be_bytes-source.ll.gz",
+        "uncompressed_sha256": "136fbe816b5bb3f5390781070a8fa748341c0390fc37e0d6a24f8c3b9add5a6b",
+        "gzip_sha256": "10abaca20dfe48594f046c8d8fa879c2cb14f5723008f41e3a1208ecbeeca237"
+      },
+      "ir/static_same_width_owners_keep_declared_array_and_list_contracts-ISize.to_be_bytes-wire.ll": {
+        "path": "docs/architecture/evidence/numeric-declaration-owner/native-owner-storage-integration.ir.static_same_width_owners_keep_declared_array_and_list_contracts-ISize.to_be_bytes-wire.ll.gz",
+        "uncompressed_sha256": "136fbe816b5bb3f5390781070a8fa748341c0390fc37e0d6a24f8c3b9add5a6b",
+        "gzip_sha256": "10abaca20dfe48594f046c8d8fa879c2cb14f5723008f41e3a1208ecbeeca237"
+      },
+      "ir/static_same_width_owners_keep_declared_array_and_list_contracts-Int64.to_be_bytes-source.ll": {
+        "path": "docs/architecture/evidence/numeric-declaration-owner/native-owner-storage-integration.ir.static_same_width_owners_keep_declared_array_and_list_contracts-Int64.to_be_bytes-source.ll.gz",
+        "uncompressed_sha256": "f77587351e0c5a345eba5a85aacc2ad0d4069733eec5cd888b97b969367e4ea4",
+        "gzip_sha256": "3ca7eb0dfad3f568e9cc84c98b47a0f6a8429e12eda5893aacbe5e498c1488c5"
+      },
+      "ir/static_same_width_owners_keep_declared_array_and_list_contracts-Int64.to_be_bytes-wire.ll": {
+        "path": "docs/architecture/evidence/numeric-declaration-owner/native-owner-storage-integration.ir.static_same_width_owners_keep_declared_array_and_list_contracts-Int64.to_be_bytes-wire.ll.gz",
+        "uncompressed_sha256": "f77587351e0c5a345eba5a85aacc2ad0d4069733eec5cd888b97b969367e4ea4",
+        "gzip_sha256": "3ca7eb0dfad3f568e9cc84c98b47a0f6a8429e12eda5893aacbe5e498c1488c5"
+      },
+      "ir/static_same_width_owners_keep_declared_array_and_list_contracts-UInt64.to_be_bytes-source.ll": {
+        "path": "docs/architecture/evidence/numeric-declaration-owner/native-owner-storage-integration.ir.static_same_width_owners_keep_declared_array_and_list_contracts-UInt64.to_be_bytes-source.ll.gz",
+        "uncompressed_sha256": "6eec78010528019a414f530bef2bacb2b289cf9a8dc9c3de7fa72007ad2d37f2",
+        "gzip_sha256": "e0f67d87a4ea6773e89fd87e06ca5b7f1401392cfe5145d218a1f599aeaee0eb"
+      },
+      "ir/static_same_width_owners_keep_declared_array_and_list_contracts-UInt64.to_be_bytes-wire.ll": {
+        "path": "docs/architecture/evidence/numeric-declaration-owner/native-owner-storage-integration.ir.static_same_width_owners_keep_declared_array_and_list_contracts-UInt64.to_be_bytes-wire.ll.gz",
+        "uncompressed_sha256": "6eec78010528019a414f530bef2bacb2b289cf9a8dc9c3de7fa72007ad2d37f2",
+        "gzip_sha256": "e0f67d87a4ea6773e89fd87e06ca5b7f1401392cfe5145d218a1f599aeaee0eb"
+      },
+      "ir/static_same_width_owners_keep_declared_array_and_list_contracts-USize.to_be_bytes-source.ll": {
+        "path": "docs/architecture/evidence/numeric-declaration-owner/native-owner-storage-integration.ir.static_same_width_owners_keep_declared_array_and_list_contracts-USize.to_be_bytes-source.ll.gz",
+        "uncompressed_sha256": "ec5bbdbc4b6a5741612601246cd9d6d92f5faa98d551ffe88900752ecead9dc5",
+        "gzip_sha256": "eff460722d47143ca56b14edf1ea5d3732def65e1a13aea9a8ded163f23a5b7e"
+      },
+      "ir/static_same_width_owners_keep_declared_array_and_list_contracts-USize.to_be_bytes-wire.ll": {
+        "path": "docs/architecture/evidence/numeric-declaration-owner/native-owner-storage-integration.ir.static_same_width_owners_keep_declared_array_and_list_contracts-USize.to_be_bytes-wire.ll.gz",
+        "uncompressed_sha256": "ec5bbdbc4b6a5741612601246cd9d6d92f5faa98d551ffe88900752ecead9dc5",
+        "gzip_sha256": "eff460722d47143ca56b14edf1ea5d3732def65e1a13aea9a8ded163f23a5b7e"
+      },
+      "ir/uint64_instance_keeps_its_fixed_array_body-UInt64.to_be_bytes-source.ll": {
+        "path": "docs/architecture/evidence/numeric-declaration-owner/native-owner-storage-integration.ir.uint64_instance_keeps_its_fixed_array_body-UInt64.to_be_bytes-source.ll.gz",
+        "uncompressed_sha256": "f51636cbd220da90e975b676d61991b7432342ef75fa8ff8bd039dafa102e014",
+        "gzip_sha256": "9edf72f162396916d9a3b5c2e6bb8cf32882c5cdffe4b91cb25a1428bff769d7"
+      },
+      "ir/uint64_instance_keeps_its_fixed_array_body-UInt64.to_be_bytes-wire.ll": {
+        "path": "docs/architecture/evidence/numeric-declaration-owner/native-owner-storage-integration.ir.uint64_instance_keeps_its_fixed_array_body-UInt64.to_be_bytes-wire.ll.gz",
+        "uncompressed_sha256": "f51636cbd220da90e975b676d61991b7432342ef75fa8ff8bd039dafa102e014",
+        "gzip_sha256": "9edf72f162396916d9a3b5c2e6bb8cf32882c5cdffe4b91cb25a1428bff769d7"
+      },
+      "ir/usize_alias_and_cast_keep_the_exact_body-USize.to_be_bytes-source.ll": {
+        "path": "docs/architecture/evidence/numeric-declaration-owner/native-owner-storage-integration.ir.usize_alias_and_cast_keep_the_exact_body-USize.to_be_bytes-source.ll.gz",
+        "uncompressed_sha256": "900f4f452144c2b51d322c80a090cc9dfc48ea5279bec09a4e7682297331bdbb",
+        "gzip_sha256": "00f0738b6a44551c215933367ab8c585eac96fc5edef2ecaf19c6446d0770d09"
+      },
+      "ir/usize_alias_and_cast_keep_the_exact_body-USize.to_be_bytes-wire.ll": {
+        "path": "docs/architecture/evidence/numeric-declaration-owner/native-owner-storage-integration.ir.usize_alias_and_cast_keep_the_exact_body-USize.to_be_bytes-wire.ll.gz",
+        "uncompressed_sha256": "900f4f452144c2b51d322c80a090cc9dfc48ea5279bec09a4e7682297331bdbb",
+        "gzip_sha256": "00f0738b6a44551c215933367ab8c585eac96fc5edef2ecaf19c6446d0770d09"
+      },
+      "ir/usize_instance_keeps_its_growable_list_body-USize.to_be_bytes-source.ll": {
+        "path": "docs/architecture/evidence/numeric-declaration-owner/native-owner-storage-integration.ir.usize_instance_keeps_its_growable_list_body-USize.to_be_bytes-source.ll.gz",
+        "uncompressed_sha256": "62aa3b59b9f059d0f41d427a40f1a0f99129d3e50b55966bc3af09fc75da51b9",
+        "gzip_sha256": "f86936c46d45d7dda85333d5d93c1211b992b55cd8809ca455845cb72327fcb4"
+      },
+      "ir/usize_instance_keeps_its_growable_list_body-USize.to_be_bytes-wire.ll": {
+        "path": "docs/architecture/evidence/numeric-declaration-owner/native-owner-storage-integration.ir.usize_instance_keeps_its_growable_list_body-USize.to_be_bytes-wire.ll.gz",
+        "uncompressed_sha256": "62aa3b59b9f059d0f41d427a40f1a0f99129d3e50b55966bc3af09fc75da51b9",
+        "gzip_sha256": "f86936c46d45d7dda85333d5d93c1211b992b55cd8809ca455845cb72327fcb4"
+      }
+    },
+    "runner-baseline": {
+      "path": "docs/architecture/evidence/numeric-declaration-owner/native-owner-baseline.runner.py.gz",
+      "uncompressed_sha256": "7953f2862a46d3f7385501b736f21ceed90795d013f46d78b30603bb3e560bfb",
+      "gzip_sha256": "59b2961b8caa357a3874b4648a72be86cfa29e2e640171a4d3797c446bf8382a"
+    },
+    "runner-integration": {
+      "path": "docs/architecture/evidence/numeric-declaration-owner/native-owner-integration.runner.py.gz",
+      "uncompressed_sha256": "2979cce2aa9145603c4819f082d63938821069585f0f14f22fbf25f76cc2a7fb",
+      "gzip_sha256": "79b21306f0be43623203fcc758facda041382072024256defea5d2b425ab1f82"
+    }
+  },
+  "status": "Focused native gate passed after storage integration; ordinary platform acceptance remains pending.",
+  "production_delta_from_storage_integration": ""
+}
