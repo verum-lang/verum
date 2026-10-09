@@ -397,3 +397,80 @@ fn probe() -> Int {
         141,
     );
 }
+
+#[test]
+fn contextual_residual_uses_full_static_callback_signature() {
+    value(
+        r#"
+type Runner is { marker: Int };
+implement Runner {
+    fn invoke(work: fn() -> Result<Built, ConvertedFailure>) -> Result<Built, ConvertedFailure> {
+        work()
+    }
+}
+fn probe() -> Int {
+    match Runner.invoke(|| { Result.Ok(Built { value: missing()? }) }) {
+        Result.Ok(_) => 0, Result.Err(error) => error.code,
+    }
+}
+"#,
+        141,
+    );
+}
+
+#[test]
+fn contextual_residual_uses_full_instance_callback_signature() {
+    value(
+        r#"
+type Runner is { marker: Int };
+implement Runner {
+    fn invoke(&self, work: fn() -> Result<Built, ConvertedFailure>) -> Result<Built, ConvertedFailure> {
+        work()
+    }
+}
+fn probe() -> Int {
+    let runner = Runner { marker: 0 };
+    match runner.invoke(|| { Result.Ok(Built { value: missing()? }) }) {
+        Result.Ok(_) => 0, Result.Err(error) => error.code,
+    }
+}
+"#,
+        141,
+    );
+}
+
+#[test]
+fn contextual_residual_uses_full_callable_assignment_signature() {
+    value(
+        r#"
+fn probe() -> Int {
+    let mut work: fn() -> Result<Built, ConvertedFailure> = || {
+        Result.Ok(Built { value: Maybe.None })
+    };
+    work = || { Result.Ok(Built { value: missing()? }) };
+    match work() { Result.Ok(_) => 0, Result.Err(error) => error.code }
+}
+"#,
+        141,
+    );
+}
+
+#[test]
+fn contextual_residual_keeps_sibling_callback_signatures_independent() {
+    value(
+        r#"
+fn combine(first: fn() -> Result<Built, ConvertedFailure>, second: fn() -> Maybe<Int>) -> Int {
+    let left = match first() { Result.Ok(_) => 0, Result.Err(error) => error.code };
+    let right = match second() { Maybe.Some(_) => 0, Maybe.None => 29 };
+    left + right
+}
+fn probe() -> Int {
+    combine(
+        || { Result.Ok(Built { value: missing()? }) },
+        || { let value = missing()?; Maybe.Some(0) },
+    )
+}
+"#,
+        170,
+    );
+}
