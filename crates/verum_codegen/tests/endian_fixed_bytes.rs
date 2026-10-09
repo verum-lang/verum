@@ -192,3 +192,31 @@ fn native_inferred_and_annotated_indexing_preserve_byte_access() {
         });
     }
 }
+
+#[test]
+fn native_fixed_intrinsic_input_preserves_packed_byte_access() {
+    let module = source("fn probe() -> Int { let bytes: [Byte;8] = [1,2,3,4,5,6,7,8]; from_be_bytes_8(bytes) }");
+    let probe = module.functions.iter().find(|function| module.get_string(function.name) == Some("probe")).unwrap();
+    // This local is emitted by NewByteArray in the same callable. The generic
+    // container load cannot read that raw native payload; refuse before JIT.
+    assert!(!probe.instructions.as_ref().unwrap().iter().any(|instruction| matches!(instruction,
+        verum_vbc::instruction::Instruction::GetE { .. }
+    )), "fixed intrinsic input lost its proven packed producer");
+    native(&module, |engine| {
+        // SAFETY: source probe is zero-argument and returns one Int slot.
+        let value = unsafe { engine.get_function::<unsafe extern "C" fn() -> i64>("probe").unwrap().call() };
+        assert_eq!(value, 0x0102030405060708);
+    });
+}
+
+#[test]
+fn native_list_input_keeps_its_declared_compatibility() {
+    // The source library's pointer-sized methods accept List<Byte> and delegate
+    // to these intrinsics. Keep that producer distinct from packed fixed bytes.
+    let module = source("fn probe() -> Int { let bytes: List<Byte> = [1 as Byte,2 as Byte,3 as Byte,4 as Byte,5 as Byte,6 as Byte,7 as Byte,8 as Byte]; from_be_bytes_8(bytes) }");
+    native(&module, |engine| {
+        // SAFETY: source probe is zero-argument and returns one Int slot.
+        let value = unsafe { engine.get_function::<unsafe extern "C" fn() -> i64>("probe").unwrap().call() };
+        assert_eq!(value, 0x0102030405060708);
+    });
+}
