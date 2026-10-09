@@ -100,17 +100,6 @@ fn register(res: NetResource) -> i64 {
     register_with_error(res, -1)
 }
 
-#[cfg(unix)]
-fn positive_unix_listener(listener: TcpListener) -> std::io::Result<TcpListener> {
-    if listener_raw_fd(&listener) == 0 {
-        // Keep zero owned until duplication succeeds or fails. The original
-        // closes on either path, and a successful duplicate is a real fd > 0.
-        listener.try_clone()
-    } else {
-        Ok(listener)
-    }
-}
-
 fn register_with_error(res: NetResource, error_status: i64) -> i64 {
     // The public raw APIs require positive success handles. If stdin was
     // closed, a valid socket can own descriptor zero. Duplicate while zero
@@ -118,15 +107,17 @@ fn register_with_error(res: NetResource, error_status: i64) -> i64 {
     // A failed duplicate drops the input owner and reports the caller's I/O
     // error convention; it never publishes zero or invents a handle offset.
     #[cfg(unix)]
-    let res = match match res {
-        NetResource::Listener(listener) => positive_unix_listener(listener).map(NetResource::Listener),
-        NetResource::Stream(stream) if stream_raw_fd(&stream) == 0 => {
+    let res = match match &res {
+        NetResource::Listener(listener) if listener_raw_fd(listener) == 0 => {
+            listener.try_clone().map(NetResource::Listener)
+        }
+        NetResource::Stream(stream) if stream_raw_fd(stream) == 0 => {
             stream.try_clone().map(NetResource::Stream)
         }
-        NetResource::Udp(socket) if udp_raw_fd(&socket) == 0 => {
+        NetResource::Udp(socket) if udp_raw_fd(socket) == 0 => {
             socket.try_clone().map(NetResource::Udp)
         }
-        resource => Ok(resource),
+        _ => Ok(res),
     } {
         Ok(resource) => resource,
         Err(_) => return error_status,
@@ -195,9 +186,10 @@ pub const TCP_LISTEN_FLAG_REUSEPORT: i64 = 1 << 0;
 /// cap large values at `/proc/sys/net/core/somaxconn` (or similar).
 ///
 /// Returns:
-/// * A positive raw OS descriptor on Unix, or a registered handle elsewhere.
-///   A listener created as descriptor zero is duplicated while still owned.
-/// * `-errno` on bind/listen/duplication failure — caller maps to IoErrorKind via
+/// * A raw OS descriptor on Unix, or a registered handle elsewhere.
+///   Current consumers require `fd > 0`; raw Unix descriptor zero remains a
+///   separate compatibility limitation when stdin is closed.
+/// * `-errno` on bind/listen failure — caller maps to IoErrorKind via
 ///  `core/io/protocols.vr::from_raw_os_error`.
 /// * `-EINVAL` (`-22` Linux / `-22` macOS) for argument-validation
 ///  failures (bad host, port out of range, negative backlog).
@@ -303,10 +295,7 @@ pub fn tcp_listen_v2(host: &str, port: i64, backlog: i64, flags: i64) -> i64 {
     #[cfg(unix)]
     {
         use std::os::fd::IntoRawFd;
-        return match positive_unix_listener(listener) {
-            Ok(listener) => i64::from(listener.into_raw_fd()),
-            Err(error) => -i64::from(error.raw_os_error().unwrap_or(EINVAL)),
-        };
+        return listener.into_raw_fd() as i64;
     }
     #[cfg(not(unix))]
     {
