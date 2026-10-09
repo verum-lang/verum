@@ -548,3 +548,81 @@ fn native_existing_sext_uses_width_bytes_after_canonical_wide_registers() {
         });
     }
 }
+
+#[test]
+fn native_sext_refuses_truncated_trailing_and_unsupported_width_operands() {
+    use verum_vbc::instruction::{ArithSubOpcode, Instruction, Reg};
+    use verum_vbc::module::FunctionDescriptor;
+    let mut prefix = List::new().into();
+    verum_vbc::encoding::encode_reg(Reg(270), &mut prefix);
+    verum_vbc::encoding::encode_reg(Reg(257), &mut prefix);
+    let mut cases: List<(Text, List<u8>, &str)> = List::new();
+    cases.push((
+        "truncated destination".into(),
+        List::from_iter([0x81]),
+        "read_reg_varlen",
+    ));
+    for (label, widths) in [
+        ("missing widths", &[][..]),
+        ("missing target", &[16][..]),
+        ("trailing operand", &[16, 64, 0][..]),
+    ] {
+        let mut operands: List<u8> = prefix.iter().copied().collect();
+        operands.extend(widths.iter().copied());
+        cases.push((
+            label.into(),
+            operands,
+            "SextI requires source and target widths",
+        ));
+    }
+    for widths in [[0, 64], [128, 64], [16, 0], [64, 16]] {
+        let mut operands: List<u8> = prefix.iter().copied().collect();
+        operands.extend(widths);
+        cases.push((
+            format!("unsupported widths {widths:?}").into(),
+            operands,
+            "SextI has unsupported integer widths",
+        ));
+    }
+    for (label, operands, expected) in cases {
+        let mut module = VbcModule::new("malformed_signed_normalization".into());
+        let mut function = FunctionDescriptor::new(module.intern_string("probe"));
+        let body = vec![
+            Instruction::LoadI {
+                dst: Reg(257),
+                value: 32768,
+            },
+            Instruction::ArithExtended {
+                sub_op: ArithSubOpcode::SextI.to_byte(),
+                operands: operands.into(),
+            },
+            Instruction::Ret { value: Reg(270) },
+        ];
+        for instruction in &body {
+            verum_vbc::bytecode::encode_instruction(instruction, &mut module.bytecode);
+        }
+        function.bytecode_length = module.bytecode.len() as u32;
+        function.register_count = 271;
+        function.return_type = verum_vbc::types::TypeRef::Concrete(verum_vbc::types::TypeId::INT);
+        function.instructions = Some(body);
+        module.add_function(function);
+        let wire = decoded_wire(&module);
+        for (route, module) in [("source instructions", &module), ("decoded wire", &wire)] {
+            let context = Context::create();
+            let mut lowering = VbcToLlvmLowering::new(
+                &context,
+                LoweringConfig::debug("invalid_sext").with_debug_info(false),
+            );
+            let result = lowering.lower_module(module);
+            assert!(
+                result.is_err(),
+                "{label} {route}: malformed instruction was accepted"
+            );
+            let error = format!("{:?}", result.unwrap_err());
+            assert!(
+                error.contains(expected),
+                "{label} {route}: unrelated refusal {error}"
+            );
+        }
+    }
+}
