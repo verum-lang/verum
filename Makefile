@@ -457,7 +457,8 @@ check-early-return-tenants: ## Gate (T1078): the count of diagnostics behind the
 check-dup-emitters: ## Gate (T0438): one definer per verum_* symbol + no libc-referencing emitter bodies without a syscall path
 	python3 scripts/ci/check_dup_emitters.py
 
-check-bake-prepass-parity: ## Gate (T0640): every collect_all_declarations pre-pass is classified for the stdlib bake
+check-bake-prepass-parity: ## Gate (T0640): every shared declaration pre-pass is classified for the stdlib bake
+	python3 scripts/ci/tests/test_bake_prepass_parity.py
 	python3 scripts/ci/check_bake_prepass_parity.py
 
 check-reexport-names: ## Gate (A135): a `public mount .leaf.{…}` may not name something the leaf does not declare
@@ -481,4 +482,3 @@ check-inventory-live: ## Gate (T0220): INVENTORY liveness — green claims re-ve
 		cargo run --release -p verum_cli -- test --interp --format json > $$tmp 2>/dev/null; \
 		python3 scripts/ci/check_inventory.py --results $$tmp; \
 	fi
-
