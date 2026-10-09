@@ -330,3 +330,43 @@ fn probe() -> Int { let value: USize = 29; read(&value) }
         42,
     );
 }
+
+#[test]
+fn bodyless_numeric_declaration_keeps_existing_builtin_fallback() {
+    check(
+        r#"
+implement USize { public fn to_be_bytes(self) -> List<Byte>; }
+fn probe() -> Int {
+    let value: USize = 1;
+    value.to_be_bytes().len()
+}
+"#,
+        8,
+    );
+}
+
+#[test]
+fn bodyless_numeric_alias_keeps_existing_builtin_fallback() {
+    check(
+        r#"
+implement USize { public fn to_be_bytes(self) -> List<Byte>; }
+type SizeAlias is USize;
+fn probe() -> Int { (1 as SizeAlias).to_be_bytes().len() }
+"#,
+        8,
+    );
+}
+
+#[test]
+fn empty_source_body_is_still_an_executable_declaration() {
+    check(
+        r#"
+implement USize { public fn to_be_bytes(self) -> Unit {} }
+fn probe() -> Int {
+    let value: USize = 1;
+    if value.to_be_bytes() == () { 42 } else { -1 }
+}
+"#,
+        42,
+    );
+}
