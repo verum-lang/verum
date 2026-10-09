@@ -46,8 +46,11 @@ impl ArrayResultFacts {
         self.values.remove(&register);
     }
 
-    /// Advance proof using the actual emitted instruction.
-    pub fn observe(&mut self, instruction: &Instruction) {
+    /// Advance proof using the actual emitted instruction. Returns whether the
+    /// instruction has an explicitly supported straight-line transfer. A body
+    /// summary must reject every other instruction, even if a later allocation
+    /// could establish a new local fact: unknown control flow may skip it.
+    pub fn observe(&mut self, instruction: &Instruction) -> bool {
         use Instruction as I;
         match instruction {
             I::Mov { dst, src } => {
@@ -70,29 +73,29 @@ impl ArrayResultFacts {
             I::MemExtended { sub_op, operands } => {
                 let Some(op) = MemSubOpcode::from_byte(*sub_op) else {
                     self.clear();
-                    return;
+                    return false;
                 };
                 if matches!(
                     op,
                     MemSubOpcode::ByteArrayStore | MemSubOpcode::TypedArrayStore
                 ) {
-                    return; // Element stores do not replace a register or resize a fixed array.
+                    return true; // Element stores do not replace or resize the array.
                 }
                 let mut cursor = 0;
                 let Ok(dst) = decode_reg(operands, &mut cursor) else {
                     self.clear();
-                    return;
+                    return false;
                 };
                 if matches!(
                     op,
                     MemSubOpcode::ByteArrayLoad | MemSubOpcode::TypedArrayLoad
                 ) {
                     self.forget(dst);
-                    return;
+                    return true;
                 }
                 if !matches!(op, MemSubOpcode::NewByteArray | MemSubOpcode::NewTypedArray) {
                     self.clear();
-                    return;
+                    return false;
                 }
                 let count =
                     decode_reg(operands, &mut cursor)
@@ -146,15 +149,24 @@ impl ArrayResultFacts {
             | I::CmpU { dst, .. }
             | I::Not { dst, .. }
             | I::CvtIF { dst, .. }
-            | I::CvtFI { dst, .. } => self.forget(*dst),
+            | I::CvtFI { dst, .. }
+            | I::GetE { dst, .. }
+            | I::Len { dst, .. } => self.forget(*dst),
             // Dropping can invoke user glue, with the same unknown side effects
             // as a call. It is not merely a register overwrite.
-            I::DropRef { .. } => self.clear(),
-            I::Nop | I::ListPush { .. } => {}
+            I::DropRef { .. } => { self.clear(); return false; }
+            I::Nop | I::ListPush { .. } | I::Assert { .. } => {}
             // Clones, reference accesses and calls need their selected producer
             // contract. Branch/loop joins need a meet, not last-emitted-wins.
-            _ => self.clear(),
+            _ => { self.clear(); return false; }
         }
+        true
+    }
+
+    /// Record a result only after its actual selected producer has been proved.
+    /// Type declarations and method spelling are not sufficient evidence.
+    pub fn record_selected_result(&mut self, register: Reg, fact: ArrayResultFact) {
+        self.values.insert(register, fact);
     }
 }
 
@@ -163,25 +175,10 @@ impl ArrayResultFacts {
 /// body is selected. Declarations, stubs and signatures supply no storage fact.
 ///
 /// Branches, multiple returns, parameter forwarding and unknown returned values
-/// remain unproved. No last-emitted-wins rule crosses a control-flow join. Calls
-/// clear facts, but a subsequent independent allocation can establish a result.
+/// remain unproved. No last-emitted-wins rule crosses a control-flow join. The
+/// transfer whitelist rejects calls, suspension and every unknown instruction;
+/// no later allocation can turn unknown reachability into a body-wide proof.
 pub fn straight_line_array_return(instructions: &[Instruction]) -> Maybe<ArrayResultFact> {
-    if instructions.iter().any(|instruction| {
-        matches!(
-            instruction,
-            Instruction::Jmp { .. }
-                | Instruction::JmpIf { .. }
-                | Instruction::JmpNot { .. }
-                | Instruction::JmpCmp { .. }
-                | Instruction::Switch { .. }
-                | Instruction::TryBegin { .. }
-                | Instruction::CtxProvide { .. }
-                | Instruction::Guard { .. }
-                | Instruction::TailCall { .. }
-        )
-    }) {
-        return None;
-    }
     let mut facts = ArrayResultFacts::default();
     let mut result = None;
     let mut returned = false;
@@ -202,7 +199,8 @@ pub fn straight_line_array_return(instructions: &[Instruction]) -> Maybe<ArrayRe
             Instruction::RetV => return None,
             Instruction::Nop if returned => {}
             _ if returned => return None,
-            _ => facts.observe(instruction),
+            _ if !facts.observe(instruction) => return None,
+            _ => {},
         }
     }
     result

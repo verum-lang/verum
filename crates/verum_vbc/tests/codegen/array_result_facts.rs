@@ -211,3 +211,22 @@ fn parameter_unknown_call_and_mixed_returns_have_no_storage_summary() {
         None
     );
 }
+
+
+#[test]
+fn unknown_flow_before_a_later_allocation_cannot_establish_a_body_summary() {
+    use super::straight_line_array_return;
+    for prefix in [
+        Instruction::CtxProvide { ctx_type: 1, value: Reg(0), body_offset: 4 },
+        Instruction::Guard { reg: Reg(0), expected_type: 1, deopt_offset: 4 },
+        Instruction::Call { dst: Reg(0), func_id: 42,
+            args: crate::instruction::RegRange { start: Reg(0), count: 0 } },
+    ] {
+        assert_eq!(straight_line_array_return(&[
+            prefix,
+            Instruction::LoadI { dst: Reg(128), value: 2 },
+            allocation(Reg(270), Reg(128), Reg(257), None),
+            Instruction::Ret { value: Reg(270) },
+        ]), None);
+    }
+}
