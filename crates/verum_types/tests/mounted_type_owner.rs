@@ -516,3 +516,41 @@ fn static_receiver_instantiations_do_not_bind_the_declaration() {
         );
     }
 }
+
+#[test]
+fn shadowed_static_method_parameter_does_not_replace_the_impl_parameter() {
+    let declaration = "public type Cache<T> is { value: T }; implement<T> Cache<T> { public fn keep<T>(value: T) -> T { value } public fn from_value(value: T) -> Cache<T> { Cache { value } } }";
+    for mounted in [false, true] {
+        assert_static_receiver_case(
+            declaration,
+            "fn probe() -> Int { let kept = Cache<Bool>.keep(37); let matches = Cache<Bool>.from_value(true).value; if matches { kept } else { 0 } }",
+            mounted,
+            false,
+        );
+        assert_static_receiver_case(
+            declaration,
+            "fn probe() -> Int { Cache<Bool>.from_value(37).value }",
+            mounted,
+            true,
+        );
+    }
+}
+
+#[test]
+fn repeated_impl_parameter_requires_equal_receiver_arguments() {
+    let declaration = "public type Cache<First, Second> is { first: First, second: Second }; implement<T> Cache<T, T> { public fn code() -> Int { 37 } }";
+    for mounted in [false, true] {
+        assert_static_receiver_case(
+            declaration,
+            "fn probe() -> Int { Cache<Bool, Bool>.code() }",
+            mounted,
+            false,
+        );
+        assert_static_receiver_case(
+            declaration,
+            "fn probe() -> Int { Cache<Bool, Int>.code() }",
+            mounted,
+            true,
+        );
+    }
+}

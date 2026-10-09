@@ -6031,12 +6031,17 @@ impl TypeChecker {
                         // variables even when a method reuses their spelling.
                         self.ctx.enter_scope();
                         let mut ordered_vars = impl_type_vars.clone();
+                        let mut method_type_bindings = List::new();
                         let mut method_bounds = List::new();
                         for generic in &func.generics {
                             if let verum_ast::ty::GenericParamKind::Type { name, bounds, .. } =
                                 &generic.kind
                             {
                                 let fresh = TypeVar::fresh();
+                                method_type_bindings.push((
+                                    name.name.clone(),
+                                    self.ctx.lookup_type(name.name.as_str()).cloned(),
+                                ));
                                 self.ctx.define_type(name.name.clone(), Type::Var(fresh));
                                 ordered_vars.push(fresh);
                                 method_bounds.push((fresh, bounds));
@@ -6104,6 +6109,15 @@ impl TypeChecker {
                         method_scheme.impl_self_type = self.current_self_type.clone();
                         if !method_type_bounds.is_empty() {
                             method_scheme = method_scheme.with_type_bounds(method_type_bounds);
+                        }
+                        // Value scopes do not own type bindings. Restore a
+                        // shadowed impl parameter before registering its next method.
+                        for (name, prior) in method_type_bindings.into_iter().rev() {
+                            if let Some(ty) = prior {
+                                self.ctx.define_type(name, ty);
+                            } else {
+                                self.ctx.remove_type(&name);
+                            }
                         }
                         self.ctx.exit_scope();
 
