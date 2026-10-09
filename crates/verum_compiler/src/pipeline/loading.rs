@@ -28,11 +28,11 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
 
-use anyhow::Result;
+use anyhow::{Context as _, Result};
 use tracing::{debug, info, warn};
 
 use verum_ast::{FileId, Module, decl::ItemKind};
-use verum_common::{List, Text};
+use verum_common::{List, Map, Text};
 use verum_diagnostics::DiagnosticBuilder;
 use verum_fast_parser::VerumParser;
 use verum_lexer::Lexer;
@@ -627,163 +627,122 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Load project modules from the input file's directory.
     ///
-    /// When the input file resides in a directory containing a `mod.vr` file,
-    /// that directory is treated as a multi-file project. All sibling `.vr` files
-    /// are discovered, parsed, and registered as modules, enabling cross-file
-    /// `mount` imports (e.g., `mount bootstrap.token.*`).
-    /// Walk every cog registered in the session's `CogResolver` and
-    /// load its modules into the session's module registry. Symmetric
-    /// with `load_project_modules` but sourced from the resolver
-    /// (script-mode `dependencies = [...]`, `verum add`, etc.) instead
-    /// of the manifest's project tree.
-    ///
-    /// Each cog's filesystem root is walked recursively; every `.vr`
-    /// file is parsed in library mode and registered under the dotted
-    /// path `<cog_name>.<relative_path>` (with `mod.vr` collapsing to
-    /// the directory name). Subsequent `mount cog_name.foo` from the
-    /// entry source resolves through the same registry as workspace
-    /// modules — the consumer can't tell the difference.
-    ///
-    /// No-op when no resolver is installed (project mode, plain
-    /// scripts without `dependencies = [...]`).
-    pub(super) fn load_external_cog_modules(&mut self) -> Result<()> {
-        let cog_locations: Vec<(String, PathBuf)> = match self.session.cog_resolver() {
-            Some(resolver) => resolver
-                .cog_names()
-                .into_iter()
-                .filter_map(|name| {
-                    resolver
-                        .get_cog_root(name.as_str())
-                        .map(|root| (name.as_str().to_string(), root.clone()))
-                })
-                .collect(),
-            None => return Ok(()),
+    /// Inventory the source cogs supplied by the session. Checking and
+    /// execution consume the same source roots and module identities.
+    pub(super) fn external_cog_sources(&self) -> Result<List<(Text, PathBuf)>> {
+        let Some(resolver) = self.session.cog_resolver() else {
+            return Ok(List::new());
         };
+        let mut names = resolver.cog_names();
+        names.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+        let mut sources = List::new();
+        let mut paths: Map<Text, PathBuf> = Map::new();
+        for name in names {
+            if resolver.is_vbca(name.as_str()) {
+                continue;
+            }
+            let location = resolver
+                .get_cog_location(name.as_str())
+                .expect("name came from the resolver");
+            let root = location.source_root().canonicalize().with_context(|| {
+                format!(
+                    "Cannot read source root for cog '{}' at {}",
+                    name,
+                    location.root_path.display()
+                )
+            })?;
+            let mut files = List::new();
+            Self::discover_vr_files_recursive(&root, &None, &mut files)?;
+            anyhow::ensure!(
+                !files.is_empty(),
+                "Source cog '{}' at {} contains no .vr files",
+                name,
+                root.display()
+            );
+            for file in files {
+                let path: Text = Self::project_module_path_for(&root, name.as_str(), &file).into();
+                if let Some(previous) = paths.get(&path) {
+                    anyhow::bail!(
+                        "E_MODULE_PATH_COLLISION: module '{}' resolves to {} and {}",
+                        path,
+                        previous.display(),
+                        file.display()
+                    );
+                }
+                paths.insert(path.clone(), file.clone());
+                sources.push((path, file));
+            }
+        }
+        Ok(sources)
+    }
 
-        for (cog_name, cog_root) in cog_locations {
-            let canonical_root = cog_root.canonicalize().unwrap_or(cog_root.clone());
-            let mut cog_files: Vec<PathBuf> = Vec::new();
-            // Reuse the same recursive walker as project modules — the
-            // skip-list (hidden dirs, target/, node_modules/, test_*)
-            // applies identically to external cogs.
-            Self::discover_vr_files_recursive(&canonical_root, &None, &mut cog_files);
-            if cog_files.is_empty() {
-                debug!(
-                    "External cog '{}' at {} has no .vr files",
-                    cog_name,
-                    canonical_root.display()
+    /// Load registered source dependencies through the ordinary module registry.
+    /// Package errors are compilation errors; no successful partial load.
+    pub(super) fn load_external_cog_modules(&mut self) -> Result<()> {
+        let sources = self.external_cog_sources()?;
+        if sources.is_empty() {
+            return Ok(());
+        }
+        for (module_path_str, file_path) in sources {
+            if let Some(existing) = self.modules.get(&module_path_str) {
+                let same_source = self
+                    .session
+                    .get_source(existing.file_id)
+                    .and_then(|source| {
+                        source
+                            .path
+                            .as_ref()
+                            .and_then(|path| path.canonicalize().ok())
+                    })
+                    == file_path.canonicalize().ok();
+                anyhow::ensure!(
+                    same_source,
+                    "E_MODULE_PATH_COLLISION: external module '{}' conflicts with an already loaded module",
+                    module_path_str
                 );
                 continue;
             }
-
-            info!(
-                "Loading {} module(s) from external cog '{}' at {}",
-                cog_files.len(),
-                cog_name,
-                canonical_root.display()
+            let source: Text = std::fs::read_to_string(&file_path)
+                .with_context(|| {
+                    format!(
+                        "Cannot read external module '{}' at {}",
+                        module_path_str,
+                        file_path.display()
+                    )
+                })?
+                .into();
+            let module = self
+                .parse_stdlib_module(&module_path_str, &source, &file_path)
+                .with_context(|| {
+                    format!(
+                        "Cannot parse external module '{}' at {}",
+                        module_path_str,
+                        file_path.display()
+                    )
+                })?;
+            let module_path = ModulePath::from_str(module_path_str.as_str());
+            let registry = self.session.module_registry();
+            let module_id = registry.read().allocate_id();
+            let file_id = module.file_id;
+            let mut info = ModuleInfo::new(
+                module_id,
+                module_path.clone(),
+                module.clone(),
+                file_id,
+                source,
             );
-
-            for file_path in &cog_files {
-                let stem = file_path
-                    .file_stem()
-                    .and_then(|s| s.to_str())
-                    .unwrap_or("unknown");
-                let module_path_str = {
-                    let rel = file_path
-                        .parent()
-                        .and_then(|p| p.strip_prefix(&canonical_root).ok())
-                        .unwrap_or(std::path::Path::new(""));
-                    let mut parts = vec![cog_name.clone()];
-                    for component in rel.components() {
-                        if let std::path::Component::Normal(seg) = component {
-                            if let Some(s) = seg.to_str() {
-                                parts.push(s.to_string());
-                            }
-                        }
-                    }
-                    if stem != "mod" {
-                        parts.push(stem.to_string());
-                    }
-                    Text::from(parts.join("."))
-                };
-
-                if self.modules.contains_key(&module_path_str) {
-                    continue;
-                }
-
-                let source_text = match std::fs::read_to_string(file_path) {
-                    Ok(s) => s,
-                    Err(e) => {
-                        debug!(
-                            "Failed to read external cog module {}: {:?}",
-                            module_path_str.as_str(),
-                            e
-                        );
-                        continue;
-                    }
-                };
-
-                match self.parse_stdlib_module(
-                    &module_path_str,
-                    &Text::from(source_text.clone()),
-                    file_path,
-                ) {
-                    Ok(module) => {
-                        let module_path = ModulePath::from_str(module_path_str.as_str());
-                        let module_registry = self.session.module_registry();
-                        let module_id = module_registry.read().allocate_id();
-                        let file_id = module
-                            .items
-                            .first()
-                            .map(|item| item.span.file_id)
-                            .unwrap_or(FileId::new(0));
-
-                        let mut module_info = ModuleInfo::new(
-                            module_id,
-                            module_path.clone(),
-                            module.clone(),
-                            file_id,
-                            Text::from(source_text),
-                        );
-
-                        // External-cog modules behave like project
-                        // modules from the consumer's perspective —
-                        // export ALL items, not just `pub` ones,
-                        // so the script can reach internals it
-                        // explicitly mounts.
-                        let export_table =
-                            Self::extract_all_exports(&module, module_id, &module_path);
-                        module_info.exports = export_table;
-
-                        module_registry.write().register(module_info);
-                        self.register_inline_modules(&module, &module_path, file_id);
-                        let module_rc = Arc::new(module);
-                        self.modules
-                            .insert(module_path_str.clone(), module_rc.clone());
-                        self.project_modules
-                            .insert(module_path_str.clone(), module_rc);
-                        debug!("Loaded external-cog module: {}", module_path_str.as_str());
-                    }
-                    Err(e) => {
-                        debug!(
-                            "Failed to parse external-cog module {}: {:?}",
-                            module_path_str.as_str(),
-                            e
-                        );
-                    }
-                }
-            }
+            info.exports = extract_exports_from_module(&module, module_id, &module_path)
+                .with_context(|| format!("Cannot export external module '{}'", module_path_str))?;
+            registry.write().register(info);
+            self.register_inline_modules(&module, &module_path, file_id);
+            let module = Arc::new(module);
+            self.modules.insert(module_path_str.clone(), module.clone());
+            self.project_modules.insert(module_path_str, module);
         }
-
-        // Resolve re-exports across the registered modules (mirrors
-        // the same step at the end of load_project_modules).
-        {
-            let module_registry = self.session.module_registry();
-            let mut guard = module_registry.write();
-            let _ = resolve_specific_reexport_kinds(&mut guard);
-            let _ = resolve_glob_reexports(&mut guard);
-        }
-
+        let registry = self.session.module_registry();
+        let mut guard = registry.write();
+        resolve_specific_reexport_kinds(&mut guard)?;
+        resolve_glob_reexports(&mut guard)?;
         Ok(())
     }
 
@@ -825,7 +784,7 @@ impl<'s> CompilationPipeline<'s> {
             let mut cursor = immediate_dir.clone();
             let mut root: Option<std::path::PathBuf> = None;
             loop {
-                if cursor.join("verum.toml").exists() {
+                if Self::project_manifest_path(&cursor).is_some() {
                     root = Some(cursor.clone());
                     break;
                 }
@@ -870,8 +829,7 @@ impl<'s> CompilationPipeline<'s> {
         // archive from core's source) does not take this path, so it is
         // unaffected.
         if matches!(self.build_mode, BuildMode::Normal) {
-            let manifest = input_dir.join("verum.toml");
-            if manifest.exists()
+            if let Some(manifest) = Self::project_manifest_path(&input_dir)
                 && let Ok(cfg) = crate::linker_config::ProjectConfig::load_from_file(&manifest)
                 && cfg.cog.name == "core"
             {
@@ -969,8 +927,8 @@ impl<'s> CompilationPipeline<'s> {
 
         // Discover all .vr files in the project directory (recursive)
         let canonical_input = input_path.canonicalize().ok();
-        let mut project_files: Vec<PathBuf> = Vec::new();
-        Self::discover_vr_files_recursive(&enumerate_from, &canonical_input, &mut project_files);
+        let mut project_files = List::new();
+        Self::discover_vr_files_recursive(&enumerate_from, &canonical_input, &mut project_files)?;
 
         if trace_load {
             eprintln!(
@@ -1159,10 +1117,16 @@ impl<'s> CompilationPipeline<'s> {
     /// Manifest names carry hyphens (`verum-registry`); module paths are
     /// dotted identifiers, so the conversion is the same one the rest of
     /// the toolchain makes.
+    pub(super) fn project_manifest_path(dir: &Path) -> Option<PathBuf> {
+        ["Verum.toml", "verum.toml"]
+            .into_iter()
+            .map(|name| dir.join(name))
+            .find(|path| path.is_file())
+    }
+
     pub(crate) fn project_prefix_for(input_dir: &std::path::Path) -> String {
-        let manifest = input_dir.join("verum.toml");
-        crate::linker_config::ProjectConfig::load_from_file(&manifest)
-            .ok()
+        Self::project_manifest_path(input_dir)
+            .and_then(|manifest| crate::linker_config::ProjectConfig::load_from_file(manifest).ok())
             .map(|cfg| cfg.cog.name.replace('-', "_"))
             .filter(|n| !n.is_empty())
             .unwrap_or_else(|| {
@@ -1227,45 +1191,40 @@ impl<'s> CompilationPipeline<'s> {
     }
 
     fn discover_vr_files_recursive(
-        dir: &std::path::Path,
+        dir: &Path,
         canonical_input: &Option<PathBuf>,
-        out: &mut Vec<PathBuf>,
-    ) {
-        let entries = match std::fs::read_dir(dir) {
-            Ok(rd) => rd,
-            Err(_) => return,
-        };
-        // REPRODUCIBILITY (T0736): `read_dir` yields directory order, which
-        // is a filesystem property, not a property of the project. Discovery
-        // order decides module registration order, and registration is
-        // first-wins, so an unsorted walk makes the compiled artifact depend
-        // on how the checkout happens to be laid out. Sort by path so two
-        // machines with the same sources produce the same module table.
-        let mut entries: Vec<std::fs::DirEntry> = entries.flatten().collect();
-        entries.sort_by_key(|e| e.path());
+        out: &mut List<PathBuf>,
+    ) -> Result<()> {
+        let mut entries: List<std::fs::DirEntry> = std::fs::read_dir(dir)
+            .with_context(|| format!("Cannot read source directory {}", dir.display()))?
+            .collect::<std::io::Result<_>>()?;
+        entries.sort_by_key(|entry| entry.path());
         for entry in entries {
             let path = entry.path();
-            if path.is_dir() {
-                let dir_name = entry.file_name();
-                let name = dir_name.to_str().unwrap_or("");
-                // Skip hidden directories, build artifacts, and node_modules
+            let kind = entry.file_type()?;
+            // Match Session's project discovery: symlinks are not source
+            // entries, and must not lead the walk outside the source tree.
+            if kind.is_symlink() {
+                continue;
+            }
+            if kind.is_dir() {
+                let name = entry.file_name();
+                let name = name.to_str().unwrap_or("");
                 if name.starts_with('.') || name == "target" || name == "node_modules" {
                     continue;
                 }
-                Self::discover_vr_files_recursive(&path, canonical_input, out);
-            } else if path.extension().is_some_and(|ext| ext == "vr") {
-                // Skip the main input file (it will be loaded separately)
-                if path.canonicalize().ok().as_ref() == canonical_input.as_ref() {
+                Self::discover_vr_files_recursive(&path, canonical_input, out)?;
+            } else if kind.is_file() && path.extension().is_some_and(|ext| ext == "vr") {
+                if canonical_input.is_some() && path.canonicalize().ok().as_ref() == canonical_input.as_ref() {
                     continue;
                 }
-                // Skip test files (they're standalone)
                 let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
-                if stem.starts_with("test_") {
-                    continue;
+                if !stem.starts_with("test_") {
+                    out.push(path);
                 }
-                out.push(path);
             }
         }
+        Ok(())
     }
 
     /// Extract all exports from a module regardless of visibility.

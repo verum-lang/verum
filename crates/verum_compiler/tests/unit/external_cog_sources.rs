@@ -224,3 +224,123 @@ fn source_loader_leaves_precompiled_cogs_to_the_archive_path() {
         .expect("archive handled by its own path");
     assert!(pipeline.modules.is_empty());
 }
+
+#[test]
+fn module_loader_uses_the_same_package_source_root() {
+    let fixture = Fixture::new();
+    let session = fixture.session(fixture.dependency.clone());
+    let mut loader = session.create_module_loader();
+    loader
+        .load_module(
+            &verum_modules::ModulePath::from_str("greeting.lib"),
+            verum_modules::ModuleId::new(0),
+        )
+        .expect("lazy and eager loading agree on package src/");
+}
+
+#[test]
+fn reloading_the_same_source_cog_is_idempotent() {
+    let fixture = Fixture::new();
+    let mut session = fixture.session(fixture.dependency.join("src"));
+    let mut pipeline = CompilationPipeline::new_check(&mut session);
+    pipeline.load_external_cog_modules().unwrap();
+    pipeline
+        .load_external_cog_modules()
+        .expect("same physical source is not a collision");
+    assert_eq!(pipeline.project_modules.len(), 1);
+}
+
+#[test]
+fn an_empty_source_cog_is_not_a_successful_load() {
+    let fixture = Fixture::new();
+    std::fs::remove_file(fixture.dependency.join("src/lib.vr")).unwrap();
+    let mut session = fixture.session(fixture.dependency.join("src"));
+    assert!(
+        CompilationPipeline::new_check(&mut session)
+            .load_external_cog_modules()
+            .is_err()
+    );
+}
+
+#[test]
+fn unreadable_text_in_a_dependency_is_a_load_error() {
+    let fixture = Fixture::new();
+    std::fs::write(fixture.dependency.join("src/lib.vr"), [0xff, 0xfe]).unwrap();
+    let mut session = fixture.session(fixture.dependency.join("src"));
+    assert!(
+        CompilationPipeline::new_check(&mut session)
+            .load_external_cog_modules()
+            .is_err()
+    );
+}
+
+#[test]
+fn canonical_manifest_keeps_project_check_and_probe_enabled() {
+    let fixture = Fixture::new();
+    std::fs::rename(
+        fixture.consumer.join("verum.toml"),
+        fixture.consumer.join("Verum.toml"),
+    )
+    .unwrap();
+    let mut session = fixture.session(fixture.dependency.clone());
+    let mut pipeline = CompilationPipeline::new_check(&mut session);
+    assert!(pipeline.input_belongs_to_a_cog());
+    let result = pipeline
+        .check_project()
+        .expect("canonical manifest project check");
+    assert_eq!(
+        result.user_errors,
+        0,
+        "{}",
+        pipeline.session.format_diagnostics()
+    );
+    assert!(pipeline.modules.contains_key(&Text::from("consumer.main")));
+    assert_eq!(
+        result.files_checked, 2,
+        "both project and dependency were checked"
+    );
+}
+
+#[test]
+fn project_check_refuses_a_private_dependency_mount() {
+    let fixture = Fixture::new();
+    write(
+        &fixture.consumer.join("src/main.vr"),
+        "module consumer.main;\nmount greeting.lib.{secret};\nfn main() -> Int { secret() }\n",
+    );
+    let mut session = fixture.session(fixture.dependency.clone());
+    let result = CompilationPipeline::new_check(&mut session)
+        .check_project()
+        .unwrap();
+    assert!(result.user_errors > 0, "private function was accepted");
+    let diagnostics = session.format_diagnostics();
+    assert!(
+        diagnostics.contains("E401") && diagnostics.contains("secret"),
+        "{diagnostics}"
+    );
+    assert!(
+        !diagnostics.contains("E402"),
+        "module must be available: {diagnostics}"
+    );
+}
+
+#[test]
+fn dependency_body_errors_keep_the_physical_source_path() {
+    let fixture = Fixture::new();
+    write(
+        &fixture.dependency.join("src/lib.vr"),
+        "module greeting.lib;\npublic fn answer() -> Int { 42 }\nfn invalid() -> Bool { 1 }\n",
+    );
+    let mut session = fixture.session(fixture.dependency.clone());
+    let result = CompilationPipeline::new_check(&mut session)
+        .check_project()
+        .unwrap();
+    assert!(result.user_errors > 0, "dependency bodies were not checked");
+    assert!(
+        session
+            .format_diagnostics()
+            .contains("downloaded-package/src/lib.vr"),
+        "{}",
+        session.format_diagnostics()
+    );
+}

@@ -99,6 +99,11 @@ impl<'s> CompilationPipeline<'s> {
         // findings; nothing moves the symbol tables.
         let mut probe_session =
             crate::session::Session::new(self.session.options().clone());
+        // Dependency locations are inputs to checking. Keep the probe's
+        // symbol tables isolated, but resolve the same source cogs.
+        if let Some(resolver) = self.session.cog_resolver() {
+            probe_session.set_cog_resolver(resolver.clone());
+        }
         let outcome = {
             let mut probe =
                 crate::pipeline::CompilationPipeline::new(&mut probe_session);
@@ -151,11 +156,11 @@ impl<'s> CompilationPipeline<'s> {
         // At the entry's own directory, or exactly one level above it.
         // Anything further away is not this file's project — it is
         // whatever repository the file happens to live in.
-        if dir.join("verum.toml").exists() {
+        if Self::project_manifest_path(&dir).is_some() {
             return true;
         }
         match dir.parent() {
-            Some(p) => p.join("verum.toml").exists(),
+            Some(p) => Self::project_manifest_path(p).is_some(),
             None => false,
         }
     }

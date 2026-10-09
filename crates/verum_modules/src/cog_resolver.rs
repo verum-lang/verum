@@ -47,6 +47,21 @@ pub struct CogLocation {
     pub artifact_kind: CogArtifactKind,
 }
 
+impl CogLocation {
+    /// Accept an explicit source directory or a package directory containing
+    /// a manifest and `src/`. The resolver's package identity stays unchanged.
+    pub fn source_root(&self) -> PathBuf {
+        let has_manifest = self.root_path.join("Verum.toml").is_file()
+            || self.root_path.join("verum.toml").is_file();
+        let source = self.root_path.join("src");
+        if self.artifact_kind == CogArtifactKind::Source && has_manifest && source.is_dir() {
+            source
+        } else {
+            self.root_path.clone()
+        }
+    }
+}
+
 /// Discriminator for [`CogLocation::artifact_kind`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CogArtifactKind {

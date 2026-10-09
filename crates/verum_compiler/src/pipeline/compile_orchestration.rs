@@ -661,7 +661,10 @@ impl<'s> CompilationPipeline<'s> {
         // STDLIB-LOAD-COST (T0827): prescan for the mount closure so
         // the stdlib load below materialises the reachable slice, not
         // all ~2300 modules — see compile_project for the full note.
-        let prescan_scope = prescan_stdlib_scope(&project_files);
+        let external_sources = self.external_cog_sources()?;
+        let mut prescan_files = project_files.clone();
+        prescan_files.extend(external_sources.iter().map(|(_, path)| path.clone()));
+        let prescan_scope = prescan_stdlib_scope(&prescan_files);
         self.load_stdlib_modules_scoped(prescan_scope.as_ref())?;
 
         info!("Found {} .vr file(s) to check", project_files.len());
@@ -676,7 +679,7 @@ impl<'s> CompilationPipeline<'s> {
             .and_then(|f| {
                 let mut dir = f.parent();
                 while let Some(d) = dir {
-                    if d.join("verum.toml").is_file() {
+                    if Self::project_manifest_path(d).is_some() {
                         return Some(d.to_path_buf());
                     }
                     dir = d.parent();
@@ -746,6 +749,29 @@ impl<'s> CompilationPipeline<'s> {
             sources.insert(Text::from(module_path_str), Text::from(source_text));
         }
 
+        // These sources take every project checking pass as well: parsing,
+        // declaration validation, meta registration and body checking. Their
+        // paths come from the resolver, never from the consumer's cwd.
+        for (module_path, file_path) in external_sources {
+            if let Some(previous) = path_to_source.get(module_path.as_str()) {
+                anyhow::bail!(
+                    "E_MODULE_PATH_COLLISION: module '{}' resolves to {} and {}",
+                    module_path,
+                    previous.display(),
+                    file_path.display()
+                );
+            }
+            let source = std::fs::read_to_string(&file_path).with_context(|| {
+                format!(
+                    "Cannot read external module '{}' at {}",
+                    module_path,
+                    file_path.display()
+                )
+            })?;
+            path_to_source.insert(module_path.to_string(), file_path);
+            sources.insert(module_path, source.into());
+        }
+
         // Track the initial diagnostic count
         let initial_error_count = self.session.error_count();
         let initial_warning_count = self.session.warning_count();
@@ -776,10 +802,11 @@ impl<'s> CompilationPipeline<'s> {
             debug!("  Registering meta declarations from: {}", path.as_str());
 
             // Load source as a string (files are already loaded in sources map)
-            let virtual_path = PathBuf::from(path.as_str());
+            let virtual_path = path_to_source.get(path.as_str())
+                .expect("every source has its physical path").clone();
             let file_id = self
                 .session
-                .load_source_string(source.as_str(), virtual_path)?;
+                .load_source_string(source.as_str(), virtual_path.clone())?;
 
             // Parse the module
             let lexer = Lexer::new(source.as_str(), file_id);
@@ -874,7 +901,7 @@ impl<'s> CompilationPipeline<'s> {
                     // inline-vs-filesystem overlaps surface here too.
                     let header_warnings =
                         verum_modules::loader::validate_module_headers_against_filesystem(
-                            &PathBuf::from(path.as_str()),
+                            &virtual_path,
                             &module,
                         );
                     for warning in header_warnings {
@@ -1516,7 +1543,7 @@ impl<'s> CompilationPipeline<'s> {
 
         // Create result
         let result = CheckResult {
-            files_checked: project_files.len(),
+            files_checked: sources.len(),
             types_inferred: total_types_inferred,
             warnings: new_warnings,
             errors: new_errors,

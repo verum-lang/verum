@@ -594,14 +594,14 @@ impl ModuleLoader {
             if !segments.is_empty() {
                 let first_segment = segments[0].as_str();
                 if cog_resolver.is_external_cog(first_segment) {
-                    cog_resolver.get_cog_root(first_segment).map(|cog_root| {
+                    cog_resolver.get_cog_location(first_segment).map(|location| {
                         let rest_segments: List<Text> = segments.iter().skip(1).cloned().collect();
                         let cog_module_path = if rest_segments.is_empty() {
                             ModulePath::root()
                         } else {
                             ModulePath::new(rest_segments)
                         };
-                        (cog_root.clone(), cog_module_path)
+                        (location.source_root(), cog_module_path)
                     })
                 } else {
                     None
