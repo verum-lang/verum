@@ -175,22 +175,23 @@ fn compile_with_endian_methods(source: &str, owner: &str) -> VbcModule {
         .compile_module(&ast).expect("actual method codegen")
 }
 
-#[test]
-fn actual_narrow_and_float32_methods_produce_fixed_bytes() {
-    for (owner, value, expected) in [
-        ("UInt16", "0x0102", &[1,2][..]),
-        ("UInt32", "0x01020304", &[1,2,3,4][..]),
-        ("Int16", "-2", &[255,254][..]),
-        ("Float32", "-0.0", &[128,0,0,0][..]),
-    ] {
-        for endian in ["be", "le"] {
-            let source = format!("module endian_arrays; fn probe() -> [Byte; {}] {{ let number: {owner} = {value}; number.to_{endian}_bytes() }}", expected.len());
-            let mut bytes: verum_common::List<u8> = expected.iter().copied().collect();
-            if endian == "le" { bytes.reverse(); }
-            assert_packed_bytes(compile_with_endian_methods(&source, owner), &bytes);
-        }
+fn actual_endian_bytes(owner: &str, value: &str, expected: &[u8]) {
+    for endian in ["be", "le"] {
+        let source = format!("module endian_arrays; fn probe() -> [Byte; {}] {{ let number: {owner} = {value}; number.to_{endian}_bytes() }}", expected.len());
+        let mut bytes: verum_common::List<u8> = expected.iter().copied().collect();
+        if endian == "le" { bytes.reverse(); }
+        assert_packed_bytes(compile_with_endian_methods(&source, owner), &bytes);
     }
 }
+
+#[test]
+fn actual_uint16_methods_produce_fixed_bytes() { actual_endian_bytes("UInt16", "0x0102", &[1,2]); }
+#[test]
+fn actual_uint32_methods_produce_fixed_bytes() { actual_endian_bytes("UInt32", "0x01020304", &[1,2,3,4]); }
+#[test]
+fn actual_int16_methods_preserve_negative_bits() { actual_endian_bytes("Int16", "-2", &[255,254]); }
+#[test]
+fn actual_float32_methods_preserve_negative_zero_bytes() { actual_endian_bytes("Float32", "-0.0", &[128,0,0,0]); }
 
 #[test]
 fn actual_float32_roundtrip_preserves_negative_zero_bits() {
