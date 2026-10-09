@@ -33,7 +33,7 @@ fn source(source: &str) -> VbcModule {
 }
 
 fn reachable_ir(module: &Module, root: &str) -> Text {
-    let mut text = Text::from("declare ptr @verum_cbgr_allocate(i64)\ndeclare ptr @verum_checked_malloc(i64)\n");
+    let mut text = Text::new();
     let full = module.print_to_string();
     for line in full.to_str().expect("IR UTF8").lines() {
         if line.starts_with("target ") || line.starts_with("attributes #")
@@ -41,6 +41,7 @@ fn reachable_ir(module: &Module, root: &str) -> Text {
             text.push_str(line); text.push('\n');
         }
     }
+    text.push_str("declare ptr @verum_cbgr_allocate(i64)\ndeclare ptr @verum_checked_malloc(i64)\n");
     let mut pending: List<Text> = [Text::from(root)].into_iter().collect();
     let mut seen: Set<Text> = [Text::from("verum_cbgr_allocate"), Text::from("verum_checked_malloc")].into_iter().collect();
     while let Some(name) = pending.pop() {
