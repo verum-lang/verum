@@ -412,3 +412,44 @@ fn declared_generic_variant_broken_or_private_reexport_never_borrows_parent_iden
         );
     }
 }
+
+#[test]
+fn declared_generic_variant_renamed_reexport_chains_preserve_identity() {
+    let mut prior: List<_> = COLLECTIONS.iter().copied().collect();
+    prior.extend([
+        (
+            "facade",
+            "public mount core.collections.{List as Sequence, Map as Dictionary};",
+        ),
+        (
+            "facade.outer",
+            "public mount facade.{Sequence as Items, Dictionary as Table};",
+        ),
+    ]);
+    let source = json("mount facade.outer.{Items, Table};", "Items", "Table");
+    let (module, archive) = bootstrap(&prior, &source);
+    assert_collections(&module);
+    assert_collections(&archive.load_module("core.encoding.json").unwrap());
+}
+
+#[test]
+fn declared_generic_variant_nonbuiltin_export_uses_the_same_source_authority() {
+    let (module, archive) = bootstrap(
+        &[
+            ("alpha", "public type Widget<T> is { item: T };"),
+            ("facade", "public mount alpha.{Widget as Wrapper};"),
+        ],
+        "mount facade.Wrapper; public type JsonValue is JsonArray(Wrapper<Int>);",
+    );
+    for module in [&module, &archive.load_module("core.encoding.json").unwrap()] {
+        let widget = ty(module, "alpha", "Widget").id;
+        assert_payload(
+            module,
+            "JsonArray",
+            TypeRef::Instantiated {
+                base: widget,
+                args: List::from_iter([TypeRef::Concrete(TypeId::INT)]).into(),
+            },
+        );
+    }
+}

@@ -313,7 +313,7 @@ impl VbcCodegen {
                 Some(resolved.to_string())
             } else if catalog.contains_key(&format!("core.{resolved}")) {
                 Some(format!("core.{resolved}"))
-            } else if !resolved.contains('.') {
+            } else if !resolved.contains(".") {
                 bare.get(resolved.as_str()).cloned().flatten()
             } else {
                 None
