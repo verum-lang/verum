@@ -1,0 +1,63 @@
+{
+  "task": "T1698",
+  "language_product_commit": "9b9c04a8a7364d35534a9e15dcfe7d9942c47420",
+  "cases": {
+    "sha256": {
+      "result": "/private/tmp/verum-T1698-sha256-ordinary-trace/verum-sha256-digest-probe/result.json",
+      "result_sha256": "39713832e5e5567d34ac417dbbba06a58473fbfb8920fd879752cdb15e2b7213",
+      "fixture_sha256": "2247db7228b7007afc94c111ab88e885b1e5202fbc306ace0b24b19571f8f38f",
+      "status": "failed",
+      "elapsed_seconds": 11.662,
+      "logs": {
+        "stdout.log": "9d973085134732c00491fa4078d180b111f029e83529973b891e21927356047b",
+        "stderr.log": "53a79c8ce9a2c50120069620b563beee396ef5dfcba265f5d096866499bf53f1"
+      }
+    },
+    "big_endian_annotated": {
+      "result": "/private/tmp/verum-T1698-endian-ordinary-trace/big_endian_annotated/result.json",
+      "result_sha256": "d4c3928437df307b33f1cf05512a1176ba0de9a940c9a77d808523fa97a4f9e8",
+      "fixture_sha256": "98925e9bfe0a7bc19da90b4723d3c2c370ba31a3505f787a9f0c5e56d1e4adc2",
+      "status": "passed",
+      "elapsed_seconds": 13.861,
+      "logs": {
+        "stdout.log": "d41b04bb5a02dcd0b9a63d576f831d3ed0d4515105fd45e5cf4f3931d1006898",
+        "stderr.log": "77ebf21b30d1b7b4159c23094fbe2f41cad0a4fd01000d687a4e5c49ea801b08"
+      }
+    },
+    "big_endian_inferred": {
+      "result": "/private/tmp/verum-T1698-endian-ordinary-trace/big_endian_inferred/result.json",
+      "result_sha256": "fd4e85a3c36bf2b8b870ecc8f2a7b4ce75f3e36d49d68068da99953f6f4df650",
+      "fixture_sha256": "368144c7035d8e2b0673aacc10dfcd93b0be99eff4f1a412e1a9275c189670f8",
+      "status": "failed",
+      "elapsed_seconds": 13.704,
+      "logs": {
+        "stdout.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr.log": "abea5d4e0aeb85162bd59567b4361f3fff8bbc2d6061b1a07d578b5850beef98"
+      }
+    },
+    "literal_bytes": {
+      "result": "/private/tmp/verum-T1698-endian-ordinary-trace/literal_bytes/result.json",
+      "result_sha256": "a1406f3fbcccacbd705cf92c7b9f9ed6629fdab9076b0968951e566dd575089c",
+      "fixture_sha256": "61abbd4bdf3fb3e798b8414002290307fa3687da4932a8b1e5f515c1c8059a1c",
+      "status": "passed",
+      "elapsed_seconds": 12.37,
+      "logs": {
+        "stdout.log": "afa52f460b1e7addd260a7eeeedccadc15e71bb0a3fe61c6526da68510fc72f1",
+        "stderr.log": "ffd311cae525e1277750e4d434a7eafcf6d2616350a54b30986fff6352d5c4c2"
+      }
+    },
+    "little_endian_annotated": {
+      "result": "/private/tmp/verum-T1698-endian-ordinary-trace/little_endian_annotated/result.json",
+      "result_sha256": "1d44bf7caeca6c002877d50dcd3061ebd8e57db543c512b9de71c85a1cb70229",
+      "fixture_sha256": "3276779070e949760e5d9baa14f307c2c1d60ac693ab73dd32583ba3985e9072",
+      "status": "passed",
+      "elapsed_seconds": 14.12,
+      "logs": {
+        "stdout.log": "929a182d09f91564d737e48511f076a40f784450a64527ebf22d25b5c34ab3d4",
+        "stderr.log": "74d025698b3f4c0572d7d2e14202533de713c9ee86e38fe9a5ad12dc3f46100c"
+      }
+    }
+  },
+  "finding": "Identical real numeric method calls produce List carriers. An inferred binding emits TypedArrayLoad stride8 and fails; an explicit Byte8 annotation emits GetE and passes. The literal Byte8 control emits NewByteArray and passes. No normalization copy occurs in the explicit method result trace. Sha256 fails at this inferred length-encoding consumer, after state reads and padding.",
+  "boundary": "Interpreter baseline and causal controls only. Exact AOT inferred control pending; no repair or full auth acceptance."
+}

@@ -56,6 +56,7 @@
 #![allow(clippy::doc_overindented_list_items)]
 
 pub mod archive;
+pub mod array_storage;
 pub mod bytecode_remap;
 pub mod cfg_key;
 pub mod linker;

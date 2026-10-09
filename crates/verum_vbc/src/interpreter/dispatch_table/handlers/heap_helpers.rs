@@ -118,6 +118,19 @@ pub(super) fn wrap_in_variant(
     Ok(Value::from_ptr(base))
 }
 
+/// Allocate a fixed byte array using the same packed U8 carrier as NewByteArray.
+/// Fixed arrays have no List length/capacity/backing header.
+pub(super) fn alloc_byte_array(
+    state: &mut InterpreterState,
+    bytes: &[u8],
+) -> InterpreterResult<Value> {
+    let object = state.heap.alloc_with_init(TypeId::U8, bytes.len(), |payload| {
+        payload.copy_from_slice(bytes);
+    })?;
+    state.record_allocation();
+    Ok(Value::from_ptr(object.as_ptr() as *mut u8))
+}
+
 // ============================================================================
 // Byte-list construction + decoding (List<Byte>)
 // ============================================================================

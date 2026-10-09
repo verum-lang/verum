@@ -1,0 +1,16 @@
+{
+  "executable": "/Users/taaliman/.tmp/verum-codex-01a10248/native-target/debug/build/verum_vbc/4d301b5e01713114/out/t1698_archive_diagnostic-4d301b5e01713114",
+  "executable_sha256": "f44a31d69efe439763b2d2b3f37de667cff0f3342538a99b6b1e78d544b98d4a",
+  "archive": "/private/tmp/verum-registry-stage20-callable-boundaries/artifacts/runtime.vbca",
+  "archive_sha256": "8569748c802eb09c42c79e1d6f58d431e9e3d09266d22e89436ba942fad999ff",
+  "diagnostic_source_sha256": "d25537c58cfbcd116a967066afc03a88e0e2cfb3fc877518ec7efc4bbce282f6",
+  "command": [
+    "/Users/taaliman/.tmp/verum-codex-01a10248/native-target/debug/build/verum_vbc/4d301b5e01713114/out/t1698_archive_diagnostic-4d301b5e01713114",
+    "--nocapture"
+  ],
+  "deadline_seconds": 30,
+  "returncode": 101,
+  "elapsed_seconds": 1.082,
+  "executable_sha256_after": "f44a31d69efe439763b2d2b3f37de667cff0f3342538a99b6b1e78d544b98d4a",
+  "archive_sha256_after": "8569748c802eb09c42c79e1d6f58d431e9e3d09266d22e89436ba942fad999ff"
+}

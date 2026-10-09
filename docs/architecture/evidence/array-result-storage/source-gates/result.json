@@ -1,0 +1,16 @@
+{
+  "source": "b6d0dff764543e856f92ea1bf2de0f6b6ca2d64a",
+  "command": [
+    "make",
+    "check-per-register-privacy",
+    "check-internal-refs",
+    "check-panic-surface",
+    "check-early-return-tenants",
+    "check-dup-emitters"
+  ],
+  "returncode": 0,
+  "elapsed_seconds": 17.777,
+  "source_after": "b6d0dff764543e856f92ea1bf2de0f6b6ca2d64a",
+  "clean_after": true,
+  "log_sha256": "602a7ef54f274326156c278db86103e34ad3a0c01d9b2934592ca84dbb67c983"
+}

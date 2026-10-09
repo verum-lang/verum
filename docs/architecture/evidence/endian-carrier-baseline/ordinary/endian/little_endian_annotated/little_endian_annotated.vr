@@ -1,0 +1,11 @@
+fn main() {
+    let number: UInt64 = 0x0807060504030201_u64;
+    let actual: [Byte; 8] = number.to_le_bytes();
+    assert_eq(actual[7], 8_u8);
+    let mut index = 0;
+    while index < 8 {
+        assert_eq(actual[index], (index+1) as Byte);
+        index = index+1;
+    }
+    print("little_endian_annotated:passed");
+}

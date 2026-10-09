@@ -38086,100 +38086,27 @@ impl VbcCodegen {
                 self.emit_arith_extended_reg2(sub_op, dest, src);
             }
 
-            // Byte conversion: to_le_bytes(value) -> [byte; N]
-            InlineSequenceId::ToLeBytes => {
-                let width = byte_width as usize;
-                let src = if !args.is_empty() { args[0] } else { dest };
-                self.ctx.emit(Instruction::NewList { dst: dest , capacity_hint: 0 });
-                let shift_reg = self.ctx.alloc_temp();
-                let byte_reg = self.ctx.alloc_temp();
-                let mask_reg = self.ctx.alloc_temp();
-                self.ctx.emit(Instruction::LoadI {
-                    dst: mask_reg,
-                    value: 0xFF,
+            // Both endian intrinsics declare a fixed [Byte; N] result. Emit
+            // the same packed carrier as a source byte-array literal (T1698).
+            InlineSequenceId::ToLeBytes | InlineSequenceId::ToBeBytes => {
+                let input = if !args.is_empty() { args[0] } else { dest };
+                let preserved = (input == dest).then(|| {
+                    let saved = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::Mov { dst: saved, src: input });
+                    saved
                 });
-                for i in 0..width {
-                    if i == 0 {
-                        self.ctx.emit(Instruction::Mov {
-                            dst: shift_reg,
-                            src,
-                        });
-                    } else {
-                        let shift_amt = self.ctx.alloc_temp();
-                        self.ctx.emit(Instruction::LoadI {
-                            dst: shift_amt,
-                            value: (i * 8) as i64,
-                        });
-                        self.ctx.emit(Instruction::Bitwise {
-                            op: BitwiseOp::Shr,
-                            dst: shift_reg,
-                            a: src,
-                            b: shift_amt,
-                        });
-                        self.ctx.free_temp(shift_amt);
-                    }
-                    self.ctx.emit(Instruction::Bitwise {
-                        op: BitwiseOp::And,
-                        dst: byte_reg,
-                        a: shift_reg,
-                        b: mask_reg,
-                    });
-                    self.ctx.emit(Instruction::ListPush {
-                        list: dest,
-                        val: byte_reg,
-                    });
+                let src = preserved.unwrap_or(input);
+                let temporaries = [
+                    self.ctx.alloc_temp(), self.ctx.alloc_temp(),
+                    self.ctx.alloc_temp(), self.ctx.alloc_temp(),
+                ];
+                for instruction in crate::intrinsics::expand::fixed_endian_bytes(
+                    src, dest, byte_width, seq_id == InlineSequenceId::ToLeBytes, temporaries,
+                ) {
+                    self.ctx.emit(instruction);
                 }
-                self.ctx.free_temp(mask_reg);
-                self.ctx.free_temp(byte_reg);
-                self.ctx.free_temp(shift_reg);
-            }
-
-            // Byte conversion: to_be_bytes(value) -> [byte; N]
-            InlineSequenceId::ToBeBytes => {
-                let width = byte_width as usize;
-                let src = if !args.is_empty() { args[0] } else { dest };
-                self.ctx.emit(Instruction::NewList { dst: dest , capacity_hint: 0 });
-                let shift_reg = self.ctx.alloc_temp();
-                let byte_reg = self.ctx.alloc_temp();
-                let mask_reg = self.ctx.alloc_temp();
-                self.ctx.emit(Instruction::LoadI {
-                    dst: mask_reg,
-                    value: 0xFF,
-                });
-                for i in (0..width).rev() {
-                    if i == 0 {
-                        self.ctx.emit(Instruction::Mov {
-                            dst: shift_reg,
-                            src,
-                        });
-                    } else {
-                        let shift_amt = self.ctx.alloc_temp();
-                        self.ctx.emit(Instruction::LoadI {
-                            dst: shift_amt,
-                            value: (i * 8) as i64,
-                        });
-                        self.ctx.emit(Instruction::Bitwise {
-                            op: BitwiseOp::Shr,
-                            dst: shift_reg,
-                            a: src,
-                            b: shift_amt,
-                        });
-                        self.ctx.free_temp(shift_amt);
-                    }
-                    self.ctx.emit(Instruction::Bitwise {
-                        op: BitwiseOp::And,
-                        dst: byte_reg,
-                        a: shift_reg,
-                        b: mask_reg,
-                    });
-                    self.ctx.emit(Instruction::ListPush {
-                        list: dest,
-                        val: byte_reg,
-                    });
-                }
-                self.ctx.free_temp(mask_reg);
-                self.ctx.free_temp(byte_reg);
-                self.ctx.free_temp(shift_reg);
+                for reg in temporaries.into_iter().rev() { self.ctx.free_temp(reg); }
+                if let Some(saved) = preserved { self.ctx.free_temp(saved); }
             }
 
             // Byte conversion: from_le_bytes(bytes) -> Int

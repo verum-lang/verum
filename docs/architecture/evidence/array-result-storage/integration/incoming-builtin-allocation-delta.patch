@@ -1,0 +1,98 @@
+--- f3006f403/crates/verum_vbc/src/interpreter/dispatch_table/handlers/method_dispatch.rs
++++ integration/crates/verum_vbc/src/interpreter/dispatch_table/handlers/method_dispatch.rs
+@@ -6479,13 +6479,11 @@
+             // Byte conversion methods
+             "to_le_bytes" => {
+                 let bytes = v.to_le_bytes();
+-                let vals: Vec<Value> = bytes.iter().map(|&b| Value::from_i64(b as i64)).collect();
+-                return Ok(Some(alloc_list_from_values(state, vals)?));
++                return Ok(Some(super::heap_helpers::alloc_byte_array(state, &bytes)?));
+             }
+             "to_be_bytes" => {
+                 let bytes = v.to_be_bytes();
+-                let vals: Vec<Value> = bytes.iter().map(|&b| Value::from_i64(b as i64)).collect();
+-                return Ok(Some(alloc_list_from_values(state, vals)?));
++                return Ok(Some(super::heap_helpers::alloc_byte_array(state, &bytes)?));
+             }
+             "from_le_bytes" | "from_be_bytes" => {
+                 // Static-style: Int.from_le_bytes(bytes_list)
+@@ -6558,13 +6556,11 @@
+             "int32$MIN" => Value::from_i64(i32::MIN as i64),
+             "int32$to_le_bytes" => {
+                 let bytes = (v as i32).to_le_bytes();
+-                let vals: Vec<Value> = bytes.iter().map(|&b| Value::from_i64(b as i64)).collect();
+-                return Ok(Some(alloc_list_from_values(state, vals)?));
++                return Ok(Some(super::heap_helpers::alloc_byte_array(state, &bytes)?));
+             }
+             "int32$to_be_bytes" => {
+                 let bytes = (v as i32).to_be_bytes();
+-                let vals: Vec<Value> = bytes.iter().map(|&b| Value::from_i64(b as i64)).collect();
+-                return Ok(Some(alloc_list_from_values(state, vals)?));
++                return Ok(Some(super::heap_helpers::alloc_byte_array(state, &bytes)?));
+             }
+             "int32$from_le_bytes" | "int32$from_be_bytes" => {
+                 let list_val = state.get_reg(Reg(args.start.0));
+@@ -6631,13 +6627,11 @@
+             "uint64$MIN" => Value::from_i64(u64::MIN as i64),
+             "uint64$to_le_bytes" => {
+                 let bytes = (v as u64).to_le_bytes();
+-                let vals: Vec<Value> = bytes.iter().map(|&b| Value::from_i64(b as i64)).collect();
+-                return Ok(Some(alloc_list_from_values(state, vals)?));
++                return Ok(Some(super::heap_helpers::alloc_byte_array(state, &bytes)?));
+             }
+             "uint64$to_be_bytes" => {
+                 let bytes = (v as u64).to_be_bytes();
+-                let vals: Vec<Value> = bytes.iter().map(|&b| Value::from_i64(b as i64)).collect();
+-                return Ok(Some(alloc_list_from_values(state, vals)?));
++                return Ok(Some(super::heap_helpers::alloc_byte_array(state, &bytes)?));
+             }
+             "uint64$from_le_bytes" | "uint64$from_be_bytes" => {
+                 let list_val = state.get_reg(Reg(args.start.0));
+@@ -6687,13 +6681,11 @@
+             // ── UInt32 (u32-width) methods ──
+             "uint32$to_le_bytes" => {
+                 let bytes = (v as u32).to_le_bytes();
+-                let vals: Vec<Value> = bytes.iter().map(|&b| Value::from_i64(b as i64)).collect();
+-                return Ok(Some(alloc_list_from_values(state, vals)?));
++                return Ok(Some(super::heap_helpers::alloc_byte_array(state, &bytes)?));
+             }
+             "uint32$to_be_bytes" => {
+                 let bytes = (v as u32).to_be_bytes();
+-                let vals: Vec<Value> = bytes.iter().map(|&b| Value::from_i64(b as i64)).collect();
+-                return Ok(Some(alloc_list_from_values(state, vals)?));
++                return Ok(Some(super::heap_helpers::alloc_byte_array(state, &bytes)?));
+             }
+             "uint32$from_le_bytes" | "uint32$from_be_bytes" => {
+                 let list_val = state.get_reg(Reg(args.start.0));
+@@ -6714,13 +6706,11 @@
+             // ── UInt16 (u16-width) methods ──
+             "uint16$to_le_bytes" => {
+                 let bytes = (v as u16).to_le_bytes();
+-                let vals: Vec<Value> = bytes.iter().map(|&b| Value::from_i64(b as i64)).collect();
+-                return Ok(Some(alloc_list_from_values(state, vals)?));
++                return Ok(Some(super::heap_helpers::alloc_byte_array(state, &bytes)?));
+             }
+             "uint16$to_be_bytes" => {
+                 let bytes = (v as u16).to_be_bytes();
+-                let vals: Vec<Value> = bytes.iter().map(|&b| Value::from_i64(b as i64)).collect();
+-                return Ok(Some(alloc_list_from_values(state, vals)?));
++                return Ok(Some(super::heap_helpers::alloc_byte_array(state, &bytes)?));
+             }
+             "uint16$from_le_bytes" | "uint16$from_be_bytes" => {
+                 let list_val = state.get_reg(Reg(args.start.0));
+@@ -6941,13 +6931,11 @@
+             // Byte conversion methods
+             "to_le_bytes" => {
+                 let bytes = v.to_le_bytes();
+-                let vals: Vec<Value> = bytes.iter().map(|&b| Value::from_i64(b as i64)).collect();
+-                return Ok(Some(alloc_list_from_values(state, vals)?));
++                return Ok(Some(super::heap_helpers::alloc_byte_array(state, &bytes)?));
+             }
+             "to_be_bytes" => {
+                 let bytes = v.to_be_bytes();
+-                let vals: Vec<Value> = bytes.iter().map(|&b| Value::from_i64(b as i64)).collect();
+-                return Ok(Some(alloc_list_from_values(state, vals)?));
++                return Ok(Some(super::heap_helpers::alloc_byte_array(state, &bytes)?));
+             }
+             "from_le_bytes" | "from_be_bytes" => {
+                 let list_val = state.get_reg(Reg(args.start.0));

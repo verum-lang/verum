@@ -469,8 +469,9 @@ impl VbcCodegen {
             Self::element_type_name(&source_type)
         });
 
-        // The existing packed field/call carriers (T1475) also publish AFTER
-        // binding. Wider array fields remain slot-backed; only byte fields pack.
+        // Packed record fields have a separate representation contract. A call's
+        // declared array result is not storage evidence: the selected body can
+        // return either a List or a packed allocation with the same signature.
         let inferred_layout = if ty.is_none() {
             value.and_then(|value| {
                 if let verum_ast::expr::ExprKind::Field { expr: base, field } = &value.kind
@@ -480,12 +481,7 @@ impl VbcCodegen {
                 {
                     return Some((1, is_float, count as usize));
                 }
-                let info = self.call_callee_info(value)?;
-                let crate::types::TypeRef::Array { element, length } = info.return_type? else {
-                    return None;
-                };
-                let (stride, is_float) = self.primitive_array_element_spec(&element)?;
-                (length > 0).then_some((stride, is_float, length as usize))
+                None
             })
         } else {
             None
@@ -497,7 +493,17 @@ impl VbcCodegen {
             if let Some(element) = element_name {
                 self.ctx.set_array_element_type_name(&name.name, element);
             }
-            if let Some((stride, is_float, count)) = inferred_layout {
+            // Both inferred and annotated bindings consume the actual local
+            // producer. Call results stay neutral here: final module assembly
+            // may still replace a same-ID body after this caller is emitted.
+            let emitted_layout = self.ctx.lookup_var(&name.name)
+                .and_then(|binding| self.ctx.array_result_facts.get(binding.reg))
+                .and_then(|fact| match fact {
+                    crate::array_storage::ArrayResultFact::Packed { width, float, count } =>
+                        usize::try_from(count).ok().map(|count| (width, float, count)),
+                    _ => None,
+                });
+            if let Some((stride, is_float, count)) = emitted_layout.or(inferred_layout) {
                 if stride == 1 {
                     self.ctx.mark_byte_array_var(&name.name);
                 } else {
@@ -1752,100 +1758,6 @@ impl VbcCodegen {
             }
         }
         Ok(None)
-    }
-
-    /// Gets the init value for typed array from repeat syntax [value; N].
-    /// The callee's registered `FunctionInfo` for an initialiser that is a
-    /// call, in either spelling the parser produces.
-    ///
-    /// BOTH SPELLINGS ARE NEEDED, and the second is the one that matters:
-    /// `plain()` arrives as `ExprKind::Call`, but `H.digest(1)` arrives as
-    /// `ExprKind::MethodCall` with `H` as the receiver — and every one of the
-    /// 89 byte-array returns in `core/` is written that way (`Sha512.digest`,
-    /// `Sha256.finalize`, `UInt64.to_be_bytes`). Handling only `Call` covered
-    /// the probe and none of the stdlib.
-    fn call_callee_info(
-        &self,
-        value: &verum_ast::Expr,
-    ) -> Option<crate::codegen::context::FunctionInfo> {
-        use verum_ast::expr::ExprKind;
-        use verum_ast::ty::PathSegment;
-        match &value.kind {
-            ExprKind::Call { func, .. } => {
-                let ExprKind::Path(path) = &func.kind else {
-                    return None;
-                };
-                Self::path_call_names(path)
-                    .iter()
-                    .find_map(|n| self.ctx.lookup_function_in_scope(n).cloned())
-            }
-            ExprKind::MethodCall {
-                receiver, method, ..
-            } => {
-                // A TYPE receiver (`H.digest`) is a static call and its
-                // registration key is `Type.method`. An instance receiver
-                // (`h.finalize()`) needs the receiver's tracked type name,
-                // which is the same table `packed_field_receiver_type` reads.
-                let owner = match &receiver.kind {
-                    ExprKind::Path(p) if p.segments.len() == 1 => {
-                        match p.segments.last() {
-                            Some(PathSegment::Name(n))
-                                if n.as_str()
-                                    .chars()
-                                    .next()
-                                    .is_some_and(|c| c.is_uppercase()) =>
-                            {
-                                Some(n.to_string())
-                            }
-                            Some(PathSegment::Name(n)) => {
-                                self.ctx.variable_type_names.get(n.as_str()).cloned()
-                            }
-                            _ => None,
-                        }
-                    }
-                    _ => None,
-                }?;
-                let base = owner.split('<').next().unwrap_or(&owner);
-                self.ctx
-                    .lookup_function_in_scope(&format!("{}.{}", base, method.name))
-                    .cloned()
-            }
-            _ => None,
-        }
-    }
-
-    /// The names a call's callee path may be registered under, most
-    /// qualified first.
-    ///
-    /// `H.digest(…)` must be looked up as `"H.digest"` — NOT as `"digest"`.
-    /// Measured (T1475): the bare-last-segment lookup made the packed-return
-    /// mark miss every qualified call, so `let d = Sha512.digest(…)` stayed
-    /// unmarked while `let d = plain()` was marked. And a bare `"digest"` is
-    /// not merely useless here, it is dangerous: simple names are
-    /// first-wins across the tree, so it can resolve to an unrelated
-    /// function of the same name and answer with ITS return type.
-    fn path_call_names(path: &verum_ast::ty::Path) -> Vec<String> {
-        use verum_ast::ty::PathSegment;
-        let segs: Vec<String> = path
-            .segments
-            .iter()
-            .filter_map(|s| match s {
-                PathSegment::Name(n) => Some(n.to_string()),
-                _ => None,
-            })
-            .collect();
-        let mut out = Vec::new();
-        if segs.len() >= 2 {
-            // `Type.method` — the registration key for an impl function.
-            out.push(segs[segs.len() - 2..].join("."));
-            if segs.len() > 2 {
-                out.push(segs.join("."));
-            }
-        }
-        if let Some(last) = segs.last() {
-            out.push(last.clone());
-        }
-        out
     }
 
     /// Returns Some(value) for literal integers, None otherwise.

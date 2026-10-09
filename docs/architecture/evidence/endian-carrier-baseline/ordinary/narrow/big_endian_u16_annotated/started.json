@@ -1,0 +1,29 @@
+{
+  "language_commit": "9b9c04a8a7364d35534a9e15dcfe7d9942c47420",
+  "build_manifest_sha256": "9e2884dfe1d7f3078b81e7b0b20eaf2ebf25c97fbf9c365412d0df3162040943",
+  "cli_sha256": "ebb60204de9bf5b7895f43a30cc50fcdc82427734bfe4807948834cb98577426",
+  "fixture_path": "/private/tmp/verum-T1698-endian-fixtures/big_endian_u16_annotated.vr",
+  "fixture_sha256": "cd83479d6b60e311c0ce11e4c9696236589247bb60ed31faf2316f6b54d14e55",
+  "executed_fixture": "/private/tmp/verum-T1698-narrow-endian-ordinary-trace/big_endian_u16_annotated/big_endian_u16_annotated.vr",
+  "command": [
+    "/private/tmp/verum-registry-stage20-callable-boundaries/verum-9b9c04a8a",
+    "run",
+    "--tier",
+    "interpret",
+    "/private/tmp/verum-T1698-narrow-endian-ordinary-trace/big_endian_u16_annotated/big_endian_u16_annotated.vr"
+  ],
+  "expected_stdout": "big_endian_u16_annotated:passed\n",
+  "deadline_seconds": 180,
+  "environment_overrides": {
+    "NO_COLOR": "1",
+    "VERUM_NO_OBJECT_CACHE": "1",
+    "TMPDIR": "/private/tmp",
+    "VERUM_TRACE_CALLS": "1",
+    "VERUM_TRACE_PC": "main",
+    "VERUM_TRACE_PC_DECODE": "1",
+    "VERUM_TRACE_GETF": "1"
+  },
+  "scope": "Standalone ordinary interpreter fixture; no whole-project, AOT, cryptographic evidence or service acceptance.",
+  "working_directory": "/private/tmp/verum-identified-raz2520i",
+  "pid": 60115
+}

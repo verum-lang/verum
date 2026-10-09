@@ -1,0 +1,57 @@
+{
+  "source": "949b9cc72d9608dfee5ccd59d7cb0170608e73cf",
+  "command": [
+    "cargo",
+    "test",
+    "--offline",
+    "--locked",
+    "--no-fail-fast",
+    "-p",
+    "verum_vbc",
+    "--test",
+    "endian_array_returns",
+    "--test",
+    "consuming_receiver_after_mutation",
+    "--test",
+    "endian_intrinsic_expansion",
+    "--no-default-features",
+    "--features",
+    "compression,table_dispatch,codegen,ffi",
+    "--message-format=json",
+    "--",
+    "--nocapture"
+  ],
+  "cwd": "/Users/taaliman/.codex/worktrees/registry-record-map-keys/verum",
+  "environment_overrides": {
+    "CARGO_TARGET_DIR": "/Users/taaliman/.tmp/verum-codex-01a10248/native-target",
+    "CARGO_BUILD_JOBS": "2",
+    "CARGO_INCREMENTAL": "0",
+    "VERUM_NO_AUTO_PRECOMPILE": "1",
+    "VERUM_LLVM_DIR": "/Users/taaliman/projects/oldman/verum-lang/verum/llvm/install",
+    "VERUM_T1698_ARCHIVE": "/private/tmp/verum-registry-stage20-callable-boundaries/artifacts/runtime.vbca"
+  },
+  "deadline_seconds": 600,
+  "temporary_diagnostic_sha256": null,
+  "returncode": 101,
+  "timed_out": false,
+  "elapsed_seconds": 29.013,
+  "source_after": "949b9cc72d9608dfee5ccd59d7cb0170608e73cf",
+  "executables": [
+    {
+      "path": "/Users/taaliman/.tmp/verum-codex-01a10248/native-target/debug/build/verum_vbc/be8d2ded80782237/out/endian_intrinsic_expansion-be8d2ded80782237",
+      "sha256": "5d4c4492fb958ca9ee3a55d8319be214748a57ece681e15f2316ec6ce63d79cd"
+    },
+    {
+      "path": "/Users/taaliman/.tmp/verum-codex-01a10248/native-target/debug/build/verum_vbc/8dff25bf7d3f5ddf/out/consuming_receiver_after_mutation-8dff25bf7d3f5ddf",
+      "sha256": "8d988d1c448fec23b94df88964cc5db73f9faccdb7859fdc4e0cfc14ef7e73f5"
+    },
+    {
+      "path": "/Users/taaliman/.tmp/verum-codex-01a10248/native-target/debug/build/verum_vbc/6460f4f8ee3908c1/out/endian_array_returns-6460f4f8ee3908c1",
+      "sha256": "fd350c2a49af34d8d6e27f27004c6bf57d1e589ee435156f0af23d2346782adb"
+    }
+  ],
+  "logs_sha256": {
+    "cargo.jsonl": "05993b98da2a0f9aeef702f99f0d7f6ef916190bae80b783ab9fe1de78f61908",
+    "stderr.log": "aee1cce7bfae07c907c8c7fb6293caa8f4d82e245ff93f95b55f1b2530f340b6"
+  }
+}

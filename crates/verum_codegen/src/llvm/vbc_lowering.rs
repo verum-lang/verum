@@ -39,7 +39,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use verum_common::{Set, Text};
+use verum_common::{Map, Set, Text};
 use verum_llvm::AddressSpace;
 use verum_llvm::attributes::{Attribute, AttributeLoc};
 use verum_llvm::context::Context;
@@ -569,6 +569,7 @@ pub struct VbcToLlvmLowering<'ctx> {
     /// Function map (VBC function ID → LLVM function).
     functions: HashMap<u32, FunctionValue<'ctx>>,
     native_calls: super::native_call::NativeCallAuthority<'ctx>,
+    array_returns: verum_common::Shared<super::array_storage::ArrayReturns<'ctx>>,
     /// Capture kinds per closure func-id (T0241 facet-2), harvested from each
     /// function's `NewClosure` records as it is lowered and read by the
     /// closure body prologue to re-mark its capture registers. `RefCell` so it
@@ -865,6 +866,7 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
             config,
             functions: HashMap::new(),
             native_calls: super::native_call::NativeCallAuthority::default(),
+            array_returns: verum_common::Shared::new(Map::new()),
             closure_capture_kinds: std::cell::RefCell::new(HashMap::new()),
             stats: LoweringStats::default(),
             func_name_index: None,
@@ -970,6 +972,10 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
 
         // Phase 1: Forward declare all functions
         self.declare_functions(vbc_module)?;
+        self.array_returns = verum_common::Shared::new(
+            super::array_storage::selected_source_returns(vbc_module,
+                |id| self.functions.get(&id).copied()),
+        );
 
         // Backend-introduced ABI data is owned even in library/no-main builds.
         super::windows_abi::emit_float_marker(self.context, &self.module)?;
@@ -1247,6 +1253,14 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                     eprintln!("[aot-lower] id={} name={}", func_desc.id.0, func_name);
                 }
                 if let Err(e) = self.lower_vbc_function(vbc_module, &vbc_func) {
+                    // A caller may already depend on this exact physical return.
+                    // Never replace that body with the lenient zero-return stub.
+                    if matches!(e, super::error::LlvmLoweringError::UnprovenArrayStorage(_))
+                        || self.functions.get(&func_desc.id.0)
+                            .is_some_and(|target| self.array_returns.contains_key(target))
+                    {
+                        return Err(e);
+                    }
                     // Stdlib functions may fail to lower (e.g. methods using
                     // unimplemented intrinsics). Skip gracefully.
                     if is_tracked {
@@ -3081,6 +3095,11 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
         // When user and stdlib functions share a name, the arity-suffixed LLVM
         // function can only be found via func_id, not by name.
         ctx.set_func_id_map(Arc::new(self.functions.clone()));
+        ctx.initialize_array_storage(
+            self.array_returns.clone(),
+            &vbc_func.instructions,
+            &vbc_func.descriptor.params,
+        )?;
 
         // Set function ID base for merged stdlib modules.
         // Call func_ids in merged bytecode are relative to the source module;
@@ -3372,6 +3391,9 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                     TypeRef::Instantiated { base, .. } if *base == TypeId::CHANNEL
                 );
 
+                if matches!(effective_type, TypeRef::Array { .. }) {
+                    ctx.mark_array_value(verum_vbc::instruction::Reg(reg));
+                }
                 if is_text {
                     ctx.mark_text_register(reg);
                 }
@@ -3647,12 +3669,10 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                             ctx.set_generic_type_args(reg, args.clone());
                         }
                     }
-                    // A fixed-size array `[T; N]` parameter is a LIST OBJECT at
-                    // runtime (same as `List<T>`); without this arm it was left
-                    // unmarked and GetE dereferenced the list header → SIGSEGV
-                    // reading a `[Byte; N]` argument (`from_*_bytes`).
+                    // A fixed-array parameter has no physical argument proof.
+                    // Keep that uncertainty explicit until call adaptation owns it.
                     TypeRef::Array { element, .. } => {
-                        ctx.mark_list_register(reg);
+                        ctx.mark_array_value(verum_vbc::instruction::Reg(reg));
                         ctx.set_generic_type_args(reg, vec![(**element).clone()]);
                     }
                     TypeRef::Concrete(tid) if *tid == TypeId::LIST => {
@@ -3851,11 +3871,10 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                             TypeRef::Slice(_) => {
                                 ctx.mark_slice_register(reg);
                             }
-                            // `&[T; N]` coerces to RefSlice at the call site
-                            // (ffi-byte-buffer contract, task #24) — runtime
-                            // shape is the same slice value.
+                            // The reference annotation alone does not prove that
+                            // a selected caller materialized a slice descriptor.
                             TypeRef::Array { .. } => {
-                                ctx.mark_slice_register(reg);
+                                ctx.mark_array_value(verum_vbc::instruction::Reg(reg));
                             }
                             _ => {}
                         }
@@ -4661,6 +4680,7 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                         let _ = ctx.builder().build_unconditional_branch(block);
                     }
                     ctx.position_at_end(block);
+                    ctx.clear_array_storage_at_join();
                     _current_block_start_idx = instr_idx;
                 }
             }

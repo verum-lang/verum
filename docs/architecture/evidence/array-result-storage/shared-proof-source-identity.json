@@ -1,0 +1,8 @@
+{
+  "tested_source": "dda41dd00438106793184b39e19df7967ccbf9f8",
+  "final_source": "b6d0dff764543e856f92ea1bf2de0f6b6ca2d64a",
+  "files": {
+    "crates/verum_vbc/src/array_storage.rs": "96aacc7f4a688ab463e069442216a5851a402ec63b0d0ea981b2e40912eb9d2c",
+    "crates/verum_vbc/tests/codegen/array_result_facts.rs": "abd24aa03afffec8c85a75d8f5afba1e37528da6334045a6b4f053264fe87c7c"
+  }
+}

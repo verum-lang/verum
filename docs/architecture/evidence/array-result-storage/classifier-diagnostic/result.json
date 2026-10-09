@@ -1,0 +1,37 @@
+{
+  "source": "5f47257b2c764556609b3a27395d600377e58194",
+  "executable": "/Users/taaliman/.tmp/verum-codex-01a10248/native-target/debug/build/verum_codegen/1ec042b39b87232b/out/endian_fixed_bytes-1ec042b39b87232b",
+  "executable_sha256": "387812a4921227072f0edb5ca13de706ff8e2bf704ba868742ba94d8ed5f3fdd",
+  "environment_overrides": {
+    "VERUM_DUMP_VBC": "probe",
+    "RUST_MIN_STACK": "16777216"
+  },
+  "results": [
+    {
+      "command": [
+        "/Users/taaliman/.tmp/verum-codex-01a10248/native-target/debug/build/verum_codegen/1ec042b39b87232b/out/endian_fixed_bytes-1ec042b39b87232b",
+        "native_inferred_and_annotated_indexing_preserve_byte_access",
+        "--exact",
+        "--nocapture",
+        "--test-threads=1"
+      ],
+      "returncode": 101,
+      "elapsed_seconds": 0.016,
+      "stdout_sha256": "ad6508c2cf3654735eb2bc96347bb53e73ddf6a529d491bf097a97d50d87666f",
+      "stderr_sha256": "ba8e063ae13cbd24c31a3391c7fd1e69d1b9e01b6cd591564f1883e13a695358"
+    },
+    {
+      "command": [
+        "/Users/taaliman/.tmp/verum-codex-01a10248/native-target/debug/build/verum_codegen/1ec042b39b87232b/out/endian_fixed_bytes-1ec042b39b87232b",
+        "native_fixed_intrinsic_input_preserves_packed_byte_access",
+        "--exact",
+        "--nocapture",
+        "--test-threads=1"
+      ],
+      "returncode": 101,
+      "elapsed_seconds": 0.014,
+      "stdout_sha256": "539f93ee9fb1288458c291fdb8b34060d64b9e3fdfc955960626c4224207bfba",
+      "stderr_sha256": "c2313f13cd4ee9a826d7be32218e810921367194299928e388fc2d0d64efdcee"
+    }
+  ]
+}

@@ -31,6 +31,7 @@
 //! call-site emitter changes shape, change it here in the same commit.
 
 use super::registry::{CodegenStrategy, InlineSequenceId, Intrinsic};
+use verum_common::List;
 use crate::instruction::{
     ArithSubOpcode, AtomicRmwOp, BinaryFloatOp, BinaryIntOp, BitwiseOp, CompareOp, FloatToIntMode,
     Instruction, Opcode, Reg, UnaryFloatOp, UnaryIntOp,
@@ -66,24 +67,45 @@ impl Emitter {
     }
 }
 
-/// Register byte encoding for extended-opcode operand vectors —
-/// mirrors `VbcCodegen::write_reg` (short `< 128`, long `0x80 |` hi).
-fn write_reg(operands: &mut Vec<u8>, reg: u16) {
-    if reg < 128 {
-        operands.push(reg as u8);
-    } else {
-        operands.push(0x80 | ((reg >> 8) as u8));
-        operands.push((reg & 0xFF) as u8);
-    }
-}
-
 fn extended_operands(dest: Reg, args: &[Reg]) -> Vec<u8> {
     let mut operands = Vec::with_capacity(2 + args.len() * 2);
-    write_reg(&mut operands, dest.0);
+    crate::encoding::encode_reg(dest, &mut operands);
     for a in args {
-        write_reg(&mut operands, a.0);
+        crate::encoding::encode_reg(*a, &mut operands);
     }
     operands
+}
+
+/// One fixed-byte producer for inline calls and synthesized intrinsic bodies.
+/// `src` is preserved by the caller when it aliases `dest`; the four temporary
+/// registers are distinct from both. Extended operands use the wire encoder.
+pub(crate) fn fixed_endian_bytes(
+    src: Reg,
+    dest: Reg,
+    byte_width: u8,
+    little_endian: bool,
+    [index, byte, shifted, mask]: [Reg; 4],
+) -> List<Instruction> {
+    let mut instructions = List::new();
+    instructions.push(Instruction::LoadI { dst: index, value: i64::from(byte_width) });
+    instructions.push(Instruction::LoadI { dst: byte, value: 0 });
+    instructions.push(Instruction::MemExtended {
+        sub_op: crate::instruction::MemSubOpcode::NewByteArray.to_byte(),
+        operands: extended_operands(dest, &[index, byte]),
+    });
+    instructions.push(Instruction::LoadI { dst: mask, value: 0xFF });
+    for output in 0..byte_width {
+        let input_byte = if little_endian { output } else { byte_width - 1 - output };
+        instructions.push(Instruction::LoadI { dst: index, value: i64::from(input_byte) * 8 });
+        instructions.push(Instruction::Bitwise { op: BitwiseOp::Shr, dst: shifted, a: src, b: index });
+        instructions.push(Instruction::Bitwise { op: BitwiseOp::And, dst: byte, a: shifted, b: mask });
+        instructions.push(Instruction::LoadI { dst: index, value: i64::from(output) });
+        instructions.push(Instruction::MemExtended {
+            sub_op: crate::instruction::MemSubOpcode::ByteArrayStore.to_byte(),
+            operands: extended_operands(dest, &[index, byte]),
+        });
+    }
+    instructions
 }
 
 /// Expand a registry intrinsic into a wrapper body, or `None` when the
@@ -425,9 +447,9 @@ fn expand_sequence(
                 0x45 // CMemmove
             };
             let mut operands = Vec::<u8>::new();
-            write_reg(&mut operands, args[0].0);
-            write_reg(&mut operands, args[1].0);
-            write_reg(&mut operands, args[2].0);
+            crate::encoding::encode_reg(args[0], &mut operands);
+            crate::encoding::encode_reg(args[1], &mut operands);
+            crate::encoding::encode_reg(args[2], &mut operands);
             e.emit(Instruction::FfiExtended { sub_op, operands });
             e.emit(Instruction::Mov {
                 dst: dest,
@@ -436,9 +458,9 @@ fn expand_sequence(
         }
         InlineSequenceId::Memset if args.len() >= 3 => {
             let mut operands = Vec::<u8>::new();
-            write_reg(&mut operands, args[0].0);
-            write_reg(&mut operands, args[1].0);
-            write_reg(&mut operands, args[2].0);
+            crate::encoding::encode_reg(args[0], &mut operands);
+            crate::encoding::encode_reg(args[1], &mut operands);
+            crate::encoding::encode_reg(args[2], &mut operands);
             e.emit(Instruction::FfiExtended {
                 sub_op: 0x44, // CMemset
                 operands,
@@ -450,10 +472,10 @@ fn expand_sequence(
         }
         InlineSequenceId::Memcmp if args.len() >= 3 => {
             let mut operands = Vec::<u8>::new();
-            write_reg(&mut operands, dest.0);
-            write_reg(&mut operands, args[0].0);
-            write_reg(&mut operands, args[1].0);
-            write_reg(&mut operands, args[2].0);
+            crate::encoding::encode_reg(dest, &mut operands);
+            crate::encoding::encode_reg(args[0], &mut operands);
+            crate::encoding::encode_reg(args[1], &mut operands);
+            crate::encoding::encode_reg(args[2], &mut operands);
             e.emit(Instruction::FfiExtended {
                 sub_op: 0x46, // CMemcmp
                 operands,
@@ -471,9 +493,9 @@ fn expand_sequence(
                 0x14 // MemSubOpcode::PtrSub (element-scaled ×8)
             };
             let mut operands = Vec::<u8>::new();
-            write_reg(&mut operands, dest.0);
-            write_reg(&mut operands, args[0].0);
-            write_reg(&mut operands, args[1].0);
+            crate::encoding::encode_reg(dest, &mut operands);
+            crate::encoding::encode_reg(args[0], &mut operands);
+            crate::encoding::encode_reg(args[1], &mut operands);
             e.emit(Instruction::MemExtended { sub_op, operands });
         }
         InlineSequenceId::CheckedAdd
@@ -489,9 +511,9 @@ fn expand_sequence(
                 _ => ArithSubOpcode::CheckedDivI as u8,
             };
             let mut operands = Vec::<u8>::new();
-            write_reg(&mut operands, dest.0);
-            write_reg(&mut operands, args[0].0);
-            write_reg(&mut operands, args[1].0);
+            crate::encoding::encode_reg(dest, &mut operands);
+            crate::encoding::encode_reg(args[0], &mut operands);
+            crate::encoding::encode_reg(args[1], &mut operands);
             e.emit(Instruction::ArithExtended { sub_op, operands });
         }
         InlineSequenceId::OverflowingAdd
@@ -505,9 +527,9 @@ fn expand_sequence(
                 _ => ArithSubOpcode::OverflowingMulI as u8,
             };
             let mut operands = Vec::<u8>::new();
-            write_reg(&mut operands, dest.0);
-            write_reg(&mut operands, args[0].0);
-            write_reg(&mut operands, args[1].0);
+            crate::encoding::encode_reg(dest, &mut operands);
+            crate::encoding::encode_reg(args[0], &mut operands);
+            crate::encoding::encode_reg(args[1], &mut operands);
             e.emit(Instruction::ArithExtended { sub_op, operands });
         }
         InlineSequenceId::AtomicFetchAdd
@@ -641,53 +663,12 @@ fn expand_sequence(
             });
         }
         InlineSequenceId::ToLeBytes | InlineSequenceId::ToBeBytes => {
-            let width = byte_width as usize;
             let src = if !args.is_empty() { args[0] } else { dest };
-            e.emit(Instruction::NewList {
-                dst: dest,
-                capacity_hint: 0,
-            });
-            let shift_reg = e.alloc_temp();
-            let byte_reg = e.alloc_temp();
-            let mask_reg = e.alloc_temp();
-            e.emit(Instruction::LoadI {
-                dst: mask_reg,
-                value: 0xFF,
-            });
-            let idx: Vec<usize> = if matches!(seq, InlineSequenceId::ToLeBytes) {
-                (0..width).collect()
-            } else {
-                (0..width).rev().collect()
-            };
-            for i in idx {
-                if i == 0 {
-                    e.emit(Instruction::Mov {
-                        dst: shift_reg,
-                        src,
-                    });
-                } else {
-                    let shift_amt = e.alloc_temp();
-                    e.emit(Instruction::LoadI {
-                        dst: shift_amt,
-                        value: (i * 8) as i64,
-                    });
-                    e.emit(Instruction::Bitwise {
-                        op: BitwiseOp::Shr,
-                        dst: shift_reg,
-                        a: src,
-                        b: shift_amt,
-                    });
-                }
-                e.emit(Instruction::Bitwise {
-                    op: BitwiseOp::And,
-                    dst: byte_reg,
-                    a: shift_reg,
-                    b: mask_reg,
-                });
-                e.emit(Instruction::ListPush {
-                    list: dest,
-                    val: byte_reg,
-                });
+            let temporaries = [e.alloc_temp(), e.alloc_temp(), e.alloc_temp(), e.alloc_temp()];
+            for instruction in fixed_endian_bytes(
+                src, dest, byte_width, seq == InlineSequenceId::ToLeBytes, temporaries,
+            ) {
+                e.emit(instruction);
             }
         }
         InlineSequenceId::FromLeBytes | InlineSequenceId::FromBeBytes => {
@@ -751,9 +732,9 @@ fn expand_sequence(
         }
         InlineSequenceId::MakeSlice if args.len() >= 2 => {
             let mut operands = Vec::with_capacity(7);
-            write_reg(&mut operands, dest.0);
-            write_reg(&mut operands, args[0].0);
-            write_reg(&mut operands, args[1].0);
+            crate::encoding::encode_reg(dest, &mut operands);
+            crate::encoding::encode_reg(args[0], &mut operands);
+            crate::encoding::encode_reg(args[1], &mut operands);
             operands.push(byte_width);
             e.emit(Instruction::CbgrExtended {
                 sub_op: crate::instruction::CbgrSubOpcode::RefSliceRaw as u8,
@@ -765,9 +746,9 @@ fn expand_sequence(
         }
         InlineSequenceId::CbgrDealloc => {
             let mut operands = Vec::<u8>::new();
-            write_reg(&mut operands, dest.0);
+            crate::encoding::encode_reg(dest, &mut operands);
             for a in args {
-                write_reg(&mut operands, a.0);
+                crate::encoding::encode_reg(*a, &mut operands);
             }
             e.emit(Instruction::CbgrExtended {
                 sub_op: 0x62, // CbgrSubOpcode::Dealloc
@@ -864,26 +845,22 @@ mod tests {
         );
     }
 
-    /// `to_le_bytes` (InlineSequenceWithWidth(ToLeBytes, 8)): NewList +
-    /// per-byte shift/mask/push, exactly the call-site loop shape.
+    /// Endian wrappers use the same packed carrier as inline expansion.
     #[test]
     fn to_le_bytes_wrapper_shape() {
         let body = expand_by_name("to_le_bytes");
-        // NewList + LoadI(mask) + 8×(shift setup + And + Push) + Ret.
-        assert!(matches!(
-            body.instructions.first(),
-            Some(Instruction::NewList { dst: Reg(1), .. })
-        ));
-        assert!(matches!(
-            body.instructions.last(),
-            Some(Instruction::Ret { value: Reg(1) })
-        ));
-        let pushes = body
-            .instructions
-            .iter()
-            .filter(|i| matches!(i, Instruction::ListPush { .. }))
-            .count();
-        assert_eq!(pushes, 8);
+        assert!(matches!(body.instructions.last(), Some(Instruction::Ret { value: Reg(1) })));
+        let allocations = body.instructions.iter().filter(|instruction| matches!(
+            instruction, Instruction::MemExtended { sub_op: 0x30, .. }
+        )).count();
+        let stores = body.instructions.iter().filter(|instruction| matches!(
+            instruction, Instruction::MemExtended { sub_op: 0x33, .. }
+        )).count();
+        assert_eq!(allocations, 1);
+        assert_eq!(stores, 8);
+        assert!(!body.instructions.iter().any(|instruction| matches!(
+            instruction, Instruction::NewList { .. } | Instruction::ListPush { .. }
+        )));
     }
 
     /// `ptr_offset` keeps the default 8-byte Value stride (FfiExtended
