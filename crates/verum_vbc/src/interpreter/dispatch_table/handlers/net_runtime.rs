@@ -97,6 +97,34 @@ fn alloc_fd() -> i64 {
 }
 
 fn register(res: NetResource) -> i64 {
+    register_with_error(res, -1)
+}
+
+fn register_with_error(res: NetResource, error_status: i64) -> i64 {
+    // The public raw APIs require positive success handles. If stdin was
+    // closed, a valid socket can own descriptor zero. Duplicate while zero
+    // is still owned, so the replacement is a real positive OS descriptor.
+    // A failed duplicate drops the input owner and reports the caller's I/O
+    // error convention; it never publishes zero or invents a handle offset.
+    #[cfg(unix)]
+    let res = match match &res {
+        NetResource::Listener(listener) if listener_raw_fd(listener) == 0 => {
+            listener.try_clone().map(NetResource::Listener)
+        }
+        NetResource::Stream(stream) if stream_raw_fd(stream) == 0 => {
+            stream.try_clone().map(NetResource::Stream)
+        }
+        NetResource::Udp(socket) if udp_raw_fd(socket) == 0 => {
+            socket.try_clone().map(NetResource::Udp)
+        }
+        _ => Ok(res),
+    } {
+        Ok(resource) => resource,
+        Err(_) => return error_status,
+    };
+    #[cfg(not(unix))]
+    let _ = error_status;
+
     // The public Unix API also accepts raw descriptors. Registry ownership
     // cannot introduce a second integer namespace over those same values.
     #[cfg(unix)]
@@ -115,7 +143,7 @@ fn register(res: NetResource) -> i64 {
 /// `interpreter::io_engine::async_accept` registers an accepted
 /// stream via this helper).  Returns the synthetic fd.
 pub fn register_accepted_stream(stream: TcpStream) -> i64 {
-    register(NetResource::Stream(stream))
+    register_with_error(NetResource::Stream(stream), NET_STATUS_IO_ERROR)
 }
 
 // =============================================================================
@@ -291,9 +319,8 @@ pub fn tcp_listen_v2(host: &str, port: i64, backlog: i64, flags: i64) -> i64 {
 /// `verum_tcp_local_port` LLVM helper provides
 /// (`crates/verum_codegen/src/llvm/runtime.rs`).
 ///
-/// **Legacy registry fallback**: pre-#25 listeners that were
-/// registered listeners still hit the registry path (opaque handles on
-/// non-Unix, owned OS descriptors on Unix).
+/// Registered listeners use the registry path: opaque handles on non-Unix
+/// targets and owned OS descriptors on Unix.
 /// The registry tries first, then falls through to `getsockname` if
 /// the fd isn't tracked — single API surface, two backing mechanisms.
 pub fn tcp_local_port(fd: i64) -> i64 {
@@ -1030,7 +1057,9 @@ pub fn tcp_accept_timeout_coop(
             // `accept` on a non-blocking listener returns the connected
             // stream directly — no sockaddr_storage decoding needed.
             match listener.accept() {
-                Ok((stream, _peer)) => return register(NetResource::Stream(stream)),
+                Ok((stream, _peer)) => {
+                    return register_with_error(NetResource::Stream(stream), NET_STATUS_IO_ERROR);
+                }
                 Err(e) => match e.kind() {
                     std::io::ErrorKind::WouldBlock => continue,
                     std::io::ErrorKind::Interrupted => continue,
@@ -1223,7 +1252,9 @@ pub fn tcp_connect_timeout(host: &str, port: i64, timeout_ms: i64) -> i64 {
     };
     for addr in addrs {
         match TcpStream::connect_timeout(&addr, dur) {
-            Ok(stream) => return register(NetResource::Stream(stream)),
+            Ok(stream) => {
+                return register_with_error(NetResource::Stream(stream), NET_STATUS_IO_ERROR);
+            }
             Err(e) if e.kind() == std::io::ErrorKind::TimedOut => return NET_STATUS_TIMEOUT,
             Err(_) => continue,
         }
