@@ -20,6 +20,10 @@ pub enum LlvmLoweringError {
     #[error("Type lowering error: {0}")]
     TypeLowering(Text),
 
+    /// A native array access lacks selected-producer storage authority.
+    #[error("Unproven native array storage: {0}")]
+    UnprovenArrayStorage(Text),
+
     /// Invalid register reference.
     #[error("Invalid register: r{0}")]
     InvalidRegister(u16),

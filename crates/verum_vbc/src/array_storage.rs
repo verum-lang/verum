@@ -154,11 +154,17 @@ impl ArrayResultFacts {
             | I::Len { dst, .. } => self.forget(*dst),
             // Dropping can invoke user glue, with the same unknown side effects
             // as a call. It is not merely a register overwrite.
-            I::DropRef { .. } => { self.clear(); return false; }
-            I::Nop | I::ListPush { .. } | I::Assert { .. } => {}
+            I::DropRef { .. } => {
+                self.clear();
+                return false;
+            }
+            I::Nop | I::ListPush { .. } | I::SetE { .. } | I::Assert { .. } => {}
             // Clones, reference accesses and calls need their selected producer
             // contract. Branch/loop joins need a meet, not last-emitted-wins.
-            _ => { self.clear(); return false; }
+            _ => {
+                self.clear();
+                return false;
+            }
         }
         true
     }
@@ -200,7 +206,7 @@ pub fn straight_line_array_return(instructions: &[Instruction]) -> Maybe<ArrayRe
             Instruction::Nop if returned => {}
             _ if returned => return None,
             _ if !facts.observe(instruction) => return None,
-            _ => {},
+            _ => {}
         }
     }
     result

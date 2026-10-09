@@ -7,6 +7,7 @@ use verum_llvm::module::Module;
 use verum_llvm::types::{BasicMetadataTypeEnum, BasicType, BasicTypeEnum};
 use verum_llvm::values::{BasicMetadataValueEnum, BasicValue, BasicValueEnum, FunctionValue, IntValue, PointerValue};
 use verum_llvm::{AtomicOrdering, AtomicRMWBinOp, FloatPredicate, IntPredicate};
+use verum_vbc::array_storage::ArrayResultFact;
 use verum_vbc::instruction::{
     ArithSubOpcode, AtomicRmwOp, BinaryFloatOp, BinaryGenericOp, BinaryIntOp, BitwiseOp,
     CmpSubOpcode, CompareOp, SystemSubOpcode, FloatToIntMode, Instruction, MachSubOpcode,
@@ -2485,7 +2486,9 @@ pub fn lower_instruction<'ctx>(
     ctx.increment_instruction_count();
 
     ctx.check_register_writes()?;
+    ctx.array_storage.begin_instruction(instr);
     lower_instruction_impl(ctx, instr)?;
+    ctx.array_storage.finish_instruction(instr)?;
     ctx.check_register_writes()
 }
 
@@ -14958,6 +14961,10 @@ fn lower_call<'ctx>(
         ctx.set_register(dst.0, ret_val);
         // Track register types based on function return type
         mark_register_from_return_type(ctx, dst.0, &func_desc.return_type);
+        if matches!(func_desc.return_type, TypeRef::Array { .. }) {
+            let storage = ctx.array_returns.get(&llvm_fn).copied();
+            ctx.array_storage.call_result(dst, storage)?;
+        }
         // After the return-type marks, so it is not overwritten by them.
         restore_interior_element_mark(ctx, dst.0, ret_ref_kind);
         // task #39/#35: a generic fn returning a bare type param T (e.g.
@@ -21935,6 +21942,10 @@ fn lower_call_method<'ctx>(
             // Track register types based on method return type
             if let Some(ref ret_type) = resolved_return_type {
                 mark_register_from_return_type(ctx, dst.0, ret_type);
+            }
+            let storage = ctx.array_returns.get(&llvm_fn).copied();
+            if storage.is_some() || matches!(resolved_return_type, Some(TypeRef::Array { .. })) {
+                ctx.array_storage.call_result(dst, storage)?;
             }
             // After the return-type marks, so it is not overwritten.
             restore_interior_element_mark(ctx, dst.0, ret_ref_kind);
@@ -33307,6 +33318,9 @@ fn try_lower_sizedint_method<'ctx>(
                 ctx.builder().build_store(slot, byte).or_llvm_err()?;
             }
             ctx.set_register(dst.0, bytes.into());
+            ctx.array_storage.call_result(dst, Some(ArrayResultFact::Packed {
+                width: 1, float: false, count,
+            }))?;
             Ok(true)
         }
         // ── from_{le,be}_bytes → read N bytes, reassemble, extend ──
@@ -33315,11 +33329,18 @@ fn try_lower_sizedint_method<'ctx>(
         | "uint32$from_be_bytes" | "uint64$from_be_bytes" => {
             let le = canon.ends_with("le_bytes");
             let n = (width / 8) as u64;
+            if !matches!(ctx.array_storage.get(args.start),
+                Some(ArrayResultFact::Packed { width: 1, float: false, count }) if count == n)
+            {
+                return Err(LlvmLoweringError::UnprovenArrayStorage(
+                    "fixed endian input needs its selected packed byte producer".into(),
+                ));
+            }
             let data_ptr = as_ptr(ctx, ctx.get_register(args.start.0)?, "siv_fb_bytes")?;
             let i8_ty = ctx.types().i8_type();
             let mut result = i64_ty.const_int(0, false);
             for read_i in 0..n {
-                // SAFETY: the fixed-array parameter declaration supplies N bytes.
+                // SAFETY: the selected producer proved exactly N packed bytes.
                 let elem_ptr = unsafe { ctx.builder().build_in_bounds_gep(
                     i8_ty, data_ptr, &[i64_ty.const_int(read_i, false)], "siv_fb_slot",
                 ).or_llvm_err()? };
@@ -38216,6 +38237,37 @@ fn lower_atomic_fence<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, ordering: u8) -
 // Array/Collection Operations
 // ============================================================================
 
+fn check_packed_array_index<'ctx>(
+    ctx: &mut FunctionContext<'_, 'ctx>,
+    idx: Reg,
+    count: u64,
+) -> Result<()> {
+    let index = as_i64(ctx, ctx.get_register(idx.0)?, "array_storage_index")?;
+    let in_bounds = ctx
+        .builder()
+        .build_int_compare(
+            IntPredicate::ULT,
+            index,
+            ctx.types().i64_type().const_int(count, false),
+            "array_storage_in_bounds",
+        )
+        .or_llvm_err()?;
+    let valid = ctx
+        .llvm_context()
+        .append_basic_block(ctx.function(), "array_storage_valid");
+    let invalid = ctx
+        .llvm_context()
+        .append_basic_block(ctx.function(), "array_storage_invalid");
+    ctx.builder()
+        .build_conditional_branch(in_bounds, valid, invalid)
+        .or_llvm_err()?;
+    ctx.builder().position_at_end(invalid);
+    emit_runtime_abort(ctx, "Array index out of bounds", "array_storage_bounds")?;
+    ctx.builder().build_unreachable().or_llvm_err()?;
+    ctx.builder().position_at_end(valid);
+    Ok(())
+}
+
 /// Lower GetE instruction (array element access).
 ///
 /// Generates GEP + load for array element access.
@@ -38226,6 +38278,31 @@ fn lower_get_element<'ctx>(
     arr: Reg,
     idx: Reg,
 ) -> Result<()> {
+    match ctx.array_storage.get(arr) {
+        Some(ArrayResultFact::Packed { width, float, count }) => {
+            // Count/geometry come from the selected allocation, never TypeRef.
+            // Use the existing typed load lowering and canonical wide-register
+            // encoding after checking the concrete allocation's bounds.
+            check_packed_array_index(ctx, idx, count)?;
+            let mut operands = vec![];
+            for register in [dst, arr, idx] {
+                verum_vbc::encoding::encode_reg(register, &mut operands);
+            }
+            let op = if width == 1 && !float { MemSubOpcode::ByteArrayLoad }
+                else {
+                    operands.push(width as u8 | if float { 0x80 } else { 0 });
+                    MemSubOpcode::TypedArrayLoad
+                };
+            return lower_mem_extended(ctx, op.to_byte(), &operands);
+        }
+        Some(ArrayResultFact::List) => {}
+        _ if ctx.array_storage.is_array(arr) => {
+            return Err(LlvmLoweringError::UnprovenArrayStorage(
+                format!("GetE r{} has no selected array storage in {}", arr.0, ctx.function_name()).into(),
+            ));
+        }
+        _ => {}
+    }
     let arr_ptr = as_ptr(ctx, ctx.get_register(arr.0)?, "arr_ptr")?;
     let index = as_i64(ctx, ctx.get_register(idx.0)?, "index")?;
     let i64_type = ctx.types().i64_type();
@@ -38357,6 +38434,28 @@ fn lower_set_element<'ctx>(
     idx: Reg,
     value: Reg,
 ) -> Result<()> {
+    match ctx.array_storage.get(arr) {
+        Some(ArrayResultFact::Packed { width, float, count }) => {
+            check_packed_array_index(ctx, idx, count)?;
+            let mut operands = vec![];
+            for register in [arr, idx, value] {
+                verum_vbc::encoding::encode_reg(register, &mut operands);
+            }
+            let op = if width == 1 && !float { MemSubOpcode::ByteArrayStore }
+                else {
+                    operands.push(width as u8 | if float { 0x80 } else { 0 });
+                    MemSubOpcode::TypedArrayStore
+                };
+            return lower_mem_extended(ctx, op.to_byte(), &operands);
+        }
+        Some(ArrayResultFact::List) => {}
+        _ if ctx.array_storage.is_array(arr) => {
+            return Err(LlvmLoweringError::UnprovenArrayStorage(
+                format!("SetE r{} has no selected array storage in {}", arr.0, ctx.function_name()).into(),
+            ));
+        }
+        _ => {}
+    }
     let arr_ptr = as_ptr(ctx, ctx.get_register(arr.0)?, "arr_ptr")?;
     let index = as_i64(ctx, ctx.get_register(idx.0)?, "index")?;
     let val = ctx.get_register(value.0)?;
@@ -38464,6 +38563,19 @@ fn lower_len<'ctx>(
     arr: Reg,
     type_hint: u8,
 ) -> Result<()> {
+    match ctx.array_storage.get(arr) {
+        Some(ArrayResultFact::Packed { count, .. }) => {
+            ctx.set_register(dst.0, ctx.types().i64_type().const_int(count, false).into());
+            return Ok(());
+        }
+        Some(ArrayResultFact::List) => {}
+        _ if ctx.array_storage.is_array(arr) => {
+            return Err(LlvmLoweringError::UnprovenArrayStorage(
+                format!("Len r{} has no selected array storage in {}", arr.0, ctx.function_name()).into(),
+            ));
+        }
+        _ => {}
+    }
     let i64_type = ctx.types().i64_type();
 
     // Priority 0: a register EXPLICITLY marked as a slice (e.g. the result
@@ -40242,16 +40354,10 @@ fn mark_register_from_return_type<'ctx>(
                 }
             }
         }
-        // A fixed-size array `[T; N]` is represented as a LIST OBJECT at
-        // runtime (built via NewList / ListPush, i64-strided backing — same as
-        // a `List<T>`).  Without this arm a `[T; N]` value returned from a
-        // function was left unmarked, so GetE fell to the raw branch
-        // (`data_ptr = arr_ptr`) and dereferenced the list OBJECT header as
-        // element data → garbage / SIGSEGV.  Backs `to_*_bytes` (`[Byte; N]`)
-        // and every `fn … -> [T; N]`.  (A dynamic `&[T]` slice is a distinct
-        // `Pack` representation marked at its own creation site.)
+        // An array type preserves element identity but does not determine its
+        // physical storage. The actual selected producer supplies that proof.
         TypeRef::Array { element, .. } => {
-            ctx.mark_list_register(reg);
+            ctx.array_storage.mark_array(Reg(reg));
             ctx.set_generic_type_args(reg, vec![(**element).clone()]);
             if let TypeRef::Concrete(elem_tid) = element.as_ref() {
                 if *elem_tid == TypeId::TEXT {

@@ -213,6 +213,10 @@ pub struct FunctionContext<'a, 'ctx> {
     /// name collision issues where multiple VBC functions share a name.
     func_id_map: Option<Arc<HashMap<u32, FunctionValue<'ctx>>>>,
 
+    /// Final executable source-body summaries, keyed by the actual native target.
+    pub(super) array_returns: Shared<super::array_storage::ArrayReturns<'ctx>>,
+    pub(super) array_storage: super::array_storage::ArrayStorage,
+
     /// LLVM builder for instruction generation.
     builder: Builder<'ctx>,
 
@@ -865,6 +869,8 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
             func_name_index: None,
             type_name_index: None,
             func_id_map: None,
+            array_returns: Shared::new(Map::new()),
+            array_storage: Default::default(),
             builder,
             types,
             cbgr,
@@ -982,6 +988,8 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
             func_name_index: None,
             type_name_index: None,
             func_id_map: None,
+            array_returns: Shared::new(Map::new()),
+            array_storage: Default::default(),
             builder,
             types,
             cbgr,
@@ -2802,6 +2810,7 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
         // will re-add them after this call.
         // Clear unified type map (covers struct, inline_struct, custom_iter, generic_param, etc.)
         self.reg_types.clear(reg);
+        self.array_storage.forget_value(verum_vbc::instruction::Reg(reg));
         // CLONE-AOT-ALIAS-1: allocation-size marks are re-set by the
         // allocation/propagation sites AFTER this call; a stale size on
         // a reused register made Clone memcpy the wrong byte count
