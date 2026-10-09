@@ -331,3 +331,68 @@ fn genuine_usize_alias_remains_a_scalar_carrier() {
         );
     }
 }
+
+#[test]
+fn delayed_function_bodies_keep_their_declaring_mounts_and_call_signatures() {
+    let canonical = (
+        "fixture.canonical_body",
+        r#"mount core.base.result.Result;
+        public fn canonical_echo(value: Result<Int, Bool>) -> Result<Int, Bool> { value }
+        public fn canonical_forward(value: Result<Int, Bool>) -> Result<Int, Bool> {
+            canonical_echo(value)
+        }"#,
+    );
+    let foreign = (
+        "fixture.foreign_body",
+        r#"mount foreign.result.Result;
+        public fn foreign_echo(value: Result<Int, Bool>) -> Result<Int, Bool> { value }
+        public fn foreign_forward(value: Result<Int, Bool>) -> Result<Int, Bool> {
+            foreign_echo(value)
+        }"#,
+    );
+    for files in [[canonical, foreign], [foreign, canonical]] {
+        let (module, archive) = bootstrap(&files, false);
+        let decoded = archive.load_module("fixture").unwrap();
+        for module in [&module, &decoded] {
+            let foreign_id = declaration(module, "foreign.result", "Result").id;
+            for (owner, stem, head) in [
+                (canonical.0, "canonical", TypeId::RESULT),
+                (foreign.0, "foreign", foreign_id),
+            ] {
+                let signature = TypeRef::Instantiated {
+                    base: head,
+                    args: List::from_iter([
+                        TypeRef::Concrete(TypeId::INT),
+                        TypeRef::Concrete(TypeId::BOOL),
+                    ])
+                    .into(),
+                };
+                let function = |leaf: &str| {
+                    module
+                        .functions
+                        .iter()
+                        .find(|function| {
+                            function.origin_module.and_then(|id| module.get_string(id)) == Some(owner)
+                                && module.get_string(function.name).is_some_and(|name| {
+                                    name == leaf || name == format!("{owner}.{leaf}")
+                                })
+                        })
+                        .unwrap_or_else(|| panic!("missing declared function {owner}.{leaf}"))
+                };
+                let echo = function(&format!("{stem}_echo"));
+                let forward = function(&format!("{stem}_forward"));
+                for function in [echo, forward] {
+                    assert_eq!(function.return_type, signature, "{owner} return identity");
+                    assert_eq!(function.params[0].type_ref, signature, "{owner} parameter identity");
+                }
+                let start = forward.bytecode_offset as usize;
+                let end = start + forward.bytecode_length as usize;
+                let body = verum_vbc::bytecode::decode_instructions(&module.bytecode[start..end])
+                    .expect("source body survives archive encoding");
+                assert!(body.iter().any(|instruction| matches!(instruction,
+                    verum_vbc::Instruction::Call { func_id, .. } if *func_id == echo.id.0
+                )), "{owner} must retain its own actual call, not a stub: {body:?}");
+            }
+        }
+    }
+}
