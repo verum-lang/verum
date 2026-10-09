@@ -508,3 +508,35 @@ helper argument failures; they do not establish incorrect record field
 declarations. The registry's `tests/evidence/publication-metadata-stage16/`
 retains its result and logs. This candidate remains separate from registry
 main, and standalone parser success does not establish metadata admission.
+
+
+## Declaration-owned generic applications — T1676
+
+The metadata reader now relates a generic record's qualified annotation to its
+method signature through the exact descriptor binding and declaring owner.
+Generic-to-named comparison retains the whole path and checks every argument;
+unknown and foreign owners cannot borrow a same-leaf declaration. Transparent
+aliases keep their existing substitution, and replacing metadata replaces the
+head-identity snapshot. Named-to-named unification is unchanged.
+
+The [checker receipt](evidence/registry-nominal-head-gate.json) records the causal
+baseline `76cee1bad`: **7 passed, 4 failed**, including the registry's exact error
+when `JsonValue.as_object()` is forwarded into a source helper accepting
+`&Map<Text, JsonValue>`. Frozen repair `3821b1961` passes all **11 controls**.
+They cover eager/lazy readers, load and comparison orders, renamed exports,
+metadata replacement, and wrong arguments, arity and owner negatives. The fixture
+serializes minimal metadata and parses real source; it does not produce a VBC
+archive or execute Verum runtime bodies.
+
+The unfiltered `cargo test --locked --offline -p verum_types --tests --
+--test-threads=2` gate passes **3,973 tests**, with zero failures and three existing
+ignored tests across 173 binaries. It uses the same frozen source, a reused private
+target and `VERUM_NO_AUTO_PRECOMPILE=1`. The receipt retains source/executable/log
+hashes, the initial Rust compile error and its correction, and the original
+baseline before the test-only `List<Text>` representation adjustment.
+
+Ordinary CLI and registry metadata replay remain separate acceptance boundaries.
+The project preflight's forward-reference error is independent of this repair.
+No archive schema or writer changed; a new reader using an existing archive must
+identify that producer artifact explicitly. These checker results do not establish
+fresh-bake, registry authentication, durable admission, installation or AOT success.

@@ -1,0 +1,22 @@
+   Compiling verum_error v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_error)
+warning: cvc5-sys@0.1.0: cvc5-sys: no linking mode configured. Enable feature `vendored` to build CVC5 from source, `system` to link system library, or set CVC5_ROOT environment variable.
+   Compiling verum_types v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_types)
+   Compiling verum_smt v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_smt)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 34.34s
+     Running unittests src/lib.rs (/Users/taaliman/.tmp/verum-codex-01a10248-types/checker-target/debug/build/verum_types/3f9c674a3e81066d/out/verum_types-3f9c674a3e81066d)
+
+running 11 tests
+test infer::core::nominal_head_identity_tests::borrowed_json_object_cannot_be_forwarded_as_integer_values ... ok
+test infer::core::nominal_head_identity_tests::borrowed_json_object_crosses_a_source_helper_signature ... ok
+test infer::core::nominal_head_identity_tests::fully_qualified_generic_and_named_heads_are_identical ... ok
+test infer::core::nominal_head_identity_tests::key_arguments_and_arity_still_constrain_declared_heads ... ok
+test infer::core::nominal_head_identity_tests::matching_leaf_without_declaration_is_not_identity ... ok
+test infer::core::nominal_head_identity_tests::metadata_generic_and_bare_named_have_one_declared_owner ... ok
+test infer::core::nominal_head_identity_tests::qualified_foreign_owner_never_borrows_the_bare_binding ... ok
+test infer::core::nominal_head_identity_tests::registered_export_alias_uses_its_declared_owner ... ok
+test infer::core::nominal_head_identity_tests::replacing_metadata_replaces_the_head_authority ... ok
+test infer::core::nominal_head_identity_tests::unknown_qualified_owner_never_borrows_the_bare_binding ... ok
+test infer::core::nominal_head_identity_tests::value_arguments_still_constrain_declared_heads ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 1047 filtered out; finished in 0.04s
+
