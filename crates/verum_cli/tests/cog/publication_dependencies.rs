@@ -180,6 +180,31 @@ fn unsupported_dependency_dry_run_refuses_before_archive_creation() {
     child_case("refuse");
 }
 
+#[test]
+fn workspace_dependency_dry_run_refuses_path_with_version() {
+    child_case("workspace_path");
+}
+
+#[test]
+fn workspace_dependency_dry_run_refuses_git_with_version() {
+    child_case("workspace_git");
+}
+
+#[test]
+fn workspace_dependency_dry_run_requires_a_declared_version() {
+    child_case("workspace_missing");
+}
+
+#[test]
+fn workspace_dependency_dry_run_refuses_invalid_semver() {
+    child_case("workspace_invalid");
+}
+
+#[test]
+fn workspace_dependency_dry_run_accepts_representable_options() {
+    child_case("workspace_valid");
+}
+
 fn child_case(case: &str) {
     let result = Command::new(std::env::current_exe().unwrap())
         .args(["--exact", CHILD, "--nocapture"])
@@ -201,6 +226,22 @@ fn child_case(case: &str) {
         std::str::from_utf8(&result.stderr).unwrap()
     );
     assert!(result.status.success(), "{case}: {output}");
+    if case == "workspace_valid" {
+        assert!(
+            output.contains("Would publish dependency-member v1.2.3"),
+            "{output}"
+        );
+        assert!(output.contains("Would publish 1 packages"), "{output}");
+    } else if case.starts_with("workspace_") {
+        assert!(!output.contains("Would publish"), "{output}");
+        assert!(output.contains("codec"), "{output}");
+        let reason = if matches!(case, "workspace_path" | "workspace_git") {
+            "source"
+        } else {
+            "version"
+        };
+        assert!(output.contains(reason), "{output}");
+    }
     if case != "upload" {
         assert!(!output.contains("valid for publishing"), "{output}");
         assert!(!output.contains("Created cog archive"), "{output}");
@@ -214,6 +255,10 @@ fn isolated_dependency_publication() {
     };
     let project = TempDir::new().unwrap();
     std::env::set_current_dir(project.path()).unwrap();
+    if case.starts_with("workspace_") {
+        workspace_dry_run(&case, project.path());
+        return;
+    }
     let name = format!("dependency-publication-{}", std::process::id());
     let archive_path = std::env::temp_dir().join(format!("{name}-1.2.3.vr"));
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -323,6 +368,47 @@ fn isolated_dependency_publication() {
         manifest_bytes.as_bytes()
     );
     assert_eq!(entries[&Text::from("src/lib.vr")].as_slice(), source_bytes);
+}
+
+fn workspace_dry_run(case: &str, project: &std::path::Path) {
+    let dependencies = match case {
+        "workspace_path" => r#"codec = { version = "^1", path = "../codec" }"#,
+        "workspace_git" => r#"codec = { version = "^1", git = "https://invalid.example/codec" }"#,
+        "workspace_missing" => r#"codec = { features = ["decode"] }"#,
+        "workspace_invalid" => r#"codec = { version = "not-semver" }"#,
+        "workspace_valid" => DETAILED,
+        _ => panic!("unknown workspace fixture case: {case}"),
+    };
+    std::fs::write(
+        project.join("verum.toml"),
+        "[cog]\nname = \"dependency-workspace\"\nversion = \"1.0.0\"\n\
+         [workspace]\nmembers = [\"member\"]\n",
+    )
+    .unwrap();
+    let member = project.join("member");
+    std::fs::create_dir(&member).unwrap();
+    std::fs::write(
+        member.join("verum.toml"),
+        format!(
+            "[cog]\nname = \"dependency-member\"\nversion = \"1.2.3\"\n\
+             [dependencies]\n{dependencies}\n"
+        ),
+    )
+    .unwrap();
+    let result = crate::commands::workspace::publish(true);
+    assert!(
+        !member.join("target").exists(),
+        "dry-run created an archive directory"
+    );
+    if case == "workspace_valid" {
+        result.expect("representable dependency options must pass workspace preflight");
+    } else {
+        let error = result.expect_err("workspace preview admitted invalid dependency metadata");
+        assert!(
+            error.to_string().contains("Failed to publish 1 packages"),
+            "{error}"
+        );
+    }
 }
 
 struct PublicationCapture {

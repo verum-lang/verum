@@ -2,7 +2,7 @@
 //! These loopback captures are transport regressions, not registry acceptance.
 
 use super::{RegistryClient, publication_client_builder};
-use crate::error::Result;
+use crate::error::{CliError, Result};
 use crate::registry::publication::{MAX_ARCHIVE_BYTES, MAX_METADATA_BYTES, PublicationLimits};
 use crate::registry::{CogMetadata, CogSignature};
 use sha2::{Digest, Sha256};
@@ -120,6 +120,92 @@ fn invalid_metadata_and_changed_archive_fail_before_http() {
         b"",
         PublicationLimits::default(),
         "Publication archive is empty",
+    );
+}
+
+#[test]
+fn direct_publication_requires_declared_dependency_versions() {
+    for specification in [
+        serde_json::json!({}),
+        serde_json::json!({"version":null, "optional":true}),
+    ] {
+        assert_dependency_rejected_before_archive_and_http(specification);
+    }
+}
+
+#[test]
+fn direct_publication_rejects_invalid_dependency_versions() {
+    for specification in [
+        serde_json::json!("not-semver"),
+        serde_json::json!({"version":"not-semver"}),
+        serde_json::json!({"version":""}),
+    ] {
+        assert_dependency_rejected_before_archive_and_http(specification);
+    }
+}
+
+#[test]
+fn direct_publication_preserves_valid_dependency_requirements_and_options() {
+    for specification in [
+        serde_json::json!("*"),
+        serde_json::json!({"version":"*", "features":null, "optional":null,
+                           "default_features":null}),
+        serde_json::json!({"version":">=1, <3", "features":["decode"], "optional":true,
+                           "default_features":false}),
+    ] {
+        let mut metadata = metadata();
+        metadata.dependencies.insert(
+            "codec".into(),
+            serde_json::from_value(specification.clone()).unwrap(),
+        );
+        let receipt = serde_json::to_string(&serde_json::json!({
+            "name":metadata.name, "version":metadata.version, "checksum":metadata.checksum,
+        }))
+        .unwrap();
+        let (result, request) = publish_to_fixture(
+            &metadata,
+            "201 Created",
+            receipt.as_bytes(),
+            "Content-Type: application/json\r\n",
+        );
+        result.expect("explicit valid dependency requirement must be publishable");
+        let body = request.body.as_slice();
+        let length = u32::from_le_bytes(body[..4].try_into().unwrap()) as usize;
+        let published: serde_json::Value = serde_json::from_slice(&body[4..4 + length]).unwrap();
+        assert_eq!(published["dependencies"]["codec"], specification);
+    }
+}
+
+fn assert_dependency_rejected_before_archive_and_http(specification: serde_json::Value) {
+    let mut metadata = metadata();
+    metadata.dependencies.insert(
+        "codec".into(),
+        serde_json::from_value(specification.clone()).unwrap(),
+    );
+    let project = TempDir::new().unwrap();
+    let missing_archive = project.path().join("must-not-be-opened.vr");
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let client = client(format!("http://{}", listener.local_addr().unwrap()).into());
+    for result in [
+        client.validate_publication(&metadata, &missing_archive),
+        client.publish(&metadata, &missing_archive, "fixture-publish-token"),
+    ] {
+        let error = result.unwrap_err();
+        assert!(
+            matches!(error, CliError::Registry(_)),
+            "{specification}: {error}"
+        );
+        let message = error.to_string();
+        assert!(
+            message.contains("codec") && message.contains("version"),
+            "{specification}: {message}"
+        );
+    }
+    assert!(!missing_archive.exists());
+    assert_eq!(
+        listener.accept().unwrap_err().kind(),
+        std::io::ErrorKind::WouldBlock
     );
 }
 
