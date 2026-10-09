@@ -50,6 +50,14 @@ use verum_common::{List, Map, Text};
 /// # }
 /// ```
 pub fn publish(dry_run: bool, allow_dirty: bool) -> Result<()> {
+    publish_with_signing_keys(dry_run, allow_dirty, &signing_key_paths())
+}
+
+fn publish_with_signing_keys(
+    dry_run: bool,
+    allow_dirty: bool,
+    signing_keys: &[PathBuf],
+) -> Result<()> {
     ui::step("Publishing cog");
 
     // Find and validate manifest
@@ -80,7 +88,7 @@ pub fn publish(dry_run: bool, allow_dirty: bool) -> Result<()> {
     ui::info(&format!("  SHA-256: {}", &checksum[..16]));
 
     // Sign cog if key is available
-    let signature = sign_cog_if_key_exists(&cog_file)?;
+    let signature = sign_cog_if_key_exists(&cog_file, signing_keys)?;
     if signature.is_some() {
         ui::success("Cog signed with Ed25519");
     }
@@ -88,7 +96,15 @@ pub fn publish(dry_run: bool, allow_dirty: bool) -> Result<()> {
     // Create metadata
     let metadata = create_metadata(&manifest, checksum, signature)?;
 
+    let client = RegistryClient::from_manifest()?;
     if dry_run {
+        // A dry run must obey the same wire admission rules as the upload.
+        // In particular, signing locally does not imply v1 accepts signatures.
+        let validation = client.validate_publication(&metadata, &cog_file);
+        if let Err(error) = validation {
+            let _ = fs::remove_file(&cog_file);
+            return Err(error);
+        }
         ui::info("");
         ui::info(&format!("{}", "[DRY RUN] Would publish:".bold()));
         ui::info(&format!("  Name: {}", manifest.cog.name));
@@ -108,7 +124,6 @@ pub fn publish(dry_run: bool, allow_dirty: bool) -> Result<()> {
 
     // Upload to registry
     ui::step("Uploading to registry");
-    let client = RegistryClient::from_manifest()?;
     client.publish(&metadata, &cog_file, token.as_str())?;
 
     // Clean up temp file
@@ -436,18 +451,22 @@ fn calculate_checksum(path: &Path) -> Result<String> {
     Ok(hex::encode(hasher.finalize()))
 }
 
-/// Sign cog if signing key exists
-fn sign_cog_if_key_exists(cog_path: &Path) -> Result<Option<crate::registry::CogSignature>> {
-    // Look for signing key in standard locations
-    let key_paths = [
+/// Existing standard signing-key locations, in lookup order.
+fn signing_key_paths() -> [PathBuf; 2] {
+    [
         dirs::config_dir()
             .map(|d| d.join("verum").join("signing.key"))
             .unwrap_or_default(),
         dirs::home_dir()
             .map(|d| d.join(".verum").join("signing.key"))
             .unwrap_or_default(),
-    ];
+    ]
+}
 
+fn sign_cog_if_key_exists(
+    cog_path: &Path,
+    key_paths: &[PathBuf],
+) -> Result<Option<crate::registry::CogSignature>> {
     for key_path in key_paths.iter() {
         if key_path.exists() {
             let mut signer = CogSigner::new();
@@ -685,3 +704,7 @@ mod tests {
 #[cfg(test)]
 #[path = "../tests/cog/configured_registry_downloads.rs"]
 mod configured_registry_downloads;
+
+#[cfg(test)]
+#[path = "../tests/cog/publication_validation.rs"]
+mod publication_validation;

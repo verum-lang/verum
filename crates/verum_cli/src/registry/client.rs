@@ -1,5 +1,6 @@
 // Cog registry HTTP client: package fetching, publishing, authentication
 
+use super::publication::{PUBLICATION_CONTENT_TYPE, PublicationLimits, encode_publication};
 use super::types::*;
 use crate::error::{CliError, Result};
 use reqwest::blocking::Client;
@@ -11,20 +12,20 @@ use verum_common::{List, Text};
 pub struct RegistryClient {
     base_url: Text,
     client: Client,
+    publication_client: Option<Client>,
+    publication_limits: PublicationLimits,
 }
 
 impl RegistryClient {
     /// Create new registry client
     pub fn new(base_url: impl Into<Text>) -> Result<Self> {
-        let client = Client::builder()
-            .timeout(Duration::from_secs(30))
-            .user_agent("verum-cli/1.0.0")
-            .build()
-            .map_err(|e| CliError::Network(e.to_string()))?;
-
         Ok(Self {
             base_url: base_url.into(),
-            client,
+            client: http_client_builder()
+                .build()
+                .map_err(|error| CliError::Network(error.to_string()))?,
+            publication_client: None,
+            publication_limits: PublicationLimits::default(),
         })
     }
 
@@ -73,6 +74,12 @@ impl RegistryClient {
         // registry instead of the source its owner intended.
         let manifest = crate::config::Manifest::from_file(&path)?;
         Self::new(manifest.registry.index)
+    }
+
+    /// Apply validated local source-publication limits.
+    pub fn with_publication_limits(mut self, limits: PublicationLimits) -> Self {
+        self.publication_limits = limits;
+        self
     }
 
     /// Registry selected for this operation, also recorded in its lockfile.
@@ -197,6 +204,11 @@ impl RegistryClient {
         Ok(())
     }
 
+    /// Validate the same request used by publication, without HTTP or credentials.
+    pub fn validate_publication(&self, manifest: &CogMetadata, cog_file: &Path) -> Result<()> {
+        encode_publication(manifest, cog_file, self.publication_limits).map(|_| ())
+    }
+
     /// Publish package
     pub fn publish(&self, manifest: &CogMetadata, cog_file: &Path, token: &str) -> Result<()> {
         let url = format!(
@@ -204,14 +216,22 @@ impl RegistryClient {
             super::registry_api_url(self.base_url.as_str())
         );
 
-        let package_bytes = std::fs::read(cog_file)?;
+        let envelope = encode_publication(manifest, cog_file, self.publication_limits)?;
 
-        let response = self
-            .client
+        // Construct the no-redirect transport only for publication. Metadata
+        // and download clients retain their existing initialization behavior.
+        let publication_client = match &self.publication_client {
+            Some(client) => client.clone(),
+            None => publication_client_builder()
+                .build()
+                .map_err(|error| CliError::Network(error.to_string()))?,
+        };
+        let response = publication_client
             .post(&url)
             .header("Authorization", format!("Bearer {}", token))
-            .json(manifest)
-            .body(package_bytes)
+            .header("Content-Type", PUBLICATION_CONTENT_TYPE)
+            // reqwest's owned body uses Vec at the external API boundary.
+            .body(Vec::from(envelope))
             .send()
             .map_err(|e| CliError::Network(e.to_string()))?;
 
@@ -373,6 +393,17 @@ impl RegistryClient {
 
         Ok(())
     }
+}
+
+fn http_client_builder() -> reqwest::blocking::ClientBuilder {
+    Client::builder()
+        .timeout(Duration::from_secs(30))
+        .user_agent("verum-cli/1.0.0")
+}
+
+fn publication_client_builder() -> reqwest::blocking::ClientBuilder {
+    // A redirect must not send unpublished package bytes to another origin.
+    http_client_builder().redirect(reqwest::redirect::Policy::none())
 }
 
 #[cfg(test)]
