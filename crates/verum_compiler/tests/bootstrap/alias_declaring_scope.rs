@@ -396,3 +396,40 @@ fn delayed_function_bodies_keep_their_declaring_mounts_and_call_signatures() {
         }
     }
 }
+
+#[test]
+fn inline_owners_keep_explicit_and_empty_mount_scopes_in_both_file_orders() {
+    let mounted = (
+        "fixture.inline_mounts",
+        r#"public module selected {
+            mount foreign.result.Result;
+            public type Selected<T> is Result<T, Bool>;
+        }"#,
+    );
+    let empty = (
+        "fixture.inline_empty",
+        r#"public module untouched {
+            public type Plain<T> is Result<T, Int>;
+        }"#,
+    );
+    for files in [[mounted, empty, ALIAS], [ALIAS, empty, mounted]] {
+        let (module, archive) = bootstrap(&files, false);
+        let decoded = archive.load_module("fixture").unwrap();
+        for module in [&module, &decoded] {
+            let foreign_id = declaration(module, "foreign.result", "Result").id;
+            assert_ne!(foreign_id, TypeId::RESULT);
+            assert_eq!(
+                target(module, "selected", "Selected"),
+                expected(foreign_id, TypeId::BOOL),
+                "an inline owner keeps its own explicit mount",
+            );
+            for (owner, leaf) in [("untouched", "Plain"), (ALIAS.0, "IoResult")] {
+                assert_eq!(
+                    target(module, owner, leaf),
+                    expected(TypeId::RESULT, TypeId::INT),
+                    "known empty inline and file scopes cannot inherit another owner's mount",
+                );
+            }
+        }
+    }
+}
