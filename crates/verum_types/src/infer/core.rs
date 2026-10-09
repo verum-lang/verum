@@ -4634,3 +4634,7 @@ impl Default for TypeChecker {
         Self::new()
     }
 }
+
+#[cfg(test)]
+#[path = "../../tests/unit/nominal_head_identity.rs"]
+mod nominal_head_identity_tests;
