@@ -1,0 +1,77 @@
+{
+  "task": "T1636",
+  "component": "credentials_file",
+  "scope": "Run the unmodified typed credential-file loader, real File/Read path and deterministic reader controls with an exact hashed test credential asset.\n\nThis component does not establish startup wiring, filesystem ownership, hot reload, live HTTP publication, durable admission, or AOT.",
+  "source_inputs": {
+    "src/protocol/authority.vr": "315fc641b19910be3fbc0add4b666771052f8b42af16e8a98e38fac002c5e3f6",
+    "src/node/publication_auth.vr": "f070dbe89ec702c74057796cb8672274f14419689bcf0d0149c0e669baabd22f",
+    "src/node/publication_credentials_file.vr": "c80b2e6c598951656e6143d7e0572a7b40fd522e86ca046543e371fd51a0005a",
+    "tests/fixtures/publication_auth/credentials-v1.json": "028647395adbb09a04439fd2cb9b2d8e63016dd40eaa2f667283e43ff57abbbf",
+    "tests/publication_credentials_file.vr": "0ecd529f6557837e4269a86bb637d94467379815e2d3668ae1337d1203e66733",
+    "tests/publication_credentials_file.expected": "ea8983094700fc3c56261d6cd25453978f3d0dce1babee5822083bce3b5d2f9a",
+    "tools/run_publication_envelope.py": "e3a02c1a3a6d7397316f4c247f042ab2464878419a91f7f4427b298ef7829ca9"
+  },
+  "project_inputs": {
+    "src/protocol/authority.vr": "315fc641b19910be3fbc0add4b666771052f8b42af16e8a98e38fac002c5e3f6",
+    "src/node/publication_auth.vr": "f070dbe89ec702c74057796cb8672274f14419689bcf0d0149c0e669baabd22f",
+    "src/node/publication_credentials_file.vr": "c80b2e6c598951656e6143d7e0572a7b40fd522e86ca046543e371fd51a0005a",
+    "tests/fixtures/publication_auth/credentials-v1.json": "028647395adbb09a04439fd2cb9b2d8e63016dd40eaa2f667283e43ff57abbbf",
+    "src/main.vr": "a50ce42e32ac5d7468905a690dff25dad772a459a58fc171fa9c41a2ef0b0f38",
+    "verum.toml": "1d99c409b02e7bdb88b9765716721b42e2360e7ecd55f9bbe2a4b18213f97ab2"
+  },
+  "entry_transformation": "Only replace the fixture's module header with verum_registry.main.",
+  "module_assemblies": [],
+  "cli_sha256": "e29bc1de67057c286cc845e45371167c04bb8ddfe07e0ad24db15bd0e6480cab",
+  "expected_cli_sha256": "e29bc1de67057c286cc845e45371167c04bb8ddfe07e0ad24db15bd0e6480cab",
+  "language_source_commit_supplied": "49559a042a30f65c524c753d2f13c9f2838f9818",
+  "identity_boundary": "The executable hash is measured; its source commit is supplied by the operator.",
+  "command": [
+    "/private/tmp/verum-registry-stage21-array-storage/verum-49559a042",
+    "run",
+    "--tier",
+    "interpret"
+  ],
+  "working_directory": "/private/tmp/verum-publication-credentials_file-v1m9ms0p",
+  "environment_overrides": {
+    "NO_COLOR": "1",
+    "VERUM_NO_OBJECT_CACHE": "1",
+    "TMPDIR": "/private/tmp"
+  },
+  "deadline_seconds": 600.0,
+  "status": "failed",
+  "checks": {
+    "exit_zero": false,
+    "within_deadline": true,
+    "exact_stdout": false,
+    "source_unchanged": true,
+    "project_unchanged": true,
+    "executable_unchanged": true
+  },
+  "elapsed_seconds": 73.0,
+  "returncode": 1,
+  "timed_out": false,
+  "interrupted": false,
+  "runner_error": null,
+  "source_inputs_after": {
+    "src/protocol/authority.vr": "315fc641b19910be3fbc0add4b666771052f8b42af16e8a98e38fac002c5e3f6",
+    "src/node/publication_auth.vr": "f070dbe89ec702c74057796cb8672274f14419689bcf0d0149c0e669baabd22f",
+    "src/node/publication_credentials_file.vr": "c80b2e6c598951656e6143d7e0572a7b40fd522e86ca046543e371fd51a0005a",
+    "tests/fixtures/publication_auth/credentials-v1.json": "028647395adbb09a04439fd2cb9b2d8e63016dd40eaa2f667283e43ff57abbbf",
+    "tests/publication_credentials_file.vr": "0ecd529f6557837e4269a86bb637d94467379815e2d3668ae1337d1203e66733",
+    "tests/publication_credentials_file.expected": "ea8983094700fc3c56261d6cd25453978f3d0dce1babee5822083bce3b5d2f9a",
+    "tools/run_publication_envelope.py": "e3a02c1a3a6d7397316f4c247f042ab2464878419a91f7f4427b298ef7829ca9"
+  },
+  "project_inputs_after": {
+    "src/main.vr": "a50ce42e32ac5d7468905a690dff25dad772a459a58fc171fa9c41a2ef0b0f38",
+    "src/node/publication_auth.vr": "f070dbe89ec702c74057796cb8672274f14419689bcf0d0149c0e669baabd22f",
+    "src/node/publication_credentials_file.vr": "c80b2e6c598951656e6143d7e0572a7b40fd522e86ca046543e371fd51a0005a",
+    "src/protocol/authority.vr": "315fc641b19910be3fbc0add4b666771052f8b42af16e8a98e38fac002c5e3f6",
+    "tests/fixtures/publication_auth/credentials-v1.json": "028647395adbb09a04439fd2cb9b2d8e63016dd40eaa2f667283e43ff57abbbf",
+    "verum.toml": "1d99c409b02e7bdb88b9765716721b42e2360e7ecd55f9bbe2a4b18213f97ab2"
+  },
+  "cli_sha256_after": "e29bc1de67057c286cc845e45371167c04bb8ddfe07e0ad24db15bd0e6480cab",
+  "logs": {
+    "stdout.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderr.log": "da1ff9d32b5a5a510f2ce5b5ef2fe1cdc66c01dc048d9b1412313ce4b2c17380"
+  }
+}

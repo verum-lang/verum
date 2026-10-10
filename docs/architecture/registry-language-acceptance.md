@@ -1029,3 +1029,22 @@ the earlier five diagnostics. All earlier source inputs are unchanged; the
 new snapshot compiles 29 source modules. T1681 remains open, and successful
 authentication does not make this a complete-project acceptance. Exact output
 is retained in the linked runtime record.
+
+
+### Publication preparation and external privacy
+
+The same fresh `49559a042` product passes the public single-consumption project
+control and refuses affine reuse with E310. Four external private-field read
+and construction controls incorrectly succeed (T1713). The passing runtime
+isolation fixture deliberately appends a private helper and does not validate
+those visibility boundaries. Credential-file and preparation runtime checks
+stop on returned public method lookup (T1711); preparation also reports a
+borrowed fixed-array/List mismatch. The bounds fixture stops on a mounted
+constructor selecting a foreign nominal owner (T1212).
+
+The [publication boundary record](evidence/registry-stage21-publication/review.json)
+retains all original receipts, exact source/project bytes, and specific
+diagnostic review. It also retains the two passing narrow endian controls and
+website validation at `73390a4`. Authentication candidate `c02238261` remains
+unintegrated pending compiler visibility and runtime acceptance; passing its
+standalone authentication fixture is insufficient for publication readiness.

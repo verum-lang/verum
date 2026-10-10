@@ -1,0 +1,1046 @@
+{
+  "tasks": [
+    "T1635",
+    "T1636",
+    "T1713"
+  ],
+  "language_commit": "49559a042a30f65c524c753d2f13c9f2838f9818",
+  "registry_candidate": "c02238261fee7cf7a0885886e5e3cf9928e7a73d",
+  "cli_sha256": "e29bc1de67057c286cc845e45371167c04bb8ddfe07e0ad24db15bd0e6480cab",
+  "build_manifest": "../registry-stage21-runtime/build/build-manifest.json",
+  "build_manifest_sha256": "cc3119ce9094b199abb682796c2d0741057e24b1c19389daee264af4c921fd34",
+  "schema": "v53-declared-function-bodies",
+  "cases": {
+    "prepare": {
+      "classification": "compile_failure: eight returned-public-method errors (T1711), plus one borrowed fixed-array versus List mismatch; no preparation runtime result",
+      "receipt": "prepare/result.json",
+      "elapsed_seconds": 86.56,
+      "input_retention": "Reconstructed byte-for-byte from pinned source and recorded assembly; all original receipt hashes match."
+    },
+    "credentials_file": {
+      "classification": "compile_failure: return-inferred PublisherAttribution.principal_id is missing (T1711); file-loading runtime not reached",
+      "receipt": "credentials_file/result.json",
+      "elapsed_seconds": 73.0,
+      "input_retention": "Reconstructed byte-for-byte from pinned source and recorded assembly; all original receipt hashes match."
+    },
+    "auth_bounds": {
+      "classification": "compile_failure: mounted core.text.builder.TextBuilder.new returns a foreign same-leaf owner (T1212); bound tests not reached",
+      "receipt": "auth_bounds/result.json",
+      "elapsed_seconds": 69.17,
+      "input_retention": "Reconstructed byte-for-byte from pinned source and recorded assembly; all original receipt hashes match."
+    },
+    "auth_isolation": {
+      "classification": "passed: exact private-state isolation fixture with an explicitly appended test helper; no external privacy conclusion",
+      "receipt": "auth_isolation/result.json",
+      "elapsed_seconds": 111.27,
+      "input_retention": "Reconstructed byte-for-byte from pinned source and recorded assembly; all original receipt hashes match."
+    },
+    "publication_prepare_consume": {
+      "classification": "accepted: one public consuming into_parts call checks",
+      "receipt": "type-boundaries/publication_prepare_consume/result.json",
+      "elapsed_seconds": 78.887,
+      "input_retention": "Original complete project snapshot."
+    },
+    "publication_auth_private_store": {
+      "classification": "incorrectly accepted: external private-field access or construction (T1713)",
+      "receipt": "type-boundaries/publication_auth_private_store/result.json",
+      "elapsed_seconds": 97.57,
+      "input_retention": "Original complete project snapshot."
+    },
+    "publication_auth_construct_store": {
+      "classification": "incorrectly accepted: external private-field access or construction (T1713)",
+      "receipt": "type-boundaries/publication_auth_construct_store/result.json",
+      "elapsed_seconds": 88.344,
+      "input_retention": "Original complete project snapshot."
+    },
+    "publication_prepare_construct": {
+      "classification": "incorrectly accepted: external private-field access or construction (T1713)",
+      "receipt": "type-boundaries/publication_prepare_construct/result.json",
+      "elapsed_seconds": 89.332,
+      "input_retention": "Original complete project snapshot."
+    },
+    "publication_prepare_private_field": {
+      "classification": "incorrectly accepted: external private-field access or construction (T1713)",
+      "receipt": "type-boundaries/publication_prepare_private_field/result.json",
+      "elapsed_seconds": 90.3,
+      "input_retention": "Original complete project snapshot."
+    },
+    "publication_prepare_affine_reuse": {
+      "classification": "required refusal: E310 uses move offset 237 and second-use offset 277; displayed excerpt highlights first use",
+      "receipt": "type-boundaries/publication_prepare_affine_reuse/result.json",
+      "elapsed_seconds": 89.073,
+      "input_retention": "Original complete project snapshot."
+    },
+    "big_endian_u16_annotated": {
+      "classification": "passed: unchanged ordinary interpreter endian fixture",
+      "receipt": "narrow-endian/big_endian_u16_annotated/result.json"
+    },
+    "big_endian_u32_annotated": {
+      "classification": "passed: unchanged ordinary interpreter endian fixture",
+      "receipt": "narrow-endian/big_endian_u32_annotated/result.json"
+    }
+  },
+  "website_commit": "73390a4f0613f582820b59f4a81d1237b51a1120",
+  "files": {
+    "prepare/source/src/protocol/authority.vr.gz": {
+      "raw_sha256": "315fc641b19910be3fbc0add4b666771052f8b42af16e8a98e38fac002c5e3f6",
+      "stored_sha256": "6e30359289850d8425fe0043c2be40a11b749c9f151253a3bc5f60f201d60db4",
+      "raw_bytes": 9565,
+      "stored_bytes": 3300,
+      "compressed": true
+    },
+    "prepare/source/src/protocol/publication.vr.gz": {
+      "raw_sha256": "a76e24d9ef9086bd81d665d3113f60e8949bdac6b6b5bb6be2087781b5047516",
+      "stored_sha256": "b51937e2ff343de7c968221d3c17027284821de63e84bb05d39b013c76b2cda5",
+      "raw_bytes": 4409,
+      "stored_bytes": 1420,
+      "compressed": true
+    },
+    "prepare/source/src/protocol/publication_metadata.vr.gz": {
+      "raw_sha256": "558a1a0de43bebdca1f5f2bc718786feb3a32e8a45a212f3d4001dffc0b88148",
+      "stored_sha256": "f76862f79b636daf5c2c9382bcde93dd1ab4a3ebf12b8ef3cfea08a5ff60941d",
+      "raw_bytes": 10479,
+      "stored_bytes": 2511,
+      "compressed": true
+    },
+    "prepare/source/src/node/publication_auth.vr.gz": {
+      "raw_sha256": "f070dbe89ec702c74057796cb8672274f14419689bcf0d0149c0e669baabd22f",
+      "stored_sha256": "f839b58103aa2291902327e2649d737c9ce6e09ba9b59bc11df83ca160c7a649",
+      "raw_bytes": 16587,
+      "stored_bytes": 3697,
+      "compressed": true
+    },
+    "prepare/source/src/node/publication_prepare.vr.gz": {
+      "raw_sha256": "07a0ee43a30a46c34fef7bf3b2778bd87fa46f943e34940d04d6d1e5ca163b0e",
+      "stored_sha256": "5408924312a5dd81f82a70f041e8986ed1d7721ef06a5a1f66c89c65ee846e45",
+      "raw_bytes": 7763,
+      "stored_bytes": 2372,
+      "compressed": true
+    },
+    "prepare/source/tests/publication_prepare.vr.gz": {
+      "raw_sha256": "4da6282bd5f2722190386d05c0b639332e387dbb6ca70086330968ae459e658b",
+      "stored_sha256": "75d9d4d7418eff7b8653663b2b9837387e90ae82bfc7beeee834dead27bd551d",
+      "raw_bytes": 11751,
+      "stored_bytes": 3155,
+      "compressed": true
+    },
+    "prepare/source/tests/publication_prepare.expected.gz": {
+      "raw_sha256": "528ac981b1dc6609f29dbb5b649c0ce972344a90ea3abfa69e57f9005d2cf0c1",
+      "stored_sha256": "cba88a0223778ed0bfc9109f30f97ad0317a80e9a2b5f97fc2f897cb0d49d741",
+      "raw_bytes": 24,
+      "stored_bytes": 44,
+      "compressed": true
+    },
+    "prepare/source/tools/run_publication_envelope.py.gz": {
+      "raw_sha256": "e3a02c1a3a6d7397316f4c247f042ab2464878419a91f7f4427b298ef7829ca9",
+      "stored_sha256": "a8db44763a4de292e25e6e15bc4b4b2c9a594c57fd9ddc0478303a5c3609f460",
+      "raw_bytes": 16226,
+      "stored_bytes": 4602,
+      "compressed": true
+    },
+    "prepare/reconstructed-inputs/src/protocol/authority.vr.gz": {
+      "raw_sha256": "315fc641b19910be3fbc0add4b666771052f8b42af16e8a98e38fac002c5e3f6",
+      "stored_sha256": "6e30359289850d8425fe0043c2be40a11b749c9f151253a3bc5f60f201d60db4",
+      "raw_bytes": 9565,
+      "stored_bytes": 3300,
+      "compressed": true
+    },
+    "prepare/reconstructed-inputs/src/protocol/publication.vr.gz": {
+      "raw_sha256": "a76e24d9ef9086bd81d665d3113f60e8949bdac6b6b5bb6be2087781b5047516",
+      "stored_sha256": "b51937e2ff343de7c968221d3c17027284821de63e84bb05d39b013c76b2cda5",
+      "raw_bytes": 4409,
+      "stored_bytes": 1420,
+      "compressed": true
+    },
+    "prepare/reconstructed-inputs/src/protocol/publication_metadata.vr.gz": {
+      "raw_sha256": "558a1a0de43bebdca1f5f2bc718786feb3a32e8a45a212f3d4001dffc0b88148",
+      "stored_sha256": "f76862f79b636daf5c2c9382bcde93dd1ab4a3ebf12b8ef3cfea08a5ff60941d",
+      "raw_bytes": 10479,
+      "stored_bytes": 2511,
+      "compressed": true
+    },
+    "prepare/reconstructed-inputs/src/node/publication_auth.vr.gz": {
+      "raw_sha256": "f070dbe89ec702c74057796cb8672274f14419689bcf0d0149c0e669baabd22f",
+      "stored_sha256": "f839b58103aa2291902327e2649d737c9ce6e09ba9b59bc11df83ca160c7a649",
+      "raw_bytes": 16587,
+      "stored_bytes": 3697,
+      "compressed": true
+    },
+    "prepare/reconstructed-inputs/src/node/publication_prepare.vr.gz": {
+      "raw_sha256": "07a0ee43a30a46c34fef7bf3b2778bd87fa46f943e34940d04d6d1e5ca163b0e",
+      "stored_sha256": "5408924312a5dd81f82a70f041e8986ed1d7721ef06a5a1f66c89c65ee846e45",
+      "raw_bytes": 7763,
+      "stored_bytes": 2372,
+      "compressed": true
+    },
+    "prepare/reconstructed-inputs/src/main.vr.gz": {
+      "raw_sha256": "2329e19b002435e31198c20aa0895cfce75a112b333fd3bff7947ac35ef80095",
+      "stored_sha256": "10d7a1681daef0b39c0a494540556478b04fa987fa2897923d92a5d4b4c7ebd0",
+      "raw_bytes": 11730,
+      "stored_bytes": 3148,
+      "compressed": true
+    },
+    "prepare/reconstructed-inputs/verum.toml.gz": {
+      "raw_sha256": "1d99c409b02e7bdb88b9765716721b42e2360e7ecd55f9bbe2a4b18213f97ab2",
+      "stored_sha256": "90032de956afe0f7d1d95ae751f1679da6514795c9ee0ba6ea3838929732c327",
+      "raw_bytes": 65,
+      "stored_bytes": 76,
+      "compressed": true
+    },
+    "prepare/stdout.log.gz": {
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stored_sha256": "9ceffb7310338057cfe71a4ae1e2c98d2c485d81cdef906532a801f457a38d64",
+      "raw_bytes": 0,
+      "stored_bytes": 20,
+      "compressed": true
+    },
+    "prepare/stderr.log.gz": {
+      "raw_sha256": "a6e1beb74698d90b3d743b536e1d9f0677e0a01fb41dbf1c75c5555d0062519d",
+      "stored_sha256": "42d25bb1b25b07d5e1e90a6b266a29564fc7910b9b633133c83157bdb44695b3",
+      "raw_bytes": 6589,
+      "stored_bytes": 1368,
+      "compressed": true
+    },
+    "prepare/result.json": {
+      "raw_sha256": "9ada90e43e77c4f9bb290adf60ec30a6fb618786f93fe10ccb678e216d246169",
+      "stored_sha256": "9ada90e43e77c4f9bb290adf60ec30a6fb618786f93fe10ccb678e216d246169",
+      "raw_bytes": 5171,
+      "stored_bytes": 5171,
+      "compressed": false
+    },
+    "credentials_file/source/src/protocol/authority.vr.gz": {
+      "raw_sha256": "315fc641b19910be3fbc0add4b666771052f8b42af16e8a98e38fac002c5e3f6",
+      "stored_sha256": "6e30359289850d8425fe0043c2be40a11b749c9f151253a3bc5f60f201d60db4",
+      "raw_bytes": 9565,
+      "stored_bytes": 3300,
+      "compressed": true
+    },
+    "credentials_file/source/src/node/publication_auth.vr.gz": {
+      "raw_sha256": "f070dbe89ec702c74057796cb8672274f14419689bcf0d0149c0e669baabd22f",
+      "stored_sha256": "f839b58103aa2291902327e2649d737c9ce6e09ba9b59bc11df83ca160c7a649",
+      "raw_bytes": 16587,
+      "stored_bytes": 3697,
+      "compressed": true
+    },
+    "credentials_file/source/src/node/publication_credentials_file.vr.gz": {
+      "raw_sha256": "c80b2e6c598951656e6143d7e0572a7b40fd522e86ca046543e371fd51a0005a",
+      "stored_sha256": "c28da3ecc8e522de5b1f9f78780dc69958b419902695104424b46f1fe18d23d2",
+      "raw_bytes": 2564,
+      "stored_bytes": 975,
+      "compressed": true
+    },
+    "credentials_file/source/tests/fixtures/publication_auth/credentials-v1.json.gz": {
+      "raw_sha256": "028647395adbb09a04439fd2cb9b2d8e63016dd40eaa2f667283e43ff57abbbf",
+      "stored_sha256": "42235e4b001dcf604658eda15e1141826ca76ac0e4ec7e8c9a3618323c96e56e",
+      "raw_bytes": 1258,
+      "stored_bytes": 431,
+      "compressed": true
+    },
+    "credentials_file/source/tests/publication_credentials_file.vr.gz": {
+      "raw_sha256": "0ecd529f6557837e4269a86bb637d94467379815e2d3668ae1337d1203e66733",
+      "stored_sha256": "b436ff7b72c6bcd3db2f7772de94e8bc95f56eb06a088b64e04c79512440e503",
+      "raw_bytes": 5456,
+      "stored_bytes": 1766,
+      "compressed": true
+    },
+    "credentials_file/source/tests/publication_credentials_file.expected.gz": {
+      "raw_sha256": "ea8983094700fc3c56261d6cd25453978f3d0dce1babee5822083bce3b5d2f9a",
+      "stored_sha256": "d99377470336208f5eecba1067f90a385ff42d3947546844845ec9e3f36e401b",
+      "raw_bytes": 33,
+      "stored_bytes": 53,
+      "compressed": true
+    },
+    "credentials_file/source/tools/run_publication_envelope.py.gz": {
+      "raw_sha256": "e3a02c1a3a6d7397316f4c247f042ab2464878419a91f7f4427b298ef7829ca9",
+      "stored_sha256": "a8db44763a4de292e25e6e15bc4b4b2c9a594c57fd9ddc0478303a5c3609f460",
+      "raw_bytes": 16226,
+      "stored_bytes": 4602,
+      "compressed": true
+    },
+    "credentials_file/reconstructed-inputs/src/protocol/authority.vr.gz": {
+      "raw_sha256": "315fc641b19910be3fbc0add4b666771052f8b42af16e8a98e38fac002c5e3f6",
+      "stored_sha256": "6e30359289850d8425fe0043c2be40a11b749c9f151253a3bc5f60f201d60db4",
+      "raw_bytes": 9565,
+      "stored_bytes": 3300,
+      "compressed": true
+    },
+    "credentials_file/reconstructed-inputs/src/node/publication_auth.vr.gz": {
+      "raw_sha256": "f070dbe89ec702c74057796cb8672274f14419689bcf0d0149c0e669baabd22f",
+      "stored_sha256": "f839b58103aa2291902327e2649d737c9ce6e09ba9b59bc11df83ca160c7a649",
+      "raw_bytes": 16587,
+      "stored_bytes": 3697,
+      "compressed": true
+    },
+    "credentials_file/reconstructed-inputs/src/node/publication_credentials_file.vr.gz": {
+      "raw_sha256": "c80b2e6c598951656e6143d7e0572a7b40fd522e86ca046543e371fd51a0005a",
+      "stored_sha256": "c28da3ecc8e522de5b1f9f78780dc69958b419902695104424b46f1fe18d23d2",
+      "raw_bytes": 2564,
+      "stored_bytes": 975,
+      "compressed": true
+    },
+    "credentials_file/reconstructed-inputs/tests/fixtures/publication_auth/credentials-v1.json.gz": {
+      "raw_sha256": "028647395adbb09a04439fd2cb9b2d8e63016dd40eaa2f667283e43ff57abbbf",
+      "stored_sha256": "42235e4b001dcf604658eda15e1141826ca76ac0e4ec7e8c9a3618323c96e56e",
+      "raw_bytes": 1258,
+      "stored_bytes": 431,
+      "compressed": true
+    },
+    "credentials_file/reconstructed-inputs/src/main.vr.gz": {
+      "raw_sha256": "a50ce42e32ac5d7468905a690dff25dad772a459a58fc171fa9c41a2ef0b0f38",
+      "stored_sha256": "342ad65e3d33fb7002f1222a49adac4736857c0d865a9d66ce1e5f49fc0dea0c",
+      "raw_bytes": 5426,
+      "stored_bytes": 1761,
+      "compressed": true
+    },
+    "credentials_file/reconstructed-inputs/verum.toml.gz": {
+      "raw_sha256": "1d99c409b02e7bdb88b9765716721b42e2360e7ecd55f9bbe2a4b18213f97ab2",
+      "stored_sha256": "90032de956afe0f7d1d95ae751f1679da6514795c9ee0ba6ea3838929732c327",
+      "raw_bytes": 65,
+      "stored_bytes": 76,
+      "compressed": true
+    },
+    "credentials_file/stdout.log.gz": {
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stored_sha256": "9ceffb7310338057cfe71a4ae1e2c98d2c485d81cdef906532a801f457a38d64",
+      "raw_bytes": 0,
+      "stored_bytes": 20,
+      "compressed": true
+    },
+    "credentials_file/stderr.log.gz": {
+      "raw_sha256": "da1ff9d32b5a5a510f2ce5b5ef2fe1cdc66c01dc048d9b1412313ce4b2c17380",
+      "stored_sha256": "4fd86f963a4ef0857e517436970689b67c367b99d1c436b22bbcb632746f8733",
+      "raw_bytes": 834,
+      "stored_bytes": 471,
+      "compressed": true
+    },
+    "credentials_file/result.json": {
+      "raw_sha256": "5182dffd8f9caf8fbb2015e2c7f6f6c474d760d5e35f5dbe35c833df9ec84677",
+      "stored_sha256": "5182dffd8f9caf8fbb2015e2c7f6f6c474d760d5e35f5dbe35c833df9ec84677",
+      "raw_bytes": 4749,
+      "stored_bytes": 4749,
+      "compressed": false
+    },
+    "auth_bounds/source/src/protocol/authority.vr.gz": {
+      "raw_sha256": "315fc641b19910be3fbc0add4b666771052f8b42af16e8a98e38fac002c5e3f6",
+      "stored_sha256": "6e30359289850d8425fe0043c2be40a11b749c9f151253a3bc5f60f201d60db4",
+      "raw_bytes": 9565,
+      "stored_bytes": 3300,
+      "compressed": true
+    },
+    "auth_bounds/source/src/node/publication_auth.vr.gz": {
+      "raw_sha256": "f070dbe89ec702c74057796cb8672274f14419689bcf0d0149c0e669baabd22f",
+      "stored_sha256": "f839b58103aa2291902327e2649d737c9ce6e09ba9b59bc11df83ca160c7a649",
+      "raw_bytes": 16587,
+      "stored_bytes": 3697,
+      "compressed": true
+    },
+    "auth_bounds/source/tests/publication_auth_bounds.vr.gz": {
+      "raw_sha256": "73f81cb413d405411eb2da0e65041e60456dfd0e2cc0800128f3f860b59e3c71",
+      "stored_sha256": "831c6d80d23efd8c752a3b2ecc37a858d046f97d8d356c22501d41575ce2dfbe",
+      "raw_bytes": 3719,
+      "stored_bytes": 1202,
+      "compressed": true
+    },
+    "auth_bounds/source/tests/publication_auth_bounds.expected.gz": {
+      "raw_sha256": "b2e02c2b11b53cc79f704a070f91bf1e5f9bc3a0ae8d4110dbe69b57c668466f",
+      "stored_sha256": "c1e1657c0a73ccabefb58befd18946c3dfd56ce0b2a6d01408b2aa438295d090",
+      "raw_bytes": 28,
+      "stored_bytes": 48,
+      "compressed": true
+    },
+    "auth_bounds/source/tools/run_publication_envelope.py.gz": {
+      "raw_sha256": "e3a02c1a3a6d7397316f4c247f042ab2464878419a91f7f4427b298ef7829ca9",
+      "stored_sha256": "a8db44763a4de292e25e6e15bc4b4b2c9a594c57fd9ddc0478303a5c3609f460",
+      "raw_bytes": 16226,
+      "stored_bytes": 4602,
+      "compressed": true
+    },
+    "auth_bounds/reconstructed-inputs/src/protocol/authority.vr.gz": {
+      "raw_sha256": "315fc641b19910be3fbc0add4b666771052f8b42af16e8a98e38fac002c5e3f6",
+      "stored_sha256": "6e30359289850d8425fe0043c2be40a11b749c9f151253a3bc5f60f201d60db4",
+      "raw_bytes": 9565,
+      "stored_bytes": 3300,
+      "compressed": true
+    },
+    "auth_bounds/reconstructed-inputs/src/node/publication_auth.vr.gz": {
+      "raw_sha256": "f070dbe89ec702c74057796cb8672274f14419689bcf0d0149c0e669baabd22f",
+      "stored_sha256": "f839b58103aa2291902327e2649d737c9ce6e09ba9b59bc11df83ca160c7a649",
+      "raw_bytes": 16587,
+      "stored_bytes": 3697,
+      "compressed": true
+    },
+    "auth_bounds/reconstructed-inputs/src/main.vr.gz": {
+      "raw_sha256": "f4cddc56f87c58779e945891b0dca0c5c7be9712498c63a48576391e00c24698",
+      "stored_sha256": "c6b68b66a4751f81e5fd1b8c2350622702424d73b19c3c97ec6852655272d7df",
+      "raw_bytes": 3694,
+      "stored_bytes": 1195,
+      "compressed": true
+    },
+    "auth_bounds/reconstructed-inputs/verum.toml.gz": {
+      "raw_sha256": "1d99c409b02e7bdb88b9765716721b42e2360e7ecd55f9bbe2a4b18213f97ab2",
+      "stored_sha256": "90032de956afe0f7d1d95ae751f1679da6514795c9ee0ba6ea3838929732c327",
+      "raw_bytes": 65,
+      "stored_bytes": 76,
+      "compressed": true
+    },
+    "auth_bounds/stdout.log.gz": {
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stored_sha256": "9ceffb7310338057cfe71a4ae1e2c98d2c485d81cdef906532a801f457a38d64",
+      "raw_bytes": 0,
+      "stored_bytes": 20,
+      "compressed": true
+    },
+    "auth_bounds/stderr.log.gz": {
+      "raw_sha256": "224b2abc462246a06a935a82034133d938c52cd8164511bc3060ecd9981b13f7",
+      "stored_sha256": "296de0961e8eecd5b8a8cac82fe1ad4382a4a655177f6040128d8097cc7a14e3",
+      "raw_bytes": 5650,
+      "stored_bytes": 918,
+      "compressed": true
+    },
+    "auth_bounds/result.json": {
+      "raw_sha256": "cd0ec2f45acf03bdf301a9950b185dd02e68ae382593c00a12f4e0d2b5cd74ca",
+      "stored_sha256": "cd0ec2f45acf03bdf301a9950b185dd02e68ae382593c00a12f4e0d2b5cd74ca",
+      "raw_bytes": 3812,
+      "stored_bytes": 3812,
+      "compressed": false
+    },
+    "auth_isolation/source/src/protocol/authority.vr.gz": {
+      "raw_sha256": "315fc641b19910be3fbc0add4b666771052f8b42af16e8a98e38fac002c5e3f6",
+      "stored_sha256": "6e30359289850d8425fe0043c2be40a11b749c9f151253a3bc5f60f201d60db4",
+      "raw_bytes": 9565,
+      "stored_bytes": 3300,
+      "compressed": true
+    },
+    "auth_isolation/source/src/node/publication_auth.vr.gz": {
+      "raw_sha256": "f070dbe89ec702c74057796cb8672274f14419689bcf0d0149c0e669baabd22f",
+      "stored_sha256": "f839b58103aa2291902327e2649d737c9ce6e09ba9b59bc11df83ca160c7a649",
+      "raw_bytes": 16587,
+      "stored_bytes": 3697,
+      "compressed": true
+    },
+    "auth_isolation/source/tests/fragments/publication_auth_isolation.vr.gz": {
+      "raw_sha256": "373dd1061c52aff07f53bca3682c0da09c70c2f19aa4877b703fd3cebd380638",
+      "stored_sha256": "5b30652c3457b3ec2d88b14cf5c7d3fa0ef1450f6d2ae31a98e3d15d18b80931",
+      "raw_bytes": 2911,
+      "stored_bytes": 1081,
+      "compressed": true
+    },
+    "auth_isolation/source/tests/publication_auth_isolation.vr.gz": {
+      "raw_sha256": "c8208b329172a3f258f8a60b093b0cb6d18df2c72a6710cfddc388229291cdd7",
+      "stored_sha256": "62f6d60b10a75ef4ca5ff095566c6d998062146d816fb2441f6ff6ba7cdd10fc",
+      "raw_bytes": 322,
+      "stored_bytes": 197,
+      "compressed": true
+    },
+    "auth_isolation/source/tests/publication_auth_isolation.expected.gz": {
+      "raw_sha256": "27b4917ca450b045a163b83c448bbe66a8072d092e25e1ca9aa4db9ba136338d",
+      "stored_sha256": "d0f9ca6c5730a28e399e1b1cdf8907730a895abc93931a3eba27920c888dd0d7",
+      "raw_bytes": 31,
+      "stored_bytes": 47,
+      "compressed": true
+    },
+    "auth_isolation/source/tools/run_publication_envelope.py.gz": {
+      "raw_sha256": "e3a02c1a3a6d7397316f4c247f042ab2464878419a91f7f4427b298ef7829ca9",
+      "stored_sha256": "a8db44763a4de292e25e6e15bc4b4b2c9a594c57fd9ddc0478303a5c3609f460",
+      "raw_bytes": 16226,
+      "stored_bytes": 4602,
+      "compressed": true
+    },
+    "auth_isolation/reconstructed-inputs/src/protocol/authority.vr.gz": {
+      "raw_sha256": "315fc641b19910be3fbc0add4b666771052f8b42af16e8a98e38fac002c5e3f6",
+      "stored_sha256": "6e30359289850d8425fe0043c2be40a11b749c9f151253a3bc5f60f201d60db4",
+      "raw_bytes": 9565,
+      "stored_bytes": 3300,
+      "compressed": true
+    },
+    "auth_isolation/reconstructed-inputs/src/node/publication_auth.vr.gz": {
+      "raw_sha256": "1416c4eb1917f9da8a1759dff2c1126c2b71880634d5c8b8a402367dcdb01844",
+      "stored_sha256": "8a73d2f4f0568b0d4cff74eefdac0a8e3516cef4574c44757d6616698cfabc29",
+      "raw_bytes": 19499,
+      "stored_bytes": 4530,
+      "compressed": true
+    },
+    "auth_isolation/reconstructed-inputs/src/main.vr.gz": {
+      "raw_sha256": "eef9fe820af261dcd4a64af162b59312770e00ea10c04e666f028ca8ea2af7a4",
+      "stored_sha256": "fa702ced89881b209afcc293a6a4745b21611998550b63f751b3b06d97a499f8",
+      "raw_bytes": 294,
+      "stored_bytes": 193,
+      "compressed": true
+    },
+    "auth_isolation/reconstructed-inputs/verum.toml.gz": {
+      "raw_sha256": "1d99c409b02e7bdb88b9765716721b42e2360e7ecd55f9bbe2a4b18213f97ab2",
+      "stored_sha256": "90032de956afe0f7d1d95ae751f1679da6514795c9ee0ba6ea3838929732c327",
+      "raw_bytes": 65,
+      "stored_bytes": 76,
+      "compressed": true
+    },
+    "auth_isolation/stdout.log.gz": {
+      "raw_sha256": "27b4917ca450b045a163b83c448bbe66a8072d092e25e1ca9aa4db9ba136338d",
+      "stored_sha256": "d0f9ca6c5730a28e399e1b1cdf8907730a895abc93931a3eba27920c888dd0d7",
+      "raw_bytes": 31,
+      "stored_bytes": 47,
+      "compressed": true
+    },
+    "auth_isolation/stderr.log.gz": {
+      "raw_sha256": "e60cef576111388815a0cc56800bd511192c68a41fb44fd333e0cd12e945166d",
+      "stored_sha256": "b7c3cfafcf84e568f76b1e47ffe7f76d0e7c4681009acf507a753438a65fd5ef",
+      "raw_bytes": 112,
+      "stored_bytes": 111,
+      "compressed": true
+    },
+    "auth_isolation/result.json": {
+      "raw_sha256": "4658bdf3b6e30212ad8673113aebec25802833df3a1b878df2c3f2065c5bd31e",
+      "stored_sha256": "4658bdf3b6e30212ad8673113aebec25802833df3a1b878df2c3f2065c5bd31e",
+      "raw_bytes": 4619,
+      "stored_bytes": 4619,
+      "compressed": false
+    },
+    "type-boundaries/publication_prepare_consume/inputs/src/main.vr.gz": {
+      "raw_sha256": "38fbd6416a19040079e7e56de58e11858d67a594e0710893f54f3e5dc36bb7cd",
+      "stored_sha256": "38e88e9f26ba779afab253afb0ae1745626848429125ab4b14b2766b2d2bba2b",
+      "raw_bytes": 325,
+      "stored_bytes": 224,
+      "compressed": true
+    },
+    "type-boundaries/publication_prepare_consume/inputs/src/node/publication_auth.vr.gz": {
+      "raw_sha256": "f070dbe89ec702c74057796cb8672274f14419689bcf0d0149c0e669baabd22f",
+      "stored_sha256": "f839b58103aa2291902327e2649d737c9ce6e09ba9b59bc11df83ca160c7a649",
+      "raw_bytes": 16587,
+      "stored_bytes": 3697,
+      "compressed": true
+    },
+    "type-boundaries/publication_prepare_consume/inputs/src/node/publication_prepare.vr.gz": {
+      "raw_sha256": "07a0ee43a30a46c34fef7bf3b2778bd87fa46f943e34940d04d6d1e5ca163b0e",
+      "stored_sha256": "5408924312a5dd81f82a70f041e8986ed1d7721ef06a5a1f66c89c65ee846e45",
+      "raw_bytes": 7763,
+      "stored_bytes": 2372,
+      "compressed": true
+    },
+    "type-boundaries/publication_prepare_consume/inputs/src/protocol/authority.vr.gz": {
+      "raw_sha256": "315fc641b19910be3fbc0add4b666771052f8b42af16e8a98e38fac002c5e3f6",
+      "stored_sha256": "6e30359289850d8425fe0043c2be40a11b749c9f151253a3bc5f60f201d60db4",
+      "raw_bytes": 9565,
+      "stored_bytes": 3300,
+      "compressed": true
+    },
+    "type-boundaries/publication_prepare_consume/inputs/src/protocol/publication.vr.gz": {
+      "raw_sha256": "a76e24d9ef9086bd81d665d3113f60e8949bdac6b6b5bb6be2087781b5047516",
+      "stored_sha256": "b51937e2ff343de7c968221d3c17027284821de63e84bb05d39b013c76b2cda5",
+      "raw_bytes": 4409,
+      "stored_bytes": 1420,
+      "compressed": true
+    },
+    "type-boundaries/publication_prepare_consume/inputs/src/protocol/publication_metadata.vr.gz": {
+      "raw_sha256": "558a1a0de43bebdca1f5f2bc718786feb3a32e8a45a212f3d4001dffc0b88148",
+      "stored_sha256": "f76862f79b636daf5c2c9382bcde93dd1ab4a3ebf12b8ef3cfea08a5ff60941d",
+      "raw_bytes": 10479,
+      "stored_bytes": 2511,
+      "compressed": true
+    },
+    "type-boundaries/publication_prepare_consume/inputs/verum.toml.gz": {
+      "raw_sha256": "1d99c409b02e7bdb88b9765716721b42e2360e7ecd55f9bbe2a4b18213f97ab2",
+      "stored_sha256": "90032de956afe0f7d1d95ae751f1679da6514795c9ee0ba6ea3838929732c327",
+      "raw_bytes": 65,
+      "stored_bytes": 76,
+      "compressed": true
+    },
+    "type-boundaries/publication_prepare_consume/stdout.log.gz": {
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stored_sha256": "9ceffb7310338057cfe71a4ae1e2c98d2c485d81cdef906532a801f457a38d64",
+      "raw_bytes": 0,
+      "stored_bytes": 20,
+      "compressed": true
+    },
+    "type-boundaries/publication_prepare_consume/stderr.log.gz": {
+      "raw_sha256": "883590bc671c488b9ec3c4b24083511fc5e6fc32797da78b264d2051036a8454",
+      "stored_sha256": "e38263e69f4c92890c00f57c9da9955e96c51f85bc4349948d6edf2a94b3641c",
+      "raw_bytes": 211,
+      "stored_bytes": 170,
+      "compressed": true
+    },
+    "type-boundaries/publication_prepare_consume/result.json": {
+      "raw_sha256": "209336744ec6ef5f477aab74a137dd26b20fc55a08eca28a57dc28dac2338359",
+      "stored_sha256": "209336744ec6ef5f477aab74a137dd26b20fc55a08eca28a57dc28dac2338359",
+      "raw_bytes": 3095,
+      "stored_bytes": 3095,
+      "compressed": false
+    },
+    "type-boundaries/publication_auth_private_store/inputs/src/main.vr.gz": {
+      "raw_sha256": "4e430d0174cbd2867077ccdbdb8da80bef6febd3855f62de4f1f5806424c1006",
+      "stored_sha256": "32df37fb10b4b689dd8e8ad92dff6f76f705decc53f291174533f91eb027259c",
+      "raw_bytes": 259,
+      "stored_bytes": 188,
+      "compressed": true
+    },
+    "type-boundaries/publication_auth_private_store/inputs/src/node/publication_auth.vr.gz": {
+      "raw_sha256": "f070dbe89ec702c74057796cb8672274f14419689bcf0d0149c0e669baabd22f",
+      "stored_sha256": "f839b58103aa2291902327e2649d737c9ce6e09ba9b59bc11df83ca160c7a649",
+      "raw_bytes": 16587,
+      "stored_bytes": 3697,
+      "compressed": true
+    },
+    "type-boundaries/publication_auth_private_store/inputs/src/node/publication_prepare.vr.gz": {
+      "raw_sha256": "07a0ee43a30a46c34fef7bf3b2778bd87fa46f943e34940d04d6d1e5ca163b0e",
+      "stored_sha256": "5408924312a5dd81f82a70f041e8986ed1d7721ef06a5a1f66c89c65ee846e45",
+      "raw_bytes": 7763,
+      "stored_bytes": 2372,
+      "compressed": true
+    },
+    "type-boundaries/publication_auth_private_store/inputs/src/protocol/authority.vr.gz": {
+      "raw_sha256": "315fc641b19910be3fbc0add4b666771052f8b42af16e8a98e38fac002c5e3f6",
+      "stored_sha256": "6e30359289850d8425fe0043c2be40a11b749c9f151253a3bc5f60f201d60db4",
+      "raw_bytes": 9565,
+      "stored_bytes": 3300,
+      "compressed": true
+    },
+    "type-boundaries/publication_auth_private_store/inputs/src/protocol/publication.vr.gz": {
+      "raw_sha256": "a76e24d9ef9086bd81d665d3113f60e8949bdac6b6b5bb6be2087781b5047516",
+      "stored_sha256": "b51937e2ff343de7c968221d3c17027284821de63e84bb05d39b013c76b2cda5",
+      "raw_bytes": 4409,
+      "stored_bytes": 1420,
+      "compressed": true
+    },
+    "type-boundaries/publication_auth_private_store/inputs/src/protocol/publication_metadata.vr.gz": {
+      "raw_sha256": "558a1a0de43bebdca1f5f2bc718786feb3a32e8a45a212f3d4001dffc0b88148",
+      "stored_sha256": "f76862f79b636daf5c2c9382bcde93dd1ab4a3ebf12b8ef3cfea08a5ff60941d",
+      "raw_bytes": 10479,
+      "stored_bytes": 2511,
+      "compressed": true
+    },
+    "type-boundaries/publication_auth_private_store/inputs/verum.toml.gz": {
+      "raw_sha256": "1d99c409b02e7bdb88b9765716721b42e2360e7ecd55f9bbe2a4b18213f97ab2",
+      "stored_sha256": "90032de956afe0f7d1d95ae751f1679da6514795c9ee0ba6ea3838929732c327",
+      "raw_bytes": 65,
+      "stored_bytes": 76,
+      "compressed": true
+    },
+    "type-boundaries/publication_auth_private_store/stdout.log.gz": {
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stored_sha256": "9ceffb7310338057cfe71a4ae1e2c98d2c485d81cdef906532a801f457a38d64",
+      "raw_bytes": 0,
+      "stored_bytes": 20,
+      "compressed": true
+    },
+    "type-boundaries/publication_auth_private_store/stderr.log.gz": {
+      "raw_sha256": "36f8bcbc932dd4efc81d388d968ebad6a7976bb5d26a6a1b3c70041b0498e07b",
+      "stored_sha256": "dde246397eb7ef747c0df694b405eac7154ce988b5809128c41263423c220ea5",
+      "raw_bytes": 214,
+      "stored_bytes": 170,
+      "compressed": true
+    },
+    "type-boundaries/publication_auth_private_store/result.json": {
+      "raw_sha256": "ae60ec62a824fa12d65669ba6a723c227370d873f8fc4b83a0838022409e90b9",
+      "stored_sha256": "ae60ec62a824fa12d65669ba6a723c227370d873f8fc4b83a0838022409e90b9",
+      "raw_bytes": 3133,
+      "stored_bytes": 3133,
+      "compressed": false
+    },
+    "type-boundaries/publication_auth_construct_store/inputs/src/main.vr.gz": {
+      "raw_sha256": "584d227bc8694b8029dabc65516817bf2a36c9913a704192b8be2b02d19fdedf",
+      "stored_sha256": "f494ad38f8617e9e6fc4d18f4edb7737e02c58c3c645c991db77e70efeb2b0fd",
+      "raw_bytes": 289,
+      "stored_bytes": 206,
+      "compressed": true
+    },
+    "type-boundaries/publication_auth_construct_store/inputs/src/node/publication_auth.vr.gz": {
+      "raw_sha256": "f070dbe89ec702c74057796cb8672274f14419689bcf0d0149c0e669baabd22f",
+      "stored_sha256": "f839b58103aa2291902327e2649d737c9ce6e09ba9b59bc11df83ca160c7a649",
+      "raw_bytes": 16587,
+      "stored_bytes": 3697,
+      "compressed": true
+    },
+    "type-boundaries/publication_auth_construct_store/inputs/src/node/publication_prepare.vr.gz": {
+      "raw_sha256": "07a0ee43a30a46c34fef7bf3b2778bd87fa46f943e34940d04d6d1e5ca163b0e",
+      "stored_sha256": "5408924312a5dd81f82a70f041e8986ed1d7721ef06a5a1f66c89c65ee846e45",
+      "raw_bytes": 7763,
+      "stored_bytes": 2372,
+      "compressed": true
+    },
+    "type-boundaries/publication_auth_construct_store/inputs/src/protocol/authority.vr.gz": {
+      "raw_sha256": "315fc641b19910be3fbc0add4b666771052f8b42af16e8a98e38fac002c5e3f6",
+      "stored_sha256": "6e30359289850d8425fe0043c2be40a11b749c9f151253a3bc5f60f201d60db4",
+      "raw_bytes": 9565,
+      "stored_bytes": 3300,
+      "compressed": true
+    },
+    "type-boundaries/publication_auth_construct_store/inputs/src/protocol/publication.vr.gz": {
+      "raw_sha256": "a76e24d9ef9086bd81d665d3113f60e8949bdac6b6b5bb6be2087781b5047516",
+      "stored_sha256": "b51937e2ff343de7c968221d3c17027284821de63e84bb05d39b013c76b2cda5",
+      "raw_bytes": 4409,
+      "stored_bytes": 1420,
+      "compressed": true
+    },
+    "type-boundaries/publication_auth_construct_store/inputs/src/protocol/publication_metadata.vr.gz": {
+      "raw_sha256": "558a1a0de43bebdca1f5f2bc718786feb3a32e8a45a212f3d4001dffc0b88148",
+      "stored_sha256": "f76862f79b636daf5c2c9382bcde93dd1ab4a3ebf12b8ef3cfea08a5ff60941d",
+      "raw_bytes": 10479,
+      "stored_bytes": 2511,
+      "compressed": true
+    },
+    "type-boundaries/publication_auth_construct_store/inputs/verum.toml.gz": {
+      "raw_sha256": "1d99c409b02e7bdb88b9765716721b42e2360e7ecd55f9bbe2a4b18213f97ab2",
+      "stored_sha256": "90032de956afe0f7d1d95ae751f1679da6514795c9ee0ba6ea3838929732c327",
+      "raw_bytes": 65,
+      "stored_bytes": 76,
+      "compressed": true
+    },
+    "type-boundaries/publication_auth_construct_store/stdout.log.gz": {
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stored_sha256": "9ceffb7310338057cfe71a4ae1e2c98d2c485d81cdef906532a801f457a38d64",
+      "raw_bytes": 0,
+      "stored_bytes": 20,
+      "compressed": true
+    },
+    "type-boundaries/publication_auth_construct_store/stderr.log.gz": {
+      "raw_sha256": "122621a62501324e2770573c8f6ea9e2edbed6b6ba1b5e73a85b93d3e2020a69",
+      "stored_sha256": "987dee701e22b63c0e8ab7a947088ae3d3cb19a112da5538c8ae4e2d84f7bcb4",
+      "raw_bytes": 216,
+      "stored_bytes": 172,
+      "compressed": true
+    },
+    "type-boundaries/publication_auth_construct_store/result.json": {
+      "raw_sha256": "53d0b95f99a5e0f7bbe0358fbcfdbb05cf5d729fd822f46822bfbbf4cf395016",
+      "stored_sha256": "53d0b95f99a5e0f7bbe0358fbcfdbb05cf5d729fd822f46822bfbbf4cf395016",
+      "raw_bytes": 3140,
+      "stored_bytes": 3140,
+      "compressed": false
+    },
+    "type-boundaries/publication_prepare_construct/inputs/src/main.vr.gz": {
+      "raw_sha256": "f7192ee14a2d2b01fc177e6a8e35997c29373aabb3b2fb17c69faa77013e30a6",
+      "stored_sha256": "d70345efb163576547a62e095fbdcea3062e4371c6712b4d3bf9baa620129487",
+      "raw_bytes": 519,
+      "stored_bytes": 243,
+      "compressed": true
+    },
+    "type-boundaries/publication_prepare_construct/inputs/src/node/publication_auth.vr.gz": {
+      "raw_sha256": "f070dbe89ec702c74057796cb8672274f14419689bcf0d0149c0e669baabd22f",
+      "stored_sha256": "f839b58103aa2291902327e2649d737c9ce6e09ba9b59bc11df83ca160c7a649",
+      "raw_bytes": 16587,
+      "stored_bytes": 3697,
+      "compressed": true
+    },
+    "type-boundaries/publication_prepare_construct/inputs/src/node/publication_prepare.vr.gz": {
+      "raw_sha256": "07a0ee43a30a46c34fef7bf3b2778bd87fa46f943e34940d04d6d1e5ca163b0e",
+      "stored_sha256": "5408924312a5dd81f82a70f041e8986ed1d7721ef06a5a1f66c89c65ee846e45",
+      "raw_bytes": 7763,
+      "stored_bytes": 2372,
+      "compressed": true
+    },
+    "type-boundaries/publication_prepare_construct/inputs/src/protocol/authority.vr.gz": {
+      "raw_sha256": "315fc641b19910be3fbc0add4b666771052f8b42af16e8a98e38fac002c5e3f6",
+      "stored_sha256": "6e30359289850d8425fe0043c2be40a11b749c9f151253a3bc5f60f201d60db4",
+      "raw_bytes": 9565,
+      "stored_bytes": 3300,
+      "compressed": true
+    },
+    "type-boundaries/publication_prepare_construct/inputs/src/protocol/publication.vr.gz": {
+      "raw_sha256": "a76e24d9ef9086bd81d665d3113f60e8949bdac6b6b5bb6be2087781b5047516",
+      "stored_sha256": "b51937e2ff343de7c968221d3c17027284821de63e84bb05d39b013c76b2cda5",
+      "raw_bytes": 4409,
+      "stored_bytes": 1420,
+      "compressed": true
+    },
+    "type-boundaries/publication_prepare_construct/inputs/src/protocol/publication_metadata.vr.gz": {
+      "raw_sha256": "558a1a0de43bebdca1f5f2bc718786feb3a32e8a45a212f3d4001dffc0b88148",
+      "stored_sha256": "f76862f79b636daf5c2c9382bcde93dd1ab4a3ebf12b8ef3cfea08a5ff60941d",
+      "raw_bytes": 10479,
+      "stored_bytes": 2511,
+      "compressed": true
+    },
+    "type-boundaries/publication_prepare_construct/inputs/verum.toml.gz": {
+      "raw_sha256": "1d99c409b02e7bdb88b9765716721b42e2360e7ecd55f9bbe2a4b18213f97ab2",
+      "stored_sha256": "90032de956afe0f7d1d95ae751f1679da6514795c9ee0ba6ea3838929732c327",
+      "raw_bytes": 65,
+      "stored_bytes": 76,
+      "compressed": true
+    },
+    "type-boundaries/publication_prepare_construct/stdout.log.gz": {
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stored_sha256": "9ceffb7310338057cfe71a4ae1e2c98d2c485d81cdef906532a801f457a38d64",
+      "raw_bytes": 0,
+      "stored_bytes": 20,
+      "compressed": true
+    },
+    "type-boundaries/publication_prepare_construct/stderr.log.gz": {
+      "raw_sha256": "ac589900fb457e181214b683c89c8c33efe2859307f845f58c9ea067d021aebb",
+      "stored_sha256": "ad7e54a9291d9a3a0a7cbe16277bcee3f5f6c8791c2a8b9c88e92d168b91eb97",
+      "raw_bytes": 213,
+      "stored_bytes": 171,
+      "compressed": true
+    },
+    "type-boundaries/publication_prepare_construct/result.json": {
+      "raw_sha256": "54e447ca4d0916c18470a07d327239dc6005eb37fbce8f78a67e89e98c7cb078",
+      "stored_sha256": "54e447ca4d0916c18470a07d327239dc6005eb37fbce8f78a67e89e98c7cb078",
+      "raw_bytes": 3131,
+      "stored_bytes": 3131,
+      "compressed": false
+    },
+    "type-boundaries/publication_prepare_private_field/inputs/src/main.vr.gz": {
+      "raw_sha256": "2ec9fceb7f5eb781747500b77dd6fdf2420dda9a9e0b113c9cd2c6a01b73c535",
+      "stored_sha256": "e7bf4fa5ae6096b81beadb1e0cbf893e4ae531a2694bfdc26a4fd3b32940b9c7",
+      "raw_bytes": 274,
+      "stored_bytes": 193,
+      "compressed": true
+    },
+    "type-boundaries/publication_prepare_private_field/inputs/src/node/publication_auth.vr.gz": {
+      "raw_sha256": "f070dbe89ec702c74057796cb8672274f14419689bcf0d0149c0e669baabd22f",
+      "stored_sha256": "f839b58103aa2291902327e2649d737c9ce6e09ba9b59bc11df83ca160c7a649",
+      "raw_bytes": 16587,
+      "stored_bytes": 3697,
+      "compressed": true
+    },
+    "type-boundaries/publication_prepare_private_field/inputs/src/node/publication_prepare.vr.gz": {
+      "raw_sha256": "07a0ee43a30a46c34fef7bf3b2778bd87fa46f943e34940d04d6d1e5ca163b0e",
+      "stored_sha256": "5408924312a5dd81f82a70f041e8986ed1d7721ef06a5a1f66c89c65ee846e45",
+      "raw_bytes": 7763,
+      "stored_bytes": 2372,
+      "compressed": true
+    },
+    "type-boundaries/publication_prepare_private_field/inputs/src/protocol/authority.vr.gz": {
+      "raw_sha256": "315fc641b19910be3fbc0add4b666771052f8b42af16e8a98e38fac002c5e3f6",
+      "stored_sha256": "6e30359289850d8425fe0043c2be40a11b749c9f151253a3bc5f60f201d60db4",
+      "raw_bytes": 9565,
+      "stored_bytes": 3300,
+      "compressed": true
+    },
+    "type-boundaries/publication_prepare_private_field/inputs/src/protocol/publication.vr.gz": {
+      "raw_sha256": "a76e24d9ef9086bd81d665d3113f60e8949bdac6b6b5bb6be2087781b5047516",
+      "stored_sha256": "b51937e2ff343de7c968221d3c17027284821de63e84bb05d39b013c76b2cda5",
+      "raw_bytes": 4409,
+      "stored_bytes": 1420,
+      "compressed": true
+    },
+    "type-boundaries/publication_prepare_private_field/inputs/src/protocol/publication_metadata.vr.gz": {
+      "raw_sha256": "558a1a0de43bebdca1f5f2bc718786feb3a32e8a45a212f3d4001dffc0b88148",
+      "stored_sha256": "f76862f79b636daf5c2c9382bcde93dd1ab4a3ebf12b8ef3cfea08a5ff60941d",
+      "raw_bytes": 10479,
+      "stored_bytes": 2511,
+      "compressed": true
+    },
+    "type-boundaries/publication_prepare_private_field/inputs/verum.toml.gz": {
+      "raw_sha256": "1d99c409b02e7bdb88b9765716721b42e2360e7ecd55f9bbe2a4b18213f97ab2",
+      "stored_sha256": "90032de956afe0f7d1d95ae751f1679da6514795c9ee0ba6ea3838929732c327",
+      "raw_bytes": 65,
+      "stored_bytes": 76,
+      "compressed": true
+    },
+    "type-boundaries/publication_prepare_private_field/stdout.log.gz": {
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stored_sha256": "9ceffb7310338057cfe71a4ae1e2c98d2c485d81cdef906532a801f457a38d64",
+      "raw_bytes": 0,
+      "stored_bytes": 20,
+      "compressed": true
+    },
+    "type-boundaries/publication_prepare_private_field/stderr.log.gz": {
+      "raw_sha256": "6f32513c751362bf4fea567eb8d0dacaa372bd2ef092b4d8598469b3389703ad",
+      "stored_sha256": "8bb12a54704b5431f3c87a608c6feb5fc78045bd419961281885d28b1594670f",
+      "raw_bytes": 217,
+      "stored_bytes": 172,
+      "compressed": true
+    },
+    "type-boundaries/publication_prepare_private_field/result.json": {
+      "raw_sha256": "04b0e998e53a035f255ae5f734082163e53657a0aadc607117ee311c15a4057a",
+      "stored_sha256": "04b0e998e53a035f255ae5f734082163e53657a0aadc607117ee311c15a4057a",
+      "raw_bytes": 3141,
+      "stored_bytes": 3141,
+      "compressed": false
+    },
+    "type-boundaries/publication_prepare_affine_reuse/inputs/src/main.vr.gz": {
+      "raw_sha256": "db88ed6fa765d85f2868703576614970f2a5263d8025992fd66427b076e5a2ae",
+      "stored_sha256": "00392e8bdc8a929b9965b30974cf7d704c646379da8f3d114a2433fda2b40e2c",
+      "raw_bytes": 386,
+      "stored_bytes": 218,
+      "compressed": true
+    },
+    "type-boundaries/publication_prepare_affine_reuse/inputs/src/node/publication_auth.vr.gz": {
+      "raw_sha256": "f070dbe89ec702c74057796cb8672274f14419689bcf0d0149c0e669baabd22f",
+      "stored_sha256": "f839b58103aa2291902327e2649d737c9ce6e09ba9b59bc11df83ca160c7a649",
+      "raw_bytes": 16587,
+      "stored_bytes": 3697,
+      "compressed": true
+    },
+    "type-boundaries/publication_prepare_affine_reuse/inputs/src/node/publication_prepare.vr.gz": {
+      "raw_sha256": "07a0ee43a30a46c34fef7bf3b2778bd87fa46f943e34940d04d6d1e5ca163b0e",
+      "stored_sha256": "5408924312a5dd81f82a70f041e8986ed1d7721ef06a5a1f66c89c65ee846e45",
+      "raw_bytes": 7763,
+      "stored_bytes": 2372,
+      "compressed": true
+    },
+    "type-boundaries/publication_prepare_affine_reuse/inputs/src/protocol/authority.vr.gz": {
+      "raw_sha256": "315fc641b19910be3fbc0add4b666771052f8b42af16e8a98e38fac002c5e3f6",
+      "stored_sha256": "6e30359289850d8425fe0043c2be40a11b749c9f151253a3bc5f60f201d60db4",
+      "raw_bytes": 9565,
+      "stored_bytes": 3300,
+      "compressed": true
+    },
+    "type-boundaries/publication_prepare_affine_reuse/inputs/src/protocol/publication.vr.gz": {
+      "raw_sha256": "a76e24d9ef9086bd81d665d3113f60e8949bdac6b6b5bb6be2087781b5047516",
+      "stored_sha256": "b51937e2ff343de7c968221d3c17027284821de63e84bb05d39b013c76b2cda5",
+      "raw_bytes": 4409,
+      "stored_bytes": 1420,
+      "compressed": true
+    },
+    "type-boundaries/publication_prepare_affine_reuse/inputs/src/protocol/publication_metadata.vr.gz": {
+      "raw_sha256": "558a1a0de43bebdca1f5f2bc718786feb3a32e8a45a212f3d4001dffc0b88148",
+      "stored_sha256": "f76862f79b636daf5c2c9382bcde93dd1ab4a3ebf12b8ef3cfea08a5ff60941d",
+      "raw_bytes": 10479,
+      "stored_bytes": 2511,
+      "compressed": true
+    },
+    "type-boundaries/publication_prepare_affine_reuse/inputs/verum.toml.gz": {
+      "raw_sha256": "1d99c409b02e7bdb88b9765716721b42e2360e7ecd55f9bbe2a4b18213f97ab2",
+      "stored_sha256": "90032de956afe0f7d1d95ae751f1679da6514795c9ee0ba6ea3838929732c327",
+      "raw_bytes": 65,
+      "stored_bytes": 76,
+      "compressed": true
+    },
+    "type-boundaries/publication_prepare_affine_reuse/stdout.log.gz": {
+      "raw_sha256": "6a3cf5192354f71615ac51034b3e97c20eda99643fcaf5bbe6d41ad59bd12167",
+      "stored_sha256": "ffc5caa7800bbfa6435cd1d06d071044b5085acdb624ce58e86d97730d38e9dc",
+      "raw_bytes": 3,
+      "stored_bytes": 23,
+      "compressed": true
+    },
+    "type-boundaries/publication_prepare_affine_reuse/stderr.log.gz": {
+      "raw_sha256": "0026905ddc6e7e3fe18516954df0ddbd18d88f543b0a0c91702b3696c30aa341",
+      "stored_sha256": "1250f05233669b46c9857e904dfa2f15e770d0e43ed4a2ab7adba7424c3feb62",
+      "raw_bytes": 815,
+      "stored_bytes": 410,
+      "compressed": true
+    },
+    "type-boundaries/publication_prepare_affine_reuse/result.json": {
+      "raw_sha256": "8c0049bb2e1759a71fd83d4b86c2eb97789883238e016ac9a4f94ae7f4c9e447",
+      "stored_sha256": "8c0049bb2e1759a71fd83d4b86c2eb97789883238e016ac9a4f94ae7f4c9e447",
+      "raw_bytes": 3304,
+      "stored_bytes": 3304,
+      "compressed": false
+    },
+    "narrow-endian/big_endian_u16_annotated/result.json": {
+      "raw_sha256": "55a33637afd2198fea4132deaf20333673e7be72843c2d1afecff2b29324ae91",
+      "stored_sha256": "55a33637afd2198fea4132deaf20333673e7be72843c2d1afecff2b29324ae91",
+      "raw_bytes": 2811,
+      "stored_bytes": 2811,
+      "compressed": false
+    },
+    "narrow-endian/big_endian_u16_annotated/stdout.log.gz": {
+      "raw_sha256": "80b66897753145005165540be6fb2c914333f991a975b8bdcf0e7fec42251057",
+      "stored_sha256": "921c036f6dd53f9dfc1f9ddb90086e5a8010f5a5a118551a336718c4d95aebb7",
+      "raw_bytes": 32,
+      "stored_bytes": 52,
+      "compressed": true
+    },
+    "narrow-endian/big_endian_u16_annotated/stderr.log.gz": {
+      "raw_sha256": "42c8e0a03d99eeb1ea42747e9c82ed4bec0e66774e691558a2047eabb1719d8c",
+      "stored_sha256": "e8d50f6ba566bdecde1c742b38a86a3dfdeab2064de13b918747d3340cd6f8f5",
+      "raw_bytes": 6973,
+      "stored_bytes": 880,
+      "compressed": true
+    },
+    "narrow-endian/big_endian_u16_annotated/inputs/big_endian_u16_annotated.vr.gz": {
+      "raw_sha256": "cd83479d6b60e311c0ce11e4c9696236589247bb60ed31faf2316f6b54d14e55",
+      "stored_sha256": "a3a0235948931fd8b337742e1a7765907c090851a797a41a7e619848a3ef267a",
+      "raw_bytes": 276,
+      "stored_bytes": 199,
+      "compressed": true
+    },
+    "narrow-endian/big_endian_u32_annotated/result.json": {
+      "raw_sha256": "eb8652e98d9f33eab24c2f12b28176245a0c1a338e3d52a7ab5d7ae89bd795a8",
+      "stored_sha256": "eb8652e98d9f33eab24c2f12b28176245a0c1a338e3d52a7ab5d7ae89bd795a8",
+      "raw_bytes": 2810,
+      "stored_bytes": 2810,
+      "compressed": false
+    },
+    "narrow-endian/big_endian_u32_annotated/stdout.log.gz": {
+      "raw_sha256": "d63563ae58df098ce736addc2fbf61dad52a6cdbc1f080e79375a4c2f31ca80f",
+      "stored_sha256": "e8daa9cbe7fc0ae3c0590adaa5c20586d375885325fa31041adb82ce5c9367b1",
+      "raw_bytes": 32,
+      "stored_bytes": 52,
+      "compressed": true
+    },
+    "narrow-endian/big_endian_u32_annotated/stderr.log.gz": {
+      "raw_sha256": "da1211d4028c52d7fc6a790a7cdeb81cf94bbb4e27a9e8f5c064a759e72fb273",
+      "stored_sha256": "391ee826eaa7b6add7073708810fc8a897307b4e507a60245a1d5a972df1d39b",
+      "raw_bytes": 12343,
+      "stored_bytes": 942,
+      "compressed": true
+    },
+    "narrow-endian/big_endian_u32_annotated/inputs/big_endian_u32_annotated.vr.gz": {
+      "raw_sha256": "37731cb3d9b971bd60ecb2f94eb00e047b10f711243cbd3970f7e0e88b5ceafb",
+      "stored_sha256": "e74b306b31586fd192b25bdf1961885aa9af6fe3d60b7a99f73114183e6094fb",
+      "raw_bytes": 280,
+      "stored_bytes": 202,
+      "compressed": true
+    },
+    "website/typecheck.log.gz": {
+      "raw_sha256": "aa9e1405d15fbce90be13cc5ab0af5608d23ee9e1169a550c10e6676b2f7c482",
+      "stored_sha256": "06656cd1b1a6f691f094a44abeaa833df7edb9eafea94a152ecefede90d71976",
+      "raw_bytes": 42,
+      "stored_bytes": 62,
+      "compressed": true
+    },
+    "website/internal-artefacts.log.gz": {
+      "raw_sha256": "0028a6560f6b1dc818de3ae2d145d30ab6cb2e48ca06621d51f7c2f646990c2f",
+      "stored_sha256": "a77a52351d1f430c10d5f2ac49dd65213f439afca74c5cc1dff7bdf20a8bfc3c",
+      "raw_bytes": 483,
+      "stored_bytes": 331,
+      "compressed": true
+    },
+    "website/freshness.log.gz": {
+      "raw_sha256": "77ba8b8c7c5070994d99e94d1935b8d95c178db35d126a82755f426f0314fa16",
+      "stored_sha256": "9789005486ce98667ca9556c9f02c4c532196c5f236895f55f566b8ffd7ff7da",
+      "raw_bytes": 56,
+      "stored_bytes": 76,
+      "compressed": true
+    },
+    "website/links.log.gz": {
+      "raw_sha256": "17a2f1160d54c50fdc3acc9d276627ca3c41f88d49b0581bb04e899fe289e08e",
+      "stored_sha256": "e28313c51e34ef49448c9c85318c54e95f2587690f416c40ca66a0e9a0e40dd2",
+      "raw_bytes": 131,
+      "stored_bytes": 125,
+      "compressed": true
+    },
+    "website/build.log.gz": {
+      "raw_sha256": "3afcdda9d2e443f64b92d20afb1187114650d906ded0ca0e39ce6b45a7933b5e",
+      "stored_sha256": "806f9cbbc561427d8d0b83e123996d1c958c9e2afe425974e3c1faf74c428d92",
+      "raw_bytes": 1913,
+      "stored_bytes": 778,
+      "compressed": true
+    },
+    "website/result.json.gz": {
+      "raw_sha256": "2f7228a090d58b566869cc1906eee28cc1cae4c3bfa007f9b08fe279110d3c40",
+      "stored_sha256": "a26b0fd1bb4c60fe95b12c429637b8366eea1369c23e6454c035cd6eaf4a053c",
+      "raw_bytes": 91340,
+      "stored_bytes": 40763,
+      "compressed": true
+    },
+    "website/root-audit.json": {
+      "raw_sha256": "4be6fdb07610471f9429206070377dadece2964d48983d72f7fae80acf6cbed1",
+      "stored_sha256": "4be6fdb07610471f9429206070377dadece2964d48983d72f7fae80acf6cbed1",
+      "raw_bytes": 494,
+      "stored_bytes": 494,
+      "compressed": false
+    },
+    "runners/type-boundaries.py.gz": {
+      "raw_sha256": "05f0bf2084c1fd5fb82a8940ef2cbeac2c2e69fbed89cc9fcfdb4ed9bfb9f269",
+      "stored_sha256": "cda545dac50a0a0c6a5375071f0ce4cd308dbf44e5bcea7385c2a898be61c045",
+      "raw_bytes": 5886,
+      "stored_bytes": 2255,
+      "compressed": true
+    },
+    "runners/retain.py.gz": {
+      "raw_sha256": "8f9a39590448c28588e069becb6b5cc225e823282262ac7787ecf186d0eeaad2",
+      "stored_sha256": "8a2c2ce66ff5058a45a3d9739dfb36fcb8a721a897acc0d03abaf9d5a3df0463",
+      "raw_bytes": 12825,
+      "stored_bytes": 4475,
+      "compressed": true
+    },
+    "type-boundaries/original-contract.md": {
+      "raw_sha256": "247b8f13c32b9bc89aae0aa841690771db9376f8aab2b170805389c3fceb52ba",
+      "stored_sha256": "247b8f13c32b9bc89aae0aa841690771db9376f8aab2b170805389c3fceb52ba",
+      "raw_bytes": 1832,
+      "stored_bytes": 1832,
+      "compressed": false
+    }
+  },
+  "scope": "Ordinary interpreter/component and complete-project type controls. Compiler ownership and privacy defects prevent authentication candidate integration. No HTTP, durable publication, deployed service or AOT acceptance."
+}

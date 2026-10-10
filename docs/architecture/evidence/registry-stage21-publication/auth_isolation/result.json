@@ -1,0 +1,81 @@
+{
+  "task": "T1636",
+  "component": "auth_isolation",
+  "scope": "Run private-state ownership controls in a deliberately assembled auth module: exact production bytes, one newline, then the hashed test fragment.\n\nNo production function is replaced. This is distinct from the unmodified public auth/prepare components and cannot establish private-field enforcement, HTTP publication, durable admission, or AOT.",
+  "source_inputs": {
+    "src/protocol/authority.vr": "315fc641b19910be3fbc0add4b666771052f8b42af16e8a98e38fac002c5e3f6",
+    "src/node/publication_auth.vr": "f070dbe89ec702c74057796cb8672274f14419689bcf0d0149c0e669baabd22f",
+    "tests/fragments/publication_auth_isolation.vr": "373dd1061c52aff07f53bca3682c0da09c70c2f19aa4877b703fd3cebd380638",
+    "tests/publication_auth_isolation.vr": "c8208b329172a3f258f8a60b093b0cb6d18df2c72a6710cfddc388229291cdd7",
+    "tests/publication_auth_isolation.expected": "27b4917ca450b045a163b83c448bbe66a8072d092e25e1ca9aa4db9ba136338d",
+    "tools/run_publication_envelope.py": "e3a02c1a3a6d7397316f4c247f042ab2464878419a91f7f4427b298ef7829ca9"
+  },
+  "project_inputs": {
+    "src/protocol/authority.vr": "315fc641b19910be3fbc0add4b666771052f8b42af16e8a98e38fac002c5e3f6",
+    "src/node/publication_auth.vr": "1416c4eb1917f9da8a1759dff2c1126c2b71880634d5c8b8a402367dcdb01844",
+    "src/main.vr": "eef9fe820af261dcd4a64af162b59312770e00ea10c04e666f028ca8ea2af7a4",
+    "verum.toml": "1d99c409b02e7bdb88b9765716721b42e2360e7ecd55f9bbe2a4b18213f97ab2"
+  },
+  "entry_transformation": "Only replace the fixture's module header with verum_registry.main.",
+  "module_assemblies": [
+    {
+      "target": "src/node/publication_auth.vr",
+      "production_sha256": "f070dbe89ec702c74057796cb8672274f14419689bcf0d0149c0e669baabd22f",
+      "fragment": "tests/fragments/publication_auth_isolation.vr",
+      "fragment_sha256": "373dd1061c52aff07f53bca3682c0da09c70c2f19aa4877b703fd3cebd380638",
+      "separator_hex": "0a",
+      "assembled_sha256": "1416c4eb1917f9da8a1759dff2c1126c2b71880634d5c8b8a402367dcdb01844",
+      "transformation": "Append only: preserve every production byte, then newline and exact test fragment."
+    }
+  ],
+  "cli_sha256": "e29bc1de67057c286cc845e45371167c04bb8ddfe07e0ad24db15bd0e6480cab",
+  "expected_cli_sha256": "e29bc1de67057c286cc845e45371167c04bb8ddfe07e0ad24db15bd0e6480cab",
+  "language_source_commit_supplied": "49559a042a30f65c524c753d2f13c9f2838f9818",
+  "identity_boundary": "The executable hash is measured; its source commit is supplied by the operator.",
+  "command": [
+    "/private/tmp/verum-registry-stage21-array-storage/verum-49559a042",
+    "run",
+    "--tier",
+    "interpret"
+  ],
+  "working_directory": "/private/tmp/verum-publication-auth_isolation-antynrke",
+  "environment_overrides": {
+    "NO_COLOR": "1",
+    "VERUM_NO_OBJECT_CACHE": "1",
+    "TMPDIR": "/private/tmp"
+  },
+  "deadline_seconds": 600.0,
+  "status": "passed",
+  "checks": {
+    "exit_zero": true,
+    "within_deadline": true,
+    "exact_stdout": true,
+    "source_unchanged": true,
+    "project_unchanged": true,
+    "executable_unchanged": true
+  },
+  "elapsed_seconds": 111.27,
+  "returncode": 0,
+  "timed_out": false,
+  "interrupted": false,
+  "runner_error": null,
+  "source_inputs_after": {
+    "src/protocol/authority.vr": "315fc641b19910be3fbc0add4b666771052f8b42af16e8a98e38fac002c5e3f6",
+    "src/node/publication_auth.vr": "f070dbe89ec702c74057796cb8672274f14419689bcf0d0149c0e669baabd22f",
+    "tests/fragments/publication_auth_isolation.vr": "373dd1061c52aff07f53bca3682c0da09c70c2f19aa4877b703fd3cebd380638",
+    "tests/publication_auth_isolation.vr": "c8208b329172a3f258f8a60b093b0cb6d18df2c72a6710cfddc388229291cdd7",
+    "tests/publication_auth_isolation.expected": "27b4917ca450b045a163b83c448bbe66a8072d092e25e1ca9aa4db9ba136338d",
+    "tools/run_publication_envelope.py": "e3a02c1a3a6d7397316f4c247f042ab2464878419a91f7f4427b298ef7829ca9"
+  },
+  "project_inputs_after": {
+    "src/main.vr": "eef9fe820af261dcd4a64af162b59312770e00ea10c04e666f028ca8ea2af7a4",
+    "src/node/publication_auth.vr": "1416c4eb1917f9da8a1759dff2c1126c2b71880634d5c8b8a402367dcdb01844",
+    "src/protocol/authority.vr": "315fc641b19910be3fbc0add4b666771052f8b42af16e8a98e38fac002c5e3f6",
+    "verum.toml": "1d99c409b02e7bdb88b9765716721b42e2360e7ecd55f9bbe2a4b18213f97ab2"
+  },
+  "cli_sha256_after": "e29bc1de67057c286cc845e45371167c04bb8ddfe07e0ad24db15bd0e6480cab",
+  "logs": {
+    "stdout.log": "27b4917ca450b045a163b83c448bbe66a8072d092e25e1ca9aa4db9ba136338d",
+    "stderr.log": "e60cef576111388815a0cc56800bd511192c68a41fb44fd333e0cd12e945166d"
+  }
+}

@@ -1,0 +1,61 @@
+{
+  "task": "T1636",
+  "case": "publication_prepare_affine_reuse",
+  "command": [
+    "/private/tmp/verum-registry-stage21-array-storage/verum-49559a042",
+    "check"
+  ],
+  "working_directory": "/private/tmp/verum-registry-stage21-type-boundaries/publication_prepare_affine_reuse/project",
+  "environment_overrides": {
+    "NO_COLOR": "1",
+    "VERUM_NO_OBJECT_CACHE": "1",
+    "TMPDIR": "/private/tmp"
+  },
+  "language_commit": "49559a042a30f65c524c753d2f13c9f2838f9818",
+  "cli": {
+    "path": "/private/tmp/verum-registry-stage21-array-storage/verum-49559a042",
+    "bytes": 547068760,
+    "sha256": "e29bc1de67057c286cc845e45371167c04bb8ddfe07e0ad24db15bd0e6480cab"
+  },
+  "build_manifest_sha256": "cc3119ce9094b199abb682796c2d0741057e24b1c19389daee264af4c921fd34",
+  "schema": "v53-declared-function-bodies",
+  "registry_commit": "c02238261fee7cf7a0885886e5e3cf9928e7a73d",
+  "source_inputs": {
+    "src/protocol/authority.vr": "315fc641b19910be3fbc0add4b666771052f8b42af16e8a98e38fac002c5e3f6",
+    "src/protocol/publication.vr": "a76e24d9ef9086bd81d665d3113f60e8949bdac6b6b5bb6be2087781b5047516",
+    "src/protocol/publication_metadata.vr": "558a1a0de43bebdca1f5f2bc718786feb3a32e8a45a212f3d4001dffc0b88148",
+    "src/node/publication_auth.vr": "f070dbe89ec702c74057796cb8672274f14419689bcf0d0149c0e669baabd22f",
+    "src/node/publication_prepare.vr": "07a0ee43a30a46c34fef7bf3b2778bd87fa46f943e34940d04d6d1e5ca163b0e",
+    "tests/language/publication_prepare_affine_reuse.vr": "779663cdead5984df739a4d5806b8219b55125b25694a3230c4a262187168bca"
+  },
+  "project_inputs": {
+    "src/main.vr": "db88ed6fa765d85f2868703576614970f2a5263d8025992fd66427b076e5a2ae",
+    "src/node/publication_auth.vr": "f070dbe89ec702c74057796cb8672274f14419689bcf0d0149c0e669baabd22f",
+    "src/node/publication_prepare.vr": "07a0ee43a30a46c34fef7bf3b2778bd87fa46f943e34940d04d6d1e5ca163b0e",
+    "src/protocol/authority.vr": "315fc641b19910be3fbc0add4b666771052f8b42af16e8a98e38fac002c5e3f6",
+    "src/protocol/publication.vr": "a76e24d9ef9086bd81d665d3113f60e8949bdac6b6b5bb6be2087781b5047516",
+    "src/protocol/publication_metadata.vr": "558a1a0de43bebdca1f5f2bc718786feb3a32e8a45a212f3d4001dffc0b88148",
+    "verum.toml": "1d99c409b02e7bdb88b9765716721b42e2360e7ecd55f9bbe2a4b18213f97ab2"
+  },
+  "entry_transformation": "Replace only the fixture module header with verum_registry.main.",
+  "expected": "specific visibility, construction or second-consumption refusal",
+  "deadline_seconds": 600,
+  "scope": "Ordinary project type check of exact production modules. A negative exit requires diagnostic review; unrelated compile errors do not establish refusal. No runtime, HTTP, durability or AOT acceptance.",
+  "returncode": 101,
+  "elapsed_seconds": 89.073,
+  "timed_out": false,
+  "source_unchanged": true,
+  "project_unchanged": true,
+  "executable_unchanged": true,
+  "logs": {
+    "stdout.log": "6a3cf5192354f71615ac51034b3e97c20eda99643fcaf5bbe6d41ad59bd12167",
+    "stderr.log": "0026905ddc6e7e3fe18516954df0ddbd18d88f543b0a0c91702b3696c30aa341"
+  },
+  "error_lines": [
+    "error<E310>: value `prepared` used after move",
+    "error: compilation failed with 1 error",
+    "error: compilation failed with 1 error"
+  ],
+  "complete_check_marker": false,
+  "verdict": "requires_specific_diagnostic_review"
+}

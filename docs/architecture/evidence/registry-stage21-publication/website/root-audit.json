@@ -1,0 +1,10 @@
+{
+  "candidate": "73390a4f0613f582820b59f4a81d1237b51a1120",
+  "tree": "031b687778bdddf43b520b4d20f2e9e9dde7be65",
+  "source_files_verified": 403,
+  "logs_verified": 5,
+  "rendered_documents_verified": 4,
+  "receipt_sha256": "2f7228a090d58b566869cc1906eee28cc1cae4c3bfa007f9b08fe279110d3c40",
+  "runtime_provenance_sha256": "70df63b1891a5226d2573c97e365a2cb099f9b1eb6450fe5cb36bef3d2663cb7",
+  "scope": "Public docs reflect actual interpreter cases; no new AOT or general crypto acceptance."
+}

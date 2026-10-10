@@ -1,0 +1,61 @@
+{
+  "case": "big_endian_u16_annotated",
+  "engine_commit": "49559a042a30f65c524c753d2f13c9f2838f9818",
+  "cli": {
+    "path": "/private/tmp/verum-registry-stage21-array-storage/verum-49559a042",
+    "bytes": 547068760,
+    "sha256": "e29bc1de67057c286cc845e45371167c04bb8ddfe07e0ad24db15bd0e6480cab"
+  },
+  "schema": "v53-declared-function-bodies",
+  "artifact_identities": {
+    "runtime.vbca": {
+      "bytes": 40425565,
+      "sha256": "a49404b0efe393f7d1ecee178ca79363c2b38cdf1f26f239c88f4c9bbec17b7c"
+    },
+    "runtime.core_metadata": {
+      "bytes": 118155695,
+      "sha256": "186c64699f8f8c1c24dc737869b1ce576847104f839a4f77dbca73b86ce63504"
+    },
+    "runtime.symbol_graph": {
+      "bytes": 6993444,
+      "sha256": "430406d610f3014f398f55ff7da9eddc8a0e07043551be8c70242952a1351f1a"
+    }
+  },
+  "build_manifest_sha256": "cc3119ce9094b199abb682796c2d0741057e24b1c19389daee264af4c921fd34",
+  "baseline_result_path": "/private/tmp/verum-T1698-narrow-endian-ordinary-trace/big_endian_u16_annotated/result.json",
+  "baseline_result_sha256": "74e844eb6eeec525f6c41cde59995e0c1d67851081e07fccf89ecd68e899718d",
+  "source_fixture": "/private/tmp/verum-T1698-narrow-endian-ordinary-trace/big_endian_u16_annotated/big_endian_u16_annotated.vr",
+  "fixture_sha256": "cd83479d6b60e311c0ce11e4c9696236589247bb60ed31faf2316f6b54d14e55",
+  "executed_fixture": "/private/tmp/verum-registry-stage21-narrow-endian/big_endian_u16_annotated/project/big_endian_u16_annotated.vr",
+  "command": [
+    "/private/tmp/verum-registry-stage21-array-storage/verum-49559a042",
+    "run",
+    "--tier",
+    "interpret",
+    "/private/tmp/verum-registry-stage21-narrow-endian/big_endian_u16_annotated/project/big_endian_u16_annotated.vr"
+  ],
+  "environment_overrides": {
+    "NO_COLOR": "1",
+    "VERUM_NO_OBJECT_CACHE": "1",
+    "TMPDIR": "/private/tmp",
+    "VERUM_TRACE_CALLS": "1",
+    "VERUM_TRACE_PC": "main",
+    "VERUM_TRACE_PC_DECODE": "1",
+    "VERUM_TRACE_GETF": "1"
+  },
+  "expected_stdout": "big_endian_u16_annotated:passed\n",
+  "deadline_seconds": 180,
+  "working_directory": "/private/tmp/verum-registry-stage21-narrow-endian/big_endian_u16_annotated/project",
+  "runner_sha256": "14626a2bc0db8bf9de169acb1483f2236a018007775096b41bd8a7f4e256ca07",
+  "scope": "Unchanged captured width-specific ordinary interpreter fixture; same explicit diagnostic trace flags as its baseline. No AOT, general conversion, crypto or service acceptance.",
+  "elapsed_seconds": 10.064,
+  "exit_code": 0,
+  "timed_out": false,
+  "cli_unchanged": true,
+  "inputs_unchanged": true,
+  "artifacts_unchanged": true,
+  "output_matches": true,
+  "stdout_sha256": "80b66897753145005165540be6fb2c914333f991a975b8bdcf0e7fec42251057",
+  "stderr_sha256": "42c8e0a03d99eeb1ea42747e9c82ed4bec0e66774e691558a2047eabb1719d8c",
+  "accepted": true
+}

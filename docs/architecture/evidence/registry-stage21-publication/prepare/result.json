@@ -1,0 +1,81 @@
+{
+  "task": "T1636",
+  "component": "prepare",
+  "scope": "Run unmodified authentication and request-preparation modules with the actual strict metadata/envelope decoder in an isolated interpreter project.\n\nThis component checks in-memory request refusals and owned prepared inputs; it does not establish HTTP receive limits, file loading, timing resistance, semantic admission, persistence, private-field/affine enforcement, or AOT. The preparation path produces no successful publication response.",
+  "source_inputs": {
+    "src/protocol/authority.vr": "315fc641b19910be3fbc0add4b666771052f8b42af16e8a98e38fac002c5e3f6",
+    "src/protocol/publication.vr": "a76e24d9ef9086bd81d665d3113f60e8949bdac6b6b5bb6be2087781b5047516",
+    "src/protocol/publication_metadata.vr": "558a1a0de43bebdca1f5f2bc718786feb3a32e8a45a212f3d4001dffc0b88148",
+    "src/node/publication_auth.vr": "f070dbe89ec702c74057796cb8672274f14419689bcf0d0149c0e669baabd22f",
+    "src/node/publication_prepare.vr": "07a0ee43a30a46c34fef7bf3b2778bd87fa46f943e34940d04d6d1e5ca163b0e",
+    "tests/publication_prepare.vr": "4da6282bd5f2722190386d05c0b639332e387dbb6ca70086330968ae459e658b",
+    "tests/publication_prepare.expected": "528ac981b1dc6609f29dbb5b649c0ce972344a90ea3abfa69e57f9005d2cf0c1",
+    "tools/run_publication_envelope.py": "e3a02c1a3a6d7397316f4c247f042ab2464878419a91f7f4427b298ef7829ca9"
+  },
+  "project_inputs": {
+    "src/protocol/authority.vr": "315fc641b19910be3fbc0add4b666771052f8b42af16e8a98e38fac002c5e3f6",
+    "src/protocol/publication.vr": "a76e24d9ef9086bd81d665d3113f60e8949bdac6b6b5bb6be2087781b5047516",
+    "src/protocol/publication_metadata.vr": "558a1a0de43bebdca1f5f2bc718786feb3a32e8a45a212f3d4001dffc0b88148",
+    "src/node/publication_auth.vr": "f070dbe89ec702c74057796cb8672274f14419689bcf0d0149c0e669baabd22f",
+    "src/node/publication_prepare.vr": "07a0ee43a30a46c34fef7bf3b2778bd87fa46f943e34940d04d6d1e5ca163b0e",
+    "src/main.vr": "2329e19b002435e31198c20aa0895cfce75a112b333fd3bff7947ac35ef80095",
+    "verum.toml": "1d99c409b02e7bdb88b9765716721b42e2360e7ecd55f9bbe2a4b18213f97ab2"
+  },
+  "entry_transformation": "Only replace the fixture's module header with verum_registry.main.",
+  "module_assemblies": [],
+  "cli_sha256": "e29bc1de67057c286cc845e45371167c04bb8ddfe07e0ad24db15bd0e6480cab",
+  "expected_cli_sha256": "e29bc1de67057c286cc845e45371167c04bb8ddfe07e0ad24db15bd0e6480cab",
+  "language_source_commit_supplied": "49559a042a30f65c524c753d2f13c9f2838f9818",
+  "identity_boundary": "The executable hash is measured; its source commit is supplied by the operator.",
+  "command": [
+    "/private/tmp/verum-registry-stage21-array-storage/verum-49559a042",
+    "run",
+    "--tier",
+    "interpret"
+  ],
+  "working_directory": "/private/tmp/verum-publication-prepare-cjghi2b7",
+  "environment_overrides": {
+    "NO_COLOR": "1",
+    "VERUM_NO_OBJECT_CACHE": "1",
+    "TMPDIR": "/private/tmp"
+  },
+  "deadline_seconds": 600.0,
+  "status": "failed",
+  "checks": {
+    "exit_zero": false,
+    "within_deadline": true,
+    "exact_stdout": false,
+    "source_unchanged": true,
+    "project_unchanged": true,
+    "executable_unchanged": true
+  },
+  "elapsed_seconds": 86.56,
+  "returncode": 1,
+  "timed_out": false,
+  "interrupted": false,
+  "runner_error": null,
+  "source_inputs_after": {
+    "src/protocol/authority.vr": "315fc641b19910be3fbc0add4b666771052f8b42af16e8a98e38fac002c5e3f6",
+    "src/protocol/publication.vr": "a76e24d9ef9086bd81d665d3113f60e8949bdac6b6b5bb6be2087781b5047516",
+    "src/protocol/publication_metadata.vr": "558a1a0de43bebdca1f5f2bc718786feb3a32e8a45a212f3d4001dffc0b88148",
+    "src/node/publication_auth.vr": "f070dbe89ec702c74057796cb8672274f14419689bcf0d0149c0e669baabd22f",
+    "src/node/publication_prepare.vr": "07a0ee43a30a46c34fef7bf3b2778bd87fa46f943e34940d04d6d1e5ca163b0e",
+    "tests/publication_prepare.vr": "4da6282bd5f2722190386d05c0b639332e387dbb6ca70086330968ae459e658b",
+    "tests/publication_prepare.expected": "528ac981b1dc6609f29dbb5b649c0ce972344a90ea3abfa69e57f9005d2cf0c1",
+    "tools/run_publication_envelope.py": "e3a02c1a3a6d7397316f4c247f042ab2464878419a91f7f4427b298ef7829ca9"
+  },
+  "project_inputs_after": {
+    "src/main.vr": "2329e19b002435e31198c20aa0895cfce75a112b333fd3bff7947ac35ef80095",
+    "src/node/publication_auth.vr": "f070dbe89ec702c74057796cb8672274f14419689bcf0d0149c0e669baabd22f",
+    "src/node/publication_prepare.vr": "07a0ee43a30a46c34fef7bf3b2778bd87fa46f943e34940d04d6d1e5ca163b0e",
+    "src/protocol/authority.vr": "315fc641b19910be3fbc0add4b666771052f8b42af16e8a98e38fac002c5e3f6",
+    "src/protocol/publication.vr": "a76e24d9ef9086bd81d665d3113f60e8949bdac6b6b5bb6be2087781b5047516",
+    "src/protocol/publication_metadata.vr": "558a1a0de43bebdca1f5f2bc718786feb3a32e8a45a212f3d4001dffc0b88148",
+    "verum.toml": "1d99c409b02e7bdb88b9765716721b42e2360e7ecd55f9bbe2a4b18213f97ab2"
+  },
+  "cli_sha256_after": "e29bc1de67057c286cc845e45371167c04bb8ddfe07e0ad24db15bd0e6480cab",
+  "logs": {
+    "stdout.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderr.log": "a6e1beb74698d90b3d743b536e1d9f0677e0a01fb41dbf1c75c5555d0062519d"
+  }
+}
