@@ -1,0 +1,37 @@
+// @test: run-interpreter
+// @level: L2
+// @tier: 0
+// @tags: json, diagnostics, public-fields, T1724
+// @description: Public diagnostic fields preserve parser evidence without conferring admission.
+// @expected-stdout: json-error-data: ok
+// @expected-exit: 0
+// @timeout: 180000
+
+mount core.encoding.json.{JsonError, JsonErrorKind, parse_strict};
+
+fn main() {
+    let source = "{\"name\":1,\n \"\\u006eame\":2}";
+    match parse_strict(&source, source.len()) {
+        Result.Err(error) => {
+            assert(error.kind is JsonErrorKind.DuplicateKey);
+            assert_eq(error.line, 2);
+            assert_eq(error.column, 2);
+            assert_eq(error.message, "duplicate object key: name");
+        },
+        Result.Ok(_) => panic("escaped duplicate was accepted"),
+    }
+
+    // A caller-authored diagnostic carries no claim that the parser produced it.
+    let mut diagnostic = JsonError {
+        kind: JsonErrorKind.UnexpectedEof, line: 1, column: 2, message: "caller input",
+    };
+    diagnostic.kind = JsonErrorKind.UnexpectedChar;
+    diagnostic.line = 3;
+    diagnostic.column = 4;
+    diagnostic.message = "caller annotation";
+    assert(diagnostic.kind is JsonErrorKind.UnexpectedChar);
+    assert_eq(diagnostic.line, 3);
+    assert_eq(diagnostic.column, 4);
+    assert_eq(diagnostic.message, "caller annotation");
+    print("json-error-data: ok");
+}

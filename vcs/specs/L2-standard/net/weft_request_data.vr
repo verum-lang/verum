@@ -1,0 +1,76 @@
+// @test: run-interpreter
+// @level: L2
+// @tier: 0
+// @tags: weft, request, public-fields, T1724
+// @description: Plain request data keeps duplicate headers, raw query and exact bytes.
+// @expected-stdout: weft-request-data: ok
+// @expected-exit: 0
+// @timeout: 180000
+
+mount core.net.http.{Method, Headers};
+mount core.net.addr.{Ipv4Addr, SocketAddr};
+mount core.net.weft.handler.WeftRequest;
+
+fn main() {
+    let mut headers = Headers.new();
+    headers.append(&"Authorization", &"Bearer first");
+    headers.append(&"authorization", &"Bearer second");
+    let mut body: List<Byte> = List.new();
+    body.push(0_u8);
+    body.push(255_u8);
+    let mut request = WeftRequest.new(
+        Method.Post, "/publish", Maybe.Some("name=%2F&name=second"), headers, body,
+    );
+    let values = request.headers.get_all(&"AUTHORIZATION");
+    assert_eq(values.len(), 2);
+    assert_eq(values[0], "Bearer first");
+    assert_eq(values[1], "Bearer second");
+    match request.raw_query {
+        Maybe.Some(raw) => assert_eq(raw, "name=%2F&name=second"),
+        _ => panic("raw query lost"),
+    }
+    assert(request.method is Method.Post);
+    assert_eq(request.path, "/publish");
+    assert_eq(request.body.len(), 2);
+    assert_eq(request.body[0], 0_u8);
+    assert_eq(request.body[1], 255_u8);
+
+    // These edits are ordinary input construction, not authenticated evidence.
+    request.method = Method.Get;
+    request.path = "/changed";
+    request.raw_query = Maybe.Some("");
+    request.headers.append(&"AUTHORIZATION", &"Bearer third");
+    request.body[0] = 31_u8;
+    request.body.push(139_u8);
+    request.path_params.insert("name", "widget");
+    request.peer_addr = Maybe.Some(SocketAddr.new_v4(Ipv4Addr.localhost(), 4321));
+    assert(request.method is Method.Get);
+    assert_eq(request.path, "/changed");
+    match request.raw_query {
+        Maybe.Some(raw) => assert_eq(raw, ""),
+        _ => panic("empty query collapsed into absence"),
+    }
+    assert_eq(request.headers.get_all(&"authorization").len(), 3);
+    assert_eq(request.body.len(), 3);
+    assert_eq(request.body[0], 31_u8);
+    assert_eq(request.body[1], 255_u8);
+    assert_eq(request.body[2], 139_u8);
+    match request.path_params.get(&"name") {
+        Maybe.Some(name) => assert_eq(name, "widget"),
+        _ => panic("router data lost"),
+    }
+    match request.peer_addr {
+        Maybe.Some(peer) => assert_eq(peer.port(), 4321),
+        _ => panic("supplied peer address lost"),
+    }
+
+    let plain = WeftRequest {
+        method: Method.Post, path: "/literal", raw_query: Maybe.None,
+        headers: Headers.new(), body: List.new(), path_params: Map.new(),
+        peer_addr: Maybe.None,
+    };
+    assert_eq(plain.path, "/literal");
+    assert(plain.raw_query is Maybe.None);
+    assert_eq(plain.body.len(), 0);
+    print("weft-request-data: ok");
+}
