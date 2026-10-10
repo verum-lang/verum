@@ -484,7 +484,9 @@ pub(super) fn unwrap_ref(state: &InterpreterState, v: Value) -> Value {
 /// an object whose TypeId resolves (in the loaded module's type
 /// table) to a type named `name`. Used by the method-dispatch
 /// hooks to gate their intercepts on the receiver actually being
-/// the expected stdlib type.
+/// the expected stdlib type. The first descriptor owns a TypeId, just as
+/// in runtime layout and CBGR lookup; a later duplicate cannot authorize
+/// a different name. The module's shared index avoids a table scan per probe.
 pub(super) fn is_record_typed_as(state: &InterpreterState, v: Value, name: &str) -> bool {
     if !v.is_ptr() || v.is_nil() {
         return false;
@@ -494,15 +496,13 @@ pub(super) fn is_record_typed_as(state: &InterpreterState, v: Value, name: &str)
         return false;
     }
     let header = unsafe { heap::ObjectHeader::ref_or_stub(ptr) };
-    state
-        .module
-        .types
-        .iter()
-        .any(|td| {
-            #[cfg(test)]
-            record_probe_tests::record_descriptor_visit();
-            td.id == header.type_id && state.module.strings.get(td.name) == Some(name)
-        })
+    let Some(index) = state.module.type_index_by_id(header.type_id) else {
+        return false;
+    };
+    #[cfg(test)]
+    record_probe_tests::record_descriptor_visit();
+    let descriptor = &state.module.types[index];
+    state.module.strings.get(descriptor.name) == Some(name)
 }
 
 #[cfg(test)]
