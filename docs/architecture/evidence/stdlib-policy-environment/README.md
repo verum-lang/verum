@@ -47,3 +47,10 @@ VERUM_NO_AUTO_PRECOMPILE=1 cargo test --offline --locked \
 
 `VERUM_CACHE_POLICY_EVIDENCE_DIR` optionally names a new directory for the
 individual Cargo invocation logs. The test refuses to reuse an existing one.
+
+Local main `e0c9e20b6` passes the complete eight-test target in 111.393 seconds
+(including compilation). All seven policy transitions and unchanged repeats
+pass on that exact committed source. Its 14,738 source bindings, original
+logs and retained executable were verified; all inherited archive files and
+the pinned stage22 product remained unchanged. This closes the environment
+invalidation repair without claiming an automatic bake or registry runtime.
