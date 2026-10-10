@@ -11,9 +11,11 @@ unchanged embedded artifacts, and 6,482 source-at-commit hash checks. The origin
 logs and failed controls are retained byte for byte. Executables remain at the
 recorded scratch paths with their hashes; they are not checked into the repository.
 
-The source endpoint is `71f8e7f9fad8340f135798ffc58dd99a1e3146fd`. The last
-executed source is `66a8b9f3eba35a58432502161bfedd8cc2355439`; the intervening
-commit changes indentation only (`git diff -w` is empty).
+The focused-control source endpoint is
+`71f8e7f9fad8340f135798ffc58dd99a1e3146fd`. Those gates last executed
+`66a8b9f3eba35a58432502161bfedd8cc2355439`; the intervening commit changes
+indentation only (`git diff -w` is empty). The subsequent full library gate is
+recorded below.
 
 ## Causal controls and completed gates
 
@@ -71,3 +73,29 @@ The whole-tree internal-reference/citation and dead-module-call gates passed.
 whitespace result: raw Cargo output ends with blank lines, and the retained
 patch contains context lines. Those bytes were preserved. [Authored source and
 prose whitespace checks](source-gates/authored-result.json) passed separately.
+
+## Unfiltered VBC library gate
+
+The subsequent [full gate](full-vbc/manifest.json) passed on frozen source
+`875589c743c84a500252b991d46118ad566251c6`: 2,107 passed, zero failed,
+one existing ignored test, and zero filtered tests. The command ran once with
+`--lib --no-default-features --features compression,table_dispatch,codegen,ffi`
+plus locked/offline Cargo resolution. Wall time was 534.449 seconds; libtest
+reported 499.59 seconds. No retry, new ignore, solver build, or automatic
+precompile was used.
+
+The [raw receipt](full-vbc/result.json) records the complete command and
+inherited test flags, 761 source hashes, source tree identities, an immutable
+executable clone, and all five unchanged embedded artifact hashes. Input source
+and Git state remained frozen throughout. The Client target was then released
+with [no remaining owned process](full-vbc/release-selection.json).
+
+The six socket controls that failed in the earlier signed-array full gate all
+passed in this run. Their relevant production and fixture files are
+byte-identical between the two sources, as recorded in the full-gate manifest.
+This comparison does not establish why the earlier run failed. The earlier raw
+failures remain preserved in their original evidence.
+
+This unfiltered library pass complements the focused producer gates. It does not
+execute the separate checker privacy consumer or establish fresh-bake, ordinary
+CLI, whole-registry, or AOT acceptance.

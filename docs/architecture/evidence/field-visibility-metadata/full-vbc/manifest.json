@@ -1,0 +1,81 @@
+{
+  "task": "T1714",
+  "source": "875589c743c84a500252b991d46118ad566251c6",
+  "tree": "edd8e85aa20cb2eb549aca716756ac41c18bd0e4",
+  "scope": "One unfiltered VBC library gate with compression,table_dispatch,codegen,ffi; no retries. This does not run separate integration/compiler controls or checker privacy enforcement, native lowering, ordinary CLI, automatic stdlib bake, AOT or registry acceptance. Inherited artifacts are held unchanged.",
+  "exit_code": 0,
+  "failure": null,
+  "wall_seconds": 534.449,
+  "announced_test_count": [
+    2108
+  ],
+  "test_results": [
+    "test result: ok. 2107 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 499.59s"
+  ],
+  "completed_unfiltered": true,
+  "accounting_matches": true,
+  "individual_failures": [],
+  "previous_full_gate": {
+    "source": "3c99c5e9b02b10254eb7df20f37e4cd0455013a5",
+    "test_results": [
+      "test result: FAILED. 2099 passed; 6 failed; 1 ignored; 0 measured; 0 filtered out; finished in 529.61s"
+    ],
+    "individual_failures": [
+      "interpreter::dispatch_table::handlers::net_runtime::bounded_tcp_tests::concurrent_recv_does_not_block_unrelated_send",
+      "interpreter::dispatch_table::handlers::net_runtime::bounded_tcp_tests::parked_worker_is_joined_and_sockets_closed_during_unwind",
+      "interpreter::dispatch_table::handlers::net_runtime::udp_peer_address_tests::udp_recv_from_returns_peer_address",
+      "interpreter::io_engine::socket_readiness_tests::async_accept_round_trip_via_io_engine",
+      "interpreter::io_engine::socket_readiness_tests::async_write_end_to_end_via_io_engine",
+      "interpreter::io_engine::socket_readiness_tests::poll_signals_ready_on_pending_connection"
+    ],
+    "note": "Comparison only; shared test names do not establish identical failure cause."
+  },
+  "source_at_commit_hashes_verified": 761,
+  "raw_sha256": {
+    "runner.py": "efdb34b623ced2d0ea369350ded94c1b4c59388a900dce0ad7c81ddb834f9622",
+    "result.json": "e5fd9f04e5aaae10127a52d72cda2d89dfe2e2ff047d4ad054b68aea9a2f75f7",
+    "idle-selection.json": "28b07c5b7748df6a273eb8e3e191498f800138550ba8e796c1083cfd558540f6",
+    "started.json": "3181ee42c09dd9fbefe01c02740e1f08bacdf7ffbe439457321779a2c0e6cd68",
+    "process.json": "f51380c77f1999db5884aba3030f9e68db17aa794ed8bf8dbaf8908a1eba6905",
+    "gate.log": "5e365309ea906b809ae57baad523979fe4ba847f9f3124882a8b72528a5082ad",
+    "release-selection.json": "6302dff11e86cd5b2d3d5f61a1c4c0d9733b8ce91ae74b4151950cbcfd2922a0"
+  },
+  "executable_storage": "The exact executable is retained as an APFS clone at the scratch path in result.json; binaries are not checked into source.",
+  "limits": [
+    "No retries, filtered reruns, or newly ignored tests.",
+    "No checker privacy enforcement, fresh stdlib bake, ordinary CLI, complete registry, or AOT acceptance."
+  ],
+  "previous_network_source_comparison": {
+    "crates/verum_vbc/src/interpreter/io_engine.rs": {
+      "previous_sha256": "f4eb364e97666347444375f8030e191c1c1c1f45197ba5de686a4897fc6e7920",
+      "current_sha256": "f4eb364e97666347444375f8030e191c1c1c1f45197ba5de686a4897fc6e7920",
+      "identical": true
+    },
+    "crates/verum_vbc/src/interpreter/dispatch_table/handlers/net_runtime.rs": {
+      "previous_sha256": "f67d7fe3436cbcfe6cce5de1f9662d54ac7b04d252e31c467b660195ef5199a4",
+      "current_sha256": "f67d7fe3436cbcfe6cce5de1f9662d54ac7b04d252e31c467b660195ef5199a4",
+      "identical": true
+    },
+    "crates/verum_vbc/tests/unit/net_runtime_bounded_tcp.rs": {
+      "previous_sha256": "5f18aa2da1e5d2fcbd89e2d5afc8c6fac534928dcf27818dd3924d3fd0182175",
+      "current_sha256": "5f18aa2da1e5d2fcbd89e2d5afc8c6fac534928dcf27818dd3924d3fd0182175",
+      "identical": true
+    },
+    "crates/verum_vbc/tests/unit/io_engine_socket_readiness.rs": {
+      "previous_sha256": "62c165514df98f11bd917c058632f696b914315f811f4df489f80191b3db7b46",
+      "current_sha256": "62c165514df98f11bd917c058632f696b914315f811f4df489f80191b3db7b46",
+      "identical": true
+    },
+    "crates/verum_vbc/tests/unit/udp_peer_address.rs": {
+      "previous_sha256": "627dd3cc1eaa5cb8ee16d620495c0dfeb7d98483b85f1703f2fa450076ead9e6",
+      "current_sha256": "627dd3cc1eaa5cb8ee16d620495c0dfeb7d98483b85f1703f2fa450076ead9e6",
+      "identical": true
+    }
+  },
+  "ignored_tests": [
+    [
+      "codegen::test_params::test_compile_stdlib_coverage_report",
+      ", T0839: FIELD-GUESS-HARD-1 refusal (codegen/mod.rs positional emission) \u2014 feature-unified workspace runs gate the unit tier on this red (T0839 tracks the six)"
+    ]
+  ]
+}
