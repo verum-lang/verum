@@ -1062,6 +1062,22 @@ impl TypeDescriptor {
             .flatten()
             .filter(|id| *id == self.id)
     }
+
+    /// A runtime record carrier is identified by its explicit declaration,
+    /// independently of the producer's local type number. An archive bundle
+    /// or a same-spelled foreign record cannot establish that ownership.
+    pub(crate) fn canonical_record_type_id(
+        &self,
+        declared_name: &str,
+        declaring_owner: verum_common::Maybe<&str>,
+    ) -> verum_common::Maybe<TypeId> {
+        use verum_common::well_known_types::WellKnownType;
+        let carrier = WellKnownType::Text;
+        (self.kind == TypeKind::Record
+            && declared_name == carrier.name()
+            && declaring_owner == carrier.canonical_archive_modules().first().copied())
+            .then_some(TypeId::TEXT)
+    }
 }
 
 impl Default for TypeDescriptor {

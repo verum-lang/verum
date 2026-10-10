@@ -389,6 +389,10 @@ impl VbcCodegen {
             let source = &available[mi].types[ti];
             let leaf = available[mi].strings.get(source.name).unwrap();
             let id = source.canonical_scalar_type_id(leaf)
+                .or_else(|| source.canonical_record_type_id(
+                    leaf,
+                    source.origin_module.and_then(|owner| available[mi].strings.get(owner)),
+                ))
                 .or_else(|| self.type_name_to_id.get(key).copied())
                 .unwrap_or_else(|| {
                     self.type_name_to_id

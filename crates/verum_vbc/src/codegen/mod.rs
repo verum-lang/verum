@@ -26405,6 +26405,9 @@ impl VbcCodegen {
             .and_then(|(owner, name)| name.strip_prefix(&format!("{owner}.")))
             .unwrap_or(&name_str).to_owned();
         let scalar_id = ty.canonical_scalar_type_id(&name_str);
+        let canonical_id = scalar_id.or_else(|| {
+            ty.canonical_record_type_id(&name_str, source_owner)
+        });
         // REFINE-FIELD-DYNAMIC-BYPASS-1 phase 2: hydrate field
         // refinements on THIS import path too — the lazy loader
         // reaches most stdlib types through the protocol-remap
@@ -26472,9 +26475,9 @@ impl VbcCodegen {
         //      simple binding untouched.
         let reserved = qualified_key.as_ref()
             .and_then(|key| self.type_name_to_id.get(key)).copied();
-        let (new_id, owns_simple_key) = if let Some(id) = scalar_id {
-            // An impl in another module does not redeclare the scalar.
-            // Keep nominal same-name types independent in the bare registry.
+        let (new_id, owns_simple_key) = if let Some(id) = canonical_id {
+            // Primitive impl carriers and the exact runtime record declaration
+            // retain their ABI identity; same-name foreign types stay independent.
             let owns = self.type_name_to_id.get(&name_str).is_none_or(|current| *current == id);
             if owns { self.type_name_to_id.insert(name_str.clone(), id); }
             (id, owns)
