@@ -2077,6 +2077,11 @@ fn compute_core_blake3(core_dir: &Path, files: &[(String, Vec<u8>)]) -> String {
         "crates/verum_vbc/src/intrinsics/expand.rs",
         "crates/verum_vbc/src/intrinsics/codegen.rs",
         "crates/verum_vbc/src/intrinsics/lowering.rs",
+        // Actual array storage evidence, callable conversions, and declared
+        // element semantics all shape the bytecode emitted into the archive.
+        "crates/verum_vbc/src/array_storage.rs",
+        "crates/verum_vbc/src/codegen/array_coercions.rs",
+        "crates/verum_vbc/src/codegen/array_elements.rs",
         "crates/verum_vbc/src/codegen/expressions.rs",
         "crates/verum_vbc/src/codegen/statements.rs",
         // Error classification decides whether invalid source becomes a baked
