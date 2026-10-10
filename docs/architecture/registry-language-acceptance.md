@@ -1077,3 +1077,28 @@ archive. This is checker acceptance. Replaying the unchanged registry
 required. Private fields/construction (T1713), the separate prepared-request
 array mismatch, AOT and authenticated durable HTTP publication are separate
 boundaries.
+
+### Parser semantics and automatic archive identity
+
+The parser recognizes a type declaration's own generic parameter as an alias
+when the body is that bare parameter followed by a semicolon. Explicit marker
+syntax and unrelated declarations keep their meaning. The automatic archive
+key and rerun dependency roster include the fast parser's manifest and every
+production Rust source; the existing schema, missing-input and no-auto rules
+remain unchanged.
+
+The [main-based evidence](evidence/parser-cache-main-landing/manifest.json)
+binds twelve passing parser/checker controls and eight passing compiler
+controls at `f54ffc870`. The semantic compiler control actually writes a small
+archive through `compile_core`, then reads its descriptors and metadata to
+verify declared alias parameter positions and marker preservation. The
+[earlier cache evidence](evidence/parser-archive-cache-identity/manifest.json)
+retains the corrected five-failure baseline and original harness compilation
+failure. Historical parser results retain their original source identities.
+
+This independent landing carries no pending record-field visibility consumer
+implementation. Its full standard-library files remain byte-identical to the
+separately recorded e86/v54 producer. These no-auto tests do not establish a new
+whole-library automatic bake, ordinary CLI, registry runtime or native/AOT
+acceptance. Cargo environment-only rerun behavior remains the separate T1735
+boundary; directly executing the disabled build script does not prove it.

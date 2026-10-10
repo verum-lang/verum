@@ -1,0 +1,18 @@
+{
+  "target": "/Users/taaliman/.tmp/verum-codex-01a10248-types/checker-target",
+  "source_commit": "f54ffc87061be49f466523cb215187ff1e180eb9",
+  "status": "released",
+  "active_build_or_test_processes": [],
+  "gate_result_sha256": "b728c3767aa7a49f71e771e65a30256a4313a125f72c0a2f26253180eee8eddd",
+  "executables": {
+    "generic_alias_parameter_classification": {
+      "path": "/Users/taaliman/.tmp/verum-codex-01a10248-types/checker-target/debug/build/verum_types/226204bc868345d0/out/generic_alias_parameter_classification-226204bc868345d0",
+      "sha256": "982e783861438e0ac55d0ec13788166cb07de3f68254166470e32239ef3604b8",
+      "retained": "/private/tmp/verum-T1728-main-alias/generic_alias_parameter_classification-226204bc868345d0",
+      "retained_sha256": "982e783861438e0ac55d0ec13788166cb07de3f68254166470e32239ef3604b8",
+      "fresh": false
+    }
+  },
+  "artifacts_after": {},
+  "scope": "Only this exact alias target ran; checker lane idle and released to parent."
+}

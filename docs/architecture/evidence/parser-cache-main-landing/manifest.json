@@ -1,0 +1,490 @@
+{
+  "tasks": [
+    "T1720",
+    "T1728"
+  ],
+  "base_main": "d4f68f3d8745e895d1663231b5fac5a720e05581",
+  "tested_main_candidate": "f54ffc87061be49f466523cb215187ff1e180eb9",
+  "previous_cache_endpoint": "05c0ee445361dddad060d82800c779dc962412dc",
+  "parser_original_fix": "b9bf31ff52bf1f3aa16b2a501b9f095859585268",
+  "production_paths": [
+    "crates/verum_fast_parser/src/decl.rs",
+    "crates/verum_compiler/build.rs",
+    "crates/verum_compiler/build_support/stdlib_cache.rs"
+  ],
+  "test_paths": [
+    "crates/verum_types/tests/generic_alias_parameter_classification.rs",
+    "crates/verum_compiler/tests/stdlib_cache_identity.rs",
+    "crates/verum_compiler/tests/stdlib_cache_alias_archive.rs"
+  ],
+  "ci_path": ".github/workflows/ci.yml",
+  "scope": "Only the parser semantic fix and automatic archive-key/rerun dependency repair are carried from pending integration. No field-policy consumer implementation, ordinary CLI, automatic whole-stdlib bake, registry runtime, native or AOT acceptance. The new compiler semantic control actually writes and decodes its own minimal fixture archive.",
+  "historical_parser_gates": [
+    {
+      "original_gate": {
+        "directory": "harness-map-key",
+        "original_directory": "/private/tmp/verum-T1720-baseline",
+        "classification": "No language verdict: semantic Map requires a Text key.",
+        "source_commit": "54ec5b5ff893816dc7410fc788ec5ed784b216f4",
+        "exit_code": 101,
+        "wall_seconds": 27.209,
+        "executed_binaries": 0,
+        "totals": {
+          "passed": 0,
+          "failed": 0,
+          "ignored": 0
+        },
+        "source_at_commit_hashes_verified": 443,
+        "retained_executables_verified": 0,
+        "receipt_sha256": "d2563b5f36ae503ea89587d7180c192b99860e99292973b1913d8e457d90c1a9",
+        "raw_log_sha256": "3b497d21390eb46995766bb143d5e8fa4f6b34de0fcc5347eda33aae7b140052"
+      },
+      "files": {
+        "receipt": {
+          "path": "historical-parser/harness-map-key/result.json.gz",
+          "bytes": 57744,
+          "sha256": "d2563b5f36ae503ea89587d7180c192b99860e99292973b1913d8e457d90c1a9",
+          "stored_sha256": "8bc2a760543736d978e2de6c268cf73b19380346c6229e777e5fe8bf935467a5"
+        },
+        "log": {
+          "path": "historical-parser/harness-map-key/gate.log.gz",
+          "bytes": 2354,
+          "sha256": "3b497d21390eb46995766bb143d5e8fa4f6b34de0fcc5347eda33aae7b140052",
+          "stored_sha256": "4e930d2eb65cde634bd54a66629cf049d3c9179a5ca89cb359cdf5084d336671"
+        }
+      },
+      "retained_executables_verified": {}
+    },
+    {
+      "original_gate": {
+        "directory": "initial-baseline",
+        "original_directory": "/private/tmp/verum-T1720-baseline-corrected",
+        "classification": "Five passes/six failures; one nominal path oracle uses Display dot spelling instead of actual AST segments.",
+        "source_commit": "ae7de9cb6488ae8c43472bada7cd56509429bc50",
+        "exit_code": 101,
+        "wall_seconds": 18.109,
+        "executed_binaries": 1,
+        "totals": {
+          "passed": 5,
+          "failed": 6,
+          "ignored": 0
+        },
+        "source_at_commit_hashes_verified": 443,
+        "retained_executables_verified": 1,
+        "receipt_sha256": "03bb8bb9cecefd389e7f4c3cf715063ff378dd9bfad27dc7240df25c4044230e",
+        "raw_log_sha256": "f8956684185edbdb0fdfe5ddcf0aa19ff9927623fc16256915903e7c39a91ad0"
+      },
+      "files": {
+        "receipt": {
+          "path": "historical-parser/initial-baseline/result.json.gz",
+          "bytes": 58092,
+          "sha256": "03bb8bb9cecefd389e7f4c3cf715063ff378dd9bfad27dc7240df25c4044230e",
+          "stored_sha256": "077dd0ee8f4f57f73e3c6d1fabbd9a7f944e761eaa4958e0e89094fe4cf34b37"
+        },
+        "log": {
+          "path": "historical-parser/initial-baseline/gate.log.gz",
+          "bytes": 4321,
+          "sha256": "f8956684185edbdb0fdfe5ddcf0aa19ff9927623fc16256915903e7c39a91ad0",
+          "stored_sha256": "e4b4c8ca85e4b36ef98ad66b4152f196b6b4cab15bc8b70cbe073ae88844c573"
+        }
+      },
+      "retained_executables_verified": {
+        "/private/tmp/verum-T1720-baseline-corrected/test-executable-0": "da63363e7117713b24b1cda6450d2217f0699682479c679cd21f47bf72a338a0"
+      }
+    },
+    {
+      "original_gate": {
+        "directory": "harness-list-construction",
+        "original_directory": "/private/tmp/verum-T1720-classification-baseline",
+        "classification": "No language verdict: semantic List has no From<[T;N]> implementation.",
+        "source_commit": "0d7c66ece060dcb81845d5a128c44b5245ae7ff5",
+        "exit_code": 101,
+        "wall_seconds": 16.128,
+        "executed_binaries": 0,
+        "totals": {
+          "passed": 0,
+          "failed": 0,
+          "ignored": 0
+        },
+        "source_at_commit_hashes_verified": 443,
+        "retained_executables_verified": 0,
+        "receipt_sha256": "a300fbca2316a22cc3c50859cfe285fd66f658e90032cecda645676384ba9792",
+        "raw_log_sha256": "54ebfe34cac3a08715683b06f075d4b4323ed2dafa0132839b10453f99454767"
+      },
+      "files": {
+        "receipt": {
+          "path": "historical-parser/harness-list-construction/result.json.gz",
+          "bytes": 57744,
+          "sha256": "a300fbca2316a22cc3c50859cfe285fd66f658e90032cecda645676384ba9792",
+          "stored_sha256": "3d1e5be69ea23570612609bfa75692541e58be72f3ed2836f66b4d06a21e9d41"
+        },
+        "log": {
+          "path": "historical-parser/harness-list-construction/gate.log.gz",
+          "bytes": 1509,
+          "sha256": "54ebfe34cac3a08715683b06f075d4b4323ed2dafa0132839b10453f99454767",
+          "stored_sha256": "2b7b8f08cc88298b4edc56acdfcb0cb56093eeabe60e647ea918c0886b631d61"
+        }
+      },
+      "retained_executables_verified": {}
+    },
+    {
+      "original_gate": {
+        "directory": "causal-baseline",
+        "original_directory": "/private/tmp/verum-T1720-classification-baseline-final",
+        "classification": "Five passes/seven causal failures with corrected owner-segment assertions.",
+        "source_commit": "98934648152aef73498a7d63437937139af5e5fd",
+        "exit_code": 101,
+        "wall_seconds": 18.113,
+        "executed_binaries": 1,
+        "totals": {
+          "passed": 5,
+          "failed": 7,
+          "ignored": 0
+        },
+        "source_at_commit_hashes_verified": 443,
+        "retained_executables_verified": 1,
+        "receipt_sha256": "1a80697eb53751ed88700856f73ec27051ba9e852684c056ca680f514784cab4",
+        "raw_log_sha256": "9ea8037b3d5285af015351a2ccd34f3748b17b840b25116a8b5cf048efede71e"
+      },
+      "files": {
+        "receipt": {
+          "path": "historical-parser/causal-baseline/result.json.gz",
+          "bytes": 58092,
+          "sha256": "1a80697eb53751ed88700856f73ec27051ba9e852684c056ca680f514784cab4",
+          "stored_sha256": "ea5b39bbb724b86c4d22e336cb9d633d3cd3537f30b19b5db2311b9702f30cf4"
+        },
+        "log": {
+          "path": "historical-parser/causal-baseline/gate.log.gz",
+          "bytes": 5005,
+          "sha256": "9ea8037b3d5285af015351a2ccd34f3748b17b840b25116a8b5cf048efede71e",
+          "stored_sha256": "af01b78bfabe20a78ff911c9d8ca763c64cce0ae1a44d5e33618711c5b7d9260"
+        }
+      },
+      "retained_executables_verified": {
+        "/private/tmp/verum-T1720-classification-baseline-final/test-executable-0": "4f9f262abc8845785e09658fbd65e4e2a996d6c2aa3aab2cf3c60f3d5d5e286d"
+      }
+    },
+    {
+      "original_gate": {
+        "directory": "fixed-focus",
+        "original_directory": "/private/tmp/verum-T1720-fixed",
+        "classification": "Twelve focused parser/checker controls pass.",
+        "source_commit": "b9bf31ff52bf1f3aa16b2a501b9f095859585268",
+        "exit_code": 0,
+        "wall_seconds": 20.155,
+        "executed_binaries": 1,
+        "totals": {
+          "passed": 12,
+          "failed": 0,
+          "ignored": 0
+        },
+        "source_at_commit_hashes_verified": 443,
+        "retained_executables_verified": 1,
+        "receipt_sha256": "1477ec1e9950c4fe7975ccf78772eef6dec4a87bdb102c28b50a26d5aae4bcdb",
+        "raw_log_sha256": "e565c5a8ea156f0e0feca98db6e0b4f4c8a9b5d0c00b2af4ac339d5f30667057"
+      },
+      "files": {
+        "receipt": {
+          "path": "historical-parser/fixed-focus/result.json.gz",
+          "bytes": 58087,
+          "sha256": "1477ec1e9950c4fe7975ccf78772eef6dec4a87bdb102c28b50a26d5aae4bcdb",
+          "stored_sha256": "3118bbf474b44890303d9f52bb56424f814849465fdca2ae6676cbf94e2095e3"
+        },
+        "log": {
+          "path": "historical-parser/fixed-focus/gate.log.gz",
+          "bytes": 2175,
+          "sha256": "e565c5a8ea156f0e0feca98db6e0b4f4c8a9b5d0c00b2af4ac339d5f30667057",
+          "stored_sha256": "18b30deb1db61f8677b0c899dea6b0b638a50fbb3a24408b79d58d2073336081"
+        }
+      },
+      "retained_executables_verified": {
+        "/private/tmp/verum-T1720-fixed/test-executable-0": "b9e36d9254abece0952bd9a8d2a27145f67546f81c1f9c638fc8d128c073f228"
+      }
+    },
+    {
+      "original_gate": {
+        "directory": "parser-full",
+        "original_directory": "/private/tmp/verum-T1720-full-parser",
+        "classification": "Unfiltered parser library and integration suite passes.",
+        "source_commit": "b9bf31ff52bf1f3aa16b2a501b9f095859585268",
+        "exit_code": 0,
+        "wall_seconds": 89.652,
+        "executed_binaries": 124,
+        "totals": {
+          "passed": 4231,
+          "failed": 0,
+          "ignored": 0
+        },
+        "source_at_commit_hashes_verified": 443,
+        "retained_executables_verified": 124,
+        "receipt_sha256": "0b0a04ac5760c47971393b689ae2fdcc445c388d8c1c4b98c0da9c15a44a149c",
+        "raw_log_sha256": "49e61318f64c6939bfaff7d08938988272aa8cd7fc872897ca8ccf66d25feced"
+      },
+      "files": {
+        "receipt": {
+          "path": "historical-parser/parser-full/result.json.gz",
+          "bytes": 98559,
+          "sha256": "0b0a04ac5760c47971393b689ae2fdcc445c388d8c1c4b98c0da9c15a44a149c",
+          "stored_sha256": "67270527277b407c290b7e61f7f767eb1d9bd2d674304647e70927568120a1f4"
+        },
+        "log": {
+          "path": "historical-parser/parser-full/gate.log.gz",
+          "bytes": 234580,
+          "sha256": "49e61318f64c6939bfaff7d08938988272aa8cd7fc872897ca8ccf66d25feced",
+          "stored_sha256": "1aa03fcd83f2941402d8399878155656b44a9e6fa39a18b2c281870650ca87ac"
+        }
+      },
+      "retained_executables_verified": {
+        "/private/tmp/verum-T1720-full-parser/test-executable-0": "0bd264b97866a347c7ba84759bd860d3649280780e578b6680ce07058c7b44bd",
+        "/private/tmp/verum-T1720-full-parser/test-executable-1": "2b66394e5b5c0be191b554f8d85e1f2a3efbe0b5409666726b57942c471f8990",
+        "/private/tmp/verum-T1720-full-parser/test-executable-2": "04152ef721f6d783e3a86288733c5a72bdd315e0b1a0d3d52f1892920c6e58e8",
+        "/private/tmp/verum-T1720-full-parser/test-executable-3": "bc0ae3ef0f11d275a0c32dcba431d8c1d9c3049896e84da8d2de825dec05cc96",
+        "/private/tmp/verum-T1720-full-parser/test-executable-4": "903d29d5398dc094c670b79e49d117bd30d622abd798e5149bb933df0d22c8b5",
+        "/private/tmp/verum-T1720-full-parser/test-executable-5": "bcfeb3f4f50943d663244a7fbddb9fdd436f22ffc7f73c0053b2fb9d2d7e879f",
+        "/private/tmp/verum-T1720-full-parser/test-executable-6": "457a3d979eaf041f19ec6f0d87f03c826a06250735a5532940fd113a5cfbde73",
+        "/private/tmp/verum-T1720-full-parser/test-executable-7": "0a17ffd75358c1a5e0bb625c32df760a05a0f4c5ca0e675677de3985270a9534",
+        "/private/tmp/verum-T1720-full-parser/test-executable-8": "c9b84343152f763053fd9828c802427b7a952fe256d7839db39f05f258810430",
+        "/private/tmp/verum-T1720-full-parser/test-executable-9": "c031b2d254ec4e2c8fb818d4fdd38e6adbbdb8c5f8aacc902be1fd02cc1eea74",
+        "/private/tmp/verum-T1720-full-parser/test-executable-10": "c495f40999a1ed23f664a64b63773ed454d12eb9541e10c2d667b87b0b592bc3",
+        "/private/tmp/verum-T1720-full-parser/test-executable-11": "d84433042435edcc8b98d3f56ff9fcce9937f1d57d01f512bff0c19f77c7ea20",
+        "/private/tmp/verum-T1720-full-parser/test-executable-12": "a82572fbfafde9b345c42bd17173f2de1fb651a3d5bcf0efb2f0eea2cf663724",
+        "/private/tmp/verum-T1720-full-parser/test-executable-13": "cedfd547d7ab774936da7b721d5f4b797257620daa776032cf32593c53c2c94b",
+        "/private/tmp/verum-T1720-full-parser/test-executable-14": "b03d3526c0896873181dff222b0f2c656dc40213ca59da6452aaa3016c4d1977",
+        "/private/tmp/verum-T1720-full-parser/test-executable-15": "940076c0b06e0d1214a18322c969945beed115922443780f81f6c53852edc21b",
+        "/private/tmp/verum-T1720-full-parser/test-executable-16": "3c54aafe1a28caca4f72e523fef791171b9f70b0c5adce19995fd333be1fc76f",
+        "/private/tmp/verum-T1720-full-parser/test-executable-17": "4e48cfb5d724ae0f26e2015420dfa05a0fe75221c8398110393322facfb1e08d",
+        "/private/tmp/verum-T1720-full-parser/test-executable-18": "548e4cc81cd0c1fcb80fb3fab0a8b21cfe0da4fde01886cbfe466d4e63771ae8",
+        "/private/tmp/verum-T1720-full-parser/test-executable-19": "0f4645126bb0b549a61af259b2702131cc7abe3d8dc90c570d125c498715ba81",
+        "/private/tmp/verum-T1720-full-parser/test-executable-20": "aed1cea725daeb1f63e6910c9401dec24cf6c6b826d516e826a13afca3706daf",
+        "/private/tmp/verum-T1720-full-parser/test-executable-21": "5338c00d4b18d0e0c83cb8559c73a6791f3c8f34049fd7cc69545bff73788e34",
+        "/private/tmp/verum-T1720-full-parser/test-executable-22": "a796bf64c30214be2f1ec0c10a4deb37ab37c373f15445ddcdc9734aa6594bc7",
+        "/private/tmp/verum-T1720-full-parser/test-executable-23": "9d9623f35479947f8032821c1be7506e41b131bbb4fb89b1032d95a8acda2baf",
+        "/private/tmp/verum-T1720-full-parser/test-executable-24": "04fc8701cda34e0dd763eed05717c3b8e86356b626c8f9130387bcf5a75e1af7",
+        "/private/tmp/verum-T1720-full-parser/test-executable-25": "ba0d9abf686e311a1634647d2f9cb749ce5de5e2198ecd20166e952157cbc9a5",
+        "/private/tmp/verum-T1720-full-parser/test-executable-26": "cac820e04ae126ccd5b50215a330712b9f124a1fcb05e7d049ce3c9baa47e8fa",
+        "/private/tmp/verum-T1720-full-parser/test-executable-27": "5fb5be57fbbd8618705217d4f72114c9595f5874883877f7ed36268bb1ec637e",
+        "/private/tmp/verum-T1720-full-parser/test-executable-28": "e60cfe168c1c0e70912d53a9e227e45128b4ba0bf09045e2befcd658ae533aff",
+        "/private/tmp/verum-T1720-full-parser/test-executable-29": "449e952e5c78b7e341f229a0edcf0ee027ca10ef65c05f9d8be52eb18e2dccda",
+        "/private/tmp/verum-T1720-full-parser/test-executable-30": "4bc5575d8b59b5f0774946e56d9884ca49ba9ef61c7e0a8e57f723d90b8d10d5",
+        "/private/tmp/verum-T1720-full-parser/test-executable-31": "6f51ebe87db427f27773f0b5b0ea7fd7af7f92e1b764a47d604e32758680c9f6",
+        "/private/tmp/verum-T1720-full-parser/test-executable-32": "0279c21990a9637a2349bc6be9ce98c69e8e0b49bafee47dc42acac54dc8fad1",
+        "/private/tmp/verum-T1720-full-parser/test-executable-33": "65ce8bcb1acae4e7f6a1a4742c39ec7aaf68d8e65d0dbfc642f0e1527b00b54a",
+        "/private/tmp/verum-T1720-full-parser/test-executable-34": "97d5d050d8726c442fb6466e6118f40fc5e0348693c54fb4d3ed14ea6ee716dc",
+        "/private/tmp/verum-T1720-full-parser/test-executable-35": "0b9adee908a0d8d9c8bc248eeb03551b7a1da0f59313fdb6eef6fbbb05aa2063",
+        "/private/tmp/verum-T1720-full-parser/test-executable-36": "5b9a35c9de8ff9d02469bf874a83eb3d47e564b69a016482a8e470c4f86670c8",
+        "/private/tmp/verum-T1720-full-parser/test-executable-37": "5d8d1b7e73ff4f0df8856001b8efd8b8b45bbe8d526aff396ef4dc9bbeffec0f",
+        "/private/tmp/verum-T1720-full-parser/test-executable-38": "1be46b6c49c3068f7a1f5264659e16f975727cbd4b8befc92ada598aac86fc53",
+        "/private/tmp/verum-T1720-full-parser/test-executable-39": "3e622f65e5c7338dd4b0b0ad2ee979ff5896437224fcd0dd858b3f76e6efb69e",
+        "/private/tmp/verum-T1720-full-parser/test-executable-40": "50925cfd40406212ed12bda8100e463ab4a619ee3aa3f892a0daf9320e0ff2c4",
+        "/private/tmp/verum-T1720-full-parser/test-executable-41": "67852eb44aac65e1d8f0108775d88cb78f317f1626a70e46786c42f9dcfaad40",
+        "/private/tmp/verum-T1720-full-parser/test-executable-42": "33b6b9622a7d67afb975a492ab6a55150869d5672479a6ef995a0ae0c697adcd",
+        "/private/tmp/verum-T1720-full-parser/test-executable-43": "b96a8a2a96104e5b6dab0842f4c94b75be8c2dfaaf11adb1240bb7e3d0e470bc",
+        "/private/tmp/verum-T1720-full-parser/test-executable-44": "f2feeae2a1b328676240a342564ae038cda73378b67b0d6af06b67c6138fca9a",
+        "/private/tmp/verum-T1720-full-parser/test-executable-45": "85aa32fbe375693faf06273d4b6440661c8b0eb68c94ccf800cbe0e46762441d",
+        "/private/tmp/verum-T1720-full-parser/test-executable-46": "24b25e511105e6353a982f7b2e738ecc3a87b777490f27db1d999b279077b094",
+        "/private/tmp/verum-T1720-full-parser/test-executable-47": "88f496a276f7a5390d970102870e9ffc97717647ff28131adc2eb6206a7b9121",
+        "/private/tmp/verum-T1720-full-parser/test-executable-48": "2bfda16f33fb4c7d658330e613a92239dfebbd64a2b79e69a8c4b30fd65e54d5",
+        "/private/tmp/verum-T1720-full-parser/test-executable-49": "9f682e6e9764211cc265142563832a29b33b6f61353583de116fac9635227945",
+        "/private/tmp/verum-T1720-full-parser/test-executable-50": "a3de99a81ee96dd876cf866bba515a90209db7fa619733c9301c8f5074d67b83",
+        "/private/tmp/verum-T1720-full-parser/test-executable-51": "6878f40ba7273e3735d162336f6c803af17d5cecc1e31ee5f3e97e508d96e22a",
+        "/private/tmp/verum-T1720-full-parser/test-executable-52": "ae9287ad6edd02a49907ac8c634c60156d1c318ebf3455394d13296402e45646",
+        "/private/tmp/verum-T1720-full-parser/test-executable-53": "1989ce43975a8b1f6b5e05aeb31bbc01497ba708505ee26d4082a0950149204a",
+        "/private/tmp/verum-T1720-full-parser/test-executable-54": "bb1cc719698acdba7bf347d1b9ade766902efde0c8a611a0bed056078136032f",
+        "/private/tmp/verum-T1720-full-parser/test-executable-55": "4d48c30a52656293e8516836fef5fdd6053ec956f6b24ad43a51b824e4897f65",
+        "/private/tmp/verum-T1720-full-parser/test-executable-56": "c883cefe1c525273c765d12a23e4d91045d20b13922834e5a66f5dafbfcf0c2b",
+        "/private/tmp/verum-T1720-full-parser/test-executable-57": "981997d2b2b47ebfd911a942e7c365fb1fcac82e5598a70dde0fe9b9d29a8e8c",
+        "/private/tmp/verum-T1720-full-parser/test-executable-58": "5fcc359e1faf01ece366a7f84f2797df4d760625c2f971b210ff9d45e0532e96",
+        "/private/tmp/verum-T1720-full-parser/test-executable-59": "1d9f15f939ec031b50861f2fdf1707d095e1d92107c0a7fdc970974ea71ef4d6",
+        "/private/tmp/verum-T1720-full-parser/test-executable-60": "3b03f32eeee52a01969a31decc1671aa2dbb1ab33e1f300be083f9fc0ad51c8c",
+        "/private/tmp/verum-T1720-full-parser/test-executable-61": "60a17a8c3918c000466fce1abaa26ed2d88a200a8bf45915dc0101b72d9857c3",
+        "/private/tmp/verum-T1720-full-parser/test-executable-62": "454730486ccefcab1ee5d190fa98476963967cce8ee66130bf7fbc44462f3714",
+        "/private/tmp/verum-T1720-full-parser/test-executable-63": "adc7fb6e5d474a3e3af713d18d89e6ce27a3356510721e9aeeb5c0088939c6ad",
+        "/private/tmp/verum-T1720-full-parser/test-executable-64": "4e331f0e2725fff34a5ff2e19b59638978b89071ae69711759727a968bae5476",
+        "/private/tmp/verum-T1720-full-parser/test-executable-65": "91d96994fedcdc08824771fd5da9da13ff92ac39fa2b00aaf7ef74980082ba1a",
+        "/private/tmp/verum-T1720-full-parser/test-executable-66": "9057d4cc31fcdd6aad26d9e81724c1ffea4dd975aa58536c4c3e540f3cd984ca",
+        "/private/tmp/verum-T1720-full-parser/test-executable-67": "3ea0893e5da388426d535eface674383e466487051926b0e0777b9e3845d9be9",
+        "/private/tmp/verum-T1720-full-parser/test-executable-68": "2131cce80162000d07881ff1ec4400419419a83d9f6182e2501235c75ca21473",
+        "/private/tmp/verum-T1720-full-parser/test-executable-69": "e3131ea59812da2d987b2a92917462187af849e80bab0802a1c6735b6ccc682a",
+        "/private/tmp/verum-T1720-full-parser/test-executable-70": "7da43971d4e7f81d500eea47d399e211980d5ebdcc086eb2722e36732b3593e3",
+        "/private/tmp/verum-T1720-full-parser/test-executable-71": "c1615c75946bc37e582571242527c4732d93abbbe9ca92b95018c7c5cbd93ffc",
+        "/private/tmp/verum-T1720-full-parser/test-executable-72": "191545eb6c739649ee4f16dbe89c5901745e8a33ba58055f23a20ce00ca04765",
+        "/private/tmp/verum-T1720-full-parser/test-executable-73": "fbe4c24326a42d7c9bb4ec828c65012c325e13e2dad17b60e333b96f373caa98",
+        "/private/tmp/verum-T1720-full-parser/test-executable-74": "de2556a8eb916a9ea1f25d5055e0335945adc94fcdb198b33bf850575921b0c1",
+        "/private/tmp/verum-T1720-full-parser/test-executable-75": "a26623b78fc779ef717f0d289577d27534a26c95185446b05353b7980a448dab",
+        "/private/tmp/verum-T1720-full-parser/test-executable-76": "8fb215eb0243ca693906ce483708f3741ff61ed27d8ea06a9e7e89c926e30d25",
+        "/private/tmp/verum-T1720-full-parser/test-executable-77": "74e86693f8683d9fbffa5e4f200b35cb78ac55d3448feb7c62e6c35f0a69fd03",
+        "/private/tmp/verum-T1720-full-parser/test-executable-78": "975e40fa940da1d1181faa16596852adad71f279f355113d49bcca4f614b6f5b",
+        "/private/tmp/verum-T1720-full-parser/test-executable-79": "d7d73f2f901454460799935cd473a2a88a8c879ae87948ce182e6e86f6670d84",
+        "/private/tmp/verum-T1720-full-parser/test-executable-80": "d5dc1658680de308affae525b317d9c04f9ba3e5dccc23f724bf52af40c20a8a",
+        "/private/tmp/verum-T1720-full-parser/test-executable-81": "d5d213e529205736862ab14179f82ee2d7455d5e3e0d6eae7675648d9a7d1132",
+        "/private/tmp/verum-T1720-full-parser/test-executable-82": "32c558426c203a6ba345352797cbd8a9c3f9cbacf2925d8ed9b9ae6c196a7a31",
+        "/private/tmp/verum-T1720-full-parser/test-executable-83": "2ca7f53201786141451f3977d4c3ab5935350f242b659537728f12a96b6adf7d",
+        "/private/tmp/verum-T1720-full-parser/test-executable-84": "281eaa8b1736665212e46e7999bde7d93fa3a871763c61abd33bfea247444aa7",
+        "/private/tmp/verum-T1720-full-parser/test-executable-85": "4b51c81f37da3090ecefba9c69f5afdddb2a95e565e1e8182757f5d0750906ce",
+        "/private/tmp/verum-T1720-full-parser/test-executable-86": "04ab665f93d6af4eecf03b4bb0824647a6d16eb002069c06e9f844303fbe1886",
+        "/private/tmp/verum-T1720-full-parser/test-executable-87": "fddafc272a380105b47ed359b5e701a3330e2c281d993a8b81ff00b494694348",
+        "/private/tmp/verum-T1720-full-parser/test-executable-88": "1b6f629ead3bc4e40dce617b14f9ba0100bcff37b6079347b32f4287c3511e98",
+        "/private/tmp/verum-T1720-full-parser/test-executable-89": "10e2b48a249a03ccc579428f52772f8ca82443f8537cc4e8c2c170326bdc3621",
+        "/private/tmp/verum-T1720-full-parser/test-executable-90": "281294193bb67fa29ec7c6dc61264fbe50c3e04eb3169df160f724f2ac567448",
+        "/private/tmp/verum-T1720-full-parser/test-executable-91": "18de5d07a3883f1f0f67f648a6216fe5cf51ca3d839daa844cc1deaf1240751c",
+        "/private/tmp/verum-T1720-full-parser/test-executable-92": "1b438d74bf651e1fcee2fde019a028e007b7185beabc7e8c8e85ffdd41c74c5a",
+        "/private/tmp/verum-T1720-full-parser/test-executable-93": "ae165533505bd6a0678cb1883b19e50b289ff4949afe68f0a3442bc4b9d71314",
+        "/private/tmp/verum-T1720-full-parser/test-executable-94": "e4a96b6e345b6ee2cc7a686b904a127b03917c2cfb1af93e2595189e987ef6a7",
+        "/private/tmp/verum-T1720-full-parser/test-executable-95": "347ef9c4110ba98c4ca405623158c39ece94774bb7c0f84724ebf47d94e2a643",
+        "/private/tmp/verum-T1720-full-parser/test-executable-96": "ede51192976e7e36693be87b124e0e3baa23f2d7398d6bb66aaeb58e4d0a860b",
+        "/private/tmp/verum-T1720-full-parser/test-executable-97": "767756c5f761f7c0bfef31ced31e31e49fa56f3fe48107f22a437058ef722d18",
+        "/private/tmp/verum-T1720-full-parser/test-executable-98": "d52aa8eeba9ecc35b34f669e40d79d691504cb0140299d1b9a329e8d600470d9",
+        "/private/tmp/verum-T1720-full-parser/test-executable-99": "39ed1dd13253082b2201cfb8ca7de563f7dfbd2e92c543fccf4c4cafcdb462c7",
+        "/private/tmp/verum-T1720-full-parser/test-executable-100": "0c2634bdc912b619abb87150750b0886ba4e0a7f22cb5bda9c9843d50065b39b",
+        "/private/tmp/verum-T1720-full-parser/test-executable-101": "6fa341d07eba985fb8137e9ad8ad65199730b197808c2bba0fefe785f72da488",
+        "/private/tmp/verum-T1720-full-parser/test-executable-102": "f7cce7e5b3e2439e22ce622c60edc617d8901be9c675e276302c6c176195dc88",
+        "/private/tmp/verum-T1720-full-parser/test-executable-103": "0fc3b426bd0c1dcc5558841243c72d0c10705807baacac3aa1e6e4bbda00e6b5",
+        "/private/tmp/verum-T1720-full-parser/test-executable-104": "519dd7d4c57f4891aac9c4aad5642fc0a1a36b716fb2b9b920e9b0e70f81c7b5",
+        "/private/tmp/verum-T1720-full-parser/test-executable-105": "fa5eef081ad3c6d3a6c28f064d284f85e4b9a2724206af087e8b15da57a567ef",
+        "/private/tmp/verum-T1720-full-parser/test-executable-106": "18389eecb647b30fb6e56b83e236406f1b5c8266cc36cb2bd5e08430c6dcc654",
+        "/private/tmp/verum-T1720-full-parser/test-executable-107": "156258f4ec51d821315a9efad6fee6566f0bf79d8e7dc9abf9445170cddf0fdc",
+        "/private/tmp/verum-T1720-full-parser/test-executable-108": "991ca9e1dc1b4ea3fd6b060ea2de7e8b2bc8d8d0a1cf4abc9851581de1e0a235",
+        "/private/tmp/verum-T1720-full-parser/test-executable-109": "78ff8a7f3446210bfecc702bcd8ed36e202a3a53cf3acc3575ed411f3eebf841",
+        "/private/tmp/verum-T1720-full-parser/test-executable-110": "2605a0ded5b33369474bee83577014001bcf4f69c6e0f07368b9f9d03ff8363e",
+        "/private/tmp/verum-T1720-full-parser/test-executable-111": "b92a29f8dc17aa32721002f4f65704070ceac79c534f0a5f13e495579e00f0c5",
+        "/private/tmp/verum-T1720-full-parser/test-executable-112": "6da7ef3c57b92aa10986916ed1a9903678851f21f3264cd6efa233cb9f9d5306",
+        "/private/tmp/verum-T1720-full-parser/test-executable-113": "da1754944f49d7a95e4600c7c22872ebf90b8b32b0a199fa0ceeb28f60a3d1ce",
+        "/private/tmp/verum-T1720-full-parser/test-executable-114": "ae7c84b5f38f3e2842ae4d327c134c546c329133b1a5072febe9fdc192899d23",
+        "/private/tmp/verum-T1720-full-parser/test-executable-115": "46c36787f08157dad27eed09bb95bf7f222901b127aab437cfbb72566a42e1c6",
+        "/private/tmp/verum-T1720-full-parser/test-executable-116": "cbddfc1b181781bab32f47b17dc27c657ccef73f5bb0e09f2f99bc58c28dce8f",
+        "/private/tmp/verum-T1720-full-parser/test-executable-117": "5cd204e069729d66b32a511ad338c4fa04f783808ca64aefe84481ca53257e1b",
+        "/private/tmp/verum-T1720-full-parser/test-executable-118": "29ff492faf0d50bdccbd267ae6bd76dab553af0e459a48733d0740e36969a1b5",
+        "/private/tmp/verum-T1720-full-parser/test-executable-119": "58162e42a9780d9cd3f3eef04ed9345d8868d15aa0fac0e04826d5b6c4da60e4",
+        "/private/tmp/verum-T1720-full-parser/test-executable-120": "2765e5ff6e0fcc8b93d854e3d15118bd88f465a0e603215269f7e8d026bdd6c3",
+        "/private/tmp/verum-T1720-full-parser/test-executable-121": "0f36a48628bb76b4648109c5379a77b7b63182f42bb2ed96cc5948c3cb7be74a",
+        "/private/tmp/verum-T1720-full-parser/test-executable-122": "4627dae6cffca01600fe4f94733cc3a9626e6f00c8fe246dfd3276594ba1bd95",
+        "/private/tmp/verum-T1720-full-parser/test-executable-123": "c90d8bc8e9338a2a66c9d8836aef473de2d7919abc291d0978c8d4457b4e3ab7"
+      }
+    }
+  ],
+  "main_gates": {
+    "alias": {
+      "source_commit": "f54ffc87061be49f466523cb215187ff1e180eb9",
+      "wall_seconds": 28.255,
+      "exit_code": 0,
+      "test_results": [
+        "test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s"
+      ],
+      "files": {
+        "result.json": {
+          "path": "alias/result.json.gz",
+          "bytes": 636715,
+          "sha256": "b728c3767aa7a49f71e771e65a30256a4313a125f72c0a2f26253180eee8eddd",
+          "stored_sha256": "c52b3f327bfc16c31989c884a650e402c18db90c6d10091fc0da4cb32f027b8d"
+        },
+        "gate.log": {
+          "path": "alias/gate.log.gz",
+          "bytes": 325704,
+          "sha256": "0ecced7fd26d06152a859238970f80f0a632ff891bb77bf30b281331b8eecd31",
+          "stored_sha256": "32215fb9bc6e5ef0032d0b2399975203aa8398f0a1dbcecbe98d2488d8f082af"
+        },
+        "release.json": {
+          "path": "alias/release.json",
+          "bytes": 985,
+          "sha256": "91d6f4c862f179ac1d600ddd26db03c9eb8a4547282f7867327493b194735d7c"
+        }
+      },
+      "executables": {
+        "generic_alias_parameter_classification": {
+          "path": "/Users/taaliman/.tmp/verum-codex-01a10248-types/checker-target/debug/build/verum_types/226204bc868345d0/out/generic_alias_parameter_classification-226204bc868345d0",
+          "sha256": "982e783861438e0ac55d0ec13788166cb07de3f68254166470e32239ef3604b8",
+          "retained": "/private/tmp/verum-T1728-main-alias/generic_alias_parameter_classification-226204bc868345d0",
+          "retained_sha256": "982e783861438e0ac55d0ec13788166cb07de3f68254166470e32239ef3604b8",
+          "fresh": false
+        }
+      },
+      "artifact_origin": null,
+      "artifact_schema": null,
+      "artifacts_unchanged": true,
+      "cargo_compilations": [
+        "verum_fast_parser v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_fast_parser)",
+        "verum_error v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_error)",
+        "verum_modules v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_modules)",
+        "verum_types v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_types)",
+        "verum_smt v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_smt)",
+        "verum_parser v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_parser)"
+      ]
+    },
+    "compiler": {
+      "source_commit": "f54ffc87061be49f466523cb215187ff1e180eb9",
+      "wall_seconds": 153.695,
+      "exit_code": 0,
+      "test_results": [
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s",
+        "test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s"
+      ],
+      "files": {
+        "result.json": {
+          "path": "compiler/result.json.gz",
+          "bytes": 640408,
+          "sha256": "01c28ba54223905fd837a59423f8dc8eb2fe664c0ac2a54bddc2ee8f3c98c1b6",
+          "stored_sha256": "0d003bf079992e4c8083679108fa0226e92edf47141b47521c199e0ee3c98be9"
+        },
+        "gate.log": {
+          "path": "compiler/gate.log.gz",
+          "bytes": 1259804,
+          "sha256": "69e096a07bcda33decd0a62fbc721c364821095d09c1e31657956b7572b322ba",
+          "stored_sha256": "8fdb22bb0098904d086d325031862afbbc3b5830668fc74345c2e8e4b33c1586"
+        },
+        "release.json": {
+          "path": "compiler/release.json",
+          "bytes": 2220,
+          "sha256": "6ee7471d88cf6dc3db6010dd69b41785017edd90fca60dba37d0d52da324b1c2"
+        }
+      },
+      "executables": {
+        "stdlib_cache_identity": {
+          "path": "/Users/taaliman/.tmp/verum-codex-01a10248/native-target/debug/build/verum_compiler/8b75c51fb71df551/out/stdlib_cache_identity-8b75c51fb71df551",
+          "sha256": "dc8a816b44bc878dc6753dc54e2dd838cdc5ed9129e3e7bc7fbff8cb0227a8e8",
+          "retained": "/private/tmp/verum-T1728-main-compiler/stdlib_cache_identity-8b75c51fb71df551",
+          "retained_sha256": "dc8a816b44bc878dc6753dc54e2dd838cdc5ed9129e3e7bc7fbff8cb0227a8e8",
+          "fresh": false
+        },
+        "stdlib_cache_alias_archive": {
+          "path": "/Users/taaliman/.tmp/verum-codex-01a10248/native-target/debug/build/verum_compiler/6b0fe1ee810bfa80/out/stdlib_cache_alias_archive-6b0fe1ee810bfa80",
+          "sha256": "977963c72a4d4b379a30f36d84d2ac86dea4cbb4f6fb9f071abd5735cbf21c48",
+          "retained": "/private/tmp/verum-T1728-main-compiler/stdlib_cache_alias_archive-6b0fe1ee810bfa80",
+          "retained_sha256": "977963c72a4d4b379a30f36d84d2ac86dea4cbb4f6fb9f071abd5735cbf21c48",
+          "fresh": false
+        }
+      },
+      "artifact_origin": "e86f2abd77e041e2f29cdcbf30d9629435e64f7e",
+      "artifact_schema": "v54-2026-10-10-declared-field-visibility",
+      "artifacts_unchanged": true,
+      "cargo_compilations": [
+        "verum_error v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_error)",
+        "verum_tblgen v21.0.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/llvm/verum_tblgen)",
+        "verum_fast_parser v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_fast_parser)",
+        "verum_mlir_macro v21.0.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/llvm/verum_mlir_macro)",
+        "verum_llvm_sys v21.0.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/llvm/verum_llvm_sys)",
+        "verum_modules v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_modules)",
+        "verum_mlir_sys v21.0.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/llvm/verum_mlir_sys)",
+        "verum_types v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_types)",
+        "verum_cbgr v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_cbgr)",
+        "verum_mlir v21.0.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/llvm/verum_mlir)",
+        "verum_llvm v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/llvm/verum_llvm)",
+        "verum_vbc v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_vbc)",
+        "verum_smt v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_smt)",
+        "verum_compiler v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_compiler)",
+        "verum_codegen v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_codegen)",
+        "verum_verification v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_verification)"
+      ]
+    }
+  },
+  "runner_sha256": "99bedb4f1c0280ef1ef03fd298d82614352cbcc9869e38744b3c60ee52c5aac9",
+  "historical_scope": "Original parser controls and unfiltered parser acceptance remain attributed to their recorded old source commits. The unrelated 53-control field-policy consumer gate is deliberately not carried or presented as main acceptance.",
+  "equivalent_changed_source_paths": {
+    "crates/verum_fast_parser/src/decl.rs": "49dc507d79c4b5b0b0bcf306438e1d76739df3421e72b20b7ec52db03b51bb3d",
+    "crates/verum_compiler/build.rs": "56a338eb613226972ab45fbd698ed87fb9be6a081e509220fa27f7fdb5a428db",
+    "crates/verum_compiler/build_support/stdlib_cache.rs": "f06e6f264af02360bff9c6ad61acf72a4be86de5c800ee1eb8d79cf70dcc88e2",
+    "crates/verum_types/tests/generic_alias_parameter_classification.rs": "24deba75c49300b98e11b4f5ce59b278ea2e11d656f28d643d996ddad8a73d11",
+    "crates/verum_compiler/tests/stdlib_cache_identity.rs": "8ba5bd6b72f051611a7fccbd071cf4b2ee923fb973f7685a33f1ffd3af746751",
+    "crates/verum_compiler/tests/stdlib_cache_alias_archive.rs": "1fe1d759c27788e8beb116f2d8429302699805a40b3553a9d7a4ba2a5330a341",
+    ".github/workflows/ci.yml": "10c68ad96e198ae945e9d204317b4bf41e9c3df198fc5eaf9c69a437d28c7106"
+  }
+}

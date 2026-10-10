@@ -1,0 +1,29 @@
+{
+  "raw_receipt_sha256": "2e5eb6064660e1a7a9a9ad14079e04f4e651a3acb44f33d8b115eb6f8642a79d",
+  "raw_log_sha256": "0e98a47e6574a5136b5498650b2563351bcf878f07fcaa8e3b36238eb5d086da",
+  "source_commit": "75936d87614b18dbba801643866564730b2cd31c",
+  "accounting_script_sha256": "1ea1a7182020e7e5072de8489d315ecadca85fd8826f7860cec3326a9887b059",
+  "explanation": "Per-target results use each actual Cargo test invocation, its first announced count and its final summary. The original flat baseline parser also saw the successful isolated child summary printed as text inside the expected dependency assertion failure; that child is part of one of the seven controls, not an extra selected target. Original receipt and raw log remain unchanged.",
+  "targets": {
+    "stdlib_cache_alias_archive": {
+      "cargo_invocation_line": 5243,
+      "announced": 1,
+      "status": "ok",
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0,
+      "measured": 0,
+      "filtered": 0
+    },
+    "stdlib_cache_identity": {
+      "cargo_invocation_line": 5250,
+      "announced": 7,
+      "status": "ok",
+      "passed": 7,
+      "failed": 0,
+      "ignored": 0,
+      "measured": 0,
+      "filtered": 0
+    }
+  }
+}

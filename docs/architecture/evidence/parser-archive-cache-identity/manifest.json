@@ -1,0 +1,200 @@
+{
+  "task": "T1728",
+  "base": "e86f2abd77e041e2f29cdcbf30d9629435e64f7e",
+  "tested_fixed_source": "75936d87614b18dbba801643866564730b2cd31c",
+  "tested_causal_baseline": "4a4b2df4cef1278e75d65079cdffa993bd15c365",
+  "initial_harness_source": "5dc1f85847c784eb4ec03f8894d9d4deae5c3c8c",
+  "scope": "The real automatic-archive hash function and build-script dependency output include the parser manifest and all production parser Rust sources. Real compile_core produces a small disk archive retaining Identity<T> and Pick<L,R> alias meaning through archive and metadata decoding. These gates do not automatically rebake the whole standard library or execute an ordinary CLI, registry, native or AOT program.",
+  "prerequisite": {
+    "task": "T1720",
+    "parser_repair": "b9bf31ff52bf1f3aa16b2a501b9f095859585268",
+    "reason": "The alias archive semantic oracle and semantic parser mutation fixture require the declaration-owned generic-parameter repair. Current main d4f68f3d8 does not yet contain it; a self-contained main landing must carry and validate that prerequisite."
+  },
+  "unrelated_open_boundary": {
+    "task": "T1735",
+    "scope": "Build-script environment-only Cargo rerun invalidation is not established by directly executing the disabled build script."
+  },
+  "production_paths": [
+    "crates/verum_compiler/build.rs",
+    "crates/verum_compiler/build_support/stdlib_cache.rs"
+  ],
+  "test_source_identity": {
+    "crates/verum_compiler/tests/stdlib_cache_identity.rs": "8ba5bd6b72f051611a7fccbd071cf4b2ee923fb973f7685a33f1ffd3af746751",
+    "crates/verum_compiler/tests/stdlib_cache_alias_archive.rs": "1fe1d759c27788e8beb116f2d8429302699805a40b3553a9d7a4ba2a5330a341"
+  },
+  "same_test_bytes_on_causal_baseline_and_fixed": true,
+  "schema_unchanged": "v54-2026-10-10-declared-field-visibility",
+  "cache_file_policy": "Every roster input contributes its relative path and bytes, or its existing missing-input sentinel; the same loop reports its absolute rerun dependency. The caller still computes this key outside the no-auto conditional.",
+  "runner_sha256": "79c8a86a51695d405b91f3dd5c4dfa11058b390e64a3fdf8c30b8a5737d5e43e",
+  "accounting_sha256": "1ea1a7182020e7e5072de8489d315ecadca85fd8826f7860cec3326a9887b059",
+  "runs": {
+    "initial-harness": {
+      "source_commit": "5dc1f85847c784eb4ec03f8894d9d4deae5c3c8c",
+      "exit_code": 101,
+      "wall_seconds": 137.175,
+      "test_results_raw": [],
+      "source_unchanged": true,
+      "source_paths_unchanged": true,
+      "artifacts_unchanged": true,
+      "files": {
+        "result.json": {
+          "path": "initial-harness/result.json.gz",
+          "sha256": "77b5f409ff5d8485e5c092a8c67f84dfaf4355d0790c09d7c7775dd37f1f7de2",
+          "stored_sha256": "57d825a72de2cf6bd5b753282b9349859ef0c10e4a2ba25bf5393acdc22afca0",
+          "bytes": 647653
+        },
+        "gate.log": {
+          "path": "initial-harness/gate.log.gz",
+          "sha256": "7a0dc5da32445f586b56ab6f95a9aa7128ac92e67fb3cd0498db27f76f601a70",
+          "stored_sha256": "68098a8326822fd11399774e8f88bfed1043fb5c493bf5f5c8f8d77377bac834",
+          "bytes": 1273193
+        }
+      },
+      "retained_executables": {}
+    },
+    "causal-baseline": {
+      "source_commit": "4a4b2df4cef1278e75d65079cdffa993bd15c365",
+      "exit_code": 101,
+      "wall_seconds": 147.692,
+      "test_results_raw": [
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s",
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.01s",
+        "test result: FAILED. 2 passed; 5 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s"
+      ],
+      "source_unchanged": true,
+      "source_paths_unchanged": true,
+      "artifacts_unchanged": true,
+      "files": {
+        "result.json": {
+          "path": "causal-baseline/result.json.gz",
+          "sha256": "78c55f608b512c3861dbe9b5814a076d11b7dbd35e894e1665831f076ae22664",
+          "stored_sha256": "7566312796124c817824e51b3005b2a49ee882020e46e26bb644a6f97c661e29",
+          "bytes": 649012
+        },
+        "gate.log": {
+          "path": "causal-baseline/gate.log.gz",
+          "sha256": "0177b12d079173d9efb4a3129420b43bbf6c5e5c84982e77c29f6145318f4836",
+          "stored_sha256": "f0a8ea9094279ad0a5055853f3a96f864e37a55dd8b8df11eadcf75c3f40abe8",
+          "bytes": 1246550
+        },
+        "target-accounting.json": {
+          "path": "causal-baseline/target-accounting.json",
+          "sha256": "6ee1d14d9f30d59625582836d4a0bb66ece38c787237af9b1a74031ba58c5766",
+          "bytes": 1208
+        }
+      },
+      "retained_executables": {
+        "stdlib_cache_alias_archive": {
+          "path": "/Users/taaliman/.tmp/verum-codex-01a10248/native-target/debug/build/verum_compiler/6b0fe1ee810bfa80/out/stdlib_cache_alias_archive-6b0fe1ee810bfa80",
+          "sha256": "cfacc515fc3354be6375a0bb9e11f1c565ed330de01c60a5f6161c00e095986c",
+          "retained": "/private/tmp/verum-T1728-cache-baseline-compiled/stdlib_cache_alias_archive-6b0fe1ee810bfa80",
+          "retained_sha256": "cfacc515fc3354be6375a0bb9e11f1c565ed330de01c60a5f6161c00e095986c",
+          "fresh": false
+        },
+        "stdlib_cache_identity": {
+          "path": "/Users/taaliman/.tmp/verum-codex-01a10248/native-target/debug/build/verum_compiler/8b75c51fb71df551/out/stdlib_cache_identity-8b75c51fb71df551",
+          "sha256": "e43808c5f3c982e7a52127aa926008278c5ee91246867323d5388197920fedb0",
+          "retained": "/private/tmp/verum-T1728-cache-baseline-compiled/stdlib_cache_identity-8b75c51fb71df551",
+          "retained_sha256": "e43808c5f3c982e7a52127aa926008278c5ee91246867323d5388197920fedb0",
+          "fresh": false
+        }
+      },
+      "targets": {
+        "stdlib_cache_alias_archive": {
+          "cargo_invocation_line": 5228,
+          "announced": 1,
+          "status": "ok",
+          "passed": 1,
+          "failed": 0,
+          "ignored": 0,
+          "measured": 0,
+          "filtered": 0
+        },
+        "stdlib_cache_identity": {
+          "cargo_invocation_line": 5235,
+          "announced": 7,
+          "status": "FAILED",
+          "passed": 2,
+          "failed": 5,
+          "ignored": 0,
+          "measured": 0,
+          "filtered": 0
+        }
+      }
+    },
+    "fixed": {
+      "source_commit": "75936d87614b18dbba801643866564730b2cd31c",
+      "exit_code": 0,
+      "wall_seconds": 152.716,
+      "test_results_raw": [
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s",
+        "test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s"
+      ],
+      "source_unchanged": true,
+      "source_paths_unchanged": true,
+      "artifacts_unchanged": true,
+      "files": {
+        "result.json": {
+          "path": "fixed/result.json.gz",
+          "sha256": "2e5eb6064660e1a7a9a9ad14079e04f4e651a3acb44f33d8b115eb6f8642a79d",
+          "stored_sha256": "263da3d0b82e289c548c737fef7231a9247a5354b81fe5af2b1904cebc2757fb",
+          "bytes": 648873
+        },
+        "gate.log": {
+          "path": "fixed/gate.log.gz",
+          "sha256": "0e98a47e6574a5136b5498650b2563351bcf878f07fcaa8e3b36238eb5d086da",
+          "stored_sha256": "010f4f9d6bd1c31f0157198035e4b1fedd3b631f2a5d777a4ce5a2d92e1016fd",
+          "bytes": 1242323
+        },
+        "target-accounting.json": {
+          "path": "fixed/target-accounting.json",
+          "sha256": "34b5172f183ab8c9abd1f967358906f340c9a9573cfd2a2e82857db64c1c62e1",
+          "bytes": 1204
+        },
+        "release.json": {
+          "path": "fixed/release.json",
+          "sha256": "8dbd5b5ae665c68bc13e3bdbb146c5d36c8940a15f8f8194e7813f9dc131782c",
+          "bytes": 2444
+        }
+      },
+      "retained_executables": {
+        "stdlib_cache_identity": {
+          "path": "/Users/taaliman/.tmp/verum-codex-01a10248/native-target/debug/build/verum_compiler/8b75c51fb71df551/out/stdlib_cache_identity-8b75c51fb71df551",
+          "sha256": "dc8a816b44bc878dc6753dc54e2dd838cdc5ed9129e3e7bc7fbff8cb0227a8e8",
+          "retained": "/private/tmp/verum-T1728-cache-fixed/stdlib_cache_identity-8b75c51fb71df551",
+          "retained_sha256": "dc8a816b44bc878dc6753dc54e2dd838cdc5ed9129e3e7bc7fbff8cb0227a8e8",
+          "fresh": false
+        },
+        "stdlib_cache_alias_archive": {
+          "path": "/Users/taaliman/.tmp/verum-codex-01a10248/native-target/debug/build/verum_compiler/6b0fe1ee810bfa80/out/stdlib_cache_alias_archive-6b0fe1ee810bfa80",
+          "sha256": "cfacc515fc3354be6375a0bb9e11f1c565ed330de01c60a5f6161c00e095986c",
+          "retained": "/private/tmp/verum-T1728-cache-fixed/stdlib_cache_alias_archive-6b0fe1ee810bfa80",
+          "retained_sha256": "cfacc515fc3354be6375a0bb9e11f1c565ed330de01c60a5f6161c00e095986c",
+          "fresh": false
+        }
+      },
+      "targets": {
+        "stdlib_cache_alias_archive": {
+          "cargo_invocation_line": 5243,
+          "announced": 1,
+          "status": "ok",
+          "passed": 1,
+          "failed": 0,
+          "ignored": 0,
+          "measured": 0,
+          "filtered": 0
+        },
+        "stdlib_cache_identity": {
+          "cargo_invocation_line": 5250,
+          "announced": 7,
+          "status": "ok",
+          "passed": 7,
+          "failed": 0,
+          "ignored": 0,
+          "measured": 0,
+          "filtered": 0
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,47 @@
+{
+  "source_commit": "75936d87614b18dbba801643866564730b2cd31c",
+  "target": "/Users/taaliman/.tmp/verum-codex-01a10248/native-target",
+  "released": true,
+  "idle_process_inspection": "ps -axo pid,ppid,command returned only the inspection shell and rg for native-target, T1728 and both selected test executables; runner session 64080 had exited.",
+  "receipt_sha256": "2e5eb6064660e1a7a9a9ad14079e04f4e651a3acb44f33d8b115eb6f8642a79d",
+  "retained_executables": {
+    "stdlib_cache_identity": {
+      "path": "/Users/taaliman/.tmp/verum-codex-01a10248/native-target/debug/build/verum_compiler/8b75c51fb71df551/out/stdlib_cache_identity-8b75c51fb71df551",
+      "sha256": "dc8a816b44bc878dc6753dc54e2dd838cdc5ed9129e3e7bc7fbff8cb0227a8e8",
+      "retained": "/private/tmp/verum-T1728-cache-fixed/stdlib_cache_identity-8b75c51fb71df551",
+      "retained_sha256": "dc8a816b44bc878dc6753dc54e2dd838cdc5ed9129e3e7bc7fbff8cb0227a8e8",
+      "fresh": false
+    },
+    "stdlib_cache_alias_archive": {
+      "path": "/Users/taaliman/.tmp/verum-codex-01a10248/native-target/debug/build/verum_compiler/6b0fe1ee810bfa80/out/stdlib_cache_alias_archive-6b0fe1ee810bfa80",
+      "sha256": "cfacc515fc3354be6375a0bb9e11f1c565ed330de01c60a5f6161c00e095986c",
+      "retained": "/private/tmp/verum-T1728-cache-fixed/stdlib_cache_alias_archive-6b0fe1ee810bfa80",
+      "retained_sha256": "cfacc515fc3354be6375a0bb9e11f1c565ed330de01c60a5f6161c00e095986c",
+      "fresh": false
+    }
+  },
+  "held_artifacts": {
+    "runtime.vbca": {
+      "bytes": 40537620,
+      "sha256": "aba325627fb569fa15c62a2907df819e858870834d7670f4c61d5888739faf7c"
+    },
+    "runtime.core_metadata": {
+      "bytes": 118785477,
+      "sha256": "cba1131412a3a460cab4f85ae7f0f05777492de0f9f3190fc4601beef76d48c5"
+    },
+    "runtime.symbol_graph": {
+      "bytes": 6993444,
+      "sha256": "cdf890eb0454d5f28ce7ad4b1cf0810b483a0e4ce27d1e62a2a4bf05e0b5a822"
+    },
+    "runtime.vbca.checksum": {
+      "bytes": 64,
+      "sha256": "93465e1e3b39c335df1d3bbf7ee257340cd420e10d671008de334095498a26b1"
+    },
+    "runtime.vbca.schema": {
+      "bytes": 40,
+      "sha256": "1c3b3d0a7b02c7c0f4001b49068bc4a69cd1ce368a547335fbf4186391971e4c"
+    }
+  },
+  "artifact_origin": "e86f2abd77e041e2f29cdcbf30d9629435e64f7e",
+  "scope": "No further target access after release. Full stdlib artifacts remain inherited e86 v54; only the test-owned tiny compile_core fixture archive was newly produced."
+}
