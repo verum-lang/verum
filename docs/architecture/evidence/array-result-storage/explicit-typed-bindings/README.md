@@ -24,7 +24,10 @@ with SHA-256 `a09947d2c5aff6f4496732b43f978adc52d669fd614dfa90d30ea0dc154280c9`.
 The same source commit expands the LLVM/JIT matrix with scalar value, mutation
 and length probes for all eight combinations. Those controls also verify the
 actual source producer differs and packed access retains its bounds guard.
-They have not yet run. T1704 therefore remains open for that native gate.
+The [focused native gate](native/README.md) subsequently passed all 48 source/wire
+probes at `4afb8b520aa9464e3ad9836c7f2119af5ee2e5b7`, whose test and production
+source bytes are unchanged from this checkpoint. Integration review remains
+separate from these recorded executions.
 
 This result establishes parsed-source and decoded-wire interpreter behavior.
 It does not establish ordinary CLI, fresh standard-library, native executable,
