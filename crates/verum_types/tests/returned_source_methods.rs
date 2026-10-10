@@ -286,3 +286,17 @@ fn inferred_private_type_does_not_expose_its_private_method() {
     assert_missing_method(&errors, "hidden");
     assert!(errors[0].contains("demo.provider.Receipt"), "{errors:?}");
 }
+
+#[test]
+fn inferred_private_type_does_not_publish_its_bare_name() {
+    let errors = check(
+        "mount demo.provider.issue; fn forbidden(value: Receipt) -> Int { 0 }",
+        &[("demo.provider", HIDDEN_PROVIDER)],
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.contains("TypeNotFound") && error.contains("Receipt")),
+        "the factory must not import its private return type name: {errors:?}",
+    );
+}
