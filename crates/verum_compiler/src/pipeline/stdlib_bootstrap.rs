@@ -2962,3 +2962,7 @@ mod qualified_record_assignment_tests;
 #[cfg(test)]
 #[path = "../../tests/bootstrap/alias_declaring_scope.rs"]
 mod alias_declaring_scope_tests;
+
+#[cfg(test)]
+#[path = "../../tests/bootstrap/field_visibility.rs"]
+mod field_visibility_tests;
