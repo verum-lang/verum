@@ -134,7 +134,7 @@ fn callable_return_context_does_not_convert_array_closure_storage() {
         assert!(
             !instructions
                 .iter()
-                .any(|instruction| matches!(instruction, Instruction::NewL { .. })),
+                .any(|instruction| matches!(instruction, Instruction::NewList { .. })),
             "{route}: array closure acquired an enclosing List conversion: {instructions:?}"
         );
     }
