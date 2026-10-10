@@ -10,11 +10,12 @@ impl VbcCodegen {
     /// Only the callable's structural contract selects conversion. Expression
     /// hints belong to initializers/arguments/fields and are not return targets.
     pub(super) fn materialize_list_return(&mut self, source: Reg) -> CodegenResult<Reg> {
-        let returns_list = match self.ctx.return_type.as_ref() {
-            Some(TypeRef::Instantiated { base, .. }) | Some(TypeRef::Concrete(base)) => {
-                *base == TypeId::LIST
+        let (returns_list, signed_bits) = match self.ctx.return_type.as_ref() {
+            Some(TypeRef::Instantiated { base, args }) if *base == TypeId::LIST => {
+                (true, args.first().and_then(|element| self.array_element_signed_bits(element)))
             }
-            _ => false,
+            Some(TypeRef::Concrete(base)) if *base == TypeId::LIST => (true, None),
+            _ => (false, None),
         };
         if returns_list
             && let Some(ArrayResultFact::Packed {
@@ -24,7 +25,7 @@ impl VbcCodegen {
             }) = self.ctx.array_result_facts.get(source)
         {
             // Zero is known empty storage, which still needs a growable List.
-            self.emit_unpack_packed_into_list(source, width, float, count)
+            self.emit_unpack_packed_into_list(source, width, float, count, signed_bits)
         } else {
             Ok(source)
         }

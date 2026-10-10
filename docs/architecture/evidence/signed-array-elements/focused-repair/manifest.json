@@ -1,0 +1,241 @@
+{
+  "task": "T1706",
+  "source_endpoint": "9692bdf1b67dea5b9d7d9787a9288be52ba4addf",
+  "status": "Focused signed decoding passes; one active pre-existing read-before-List-return control still fails. Native and full-library gates remain pending.",
+  "gates": [
+    {
+      "name": "fixed-elements",
+      "source_commit": "73f2d4b4187bfde77e3f1a02b45ec81fa3911ef1",
+      "exit_code": 101,
+      "wall_seconds": 29.17,
+      "test_results": [
+        "test result: FAILED. 37 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.13s"
+      ],
+      "receipt": "docs/architecture/evidence/signed-array-elements/focused-repair/fixed-elements/result.json.gz",
+      "runner": "runner-original.py"
+    },
+    {
+      "name": "fixed-facts",
+      "source_commit": "73f2d4b4187bfde77e3f1a02b45ec81fa3911ef1",
+      "exit_code": 0,
+      "wall_seconds": 29.195,
+      "test_results": [
+        "test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 2094 filtered out; finished in 0.00s"
+      ],
+      "receipt": "docs/architecture/evidence/signed-array-elements/focused-repair/fixed-facts/result.json.gz",
+      "runner": "runner-original.py"
+    },
+    {
+      "name": "fixed-owners",
+      "source_commit": "73f2d4b4187bfde77e3f1a02b45ec81fa3911ef1",
+      "exit_code": 101,
+      "wall_seconds": 1.8981492920138407,
+      "test_results": [
+        "test result: FAILED. 2 passed; 2 failed; 0 ignored; 0 measured; 2102 filtered out; finished in 0.01s"
+      ],
+      "receipt": "docs/architecture/evidence/signed-array-elements/focused-repair/fixed-owners/result.json.gz",
+      "runner": "Direct retained executable; exact command and executable hash are in the receipt."
+    },
+    {
+      "name": "read-before-return-trace",
+      "source_commit": "73f2d4b4187bfde77e3f1a02b45ec81fa3911ef1",
+      "exit_code": 101,
+      "wall_seconds": 0.5400179999996908,
+      "test_results": [
+        "test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 37 filtered out; finished in 0.01s"
+      ],
+      "receipt": "docs/architecture/evidence/signed-array-elements/focused-repair/read-before-return-trace/result.json.gz",
+      "runner": "Direct retained executable; exact command and executable hash are in the receipt."
+    },
+    {
+      "name": "read-before-return-baseline",
+      "source_commit": "55106b7f7c063df5bc0e2e81698ae1b2f8c7387e",
+      "exit_code": 101,
+      "wall_seconds": 25.182,
+      "test_results": [
+        "test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 36 filtered out; finished in 0.01s"
+      ],
+      "receipt": "docs/architecture/evidence/signed-array-elements/focused-repair/read-before-return-baseline/result.json.gz",
+      "runner": "runner-with-baseline.py"
+    },
+    {
+      "name": "fixed-elements-diagnostic",
+      "source_commit": "c3075ec91075ccad9089bc35748555dbb37b439d",
+      "exit_code": 101,
+      "wall_seconds": 25.224,
+      "test_results": [
+        "test result: FAILED. 37 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.12s"
+      ],
+      "receipt": "docs/architecture/evidence/signed-array-elements/focused-repair/fixed-elements-diagnostic/result.json.gz",
+      "runner": "runner-with-baseline.py"
+    },
+    {
+      "name": "fixed-owners-scoped",
+      "source_commit": "c3075ec91075ccad9089bc35748555dbb37b439d",
+      "exit_code": 0,
+      "wall_seconds": 29.219,
+      "test_results": [
+        "test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 2102 filtered out; finished in 0.01s"
+      ],
+      "receipt": "docs/architecture/evidence/signed-array-elements/focused-repair/fixed-owners-scoped/result.json.gz",
+      "runner": "runner-with-baseline.py"
+    }
+  ],
+  "findings": [
+    "All eleven failing merged-baseline sign controls pass at repaired source 73f2d4b41 and c3075ec91. Both source and independently decoded VBC execute in each integration control.",
+    "Direct boxed List payload controls verify sign normalization without using typed index lowering. Signed and unsigned aliases, named/shorthand field conversions, and generic-name refusal are covered.",
+    "The remaining signed_read_before_list_return_keeps_the_packed_producer control fails at the tests-only pre-repair source 55106b7f7 as well as repaired source. The c307 diagnostic records the actual decoded producer: a scalar local DropRef precedes Ret and conservatively clears unrelated packed-result evidence. DropRef behavior is unchanged.",
+    "The initial owner helper gate passed two and failed two because its source fixtures omitted module declarations. The test-only c307 correction adds explicit declarations; all four owner controls then pass without relaxing lookup or alias authority.",
+    "The initial VERUM_DUMP_VBC trace attempt reproduced the failure but emitted no bytecode dump. Only the later c307 gate log contains the actual decoded instruction trace."
+  ],
+  "production_equivalence": {
+    "from": "73f2d4b4187bfde77e3f1a02b45ec81fa3911ef1",
+    "to": "9692bdf1b67dea5b9d7d9787a9288be52ba4addf",
+    "paths": [
+      "crates/verum_vbc/src",
+      "crates/verum_codegen/src"
+    ],
+    "result": "byte-identical; later commits change test fixtures and native controls only"
+  },
+  "source_at_commit_hashes_verified": 1347,
+  "source_hash_entries_verified_across_receipts": 2247,
+  "runner_hashes": {
+    "runner-original.py": "108f0de1891d3deedbea0d6912b16198f163a8bd5bd160b9908183e0a10eae95",
+    "runner-with-baseline.py": "27408dda0a4b2d8ea3d97f33ec3882d5babc40874d18b0f3f424c3ffcf23e7b7"
+  },
+  "runner_preservation": "The original runner was reconstructed from the later runner by reverting the added baseline selection and scope wording. Its complete bytes match the original recorded SHA-256. Both versions are retained.",
+  "raw_files": {
+    "fixed-elements/result.json.gz": {
+      "path": "docs/architecture/evidence/signed-array-elements/focused-repair/fixed-elements/result.json.gz",
+      "raw_sha256": "6519fe979e49761d1b0d9bdd05b368b12f0d91fee5f8ad28b4501c22460c0477",
+      "gzip_sha256": "2288b69405a24d4792cf6f27bdbbce46b59e055eb06c5c671fa2847795c83b26"
+    },
+    "fixed-elements/started.json.gz": {
+      "path": "docs/architecture/evidence/signed-array-elements/focused-repair/fixed-elements/started.json.gz",
+      "raw_sha256": "137455fe4ee29f33b018cb241ae8dbf3d5d735fde00a99dc1368f3b08ff04deb",
+      "gzip_sha256": "80ad76cd8252611071645b9446e2a41f013a1b933a0d0795f7aaf0a8b67cd79f"
+    },
+    "fixed-elements/process.json.gz": {
+      "path": "docs/architecture/evidence/signed-array-elements/focused-repair/fixed-elements/process.json.gz",
+      "raw_sha256": "2076690f603a50be8ee1bb1710a37dcf1164e9901549c0a0a73d7605fdd7e2ab",
+      "gzip_sha256": "a1b0384d8a09bcf6dad2c0d552b2ec27771019aad5c0b8b1fef4abe9675bf2f5"
+    },
+    "fixed-elements/gate.log.gz": {
+      "path": "docs/architecture/evidence/signed-array-elements/focused-repair/fixed-elements/gate.log.gz",
+      "raw_sha256": "a6810713bd03a6c0ed9d075aa9b67220a3e771c65d6dadc2b1dc68d462cd3a3d",
+      "gzip_sha256": "3d9f498cd08c7a349fc1646ce3ef873ebd9783e0f62a7f5812d11cf477e75500"
+    },
+    "fixed-facts/result.json.gz": {
+      "path": "docs/architecture/evidence/signed-array-elements/focused-repair/fixed-facts/result.json.gz",
+      "raw_sha256": "91742a024a4e5673164c2a471a5df47fe79091ed4af85371b0b936d3d59801d3",
+      "gzip_sha256": "894243a95ea3884118dcc36032308fe3040b2aab03078072ac27750af9157663"
+    },
+    "fixed-facts/started.json.gz": {
+      "path": "docs/architecture/evidence/signed-array-elements/focused-repair/fixed-facts/started.json.gz",
+      "raw_sha256": "4302b7d0258c86bc6725602f5bc17d4af8329427108780dedc54193586d4e7c3",
+      "gzip_sha256": "aee4bd624579c0f949b6b5b5ba2a6f8995eb147cceb1d046be61f5c9d3ca0867"
+    },
+    "fixed-facts/process.json.gz": {
+      "path": "docs/architecture/evidence/signed-array-elements/focused-repair/fixed-facts/process.json.gz",
+      "raw_sha256": "565f4037b461e91b92392466e471509425df68de56254562bff692e10e36ddca",
+      "gzip_sha256": "a3f60faa2f344ac114bc0c88c7cab5b92c1500fdbbee399aa3d89eb457439014"
+    },
+    "fixed-facts/gate.log.gz": {
+      "path": "docs/architecture/evidence/signed-array-elements/focused-repair/fixed-facts/gate.log.gz",
+      "raw_sha256": "d55e9e76aff519a7bc795e20e10aaef05dfb9eb1346373977de18e7a78035ad0",
+      "gzip_sha256": "f816f03175f0f887f701cd9df2a23960348acdf85a5c1a00234a8c143cb6167a"
+    },
+    "fixed-owners/result.json.gz": {
+      "path": "docs/architecture/evidence/signed-array-elements/focused-repair/fixed-owners/result.json.gz",
+      "raw_sha256": "8a07a95169fcc141fa547ac2a646bfa826227b0bfd511d54c59ab9a8e16ff9be",
+      "gzip_sha256": "7aa45be03ffe63fa4a1b10e31b7603da94137cbe27706b67e587cf2d6510cf28"
+    },
+    "fixed-owners/gate.log.gz": {
+      "path": "docs/architecture/evidence/signed-array-elements/focused-repair/fixed-owners/gate.log.gz",
+      "raw_sha256": "ee4cde367916bf0b87474d2fc5d4feeb4a2ad59ab057a40d8c802e82fde9e15d",
+      "gzip_sha256": "6972e4705f63130ead466772dbcd5749cc8bd0baec1e21c5bd8bbf127430ff56"
+    },
+    "read-before-return-trace/result.json.gz": {
+      "path": "docs/architecture/evidence/signed-array-elements/focused-repair/read-before-return-trace/result.json.gz",
+      "raw_sha256": "6874cef7ecb5744976e37662eb55f5daa9506840067e97bc42349b1757d90e28",
+      "gzip_sha256": "575e5987bbb088dc04d9461ce3e45859262b1e2e1ab35cb5cf151c7bbebec0c7"
+    },
+    "read-before-return-trace/gate.log.gz": {
+      "path": "docs/architecture/evidence/signed-array-elements/focused-repair/read-before-return-trace/gate.log.gz",
+      "raw_sha256": "973a34baf593afc09db8124510c2c1c3701e39724d2a707498a96c533f1ad7ed",
+      "gzip_sha256": "c23b91b1b67a5e97665061e14a0daf55a446f491e209ea9c30901654c0a2a46e"
+    },
+    "read-before-return-baseline/result.json.gz": {
+      "path": "docs/architecture/evidence/signed-array-elements/focused-repair/read-before-return-baseline/result.json.gz",
+      "raw_sha256": "320c16b8e5e0e5c261d1187608f549787d1cc59de1a2cef700d5b91fa2527d6e",
+      "gzip_sha256": "c6f3ae11b7b2fc212a4f4fe8e70fd841c5f435853215fa755ed1599bd75a06a5"
+    },
+    "read-before-return-baseline/started.json.gz": {
+      "path": "docs/architecture/evidence/signed-array-elements/focused-repair/read-before-return-baseline/started.json.gz",
+      "raw_sha256": "6381180253aa0597965524f4958d631197b3e3a8e04eca70edc350ae7a1ae837",
+      "gzip_sha256": "6cefd9acc75581e8fdf38053db532d32bfafc86d31b9097b200cead50c7fa560"
+    },
+    "read-before-return-baseline/process.json.gz": {
+      "path": "docs/architecture/evidence/signed-array-elements/focused-repair/read-before-return-baseline/process.json.gz",
+      "raw_sha256": "b66df23a3e2fb89cacb40aebc8b778ed3f009ae643725230fc47c704835bb7c0",
+      "gzip_sha256": "9312302fb74809834d5071d9d606acfcb7b177962bb43cdbf670b69bcbbec3aa"
+    },
+    "read-before-return-baseline/gate.log.gz": {
+      "path": "docs/architecture/evidence/signed-array-elements/focused-repair/read-before-return-baseline/gate.log.gz",
+      "raw_sha256": "9e700c1c5fd6217f2f961de5bcfbd4b4f1d82400f290d8f319db88629fe5be4c",
+      "gzip_sha256": "68560b60fea1d2264eb4f8e2624c6d868484d488b05a98c176599ca51e794cb4"
+    },
+    "fixed-elements-diagnostic/result.json.gz": {
+      "path": "docs/architecture/evidence/signed-array-elements/focused-repair/fixed-elements-diagnostic/result.json.gz",
+      "raw_sha256": "3cfd6b2a6849ecac8625493b43bb9b8cd0b5be1fe883ad62ba9909e00ba8dad6",
+      "gzip_sha256": "cca9e638e0b041067c89c662cccfa3a969d2bbfcfdbd1244d05e2ff08040c0ff"
+    },
+    "fixed-elements-diagnostic/started.json.gz": {
+      "path": "docs/architecture/evidence/signed-array-elements/focused-repair/fixed-elements-diagnostic/started.json.gz",
+      "raw_sha256": "2b6108beb6e7a6ec27a9f92f1ba702341dc2c16f0258928fdfa22e55611a77a7",
+      "gzip_sha256": "d4ab6983d76af2e37d276b0e18a63eb7c911d74d6cd5a51a244da1dc4211c3fb"
+    },
+    "fixed-elements-diagnostic/process.json.gz": {
+      "path": "docs/architecture/evidence/signed-array-elements/focused-repair/fixed-elements-diagnostic/process.json.gz",
+      "raw_sha256": "c4f34d70ef38b47577548d29852ba25eff905ac183fad26730daac78ff857cb0",
+      "gzip_sha256": "2a535026d80f34cb71d33eac0f4a19725f3019476d68b785b348543641cc1bfd"
+    },
+    "fixed-elements-diagnostic/gate.log.gz": {
+      "path": "docs/architecture/evidence/signed-array-elements/focused-repair/fixed-elements-diagnostic/gate.log.gz",
+      "raw_sha256": "efcecd064db12fb1051d563d26e1643e9d4cf0faa10fc02acab243ce8d4ff119",
+      "gzip_sha256": "787e790fb4c02c5ad48e35c344dfb0b82e13103a85ec2d5a099e2085de2b0e98"
+    },
+    "fixed-owners-scoped/result.json.gz": {
+      "path": "docs/architecture/evidence/signed-array-elements/focused-repair/fixed-owners-scoped/result.json.gz",
+      "raw_sha256": "0f2fc8b0cae98a1eee76c410fa7e199b656679d3aca7a930cf76c7a15ed9748e",
+      "gzip_sha256": "66779dfc7cca6adcfc88f904a2b21517131fc9deb0b6b9f438845dc96eba3c4d"
+    },
+    "fixed-owners-scoped/started.json.gz": {
+      "path": "docs/architecture/evidence/signed-array-elements/focused-repair/fixed-owners-scoped/started.json.gz",
+      "raw_sha256": "eeef64b02553ccd5e583b691523e4c7269a7e05252b475e42ed461b126d79f48",
+      "gzip_sha256": "0431eb76b56aaf7c5eb99d894aa511d14824cbec84bd7fdec30c203271a2cec4"
+    },
+    "fixed-owners-scoped/process.json.gz": {
+      "path": "docs/architecture/evidence/signed-array-elements/focused-repair/fixed-owners-scoped/process.json.gz",
+      "raw_sha256": "8ff75ff1b9273c5c93567fe4d297dd78b72bb6fa714c267118257fcc7368b101",
+      "gzip_sha256": "f2292e4a54e01bdb237d49410f62dd60ebd2402341c4213f1e09c585812e9b5d"
+    },
+    "fixed-owners-scoped/gate.log.gz": {
+      "path": "docs/architecture/evidence/signed-array-elements/focused-repair/fixed-owners-scoped/gate.log.gz",
+      "raw_sha256": "81b94b6bc5a53a2757bd0dce31b450e8a86ecd2679dfcbdc7ad00435a15a2469",
+      "gzip_sha256": "6b7c22bbb28f8c1cef90d3526a8fe748a835e970b2a75a08d96e7928c1786a6b"
+    },
+    "target-handoff.json.gz": {
+      "path": "docs/architecture/evidence/signed-array-elements/focused-repair/target-handoff.json.gz",
+      "raw_sha256": "2579c91ba56877c21a346a0dfbb8b6e053957ba1c7c3e240190173a3488c1b35",
+      "gzip_sha256": "3bd62f566bdb07b33f14ac3f09bd69a83cf130198494a347eda5f230f168b4ee"
+    }
+  },
+  "limitations": [
+    "No native tests were run in these gates. The prepared native source/wire, wide-register and malformed-width/operand controls are unrun at this endpoint.",
+    "No full VBC-library, ordinary CLI, automatic stdlib bake, AOT or registry acceptance is claimed.",
+    "The client target was released with its recorded artifact hashes unchanged. Executables and host process inventory remain in temporary evidence paths; they are not repository payloads.",
+    "The read-before-return control remains active and failing under the separate scalar-cleanup/conversion task T1710. The focused integration target is not green."
+  ],
+  "residual_task": "T1710"
+}

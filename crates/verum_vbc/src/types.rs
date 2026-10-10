@@ -1136,6 +1136,30 @@ impl Default for TypeParamDescriptor {
     }
 }
 
+/// Complete source field access policy, distinct from coarse runtime visibility.
+/// `In` names an absolute declaration-owned scope in this module's string pool.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum DeclaredFieldVisibility {
+    Private,
+    Public,
+    Cog,
+    Super,
+    In(StringId),
+    Internal,
+    Protected,
+}
+
+impl DeclaredFieldVisibility {
+    /// Re-home an optional scope while preserving non-path policies. A missing
+    /// scope loses authority instead of being interpreted in the target pool.
+    pub fn remap_scope(self, remap: impl FnOnce(StringId) -> Option<StringId>) -> Option<Self> {
+        match self {
+            Self::In(scope) => remap(scope).map(Self::In),
+            policy => Some(policy),
+        }
+    }
+}
+
 /// Field descriptor for record types.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FieldDescriptor {
@@ -1150,8 +1174,12 @@ pub struct FieldDescriptor {
     pub declaration_type: Option<TypeRef>,
     /// Offset within struct (0 for generic types).
     pub offset: u32,
-    /// Field visibility.
+    /// Coarse compatibility visibility; not authority for declaration access.
     pub visibility: Visibility,
+    /// Full source policy. None means unknown (including pre-v2.25 archives),
+    /// never public, regardless of the compatibility visibility above.
+    #[serde(default)]
+    pub declared_visibility: Option<DeclaredFieldVisibility>,
     /// REFINE-FIELD-DYNAMIC-BYPASS-1 phase 2: the field's refinement
     /// predicate SOURCE (display form, e.g. "it >= 0.0 && it <= 1.0"),
     /// carried through the archive so USER-side construction of
@@ -1189,6 +1217,7 @@ impl Default for FieldDescriptor {
             name: StringId::EMPTY,
             type_ref: TypeRef::Concrete(TypeId::UNIT),
             declaration_type: None,
+            declared_visibility: None,
             offset: 0,
             visibility: Visibility::Public,
                     refinement_src: StringId::EMPTY,
@@ -2245,6 +2274,7 @@ mod tests {
         td.kind = TypeKind::Record;
         td.fields.push(FieldDescriptor {
             declaration_type: None,
+            declared_visibility: None,
             refinement_src: StringId::EMPTY,
             refinement_binding: StringId::EMPTY,
             type_name: StringId::EMPTY,
@@ -2255,6 +2285,7 @@ mod tests {
         });
         td.fields.push(FieldDescriptor {
             declaration_type: None,
+            declared_visibility: None,
             refinement_src: StringId::EMPTY,
             refinement_binding: StringId::EMPTY,
             type_name: StringId::EMPTY,
@@ -2370,6 +2401,7 @@ mod tests {
     fn test_field_descriptor_custom() {
         let fd = FieldDescriptor {
             declaration_type: None,
+            declared_visibility: None,
             refinement_src: StringId::EMPTY,
             refinement_binding: StringId::EMPTY,
             type_name: StringId::EMPTY,
@@ -2434,6 +2466,7 @@ mod tests {
         let mut fields = SmallVec::new();
         fields.push(FieldDescriptor {
             declaration_type: None,
+            declared_visibility: None,
             refinement_src: StringId::EMPTY,
             refinement_binding: StringId::EMPTY,
             type_name: StringId::EMPTY,
@@ -2699,6 +2732,7 @@ mod tests {
         td.alignment = 8;
         td.fields.push(FieldDescriptor {
             declaration_type: None,
+            declared_visibility: None,
             refinement_src: StringId::EMPTY,
             refinement_binding: StringId::EMPTY,
             type_name: StringId::EMPTY,
@@ -2730,6 +2764,7 @@ mod tests {
     fn test_field_descriptor_serde() {
         let fd = FieldDescriptor {
             declaration_type: None,
+            declared_visibility: None,
             refinement_src: StringId::EMPTY,
             refinement_binding: StringId::EMPTY,
             type_name: StringId::EMPTY,

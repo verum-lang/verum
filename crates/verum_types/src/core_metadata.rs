@@ -402,6 +402,10 @@ pub struct FieldDescriptor {
     pub name: Text,
     pub ty: Text,
     pub is_public: bool,
+    /// Full declaration policy. None is Unknown, never authorization through
+    /// `is_public`. Restricted paths are absolute and have canonical dummy spans.
+    #[serde(default)]
+    pub declared_visibility: Maybe<verum_ast::Visibility>,
 }
 
 /// Variant case descriptor

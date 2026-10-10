@@ -135,6 +135,7 @@ pub mod stmt;
 pub mod ty;
 pub mod visit_mut;
 pub mod visitor;
+mod visibility;
 
 // Re-export smallvec for use in creating AST nodes
 pub use smallvec;

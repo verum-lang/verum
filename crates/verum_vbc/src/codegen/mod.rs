@@ -57,11 +57,13 @@ pub mod registers;
 mod bootstrap_types;
 mod expressions;
 mod array_coercions;
+mod array_elements;
 mod parsed_field_types;
 mod associated_types;
 mod statements;
 mod value_uses;
 mod formal_parameters;
+mod field_visibility;
 
 #[cfg(test)]
 mod tests_comprehensive;
@@ -688,6 +690,15 @@ impl VbcCodegen {
 pub(super) enum ResultDemand {
     Used,
     Discarded,
+    /// The value crosses this callable's declared return boundary. Only
+    /// value-forwarding syntax carries this demand into nested expressions.
+    CallableReturn,
+}
+
+impl ResultDemand {
+    fn is_used(self) -> bool {
+        self != Self::Discarded
+    }
 }
 
 /// AST-to-VBC code generator: owns the module under construction (string /
@@ -6697,6 +6708,13 @@ impl VbcCodegen {
                     param_closure_return_type_names: Vec::new(),
                 };
                 self.ctx.register_function(qualified, info);
+            }
+        }
+        if let Some(strings) = archive_strings {
+            for field in ty.fields.iter_mut().chain(ty.variants.iter_mut().flat_map(|variant| variant.fields.iter_mut())) {
+                field.declared_visibility = field.declared_visibility.and_then(|policy| policy.remap_scope(|scope| {
+                    strings.get(scope).map(|name| crate::types::StringId(self.ctx.intern_string_raw(name)))
+                }));
             }
         }
         self.push_type_dedupe(ty);
@@ -15977,23 +15995,28 @@ impl VbcCodegen {
                             let fds: smallvec::SmallVec<[crate::types::FieldDescriptor; 4]> =
                                 fields
                                     .iter()
-                                    .map(|f| crate::types::FieldDescriptor {
-                                        name: StringId(
-                                            self.ctx.intern_string_raw(f.name.name.as_str()),
-                                        ),
-                                        declaration_type: Some(self.resolve_signature_type_ref(&f.ty, &sum_generic_param_map)),
-                                        type_ref: self.resolve_field_type_ref(
-                                            &f.ty,
-                                            &sum_generic_param_map,
-                                        ),
-                                        // UNIFIED-CROSS-MODULE-TYPE-IDENTITY: carry the
-                                        // record-variant field's declared type name.
-                                        type_name: StringId(self.ctx.intern_string_raw(
-                                            &Self::extract_type_name_from_ast(&f.ty),
-                                        )),
-                                        ..Default::default()
+                                    .map(|f| {
+                                        let (visibility, declared_visibility) = self.lower_field_visibility(&f.visibility)?;
+                                        Ok(crate::types::FieldDescriptor {
+                                            visibility,
+                                            declared_visibility: Some(declared_visibility),
+                                            name: StringId(
+                                                self.ctx.intern_string_raw(f.name.name.as_str()),
+                                            ),
+                                            declaration_type: Some(self.resolve_signature_type_ref(&f.ty, &sum_generic_param_map)),
+                                            type_ref: self.resolve_field_type_ref(
+                                                &f.ty,
+                                                &sum_generic_param_map,
+                                            ),
+                                            // UNIFIED-CROSS-MODULE-TYPE-IDENTITY: carry the
+                                            // record-variant field's declared type name.
+                                            type_name: StringId(self.ctx.intern_string_raw(
+                                                &Self::extract_type_name_from_ast(&f.ty),
+                                            )),
+                                            ..Default::default()
+                                        })
                                     })
-                                    .collect();
+                                    .collect::<CodegenResult<_>>()?;
                             (crate::types::VariantKind::Record, 0u8, fds)
                         }
                     };
@@ -16227,12 +16250,14 @@ impl VbcCodegen {
                         self.ctx
                             .intern_string_raw(&Self::render_field_type_name(&field.ty, true)),
                     );
+                    let (visibility, declared_visibility) = self.lower_field_visibility(&field.visibility)?;
                     type_desc.fields.push(crate::types::FieldDescriptor {
+                        declared_visibility: Some(declared_visibility),
                         name: StringId(self.ctx.intern_string_raw(&field_name)),
                         type_ref: field_type_ref,
                         declaration_type: Some(self.resolve_signature_type_ref(&field.ty, &generic_param_map)),
                         offset: field_idx * 8, // Use global field index * sizeof(Value)
-                        visibility: crate::types::Visibility::Public,
+                        visibility,
                         refinement_src,
                         refinement_binding,
                         type_name: field_type_name,
@@ -16675,6 +16700,7 @@ impl VbcCodegen {
                     ..Default::default()
                 };
                 type_desc.fields.push(crate::types::FieldDescriptor {
+                    declared_visibility: None,
                     name: StringId(self.ctx.intern_string_raw("_0")),
                     type_ref: inner_type_ref,
                     declaration_type: Some(self.resolve_signature_type_ref(_inner_type, &generic_param_map)),
@@ -16788,6 +16814,7 @@ impl VbcCodegen {
                     let inner_type_ref = self.resolve_field_type_ref(inner_ty, &generic_param_map);
                     let field_idx = self.intern_field_name(&field_name);
                     type_desc.fields.push(crate::types::FieldDescriptor {
+                    declared_visibility: None,
                         name: StringId(self.ctx.intern_string_raw(&field_name)),
                         type_ref: inner_type_ref,
                         declaration_type: Some(self.resolve_signature_type_ref(inner_ty, &generic_param_map)),
@@ -20391,7 +20418,7 @@ impl VbcCodegen {
             match body {
                 verum_ast::FunctionBody::Block(block) => {
                     let result = self
-                        .compile_block(block)
+                        .compile_block_with_demand(block, ResultDemand::CallableReturn)
                         .map_err(|e| e.with_context(format!("in function {}", lookup_name)))?;
                     // Return the block result if present (implicit return)
                     if let Some(reg) = result {
@@ -20406,7 +20433,7 @@ impl VbcCodegen {
                 }
                 verum_ast::FunctionBody::Expr(expr) => {
                     let result = self
-                        .compile_expr(expr)
+                        .compile_expr_with_demand(expr, ResultDemand::CallableReturn)
                         .map_err(|e| e.with_context(format!("in function {}", lookup_name)))?;
                     // Return the expression result
                     if let Some(reg) = result {
@@ -21380,6 +21407,14 @@ impl VbcCodegen {
             );
         }
 
+        // Convert the callable result while its actual producer is still
+        // known. Deferred code and DropRef remain conservative fact barriers.
+        // A newly materialized List is distinct from the packed source local:
+        // the ordinary cleanup below must still drop that original binding.
+        if demand == ResultDemand::CallableReturn {
+            result = result.map(|reg| self.materialize_list_return(reg)).transpose()?;
+        }
+
         // CRITICAL FIX: Copy result to a new register BEFORE exiting scope.
         // When exit_scope is called, it recycles registers for variables defined
         // in this scope (like `doubled` in `{ let doubled = x * 2; doubled }`).
@@ -21430,7 +21465,7 @@ impl VbcCodegen {
             // Dropping its local slot here would destroy that same object
             // before the enclosing expression/caller can use it. Other
             // locals retain their ordinary reverse declaration cleanup.
-            if demand == ResultDemand::Used && block.expr.is_some() && result == Some(*var_reg) {
+            if demand.is_used() && block.expr.is_some() && result == Some(*var_reg) {
                 continue;
             }
             if self.ctx.current_fn_escaping_vars.contains(name) {
@@ -22973,7 +23008,17 @@ impl VbcCodegen {
     /// `PACKED-FIELD-ONE-REPRESENTATION-1` (T1463) needs it to size the
     /// normalising unpack loop, and treats `0` as "not normalisable".
     fn field_array_spec(&self, type_name: &str, field_name: &str) -> Option<(usize, bool, u64)> {
-        use crate::types::TypeRef;
+        match self.field_array_type(type_name, field_name)? {
+            TypeRef::Array { element, length } => self
+                .primitive_array_element_spec(element)
+                .map(|(sz, is_float)| (sz, is_float, *length)),
+            _ => None,
+        }
+    }
+
+    /// The exact field declaration supplies element semantics independently of
+    /// whether its current value is packed or a boxed List.
+    fn field_array_type(&self, type_name: &str, field_name: &str) -> Option<&TypeRef> {
         // Mirror resolve_field_index_impl's key discipline: strip generic
         // args, and re-key a non-authoritative simple name to its
         // module-qualified registration before the descriptor lookup.
@@ -22998,12 +23043,7 @@ impl VbcCodegen {
                 .get(fd.name.0 as usize)
                 .is_some_and(|s| s == field_name)
         })?;
-        match &fd.type_ref {
-            TypeRef::Array { element, length } => self
-                .primitive_array_element_spec(element)
-                .map(|(sz, is_float)| (sz, is_float, *length)),
-            _ => None,
-        }
+        Some(&fd.type_ref)
     }
 
     /// `(elem_size, is_float)` for a PRIMITIVE array-element `TypeRef`, or
@@ -25093,6 +25133,9 @@ impl VbcCodegen {
                 // type NAME is a StringId too — remap it identically, else a
                 // cross-module field type reads as garbage in the canonical
                 // table (the T0109 field-identity hole).
+                field.declared_visibility = field.declared_visibility.and_then(|policy| {
+                    policy.remap_scope(|scope| string_id_map.get(scope.0 as usize).copied())
+                });
                 if field.type_name != StringId::EMPTY {
                     if let Some(mapped) = string_id_map.get(field.type_name.0 as usize) {
                         field.type_name = *mapped;
@@ -25140,6 +25183,9 @@ impl VbcCodegen {
                     }
                     // UNIFIED-CROSS-MODULE-TYPE-IDENTITY (T0109): variant field
                     // type name — same canonical remap as the field name.
+                    f.declared_visibility = f.declared_visibility.and_then(|policy| {
+                        policy.remap_scope(|scope| string_id_map.get(scope.0 as usize).copied())
+                    });
                     if f.type_name != StringId::EMPTY {
                         if let Some(mapped) = string_id_map.get(f.type_name.0 as usize) {
                             f.type_name = *mapped;
@@ -26509,6 +26555,9 @@ impl VbcCodegen {
                 // UNIFIED-CROSS-MODULE-TYPE-IDENTITY (T0109): re-intern the
                 // field's carried type NAME (archive→local); a raw ..clone()
                 // misindexes it against this module's strings.
+                declared_visibility: fd.declared_visibility.and_then(|policy| policy.remap_scope(|scope| {
+                    archive_strings.get(scope).map(|name| crate::types::StringId(self.ctx.intern_string_raw(name)))
+                })),
                 type_name: intern_optional(self, fd.type_name),
                 refinement_src: intern_optional(self, fd.refinement_src),
                 refinement_binding: intern_optional(self, fd.refinement_binding),
@@ -26530,6 +26579,9 @@ impl VbcCodegen {
             for fd in v.fields.iter() {
                 v_fields.push(crate::types::FieldDescriptor {
                     name: intern(self, fd.name),
+                    declared_visibility: fd.declared_visibility.and_then(|policy| policy.remap_scope(|scope| {
+                        archive_strings.get(scope).map(|name| crate::types::StringId(self.ctx.intern_string_raw(name)))
+                    })),
                     type_name: intern_optional(self, fd.type_name),
                     refinement_src: intern_optional(self, fd.refinement_src),
                     refinement_binding: intern_optional(self, fd.refinement_binding),

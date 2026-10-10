@@ -1185,7 +1185,7 @@ impl VbcCodegen {
         // Track source span for DWARF debug info (SourceMap population)
         self.ctx.set_current_span(expr.span);
 
-        match &expr.kind {
+        let result = match &expr.kind {
             // === Literals ===
             ExprKind::Literal(lit) => self.compile_literal(lit),
 
@@ -1532,6 +1532,11 @@ impl VbcCodegen {
             // At runtime this compiles to a record/object where each slot
             // holds the thunk/closure for the corresponding observation.
             ExprKind::CopatternBody { arms, .. } => self.compile_copattern_body(arms),
+        }?;
+        if demand == ResultDemand::CallableReturn {
+            result.map(|reg| self.materialize_list_return(reg)).transpose()
+        } else {
+            Ok(result)
         }
     }
 
@@ -18534,7 +18539,7 @@ impl VbcCodegen {
                     "nested return-use observation exceeds its depth bound".into(),
                 ), expr.span));
             }
-            let compiled = self.compile_expr(expr);
+            let compiled = self.compile_expr_with_demand(expr, ResultDemand::CallableReturn);
             let uses_named_affine = self.ctx.registers.value_uses.finish_return_use_capture();
             let reg = compiled?.or_internal("return value has no value")?;
             let reg = self.materialize_list_return(reg)?;
@@ -18627,7 +18632,7 @@ impl VbcCodegen {
         let result = self.ctx.alloc_temp();
         let loop_ctx = self.ctx.enter_loop(
             label.map(|s| s.to_string()),
-            (demand == ResultDemand::Used).then_some(result),
+            demand.is_used().then_some(result),
         );
 
         // Loop start
@@ -24889,8 +24894,41 @@ impl VbcCodegen {
         Ok(Some(result))
     }
 
-    /// Compiles index access.
+    /// Compiles index access, then applies the declared scalar meaning. The
+    /// physical reader is selected separately by actual storage evidence.
     fn compile_index(&mut self, base: &Expr, index: &Expr) -> CodegenResult<Option<Reg>> {
+        let signed_bits = if matches!(index.kind, ExprKind::Range { .. }) {
+            None // A slice result is a container, never a scalar to normalize.
+        } else {
+            self.indexed_element_signed_bits(base)
+        };
+        let result = self.compile_index_storage(base, index)?;
+        if let Some(value) = result {
+            self.emit_signed_array_element(value, signed_bits);
+        }
+        Ok(result)
+    }
+
+    fn indexed_element_signed_bits(&self, base: &Expr) -> Option<u8> {
+        if let ExprKind::Paren(inner) = &base.kind {
+            return self.indexed_element_signed_bits(inner);
+        }
+        if let ExprKind::Field { expr: receiver, field } = &base.kind
+            && let Some(owner) = self.packed_field_receiver_type(receiver)
+            && let Some(crate::types::TypeRef::Array { element, .. }) =
+                self.field_array_type(&owner, field.name.as_str())
+        {
+            return self.array_element_signed_bits(element);
+        }
+        let element = Self::expr_ident_name(base)
+            .and_then(|name| self.ctx.array_element_type_name(&name).cloned())
+            .or_else(|| self.extract_expr_type_name(base)
+                .and_then(|name| Self::element_type_name(&name)))?;
+        let element = self.type_name_to_type_ref_mono(&element)?;
+        self.array_element_signed_bits(&element)
+    }
+
+    fn compile_index_storage(&mut self, base: &Expr, index: &Expr) -> CodegenResult<Option<Reg>> {
         // Range-as-index (`b[..]`, `b[start..end]`, etc.) without an
         // enclosing `&` borrow — same root cause as the `&list[range]`
         // bug: `GetE { arr, idx: range_value }` interprets the heap
@@ -25211,9 +25249,13 @@ impl VbcCodegen {
         owner_type: &str,
         field_name: &str,
         src_name: &str,
-    ) -> Option<(usize, bool, u64)> {
+    ) -> Option<(usize, bool, u64, Option<u8>)> {
         let (elem_size, is_float, declared_len) =
             self.field_array_spec(owner_type, field_name)?;
+        let signed_bits = match self.field_array_type(owner_type, field_name)? {
+            crate::types::TypeRef::Array { element, .. } => self.array_element_signed_bits(element),
+            _ => None,
+        };
         // Byte fields keep the packed representation (#37).
         if elem_size == 1 {
             return None;
@@ -25239,7 +25281,7 @@ impl VbcCodegen {
         if len == 0 {
             return None;
         }
-        Some((elem_size, is_float, len))
+        Some((elem_size, is_float, len, signed_bits))
     }
 
     /// Emit `NewList` + a `TypedArrayLoad`/`ListPush` loop that copies
@@ -25253,6 +25295,7 @@ impl VbcCodegen {
         elem_size: usize,
         is_float: bool,
         len: u64,
+        signed_bits: Option<u8>,
     ) -> CodegenResult<Reg> {
         let result = self.ctx.alloc_temp();
         let cap_hint = len.min(u16::MAX as u64) as u16;
@@ -25304,6 +25347,7 @@ impl VbcCodegen {
             sub_op: crate::instruction::MemSubOpcode::TypedArrayLoad.to_byte(),
             operands,
         });
+        self.emit_signed_array_element(elem_reg, signed_bits);
         self.ctx.emit(Instruction::ListPush {
             list: result,
             val: elem_reg,
@@ -26127,7 +26171,7 @@ impl VbcCodegen {
                         self.try_compile_packed_array_field_value(&type_name, &field.name.name, v)?
                     {
                         reg
-                    } else if let Some((esz, isf, len)) = Self::expr_ident_name(v)
+                    } else if let Some((esz, isf, len, signed_bits)) = Self::expr_ident_name(v)
                         .and_then(|n| {
                             self.packed_local_field_unpack_spec(&type_name, &field.name.name, &n)
                         })
@@ -26140,21 +26184,21 @@ impl VbcCodegen {
                         let src = self
                             .compile_expr(v)?
                             .or_internal("field value has no value")?;
-                        let list = self.emit_unpack_packed_into_list(src, esz, isf, len)?;
+                        let list = self.emit_unpack_packed_into_list(src, esz, isf, len, signed_bits)?;
                         self.ctx.free_temp(src);
                         list
                     } else {
                         self.compile_expr(v)?
                             .or_internal("field value has no value")?
                     }
-                } else if let Some((esz, isf, len)) = self.packed_local_field_unpack_spec(
+                } else if let Some((esz, isf, len, signed_bits)) = self.packed_local_field_unpack_spec(
                     &type_name,
                     &field.name.name,
                     &field.name.name,
                 ) {
                     // Field shorthand `K { w }` — same producer as `K { w: w }`.
                     let src = self.ctx.get_var_reg(&field.name.name)?;
-                    self.emit_unpack_packed_into_list(src, esz, isf, len)?
+                    self.emit_unpack_packed_into_list(src, esz, isf, len, signed_bits)?
                 } else {
                     self.ctx.get_var_reg(&field.name.name)?
                 };
@@ -32911,8 +32955,9 @@ impl VbcCodegen {
             }
         }
 
-        // Compile the body expression
-        let result = self.compile_expr(body)?;
+        // The closure's begin_function installed its own return contract;
+        // never use the enclosing expression hint as conversion authority.
+        let result = self.compile_expr_with_demand(body, ResultDemand::CallableReturn)?;
         // Infer while closure parameters and compiled block results are still
         // in scope. The surrounding function's return context is not evidence.
         let mut tail = body;

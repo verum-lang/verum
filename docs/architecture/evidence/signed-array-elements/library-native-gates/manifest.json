@@ -1,0 +1,422 @@
+{
+  "task": "T1706",
+  "source_commit": "3c99c5e9b02b10254eb7df20f37e4cd0455013a5",
+  "full_library": {
+    "result": [
+      "test result: FAILED. 2099 passed; 6 failed; 1 ignored; 0 measured; 0 filtered out; finished in 529.61s"
+    ],
+    "wall_seconds": 558.246,
+    "failure_names": [
+      "interpreter::dispatch_table::handlers::net_runtime::bounded_tcp_tests::concurrent_recv_does_not_block_unrelated_send",
+      "interpreter::dispatch_table::handlers::net_runtime::bounded_tcp_tests::parked_worker_is_joined_and_sockets_closed_during_unwind",
+      "interpreter::dispatch_table::handlers::net_runtime::udp_peer_address_tests::udp_recv_from_returns_peer_address",
+      "interpreter::io_engine::socket_readiness_tests::async_accept_round_trip_via_io_engine",
+      "interpreter::io_engine::socket_readiness_tests::async_write_end_to_end_via_io_engine",
+      "interpreter::io_engine::socket_readiness_tests::poll_signals_ready_on_pending_connection"
+    ],
+    "status": "Completed unfiltered but failed. No retry; existing T0839 ignore retained. Two TCP fixture connect calls report -2; three readiness fixture connections report explicit TimedOut errors; the UDP control received None without a retained OS error. UDP timeout causality and an exclusive environment cause are not established.",
+    "scope": "The library gate does not select the separate integration test that records T1710."
+  },
+  "native_original": {
+    "result": [
+      "test result: FAILED. 26 passed; 7 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.40s"
+    ],
+    "wall_seconds": 74.803,
+    "status": "Completed but failed. All original seven failures are retained; no ignored or suppressed control.",
+    "read_only_triage": [
+      "Twenty-five signed/unsigned/alias scalar routes plus the wide-register SextI control pass, each through source and decoded wire. The direct wide-register control asserts all three source widths; its IR evidence filenames retain the final width only.",
+      "Five direct List payload controls fail because the fixture allocation ledger does not include backing storage allocated through verum_os_alloc. Actual emitted LLVM IR retains the allocation path. This is a harness diagnosis; no corrected payload execution is claimed here.",
+      "The first malformed SextI case fails its module-level refusal assertion. The production handler returns an error, while lower_module retains the documented default lenient fallback. Remaining malformed cases were not reached in this original control. A separate strict-codegen child is required to exercise the intended strict refusal contract.",
+      "The read-before-return List header failure is the separate T1710 residual and remains active."
+    ]
+  },
+  "source_at_commit_hashes_verified": 451,
+  "source_hash_entries_verified_across_receipts": 902,
+  "runner_hashes": {
+    "full-library-runner.py": "c8356fe95e68a3ee3ed76b2e78fd4f4883e2127f7f0b9b535b02737e9b5a00c4",
+    "native-runner.py": "7e34f66205be53bd20ca004d27d336d1e924a1ccf916c3a63cb07edd59800d66"
+  },
+  "raw_files": {
+    "full-library/result.json": {
+      "path": "docs/architecture/evidence/signed-array-elements/library-native-gates/full-library/result.json.gz",
+      "raw_sha256": "f717f7212ae767817d524e728dadbf64ba06a920347d33617f87d89eab942b7f",
+      "gzip_sha256": "d21eaa51bcb3cb06db5e6c82238ed7f4f7502d060477e7c431122d88ad225b94"
+    },
+    "full-library/started.json": {
+      "path": "docs/architecture/evidence/signed-array-elements/library-native-gates/full-library/started.json.gz",
+      "raw_sha256": "89fd303863eeaa8f5aaefdb422ca328d8fd9fc40abf090759e255d718af414d1",
+      "gzip_sha256": "37b222958a1f8d9fb625eb9302da3a5f0ccec75b0790989e0826e245c6c2e29c"
+    },
+    "full-library/process.json": {
+      "path": "docs/architecture/evidence/signed-array-elements/library-native-gates/full-library/process.json.gz",
+      "raw_sha256": "7df13305e3b7e02870dcd6435151525054e4707076f24802beab0e531e55f8e2",
+      "gzip_sha256": "8948680c60b8ed53f8655c40579f95d17c77605fc89972ad520e7d5d226258e0"
+    },
+    "full-library/gate.log": {
+      "path": "docs/architecture/evidence/signed-array-elements/library-native-gates/full-library/gate.log.gz",
+      "raw_sha256": "b206fcf266a7b256d2b77b73d374dfaafbe1e0c1c992a4717703430048d5fe71",
+      "gzip_sha256": "266ce9b8c44a4a94b8eefb09c4c99a36ef87fb3eda399c9a3ba9643c55fb9597"
+    },
+    "native-original/result.json": {
+      "path": "docs/architecture/evidence/signed-array-elements/library-native-gates/native-original/result.json.gz",
+      "raw_sha256": "62bd2c2af43f08bda92b2db950e23ab4bb80db36935ad0e1516d66fe6ae6f270",
+      "gzip_sha256": "d772d73a23d913458560acf60d673ffddfa489ce10961b518e5bec122a25fb83"
+    },
+    "native-original/started.json": {
+      "path": "docs/architecture/evidence/signed-array-elements/library-native-gates/native-original/started.json.gz",
+      "raw_sha256": "35898d65d6fbe767c249eabb6610b2eb4eb952e5292212631279b25605820555",
+      "gzip_sha256": "573033e9be8bc699c214899afeeda69dd8106a158549fd004c1345e2e05a2141"
+    },
+    "native-original/process.json": {
+      "path": "docs/architecture/evidence/signed-array-elements/library-native-gates/native-original/process.json.gz",
+      "raw_sha256": "b32462465662ca611ce812dbf565a336f4f66ae198343d1bf88c41e930cd7ba3",
+      "gzip_sha256": "a814cdba5fb948145f3e3e0b6c1eec2c4d0ce27a24b599364adff907c308b5e9"
+    },
+    "native-original/stderr.log": {
+      "path": "docs/architecture/evidence/signed-array-elements/library-native-gates/native-original/stderr.log.gz",
+      "raw_sha256": "611a07ad61d5fc003595f8c2690aaf3bf7b937b05c838e3e2a9c40b8e5e2af25",
+      "gzip_sha256": "1429c4d66799e649b4e22f3dc65ac577d4271e8f3a89fd733c56823a3310b636"
+    },
+    "native-original/cargo.jsonl": {
+      "path": "docs/architecture/evidence/signed-array-elements/library-native-gates/native-original/cargo.jsonl.gz",
+      "raw_sha256": "12b044b093cfb90d995b1ea671e0187e71c93dd7c3535c7ef8c6ad5d9051312f",
+      "gzip_sha256": "964e23febead271da21fc6a3d3708a21ca771a897e915defed5b94ad49af8989"
+    },
+    "native-original/ir/native_signed_byte_list_return-wire.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/library-native-gates/native-original/ir/native_signed_byte_list_return-wire.ll.gz",
+      "raw_sha256": "394d32330cc1a1e6b5603e35c87e381421775d06d678601c6ff06514559f854f",
+      "gzip_sha256": "676a10b337f289e1e7f1cb8507742e01e4cc7098229ae5d279ecdc4c9b7515bb"
+    },
+    "native-original/ir/native_packed_signed_alias_list_has_signed_payload-wire.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/library-native-gates/native-original/ir/native_packed_signed_alias_list_has_signed_payload-wire.ll.gz",
+      "raw_sha256": "4ec2d2c5e08eebccc831c6cbedc8bc888b8de08983e3d3ff0edfd6227a743169",
+      "gzip_sha256": "a3e8f0ab991f76ef26d87f2ea75706cf222b80d144799782a0705fbe3fa0bd40"
+    },
+    "native-original/ir/native_unsigned_byte_local-wire.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/library-native-gates/native-original/ir/native_unsigned_byte_local-wire.ll.gz",
+      "raw_sha256": "5b36e1377c091af2049d050a79936f93df35d39d2e653f9fb20966ac852969d8",
+      "gzip_sha256": "b5e7894d475f3ead454135672e2cc8e9de4169a156da3dd42406823d606488fb"
+    },
+    "native-original/ir/native_signed_word_list_return-source.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/library-native-gates/native-original/ir/native_signed_word_list_return-source.ll.gz",
+      "raw_sha256": "8459ec51a5a6e24afbf81c00481d978fcf9583bdccc9944730749d230049e080",
+      "gzip_sha256": "ded1b8e5c7340e37124f0ff85af3f6e9684cb228834d4eda0024d4d5ae175225"
+    },
+    "native-original/ir/native_signed_byte_local-wire.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/library-native-gates/native-original/ir/native_signed_byte_local-wire.ll.gz",
+      "raw_sha256": "a70b2791ab7a767f3aa4e68da6dacf04ee1b9b2d015027380bc53d2ffcf6f754",
+      "gzip_sha256": "c7e626a0bc502beaa792711680e7b402ddfa512f0ee4c5d0ae634ca20759f10a"
+    },
+    "native-original/ir/native_packed_signed_alias_array_return-source.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/library-native-gates/native-original/ir/native_packed_signed_alias_array_return-source.ll.gz",
+      "raw_sha256": "ed61099eb592cb818adc3fd289a1e8a6363a7b93713e607b924f1262d3f92769",
+      "gzip_sha256": "34d36fb63aad41565f9d5c978a9ac861ea5b1d47e0c55a70da08437a5ab3affe"
+    },
+    "native-original/ir/native_unsigned_word_local-source.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/library-native-gates/native-original/ir/native_unsigned_word_local-source.ll.gz",
+      "raw_sha256": "e9c1c5b1c7aff98a1d316cda4ca74aaa183b2d8a9476cfde76acb0c15388ac78",
+      "gzip_sha256": "d7c0f01e2c45e651cd5f666ca096fc36138ffb0dbfc655b9b995d2a5ca0b2b3e"
+    },
+    "native-original/ir/native_signed_byte_array_return-source.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/library-native-gates/native-original/ir/native_signed_byte_array_return-source.ll.gz",
+      "raw_sha256": "c72c19f3936bd13ce07cc98678c9af1d5b39a52b161945ed0a34b194df0012aa",
+      "gzip_sha256": "4fd32893c0e01f24c3c711571ba99ba636ee76b69d5314f1b5f09c1e9e556723"
+    },
+    "native-original/ir/native_signed_word_local-source.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/library-native-gates/native-original/ir/native_signed_word_local-source.ll.gz",
+      "raw_sha256": "4f578b687e5d3c86610060b96fb6abebd0dbca46598965fbc6425ccc0961148b",
+      "gzip_sha256": "86160ec67d7b1307dfb7f2f45b737ebff32eaced374fe81de1fd41b9f219d7a3"
+    },
+    "native-original/ir/native_packed_signed_word_list_has_signed_payload-source.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/library-native-gates/native-original/ir/native_packed_signed_word_list_has_signed_payload-source.ll.gz",
+      "raw_sha256": "ba880fcf22ec96b80f0b9fd8c94caf091171f78ea67cfbe2a193305952589224",
+      "gzip_sha256": "94f74c77163fa56a3437d0e630251829e1498d5a3033aff4cdafa30778dc79c2"
+    },
+    "native-original/ir/native_unsigned_byte_array_return-wire.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/library-native-gates/native-original/ir/native_unsigned_byte_array_return-wire.ll.gz",
+      "raw_sha256": "a71a614cf5c410c4a2d80535d1d278b682aa1a01f8d8a383a8ac116986ebf2ef",
+      "gzip_sha256": "b3f26263c3ea1357b5dc9cfc49cad20db1be4598f437fe4e1e19b8e6f0ea11b0"
+    },
+    "native-original/ir/native_unsigned_short_local-source.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/library-native-gates/native-original/ir/native_unsigned_short_local-source.ll.gz",
+      "raw_sha256": "7d8643325c1cc5f9752bcc86a27d848bfd4f55eebe100bc8e4bf8f5e39870c93",
+      "gzip_sha256": "90071d421f647f6bf462c7b3ab6eda83077c9b226dfb3e5159a1c71fc69265bf"
+    },
+    "native-original/ir/native_signed_short_list_return-wire.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/library-native-gates/native-original/ir/native_signed_short_list_return-wire.ll.gz",
+      "raw_sha256": "2f4698679e1ed90d17d2c2fde96411a2893a3731a126747bcdf0ed838235a294",
+      "gzip_sha256": "c5cf9146bc1d3c7985a3163396913239bcd1cf7c121d9af00568b74203c21dd1"
+    },
+    "native-original/ir/native_signed_word_local-wire.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/library-native-gates/native-original/ir/native_signed_word_local-wire.ll.gz",
+      "raw_sha256": "4f578b687e5d3c86610060b96fb6abebd0dbca46598965fbc6425ccc0961148b",
+      "gzip_sha256": "86160ec67d7b1307dfb7f2f45b737ebff32eaced374fe81de1fd41b9f219d7a3"
+    },
+    "native-original/ir/native_unsigned_word_local-wire.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/library-native-gates/native-original/ir/native_unsigned_word_local-wire.ll.gz",
+      "raw_sha256": "e9c1c5b1c7aff98a1d316cda4ca74aaa183b2d8a9476cfde76acb0c15388ac78",
+      "gzip_sha256": "d7c0f01e2c45e651cd5f666ca096fc36138ffb0dbfc655b9b995d2a5ca0b2b3e"
+    },
+    "native-original/ir/native_packed_signed_short_list_has_signed_payload-source.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/library-native-gates/native-original/ir/native_packed_signed_short_list_has_signed_payload-source.ll.gz",
+      "raw_sha256": "4ec2d2c5e08eebccc831c6cbedc8bc888b8de08983e3d3ff0edfd6227a743169",
+      "gzip_sha256": "a3e8f0ab991f76ef26d87f2ea75706cf222b80d144799782a0705fbe3fa0bd40"
+    },
+    "native-original/ir/native_unsigned_short_local-wire.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/library-native-gates/native-original/ir/native_unsigned_short_local-wire.ll.gz",
+      "raw_sha256": "7d8643325c1cc5f9752bcc86a27d848bfd4f55eebe100bc8e4bf8f5e39870c93",
+      "gzip_sha256": "90071d421f647f6bf462c7b3ab6eda83077c9b226dfb3e5159a1c71fc69265bf"
+    },
+    "native-original/ir/native_unsigned_byte_array_return-source.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/library-native-gates/native-original/ir/native_unsigned_byte_array_return-source.ll.gz",
+      "raw_sha256": "a71a614cf5c410c4a2d80535d1d278b682aa1a01f8d8a383a8ac116986ebf2ef",
+      "gzip_sha256": "b3f26263c3ea1357b5dc9cfc49cad20db1be4598f437fe4e1e19b8e6f0ea11b0"
+    },
+    "native-original/ir/native_packed_signed_byte_list_has_signed_payload-source.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/library-native-gates/native-original/ir/native_packed_signed_byte_list_has_signed_payload-source.ll.gz",
+      "raw_sha256": "b57f25ded92280b9ec002abd4fe5767e97f687921a7c3b42d0d7a4a5f1bbc724",
+      "gzip_sha256": "4563782f67cd7bc791512a3e66bf1c5065ff905c1dfa00afd6059570255b5d49"
+    },
+    "native-original/ir/native_unsigned_byte_list_return-source.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/library-native-gates/native-original/ir/native_unsigned_byte_list_return-source.ll.gz",
+      "raw_sha256": "392f9731343fa30e81df9a38916ad8deaba980f7ca15b36fa9991d1fa46105ac",
+      "gzip_sha256": "56ca45b305f4b408f8517eba928a5d4d15a07211c31ee460f237a0a08005ffd5"
+    },
+    "native-original/ir/native_packed_unsigned_alias_list_keeps_high_bit_payload-wire.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/library-native-gates/native-original/ir/native_packed_unsigned_alias_list_keeps_high_bit_payload-wire.ll.gz",
+      "raw_sha256": "ba5d37008873617b1f3ec8efd19db0a07eb2c42a94e0b36f2317258cf26c2139",
+      "gzip_sha256": "b17d1bd5f143db8cb1314ad7495a195d97a01965a713f8cc9d4b4b2864fa2329"
+    },
+    "native-original/ir/native_unsigned_word_list_return-wire.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/library-native-gates/native-original/ir/native_unsigned_word_list_return-wire.ll.gz",
+      "raw_sha256": "d438133d09c0092f1efc97b6b741cce73e5840535cd0efd7848ffb34024dc3d2",
+      "gzip_sha256": "ea240f8e3677a7e5aa2baf1c64d381521b648046ff876bc357f9ede059f9e09f"
+    },
+    "native-original/ir/native_unsigned_short_array_return-wire.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/library-native-gates/native-original/ir/native_unsigned_short_array_return-wire.ll.gz",
+      "raw_sha256": "8c25d29db6a4028f2d0fe1c588273ae0427446e77d62f159239e7d73728798d9",
+      "gzip_sha256": "04d6a36874d028cab955ca04a87360ba886dd8a4c8620ed290f5c6462fc39408"
+    },
+    "native-original/ir/native_packed_unsigned_alias_array_return-source.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/library-native-gates/native-original/ir/native_packed_unsigned_alias_array_return-source.ll.gz",
+      "raw_sha256": "8c25d29db6a4028f2d0fe1c588273ae0427446e77d62f159239e7d73728798d9",
+      "gzip_sha256": "04d6a36874d028cab955ca04a87360ba886dd8a4c8620ed290f5c6462fc39408"
+    },
+    "native-original/ir/native_packed_unsigned_alias_list_return-source.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/library-native-gates/native-original/ir/native_packed_unsigned_alias_list_return-source.ll.gz",
+      "raw_sha256": "f67dfc1ca1afd5401ea06c963c732e95d33c5b9721e604372ad16a55501084fc",
+      "gzip_sha256": "49563ca6218d4266780ebfcfc8d2ecfa7e2bcaeba43af8ba48a0a28210fedf2b"
+    },
+    "native-original/ir/native_signed_word_array_return-wire.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/library-native-gates/native-original/ir/native_signed_word_array_return-wire.ll.gz",
+      "raw_sha256": "bbefe6ffb1c997f11b4d41b78556895399a759fbfa58fb50bc2bda6943ccc231",
+      "gzip_sha256": "163a1ffb61d3994254e657ea1a6274a84d06ac49838245450472f4026d8af50f"
+    },
+    "native-original/ir/native_packed_signed_alias_list_has_signed_payload-source.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/library-native-gates/native-original/ir/native_packed_signed_alias_list_has_signed_payload-source.ll.gz",
+      "raw_sha256": "4ec2d2c5e08eebccc831c6cbedc8bc888b8de08983e3d3ff0edfd6227a743169",
+      "gzip_sha256": "a3e8f0ab991f76ef26d87f2ea75706cf222b80d144799782a0705fbe3fa0bd40"
+    },
+    "native-original/ir/native_packed_unsigned_alias_list_return-wire.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/library-native-gates/native-original/ir/native_packed_unsigned_alias_list_return-wire.ll.gz",
+      "raw_sha256": "f67dfc1ca1afd5401ea06c963c732e95d33c5b9721e604372ad16a55501084fc",
+      "gzip_sha256": "49563ca6218d4266780ebfcfc8d2ecfa7e2bcaeba43af8ba48a0a28210fedf2b"
+    },
+    "native-original/ir/native_signed_read_preserves_packed_proof_for_later_list_conversion-source.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/library-native-gates/native-original/ir/native_signed_read_preserves_packed_proof_for_later_list_conversion-source.ll.gz",
+      "raw_sha256": "b5372193cad7dbd6e085f681be4a7030150419ab6ee80c776d75994d6513953e",
+      "gzip_sha256": "f2e4e506df47f52b043471c547e9c73cd818589dc15b08d8084a633ebd67739d"
+    },
+    "native-original/ir/native_existing_sext_uses_width_bytes_after_canonical_wide_registers-source.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/library-native-gates/native-original/ir/native_existing_sext_uses_width_bytes_after_canonical_wide_registers-source.ll.gz",
+      "raw_sha256": "5370eed2d0f848de5ba68ac4424df478832f7911f535beebc4f495a3f982fac3",
+      "gzip_sha256": "0c6769269b8d9bba68c5ae4d1dd6d8161dbef4d78e70bc5e230737af6f0c393d"
+    },
+    "native-original/ir/native_actual_packed_byte_list_return-wire.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/library-native-gates/native-original/ir/native_actual_packed_byte_list_return-wire.ll.gz",
+      "raw_sha256": "2f7c364d58c81d67b2267a93a29a8a839fb9a8dd2aa248896d7c7c885a524128",
+      "gzip_sha256": "167bf030f269788d1d1b4f42015e9b08c191f6f0816d08fd27544904f79ea227"
+    },
+    "native-original/ir/native_packed_signed_alias_list_return-source.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/library-native-gates/native-original/ir/native_packed_signed_alias_list_return-source.ll.gz",
+      "raw_sha256": "2f4698679e1ed90d17d2c2fde96411a2893a3731a126747bcdf0ed838235a294",
+      "gzip_sha256": "c5cf9146bc1d3c7985a3163396913239bcd1cf7c121d9af00568b74203c21dd1"
+    },
+    "native-original/ir/native_packed_signed_alias_list_return-wire.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/library-native-gates/native-original/ir/native_packed_signed_alias_list_return-wire.ll.gz",
+      "raw_sha256": "2f4698679e1ed90d17d2c2fde96411a2893a3731a126747bcdf0ed838235a294",
+      "gzip_sha256": "c5cf9146bc1d3c7985a3163396913239bcd1cf7c121d9af00568b74203c21dd1"
+    },
+    "native-original/ir/native_signed_byte_array_return-wire.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/library-native-gates/native-original/ir/native_signed_byte_array_return-wire.ll.gz",
+      "raw_sha256": "c72c19f3936bd13ce07cc98678c9af1d5b39a52b161945ed0a34b194df0012aa",
+      "gzip_sha256": "4fd32893c0e01f24c3c711571ba99ba636ee76b69d5314f1b5f09c1e9e556723"
+    },
+    "native-original/ir/native_signed_short_list_return-source.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/library-native-gates/native-original/ir/native_signed_short_list_return-source.ll.gz",
+      "raw_sha256": "2f4698679e1ed90d17d2c2fde96411a2893a3731a126747bcdf0ed838235a294",
+      "gzip_sha256": "c5cf9146bc1d3c7985a3163396913239bcd1cf7c121d9af00568b74203c21dd1"
+    },
+    "native-original/ir/native_actual_packed_byte_local-source.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/library-native-gates/native-original/ir/native_actual_packed_byte_local-source.ll.gz",
+      "raw_sha256": "3eaa0a612495d24d5869a6d2a1c0021cfc359ec7f78fd9c52885a1180ef86ea8",
+      "gzip_sha256": "23e84a7b7bf7e71d5f89db42d88d6335768b1a8a3b4f49e05b8f33fd2d309a48"
+    },
+    "native-original/ir/native_actual_packed_byte_list_return-source.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/library-native-gates/native-original/ir/native_actual_packed_byte_list_return-source.ll.gz",
+      "raw_sha256": "2f7c364d58c81d67b2267a93a29a8a839fb9a8dd2aa248896d7c7c885a524128",
+      "gzip_sha256": "167bf030f269788d1d1b4f42015e9b08c191f6f0816d08fd27544904f79ea227"
+    },
+    "native-original/ir/native_signed_word_array_return-source.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/library-native-gates/native-original/ir/native_signed_word_array_return-source.ll.gz",
+      "raw_sha256": "bbefe6ffb1c997f11b4d41b78556895399a759fbfa58fb50bc2bda6943ccc231",
+      "gzip_sha256": "163a1ffb61d3994254e657ea1a6274a84d06ac49838245450472f4026d8af50f"
+    },
+    "native-original/ir/native_signed_read_preserves_packed_proof_for_later_list_conversion-wire.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/library-native-gates/native-original/ir/native_signed_read_preserves_packed_proof_for_later_list_conversion-wire.ll.gz",
+      "raw_sha256": "b5372193cad7dbd6e085f681be4a7030150419ab6ee80c776d75994d6513953e",
+      "gzip_sha256": "f2e4e506df47f52b043471c547e9c73cd818589dc15b08d8084a633ebd67739d"
+    },
+    "native-original/ir/native_unsigned_short_list_return-wire.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/library-native-gates/native-original/ir/native_unsigned_short_list_return-wire.ll.gz",
+      "raw_sha256": "f67dfc1ca1afd5401ea06c963c732e95d33c5b9721e604372ad16a55501084fc",
+      "gzip_sha256": "49563ca6218d4266780ebfcfc8d2ecfa7e2bcaeba43af8ba48a0a28210fedf2b"
+    },
+    "native-original/ir/native_unsigned_word_list_return-source.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/library-native-gates/native-original/ir/native_unsigned_word_list_return-source.ll.gz",
+      "raw_sha256": "d438133d09c0092f1efc97b6b741cce73e5840535cd0efd7848ffb34024dc3d2",
+      "gzip_sha256": "ea240f8e3677a7e5aa2baf1c64d381521b648046ff876bc357f9ede059f9e09f"
+    },
+    "native-original/ir/native_signed_short_local-wire.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/library-native-gates/native-original/ir/native_signed_short_local-wire.ll.gz",
+      "raw_sha256": "61e69e932b0ea2f726db99b1109659990cfe127a13d3986a17d335a8bf17218b",
+      "gzip_sha256": "ae06e245c408553cf48d135bf971d32d5f7f6a77625856e49ac0eea50c9590b8"
+    },
+    "native-original/ir/native_unsigned_byte_list_return-wire.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/library-native-gates/native-original/ir/native_unsigned_byte_list_return-wire.ll.gz",
+      "raw_sha256": "392f9731343fa30e81df9a38916ad8deaba980f7ca15b36fa9991d1fa46105ac",
+      "gzip_sha256": "56ca45b305f4b408f8517eba928a5d4d15a07211c31ee460f237a0a08005ffd5"
+    },
+    "native-original/ir/native_actual_packed_byte_local-wire.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/library-native-gates/native-original/ir/native_actual_packed_byte_local-wire.ll.gz",
+      "raw_sha256": "3eaa0a612495d24d5869a6d2a1c0021cfc359ec7f78fd9c52885a1180ef86ea8",
+      "gzip_sha256": "23e84a7b7bf7e71d5f89db42d88d6335768b1a8a3b4f49e05b8f33fd2d309a48"
+    },
+    "native-original/ir/native_unsigned_byte_local-source.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/library-native-gates/native-original/ir/native_unsigned_byte_local-source.ll.gz",
+      "raw_sha256": "5b36e1377c091af2049d050a79936f93df35d39d2e653f9fb20966ac852969d8",
+      "gzip_sha256": "b5e7894d475f3ead454135672e2cc8e9de4169a156da3dd42406823d606488fb"
+    },
+    "native-original/ir/native_packed_signed_byte_list_has_signed_payload-wire.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/library-native-gates/native-original/ir/native_packed_signed_byte_list_has_signed_payload-wire.ll.gz",
+      "raw_sha256": "b57f25ded92280b9ec002abd4fe5767e97f687921a7c3b42d0d7a4a5f1bbc724",
+      "gzip_sha256": "4563782f67cd7bc791512a3e66bf1c5065ff905c1dfa00afd6059570255b5d49"
+    },
+    "native-original/ir/native_packed_signed_word_list_has_signed_payload-wire.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/library-native-gates/native-original/ir/native_packed_signed_word_list_has_signed_payload-wire.ll.gz",
+      "raw_sha256": "ba880fcf22ec96b80f0b9fd8c94caf091171f78ea67cfbe2a193305952589224",
+      "gzip_sha256": "94f74c77163fa56a3437d0e630251829e1498d5a3033aff4cdafa30778dc79c2"
+    },
+    "native-original/ir/native_signed_short_local-source.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/library-native-gates/native-original/ir/native_signed_short_local-source.ll.gz",
+      "raw_sha256": "61e69e932b0ea2f726db99b1109659990cfe127a13d3986a17d335a8bf17218b",
+      "gzip_sha256": "ae06e245c408553cf48d135bf971d32d5f7f6a77625856e49ac0eea50c9590b8"
+    },
+    "native-original/ir/native_unsigned_short_list_return-source.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/library-native-gates/native-original/ir/native_unsigned_short_list_return-source.ll.gz",
+      "raw_sha256": "f67dfc1ca1afd5401ea06c963c732e95d33c5b9721e604372ad16a55501084fc",
+      "gzip_sha256": "49563ca6218d4266780ebfcfc8d2ecfa7e2bcaeba43af8ba48a0a28210fedf2b"
+    },
+    "native-original/ir/native_actual_packed_byte_array_return-wire.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/library-native-gates/native-original/ir/native_actual_packed_byte_array_return-wire.ll.gz",
+      "raw_sha256": "2e51609b4d19c496cb06914c0b80823c44093637d52b99d2a350a3d027385f51",
+      "gzip_sha256": "aa039300dd50bf93cfe5f78f5eae55f94accfa608aa12313a90fe10fbc8b3b7b"
+    },
+    "native-original/ir/native_packed_signed_alias_array_return-wire.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/library-native-gates/native-original/ir/native_packed_signed_alias_array_return-wire.ll.gz",
+      "raw_sha256": "ed61099eb592cb818adc3fd289a1e8a6363a7b93713e607b924f1262d3f92769",
+      "gzip_sha256": "34d36fb63aad41565f9d5c978a9ac861ea5b1d47e0c55a70da08437a5ab3affe"
+    },
+    "native-original/ir/native_unsigned_short_array_return-source.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/library-native-gates/native-original/ir/native_unsigned_short_array_return-source.ll.gz",
+      "raw_sha256": "8c25d29db6a4028f2d0fe1c588273ae0427446e77d62f159239e7d73728798d9",
+      "gzip_sha256": "04d6a36874d028cab955ca04a87360ba886dd8a4c8620ed290f5c6462fc39408"
+    },
+    "native-original/ir/native_signed_short_array_return-wire.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/library-native-gates/native-original/ir/native_signed_short_array_return-wire.ll.gz",
+      "raw_sha256": "ed61099eb592cb818adc3fd289a1e8a6363a7b93713e607b924f1262d3f92769",
+      "gzip_sha256": "34d36fb63aad41565f9d5c978a9ac861ea5b1d47e0c55a70da08437a5ab3affe"
+    },
+    "native-original/ir/native_signed_byte_local-source.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/library-native-gates/native-original/ir/native_signed_byte_local-source.ll.gz",
+      "raw_sha256": "a70b2791ab7a767f3aa4e68da6dacf04ee1b9b2d015027380bc53d2ffcf6f754",
+      "gzip_sha256": "c7e626a0bc502beaa792711680e7b402ddfa512f0ee4c5d0ae634ca20759f10a"
+    },
+    "native-original/ir/native_signed_word_list_return-wire.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/library-native-gates/native-original/ir/native_signed_word_list_return-wire.ll.gz",
+      "raw_sha256": "8459ec51a5a6e24afbf81c00481d978fcf9583bdccc9944730749d230049e080",
+      "gzip_sha256": "ded1b8e5c7340e37124f0ff85af3f6e9684cb228834d4eda0024d4d5ae175225"
+    },
+    "native-original/ir/native_signed_short_array_return-source.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/library-native-gates/native-original/ir/native_signed_short_array_return-source.ll.gz",
+      "raw_sha256": "ed61099eb592cb818adc3fd289a1e8a6363a7b93713e607b924f1262d3f92769",
+      "gzip_sha256": "34d36fb63aad41565f9d5c978a9ac861ea5b1d47e0c55a70da08437a5ab3affe"
+    },
+    "native-original/ir/native_packed_unsigned_alias_list_keeps_high_bit_payload-source.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/library-native-gates/native-original/ir/native_packed_unsigned_alias_list_keeps_high_bit_payload-source.ll.gz",
+      "raw_sha256": "ba5d37008873617b1f3ec8efd19db0a07eb2c42a94e0b36f2317258cf26c2139",
+      "gzip_sha256": "b17d1bd5f143db8cb1314ad7495a195d97a01965a713f8cc9d4b4b2864fa2329"
+    },
+    "native-original/ir/native_existing_sext_uses_width_bytes_after_canonical_wide_registers-wire.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/library-native-gates/native-original/ir/native_existing_sext_uses_width_bytes_after_canonical_wide_registers-wire.ll.gz",
+      "raw_sha256": "5370eed2d0f848de5ba68ac4424df478832f7911f535beebc4f495a3f982fac3",
+      "gzip_sha256": "0c6769269b8d9bba68c5ae4d1dd6d8161dbef4d78e70bc5e230737af6f0c393d"
+    },
+    "native-original/ir/native_actual_packed_byte_array_return-source.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/library-native-gates/native-original/ir/native_actual_packed_byte_array_return-source.ll.gz",
+      "raw_sha256": "2e51609b4d19c496cb06914c0b80823c44093637d52b99d2a350a3d027385f51",
+      "gzip_sha256": "aa039300dd50bf93cfe5f78f5eae55f94accfa608aa12313a90fe10fbc8b3b7b"
+    },
+    "native-original/ir/native_packed_unsigned_alias_array_return-wire.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/library-native-gates/native-original/ir/native_packed_unsigned_alias_array_return-wire.ll.gz",
+      "raw_sha256": "8c25d29db6a4028f2d0fe1c588273ae0427446e77d62f159239e7d73728798d9",
+      "gzip_sha256": "04d6a36874d028cab955ca04a87360ba886dd8a4c8620ed290f5c6462fc39408"
+    },
+    "native-original/ir/native_unsigned_word_array_return-source.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/library-native-gates/native-original/ir/native_unsigned_word_array_return-source.ll.gz",
+      "raw_sha256": "44e5dc5abab9f886b7500899464f4194cff126ed7559e100e9c6c71a079465ce",
+      "gzip_sha256": "ee41bdb2dd050f521f72cc5c6729e11034e04d6e291e1766804d454c3c24842b"
+    },
+    "native-original/ir/native_signed_byte_list_return-source.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/library-native-gates/native-original/ir/native_signed_byte_list_return-source.ll.gz",
+      "raw_sha256": "394d32330cc1a1e6b5603e35c87e381421775d06d678601c6ff06514559f854f",
+      "gzip_sha256": "676a10b337f289e1e7f1cb8507742e01e4cc7098229ae5d279ecdc4c9b7515bb"
+    },
+    "native-original/ir/native_packed_signed_short_list_has_signed_payload-wire.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/library-native-gates/native-original/ir/native_packed_signed_short_list_has_signed_payload-wire.ll.gz",
+      "raw_sha256": "4ec2d2c5e08eebccc831c6cbedc8bc888b8de08983e3d3ff0edfd6227a743169",
+      "gzip_sha256": "a3e8f0ab991f76ef26d87f2ea75706cf222b80d144799782a0705fbe3fa0bd40"
+    },
+    "native-original/ir/native_unsigned_word_array_return-wire.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/library-native-gates/native-original/ir/native_unsigned_word_array_return-wire.ll.gz",
+      "raw_sha256": "44e5dc5abab9f886b7500899464f4194cff126ed7559e100e9c6c71a079465ce",
+      "gzip_sha256": "ee41bdb2dd050f521f72cc5c6729e11034e04d6e291e1766804d454c3c24842b"
+    },
+    "full-library/idle-selection.json": {
+      "path": "docs/architecture/evidence/signed-array-elements/library-native-gates/full-library/idle-selection.json.gz",
+      "raw_sha256": "47e14b1c8f20e0130135d2ac730f9904fa735b2c2ff057e99c90676c857eb4b6",
+      "gzip_sha256": "3891385289861ca29122fdc879eba798736815ea751227c785d91d0d4c7651a3"
+    },
+    "full-library/release-selection.json": {
+      "path": "docs/architecture/evidence/signed-array-elements/library-native-gates/full-library/release-selection.json.gz",
+      "raw_sha256": "47e14b1c8f20e0130135d2ac730f9904fa735b2c2ff057e99c90676c857eb4b6",
+      "gzip_sha256": "3891385289861ca29122fdc879eba798736815ea751227c785d91d0d4c7651a3"
+    }
+  },
+  "limits": [
+    "The two targets carry different pinned stdlib snapshots; their before/after hashes are preserved separately and unchanged. These gates do not claim a new automatic bake.",
+    "Native fixture allocation is bounded host test infrastructure, not allocator-lifecycle or no-libc acceptance.",
+    "No ordinary CLI, AOT executable, SHA implementation or whole-registry acceptance is inferred.",
+    "Both targets were explicitly released after their completed gates; immutable executables remain in the recorded temporary directories."
+  ]
+}

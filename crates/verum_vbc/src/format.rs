@@ -115,7 +115,9 @@ pub const VERSION_MAJOR: u16 = 2;
 /// Version 2.23 carries optional declaration-owned semantic formal parameters.
 /// Version 2.24 gives function flag bit 3 declaration-owned body provenance.
 /// Earlier descriptors leave body presence unknown even when they contain RetV.
-pub const VERSION_MINOR: u16 = 24;
+/// Version 2.25 carries complete optional field declaration visibility.
+/// Legacy coarse flags cannot authorize access when that policy is absent.
+pub const VERSION_MINOR: u16 = 25;
 
 /// Minor-version floors for sections whose presence readers gate on.  The
 /// register-type-hints section has been written unconditionally since minor 2,

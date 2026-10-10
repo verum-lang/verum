@@ -1,0 +1,5 @@
+   Compiling verum_error v0.1.0 (/Users/taaliman/.codex/worktrees/registry-metadata-lookup/verum/crates/verum_error)
+   Compiling verum_cbgr v0.1.0 (/Users/taaliman/.codex/worktrees/registry-metadata-lookup/verum/crates/verum_cbgr)
+   Compiling verum_vbc v0.1.0 (/Users/taaliman/.codex/worktrees/registry-metadata-lookup/verum/crates/verum_vbc)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 27.50s
+     Running tests/field_visibility.rs (/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target/debug/build/verum_vbc/03ade4b23c897543/out/field_visibility-03ade4b23c897543)

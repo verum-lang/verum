@@ -1,0 +1,45 @@
+[
+  {
+    "command": [
+      "git",
+      "diff",
+      "--check"
+    ],
+    "exit_code": 0,
+    "seconds": 0.044,
+    "log": "/private/tmp/verum-T1714-final-source-gates/gate-0.log",
+    "sha256": "54dc9366cf6d804bdf5ae1ffa172dab10fc68a63170232134cbe6981ee4634fb"
+  },
+  {
+    "command": [
+      "git",
+      "diff",
+      "--cached",
+      "--check"
+    ],
+    "exit_code": 2,
+    "seconds": 0.042,
+    "log": "/private/tmp/verum-T1714-final-source-gates/gate-1.log",
+    "sha256": "ff48d051141b4c0b9f59cf244a1e1a69d76ed4e8a2eb6397f0cf942dd8d291cc"
+  },
+  {
+    "command": [
+      "make",
+      "check-internal-refs"
+    ],
+    "exit_code": 0,
+    "seconds": 5.189,
+    "log": "/private/tmp/verum-T1714-final-source-gates/gate-2.log",
+    "sha256": "26b7352043bafeb3fcd29bbf9cc9ed6d7794f4b2e572db9a0bf832348cbccb9c"
+  },
+  {
+    "command": [
+      "make",
+      "check-dead-module-path-calls"
+    ],
+    "exit_code": 0,
+    "seconds": 1.342,
+    "log": "/private/tmp/verum-T1714-final-source-gates/gate-3.log",
+    "sha256": "2dc51dc3c7fd111f5613cda31c3808b973f421c47e491dea18761b0349176179"
+  }
+]

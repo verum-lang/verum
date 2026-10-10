@@ -1,0 +1,294 @@
+{
+  "task": "T1706",
+  "control": "The exact committed production compute_core_blake3 function is compiled with an existing cached blake3 library. Isolated file changes and deletion test actual hash and Cargo rerun outputs. No new CI gate is claimed.",
+  "results": [
+    {
+      "label": "baseline",
+      "source_commit": "98a4acdae94a83273bd1a4a5dd461df122ecbd4d",
+      "schema": "v53-declared-function-bodies",
+      "production_function_sha256": "382b188e6f1648f739589dc009353eb81323fdfc4c7dd606f036600b13b401cb",
+      "deterministic_repeat": true,
+      "deltas": {
+        "crates/verum_vbc/src/array_storage.rs": {
+          "changed_digest": false,
+          "missing_digest": false,
+          "restored_digest": true,
+          "rerun_declared": false
+        },
+        "crates/verum_vbc/src/codegen/array_coercions.rs": {
+          "changed_digest": false,
+          "missing_digest": false,
+          "restored_digest": true,
+          "rerun_declared": false
+        },
+        "crates/verum_vbc/src/codegen/array_elements.rs": {
+          "changed_digest": false,
+          "missing_digest": false,
+          "restored_digest": true,
+          "rerun_declared": false
+        },
+        "crates/verum_vbc/src/codegen/expressions.rs": {
+          "changed_digest": true,
+          "missing_digest": true,
+          "restored_digest": true,
+          "rerun_declared": true
+        },
+        "docs/unrelated-fingerprint-control.md": {
+          "changed_digest": false,
+          "missing_digest": false,
+          "restored_digest": true,
+          "rerun_declared": false
+        }
+      },
+      "wall_seconds": 0.533
+    },
+    {
+      "label": "fixed",
+      "source_commit": "4867b6f523755106938a44cbaf0c2dc5f33ef651",
+      "schema": "v53-declared-function-bodies",
+      "production_function_sha256": "157885c4d414ac7d011026252b59fa0bd012968136da9ed3664f18a08e19beae",
+      "deterministic_repeat": true,
+      "deltas": {
+        "crates/verum_vbc/src/array_storage.rs": {
+          "changed_digest": true,
+          "missing_digest": true,
+          "restored_digest": true,
+          "rerun_declared": true
+        },
+        "crates/verum_vbc/src/codegen/array_coercions.rs": {
+          "changed_digest": true,
+          "missing_digest": true,
+          "restored_digest": true,
+          "rerun_declared": true
+        },
+        "crates/verum_vbc/src/codegen/array_elements.rs": {
+          "changed_digest": true,
+          "missing_digest": true,
+          "restored_digest": true,
+          "rerun_declared": true
+        },
+        "crates/verum_vbc/src/codegen/expressions.rs": {
+          "changed_digest": true,
+          "missing_digest": true,
+          "restored_digest": true,
+          "rerun_declared": true
+        },
+        "docs/unrelated-fingerprint-control.md": {
+          "changed_digest": false,
+          "missing_digest": false,
+          "restored_digest": true,
+          "rerun_declared": false
+        }
+      },
+      "wall_seconds": 0.548
+    }
+  ],
+  "runner_sha256": "388112c1db67a1b48d2ed31575fb39ab3b7e0dbee77886b96a41858bbe26d097",
+  "raw_files": {
+    "baseline/build.log.gz": {
+      "path": "docs/architecture/evidence/signed-array-elements/producer-cache/baseline/build.log.gz",
+      "raw_sha256": "e1bf2256d1525e647fff6dcf231a40d1f101dcea6f890e729c91d99a7efb87d4",
+      "gzip_sha256": "63e5566481ce2da9a4a842fa7fa3c5c896751a0c9c6631ca493d93a06fbd45a2"
+    },
+    "baseline/case-0-changed.log.gz": {
+      "path": "docs/architecture/evidence/signed-array-elements/producer-cache/baseline/case-0-changed.log.gz",
+      "raw_sha256": "2d620510536d44cbae4daee29e17f29616c6cd63875d0213afd29e02f481f133",
+      "gzip_sha256": "60f32a74128cfb9e23e7c1c0805bec536de393f8a20737e5844030f4d29431a0"
+    },
+    "baseline/case-0-missing.log.gz": {
+      "path": "docs/architecture/evidence/signed-array-elements/producer-cache/baseline/case-0-missing.log.gz",
+      "raw_sha256": "2d620510536d44cbae4daee29e17f29616c6cd63875d0213afd29e02f481f133",
+      "gzip_sha256": "60f32a74128cfb9e23e7c1c0805bec536de393f8a20737e5844030f4d29431a0"
+    },
+    "baseline/case-0-restored.log.gz": {
+      "path": "docs/architecture/evidence/signed-array-elements/producer-cache/baseline/case-0-restored.log.gz",
+      "raw_sha256": "2d620510536d44cbae4daee29e17f29616c6cd63875d0213afd29e02f481f133",
+      "gzip_sha256": "60f32a74128cfb9e23e7c1c0805bec536de393f8a20737e5844030f4d29431a0"
+    },
+    "baseline/case-1-changed.log.gz": {
+      "path": "docs/architecture/evidence/signed-array-elements/producer-cache/baseline/case-1-changed.log.gz",
+      "raw_sha256": "2d620510536d44cbae4daee29e17f29616c6cd63875d0213afd29e02f481f133",
+      "gzip_sha256": "60f32a74128cfb9e23e7c1c0805bec536de393f8a20737e5844030f4d29431a0"
+    },
+    "baseline/case-1-missing.log.gz": {
+      "path": "docs/architecture/evidence/signed-array-elements/producer-cache/baseline/case-1-missing.log.gz",
+      "raw_sha256": "2d620510536d44cbae4daee29e17f29616c6cd63875d0213afd29e02f481f133",
+      "gzip_sha256": "60f32a74128cfb9e23e7c1c0805bec536de393f8a20737e5844030f4d29431a0"
+    },
+    "baseline/case-1-restored.log.gz": {
+      "path": "docs/architecture/evidence/signed-array-elements/producer-cache/baseline/case-1-restored.log.gz",
+      "raw_sha256": "2d620510536d44cbae4daee29e17f29616c6cd63875d0213afd29e02f481f133",
+      "gzip_sha256": "60f32a74128cfb9e23e7c1c0805bec536de393f8a20737e5844030f4d29431a0"
+    },
+    "baseline/case-2-changed.log.gz": {
+      "path": "docs/architecture/evidence/signed-array-elements/producer-cache/baseline/case-2-changed.log.gz",
+      "raw_sha256": "2d620510536d44cbae4daee29e17f29616c6cd63875d0213afd29e02f481f133",
+      "gzip_sha256": "60f32a74128cfb9e23e7c1c0805bec536de393f8a20737e5844030f4d29431a0"
+    },
+    "baseline/case-2-missing.log.gz": {
+      "path": "docs/architecture/evidence/signed-array-elements/producer-cache/baseline/case-2-missing.log.gz",
+      "raw_sha256": "2d620510536d44cbae4daee29e17f29616c6cd63875d0213afd29e02f481f133",
+      "gzip_sha256": "60f32a74128cfb9e23e7c1c0805bec536de393f8a20737e5844030f4d29431a0"
+    },
+    "baseline/case-2-restored.log.gz": {
+      "path": "docs/architecture/evidence/signed-array-elements/producer-cache/baseline/case-2-restored.log.gz",
+      "raw_sha256": "2d620510536d44cbae4daee29e17f29616c6cd63875d0213afd29e02f481f133",
+      "gzip_sha256": "60f32a74128cfb9e23e7c1c0805bec536de393f8a20737e5844030f4d29431a0"
+    },
+    "baseline/case-3-changed.log.gz": {
+      "path": "docs/architecture/evidence/signed-array-elements/producer-cache/baseline/case-3-changed.log.gz",
+      "raw_sha256": "bf48bd6edc117d598e51f2d2f556d3faa4d02bc6bff6c5925fe8c9f9b17972d5",
+      "gzip_sha256": "0bee84cdcbeaa80d95d9cceaa7a52d2f62d70730bdee760a61bbb98f19106ad9"
+    },
+    "baseline/case-3-missing.log.gz": {
+      "path": "docs/architecture/evidence/signed-array-elements/producer-cache/baseline/case-3-missing.log.gz",
+      "raw_sha256": "a4bb7d922a88bfce1e28e83624501818d9ddcdc9ecaba3a3f09022040ddc1335",
+      "gzip_sha256": "e46a803f76ffde6db034342e3d549aac1c1c0082498c37f439bcbf080699cab2"
+    },
+    "baseline/case-3-restored.log.gz": {
+      "path": "docs/architecture/evidence/signed-array-elements/producer-cache/baseline/case-3-restored.log.gz",
+      "raw_sha256": "2d620510536d44cbae4daee29e17f29616c6cd63875d0213afd29e02f481f133",
+      "gzip_sha256": "60f32a74128cfb9e23e7c1c0805bec536de393f8a20737e5844030f4d29431a0"
+    },
+    "baseline/case-4-changed.log.gz": {
+      "path": "docs/architecture/evidence/signed-array-elements/producer-cache/baseline/case-4-changed.log.gz",
+      "raw_sha256": "2d620510536d44cbae4daee29e17f29616c6cd63875d0213afd29e02f481f133",
+      "gzip_sha256": "60f32a74128cfb9e23e7c1c0805bec536de393f8a20737e5844030f4d29431a0"
+    },
+    "baseline/case-4-missing.log.gz": {
+      "path": "docs/architecture/evidence/signed-array-elements/producer-cache/baseline/case-4-missing.log.gz",
+      "raw_sha256": "2d620510536d44cbae4daee29e17f29616c6cd63875d0213afd29e02f481f133",
+      "gzip_sha256": "60f32a74128cfb9e23e7c1c0805bec536de393f8a20737e5844030f4d29431a0"
+    },
+    "baseline/case-4-restored.log.gz": {
+      "path": "docs/architecture/evidence/signed-array-elements/producer-cache/baseline/case-4-restored.log.gz",
+      "raw_sha256": "2d620510536d44cbae4daee29e17f29616c6cd63875d0213afd29e02f481f133",
+      "gzip_sha256": "60f32a74128cfb9e23e7c1c0805bec536de393f8a20737e5844030f4d29431a0"
+    },
+    "baseline/fingerprint.rs.gz": {
+      "path": "docs/architecture/evidence/signed-array-elements/producer-cache/baseline/fingerprint.rs.gz",
+      "raw_sha256": "0ad1ce8e8e683186df1bdd0fc7f451d2f0e33d56a7faba38255459d8ee6ff59e",
+      "gzip_sha256": "1a9a6eb2d63a6411ca6bdda4a5644ed8504ce8cdc8edf429ae9203d30338c3d1"
+    },
+    "baseline/initial.log.gz": {
+      "path": "docs/architecture/evidence/signed-array-elements/producer-cache/baseline/initial.log.gz",
+      "raw_sha256": "2d620510536d44cbae4daee29e17f29616c6cd63875d0213afd29e02f481f133",
+      "gzip_sha256": "60f32a74128cfb9e23e7c1c0805bec536de393f8a20737e5844030f4d29431a0"
+    },
+    "baseline/repeated.log.gz": {
+      "path": "docs/architecture/evidence/signed-array-elements/producer-cache/baseline/repeated.log.gz",
+      "raw_sha256": "2d620510536d44cbae4daee29e17f29616c6cd63875d0213afd29e02f481f133",
+      "gzip_sha256": "60f32a74128cfb9e23e7c1c0805bec536de393f8a20737e5844030f4d29431a0"
+    },
+    "baseline/result.json.gz": {
+      "path": "docs/architecture/evidence/signed-array-elements/producer-cache/baseline/result.json.gz",
+      "raw_sha256": "0062403c7a0f26c83179f60f107e6da7f2c576a5ca134cb559a57793df3083a3",
+      "gzip_sha256": "278b61fe20737727354299340109956c424fe9bc0a6c8b0bbb46adcc4c4e878e"
+    },
+    "fixed/build.log.gz": {
+      "path": "docs/architecture/evidence/signed-array-elements/producer-cache/fixed/build.log.gz",
+      "raw_sha256": "e1bf2256d1525e647fff6dcf231a40d1f101dcea6f890e729c91d99a7efb87d4",
+      "gzip_sha256": "63e5566481ce2da9a4a842fa7fa3c5c896751a0c9c6631ca493d93a06fbd45a2"
+    },
+    "fixed/case-0-changed.log.gz": {
+      "path": "docs/architecture/evidence/signed-array-elements/producer-cache/fixed/case-0-changed.log.gz",
+      "raw_sha256": "63c6f0dd7e44325253a3a2fbba944c4cbe18ab08aa587bd741d866175dcaeb78",
+      "gzip_sha256": "c0ed97b840afe9c6977c77bf739adc8c043e4d17d16205493be42c2ec326ea45"
+    },
+    "fixed/case-0-missing.log.gz": {
+      "path": "docs/architecture/evidence/signed-array-elements/producer-cache/fixed/case-0-missing.log.gz",
+      "raw_sha256": "064c433e69cd5146717a64e7f14414cff9feec649bc6a9974874207feaf55c3c",
+      "gzip_sha256": "8444779c99b2fe422e6ce8cf8b83f78fe37aa6b88af24ab2c68159fdd36fef18"
+    },
+    "fixed/case-0-restored.log.gz": {
+      "path": "docs/architecture/evidence/signed-array-elements/producer-cache/fixed/case-0-restored.log.gz",
+      "raw_sha256": "7c98e9d5541fcdb9e9679b201b30bc27622fc3e60f3f4213cd76e16b8c946460",
+      "gzip_sha256": "32740d5c7931d079cc598ef81876c728ea9f598d1e2bc0d007e7e2564b7af9a7"
+    },
+    "fixed/case-1-changed.log.gz": {
+      "path": "docs/architecture/evidence/signed-array-elements/producer-cache/fixed/case-1-changed.log.gz",
+      "raw_sha256": "ce2ed5ffd415915a786e0a03b2c4199c42f6a4e84eae72a28b1e773cd84dd2ce",
+      "gzip_sha256": "228f5b30c6445696b948997d5eae89be441cb4388a0d59b17dd6335ae497fc36"
+    },
+    "fixed/case-1-missing.log.gz": {
+      "path": "docs/architecture/evidence/signed-array-elements/producer-cache/fixed/case-1-missing.log.gz",
+      "raw_sha256": "43693780491d6ead3ebd1df4c490a2c402fe4c2de7eb40a3d6b20664136f7b4c",
+      "gzip_sha256": "9dcaee7af5306c9595d73a47943c5be4545020d37f11ac95280e56a0c6c21b91"
+    },
+    "fixed/case-1-restored.log.gz": {
+      "path": "docs/architecture/evidence/signed-array-elements/producer-cache/fixed/case-1-restored.log.gz",
+      "raw_sha256": "7c98e9d5541fcdb9e9679b201b30bc27622fc3e60f3f4213cd76e16b8c946460",
+      "gzip_sha256": "32740d5c7931d079cc598ef81876c728ea9f598d1e2bc0d007e7e2564b7af9a7"
+    },
+    "fixed/case-2-changed.log.gz": {
+      "path": "docs/architecture/evidence/signed-array-elements/producer-cache/fixed/case-2-changed.log.gz",
+      "raw_sha256": "e52619e2f8942daadfec837d306206f6ace6f0b763f2ff1c9b605951f2879d92",
+      "gzip_sha256": "01a733be6205083ca6938d322d3f0b5371c84abe08f44c3910fd73ef3cbe6c41"
+    },
+    "fixed/case-2-missing.log.gz": {
+      "path": "docs/architecture/evidence/signed-array-elements/producer-cache/fixed/case-2-missing.log.gz",
+      "raw_sha256": "6af344d16fc6f934cf4acfc295a9d13f603561584c5854d345c124a767f6283a",
+      "gzip_sha256": "0f845a17ae2617963b0263023a11329c390bc07f58dddbf0cdad2c3773d66acc"
+    },
+    "fixed/case-2-restored.log.gz": {
+      "path": "docs/architecture/evidence/signed-array-elements/producer-cache/fixed/case-2-restored.log.gz",
+      "raw_sha256": "7c98e9d5541fcdb9e9679b201b30bc27622fc3e60f3f4213cd76e16b8c946460",
+      "gzip_sha256": "32740d5c7931d079cc598ef81876c728ea9f598d1e2bc0d007e7e2564b7af9a7"
+    },
+    "fixed/case-3-changed.log.gz": {
+      "path": "docs/architecture/evidence/signed-array-elements/producer-cache/fixed/case-3-changed.log.gz",
+      "raw_sha256": "8f7a6d189eb6e47d12c456c79751c56758da0d409f8c2bf11984173f825691fe",
+      "gzip_sha256": "b0eab5a4cc9487cfc1130aebf6fd971ba318711c3ce39fb115036c65a6586314"
+    },
+    "fixed/case-3-missing.log.gz": {
+      "path": "docs/architecture/evidence/signed-array-elements/producer-cache/fixed/case-3-missing.log.gz",
+      "raw_sha256": "a3fed20e45e95ff31c33563c6bb0e4cf2df2c0adf2afa75726724b7ea0707ed4",
+      "gzip_sha256": "aa9a775fbe3d5e12ab15f078f35fc02a481c09205c3a6bfe82ff1f48fa6b92c3"
+    },
+    "fixed/case-3-restored.log.gz": {
+      "path": "docs/architecture/evidence/signed-array-elements/producer-cache/fixed/case-3-restored.log.gz",
+      "raw_sha256": "7c98e9d5541fcdb9e9679b201b30bc27622fc3e60f3f4213cd76e16b8c946460",
+      "gzip_sha256": "32740d5c7931d079cc598ef81876c728ea9f598d1e2bc0d007e7e2564b7af9a7"
+    },
+    "fixed/case-4-changed.log.gz": {
+      "path": "docs/architecture/evidence/signed-array-elements/producer-cache/fixed/case-4-changed.log.gz",
+      "raw_sha256": "7c98e9d5541fcdb9e9679b201b30bc27622fc3e60f3f4213cd76e16b8c946460",
+      "gzip_sha256": "32740d5c7931d079cc598ef81876c728ea9f598d1e2bc0d007e7e2564b7af9a7"
+    },
+    "fixed/case-4-missing.log.gz": {
+      "path": "docs/architecture/evidence/signed-array-elements/producer-cache/fixed/case-4-missing.log.gz",
+      "raw_sha256": "7c98e9d5541fcdb9e9679b201b30bc27622fc3e60f3f4213cd76e16b8c946460",
+      "gzip_sha256": "32740d5c7931d079cc598ef81876c728ea9f598d1e2bc0d007e7e2564b7af9a7"
+    },
+    "fixed/case-4-restored.log.gz": {
+      "path": "docs/architecture/evidence/signed-array-elements/producer-cache/fixed/case-4-restored.log.gz",
+      "raw_sha256": "7c98e9d5541fcdb9e9679b201b30bc27622fc3e60f3f4213cd76e16b8c946460",
+      "gzip_sha256": "32740d5c7931d079cc598ef81876c728ea9f598d1e2bc0d007e7e2564b7af9a7"
+    },
+    "fixed/fingerprint.rs.gz": {
+      "path": "docs/architecture/evidence/signed-array-elements/producer-cache/fixed/fingerprint.rs.gz",
+      "raw_sha256": "dbc7d933ef782e6a7e763d09957210bf4a629602694046f4d176b875b9dc131a",
+      "gzip_sha256": "d46f7b99be91f9e3808ab338fa07fc43d509d5fe8bec83b194fbaddab54db4f1"
+    },
+    "fixed/initial.log.gz": {
+      "path": "docs/architecture/evidence/signed-array-elements/producer-cache/fixed/initial.log.gz",
+      "raw_sha256": "7c98e9d5541fcdb9e9679b201b30bc27622fc3e60f3f4213cd76e16b8c946460",
+      "gzip_sha256": "32740d5c7931d079cc598ef81876c728ea9f598d1e2bc0d007e7e2564b7af9a7"
+    },
+    "fixed/repeated.log.gz": {
+      "path": "docs/architecture/evidence/signed-array-elements/producer-cache/fixed/repeated.log.gz",
+      "raw_sha256": "7c98e9d5541fcdb9e9679b201b30bc27622fc3e60f3f4213cd76e16b8c946460",
+      "gzip_sha256": "32740d5c7931d079cc598ef81876c728ea9f598d1e2bc0d007e7e2564b7af9a7"
+    },
+    "fixed/result.json.gz": {
+      "path": "docs/architecture/evidence/signed-array-elements/producer-cache/fixed/result.json.gz",
+      "raw_sha256": "f1f52c8d0c2bf2cc7b29b76116139b487dc26e71f2e65fcad15952edcb321950",
+      "gzip_sha256": "5d1f67b2c670970325c6bd8fb5e4d43d269f7015589ffc1cb768181e4d4749af"
+    }
+  },
+  "limits": [
+    "Only the three array producer helpers are added; no exhaustive precompiler-input audit is claimed.",
+    "Unchanged schema v53 is intentional: this source fix reuses the existing SextI ABI.",
+    "No Cargo target writes, automatic bake, native VBC lowering, ordinary CLI, AOT or registry acceptance."
+  ]
+}

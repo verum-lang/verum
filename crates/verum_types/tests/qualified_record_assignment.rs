@@ -52,6 +52,7 @@ fn metadata(reverse: bool) -> CoreMetadata {
                 fields: [("body", body), (own_field, "Int")]
                     .into_iter()
                     .map(|(name, ty)| FieldDescriptor {
+                    declared_visibility: None,
                         name: name.into(),
                         ty: ty.into(),
                         is_public: true,

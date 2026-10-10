@@ -1,0 +1,264 @@
+{
+  "task": "T1714",
+  "source_endpoint": "71f8e7f9fad8340f135798ffc58dd99a1e3146fd",
+  "base": "f242a0beff93e846246c0c2dbf3fe9dbd4a39f88",
+  "production_checkpoint": "d16326946e67edad0b26ae379e3de88c052ad3cb",
+  "last_test_source": "66a8b9f3eba35a58432502161bfedd8cc2355439",
+  "last_followup_is_whitespace_only": true,
+  "schema": "VBC2.25 / v54-2026-10-10-declared-field-visibility",
+  "metadata_api": "FieldDescriptor.declared_visibility: Maybe<verum_ast::Visibility>; None is Unknown",
+  "gates": [
+    {
+      "label": "vbc-baseline",
+      "source": "09dd94b31b632b31bb7547490cb6b5dbd0b4b220",
+      "receipt": "vbc-baseline/result.json",
+      "returncode": 101,
+      "test_results": [
+        "test result: FAILED. 1 passed; 6 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s"
+      ],
+      "scope": "T1714 parsed field declaration visibility through source and independently decoded wire. Selection is the exact recorded command. No ordinary CLI/bake/AOT or complete registry acceptance."
+    },
+    {
+      "label": "compiler-baseline",
+      "source": "09dd94b31b632b31bb7547490cb6b5dbd0b4b220",
+      "receipt": "compiler-baseline/result.json",
+      "returncode": 101,
+      "test_results": [
+        "test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 1260 filtered out; finished in 0.03s"
+      ],
+      "scope": "T1714 parsed source through actual bootstrap producer, archive wire and bincode CoreMetadata. Selection is the exact recorded command. No ordinary CLI/bake/AOT or complete registry acceptance."
+    },
+    {
+      "label": "compiler-causal-baseline",
+      "source": "513e1212ab5a4b5a6246504e46aaf52d250b0147",
+      "receipt": "compiler-causal-baseline/result.json",
+      "returncode": 101,
+      "test_results": [
+        "test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 1260 filtered out; finished in 0.03s"
+      ],
+      "scope": "T1714 parsed source through actual bootstrap producer, archive wire and bincode CoreMetadata. Selection is the exact recorded command. No ordinary CLI/bake/AOT or complete registry acceptance."
+    },
+    {
+      "label": "scope-first",
+      "source": "d16326946e67edad0b26ae379e3de88c052ad3cb",
+      "receipt": "scope-first/result.json",
+      "returncode": 0,
+      "test_results": [
+        "test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+      ],
+      "scope": "T1714 parsed field declaration visibility through source and independently decoded wire. Selection is the exact recorded command. No ordinary CLI/bake/AOT or complete registry acceptance."
+    },
+    {
+      "label": "vbc-first",
+      "source": "d16326946e67edad0b26ae379e3de88c052ad3cb",
+      "receipt": "vbc-first/result.json",
+      "returncode": 101,
+      "test_results": [
+        "test result: FAILED. 1 passed; 8 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s"
+      ],
+      "scope": "T1714 parsed field declaration visibility through source and independently decoded wire. Selection is the exact recorded command. No ordinary CLI/bake/AOT or complete registry acceptance."
+    },
+    {
+      "label": "vbc-fixed",
+      "source": "96d8e6dbf5d30e8f4cb8ad36f0868bdf83fecbc9",
+      "receipt": "vbc-fixed/result.json",
+      "returncode": 0,
+      "test_results": [
+        "test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s"
+      ],
+      "scope": "T1714 parsed field declaration visibility through source and independently decoded wire. Selection is the exact recorded command. No ordinary CLI/bake/AOT or complete registry acceptance."
+    },
+    {
+      "label": "codec-fixed",
+      "source": "96d8e6dbf5d30e8f4cb8ad36f0868bdf83fecbc9",
+      "receipt": "codec-fixed/result.json",
+      "returncode": 0,
+      "test_results": [
+        "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 2106 filtered out; finished in 0.00s"
+      ],
+      "scope": "T1714 parsed field declaration visibility through source and independently decoded wire. Selection is the exact recorded command. No ordinary CLI/bake/AOT or complete registry acceptance."
+    },
+    {
+      "label": "compiler-fixed",
+      "source": "96d8e6dbf5d30e8f4cb8ad36f0868bdf83fecbc9",
+      "receipt": "compiler-fixed/result.json",
+      "returncode": 0,
+      "test_results": [
+        "test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 1260 filtered out; finished in 0.10s"
+      ],
+      "scope": "T1714 parsed source through actual bootstrap producer, archive wire and bincode CoreMetadata. Selection is the exact recorded command. No ordinary CLI/bake/AOT or complete registry acceptance."
+    },
+    {
+      "label": "import-link",
+      "source": "66a8b9f3eba35a58432502161bfedd8cc2355439",
+      "receipt": "import-link/result.json",
+      "returncode": 0,
+      "test_results": [
+        "test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s"
+      ],
+      "scope": "T1714 parsed field declaration visibility through source and independently decoded wire. Selection is the exact recorded command. No ordinary CLI/bake/AOT or complete registry acceptance."
+    },
+    {
+      "label": "adjacent",
+      "source": "66a8b9f3eba35a58432502161bfedd8cc2355439",
+      "receipt": "adjacent/result.json",
+      "returncode": 0,
+      "test_results": [
+        "test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s",
+        "test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s",
+        "test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s"
+      ],
+      "scope": "T1714 parsed field declaration visibility through source and independently decoded wire. Selection is the exact recorded command. No ordinary CLI/bake/AOT or complete registry acceptance."
+    },
+    {
+      "label": "producer-cache-baseline",
+      "source": "513e1212ab5a4b5a6246504e46aaf52d250b0147",
+      "receipt": "producer-cache-baseline/result.json",
+      "returncode": null,
+      "test_results": null,
+      "scope": "Exact committed production fingerprint function compiled with the existing cached blake3 library. Isolated fixture only; no Cargo, build target writes, automatic stdlib bake, native VBC lowering or ordinary CLI/AOT acceptance."
+    },
+    {
+      "label": "producer-cache-fixed",
+      "source": "66a8b9f3eba35a58432502161bfedd8cc2355439",
+      "receipt": "producer-cache-fixed/result.json",
+      "returncode": null,
+      "test_results": null,
+      "scope": "Exact committed production fingerprint function compiled with the existing cached blake3 library. Isolated fixture only; no Cargo, build target writes, automatic stdlib bake, native VBC lowering or ordinary CLI/AOT acceptance."
+    }
+  ],
+  "raw_sha256": {
+    "vbc-baseline/result.json": "3307a59fd81b0f53a56ff49f963df93e7c02e52c8181a8f09a6972b3307a9c99",
+    "vbc-baseline/started.json": "ad2a257d5d83b48a0387748bcbb58818cc53858ca25402bfba8c04a9faa232b8",
+    "vbc-baseline/process.json": "43667ba956736f731101acc320567a2a17a38a760713caaa8247f07ffaf9b137",
+    "vbc-baseline/cargo.jsonl": "766f692ca240c4d0e3fb4d15b786db01063ccfeb4662589020d3787ad199d897",
+    "vbc-baseline/stderr.log": "eef054f201737faecb34c96f580ab76ad0ae395697307cf139e9e7027f5c975a",
+    "vbc-baseline/runner.py": "3d5c71167852095ac07fc97dc2a2d62f020949cdc2bcc0f20366ddd5d3d0a6dc",
+    "compiler-baseline/result.json": "b2a04e09168d524bb1b8b899586cbc518e5bdd0141d9b060b2db8e62dde49c36",
+    "compiler-baseline/started.json": "1de0c160f9ac6bf9abcc73aae323aa8cba47fa11f37d64af181d83bd16e9389a",
+    "compiler-baseline/process.json": "45c7ceca7336f7b1b45ab34470ef4ad98884b7c61affa7bd6d8b1ac1d87176b0",
+    "compiler-baseline/cargo.jsonl": "37a1b08006933c34dace4fc85d14e0c53cfb1887efbac9965c65143dd9baf404",
+    "compiler-baseline/stderr.log": "78430555adf5bc6be4f1db8cd7440b11b72fbc1d8d0d137e6b80f075a184d70f",
+    "compiler-baseline/runner.py": "5336d9684811697eaa98f629e1e2ac819eb71d02fc39f3809c49205c56220d19",
+    "compiler-causal-baseline/result.json": "5cec141fc51507cf39591696f343454bd7dc9b71c29d6fa4906d1655fa8a28e6",
+    "compiler-causal-baseline/started.json": "a80624c4b3d9e48ff38c2c50a96e71902d96e515103bfa790769ac76d2487e0b",
+    "compiler-causal-baseline/process.json": "e199bd5b80570922d40d305803ca9bba4ba1169c80a607ad35f627007b761ff1",
+    "compiler-causal-baseline/cargo.jsonl": "c132ab12fa16d4413dbad854b7d4786c587ea1ceb523635d0313e436cdf7876e",
+    "compiler-causal-baseline/stderr.log": "5984eff61fbe7fb8a8dc00afe2725bd7c5d61b6211ac05cc5f4f2f8fdb960912",
+    "compiler-causal-baseline/runner.py": "5336d9684811697eaa98f629e1e2ac819eb71d02fc39f3809c49205c56220d19",
+    "scope-first/result.json": "76696a966444ab6b8fdd2e389be57b1a12d60eede0880db30100f711c929c808",
+    "scope-first/started.json": "77633ddd282091a2c8b94bc2a32fc604d7766083de4a09fc2331354b886589b0",
+    "scope-first/process.json": "bdf92a51a17381b53ca2a445baf35c8f0949cf76d36d971ac637b29466be12e7",
+    "scope-first/cargo.jsonl": "2da63ced799cf70426609d687e084842c8dee09b2c9b1f8fac840df882b9a806",
+    "scope-first/stderr.log": "48ed913fd2d82dfb2c94fe14edfd0e7f9622534ca898fbe445a1ece9b1897a5a",
+    "scope-first/runner.py": "63f79f2ffc39cf9c8e8474e891fd854634b11f608ce110f773f77fe343f0815d",
+    "vbc-first/result.json": "1f087645a6172d1c9673cde1f30c57611ac1328be70e09eb6ceba94ca6c56118",
+    "vbc-first/started.json": "f0a8031c5bbbd9149602af849dbbd57b5ccbadadfc930386f2a651e55efa6084",
+    "vbc-first/process.json": "4ab3d2b9b9a500e2c24b14f452ca414368a305b3450b30edf360581cf36771ea",
+    "vbc-first/cargo.jsonl": "e8617f555affc77054b282efe5567d36e4cbe417c080e5b4fddcf6eb9c68dc84",
+    "vbc-first/stderr.log": "239fa8cabddb3a460a8ba1a0cff9c34ea26aecdb66642de1a673a406d8f54646",
+    "vbc-first/runner.py": "63f79f2ffc39cf9c8e8474e891fd854634b11f608ce110f773f77fe343f0815d",
+    "vbc-fixed/result.json": "614f926e4d0c58d9f38647b9bd327c0d9c342beee362e1a746cbf78c633e2f4b",
+    "vbc-fixed/started.json": "3b99eb79eac849b514cdca72c11606bab1e32bcd9081ba447bd97bb5804ede6a",
+    "vbc-fixed/process.json": "39b305d1712ae9083440b2b339d59a3e92a57565c7aa3b74fc8a86edc9bb5f7d",
+    "vbc-fixed/cargo.jsonl": "e2e3797ce0122c6230c5afee8c3f10482a35c8fc51983f1aab0f741c4c516338",
+    "vbc-fixed/stderr.log": "9dc38e1abc9e0ed324df0452372ec485d23a5744af068ce96b49827f8b39e4b8",
+    "vbc-fixed/runner.py": "63f79f2ffc39cf9c8e8474e891fd854634b11f608ce110f773f77fe343f0815d",
+    "codec-fixed/result.json": "2bf638905825afc02e0527d04721b355a77a598c0d0289ba4389aeb0db84828f",
+    "codec-fixed/started.json": "76e1125555635fe827fe763306c8ecd3290b5920b21ad40b20cfb5c32b79506c",
+    "codec-fixed/process.json": "86157562d9d0d7eaacb8a89497dcf9291b319d543cf190b3af66e8b0f6153313",
+    "codec-fixed/cargo.jsonl": "b235957470fb2d529b0d7da077183158c83864d064f74ef11566083e740892fa",
+    "codec-fixed/stderr.log": "fe25951a757df49b432dfd908bc54acb1737cbb59706d30bd3b1f62627ebd401",
+    "codec-fixed/runner.py": "63f79f2ffc39cf9c8e8474e891fd854634b11f608ce110f773f77fe343f0815d",
+    "compiler-fixed/result.json": "696028eb0b435686c667f9e6cfb71522eadd7d9ea0356331bb2b06a3e5aa497a",
+    "compiler-fixed/started.json": "28a760a0d7c16f06e87ab5db08a12717dbd2fbcac5773fb60932b943fccde886",
+    "compiler-fixed/process.json": "d05f94d9a1d4e421b7be361aad5f3820dddd705fdeb1e7eabdf0c0c7e3991b35",
+    "compiler-fixed/cargo.jsonl": "e570b865fdcb608a55fca0d13c5b86c0d944d3c5f39f73b264d5b3c33883859f",
+    "compiler-fixed/stderr.log": "8ee01af52abfe5e54c25bf7fc456d0ef764173d5c13700d4e179ce63b1e0f0f5",
+    "compiler-fixed/runner.py": "5336d9684811697eaa98f629e1e2ac819eb71d02fc39f3809c49205c56220d19",
+    "import-link/result.json": "a27e4dacad758ce6c020d100c09238bcb2639b7381776ed77f6e44e56332bd91",
+    "import-link/started.json": "6b201c124db44f47e2869b98e8513eabe92b197c48862d6f162fa8b4330ac507",
+    "import-link/process.json": "f7e0a61c5df321cf81575d59244b30832725bfba95c42879ec4ccdd76a440669",
+    "import-link/cargo.jsonl": "eb90244d70fff5e29c82159e516b2c95364065ec33e91036233f40b5f2bc4322",
+    "import-link/stderr.log": "34cdaa52cfa143256557471538ff3b4219a1111050640a2f040204dba97393f5",
+    "import-link/runner.py": "63f79f2ffc39cf9c8e8474e891fd854634b11f608ce110f773f77fe343f0815d",
+    "adjacent/result.json": "01b1a242401246334976c49057aa42608b119187222b2b30a38f8a6f4c1653ae",
+    "adjacent/started.json": "2fafe255c09b4c521a2dda20702b09f098dae94eef4e7b5344c38e27503e11e8",
+    "adjacent/process.json": "9f26a8b4dde6733c1ee63959ebc8f77bbd73bf7942c013bc0a62d5f66c80b004",
+    "adjacent/cargo.jsonl": "08b67b18b40aa65faf7de97cdd5912f4e8451e5f96bb6545c8c77add22eceeae",
+    "adjacent/stderr.log": "f2f8b441f76a57df4d4cecf9535f1152a93aaa9850bf2030418e9ff8a3081c55",
+    "adjacent/runner.py": "05d20e280d521b396d9639889582b37af0849a3fb67b5fe7c9cc9e4bb075d5c1",
+    "producer-cache-baseline/result.json": "8f1417ce7dbbc2f48778700931de7c756848b4a20a34496f77105fc8cc310604",
+    "producer-cache-baseline/build.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "producer-cache-baseline/fingerprint.rs": "dbc7d933ef782e6a7e763d09957210bf4a629602694046f4d176b875b9dc131a",
+    "producer-cache-baseline/case-0-missing.log": "59a3a9fe1ca225c1b908ac269cc9baafc9c328fa5d4021dc4f595f55831f2e3b",
+    "producer-cache-baseline/case-0-changed.log": "59a3a9fe1ca225c1b908ac269cc9baafc9c328fa5d4021dc4f595f55831f2e3b",
+    "producer-cache-baseline/case-3-changed.log": "33c67b8058cacac9163c5dbfdf2feaf494d35c1eef97dfc325148a97b995acf7",
+    "producer-cache-baseline/case-1-restored.log": "59a3a9fe1ca225c1b908ac269cc9baafc9c328fa5d4021dc4f595f55831f2e3b",
+    "producer-cache-baseline/case-3-missing.log": "d3ff31182d559c6ff13efc1110652ccaf96e80415e3caf5488dc7490d2f93564",
+    "producer-cache-baseline/case-0-restored.log": "59a3a9fe1ca225c1b908ac269cc9baafc9c328fa5d4021dc4f595f55831f2e3b",
+    "producer-cache-baseline/case-1-changed.log": "59a3a9fe1ca225c1b908ac269cc9baafc9c328fa5d4021dc4f595f55831f2e3b",
+    "producer-cache-baseline/case-4-missing.log": "59a3a9fe1ca225c1b908ac269cc9baafc9c328fa5d4021dc4f595f55831f2e3b",
+    "producer-cache-baseline/case-2-restored.log": "59a3a9fe1ca225c1b908ac269cc9baafc9c328fa5d4021dc4f595f55831f2e3b",
+    "producer-cache-baseline/repeated.log": "59a3a9fe1ca225c1b908ac269cc9baafc9c328fa5d4021dc4f595f55831f2e3b",
+    "producer-cache-baseline/case-3-restored.log": "59a3a9fe1ca225c1b908ac269cc9baafc9c328fa5d4021dc4f595f55831f2e3b",
+    "producer-cache-baseline/case-1-missing.log": "59a3a9fe1ca225c1b908ac269cc9baafc9c328fa5d4021dc4f595f55831f2e3b",
+    "producer-cache-baseline/case-4-restored.log": "59a3a9fe1ca225c1b908ac269cc9baafc9c328fa5d4021dc4f595f55831f2e3b",
+    "producer-cache-baseline/case-4-changed.log": "59a3a9fe1ca225c1b908ac269cc9baafc9c328fa5d4021dc4f595f55831f2e3b",
+    "producer-cache-baseline/initial.log": "59a3a9fe1ca225c1b908ac269cc9baafc9c328fa5d4021dc4f595f55831f2e3b",
+    "producer-cache-baseline/case-2-missing.log": "59a3a9fe1ca225c1b908ac269cc9baafc9c328fa5d4021dc4f595f55831f2e3b",
+    "producer-cache-baseline/case-2-changed.log": "59a3a9fe1ca225c1b908ac269cc9baafc9c328fa5d4021dc4f595f55831f2e3b",
+    "producer-cache-baseline/runner.py": "2dcb6147491816ad31d5bbffb8a19360fd7388f61220cbf973ed31e57fcfb057",
+    "producer-cache-fixed/result.json": "e27d11e992822d06b8745876d4474b65a704447a28261ceb350074f4ac0b5155",
+    "producer-cache-fixed/build.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "producer-cache-fixed/fingerprint.rs": "08c6d215f4f11ff7fb4049245c64f74ba5421d6bd0260f291aec3c10f9a45e9e",
+    "producer-cache-fixed/case-0-missing.log": "72b4013837f672dd1206a335a2e62ed58ed1c189799986a42cd0dfa5fd5393c4",
+    "producer-cache-fixed/case-0-changed.log": "c203a5ef3c371982b7bc3971df1d5128c54f3e710392ce3cbee56361c234c2d2",
+    "producer-cache-fixed/case-3-changed.log": "66471d2e1c95cb055e4db37d4c4c154b5855e16b291f71226c54c22c73af3d9b",
+    "producer-cache-fixed/case-1-restored.log": "084df5dd6a3c0ebe2d43578e7577fb8201dd8df5ef14ed85fe9310bca2e8838c",
+    "producer-cache-fixed/case-3-missing.log": "c5fb4a10381afa8f5290303c196907d3b6b4cfb4972615a8ce6ea27d445680b1",
+    "producer-cache-fixed/case-0-restored.log": "084df5dd6a3c0ebe2d43578e7577fb8201dd8df5ef14ed85fe9310bca2e8838c",
+    "producer-cache-fixed/case-1-changed.log": "abe21c9de56991a02291dbd6cd684087cd04b27e5acb3d79fa604a8cb793def1",
+    "producer-cache-fixed/case-4-missing.log": "084df5dd6a3c0ebe2d43578e7577fb8201dd8df5ef14ed85fe9310bca2e8838c",
+    "producer-cache-fixed/case-2-restored.log": "084df5dd6a3c0ebe2d43578e7577fb8201dd8df5ef14ed85fe9310bca2e8838c",
+    "producer-cache-fixed/repeated.log": "084df5dd6a3c0ebe2d43578e7577fb8201dd8df5ef14ed85fe9310bca2e8838c",
+    "producer-cache-fixed/case-3-restored.log": "084df5dd6a3c0ebe2d43578e7577fb8201dd8df5ef14ed85fe9310bca2e8838c",
+    "producer-cache-fixed/case-1-missing.log": "e0ad66ce8d0949c6c87eda390e47fbc89ed03169d02e59e8d9a83e602281d22f",
+    "producer-cache-fixed/case-4-restored.log": "084df5dd6a3c0ebe2d43578e7577fb8201dd8df5ef14ed85fe9310bca2e8838c",
+    "producer-cache-fixed/case-4-changed.log": "084df5dd6a3c0ebe2d43578e7577fb8201dd8df5ef14ed85fe9310bca2e8838c",
+    "producer-cache-fixed/initial.log": "084df5dd6a3c0ebe2d43578e7577fb8201dd8df5ef14ed85fe9310bca2e8838c",
+    "producer-cache-fixed/case-2-missing.log": "3f0e58aa39ed58e087c46218549e4f1be0a460004e43344e5bad33c805204b56",
+    "producer-cache-fixed/case-2-changed.log": "e968e6eb85620533af08b11db35ea9d4b25ad23ddb45278100dda15884f57ad7",
+    "producer-cache-fixed/runner.py": "2dcb6147491816ad31d5bbffb8a19360fd7388f61220cbf973ed31e57fcfb057",
+    "valid-source.vr": "da608b9e3e5a1bd6c50d98b3705c7aeb524363e4990959b538f959d081749ad6",
+    "relative-parser-baseline.vr": "38b57b43f9dc6bece524e70645957e479d139b0a55b037ad601e44156a072cd1",
+    "target-release-result.json": "fb8db401499e16b688266d01ccb2bb76f3938ae43ec0b9a2d32addba6235c4b6",
+    "native-initial-idle-selection.json": "1dc67f4706435a5739817cc9889521a5e14175832b43567b7954a9a62b0576fe",
+    "changes.patch": "a42f4328b4a8e4b76b761b2ca65bcd6e3aea9a8369f652c5477104efec57aa25",
+    "source-gates/result.json": "a73ae39778a89053d7edb874841e251fdc9851b329318645b802d4bed1a3406c",
+    "source-gates/gate-3.log": "2dc51dc3c7fd111f5613cda31c3808b973f421c47e491dea18761b0349176179",
+    "source-gates/gate-2.log": "26b7352043bafeb3fcd29bbf9cc9ed6d7794f4b2e572db9a0bf832348cbccb9c",
+    "source-gates/gate-0.log": "54dc9366cf6d804bdf5ae1ffa172dab10fc68a63170232134cbe6981ee4634fb",
+    "source-gates/gate-1.log": "ff48d051141b4c0b9f59cf244a1e1a69d76ed4e8a2eb6397f0cf942dd8d291cc",
+    "source-gates/authored-result.json": "d8aa17d6d120e3eaa41d72f75f6539cad82b459b478349b355e3fd0abaedd729",
+    "source-gates/authored-0.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "source-gates/authored-1.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "source_at_commit_hashes_verified": 6482,
+  "limits": [
+    "No fresh stdlib bake, ordinary CLI, complete registry or AOT acceptance.",
+    "Checker field enforcement belongs to T1713.",
+    "public(in .scope) parser discrepancy is retained as separate T1716; AST normalization equivalence passes.",
+    "First archive baseline failed the owner oracle; corrected causal baseline separately demonstrates all eight nonpublic fields promoted.",
+    "VBC2.24 field decoding retains Unknown; old bincode sidecars require the v54 rebuild, not serde-default recovery.",
+    "Executables remain APFS-cloned at recorded scratch paths; no large executable binaries are committed."
+  ],
+  "source_gates": {
+    "receipt": "source-gates/result.json",
+    "authored_whitespace": "source-gates/authored-result.json",
+    "internal_reference_and_citation": "passed",
+    "dead_module_calls": "passed",
+    "raw_whitespace_exception": "Only immutable Cargo trailing blank lines and patch context lines; no evidence bytes normalized."
+  }
+}
