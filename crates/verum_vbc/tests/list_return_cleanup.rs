@@ -277,8 +277,9 @@ fn probe() -> List<UInt16> {
             .position(|instruction| matches!(instruction, Instruction::Call { .. }))
             .expect("actual operand consumer");
         assert!(
-            !instructions[..call]
+            !instructions
                 .iter()
+                .take(call)
                 .any(|instruction| matches!(instruction, Instruction::NewList { .. })),
             "{route}: initializer or argument acquired a return conversion"
         );
