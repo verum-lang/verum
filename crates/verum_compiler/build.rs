@@ -1818,7 +1818,7 @@ fn symbol_count(files: &[(String, Vec<u8>)]) -> usize {
 /// sources and core files. A change to any of these inputs invalidates
 /// the cached bake.  Format: free-form ASCII;
 /// readable strings make `git log` of this constant tell the story.
-const PRECOMPILE_SCHEMA_VERSION: &str =
+pub(crate) const PRECOMPILE_SCHEMA_VERSION: &str =
     // v54: VBC2.25 and metadata carry complete declared field visibility.
     // Missing legacy policy is Unknown; bincode sidecars must be rebuilt.
     // v53: VBC2.24 carries source body presence; a legacy RetV stub cannot

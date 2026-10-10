@@ -1,5 +1,5 @@
 //! Automatic archive identity uses the actual build-script hash implementation.
-//! These controls do not invoke Cargo or bake a standard-library archive.
+//! Policy controls include a dependency-free Cargo fixture; none bake an archive.
 
 #[allow(dead_code)]
 #[path = "../build.rs"]
@@ -242,6 +242,11 @@ fn no_auto_still_reports_parser_dependencies_without_refreshing() {
                 .any(|line| line.as_str() == dependency.as_str()),
             "{flag}={value}: {stdout}"
         );
+        for policy in ["VERUM_NO_AUTO_PRECOMPILE", "DOCS_RS"] {
+            let dependency = format!("cargo:rerun-if-env-changed={policy}");
+            assert!(stdout.lines().iter().any(|line| line.as_str() == dependency),
+                "{flag}={value}: {stdout}");
+        }
         let checksum = format!(
             "cargo:rerun-if-changed={}",
             target
@@ -267,5 +272,219 @@ fn no_auto_still_reports_parser_dependencies_without_refreshing() {
                 .len(),
             0
         );
+    }
+}
+
+/// Cargo must observe flag-only changes. The archive bytes below are deliberate
+/// sentinels: this verifies successful cache-hit/disabled policy selection, not
+/// archive validity or a successful bake. The real build script runs in a child
+/// of a dependency-free Cargo fixture; its empty PATH forbids a nested baker.
+#[test]
+fn cargo_rechecks_auto_precompile_policy_on_environment_changes() {
+    const CHILD: &str = "VERUM_CACHE_POLICY_CHILD";
+    if std::env::var_os(CHILD).is_some() {
+        build_script::main();
+        return;
+    }
+    let root = tempfile::tempdir().unwrap();
+    let manifest = root.path().join("crates/verum_compiler/Cargo.toml");
+    let target = root.path().join("target");
+    write(root.path(), "core/mod.vr", CORE[0].1);
+    write(root.path(), PARSER_DECLARATIONS, PARSER_SOURCE);
+    // An absent rerun-if-changed input makes every Cargo invocation dirty and
+    // would hide the missing environment dependency. Materialize the complete
+    // reported roster before computing the fixture's stable cache key.
+    for path in key(root.path(), build_script::PRECOMPILE_SCHEMA_VERSION, CORE).1 {
+        if !path.exists() {
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, b"").unwrap();
+        }
+    }
+    let expected_key = key(root.path(), build_script::PRECOMPILE_SCHEMA_VERSION, CORE).0;
+    let cache = target.join("precompiled-stdlib");
+    fs::create_dir_all(&cache).unwrap();
+    for artifact in [
+        "runtime.vbca",
+        "runtime.core_metadata",
+        "runtime.symbol_graph",
+    ] {
+        fs::write(
+            cache.join(artifact),
+            b"policy-control sentinel; not an archive",
+        )
+        .unwrap();
+    }
+    fs::write(
+        cache.join("runtime.vbca.checksum"),
+        expected_key.to_hex().as_str(),
+    )
+    .unwrap();
+    fs::write(
+        cache.join("runtime.vbca.schema"),
+        build_script::PRECOMPILE_SCHEMA_VERSION,
+    )
+    .unwrap();
+    write(root.path(), "crates/verum_compiler/Cargo.toml", b"[package]\nname = \"stdlib-policy-probe\"\nversion = \"0.0.0\"\nedition = \"2024\"\n[workspace]\n");
+    write(
+        root.path(),
+        "crates/verum_compiler/Cargo.lock",
+        b"version = 4\n\n[[package]]\nname = \"stdlib-policy-probe\"\nversion = \"0.0.0\"\n",
+    );
+    write(
+        root.path(),
+        "crates/verum_compiler/src/lib.rs",
+        b"pub const PROBE: bool = true;\n",
+    );
+    // Only the wrapper is synthetic. It delegates to the already compiled
+    // production entry point and forwards its exact Cargo dependency output.
+    let wrapper = format!(
+        r#"
+use std::io::Write;
+fn main() {{
+    let out = std::path::PathBuf::from(std::env::var_os("OUT_DIR").unwrap());
+    let output = std::process::Command::new({exe:?})
+        .args(["--exact", "cargo_rechecks_auto_precompile_policy_on_environment_changes", "--nocapture"])
+        .env("VERUM_CACHE_POLICY_CHILD", "1")
+        .env("PATH", {empty_path:?})
+        .output().expect("run actual build script");
+    let mut counter = std::fs::OpenOptions::new().create(true).append(true)
+        .open(out.join("policy-invocations.log")).unwrap();
+    counter.write_all(b"run\n").unwrap();
+    std::fs::write(out.join("policy-last.stdout"), &output.stdout).unwrap();
+    std::fs::write(out.join("policy-last.stderr"), &output.stderr).unwrap();
+    print!("{{}}", String::from_utf8_lossy(&output.stdout));
+    eprint!("{{}}", String::from_utf8_lossy(&output.stderr));
+    assert!(output.status.success(), "production build-script child failed");
+}}
+"#,
+        exe = std::env::current_exe().unwrap(),
+        empty_path = root.path().join("no-executables")
+    );
+    write(root.path(), "crates/verum_compiler/build.rs", wrapper);
+    let evidence = std::env::var_os("VERUM_CACHE_POLICY_EVIDENCE_DIR").map(PathBuf::from);
+    if let Some(directory) = &evidence {
+        fs::create_dir(directory).expect("policy evidence directory must be new");
+    }
+    let mut states: List<(Option<&str>, Option<&str>)> = List::from_iter([(None, None)]);
+    for flag in ["VERUM_NO_AUTO_PRECOMPILE", "DOCS_RS"] {
+        states.extend([
+            (Some(flag), Some("1")),
+            (Some(flag), Some("0")),
+            (None, None),
+        ]);
+    }
+    let mut expected_runs = 0usize;
+    let mut last_out = None;
+    for (step, (flag, value)) in states.into_iter().enumerate() {
+        // Repeat every state without changing source, output paths or flags.
+        // The first call must rerun; the second must reuse the same fingerprint.
+        expected_runs += 1;
+        for repeat in 0..2 {
+            let label = format!("{step:02}-{repeat}-{}", flag.unwrap_or("automatic"));
+            let stdout_path = root.path().join(format!("{label}.stdout"));
+            let stderr_path = root.path().join(format!("{label}.stderr"));
+            let mut command = Command::new(env!("CARGO"));
+            command
+                .args([
+                    "build",
+                    "--offline",
+                    "--locked",
+                    "--message-format=json",
+                    "-vv",
+                ])
+                .arg("--manifest-path")
+                .arg(&manifest)
+                .arg("--target-dir")
+                .arg(&target)
+                .current_dir(manifest.parent().unwrap())
+                .env_remove("VERUM_NO_AUTO_PRECOMPILE")
+                .env_remove("DOCS_RS")
+                .env_remove("VERUM_ALLOW_STALE_STDLIB")
+                .env("CARGO_LOG", "cargo::core::compiler::fingerprint=trace")
+                .stdout(Stdio::from(fs::File::create(&stdout_path).unwrap()))
+                .stderr(Stdio::from(fs::File::create(&stderr_path).unwrap()));
+            if let (Some(flag), Some(value)) = (flag, value) {
+                command.env(flag, value);
+            }
+            let mut child = OwnedChild(command.spawn().unwrap());
+            let deadline = Instant::now() + Duration::from_secs(45);
+            let status = loop {
+                if let Some(status) = child.0.try_wait().unwrap() {
+                    break status;
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "{label}: Cargo policy control exceeded 45 seconds"
+                );
+                std::thread::sleep(Duration::from_millis(10));
+            };
+            let stdout: Text = fs::read_to_string(&stdout_path).unwrap().into();
+            let stderr: Text = fs::read_to_string(&stderr_path).unwrap().into();
+            if let Some(directory) = &evidence {
+                fs::copy(&stdout_path, directory.join(format!("{label}.stdout"))).unwrap();
+                fs::copy(&stderr_path, directory.join(format!("{label}.stderr"))).unwrap();
+            }
+            assert!(status.success(), "{label}: {status}; {stdout}; {stderr}");
+            for line in stdout.lines() {
+                if let Ok(message) = serde_json::from_str::<serde_json::Value>(line.as_str())
+                    && message["reason"] == "build-script-executed"
+                {
+                    last_out = Some(PathBuf::from(
+                        message["out_dir"].as_str().expect("script output path"),
+                    ));
+                }
+            }
+            let output = last_out
+                .as_ref()
+                .expect("Cargo reported actual build-script execution");
+            let runs = fs::read_to_string(output.join("policy-invocations.log"))
+                .unwrap()
+                .lines()
+                .count();
+            assert_eq!(
+                runs, expected_runs,
+                "{label}: expected flag change to rerun once and identical state to stay fresh; {stderr}"
+            );
+            let policy: Text = fs::read_to_string(output.join("policy-last.stdout"))
+                .unwrap()
+                .into();
+            assert_eq!(
+                policy.contains("Stdlib precompile cache HIT"),
+                flag.is_none(),
+                "{label}: {policy}"
+            );
+            assert!(
+                !policy.contains("Refreshing stdlib precompile"),
+                "sentinel cache must prevent baking: {policy}"
+            );
+            assert_eq!(
+                expected_key,
+                key(root.path(), build_script::PRECOMPILE_SCHEMA_VERSION, CORE).0,
+                "the source/checksum inputs must stay unchanged across environment transitions"
+            );
+            assert_eq!(
+                fs::read_to_string(cache.join("runtime.vbca.checksum")).unwrap(),
+                expected_key.to_hex().as_str()
+            );
+            assert_eq!(
+                fs::read(cache.join("runtime.vbca")).unwrap(),
+                b"policy-control sentinel; not an archive"
+            );
+            assert!(
+                !target.join("precompile-bootstrap").exists(),
+                "no nested baker target may be created"
+            );
+            eprintln!(
+                "policy control {label}: runs={runs}, automatic={}",
+                flag.is_none()
+            );
+            if let Some(directory) = &evidence {
+                fs::write(
+                    directory.join(format!("{label}.build-script.stdout")),
+                    policy.as_bytes(),
+                )
+                .unwrap();
+            }
+        }
     }
 }
