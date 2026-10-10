@@ -19,6 +19,7 @@ use verum_vbc::{
 
 thread_local! {
     static ALLOCATIONS: RefCell<List<Heap<[u64]>>> = RefCell::new(List::new());
+    static DEALLOCATIONS: RefCell<List<(usize, u64)>> = RefCell::new(List::new());
 }
 extern "C" fn allocate(size: u64) -> *mut u64 {
     assert!(size <= 4096, "bounded signed-array fixture allocation");
@@ -28,6 +29,13 @@ extern "C" fn allocate(size: u64) -> *mut u64 {
         allocations.borrow_mut().push(bytes);
         pointer
     })
+}
+
+// Keep fixture memory alive until the JIT is gone. These fixed-capacity controls
+// do not accept any release as allocator-lifecycle coverage; observing
+// one makes the route fail without passing a host allocation to native free.
+extern "C" fn record_deallocation(pointer: *mut u8, size: u64) {
+    DEALLOCATIONS.with(|calls| calls.borrow_mut().push((pointer as usize, size)));
 }
 
 fn source(source: &str) -> VbcModule {
@@ -63,12 +71,14 @@ fn reachable_ir(module: &Module, root: &str) -> Text {
         }
     }
     text.push_str(
-        "declare ptr @verum_cbgr_allocate(i64)\ndeclare ptr @verum_checked_malloc(i64)\n",
+        "declare ptr @verum_cbgr_allocate(i64)\ndeclare ptr @verum_checked_malloc(i64)\ndeclare ptr @verum_os_alloc(i64)\ndeclare void @verum_dealloc(ptr, i64)\n",
     );
     let mut pending: List<Text> = [Text::from(root)].into_iter().collect();
     let mut seen: Set<Text> = [
         Text::from("verum_cbgr_allocate"),
         Text::from("verum_checked_malloc"),
+        Text::from("verum_os_alloc"),
+        Text::from("verum_dealloc"),
     ]
     .into_iter()
     .collect();
@@ -159,14 +169,33 @@ fn native_with_ir(
             let engine = executable
                 .create_jit_execution_engine(OptimizationLevel::None)
                 .expect("JIT");
-            for name in ["verum_cbgr_allocate", "verum_checked_malloc"] {
+            // The actual aligned CBGR allocator adds its header and alignment
+            // inside this bounded OS backing allocation. Its ABI is ptr(i64).
+            for name in [
+                "verum_cbgr_allocate",
+                "verum_checked_malloc",
+                "verum_os_alloc",
+            ] {
                 engine.add_global_mapping(
                     &executable.get_function(name).unwrap(),
                     allocate as *const () as usize,
                 );
             }
+            engine.add_global_mapping(
+                &executable.get_function("verum_dealloc").unwrap(),
+                record_deallocation as *const () as usize,
+            );
             check(&engine);
         }));
+        let deallocations = DEALLOCATIONS.with(|calls| std::mem::take(&mut *calls.borrow_mut()));
+        if !deallocations.is_empty() {
+            failures.push(
+                format!("{route}: fixture does not cover native deallocation: {deallocations:?}")
+                    .into(),
+            );
+        }
+        // The engine and its generated globals have been dropped on both the
+        // ordinary and panic paths before any owned backing memory is released.
         ALLOCATIONS.with(|allocations| allocations.borrow_mut().clear());
         if let Err(error) = result {
             let message = error
@@ -444,12 +473,19 @@ fn list_payload(text: &str, expected: &[i64]) {
             let length = header[verum_common::layout::LIST_LEN_OFFSET as usize / 8] as usize;
             assert_eq!(length, expected.len());
             let data = header[verum_common::layout::LIST_PTR_OFFSET as usize / 8] as *const u64;
+            let byte_length = length.checked_mul(8).expect("bounded List payload extent");
             let storage = allocations
                 .iter()
-                .find(|allocation| allocation.as_ptr() == data)
-                .expect("List data must be an owned allocation");
-            assert!(storage.len() >= length);
-            let actual: List<i64> = storage[..length].iter().map(|word| *word as i64).collect();
+                .find_map(|allocation| {
+                    let offset = (data as usize).checked_sub(allocation.as_ptr() as usize)?;
+                    let end = offset.checked_add(byte_length)?;
+                    if offset % 8 != 0 || end > allocation.len() * 8 {
+                        return None;
+                    }
+                    Some(&allocation[offset / 8..end / 8])
+                })
+                .expect("List data must be an aligned in-bounds range of owned backing");
+            let actual: List<i64> = storage.iter().map(|word| *word as i64).collect();
             assert_eq!(
                 actual.as_slice(),
                 expected,
@@ -550,7 +586,38 @@ fn native_existing_sext_uses_width_bytes_after_canonical_wide_registers() {
 }
 
 #[test]
-fn native_sext_refuses_truncated_trailing_and_unsupported_width_operands() {
+fn native_sext_strictly_refuses_truncated_trailing_and_unsupported_width_operands() {
+    const CHILD: &str = "VERUM_T1706_STRICT_SEXT_CHILD";
+    const COMPLETED: &str = "T1706 strict SextI controls completed: 16";
+    if std::env::var(CHILD).as_deref() != Ok("1") {
+        // Default module lowering may retain a stub after a function error.
+        // The existing strict contract must be tested in an isolated process,
+        // never by changing process-global environment in concurrent tests.
+        let output = std::process::Command::new(std::env::current_exe().expect("test executable"))
+            .args([
+                "--exact",
+                "native_sext_strictly_refuses_truncated_trailing_and_unsupported_width_operands",
+                "--nocapture",
+            ])
+            .env(CHILD, "1")
+            .env("VERUM_STRICT_CODEGEN", "1")
+            .output()
+            .expect("strict-codegen child");
+        let stdout = Text::from_utf8_lossy(&output.stdout);
+        let stderr = Text::from_utf8_lossy(&output.stderr);
+        assert!(
+            output.status.success(),
+            "strict-codegen child failed: {stdout}\n{stderr}"
+        );
+        assert!(
+            stdout.lines().any(|line| line == COMPLETED)
+                && stdout.contains("test result: ok. 1 passed; 0 failed; 0 ignored;"),
+            "strict-codegen child did not complete all selected cases: {stdout}\n{stderr}",
+        );
+        print!("{stdout}");
+        return;
+    }
+    assert_eq!(std::env::var("VERUM_STRICT_CODEGEN").as_deref(), Ok("1"));
     use verum_vbc::instruction::{ArithSubOpcode, Instruction, Reg};
     use verum_vbc::module::FunctionDescriptor;
     let mut prefix = List::new().into();
@@ -584,6 +651,7 @@ fn native_sext_refuses_truncated_trailing_and_unsupported_width_operands() {
             "SextI has unsupported integer widths",
         ));
     }
+    let mut completed = 0;
     for (label, operands, expected) in cases {
         let mut module = VbcModule::new("malformed_signed_normalization".into());
         let mut function = FunctionDescriptor::new(module.intern_string("probe"));
@@ -623,6 +691,9 @@ fn native_sext_refuses_truncated_trailing_and_unsupported_width_operands() {
                 error.contains(expected),
                 "{label} {route}: unrelated refusal {error}"
             );
+            completed += 1;
         }
     }
+    assert_eq!(completed, 16);
+    println!("{COMPLETED}");
 }
