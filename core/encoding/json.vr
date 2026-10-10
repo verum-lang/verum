@@ -73,12 +73,13 @@ public type JsonValue is
 // object's members.
 public type JsonMap is Map<Text, JsonValue>;
 
-// Error position and cause.
+// Plain diagnostic data. Callers can inspect and annotate position and cause;
+// constructing this record does not establish that a parser produced it.
 public type JsonError is {
-    kind: JsonErrorKind,
-    line: Int,       // 1-indexed
-    column: Int,     // 1-indexed, counting bytes (RFC 8259 input is UTF-8)
-    message: Text,
+    public kind: JsonErrorKind,
+    public line: Int,       // 1-indexed
+    public column: Int,     // 1-indexed, counting bytes (RFC 8259 input is UTF-8)
+    public message: Text,
 };
 
 public type JsonErrorKind is

@@ -25,14 +25,16 @@ mount core.net.weft.error.{WeftError, ExtractRejection};
 
 /// Server-side enriched HTTP request. Produced by the listener after
 /// parsing; augmented by the router with path parameters on a match.
+/// Fields are plain application data for adapters and middleware. The record
+/// itself certifies neither peer identity nor authenticated publication.
 public type WeftRequest is {
-    method: Method,
-    path: Text,
-    raw_query: Maybe<Text>,
-    headers: Headers,
-    body: List<Byte>,
-    path_params: Map<Text, Text>,
-    peer_addr: Maybe<SocketAddr>,
+    public method: Method,
+    public path: Text,
+    public raw_query: Maybe<Text>,
+    public headers: Headers,
+    public body: List<Byte>,
+    public path_params: Map<Text, Text>,
+    public peer_addr: Maybe<SocketAddr>,
 };
 
 implement WeftRequest {
