@@ -693,6 +693,7 @@ jobs:
 
       # T1536/T1579/T1596/T1627: archive mounts, source shadows, explicit
       # generic slots and checked-count file scope keep declaration authority.
+      # T1728 also pins parser cache dependencies and actual bootstrap aliases.
       # Reuses the compiler/stdlib build above; no native program is compiled.
       - name: Archive and checked count declaration authority
         timeout-minutes: 15
@@ -702,6 +703,8 @@ jobs:
           --test shadowed_type_metadata_owner
           --test structural_generic_archive
           --test checked_count_file_owners
+          --test stdlib_cache_identity
+          --test stdlib_cache_alias_archive
 
       # Reuses the release CLI; includes an actual interpreter positive control.
       - name: Project run tier selection

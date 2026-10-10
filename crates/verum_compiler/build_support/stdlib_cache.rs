@@ -35,6 +35,24 @@ pub(crate) fn compute_archive_key<'a>(
     // strategies, intrinsic dispatch, and lowering — anything that
     // affects what the stdlib precompiler emits.
     let codegen_paths: &[&str] = &[
+        // The bootstrap path consumes this parser's declaration, expression,
+        // type and normalization semantics before emitting any descriptor or
+        // body. Parser-only changes therefore invalidate the same archive.
+        // stdlib_cache_identity checks this roster against every src/**/*.rs.
+        "crates/verum_fast_parser/Cargo.toml",
+        "crates/verum_fast_parser/src/attr_validation.rs",
+        "crates/verum_fast_parser/src/decl.rs",
+        "crates/verum_fast_parser/src/error.rs",
+        "crates/verum_fast_parser/src/expr.rs",
+        "crates/verum_fast_parser/src/lib.rs",
+        "crates/verum_fast_parser/src/normalize.rs",
+        "crates/verum_fast_parser/src/parser.rs",
+        "crates/verum_fast_parser/src/pattern.rs",
+        "crates/verum_fast_parser/src/proof.rs",
+        "crates/verum_fast_parser/src/recovery.rs",
+        "crates/verum_fast_parser/src/safe_interpolation.rs",
+        "crates/verum_fast_parser/src/stmt.rs",
+        "crates/verum_fast_parser/src/ty.rs",
         "crates/verum_vbc/src/intrinsics/mod.rs",
         "crates/verum_vbc/src/intrinsics/registry.rs",
         // Opcode identities and synthesized wrapper bodies also shape baked calls.

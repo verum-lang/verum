@@ -307,8 +307,8 @@ pub(crate) fn main() {
     //
     //   1. Compute a content-addressed key. It is NOT blake3(core/**/*.vr)
     //      alone: the key also mixes in PRECOMPILE_SCHEMA_VERSION and a
-    //      curated list of compiler source files (VBC codegen, intrinsic
-    //      dispatch, well-known types) — see `compute_core_blake3`, which
+    //      curated list of compiler source files (parser, VBC codegen,
+    //      intrinsic dispatch, well-known types) — see `compute_core_blake3`, which
     //      documents why. A Rust-side codegen change therefore invalidates
     //      the cache on purpose; describing the key as core/-only made a
     //      reader predict a cache HIT for exactly that edit.
@@ -347,9 +347,9 @@ pub(crate) fn main() {
 
     // T3: blake3 checksum + auto-refresh.
     //
-    // Skip when CARGO_FEATURE_NO_AUTO_PRECOMPILE is set (release CI
-    // builds + downstream cargo install where auto-running another
-    // cargo build would deadlock on the package cache lock).
+    // Either environment variable disables automatic refresh by presence.
+    // Dependency reporting below still runs, including during the nested
+    // precompiler build, which sets VERUM_NO_AUTO_PRECOMPILE to stop recursion.
     let auto_precompile_disabled =
         std::env::var("VERUM_NO_AUTO_PRECOMPILE").is_ok()
             || std::env::var("DOCS_RS").is_ok();
