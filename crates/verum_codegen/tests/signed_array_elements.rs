@@ -610,7 +610,7 @@ fn native_sext_strictly_refuses_truncated_trailing_and_unsupported_width_operand
             "strict-codegen child failed: {stdout}\n{stderr}"
         );
         assert!(
-            stdout.lines().any(|line| line == COMPLETED)
+            stdout.lines().iter().any(|line| line == COMPLETED)
                 && stdout.contains("test result: ok. 1 passed; 0 failed; 0 ignored;"),
             "strict-codegen child did not complete all selected cases: {stdout}\n{stderr}",
         );
