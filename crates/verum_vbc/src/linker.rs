@@ -792,9 +792,9 @@ impl VbcLinker {
             variant.name = remap.map_string_lenient(variant.name);
             for vf in variant.fields.iter_mut() {
                 vf.name = remap.map_string_lenient(vf.name);
-            vf.declared_visibility = vf.declared_visibility.and_then(|policy| {
-                policy.remap_scope(|scope| remap.string.get(&scope.0).copied())
-            });
+                vf.declared_visibility = vf.declared_visibility.and_then(|policy| {
+                    policy.remap_scope(|scope| remap.string.get(&scope.0).copied())
+                });
                 vf.type_ref = self.remap_type_ref(&vf.type_ref, remap)?;
                 vf.declaration_type = vf.declaration_type.as_ref().map(|ty| self.remap_type_ref(ty, remap)).transpose()?;
             }

@@ -1477,7 +1477,7 @@ mod tests {
             for j in 0..5 {
                 let field = FieldDescriptor {
                     declaration_type: None,
-            declared_visibility: None,
+                    declared_visibility: None,
                     refinement_src: StringId::EMPTY,
                     refinement_binding: StringId::EMPTY,
                     type_name: StringId::EMPTY,
