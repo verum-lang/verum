@@ -97,10 +97,21 @@ fn reachable_ir(module: &Module, root: &str) -> Text {
         text.push_str(item);
         text.push('\n');
         for tail in item.split('@').skip(1) {
-            let name = tail
-                .split(|ch: char| !ch.is_ascii_alphanumeric() && !"_.$".contains(ch))
-                .next()
-                .unwrap();
+            // LLVM prints generated closure names in quotes. This fixture
+            // follows ASCII compiler-owned symbols; it does not decode arbitrary
+            // escaped user/foreign symbol names from an IR string.
+            let name = if let Some(quoted) = tail.strip_prefix('"') {
+                let (name, _) = quoted.split_once('"').expect("closed generated symbol");
+                assert!(
+                    name.chars()
+                        .all(|ch| ch.is_ascii_alphanumeric() || "_.$".contains(ch))
+                );
+                name
+            } else {
+                tail.split(|ch: char| !ch.is_ascii_alphanumeric() && !"_.$".contains(ch))
+                    .next()
+                    .unwrap()
+            };
             if module.get_function(name).is_some() || module.get_global(name).is_some() {
                 pending.push(Text::from(name));
             }
@@ -738,8 +749,29 @@ native_cleanup_case!(
     LIST_CLOSURE,
     &[-32768, -1, 1]
 );
-native_cleanup_case!(
-    native_return_cleanup_array_closure,
-    ARRAY_CLOSURE,
-    &[32768, 65535, 1]
-);
+#[test]
+fn native_indirect_array_result_refuses_unproved_storage() {
+    // T1710 does not establish a selected producer across CallClosure. The
+    // interpreter no-leak positive remains unchanged; native GetE must retain
+    // its existing refusal instead of guessing geometry from the return type.
+    let module = source(return_cleanup_fixtures::ARRAY_CLOSURE);
+    let wire = decoded_wire(&module);
+    for (route, module) in [("source", &module), ("wire", &wire)] {
+        Target::initialize_native(&InitializationConfig::default()).expect("native target");
+        let context = Context::create();
+        let mut lowering = VbcToLlvmLowering::new(
+            &context,
+            LoweringConfig::debug("indirect_array_refusal").with_debug_info(false),
+        );
+        let error = lowering
+            .lower_module(module)
+            .expect_err("unproved indirect array storage");
+        assert!(
+            matches!(error,
+            verum_codegen::llvm::LlvmLoweringError::UnprovenArrayStorage(ref detail)
+                if detail.contains("GetE") && detail.contains("no selected array storage")
+                    && detail.contains("probe")),
+            "{route}: unrelated refusal: {error:?}"
+        );
+    }
+}
