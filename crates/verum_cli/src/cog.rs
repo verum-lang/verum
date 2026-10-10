@@ -700,3 +700,7 @@ mod publication_validation;
 #[cfg(test)]
 #[path = "../tests/cog/publication_dependencies.rs"]
 mod publication_dependencies;
+
+#[cfg(test)]
+#[path = "../tests/cog/source_archive_finalization.rs"]
+mod source_archive_finalization;
