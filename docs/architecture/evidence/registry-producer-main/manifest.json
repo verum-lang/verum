@@ -1,0 +1,115 @@
+{
+  "producer_source": "86c7bcc1336ef07f3ee39348cc10f51016df113a",
+  "scope": "Producer-only integration on main; field privacy consumers, exact metadata resolution and generic alias parser changes remain on development branches.",
+  "full_types": {
+    "passed": 4016,
+    "failed": 0,
+    "ignored": 3
+  },
+  "vbc_graph_authority": "preflight/result.json.gz compares the complete selected repository dependency trees to bfc2ccc7e4174bd4e2cf3708fb05fe7afdd36358, whose full gate passed 2109/0/1.",
+  "later_parser_gate": "The later 77f1ba4b6 graph executed 2105 passed, 4 socket deadline failures, 1 ignored. This failure is retained and remains under investigation; it is not counted as a pass or explained by an unproven cause.",
+  "files": [
+    {
+      "path": "preflight/check-0.log.gz",
+      "original_bytes": 3630,
+      "original_sha256": "0b819ac57f102e6385203ad05319ad62009ead34a274c3779e919c4fe8872fc6",
+      "compressed_sha256": "cbbbe6dea17949807a1ef6be8d49c94cd8ea35e33da86ad8edd8811c5a0cf20c"
+    },
+    {
+      "path": "preflight/check-1.log.gz",
+      "original_bytes": 261,
+      "original_sha256": "b79f32bfcd6c99e30362c95c53a9d8570dbb1579aa31e2ef6bcd68c0924df9cb",
+      "compressed_sha256": "6154ff205409d3d98c12135dd02def0747e29fa3ca8a44124338416486bc3208"
+    },
+    {
+      "path": "preflight/check-2.log.gz",
+      "original_bytes": 321,
+      "original_sha256": "0b38d479ac71812202393fe0d8d1fa2b046390387afc0b26bc343ca6ae90d67f",
+      "compressed_sha256": "6d28475f106759f270d9df0a3aa724d09f86d484e083db60942946fe1d5db7ba"
+    },
+    {
+      "path": "preflight/check-3.log.gz",
+      "original_bytes": 106,
+      "original_sha256": "54dc9366cf6d804bdf5ae1ffa172dab10fc68a63170232134cbe6981ee4634fb",
+      "compressed_sha256": "53387838afab1f72970d1194d9ef547dfee061851bc29a676ca401b02e5d9e05"
+    },
+    {
+      "path": "preflight/result.json.gz",
+      "original_bytes": 3184,
+      "original_sha256": "59f719e818f2e075fce3a8bfa37567f61dfe4702026c35a525582c2cc2912081",
+      "compressed_sha256": "d82c07a67e96759c84cb228b5121a2f441e0f214de3eb8814535f0f463cf2d06"
+    },
+    {
+      "path": "types/gate.log.gz",
+      "original_bytes": 283745,
+      "original_sha256": "225bafe8a1c1c4450d532065f138929ce3259c3bbb8c6a12eb12837ed07d2da1",
+      "compressed_sha256": "52d07645c5c9efdf2d09be1fe023ac51cab84702fa44588c649c95aa66772890"
+    },
+    {
+      "path": "types/result.json.gz",
+      "original_bytes": 167441,
+      "original_sha256": "17ba49649c7a946366b8d80be55741bda8584fbf1a9ba6c2bcfc571c3dbb7c78",
+      "compressed_sha256": "f7e0f68966cb2cbef759ef02293f055b7c4095dff61e6345cd0d7795708d548f"
+    },
+    {
+      "path": "types/started.json.gz",
+      "original_bytes": 78721,
+      "original_sha256": "bc157ae5c6eae276ee32ce406ed81e80991813d56bfef7fd2f097ec657100951",
+      "compressed_sha256": "8b73ee50b2babe6a471f7d4f1714e4c6163bc81263dd167b48931b9438f5f1f7"
+    },
+    {
+      "path": "types/runner.py.gz",
+      "original_bytes": 3309,
+      "original_sha256": "f45f47ef7729b95e13f7241501e7f26accf5f98ea32db6a0f99e279b9d08fe27",
+      "compressed_sha256": "b1f1af866eccfe492858c20148a9316f895eae28b9bbbe7c324b0658aafdce76"
+    },
+    {
+      "path": "vbc-prior/gate.log.gz",
+      "original_bytes": 162483,
+      "original_sha256": "8c36007eb4cfba94445f664ee265c50d71e4cafc5b52c527d696d8fd06b2465d",
+      "compressed_sha256": "5f291ac66f9ae35173a22baddafa113e6f4bf3338aef20d3a94927c4391d2014"
+    },
+    {
+      "path": "vbc-prior/result.json.gz",
+      "original_bytes": 99166,
+      "original_sha256": "f9e652c2ad6ebb736dc68f1e2e34f2dd12ebe20e432d1de4074509029c24d20b",
+      "compressed_sha256": "2c1f79ada3b9f4850443013c9bbf5cce4a99a8103fc01df3d012fccc4e2403b7"
+    },
+    {
+      "path": "vbc-prior/started.json.gz",
+      "original_bytes": 97682,
+      "original_sha256": "1b9be96dbaeb538f866361482561a75d3a1e7434d9cbecd5e3530907b877a543",
+      "compressed_sha256": "2a4f0bf45577e590c366969cffd23740e6f82b0a85391bc3c3ccb0fdb12cbe5e"
+    },
+    {
+      "path": "vbc-prior/runner.py.gz",
+      "original_bytes": 7088,
+      "original_sha256": "dda964c785687bc53ed45224e267a7d2824e73bb73c399c4d6553f0b3589fb26",
+      "compressed_sha256": "038e2860fd17dac1a2af3b22541f22301446d104df7a37eed6c561024186ca62"
+    },
+    {
+      "path": "vbc-later-parser/gate.log.gz",
+      "original_bytes": 164700,
+      "original_sha256": "4a84be4383ecbe04e8c5d7f40b38f263ae34b7352cdb66a67255fe609297f180",
+      "compressed_sha256": "d5e090c671bcf0beabe99ddff797816b6e2de0e80496c0e1f767dd3b82dbb7a8"
+    },
+    {
+      "path": "vbc-later-parser/result.json.gz",
+      "original_bytes": 410687,
+      "original_sha256": "9f3cc43131b43911a5b80e31ed188f7cb7ee011ae9b3b1e44057f2480269a13c",
+      "compressed_sha256": "2584b17aa850a8f5a7504b4506acaca2df052fce3e41eb55cd58580596342a7c"
+    },
+    {
+      "path": "vbc-later-parser/started.json.gz",
+      "original_bytes": 408699,
+      "original_sha256": "583d6706346f8688ab05a6f24f58cd22a6e530ed316c38b18ee32be3be5ebce3",
+      "compressed_sha256": "c6523784c7579de54cd4866c852c58d0957779061694c0a351d0b6deef149cb9"
+    },
+    {
+      "path": "vbc-later-parser/runner.py.gz",
+      "original_bytes": 6770,
+      "original_sha256": "f905bfcc358b97a52ee61d7bcec070559caf56630ec754c50c3fed95d854da75",
+      "compressed_sha256": "06a5b976ec7bd3205c3565ae322c2545584806f570efd3d29f6a84d9f243df33"
+    }
+  ]
+}
