@@ -890,7 +890,8 @@ At source `a5610f319`, five serial controls passed. Four-thread execution of the
 same executable completed with three passes and two explicit raw/synthetic
 descriptor collisions. The adjacent four-thread `net_runtime` group completed
 with fifteen passes and three failures: two descriptor collisions and the
-existing bounded UDP receive timeout. These are failed parallel gates, not
+existing bounded UDP receive failure without its underlying error. These are
+failed parallel gates, not
 retries reclassified as acceptance. T1708 tracks the descriptor namespace
 conflict; its pre-accept fixture check does not eliminate the allocation race.
 
@@ -921,7 +922,8 @@ it supplies no acceptance evidence.
 At `254400263`, all eight descriptor-identity and fd-zero controls pass in
 serial and four-thread groups. The complete groups still fail: serial has
 22 passes and four TCP connection timeouts; parallel has 21 passes, four TCP
-connection timeouts and one UDP timeout. Those TCP failures occur before
+connection timeouts and one UDP receive failure without its underlying error.
+Those TCP failures occur before
 registration. The adjacent four-thread IoEngine readiness/accept/read/write
 group passes all four controls. No retries were used to turn failures green.
 
@@ -936,10 +938,31 @@ logs, and unchanged inherited artifacts are recorded in
 ### Numeric and socket integration gate
 
 The combined source `f3006f403` completes the unfiltered VBC library run with
-2,084 passes, ten bounded socket timeout failures and the existing T0839 ignore.
+2,084 passes, ten bounded socket failures and the existing T0839 ignore. Eight
+failures are connection setup timeouts, one is a reactor wait timeout, and one
+is a UDP receive failure without its underlying error.
 The hang is removed; the remaining network failures stay tracked under T1650.
 All 80 focused numeric, reference, body-presence, wire, Array-to-List and semantic
 formal controls pass. Exact evidence and the failed target-selection attempt
 are retained in the [integration report](evidence/numeric-platform-integration/README.md).
 Fresh ordinary CLI/std-library production, native storage integration and
 registry authentication remain separate acceptance work.
+
+
+### Bounded reactor fixture reporting
+
+The two socket-positive reactor controls now bound connection setup and retain
+owned peers through the unchanged readiness assertions. The writable fixture
+confirms both endpoints. The arrival fixture captures the wait outcome, joins
+its bounded connector, and checks setup success before asserting `Ready`; its
+existing scheduling does not establish registration-before-arrival ordering.
+The production reactor is unchanged.
+
+The single serial run at `e78aa2a27` selected exactly two tests and passed both
+without retries or longer fixture deadlines. Exact source and executable
+identities, the raw output and unchanged inherited artifacts are retained in
+[the reactor fixture receipt](evidence/reactor-bounded-fixtures/integration.json).
+T1650 remains open for broader readiness diagnosis and parallel acceptance.
+Earlier UDP `None` results collapse registration, clone and receive errors;
+they must not be described as proven timeouts. No complete-library, ordinary
+CLI, fresh stdlib, native/AOT or registry-service result follows from this gate.
