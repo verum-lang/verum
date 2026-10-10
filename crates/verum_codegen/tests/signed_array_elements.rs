@@ -697,3 +697,49 @@ fn native_sext_strictly_refuses_truncated_trailing_and_unsupported_width_operand
     assert_eq!(completed, 16);
     println!("{COMPLETED}");
 }
+
+// T1710 shares the exact parsed return forms with the interpreter controls.
+#[path = "../../verum_vbc/tests/fixtures/list_return_cleanup.rs"]
+#[allow(dead_code)]
+mod return_cleanup_fixtures;
+
+macro_rules! native_cleanup_case {
+    ($name:ident, $fixture:ident, $expected:expr) => {
+        #[test]
+        fn $name() {
+            list_payload(return_cleanup_fixtures::$fixture, $expected);
+        }
+    };
+}
+native_cleanup_case!(
+    native_return_cleanup_unsigned,
+    BLOCK_UNSIGNED,
+    &[32768, 65535, 1]
+);
+native_cleanup_case!(native_return_cleanup_explicit, EXPLICIT, &[-32768, -1, 1]);
+native_cleanup_case!(
+    native_return_cleanup_explicit_block,
+    EXPLICIT_BLOCK,
+    &[-32768, -1, 1]
+);
+native_cleanup_case!(
+    native_return_cleanup_expression_body,
+    EXPRESSION_BODY,
+    &[-32768, -1, 1]
+);
+native_cleanup_case!(
+    native_return_cleanup_nested_tail,
+    NESTED_TAIL,
+    &[-32768, -1, 1]
+);
+native_cleanup_case!(native_return_cleanup_branch, BRANCH_TAIL, &[-32768, -1, 1]);
+native_cleanup_case!(
+    native_return_cleanup_list_closure,
+    LIST_CLOSURE,
+    &[-32768, -1, 1]
+);
+native_cleanup_case!(
+    native_return_cleanup_array_closure,
+    ARRAY_CLOSURE,
+    &[32768, 65535, 1]
+);

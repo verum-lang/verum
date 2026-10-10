@@ -192,3 +192,95 @@ fn owned_cleanup_and_unknown_calls_still_revoke_storage_authority() {
         );
     }
 }
+
+#[test]
+fn post_producer_record_construction_remains_a_proof_barrier() {
+    for (route, module) in source_and_wire(fixtures::POST_PRODUCER_OWNED_EFFECT) {
+        let instructions = body(&module, "make");
+        let mut facts = ArrayResultFacts::default();
+        let mut packed = None;
+        let mut barrier = None;
+        for instruction in &instructions {
+            let before = packed.and_then(|register| facts.get(register));
+            let transfer = facts.observe(instruction);
+            if before.is_some() && !transfer {
+                assert!(
+                    matches!(instruction, Instruction::New { .. }),
+                    "{route}: unexpected first barrier {instruction:?}"
+                );
+                barrier = Some(instruction);
+                break;
+            }
+            if let Instruction::MemExtended { sub_op, operands } = instruction {
+                if *sub_op == MemSubOpcode::NewTypedArray.to_byte() {
+                    let mut cursor = 0;
+                    let register = verum_vbc::encoding::decode_reg(operands, &mut cursor).unwrap();
+                    assert!(matches!(
+                        facts.get(register),
+                        Some(ArrayResultFact::Packed { .. })
+                    ));
+                    packed = Some(register);
+                }
+            }
+        }
+        let barrier = barrier.expect("actual later record construction revokes the packed fact");
+        eprintln!("{route}: retained post-producer barrier {barrier:?}");
+        assert!(
+            !instructions
+                .iter()
+                .any(|instruction| matches!(instruction, Instruction::NewList { .. })),
+            "{route}: lost proof was silently recreated"
+        );
+    }
+}
+
+#[test]
+fn converted_packed_source_keeps_its_own_scope_cleanup() {
+    for (route, module) in source_and_wire(fixtures::BLOCK_SIGNED) {
+        let instructions = body(&module, "probe");
+        let conversion = instructions
+            .iter()
+            .position(|instruction| matches!(instruction, Instruction::NewList { .. }))
+            .expect("actual List materialization");
+        let cleanup: List<_> = instructions
+            .iter()
+            .enumerate()
+            .filter_map(|(index, instruction)| {
+                matches!(instruction, Instruction::DropRef { .. }).then_some(index)
+            })
+            .collect();
+        // Exactly two named locals: the scalar read and the original packed
+        // allocation. Copying into a new List does not transfer the source slot.
+        assert_eq!(cleanup.len(), 2, "{route}: {instructions:?}");
+        assert!(
+            cleanup.iter().all(|index| *index > conversion),
+            "{route}: cleanup before conversion"
+        );
+    }
+}
+
+#[test]
+fn operand_blocks_do_not_inherit_the_callable_return_demand() {
+    let source = r#"
+fn take(values: [UInt16; 3]) -> Int { values.len() }
+fn probe() -> List<UInt16> {
+    let values: [UInt16; 3] = { let input: [UInt16; 3] = [32768, 65535, 1]; input };
+    let length = take({ let argument = values; argument });
+    [32768, 65535, 1]
+}
+"#;
+    check_payload(source, &[32768, 65535, 1]);
+    for (route, module) in source_and_wire(source) {
+        let instructions = body(&module, "probe");
+        let call = instructions
+            .iter()
+            .position(|instruction| matches!(instruction, Instruction::Call { .. }))
+            .expect("actual operand consumer");
+        assert!(
+            !instructions[..call]
+                .iter()
+                .any(|instruction| matches!(instruction, Instruction::NewList { .. })),
+            "{route}: initializer or argument acquired a return conversion"
+        );
+    }
+}

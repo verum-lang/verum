@@ -20,6 +20,28 @@ implement Drop for Watch {
 }
 fn make(counter: &mut Count) -> List<Int16> {
     let first_guard: Watch = Watch { counter, digit: 1 };
+    let last_guard: Watch = Watch { counter, digit: 2 };
+    let values: [Int16; 3] = [-32768, -1, 1];
+    let first = values[0];
+    defer { counter.value = 3; }
+    values
+}
+fn probe() -> List<Int16> {
+    let mut counter = Count { value: 0 };
+    let values = make(&mut counter);
+    assert_eq(counter.value, 321);
+    values
+}
+"#;
+
+pub const POST_PRODUCER_OWNED_EFFECT: &str = r#"
+type Count is { value: Int };
+type affine Watch is { counter: &mut Count, digit: Int };
+implement Drop for Watch {
+    fn drop(&mut self) { self.counter.value = self.counter.value * 10 + self.digit; }
+}
+fn make(counter: &mut Count) -> List<Int16> {
+    let first_guard: Watch = Watch { counter, digit: 1 };
     let values: [Int16; 3] = [-32768, -1, 1];
     let last_guard: Watch = Watch { counter, digit: 2 };
     let first = values[0];
