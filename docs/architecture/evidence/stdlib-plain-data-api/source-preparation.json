@@ -1,0 +1,62 @@
+{
+  "task": "T1724",
+  "base_commit": "e09e907e07c775b650f953cbeed06ed88194df4a",
+  "tests_preparation_commit": "3a3bb60732c7c088fae68c5821eecb761265e5a2",
+  "source_commit": "89bb182742e143d7e1914224aa7cc346fb94342b",
+  "source_tree": "084399692b11a49548e6e87917d892c4daaebbb2",
+  "scope": "Retained parser and Rust formatter only. Rust tests were not built or executed; actual source-to-archive policy, ordinary typechecking, runtime, registry preparation, HTTP behavior and AOT remain unaccepted by this receipt.",
+  "grammar": {
+    "command": [
+      "/private/tmp/verum-T1666-grammar/parse",
+      "/Users/taaliman/.codex/worktrees/registry-metadata-lookup/verum/core/net/weft/handler.vr",
+      "/Users/taaliman/.codex/worktrees/registry-metadata-lookup/verum/core/encoding/json.vr",
+      "/Users/taaliman/.codex/worktrees/registry-metadata-lookup/verum/vcs/specs/L2-standard/net/weft_request_data.vr",
+      "/Users/taaliman/.codex/worktrees/registry-metadata-lookup/verum/vcs/specs/L2-standard/encoding/json_error_data.vr"
+    ],
+    "returncode": 0,
+    "files": 4,
+    "parser_executable_sha256": "1621015edf6360a2380443e3337f95a9e9615512a1e44d3128a9cea86751e18a",
+    "log_sha256": "19eea4a075e5c54afb3d2308adcfd903178e626823c01c9a55955c5769d5ae9f"
+  },
+  "rust_format": {
+    "command": [
+      "/Users/taaliman/.rustup/toolchains/nightly-2026-08-20-aarch64-apple-darwin/bin/rustfmt",
+      "--check",
+      "--edition",
+      "2024",
+      "/Users/taaliman/.codex/worktrees/registry-metadata-lookup/verum/crates/verum_vbc/tests/stdlib_plain_data_visibility.rs"
+    ],
+    "returncode": 0,
+    "formatter_sha256": "8297ecc2d2287cc07c7f014cd8110888ebe000519b051ca9bdb242af280e1a79",
+    "output_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "scope": "Formatting/syntax parsing, not Rust compilation or semantic tests."
+  },
+  "source_sha256": {
+    "core/net/weft/handler.vr": "2c53e84484dd51d07997c535fa3256b42ca343c972c0dea59bfad20b7d3e6ddb",
+    "core/encoding/json.vr": "b37c7574b88aff034f0db50f20d3b2a3aeaad60240480770adeb2660a6f41517",
+    "crates/verum_vbc/tests/stdlib_plain_data_visibility.rs": "9e1a1322d985695072637cc9d359197be52c0a87a4f7789f49954b8d3c9d3a53",
+    "vcs/specs/L2-standard/net/weft_request_data.vr": "5e9c1ee70471ee07d233572ed924a9e5d0f18f2892efc6c419b8c66c5eb1149b",
+    "vcs/specs/L2-standard/encoding/json_error_data.vr": "9e1dbedbd614ebdc3f5782386ecec27048ab676188d0695177c387af572d6bb6"
+  },
+  "inputs_unchanged": true,
+  "head_unchanged": true,
+  "original_branch_unchanged": true,
+  "production_boundary": "Seven WeftRequest fields and four JsonError fields are explicitly public plain data. Constructors, methods, parsing, field types and order are unchanged. No registry validated type is modified.",
+  "unexecuted_controls": {
+    "cargo_target": "stdlib_plain_data_visibility",
+    "expected_tests": 4,
+    "scope": "Complete real source is parsed, then its exact selected record declaration, module owner and mounts are lowered and archived. The test checks source and decoded archive coarse/full field visibility; it does not compile or execute unrelated implementation bodies.",
+    "positives": [
+      "WeftRequest seven fields",
+      "JsonError four fields"
+    ],
+    "negatives": [
+      "Parser six fields stay private",
+      "PathParam.value stays private"
+    ],
+    "ordinary_fixtures": [
+      "vcs/specs/L2-standard/net/weft_request_data.vr",
+      "vcs/specs/L2-standard/encoding/json_error_data.vr"
+    ]
+  }
+}
