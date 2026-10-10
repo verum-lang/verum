@@ -689,6 +689,15 @@ impl VbcCodegen {
 pub(super) enum ResultDemand {
     Used,
     Discarded,
+    /// The value crosses this callable's declared return boundary. Only
+    /// value-forwarding syntax carries this demand into nested expressions.
+    CallableReturn,
+}
+
+impl ResultDemand {
+    fn is_used(self) -> bool {
+        self != Self::Discarded
+    }
 }
 
 /// AST-to-VBC code generator: owns the module under construction (string /
@@ -20392,7 +20401,7 @@ impl VbcCodegen {
             match body {
                 verum_ast::FunctionBody::Block(block) => {
                     let result = self
-                        .compile_block(block)
+                        .compile_block_with_demand(block, ResultDemand::CallableReturn)
                         .map_err(|e| e.with_context(format!("in function {}", lookup_name)))?;
                     // Return the block result if present (implicit return)
                     if let Some(reg) = result {
@@ -20407,7 +20416,7 @@ impl VbcCodegen {
                 }
                 verum_ast::FunctionBody::Expr(expr) => {
                     let result = self
-                        .compile_expr(expr)
+                        .compile_expr_with_demand(expr, ResultDemand::CallableReturn)
                         .map_err(|e| e.with_context(format!("in function {}", lookup_name)))?;
                     // Return the expression result
                     if let Some(reg) = result {
@@ -21381,6 +21390,14 @@ impl VbcCodegen {
             );
         }
 
+        // Convert the callable result while its actual producer is still
+        // known. Deferred code and DropRef remain conservative fact barriers.
+        // A newly materialized List is distinct from the packed source local:
+        // the ordinary cleanup below must still drop that original binding.
+        if demand == ResultDemand::CallableReturn {
+            result = result.map(|reg| self.materialize_list_return(reg)).transpose()?;
+        }
+
         // CRITICAL FIX: Copy result to a new register BEFORE exiting scope.
         // When exit_scope is called, it recycles registers for variables defined
         // in this scope (like `doubled` in `{ let doubled = x * 2; doubled }`).
@@ -21431,7 +21448,7 @@ impl VbcCodegen {
             // Dropping its local slot here would destroy that same object
             // before the enclosing expression/caller can use it. Other
             // locals retain their ordinary reverse declaration cleanup.
-            if demand == ResultDemand::Used && block.expr.is_some() && result == Some(*var_reg) {
+            if demand.is_used() && block.expr.is_some() && result == Some(*var_reg) {
                 continue;
             }
             if self.ctx.current_fn_escaping_vars.contains(name) {

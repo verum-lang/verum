@@ -1185,7 +1185,7 @@ impl VbcCodegen {
         // Track source span for DWARF debug info (SourceMap population)
         self.ctx.set_current_span(expr.span);
 
-        match &expr.kind {
+        let result = match &expr.kind {
             // === Literals ===
             ExprKind::Literal(lit) => self.compile_literal(lit),
 
@@ -1532,6 +1532,11 @@ impl VbcCodegen {
             // At runtime this compiles to a record/object where each slot
             // holds the thunk/closure for the corresponding observation.
             ExprKind::CopatternBody { arms, .. } => self.compile_copattern_body(arms),
+        }?;
+        if demand == ResultDemand::CallableReturn {
+            result.map(|reg| self.materialize_list_return(reg)).transpose()
+        } else {
+            Ok(result)
         }
     }
 
@@ -18534,7 +18539,7 @@ impl VbcCodegen {
                     "nested return-use observation exceeds its depth bound".into(),
                 ), expr.span));
             }
-            let compiled = self.compile_expr(expr);
+            let compiled = self.compile_expr_with_demand(expr, ResultDemand::CallableReturn);
             let uses_named_affine = self.ctx.registers.value_uses.finish_return_use_capture();
             let reg = compiled?.or_internal("return value has no value")?;
             let reg = self.materialize_list_return(reg)?;
@@ -18627,7 +18632,7 @@ impl VbcCodegen {
         let result = self.ctx.alloc_temp();
         let loop_ctx = self.ctx.enter_loop(
             label.map(|s| s.to_string()),
-            (demand == ResultDemand::Used).then_some(result),
+            demand.is_used().then_some(result),
         );
 
         // Loop start
@@ -32950,8 +32955,9 @@ impl VbcCodegen {
             }
         }
 
-        // Compile the body expression
-        let result = self.compile_expr(body)?;
+        // The closure's begin_function installed its own return contract;
+        // never use the enclosing expression hint as conversion authority.
+        let result = self.compile_expr_with_demand(body, ResultDemand::CallableReturn)?;
         // Infer while closure parameters and compiled block results are still
         // in scope. The surrounding function's return context is not evidence.
         let mut tail = body;
