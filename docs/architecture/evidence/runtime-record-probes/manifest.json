@@ -1,0 +1,140 @@
+{
+  "task": "T1743",
+  "scope": "Focused interpreter exact-TypeId receiver probe authority and counted work; not ordinary CLI or end-to-end performance acceptance",
+  "baseline_commit": "5dd9d685e8348fbd91eab7899add028d1933bbb0",
+  "fixed_commit": "0dc7a4ad328e5a410dab42ea572a956dba4838bb",
+  "baseline_tests": {
+    "passed": 5,
+    "failed": 3,
+    "ignored": 0
+  },
+  "fixed_tests": {
+    "passed": 8,
+    "failed": 0,
+    "ignored": 0
+  },
+  "descriptor_visits": {
+    "types": 16384,
+    "interceptor_calls": 128,
+    "probes_per_call": 3,
+    "baseline": 6291456,
+    "fixed": 384,
+    "warmup_excluded": true
+  },
+  "source_changes": [
+    "crates/verum_vbc/src/interpreter/dispatch_table/handlers/heap_helpers.rs"
+  ],
+  "source_binding_count": 850,
+  "retained_executables": {
+    "baseline": {
+      "original": "/Users/taaliman/.tmp/verum-codex-01a10248-types/checker-target/debug/build/verum_vbc/8a01e7da3899a55f/out/verum_vbc-8a01e7da3899a55f",
+      "retained": "/private/tmp/verum-T1743-baseline/verum_vbc-libtest",
+      "sha256": "9b44afbd2b5ebfcfed4869ee3388db022db3f0f8cc9e691a01bf476ab71d57b1",
+      "size": 26694088
+    },
+    "fixed": {
+      "original": "/Users/taaliman/.tmp/verum-codex-01a10248-types/checker-target/debug/build/verum_vbc/8a01e7da3899a55f/out/verum_vbc-8a01e7da3899a55f",
+      "retained": "/private/tmp/verum-T1743-fixed/verum_vbc-libtest",
+      "sha256": "e799e173285fd19743c7c3163d4a6c872573d6b3e9d115914d8aa674078343ff",
+      "size": 26693592
+    }
+  },
+  "context": "Two sampled worker stacks motivated the investigation. The unchanged credential run later timed out at600.050s; no repaired ordinary CLI replay is included here. Root retained the complete credential result separately.",
+  "files": [
+    {
+      "path": "baseline/result.json.gz",
+      "source": "/private/tmp/verum-T1743-baseline/result.json",
+      "raw_sha256": "b8ab3af946c83234777fd32380a41302cd9f09797b43ad514405d899726b0a63",
+      "raw_bytes": 1554,
+      "gzip_sha256": "71532eff833c46173c1a567d6de26faa4bb5f427455cb01b43ce4e610b5b483a"
+    },
+    {
+      "path": "baseline/stdout.log.gz",
+      "source": "/private/tmp/verum-T1743-baseline/stdout.log",
+      "raw_sha256": "189d395d1d15a9df05405c5a7c5ccb2d787c8da6c3c7eb9bb6cc9f061655c029",
+      "raw_bytes": 165657,
+      "gzip_sha256": "bed38d796d894654d4d61c8b58ff1884a66d24a36359bbb9b49f5f0a75b681a4"
+    },
+    {
+      "path": "baseline/stderr.log.gz",
+      "source": "/private/tmp/verum-T1743-baseline/stderr.log",
+      "raw_sha256": "255e2611282fdb661e671cf81ce0d065a741f423421711a52dd7e914a64d2e66",
+      "raw_bytes": 3402,
+      "gzip_sha256": "e5847f46db99269540d8bc129916aff40edb002ff52bd2a1576aa6c032dc38ce"
+    },
+    {
+      "path": "baseline/source-hashes.json.gz",
+      "source": "/private/tmp/verum-T1743-baseline/source-hashes.json",
+      "raw_sha256": "1d06c47f75475fae4b69fa9e02022e40c8337575e7f7bd4910b53b8599ab0b0d",
+      "raw_bytes": 105067,
+      "gzip_sha256": "78c7311b03e7663e351c2aa04b39265ee41e3e895ad2d4e77b5b6f538964012d"
+    },
+    {
+      "path": "baseline/unit-graph.json.gz",
+      "source": "/private/tmp/verum-T1743-baseline/unit-graph.json",
+      "raw_sha256": "b443659e18b98274c27f8db56ab9638f4527f5a31b5cda81a8f62abd6187d2c4",
+      "raw_bytes": 163680,
+      "gzip_sha256": "56e1618ded8e9314a6fcc7a530475d2b765c8a09ec40a0b04964f444ad65d517"
+    },
+    {
+      "path": "fixed/result.json.gz",
+      "source": "/private/tmp/verum-T1743-fixed/result.json",
+      "raw_sha256": "fa76cfb37d3c31d7ddd39db22b0a68b045dc70cf00ef9fffcb04ad7fea2741ad",
+      "raw_bytes": 1549,
+      "gzip_sha256": "7888a8f62b4433f561bbcba2171002b383d2a59048eba28c914071a38800784e"
+    },
+    {
+      "path": "fixed/stdout.log.gz",
+      "source": "/private/tmp/verum-T1743-fixed/stdout.log",
+      "raw_sha256": "1848bda2feb9021d3c1ebbaa418dc5db4fe2b8316f996a47c1205adacd65fba8",
+      "raw_bytes": 165197,
+      "gzip_sha256": "31d0f4abbaf3f2b2f7a4c1581dd9841175ff51940c7cd24d60dd03655a482a9b"
+    },
+    {
+      "path": "fixed/stderr.log.gz",
+      "source": "/private/tmp/verum-T1743-fixed/stderr.log",
+      "raw_sha256": "1cbdf69c4b09810c00ea5b5a65616a4356103ec6870420b1555ced843a2f1f0d",
+      "raw_bytes": 1667,
+      "gzip_sha256": "109e8151e6887f414bc176b7ab2e7a7fc8ad2fb3883c4a4b33dfbd139d8c9187"
+    },
+    {
+      "path": "fixed/source-hashes.json.gz",
+      "source": "/private/tmp/verum-T1743-fixed/source-hashes.json",
+      "raw_sha256": "4816352f12813b3cb48711104b4b36fa30f50e587fb616c73e154ece8667d26b",
+      "raw_bytes": 105067,
+      "gzip_sha256": "69d439ba395cec66733d649ac24fca878cd2d43a2265ac7ffc327740e0ae0fb6"
+    },
+    {
+      "path": "fixed/unit-graph.json.gz",
+      "source": "/private/tmp/verum-T1743-fixed/unit-graph.json",
+      "raw_sha256": "b443659e18b98274c27f8db56ab9638f4527f5a31b5cda81a8f62abd6187d2c4",
+      "raw_bytes": 163680,
+      "gzip_sha256": "56e1618ded8e9314a6fcc7a530475d2b765c8a09ec40a0b04964f444ad65d517"
+    },
+    {
+      "path": "run-verum-T1743.py.gz",
+      "source": "/private/tmp/run-verum-T1743.py",
+      "raw_sha256": "b82e440b5f10ab95e90ddca9ed3fab447ab4141fb4071ce44e44acaf50f215ed",
+      "raw_bytes": 4643,
+      "gzip_sha256": "6b30dcb8247fcd1ed57f9f0e5b8238f8ef7240e7b72557c3277fc1332acffaff"
+    },
+    {
+      "path": "context/credentials-progress.sample.gz",
+      "source": "/private/tmp/verum-stage23-credentials-progress.sample",
+      "raw_sha256": "67e0c98ef3cf294a6395fa37bbd3bbf91331b4be596ef3dfdf434de95177253b",
+      "raw_bytes": 99847,
+      "gzip_sha256": "6da34f5c0ee10f6750724a23af8dcb00bc881de85bc49c1d2d20d139c2dcb2ff"
+    },
+    {
+      "path": "reference-gate.log.gz",
+      "source": "/private/tmp/verum-T1743-reference-gate.log",
+      "raw_sha256": "5d0a3405cf417384a035d1a996302936214365294ea783ec21c863427e4d4ab3",
+      "raw_bytes": 465,
+      "gzip_sha256": "d87898c2de36a416ef4df9bd144a4c9d04e606ca2bc0552de3fd6946ff139441"
+    }
+  ],
+  "source_reference_gate": {
+    "command": "bash scripts/ci/check_no_internal_refs.sh",
+    "exit_code": 0
+  }
+}
