@@ -1,0 +1,1 @@
+fn probe() -> List<Int16> { let build = || -> [Int16; 3] { let values: [Int16; 3] = [-32768, -1, 1]; values }; let values = build(); assert_eq(values[0], -32768); [-32768, -1, 1] }
