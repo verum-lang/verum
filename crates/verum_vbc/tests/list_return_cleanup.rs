@@ -95,10 +95,10 @@ signed_case!(expression_body_converts_before_its_cleanup, EXPRESSION_BODY);
 signed_case!(nested_tail_block_converts_before_its_cleanup, NESTED_TAIL);
 signed_case!(branch_tail_converts_before_its_cleanup, BRANCH_TAIL);
 signed_case!(closure_uses_its_own_list_return_contract, LIST_CLOSURE);
-signed_case!(
-    array_closure_does_not_inherit_outer_list_return,
-    ARRAY_CLOSURE
-);
+#[test]
+fn array_closure_does_not_inherit_outer_list_return() {
+    check_payload(fixtures::ARRAY_CLOSURE, &[32768, 65535, 1]);
+}
 signed_case!(
     return_conversion_preserves_defer_and_owned_drop_order,
     OWNED_CLEANUP
@@ -119,12 +119,7 @@ fn callable_return_context_does_not_convert_array_closure_storage() {
         let closure = module
             .functions
             .iter()
-            .find(|function| {
-                function.has_source_body
-                    && module
-                        .get_string(function.name)
-                        .is_some_and(|name| name.contains("__closure"))
-            })
+            .find(|function| module.get_string(function.name) == Some("probe$closure$0"))
             .expect("actual closure");
         let name = module.get_string(closure.name).unwrap();
         let instructions = body(&module, name);

@@ -8,7 +8,9 @@ pub const EXPRESSION_BODY: &str = "fn probe() -> List<Int16> = { let values: [In
 pub const NESTED_TAIL: &str = "fn probe() -> List<Int16> { ({ let values: [Int16; 3] = [-32768, -1, 1]; let first = values[0]; values }) }";
 pub const BRANCH_TAIL: &str = "fn probe() -> List<Int16> { if true { let values: [Int16; 3] = [-32768, -1, 1]; let first = values[0]; values } else { let values: [Int16; 3] = [-2, -3, 1]; let first = values[0]; values } }";
 pub const LIST_CLOSURE: &str = "fn probe() -> List<Int16> { let build = || -> List<Int16> { let values: [Int16; 3] = [-32768, -1, 1]; let first = values[0]; values }; build() }";
-pub const ARRAY_CLOSURE: &str = "fn probe() -> List<Int16> { let build = || -> [Int16; 3] { let values: [Int16; 3] = [-32768, -1, 1]; values }; let values = build(); assert_eq(values[0], -32768); [-32768, -1, 1] }";
+// This isolates return-context storage. The initial signed indirect result
+// exposed a separate element-type propagation failure, retained in the baseline.
+pub const ARRAY_CLOSURE: &str = "fn probe() -> List<UInt16> { let build = || -> [UInt16; 3] { let values: [UInt16; 3] = [32768, 65535, 1]; values }; let values = build(); assert_eq(values[0], 32768); [32768, 65535, 1] }";
 
 pub const OWNED_CLEANUP: &str = r#"
 type Count is { value: Int };
