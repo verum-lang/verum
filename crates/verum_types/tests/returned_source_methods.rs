@@ -1,6 +1,6 @@
 //! T1711: a returned source value carries its declaring type's public methods.
 use verum_ast::{FileId, ItemKind};
-use verum_common::{List, Text};
+use verum_common::{List, Text, ToText};
 use verum_fast_parser::FastParser;
 use verum_modules::{
     ModuleId, ModuleInfo, ModulePath, ModuleRegistry, extract_exports_from_module,
@@ -88,7 +88,11 @@ fn check(consumer: &str, modules: &[(&str, &str)]) -> List<Text> {
 }
 
 fn assert_missing_method(errors: &List<Text>, method: &str) {
-    assert_eq!(errors.len(), 1, "expected only the missing-method refusal: {errors:?}");
+    assert_eq!(
+        errors.len(),
+        1,
+        "expected only the missing-method refusal: {errors:?}"
+    );
     assert!(
         errors[0].contains("MethodNotFound") && errors[0].contains(method),
         "wrong refusal: {errors:?}"
@@ -137,7 +141,9 @@ fn returned_same_leaf_receivers_keep_their_declaring_methods_in_both_orders() {
             "mount demo.provider.{issue as first}; mount demo.other.{issue as second};"
         };
         let errors = check(
-            &format!("{mounts} fn integer() -> Int {{ first().read() }} fn boolean() -> Bool {{ second().read() }}"),
+            &format!(
+                "{mounts} fn integer() -> Int {{ first().read() }} fn boolean() -> Bool {{ second().read() }}"
+            ),
             &modules,
         );
         assert!(errors.is_empty(), "reverse={reverse}: {errors:?}");
@@ -204,11 +210,20 @@ fn source_function_return_keeps_the_declaring_owner_without_a_type_mount() {
             };
             let (mut checker, errors) = check_with_checker(consumer, &modules);
             assert!(errors.is_empty(), "{errors:?}");
-            let signature = &checker.context_mut().env.lookup("issue").expect("mounted function").ty;
+            let signature = &checker
+                .context_mut()
+                .env
+                .lookup("issue")
+                .expect("mounted function")
+                .ty;
             let Type::Function { return_type, .. } = signature else {
                 panic!("not a function: {signature:?}");
             };
-            assert_eq!(return_type.to_text(), "demo.provider.Receipt", "reverse={reverse}; {consumer}: {signature:?}");
+            assert_eq!(
+                return_type.to_text(),
+                "demo.provider.Receipt",
+                "reverse={reverse}; {consumer}: {signature:?}"
+            );
         }
     }
 }
@@ -219,7 +234,9 @@ fn generic_return_uses_the_declaring_modules_import_alias() {
     let factory = "mount demo.model.{Receipt as Issued}; public fn issue<T>(value: T) -> Issued<T> { Issued { value: value } }";
     let other = "public type Issued<T> is { value: Bool }; implement<T> Issued<T> { public fn read(&self) -> Bool { self.value } }";
     for entry in ["demo.factory", "demo.api"] {
-        let consumer = format!("mount demo.other.Issued; mount {entry}.issue; fn probe() -> Int {{ issue(37).read() }}");
+        let consumer = format!(
+            "mount demo.other.Issued; mount {entry}.issue; fn probe() -> Int {{ issue(37).read() }}"
+        );
         let errors = check(
             &consumer,
             &[
