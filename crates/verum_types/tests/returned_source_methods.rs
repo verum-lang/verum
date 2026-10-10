@@ -5,7 +5,7 @@ use verum_fast_parser::FastParser;
 use verum_modules::{
     ModuleId, ModuleInfo, ModulePath, ModuleRegistry, extract_exports_from_module,
 };
-use verum_types::TypeChecker;
+use verum_types::{Type, TypeChecker};
 
 const PROVIDER: &str = r#"
     public type Receipt is { value: Int };
@@ -18,7 +18,7 @@ const PROVIDER: &str = r#"
     public fn checked_issue() -> Result<Receipt, Text> { Result.Ok(issue()) }
 "#;
 
-fn check(consumer: &str, modules: &[(&str, &str)]) -> List<Text> {
+fn check_with_checker(consumer: &str, modules: &[(&str, &str)]) -> (TypeChecker, List<Text>) {
     let mut checker = TypeChecker::new();
     checker.register_primitives();
     checker.set_current_cog("demo");
@@ -80,13 +80,17 @@ fn check(consumer: &str, modules: &[(&str, &str)]) -> List<Text> {
             .iter()
             .map(|error| Text::from(format!("{error:?}"))),
     );
-    errors
+    (checker, errors)
+}
+
+fn check(consumer: &str, modules: &[(&str, &str)]) -> List<Text> {
+    check_with_checker(consumer, modules).1
 }
 
 fn assert_missing_method(errors: &List<Text>, method: &str) {
     assert_eq!(errors.len(), 1, "expected only the missing-method refusal: {errors:?}");
     assert!(
-        errors[0].contains("E400") && errors[0].contains(method),
+        errors[0].contains("MethodNotFound") && errors[0].contains(method),
         "wrong refusal: {errors:?}"
     );
 }
@@ -183,4 +187,28 @@ fn owner_local_public_method_can_call_its_private_helper() {
         &[],
     );
     assert!(errors.is_empty(), "{errors:?}");
+}
+
+#[test]
+fn source_function_return_keeps_the_declaring_owner_without_a_type_mount() {
+    for consumer in [
+        "mount demo.provider.issue;",
+        "mount demo.other.Receipt; mount demo.provider.issue;",
+    ] {
+        let other = "public type Receipt is { value: Bool };";
+        for reverse in [false, true] {
+            let modules = if reverse {
+                [("demo.other", other), ("demo.provider", PROVIDER)]
+            } else {
+                [("demo.provider", PROVIDER), ("demo.other", other)]
+            };
+            let (mut checker, errors) = check_with_checker(consumer, &modules);
+            assert!(errors.is_empty(), "{errors:?}");
+            let signature = &checker.context_mut().env.lookup("issue").expect("mounted function").ty;
+            let Type::Function { return_type, .. } = signature else {
+                panic!("not a function: {signature:?}");
+            };
+            assert_eq!(return_type.to_text(), "demo.provider.Receipt", "reverse={reverse}; {consumer}: {signature:?}");
+        }
+    }
 }
