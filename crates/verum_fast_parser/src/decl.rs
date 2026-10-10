@@ -2371,8 +2371,30 @@ impl<'a> RecursiveParser<'a> {
             return Err(ParseError::missing_type_is(self.stream.current_span()));
         };
 
-        // Type body - for alias syntax, the RHS is treated as an alias
-        let body = if is_alias_syntax {
+        // A bare parameter belonging to this declaration is already a known
+        // type. Classify it here while the binding and body tokens are both
+        // available, rather than treating `Identity<T> is T` as a marker sum
+        // or adding T to the module-wide alias-normalization namespace.
+        // Only the bare form is ambiguous: a leading pipe, payload or another
+        // variant keeps its existing meaning. Value parameters are not types.
+        let is_parameter_alias =
+            matches!(self.stream.peek_nth(1).map(|token| &token.kind), Some(TokenKind::Semicolon))
+                && match self.stream.peek_kind() {
+                    Some(TokenKind::Ident(target)) => generics.iter().any(|parameter| {
+                        match &parameter.kind {
+                            verum_ast::ty::GenericParamKind::Type { name, .. }
+                            | verum_ast::ty::GenericParamKind::HigherKinded { name, .. }
+                            | verum_ast::ty::GenericParamKind::KindAnnotated { name, .. } => {
+                                name.name == *target
+                            }
+                            _ => false,
+                        }
+                    }),
+                    _ => false,
+                };
+
+        // Type body - for alias syntax, the RHS is treated as an alias.
+        let body = if is_alias_syntax || is_parameter_alias {
             // Parse the aliased type
             let aliased_type = self.parse_type()?;
             // Quotient type (T1-T): `type Q = T / relation;`
