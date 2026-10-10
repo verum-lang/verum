@@ -175,3 +175,12 @@ fn direct_type_mount_cannot_expose_a_private_method() {
     );
     assert_missing_method(&errors, "hidden");
 }
+
+#[test]
+fn owner_local_public_method_can_call_its_private_helper() {
+    let errors = check(
+        "type Receipt is { value: Int }; implement Receipt { private fn hidden(&self) -> Int { self.value } public fn read(&self) -> Int { self.hidden() } } fn probe(value: Receipt) -> Int { value.read() }",
+        &[],
+    );
+    assert!(errors.is_empty(), "{errors:?}");
+}
