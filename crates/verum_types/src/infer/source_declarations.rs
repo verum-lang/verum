@@ -7,6 +7,20 @@ use verum_common::{Set, Shared, Text};
 use verum_modules::{ModuleInfo, ModulePath, visibility::VisibilityChecker};
 
 impl TypeChecker {
+    /// Local declaration authority is independent of whether an importer may
+    /// name the type. A public function may return a privately declared type.
+    pub(super) fn local_source_type_declaration(
+        ast: &verum_ast::Module,
+        name: &str,
+    ) -> Option<verum_ast::TypeDecl> {
+        ast.items.iter().find_map(|item| match &item.kind {
+            verum_ast::ItemKind::Type(declaration) if declaration.name.name.as_str() == name => {
+                Some(declaration.clone())
+            }
+            _ => None,
+        })
+    }
+
     /// An imported signature belongs to the declaring file, including its
     /// private mounts. Re-export targets still need their own public authority.
     pub(super) fn resolve_declaring_source_type(&mut self, name: &str, span: Span) -> Result<Type> {
@@ -75,7 +89,7 @@ impl TypeChecker {
     pub(super) fn source_receiver_declaration(
         &self,
         receiver: &Type,
-    ) -> Option<(Shared<ModuleInfo>, Text)> {
+    ) -> Option<(Shared<ModuleInfo>, verum_ast::TypeDecl)> {
         let key = self.get_type_name(receiver)?;
         let (owner, name) = key.rsplit_once('.')?;
         let registry = self.module_registry.read();
@@ -83,14 +97,15 @@ impl TypeChecker {
         if module.path.to_string() != owner {
             return None;
         }
-        self.find_type_declaration_in_module(&module.ast, name)?;
-        Some((module, name.into()))
+        let declaration = Self::local_source_type_declaration(&module.ast, name)?;
+        Some((module, declaration))
     }
 
     pub(super) fn load_source_receiver_methods(&mut self, receiver: &Type) -> Result<()> {
-        let Some((module, name)) = self.source_receiver_declaration(receiver) else {
+        let Some((module, declaration)) = self.source_receiver_declaration(receiver) else {
             return Ok(());
         };
+        let name = declaration.name.name;
         let owner = module.path.to_string();
         let key: Text = format!("{owner}.{name}").into();
         if !self.loaded_source_receiver_methods.insert(key.clone()) {
@@ -115,9 +130,10 @@ impl TypeChecker {
         method: &str,
         span: Span,
     ) -> Result<()> {
-        let Some((module, name)) = self.source_receiver_declaration(receiver) else {
+        let Some((module, declaration)) = self.source_receiver_declaration(receiver) else {
             return Ok(());
         };
+        let name = declaration.name.name;
         let caller = ModulePath::from_str(self.current_module_path.as_str());
         let visibility = VisibilityChecker::new();
         for implementation in self.find_impl_blocks_for_type(&module.ast, name.as_str()) {

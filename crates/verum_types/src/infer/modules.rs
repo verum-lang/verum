@@ -5840,8 +5840,10 @@ impl TypeChecker {
         // );
 
         let saved_module_path = self.current_module_path.clone();
+        let saved_source_scope = self.resolving_source_signature;
         if let Some(path) = source_module_path {
             self.set_current_module_path(verum_common::Text::from(path));
+            self.resolving_source_signature = true;
         }
 
         let impl_blocks = self.find_impl_blocks_for_type(ast, type_name);
@@ -6513,6 +6515,7 @@ impl TypeChecker {
         // Restore the checker's module path so imports don't leak
         // the source module into surrounding scope.
         self.set_current_module_path(saved_module_path);
+        self.resolving_source_signature = saved_source_scope;
         Ok(())
     }
 
@@ -7412,7 +7415,12 @@ impl TypeChecker {
         }
 
         // First, try to find the type declaration directly in this module
-        if let Some(decl) = self.find_type_declaration_in_module(ast, type_name) {
+        let local_declaration = if allow_local_mounts {
+            Self::local_source_type_declaration(ast, type_name)
+        } else {
+            self.find_type_declaration_in_module(ast, type_name)
+        };
+        if let Some(decl) = local_declaration {
             return Some((decl, current_module_path.clone()));
         }
 
@@ -8493,6 +8501,8 @@ impl TypeChecker {
                                     &module_segments,
                                     current_module_path.as_str(),
                                 ))
+                            } else if registry.get_by_path(&module_path).is_some() {
+                                Some(module_path)
                             } else if !module_path.is_empty() {
                                 // Bare path — resolve as submodule of current module
                                 Some(format!("{}.{}", current_module_path, module_path))
@@ -8526,6 +8536,8 @@ impl TypeChecker {
                                 &module_segments,
                                 current_module_path.as_str(),
                             ))
+                        } else if registry.get_by_path(&module_path).is_some() {
+                            Some(module_path)
                         } else if !module_path.is_empty() {
                             // Bare path like `arithmetic` in `std.intrinsics` means submodule
                             // `std.intrinsics.arithmetic`
@@ -8588,6 +8600,8 @@ impl TypeChecker {
                                     &module_segments,
                                     current_module_path.as_str(),
                                 ))
+                            } else if registry.get_by_path(&module_path).is_some() {
+                                Some(module_path)
                             } else if !module_path.is_empty() {
                                 // Bare path — resolve as submodule of current module
                                 Some(format!("{}.{}", current_module_path, module_path))
