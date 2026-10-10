@@ -133,6 +133,10 @@ fn acquire_bake_lock(lock_path: &std::path::Path) -> bool {
 }
 
 pub(crate) fn main() {
+    // Policy-only environment changes must rerun this script even when its
+    // source, output paths and archive checksum are unchanged.
+    println!("cargo:rerun-if-env-changed=VERUM_NO_AUTO_PRECOMPILE");
+    println!("cargo:rerun-if-env-changed=DOCS_RS");
     let out_dir = env::var("OUT_DIR").unwrap();
     let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
 
