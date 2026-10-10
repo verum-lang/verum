@@ -1,0 +1,427 @@
+{
+  "task": "T1706",
+  "linked_residual": "T1710",
+  "source_commit": "eb623b3e8196ab8da8530799950707d32945c110",
+  "production_unchanged_from": "3c99c5e9b02b10254eb7df20f37e4cd0455013a5",
+  "production_paths_compared": [
+    "crates/verum_vbc/src",
+    "crates/verum_codegen/src",
+    "crates/verum_compiler/build.rs"
+  ],
+  "original_gate": "docs/architecture/evidence/signed-array-elements/library-native-gates/manifest.json",
+  "build_failure": {
+    "source": "e2f266c9a28ca9a7eb2ab926354e70ccacc3ff95",
+    "wall_seconds": 39.301,
+    "status": "Compilation failed before any test or executable: semantic Text.lines returns List<Text>; .any required an explicit .iter(). The one-line test-only correction is retained separately."
+  },
+  "corrected_gate": {
+    "result": [
+      "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 32 filtered out; finished in 0.01s",
+      "test result: FAILED. 32 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.17s"
+    ],
+    "wall_seconds": 40.586,
+    "strict_child_cases": 16,
+    "strict_child_completion_marker": "T1706 strict SextI controls completed: 16",
+    "status": "Completed 33 outer controls: 32 pass and the active T1710 direct List-payload residual fails on source and decoded wire. No ignores or repeated execution. The isolated strict-codegen child completes exactly one selected test covering 16 malformed cases."
+  },
+  "harness_changes": [
+    "Track the actual verum_os_alloc backing range used by native List storage; verify interior offsets, extent and alignment against retained owned allocations before reading Rust slices.",
+    "Intercept verum_dealloc with its actual (pointer, size) void ABI and fail if any non-null backing release reaches this bounded fixed-capacity fixture; owned test buffers outlive JIT execution. No allocator-lifecycle acceptance.",
+    "Test malformed SextI refusal under the existing isolated strict-codegen contract; require its exact completion marker and one-test summary. Default lenient module fallback remains outside this refusal claim."
+  ],
+  "source_at_commit_hashes_verified": 902,
+  "runner_sha256": "7e34f66205be53bd20ca004d27d336d1e924a1ccf916c3a63cb07edd59800d66",
+  "raw_files": {
+    "build-failure/result.json": {
+      "path": "docs/architecture/evidence/signed-array-elements/native-harness-correction/build-failure/result.json.gz",
+      "raw_sha256": "a06156b6541291e5264e2050c4d4b820f0201f861f9c81be3c4ba027cc614a59",
+      "gzip_sha256": "54066410520b093691c3d1d6103abeed6bfea6b02a7b3fd06ee4e5020eae158f"
+    },
+    "build-failure/started.json": {
+      "path": "docs/architecture/evidence/signed-array-elements/native-harness-correction/build-failure/started.json.gz",
+      "raw_sha256": "05ff03d5a19dd5fa843018a720a31893f69f3f83af419b35130e4a11732cb03e",
+      "gzip_sha256": "b49fe3e3c830593e2e6c27071062a18e7cf583e39e43fdaed3b49e1049d301bc"
+    },
+    "build-failure/process.json": {
+      "path": "docs/architecture/evidence/signed-array-elements/native-harness-correction/build-failure/process.json.gz",
+      "raw_sha256": "9b2a5f5bce5093af417e8871f3673226f31c4a0a0da80c5897495c45a424fc24",
+      "gzip_sha256": "3dc30a821028c2f9fa2fb92a72d25f87f5f146df44b3cbcdbd8a930d629b615b"
+    },
+    "build-failure/cargo.jsonl": {
+      "path": "docs/architecture/evidence/signed-array-elements/native-harness-correction/build-failure/cargo.jsonl.gz",
+      "raw_sha256": "e9f324efbce34b2b9f69174993c6f9daa7e266f23c942d9016d35475e88385aa",
+      "gzip_sha256": "7bb07684dd107d6cb3657037d742d4e6cd616a523448e52a60131e0b73b15772"
+    },
+    "build-failure/stderr.log": {
+      "path": "docs/architecture/evidence/signed-array-elements/native-harness-correction/build-failure/stderr.log.gz",
+      "raw_sha256": "7923222c09bdc82eb52d4c0cd94407d047f00e74a0dffdb2a665140d75993411",
+      "gzip_sha256": "ad40273ca2c676d95ae6b20312f79adacf01d4ce57f0c44848459b948d2a16fe"
+    },
+    "corrected/result.json": {
+      "path": "docs/architecture/evidence/signed-array-elements/native-harness-correction/corrected/result.json.gz",
+      "raw_sha256": "8d65eafa4b1314624a7106fb6111eebc58ab7158b14cac0ffbc370d5fea014a6",
+      "gzip_sha256": "f349befc0794341e8297804cfefcdaf193fc613968320c1173dc2aa92d5ab779"
+    },
+    "corrected/started.json": {
+      "path": "docs/architecture/evidence/signed-array-elements/native-harness-correction/corrected/started.json.gz",
+      "raw_sha256": "f34f662fad5baccccea23351f285cb8abd47a370d0ca2b52d151a5326902d4bc",
+      "gzip_sha256": "dbc56500e7325749dfcf709f983bb453607b61203e1b63bf90d6536601d8bd3f"
+    },
+    "corrected/process.json": {
+      "path": "docs/architecture/evidence/signed-array-elements/native-harness-correction/corrected/process.json.gz",
+      "raw_sha256": "1868de551c9d031bb37c6bfd523c1a5e4bf16c49f14b66f82750f54a9ca44a90",
+      "gzip_sha256": "c6ca22a6c41845ef8e8245367564d4dcd3b33ec67d7d14adf45515fe0d652094"
+    },
+    "corrected/cargo.jsonl": {
+      "path": "docs/architecture/evidence/signed-array-elements/native-harness-correction/corrected/cargo.jsonl.gz",
+      "raw_sha256": "e8838aac49dc22e8896a97b59ca37c341ee22869240e6b1b68d31340ae4794fc",
+      "gzip_sha256": "664f7f7b653723d65b68599604af8c9389e24ac9a7c5b883e0761f6da4365a6c"
+    },
+    "corrected/stderr.log": {
+      "path": "docs/architecture/evidence/signed-array-elements/native-harness-correction/corrected/stderr.log.gz",
+      "raw_sha256": "9babc96faec286bfdb2b1b881f96a7a55e4ab1439a6c58ef1e0723b236cb1302",
+      "gzip_sha256": "db7a132e993b56bb63a9dbfe3905ac764868c7eec56374f86b5bfa5a5298fb49"
+    },
+    "corrected/ir/native_actual_packed_byte_array_return-source.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/native-harness-correction/corrected/ir/native_actual_packed_byte_array_return-source.ll.gz",
+      "raw_sha256": "f6f5f0da9949a79e6a7df0771660d7a756deeb9beed5d75da7fd5eea78eef328",
+      "gzip_sha256": "258fa8563c2b9621bc54d2505012a01fcceaab8af1e8b23ed821ffaf309b516d"
+    },
+    "corrected/ir/native_actual_packed_byte_array_return-wire.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/native-harness-correction/corrected/ir/native_actual_packed_byte_array_return-wire.ll.gz",
+      "raw_sha256": "f6f5f0da9949a79e6a7df0771660d7a756deeb9beed5d75da7fd5eea78eef328",
+      "gzip_sha256": "258fa8563c2b9621bc54d2505012a01fcceaab8af1e8b23ed821ffaf309b516d"
+    },
+    "corrected/ir/native_actual_packed_byte_list_return-source.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/native-harness-correction/corrected/ir/native_actual_packed_byte_list_return-source.ll.gz",
+      "raw_sha256": "6fd29c9c2b1723e046a0f764c12ab11a973ff7214a54ebb854625842522f42a9",
+      "gzip_sha256": "65a6d5ef542888fdd29c4c65699254068bdb7f38c5fa57dea8a87307d69b4f98"
+    },
+    "corrected/ir/native_actual_packed_byte_list_return-wire.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/native-harness-correction/corrected/ir/native_actual_packed_byte_list_return-wire.ll.gz",
+      "raw_sha256": "6fd29c9c2b1723e046a0f764c12ab11a973ff7214a54ebb854625842522f42a9",
+      "gzip_sha256": "65a6d5ef542888fdd29c4c65699254068bdb7f38c5fa57dea8a87307d69b4f98"
+    },
+    "corrected/ir/native_actual_packed_byte_local-source.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/native-harness-correction/corrected/ir/native_actual_packed_byte_local-source.ll.gz",
+      "raw_sha256": "46c461d368393cce2bbe996770e8d948e8ef597b49524288e7c4ad51084dd868",
+      "gzip_sha256": "08becd2ed9bf1461455f3e3f5b268ec7ac701ff959c8674c99160903b053de3d"
+    },
+    "corrected/ir/native_actual_packed_byte_local-wire.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/native-harness-correction/corrected/ir/native_actual_packed_byte_local-wire.ll.gz",
+      "raw_sha256": "46c461d368393cce2bbe996770e8d948e8ef597b49524288e7c4ad51084dd868",
+      "gzip_sha256": "08becd2ed9bf1461455f3e3f5b268ec7ac701ff959c8674c99160903b053de3d"
+    },
+    "corrected/ir/native_existing_sext_uses_width_bytes_after_canonical_wide_registers-source.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/native-harness-correction/corrected/ir/native_existing_sext_uses_width_bytes_after_canonical_wide_registers-source.ll.gz",
+      "raw_sha256": "fc219732e0ad03d4fe8e351cf7b5e4fcc239ceb675f3a2da5b21f017356532e1",
+      "gzip_sha256": "3de3a428e5d8ea88c48686046ad353bb760de9a1668e4d464b96664a1bafa9dd"
+    },
+    "corrected/ir/native_existing_sext_uses_width_bytes_after_canonical_wide_registers-wire.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/native-harness-correction/corrected/ir/native_existing_sext_uses_width_bytes_after_canonical_wide_registers-wire.ll.gz",
+      "raw_sha256": "fc219732e0ad03d4fe8e351cf7b5e4fcc239ceb675f3a2da5b21f017356532e1",
+      "gzip_sha256": "3de3a428e5d8ea88c48686046ad353bb760de9a1668e4d464b96664a1bafa9dd"
+    },
+    "corrected/ir/native_packed_signed_alias_array_return-source.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/native-harness-correction/corrected/ir/native_packed_signed_alias_array_return-source.ll.gz",
+      "raw_sha256": "740cb4ad6c1ec5c07ecc13ebc8677e61e7795b39bfe088aa32726c853aecb5e8",
+      "gzip_sha256": "108897b63c208430bdc387fae68621ed3a14e2c7344135f705f078b62f54c6e8"
+    },
+    "corrected/ir/native_packed_signed_alias_array_return-wire.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/native-harness-correction/corrected/ir/native_packed_signed_alias_array_return-wire.ll.gz",
+      "raw_sha256": "740cb4ad6c1ec5c07ecc13ebc8677e61e7795b39bfe088aa32726c853aecb5e8",
+      "gzip_sha256": "108897b63c208430bdc387fae68621ed3a14e2c7344135f705f078b62f54c6e8"
+    },
+    "corrected/ir/native_packed_signed_alias_list_has_signed_payload-source.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/native-harness-correction/corrected/ir/native_packed_signed_alias_list_has_signed_payload-source.ll.gz",
+      "raw_sha256": "79d4b365348505212ba6c749850dc33a8e1ef55dd6c1c540d272e814b04958dd",
+      "gzip_sha256": "63ff5ca86908191709b2dbe48b51ebd185475e95b5e1a2acb7c896a39d3ebf7f"
+    },
+    "corrected/ir/native_packed_signed_alias_list_has_signed_payload-wire.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/native-harness-correction/corrected/ir/native_packed_signed_alias_list_has_signed_payload-wire.ll.gz",
+      "raw_sha256": "79d4b365348505212ba6c749850dc33a8e1ef55dd6c1c540d272e814b04958dd",
+      "gzip_sha256": "63ff5ca86908191709b2dbe48b51ebd185475e95b5e1a2acb7c896a39d3ebf7f"
+    },
+    "corrected/ir/native_packed_signed_alias_list_return-source.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/native-harness-correction/corrected/ir/native_packed_signed_alias_list_return-source.ll.gz",
+      "raw_sha256": "b2fac9d757a3ff4a3e6c45f664e4c858f0e88e30895707f186523891a2d0e9e4",
+      "gzip_sha256": "495975f8b43195a3e376f321e13b8c86fd81b4a7c72506e7de41b77c4f969f46"
+    },
+    "corrected/ir/native_packed_signed_alias_list_return-wire.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/native-harness-correction/corrected/ir/native_packed_signed_alias_list_return-wire.ll.gz",
+      "raw_sha256": "b2fac9d757a3ff4a3e6c45f664e4c858f0e88e30895707f186523891a2d0e9e4",
+      "gzip_sha256": "495975f8b43195a3e376f321e13b8c86fd81b4a7c72506e7de41b77c4f969f46"
+    },
+    "corrected/ir/native_packed_signed_byte_list_has_signed_payload-source.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/native-harness-correction/corrected/ir/native_packed_signed_byte_list_has_signed_payload-source.ll.gz",
+      "raw_sha256": "e84166ea5a03de04f7653b5eb54a986e344ca0ab9ef1fdf7e4bca26725b420f0",
+      "gzip_sha256": "243cc440d1e0d806505f41e68c1e305c3a4dd9e55a3cd8b66af3ccb9695f6248"
+    },
+    "corrected/ir/native_packed_signed_byte_list_has_signed_payload-wire.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/native-harness-correction/corrected/ir/native_packed_signed_byte_list_has_signed_payload-wire.ll.gz",
+      "raw_sha256": "e84166ea5a03de04f7653b5eb54a986e344ca0ab9ef1fdf7e4bca26725b420f0",
+      "gzip_sha256": "243cc440d1e0d806505f41e68c1e305c3a4dd9e55a3cd8b66af3ccb9695f6248"
+    },
+    "corrected/ir/native_packed_signed_short_list_has_signed_payload-source.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/native-harness-correction/corrected/ir/native_packed_signed_short_list_has_signed_payload-source.ll.gz",
+      "raw_sha256": "79d4b365348505212ba6c749850dc33a8e1ef55dd6c1c540d272e814b04958dd",
+      "gzip_sha256": "63ff5ca86908191709b2dbe48b51ebd185475e95b5e1a2acb7c896a39d3ebf7f"
+    },
+    "corrected/ir/native_packed_signed_short_list_has_signed_payload-wire.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/native-harness-correction/corrected/ir/native_packed_signed_short_list_has_signed_payload-wire.ll.gz",
+      "raw_sha256": "79d4b365348505212ba6c749850dc33a8e1ef55dd6c1c540d272e814b04958dd",
+      "gzip_sha256": "63ff5ca86908191709b2dbe48b51ebd185475e95b5e1a2acb7c896a39d3ebf7f"
+    },
+    "corrected/ir/native_packed_signed_word_list_has_signed_payload-source.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/native-harness-correction/corrected/ir/native_packed_signed_word_list_has_signed_payload-source.ll.gz",
+      "raw_sha256": "93054130393c999d78ba586fa0b4290e4806d7bc25ea9bbac13b70b2cb1717da",
+      "gzip_sha256": "96209bd7becbb780c15bd8b903cb96a2e92198cb51ecfe5e8008eb179f111d0c"
+    },
+    "corrected/ir/native_packed_signed_word_list_has_signed_payload-wire.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/native-harness-correction/corrected/ir/native_packed_signed_word_list_has_signed_payload-wire.ll.gz",
+      "raw_sha256": "93054130393c999d78ba586fa0b4290e4806d7bc25ea9bbac13b70b2cb1717da",
+      "gzip_sha256": "96209bd7becbb780c15bd8b903cb96a2e92198cb51ecfe5e8008eb179f111d0c"
+    },
+    "corrected/ir/native_packed_unsigned_alias_array_return-source.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/native-harness-correction/corrected/ir/native_packed_unsigned_alias_array_return-source.ll.gz",
+      "raw_sha256": "7c9c12490d5d3df8dd42c89f20463be09a5f26e29c04d1c3ab241f5aac73b6e7",
+      "gzip_sha256": "85eadb32c4ec8d5b89ccd6f5a04a543b347f107de422ba9c7920570a96cefb6f"
+    },
+    "corrected/ir/native_packed_unsigned_alias_array_return-wire.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/native-harness-correction/corrected/ir/native_packed_unsigned_alias_array_return-wire.ll.gz",
+      "raw_sha256": "7c9c12490d5d3df8dd42c89f20463be09a5f26e29c04d1c3ab241f5aac73b6e7",
+      "gzip_sha256": "85eadb32c4ec8d5b89ccd6f5a04a543b347f107de422ba9c7920570a96cefb6f"
+    },
+    "corrected/ir/native_packed_unsigned_alias_list_keeps_high_bit_payload-source.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/native-harness-correction/corrected/ir/native_packed_unsigned_alias_list_keeps_high_bit_payload-source.ll.gz",
+      "raw_sha256": "8b20e2eacb44b4a56b22b21bdc9e930c17ff69a1edd365cbcc530f15856794d9",
+      "gzip_sha256": "b683d2adde90eca26b218319cd65d51511acc7377913445cb9a732aec6e4d728"
+    },
+    "corrected/ir/native_packed_unsigned_alias_list_keeps_high_bit_payload-wire.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/native-harness-correction/corrected/ir/native_packed_unsigned_alias_list_keeps_high_bit_payload-wire.ll.gz",
+      "raw_sha256": "8b20e2eacb44b4a56b22b21bdc9e930c17ff69a1edd365cbcc530f15856794d9",
+      "gzip_sha256": "b683d2adde90eca26b218319cd65d51511acc7377913445cb9a732aec6e4d728"
+    },
+    "corrected/ir/native_packed_unsigned_alias_list_return-source.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/native-harness-correction/corrected/ir/native_packed_unsigned_alias_list_return-source.ll.gz",
+      "raw_sha256": "f66e5f1ca79a6305128422defe7cfa477561fdfcc86df18a366e3d93b0788c47",
+      "gzip_sha256": "56e7560b3992685b6d5ff191598f1618d3e0b7a7ad54de203648a69776c16cab"
+    },
+    "corrected/ir/native_packed_unsigned_alias_list_return-wire.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/native-harness-correction/corrected/ir/native_packed_unsigned_alias_list_return-wire.ll.gz",
+      "raw_sha256": "f66e5f1ca79a6305128422defe7cfa477561fdfcc86df18a366e3d93b0788c47",
+      "gzip_sha256": "56e7560b3992685b6d5ff191598f1618d3e0b7a7ad54de203648a69776c16cab"
+    },
+    "corrected/ir/native_signed_byte_array_return-source.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/native-harness-correction/corrected/ir/native_signed_byte_array_return-source.ll.gz",
+      "raw_sha256": "648fae6496581ec9a6be82e4a9244b09ceacda1b64b230f6b7a6e7e8fd8b5a3b",
+      "gzip_sha256": "e33f101f3ee645c9c84544f8380b40f01860bc9251f378b2862be07f2e039729"
+    },
+    "corrected/ir/native_signed_byte_array_return-wire.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/native-harness-correction/corrected/ir/native_signed_byte_array_return-wire.ll.gz",
+      "raw_sha256": "648fae6496581ec9a6be82e4a9244b09ceacda1b64b230f6b7a6e7e8fd8b5a3b",
+      "gzip_sha256": "e33f101f3ee645c9c84544f8380b40f01860bc9251f378b2862be07f2e039729"
+    },
+    "corrected/ir/native_signed_byte_list_return-source.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/native-harness-correction/corrected/ir/native_signed_byte_list_return-source.ll.gz",
+      "raw_sha256": "4d6e35995be063143771ad801c026a9639808ff027c9b12d892741afbdde0294",
+      "gzip_sha256": "1ebbead5f837cf9da5e2538c2c50c3004e4ad77d8363a6bb8b415f693ee38e5f"
+    },
+    "corrected/ir/native_signed_byte_list_return-wire.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/native-harness-correction/corrected/ir/native_signed_byte_list_return-wire.ll.gz",
+      "raw_sha256": "4d6e35995be063143771ad801c026a9639808ff027c9b12d892741afbdde0294",
+      "gzip_sha256": "1ebbead5f837cf9da5e2538c2c50c3004e4ad77d8363a6bb8b415f693ee38e5f"
+    },
+    "corrected/ir/native_signed_byte_local-source.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/native-harness-correction/corrected/ir/native_signed_byte_local-source.ll.gz",
+      "raw_sha256": "bcee82d214a130536c74abf8e4325286186cbaff01e2399a370edb3fe76c1b53",
+      "gzip_sha256": "909d4b75ad2d8fcab7d79b90deaa21290cef267d65999633d2465f87da979e86"
+    },
+    "corrected/ir/native_signed_byte_local-wire.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/native-harness-correction/corrected/ir/native_signed_byte_local-wire.ll.gz",
+      "raw_sha256": "bcee82d214a130536c74abf8e4325286186cbaff01e2399a370edb3fe76c1b53",
+      "gzip_sha256": "909d4b75ad2d8fcab7d79b90deaa21290cef267d65999633d2465f87da979e86"
+    },
+    "corrected/ir/native_signed_read_preserves_packed_proof_for_later_list_conversion-source.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/native-harness-correction/corrected/ir/native_signed_read_preserves_packed_proof_for_later_list_conversion-source.ll.gz",
+      "raw_sha256": "84c8e643c1131458dd01c0c25950e9d3fe79dfb80e68dcfda8d274568dd1b788",
+      "gzip_sha256": "e336414ed5fc2e0573ea9bdc79238473abf9a84dd1ce7b0df39f6970810382d8"
+    },
+    "corrected/ir/native_signed_read_preserves_packed_proof_for_later_list_conversion-wire.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/native-harness-correction/corrected/ir/native_signed_read_preserves_packed_proof_for_later_list_conversion-wire.ll.gz",
+      "raw_sha256": "84c8e643c1131458dd01c0c25950e9d3fe79dfb80e68dcfda8d274568dd1b788",
+      "gzip_sha256": "e336414ed5fc2e0573ea9bdc79238473abf9a84dd1ce7b0df39f6970810382d8"
+    },
+    "corrected/ir/native_signed_short_array_return-source.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/native-harness-correction/corrected/ir/native_signed_short_array_return-source.ll.gz",
+      "raw_sha256": "740cb4ad6c1ec5c07ecc13ebc8677e61e7795b39bfe088aa32726c853aecb5e8",
+      "gzip_sha256": "108897b63c208430bdc387fae68621ed3a14e2c7344135f705f078b62f54c6e8"
+    },
+    "corrected/ir/native_signed_short_array_return-wire.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/native-harness-correction/corrected/ir/native_signed_short_array_return-wire.ll.gz",
+      "raw_sha256": "740cb4ad6c1ec5c07ecc13ebc8677e61e7795b39bfe088aa32726c853aecb5e8",
+      "gzip_sha256": "108897b63c208430bdc387fae68621ed3a14e2c7344135f705f078b62f54c6e8"
+    },
+    "corrected/ir/native_signed_short_list_return-source.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/native-harness-correction/corrected/ir/native_signed_short_list_return-source.ll.gz",
+      "raw_sha256": "b2fac9d757a3ff4a3e6c45f664e4c858f0e88e30895707f186523891a2d0e9e4",
+      "gzip_sha256": "495975f8b43195a3e376f321e13b8c86fd81b4a7c72506e7de41b77c4f969f46"
+    },
+    "corrected/ir/native_signed_short_list_return-wire.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/native-harness-correction/corrected/ir/native_signed_short_list_return-wire.ll.gz",
+      "raw_sha256": "b2fac9d757a3ff4a3e6c45f664e4c858f0e88e30895707f186523891a2d0e9e4",
+      "gzip_sha256": "495975f8b43195a3e376f321e13b8c86fd81b4a7c72506e7de41b77c4f969f46"
+    },
+    "corrected/ir/native_signed_short_local-source.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/native-harness-correction/corrected/ir/native_signed_short_local-source.ll.gz",
+      "raw_sha256": "552f42d2611845dce77c0e93548acee0df99ad3bc4008cb3b4f63d87e241ec0f",
+      "gzip_sha256": "956effa2cc6d9f526043ed35232c7b2fdf38c0c72bed1096b3e7a9f7d4be8f24"
+    },
+    "corrected/ir/native_signed_short_local-wire.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/native-harness-correction/corrected/ir/native_signed_short_local-wire.ll.gz",
+      "raw_sha256": "552f42d2611845dce77c0e93548acee0df99ad3bc4008cb3b4f63d87e241ec0f",
+      "gzip_sha256": "956effa2cc6d9f526043ed35232c7b2fdf38c0c72bed1096b3e7a9f7d4be8f24"
+    },
+    "corrected/ir/native_signed_word_array_return-source.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/native-harness-correction/corrected/ir/native_signed_word_array_return-source.ll.gz",
+      "raw_sha256": "75a0d2215adac6601f4cc0a591d20ba2a97d39d5419c75da1570f8140c43e84c",
+      "gzip_sha256": "99e5abdeed76fa1ae3e02b26ad6ffc08872b07851ca4c992d558a6ec0268ae0f"
+    },
+    "corrected/ir/native_signed_word_array_return-wire.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/native-harness-correction/corrected/ir/native_signed_word_array_return-wire.ll.gz",
+      "raw_sha256": "75a0d2215adac6601f4cc0a591d20ba2a97d39d5419c75da1570f8140c43e84c",
+      "gzip_sha256": "99e5abdeed76fa1ae3e02b26ad6ffc08872b07851ca4c992d558a6ec0268ae0f"
+    },
+    "corrected/ir/native_signed_word_list_return-source.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/native-harness-correction/corrected/ir/native_signed_word_list_return-source.ll.gz",
+      "raw_sha256": "ba34e2e0d18fc9e8214a8a79aef869a305e49019ddd06915a74921315a5e2f3c",
+      "gzip_sha256": "b23a62d516fa5caf6e57aa36bec9913d03b2ed09a2c671f1f923155dc613bb91"
+    },
+    "corrected/ir/native_signed_word_list_return-wire.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/native-harness-correction/corrected/ir/native_signed_word_list_return-wire.ll.gz",
+      "raw_sha256": "ba34e2e0d18fc9e8214a8a79aef869a305e49019ddd06915a74921315a5e2f3c",
+      "gzip_sha256": "b23a62d516fa5caf6e57aa36bec9913d03b2ed09a2c671f1f923155dc613bb91"
+    },
+    "corrected/ir/native_signed_word_local-source.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/native-harness-correction/corrected/ir/native_signed_word_local-source.ll.gz",
+      "raw_sha256": "f560d47ba6a5fcacfb2dadb4c176e8eab456b8eb174a058743d75b10e2fde4dd",
+      "gzip_sha256": "e5c93996ebc20a70d523428a611bb0eabb0295d5c44c9aad9cb4592f4cc62b82"
+    },
+    "corrected/ir/native_signed_word_local-wire.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/native-harness-correction/corrected/ir/native_signed_word_local-wire.ll.gz",
+      "raw_sha256": "f560d47ba6a5fcacfb2dadb4c176e8eab456b8eb174a058743d75b10e2fde4dd",
+      "gzip_sha256": "e5c93996ebc20a70d523428a611bb0eabb0295d5c44c9aad9cb4592f4cc62b82"
+    },
+    "corrected/ir/native_unsigned_byte_array_return-source.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/native-harness-correction/corrected/ir/native_unsigned_byte_array_return-source.ll.gz",
+      "raw_sha256": "b471b5db5e86d8b94f6fbdcd6e1bf14e53356565fe622c8b0d307770f77ebfa1",
+      "gzip_sha256": "60995477a8701098af3fe62030e083411897524399392c541a056a7a2efe5c34"
+    },
+    "corrected/ir/native_unsigned_byte_array_return-wire.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/native-harness-correction/corrected/ir/native_unsigned_byte_array_return-wire.ll.gz",
+      "raw_sha256": "b471b5db5e86d8b94f6fbdcd6e1bf14e53356565fe622c8b0d307770f77ebfa1",
+      "gzip_sha256": "60995477a8701098af3fe62030e083411897524399392c541a056a7a2efe5c34"
+    },
+    "corrected/ir/native_unsigned_byte_list_return-source.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/native-harness-correction/corrected/ir/native_unsigned_byte_list_return-source.ll.gz",
+      "raw_sha256": "6686949e509de6132d54f2fa7e293a6d8cae4227bf4aeef69196894764d0c76f",
+      "gzip_sha256": "ce9c91d489d1dcabb1d6c5cceda70456d8d264ca3548bcb42bd3bd80d231a708"
+    },
+    "corrected/ir/native_unsigned_byte_list_return-wire.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/native-harness-correction/corrected/ir/native_unsigned_byte_list_return-wire.ll.gz",
+      "raw_sha256": "6686949e509de6132d54f2fa7e293a6d8cae4227bf4aeef69196894764d0c76f",
+      "gzip_sha256": "ce9c91d489d1dcabb1d6c5cceda70456d8d264ca3548bcb42bd3bd80d231a708"
+    },
+    "corrected/ir/native_unsigned_byte_local-source.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/native-harness-correction/corrected/ir/native_unsigned_byte_local-source.ll.gz",
+      "raw_sha256": "f4fc17421326fad0e99d070c59ca47f999b7c2f7d05b24cca6f358b7f1492654",
+      "gzip_sha256": "b8fbc1aac633df4fb265b86f39bdc4a3bb344a869c3b95f825a83edc2e34997c"
+    },
+    "corrected/ir/native_unsigned_byte_local-wire.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/native-harness-correction/corrected/ir/native_unsigned_byte_local-wire.ll.gz",
+      "raw_sha256": "f4fc17421326fad0e99d070c59ca47f999b7c2f7d05b24cca6f358b7f1492654",
+      "gzip_sha256": "b8fbc1aac633df4fb265b86f39bdc4a3bb344a869c3b95f825a83edc2e34997c"
+    },
+    "corrected/ir/native_unsigned_short_array_return-source.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/native-harness-correction/corrected/ir/native_unsigned_short_array_return-source.ll.gz",
+      "raw_sha256": "7c9c12490d5d3df8dd42c89f20463be09a5f26e29c04d1c3ab241f5aac73b6e7",
+      "gzip_sha256": "85eadb32c4ec8d5b89ccd6f5a04a543b347f107de422ba9c7920570a96cefb6f"
+    },
+    "corrected/ir/native_unsigned_short_array_return-wire.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/native-harness-correction/corrected/ir/native_unsigned_short_array_return-wire.ll.gz",
+      "raw_sha256": "7c9c12490d5d3df8dd42c89f20463be09a5f26e29c04d1c3ab241f5aac73b6e7",
+      "gzip_sha256": "85eadb32c4ec8d5b89ccd6f5a04a543b347f107de422ba9c7920570a96cefb6f"
+    },
+    "corrected/ir/native_unsigned_short_list_return-source.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/native-harness-correction/corrected/ir/native_unsigned_short_list_return-source.ll.gz",
+      "raw_sha256": "f66e5f1ca79a6305128422defe7cfa477561fdfcc86df18a366e3d93b0788c47",
+      "gzip_sha256": "56e7560b3992685b6d5ff191598f1618d3e0b7a7ad54de203648a69776c16cab"
+    },
+    "corrected/ir/native_unsigned_short_list_return-wire.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/native-harness-correction/corrected/ir/native_unsigned_short_list_return-wire.ll.gz",
+      "raw_sha256": "f66e5f1ca79a6305128422defe7cfa477561fdfcc86df18a366e3d93b0788c47",
+      "gzip_sha256": "56e7560b3992685b6d5ff191598f1618d3e0b7a7ad54de203648a69776c16cab"
+    },
+    "corrected/ir/native_unsigned_short_local-source.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/native-harness-correction/corrected/ir/native_unsigned_short_local-source.ll.gz",
+      "raw_sha256": "ce89c462444a96391fe31e913e76dde8d9d0c0547c52161956aab0b21eb7797e",
+      "gzip_sha256": "164bc53a3fb4dd2fac7ee5489bc3e484c5b7cf92c47d1c78450db908cbbec05c"
+    },
+    "corrected/ir/native_unsigned_short_local-wire.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/native-harness-correction/corrected/ir/native_unsigned_short_local-wire.ll.gz",
+      "raw_sha256": "ce89c462444a96391fe31e913e76dde8d9d0c0547c52161956aab0b21eb7797e",
+      "gzip_sha256": "164bc53a3fb4dd2fac7ee5489bc3e484c5b7cf92c47d1c78450db908cbbec05c"
+    },
+    "corrected/ir/native_unsigned_word_array_return-source.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/native-harness-correction/corrected/ir/native_unsigned_word_array_return-source.ll.gz",
+      "raw_sha256": "14a4df3295259722fcc9399f315bf8b379790cafe861f5c517a5d4165e8ead8b",
+      "gzip_sha256": "22a5610554c44f378315ac8d4685eaf055e5693fca3cf5d7df2d37c88698f4e2"
+    },
+    "corrected/ir/native_unsigned_word_array_return-wire.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/native-harness-correction/corrected/ir/native_unsigned_word_array_return-wire.ll.gz",
+      "raw_sha256": "14a4df3295259722fcc9399f315bf8b379790cafe861f5c517a5d4165e8ead8b",
+      "gzip_sha256": "22a5610554c44f378315ac8d4685eaf055e5693fca3cf5d7df2d37c88698f4e2"
+    },
+    "corrected/ir/native_unsigned_word_list_return-source.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/native-harness-correction/corrected/ir/native_unsigned_word_list_return-source.ll.gz",
+      "raw_sha256": "1ebfb472af0a3d6bc903bdfe68a72f6735ee9187dfbd9e91cc20dc819fc0e4dd",
+      "gzip_sha256": "5f64f9d552099461d02f90c06712859618b72de458d372aa0ee2190bfcf6e090"
+    },
+    "corrected/ir/native_unsigned_word_list_return-wire.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/native-harness-correction/corrected/ir/native_unsigned_word_list_return-wire.ll.gz",
+      "raw_sha256": "1ebfb472af0a3d6bc903bdfe68a72f6735ee9187dfbd9e91cc20dc819fc0e4dd",
+      "gzip_sha256": "5f64f9d552099461d02f90c06712859618b72de458d372aa0ee2190bfcf6e090"
+    },
+    "corrected/ir/native_unsigned_word_local-source.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/native-harness-correction/corrected/ir/native_unsigned_word_local-source.ll.gz",
+      "raw_sha256": "605d7bb62e0eece6e5ce61befef57619b6f7976545ac6f53880cac2e73b3276c",
+      "gzip_sha256": "6a520758859bb98c4beee296ccf84ee97946a9f7b61a0bdd9d6ac1ae43f78bcb"
+    },
+    "corrected/ir/native_unsigned_word_local-wire.ll": {
+      "path": "docs/architecture/evidence/signed-array-elements/native-harness-correction/corrected/ir/native_unsigned_word_local-wire.ll.gz",
+      "raw_sha256": "605d7bb62e0eece6e5ce61befef57619b6f7976545ac6f53880cac2e73b3276c",
+      "gzip_sha256": "6a520758859bb98c4beee296ccf84ee97946a9f7b61a0bdd9d6ac1ae43f78bcb"
+    },
+    "abbreviated-source-preflight.json": {
+      "path": "docs/architecture/evidence/signed-array-elements/native-harness-correction/abbreviated-source-preflight.json.gz",
+      "raw_sha256": "8e04196653286b086df33c2afbf78296f7c3bd84ac3e6943966d74f39d1c90a5",
+      "gzip_sha256": "5dbefdcb20f9ca1f37586192d41fa94fbdaaf27069e2306b10be09b6fc073cf3"
+    },
+    "idle-selection.json": {
+      "path": "docs/architecture/evidence/signed-array-elements/native-harness-correction/idle-selection.json.gz",
+      "raw_sha256": "1dc67f4706435a5739817cc9889521a5e14175832b43567b7954a9a62b0576fe",
+      "gzip_sha256": "eef6c15698af5d7177901bee4beaff896dec28320316b34bce54a5543e8e67da"
+    },
+    "release-selection.json": {
+      "path": "docs/architecture/evidence/signed-array-elements/native-harness-correction/release-selection.json.gz",
+      "raw_sha256": "1dc67f4706435a5739817cc9889521a5e14175832b43567b7954a9a62b0576fe",
+      "gzip_sha256": "eef6c15698af5d7177901bee4beaff896dec28320316b34bce54a5543e8e67da"
+    }
+  },
+  "limits": [
+    "Original seven native failures and six full-library socket failures are preserved unchanged in the linked original gate.",
+    "The abbreviated-source preflight assertion stopped before Cargo and is preserved separately; the subsequent test-harness compile error also executed no tests.",
+    "No production repair, new bytecode format, ignored residual, ordinary CLI, AOT executable or whole-registry acceptance is claimed.",
+    "All five pinned native stdlib artifacts remain byte-identical; target release process selection is empty."
+  ]
+}
