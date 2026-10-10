@@ -211,15 +211,23 @@ fn bootstrap_dependency_keeps_canonical_text_identity() {
             .expect("import declared bootstrap dependency"),
         1
     );
+    codegen
+        .collect_unit_declarations(&[&ast])
+        .expect("collect bootstrap consumer");
     let imported = codegen
-        .compile_module(&ast)
+        .compile_function_bodies(&ast)
         .expect("compile bootstrap consumer");
     let record = text(&imported, Some(OWNER));
     assert_eq!(record.id, TypeId::TEXT);
     let relay = imported
         .functions
         .iter()
-        .find(|function| imported.get_string(function.name) == Some("consumer.relay"))
+        .find(|function| {
+            matches!(
+                imported.get_string(function.name),
+                Some("relay" | "consumer.relay")
+            )
+        })
         .expect("exact consumer function");
     assert_eq!(
         relay.return_type,
