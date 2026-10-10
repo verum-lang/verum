@@ -44,7 +44,36 @@ impl TypeChecker {
             if let Some(ty) = self.ctx.lookup_type(key.as_str()) {
                 return Ok(ty.clone());
             }
-            self.register_type_declaration_in_module(&declaration, owner.as_str())?;
+            // Loading a return type is not a mount of its lexical name or
+            // constructors. Keep qualified declaration metadata, while restoring
+            // this one pre-existing consumer binding on success and failure.
+            let local_name = declaration.name.name.clone();
+            let previous_type = self.ctx.type_defs.get(&local_name).cloned();
+            let previous_alias = self.ctx.type_aliases.get(&local_name).cloned();
+            let previous_unifier_alias = self.unifier.alias_binding(local_name.as_str());
+            self.ctx.enter_scope();
+            let registration =
+                self.register_type_declaration_in_module(&declaration, owner.as_str());
+            self.ctx.exit_scope();
+            match previous_type {
+                Some(ty) => {
+                    self.ctx.type_defs.insert(local_name.clone(), ty);
+                }
+                None => {
+                    self.ctx.type_defs.remove(&local_name);
+                }
+            }
+            match previous_alias {
+                Some(ty) => {
+                    self.ctx.type_aliases.insert(local_name.clone(), ty);
+                }
+                None => {
+                    self.ctx.type_aliases.remove(&local_name);
+                }
+            }
+            self.unifier
+                .restore_alias_binding(local_name, previous_unifier_alias);
+            registration?;
             return self
                 .ctx
                 .lookup_type(key.as_str())
