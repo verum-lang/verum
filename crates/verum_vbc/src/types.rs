@@ -1074,7 +1074,7 @@ impl TypeDescriptor {
         use verum_common::well_known_types::WellKnownType;
         let carrier = WellKnownType::Text;
         (self.kind == TypeKind::Record
-            && declared_name == carrier.name()
+            && declared_name == carrier.as_str()
             && declaring_owner == carrier.canonical_archive_modules().first().copied())
             .then_some(TypeId::TEXT)
     }
