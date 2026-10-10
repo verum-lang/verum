@@ -72,7 +72,10 @@ impl TypeChecker {
 
     /// Resolve only a nominal key whose exact source module declares the type.
     /// An umbrella spelling, unknown owner, or same-leaf sibling is not proof.
-    fn source_receiver_declaration(&self, receiver: &Type) -> Option<(Shared<ModuleInfo>, Text)> {
+    pub(super) fn source_receiver_declaration(
+        &self,
+        receiver: &Type,
+    ) -> Option<(Shared<ModuleInfo>, Text)> {
         let key = self.get_type_name(receiver)?;
         let (owner, name) = key.rsplit_once('.')?;
         let registry = self.module_registry.read();
