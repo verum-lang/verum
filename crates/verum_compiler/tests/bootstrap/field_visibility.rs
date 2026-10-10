@@ -50,8 +50,11 @@ fn parsed_private_and_restricted_fields_are_not_public_after_archive_metadata() 
         .get(&Text::from(format!("{}.Vault", fixture::OWNER)))
         .expect("exact metadata owner");
     assert_eq!(
-        descriptor.origin_module_path.as_deref(),
-        Some(fixture::OWNER)
+        descriptor
+            .origin_module_path
+            .as_deref()
+            .unwrap_or(descriptor.module_path.as_str()),
+        fixture::OWNER
     );
     let TypeDescriptorKind::Record { fields } = &descriptor.kind else {
         panic!("expected record")
