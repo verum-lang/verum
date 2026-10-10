@@ -37,11 +37,16 @@ pub use types::*;
 
 use crate::error::Result;
 
-/// Complete a source-cog tar archive before reporting its output path.
+/// Check tar termination, gzip completion and the final writer flush before
+/// reporting a source-cog output path. A flush is not a durable filesystem sync.
 pub(crate) fn finish_source_archive<W: std::io::Write>(
-    mut archive: tar::Builder<flate2::write::GzEncoder<W>>,
+    archive: tar::Builder<flate2::write::GzEncoder<W>>,
 ) -> std::io::Result<()> {
-    archive.finish()
+    // Builder::finish only emits tar end blocks. GzEncoder's Drop ignores
+    // compression/trailer failures, so both owned layers must finish explicitly.
+    let encoder = archive.into_inner()?;
+    let mut writer = encoder.finish()?;
+    writer.flush()
 }
 
 /// Default Verum cog registry — `https://vcogs.io`. Phase 13 build
