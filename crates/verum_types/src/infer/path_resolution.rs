@@ -144,6 +144,10 @@ impl TypeChecker {
             return Ok(ty.clone());
         }
 
+        if self.resolving_source_signature {
+            return self.resolve_declaring_source_type(name, span);
+        }
+
         // Check for import ambiguity first
         // Name resolution across modules: qualified paths, import disambiguation, re-exports, path resolution in imports — Import Ambiguity
         if let Some(sources) = self.imported_names.get(&verum_common::Text::from(name)) {

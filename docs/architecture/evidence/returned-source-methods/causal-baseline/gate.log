@@ -1,0 +1,53 @@
+   Compiling verum_error v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_error)
+warning: cvc5-sys@0.1.0: cvc5-sys: no linking mode configured. Enable feature `vendored` to build CVC5 from source, `system` to link system library, or set CVC5_ROOT environment variable.
+   Compiling verum_types v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_types)
+   Compiling verum_smt v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_smt)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 17.74s
+     Running tests/returned_source_methods.rs (/Users/taaliman/.tmp/verum-codex-01a10248-types/checker-target/debug/build/verum_types/8c420c42b7c4b5b4/out/returned_source_methods-8c420c42b7c4b5b4)
+
+running 8 tests
+test direct_type_mount_cannot_expose_a_private_method ... 
+thread 'direct_type_mount_cannot_expose_a_private_method' (6950953) panicked at crates/verum_types/tests/returned_source_methods.rs:87:5:
+assertion `left == right` failed: expected only the missing-method refusal: List { inner: [] }
+  left: 0
+ right: 1
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+test direct_type_mount_is_the_positive_control ... ok
+test foreign_same_leaf_receiver_does_not_acquire_another_owners_method ... 
+thread 'foreign_same_leaf_receiver_does_not_acquire_another_owners_method' (6950955) panicked at crates/verum_types/tests/returned_source_methods.rs:87:5:
+assertion `left == right` failed: expected only the missing-method refusal: List { inner: [] }
+  left: 0
+ right: 1
+FAILED
+test owner_local_public_method_can_call_its_private_helper ... ok
+test returned_public_receiver_has_methods_without_direct_type_mount ... 
+thread 'returned_public_receiver_has_methods_without_direct_type_mount' (6950957) panicked at crates/verum_types/tests/returned_source_methods.rs:100:5:
+List { inner: [Text { inner: "MethodNotFound { ty: Text { inner: \"Receipt\" }, method: Text { inner: \"read\" }, span: Span { start: 47, end: 61, file_id: FileId(1) }, did_you_mean: None, field_fn: None }" }] }
+FAILED
+test returned_receiver_cannot_call_a_private_method ... 
+thread 'returned_receiver_cannot_call_a_private_method' (6950958) panicked at crates/verum_types/tests/returned_source_methods.rs:88:5:
+wrong refusal: List { inner: [Text { inner: "MethodNotFound { ty: Text { inner: \"Receipt\" }, method: Text { inner: \"hidden\" }, span: Span { start: 47, end: 63, file_id: FileId(1) }, did_you_mean: None, field_fn: None }" }] }
+FAILED
+test returned_result_payload_has_methods_without_direct_payload_mount ... 
+thread 'returned_result_payload_has_methods_without_direct_payload_mount' (6950959) panicked at crates/verum_types/tests/returned_source_methods.rs:118:5:
+List { inner: [Text { inner: "MethodNotFound { ty: Text { inner: \"Receipt\" }, method: Text { inner: \"read\" }, span: Span { start: 109, end: 121, file_id: FileId(1) }, did_you_mean: None, field_fn: None }" }] }
+FAILED
+test returned_same_leaf_receivers_keep_their_declaring_methods_in_both_orders ... 
+thread 'returned_same_leaf_receivers_keep_their_declaring_methods_in_both_orders' (6950960) panicked at crates/verum_types/tests/returned_source_methods.rs:139:9:
+reverse=false: List { inner: [Text { inner: "MethodNotFound { ty: Text { inner: \"Receipt\" }, method: Text { inner: \"read\" }, span: Span { start: 96, end: 110, file_id: FileId(2) }, did_you_mean: None, field_fn: None }" }, Text { inner: "MethodNotFound { ty: Text { inner: \"Receipt\" }, method: Text { inner: \"read\" }, span: Span { start: 136, end: 151, file_id: FileId(2) }, did_you_mean: None, field_fn: None }" }] }
+FAILED
+
+failures:
+
+failures:
+    direct_type_mount_cannot_expose_a_private_method
+    foreign_same_leaf_receiver_does_not_acquire_another_owners_method
+    returned_public_receiver_has_methods_without_direct_type_mount
+    returned_receiver_cannot_call_a_private_method
+    returned_result_payload_has_methods_without_direct_payload_mount
+    returned_same_leaf_receivers_keep_their_declaring_methods_in_both_orders
+
+test result: FAILED. 2 passed; 6 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+error: test failed, to rerun pass `-p verum_types --test returned_source_methods`

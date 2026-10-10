@@ -1,0 +1,18 @@
+   Compiling verum_error v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_error)
+warning: cvc5-sys@0.1.0: cvc5-sys: no linking mode configured. Enable feature `vendored` to build CVC5 from source, `system` to link system library, or set CVC5_ROOT environment variable.
+   Compiling verum_types v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_types)
+   Compiling verum_smt v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_smt)
+error[E0599]: no method named `to_text` found for reference `&std::boxed::Box<verum_types::Type>` in the current scope
+   --> crates/verum_types/tests/returned_source_methods.rs:211:36
+    |
+211 |             assert_eq!(return_type.to_text(), "demo.provider.Receipt", "reverse={reverse}; {consumer}: {signature:?}");
+    |                                    ^^^^^^^ method not found in `&std::boxed::Box<verum_types::Type>`
+    |
+    = help: items from traits can only be used if the trait is in scope
+help: trait `ToText` which provides `to_text` is implemented but not in scope; perhaps you want to import it
+    |
+  2 + use verum_common::ToText;
+    |
+
+For more information about this error, try `rustc --explain E0599`.
+error: could not compile `verum_types` (test "returned_source_methods") due to 1 previous error

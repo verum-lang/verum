@@ -1,0 +1,23 @@
+
+running 1 test
+[task20] process_import: from='demo.main' tree=Path("Name(Ident { name: Text { inner: \"demo\" }, span: Span { start: 6, end: 10, file_id: FileId(4) } }).Name(Ident { name: Text { inner: \"other\" }, span: Span { start: 11, end: 16, file_id: FileId(4) } }).Name(Ident { name: Text { inner: \"Issued\" }, span: Span { start: 17, end: 23, file_id: FileId(4) } })")
+[task20] find_inline_module: path='demo.other.Issued' has_crate=false
+[task20] body entry: mod='demo.other' item='Issued'
+[task20] process_import: from='demo.main' tree=Path("Name(Ident { name: Text { inner: \"demo\" }, span: Span { start: 31, end: 35, file_id: FileId(4) } }).Name(Ident { name: Text { inner: \"factory\" }, span: Span { start: 36, end: 43, file_id: FileId(4) } }).Name(Ident { name: Text { inner: \"issue\" }, span: Span { start: 44, end: 49, file_id: FileId(4) } })")
+[task20] find_inline_module: path='demo.factory.issue' has_crate=false
+[task20] body entry: mod='demo.factory' item='issue'
+[task20] AST direct: mod='demo.factory' item='issue' type=Function { params: List { inner: [Var(TypeVar(17))] }, return_type: Named { path: Path { segments: [Name(Ident { name: Text { inner: "demo" }, span: Span { start: 19, end: 20, file_id: FileId(0) } }), Name(Ident { name: Text { inner: "model" }, span: Span { start: 19, end: 20, file_id: FileId(0) } }), Name(Ident { name: Text { inner: "Receipt" }, span: Span { start: 19, end: 20, file_id: FileId(0) } })], span: Span { start: 19, end: 20, file_id: FileId(0) } }, args: List { inner: [Var(TypeVar(17))] } }, contexts: None, type_params: List { inner: [TypeParam { name: Text { inner: "T" }, bounds: List { inner: [] }, default: None, variance: Invariant, is_meta: false, span: Span { start: 54, end: 55, file_id: FileId(1) } }] }, properties: None }
+[task20] check_import: tree=Path(3)
+[task20] find_inline_module: path='demo.other.Issued' has_crate=false
+[task20] process_import: from='demo.main' tree=Path("Name(Ident { name: Text { inner: \"demo\" }, span: Span { start: 6, end: 10, file_id: FileId(4) } }).Name(Ident { name: Text { inner: \"other\" }, span: Span { start: 11, end: 16, file_id: FileId(4) } }).Name(Ident { name: Text { inner: \"Issued\" }, span: Span { start: 17, end: 23, file_id: FileId(4) } })")
+[task20] find_inline_module: path='demo.other.Issued' has_crate=false
+[task20] body entry: mod='demo.other' item='Issued'
+[task20] check_import: tree=Path(3)
+[task20] find_inline_module: path='demo.factory.issue' has_crate=false
+[task20] process_import: from='demo.main' tree=Path("Name(Ident { name: Text { inner: \"demo\" }, span: Span { start: 31, end: 35, file_id: FileId(4) } }).Name(Ident { name: Text { inner: \"factory\" }, span: Span { start: 36, end: 43, file_id: FileId(4) } }).Name(Ident { name: Text { inner: \"issue\" }, span: Span { start: 44, end: 49, file_id: FileId(4) } })")
+[task20] find_inline_module: path='demo.factory.issue' has_crate=false
+[task20] body entry: mod='demo.factory' item='issue'
+[task20] AST direct: mod='demo.factory' item='issue' type=Function { params: List { inner: [Var(TypeVar(21))] }, return_type: Named { path: Path { segments: [Name(Ident { name: Text { inner: "demo" }, span: Span { start: 19, end: 20, file_id: FileId(0) } }), Name(Ident { name: Text { inner: "model" }, span: Span { start: 19, end: 20, file_id: FileId(0) } }), Name(Ident { name: Text { inner: "Receipt" }, span: Span { start: 19, end: 20, file_id: FileId(0) } })], span: Span { start: 19, end: 20, file_id: FileId(0) } }, args: List { inner: [Var(TypeVar(21))] } }, contexts: None, type_params: List { inner: [TypeParam { name: Text { inner: "T" }, bounds: List { inner: [] }, default: None, variance: Invariant, is_meta: false, span: Span { start: 54, end: 55, file_id: FileId(1) } }] }, properties: None }
+
+thread 'generic_return_uses_the_declaring_modules_import_alias' (7014991) has overflowed its stack
+fatal runtime error: stack overflow, aborting

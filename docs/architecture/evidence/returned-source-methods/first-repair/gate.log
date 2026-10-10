@@ -1,0 +1,31 @@
+   Compiling verum_error v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_error)
+warning: cvc5-sys@0.1.0: cvc5-sys: no linking mode configured. Enable feature `vendored` to build CVC5 from source, `system` to link system library, or set CVC5_ROOT environment variable.
+   Compiling verum_types v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_types)
+   Compiling verum_smt v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_smt)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 16.21s
+     Running tests/returned_source_methods.rs (/Users/taaliman/.tmp/verum-codex-01a10248-types/checker-target/debug/build/verum_types/8c420c42b7c4b5b4/out/returned_source_methods-8c420c42b7c4b5b4)
+
+running 10 tests
+test direct_type_mount_cannot_expose_a_private_method ... ok
+test direct_type_mount_is_the_positive_control ... ok
+test foreign_same_leaf_receiver_does_not_acquire_another_owners_method ... ok
+test generic_return_uses_the_declaring_modules_import_alias ... 
+thread 'generic_return_uses_the_declaring_modules_import_alias' (7009238) panicked at crates/verum_types/tests/returned_source_methods.rs:249:9:
+entry=demo.api: List { inner: [Text { inner: "UnboundVariable { name: Text { inner: \"issue\" }, span: Span { start: 67, end: 72, file_id: FileId(4) } }" }] }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+test owner_local_public_method_can_call_its_private_helper ... ok
+test returned_public_receiver_has_methods_without_direct_type_mount ... ok
+test returned_receiver_cannot_call_a_private_method ... ok
+test returned_result_payload_has_methods_without_direct_payload_mount ... ok
+test returned_same_leaf_receivers_keep_their_declaring_methods_in_both_orders ... ok
+test source_function_return_keeps_the_declaring_owner_without_a_type_mount ... ok
+
+failures:
+
+failures:
+    generic_return_uses_the_declaring_modules_import_alias
+
+test result: FAILED. 9 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+error: test failed, to rerun pass `-p verum_types --test returned_source_methods`

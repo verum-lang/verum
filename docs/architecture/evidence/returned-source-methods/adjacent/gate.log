@@ -1,0 +1,55 @@
+   Compiling verum_error v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_error)
+warning: cvc5-sys@0.1.0: cvc5-sys: no linking mode configured. Enable feature `vendored` to build CVC5 from source, `system` to link system library, or set CVC5_ROOT environment variable.
+   Compiling verum_types v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_types)
+   Compiling verum_smt v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_smt)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 18.05s
+     Running tests/cross_module_resolution_tests.rs (/Users/taaliman/.tmp/verum-codex-01a10248-types/checker-target/debug/build/verum_types/b0748417eaabeac7/out/cross_module_resolution_tests-b0748417eaabeac7)
+
+running 13 tests
+test test_associated_type_resolution ... ok
+test test_basic_cross_module_type_reference ... ok
+test test_circular_type_references ... ok
+test test_cross_module_protocol_implementation ... ok
+test test_cross_module_type_alias ... ok
+test test_generic_constraints_cross_module ... ok
+test test_generic_with_cross_module_parameters ... ok
+test test_performance_1000_resolutions ... ok
+test test_qualified_method_call ... ok
+test test_qualified_static_method ... ok
+test test_simple_qualified_path ... ok
+test test_type_alias_with_refinements ... ok
+test test_type_forwarding_reexport ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/impl_generics_carry_tests.rs (/Users/taaliman/.tmp/verum-codex-01a10248-types/checker-target/debug/build/verum_types/9980428a1d32b7cd/out/impl_generics_carry_tests-9980428a1d32b7cd)
+
+running 3 tests
+test impl_generic_names_round_trips ... ok
+test missing_impl_generic_names_defaults_empty ... ok
+test multi_param_carry_preserves_declaration_order ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/imported_variant_pattern_tests.rs (/Users/taaliman/.tmp/verum-codex-01a10248-types/checker-target/debug/build/verum_types/5c4a3f61cd1a5b03/out/imported_variant_pattern_tests-5c4a3f61cd1a5b03)
+
+running 16 tests
+test test_match_absolute_vs_relative_paths ... ok
+test test_match_deep_module_path_variant ... ok
+test test_match_imported_maybe_complete ... ok
+test test_match_imported_maybe_none ... ok
+test test_match_imported_maybe_some ... ok
+test test_match_imported_result_complete ... ok
+test test_match_imported_result_err ... ok
+test test_match_imported_result_ok ... ok
+test test_match_imported_variant_missing_payload ... ok
+test test_match_imported_variant_mixed_simple_paths ... ok
+test test_match_imported_variant_unknown_constructor ... ok
+test test_match_imported_variant_with_record_payload ... ok
+test test_match_imported_variant_wrong_payload_type ... ok
+test test_match_nested_imported_variants_complete ... ok
+test test_match_nested_imported_variants_ok_none ... ok
+test test_match_nested_imported_variants_ok_some ... ok
+
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+

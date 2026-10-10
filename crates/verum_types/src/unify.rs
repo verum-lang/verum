@@ -808,6 +808,28 @@ impl Unifier {
         self.type_alias_params.insert(alias_name, params);
     }
 
+    /// Preserve one lexical alias while a foreign declaration is registered.
+    /// Qualified alias keys are independent and remain available to its values.
+    pub(crate) fn alias_binding(&self, name: &str) -> (Option<Type>, Option<List<Text>>) {
+        let key = Text::from(name);
+        (self.type_aliases.get(&key).cloned(), self.type_alias_params.get(&key).cloned())
+    }
+
+    pub(crate) fn restore_alias_binding(
+        &mut self,
+        name: Text,
+        binding: (Option<Type>, Option<List<Text>>),
+    ) {
+        match binding.0 {
+            Some(target) => { self.type_aliases.insert(name.clone(), target); }
+            None => { self.type_aliases.remove(&name); }
+        }
+        match binding.1 {
+            Some(parameters) => { self.type_alias_params.insert(name, parameters); }
+            None => { self.type_alias_params.remove(&name); }
+        }
+    }
+
     /// Remove a type alias (used when user types override stdlib aliases)
     pub fn remove_type_alias(&mut self, alias_name: &str) {
         let key: Text = alias_name.into();
