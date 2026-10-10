@@ -1,0 +1,64 @@
+{
+  "task": "T1742",
+  "tested_source": "9d6725c61d8ef056c5e76a8c81fc46a658bc44d6",
+  "baseline_source": "82c39ac4b8e7c6082857b1f602c71f3c801ef5f9",
+  "runs": {
+    "guard-interruption": {
+      "result_path": "guard-interruption/result.json",
+      "result_sha256": "dfdc6c9112265dcfb9d0d280f7b84bc2a849fbc7eb0c5884200301f2e89d43d5",
+      "log_path": "guard-interruption/gate.log.gz",
+      "log_gzip_sha256": "a2600f70b7a3270c66b49d5a932048bd4fbd6d5304569a278bde60456e632426",
+      "log_uncompressed_sha256": "7fde3dd9494cbc9c5ebda8c0625a170e43e35965e1388aaf061b84077d59bbfd",
+      "log_uncompressed_bytes": 411583,
+      "runner_sha256": "4c108d5ffbac74829dd29c3283be9eb5a196b9ec00ec81312dffc11371982964",
+      "test_results": [],
+      "exit_code": -15,
+      "wall_seconds": 13.067
+    },
+    "causal-baseline": {
+      "result_path": "causal-baseline/result.json",
+      "result_sha256": "46db9a433aca5459c79e378e64d6fd93b87e1dd86e307c8eb128ed263933344b",
+      "log_path": "causal-baseline/gate.log.gz",
+      "log_gzip_sha256": "fccd2e73dfb090889dc357352566815c29c82db73ac1db595bd0513564440645",
+      "log_uncompressed_sha256": "fbcd686627b474cc108a33c466892542399e680734b1c947916a2bd83930ef25",
+      "log_uncompressed_bytes": 1608163,
+      "runner_sha256": "487cfe0de05edf073c4cf695a87ebd513e81876322e35bfdd8d07e1690650148",
+      "test_results": [
+        "test result: FAILED. 3 passed; 2 failed; 0 ignored; 0 measured; 898 filtered out; finished in 0.00s"
+      ],
+      "exit_code": 101,
+      "wall_seconds": 153.129
+    },
+    "fixed": {
+      "result_path": "fixed/result.json",
+      "result_sha256": "2ce29f2e7279dd6a00afa5936b2f52de1eedc2520de27e381bb1259466020795",
+      "log_path": "fixed/gate.log.gz",
+      "log_gzip_sha256": "217aaa662a499975293448190a6be08dfdadef01a88c912abef7841bc40685a4",
+      "log_uncompressed_sha256": "990cfeec5cec7382aa472d21c714b3ad827850688b632378ffed3de0b7c5c75e",
+      "log_uncompressed_bytes": 1515721,
+      "runner_sha256": "487cfe0de05edf073c4cf695a87ebd513e81876322e35bfdd8d07e1690650148",
+      "test_results": [
+        "test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 898 filtered out; finished in 0.01s"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 150.989
+    }
+  },
+  "fixture": {
+    "archive.vr": {
+      "retained": "producer-fixture/archive.tar.gz",
+      "sha256": "1641cd4640ea51391fe321386742faf05f6214164044341c25b1b86210917952",
+      "bytes": 313
+    },
+    "archive.tar": {
+      "retained": "producer-fixture/archive.tar",
+      "sha256": "725882b126da1685c512a7b98ef71ae1c0b85f17b740b0fd2ce0830eb505ba09",
+      "bytes": 5120
+    },
+    "expected.json": {
+      "retained": "producer-fixture/expected.json",
+      "sha256": "110347c80d95c1e40e34eaea5a9a0daad38f62a6130a875776ff392344dac5a9",
+      "bytes": 1068
+    }
+  }
+}
