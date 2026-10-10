@@ -498,5 +498,13 @@ pub(super) fn is_record_typed_as(state: &InterpreterState, v: Value, name: &str)
         .module
         .types
         .iter()
-        .any(|td| td.id == header.type_id && state.module.strings.get(td.name) == Some(name))
+        .any(|td| {
+            #[cfg(test)]
+            record_probe_tests::record_descriptor_visit();
+            td.id == header.type_id && state.module.strings.get(td.name) == Some(name)
+        })
 }
+
+#[cfg(test)]
+#[path = "../../../../tests/unit/record_probe_tests.rs"]
+mod record_probe_tests;
