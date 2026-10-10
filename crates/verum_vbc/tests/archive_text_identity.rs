@@ -115,7 +115,7 @@ fn assert_canonical(module: &VbcModule) {
 #[test]
 fn parsed_canonical_text_record_and_methods_keep_runtime_identity_after_import() {
     let source = declaration(OWNER);
-    assert_eq!(text(&source, Some(OWNER)).id, TypeId::TEXT);
+    // Source-local IDs are free to differ from the consumer runtime ABI.
     for source in [&source, &wire(&source)] {
         let imported = import(&[source]);
         assert_canonical(&imported);
@@ -187,4 +187,47 @@ fn bundle_name_without_declaring_owner_cannot_authorize_text_identity() {
         .for_each(|ty| ty.origin_module = None);
     let imported = wire(&import(&[&source]));
     assert_ne!(text(&imported, None).id, TypeId::TEXT);
+}
+
+#[test]
+fn archive_bundle_spelling_is_not_the_text_declaring_owner() {
+    let source = wire(&declaration("core.text"));
+    let imported = wire(&import(&[&source]));
+    assert_ne!(text(&imported, Some("core.text")).id, TypeId::TEXT);
+}
+
+#[test]
+fn bootstrap_dependency_keeps_canonical_text_identity() {
+    let source = wire(&declaration(OWNER));
+    let ast = Parser::new(
+        "module consumer; mount core.text.text.Text; public fn relay(value: Text) -> Text { value }",
+    )
+    .parse_module()
+    .expect("parse exact-owner bootstrap consumer");
+    let mut codegen = VbcCodegen::with_config(CodegenConfig::new("consumer"));
+    assert_eq!(
+        codegen
+            .import_bootstrap_nominal_dependencies(&[&ast], &[&source])
+            .expect("import declared bootstrap dependency"),
+        1
+    );
+    let imported = codegen
+        .compile_module(&ast)
+        .expect("compile bootstrap consumer");
+    let record = text(&imported, Some(OWNER));
+    assert_eq!(record.id, TypeId::TEXT);
+    let relay = imported
+        .functions
+        .iter()
+        .find(|function| imported.get_string(function.name) == Some("consumer.relay"))
+        .expect("exact consumer function");
+    assert_eq!(
+        relay.return_type,
+        verum_vbc::types::TypeRef::Concrete(TypeId::TEXT)
+    );
+    assert_eq!(
+        relay.params[0].type_ref,
+        verum_vbc::types::TypeRef::Concrete(TypeId::TEXT)
+    );
+    assert_eq!(text(&wire(&imported), Some(OWNER)).id, TypeId::TEXT);
 }
