@@ -1,0 +1,8 @@
+   Compiling verum_error v0.1.0 (/Users/taaliman/.codex/worktrees/registry-metadata-lookup/verum/crates/verum_error)
+   Compiling verum_cbgr v0.1.0 (/Users/taaliman/.codex/worktrees/registry-metadata-lookup/verum/crates/verum_cbgr)
+   Compiling verum_vbc v0.1.0 (/Users/taaliman/.codex/worktrees/registry-metadata-lookup/verum/crates/verum_vbc)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 30.07s
+     Running tests/archive_field_type_identity.rs (/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target/debug/build/verum_vbc/01d05596fde107cc/out/archive_field_type_identity-01d05596fde107cc)
+     Running tests/bytecode_format_compatibility.rs (/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target/debug/build/verum_vbc/af1c7f17cee2c1d1/out/bytecode_format_compatibility-af1c7f17cee2c1d1)
+     Running tests/declared_function_bodies.rs (/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target/debug/build/verum_vbc/65fc6d1cc32dfedc/out/declared_function_bodies-65fc6d1cc32dfedc)
+     Running tests/resource_discipline_carry.rs (/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target/debug/build/verum_vbc/46b58b2d48d99dc9/out/resource_discipline_carry-46b58b2d48d99dc9)

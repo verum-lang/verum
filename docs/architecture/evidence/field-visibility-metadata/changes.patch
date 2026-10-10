@@ -1,0 +1,1485 @@
+diff --git a/crates/verum_ast/src/lib.rs b/crates/verum_ast/src/lib.rs
+index 601672695..be2e188f9 100644
+--- a/crates/verum_ast/src/lib.rs
++++ b/crates/verum_ast/src/lib.rs
+@@ -135,6 +135,7 @@ pub mod stmt;
+ pub mod ty;
+ pub mod visit_mut;
+ pub mod visitor;
++mod visibility;
+ 
+ // Re-export smallvec for use in creating AST nodes
+ pub use smallvec;
+diff --git a/crates/verum_ast/src/visibility.rs b/crates/verum_ast/src/visibility.rs
+new file mode 100644
+index 000000000..bb978ca39
+--- /dev/null
++++ b/crates/verum_ast/src/visibility.rs
+@@ -0,0 +1,63 @@
++//! Declaration-owned normalization for path-restricted visibility.
++use crate::{Ident, Path, PathSegment, Span, Visibility};
++use verum_common::{List, Text};
++
++impl Visibility {
++    /// Resolve a restricted scope against the module that declares the item.
++    /// The result contains only absolute name segments and no source spans;
++    /// importers must not resolve the same policy again in their own module.
++    pub fn resolve_declared_scope(&self, declaring_module: &str) -> Result<Self, Text> {
++        let Self::PublicIn(path) = self else {
++            return Ok(self.clone());
++        };
++        let Some(first) = path.segments.first() else {
++            return Err("visibility scope is empty".into());
++        };
++        let mut names: List<Text> = List::new();
++        let mut index = 0;
++        if !matches!(first, PathSegment::Name(_)) {
++            names = declaring_module.split('.').map(Text::from).collect();
++            if names.is_empty() || names.iter().any(|part| part.is_empty()) {
++                return Err("relative visibility scope requires a declaring module".into());
++            }
++            match first {
++                PathSegment::Cog => {
++                    names.truncate(1);
++                    index = 1;
++                }
++                PathSegment::SelfValue => index = 1,
++                PathSegment::Relative => {
++                    if names.len() <= 1 {
++                        return Err("visibility scope escapes the declaring cog root".into());
++                    }
++                    names.pop();
++                    index = 1;
++                }
++                PathSegment::Super => {
++                    while matches!(path.segments.get(index), Some(PathSegment::Super)) {
++                        if names.len() <= 1 {
++                            return Err("visibility scope escapes the declaring cog root".into());
++                        }
++                        names.pop();
++                        index += 1;
++                    }
++                }
++                PathSegment::Name(_) => unreachable!(),
++            }
++        }
++        for segment in &path.segments[index..] {
++            let PathSegment::Name(ident) = segment else {
++                return Err("visibility scope markers must precede name segments".into());
++            };
++            if ident.name.is_empty() {
++                return Err("visibility scope has an empty name segment".into());
++            }
++            names.push(ident.name.clone());
++        }
++        let segments = names
++            .into_iter()
++            .map(|name| PathSegment::Name(Ident::new(name, Span::dummy())))
++            .collect();
++        Ok(Self::PublicIn(Path::new(segments, Span::dummy())))
++    }
++}
+diff --git a/crates/verum_ast/tests/visibility_scope.rs b/crates/verum_ast/tests/visibility_scope.rs
+new file mode 100644
+index 000000000..c788da2fa
+--- /dev/null
++++ b/crates/verum_ast/tests/visibility_scope.rs
+@@ -0,0 +1,104 @@
++use verum_ast::{Ident, Path, PathSegment, Span, Visibility};
++use verum_common::{List, Text};
++
++fn scope(segments: &[&str]) -> Visibility {
++    let span = Span::new(4, 19, verum_ast::span::FileId::new(7));
++    Visibility::PublicIn(Path::new(
++        segments
++            .iter()
++            .map(|segment| match *segment {
++                "self" => PathSegment::SelfValue,
++                "super" => PathSegment::Super,
++                "cog" => PathSegment::Cog,
++                "." => PathSegment::Relative,
++                name => PathSegment::Name(Ident::new(name, span)),
++            })
++            .collect(),
++        span,
++    ))
++}
++
++fn resolved(segments: &[&str], owner: &str, expected: &str) {
++    let Visibility::PublicIn(path) = scope(segments).resolve_declared_scope(owner).unwrap() else {
++        panic!("restricted policy lost");
++    };
++    assert_eq!(path.span, Span::dummy());
++    let names: List<Text> = path
++        .segments
++        .iter()
++        .map(|part| {
++            let PathSegment::Name(ident) = part else {
++                panic!("noncanonical scope");
++            };
++            assert_eq!(ident.span, Span::dummy());
++            ident.name.clone()
++        })
++        .collect();
++    assert_eq!(names.join("."), expected);
++}
++
++#[test]
++fn absolute_scopes_are_span_free_and_importer_independent() {
++    resolved(&["other", "scope"], "app.owner", "other.scope");
++    resolved(&["other", "scope"], "", "other.scope");
++}
++#[test]
++fn self_scopes_use_the_declaring_module() {
++    resolved(
++        &["self", "scope"],
++        "app.owner.inner",
++        "app.owner.inner.scope",
++    );
++}
++#[test]
++fn relative_and_super_scopes_use_the_declaring_parent() {
++    resolved(&[".", "scope"], "app.owner.inner", "app.owner.scope");
++    resolved(&["super", "scope"], "app.owner.inner", "app.owner.scope");
++    resolved(&["super", "super", "scope"], "app.owner.inner", "app.scope");
++}
++#[test]
++fn cog_scopes_use_the_declared_cog_root() {
++    resolved(&["cog", "scope"], "app.owner.inner", "app.scope");
++}
++#[test]
++fn scope_root_escape_is_refused() {
++    for segments in [&["super"][..], &["."][..], &["super", "super"][..]] {
++        assert!(scope(segments).resolve_declared_scope("app").is_err());
++    }
++    assert!(
++        scope(&["super", "super", "super"])
++            .resolve_declared_scope("app.owner.inner")
++            .is_err()
++    );
++}
++#[test]
++fn scope_requires_a_valid_owner_and_leading_markers() {
++    for owner in ["", ".app", "app.", "app..owner"] {
++        assert!(
++            scope(&["self", "scope"])
++                .resolve_declared_scope(owner)
++                .is_err()
++        );
++    }
++    for segments in [
++        &["name", "super"][..],
++        &["self", "cog"][..],
++        &[][..],
++        &[""][..],
++    ] {
++        assert!(scope(segments).resolve_declared_scope("app.owner").is_err());
++    }
++}
++#[test]
++fn non_path_policies_keep_their_declaration_semantics() {
++    for policy in [
++        Visibility::Private,
++        Visibility::Public,
++        Visibility::PublicCrate,
++        Visibility::PublicSuper,
++        Visibility::Internal,
++        Visibility::Protected,
++    ] {
++        assert_eq!(policy.resolve_declared_scope("app.owner").unwrap(), policy);
++    }
++}
+diff --git a/crates/verum_compiler/build.rs b/crates/verum_compiler/build.rs
+index 040db2fa0..f99ab657f 100644
+--- a/crates/verum_compiler/build.rs
++++ b/crates/verum_compiler/build.rs
+@@ -1816,6 +1816,8 @@ fn symbol_count(files: &[(String, Vec<u8>)]) -> usize {
+ /// the cached bake.  Format: free-form ASCII;
+ /// readable strings make `git log` of this constant tell the story.
+ const PRECOMPILE_SCHEMA_VERSION: &str =
++    // v54: VBC2.25 and metadata carry complete declared field visibility.
++    // Missing legacy policy is Unknown; bincode sidecars must be rebuilt.
+     // v53: VBC2.24 carries source body presence; a legacy RetV stub cannot
+     // establish declaration authority, even under an explicit stale fallback.
+     // v52: source-owned semantic formal parameters require the VBC2.23 tail.
+@@ -1837,7 +1839,7 @@ const PRECOMPILE_SCHEMA_VERSION: &str =
+     // cache — measured: the scan was added, the build reported
+     // "precompile cache HIT", and the new field stayed empty while the
+     // reader had nothing to read. Bumping here is what invalidates it.
+-    "v53-declared-function-bodies";
++    "v54-2026-10-10-declared-field-visibility";
+ 
+ /// T3: blake3 hash of every `core/**/*.vr` file's content, sorted
+ /// by relative path, mixed with [`PRECOMPILE_SCHEMA_VERSION`].
+@@ -2176,6 +2178,10 @@ fn compute_core_blake3(core_dir: &Path, files: &[(String, Vec<u8>)]) -> String {
+         "crates/verum_ast/src/cfg.rs",
+         // Shared checked scalar rules change folded array counts in the archive.
+         "crates/verum_ast/src/checked_const.rs",
++        // Declaration field policies and canonical scopes shape archived access.
++        "crates/verum_ast/src/visibility.rs",
++        "crates/verum_vbc/src/codegen/field_visibility.rs",
++        "crates/verum_types/src/core_metadata.rs",
+         // `TypeId::well_known_name` (T0190) — the reserved-TypeId →
+         // canonical-surface-name table `archive_metadata` renders every
+         // descriptor through.  Naming one more reserved id changes the
+diff --git a/crates/verum_compiler/src/archive_metadata.rs b/crates/verum_compiler/src/archive_metadata.rs
+index 6512a247f..3779787f6 100644
+--- a/crates/verum_compiler/src/archive_metadata.rs
++++ b/crates/verum_compiler/src/archive_metadata.rs
+@@ -47,6 +47,35 @@ use verum_vbc::archive::VbcArchive;
+ use verum_vbc::module::VbcModule;
+ use verum_vbc::types::{TypeKind, TypeRef, VariantKind};
+ 
++
++/// Decode a full declaration policy. Missing/invalid scoped evidence stays Unknown;
++/// neither the coarse visibility nor the importing module can replace it.
++fn field_declared_visibility(
++    field: &verum_vbc::types::FieldDescriptor,
++    module: &VbcModule,
++) -> Maybe<verum_ast::Visibility> {
++    use verum_ast::{Ident, Path, PathSegment, Span, Visibility};
++    use verum_vbc::types::DeclaredFieldVisibility as Policy;
++    Some(match field.declared_visibility? {
++        Policy::Private => Visibility::Private,
++        Policy::Public => Visibility::Public,
++        Policy::Cog => Visibility::PublicCrate,
++        Policy::Super => Visibility::PublicSuper,
++        Policy::Internal => Visibility::Internal,
++        Policy::Protected => Visibility::Protected,
++        Policy::In(scope) => {
++            let scope = module.strings.get(scope)?;
++            let names: List<Text> = scope.split('.').map(Text::from).collect();
++            if names.is_empty() || names.iter().any(|name| name.is_empty()) {
++                return None;
++            }
++            Visibility::PublicIn(Path::new(names.into_iter().map(|name| {
++                PathSegment::Name(Ident::new(name, Span::dummy()))
++            }).collect(), Span::dummy()))
++        }
++    })
++}
++
+ /// BAKED-DEFAULT-ARG-1: render a parameter's default (carried through
+ /// the VBC descriptor's `default: Option<ConstId>` channel) back to a
+ /// SOURCE-TEXT literal for the typecheck metadata. Int/Float/Text
+@@ -408,6 +437,7 @@ fn register_module_metadata(
+                                 .map(Text::from)
+                                 .unwrap_or_default(),
+                             ty: Text::from(ty),
++                            declared_visibility: field_declared_visibility(f, module),
+                             is_public: matches!(
+                                 f.visibility,
+                                 verum_vbc::types::Visibility::Public
+@@ -502,6 +532,7 @@ fn register_module_metadata(
+                                             &type_id_to_name,
+                                             &sum_param_id_to_name,
+                                         )),
++                                        declared_visibility: field_declared_visibility(f, module),
+                                         is_public: matches!(
+                                             f.visibility,
+                                             verum_vbc::types::Visibility::Public
+diff --git a/crates/verum_compiler/src/pipeline/stdlib_bootstrap.rs b/crates/verum_compiler/src/pipeline/stdlib_bootstrap.rs
+index e0e293efa..ae6af2d95 100644
+--- a/crates/verum_compiler/src/pipeline/stdlib_bootstrap.rs
++++ b/crates/verum_compiler/src/pipeline/stdlib_bootstrap.rs
+@@ -2962,3 +2962,7 @@ mod qualified_record_assignment_tests;
+ #[cfg(test)]
+ #[path = "../../tests/bootstrap/alias_declaring_scope.rs"]
+ mod alias_declaring_scope_tests;
++
++#[cfg(test)]
++#[path = "../../tests/bootstrap/field_visibility.rs"]
++mod field_visibility_tests;
+diff --git a/crates/verum_compiler/tests/bootstrap/field_visibility.rs b/crates/verum_compiler/tests/bootstrap/field_visibility.rs
+new file mode 100644
+index 000000000..afd3d4cbe
+--- /dev/null
++++ b/crates/verum_compiler/tests/bootstrap/field_visibility.rs
+@@ -0,0 +1,219 @@
++//! T1714: real parsed bootstrap output, archive wire and metadata projection.
++use super::*;
++use verum_common::{List, Text};
++use verum_fast_parser::Parser;
++use verum_types::core_metadata::{CoreMetadata, TypeDescriptorKind};
++use verum_vbc::archive::{ArchiveBuilder, VbcArchive};
++#[path = "../../../verum_vbc/tests/fixtures/field_visibility.rs"]
++mod fixture;
++
++fn source_module(owner: &str, source: &str) -> verum_vbc::module::VbcModule {
++    let ast = Parser::new(source).parse_module().expect("fixture grammar");
++    let mut session = crate::Session::new(Default::default());
++    let config = CoreConfig::new(".");
++    let mut pipeline = CompilationPipeline::new_core(&mut session, config.clone());
++    let unit = StdlibModule {
++        name: owner.into(),
++        source_files: List::new().into(),
++        dependencies: List::new().into(),
++    };
++    let (module, _) = pipeline
++        .compile_core_module_from_ast(
++            &unit,
++            &[&ast],
++            &config,
++            &verum_ast::cfg::TargetConfig::host(),
++            &Default::default(),
++        )
++        .expect("actual bootstrap source producer");
++    module
++}
++
++fn archive_modules(modules: &[(&str, &verum_vbc::module::VbcModule)]) -> VbcArchive {
++    let mut builder = ArchiveBuilder::new();
++    for (entry, module) in modules {
++        builder
++            .add_module(entry, module, &[])
++            .expect("archive module");
++    }
++    let mut bytes = List::new();
++    verum_vbc::archive::write_archive(&builder.finish(), &mut bytes).expect("archive encode");
++    verum_vbc::archive::read_archive(std::io::Cursor::new(bytes.as_slice()))
++        .expect("archive decode")
++}
++
++fn archive() -> VbcArchive {
++    let module = source_module(fixture::OWNER, fixture::SOURCE);
++    archive_modules(&[(fixture::OWNER, &module)])
++}
++
++fn metadata(archive: &VbcArchive) -> CoreMetadata {
++    let metadata = crate::archive_metadata::archive_to_core_metadata(archive);
++    bincode::deserialize(&bincode::serialize(&metadata).expect("metadata encode"))
++        .expect("metadata decode")
++}
++
++#[test]
++fn parsed_private_and_restricted_fields_are_not_public_after_archive_metadata() {
++    let archive = archive();
++    let metadata = crate::archive_metadata::archive_to_core_metadata(&archive);
++    let metadata: CoreMetadata =
++        bincode::deserialize(&bincode::serialize(&metadata).expect("metadata encode"))
++            .expect("metadata decode");
++    let descriptor = metadata
++        .types
++        .get(&Text::from(format!("{}.Vault", fixture::OWNER)))
++        .expect("exact metadata owner");
++    assert_eq!(
++        descriptor
++            .origin_module_path
++            .as_deref()
++            .unwrap_or(descriptor.module_path.as_str()),
++        fixture::OWNER
++    );
++    let TypeDescriptorKind::Record { fields } = &descriptor.kind else {
++        panic!("expected record")
++    };
++    assert_eq!(fields.len(), 12, "every declared field is retained");
++    let mut failures: List<Text> = List::new();
++    for field in fields {
++        let expected = field.name == "visible";
++        if field.is_public != expected {
++            failures.push(
++                format!(
++                    "{}: expected is_public={expected}, found {}",
++                    field.name, field.is_public
++                )
++                .into(),
++            );
++        }
++    }
++    assert!(failures.is_empty(), "{}", failures.join("\n"));
++}
++
++#[test]
++fn complete_record_and_variant_policy_reaches_span_free_metadata() {
++    use verum_ast::{
++        ItemKind,
++        decl::{TypeDeclBody, VariantData},
++    };
++    use verum_types::core_metadata::VariantPayload;
++    let metadata = metadata(&archive());
++    let ast = Parser::new(fixture::SOURCE).parse_module().unwrap();
++    let mut count = 0;
++    for item in &ast.items {
++        let ItemKind::Type(decl) = &item.kind else {
++            continue;
++        };
++        let descriptor = metadata
++            .types
++            .get(&Text::from(format!("{}.{}", fixture::OWNER, decl.name)))
++            .expect("exact declared metadata owner");
++        let pairs: List<(
++            &verum_ast::decl::RecordField,
++            &verum_types::core_metadata::FieldDescriptor,
++        )> = match (&decl.body, &descriptor.kind) {
++            (TypeDeclBody::Record(source), TypeDescriptorKind::Record { fields }) => {
++                source.iter().zip(fields.iter()).collect()
++            }
++            (TypeDeclBody::Variant(source), TypeDescriptorKind::Variant { cases }) => source
++                .iter()
++                .zip(cases.iter())
++                .flat_map(|(source, case)| match (&source.data, &case.payload) {
++                    (Some(VariantData::Record(source)), Some(VariantPayload::Record(fields))) => {
++                        source.iter().zip(fields.iter()).collect()
++                    }
++                    (None, None) => List::new(),
++                    _ => panic!("variant payload shape lost"),
++                })
++                .collect(),
++            _ => panic!("declared type shape lost"),
++        };
++        for (source, field) in pairs {
++            assert_eq!(field.name, source.name.name);
++            assert_eq!(
++                field.declared_visibility,
++                Some(
++                    source
++                        .visibility
++                        .resolve_declared_scope(fixture::OWNER)
++                        .unwrap()
++                ),
++                "{}",
++                field.name
++            );
++            count += 1;
++        }
++    }
++    assert_eq!(count, 16);
++}
++
++#[test]
++fn same_leaf_fields_keep_declaring_scope_in_both_archive_orders() {
++    let left = source_module(
++        "fixture.left",
++        "module fixture.left; public type Vault is { public(in self.scope) value: Int };",
++    );
++    let right = source_module(
++        "fixture.right",
++        "module fixture.right; public type Vault is { private value: Int };",
++    );
++    for modules in [
++        [("bundle.left", &left), ("bundle.right", &right)],
++        [("bundle.right", &right), ("bundle.left", &left)],
++    ] {
++        let metadata = metadata(&archive_modules(&modules));
++        for (owner, expected) in [
++            ("fixture.left", Some("fixture::left::scope")),
++            ("fixture.right", None),
++        ] {
++            let descriptor = metadata
++                .types
++                .get(&Text::from(format!("{owner}.Vault")))
++                .expect("both exact owners exist");
++            assert_eq!(descriptor.origin_module_path.as_deref(), Some(owner));
++            let TypeDescriptorKind::Record { fields } = &descriptor.kind else {
++                panic!("record");
++            };
++            assert_eq!(fields.len(), 1);
++            match (&fields[0].declared_visibility, expected) {
++                (Some(verum_ast::Visibility::PublicIn(path)), Some(expected)) => {
++                    assert_eq!(path.to_string(), expected)
++                }
++                (Some(verum_ast::Visibility::Private), None) => {}
++                pair => panic!("declaration policy changed: {pair:?}"),
++            }
++        }
++    }
++}
++
++#[test]
++fn missing_field_policy_stays_unknown_even_with_a_public_compatibility_flag() {
++    let mut module = source_module(fixture::OWNER, fixture::SOURCE);
++    let mut count = 0;
++    for ty in &mut module.types {
++        for field in ty.fields.iter_mut().chain(
++            ty.variants
++                .iter_mut()
++                .flat_map(|variant| variant.fields.iter_mut()),
++        ) {
++            field.declared_visibility = None;
++            field.visibility = verum_vbc::types::Visibility::Public;
++            count += 1;
++        }
++    }
++    assert_eq!(count, 16);
++    let metadata = metadata(&archive_modules(&[(fixture::OWNER, &module)]));
++    let record = metadata
++        .types
++        .get(&Text::from(format!("{}.Vault", fixture::OWNER)))
++        .unwrap();
++    let TypeDescriptorKind::Record { fields } = &record.kind else {
++        panic!("record");
++    };
++    assert!(
++        fields
++            .iter()
++            .all(|field| field.is_public && field.declared_visibility.is_none())
++    );
++}
+diff --git a/crates/verum_types/src/core_metadata.rs b/crates/verum_types/src/core_metadata.rs
+index 7d03910b1..913f72654 100644
+--- a/crates/verum_types/src/core_metadata.rs
++++ b/crates/verum_types/src/core_metadata.rs
+@@ -402,6 +402,10 @@ pub struct FieldDescriptor {
+     pub name: Text,
+     pub ty: Text,
+     pub is_public: bool,
++    /// Full declaration policy. None is Unknown, never authorization through
++    /// `is_public`. Restricted paths are absolute and have canonical dummy spans.
++    #[serde(default)]
++    pub declared_visibility: Maybe<verum_ast::Visibility>,
+ }
+ 
+ /// Variant case descriptor
+diff --git a/crates/verum_types/tests/builtin_registration_provenance.rs b/crates/verum_types/tests/builtin_registration_provenance.rs
+index 5cca742da..d7d057211 100644
+--- a/crates/verum_types/tests/builtin_registration_provenance.rs
++++ b/crates/verum_types/tests/builtin_registration_provenance.rs
+@@ -20,6 +20,7 @@ fn metadata(reverse: bool) -> CoreMetadata {
+             generic_params: List::new(),
+             kind: TypeDescriptorKind::Record {
+                 fields: List::from_iter([FieldDescriptor {
++                    declared_visibility: None,
+                     name: "value".into(),
+                     ty: "Int".into(),
+                     is_public: true,
+diff --git a/crates/verum_types/tests/mounted_type_owner.rs b/crates/verum_types/tests/mounted_type_owner.rs
+index 74f27ae68..f72b2b2f9 100644
+--- a/crates/verum_types/tests/mounted_type_owner.rs
++++ b/crates/verum_types/tests/mounted_type_owner.rs
+@@ -25,6 +25,7 @@ fn foreign_metadata() -> Arc<CoreMetadata> {
+         generic_params: List::new(),
+         kind: TypeDescriptorKind::Record {
+             fields: [FieldDescriptor {
++                    declared_visibility: None,
+                 name: "foreign_only".into(),
+                 ty: "Bool".into(),
+                 is_public: true,
+diff --git a/crates/verum_types/tests/qualified_record_assignment.rs b/crates/verum_types/tests/qualified_record_assignment.rs
+index f454d417f..7973805e2 100644
+--- a/crates/verum_types/tests/qualified_record_assignment.rs
++++ b/crates/verum_types/tests/qualified_record_assignment.rs
+@@ -52,6 +52,7 @@ fn metadata(reverse: bool) -> CoreMetadata {
+                 fields: [("body", body), (own_field, "Int")]
+                     .into_iter()
+                     .map(|(name, ty)| FieldDescriptor {
++                    declared_visibility: None,
+                         name: name.into(),
+                         ty: ty.into(),
+                         is_public: true,
+diff --git a/crates/verum_vbc/src/archive.rs b/crates/verum_vbc/src/archive.rs
+index ea50de2fe..44c7c135c 100644
+--- a/crates/verum_vbc/src/archive.rs
++++ b/crates/verum_vbc/src/archive.rs
+@@ -1312,6 +1312,7 @@ mod tests {
+         // Create a type with named fields
+         let field1 = FieldDescriptor {
+             declaration_type: None,
++            declared_visibility: None,
+             refinement_src: StringId::EMPTY,
+             refinement_binding: StringId::EMPTY,
+             type_name: StringId::EMPTY,
+@@ -1322,6 +1323,7 @@ mod tests {
+         };
+         let field2 = FieldDescriptor {
+             declaration_type: None,
++            declared_visibility: None,
+             refinement_src: StringId::EMPTY,
+             refinement_binding: StringId::EMPTY,
+             type_name: StringId::EMPTY,
+@@ -1425,6 +1427,7 @@ mod tests {
+         // Add a type with named field
+         let field = FieldDescriptor {
+             declaration_type: None,
++            declared_visibility: None,
+             refinement_src: StringId::EMPTY,
+             refinement_binding: StringId::EMPTY,
+             type_name: StringId::EMPTY,
+@@ -1474,6 +1477,7 @@ mod tests {
+             for j in 0..5 {
+                 let field = FieldDescriptor {
+                     declaration_type: None,
++                    declared_visibility: None,
+                     refinement_src: StringId::EMPTY,
+                     refinement_binding: StringId::EMPTY,
+                     type_name: StringId::EMPTY,
+diff --git a/crates/verum_vbc/src/codegen/field_visibility.rs b/crates/verum_vbc/src/codegen/field_visibility.rs
+new file mode 100644
+index 000000000..9bd6ccbab
+--- /dev/null
++++ b/crates/verum_vbc/src/codegen/field_visibility.rs
+@@ -0,0 +1,52 @@
++//! Preserve source field policy independently of its runtime representation.
++use super::{CodegenError, CodegenErrorKind, CodegenResult, VbcCodegen};
++use crate::types::{DeclaredFieldVisibility, StringId, Visibility};
++use verum_ast::{PathSegment, Visibility as AstVisibility};
++use verum_common::{List, Text};
++
++impl VbcCodegen {
++    pub(super) fn lower_field_visibility(
++        &mut self,
++        visibility: &AstVisibility,
++    ) -> CodegenResult<(Visibility, DeclaredFieldVisibility)> {
++        // This is the declaration's source context, also used for origin_module;
++        // archive import never runs source normalization in the consumer scope.
++        let owner = self
++            .ctx
++            .current_source_module
++            .as_deref()
++            .unwrap_or(self.config.module_name.as_str());
++        let resolved = visibility
++            .resolve_declared_scope(owner)
++            .map_err(|message| {
++                CodegenError::new(CodegenErrorKind::TypeInference(message.to_string()))
++            })?;
++        let coarse = match resolved {
++            AstVisibility::Public => Visibility::Public,
++            AstVisibility::PublicCrate => Visibility::Cog,
++            _ => Visibility::Private,
++        };
++        let declared = match resolved {
++            AstVisibility::Public => DeclaredFieldVisibility::Public,
++            AstVisibility::Private => DeclaredFieldVisibility::Private,
++            AstVisibility::PublicCrate => DeclaredFieldVisibility::Cog,
++            AstVisibility::PublicSuper => DeclaredFieldVisibility::Super,
++            AstVisibility::Internal => DeclaredFieldVisibility::Internal,
++            AstVisibility::Protected => DeclaredFieldVisibility::Protected,
++            AstVisibility::PublicIn(path) => {
++                let names: List<Text> = path
++                    .segments
++                    .iter()
++                    .map(|segment| {
++                        let PathSegment::Name(ident) = segment else {
++                            unreachable!("resolved scopes contain only names");
++                        };
++                        ident.name.clone()
++                    })
++                    .collect();
++                DeclaredFieldVisibility::In(StringId(self.ctx.intern_string_raw(&names.join("."))))
++            }
++        };
++        Ok((coarse, declared))
++    }
++}
+diff --git a/crates/verum_vbc/src/codegen/mod.rs b/crates/verum_vbc/src/codegen/mod.rs
+index a6c1a53b3..183c1f79e 100644
+--- a/crates/verum_vbc/src/codegen/mod.rs
++++ b/crates/verum_vbc/src/codegen/mod.rs
+@@ -63,6 +63,7 @@ mod associated_types;
+ mod statements;
+ mod value_uses;
+ mod formal_parameters;
++mod field_visibility;
+ 
+ #[cfg(test)]
+ mod tests_comprehensive;
+@@ -6709,6 +6710,13 @@ impl VbcCodegen {
+                 self.ctx.register_function(qualified, info);
+             }
+         }
++        if let Some(strings) = archive_strings {
++            for field in ty.fields.iter_mut().chain(ty.variants.iter_mut().flat_map(|variant| variant.fields.iter_mut())) {
++                field.declared_visibility = field.declared_visibility.and_then(|policy| policy.remap_scope(|scope| {
++                    strings.get(scope).map(|name| crate::types::StringId(self.ctx.intern_string_raw(name)))
++                }));
++            }
++        }
+         self.push_type_dedupe(ty);
+     }
+ 
+@@ -15987,23 +15995,28 @@ impl VbcCodegen {
+                             let fds: smallvec::SmallVec<[crate::types::FieldDescriptor; 4]> =
+                                 fields
+                                     .iter()
+-                                    .map(|f| crate::types::FieldDescriptor {
+-                                        name: StringId(
+-                                            self.ctx.intern_string_raw(f.name.name.as_str()),
+-                                        ),
+-                                        declaration_type: Some(self.resolve_signature_type_ref(&f.ty, &sum_generic_param_map)),
+-                                        type_ref: self.resolve_field_type_ref(
+-                                            &f.ty,
+-                                            &sum_generic_param_map,
+-                                        ),
+-                                        // UNIFIED-CROSS-MODULE-TYPE-IDENTITY: carry the
+-                                        // record-variant field's declared type name.
+-                                        type_name: StringId(self.ctx.intern_string_raw(
+-                                            &Self::extract_type_name_from_ast(&f.ty),
+-                                        )),
+-                                        ..Default::default()
++                                    .map(|f| {
++                                        let (visibility, declared_visibility) = self.lower_field_visibility(&f.visibility)?;
++                                        Ok(crate::types::FieldDescriptor {
++                                            visibility,
++                                            declared_visibility: Some(declared_visibility),
++                                            name: StringId(
++                                                self.ctx.intern_string_raw(f.name.name.as_str()),
++                                            ),
++                                            declaration_type: Some(self.resolve_signature_type_ref(&f.ty, &sum_generic_param_map)),
++                                            type_ref: self.resolve_field_type_ref(
++                                                &f.ty,
++                                                &sum_generic_param_map,
++                                            ),
++                                            // UNIFIED-CROSS-MODULE-TYPE-IDENTITY: carry the
++                                            // record-variant field's declared type name.
++                                            type_name: StringId(self.ctx.intern_string_raw(
++                                                &Self::extract_type_name_from_ast(&f.ty),
++                                            )),
++                                            ..Default::default()
++                                        })
+                                     })
+-                                    .collect();
++                                    .collect::<CodegenResult<_>>()?;
+                             (crate::types::VariantKind::Record, 0u8, fds)
+                         }
+                     };
+@@ -16237,12 +16250,14 @@ impl VbcCodegen {
+                         self.ctx
+                             .intern_string_raw(&Self::render_field_type_name(&field.ty, true)),
+                     );
++                    let (visibility, declared_visibility) = self.lower_field_visibility(&field.visibility)?;
+                     type_desc.fields.push(crate::types::FieldDescriptor {
++                        declared_visibility: Some(declared_visibility),
+                         name: StringId(self.ctx.intern_string_raw(&field_name)),
+                         type_ref: field_type_ref,
+                         declaration_type: Some(self.resolve_signature_type_ref(&field.ty, &generic_param_map)),
+                         offset: field_idx * 8, // Use global field index * sizeof(Value)
+-                        visibility: crate::types::Visibility::Public,
++                        visibility,
+                         refinement_src,
+                         refinement_binding,
+                         type_name: field_type_name,
+@@ -16685,6 +16700,7 @@ impl VbcCodegen {
+                     ..Default::default()
+                 };
+                 type_desc.fields.push(crate::types::FieldDescriptor {
++                    declared_visibility: None,
+                     name: StringId(self.ctx.intern_string_raw("_0")),
+                     type_ref: inner_type_ref,
+                     declaration_type: Some(self.resolve_signature_type_ref(_inner_type, &generic_param_map)),
+@@ -16798,6 +16814,7 @@ impl VbcCodegen {
+                     let inner_type_ref = self.resolve_field_type_ref(inner_ty, &generic_param_map);
+                     let field_idx = self.intern_field_name(&field_name);
+                     type_desc.fields.push(crate::types::FieldDescriptor {
++                    declared_visibility: None,
+                         name: StringId(self.ctx.intern_string_raw(&field_name)),
+                         type_ref: inner_type_ref,
+                         declaration_type: Some(self.resolve_signature_type_ref(inner_ty, &generic_param_map)),
+@@ -25116,6 +25133,9 @@ impl VbcCodegen {
+                 // type NAME is a StringId too — remap it identically, else a
+                 // cross-module field type reads as garbage in the canonical
+                 // table (the T0109 field-identity hole).
++                field.declared_visibility = field.declared_visibility.and_then(|policy| {
++                    policy.remap_scope(|scope| string_id_map.get(scope.0 as usize).copied())
++                });
+                 if field.type_name != StringId::EMPTY {
+                     if let Some(mapped) = string_id_map.get(field.type_name.0 as usize) {
+                         field.type_name = *mapped;
+@@ -25163,6 +25183,9 @@ impl VbcCodegen {
+                     }
+                     // UNIFIED-CROSS-MODULE-TYPE-IDENTITY (T0109): variant field
+                     // type name — same canonical remap as the field name.
++                    f.declared_visibility = f.declared_visibility.and_then(|policy| {
++                        policy.remap_scope(|scope| string_id_map.get(scope.0 as usize).copied())
++                    });
+                     if f.type_name != StringId::EMPTY {
+                         if let Some(mapped) = string_id_map.get(f.type_name.0 as usize) {
+                             f.type_name = *mapped;
+@@ -26532,6 +26555,9 @@ impl VbcCodegen {
+                 // UNIFIED-CROSS-MODULE-TYPE-IDENTITY (T0109): re-intern the
+                 // field's carried type NAME (archive→local); a raw ..clone()
+                 // misindexes it against this module's strings.
++                declared_visibility: fd.declared_visibility.and_then(|policy| policy.remap_scope(|scope| {
++                    archive_strings.get(scope).map(|name| crate::types::StringId(self.ctx.intern_string_raw(name)))
++                })),
+                 type_name: intern_optional(self, fd.type_name),
+                 refinement_src: intern_optional(self, fd.refinement_src),
+                 refinement_binding: intern_optional(self, fd.refinement_binding),
+@@ -26553,6 +26579,9 @@ impl VbcCodegen {
+             for fd in v.fields.iter() {
+                 v_fields.push(crate::types::FieldDescriptor {
+                     name: intern(self, fd.name),
++                    declared_visibility: fd.declared_visibility.and_then(|policy| policy.remap_scope(|scope| {
++                        archive_strings.get(scope).map(|name| crate::types::StringId(self.ctx.intern_string_raw(name)))
++                    })),
+                     type_name: intern_optional(self, fd.type_name),
+                     refinement_src: intern_optional(self, fd.refinement_src),
+                     refinement_binding: intern_optional(self, fd.refinement_binding),
+diff --git a/crates/verum_vbc/src/deserialize.rs b/crates/verum_vbc/src/deserialize.rs
+index 5df8f364c..67b8c3d77 100644
+--- a/crates/verum_vbc/src/deserialize.rs
++++ b/crates/verum_vbc/src/deserialize.rs
+@@ -23,7 +23,7 @@ use crate::module::{
+  SourceMap, SourceMapEntry, SpecializationEntry, StringTable, VbcModule,
+ };
+ use crate::types::{
+- CbgrTier, ContextRef, FieldDescriptor, Mutability, PropertySet, ProtocolId, ProtocolImpl,
++ CbgrTier, ContextRef, DeclaredFieldVisibility, FieldDescriptor, Mutability, PropertySet, ProtocolId, ProtocolImpl,
+  StringId, TypeDescriptor, TypeId, TypeKind, TypeParamDescriptor, TypeParamId, TypeRef,
+  Variance, VariantDescriptor, VariantKind, Visibility,
+ };
+@@ -1192,7 +1192,21 @@ impl<'a> Deserializer<'a> {
+          _ => return Err(VbcError::InvalidHeader { field: "field_declaration_type", offset: self.offset }),
+      }
+  } else { None };
++ let declared_visibility = if self.header.as_ref().map_or(0, |h| h.version_minor) >= 25 {
++     match decode_u8(self.data, &mut self.offset)? {
++         0 => None,
++         1 => Some(DeclaredFieldVisibility::Private),
++         2 => Some(DeclaredFieldVisibility::Public),
++         3 => Some(DeclaredFieldVisibility::Cog),
++         4 => Some(DeclaredFieldVisibility::Super),
++         5 => Some(DeclaredFieldVisibility::In(StringId(decode_u32(self.data, &mut self.offset)?))),
++         6 => Some(DeclaredFieldVisibility::Internal),
++         7 => Some(DeclaredFieldVisibility::Protected),
++         _ => return Err(VbcError::InvalidHeader { field: "field_declared_visibility", offset: self.offset }),
++     }
++ } else { None };
+  Ok(FieldDescriptor {
++ declared_visibility,
+  declaration_type,
+  name,
+  type_ref,
+@@ -2430,3 +2444,7 @@ mod explicit_generic_param_tests;
+ #[cfg(test)]
+ #[path = "../tests/format/declared_layout.rs"]
+ mod declared_layout_tests;
++
++#[cfg(test)]
++#[path = "../tests/format/field_visibility.rs"]
++mod field_visibility_tests;
+diff --git a/crates/verum_vbc/src/format.rs b/crates/verum_vbc/src/format.rs
+index b1496dcd9..86397b704 100644
+--- a/crates/verum_vbc/src/format.rs
++++ b/crates/verum_vbc/src/format.rs
+@@ -115,7 +115,9 @@ pub const VERSION_MAJOR: u16 = 2;
+ /// Version 2.23 carries optional declaration-owned semantic formal parameters.
+ /// Version 2.24 gives function flag bit 3 declaration-owned body provenance.
+ /// Earlier descriptors leave body presence unknown even when they contain RetV.
+-pub const VERSION_MINOR: u16 = 24;
++/// Version 2.25 carries complete optional field declaration visibility.
++/// Legacy coarse flags cannot authorize access when that policy is absent.
++pub const VERSION_MINOR: u16 = 25;
+ 
+ /// Minor-version floors for sections whose presence readers gate on.  The
+ /// register-type-hints section has been written unconditionally since minor 2,
+diff --git a/crates/verum_vbc/src/interpreter/dispatch_table/handlers/extended.rs b/crates/verum_vbc/src/interpreter/dispatch_table/handlers/extended.rs
+index c7b077ef4..be86bad76 100644
+--- a/crates/verum_vbc/src/interpreter/dispatch_table/handlers/extended.rs
++++ b/crates/verum_vbc/src/interpreter/dispatch_table/handlers/extended.rs
+@@ -754,6 +754,7 @@ mod make_variant_typed_validation_tests {
+         let f_missing = module.intern_string("no_such_field");
+         let mk_field = |name: StringId, off: u32| crate::types::FieldDescriptor {
+             declaration_type: None,
++            declared_visibility: None,
+             name,
+             type_ref: crate::types::TypeRef::Concrete(TypeId::BOOL),
+             offset: off,
+diff --git a/crates/verum_vbc/src/linker.rs b/crates/verum_vbc/src/linker.rs
+index 27b5790b4..2944549cc 100644
+--- a/crates/verum_vbc/src/linker.rs
++++ b/crates/verum_vbc/src/linker.rs
+@@ -767,6 +767,7 @@ impl VbcLinker {
+         let mut out = src.clone();
+         out.id = remap.map_type_id(src.id)?;
+         out.name = remap.map_string_lenient(src.name);
++        out.origin_module = src.origin_module.map(|owner| remap.map_string(owner)).transpose()?;
+         // type_params: each carries name (StringId), id (TypeParamId
+         // — function-local, not remapped), bounds (ProtocolId), default
+         // (TypeRef).
+@@ -781,6 +782,9 @@ impl VbcLinker {
+         }
+         for field in out.fields.iter_mut() {
+             field.name = remap.map_string_lenient(field.name);
++            field.declared_visibility = field.declared_visibility.and_then(|policy| {
++                policy.remap_scope(|scope| remap.string.get(&scope.0).copied())
++            });
+             field.type_ref = self.remap_type_ref(&field.type_ref, remap)?;
+             field.declaration_type = field.declaration_type.as_ref().map(|ty| self.remap_type_ref(ty, remap)).transpose()?;
+         }
+@@ -788,6 +792,9 @@ impl VbcLinker {
+             variant.name = remap.map_string_lenient(variant.name);
+             for vf in variant.fields.iter_mut() {
+                 vf.name = remap.map_string_lenient(vf.name);
++                vf.declared_visibility = vf.declared_visibility.and_then(|policy| {
++                    policy.remap_scope(|scope| remap.string.get(&scope.0).copied())
++                });
+                 vf.type_ref = self.remap_type_ref(&vf.type_ref, remap)?;
+                 vf.declaration_type = vf.declaration_type.as_ref().map(|ty| self.remap_type_ref(ty, remap)).transpose()?;
+             }
+diff --git a/crates/verum_vbc/src/serialize.rs b/crates/verum_vbc/src/serialize.rs
+index 0584bfeca..595f732f9 100644
+--- a/crates/verum_vbc/src/serialize.rs
++++ b/crates/verum_vbc/src/serialize.rs
+@@ -34,7 +34,7 @@ use crate::module::{
+     SpecializationEntry, VbcModule,
+ };
+ use crate::types::{
+-    FieldDescriptor, TypeDescriptor, TypeParamDescriptor, TypeRef, VariantDescriptor,
++    DeclaredFieldVisibility, FieldDescriptor, TypeDescriptor, TypeParamDescriptor, TypeRef, VariantDescriptor,
+ };
+ 
+ /// Bundle for serializing FFI tables together.
+@@ -510,6 +510,20 @@ impl Serializer {
+             }
+             None => self.output.push(0),
+         }
++        // v2.25: full declaration policy; absence is explicitly unknown.
++        match field.declared_visibility {
++            None => self.output.push(0),
++            Some(DeclaredFieldVisibility::Private) => self.output.push(1),
++            Some(DeclaredFieldVisibility::Public) => self.output.push(2),
++            Some(DeclaredFieldVisibility::Cog) => self.output.push(3),
++            Some(DeclaredFieldVisibility::Super) => self.output.push(4),
++            Some(DeclaredFieldVisibility::In(scope)) => {
++                self.output.push(5);
++                encode_u32(scope.0, &mut self.output);
++            }
++            Some(DeclaredFieldVisibility::Internal) => self.output.push(6),
++            Some(DeclaredFieldVisibility::Protected) => self.output.push(7),
++        }
+         Ok(())
+     }
+ 
+diff --git a/crates/verum_vbc/src/tests.rs b/crates/verum_vbc/src/tests.rs
+index cfeb5306b..8db040406 100644
+--- a/crates/verum_vbc/src/tests.rs
++++ b/crates/verum_vbc/src/tests.rs
+@@ -137,6 +137,7 @@ fn test_roundtrip_type_descriptor() {
+         fields: smallvec::smallvec![
+             FieldDescriptor {
+                 declaration_type: None,
++                declared_visibility: None,
+                 refinement_src: crate::types::StringId::EMPTY,
+                 refinement_binding: crate::types::StringId::EMPTY,
+                 type_name: crate::types::StringId::EMPTY,
+@@ -147,6 +148,7 @@ fn test_roundtrip_type_descriptor() {
+             },
+             FieldDescriptor {
+                 declaration_type: None,
++                declared_visibility: None,
+                 refinement_src: crate::types::StringId::EMPTY,
+                 refinement_binding: crate::types::StringId::EMPTY,
+                 type_name: crate::types::StringId::EMPTY,
+@@ -944,6 +946,7 @@ fn test_roundtrip_empty_and_full_variants() {
+                 arity: 1,
+                 fields: smallvec::smallvec![FieldDescriptor {
+                     declaration_type: None,
++                    declared_visibility: None,
+                     refinement_src: crate::types::StringId::EMPTY,
+                     refinement_binding: crate::types::StringId::EMPTY,
+                     type_name: crate::types::StringId::EMPTY,
+diff --git a/crates/verum_vbc/src/types.rs b/crates/verum_vbc/src/types.rs
+index 00bd2ee15..393dee700 100644
+--- a/crates/verum_vbc/src/types.rs
++++ b/crates/verum_vbc/src/types.rs
+@@ -1136,6 +1136,30 @@ impl Default for TypeParamDescriptor {
+     }
+ }
+ 
++/// Complete source field access policy, distinct from coarse runtime visibility.
++/// `In` names an absolute declaration-owned scope in this module's string pool.
++#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
++pub enum DeclaredFieldVisibility {
++    Private,
++    Public,
++    Cog,
++    Super,
++    In(StringId),
++    Internal,
++    Protected,
++}
++
++impl DeclaredFieldVisibility {
++    /// Re-home an optional scope while preserving non-path policies. A missing
++    /// scope loses authority instead of being interpreted in the target pool.
++    pub fn remap_scope(self, remap: impl FnOnce(StringId) -> Option<StringId>) -> Option<Self> {
++        match self {
++            Self::In(scope) => remap(scope).map(Self::In),
++            policy => Some(policy),
++        }
++    }
++}
++
+ /// Field descriptor for record types.
+ #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+ pub struct FieldDescriptor {
+@@ -1150,8 +1174,12 @@ pub struct FieldDescriptor {
+     pub declaration_type: Option<TypeRef>,
+     /// Offset within struct (0 for generic types).
+     pub offset: u32,
+-    /// Field visibility.
++    /// Coarse compatibility visibility; not authority for declaration access.
+     pub visibility: Visibility,
++    /// Full source policy. None means unknown (including pre-v2.25 archives),
++    /// never public, regardless of the compatibility visibility above.
++    #[serde(default)]
++    pub declared_visibility: Option<DeclaredFieldVisibility>,
+     /// REFINE-FIELD-DYNAMIC-BYPASS-1 phase 2: the field's refinement
+     /// predicate SOURCE (display form, e.g. "it >= 0.0 && it <= 1.0"),
+     /// carried through the archive so USER-side construction of
+@@ -1189,6 +1217,7 @@ impl Default for FieldDescriptor {
+             name: StringId::EMPTY,
+             type_ref: TypeRef::Concrete(TypeId::UNIT),
+             declaration_type: None,
++            declared_visibility: None,
+             offset: 0,
+             visibility: Visibility::Public,
+                     refinement_src: StringId::EMPTY,
+@@ -2245,6 +2274,7 @@ mod tests {
+         td.kind = TypeKind::Record;
+         td.fields.push(FieldDescriptor {
+             declaration_type: None,
++            declared_visibility: None,
+             refinement_src: StringId::EMPTY,
+             refinement_binding: StringId::EMPTY,
+             type_name: StringId::EMPTY,
+@@ -2255,6 +2285,7 @@ mod tests {
+         });
+         td.fields.push(FieldDescriptor {
+             declaration_type: None,
++            declared_visibility: None,
+             refinement_src: StringId::EMPTY,
+             refinement_binding: StringId::EMPTY,
+             type_name: StringId::EMPTY,
+@@ -2370,6 +2401,7 @@ mod tests {
+     fn test_field_descriptor_custom() {
+         let fd = FieldDescriptor {
+             declaration_type: None,
++            declared_visibility: None,
+             refinement_src: StringId::EMPTY,
+             refinement_binding: StringId::EMPTY,
+             type_name: StringId::EMPTY,
+@@ -2434,6 +2466,7 @@ mod tests {
+         let mut fields = SmallVec::new();
+         fields.push(FieldDescriptor {
+             declaration_type: None,
++            declared_visibility: None,
+             refinement_src: StringId::EMPTY,
+             refinement_binding: StringId::EMPTY,
+             type_name: StringId::EMPTY,
+@@ -2699,6 +2732,7 @@ mod tests {
+         td.alignment = 8;
+         td.fields.push(FieldDescriptor {
+             declaration_type: None,
++            declared_visibility: None,
+             refinement_src: StringId::EMPTY,
+             refinement_binding: StringId::EMPTY,
+             type_name: StringId::EMPTY,
+@@ -2730,6 +2764,7 @@ mod tests {
+     fn test_field_descriptor_serde() {
+         let fd = FieldDescriptor {
+             declaration_type: None,
++            declared_visibility: None,
+             refinement_src: StringId::EMPTY,
+             refinement_binding: StringId::EMPTY,
+             type_name: StringId::EMPTY,
+diff --git a/crates/verum_vbc/tests/field_visibility.rs b/crates/verum_vbc/tests/field_visibility.rs
+new file mode 100644
+index 000000000..bafc38901
+--- /dev/null
++++ b/crates/verum_vbc/tests/field_visibility.rs
+@@ -0,0 +1,320 @@
++//! T1714: parsed declaration visibility must survive module serialization.
++#![cfg(feature = "codegen")]
++#[path = "fixtures/field_visibility.rs"]
++mod fixture;
++
++use verum_ast::{ItemKind, Visibility as AstVisibility, decl::TypeDeclBody};
++use verum_common::{List, Text};
++use verum_fast_parser::Parser;
++use verum_vbc::{codegen::VbcCodegen, module::VbcModule, types::Visibility};
++
++fn source_and_wire(field_name: &str, source_visibility: AstVisibility) -> [VbcModule; 2] {
++    let parsed = Parser::new(fixture::SOURCE)
++        .parse_module()
++        .expect("fixture grammar");
++    let fields = parsed
++        .items
++        .iter()
++        .find_map(|item| match &item.kind {
++            ItemKind::Type(declaration) => match &declaration.body {
++                TypeDeclBody::Record(fields) => Some(fields),
++                _ => None,
++            },
++            _ => None,
++        })
++        .expect("declared record");
++    let declared = fields
++        .iter()
++        .find(|field| field.name.name == field_name)
++        .expect("source field");
++    assert_eq!(
++        declared.visibility, source_visibility,
++        "parser source authority"
++    );
++    let source = VbcCodegen::new()
++        .compile_module(&parsed)
++        .expect("source lowering");
++    let wire = verum_vbc::deserialize::deserialize_module(
++        &verum_vbc::serialize::serialize_module(&source).expect("encode module"),
++    )
++    .expect("decode module");
++    [source, wire]
++}
++
++fn coarse(field_name: &str, source_visibility: AstVisibility, expected: Visibility) {
++    let mut failures: List<Text> = List::new();
++    for (route, module) in ["source", "wire"]
++        .into_iter()
++        .zip(source_and_wire(field_name, source_visibility))
++    {
++        let descriptor = module
++            .types
++            .iter()
++            .find(|descriptor| {
++                descriptor
++                    .origin_module
++                    .and_then(|id| module.get_string(id))
++                    == Some(fixture::OWNER)
++                    && module
++                        .get_string(descriptor.name)
++                        .is_some_and(|name| name.rsplit('.').next() == Some("Vault"))
++            })
++            .expect("exact declared owner");
++        let field = descriptor
++            .fields
++            .iter()
++            .find(|field| module.get_string(field.name) == Some(field_name))
++            .expect("emitted field");
++        if field.visibility != expected {
++            failures.push(
++                format!(
++                    "{route} {field_name}: expected {expected:?}, found {:?}",
++                    field.visibility
++                )
++                .into(),
++            );
++        }
++    }
++    assert!(failures.is_empty(), "{}", failures.join("\n"));
++}
++
++#[test]
++fn public_field_keeps_public_coarse_visibility() {
++    coarse("visible", AstVisibility::Public, Visibility::Public);
++}
++#[test]
++fn implicit_private_field_is_not_promoted() {
++    coarse(
++        "implicit_private",
++        AstVisibility::Private,
++        Visibility::Private,
++    );
++}
++#[test]
++fn explicit_private_field_is_not_promoted() {
++    coarse(
++        "explicit_private",
++        AstVisibility::Private,
++        Visibility::Private,
++    );
++}
++#[test]
++fn cog_field_keeps_cog_coarse_visibility() {
++    coarse("cog_only", AstVisibility::PublicCrate, Visibility::Cog);
++}
++#[test]
++fn parent_field_has_conservative_coarse_visibility() {
++    coarse(
++        "parent_only",
++        AstVisibility::PublicSuper,
++        Visibility::Private,
++    );
++}
++#[test]
++fn internal_field_has_conservative_coarse_visibility() {
++    coarse(
++        "internal_only",
++        AstVisibility::Internal,
++        Visibility::Private,
++    );
++}
++#[test]
++fn protected_field_has_conservative_coarse_visibility() {
++    coarse(
++        "protected_only",
++        AstVisibility::Protected,
++        Visibility::Private,
++    );
++}
++
++fn policy(module: &VbcModule, field: &verum_vbc::types::FieldDescriptor) -> AstVisibility {
++    use verum_ast::{Ident, Path, PathSegment, Span};
++    use verum_vbc::types::DeclaredFieldVisibility as Policy;
++    match field
++        .declared_visibility
++        .expect("source declaration policy")
++    {
++        Policy::Private => AstVisibility::Private,
++        Policy::Public => AstVisibility::Public,
++        Policy::Cog => AstVisibility::PublicCrate,
++        Policy::Super => AstVisibility::PublicSuper,
++        Policy::Internal => AstVisibility::Internal,
++        Policy::Protected => AstVisibility::Protected,
++        Policy::In(id) => AstVisibility::PublicIn(Path::new(
++            module
++                .get_string(id)
++                .expect("owning scope pool")
++                .split('.')
++                .map(|name| PathSegment::Name(Ident::new(name, Span::dummy())))
++                .collect(),
++            Span::dummy(),
++        )),
++    }
++}
++
++#[test]
++fn every_record_and_variant_policy_survives_source_and_wire() {
++    let parsed = Parser::new(fixture::SOURCE).parse_module().unwrap();
++    for module in source_and_wire("visible", AstVisibility::Public) {
++        let mut count = 0;
++        for item in &parsed.items {
++            let ItemKind::Type(decl) = &item.kind else {
++                continue;
++            };
++            let descriptor = module
++                .types
++                .iter()
++                .find(|ty| {
++                    module
++                        .get_string(ty.name)
++                        .is_some_and(|name| name.rsplit('.').next() == Some(decl.name.as_str()))
++                        && ty.origin_module.and_then(|id| module.get_string(id))
++                            == Some(fixture::OWNER)
++                })
++                .expect("exact declaration");
++            let pairs: List<(
++                &verum_ast::decl::RecordField,
++                &verum_vbc::types::FieldDescriptor,
++            )> = match &decl.body {
++                TypeDeclBody::Record(fields) => {
++                    fields.iter().zip(descriptor.fields.iter()).collect()
++                }
++                TypeDeclBody::Variant(variants) => variants
++                    .iter()
++                    .zip(descriptor.variants.iter())
++                    .flat_map(|(source, vbc)| {
++                        let Some(verum_ast::decl::VariantData::Record(fields)) = &source.data
++                        else {
++                            return List::new();
++                        };
++                        fields.iter().zip(vbc.fields.iter()).collect()
++                    })
++                    .collect(),
++                _ => continue,
++            };
++            for (field, emitted) in pairs {
++                assert_eq!(module.get_string(emitted.name), Some(field.name.as_str()));
++                assert_eq!(
++                    policy(&module, emitted),
++                    field
++                        .visibility
++                        .resolve_declared_scope(fixture::OWNER)
++                        .unwrap(),
++                    "{}",
++                    field.name
++                );
++                count += 1;
++            }
++        }
++        assert_eq!(count, 16, "all ordinary and named variant fields");
++    }
++}
++
++#[test]
++fn root_escaping_declared_scope_is_a_source_error() {
++    let parsed = Parser::new("module app; public type Cell is { public(in super) value: Int };")
++        .parse_module()
++        .unwrap();
++    let error = VbcCodegen::new()
++        .compile_module(&parsed)
++        .expect_err("invalid declared scope");
++    assert!(
++        error.to_string().contains("escapes the declaring cog root"),
++        "{error}"
++    );
++}
++
++fn assert_scoped_record(module: &VbcModule) {
++    use verum_ast::{Ident, Path, PathSegment, Span};
++    let record = module
++        .types
++        .iter()
++        .find(|ty| {
++            ty.origin_module.and_then(|id| module.get_string(id)) == Some(fixture::OWNER)
++                && module
++                    .get_string(ty.name)
++                    .is_some_and(|name| name.rsplit('.').next() == Some("Vault"))
++        })
++        .expect("declaring owner retained across pool boundary");
++    let field = record
++        .fields
++        .iter()
++        .find(|field| module.get_string(field.name) == Some("self_scoped"))
++        .expect("field identity retained");
++    let expected = AstVisibility::PublicIn(Path::new(
++        ["fixture", "visibility", "owner", "scope"]
++            .into_iter()
++            .map(|name| PathSegment::Name(Ident::new(name, Span::dummy())))
++            .collect(),
++        Span::dummy(),
++    ));
++    assert_eq!(policy(module, field), expected);
++    let variant = module
++        .types
++        .iter()
++        .find(|ty| {
++            ty.origin_module.and_then(|id| module.get_string(id)) == Some(fixture::OWNER)
++                && module
++                    .get_string(ty.name)
++                    .is_some_and(|name| name.rsplit('.').next() == Some("Message"))
++        })
++        .unwrap()
++        .variants
++        .iter()
++        .find(|variant| module.get_string(variant.name) == Some("Payload"))
++        .unwrap();
++    let scoped = variant
++        .fields
++        .iter()
++        .find(|field| module.get_string(field.name) == Some("scoped"))
++        .unwrap();
++    let expected = AstVisibility::PublicIn(Path::new(
++        ["fixture", "visibility"]
++            .into_iter()
++            .map(|name| PathSegment::Name(Ident::new(name, Span::dummy())))
++            .collect(),
++        Span::dummy(),
++    ));
++    assert_eq!(policy(module, scoped), expected);
++}
++
++#[test]
++fn archive_import_preserves_declaration_scope_across_distinct_string_pools() {
++    use verum_vbc::codegen::CodegenConfig;
++    let [_, wire] = source_and_wire("visible", AstVisibility::Public);
++    let mut consumer = VbcCodegen::with_config(CodegenConfig::new("consumer.unrelated"));
++    for index in 0..128 {
++        consumer
++            .ctx_mut()
++            .intern_string_raw(&format!("unrelated_{index}"));
++    }
++    consumer.import_archive_module_types(&wire);
++    let final_module = consumer
++        .finalize_module_from_state()
++        .expect("imported descriptors");
++    assert_scoped_record(&final_module);
++    let roundtrip = verum_vbc::deserialize::deserialize_module(
++        &verum_vbc::serialize::serialize_module(&final_module).unwrap(),
++    )
++    .unwrap();
++    assert_scoped_record(&roundtrip);
++}
++
++#[test]
++fn linker_preserves_scope_and_declaration_owner_across_distinct_pools() {
++    let [_, wire] = source_and_wire("visible", AstVisibility::Public);
++    let mut linker = verum_vbc::linker::VbcLinker::new("aarch64-apple-darwin");
++    let mut unrelated = VbcModule::new("consumer.unrelated".into());
++    for index in 0..128 {
++        unrelated.intern_string(&format!("other_{index}"));
++    }
++    linker.add_user_module(unrelated).unwrap();
++    linker.add_user_module(wire).unwrap();
++    let linked = linker.finalize();
++    assert_scoped_record(&linked);
++    let roundtrip = verum_vbc::deserialize::deserialize_module(
++        &verum_vbc::serialize::serialize_module(&linked).unwrap(),
++    )
++    .unwrap();
++    assert_scoped_record(&roundtrip);
++}
+diff --git a/crates/verum_vbc/tests/fixtures/field_visibility.rs b/crates/verum_vbc/tests/fixtures/field_visibility.rs
+new file mode 100644
+index 000000000..238a1bf73
+--- /dev/null
++++ b/crates/verum_vbc/tests/fixtures/field_visibility.rs
+@@ -0,0 +1,25 @@
++//! The producer must retain every declaration policy, not infer it from use.
++pub const OWNER: &str = "fixture.visibility.owner";
++pub const SOURCE: &str = r#"
++module fixture.visibility.owner;
++public type Vault is {
++    implicit_private: Int,
++    private explicit_private: Int,
++    public visible: Int,
++    public(cog) cog_only: Int,
++    public(super) parent_only: Int,
++    public(in fixture.visibility) scoped: Int,
++    public(in super) relative_scoped: Int,
++    public(in super.scope) super_scoped: Int,
++    public(in self.scope) self_scoped: Int,
++    public(in cog.scope) cog_scoped: Int,
++    internal internal_only: Int,
++    protected protected_only: Int,
++};
++public type Message is Empty | Payload {
++    private secret: Int,
++    public visible: Int,
++    public(cog) cog_only: Int,
++    public(in super) scoped: Int,
++};
++"#;
+diff --git a/crates/verum_vbc/tests/format/field_visibility.rs b/crates/verum_vbc/tests/format/field_visibility.rs
+new file mode 100644
+index 000000000..842d259a7
+--- /dev/null
++++ b/crates/verum_vbc/tests/format/field_visibility.rs
+@@ -0,0 +1,48 @@
++use super::*;
++use verum_common::List;
++
++fn old_field() -> List<u8> {
++    let mut bytes = List::new();
++    bytes.extend_from_slice(&17_u32.to_le_bytes()); // name
++    bytes.push(1); // concrete TypeRef
++    bytes.extend_from_slice(&TypeId::INT.0.to_le_bytes());
++    bytes.extend_from_slice(&8_u32.to_le_bytes()); // offset
++    bytes.push(Visibility::Public as u8); // coarse public is not declaration evidence
++    for _ in 0..3 {
++        bytes.extend_from_slice(&0_u32.to_le_bytes());
++    }
++    bytes.push(0); // no semantic type
++    bytes
++}
++
++#[test]
++fn legacy_v224_fields_remain_unknown_without_consuming_the_next_field() {
++    let one = old_field();
++    let mut bytes = one.clone();
++    bytes.extend_from_slice(one.as_slice());
++    let mut reader = Deserializer::new(bytes.as_slice());
++    reader.header = Some(VbcHeader {
++        version_minor: 24,
++        ..VbcHeader::default()
++    });
++    for offset in [one.len(), bytes.len()] {
++        let field = reader.parse_field().unwrap();
++        assert_eq!(field.visibility, Visibility::Public);
++        assert_eq!(field.declared_visibility, None);
++        assert_eq!(reader.offset, offset);
++    }
++}
++
++#[test]
++fn new_field_policy_rejects_invalid_tags_and_truncated_scopes() {
++    for tail in [&[][..], &[8][..], &[255][..], &[5][..], &[5, 1, 2, 3][..]] {
++        let mut bytes = old_field();
++        bytes.extend_from_slice(tail);
++        let mut reader = Deserializer::new(bytes.as_slice());
++        reader.header = Some(VbcHeader {
++            version_minor: 25,
++            ..VbcHeader::default()
++        });
++        assert!(reader.parse_field().is_err(), "tail {tail:?}");
++    }
++}

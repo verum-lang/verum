@@ -1,0 +1,60 @@
+   Compiling verum_error v0.1.0 (/Users/taaliman/.codex/worktrees/registry-metadata-lookup/verum/crates/verum_error)
+   Compiling verum_tblgen v21.0.0 (/Users/taaliman/.codex/worktrees/registry-metadata-lookup/verum/crates/llvm/verum_tblgen)
+   Compiling verum_llvm_sys v21.0.0 (/Users/taaliman/.codex/worktrees/registry-metadata-lookup/verum/crates/llvm/verum_llvm_sys)
+warning: verum_llvm_sys@21.0.0: In file included from /Users/taaliman/.codex/worktrees/registry-metadata-lookup/verum/crates/llvm/verum_llvm_sys/src/lld/linker.cpp:7:
+warning: verum_llvm_sys@21.0.0: In file included from /Users/taaliman/projects/oldman/verum-lang/verum/llvm/install/include/lld/Common/CommonLinkerContext.h:22:
+warning: verum_llvm_sys@21.0.0: In file included from /Users/taaliman/projects/oldman/verum-lang/verum/llvm/install/include/lld/Common/ErrorHandler.h:71:
+warning: verum_llvm_sys@21.0.0: In file included from /Users/taaliman/projects/oldman/verum-lang/verum/llvm/install/include/lld/Common/LLVM.h:21:
+warning: verum_llvm_sys@21.0.0: /Users/taaliman/projects/oldman/verum-lang/verum/llvm/install/include/llvm/Support/Casting.h:279:45: warning: unused parameter 'f' [-Wunused-parameter]
+warning: verum_llvm_sys@21.0.0:   279 |   static inline bool isPossible(const From &f) { return true; }
+warning: verum_llvm_sys@21.0.0:       |                                             ^
+warning: verum_llvm_sys@21.0.0: /Users/taaliman/projects/oldman/verum-lang/verum/llvm/install/include/llvm/Support/Casting.h:604:41: warning: unused parameter 't' [-Wunused-parameter]
+warning: verum_llvm_sys@21.0.0:   604 |   static inline bool isPresent(const T &t) { return true; }
+warning: verum_llvm_sys@21.0.0:       |                                         ^
+warning: verum_llvm_sys@21.0.0: In file included from /Users/taaliman/.codex/worktrees/registry-metadata-lookup/verum/crates/llvm/verum_llvm_sys/src/lld/linker.cpp:7:
+warning: verum_llvm_sys@21.0.0: In file included from /Users/taaliman/projects/oldman/verum-lang/verum/llvm/install/include/lld/Common/CommonLinkerContext.h:22:
+warning: verum_llvm_sys@21.0.0: In file included from /Users/taaliman/projects/oldman/verum-lang/verum/llvm/install/include/lld/Common/ErrorHandler.h:75:
+warning: verum_llvm_sys@21.0.0: /Users/taaliman/projects/oldman/verum-lang/verum/llvm/install/include/llvm/Support/Error.h:304:24: warning: unused parameter 'V' [-Wunused-parameter]
+warning: verum_llvm_sys@21.0.0:   304 |   void setChecked(bool V) {
+warning: verum_llvm_sys@21.0.0:       |                        ^
+warning: verum_llvm_sys@21.0.0: In file included from /Users/taaliman/.codex/worktrees/registry-metadata-lookup/verum/crates/llvm/verum_llvm_sys/src/lld/linker.cpp:7:
+warning: verum_llvm_sys@21.0.0: In file included from /Users/taaliman/projects/oldman/verum-lang/verum/llvm/install/include/lld/Common/CommonLinkerContext.h:23:
+warning: verum_llvm_sys@21.0.0: In file included from /Users/taaliman/projects/oldman/verum-lang/verum/llvm/install/include/lld/Common/Memory.h:24:
+warning: verum_llvm_sys@21.0.0: /Users/taaliman/projects/oldman/verum-lang/verum/llvm/install/include/llvm/Support/Allocator.h:226:31: warning: unused parameter 'Ptr' [-Wunused-parameter]
+warning: verum_llvm_sys@21.0.0:   226 |   void Deallocate(const void *Ptr, size_t Size, size_t /*Alignment*/) {
+warning: verum_llvm_sys@21.0.0:       |                               ^
+warning: verum_llvm_sys@21.0.0: /Users/taaliman/projects/oldman/verum-lang/verum/llvm/install/include/llvm/Support/Allocator.h:226:43: warning: unused parameter 'Size' [-Wunused-parameter]
+warning: verum_llvm_sys@21.0.0:   226 |   void Deallocate(const void *Ptr, size_t Size, size_t /*Alignment*/) {
+warning: verum_llvm_sys@21.0.0:       |                                           ^
+warning: verum_llvm_sys@21.0.0: 5 warnings generated.
+   Compiling verum_mlir_sys v21.0.0 (/Users/taaliman/.codex/worktrees/registry-metadata-lookup/verum/crates/llvm/verum_mlir_sys)
+warning: cvc5-sys@0.1.0: cvc5-sys: no linking mode configured. Enable feature `vendored` to build CVC5 from source, `system` to link system library, or set CVC5_ROOT environment variable.
+   Compiling verum_types v0.1.0 (/Users/taaliman/.codex/worktrees/registry-metadata-lookup/verum/crates/verum_types)
+   Compiling verum_mlir_macro v21.0.0 (/Users/taaliman/.codex/worktrees/registry-metadata-lookup/verum/crates/llvm/verum_mlir_macro)
+   Compiling verum_cbgr v0.1.0 (/Users/taaliman/.codex/worktrees/registry-metadata-lookup/verum/crates/verum_cbgr)
+   Compiling verum_mlir v21.0.0 (/Users/taaliman/.codex/worktrees/registry-metadata-lookup/verum/crates/llvm/verum_mlir)
+   Compiling verum_llvm v0.1.0 (/Users/taaliman/.codex/worktrees/registry-metadata-lookup/verum/crates/llvm/verum_llvm)
+   Compiling verum_smt v0.1.0 (/Users/taaliman/.codex/worktrees/registry-metadata-lookup/verum/crates/verum_smt)
+   Compiling verum_vbc v0.1.0 (/Users/taaliman/.codex/worktrees/registry-metadata-lookup/verum/crates/verum_vbc)
+   Compiling verum_compiler v0.1.0 (/Users/taaliman/.codex/worktrees/registry-metadata-lookup/verum/crates/verum_compiler)
+warning: verum_compiler@0.1.0: Stdlib default bake: excluded 2 runtime-gated file(s) (sys/embedded.vr, sys/embedded/, sys/no_runtime.vr, sys/no_runtime/)
+warning: verum_compiler@0.1.0: Embedded stdlib: 2560 files, 3440.1KB compressed (from 20573.1KB)
+warning: verum_compiler@0.1.0: Stdlib mount graph: 49379 edges, 133.3KB compressed (from 1672.0KB)
+warning: verum_compiler@0.1.0: Stdlib symbol manifest: 43982 symbols, 204.0KB compressed (from 766.6KB)
+warning: verum_compiler@0.1.0: Stdlib prelude seeds: 38 paths, 956 bytes
+warning: verum_compiler@0.1.0: Embedded precompiled stdlib VBC: 39478.1KB (/Users/taaliman/.tmp/verum-codex-01a10248/native-target/precompiled-stdlib/runtime.vbca)
+warning: verum_compiler@0.1.0: Embedded precompiled stdlib core metadata: 115386.4KB (/Users/taaliman/.tmp/verum-codex-01a10248/native-target/precompiled-stdlib/runtime.core_metadata)
+warning: verum_compiler@0.1.0: Embedded stdlib symbol graph: 6829.5KB (/Users/taaliman/.tmp/verum-codex-01a10248/native-target/precompiled-stdlib/runtime.symbol_graph)
+   Compiling verum_codegen v0.1.0 (/Users/taaliman/.codex/worktrees/registry-metadata-lookup/verum/crates/verum_codegen)
+   Compiling verum_verification v0.1.0 (/Users/taaliman/.codex/worktrees/registry-metadata-lookup/verum/crates/verum_verification)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1m 42s
+     Running unittests src/lib.rs (/Users/taaliman/.tmp/verum-codex-01a10248/native-target/debug/build/verum_compiler/c6ca94c7409ab771/out/verum_compiler-c6ca94c7409ab771)
+
+thread 'pipeline::stdlib_bootstrap::field_visibility_tests::parsed_private_and_restricted_fields_are_not_public_after_archive_metadata' (7048364) panicked at crates/verum_compiler/src/pipeline/../../tests/bootstrap/field_visibility.rs:52:5:
+assertion `left == right` failed
+  left: None
+ right: Some("fixture.visibility.owner")
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+error: test failed, to rerun pass `-p verum_compiler --lib`
+error: 1 target failed:
+    `-p verum_compiler --lib`

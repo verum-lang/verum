@@ -1,0 +1,35 @@
+{
+  "checks": [
+    {
+      "command": [
+        "git",
+        "diff",
+        "--check",
+        "f242a0beff93e846246c0c2dbf3fe9dbd4a39f88",
+        "71f8e7f9fad8340f135798ffc58dd99a1e3146fd",
+        "--",
+        "crates"
+      ],
+      "exit_code": 0,
+      "seconds": 0.041,
+      "log": "authored-0.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "command": [
+        "git",
+        "diff",
+        "--cached",
+        "--check",
+        "--",
+        "docs/architecture/evidence/field-visibility-metadata/README.md",
+        "docs/architecture/evidence/field-visibility-metadata/manifest.json"
+      ],
+      "exit_code": 0,
+      "seconds": 0.018,
+      "log": "authored-1.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ],
+  "raw_whitespace": "Unfiltered staged whitespace reports only retained Cargo trailing blank lines and patch context lines. Raw evidence remains byte-identical."
+}

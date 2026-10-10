@@ -1,0 +1,22 @@
+{
+  "source": "71f8e7f9fad8340f135798ffc58dd99a1e3146fd",
+  "owned_target_processes": [],
+  "artifacts": {
+    "/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target": {
+      "runtime.vbca": "410ff097b455437cab98b651f7799b3129588820925afe98e0de9c3781530a0f",
+      "runtime.core_metadata": "a92bd89e649e102cdc67d7ad0032513d6448d8915e5744127e6cdf1f1e34ebbb",
+      "runtime.symbol_graph": "a6678c18498f7519749ca1fdf1d22629b479083f42fa95a15177e8c7acf1c722",
+      "runtime.vbca.checksum": "c33573118a8c4b635f6c8f727c3784b524f660be57de702365e8d9c14b2f3a8b",
+      "runtime.vbca.schema": "fec20d7b3f8d1b81aff66c6c1181be574963779f7eacaf65660f8ab9127fca87"
+    },
+    "/Users/taaliman/.tmp/verum-codex-01a10248/native-target": {
+      "runtime.vbca": "a49404b0efe393f7d1ecee178ca79363c2b38cdf1f26f239c88f4c9bbec17b7c",
+      "runtime.core_metadata": "186c64699f8f8c1c24dc737869b1ce576847104f839a4f77dbca73b86ce63504",
+      "runtime.symbol_graph": "430406d610f3014f398f55ff7da9eddc8a0e07043551be8c70242952a1351f1a",
+      "runtime.vbca.checksum": "846397d1921eee99103f71e082baf016e3ad500ce18222797f0e12589b333c88",
+      "runtime.vbca.schema": "240cd78e72e26babff8e42d67de2822d22bd5923e28d7f181a868006f6116552"
+    }
+  },
+  "free_bytes": 9412485120,
+  "scope": "Released T1714 target loans; no ordinary CLI or fresh bake run."
+}

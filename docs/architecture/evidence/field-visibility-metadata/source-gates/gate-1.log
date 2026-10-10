@@ -1,0 +1,31 @@
+docs/architecture/evidence/field-visibility-metadata/adjacent/cargo.jsonl:273: new blank line at EOF.
+docs/architecture/evidence/field-visibility-metadata/changes.patch:10: trailing whitespace.
++ 
+docs/architecture/evidence/field-visibility-metadata/changes.patch:211: trailing whitespace.
++ 
+docs/architecture/evidence/field-visibility-metadata/changes.patch:232: trailing whitespace.
++ 
+docs/architecture/evidence/field-visibility-metadata/changes.patch:531: trailing whitespace.
++ 
+docs/architecture/evidence/field-visibility-metadata/changes.patch:672: trailing whitespace.
++ 
+docs/architecture/evidence/field-visibility-metadata/changes.patch:688: trailing whitespace.
++ 
+docs/architecture/evidence/field-visibility-metadata/changes.patch:861: trailing whitespace.
++ 
+docs/architecture/evidence/field-visibility-metadata/changes.patch:919: trailing whitespace.
++ 
+docs/architecture/evidence/field-visibility-metadata/changes.patch:941: trailing whitespace.
++ 
+docs/architecture/evidence/field-visibility-metadata/changes.patch:977: trailing whitespace.
++ 
+docs/architecture/evidence/field-visibility-metadata/codec-fixed/cargo.jsonl:228: new blank line at EOF.
+docs/architecture/evidence/field-visibility-metadata/compiler-baseline/cargo.jsonl:375: new blank line at EOF.
+docs/architecture/evidence/field-visibility-metadata/compiler-causal-baseline/cargo.jsonl:375: new blank line at EOF.
+docs/architecture/evidence/field-visibility-metadata/compiler-fixed/cargo.jsonl:380: new blank line at EOF.
+docs/architecture/evidence/field-visibility-metadata/import-link/cargo.jsonl:238: new blank line at EOF.
+docs/architecture/evidence/field-visibility-metadata/scope-first/cargo.jsonl:137: new blank line at EOF.
+docs/architecture/evidence/field-visibility-metadata/vbc-baseline/cargo.jsonl:237: new blank line at EOF.
+docs/architecture/evidence/field-visibility-metadata/vbc-first/cargo.jsonl:248: new blank line at EOF.
+docs/architecture/evidence/field-visibility-metadata/vbc-fixed/cargo.jsonl:236: new blank line at EOF.
+git: warning: confstr() failed with code 5: couldn't get path of DARWIN_USER_TEMP_DIR; using /tmp instead

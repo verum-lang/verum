@@ -1,0 +1,33 @@
+   Compiling verum_error v0.1.0 (/Users/taaliman/.codex/worktrees/registry-metadata-lookup/verum/crates/verum_error)
+   Compiling verum_cbgr v0.1.0 (/Users/taaliman/.codex/worktrees/registry-metadata-lookup/verum/crates/verum_cbgr)
+   Compiling verum_vbc v0.1.0 (/Users/taaliman/.codex/worktrees/registry-metadata-lookup/verum/crates/verum_vbc)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 25.81s
+     Running tests/field_visibility.rs (/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target/debug/build/verum_vbc/03ade4b23c897543/out/field_visibility-03ade4b23c897543)
+
+thread 'cog_field_keeps_cog_coarse_visibility' (7041074) panicked at crates/verum_vbc/tests/field_visibility.rs:78:5:
+source cog_only: expected Cog, found Public
+wire cog_only: expected Cog, found Public
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+thread 'explicit_private_field_is_not_promoted' (7041075) panicked at crates/verum_vbc/tests/field_visibility.rs:78:5:
+source explicit_private: expected Private, found Public
+wire explicit_private: expected Private, found Public
+
+thread 'implicit_private_field_is_not_promoted' (7041076) panicked at crates/verum_vbc/tests/field_visibility.rs:78:5:
+source implicit_private: expected Private, found Public
+wire implicit_private: expected Private, found Public
+
+thread 'internal_field_has_conservative_coarse_visibility' (7041077) panicked at crates/verum_vbc/tests/field_visibility.rs:78:5:
+source internal_only: expected Private, found Public
+wire internal_only: expected Private, found Public
+
+thread 'parent_field_has_conservative_coarse_visibility' (7041078) panicked at crates/verum_vbc/tests/field_visibility.rs:78:5:
+source parent_only: expected Private, found Public
+wire parent_only: expected Private, found Public
+
+thread 'protected_field_has_conservative_coarse_visibility' (7041079) panicked at crates/verum_vbc/tests/field_visibility.rs:78:5:
+source protected_only: expected Private, found Public
+wire protected_only: expected Private, found Public
+error: test failed, to rerun pass `-p verum_vbc --test field_visibility`
+error: 1 target failed:
+    `-p verum_vbc --test field_visibility`
