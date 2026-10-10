@@ -258,3 +258,31 @@ fn generic_return_uses_the_declaring_modules_import_alias() {
 fn reexported_generic_return_uses_the_declaring_modules_import_alias() {
     check_generic_factory("demo.api");
 }
+
+const HIDDEN_PROVIDER: &str = r#"
+    private type Receipt is { value: Int };
+    implement Receipt {
+        public fn read(&self) -> Int { self.hidden() }
+        private fn hidden(&self) -> Int { self.value }
+    }
+    public fn issue() -> Receipt { Receipt { value: 37 } }
+"#;
+
+#[test]
+fn inferred_private_type_retains_its_public_method() {
+    let errors = check(
+        "mount demo.provider.issue; fn probe() -> Int { issue().read() }",
+        &[("demo.provider", HIDDEN_PROVIDER)],
+    );
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
+#[test]
+fn inferred_private_type_does_not_expose_its_private_method() {
+    let errors = check(
+        "mount demo.provider.issue; fn probe() -> Int { issue().hidden() }",
+        &[("demo.provider", HIDDEN_PROVIDER)],
+    );
+    assert_missing_method(&errors, "hidden");
+    assert!(errors[0].contains("demo.provider.Receipt"), "{errors:?}");
+}
