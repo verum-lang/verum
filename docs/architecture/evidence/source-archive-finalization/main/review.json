@@ -1,0 +1,77 @@
+{
+  "task": "T1742",
+  "status": "passed",
+  "main_base": "09f1d79d867da8c605a03e4b32941ab2ba526e89",
+  "tested_source": "5ebe513ad919d4c6a90c690f7fc1f99ccae6ad57",
+  "source_bindings_verified": 5296,
+  "tests_passed": 6,
+  "tests_failed": 0,
+  "tests_ignored": 0,
+  "elapsed_seconds": 248.933,
+  "files": {
+    "result.json.gz": {
+      "original": "/private/tmp/verum-T1742-main-acceptance/result.json",
+      "bytes": 642525,
+      "sha256": "2d684702f50122f90bb5d25fae6e26730e1825871b7d84981fb34a4eef6a4862",
+      "gzip_bytes": 256544,
+      "gzip_sha256": "59a060d2734e3969dcef484a6fa65fb6ee1ef6c5eaf888c0067b6bf91f323fe9"
+    },
+    "gate.log.gz": {
+      "original": "/private/tmp/verum-T1742-main-acceptance/gate.log",
+      "bytes": 1720547,
+      "sha256": "7b0a14654c8ac22221c0042865cc414830be3ca78f60c9921d2c179cf94ee05b",
+      "gzip_bytes": 173031,
+      "gzip_sha256": "815abf73259dbe628520a66d5c7287d96035952dfb4e73f353a0f5935c0bef85"
+    },
+    "runner.py.gz": {
+      "original": "/private/tmp/verum-T1742-main-gate.py",
+      "bytes": 9354,
+      "sha256": "9ed16de56ca5636393b2f102fad1a80c7f2e65043a6edfc617c9af4dc6fc3fdc",
+      "gzip_bytes": 3523,
+      "gzip_sha256": "83ae86c84ffcb8f0b1c36d12722728137a0fcf714f32cbd91d8f99ba278b8340"
+    },
+    "producer-fixture/source-cog/archive.tar.gz": {
+      "original": "/private/tmp/verum-T1742-main-acceptance/producer-fixture/source-cog/archive.tar",
+      "bytes": 5120,
+      "sha256": "3cbee8ca44a0b64aec2ceeaa576ef7dc2c6c036e0267e2ebd2ae08c2f3b2c347",
+      "gzip_bytes": 300,
+      "gzip_sha256": "2289de5808eb7a06d9ff43b96f755bc7c455639a27d85846cfe775c8c800baad"
+    },
+    "producer-fixture/source-cog/archive.vr.gz": {
+      "original": "/private/tmp/verum-T1742-main-acceptance/producer-fixture/source-cog/archive.vr",
+      "bytes": 313,
+      "sha256": "1dab992a16d4f863f4c4b72e69a071d73b139a31da6db6badc770e9586371f4e",
+      "gzip_bytes": 336,
+      "gzip_sha256": "f79b8bb170343f888410d28e23fdc3448f70ee3dd0ca6a03c9e7bb444ce2488b"
+    },
+    "producer-fixture/source-cog/expected.json.gz": {
+      "original": "/private/tmp/verum-T1742-main-acceptance/producer-fixture/source-cog/expected.json",
+      "bytes": 1068,
+      "sha256": "535edaefc0257184793894f1222de891dfc8e7aa56c2156f0619b57c4e25edde",
+      "gzip_bytes": 530,
+      "gzip_sha256": "17d93d33ad0bed3c498bd64ee60855bafabbe10a48bb91321000a5d7f6892f8e"
+    },
+    "producer-fixture/source-cog/input/Verum.toml.gz": {
+      "original": "/private/tmp/verum-T1742-main-acceptance/producer-fixture/source-cog/input/Verum.toml",
+      "bytes": 87,
+      "sha256": "c44cccc28d6a6f2d0b73c6c3924719c86620c734db75809483da71ce7670aaa0",
+      "gzip_bytes": 103,
+      "gzip_sha256": "8ee0c61079a4dcd243241aabfc6e06023052cb2c34b06ad4300f60d723da15b5"
+    },
+    "producer-fixture/source-cog/input/src/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/binary.dat.gz": {
+      "original": "/private/tmp/verum-T1742-main-acceptance/producer-fixture/source-cog/input/src/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/binary.dat",
+      "bytes": 7,
+      "sha256": "d6602612a6534826e99744c062a396ea9712f188cc28603f432ee817670aede1",
+      "gzip_bytes": 27,
+      "gzip_sha256": "654ed41a106a33d422dff0bddb279e45f4b7b9ab5e358c20c3e4507ebb257d30"
+    },
+    "producer-fixture/source-cog/input/src/short.bin.gz": {
+      "original": "/private/tmp/verum-T1742-main-acceptance/producer-fixture/source-cog/input/src/short.bin",
+      "bytes": 8,
+      "sha256": "f4e20074cff4faf310f63ae8e9ce49828390205c8ea46a5ac7a590e27ff4d8f1",
+      "gzip_bytes": 28,
+      "gzip_sha256": "e0e0670c29d57e0426666b0a61bc46f633740f13d070a946febd99a0c8d228fc"
+    }
+  },
+  "scope": "Focused main-based host CLI library writer/producer tests. All CLI sources, tests and Cargo dependency inputs match the previously accepted implementation. No automatic bake, decoder, AOT or durable registry acceptance."
+}

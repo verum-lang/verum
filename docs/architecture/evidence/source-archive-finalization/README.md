@@ -30,3 +30,9 @@ one GNU long-name extension. The compressed output is retained as
 The decompressed tar and exact project input files are retained alongside it.
 The locked Rust gzip and tar readers verify framing and exact entry contents.
 Acceptance by the shared Verum decoders remains a separate execution gate.
+
+The [main integration check](main/review.json) repeats all six controls on
+the isolated branch based directly on main, with no failures or ignored
+tests in 248.933 seconds. Its CLI sources and Cargo dependency inputs
+match the reviewed implementation. All source and inherited archive
+identities remain unchanged; the actual producer fixture is retained.

@@ -1,0 +1,28 @@
+{
+  "status": "verified",
+  "scope": "Independent committed source, retained executable, log and producer-fixture hash review. Runtime and source acceptance scopes remain those of the original receipts.",
+  "runs": {
+    "guard-interruption": {
+      "commit": "82c39ac4b8e7c6082857b1f602c71f3c801ef5f9",
+      "source_bindings": 5316,
+      "exit_code": -15,
+      "test_results": []
+    },
+    "causal-baseline": {
+      "commit": "82c39ac4b8e7c6082857b1f602c71f3c801ef5f9",
+      "source_bindings": 5316,
+      "exit_code": 101,
+      "test_results": [
+        "test result: FAILED. 3 passed; 2 failed; 0 ignored; 0 measured; 898 filtered out; finished in 0.00s"
+      ]
+    },
+    "fixed": {
+      "commit": "9d6725c61d8ef056c5e76a8c81fc46a658bc44d6",
+      "source_bindings": 5317,
+      "exit_code": 0,
+      "test_results": [
+        "test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 898 filtered out; finished in 0.01s"
+      ]
+    }
+  }
+}
