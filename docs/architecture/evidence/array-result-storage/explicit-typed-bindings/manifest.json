@@ -1,0 +1,36 @@
+{
+  "result.json.gz": {
+    "original_name": "result.json",
+    "original_sha256": "5f8baf156ad3fb9afc10f1758abce75b13bc64bbfd40f648d6a3a0277c16a1ea",
+    "stored_sha256": "3c1619462ab1c0a6fdbd438212636dd2e558e57fc07b15782f54aafd07d688e8",
+    "original_size_bytes": 59869,
+    "stored_size_bytes": 24276
+  },
+  "cargo.jsonl.gz": {
+    "original_name": "cargo.jsonl",
+    "original_sha256": "f72f75861fa66b0620a973bfaf34f3fd4b566976183c4c3216c9309c8b9ca5e2",
+    "stored_sha256": "dc034b84e685b3f2a87130a8d1f9d3320492ff7016f2259b773c4a0d0982520b",
+    "original_size_bytes": 180143,
+    "stored_size_bytes": 13256
+  },
+  "stderr.log.gz": {
+    "original_name": "stderr.log",
+    "original_sha256": "3aa37249604a2bf2d11aee4aeff31566db44a709b6ed9d41b8bff31f5abb9659",
+    "stored_sha256": "9c73b57aad6dae4da5e4a3ee285a7b060d68f1549ad36d110dff356f01315d61",
+    "original_size_bytes": 610,
+    "stored_size_bytes": 278
+  },
+  "retained-executable.json.gz": {
+    "original_name": "retained-executable.json",
+    "original_sha256": "8ed07c75a804ffd73bcc8463b67da69fc6e6c11d95d6d9009263f51eb1a3a24a",
+    "stored_sha256": "c57dd4351a42e62803a861b47717609ae2ef19e78e2b006ff1e7bc304b9710a5",
+    "original_size_bytes": 459,
+    "stored_size_bytes": 329
+  },
+  "run_gate.py": {
+    "sha256": "b88c3187eaf6efd3258dcee62a337d56dcd45f33854238c8706b60e9b004c17a"
+  },
+  "README.md": {
+    "sha256": "34bb2d517ed9310912eb1bf767e1b17e5ec986df6e113b1a0ca02cc176a20a4e"
+  }
+}

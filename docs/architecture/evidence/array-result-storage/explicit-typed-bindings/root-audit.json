@@ -1,0 +1,29 @@
+{
+  "candidate": "6a51ebe1e6c30874d1f307565080643896ba3243",
+  "files_verified": 60,
+  "source_hashes_verified": 445,
+  "gates": [
+    {
+      "source": "f14fba3a8ad71b9d31ba8d07a660c8587e5ccc1c",
+      "source_paths": 446,
+      "result": [
+        "test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s"
+      ],
+      "seconds": 24.189,
+      "ir_files": 0,
+      "receipt_sha256": "5f8baf156ad3fb9afc10f1758abce75b13bc64bbfd40f648d6a3a0277c16a1ea"
+    },
+    {
+      "source": "4afb8b520aa9464e3ad9836c7f2119af5ee2e5b7",
+      "source_paths": 446,
+      "result": [
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 15 filtered out; finished in 0.87s"
+      ],
+      "seconds": 45.371,
+      "ir_files": 48,
+      "receipt_sha256": "7e5b6a0e14ae84cb50585a77c1b5713e41504f39b0b5aeefb6db94b62d4fd791"
+    }
+  ],
+  "scope": "Explicit and inferred UInt32/Float bindings through packed and List producers; interpreter and LLVM JIT, source and decoded wire. No ordinary CLI/AOT/service verdict.",
+  "retained_executables_verified": true
+}

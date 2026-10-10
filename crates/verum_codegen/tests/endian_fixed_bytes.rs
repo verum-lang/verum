@@ -14,7 +14,10 @@ use verum_llvm::{
     values::AnyValue,
 };
 use verum_vbc::{
-    codegen::VbcCodegen, deserialize::deserialize_module, module::VbcModule,
+    codegen::VbcCodegen,
+    deserialize::deserialize_module,
+    instruction::{Instruction, MemSubOpcode},
+    module::VbcModule,
     serialize::serialize_module,
 };
 
@@ -109,6 +112,15 @@ fn native_with_ir(
     check_ir: impl Fn(&str),
     check: impl Fn(&verum_llvm::execution_engine::ExecutionEngine),
 ) {
+    native_case_with_ir(module, "", check_ir, check);
+}
+
+fn native_case_with_ir(
+    module: &VbcModule,
+    case: &str,
+    check_ir: impl Fn(&str),
+    check: impl Fn(&verum_llvm::execution_engine::ExecutionEngine),
+) {
     let wire = decoded_wire(module);
     for (route, module) in [("source", module), ("wire", &wire)] {
         Target::initialize_native(&InitializationConfig::default()).expect("native target");
@@ -139,9 +151,16 @@ fn native_with_ir(
         if let Ok(directory) = std::env::var("VERUM_T1698_IR_DIR") {
             std::fs::create_dir_all(&directory).expect("IR evidence directory");
             let thread = std::thread::current();
+            let suffix: Text = if case.is_empty() {
+                "".into()
+            } else {
+                format!("-{case}").into()
+            };
             std::fs::write(
-                std::path::Path::new(&directory)
-                    .join(format!("{}-{route}.ll", thread.name().unwrap_or("endian"))),
+                std::path::Path::new(&directory).join(format!(
+                    "{}{suffix}-{route}.ll",
+                    thread.name().unwrap_or("endian")
+                )),
                 text.as_bytes(),
             )
             .expect("IR evidence");
@@ -553,36 +572,117 @@ fn native_selected_packed_array_access_uses_canonical_wide_registers() {
 
 #[test]
 fn native_selected_typed_array_results_keep_integer_and_float_geometry() {
-    native(
-        &source(
-            "fn selected() -> [UInt32; 2] { let values: [UInt32; 2] = [1, 65539]; values } fn probe() -> Int { let values = selected(); values[1] as Int }",
+    for (element, packed, listed, replacement, initial, mutated) in [
+        (
+            "UInt32",
+            "let values: [UInt32; 2] = [1, 65539]; values",
+            "[1 as UInt32, 65539 as UInt32]",
+            "65541",
+            65539.0,
+            65541.0,
         ),
-        |engine| {
-            // SAFETY: the exact source function has no parameters and returns Int.
-            let actual = unsafe {
-                engine
-                    .get_function::<unsafe extern "C" fn() -> i64>("probe")
-                    .unwrap()
-                    .call()
-            };
-            assert_eq!(actual, 65539);
-        },
-    );
-    native(
-        &source(
-            "fn selected() -> [Float; 2] { let values: [Float; 2] = [1.25, -0.5]; values } fn probe() -> Float { let values = selected(); values[1] }",
+        (
+            "Float",
+            "let values: [Float; 2] = [1.25, -0.5]; values",
+            "[1.25, -0.5]",
+            "-2.75",
+            -0.5,
+            -2.75,
         ),
-        |engine| {
-            // SAFETY: the exact source function has no parameters and returns Float.
-            let actual = unsafe {
-                engine
-                    .get_function::<unsafe extern "C" fn() -> f64>("probe")
-                    .unwrap()
-                    .call()
-            };
-            assert_eq!(actual, -0.5);
-        },
-    );
+    ] {
+        for (storage, body) in [("packed", packed), ("list", listed)] {
+            for annotated in [false, true] {
+                let binding: Text = if annotated {
+                    format!("let mut values: [{element}; 2] =").into()
+                } else {
+                    "let mut values =".into()
+                };
+                for operation in ["read", "mutate", "length"] {
+                    let float_result = element == "Float" && operation != "length";
+                    let return_type = if float_result { "Float" } else { "Int" };
+                    let value = if operation == "length" {
+                        "values.len()"
+                    } else if float_result {
+                        "values[1]"
+                    } else {
+                        "values[1] as Int"
+                    };
+                    let mutation: Text = if operation == "mutate" {
+                        format!("values[1] = {replacement};").into()
+                    } else {
+                        "".into()
+                    };
+                    let expected = match operation {
+                        "read" => initial,
+                        "mutate" => mutated,
+                        _ => 2.0,
+                    };
+                    let case: Text =
+                        format!("{element}-{storage}-annotated{annotated}-{operation}").into();
+                    let module = source(&format!(
+                        "fn selected() -> [{element}; 2] {{ {body} }} fn probe() -> {return_type} {{ {binding} selected(); {mutation} {value} }}"
+                    ));
+                    // The two source fixtures must actually emit different
+                    // producers, despite having the same declared array shape.
+                    let selected = module
+                        .functions
+                        .iter()
+                        .find(|function| module.get_string(function.name) == Some("selected"))
+                        .expect("exact selected producer");
+                    let body = selected.instructions.as_deref().expect("producer body");
+                    assert!(body.iter().any(|instruction| {
+                        if storage == "list" {
+                            matches!(instruction, Instruction::NewList { .. })
+                        } else {
+                            matches!(instruction, Instruction::MemExtended { sub_op, .. }
+                                if MemSubOpcode::from_byte(*sub_op) == Some(MemSubOpcode::NewTypedArray))
+                        }
+                    }), "{case}: fixture lost its physical producer distinction");
+                    native_case_with_ir(
+                        &module,
+                        case.as_str(),
+                        |ir| {
+                            if storage == "packed" {
+                                assert!(
+                                    !ir.contains("geteu") && !ir.contains("len_hdr_tid"),
+                                    "{case}: generic header probe remains"
+                                );
+                                if operation != "length" {
+                                    assert!(
+                                        ir.contains("array_storage_in_bounds"),
+                                        "{case}: checked array access absent"
+                                    );
+                                }
+                            }
+                        },
+                        |engine| {
+                            // SAFETY: each source probe is parameterless and its
+                            // scalar ABI is fixed by return_type above.
+                            if float_result {
+                                let actual = unsafe {
+                                    engine
+                                        .get_function::<unsafe extern "C" fn() -> f64>("probe")
+                                        .unwrap()
+                                        .call()
+                                };
+                                assert_eq!(actual, expected, "{case}");
+                            } else {
+                                let actual = unsafe {
+                                    engine
+                                        .get_function::<unsafe extern "C" fn() -> i64>("probe")
+                                        .unwrap()
+                                        .call()
+                                };
+                                // Integer fixtures and lengths are exactly
+                                // representable in this table's scalar oracle.
+                                assert_eq!(actual, expected as i64, "{case}");
+                            }
+                        },
+                    );
+                }
+            }
+        }
+    }
 }
 
 #[test]

@@ -1,6 +1,7 @@
 //! T1704: executable bodies, not identical array signatures, establish storage.
 #![cfg(feature = "codegen")]
 
+use verum_common::Text;
 use verum_fast_parser::Parser;
 use verum_vbc::{
     array_storage::{ArrayResultFact, straight_line_array_return},
@@ -220,12 +221,49 @@ fn interpreter_array_call_bounds_are_actual_allocation_bounds() {
 
 #[test]
 fn interpreter_array_results_keep_declared_integer_and_float_elements() {
-    execute_both(
-        "fn selected() -> [UInt32; 2] { let values: [UInt32; 2] = [1, 65539]; values } fn probe() -> Int { let values = selected(); assert_eq(values[1], 65539); 1 }",
-        1,
-    );
-    execute_both(
-        "fn selected() -> [Float; 2] { let values: [Float; 2] = [1.25, -0.5]; values } fn probe() -> Int { let values = selected(); assert_eq(values[1], -0.5); 1 }",
-        1,
-    );
+    for (element, packed, listed, first, initial, replacement) in [
+        (
+            "UInt32",
+            "let values: [UInt32; 2] = [1, 65539]; values",
+            "[1 as UInt32, 65539 as UInt32]",
+            "1",
+            "65539",
+            "65541",
+        ),
+        (
+            "Float",
+            "let values: [Float; 2] = [1.25, -0.5]; values",
+            "[1.25, -0.5]",
+            "1.25",
+            "-0.5",
+            "-2.75",
+        ),
+    ] {
+        for body in [packed, listed] {
+            for annotated in [false, true] {
+                let binding: Text = if annotated {
+                    format!("let mut values: [{element}; 2] =").into()
+                } else {
+                    "let mut values =".into()
+                };
+                execute_both(
+                    &format!(
+                        "fn selected() -> [{element}; 2] {{ {body} }}
+fn probe() -> Int {{
+    {binding} selected();
+    assert_eq(values[0], {first});
+    assert_eq(values[1], {initial});
+    assert_eq(values.len(), 2);
+    values[1] = {replacement};
+    assert_eq(values[0], {first});
+    assert_eq(values[1], {replacement});
+    assert_eq(values.len(), 2);
+    1
+}}"
+                    ),
+                    1,
+                );
+            }
+        }
+    }
 }
