@@ -856,7 +856,7 @@ fn bg_thread(reactor: &Reactor) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::net::{TcpListener, TcpStream};
+    use std::net::TcpListener;
     use std::os::fd::AsRawFd;
 
     /// On platforms where the reactor is disabled, the public API
@@ -881,39 +881,6 @@ mod tests {
         let elapsed = start.elapsed();
         assert_eq!(r, WaitOutcome::TimedOut);
         assert!(elapsed >= Duration::from_millis(80) && elapsed < Duration::from_secs(2));
-    }
-
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
-    #[test]
-    fn ready_signalled_when_connection_arrives() {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        listener.set_nonblocking(true).unwrap();
-        let port = listener.local_addr().unwrap().port();
-        let fd = listener.as_raw_fd() as i64;
-        let h = std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_millis(50));
-            let _s = TcpStream::connect(("127.0.0.1", port)).unwrap();
-            std::thread::sleep(Duration::from_millis(50));
-        });
-        let r = wait_readable(fd, Duration::from_secs(2));
-        assert_eq!(r, WaitOutcome::Ready);
-        h.join().unwrap();
-    }
-
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
-    #[test]
-    fn writable_signalled_for_fresh_socket() {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let port = listener.local_addr().unwrap().port();
-        let _accept_thread = std::thread::spawn(move || {
-            let (_s, _) = listener.accept().unwrap();
-            std::thread::sleep(Duration::from_millis(100));
-        });
-        let stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
-        stream.set_nonblocking(true).unwrap();
-        let fd = stream.as_raw_fd() as i64;
-        let r = wait_writable(fd, Duration::from_secs(2));
-        assert_eq!(r, WaitOutcome::Ready);
     }
 
     #[cfg(any(target_os = "macos", target_os = "linux"))]
@@ -952,3 +919,7 @@ mod tests {
         drop(listeners);
     }
 }
+
+#[cfg(all(test, any(target_os = "macos", target_os = "linux")))]
+#[path = "../../tests/unit/reactor_socket_readiness.rs"]
+mod socket_readiness_tests;

@@ -1,0 +1,24 @@
+{
+  "task": "T1650",
+  "target": "/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target",
+  "released": true,
+  "active_target_processes": [],
+  "source_commit": "e78aa2a27089442fe7a0871b6eb6c88fb3cbdf54",
+  "receipt_sha256": "c98706081f01043b68a3494c91cec543781dc942dbe859bf5cd34b4a96d3b4e4",
+  "executables": [
+    {
+      "built_path": "/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target/debug/build/verum_vbc/9777a8ed778eb0dc/out/verum_vbc-9777a8ed778eb0dc",
+      "sha256": "613fa7d39d229fb7de4c79728c08fd80418af4273f2414e9f9fac40b2be76279",
+      "retained_path": "/private/tmp/verum-T1650-reactor-focused/reactor-test-executable",
+      "retained_sha256": "613fa7d39d229fb7de4c79728c08fd80418af4273f2414e9f9fac40b2be76279"
+    }
+  ],
+  "artifacts_after": {
+    "runtime.vbca": "410ff097b455437cab98b651f7799b3129588820925afe98e0de9c3781530a0f",
+    "runtime.core_metadata": "a92bd89e649e102cdc67d7ad0032513d6448d8915e5744127e6cdf1f1e34ebbb",
+    "runtime.symbol_graph": "a6678c18498f7519749ca1fdf1d22629b479083f42fa95a15177e8c7acf1c722",
+    "runtime.vbca.checksum": "c33573118a8c4b635f6c8f727c3784b524f660be57de702365e8d9c14b2f3a8b",
+    "runtime.vbca.schema": "fec20d7b3f8d1b81aff66c6c1181be574963779f7eacaf65660f8ab9127fca87"
+  },
+  "scope": "One authorized serial focused gate ended. No further Cargo or test use of this target without a new explicit loan. T1650 remains open for broader readiness and parallel acceptance."
+}

@@ -1,0 +1,15 @@
+{
+  "source": "e78aa2a27089442fe7a0871b6eb6c88fb3cbdf54",
+  "candidate": "9d01e3239f6807cce0a1aec48d7af0092b20a84f",
+  "receipt_sha256": "c98706081f01043b68a3494c91cec543781dc942dbe859bf5cd34b4a96d3b4e4",
+  "source_paths_verified": 331,
+  "raw_log_verified": true,
+  "retained_executable_verified": true,
+  "production_prefix_sha256": "0ba92a48adaa653b455ace221f7b47c3e58db29684b8e0888c504f27b9ada620",
+  "production_unchanged": true,
+  "artifacts_unchanged": true,
+  "result": [
+    "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 2093 filtered out; finished in 0.06s"
+  ],
+  "limitation": "Focused serial test-fixture repair only; T1650 broader readiness and parallel acceptance remain open."
+}

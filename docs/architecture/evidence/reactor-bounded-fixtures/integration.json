@@ -1,0 +1,59 @@
+{
+  "task": "T1650",
+  "tested_source": "e78aa2a27089442fe7a0871b6eb6c88fb3cbdf54",
+  "base": "9162d5d05bb8e83c3bf57b56e2590422f1437b88",
+  "source_commits": [
+    "df1be83347fab26ff32b15393a65e167e24261e0",
+    "e78aa2a27089442fe7a0871b6eb6c88fb3cbdf54"
+  ],
+  "changed_crate_paths": [
+    "crates/verum_vbc/src/interpreter/reactor.rs",
+    "crates/verum_vbc/tests/unit/reactor_socket_readiness.rs"
+  ],
+  "scope": "Two test fixtures only; production reactor prefix is byte-identical. One serial focused run passed. No broader readiness diagnosis, parallel acceptance, full-library pass, fresh standard-library, ordinary CLI, native/AOT or service acceptance.",
+  "production_prefix": {
+    "marker": "#[cfg(test)]\nmod tests",
+    "base_sha256": "0ba92a48adaa653b455ace221f7b47c3e58db29684b8e0888c504f27b9ada620",
+    "tested_sha256": "0ba92a48adaa653b455ace221f7b47c3e58db29684b8e0888c504f27b9ada620",
+    "identical": true
+  },
+  "focused": {
+    "receipt": "focused-result.json",
+    "receipt_sha256": "c98706081f01043b68a3494c91cec543781dc942dbe859bf5cd34b4a96d3b4e4",
+    "compressed_log": "focused-output.txt.gz",
+    "compressed_log_sha256": "16daf00cb0ef08902966e89e2d57d61b2775281292ddf6aefb8cfa8f1e521bdf",
+    "raw_log_sha256": "db402e12889d84018f64fbb4f86389230f3c963014c3531f18af3f719275b3c6",
+    "selected_tests": [
+      "interpreter::reactor::socket_readiness_tests::ready_signalled_when_connection_arrives",
+      "interpreter::reactor::socket_readiness_tests::writable_signalled_for_fresh_socket"
+    ],
+    "test_results": [
+      "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 2093 filtered out; finished in 0.06s"
+    ],
+    "wall_seconds": 29.223,
+    "single_attempt": true
+  },
+  "release": {
+    "receipt": "target-release.json",
+    "receipt_sha256": "71ca92d644cf3dbad5f512edbdafac9db3ac26a36e609dbdd6897e00888532f7",
+    "target_released": true
+  },
+  "source_verification": {
+    "tracked_vbc_files_checked_against_tested_commit": 331,
+    "all_match": true
+  },
+  "artifacts_unchanged": true,
+  "retained_executable": {
+    "built_path": "/Users/taaliman/.tmp/verum-codex-01a10248-registry-client/target/debug/build/verum_vbc/9777a8ed778eb0dc/out/verum_vbc-9777a8ed778eb0dc",
+    "sha256": "613fa7d39d229fb7de4c79728c08fd80418af4273f2414e9f9fac40b2be76279",
+    "retained_path": "/private/tmp/verum-T1650-reactor-focused/reactor-test-executable",
+    "retained_sha256": "613fa7d39d229fb7de4c79728c08fd80418af4273f2414e9f9fac40b2be76279"
+  },
+  "residuals": [
+    "T1650 remains open: this slice does not diagnose the previously observed TCP connect, reactor, or UDP receive failures, and has no parallel gate.",
+    "The existing f300 full-run reactor failure was produced by a fixture without confirmed connection setup and reliable join on failure; it is not a causal readiness-regression oracle.",
+    "UDP None collapses missing registration, clone failure, and recv_from errors. Its retained failure does not establish a timeout without an underlying error.",
+    "The arrival fixture preserves the original 50ms scheduling but does not prove registration-before-arrival. Successful peer ownership is retained until after the readiness assertion.",
+    "The connector uses connect_timeout and only joins a finished worker. A worker exceeding its cleanup deadline is reported; Rust does not offer cancellation of an arbitrarily stuck thread."
+  ]
+}
