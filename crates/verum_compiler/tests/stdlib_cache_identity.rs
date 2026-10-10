@@ -396,6 +396,9 @@ fn main() {{
                 .arg(&manifest)
                 .arg("--target-dir")
                 .arg(&target)
+                // The production script gives this absolute environment
+                // value precedence over OUT_DIR when locating its cache.
+                .env("CARGO_TARGET_DIR", &target)
                 .current_dir(manifest.parent().unwrap())
                 .env_remove("VERUM_NO_AUTO_PRECOMPILE")
                 .env_remove("DOCS_RS")
@@ -441,13 +444,16 @@ fn main() {{
                 .unwrap()
                 .lines()
                 .count();
+            let policy: Text = fs::read_to_string(output.join("policy-last.stdout"))
+                .unwrap()
+                .into();
+            if let Some(directory) = &evidence {
+                fs::write(directory.join(format!("{label}.build-script.stdout")), policy.as_bytes()).unwrap();
+            }
             assert_eq!(
                 runs, expected_runs,
                 "{label}: expected flag change to rerun once and identical state to stay fresh; {stderr}"
             );
-            let policy: Text = fs::read_to_string(output.join("policy-last.stdout"))
-                .unwrap()
-                .into();
             assert_eq!(
                 policy.contains("Stdlib precompile cache HIT"),
                 flag.is_none(),
@@ -478,13 +484,6 @@ fn main() {{
                 "policy control {label}: runs={runs}, automatic={}",
                 flag.is_none()
             );
-            if let Some(directory) = &evidence {
-                fs::write(
-                    directory.join(format!("{label}.build-script.stdout")),
-                    policy.as_bytes(),
-                )
-                .unwrap();
-            }
         }
     }
 }
