@@ -418,7 +418,7 @@ fn create_cog_tarball(manifest_dir: &Path, manifest: &Manifest) -> Result<PathBu
         }
     }
 
-    archive.finish()?;
+    crate::registry::finish_source_archive(archive)?;
 
     Ok(cog_path)
 }

@@ -37,6 +37,13 @@ pub use types::*;
 
 use crate::error::Result;
 
+/// Complete a source-cog tar archive before reporting its output path.
+pub(crate) fn finish_source_archive<W: std::io::Write>(
+    mut archive: tar::Builder<flate2::write::GzEncoder<W>>,
+) -> std::io::Result<()> {
+    archive.finish()
+}
+
 /// Default Verum cog registry — `https://vcogs.io`. Phase 13 build
 /// worker will live behind this domain; until it ships, the URL
 /// resolves to a placeholder that returns 404 for every cog
@@ -81,3 +88,7 @@ pub fn git_dir() -> Result<std::path::PathBuf> {
         .ok_or_else(|| crate::error::CliError::Custom("Cannot determine cache directory".into()))?;
     Ok(cache.join("verum").join("git"))
 }
+
+#[cfg(test)]
+#[path = "../../tests/registry/source_archive_finalization.rs"]
+mod source_archive_finalization;

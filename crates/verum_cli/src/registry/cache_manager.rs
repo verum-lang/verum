@@ -473,8 +473,7 @@ impl CacheManager {
             .append_dir_all(".", source_dir)
             .map_err(|e| CliError::Custom(format!("Failed to create archive: {}", e)))?;
 
-        builder
-            .finish()
+        super::finish_source_archive(builder)
             .map_err(|e| CliError::Custom(format!("Failed to finish archive: {}", e)))?;
 
         Ok(dest_path)

@@ -681,7 +681,7 @@ fn create_member_cog(member_path: &Path, manifest: &crate::config::Manifest) -> 
         tar.append_path_with_name(member_path.join("README.md"), "README.md")?;
     }
 
-    tar.finish()?;
+    crate::registry::finish_source_archive(tar)?;
 
     Ok(cog_file)
 }
