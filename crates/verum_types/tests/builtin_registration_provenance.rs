@@ -20,6 +20,7 @@ fn metadata(reverse: bool) -> CoreMetadata {
             generic_params: List::new(),
             kind: TypeDescriptorKind::Record {
                 fields: List::from_iter([FieldDescriptor {
+                    declared_visibility: None,
                     name: "value".into(),
                     ty: "Int".into(),
                     is_public: true,

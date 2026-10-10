@@ -126,3 +126,100 @@ fn protected_field_has_conservative_coarse_visibility() {
         Visibility::Private,
     );
 }
+
+fn policy(module: &VbcModule, field: &verum_vbc::types::FieldDescriptor) -> AstVisibility {
+    use verum_ast::{Ident, Path, PathSegment, Span};
+    use verum_vbc::types::DeclaredFieldVisibility as Policy;
+    match field
+        .declared_visibility
+        .expect("source declaration policy")
+    {
+        Policy::Private => AstVisibility::Private,
+        Policy::Public => AstVisibility::Public,
+        Policy::Cog => AstVisibility::PublicCrate,
+        Policy::Super => AstVisibility::PublicSuper,
+        Policy::Internal => AstVisibility::Internal,
+        Policy::Protected => AstVisibility::Protected,
+        Policy::In(id) => AstVisibility::PublicIn(Path::new(
+            module
+                .get_string(id)
+                .expect("owning scope pool")
+                .split('.')
+                .map(|name| PathSegment::Name(Ident::new(name, Span::dummy())))
+                .collect(),
+            Span::dummy(),
+        )),
+    }
+}
+
+#[test]
+fn every_record_and_variant_policy_survives_source_and_wire() {
+    let parsed = Parser::new(fixture::SOURCE).parse_module().unwrap();
+    for module in source_and_wire("visible", AstVisibility::Public) {
+        let mut count = 0;
+        for item in &parsed.items {
+            let ItemKind::Type(decl) = &item.kind else {
+                continue;
+            };
+            let descriptor = module
+                .types
+                .iter()
+                .find(|ty| {
+                    module
+                        .get_string(ty.name)
+                        .is_some_and(|name| name.rsplit('.').next() == Some(decl.name.as_str()))
+                        && ty.origin_module.and_then(|id| module.get_string(id))
+                            == Some(fixture::OWNER)
+                })
+                .expect("exact declaration");
+            let pairs: List<(
+                &verum_ast::decl::RecordField,
+                &verum_vbc::types::FieldDescriptor,
+            )> = match &decl.body {
+                TypeDeclBody::Record(fields) => {
+                    fields.iter().zip(descriptor.fields.iter()).collect()
+                }
+                TypeDeclBody::Variant(variants) => variants
+                    .iter()
+                    .zip(descriptor.variants.iter())
+                    .flat_map(|(source, vbc)| {
+                        let Some(verum_ast::decl::VariantData::Record(fields)) = &source.data
+                        else {
+                            return List::new();
+                        };
+                        fields.iter().zip(vbc.fields.iter()).collect()
+                    })
+                    .collect(),
+                _ => continue,
+            };
+            for (field, emitted) in pairs {
+                assert_eq!(module.get_string(emitted.name), Some(field.name.as_str()));
+                assert_eq!(
+                    policy(&module, emitted),
+                    field
+                        .visibility
+                        .resolve_declared_scope(fixture::OWNER)
+                        .unwrap(),
+                    "{}",
+                    field.name
+                );
+                count += 1;
+            }
+        }
+        assert_eq!(count, 17, "all ordinary and named variant fields");
+    }
+}
+
+#[test]
+fn root_escaping_declared_scope_is_a_source_error() {
+    let parsed = Parser::new("module app; public type Cell is { public(in super) value: Int };")
+        .parse_module()
+        .unwrap();
+    let error = VbcCodegen::new()
+        .compile_module(&parsed)
+        .expect_err("invalid declared scope");
+    assert!(
+        error.to_string().contains("escapes the declaring cog root"),
+        "{error}"
+    );
+}

@@ -63,6 +63,7 @@ mod associated_types;
 mod statements;
 mod value_uses;
 mod formal_parameters;
+mod field_visibility;
 
 #[cfg(test)]
 mod tests_comprehensive;
@@ -6707,6 +6708,13 @@ impl VbcCodegen {
                     param_closure_return_type_names: Vec::new(),
                 };
                 self.ctx.register_function(qualified, info);
+            }
+        }
+        if let Some(strings) = archive_strings {
+            for field in ty.fields.iter_mut().chain(ty.variants.iter_mut().flat_map(|variant| variant.fields.iter_mut())) {
+                field.declared_visibility = field.declared_visibility.and_then(|policy| policy.remap_scope(|scope| {
+                    strings.get(scope).map(|name| crate::types::StringId(self.ctx.intern_string_raw(name)))
+                }));
             }
         }
         self.push_type_dedupe(ty);
@@ -15987,7 +15995,11 @@ impl VbcCodegen {
                             let fds: smallvec::SmallVec<[crate::types::FieldDescriptor; 4]> =
                                 fields
                                     .iter()
-                                    .map(|f| crate::types::FieldDescriptor {
+                                    .map(|f| {
+                                        let (visibility, declared_visibility) = self.lower_field_visibility(&f.visibility)?;
+                                        Ok(crate::types::FieldDescriptor {
+                                        visibility,
+                                        declared_visibility: Some(declared_visibility),
                                         name: StringId(
                                             self.ctx.intern_string_raw(f.name.name.as_str()),
                                         ),
@@ -16003,7 +16015,8 @@ impl VbcCodegen {
                                         )),
                                         ..Default::default()
                                     })
-                                    .collect();
+                                    })
+                                    .collect::<CodegenResult<_>>()?;
                             (crate::types::VariantKind::Record, 0u8, fds)
                         }
                     };
@@ -16237,12 +16250,14 @@ impl VbcCodegen {
                         self.ctx
                             .intern_string_raw(&Self::render_field_type_name(&field.ty, true)),
                     );
+                    let (visibility, declared_visibility) = self.lower_field_visibility(&field.visibility)?;
                     type_desc.fields.push(crate::types::FieldDescriptor {
+                        declared_visibility: Some(declared_visibility),
                         name: StringId(self.ctx.intern_string_raw(&field_name)),
                         type_ref: field_type_ref,
                         declaration_type: Some(self.resolve_signature_type_ref(&field.ty, &generic_param_map)),
                         offset: field_idx * 8, // Use global field index * sizeof(Value)
-                        visibility: crate::types::Visibility::Public,
+                        visibility,
                         refinement_src,
                         refinement_binding,
                         type_name: field_type_name,
@@ -16685,6 +16700,7 @@ impl VbcCodegen {
                     ..Default::default()
                 };
                 type_desc.fields.push(crate::types::FieldDescriptor {
+                        declared_visibility: None,
                     name: StringId(self.ctx.intern_string_raw("_0")),
                     type_ref: inner_type_ref,
                     declaration_type: Some(self.resolve_signature_type_ref(_inner_type, &generic_param_map)),
@@ -16798,6 +16814,7 @@ impl VbcCodegen {
                     let inner_type_ref = self.resolve_field_type_ref(inner_ty, &generic_param_map);
                     let field_idx = self.intern_field_name(&field_name);
                     type_desc.fields.push(crate::types::FieldDescriptor {
+                        declared_visibility: None,
                         name: StringId(self.ctx.intern_string_raw(&field_name)),
                         type_ref: inner_type_ref,
                         declaration_type: Some(self.resolve_signature_type_ref(inner_ty, &generic_param_map)),
@@ -25116,6 +25133,9 @@ impl VbcCodegen {
                 // type NAME is a StringId too — remap it identically, else a
                 // cross-module field type reads as garbage in the canonical
                 // table (the T0109 field-identity hole).
+field.declared_visibility = field.declared_visibility.and_then(|policy| {
+                    policy.remap_scope(|scope| string_id_map.get(scope.0 as usize).copied())
+                });
                 if field.type_name != StringId::EMPTY {
                     if let Some(mapped) = string_id_map.get(field.type_name.0 as usize) {
                         field.type_name = *mapped;
@@ -25163,6 +25183,9 @@ impl VbcCodegen {
                     }
                     // UNIFIED-CROSS-MODULE-TYPE-IDENTITY (T0109): variant field
                     // type name — same canonical remap as the field name.
+f.declared_visibility = f.declared_visibility.and_then(|policy| {
+                    policy.remap_scope(|scope| string_id_map.get(scope.0 as usize).copied())
+                });
                     if f.type_name != StringId::EMPTY {
                         if let Some(mapped) = string_id_map.get(f.type_name.0 as usize) {
                             f.type_name = *mapped;
@@ -26532,6 +26555,9 @@ impl VbcCodegen {
                 // UNIFIED-CROSS-MODULE-TYPE-IDENTITY (T0109): re-intern the
                 // field's carried type NAME (archive→local); a raw ..clone()
                 // misindexes it against this module's strings.
+                declared_visibility: fd.declared_visibility.and_then(|policy| policy.remap_scope(|scope| {
+                    archive_strings.get(scope).map(|name| crate::types::StringId(self.ctx.intern_string_raw(name)))
+                })),
                 type_name: intern_optional(self, fd.type_name),
                 refinement_src: intern_optional(self, fd.refinement_src),
                 refinement_binding: intern_optional(self, fd.refinement_binding),
@@ -26553,6 +26579,9 @@ impl VbcCodegen {
             for fd in v.fields.iter() {
                 v_fields.push(crate::types::FieldDescriptor {
                     name: intern(self, fd.name),
+                    declared_visibility: fd.declared_visibility.and_then(|policy| policy.remap_scope(|scope| {
+                    archive_strings.get(scope).map(|name| crate::types::StringId(self.ctx.intern_string_raw(name)))
+                })),
                     type_name: intern_optional(self, fd.type_name),
                     refinement_src: intern_optional(self, fd.refinement_src),
                     refinement_binding: intern_optional(self, fd.refinement_binding),

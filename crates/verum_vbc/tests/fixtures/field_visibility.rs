@@ -10,7 +10,17 @@ public type Vault is {
     public(super) parent_only: Int,
     public(in fixture.visibility) scoped: Int,
     public(in super) relative_scoped: Int,
+    public(in .scope) dot_scoped: Int,
+    public(in super.scope) super_scoped: Int,
+    public(in self.scope) self_scoped: Int,
+    public(in cog.scope) cog_scoped: Int,
     internal internal_only: Int,
     protected protected_only: Int,
+};
+public type Message is Empty | Payload {
+    private secret: Int,
+    public visible: Int,
+    public(cog) cog_only: Int,
+    public(in super) scoped: Int,
 };
 "#;

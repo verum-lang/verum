@@ -137,6 +137,7 @@ fn test_roundtrip_type_descriptor() {
         fields: smallvec::smallvec![
             FieldDescriptor {
                 declaration_type: None,
+            declared_visibility: None,
                 refinement_src: crate::types::StringId::EMPTY,
                 refinement_binding: crate::types::StringId::EMPTY,
                 type_name: crate::types::StringId::EMPTY,
@@ -147,6 +148,7 @@ fn test_roundtrip_type_descriptor() {
             },
             FieldDescriptor {
                 declaration_type: None,
+            declared_visibility: None,
                 refinement_src: crate::types::StringId::EMPTY,
                 refinement_binding: crate::types::StringId::EMPTY,
                 type_name: crate::types::StringId::EMPTY,
@@ -944,6 +946,7 @@ fn test_roundtrip_empty_and_full_variants() {
                 arity: 1,
                 fields: smallvec::smallvec![FieldDescriptor {
                     declaration_type: None,
+            declared_visibility: None,
                     refinement_src: crate::types::StringId::EMPTY,
                     refinement_binding: crate::types::StringId::EMPTY,
                     type_name: crate::types::StringId::EMPTY,

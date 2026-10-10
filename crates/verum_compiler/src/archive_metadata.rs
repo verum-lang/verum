@@ -47,6 +47,35 @@ use verum_vbc::archive::VbcArchive;
 use verum_vbc::module::VbcModule;
 use verum_vbc::types::{TypeKind, TypeRef, VariantKind};
 
+
+/// Decode a full declaration policy. Missing/invalid scoped evidence stays Unknown;
+/// neither the coarse visibility nor the importing module can replace it.
+fn field_declared_visibility(
+    field: &verum_vbc::types::FieldDescriptor,
+    module: &VbcModule,
+) -> Maybe<verum_ast::Visibility> {
+    use verum_ast::{Ident, Path, PathSegment, Span, Visibility};
+    use verum_vbc::types::DeclaredFieldVisibility as Policy;
+    Some(match field.declared_visibility? {
+        Policy::Private => Visibility::Private,
+        Policy::Public => Visibility::Public,
+        Policy::Cog => Visibility::PublicCrate,
+        Policy::Super => Visibility::PublicSuper,
+        Policy::Internal => Visibility::Internal,
+        Policy::Protected => Visibility::Protected,
+        Policy::In(scope) => {
+            let scope = module.strings.get(scope)?;
+            let names: List<Text> = scope.split('.').map(Text::from).collect();
+            if names.is_empty() || names.iter().any(|name| name.is_empty()) {
+                return None;
+            }
+            Visibility::PublicIn(Path::new(names.into_iter().map(|name| {
+                PathSegment::Name(Ident::new(name, Span::dummy()))
+            }).collect(), Span::dummy()))
+        }
+    })
+}
+
 /// BAKED-DEFAULT-ARG-1: render a parameter's default (carried through
 /// the VBC descriptor's `default: Option<ConstId>` channel) back to a
 /// SOURCE-TEXT literal for the typecheck metadata. Int/Float/Text
@@ -408,6 +437,7 @@ fn register_module_metadata(
                                 .map(Text::from)
                                 .unwrap_or_default(),
                             ty: Text::from(ty),
+                            declared_visibility: field_declared_visibility(f, module),
                             is_public: matches!(
                                 f.visibility,
                                 verum_vbc::types::Visibility::Public
@@ -502,6 +532,7 @@ fn register_module_metadata(
                                             &type_id_to_name,
                                             &sum_param_id_to_name,
                                         )),
+                                        declared_visibility: field_declared_visibility(f, module),
                                         is_public: matches!(
                                             f.visibility,
                                             verum_vbc::types::Visibility::Public

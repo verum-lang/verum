@@ -34,7 +34,7 @@ use crate::module::{
     SpecializationEntry, VbcModule,
 };
 use crate::types::{
-    FieldDescriptor, TypeDescriptor, TypeParamDescriptor, TypeRef, VariantDescriptor,
+    DeclaredFieldVisibility, FieldDescriptor, TypeDescriptor, TypeParamDescriptor, TypeRef, VariantDescriptor,
 };
 
 /// Bundle for serializing FFI tables together.
@@ -509,6 +509,20 @@ impl Serializer {
                 self.serialize_type_ref(ty)?;
             }
             None => self.output.push(0),
+        }
+        // v2.25: full declaration policy; absence is explicitly unknown.
+        match field.declared_visibility {
+            None => self.output.push(0),
+            Some(DeclaredFieldVisibility::Private) => self.output.push(1),
+            Some(DeclaredFieldVisibility::Public) => self.output.push(2),
+            Some(DeclaredFieldVisibility::Cog) => self.output.push(3),
+            Some(DeclaredFieldVisibility::Super) => self.output.push(4),
+            Some(DeclaredFieldVisibility::In(scope)) => {
+                self.output.push(5);
+                encode_u32(scope.0, &mut self.output);
+            }
+            Some(DeclaredFieldVisibility::Internal) => self.output.push(6),
+            Some(DeclaredFieldVisibility::Protected) => self.output.push(7),
         }
         Ok(())
     }

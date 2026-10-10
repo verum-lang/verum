@@ -1816,6 +1816,8 @@ fn symbol_count(files: &[(String, Vec<u8>)]) -> usize {
 /// the cached bake.  Format: free-form ASCII;
 /// readable strings make `git log` of this constant tell the story.
 const PRECOMPILE_SCHEMA_VERSION: &str =
+    // v54: VBC2.25 and metadata carry complete declared field visibility.
+    // Missing legacy policy is Unknown; bincode sidecars must be rebuilt.
     // v53: VBC2.24 carries source body presence; a legacy RetV stub cannot
     // establish declaration authority, even under an explicit stale fallback.
     // v52: source-owned semantic formal parameters require the VBC2.23 tail.
@@ -1837,7 +1839,7 @@ const PRECOMPILE_SCHEMA_VERSION: &str =
     // cache — measured: the scan was added, the build reported
     // "precompile cache HIT", and the new field stayed empty while the
     // reader had nothing to read. Bumping here is what invalidates it.
-    "v53-declared-function-bodies";
+    "v54-2026-10-10-declared-field-visibility";
 
 /// T3: blake3 hash of every `core/**/*.vr` file's content, sorted
 /// by relative path, mixed with [`PRECOMPILE_SCHEMA_VERSION`].
@@ -2176,6 +2178,10 @@ fn compute_core_blake3(core_dir: &Path, files: &[(String, Vec<u8>)]) -> String {
         "crates/verum_ast/src/cfg.rs",
         // Shared checked scalar rules change folded array counts in the archive.
         "crates/verum_ast/src/checked_const.rs",
+        // Declaration field policies and canonical scopes shape archived access.
+        "crates/verum_ast/src/visibility.rs",
+        "crates/verum_vbc/src/codegen/field_visibility.rs",
+        "crates/verum_types/src/core_metadata.rs",
         // `TypeId::well_known_name` (T0190) — the reserved-TypeId →
         // canonical-surface-name table `archive_metadata` renders every
         // descriptor through.  Naming one more reserved id changes the

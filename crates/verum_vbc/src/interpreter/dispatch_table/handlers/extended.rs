@@ -754,6 +754,7 @@ mod make_variant_typed_validation_tests {
         let f_missing = module.intern_string("no_such_field");
         let mk_field = |name: StringId, off: u32| crate::types::FieldDescriptor {
             declaration_type: None,
+            declared_visibility: None,
             name,
             type_ref: crate::types::TypeRef::Concrete(TypeId::BOOL),
             offset: off,

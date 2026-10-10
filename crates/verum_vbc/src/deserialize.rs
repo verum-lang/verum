@@ -23,7 +23,7 @@ use crate::module::{
  SourceMap, SourceMapEntry, SpecializationEntry, StringTable, VbcModule,
 };
 use crate::types::{
- CbgrTier, ContextRef, FieldDescriptor, Mutability, PropertySet, ProtocolId, ProtocolImpl,
+ CbgrTier, ContextRef, DeclaredFieldVisibility, FieldDescriptor, Mutability, PropertySet, ProtocolId, ProtocolImpl,
  StringId, TypeDescriptor, TypeId, TypeKind, TypeParamDescriptor, TypeParamId, TypeRef,
  Variance, VariantDescriptor, VariantKind, Visibility,
 };
@@ -1192,7 +1192,21 @@ impl<'a> Deserializer<'a> {
          _ => return Err(VbcError::InvalidHeader { field: "field_declaration_type", offset: self.offset }),
      }
  } else { None };
+ let declared_visibility = if self.header.as_ref().map_or(0, |h| h.version_minor) >= 25 {
+     match decode_u8(self.data, &mut self.offset)? {
+         0 => None,
+         1 => Some(DeclaredFieldVisibility::Private),
+         2 => Some(DeclaredFieldVisibility::Public),
+         3 => Some(DeclaredFieldVisibility::Cog),
+         4 => Some(DeclaredFieldVisibility::Super),
+         5 => Some(DeclaredFieldVisibility::In(StringId(decode_u32(self.data, &mut self.offset)?))),
+         6 => Some(DeclaredFieldVisibility::Internal),
+         7 => Some(DeclaredFieldVisibility::Protected),
+         _ => return Err(VbcError::InvalidHeader { field: "field_declared_visibility", offset: self.offset }),
+     }
+ } else { None };
  Ok(FieldDescriptor {
+ declared_visibility,
  declaration_type,
  name,
  type_ref,
@@ -2430,3 +2444,7 @@ mod explicit_generic_param_tests;
 #[cfg(test)]
 #[path = "../tests/format/declared_layout.rs"]
 mod declared_layout_tests;
+
+#[cfg(test)]
+#[path = "../tests/format/field_visibility.rs"]
+mod field_visibility_tests;

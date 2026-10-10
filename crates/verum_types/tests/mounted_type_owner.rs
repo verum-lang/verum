@@ -25,6 +25,7 @@ fn foreign_metadata() -> Arc<CoreMetadata> {
         generic_params: List::new(),
         kind: TypeDescriptorKind::Record {
             fields: [FieldDescriptor {
+                    declared_visibility: None,
                 name: "foreign_only".into(),
                 ty: "Bool".into(),
                 is_public: true,
