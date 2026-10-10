@@ -38,6 +38,8 @@ intrinsic diagnostics. A successful build is not acceptance of every baked
 standard-library body. Earlier non-verbose logs did not capture the same nested
 diagnostics, so this record does not classify those warnings as new regressions.
 The six external privacy controls and preparation-copy runtime control remain
-pending the compiler repair. Authentication bounds are a separate in-progress
-execution and are not included in this packet. Full VBC socket failures,
+pending the compiler repair. The unchanged [authentication-bounds component](auth-bounds/review.json) passes
+in 543.100 seconds with exact expected output and unchanged source/project/CLI
+identities. Its original receipt and inputs are retained separately; it does
+not cover credential-file loading or publication preparation. Full VBC socket failures,
 native/AOT validation and durable authenticated HTTP publication remain open.

@@ -1,0 +1,110 @@
+{
+  "language_commit": "e86f2abd77e041e2f29cdcbf30d9629435e64f7e",
+  "registry_commit": "6c055769bab8deca3787b55e782e7ca61a7ce2c4",
+  "build_manifest_sha256": "91a90f9b3343732651ad8d8fd35f64363ededd7328e15f02d1da1fe99dc9ee72",
+  "component": "auth_bounds",
+  "status": "passed",
+  "elapsed_seconds": 543.1,
+  "checks": {
+    "exit_zero": true,
+    "within_deadline": true,
+    "exact_stdout": true,
+    "source_unchanged": true,
+    "project_unchanged": true,
+    "executable_unchanged": true
+  },
+  "retained": {
+    "build-identity-helper.py.gz": {
+      "bytes": 21769,
+      "sha256": "f1d85bf7d7489f406a25802038cc91296776a5225bd835d5ef72bdd24815c77a",
+      "gzip_sha256": "533b43c6acffdaa15a09ad9fdc6f9fc743d26f1f7b97f13903c7839037ac230f"
+    },
+    "build-manifest.json.gz": {
+      "bytes": 649557,
+      "sha256": "91a90f9b3343732651ad8d8fd35f64363ededd7328e15f02d1da1fe99dc9ee72",
+      "gzip_sha256": "c99c6d8d89415165c48707881fd9b40bfd4f8b2be1cf14c46f468e1574b879ae"
+    },
+    "component/result.json.gz": {
+      "bytes": 3810,
+      "sha256": "965363e47423e3d774cebe6a33bee173621812172705236ebe0296eddb7013ab",
+      "gzip_sha256": "e943d8f744132b999ed93107802ef0a92705e45b59f4343b9d813aacd051ae7d"
+    },
+    "component/started.json.gz": {
+      "bytes": 2225,
+      "sha256": "57f6647a468193e581374d6c3db65d578304a823fd1bb5096a15a22788acf997",
+      "gzip_sha256": "81f1822a7072970c4aada900f5f95b7c99d5810e2e156a68285ad7477dda726b"
+    },
+    "component/stderr.log.gz": {
+      "bytes": 108,
+      "sha256": "89260c84abdefb93a6a1ac31b06b7b2aaddf717665d065926cdcf0ecc8016349",
+      "gzip_sha256": "952790957cbd9fb581fef6c466f7f2bde57587e7bae91b6d58f8f24966fb87f2"
+    },
+    "component/stdout.log.gz": {
+      "bytes": 28,
+      "sha256": "b2e02c2b11b53cc79f704a070f91bf1e5f9bc3a0ae8d4110dbe69b57c668466f",
+      "gzip_sha256": "c1e1657c0a73ccabefb58befd18946c3dfd56ce0b2a6d01408b2aa438295d090"
+    },
+    "inputs/project/src/main.vr.gz": {
+      "bytes": 3694,
+      "sha256": "f4cddc56f87c58779e945891b0dca0c5c7be9712498c63a48576391e00c24698",
+      "gzip_sha256": "c6b68b66a4751f81e5fd1b8c2350622702424d73b19c3c97ec6852655272d7df"
+    },
+    "inputs/project/src/node/publication_auth.vr.gz": {
+      "bytes": 16622,
+      "sha256": "183f3034e3cb6ab6e638082ef66aa369318847e6cfa47d6930a66ff58e8f7a85",
+      "gzip_sha256": "4d5d4d1f4b02140fea7b913779541eea9eec302b030d1299fc7f62ab405cc8c5"
+    },
+    "inputs/project/src/protocol/authority.vr.gz": {
+      "bytes": 9924,
+      "sha256": "d01dc3e14f8066405e567e8320cc8c2a7e95f4a33910da54d97a12a0d3113d07",
+      "gzip_sha256": "1f9c0f406fa2a5a9652960ab9459024abbce837fecc969d367bbb3261f078912"
+    },
+    "inputs/project/verum.toml.gz": {
+      "bytes": 65,
+      "sha256": "1d99c409b02e7bdb88b9765716721b42e2360e7ecd55f9bbe2a4b18213f97ab2",
+      "gzip_sha256": "90032de956afe0f7d1d95ae751f1679da6514795c9ee0ba6ea3838929732c327"
+    },
+    "inputs/source/src/node/publication_auth.vr.gz": {
+      "bytes": 16622,
+      "sha256": "183f3034e3cb6ab6e638082ef66aa369318847e6cfa47d6930a66ff58e8f7a85",
+      "gzip_sha256": "4d5d4d1f4b02140fea7b913779541eea9eec302b030d1299fc7f62ab405cc8c5"
+    },
+    "inputs/source/src/protocol/authority.vr.gz": {
+      "bytes": 9924,
+      "sha256": "d01dc3e14f8066405e567e8320cc8c2a7e95f4a33910da54d97a12a0d3113d07",
+      "gzip_sha256": "1f9c0f406fa2a5a9652960ab9459024abbce837fecc969d367bbb3261f078912"
+    },
+    "inputs/source/tests/publication_auth_bounds.expected.gz": {
+      "bytes": 28,
+      "sha256": "b2e02c2b11b53cc79f704a070f91bf1e5f9bc3a0ae8d4110dbe69b57c668466f",
+      "gzip_sha256": "c1e1657c0a73ccabefb58befd18946c3dfd56ce0b2a6d01408b2aa438295d090"
+    },
+    "inputs/source/tests/publication_auth_bounds.vr.gz": {
+      "bytes": 3719,
+      "sha256": "73f81cb413d405411eb2da0e65041e60456dfd0e2cc0800128f3f860b59e3c71",
+      "gzip_sha256": "831c6d80d23efd8c752a3b2ecc37a858d046f97d8d356c22501d41575ce2dfbe"
+    },
+    "inputs/source/tools/run_publication_envelope.py.gz": {
+      "bytes": 17331,
+      "sha256": "b7cf8368cb930a8fcef8357b8b5ce608c313754ab2df99e5ea19625ed56e4a8b",
+      "gzip_sha256": "5a9ac180c6d9ada8b1e1fc709ca18d0882be7172ad8d45577828c4b8dfc43b1c"
+    },
+    "result.json.gz": {
+      "bytes": 4086,
+      "sha256": "2f6427f53abb3ce339aa86c603fe72c94a63fc358e4b68e7c21f3dcfe52a33ed",
+      "gzip_sha256": "7a2ba5308b1213063115e9c79b69a4b6d194d782d663efa3c0e7cc32c3e72a89"
+    },
+    "started.json.gz": {
+      "bytes": 3294,
+      "sha256": "f24ad09aa44e033350d2795044d55b74903497a3b26f3c2b555030eceb96d3b1",
+      "gzip_sha256": "df43be45134552e5c3663b3d1e0f01d52d18a88ab845c67a16350ff16a430c61"
+    },
+    "wrapper.py.gz": {
+      "bytes": 12260,
+      "sha256": "ea357c174be738ab3d42b3232be26986d2f4364451d606530cb2b70f2e75bb6f",
+      "gzip_sha256": "7203f2afff712a04af9c2a28b93edb4c6fe35817c7f3922b50b59bed64627345"
+    }
+  },
+  "scope": "Run exact principal/credential/grant/name collection limits through the unmodified credential decoder in an isolated interpreter project.\n\nThis includes 1024 distinct credentials; a timeout remains incomplete. It is no configuration performance or timing-resistance acceptance, and does not establish HTTP publication, durable admission, or AOT.",
+  "acceptance_limit": "Unchanged committed interpreter component only; no credential-file loading, preparation, HTTP receive, durable admission or AOT claim."
+}
