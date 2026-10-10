@@ -212,3 +212,23 @@ fn source_function_return_keeps_the_declaring_owner_without_a_type_mount() {
         }
     }
 }
+
+#[test]
+fn generic_return_uses_the_declaring_modules_import_alias() {
+    let model = "public type Receipt<T> is { value: T }; implement<T> Receipt<T> { public fn read(&self) -> T { self.value } }";
+    let factory = "mount demo.model.{Receipt as Issued}; public fn issue<T>(value: T) -> Issued<T> { Issued { value: value } }";
+    let other = "public type Issued<T> is { value: Bool }; implement<T> Issued<T> { public fn read(&self) -> Bool { self.value } }";
+    for entry in ["demo.factory", "demo.api"] {
+        let consumer = format!("mount demo.other.Issued; mount {entry}.issue; fn probe() -> Int {{ issue(37).read() }}");
+        let errors = check(
+            &consumer,
+            &[
+                ("demo.model", model),
+                ("demo.factory", factory),
+                ("demo.other", other),
+                ("demo.api", "public mount demo.factory.issue;"),
+            ],
+        );
+        assert!(errors.is_empty(), "entry={entry}: {errors:?}");
+    }
+}
