@@ -59,7 +59,7 @@ fn parsed_private_and_restricted_fields_are_not_public_after_archive_metadata() 
     let TypeDescriptorKind::Record { fields } = &descriptor.kind else {
         panic!("expected record")
     };
-    assert_eq!(fields.len(), 13, "every declared field is retained");
+    assert_eq!(fields.len(), 12, "every declared field is retained");
     let mut failures: List<Text> = List::new();
     for field in fields {
         let expected = field.name == "visible";

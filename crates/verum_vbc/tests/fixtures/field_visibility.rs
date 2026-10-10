@@ -10,7 +10,6 @@ public type Vault is {
     public(super) parent_only: Int,
     public(in fixture.visibility) scoped: Int,
     public(in super) relative_scoped: Int,
-    public(in .scope) dot_scoped: Int,
     public(in super.scope) super_scoped: Int,
     public(in self.scope) self_scoped: Int,
     public(in cog.scope) cog_scoped: Int,

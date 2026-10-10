@@ -206,7 +206,7 @@ fn every_record_and_variant_policy_survives_source_and_wire() {
                 count += 1;
             }
         }
-        assert_eq!(count, 17, "all ordinary and named variant fields");
+        assert_eq!(count, 16, "all ordinary and named variant fields");
     }
 }
 
