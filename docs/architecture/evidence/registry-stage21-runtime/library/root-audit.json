@@ -1,0 +1,26 @@
+{
+  "source_commit": "49559a042a30f65c524c753d2f13c9f2838f9818",
+  "test_results": [
+    "test result: FAILED. 2090 passed; 10 failed; 1 ignored; 0 measured; 0 filtered out; finished in 552.78s"
+  ],
+  "wall_seconds": 581.252,
+  "source_and_inherited_artifacts_unchanged": true,
+  "failing_tests_identical_to_prior_integration": true,
+  "failed_tests": [
+    "interpreter::dispatch_table::handlers::net_runtime::bounded_tcp_tests::concurrent_recv_does_not_block_unrelated_send",
+    "interpreter::dispatch_table::handlers::net_runtime::bounded_tcp_tests::parked_worker_is_joined_and_sockets_closed_during_unwind",
+    "interpreter::dispatch_table::handlers::net_runtime::bounded_tcp_tests::silent_stream_reports_recv_deadline_and_cleans_registry",
+    "interpreter::dispatch_table::handlers::net_runtime::bounded_tcp_tests::tcp_listen_accept_send_recv_round_trip",
+    "interpreter::dispatch_table::handlers::net_runtime::udp_peer_address_tests::udp_recv_from_returns_peer_address",
+    "interpreter::io_engine::socket_readiness_tests::async_accept_round_trip_via_io_engine",
+    "interpreter::io_engine::socket_readiness_tests::async_read_end_to_end_via_io_engine",
+    "interpreter::io_engine::socket_readiness_tests::async_write_end_to_end_via_io_engine",
+    "interpreter::io_engine::socket_readiness_tests::poll_signals_ready_on_pending_connection",
+    "interpreter::reactor::tests::ready_signalled_when_connection_arrives"
+  ],
+  "retained_executable": {
+    "path": "/private/tmp/verum-T1704-integrated-full-vbc/verum_vbc-49559a042",
+    "sha256": "6c0c73b8a5b770f23df3d4557495f679a6737642448bd2d92e1b05e2e4edab42"
+  },
+  "limitation": "Eight connection setup timeouts, one unconfirmed reactor readiness failure, one UDP None result with underlying error discarded. No complete-library pass, host-root-cause, fresh producer, ordinary CLI or registry acceptance is inferred."
+}

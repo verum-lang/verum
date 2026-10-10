@@ -1,0 +1,18 @@
+[
+  {
+    "repository": "/Users/taaliman/projects/oldman/verum-lang/verum",
+    "before": "9162d5d05bb8e83c3bf57b56e2590422f1437b88",
+    "after": "49559a042a30f65c524c753d2f13c9f2838f9818",
+    "clean": true,
+    "commits_integrated": 50,
+    "ahead_origin": 122
+  },
+  {
+    "repository": "/Users/taaliman/projects/oldman/verum-lang/website",
+    "before": "0e1fcb3da6fae4c808c7d54fb954786f428dffc2",
+    "after": "456632da0a6202a4d249bdb7fa5d286cbe6130b9",
+    "clean": true,
+    "commits_integrated": 1,
+    "ahead_origin": 8
+  }
+]

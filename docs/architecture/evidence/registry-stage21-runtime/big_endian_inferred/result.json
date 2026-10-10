@@ -1,0 +1,57 @@
+{
+  "case": "big_endian_inferred",
+  "engine_commit": "49559a042a30f65c524c753d2f13c9f2838f9818",
+  "cli": {
+    "path": "/private/tmp/verum-registry-stage21-array-storage/verum-49559a042",
+    "bytes": 547068760,
+    "sha256": "e29bc1de67057c286cc845e45371167c04bb8ddfe07e0ad24db15bd0e6480cab"
+  },
+  "schema": "v53-declared-function-bodies",
+  "artifact_identities": {
+    "runtime.vbca": {
+      "bytes": 40425565,
+      "sha256": "a49404b0efe393f7d1ecee178ca79363c2b38cdf1f26f239c88f4c9bbec17b7c"
+    },
+    "runtime.core_metadata": {
+      "bytes": 118155695,
+      "sha256": "186c64699f8f8c1c24dc737869b1ce576847104f839a4f77dbca73b86ce63504"
+    },
+    "runtime.symbol_graph": {
+      "bytes": 6993444,
+      "sha256": "430406d610f3014f398f55ff7da9eddc8a0e07043551be8c70242952a1351f1a"
+    }
+  },
+  "source_fingerprint_blake3": "6b31b8cc8d195a180b9797959d8c0c24648bd5b0f54d985e2e6105b0c9811b7b",
+  "build_manifest_sha256": "cc3119ce9094b199abb682796c2d0741057e24b1c19389daee264af4c921fd34",
+  "input_plan_sha256": "c19da42cbafa70c2f479cee0e649623cd25c5d9173e4ed466090d051206552a1",
+  "deadline_seconds": 600,
+  "baseline_result_sha256": "fd4e85a3c36bf2b8b870ecc8f2a7b4ce75f3e36d49d68068da99953f6f4df650",
+  "baseline_summary_sha256": "33c250707072803066d0e64c8ae41539cb58cc41247954797941169020d37a58",
+  "expected_stdout": "big_endian_inferred:passed\n",
+  "scope": "Unchanged single-vector SHA-256 or endian/byte fixture through the ordinary interpreter; no general crypto, AOT or service verdict.",
+  "command": [
+    "/private/tmp/verum-registry-stage21-array-storage/verum-49559a042",
+    "run",
+    "--tier",
+    "interpret",
+    "/private/tmp/verum-registry-stage21-endian-big_endian_inferred/project/big_endian_inferred.vr"
+  ],
+  "working_directory": "/private/tmp/verum-registry-stage21-endian-big_endian_inferred/project",
+  "environment_overrides": {
+    "NO_COLOR": "1",
+    "VERUM_NO_OBJECT_CACHE": "1",
+    "TMPDIR": "/private/tmp"
+  },
+  "project_inputs": {
+    "big_endian_inferred.vr": "368144c7035d8e2b0673aacc10dfcd93b0be99eff4f1a412e1a9275c189670f8"
+  },
+  "elapsed_seconds": 15.544,
+  "exit_code": 0,
+  "timed_out": false,
+  "cli_unchanged": true,
+  "inputs_unchanged": true,
+  "stdout_sha256": "5bb65c5703fa2a7a2f855a28b7e37f13d08aa811e51d08d4db41cdd5c3328a8f",
+  "stderr_sha256": "dd574cbed24060198994c8add4391825da9f908f0e27994d2c272f29290cc24d",
+  "output_matches": true,
+  "accepted": true
+}

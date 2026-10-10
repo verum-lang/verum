@@ -1,0 +1,68 @@
+{
+  "task": "T1636",
+  "component": "auth",
+  "scope": "Run unmodified credential configuration, actual SHA-256 authentication and authority/scope modules in an isolated interpreter project.\n\nThis component does not establish file loading, request preparation, HTTP receive bounds, timing resistance, semantic publication admission, persistence, private-field/affine enforcement, or AOT acceptance.",
+  "source_inputs": {
+    "src/protocol/authority.vr": "315fc641b19910be3fbc0add4b666771052f8b42af16e8a98e38fac002c5e3f6",
+    "src/node/publication_auth.vr": "f070dbe89ec702c74057796cb8672274f14419689bcf0d0149c0e669baabd22f",
+    "tests/publication_auth.vr": "d2fbecbee875f470b0a1e4f4d36ce5174ab03b0f33a756d5ca74ade12a546117",
+    "tests/publication_auth.expected": "35e6f1369090a198fd7e278f62fb3fc241425501f2e1c27ac959771397375887",
+    "tools/run_publication_envelope.py": "14e51d993de877824456a2e6d93622dfade13ac54b95725add52743b0b668674"
+  },
+  "project_inputs": {
+    "src/protocol/authority.vr": "315fc641b19910be3fbc0add4b666771052f8b42af16e8a98e38fac002c5e3f6",
+    "src/node/publication_auth.vr": "f070dbe89ec702c74057796cb8672274f14419689bcf0d0149c0e669baabd22f",
+    "src/main.vr": "17c91d7d5006eae2874d91303ae330f3642bf0a8632f6545b4875c4542e6b414",
+    "verum.toml": "1d99c409b02e7bdb88b9765716721b42e2360e7ecd55f9bbe2a4b18213f97ab2"
+  },
+  "entry_transformation": "Only replace the fixture's module header with verum_registry.main.",
+  "cli_sha256": "ebb60204de9bf5b7895f43a30cc50fcdc82427734bfe4807948834cb98577426",
+  "expected_cli_sha256": "ebb60204de9bf5b7895f43a30cc50fcdc82427734bfe4807948834cb98577426",
+  "language_source_commit_supplied": "9b9c04a8a7364d35534a9e15dcfe7d9942c47420",
+  "identity_boundary": "The executable hash is measured; its source commit is supplied by the operator.",
+  "command": [
+    "/private/tmp/verum-registry-stage20-callable-boundaries/verum-9b9c04a8a",
+    "run",
+    "--tier",
+    "interpret"
+  ],
+  "working_directory": "/Users/taaliman/.tmp/verum-publication-auth-11n44jig",
+  "environment_overrides": {
+    "NO_COLOR": "1",
+    "VERUM_NO_OBJECT_CACHE": "1",
+    "TMPDIR": "/Users/taaliman/.tmp"
+  },
+  "deadline_seconds": 600.0,
+  "status": "failed",
+  "checks": {
+    "exit_zero": false,
+    "within_deadline": true,
+    "exact_stdout": false,
+    "source_unchanged": true,
+    "project_unchanged": true,
+    "executable_unchanged": true
+  },
+  "elapsed_seconds": 184.62,
+  "returncode": 1,
+  "timed_out": false,
+  "interrupted": false,
+  "runner_error": null,
+  "source_inputs_after": {
+    "src/protocol/authority.vr": "315fc641b19910be3fbc0add4b666771052f8b42af16e8a98e38fac002c5e3f6",
+    "src/node/publication_auth.vr": "f070dbe89ec702c74057796cb8672274f14419689bcf0d0149c0e669baabd22f",
+    "tests/publication_auth.vr": "d2fbecbee875f470b0a1e4f4d36ce5174ab03b0f33a756d5ca74ade12a546117",
+    "tests/publication_auth.expected": "35e6f1369090a198fd7e278f62fb3fc241425501f2e1c27ac959771397375887",
+    "tools/run_publication_envelope.py": "14e51d993de877824456a2e6d93622dfade13ac54b95725add52743b0b668674"
+  },
+  "project_inputs_after": {
+    "src/main.vr": "17c91d7d5006eae2874d91303ae330f3642bf0a8632f6545b4875c4542e6b414",
+    "src/node/publication_auth.vr": "f070dbe89ec702c74057796cb8672274f14419689bcf0d0149c0e669baabd22f",
+    "src/protocol/authority.vr": "315fc641b19910be3fbc0add4b666771052f8b42af16e8a98e38fac002c5e3f6",
+    "verum.toml": "1d99c409b02e7bdb88b9765716721b42e2360e7ecd55f9bbe2a4b18213f97ab2"
+  },
+  "cli_sha256_after": "ebb60204de9bf5b7895f43a30cc50fcdc82427734bfe4807948834cb98577426",
+  "logs": {
+    "stdout.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderr.log": "df50eadd3cec81ecd21d20d5e05f4920e0dc11803597e62cd58524ef7ee1f8c5"
+  }
+}

@@ -1,0 +1,57 @@
+{
+  "case": "literal_bytes",
+  "engine_commit": "49559a042a30f65c524c753d2f13c9f2838f9818",
+  "cli": {
+    "path": "/private/tmp/verum-registry-stage21-array-storage/verum-49559a042",
+    "bytes": 547068760,
+    "sha256": "e29bc1de67057c286cc845e45371167c04bb8ddfe07e0ad24db15bd0e6480cab"
+  },
+  "schema": "v53-declared-function-bodies",
+  "artifact_identities": {
+    "runtime.vbca": {
+      "bytes": 40425565,
+      "sha256": "a49404b0efe393f7d1ecee178ca79363c2b38cdf1f26f239c88f4c9bbec17b7c"
+    },
+    "runtime.core_metadata": {
+      "bytes": 118155695,
+      "sha256": "186c64699f8f8c1c24dc737869b1ce576847104f839a4f77dbca73b86ce63504"
+    },
+    "runtime.symbol_graph": {
+      "bytes": 6993444,
+      "sha256": "430406d610f3014f398f55ff7da9eddc8a0e07043551be8c70242952a1351f1a"
+    }
+  },
+  "source_fingerprint_blake3": "6b31b8cc8d195a180b9797959d8c0c24648bd5b0f54d985e2e6105b0c9811b7b",
+  "build_manifest_sha256": "cc3119ce9094b199abb682796c2d0741057e24b1c19389daee264af4c921fd34",
+  "input_plan_sha256": "c19da42cbafa70c2f479cee0e649623cd25c5d9173e4ed466090d051206552a1",
+  "deadline_seconds": 600,
+  "baseline_result_sha256": "a1406f3fbcccacbd705cf92c7b9f9ed6629fdab9076b0968951e566dd575089c",
+  "baseline_summary_sha256": "33c250707072803066d0e64c8ae41539cb58cc41247954797941169020d37a58",
+  "expected_stdout": "literal_bytes:passed\n",
+  "scope": "Unchanged single-vector SHA-256 or endian/byte fixture through the ordinary interpreter; no general crypto, AOT or service verdict.",
+  "command": [
+    "/private/tmp/verum-registry-stage21-array-storage/verum-49559a042",
+    "run",
+    "--tier",
+    "interpret",
+    "/private/tmp/verum-registry-stage21-endian-literal_bytes/project/literal_bytes.vr"
+  ],
+  "working_directory": "/private/tmp/verum-registry-stage21-endian-literal_bytes/project",
+  "environment_overrides": {
+    "NO_COLOR": "1",
+    "VERUM_NO_OBJECT_CACHE": "1",
+    "TMPDIR": "/private/tmp"
+  },
+  "project_inputs": {
+    "literal_bytes.vr": "61abbd4bdf3fb3e798b8414002290307fa3687da4932a8b1e5f515c1c8059a1c"
+  },
+  "elapsed_seconds": 13.807,
+  "exit_code": 0,
+  "timed_out": false,
+  "cli_unchanged": true,
+  "inputs_unchanged": true,
+  "stdout_sha256": "afa52f460b1e7addd260a7eeeedccadc15e71bb0a3fe61c6526da68510fc72f1",
+  "stderr_sha256": "1010da3024a7b65c1a9c30f59de49512fe1f77f3722fb81be4f81a9a0444ed44",
+  "output_matches": true,
+  "accepted": true
+}

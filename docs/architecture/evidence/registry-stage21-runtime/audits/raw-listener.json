@@ -1,0 +1,14 @@
+{
+  "source_endpoint": "49559a042a30f65c524c753d2f13c9f2838f9818",
+  "manifest_sha256": "3ac615eb0e8e9c69584ca3eca552c87681551c471d3286d9fa80a7d8b3db390a",
+  "raw_logs_verified": 7,
+  "unique_source_at_commit_hashes_verified": 1320,
+  "unique_blobs_verified": 332,
+  "retained_executables_verified": 3,
+  "only_integrated_code_delta": [
+    "crates/verum_vbc/src/interpreter/dispatch_table/handlers/net_runtime.rs",
+    "crates/verum_vbc/tests/unit/net_runtime_descriptor_identity.rs"
+  ],
+  "prior_numeric_native_compiler_and_typechecker_subtrees_unchanged": true,
+  "all_artifact_pairs_unchanged": true
+}

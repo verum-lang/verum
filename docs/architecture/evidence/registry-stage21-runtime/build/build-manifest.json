@@ -1,0 +1,52 @@
+{
+  "engine_commit": "49559a042a30f65c524c753d2f13c9f2838f9818",
+  "engine_tree": "f5eba43fc697bf6573534ec030f9976e36b5a003",
+  "utc_started": "2026-10-09T23:38:51.639824+00:00",
+  "command": [
+    "cargo",
+    "build",
+    "--locked",
+    "--offline",
+    "-p",
+    "verum_cli",
+    "--bin",
+    "verum"
+  ],
+  "environment_overrides": {
+    "CARGO_TARGET_DIR": "/Users/taaliman/.tmp/verum-codex-01a10248/native-target",
+    "CARGO_BUILD_JOBS": "2",
+    "CARGO_INCREMENTAL": "0",
+    "VERUM_LLVM_DIR": "/Users/taaliman/projects/oldman/verum-lang/verum/llvm/install"
+  },
+  "automatic_precompile": true,
+  "deadline_seconds": 3600,
+  "free_bytes_before": 19531796480,
+  "free_bytes_after": 14086959104,
+  "seconds": 1625.883,
+  "exit_code": 0,
+  "timed_out": false,
+  "log_sha256": "918aad6f6572ce36a65835d07e92059d17cc03bd02fedfe506a70c639fd3f1bd",
+  "source_unchanged": true,
+  "cli": {
+    "path": "/private/tmp/verum-registry-stage21-array-storage/verum-49559a042",
+    "bytes": 547068760,
+    "sha256": "e29bc1de67057c286cc845e45371167c04bb8ddfe07e0ad24db15bd0e6480cab"
+  },
+  "schema": "v53-declared-function-bodies",
+  "source_fingerprint_blake3": "6b31b8cc8d195a180b9797959d8c0c24648bd5b0f54d985e2e6105b0c9811b7b",
+  "artifacts": {
+    "runtime.vbca": {
+      "bytes": 40425565,
+      "sha256": "a49404b0efe393f7d1ecee178ca79363c2b38cdf1f26f239c88f4c9bbec17b7c"
+    },
+    "runtime.core_metadata": {
+      "bytes": 118155695,
+      "sha256": "186c64699f8f8c1c24dc737869b1ce576847104f839a4f77dbca73b86ce63504"
+    },
+    "runtime.symbol_graph": {
+      "bytes": 6993444,
+      "sha256": "430406d610f3014f398f55ff7da9eddc8a0e07043551be8c70242952a1351f1a"
+    }
+  },
+  "artifact_snapshot": "/private/tmp/verum-registry-stage21-array-storage/artifacts"
+}

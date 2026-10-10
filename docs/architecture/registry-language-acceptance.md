@@ -1004,3 +1004,28 @@ T1650 remains open for broader readiness diagnosis and parallel acceptance.
 Earlier UDP `None` results collapse registration, clone and receive errors;
 they must not be described as proven timeouts. No complete-library, ordinary
 CLI, fresh stdlib, native/AOT or registry-service result follows from this gate.
+
+
+### Fresh array-storage build and ordinary authentication
+
+The automatic CLI build from `49559a042` regenerated the standard-library
+archive, metadata and symbol graph with schema `v53-declared-function-bodies`.
+Its captured immutable executable passes the unchanged SHA-256 known-answer
+fixture and actual registry configuration/digest/authority/scope fixture that
+failed with the preceding compiler. All four retained ordinary endian controls
+pass, including the inferred big-endian binding.
+
+The [fresh runtime record](evidence/registry-stage21-runtime/comparison.json)
+binds each result to the build, artifact and input hashes. These are interpreter
+results for the recorded inputs; general crypto, timing resistance, AOT,
+request preparation, full-project and HTTP/durable publication acceptance are
+separate. The same source's full VBC library run still has ten network failures,
+with exact failure distinctions retained in its receipt; all five source gates
+pass.
+
+The subsequent complete registry check of candidate `c02238261` finishes
+with two spawned-handle/await type errors in `src/node/slice.vr`, down from
+the earlier five diagnostics. All earlier source inputs are unchanged; the
+new snapshot compiles 29 source modules. T1681 remains open, and successful
+authentication does not make this a complete-project acceptance. Exact output
+is retained in the linked runtime record.

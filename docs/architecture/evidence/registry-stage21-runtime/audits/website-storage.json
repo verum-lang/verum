@@ -1,0 +1,12 @@
+{
+  "committed_endpoint": "456632da0a6202a4d249bdb7fa5d286cbe6130b9",
+  "receipt_sha256": "82561b8ccba4c5983beb6198ad42711c5ee70a600b323e40a27e4d6570900555",
+  "tracked_source_files_verified": 403,
+  "gate_logs_verified": 5,
+  "all_preserved_limitations_unchanged": true,
+  "only_changed_paths": [
+    "docs/architecture/codegen.md",
+    "docs/architecture/vbc-bytecode.md"
+  ],
+  "scope": "Prose-only selected array storage documentation; held for corresponding language landing."
+}
