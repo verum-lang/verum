@@ -1,0 +1,40 @@
+{
+  "task": "T1724",
+  "source_commit": "bf09017ffb7a0493e547a5d5162f9ab97ac8e1bc",
+  "results": [
+    "test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s"
+  ],
+  "wall_seconds": 32.249,
+  "source_and_artifacts_unchanged": true,
+  "scope": "Four actual stdlib record declaration policy controls through source lowering and archive encoding/decoding, with no retries. Source remains frozen for the run. Inherited stdlib artifacts are held unchanged. This does not execute Weft/JSON runtime bodies and is not automatic bake, ordinary CLI, AOT, structural checker or registry acceptance.",
+  "files": [
+    {
+      "original": "/private/tmp/verum-T1724-plain-data-wire/started.json",
+      "original_sha256": "c8f17def38c337c791dfe84a008e6f096546fe88383e56a18f121e5ce4e1db9e",
+      "original_bytes": 408942,
+      "retained": "wire-started.json.gz",
+      "retained_sha256": "0644f92db487dad850918b896e97b27b6f43f67f455b1baf4c5d264f7c676ca5"
+    },
+    {
+      "original": "/private/tmp/verum-T1724-plain-data-wire/result.json",
+      "original_sha256": "3d45d263489d1ce0e5cede16187c4795b7258eb730300957f23c32a5c03f06bc",
+      "original_bytes": 410451,
+      "retained": "wire-result.json.gz",
+      "retained_sha256": "b4517691cdfbf2b8fae17d039731d873276b78f83000f28fcb80fff3f4bb1c4a"
+    },
+    {
+      "original": "/private/tmp/verum-T1724-plain-data-wire/gate.log",
+      "original_sha256": "5d984a23c9c45092d038ead38670006eb7eca57e1bc9725b15fba909ea7fcd9c",
+      "original_bytes": 2194,
+      "retained": "wire-gate.log.gz",
+      "retained_sha256": "f311b4a361cac007037cb59dc2c09d5717b414b266d7f6d4602195f22e37587f"
+    },
+    {
+      "original": "/private/tmp/verum-T1724-plain-data-wire-runner.py",
+      "original_sha256": "62f065f436d72c4fcd981f448e4417d7e1d3e6ec6a87632a0d511cbea3ec751a",
+      "original_bytes": 6844,
+      "retained": "wire-verum-T1724-plain-data-wire-runner.py.gz",
+      "retained_sha256": "d9e6fe1eebcecfaa2579ea83c50655035258a1ffceb6dfe0adf2014dad766f6c"
+    }
+  ]
+}

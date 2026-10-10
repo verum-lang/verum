@@ -15,10 +15,12 @@ checks also pass.
 
 A later bytecode gate at `77f1ba4b6`, which additionally contains the generic
 alias parser fix and record-field consumer work, completed with **2,105 passed,
-4 failed, 1 ignored**. The failures are three TCP fixture connection deadlines
-and one UDP fixture receive deadline. Their exact logs are retained here;
-no cause or regression attribution has yet been established. A prior green
-run does not make this newer run green.
+4 failed, 1 ignored**. Three TCP fixture connections returned the status
+mapped from `ErrorKind::TimedOut`; one UDP receive returned `None`. The UDP
+API erased whether resource lookup, socket cloning or receive failed, so that
+result does not establish a deadline failure. The exact logs are retained
+here; the operating-system causes and regression attribution remain unknown.
+A prior green run does not make this newer run green.
 
 The producer landing does not include the pending record-field enforcement,
 structural-conversion authority checks or registry authentication candidate.
