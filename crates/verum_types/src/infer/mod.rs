@@ -13,6 +13,7 @@
 //! allowing the algorithm to prune the search space early.
 
 // Submodules containing impl TypeChecker method groups
+mod source_declarations;
 pub(crate) mod decls;           // Type declaration registration (register_type_declaration*, …)
 pub(crate) mod env;             // Environment management (stdlib bootstrap, pre-register, constraints)
 pub(crate) mod expr;            // Expression inference (synth_expr, check_expr, infer_expr*)
@@ -820,6 +821,9 @@ pub struct TypeChecker {
     /// Current module path for import resolution
     /// Name resolution across modules: qualified paths, import disambiguation, re-exports, path resolution in imports — Path resolution in imports
     pub(crate) current_module_path: Text,
+    /// Resolve imported signatures in their declaring source scope.
+    pub(crate) resolving_source_signature: bool,
+    loaded_source_receiver_methods: Set<Text>,
     /// Registry of inline module declarations for qualified path resolution
     /// Maps module path (e.g., "cog.api.v1") to its declaration
     /// Module declaration: inline "module name { ... }" or file-based (foo.vr defines module foo) — Inline Modules

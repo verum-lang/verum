@@ -3399,7 +3399,7 @@ impl TypeChecker {
                         // #[cfg(debug_assertions)]
                         // eprintln!("[DEBUG] About to extract_function_type_from_module for '{}'", item_name);
                         if let Some((func_type, type_vars)) =
-                            self.extract_function_type_from_module(&module_info.ast, item_name)
+                            self.extract_function_type_from_module(&module_info.ast, item_name, &module_info.path.to_string())
                         {
                             if std::env::var("VERUM_TRACE_TASK20").is_ok() {
                                 eprintln!("[task20] AST direct: mod='{}' item='{}' type={:?}",
@@ -3835,7 +3835,7 @@ impl TypeChecker {
                         // as separate submodules. Their public functions are in the parent's AST.
                         if !found {
                             if let Some((func_type, type_vars)) =
-                                self.extract_function_type_from_module(&module_info.ast, item_name)
+                                self.extract_function_type_from_module(&module_info.ast, item_name, &module_info.path.to_string())
                             {
                                 let scheme = if type_vars.is_empty() {
                                     TypeScheme::mono(func_type)
@@ -4026,7 +4026,7 @@ impl TypeChecker {
                                 // Extract function type and register it
                                 // Use TypeScheme::poly() for generic functions
                                 if let Some((func_type, type_vars)) = self
-                                    .extract_function_type_from_module(&module_info.ast, item_name)
+                                    .extract_function_type_from_module(&module_info.ast, item_name, &module_info.path.to_string())
                                 {
                                     let register_name = local_name.unwrap_or(item_name);
                                     let scheme = if type_vars.is_empty() {
@@ -5448,7 +5448,7 @@ impl TypeChecker {
         Ok(())
     }
 
-    fn find_type_declaration_in_module(
+    pub(super) fn find_type_declaration_in_module(
         &self,
         ast: &verum_ast::Module,
         type_name: &str,
@@ -5742,7 +5742,7 @@ impl TypeChecker {
     /// Returns a list of ImplDecl for both inherent AND protocol implementations of the type.
     /// This ensures that methods from protocol implementations (e.g., `implement Allocator for GlobalAllocator`)
     /// are also available for method calls on the implementing type.
-    fn find_impl_blocks_for_type(
+    pub(super) fn find_impl_blocks_for_type(
         &self,
         ast: &verum_ast::Module,
         type_name: &str,
@@ -5825,7 +5825,7 @@ impl TypeChecker {
     /// flat `ctx.type_defs` map where whichever same-named type was
     /// registered last wins — so imported broadcast's `poll_next` ends up
     /// with QUIC's `RecvError` in its stored return type.
-    fn import_impl_blocks_for_type_in_module(
+    pub(super) fn import_impl_blocks_for_type_in_module(
         &mut self,
         ast: &verum_ast::Module,
         type_name: &str,
@@ -7264,7 +7264,7 @@ impl TypeChecker {
     /// or bare paths like "io.". This function generates candidate paths and tries each.
     ///
     /// For example, "core.io.path" generates candidates: ["core.io.path", "std.io.path", "io.path"]
-    fn get_module_with_path_aliases(
+    pub(super) fn get_module_with_path_aliases(
         &self,
         path: &str,
         registry: &verum_modules::ModuleRegistry,
@@ -7334,7 +7334,7 @@ impl TypeChecker {
         let mut visited = Set::new();
         self.find_type_declaration_with_source_module_inner(
             &module.ast, type_name, &Text::from(module.path.to_string()), registry,
-            &mut visited, true,
+            &mut visited, true, false,
         )
     }
 
@@ -7370,11 +7370,12 @@ impl TypeChecker {
             registry,
             &mut visited,
             false,
+            false,
         )
     }
 
     /// Inner implementation of find_type_declaration_with_source_module.
-    fn find_type_declaration_with_source_module_inner(
+    pub(super) fn find_type_declaration_with_source_module_inner(
         &self,
         ast: &verum_ast::Module,
         type_name: &str,
@@ -7382,6 +7383,7 @@ impl TypeChecker {
         registry: &verum_modules::ModuleRegistry,
         visited: &mut Set<(Text, Text)>,
         require_exported_source: bool,
+        allow_local_mounts: bool,
     ) -> Option<(verum_ast::decl::TypeDecl, Text)> {
         use verum_ast::ItemKind;
         use verum_ast::decl::{MountTreeKind, Visibility as AstVisibility};
@@ -7399,7 +7401,7 @@ impl TypeChecker {
             return None;
         }
 
-        if require_exported_source {
+        if require_exported_source && !allow_local_mounts {
             let module = self.get_module_with_path_aliases(current_module_path, registry)?;
             let export = module.exports.get(&Text::from(type_name))?;
             if export.kind != verum_modules::ExportKind::Type
@@ -7432,7 +7434,7 @@ impl TypeChecker {
         // If not found directly, check if it's re-exported via `pub import`
         for item in &ast.items {
             if let ItemKind::Mount(import_decl) = &item.kind {
-                if import_decl.visibility != AstVisibility::Public {
+                if !allow_local_mounts && import_decl.visibility != AstVisibility::Public {
                     continue;
                 }
 
@@ -7562,6 +7564,7 @@ impl TypeChecker {
                                 registry,
                                 visited,
                                 require_exported_source,
+                                false,
                             )
                         {
                             return Some((decl, final_path));
@@ -8392,7 +8395,7 @@ impl TypeChecker {
         use verum_ast::ty::PathSegment;
 
         // First, try to find the function directly in this module (including variant constructors)
-        if let Some((func_type, type_vars)) = self.extract_function_type_from_module(ast, func_name)
+        if let Some((func_type, type_vars)) = self.extract_function_type_from_module(ast, func_name, current_module_path.as_str())
         {
             return Some((func_type, type_vars, current_module_path.clone()));
         }
@@ -8606,7 +8609,7 @@ impl TypeChecker {
                     let lookup_name = original_name.as_deref().unwrap_or(func_name);
                     if let Some(source_module) = registry.get_by_path(source_path) {
                         if let Some((func_type, type_vars)) =
-                            self.extract_function_type_from_module(&source_module.ast, lookup_name)
+                            self.extract_function_type_from_module(&source_module.ast, lookup_name, &source_module.path.to_string())
                         {
                             return Some((func_type, type_vars, Text::from(source_path.clone())));
                         } else {
@@ -10693,6 +10696,22 @@ impl TypeChecker {
         &mut self,
         ast: &verum_ast::Module,
         func_name: &str,
+        source_module: &str,
+    ) -> Option<(Type, List<TypeVar>)> {
+        let saved_owner = std::mem::replace(&mut self.current_module_path, source_module.into());
+        let saved_scope = std::mem::replace(&mut self.resolving_source_signature, true);
+        self.push_decl_param_frame(indexmap::IndexMap::new());
+        let result = self.extract_function_type_in_source_scope(ast, func_name);
+        self.pop_decl_param_frame();
+        self.resolving_source_signature = saved_scope;
+        self.current_module_path = saved_owner;
+        result
+    }
+
+    fn extract_function_type_in_source_scope(
+        &mut self,
+        ast: &verum_ast::Module,
+        func_name: &str,
     ) -> Option<(Type, List<TypeVar>)> {
         use crate::context::{TypeParam as ContextTypeParam, Variance};
         use crate::protocol::ProtocolBound;
@@ -10737,7 +10756,7 @@ impl TypeChecker {
 
                         // Register in type context so ast_to_type can find it
                         type_param_map.insert(name_text.clone(), type_var.clone());
-                        self.ctx.define_type(name_text.clone(), type_var);
+                        self.decl_param_frames.last_mut()?.insert(name_text.clone(), type_var);
 
                         // Extract protocol bounds from AST
                         // e.g., T: Numeric, T: Atomic + Integer
@@ -10920,7 +10939,7 @@ impl TypeChecker {
                         let type_var = Type::Var(fresh_var);
                         let name_text: Text = name.name.clone();
                         type_param_map.insert(name_text.clone(), type_var.clone());
-                        self.ctx.define_type(name_text.clone(), type_var);
+                        self.decl_param_frames.last_mut()?.insert(name_text.clone(), type_var);
                         let protocol_bounds: List<ProtocolBound> = bounds
                             .iter()
                             .filter_map(|bound| match &bound.kind {
@@ -19636,6 +19655,9 @@ impl TypeChecker {
             Type::Sigma { fst_type, .. } => *fst_type,
             other => other,
         };
+
+        self.load_source_receiver_methods(&recv_ty_raw)?;
+        self.check_source_method_visibility(&recv_ty_raw, method.name.as_str(), span)?;
 
         if let Some(r) = self.resolve_reference_type_method(&recv_ty_raw, method, args, span)? {
             if crate::ctor_trace_enabled() {
