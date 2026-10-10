@@ -399,6 +399,9 @@ fn main() {{
                 // The production script gives this absolute environment
                 // value precedence over OUT_DIR when locating its cache.
                 .env("CARGO_TARGET_DIR", &target)
+                .env("CARGO_BUILD_JOBS", "1")
+                .env_remove("CARGO_MAKEFLAGS")
+                .env_remove("MAKEFLAGS")
                 .current_dir(manifest.parent().unwrap())
                 .env_remove("VERUM_NO_AUTO_PRECOMPILE")
                 .env_remove("DOCS_RS")
