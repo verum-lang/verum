@@ -1029,3 +1029,33 @@ the earlier five diagnostics. All earlier source inputs are unchanged; the
 new snapshot compiles 29 source modules. T1681 remains open, and successful
 authentication does not make this a complete-project acceptance. Exact output
 is retained in the linked runtime record.
+
+
+### Declaration-owned methods on returned source values
+
+T1711 now preserves the declaring module when extracting an imported source
+function's signature. A public factory can expose a value's public inherent
+methods without requiring the consumer to mount the returned type. Generic
+parameters, source import aliases, Result payloads and exact absolute function
+re-exports retain their own declaration authority. An unrelated same-named type
+cannot supply the return owner or its methods.
+
+Caller-side method visibility uses the source declaration and the existing
+visibility policy. Private helpers remain available inside their module, while
+both inferred receivers and explicitly imported types refuse external private
+method calls. Implicit registration keeps qualified type information without
+publishing the return type's private bare name or constructors into the caller's
+lexical scope.
+
+The [retained checker record](evidence/returned-source-methods/manifest.json)
+contains the causal failures, intermediate corrections and exact source,
+executable and raw-output identities. Frozen source `63b9a52fe` passes 14 focused
+controls, 32 adjacent import/variant/generic controls, and the unfiltered
+`verum_types --tests` gate: 4,016 passed, zero failed, three existing ignores.
+The broad gate ran 177 test binaries in 190.347 seconds with automatic
+precompilation disabled; these source fixtures consume no standard-library
+archive. This is checker acceptance. Replaying the unchanged registry
+`credentials_file` and `prepare` components with an ordinary rebuilt CLI remains
+required. Private fields/construction (T1713), the separate prepared-request
+array mismatch, AOT and authenticated durable HTTP publication are separate
+boundaries.
