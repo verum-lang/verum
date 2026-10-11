@@ -1,0 +1,12 @@
+{
+  "task": "T1744",
+  "source_commit": "4f6532de545dbda1324cc708bcc9a532de144f3b",
+  "status": "preflight_refused",
+  "cargo_started": false,
+  "test_execution": false,
+  "reason": "insufficient initial disk headroom",
+  "required_free_bytes": 4294967296,
+  "free_bytes_at_receipt": 3954315264,
+  "runner_sha256": "500d7487394d082f3a04d65935b04d36714d0d4cf1dbddac20a1d2448e4c1a11",
+  "fixture_sha256": "095cd07dd0b4bcb83640429cbae7e7a69158c9d106f71573fb9018bbc12b0a7c"
+}

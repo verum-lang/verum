@@ -1,0 +1,188 @@
+{
+  "task": "T1744",
+  "source_commit": "2565d34b4823ca7f140ba34ef9eabc1fd0cf09e3",
+  "source_tree": "0ab4b004f77bd6562f0bc8cfa1b3f465e8edd1a8",
+  "source_receipt": "/private/tmp/verum-T1744-compilation-owned-fixed/result.json",
+  "source_receipt_sha256": "700c87fe188190a312ab6cb95cdef8573cba289527963a8e79a2b7fafb4f6357",
+  "source_bindings_canonical_sha256": "08a2ef0f992d7f2c51a2d17c319094248122ab7b9969018087db6ed58709d8bb",
+  "runner_sha256": "b6bcf687405f73fa2f370addde8662dcbd5c8d0b11246d66fcc4d3d57867b1af",
+  "executable": "/private/tmp/verum-T1744-compilation-owned-fixed/verum_compiler-c6ca94c7409ab771",
+  "executable_sha256": "43fcdf546e68b6fb12b6b59f8d84a549d1854018e76268058874e89306aac991",
+  "environment": {
+    "CARGO_TARGET_DIR": "/Users/taaliman/.tmp/verum-codex-01a10248/native-target",
+    "CARGO_BUILD_JOBS": "1",
+    "CARGO_INCREMENTAL": "0",
+    "VERUM_NO_AUTO_PRECOMPILE": "1",
+    "RUST_MIN_STACK": "16777216",
+    "VERUM_LLVM_DIR": "/Users/taaliman/projects/oldman/verum-lang/verum/llvm/install"
+  },
+  "deadline_seconds": 300,
+  "artifacts_before": {
+    "runtime.vbca": {
+      "bytes": 40545239,
+      "sha256": "48d2cd1e07ac1cbbe5cb74eadcaf37ba84523d1dc99f68ddcc9eb067a8986d78"
+    },
+    "runtime.core_metadata": {
+      "bytes": 118793446,
+      "sha256": "7f021e1463de5414d9c7d84228357485e7db68c7aa9f5bb521cf550eff471acf"
+    },
+    "runtime.symbol_graph": {
+      "bytes": 6995428,
+      "sha256": "e44ff2b708e0c36d89b1567284fafd6146b36ede30ad520b0bdffd0035c8d27a"
+    },
+    "runtime.vbca.checksum": {
+      "bytes": 64,
+      "sha256": "603d89a857d4d0eb6a7ef9180545ccb94eb30009e0cc11ec401c78d75bfb5833"
+    },
+    "runtime.vbca.schema": {
+      "bytes": 40,
+      "sha256": "1c3b3d0a7b02c7c0f4001b49068bc4a69cd1ce368a547335fbf4186391971e4c"
+    }
+  },
+  "scope": "Direct selected archive-contract tests from the exact retained nine-control executable; no Cargo rebuild, bake, ordinary CLI, AOT or traffic campaign.",
+  "groups": [
+    {
+      "filter": "declared_function_bodies",
+      "command": [
+        "/private/tmp/verum-T1744-compilation-owned-fixed/verum_compiler-c6ca94c7409ab771",
+        "archive_ctx_loader::declared_function_bodies::",
+        "--test-threads=1",
+        "--nocapture"
+      ],
+      "selected": 1,
+      "expected_ignored": 0,
+      "exit_code": 0,
+      "wall_seconds": 3.346,
+      "interrupted": null,
+      "announced_counts": [
+        1
+      ],
+      "test_results": [
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1273 filtered out; finished in 0.01s"
+      ],
+      "log": "declared_function_bodies.log",
+      "log_sha256": "7f8b4d95dbb850ce7b2aef5e4455ce6ee868ab1a2a02d16259a24cd88b8e8a3b",
+      "passed": true
+    },
+    {
+      "filter": "explicit_generic_param_tests",
+      "command": [
+        "/private/tmp/verum-T1744-compilation-owned-fixed/verum_compiler-c6ca94c7409ab771",
+        "archive_ctx_loader::explicit_generic_param_tests::",
+        "--test-threads=1",
+        "--nocapture"
+      ],
+      "selected": 2,
+      "expected_ignored": 0,
+      "exit_code": 0,
+      "wall_seconds": 0.046,
+      "interrupted": null,
+      "announced_counts": [
+        2
+      ],
+      "test_results": [
+        "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 1272 filtered out; finished in 0.01s"
+      ],
+      "log": "explicit_generic_param_tests.log",
+      "log_sha256": "076664ea9b4d89f1658c4a3bd51652727528fe0bdd98426ab4a271e2ed128e63",
+      "passed": true
+    },
+    {
+      "filter": "bootstrap_glue_tests",
+      "command": [
+        "/private/tmp/verum-T1744-compilation-owned-fixed/verum_compiler-c6ca94c7409ab771",
+        "archive_ctx_loader::bootstrap_glue_tests::",
+        "--test-threads=1",
+        "--nocapture"
+      ],
+      "selected": 2,
+      "expected_ignored": 0,
+      "exit_code": 0,
+      "wall_seconds": 0.026,
+      "interrupted": null,
+      "announced_counts": [
+        2
+      ],
+      "test_results": [
+        "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 1272 filtered out; finished in 0.00s"
+      ],
+      "log": "bootstrap_glue_tests.log",
+      "log_sha256": "ad4d28e9c7a19a13cf3fce8b3462b19f3efa2641171a294e19c1899429052dfa",
+      "passed": true
+    },
+    {
+      "filter": "symbol_graph_declaring_owner_tests",
+      "command": [
+        "/private/tmp/verum-T1744-compilation-owned-fixed/verum_compiler-c6ca94c7409ab771",
+        "archive_ctx_loader::symbol_graph_declaring_owner_tests::",
+        "--test-threads=1",
+        "--nocapture"
+      ],
+      "selected": 6,
+      "expected_ignored": 0,
+      "exit_code": 0,
+      "wall_seconds": 0.024,
+      "interrupted": null,
+      "announced_counts": [
+        6
+      ],
+      "test_results": [
+        "test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 1268 filtered out; finished in 0.00s"
+      ],
+      "log": "symbol_graph_declaring_owner_tests.log",
+      "log_sha256": "8920bfdba773d97afa639093da97c47a714cf68cb52baca1a8f3d9a8e2272d13",
+      "passed": true
+    },
+    {
+      "filter": "wanted_leaf_index_tests",
+      "command": [
+        "/private/tmp/verum-T1744-compilation-owned-fixed/verum_compiler-c6ca94c7409ab771",
+        "archive_ctx_loader::wanted_leaf_index_tests::",
+        "--test-threads=1",
+        "--nocapture"
+      ],
+      "selected": 6,
+      "expected_ignored": 1,
+      "exit_code": 0,
+      "wall_seconds": 0.041,
+      "interrupted": null,
+      "announced_counts": [
+        6
+      ],
+      "test_results": [
+        "test result: ok. 5 passed; 0 failed; 1 ignored; 0 measured; 1268 filtered out; finished in 0.02s"
+      ],
+      "log": "wanted_leaf_index_tests.log",
+      "log_sha256": "e432a8af878e5a36d564148f36c1fc348769d15c22e04bf1ffee4c001d745682",
+      "passed": true
+    }
+  ],
+  "wall_seconds": 3.484,
+  "source_unchanged": true,
+  "source_paths_unchanged": true,
+  "executable_unchanged": true,
+  "artifacts_after": {
+    "runtime.vbca": {
+      "bytes": 40545239,
+      "sha256": "48d2cd1e07ac1cbbe5cb74eadcaf37ba84523d1dc99f68ddcc9eb067a8986d78"
+    },
+    "runtime.core_metadata": {
+      "bytes": 118793446,
+      "sha256": "7f021e1463de5414d9c7d84228357485e7db68c7aa9f5bb521cf550eff471acf"
+    },
+    "runtime.symbol_graph": {
+      "bytes": 6995428,
+      "sha256": "e44ff2b708e0c36d89b1567284fafd6146b36ede30ad520b0bdffd0035c8d27a"
+    },
+    "runtime.vbca.checksum": {
+      "bytes": 64,
+      "sha256": "603d89a857d4d0eb6a7ef9180545ccb94eb30009e0cc11ec401c78d75bfb5833"
+    },
+    "runtime.vbca.schema": {
+      "bytes": 40,
+      "sha256": "1c3b3d0a7b02c7c0f4001b49068bc4a69cd1ce368a547335fbf4186391971e4c"
+    }
+  },
+  "artifacts_unchanged": true,
+  "passed": true
+}

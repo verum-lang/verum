@@ -1,0 +1,1919 @@
+     Running /private/tmp/verum-T1744-concat-registration/runtime/options_trace.vr (interpreter)
+[fnreg] 'core.text.Text.concat' id=13421 arity=2 rt=Some("Text") variant_tag=None prev=None
+[fnreg] 'Text.concat' id=13421 arity=2 rt=Some("Text") variant_tag=None prev=None
+[ambig-mark] 'Text.from_utf8_lossy' via suffix of 'core.text.Text.from_utf8_lossy' (ids 588/13460)
+[ambig-mark] 'Text.from_utf8_lossy' via suffix of 'core.text.text.Text.from_utf8_lossy' (ids 588/13460)
+[ambig-mark] 'Text.from_utf8_unchecked' via suffix of 'core.text.Text.from_utf8_unchecked' (ids 587/13461)
+[ambig-mark] 'Text.from_utf8_unchecked' via suffix of 'core.text.text.Text.from_utf8_unchecked' (ids 587/13461)
+[ambig-mark] 'Int.checked_mul' via suffix of 'core.time.Int.checked_mul' (ids 7827/14028)
+[ambig-mark] 'ArchiveError.fmt' via suffix of 'core.cog.ArchiveError.fmt' (ids 20814/25652)
+[ambig-mark] 'PathError.fmt' via suffix of 'core.net.quic.PathError.fmt' (ids 26147/29086)
+[ambig-mark] 'TextBuilder.new' via suffix of 'core.net.quic.TextBuilder.new' (ids 13584/29203)
+[ambig-mark] 'Int.abs' via suffix of 'core.math.Int.abs' (ids 7815/32239)
+[ambig-mark] 'ResolveError.fmt' via suffix of 'core.database.sqlite.native.l5_sql.ResolveError.fmt' (ids 25665/39123)
+[ambig-mark] 'ProverError.fmt' via suffix of 'core.security.zk.stark.ProverError.fmt' (ids 42567/42609)
+[ambig-mark] 'VerifierError.fmt' via suffix of 'core.security.zk.stark.VerifierError.fmt' (ids 42579/42612)
+[strdice] intern "Text.concat" module=None strings_len=20895
+   3: <verum_vbc::codegen::context::CodegenContext>::intern_string_raw
+   4: <verum_vbc::codegen::VbcCodegen>::remap_archive_string_operands::{closure#0}
+             at /private/tmp/verum-t1743-record-probes/crates/verum_vbc/src/codegen/mod.rs:28464:22
+   5: <verum_vbc::codegen::VbcCodegen>::remap_archive_string_operands
+             at /private/tmp/verum-t1743-record-probes/crates/verum_vbc/src/codegen/mod.rs:28468:30
+   6: <verum_vbc::codegen::VbcCodegen>::merge_archive_function_bodies
+             at /private/tmp/verum-t1743-record-probes/crates/verum_vbc/src/codegen/mod.rs:27970:22
+   7: <verum_compiler::archive_ctx_loader::ArchiveCtxCache>::apply_lazy_with_types
+             at /private/tmp/verum-t1743-record-probes/crates/verum_compiler/src/archive_ctx_loader.rs:3510:25
+   8: <verum_compiler::pipeline::CompilationPipeline>::compile_ast_to_vbc
+             at /private/tmp/verum-t1743-record-probes/crates/verum_compiler/src/pipeline/vbc_codegen.rs:448:52
+   9: <verum_compiler::pipeline::CompilationPipeline>::phase_interpret
+[ambig-mark] 'Char.encode_utf8' via suffix of 'core.base.Char.encode_utf8' (ids 5608/45978)
+[ambig-mark] 'DefaultHasher.finish' via suffix of 'core.base.DefaultHasher.finish' (ids 6308/46678)
+[ambig-mark] 'DefaultHasher.new' via suffix of 'core.base.DefaultHasher.new' (ids 6309/46679)
+[ambig-mark] 'DefaultHasher.write' via suffix of 'core.base.DefaultHasher.write' (ids 6310/46680)
+[ambig-mark] 'DefaultHasher.write_byte' via suffix of 'core.base.DefaultHasher.write_byte' (ids 6311/46681)
+[ambig-mark] 'DefaultHasher.write_int' via suffix of 'core.base.DefaultHasher.write_int' (ids 6312/46682)
+[ambig-mark] 'FormatSpec.is_zero_padded' via suffix of 'core.base.FormatSpec.is_zero_padded' (ids 7339/47709)
+[ambig-mark] 'Formatter.write_int' via suffix of 'core.base.Formatter.write_int' (ids 7357/47727)
+[ambig-mark] 'Formatter.write_int_base' via suffix of 'core.base.Formatter.write_int_base' (ids 7358/47728)
+[ambig-mark] 'Formatter.write_int_decimal' via suffix of 'core.base.Formatter.write_int_decimal' (ids 7359/47729)
+[ambig-mark] 'Formatter.write_padded' via suffix of 'core.base.Formatter.write_padded' (ids 7360/47730)
+[ambig-mark] 'Formatter.write_str' via suffix of 'core.base.Formatter.write_str' (ids 7361/47731)
+[ambig-mark] 'Formatter.write_with_sign' via suffix of 'core.base.Formatter.write_with_sign' (ids 7362/47732)
+[ambig-mark] 'Int.abs' via suffix of 'core.base.Int.abs' (ids 7815/48185)
+[ambig-mark] 'Int.checked_mul' via suffix of 'core.base.Int.checked_mul' (ids 7827/48197)
+[ambig-mark] 'Int.hash' via suffix of 'core.base.Int.hash' (ids 7854/48224)
+[ambig-mark] 'Int.rotate_left' via suffix of 'core.base.Int.rotate_left' (ids 7890/48260)
+[ambig-mark] 'Int.wrapping_mul' via suffix of 'core.base.Int.wrapping_mul' (ids 7917/48287)
+[ambig-mark] 'Maybe.expect' via suffix of 'core.base.Maybe.expect' (ids 9041/49411)
+[ambig-mark] 'Maybe.hash' via suffix of 'core.base.Maybe.hash' (ids 9057/49427)
+[ambig-mark] 'Maybe.hash_value' via suffix of 'core.base.Maybe.hash_value' (ids 9058/49428)
+[ambig-mark] 'Maybe.unwrap_or' via suffix of 'core.base.Maybe.unwrap_or' (ids 9086/49456)
+[ambig-mark] 'Range.next' via suffix of 'core.base.Range.next' (ids 9715/50085)
+[ambig-mark] 'RangeInclusive.next' via suffix of 'core.base.RangeInclusive.next' (ids 9854/50224)
+[ambig-mark] 'Result.hash' via suffix of 'core.base.Result.hash' (ids 10232/50602)
+[ambig-mark] 'Result.hash_value' via suffix of 'core.base.Result.hash_value' (ids 10233/50603)
+[ambig-mark] 'Chars.next' via suffix of 'core.text.Chars.next' (ids 13219/53479)
+[ambig-mark] 'Chars.nth' via suffix of 'core.text.Chars.nth' (ids 13220/53480)
+[ambig-mark] 'Text.as_ptr' via suffix of 'core.text.Text.as_ptr' (ids 13403/53663)
+[ambig-mark] 'Text.char_count' via suffix of 'core.text.Text.char_count' (ids 13413/53673)
+[ambig-mark] 'Text.chars' via suffix of 'core.text.Text.chars' (ids 13415/53675)
+[ambig-mark] 'Text.clone' via suffix of 'core.text.Text.clone' (ids 13418/53678)
+[fnreg] 'core.text.Text.concat' id=53681 arity=2 rt=Some("Text") variant_tag=None prev=Some((13421, 2))
+[ambig-mark] 'Text.concat' via suffix of 'core.text.Text.concat' (ids 13421/53681)
+[ambig-mark] 'Text.from_utf8_unchecked' via suffix of 'core.text.Text.from_utf8_unchecked' (ids 587/53721)
+[ambig-mark] 'Text.grow' via suffix of 'core.text.Text.grow' (ids 13463/53723)
+[ambig-mark] 'Text.hash' via suffix of 'core.text.Text.hash' (ids 13465/53725)
+[ambig-mark] 'Text.hash_value' via suffix of 'core.text.Text.hash_value' (ids 13466/53726)
+[ambig-mark] 'Text.new' via suffix of 'core.text.Text.new' (ids 13495/53755)
+[ambig-mark] 'Text.nth_char' via suffix of 'core.text.Text.nth_char' (ids 13496/53756)
+[ambig-mark] 'Text.push' via suffix of 'core.text.Text.push' (ids 13508/53768)
+[ambig-mark] 'Text.push_byte' via suffix of 'core.text.Text.push_byte' (ids 13509/53769)
+[ambig-mark] 'Text.push_str' via suffix of 'core.text.Text.push_str' (ids 13510/53770)
+[ambig-mark] 'Text.reserve' via suffix of 'core.text.Text.reserve' (ids 13519/53779)
+[ambig-mark] 'Text.slice' via suffix of 'core.text.Text.slice' (ids 13528/53788)
+[ambig-mark] 'Text.with_capacity' via suffix of 'core.text.Text.with_capacity' (ids 13568/53828)
+[ambig-mark] 'Int.checked_mul' via suffix of 'core.time.Int.checked_mul' (ids 7827/54229)
+[ambig-mark] 'List.grow' via suffix of 'core.collections.List.grow' (ids 16746/56947)
+[ambig-mark] 'List.hash' via suffix of 'core.collections.List.hash' (ids 16747/56948)
+[ambig-mark] 'List.hash_value' via suffix of 'core.collections.List.hash_value' (ids 16748/56949)
+[ambig-mark] 'List.next_cap' via suffix of 'core.collections.List.next_cap' (ids 16776/56977)
+[ambig-mark] 'List.push' via suffix of 'core.collections.List.push' (ids 16786/56987)
+[ambig-mark] 'List.resize_buffer' via suffix of 'core.collections.List.resize_buffer' (ids 16797/56998)
+[ambig-mark] 'Map.get' via suffix of 'core.collections.Map.get' (ids 17100/57301)
+[ambig-mark] 'Map.hash' via suffix of 'core.collections.Map.hash' (ids 17108/57309)
+[ambig-mark] 'Map.hash_value' via suffix of 'core.collections.Map.hash_value' (ids 17109/57310)
+[ambig-mark] 'Map.insert_internal' via suffix of 'core.collections.Map.insert_internal' (ids 17112/57313)
+[ambig-mark] 'Map.make_hash_val' via suffix of 'core.collections.Map.make_hash_val' (ids 17125/57326)
+[ambig-mark] 'Map.resize' via suffix of 'core.collections.Map.resize' (ids 17136/57337)
+[ambig-mark] 'Map.swap_in_table' via suffix of 'core.collections.Map.swap_in_table' (ids 17140/57341)
+[ambig-mark] 'Set.hash' via suffix of 'core.collections.Set.hash' (ids 18266/58467)
+[ambig-mark] 'Set.hash_value' via suffix of 'core.collections.Set.hash_value' (ids 18267/58468)
+[ambig-mark] 'Int.abs' via suffix of 'core.math.Int.abs' (ids 7815/60541)
+[strdice-stub/callm] id=53681 chosen="core.text.Text.concat" keys-of-id=["core.text.Text.concat"] module="main"
+[strdice] intern "core.text.Text.concat" module=None strings_len=66075
+   3: <verum_vbc::codegen::context::CodegenContext>::intern_string_raw
+   4: <verum_vbc::codegen::VbcCodegen>::emit_missing_stub_descriptors_with_callm
+             at /private/tmp/verum-t1743-record-probes/crates/verum_vbc/src/codegen/mod.rs:24778:49
+   5: <verum_vbc::codegen::VbcCodegen>::emit_missing_stub_descriptors
+             at /private/tmp/verum-t1743-record-probes/crates/verum_vbc/src/codegen/mod.rs:24041:14
+   6: <verum_vbc::codegen::VbcCodegen>::finalize_module
+             at /private/tmp/verum-t1743-record-probes/crates/verum_vbc/src/codegen/mod.rs:6061:14
+   7: <verum_compiler::pipeline::CompilationPipeline>::compile_ast_to_vbc
+             at /private/tmp/verum-t1743-record-probes/crates/verum_compiler/src/pipeline/vbc_codegen.rs:569:14
+   8: <verum_compiler::pipeline::CompilationPipeline>::phase_interpret
+             at /private/tmp/verum-t1743-record-probes/crates/verum_compiler/src/pipeline/interpreter.rs:80:31
+   9: <verum_compiler::pipeline::CompilationPipeline>::phase_interpret_with_args
+[trace-call] handler=Call func_id=13725 name='Mutex.new' descriptor.id=13725 args.count=1 bytecode_length=42
+[trace-call] handler=Call func_id=8243 name='FutexLock.new' descriptor.id=8243 args.count=0 bytecode_length=26
+[trace-call] handler=Call func_id=752 name='AtomicInt.new' descriptor.id=752 args.count=1 bytecode_length=14
+[trace-call] handler=Call func_id=735 name='AtomicBool.new' descriptor.id=735 args.count=1 bytecode_length=37
+[trace-call] handler=Call func_id=752 name='AtomicInt.new' descriptor.id=752 args.count=1 bytecode_length=14
+[trace-call] handler=Call func_id=13725 name='Mutex.new' descriptor.id=13725 args.count=1 bytecode_length=42
+[trace-call] handler=Call func_id=8243 name='FutexLock.new' descriptor.id=8243 args.count=0 bytecode_length=26
+[trace-call] handler=Call func_id=752 name='AtomicInt.new' descriptor.id=752 args.count=1 bytecode_length=14
+[trace-call] handler=Call func_id=735 name='AtomicBool.new' descriptor.id=735 args.count=1 bytecode_length=37
+[trace-call] handler=Call func_id=2973 name='CancellationFlag.new' descriptor.id=2973 args.count=0 bytecode_length=114
+[trace-call] handler=Call func_id=752 name='AtomicInt.new' descriptor.id=752 args.count=1 bytecode_length=14
+[trace-callG] func_id=13725 name='Mutex.new' descriptor.id=13725 args.count=1 bytecode_length=42
+[trace-call] handler=Call func_id=8243 name='FutexLock.new' descriptor.id=8243 args.count=0 bytecode_length=26
+[trace-call] handler=Call func_id=752 name='AtomicInt.new' descriptor.id=752 args.count=1 bytecode_length=14
+[trace-call] handler=Call func_id=735 name='AtomicBool.new' descriptor.id=735 args.count=1 bytecode_length=37
+[trace-call] handler=Call func_id=13725 name='Mutex.new' descriptor.id=13725 args.count=1 bytecode_length=42
+[trace-call] handler=Call func_id=8243 name='FutexLock.new' descriptor.id=8243 args.count=0 bytecode_length=26
+[trace-call] handler=Call func_id=752 name='AtomicInt.new' descriptor.id=752 args.count=1 bytecode_length=14
+[trace-call] handler=Call func_id=735 name='AtomicBool.new' descriptor.id=735 args.count=1 bytecode_length=37
+[trace-call] handler=Call func_id=13725 name='Mutex.new' descriptor.id=13725 args.count=1 bytecode_length=42
+[trace-call] handler=Call func_id=8243 name='FutexLock.new' descriptor.id=8243 args.count=0 bytecode_length=26
+[trace-call] handler=Call func_id=752 name='AtomicInt.new' descriptor.id=752 args.count=1 bytecode_length=14
+[trace-call] handler=Call func_id=735 name='AtomicBool.new' descriptor.id=735 args.count=1 bytecode_length=37
+[trace-call] handler=Call func_id=13725 name='Mutex.new' descriptor.id=13725 args.count=1 bytecode_length=42
+[trace-call] handler=Call func_id=8243 name='FutexLock.new' descriptor.id=8243 args.count=0 bytecode_length=26
+[trace-call] handler=Call func_id=752 name='AtomicInt.new' descriptor.id=752 args.count=1 bytecode_length=14
+[trace-call] handler=Call func_id=735 name='AtomicBool.new' descriptor.id=735 args.count=1 bytecode_length=37
+[trace-call] handler=Call func_id=752 name='AtomicInt.new' descriptor.id=752 args.count=1 bytecode_length=14
+[callm-flow] A-post-primitive method=Shared.new recv=other
+[callm-flow] B-pre-array method=Shared.new
+[callm-flow] C-pre-variant-1 method=Shared.new
+[callm-flow] C1b-pre-shared-new method=Shared.new
+[callm-flow] C2-post-new-block method=new
+[callm-flow] C3-pre-usersearch method=new
+[callm-flow] D-pre-variant-2 method=Shared.new
+[callm-flow] F-safety-net method=Shared.new
+[trace-call] handler=Call func_id=752 name='AtomicInt.new' descriptor.id=752 args.count=1 bytecode_length=14
+[trace-call] handler=Call func_id=799 name='AtomicU64.new' descriptor.id=799 args.count=1 bytecode_length=14
+[trace-call] handler=Call func_id=799 name='AtomicU64.new' descriptor.id=799 args.count=1 bytecode_length=14
+[trace-call] handler=Call func_id=14038 name='OnceLock.new' descriptor.id=14038 args.count=0 bytecode_length=31
+[trace-call] handler=Call func_id=13903 name='Once.new' descriptor.id=13903 args.count=0 bytecode_length=26
+[trace-call] handler=Call func_id=752 name='AtomicInt.new' descriptor.id=752 args.count=1 bytecode_length=14
+[trace-call] handler=Call func_id=799 name='AtomicU64.new' descriptor.id=799 args.count=1 bytecode_length=14
+[trace-call] handler=Call func_id=799 name='AtomicU64.new' descriptor.id=799 args.count=1 bytecode_length=14
+[trace-call] handler=Call func_id=799 name='AtomicU64.new' descriptor.id=799 args.count=1 bytecode_length=14
+[trace-call] handler=Call func_id=13919 name='OnceCell.new' descriptor.id=13919 args.count=0 bytecode_length=21
+[trace-call] handler=Call func_id=752 name='AtomicInt.new' descriptor.id=752 args.count=1 bytecode_length=14
+[trace-callG] func_id=13725 name='Mutex.new' descriptor.id=13725 args.count=1 bytecode_length=42
+[trace-call] handler=Call func_id=8243 name='FutexLock.new' descriptor.id=8243 args.count=0 bytecode_length=26
+[trace-call] handler=Call func_id=752 name='AtomicInt.new' descriptor.id=752 args.count=1 bytecode_length=14
+[trace-call] handler=Call func_id=735 name='AtomicBool.new' descriptor.id=735 args.count=1 bytecode_length=37
+[callm-flow] A-post-primitive method=Text.concat recv=other
+[callm-flow] B-pre-array method=Text.concat
+[callm-flow] C-pre-variant-1 method=Text.concat
+[callm-flow] C1b-pre-shared-new method=Text.concat
+[callm-flow] C2-post-new-block method=concat
+[callm-flow] C3-pre-usersearch method=concat
+[pc] Text.concat pc=0 op=0x66 | r1=other r2=other r3=other | Len { dst: Reg(3), arr: Reg(1), type_hint: 5 }
+[pc] Text.concat pc=4 op=0x02 | r1=other r2=other r3=int(3) | LoadI { dst: Reg(4), value: 0 }
+[pc] Text.concat pc=7 op=0x40 | r1=other r2=other r3=int(3) | CmpI { op: Eq, dst: Reg(5), a: Reg(3), b: Reg(4) }
+[pc] Text.concat pc=11 op=0x52 | r1=other r2=other r3=int(3) | JmpNot { cond: Reg(5), offset: 14 }
+[pc] Text.concat pc=28 op=0x06 | r1=other r2=other r3=int(3) | LoadUnit { dst: Reg(2) }
+[pc] Text.concat pc=30 op=0x66 | r1=other r2=other r3=int(3) | Len { dst: Reg(4), arr: Reg(0), type_hint: 5 }
+[pc] Text.concat pc=34 op=0x02 | r1=other r2=other r3=int(3) | LoadI { dst: Reg(6), value: 0 }
+[pc] Text.concat pc=37 op=0x40 | r1=other r2=other r3=int(3) | CmpI { op: Eq, dst: Reg(7), a: Reg(4), b: Reg(6) }
+[pc] Text.concat pc=41 op=0x52 | r1=other r2=other r3=int(3) | JmpNot { cond: Reg(7), offset: 14 }
+[pc] Text.concat pc=58 op=0x06 | r1=other r2=other r3=int(3) | LoadUnit { dst: Reg(3) }
+[pc] Text.concat pc=60 op=0x66 | r1=other r2=other r3=other | Len { dst: Reg(4), arr: Reg(0), type_hint: 5 }
+[pc] Text.concat pc=64 op=0x66 | r1=other r2=other r3=other | Len { dst: Reg(6), arr: Reg(1), type_hint: 5 }
+[pc] Text.concat pc=68 op=0x10 | r1=other r2=other r3=other | BinaryI { op: Add, dst: Reg(8), a: Reg(4), b: Reg(6) }
+[pc] Text.concat pc=72 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(9), src: Reg(8) }
+[pc] Text.concat pc=75 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(10), src: Reg(9) }
+[pc] Text.concat pc=78 op=0x5b | r1=other r2=other r3=other | Call { dst: Reg(6), func_id: 21898, args: RegRange { start: Reg(10), count: 1 } }
+[trace-call] handler=Call func_id=21898 name='Text.with_capacity' descriptor.id=21898 args.count=1 bytecode_length=135
+[pc] Text.concat pc=85 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(11), src: Reg(6) }
+[pc] Text.concat pc=88 op=0x79 | r1=other r2=other r3=other | TextExtended { sub_op: 52, operands: [4, 0] }
+[pc] Text.concat pc=93 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(12), src: Reg(4) }
+[pc] Text.concat pc=96 op=0x02 | r1=other r2=other r3=other | LoadI { dst: Reg(13), value: 0 }
+[pc] Text.concat pc=99 op=0x66 | r1=other r2=other r3=other | Len { dst: Reg(14), arr: Reg(12), type_hint: 0 }
+[pc] Text.concat pc=103 op=0xcc | r1=other r2=other r3=other | NewRange { dst: Reg(15), start: Reg(13), end: Reg(14), inclusive: false }
+[pc] Text.concat pc=108 op=0xc0 | r1=other r2=other r3=other | IterNew { dst: Reg(14), iterable: Reg(15) }
+[pc] Text.concat pc=111 op=0xc1 | r1=other r2=other r3=other | IterNext { dst: Reg(13), has_next: Reg(16), iter: Reg(14) }
+[pc] Text.concat pc=115 op=0x52 | r1=other r2=other r3=other | JmpNot { cond: Reg(16), offset: 23 }
+[pc] Text.concat pc=118 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(17), src: Reg(13) }
+[pc] Text.concat pc=121 op=0x64 | r1=other r2=other r3=other | GetE { dst: Reg(18), arr: Reg(12), idx: Reg(17) }
+[pc] Text.concat pc=125 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(19), src: Reg(18) }
+[pc] Text.concat pc=128 op=0x71 | r1=other r2=other r3=other | RefMut { dst: Reg(20), src: Reg(11) }
+[pc] Text.concat pc=131 op=0x5d | r1=other r2=other r3=other | CallM { dst: Reg(18), receiver: Reg(20), method_id: 1017065, args: RegRange { start: Reg(19), count: 1 } }
+[pc] Text.concat pc=139 op=0x50 | r1=other r2=other r3=other | Jmp { offset: -30 }
+[pc] Text.concat pc=111 op=0xc1 | r1=other r2=other r3=other | IterNext { dst: Reg(13), has_next: Reg(16), iter: Reg(14) }
+[pc] Text.concat pc=115 op=0x52 | r1=other r2=other r3=other | JmpNot { cond: Reg(16), offset: 23 }
+[pc] Text.concat pc=118 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(17), src: Reg(13) }
+[pc] Text.concat pc=121 op=0x64 | r1=other r2=other r3=other | GetE { dst: Reg(18), arr: Reg(12), idx: Reg(17) }
+[pc] Text.concat pc=125 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(19), src: Reg(18) }
+[pc] Text.concat pc=128 op=0x71 | r1=other r2=other r3=other | RefMut { dst: Reg(20), src: Reg(11) }
+[pc] Text.concat pc=131 op=0x5d | r1=other r2=other r3=other | CallM { dst: Reg(18), receiver: Reg(20), method_id: 1017065, args: RegRange { start: Reg(19), count: 1 } }
+[pc] Text.concat pc=139 op=0x50 | r1=other r2=other r3=other | Jmp { offset: -30 }
+[pc] Text.concat pc=111 op=0xc1 | r1=other r2=other r3=other | IterNext { dst: Reg(13), has_next: Reg(16), iter: Reg(14) }
+[pc] Text.concat pc=115 op=0x52 | r1=other r2=other r3=other | JmpNot { cond: Reg(16), offset: 23 }
+[pc] Text.concat pc=141 op=0x06 | r1=other r2=other r3=other | LoadUnit { dst: Reg(16) }
+[pc] Text.concat pc=143 op=0x79 | r1=other r2=other r3=other | TextExtended { sub_op: 52, operands: [13, 1] }
+[pc] Text.concat pc=148 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(21), src: Reg(13) }
+[pc] Text.concat pc=151 op=0x02 | r1=other r2=other r3=other | LoadI { dst: Reg(14), value: 0 }
+[pc] Text.concat pc=154 op=0x66 | r1=other r2=other r3=other | Len { dst: Reg(15), arr: Reg(21), type_hint: 0 }
+[pc] Text.concat pc=158 op=0xcc | r1=other r2=other r3=other | NewRange { dst: Reg(17), start: Reg(14), end: Reg(15), inclusive: false }
+[pc] Text.concat pc=163 op=0xc0 | r1=other r2=other r3=other | IterNew { dst: Reg(15), iterable: Reg(17) }
+[pc] Text.concat pc=166 op=0xc1 | r1=other r2=other r3=other | IterNext { dst: Reg(14), has_next: Reg(18), iter: Reg(15) }
+[pc] Text.concat pc=170 op=0x52 | r1=other r2=other r3=other | JmpNot { cond: Reg(18), offset: 23 }
+[pc] Text.concat pc=173 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(22), src: Reg(14) }
+[pc] Text.concat pc=176 op=0x64 | r1=other r2=other r3=other | GetE { dst: Reg(20), arr: Reg(21), idx: Reg(22) }
+[pc] Text.concat pc=180 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(23), src: Reg(20) }
+[pc] Text.concat pc=183 op=0x71 | r1=other r2=other r3=other | RefMut { dst: Reg(24), src: Reg(11) }
+[pc] Text.concat pc=186 op=0x5d | r1=other r2=other r3=other | CallM { dst: Reg(20), receiver: Reg(24), method_id: 1017065, args: RegRange { start: Reg(23), count: 1 } }
+[pc] Text.concat pc=194 op=0x50 | r1=other r2=other r3=other | Jmp { offset: -30 }
+[pc] Text.concat pc=166 op=0xc1 | r1=other r2=other r3=other | IterNext { dst: Reg(14), has_next: Reg(18), iter: Reg(15) }
+[pc] Text.concat pc=170 op=0x52 | r1=other r2=other r3=other | JmpNot { cond: Reg(18), offset: 23 }
+[pc] Text.concat pc=173 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(22), src: Reg(14) }
+[pc] Text.concat pc=176 op=0x64 | r1=other r2=other r3=other | GetE { dst: Reg(20), arr: Reg(21), idx: Reg(22) }
+[pc] Text.concat pc=180 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(23), src: Reg(20) }
+[pc] Text.concat pc=183 op=0x71 | r1=other r2=other r3=other | RefMut { dst: Reg(24), src: Reg(11) }
+[pc] Text.concat pc=186 op=0x5d | r1=other r2=other r3=other | CallM { dst: Reg(20), receiver: Reg(24), method_id: 1017065, args: RegRange { start: Reg(23), count: 1 } }
+[pc] Text.concat pc=194 op=0x50 | r1=other r2=other r3=other | Jmp { offset: -30 }
+[pc] Text.concat pc=166 op=0xc1 | r1=other r2=other r3=other | IterNext { dst: Reg(14), has_next: Reg(18), iter: Reg(15) }
+[pc] Text.concat pc=170 op=0x52 | r1=other r2=other r3=other | JmpNot { cond: Reg(18), offset: 23 }
+[pc] Text.concat pc=173 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(22), src: Reg(14) }
+[pc] Text.concat pc=176 op=0x64 | r1=other r2=other r3=other | GetE { dst: Reg(20), arr: Reg(21), idx: Reg(22) }
+[pc] Text.concat pc=180 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(23), src: Reg(20) }
+[pc] Text.concat pc=183 op=0x71 | r1=other r2=other r3=other | RefMut { dst: Reg(24), src: Reg(11) }
+[pc] Text.concat pc=186 op=0x5d | r1=other r2=other r3=other | CallM { dst: Reg(20), receiver: Reg(24), method_id: 1017065, args: RegRange { start: Reg(23), count: 1 } }
+[pc] Text.concat pc=194 op=0x50 | r1=other r2=other r3=other | Jmp { offset: -30 }
+[pc] Text.concat pc=166 op=0xc1 | r1=other r2=other r3=other | IterNext { dst: Reg(14), has_next: Reg(18), iter: Reg(15) }
+[pc] Text.concat pc=170 op=0x52 | r1=other r2=other r3=other | JmpNot { cond: Reg(18), offset: 23 }
+[pc] Text.concat pc=196 op=0x06 | r1=other r2=other r3=other | LoadUnit { dst: Reg(18) }
+[pc] Text.concat pc=198 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(14), src: Reg(11) }
+[pc] Text.concat pc=201 op=0x77 | r1=other r2=other r3=other | DropRef { src: Reg(21) }
+[pc] Text.concat pc=203 op=0x77 | r1=other r2=other r3=other | DropRef { src: Reg(12) }
+[pc] Text.concat pc=205 op=0x77 | r1=other r2=other r3=other | DropRef { src: Reg(9) }
+[pc] Text.concat pc=207 op=0x59 | r1=other r2=other r3=other | Ret { value: Reg(14) }
+[trace-call] handler=Call func_id=25496 name='core.base.semver_constraint.parse_cargo' descriptor.id=25496 args.count=1 bytecode_length=20
+[trace-call] handler=Call func_id=25497 name='core.base.semver_constraint.parse_clause' descriptor.id=25497 args.count=2 bytecode_length=684
+[trace-call] handler=Call func_id=25505 name='core.base.semver_constraint.skip_requirement_space' descriptor.id=25505 args.count=3 bytecode_length=59
+[trace-call] handler=Call func_id=25504 name='core.base.semver_constraint.requirement_space' descriptor.id=25504 args.count=2 bytecode_length=37
+[trace-call] handler=Call func_id=25492 name='core.base.semver_constraint.operator_length' descriptor.id=25492 args.count=2 bytecode_length=192
+[trace-call] handler=Call func_id=25505 name='core.base.semver_constraint.skip_requirement_space' descriptor.id=25505 args.count=3 bytecode_length=59
+[trace-call] handler=Call func_id=25504 name='core.base.semver_constraint.requirement_space' descriptor.id=25504 args.count=2 bytecode_length=37
+[trace-call] handler=Call func_id=25504 name='core.base.semver_constraint.requirement_space' descriptor.id=25504 args.count=2 bytecode_length=37
+[trace-call] handler=Call func_id=25504 name='core.base.semver_constraint.requirement_space' descriptor.id=25504 args.count=2 bytecode_length=37
+[trace-call] handler=Call func_id=25504 name='core.base.semver_constraint.requirement_space' descriptor.id=25504 args.count=2 bytecode_length=37
+[trace-call] handler=Call func_id=25504 name='core.base.semver_constraint.requirement_space' descriptor.id=25504 args.count=2 bytecode_length=37
+[trace-call] handler=Call func_id=25506 name='core.base.semver_constraint.slice_text' descriptor.id=25506 args.count=3 bytecode_length=94
+[trace-call] handler=Call func_id=21771 name='Text.from_bytes' descriptor.id=21771 args.count=1 bytecode_length=15
+[pc] Text.from_bytes pc=0 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(1), src: Reg(0) }
+[pc] Text.from_bytes pc=3 op=0x5b | r1=other r2=other r3=other | Call { dst: Reg(2), func_id: 21784, args: RegRange { start: Reg(1), count: 1 } }
+[trace-call] handler=Call func_id=21784 name='Text.from_utf8' descriptor.id=21784 args.count=1 bytecode_length=74
+[pc] Text.from_bytes pc=10 op=0x00 | r1=other r2=ptr(@0xc013c7510 tid=516 vtag=0) r3=other | Mov { dst: Reg(3), src: Reg(2) }
+[pc] Text.from_bytes pc=13 op=0x59 | r1=other r2=ptr(@0xc013c7510 tid=516 vtag=0) r3=ptr(@0xc013c7510 tid=516 vtag=0) | Ret { value: Reg(3) }
+[trace-call] handler=Call func_id=21823 name='Text.new' descriptor.id=21823 args.count=0 bytecode_length=31
+[callm-flow] A-post-primitive method=Result.unwrap_or recv=ptr(0xc013c7510 interior=false)
+[callm-flow] B-pre-array method=Result.unwrap_or
+[callm-flow] C-pre-variant-1 method=Result.unwrap_or
+[callm-flow] C0-carrier-block method=Result.unwrap_or heapcell=false tid=516
+[callm-flow] C1b-pre-shared-new method=Result.unwrap_or
+[callm-flow] C2-post-new-block method=unwrap_or
+[callm-flow] C3-pre-usersearch method=unwrap_or
+[trace-call] handler=Call func_id=25495 name='core.base.semver_constraint.parse_atom' descriptor.id=25495 args.count=2 bytecode_length=417
+[trace-call] handler=Call func_id=25492 name='core.base.semver_constraint.operator_length' descriptor.id=25492 args.count=2 bytecode_length=192
+[trace-call] handler=Call func_id=25505 name='core.base.semver_constraint.skip_requirement_space' descriptor.id=25505 args.count=3 bytecode_length=59
+[trace-call] handler=Call func_id=25504 name='core.base.semver_constraint.requirement_space' descriptor.id=25504 args.count=2 bytecode_length=37
+[trace-call] handler=Call func_id=25506 name='core.base.semver_constraint.slice_text' descriptor.id=25506 args.count=3 bytecode_length=94
+[trace-call] handler=Call func_id=21771 name='Text.from_bytes' descriptor.id=21771 args.count=1 bytecode_length=15
+[pc] Text.from_bytes pc=0 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(1), src: Reg(0) }
+[pc] Text.from_bytes pc=3 op=0x5b | r1=other r2=other r3=other | Call { dst: Reg(2), func_id: 21784, args: RegRange { start: Reg(1), count: 1 } }
+[trace-call] handler=Call func_id=21784 name='Text.from_utf8' descriptor.id=21784 args.count=1 bytecode_length=74
+[pc] Text.from_bytes pc=10 op=0x00 | r1=other r2=ptr(@0xc013c4810 tid=516 vtag=0) r3=other | Mov { dst: Reg(3), src: Reg(2) }
+[pc] Text.from_bytes pc=13 op=0x59 | r1=other r2=ptr(@0xc013c4810 tid=516 vtag=0) r3=ptr(@0xc013c4810 tid=516 vtag=0) | Ret { value: Reg(3) }
+[trace-call] handler=Call func_id=21823 name='Text.new' descriptor.id=21823 args.count=0 bytecode_length=31
+[callm-flow] A-post-primitive method=Result.unwrap_or recv=ptr(0xc013c4810 interior=false)
+[callm-flow] B-pre-array method=Result.unwrap_or
+[callm-flow] C-pre-variant-1 method=Result.unwrap_or
+[callm-flow] C0-carrier-block method=Result.unwrap_or heapcell=false tid=516
+[callm-flow] C1b-pre-shared-new method=Result.unwrap_or
+[callm-flow] C2-post-new-block method=unwrap_or
+[callm-flow] C3-pre-usersearch method=unwrap_or
+[trace-call] handler=Call func_id=25501 name='core.base.semver_constraint.parse_partial' descriptor.id=25501 args.count=3 bytecode_length=788
+[trace-call] handler=Call func_id=25509 name='core.base.semver_constraint.split_suffix' descriptor.id=25509 args.count=2 bytecode_length=165
+[trace-call] handler=Call func_id=25509 name='core.base.semver_constraint.split_suffix' descriptor.id=25509 args.count=2 bytecode_length=165
+[trace-call] handler=Call func_id=25508 name='core.base.semver_constraint.split_dot' descriptor.id=25508 args.count=1 bytecode_length=161
+[trace-call] handler=Call func_id=25506 name='core.base.semver_constraint.slice_text' descriptor.id=25506 args.count=3 bytecode_length=94
+[trace-call] handler=Call func_id=21771 name='Text.from_bytes' descriptor.id=21771 args.count=1 bytecode_length=15
+[pc] Text.from_bytes pc=0 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(1), src: Reg(0) }
+[pc] Text.from_bytes pc=3 op=0x5b | r1=other r2=other r3=other | Call { dst: Reg(2), func_id: 21784, args: RegRange { start: Reg(1), count: 1 } }
+[trace-call] handler=Call func_id=21784 name='Text.from_utf8' descriptor.id=21784 args.count=1 bytecode_length=74
+[pc] Text.from_bytes pc=10 op=0x00 | r1=other r2=ptr(@0xc013c43f0 tid=516 vtag=0) r3=other | Mov { dst: Reg(3), src: Reg(2) }
+[pc] Text.from_bytes pc=13 op=0x59 | r1=other r2=ptr(@0xc013c43f0 tid=516 vtag=0) r3=ptr(@0xc013c43f0 tid=516 vtag=0) | Ret { value: Reg(3) }
+[trace-call] handler=Call func_id=21823 name='Text.new' descriptor.id=21823 args.count=0 bytecode_length=31
+[callm-flow] A-post-primitive method=Result.unwrap_or recv=ptr(0xc013c43f0 interior=false)
+[callm-flow] B-pre-array method=Result.unwrap_or
+[callm-flow] C-pre-variant-1 method=Result.unwrap_or
+[callm-flow] C0-carrier-block method=Result.unwrap_or heapcell=false tid=516
+[callm-flow] C1b-pre-shared-new method=Result.unwrap_or
+[callm-flow] C2-post-new-block method=unwrap_or
+[callm-flow] C3-pre-usersearch method=unwrap_or
+[trace-call] handler=Call func_id=25506 name='core.base.semver_constraint.slice_text' descriptor.id=25506 args.count=3 bytecode_length=94
+[trace-call] handler=Call func_id=21771 name='Text.from_bytes' descriptor.id=21771 args.count=1 bytecode_length=15
+[pc] Text.from_bytes pc=0 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(1), src: Reg(0) }
+[pc] Text.from_bytes pc=3 op=0x5b | r1=other r2=other r3=other | Call { dst: Reg(2), func_id: 21784, args: RegRange { start: Reg(1), count: 1 } }
+[trace-call] handler=Call func_id=21784 name='Text.from_utf8' descriptor.id=21784 args.count=1 bytecode_length=74
+[pc] Text.from_bytes pc=10 op=0x00 | r1=other r2=ptr(@0xc013c4c90 tid=516 vtag=0) r3=other | Mov { dst: Reg(3), src: Reg(2) }
+[pc] Text.from_bytes pc=13 op=0x59 | r1=other r2=ptr(@0xc013c4c90 tid=516 vtag=0) r3=ptr(@0xc013c4c90 tid=516 vtag=0) | Ret { value: Reg(3) }
+[trace-call] handler=Call func_id=21823 name='Text.new' descriptor.id=21823 args.count=0 bytecode_length=31
+[callm-flow] A-post-primitive method=Result.unwrap_or recv=ptr(0xc013c4c90 interior=false)
+[callm-flow] B-pre-array method=Result.unwrap_or
+[callm-flow] C-pre-variant-1 method=Result.unwrap_or
+[callm-flow] C0-carrier-block method=Result.unwrap_or heapcell=false tid=516
+[callm-flow] C1b-pre-shared-new method=Result.unwrap_or
+[callm-flow] C2-post-new-block method=unwrap_or
+[callm-flow] C3-pre-usersearch method=unwrap_or
+[trace-call] handler=Call func_id=25498 name='core.base.semver_constraint.parse_component' descriptor.id=25498 args.count=1 bytecode_length=407
+[trace-call] handler=Call func_id=25484 name='core.base.semver_constraint.is_wildcard' descriptor.id=25484 args.count=1 bytecode_length=98
+[trace-call] handler=Call func_id=25498 name='core.base.semver_constraint.parse_component' descriptor.id=25498 args.count=1 bytecode_length=407
+[callm-flow] A-post-primitive method=Maybe.is_none recv=ptr(0xbe487f880 interior=false)
+[callm-flow] B-pre-array method=Maybe.is_none
+[callm-flow] C-pre-variant-1 method=Maybe.is_none
+[callm-flow] C0-carrier-block method=Maybe.is_none heapcell=false tid=515
+[callm-flow] C1b-pre-shared-new method=Maybe.is_none
+[callm-flow] C2-post-new-block method=is_none
+[callm-flow] C3-pre-usersearch method=is_none
+[callm-flow] A-post-primitive method=Maybe.is_some recv=ptr(0xbe487d840 interior=false)
+[callm-flow] B-pre-array method=Maybe.is_some
+[callm-flow] C-pre-variant-1 method=Maybe.is_some
+[callm-flow] C0-carrier-block method=Maybe.is_some heapcell=false tid=515
+[callm-flow] C1b-pre-shared-new method=Maybe.is_some
+[callm-flow] C2-post-new-block method=is_some
+[callm-flow] C3-pre-usersearch method=is_some
+[callm-flow] A-post-primitive method=Maybe.is_some recv=ptr(0xbe487c140 interior=false)
+[callm-flow] B-pre-array method=Maybe.is_some
+[callm-flow] C-pre-variant-1 method=Maybe.is_some
+[callm-flow] C0-carrier-block method=Maybe.is_some heapcell=false tid=515
+[callm-flow] C1b-pre-shared-new method=Maybe.is_some
+[callm-flow] C2-post-new-block method=is_some
+[callm-flow] C3-pre-usersearch method=is_some
+[trace-call] handler=Call func_id=25469 name='core.base.semver_constraint.and' descriptor.id=25469 args.count=2 bytecode_length=234
+[trace-call] handler=Call func_id=25505 name='core.base.semver_constraint.skip_requirement_space' descriptor.id=25505 args.count=3 bytecode_length=59
+[trace-call] handler=Call func_id=25504 name='core.base.semver_constraint.requirement_space' descriptor.id=25504 args.count=2 bytecode_length=37
+[trace-call] handler=Call func_id=25505 name='core.base.semver_constraint.skip_requirement_space' descriptor.id=25505 args.count=3 bytecode_length=59
+[trace-call] handler=Call func_id=25504 name='core.base.semver_constraint.requirement_space' descriptor.id=25504 args.count=2 bytecode_length=37
+[trace-call] handler=Call func_id=25504 name='core.base.semver_constraint.requirement_space' descriptor.id=25504 args.count=2 bytecode_length=37
+[trace-call] handler=Call func_id=25492 name='core.base.semver_constraint.operator_length' descriptor.id=25492 args.count=2 bytecode_length=192
+[trace-call] handler=Call func_id=25505 name='core.base.semver_constraint.skip_requirement_space' descriptor.id=25505 args.count=3 bytecode_length=59
+[trace-call] handler=Call func_id=25504 name='core.base.semver_constraint.requirement_space' descriptor.id=25504 args.count=2 bytecode_length=37
+[trace-call] handler=Call func_id=25504 name='core.base.semver_constraint.requirement_space' descriptor.id=25504 args.count=2 bytecode_length=37
+[trace-call] handler=Call func_id=25506 name='core.base.semver_constraint.slice_text' descriptor.id=25506 args.count=3 bytecode_length=94
+[trace-call] handler=Call func_id=21771 name='Text.from_bytes' descriptor.id=21771 args.count=1 bytecode_length=15
+[pc] Text.from_bytes pc=0 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(1), src: Reg(0) }
+[pc] Text.from_bytes pc=3 op=0x5b | r1=other r2=other r3=other | Call { dst: Reg(2), func_id: 21784, args: RegRange { start: Reg(1), count: 1 } }
+[trace-call] handler=Call func_id=21784 name='Text.from_utf8' descriptor.id=21784 args.count=1 bytecode_length=74
+[pc] Text.from_bytes pc=10 op=0x00 | r1=other r2=ptr(@0xc013c7f00 tid=516 vtag=0) r3=other | Mov { dst: Reg(3), src: Reg(2) }
+[pc] Text.from_bytes pc=13 op=0x59 | r1=other r2=ptr(@0xc013c7f00 tid=516 vtag=0) r3=ptr(@0xc013c7f00 tid=516 vtag=0) | Ret { value: Reg(3) }
+[trace-call] handler=Call func_id=21823 name='Text.new' descriptor.id=21823 args.count=0 bytecode_length=31
+[callm-flow] A-post-primitive method=Result.unwrap_or recv=ptr(0xc013c7f00 interior=false)
+[callm-flow] B-pre-array method=Result.unwrap_or
+[callm-flow] C-pre-variant-1 method=Result.unwrap_or
+[callm-flow] C0-carrier-block method=Result.unwrap_or heapcell=false tid=516
+[callm-flow] C1b-pre-shared-new method=Result.unwrap_or
+[callm-flow] C2-post-new-block method=unwrap_or
+[callm-flow] C3-pre-usersearch method=unwrap_or
+[trace-call] handler=Call func_id=25495 name='core.base.semver_constraint.parse_atom' descriptor.id=25495 args.count=2 bytecode_length=417
+[trace-call] handler=Call func_id=25492 name='core.base.semver_constraint.operator_length' descriptor.id=25492 args.count=2 bytecode_length=192
+[trace-call] handler=Call func_id=25505 name='core.base.semver_constraint.skip_requirement_space' descriptor.id=25505 args.count=3 bytecode_length=59
+[trace-call] handler=Call func_id=25504 name='core.base.semver_constraint.requirement_space' descriptor.id=25504 args.count=2 bytecode_length=37
+[trace-call] handler=Call func_id=25506 name='core.base.semver_constraint.slice_text' descriptor.id=25506 args.count=3 bytecode_length=94
+[trace-call] handler=Call func_id=21771 name='Text.from_bytes' descriptor.id=21771 args.count=1 bytecode_length=15
+[pc] Text.from_bytes pc=0 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(1), src: Reg(0) }
+[pc] Text.from_bytes pc=3 op=0x5b | r1=other r2=other r3=other | Call { dst: Reg(2), func_id: 21784, args: RegRange { start: Reg(1), count: 1 } }
+[trace-call] handler=Call func_id=21784 name='Text.from_utf8' descriptor.id=21784 args.count=1 bytecode_length=74
+[pc] Text.from_bytes pc=10 op=0x00 | r1=other r2=ptr(@0xc013c6670 tid=516 vtag=0) r3=other | Mov { dst: Reg(3), src: Reg(2) }
+[pc] Text.from_bytes pc=13 op=0x59 | r1=other r2=ptr(@0xc013c6670 tid=516 vtag=0) r3=ptr(@0xc013c6670 tid=516 vtag=0) | Ret { value: Reg(3) }
+[trace-call] handler=Call func_id=21823 name='Text.new' descriptor.id=21823 args.count=0 bytecode_length=31
+[callm-flow] A-post-primitive method=Result.unwrap_or recv=ptr(0xc013c6670 interior=false)
+[callm-flow] B-pre-array method=Result.unwrap_or
+[callm-flow] C-pre-variant-1 method=Result.unwrap_or
+[callm-flow] C0-carrier-block method=Result.unwrap_or heapcell=false tid=516
+[callm-flow] C1b-pre-shared-new method=Result.unwrap_or
+[callm-flow] C2-post-new-block method=unwrap_or
+[callm-flow] C3-pre-usersearch method=unwrap_or
+[trace-call] handler=Call func_id=25501 name='core.base.semver_constraint.parse_partial' descriptor.id=25501 args.count=3 bytecode_length=788
+[trace-call] handler=Call func_id=25509 name='core.base.semver_constraint.split_suffix' descriptor.id=25509 args.count=2 bytecode_length=165
+[trace-call] handler=Call func_id=25509 name='core.base.semver_constraint.split_suffix' descriptor.id=25509 args.count=2 bytecode_length=165
+[trace-call] handler=Call func_id=25508 name='core.base.semver_constraint.split_dot' descriptor.id=25508 args.count=1 bytecode_length=161
+[trace-call] handler=Call func_id=25506 name='core.base.semver_constraint.slice_text' descriptor.id=25506 args.count=3 bytecode_length=94
+[trace-call] handler=Call func_id=21771 name='Text.from_bytes' descriptor.id=21771 args.count=1 bytecode_length=15
+[pc] Text.from_bytes pc=0 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(1), src: Reg(0) }
+[pc] Text.from_bytes pc=3 op=0x5b | r1=other r2=other r3=other | Call { dst: Reg(2), func_id: 21784, args: RegRange { start: Reg(1), count: 1 } }
+[trace-call] handler=Call func_id=21784 name='Text.from_utf8' descriptor.id=21784 args.count=1 bytecode_length=74
+[pc] Text.from_bytes pc=10 op=0x00 | r1=other r2=ptr(@0xc013c6730 tid=516 vtag=0) r3=other | Mov { dst: Reg(3), src: Reg(2) }
+[pc] Text.from_bytes pc=13 op=0x59 | r1=other r2=ptr(@0xc013c6730 tid=516 vtag=0) r3=ptr(@0xc013c6730 tid=516 vtag=0) | Ret { value: Reg(3) }
+[trace-call] handler=Call func_id=21823 name='Text.new' descriptor.id=21823 args.count=0 bytecode_length=31
+[callm-flow] A-post-primitive method=Result.unwrap_or recv=ptr(0xc013c6730 interior=false)
+[callm-flow] B-pre-array method=Result.unwrap_or
+[callm-flow] C-pre-variant-1 method=Result.unwrap_or
+[callm-flow] C0-carrier-block method=Result.unwrap_or heapcell=false tid=516
+[callm-flow] C1b-pre-shared-new method=Result.unwrap_or
+[callm-flow] C2-post-new-block method=unwrap_or
+[callm-flow] C3-pre-usersearch method=unwrap_or
+[trace-call] handler=Call func_id=25498 name='core.base.semver_constraint.parse_component' descriptor.id=25498 args.count=1 bytecode_length=407
+[callm-flow] A-post-primitive method=Maybe.is_none recv=ptr(0xbe9d16fc0 interior=false)
+[callm-flow] B-pre-array method=Maybe.is_none
+[callm-flow] C-pre-variant-1 method=Maybe.is_none
+[callm-flow] C0-carrier-block method=Maybe.is_none heapcell=false tid=515
+[callm-flow] C1b-pre-shared-new method=Maybe.is_none
+[callm-flow] C2-post-new-block method=is_none
+[callm-flow] C3-pre-usersearch method=is_none
+[callm-flow] A-post-primitive method=Maybe.is_some recv=ptr(0xbf780c280 interior=false)
+[callm-flow] B-pre-array method=Maybe.is_some
+[callm-flow] C-pre-variant-1 method=Maybe.is_some
+[callm-flow] C0-carrier-block method=Maybe.is_some heapcell=false tid=515
+[callm-flow] C1b-pre-shared-new method=Maybe.is_some
+[callm-flow] C2-post-new-block method=is_some
+[callm-flow] C3-pre-usersearch method=is_some
+[callm-flow] A-post-primitive method=Maybe.is_some recv=ptr(0xbf780c060 interior=false)
+[callm-flow] B-pre-array method=Maybe.is_some
+[callm-flow] C-pre-variant-1 method=Maybe.is_some
+[callm-flow] C0-carrier-block method=Maybe.is_some heapcell=false tid=515
+[callm-flow] C1b-pre-shared-new method=Maybe.is_some
+[callm-flow] C2-post-new-block method=is_some
+[callm-flow] C3-pre-usersearch method=is_some
+[trace-call] handler=Call func_id=25469 name='core.base.semver_constraint.and' descriptor.id=25469 args.count=2 bytecode_length=234
+[callm-flow] A-post-primitive method=Heap.new recv=other
+[callm-flow] B-pre-array method=Heap.new
+[callm-flow] C-pre-variant-1 method=Heap.new
+[callm-flow] C1b-pre-shared-new method=Heap.new
+[callm-flow] A-post-primitive method=Heap.new recv=other
+[callm-flow] B-pre-array method=Heap.new
+[callm-flow] C-pre-variant-1 method=Heap.new
+[callm-flow] C1b-pre-shared-new method=Heap.new
+[trace-call] handler=Call func_id=25505 name='core.base.semver_constraint.skip_requirement_space' descriptor.id=25505 args.count=3 bytecode_length=59
+[callm-flow] A-post-primitive method=Result.unwrap recv=ptr(0xc013c4cf0 interior=false)
+[callm-flow] B-pre-array method=Result.unwrap
+[callm-flow] C-pre-variant-1 method=Result.unwrap
+[callm-flow] C0-carrier-block method=Result.unwrap heapcell=false tid=516
+[callm-flow] C1b-pre-shared-new method=Result.unwrap
+[callm-flow] C2-post-new-block method=unwrap
+[callm-flow] C3-pre-usersearch method=unwrap
+[trace-call] handler=Call func_id=25482 name='core.base.semver_constraint.format_constraint' descriptor.id=25482 args.count=1 bytecode_length=15
+[trace-call] handler=Call func_id=25483 name='core.base.semver_constraint.format_impl' descriptor.id=25483 args.count=1 bytecode_length=659
+[callm-flow] A-post-primitive method=Heap.deref recv=ptr(0xc211684a0 interior=false)
+[callm-flow] B-pre-array method=Heap.deref
+[callm-flow] C-pre-variant-1 method=Heap.deref
+[callm-flow] C0-carrier-block method=Heap.deref heapcell=true tid=20730128
+[callm-flow] C1a-heap-carrier method=Heap.deref
+[trace-call] handler=Call func_id=25483 name='core.base.semver_constraint.format_impl' descriptor.id=25483 args.count=1 bytecode_length=659
+[trace-call] handler=Call func_id=25481 name='core.base.semver_constraint.format_comparator' descriptor.id=25481 args.count=1 bytecode_length=492
+[callm-flow] A-post-primitive method=Text.concat recv=other
+[callm-flow] B-pre-array method=Text.concat
+[callm-flow] C-pre-variant-1 method=Text.concat
+[callm-flow] C1b-pre-shared-new method=Text.concat
+[callm-flow] C2-post-new-block method=concat
+[callm-flow] C3-pre-usersearch method=concat
+[pc] Text.concat pc=0 op=0x66 | r1=other r2=other r3=other | Len { dst: Reg(3), arr: Reg(1), type_hint: 5 }
+[pc] Text.concat pc=4 op=0x02 | r1=other r2=other r3=int(1) | LoadI { dst: Reg(4), value: 0 }
+[pc] Text.concat pc=7 op=0x40 | r1=other r2=other r3=int(1) | CmpI { op: Eq, dst: Reg(5), a: Reg(3), b: Reg(4) }
+[pc] Text.concat pc=11 op=0x52 | r1=other r2=other r3=int(1) | JmpNot { cond: Reg(5), offset: 14 }
+[pc] Text.concat pc=28 op=0x06 | r1=other r2=other r3=int(1) | LoadUnit { dst: Reg(2) }
+[pc] Text.concat pc=30 op=0x66 | r1=other r2=other r3=int(1) | Len { dst: Reg(4), arr: Reg(0), type_hint: 5 }
+[pc] Text.concat pc=34 op=0x02 | r1=other r2=other r3=int(1) | LoadI { dst: Reg(6), value: 0 }
+[pc] Text.concat pc=37 op=0x40 | r1=other r2=other r3=int(1) | CmpI { op: Eq, dst: Reg(7), a: Reg(4), b: Reg(6) }
+[pc] Text.concat pc=41 op=0x52 | r1=other r2=other r3=int(1) | JmpNot { cond: Reg(7), offset: 14 }
+[pc] Text.concat pc=58 op=0x06 | r1=other r2=other r3=int(1) | LoadUnit { dst: Reg(3) }
+[pc] Text.concat pc=60 op=0x66 | r1=other r2=other r3=other | Len { dst: Reg(4), arr: Reg(0), type_hint: 5 }
+[pc] Text.concat pc=64 op=0x66 | r1=other r2=other r3=other | Len { dst: Reg(6), arr: Reg(1), type_hint: 5 }
+[pc] Text.concat pc=68 op=0x10 | r1=other r2=other r3=other | BinaryI { op: Add, dst: Reg(8), a: Reg(4), b: Reg(6) }
+[pc] Text.concat pc=72 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(9), src: Reg(8) }
+[pc] Text.concat pc=75 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(10), src: Reg(9) }
+[pc] Text.concat pc=78 op=0x5b | r1=other r2=other r3=other | Call { dst: Reg(6), func_id: 21898, args: RegRange { start: Reg(10), count: 1 } }
+[trace-call] handler=Call func_id=21898 name='Text.with_capacity' descriptor.id=21898 args.count=1 bytecode_length=135
+[pc] Text.concat pc=85 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(11), src: Reg(6) }
+[pc] Text.concat pc=88 op=0x79 | r1=other r2=other r3=other | TextExtended { sub_op: 52, operands: [4, 0] }
+[pc] Text.concat pc=93 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(12), src: Reg(4) }
+[pc] Text.concat pc=96 op=0x02 | r1=other r2=other r3=other | LoadI { dst: Reg(13), value: 0 }
+[pc] Text.concat pc=99 op=0x66 | r1=other r2=other r3=other | Len { dst: Reg(14), arr: Reg(12), type_hint: 0 }
+[pc] Text.concat pc=103 op=0xcc | r1=other r2=other r3=other | NewRange { dst: Reg(15), start: Reg(13), end: Reg(14), inclusive: false }
+[pc] Text.concat pc=108 op=0xc0 | r1=other r2=other r3=other | IterNew { dst: Reg(14), iterable: Reg(15) }
+[pc] Text.concat pc=111 op=0xc1 | r1=other r2=other r3=other | IterNext { dst: Reg(13), has_next: Reg(16), iter: Reg(14) }
+[pc] Text.concat pc=115 op=0x52 | r1=other r2=other r3=other | JmpNot { cond: Reg(16), offset: 23 }
+[pc] Text.concat pc=118 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(17), src: Reg(13) }
+[pc] Text.concat pc=121 op=0x64 | r1=other r2=other r3=other | GetE { dst: Reg(18), arr: Reg(12), idx: Reg(17) }
+[pc] Text.concat pc=125 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(19), src: Reg(18) }
+[pc] Text.concat pc=128 op=0x71 | r1=other r2=other r3=other | RefMut { dst: Reg(20), src: Reg(11) }
+[pc] Text.concat pc=131 op=0x5d | r1=other r2=other r3=other | CallM { dst: Reg(18), receiver: Reg(20), method_id: 1017065, args: RegRange { start: Reg(19), count: 1 } }
+[pc] Text.concat pc=139 op=0x50 | r1=other r2=other r3=other | Jmp { offset: -30 }
+[pc] Text.concat pc=111 op=0xc1 | r1=other r2=other r3=other | IterNext { dst: Reg(13), has_next: Reg(16), iter: Reg(14) }
+[pc] Text.concat pc=115 op=0x52 | r1=other r2=other r3=other | JmpNot { cond: Reg(16), offset: 23 }
+[pc] Text.concat pc=118 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(17), src: Reg(13) }
+[pc] Text.concat pc=121 op=0x64 | r1=other r2=other r3=other | GetE { dst: Reg(18), arr: Reg(12), idx: Reg(17) }
+[pc] Text.concat pc=125 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(19), src: Reg(18) }
+[pc] Text.concat pc=128 op=0x71 | r1=other r2=other r3=other | RefMut { dst: Reg(20), src: Reg(11) }
+[pc] Text.concat pc=131 op=0x5d | r1=other r2=other r3=other | CallM { dst: Reg(18), receiver: Reg(20), method_id: 1017065, args: RegRange { start: Reg(19), count: 1 } }
+[pc] Text.concat pc=139 op=0x50 | r1=other r2=other r3=other | Jmp { offset: -30 }
+[pc] Text.concat pc=111 op=0xc1 | r1=other r2=other r3=other | IterNext { dst: Reg(13), has_next: Reg(16), iter: Reg(14) }
+[pc] Text.concat pc=115 op=0x52 | r1=other r2=other r3=other | JmpNot { cond: Reg(16), offset: 23 }
+[pc] Text.concat pc=141 op=0x06 | r1=other r2=other r3=other | LoadUnit { dst: Reg(16) }
+[pc] Text.concat pc=143 op=0x79 | r1=other r2=other r3=other | TextExtended { sub_op: 52, operands: [13, 1] }
+[pc] Text.concat pc=148 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(21), src: Reg(13) }
+[pc] Text.concat pc=151 op=0x02 | r1=other r2=other r3=other | LoadI { dst: Reg(14), value: 0 }
+[pc] Text.concat pc=154 op=0x66 | r1=other r2=other r3=other | Len { dst: Reg(15), arr: Reg(21), type_hint: 0 }
+[pc] Text.concat pc=158 op=0xcc | r1=other r2=other r3=other | NewRange { dst: Reg(17), start: Reg(14), end: Reg(15), inclusive: false }
+[pc] Text.concat pc=163 op=0xc0 | r1=other r2=other r3=other | IterNew { dst: Reg(15), iterable: Reg(17) }
+[pc] Text.concat pc=166 op=0xc1 | r1=other r2=other r3=other | IterNext { dst: Reg(14), has_next: Reg(18), iter: Reg(15) }
+[pc] Text.concat pc=170 op=0x52 | r1=other r2=other r3=other | JmpNot { cond: Reg(18), offset: 23 }
+[pc] Text.concat pc=173 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(22), src: Reg(14) }
+[pc] Text.concat pc=176 op=0x64 | r1=other r2=other r3=other | GetE { dst: Reg(20), arr: Reg(21), idx: Reg(22) }
+[pc] Text.concat pc=180 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(23), src: Reg(20) }
+[pc] Text.concat pc=183 op=0x71 | r1=other r2=other r3=other | RefMut { dst: Reg(24), src: Reg(11) }
+[pc] Text.concat pc=186 op=0x5d | r1=other r2=other r3=other | CallM { dst: Reg(20), receiver: Reg(24), method_id: 1017065, args: RegRange { start: Reg(23), count: 1 } }
+[pc] Text.concat pc=194 op=0x50 | r1=other r2=other r3=other | Jmp { offset: -30 }
+[pc] Text.concat pc=166 op=0xc1 | r1=other r2=other r3=other | IterNext { dst: Reg(14), has_next: Reg(18), iter: Reg(15) }
+[pc] Text.concat pc=170 op=0x52 | r1=other r2=other r3=other | JmpNot { cond: Reg(18), offset: 23 }
+[pc] Text.concat pc=196 op=0x06 | r1=other r2=other r3=other | LoadUnit { dst: Reg(18) }
+[pc] Text.concat pc=198 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(14), src: Reg(11) }
+[pc] Text.concat pc=201 op=0x77 | r1=other r2=other r3=other | DropRef { src: Reg(21) }
+[pc] Text.concat pc=203 op=0x77 | r1=other r2=other r3=other | DropRef { src: Reg(12) }
+[pc] Text.concat pc=205 op=0x77 | r1=other r2=other r3=other | DropRef { src: Reg(9) }
+[pc] Text.concat pc=207 op=0x59 | r1=other r2=other r3=other | Ret { value: Reg(14) }
+[callm-flow] A-post-primitive method=Text.concat recv=other
+[callm-flow] B-pre-array method=Text.concat
+[callm-flow] C-pre-variant-1 method=Text.concat
+[callm-flow] C1b-pre-shared-new method=Text.concat
+[callm-flow] C2-post-new-block method=concat
+[callm-flow] C3-pre-usersearch method=concat
+[pc] Text.concat pc=0 op=0x66 | r1=other r2=other r3=other | Len { dst: Reg(3), arr: Reg(1), type_hint: 5 }
+[pc] Text.concat pc=4 op=0x02 | r1=other r2=other r3=int(2) | LoadI { dst: Reg(4), value: 0 }
+[pc] Text.concat pc=7 op=0x40 | r1=other r2=other r3=int(2) | CmpI { op: Eq, dst: Reg(5), a: Reg(3), b: Reg(4) }
+[pc] Text.concat pc=11 op=0x52 | r1=other r2=other r3=int(2) | JmpNot { cond: Reg(5), offset: 14 }
+[pc] Text.concat pc=28 op=0x06 | r1=other r2=other r3=int(2) | LoadUnit { dst: Reg(2) }
+[pc] Text.concat pc=30 op=0x66 | r1=other r2=other r3=int(2) | Len { dst: Reg(4), arr: Reg(0), type_hint: 5 }
+[pc] Text.concat pc=34 op=0x02 | r1=other r2=other r3=int(2) | LoadI { dst: Reg(6), value: 0 }
+[pc] Text.concat pc=37 op=0x40 | r1=other r2=other r3=int(2) | CmpI { op: Eq, dst: Reg(7), a: Reg(4), b: Reg(6) }
+[pc] Text.concat pc=41 op=0x52 | r1=other r2=other r3=int(2) | JmpNot { cond: Reg(7), offset: 14 }
+[pc] Text.concat pc=58 op=0x06 | r1=other r2=other r3=int(2) | LoadUnit { dst: Reg(3) }
+[pc] Text.concat pc=60 op=0x66 | r1=other r2=other r3=other | Len { dst: Reg(4), arr: Reg(0), type_hint: 5 }
+[pc] Text.concat pc=64 op=0x66 | r1=other r2=other r3=other | Len { dst: Reg(6), arr: Reg(1), type_hint: 5 }
+[pc] Text.concat pc=68 op=0x10 | r1=other r2=other r3=other | BinaryI { op: Add, dst: Reg(8), a: Reg(4), b: Reg(6) }
+[pc] Text.concat pc=72 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(9), src: Reg(8) }
+[pc] Text.concat pc=75 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(10), src: Reg(9) }
+[pc] Text.concat pc=78 op=0x5b | r1=other r2=other r3=other | Call { dst: Reg(6), func_id: 21898, args: RegRange { start: Reg(10), count: 1 } }
+[trace-call] handler=Call func_id=21898 name='Text.with_capacity' descriptor.id=21898 args.count=1 bytecode_length=135
+[pc] Text.concat pc=85 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(11), src: Reg(6) }
+[pc] Text.concat pc=88 op=0x79 | r1=other r2=other r3=other | TextExtended { sub_op: 52, operands: [4, 0] }
+[pc] Text.concat pc=93 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(12), src: Reg(4) }
+[pc] Text.concat pc=96 op=0x02 | r1=other r2=other r3=other | LoadI { dst: Reg(13), value: 0 }
+[pc] Text.concat pc=99 op=0x66 | r1=other r2=other r3=other | Len { dst: Reg(14), arr: Reg(12), type_hint: 0 }
+[pc] Text.concat pc=103 op=0xcc | r1=other r2=other r3=other | NewRange { dst: Reg(15), start: Reg(13), end: Reg(14), inclusive: false }
+[pc] Text.concat pc=108 op=0xc0 | r1=other r2=other r3=other | IterNew { dst: Reg(14), iterable: Reg(15) }
+[pc] Text.concat pc=111 op=0xc1 | r1=other r2=other r3=other | IterNext { dst: Reg(13), has_next: Reg(16), iter: Reg(14) }
+[pc] Text.concat pc=115 op=0x52 | r1=other r2=other r3=other | JmpNot { cond: Reg(16), offset: 23 }
+[pc] Text.concat pc=118 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(17), src: Reg(13) }
+[pc] Text.concat pc=121 op=0x64 | r1=other r2=other r3=other | GetE { dst: Reg(18), arr: Reg(12), idx: Reg(17) }
+[pc] Text.concat pc=125 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(19), src: Reg(18) }
+[pc] Text.concat pc=128 op=0x71 | r1=other r2=other r3=other | RefMut { dst: Reg(20), src: Reg(11) }
+[pc] Text.concat pc=131 op=0x5d | r1=other r2=other r3=other | CallM { dst: Reg(18), receiver: Reg(20), method_id: 1017065, args: RegRange { start: Reg(19), count: 1 } }
+[pc] Text.concat pc=139 op=0x50 | r1=other r2=other r3=other | Jmp { offset: -30 }
+[pc] Text.concat pc=111 op=0xc1 | r1=other r2=other r3=other | IterNext { dst: Reg(13), has_next: Reg(16), iter: Reg(14) }
+[pc] Text.concat pc=115 op=0x52 | r1=other r2=other r3=other | JmpNot { cond: Reg(16), offset: 23 }
+[pc] Text.concat pc=118 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(17), src: Reg(13) }
+[pc] Text.concat pc=121 op=0x64 | r1=other r2=other r3=other | GetE { dst: Reg(18), arr: Reg(12), idx: Reg(17) }
+[pc] Text.concat pc=125 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(19), src: Reg(18) }
+[pc] Text.concat pc=128 op=0x71 | r1=other r2=other r3=other | RefMut { dst: Reg(20), src: Reg(11) }
+[pc] Text.concat pc=131 op=0x5d | r1=other r2=other r3=other | CallM { dst: Reg(18), receiver: Reg(20), method_id: 1017065, args: RegRange { start: Reg(19), count: 1 } }
+[pc] Text.concat pc=139 op=0x50 | r1=other r2=other r3=other | Jmp { offset: -30 }
+[pc] Text.concat pc=111 op=0xc1 | r1=other r2=other r3=other | IterNext { dst: Reg(13), has_next: Reg(16), iter: Reg(14) }
+[pc] Text.concat pc=115 op=0x52 | r1=other r2=other r3=other | JmpNot { cond: Reg(16), offset: 23 }
+[pc] Text.concat pc=118 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(17), src: Reg(13) }
+[pc] Text.concat pc=121 op=0x64 | r1=other r2=other r3=other | GetE { dst: Reg(18), arr: Reg(12), idx: Reg(17) }
+[pc] Text.concat pc=125 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(19), src: Reg(18) }
+[pc] Text.concat pc=128 op=0x71 | r1=other r2=other r3=other | RefMut { dst: Reg(20), src: Reg(11) }
+[pc] Text.concat pc=131 op=0x5d | r1=other r2=other r3=other | CallM { dst: Reg(18), receiver: Reg(20), method_id: 1017065, args: RegRange { start: Reg(19), count: 1 } }
+[pc] Text.concat pc=139 op=0x50 | r1=other r2=other r3=other | Jmp { offset: -30 }
+[pc] Text.concat pc=111 op=0xc1 | r1=other r2=other r3=other | IterNext { dst: Reg(13), has_next: Reg(16), iter: Reg(14) }
+[pc] Text.concat pc=115 op=0x52 | r1=other r2=other r3=other | JmpNot { cond: Reg(16), offset: 23 }
+[pc] Text.concat pc=141 op=0x06 | r1=other r2=other r3=other | LoadUnit { dst: Reg(16) }
+[pc] Text.concat pc=143 op=0x79 | r1=other r2=other r3=other | TextExtended { sub_op: 52, operands: [13, 1] }
+[pc] Text.concat pc=148 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(21), src: Reg(13) }
+[pc] Text.concat pc=151 op=0x02 | r1=other r2=other r3=other | LoadI { dst: Reg(14), value: 0 }
+[pc] Text.concat pc=154 op=0x66 | r1=other r2=other r3=other | Len { dst: Reg(15), arr: Reg(21), type_hint: 0 }
+[pc] Text.concat pc=158 op=0xcc | r1=other r2=other r3=other | NewRange { dst: Reg(17), start: Reg(14), end: Reg(15), inclusive: false }
+[pc] Text.concat pc=163 op=0xc0 | r1=other r2=other r3=other | IterNew { dst: Reg(15), iterable: Reg(17) }
+[pc] Text.concat pc=166 op=0xc1 | r1=other r2=other r3=other | IterNext { dst: Reg(14), has_next: Reg(18), iter: Reg(15) }
+[pc] Text.concat pc=170 op=0x52 | r1=other r2=other r3=other | JmpNot { cond: Reg(18), offset: 23 }
+[pc] Text.concat pc=173 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(22), src: Reg(14) }
+[pc] Text.concat pc=176 op=0x64 | r1=other r2=other r3=other | GetE { dst: Reg(20), arr: Reg(21), idx: Reg(22) }
+[pc] Text.concat pc=180 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(23), src: Reg(20) }
+[pc] Text.concat pc=183 op=0x71 | r1=other r2=other r3=other | RefMut { dst: Reg(24), src: Reg(11) }
+[pc] Text.concat pc=186 op=0x5d | r1=other r2=other r3=other | CallM { dst: Reg(20), receiver: Reg(24), method_id: 1017065, args: RegRange { start: Reg(23), count: 1 } }
+[pc] Text.concat pc=194 op=0x50 | r1=other r2=other r3=other | Jmp { offset: -30 }
+[pc] Text.concat pc=166 op=0xc1 | r1=other r2=other r3=other | IterNext { dst: Reg(14), has_next: Reg(18), iter: Reg(15) }
+[pc] Text.concat pc=170 op=0x52 | r1=other r2=other r3=other | JmpNot { cond: Reg(18), offset: 23 }
+[pc] Text.concat pc=173 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(22), src: Reg(14) }
+[pc] Text.concat pc=176 op=0x64 | r1=other r2=other r3=other | GetE { dst: Reg(20), arr: Reg(21), idx: Reg(22) }
+[pc] Text.concat pc=180 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(23), src: Reg(20) }
+[pc] Text.concat pc=183 op=0x71 | r1=other r2=other r3=other | RefMut { dst: Reg(24), src: Reg(11) }
+[pc] Text.concat pc=186 op=0x5d | r1=other r2=other r3=other | CallM { dst: Reg(20), receiver: Reg(24), method_id: 1017065, args: RegRange { start: Reg(23), count: 1 } }
+[pc] Text.concat pc=194 op=0x50 | r1=other r2=other r3=other | Jmp { offset: -30 }
+[pc] Text.concat pc=166 op=0xc1 | r1=other r2=other r3=other | IterNext { dst: Reg(14), has_next: Reg(18), iter: Reg(15) }
+[pc] Text.concat pc=170 op=0x52 | r1=other r2=other r3=other | JmpNot { cond: Reg(18), offset: 23 }
+[pc] Text.concat pc=196 op=0x06 | r1=other r2=other r3=other | LoadUnit { dst: Reg(18) }
+[pc] Text.concat pc=198 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(14), src: Reg(11) }
+[pc] Text.concat pc=201 op=0x77 | r1=other r2=other r3=other | DropRef { src: Reg(21) }
+[pc] Text.concat pc=203 op=0x77 | r1=other r2=other r3=other | DropRef { src: Reg(12) }
+[pc] Text.concat pc=205 op=0x77 | r1=other r2=other r3=other | DropRef { src: Reg(9) }
+[pc] Text.concat pc=207 op=0x59 | r1=other r2=other r3=other | Ret { value: Reg(14) }
+[callm-flow] A-post-primitive method=Text.concat recv=other
+[callm-flow] B-pre-array method=Text.concat
+[callm-flow] C-pre-variant-1 method=Text.concat
+[callm-flow] C1b-pre-shared-new method=Text.concat
+[callm-flow] C2-post-new-block method=concat
+[callm-flow] C3-pre-usersearch method=concat
+[pc] Text.concat pc=0 op=0x66 | r1=other r2=other r3=other | Len { dst: Reg(3), arr: Reg(1), type_hint: 5 }
+[pc] Text.concat pc=4 op=0x02 | r1=other r2=other r3=int(2) | LoadI { dst: Reg(4), value: 0 }
+[pc] Text.concat pc=7 op=0x40 | r1=other r2=other r3=int(2) | CmpI { op: Eq, dst: Reg(5), a: Reg(3), b: Reg(4) }
+[pc] Text.concat pc=11 op=0x52 | r1=other r2=other r3=int(2) | JmpNot { cond: Reg(5), offset: 14 }
+[pc] Text.concat pc=28 op=0x06 | r1=other r2=other r3=int(2) | LoadUnit { dst: Reg(2) }
+[pc] Text.concat pc=30 op=0x66 | r1=other r2=other r3=int(2) | Len { dst: Reg(4), arr: Reg(0), type_hint: 5 }
+[pc] Text.concat pc=34 op=0x02 | r1=other r2=other r3=int(2) | LoadI { dst: Reg(6), value: 0 }
+[pc] Text.concat pc=37 op=0x40 | r1=other r2=other r3=int(2) | CmpI { op: Eq, dst: Reg(7), a: Reg(4), b: Reg(6) }
+[pc] Text.concat pc=41 op=0x52 | r1=other r2=other r3=int(2) | JmpNot { cond: Reg(7), offset: 14 }
+[pc] Text.concat pc=58 op=0x06 | r1=other r2=other r3=int(2) | LoadUnit { dst: Reg(3) }
+[pc] Text.concat pc=60 op=0x66 | r1=other r2=other r3=other | Len { dst: Reg(4), arr: Reg(0), type_hint: 5 }
+[pc] Text.concat pc=64 op=0x66 | r1=other r2=other r3=other | Len { dst: Reg(6), arr: Reg(1), type_hint: 5 }
+[pc] Text.concat pc=68 op=0x10 | r1=other r2=other r3=other | BinaryI { op: Add, dst: Reg(8), a: Reg(4), b: Reg(6) }
+[pc] Text.concat pc=72 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(9), src: Reg(8) }
+[pc] Text.concat pc=75 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(10), src: Reg(9) }
+[pc] Text.concat pc=78 op=0x5b | r1=other r2=other r3=other | Call { dst: Reg(6), func_id: 21898, args: RegRange { start: Reg(10), count: 1 } }
+[trace-call] handler=Call func_id=21898 name='Text.with_capacity' descriptor.id=21898 args.count=1 bytecode_length=135
+[pc] Text.concat pc=85 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(11), src: Reg(6) }
+[pc] Text.concat pc=88 op=0x79 | r1=other r2=other r3=other | TextExtended { sub_op: 52, operands: [4, 0] }
+[pc] Text.concat pc=93 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(12), src: Reg(4) }
+[pc] Text.concat pc=96 op=0x02 | r1=other r2=other r3=other | LoadI { dst: Reg(13), value: 0 }
+[pc] Text.concat pc=99 op=0x66 | r1=other r2=other r3=other | Len { dst: Reg(14), arr: Reg(12), type_hint: 0 }
+[pc] Text.concat pc=103 op=0xcc | r1=other r2=other r3=other | NewRange { dst: Reg(15), start: Reg(13), end: Reg(14), inclusive: false }
+[pc] Text.concat pc=108 op=0xc0 | r1=other r2=other r3=other | IterNew { dst: Reg(14), iterable: Reg(15) }
+[pc] Text.concat pc=111 op=0xc1 | r1=other r2=other r3=other | IterNext { dst: Reg(13), has_next: Reg(16), iter: Reg(14) }
+[pc] Text.concat pc=115 op=0x52 | r1=other r2=other r3=other | JmpNot { cond: Reg(16), offset: 23 }
+[pc] Text.concat pc=118 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(17), src: Reg(13) }
+[pc] Text.concat pc=121 op=0x64 | r1=other r2=other r3=other | GetE { dst: Reg(18), arr: Reg(12), idx: Reg(17) }
+[pc] Text.concat pc=125 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(19), src: Reg(18) }
+[pc] Text.concat pc=128 op=0x71 | r1=other r2=other r3=other | RefMut { dst: Reg(20), src: Reg(11) }
+[pc] Text.concat pc=131 op=0x5d | r1=other r2=other r3=other | CallM { dst: Reg(18), receiver: Reg(20), method_id: 1017065, args: RegRange { start: Reg(19), count: 1 } }
+[pc] Text.concat pc=139 op=0x50 | r1=other r2=other r3=other | Jmp { offset: -30 }
+[pc] Text.concat pc=111 op=0xc1 | r1=other r2=other r3=other | IterNext { dst: Reg(13), has_next: Reg(16), iter: Reg(14) }
+[pc] Text.concat pc=115 op=0x52 | r1=other r2=other r3=other | JmpNot { cond: Reg(16), offset: 23 }
+[pc] Text.concat pc=118 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(17), src: Reg(13) }
+[pc] Text.concat pc=121 op=0x64 | r1=other r2=other r3=other | GetE { dst: Reg(18), arr: Reg(12), idx: Reg(17) }
+[pc] Text.concat pc=125 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(19), src: Reg(18) }
+[pc] Text.concat pc=128 op=0x71 | r1=other r2=other r3=other | RefMut { dst: Reg(20), src: Reg(11) }
+[pc] Text.concat pc=131 op=0x5d | r1=other r2=other r3=other | CallM { dst: Reg(18), receiver: Reg(20), method_id: 1017065, args: RegRange { start: Reg(19), count: 1 } }
+[pc] Text.concat pc=139 op=0x50 | r1=other r2=other r3=other | Jmp { offset: -30 }
+[pc] Text.concat pc=111 op=0xc1 | r1=other r2=other r3=other | IterNext { dst: Reg(13), has_next: Reg(16), iter: Reg(14) }
+[pc] Text.concat pc=115 op=0x52 | r1=other r2=other r3=other | JmpNot { cond: Reg(16), offset: 23 }
+[pc] Text.concat pc=118 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(17), src: Reg(13) }
+[pc] Text.concat pc=121 op=0x64 | r1=other r2=other r3=other | GetE { dst: Reg(18), arr: Reg(12), idx: Reg(17) }
+[pc] Text.concat pc=125 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(19), src: Reg(18) }
+[pc] Text.concat pc=128 op=0x71 | r1=other r2=other r3=other | RefMut { dst: Reg(20), src: Reg(11) }
+[pc] Text.concat pc=131 op=0x5d | r1=other r2=other r3=other | CallM { dst: Reg(18), receiver: Reg(20), method_id: 1017065, args: RegRange { start: Reg(19), count: 1 } }
+[pc] Text.concat pc=139 op=0x50 | r1=other r2=other r3=other | Jmp { offset: -30 }
+[pc] Text.concat pc=111 op=0xc1 | r1=other r2=other r3=other | IterNext { dst: Reg(13), has_next: Reg(16), iter: Reg(14) }
+[pc] Text.concat pc=115 op=0x52 | r1=other r2=other r3=other | JmpNot { cond: Reg(16), offset: 23 }
+[pc] Text.concat pc=118 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(17), src: Reg(13) }
+[pc] Text.concat pc=121 op=0x64 | r1=other r2=other r3=other | GetE { dst: Reg(18), arr: Reg(12), idx: Reg(17) }
+[pc] Text.concat pc=125 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(19), src: Reg(18) }
+[pc] Text.concat pc=128 op=0x71 | r1=other r2=other r3=other | RefMut { dst: Reg(20), src: Reg(11) }
+[pc] Text.concat pc=131 op=0x5d | r1=other r2=other r3=other | CallM { dst: Reg(18), receiver: Reg(20), method_id: 1017065, args: RegRange { start: Reg(19), count: 1 } }
+[pc] Text.concat pc=139 op=0x50 | r1=other r2=other r3=other | Jmp { offset: -30 }
+[pc] Text.concat pc=111 op=0xc1 | r1=other r2=other r3=other | IterNext { dst: Reg(13), has_next: Reg(16), iter: Reg(14) }
+[pc] Text.concat pc=115 op=0x52 | r1=other r2=other r3=other | JmpNot { cond: Reg(16), offset: 23 }
+[pc] Text.concat pc=118 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(17), src: Reg(13) }
+[pc] Text.concat pc=121 op=0x64 | r1=other r2=other r3=other | GetE { dst: Reg(18), arr: Reg(12), idx: Reg(17) }
+[pc] Text.concat pc=125 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(19), src: Reg(18) }
+[pc] Text.concat pc=128 op=0x71 | r1=other r2=other r3=other | RefMut { dst: Reg(20), src: Reg(11) }
+[pc] Text.concat pc=131 op=0x5d | r1=other r2=other r3=other | CallM { dst: Reg(18), receiver: Reg(20), method_id: 1017065, args: RegRange { start: Reg(19), count: 1 } }
+[pc] Text.concat pc=139 op=0x50 | r1=other r2=other r3=other | Jmp { offset: -30 }
+[pc] Text.concat pc=111 op=0xc1 | r1=other r2=other r3=other | IterNext { dst: Reg(13), has_next: Reg(16), iter: Reg(14) }
+[pc] Text.concat pc=115 op=0x52 | r1=other r2=other r3=other | JmpNot { cond: Reg(16), offset: 23 }
+[pc] Text.concat pc=141 op=0x06 | r1=other r2=other r3=other | LoadUnit { dst: Reg(16) }
+[pc] Text.concat pc=143 op=0x79 | r1=other r2=other r3=other | TextExtended { sub_op: 52, operands: [13, 1] }
+[pc] Text.concat pc=148 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(21), src: Reg(13) }
+[pc] Text.concat pc=151 op=0x02 | r1=other r2=other r3=other | LoadI { dst: Reg(14), value: 0 }
+[pc] Text.concat pc=154 op=0x66 | r1=other r2=other r3=other | Len { dst: Reg(15), arr: Reg(21), type_hint: 0 }
+[pc] Text.concat pc=158 op=0xcc | r1=other r2=other r3=other | NewRange { dst: Reg(17), start: Reg(14), end: Reg(15), inclusive: false }
+[pc] Text.concat pc=163 op=0xc0 | r1=other r2=other r3=other | IterNew { dst: Reg(15), iterable: Reg(17) }
+[pc] Text.concat pc=166 op=0xc1 | r1=other r2=other r3=other | IterNext { dst: Reg(14), has_next: Reg(18), iter: Reg(15) }
+[pc] Text.concat pc=170 op=0x52 | r1=other r2=other r3=other | JmpNot { cond: Reg(18), offset: 23 }
+[pc] Text.concat pc=173 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(22), src: Reg(14) }
+[pc] Text.concat pc=176 op=0x64 | r1=other r2=other r3=other | GetE { dst: Reg(20), arr: Reg(21), idx: Reg(22) }
+[pc] Text.concat pc=180 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(23), src: Reg(20) }
+[pc] Text.concat pc=183 op=0x71 | r1=other r2=other r3=other | RefMut { dst: Reg(24), src: Reg(11) }
+[pc] Text.concat pc=186 op=0x5d | r1=other r2=other r3=other | CallM { dst: Reg(20), receiver: Reg(24), method_id: 1017065, args: RegRange { start: Reg(23), count: 1 } }
+[pc] Text.concat pc=194 op=0x50 | r1=other r2=other r3=other | Jmp { offset: -30 }
+[pc] Text.concat pc=166 op=0xc1 | r1=other r2=other r3=other | IterNext { dst: Reg(14), has_next: Reg(18), iter: Reg(15) }
+[pc] Text.concat pc=170 op=0x52 | r1=other r2=other r3=other | JmpNot { cond: Reg(18), offset: 23 }
+[pc] Text.concat pc=173 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(22), src: Reg(14) }
+[pc] Text.concat pc=176 op=0x64 | r1=other r2=other r3=other | GetE { dst: Reg(20), arr: Reg(21), idx: Reg(22) }
+[pc] Text.concat pc=180 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(23), src: Reg(20) }
+[pc] Text.concat pc=183 op=0x71 | r1=other r2=other r3=other | RefMut { dst: Reg(24), src: Reg(11) }
+[pc] Text.concat pc=186 op=0x5d | r1=other r2=other r3=other | CallM { dst: Reg(20), receiver: Reg(24), method_id: 1017065, args: RegRange { start: Reg(23), count: 1 } }
+[pc] Text.concat pc=194 op=0x50 | r1=other r2=other r3=other | Jmp { offset: -30 }
+[pc] Text.concat pc=166 op=0xc1 | r1=other r2=other r3=other | IterNext { dst: Reg(14), has_next: Reg(18), iter: Reg(15) }
+[pc] Text.concat pc=170 op=0x52 | r1=other r2=other r3=other | JmpNot { cond: Reg(18), offset: 23 }
+[pc] Text.concat pc=196 op=0x06 | r1=other r2=other r3=other | LoadUnit { dst: Reg(18) }
+[pc] Text.concat pc=198 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(14), src: Reg(11) }
+[pc] Text.concat pc=201 op=0x77 | r1=other r2=other r3=other | DropRef { src: Reg(21) }
+[pc] Text.concat pc=203 op=0x77 | r1=other r2=other r3=other | DropRef { src: Reg(12) }
+[pc] Text.concat pc=205 op=0x77 | r1=other r2=other r3=other | DropRef { src: Reg(9) }
+[pc] Text.concat pc=207 op=0x59 | r1=other r2=other r3=other | Ret { value: Reg(14) }
+[callm-flow] A-post-primitive method=Heap.deref recv=ptr(0xc21168260 interior=false)
+[callm-flow] B-pre-array method=Heap.deref
+[callm-flow] C-pre-variant-1 method=Heap.deref
+[callm-flow] C0-carrier-block method=Heap.deref heapcell=true tid=20740208
+[callm-flow] C1a-heap-carrier method=Heap.deref
+[trace-call] handler=Call func_id=25483 name='core.base.semver_constraint.format_impl' descriptor.id=25483 args.count=1 bytecode_length=659
+[trace-call] handler=Call func_id=25481 name='core.base.semver_constraint.format_comparator' descriptor.id=25481 args.count=1 bytecode_length=492
+[callm-flow] A-post-primitive method=Text.concat recv=other
+[callm-flow] B-pre-array method=Text.concat
+[callm-flow] C-pre-variant-1 method=Text.concat
+[callm-flow] C1b-pre-shared-new method=Text.concat
+[callm-flow] C2-post-new-block method=concat
+[callm-flow] C3-pre-usersearch method=concat
+[pc] Text.concat pc=0 op=0x66 | r1=other r2=other r3=other | Len { dst: Reg(3), arr: Reg(1), type_hint: 5 }
+[pc] Text.concat pc=4 op=0x02 | r1=other r2=other r3=int(1) | LoadI { dst: Reg(4), value: 0 }
+[pc] Text.concat pc=7 op=0x40 | r1=other r2=other r3=int(1) | CmpI { op: Eq, dst: Reg(5), a: Reg(3), b: Reg(4) }
+[pc] Text.concat pc=11 op=0x52 | r1=other r2=other r3=int(1) | JmpNot { cond: Reg(5), offset: 14 }
+[pc] Text.concat pc=28 op=0x06 | r1=other r2=other r3=int(1) | LoadUnit { dst: Reg(2) }
+[pc] Text.concat pc=30 op=0x66 | r1=other r2=other r3=int(1) | Len { dst: Reg(4), arr: Reg(0), type_hint: 5 }
+[pc] Text.concat pc=34 op=0x02 | r1=other r2=other r3=int(1) | LoadI { dst: Reg(6), value: 0 }
+[pc] Text.concat pc=37 op=0x40 | r1=other r2=other r3=int(1) | CmpI { op: Eq, dst: Reg(7), a: Reg(4), b: Reg(6) }
+[pc] Text.concat pc=41 op=0x52 | r1=other r2=other r3=int(1) | JmpNot { cond: Reg(7), offset: 14 }
+[pc] Text.concat pc=58 op=0x06 | r1=other r2=other r3=int(1) | LoadUnit { dst: Reg(3) }
+[pc] Text.concat pc=60 op=0x66 | r1=other r2=other r3=other | Len { dst: Reg(4), arr: Reg(0), type_hint: 5 }
+[pc] Text.concat pc=64 op=0x66 | r1=other r2=other r3=other | Len { dst: Reg(6), arr: Reg(1), type_hint: 5 }
+[pc] Text.concat pc=68 op=0x10 | r1=other r2=other r3=other | BinaryI { op: Add, dst: Reg(8), a: Reg(4), b: Reg(6) }
+[pc] Text.concat pc=72 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(9), src: Reg(8) }
+[pc] Text.concat pc=75 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(10), src: Reg(9) }
+[pc] Text.concat pc=78 op=0x5b | r1=other r2=other r3=other | Call { dst: Reg(6), func_id: 21898, args: RegRange { start: Reg(10), count: 1 } }
+[trace-call] handler=Call func_id=21898 name='Text.with_capacity' descriptor.id=21898 args.count=1 bytecode_length=135
+[pc] Text.concat pc=85 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(11), src: Reg(6) }
+[pc] Text.concat pc=88 op=0x79 | r1=other r2=other r3=other | TextExtended { sub_op: 52, operands: [4, 0] }
+[pc] Text.concat pc=93 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(12), src: Reg(4) }
+[pc] Text.concat pc=96 op=0x02 | r1=other r2=other r3=other | LoadI { dst: Reg(13), value: 0 }
+[pc] Text.concat pc=99 op=0x66 | r1=other r2=other r3=other | Len { dst: Reg(14), arr: Reg(12), type_hint: 0 }
+[pc] Text.concat pc=103 op=0xcc | r1=other r2=other r3=other | NewRange { dst: Reg(15), start: Reg(13), end: Reg(14), inclusive: false }
+[pc] Text.concat pc=108 op=0xc0 | r1=other r2=other r3=other | IterNew { dst: Reg(14), iterable: Reg(15) }
+[pc] Text.concat pc=111 op=0xc1 | r1=other r2=other r3=other | IterNext { dst: Reg(13), has_next: Reg(16), iter: Reg(14) }
+[pc] Text.concat pc=115 op=0x52 | r1=other r2=other r3=other | JmpNot { cond: Reg(16), offset: 23 }
+[pc] Text.concat pc=118 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(17), src: Reg(13) }
+[pc] Text.concat pc=121 op=0x64 | r1=other r2=other r3=other | GetE { dst: Reg(18), arr: Reg(12), idx: Reg(17) }
+[pc] Text.concat pc=125 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(19), src: Reg(18) }
+[pc] Text.concat pc=128 op=0x71 | r1=other r2=other r3=other | RefMut { dst: Reg(20), src: Reg(11) }
+[pc] Text.concat pc=131 op=0x5d | r1=other r2=other r3=other | CallM { dst: Reg(18), receiver: Reg(20), method_id: 1017065, args: RegRange { start: Reg(19), count: 1 } }
+[pc] Text.concat pc=139 op=0x50 | r1=other r2=other r3=other | Jmp { offset: -30 }
+[pc] Text.concat pc=111 op=0xc1 | r1=other r2=other r3=other | IterNext { dst: Reg(13), has_next: Reg(16), iter: Reg(14) }
+[pc] Text.concat pc=115 op=0x52 | r1=other r2=other r3=other | JmpNot { cond: Reg(16), offset: 23 }
+[pc] Text.concat pc=141 op=0x06 | r1=other r2=other r3=other | LoadUnit { dst: Reg(16) }
+[pc] Text.concat pc=143 op=0x79 | r1=other r2=other r3=other | TextExtended { sub_op: 52, operands: [13, 1] }
+[pc] Text.concat pc=148 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(21), src: Reg(13) }
+[pc] Text.concat pc=151 op=0x02 | r1=other r2=other r3=other | LoadI { dst: Reg(14), value: 0 }
+[pc] Text.concat pc=154 op=0x66 | r1=other r2=other r3=other | Len { dst: Reg(15), arr: Reg(21), type_hint: 0 }
+[pc] Text.concat pc=158 op=0xcc | r1=other r2=other r3=other | NewRange { dst: Reg(17), start: Reg(14), end: Reg(15), inclusive: false }
+[pc] Text.concat pc=163 op=0xc0 | r1=other r2=other r3=other | IterNew { dst: Reg(15), iterable: Reg(17) }
+[pc] Text.concat pc=166 op=0xc1 | r1=other r2=other r3=other | IterNext { dst: Reg(14), has_next: Reg(18), iter: Reg(15) }
+[pc] Text.concat pc=170 op=0x52 | r1=other r2=other r3=other | JmpNot { cond: Reg(18), offset: 23 }
+[pc] Text.concat pc=173 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(22), src: Reg(14) }
+[pc] Text.concat pc=176 op=0x64 | r1=other r2=other r3=other | GetE { dst: Reg(20), arr: Reg(21), idx: Reg(22) }
+[pc] Text.concat pc=180 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(23), src: Reg(20) }
+[pc] Text.concat pc=183 op=0x71 | r1=other r2=other r3=other | RefMut { dst: Reg(24), src: Reg(11) }
+[pc] Text.concat pc=186 op=0x5d | r1=other r2=other r3=other | CallM { dst: Reg(20), receiver: Reg(24), method_id: 1017065, args: RegRange { start: Reg(23), count: 1 } }
+[pc] Text.concat pc=194 op=0x50 | r1=other r2=other r3=other | Jmp { offset: -30 }
+[pc] Text.concat pc=166 op=0xc1 | r1=other r2=other r3=other | IterNext { dst: Reg(14), has_next: Reg(18), iter: Reg(15) }
+[pc] Text.concat pc=170 op=0x52 | r1=other r2=other r3=other | JmpNot { cond: Reg(18), offset: 23 }
+[pc] Text.concat pc=196 op=0x06 | r1=other r2=other r3=other | LoadUnit { dst: Reg(18) }
+[pc] Text.concat pc=198 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(14), src: Reg(11) }
+[pc] Text.concat pc=201 op=0x77 | r1=other r2=other r3=other | DropRef { src: Reg(21) }
+[pc] Text.concat pc=203 op=0x77 | r1=other r2=other r3=other | DropRef { src: Reg(12) }
+[pc] Text.concat pc=205 op=0x77 | r1=other r2=other r3=other | DropRef { src: Reg(9) }
+[pc] Text.concat pc=207 op=0x59 | r1=other r2=other r3=other | Ret { value: Reg(14) }
+[callm-flow] A-post-primitive method=Text.concat recv=ptr(0xc21168440 interior=false)
+[callm-flow] B-pre-array method=Text.concat
+[callm-flow] C-pre-variant-1 method=Text.concat
+[callm-flow] C0-carrier-block method=Text.concat heapcell=false tid=4
+[callm-flow] C1b-pre-shared-new method=Text.concat
+[callm-flow] C2-post-new-block method=concat
+[callm-flow] C3-pre-usersearch method=concat
+[tiebreak] 'Text.concat' cand idx=21742 parent=Some(TypeId(1250)) bodied=true (recv_tid=4)
+[pc] core.text.Text.concat pc=0 op=0x5a | r1=other r2=bool(false) r3=other | RetV
+[trace-call] handler=Call func_id=25175 name='cargo' descriptor.id=25175 args.count=1 bytecode_length=32
+[trace-call] handler=Call func_id=25496 name='core.base.semver_constraint.parse_cargo' descriptor.id=25496 args.count=1 bytecode_length=20
+[trace-call] handler=Call func_id=25497 name='core.base.semver_constraint.parse_clause' descriptor.id=25497 args.count=2 bytecode_length=684
+[trace-call] handler=Call func_id=25505 name='core.base.semver_constraint.skip_requirement_space' descriptor.id=25505 args.count=3 bytecode_length=59
+[trace-call] handler=Call func_id=25504 name='core.base.semver_constraint.requirement_space' descriptor.id=25504 args.count=2 bytecode_length=37
+[trace-call] handler=Call func_id=25492 name='core.base.semver_constraint.operator_length' descriptor.id=25492 args.count=2 bytecode_length=192
+[trace-call] handler=Call func_id=25505 name='core.base.semver_constraint.skip_requirement_space' descriptor.id=25505 args.count=3 bytecode_length=59
+[trace-call] handler=Call func_id=25504 name='core.base.semver_constraint.requirement_space' descriptor.id=25504 args.count=2 bytecode_length=37
+[trace-call] handler=Call func_id=25504 name='core.base.semver_constraint.requirement_space' descriptor.id=25504 args.count=2 bytecode_length=37
+[trace-call] handler=Call func_id=25504 name='core.base.semver_constraint.requirement_space' descriptor.id=25504 args.count=2 bytecode_length=37
+[trace-call] handler=Call func_id=25504 name='core.base.semver_constraint.requirement_space' descriptor.id=25504 args.count=2 bytecode_length=37
+[trace-call] handler=Call func_id=25504 name='core.base.semver_constraint.requirement_space' descriptor.id=25504 args.count=2 bytecode_length=37
+[trace-call] handler=Call func_id=25506 name='core.base.semver_constraint.slice_text' descriptor.id=25506 args.count=3 bytecode_length=94
+[trace-call] handler=Call func_id=21771 name='Text.from_bytes' descriptor.id=21771 args.count=1 bytecode_length=15
+[pc] Text.from_bytes pc=0 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(1), src: Reg(0) }
+[pc] Text.from_bytes pc=3 op=0x5b | r1=other r2=other r3=other | Call { dst: Reg(2), func_id: 21784, args: RegRange { start: Reg(1), count: 1 } }
+[trace-call] handler=Call func_id=21784 name='Text.from_utf8' descriptor.id=21784 args.count=1 bytecode_length=74
+[pc] Text.from_bytes pc=10 op=0x00 | r1=other r2=ptr(@0xc013c4750 tid=516 vtag=0) r3=other | Mov { dst: Reg(3), src: Reg(2) }
+[pc] Text.from_bytes pc=13 op=0x59 | r1=other r2=ptr(@0xc013c4750 tid=516 vtag=0) r3=ptr(@0xc013c4750 tid=516 vtag=0) | Ret { value: Reg(3) }
+[trace-call] handler=Call func_id=21823 name='Text.new' descriptor.id=21823 args.count=0 bytecode_length=31
+[callm-flow] A-post-primitive method=Result.unwrap_or recv=ptr(0xc013c4750 interior=false)
+[callm-flow] B-pre-array method=Result.unwrap_or
+[callm-flow] C-pre-variant-1 method=Result.unwrap_or
+[callm-flow] C0-carrier-block method=Result.unwrap_or heapcell=false tid=516
+[callm-flow] C1b-pre-shared-new method=Result.unwrap_or
+[callm-flow] C2-post-new-block method=unwrap_or
+[callm-flow] C3-pre-usersearch method=unwrap_or
+[trace-call] handler=Call func_id=25495 name='core.base.semver_constraint.parse_atom' descriptor.id=25495 args.count=2 bytecode_length=417
+[trace-call] handler=Call func_id=25492 name='core.base.semver_constraint.operator_length' descriptor.id=25492 args.count=2 bytecode_length=192
+[trace-call] handler=Call func_id=25505 name='core.base.semver_constraint.skip_requirement_space' descriptor.id=25505 args.count=3 bytecode_length=59
+[trace-call] handler=Call func_id=25504 name='core.base.semver_constraint.requirement_space' descriptor.id=25504 args.count=2 bytecode_length=37
+[trace-call] handler=Call func_id=25506 name='core.base.semver_constraint.slice_text' descriptor.id=25506 args.count=3 bytecode_length=94
+[trace-call] handler=Call func_id=21771 name='Text.from_bytes' descriptor.id=21771 args.count=1 bytecode_length=15
+[pc] Text.from_bytes pc=0 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(1), src: Reg(0) }
+[pc] Text.from_bytes pc=3 op=0x5b | r1=other r2=other r3=other | Call { dst: Reg(2), func_id: 21784, args: RegRange { start: Reg(1), count: 1 } }
+[trace-call] handler=Call func_id=21784 name='Text.from_utf8' descriptor.id=21784 args.count=1 bytecode_length=74
+[pc] Text.from_bytes pc=10 op=0x00 | r1=other r2=ptr(@0xc013c6d90 tid=516 vtag=0) r3=other | Mov { dst: Reg(3), src: Reg(2) }
+[pc] Text.from_bytes pc=13 op=0x59 | r1=other r2=ptr(@0xc013c6d90 tid=516 vtag=0) r3=ptr(@0xc013c6d90 tid=516 vtag=0) | Ret { value: Reg(3) }
+[trace-call] handler=Call func_id=21823 name='Text.new' descriptor.id=21823 args.count=0 bytecode_length=31
+[callm-flow] A-post-primitive method=Result.unwrap_or recv=ptr(0xc013c6d90 interior=false)
+[callm-flow] B-pre-array method=Result.unwrap_or
+[callm-flow] C-pre-variant-1 method=Result.unwrap_or
+[callm-flow] C0-carrier-block method=Result.unwrap_or heapcell=false tid=516
+[callm-flow] C1b-pre-shared-new method=Result.unwrap_or
+[callm-flow] C2-post-new-block method=unwrap_or
+[callm-flow] C3-pre-usersearch method=unwrap_or
+[trace-call] handler=Call func_id=25501 name='core.base.semver_constraint.parse_partial' descriptor.id=25501 args.count=3 bytecode_length=788
+[trace-call] handler=Call func_id=25509 name='core.base.semver_constraint.split_suffix' descriptor.id=25509 args.count=2 bytecode_length=165
+[trace-call] handler=Call func_id=25509 name='core.base.semver_constraint.split_suffix' descriptor.id=25509 args.count=2 bytecode_length=165
+[trace-call] handler=Call func_id=25508 name='core.base.semver_constraint.split_dot' descriptor.id=25508 args.count=1 bytecode_length=161
+[trace-call] handler=Call func_id=25506 name='core.base.semver_constraint.slice_text' descriptor.id=25506 args.count=3 bytecode_length=94
+[trace-call] handler=Call func_id=21771 name='Text.from_bytes' descriptor.id=21771 args.count=1 bytecode_length=15
+[pc] Text.from_bytes pc=0 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(1), src: Reg(0) }
+[pc] Text.from_bytes pc=3 op=0x5b | r1=other r2=other r3=other | Call { dst: Reg(2), func_id: 21784, args: RegRange { start: Reg(1), count: 1 } }
+[trace-call] handler=Call func_id=21784 name='Text.from_utf8' descriptor.id=21784 args.count=1 bytecode_length=74
+[pc] Text.from_bytes pc=10 op=0x00 | r1=other r2=ptr(@0xc013c5ef0 tid=516 vtag=0) r3=other | Mov { dst: Reg(3), src: Reg(2) }
+[pc] Text.from_bytes pc=13 op=0x59 | r1=other r2=ptr(@0xc013c5ef0 tid=516 vtag=0) r3=ptr(@0xc013c5ef0 tid=516 vtag=0) | Ret { value: Reg(3) }
+[trace-call] handler=Call func_id=21823 name='Text.new' descriptor.id=21823 args.count=0 bytecode_length=31
+[callm-flow] A-post-primitive method=Result.unwrap_or recv=ptr(0xc013c5ef0 interior=false)
+[callm-flow] B-pre-array method=Result.unwrap_or
+[callm-flow] C-pre-variant-1 method=Result.unwrap_or
+[callm-flow] C0-carrier-block method=Result.unwrap_or heapcell=false tid=516
+[callm-flow] C1b-pre-shared-new method=Result.unwrap_or
+[callm-flow] C2-post-new-block method=unwrap_or
+[callm-flow] C3-pre-usersearch method=unwrap_or
+[trace-call] handler=Call func_id=25506 name='core.base.semver_constraint.slice_text' descriptor.id=25506 args.count=3 bytecode_length=94
+[trace-call] handler=Call func_id=21771 name='Text.from_bytes' descriptor.id=21771 args.count=1 bytecode_length=15
+[pc] Text.from_bytes pc=0 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(1), src: Reg(0) }
+[pc] Text.from_bytes pc=3 op=0x5b | r1=other r2=other r3=other | Call { dst: Reg(2), func_id: 21784, args: RegRange { start: Reg(1), count: 1 } }
+[trace-call] handler=Call func_id=21784 name='Text.from_utf8' descriptor.id=21784 args.count=1 bytecode_length=74
+[pc] Text.from_bytes pc=10 op=0x00 | r1=other r2=ptr(@0xc013c6850 tid=516 vtag=0) r3=other | Mov { dst: Reg(3), src: Reg(2) }
+[pc] Text.from_bytes pc=13 op=0x59 | r1=other r2=ptr(@0xc013c6850 tid=516 vtag=0) r3=ptr(@0xc013c6850 tid=516 vtag=0) | Ret { value: Reg(3) }
+[trace-call] handler=Call func_id=21823 name='Text.new' descriptor.id=21823 args.count=0 bytecode_length=31
+[callm-flow] A-post-primitive method=Result.unwrap_or recv=ptr(0xc013c6850 interior=false)
+[callm-flow] B-pre-array method=Result.unwrap_or
+[callm-flow] C-pre-variant-1 method=Result.unwrap_or
+[callm-flow] C0-carrier-block method=Result.unwrap_or heapcell=false tid=516
+[callm-flow] C1b-pre-shared-new method=Result.unwrap_or
+[callm-flow] C2-post-new-block method=unwrap_or
+[callm-flow] C3-pre-usersearch method=unwrap_or
+[trace-call] handler=Call func_id=25498 name='core.base.semver_constraint.parse_component' descriptor.id=25498 args.count=1 bytecode_length=407
+[trace-call] handler=Call func_id=25484 name='core.base.semver_constraint.is_wildcard' descriptor.id=25484 args.count=1 bytecode_length=98
+[trace-call] handler=Call func_id=25498 name='core.base.semver_constraint.parse_component' descriptor.id=25498 args.count=1 bytecode_length=407
+[callm-flow] A-post-primitive method=Maybe.is_none recv=ptr(0xbe9d14960 interior=false)
+[callm-flow] B-pre-array method=Maybe.is_none
+[callm-flow] C-pre-variant-1 method=Maybe.is_none
+[callm-flow] C0-carrier-block method=Maybe.is_none heapcell=false tid=515
+[callm-flow] C1b-pre-shared-new method=Maybe.is_none
+[callm-flow] C2-post-new-block method=is_none
+[callm-flow] C3-pre-usersearch method=is_none
+[callm-flow] A-post-primitive method=Maybe.is_some recv=ptr(0xbe9d17de0 interior=false)
+[callm-flow] B-pre-array method=Maybe.is_some
+[callm-flow] C-pre-variant-1 method=Maybe.is_some
+[callm-flow] C0-carrier-block method=Maybe.is_some heapcell=false tid=515
+[callm-flow] C1b-pre-shared-new method=Maybe.is_some
+[callm-flow] C2-post-new-block method=is_some
+[callm-flow] C3-pre-usersearch method=is_some
+[callm-flow] A-post-primitive method=Maybe.is_some recv=ptr(0xbe9d17900 interior=false)
+[callm-flow] B-pre-array method=Maybe.is_some
+[callm-flow] C-pre-variant-1 method=Maybe.is_some
+[callm-flow] C0-carrier-block method=Maybe.is_some heapcell=false tid=515
+[callm-flow] C1b-pre-shared-new method=Maybe.is_some
+[callm-flow] C2-post-new-block method=is_some
+[callm-flow] C3-pre-usersearch method=is_some
+[trace-call] handler=Call func_id=25469 name='core.base.semver_constraint.and' descriptor.id=25469 args.count=2 bytecode_length=234
+[trace-call] handler=Call func_id=25505 name='core.base.semver_constraint.skip_requirement_space' descriptor.id=25505 args.count=3 bytecode_length=59
+[trace-call] handler=Call func_id=25504 name='core.base.semver_constraint.requirement_space' descriptor.id=25504 args.count=2 bytecode_length=37
+[trace-call] handler=Call func_id=25505 name='core.base.semver_constraint.skip_requirement_space' descriptor.id=25505 args.count=3 bytecode_length=59
+[trace-call] handler=Call func_id=25504 name='core.base.semver_constraint.requirement_space' descriptor.id=25504 args.count=2 bytecode_length=37
+[trace-call] handler=Call func_id=25504 name='core.base.semver_constraint.requirement_space' descriptor.id=25504 args.count=2 bytecode_length=37
+[trace-call] handler=Call func_id=25492 name='core.base.semver_constraint.operator_length' descriptor.id=25492 args.count=2 bytecode_length=192
+[trace-call] handler=Call func_id=25505 name='core.base.semver_constraint.skip_requirement_space' descriptor.id=25505 args.count=3 bytecode_length=59
+[trace-call] handler=Call func_id=25504 name='core.base.semver_constraint.requirement_space' descriptor.id=25504 args.count=2 bytecode_length=37
+[trace-call] handler=Call func_id=25504 name='core.base.semver_constraint.requirement_space' descriptor.id=25504 args.count=2 bytecode_length=37
+[trace-call] handler=Call func_id=25506 name='core.base.semver_constraint.slice_text' descriptor.id=25506 args.count=3 bytecode_length=94
+[trace-call] handler=Call func_id=21771 name='Text.from_bytes' descriptor.id=21771 args.count=1 bytecode_length=15
+[pc] Text.from_bytes pc=0 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(1), src: Reg(0) }
+[pc] Text.from_bytes pc=3 op=0x5b | r1=other r2=other r3=other | Call { dst: Reg(2), func_id: 21784, args: RegRange { start: Reg(1), count: 1 } }
+[trace-call] handler=Call func_id=21784 name='Text.from_utf8' descriptor.id=21784 args.count=1 bytecode_length=74
+[pc] Text.from_bytes pc=10 op=0x00 | r1=other r2=ptr(@0xc013c5050 tid=516 vtag=0) r3=other | Mov { dst: Reg(3), src: Reg(2) }
+[pc] Text.from_bytes pc=13 op=0x59 | r1=other r2=ptr(@0xc013c5050 tid=516 vtag=0) r3=ptr(@0xc013c5050 tid=516 vtag=0) | Ret { value: Reg(3) }
+[trace-call] handler=Call func_id=21823 name='Text.new' descriptor.id=21823 args.count=0 bytecode_length=31
+[callm-flow] A-post-primitive method=Result.unwrap_or recv=ptr(0xc013c5050 interior=false)
+[callm-flow] B-pre-array method=Result.unwrap_or
+[callm-flow] C-pre-variant-1 method=Result.unwrap_or
+[callm-flow] C0-carrier-block method=Result.unwrap_or heapcell=false tid=516
+[callm-flow] C1b-pre-shared-new method=Result.unwrap_or
+[callm-flow] C2-post-new-block method=unwrap_or
+[callm-flow] C3-pre-usersearch method=unwrap_or
+[trace-call] handler=Call func_id=25495 name='core.base.semver_constraint.parse_atom' descriptor.id=25495 args.count=2 bytecode_length=417
+[trace-call] handler=Call func_id=25492 name='core.base.semver_constraint.operator_length' descriptor.id=25492 args.count=2 bytecode_length=192
+[trace-call] handler=Call func_id=25505 name='core.base.semver_constraint.skip_requirement_space' descriptor.id=25505 args.count=3 bytecode_length=59
+[trace-call] handler=Call func_id=25504 name='core.base.semver_constraint.requirement_space' descriptor.id=25504 args.count=2 bytecode_length=37
+[trace-call] handler=Call func_id=25506 name='core.base.semver_constraint.slice_text' descriptor.id=25506 args.count=3 bytecode_length=94
+[trace-call] handler=Call func_id=21771 name='Text.from_bytes' descriptor.id=21771 args.count=1 bytecode_length=15
+[pc] Text.from_bytes pc=0 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(1), src: Reg(0) }
+[pc] Text.from_bytes pc=3 op=0x5b | r1=other r2=other r3=other | Call { dst: Reg(2), func_id: 21784, args: RegRange { start: Reg(1), count: 1 } }
+[trace-call] handler=Call func_id=21784 name='Text.from_utf8' descriptor.id=21784 args.count=1 bytecode_length=74
+[pc] Text.from_bytes pc=10 op=0x00 | r1=other r2=ptr(@0xc013c6820 tid=516 vtag=0) r3=other | Mov { dst: Reg(3), src: Reg(2) }
+[pc] Text.from_bytes pc=13 op=0x59 | r1=other r2=ptr(@0xc013c6820 tid=516 vtag=0) r3=ptr(@0xc013c6820 tid=516 vtag=0) | Ret { value: Reg(3) }
+[trace-call] handler=Call func_id=21823 name='Text.new' descriptor.id=21823 args.count=0 bytecode_length=31
+[callm-flow] A-post-primitive method=Result.unwrap_or recv=ptr(0xc013c6820 interior=false)
+[callm-flow] B-pre-array method=Result.unwrap_or
+[callm-flow] C-pre-variant-1 method=Result.unwrap_or
+[callm-flow] C0-carrier-block method=Result.unwrap_or heapcell=false tid=516
+[callm-flow] C1b-pre-shared-new method=Result.unwrap_or
+[callm-flow] C2-post-new-block method=unwrap_or
+[callm-flow] C3-pre-usersearch method=unwrap_or
+[trace-call] handler=Call func_id=25501 name='core.base.semver_constraint.parse_partial' descriptor.id=25501 args.count=3 bytecode_length=788
+[trace-call] handler=Call func_id=25509 name='core.base.semver_constraint.split_suffix' descriptor.id=25509 args.count=2 bytecode_length=165
+[trace-call] handler=Call func_id=25509 name='core.base.semver_constraint.split_suffix' descriptor.id=25509 args.count=2 bytecode_length=165
+[trace-call] handler=Call func_id=25508 name='core.base.semver_constraint.split_dot' descriptor.id=25508 args.count=1 bytecode_length=161
+[trace-call] handler=Call func_id=25506 name='core.base.semver_constraint.slice_text' descriptor.id=25506 args.count=3 bytecode_length=94
+[trace-call] handler=Call func_id=21771 name='Text.from_bytes' descriptor.id=21771 args.count=1 bytecode_length=15
+[pc] Text.from_bytes pc=0 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(1), src: Reg(0) }
+[pc] Text.from_bytes pc=3 op=0x5b | r1=other r2=other r3=other | Call { dst: Reg(2), func_id: 21784, args: RegRange { start: Reg(1), count: 1 } }
+[trace-call] handler=Call func_id=21784 name='Text.from_utf8' descriptor.id=21784 args.count=1 bytecode_length=74
+[pc] Text.from_bytes pc=10 op=0x00 | r1=other r2=ptr(@0xc013c5560 tid=516 vtag=0) r3=other | Mov { dst: Reg(3), src: Reg(2) }
+[pc] Text.from_bytes pc=13 op=0x59 | r1=other r2=ptr(@0xc013c5560 tid=516 vtag=0) r3=ptr(@0xc013c5560 tid=516 vtag=0) | Ret { value: Reg(3) }
+[trace-call] handler=Call func_id=21823 name='Text.new' descriptor.id=21823 args.count=0 bytecode_length=31
+[callm-flow] A-post-primitive method=Result.unwrap_or recv=ptr(0xc013c5560 interior=false)
+[callm-flow] B-pre-array method=Result.unwrap_or
+[callm-flow] C-pre-variant-1 method=Result.unwrap_or
+[callm-flow] C0-carrier-block method=Result.unwrap_or heapcell=false tid=516
+[callm-flow] C1b-pre-shared-new method=Result.unwrap_or
+[callm-flow] C2-post-new-block method=unwrap_or
+[callm-flow] C3-pre-usersearch method=unwrap_or
+[trace-call] handler=Call func_id=25498 name='core.base.semver_constraint.parse_component' descriptor.id=25498 args.count=1 bytecode_length=407
+[callm-flow] A-post-primitive method=Maybe.is_none recv=ptr(0xbe9d15760 interior=false)
+[callm-flow] B-pre-array method=Maybe.is_none
+[callm-flow] C-pre-variant-1 method=Maybe.is_none
+[callm-flow] C0-carrier-block method=Maybe.is_none heapcell=false tid=515
+[callm-flow] C1b-pre-shared-new method=Maybe.is_none
+[callm-flow] C2-post-new-block method=is_none
+[callm-flow] C3-pre-usersearch method=is_none
+[callm-flow] A-post-primitive method=Maybe.is_some recv=ptr(0xbe9d17bc0 interior=false)
+[callm-flow] B-pre-array method=Maybe.is_some
+[callm-flow] C-pre-variant-1 method=Maybe.is_some
+[callm-flow] C0-carrier-block method=Maybe.is_some heapcell=false tid=515
+[callm-flow] C1b-pre-shared-new method=Maybe.is_some
+[callm-flow] C2-post-new-block method=is_some
+[callm-flow] C3-pre-usersearch method=is_some
+[callm-flow] A-post-primitive method=Maybe.is_some recv=ptr(0xbe9d16ac0 interior=false)
+[callm-flow] B-pre-array method=Maybe.is_some
+[callm-flow] C-pre-variant-1 method=Maybe.is_some
+[callm-flow] C0-carrier-block method=Maybe.is_some heapcell=false tid=515
+[callm-flow] C1b-pre-shared-new method=Maybe.is_some
+[callm-flow] C2-post-new-block method=is_some
+[callm-flow] C3-pre-usersearch method=is_some
+[trace-call] handler=Call func_id=25469 name='core.base.semver_constraint.and' descriptor.id=25469 args.count=2 bytecode_length=234
+[callm-flow] A-post-primitive method=Heap.new recv=other
+[callm-flow] B-pre-array method=Heap.new
+[callm-flow] C-pre-variant-1 method=Heap.new
+[callm-flow] C1b-pre-shared-new method=Heap.new
+[callm-flow] A-post-primitive method=Heap.new recv=other
+[callm-flow] B-pre-array method=Heap.new
+[callm-flow] C-pre-variant-1 method=Heap.new
+[callm-flow] C1b-pre-shared-new method=Heap.new
+[trace-call] handler=Call func_id=25505 name='core.base.semver_constraint.skip_requirement_space' descriptor.id=25505 args.count=3 bytecode_length=59
+[callm-flow] A-post-primitive method=Result.unwrap recv=ptr(0xc013c4690 interior=false)
+[callm-flow] B-pre-array method=Result.unwrap
+[callm-flow] C-pre-variant-1 method=Result.unwrap
+[callm-flow] C0-carrier-block method=Result.unwrap heapcell=false tid=516
+[callm-flow] C1b-pre-shared-new method=Result.unwrap
+[callm-flow] C2-post-new-block method=unwrap
+[callm-flow] C3-pre-usersearch method=unwrap
+[trace-call] handler=Call func_id=25482 name='core.base.semver_constraint.format_constraint' descriptor.id=25482 args.count=1 bytecode_length=15
+[trace-call] handler=Call func_id=25483 name='core.base.semver_constraint.format_impl' descriptor.id=25483 args.count=1 bytecode_length=659
+[callm-flow] A-post-primitive method=Heap.deref recv=ptr(0xc21168120 interior=false)
+[callm-flow] B-pre-array method=Heap.deref
+[callm-flow] C-pre-variant-1 method=Heap.deref
+[callm-flow] C0-carrier-block method=Heap.deref heapcell=true tid=20730032
+[callm-flow] C1a-heap-carrier method=Heap.deref
+[trace-call] handler=Call func_id=25483 name='core.base.semver_constraint.format_impl' descriptor.id=25483 args.count=1 bytecode_length=659
+[trace-call] handler=Call func_id=25481 name='core.base.semver_constraint.format_comparator' descriptor.id=25481 args.count=1 bytecode_length=492
+[callm-flow] A-post-primitive method=Text.concat recv=other
+[callm-flow] B-pre-array method=Text.concat
+[callm-flow] C-pre-variant-1 method=Text.concat
+[callm-flow] C1b-pre-shared-new method=Text.concat
+[callm-flow] C2-post-new-block method=concat
+[callm-flow] C3-pre-usersearch method=concat
+[pc] Text.concat pc=0 op=0x66 | r1=other r2=other r3=other | Len { dst: Reg(3), arr: Reg(1), type_hint: 5 }
+[pc] Text.concat pc=4 op=0x02 | r1=other r2=other r3=int(1) | LoadI { dst: Reg(4), value: 0 }
+[pc] Text.concat pc=7 op=0x40 | r1=other r2=other r3=int(1) | CmpI { op: Eq, dst: Reg(5), a: Reg(3), b: Reg(4) }
+[pc] Text.concat pc=11 op=0x52 | r1=other r2=other r3=int(1) | JmpNot { cond: Reg(5), offset: 14 }
+[pc] Text.concat pc=28 op=0x06 | r1=other r2=other r3=int(1) | LoadUnit { dst: Reg(2) }
+[pc] Text.concat pc=30 op=0x66 | r1=other r2=other r3=int(1) | Len { dst: Reg(4), arr: Reg(0), type_hint: 5 }
+[pc] Text.concat pc=34 op=0x02 | r1=other r2=other r3=int(1) | LoadI { dst: Reg(6), value: 0 }
+[pc] Text.concat pc=37 op=0x40 | r1=other r2=other r3=int(1) | CmpI { op: Eq, dst: Reg(7), a: Reg(4), b: Reg(6) }
+[pc] Text.concat pc=41 op=0x52 | r1=other r2=other r3=int(1) | JmpNot { cond: Reg(7), offset: 14 }
+[pc] Text.concat pc=58 op=0x06 | r1=other r2=other r3=int(1) | LoadUnit { dst: Reg(3) }
+[pc] Text.concat pc=60 op=0x66 | r1=other r2=other r3=other | Len { dst: Reg(4), arr: Reg(0), type_hint: 5 }
+[pc] Text.concat pc=64 op=0x66 | r1=other r2=other r3=other | Len { dst: Reg(6), arr: Reg(1), type_hint: 5 }
+[pc] Text.concat pc=68 op=0x10 | r1=other r2=other r3=other | BinaryI { op: Add, dst: Reg(8), a: Reg(4), b: Reg(6) }
+[pc] Text.concat pc=72 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(9), src: Reg(8) }
+[pc] Text.concat pc=75 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(10), src: Reg(9) }
+[pc] Text.concat pc=78 op=0x5b | r1=other r2=other r3=other | Call { dst: Reg(6), func_id: 21898, args: RegRange { start: Reg(10), count: 1 } }
+[trace-call] handler=Call func_id=21898 name='Text.with_capacity' descriptor.id=21898 args.count=1 bytecode_length=135
+[pc] Text.concat pc=85 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(11), src: Reg(6) }
+[pc] Text.concat pc=88 op=0x79 | r1=other r2=other r3=other | TextExtended { sub_op: 52, operands: [4, 0] }
+[pc] Text.concat pc=93 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(12), src: Reg(4) }
+[pc] Text.concat pc=96 op=0x02 | r1=other r2=other r3=other | LoadI { dst: Reg(13), value: 0 }
+[pc] Text.concat pc=99 op=0x66 | r1=other r2=other r3=other | Len { dst: Reg(14), arr: Reg(12), type_hint: 0 }
+[pc] Text.concat pc=103 op=0xcc | r1=other r2=other r3=other | NewRange { dst: Reg(15), start: Reg(13), end: Reg(14), inclusive: false }
+[pc] Text.concat pc=108 op=0xc0 | r1=other r2=other r3=other | IterNew { dst: Reg(14), iterable: Reg(15) }
+[pc] Text.concat pc=111 op=0xc1 | r1=other r2=other r3=other | IterNext { dst: Reg(13), has_next: Reg(16), iter: Reg(14) }
+[pc] Text.concat pc=115 op=0x52 | r1=other r2=other r3=other | JmpNot { cond: Reg(16), offset: 23 }
+[pc] Text.concat pc=118 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(17), src: Reg(13) }
+[pc] Text.concat pc=121 op=0x64 | r1=other r2=other r3=other | GetE { dst: Reg(18), arr: Reg(12), idx: Reg(17) }
+[pc] Text.concat pc=125 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(19), src: Reg(18) }
+[pc] Text.concat pc=128 op=0x71 | r1=other r2=other r3=other | RefMut { dst: Reg(20), src: Reg(11) }
+[pc] Text.concat pc=131 op=0x5d | r1=other r2=other r3=other | CallM { dst: Reg(18), receiver: Reg(20), method_id: 1017065, args: RegRange { start: Reg(19), count: 1 } }
+[pc] Text.concat pc=139 op=0x50 | r1=other r2=other r3=other | Jmp { offset: -30 }
+[pc] Text.concat pc=111 op=0xc1 | r1=other r2=other r3=other | IterNext { dst: Reg(13), has_next: Reg(16), iter: Reg(14) }
+[pc] Text.concat pc=115 op=0x52 | r1=other r2=other r3=other | JmpNot { cond: Reg(16), offset: 23 }
+[pc] Text.concat pc=118 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(17), src: Reg(13) }
+[pc] Text.concat pc=121 op=0x64 | r1=other r2=other r3=other | GetE { dst: Reg(18), arr: Reg(12), idx: Reg(17) }
+[pc] Text.concat pc=125 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(19), src: Reg(18) }
+[pc] Text.concat pc=128 op=0x71 | r1=other r2=other r3=other | RefMut { dst: Reg(20), src: Reg(11) }
+[pc] Text.concat pc=131 op=0x5d | r1=other r2=other r3=other | CallM { dst: Reg(18), receiver: Reg(20), method_id: 1017065, args: RegRange { start: Reg(19), count: 1 } }
+[pc] Text.concat pc=139 op=0x50 | r1=other r2=other r3=other | Jmp { offset: -30 }
+[pc] Text.concat pc=111 op=0xc1 | r1=other r2=other r3=other | IterNext { dst: Reg(13), has_next: Reg(16), iter: Reg(14) }
+[pc] Text.concat pc=115 op=0x52 | r1=other r2=other r3=other | JmpNot { cond: Reg(16), offset: 23 }
+[pc] Text.concat pc=141 op=0x06 | r1=other r2=other r3=other | LoadUnit { dst: Reg(16) }
+[pc] Text.concat pc=143 op=0x79 | r1=other r2=other r3=other | TextExtended { sub_op: 52, operands: [13, 1] }
+[pc] Text.concat pc=148 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(21), src: Reg(13) }
+[pc] Text.concat pc=151 op=0x02 | r1=other r2=other r3=other | LoadI { dst: Reg(14), value: 0 }
+[pc] Text.concat pc=154 op=0x66 | r1=other r2=other r3=other | Len { dst: Reg(15), arr: Reg(21), type_hint: 0 }
+[pc] Text.concat pc=158 op=0xcc | r1=other r2=other r3=other | NewRange { dst: Reg(17), start: Reg(14), end: Reg(15), inclusive: false }
+[pc] Text.concat pc=163 op=0xc0 | r1=other r2=other r3=other | IterNew { dst: Reg(15), iterable: Reg(17) }
+[pc] Text.concat pc=166 op=0xc1 | r1=other r2=other r3=other | IterNext { dst: Reg(14), has_next: Reg(18), iter: Reg(15) }
+[pc] Text.concat pc=170 op=0x52 | r1=other r2=other r3=other | JmpNot { cond: Reg(18), offset: 23 }
+[pc] Text.concat pc=173 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(22), src: Reg(14) }
+[pc] Text.concat pc=176 op=0x64 | r1=other r2=other r3=other | GetE { dst: Reg(20), arr: Reg(21), idx: Reg(22) }
+[pc] Text.concat pc=180 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(23), src: Reg(20) }
+[pc] Text.concat pc=183 op=0x71 | r1=other r2=other r3=other | RefMut { dst: Reg(24), src: Reg(11) }
+[pc] Text.concat pc=186 op=0x5d | r1=other r2=other r3=other | CallM { dst: Reg(20), receiver: Reg(24), method_id: 1017065, args: RegRange { start: Reg(23), count: 1 } }
+[pc] Text.concat pc=194 op=0x50 | r1=other r2=other r3=other | Jmp { offset: -30 }
+[pc] Text.concat pc=166 op=0xc1 | r1=other r2=other r3=other | IterNext { dst: Reg(14), has_next: Reg(18), iter: Reg(15) }
+[pc] Text.concat pc=170 op=0x52 | r1=other r2=other r3=other | JmpNot { cond: Reg(18), offset: 23 }
+[pc] Text.concat pc=196 op=0x06 | r1=other r2=other r3=other | LoadUnit { dst: Reg(18) }
+[pc] Text.concat pc=198 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(14), src: Reg(11) }
+[pc] Text.concat pc=201 op=0x77 | r1=other r2=other r3=other | DropRef { src: Reg(21) }
+[pc] Text.concat pc=203 op=0x77 | r1=other r2=other r3=other | DropRef { src: Reg(12) }
+[pc] Text.concat pc=205 op=0x77 | r1=other r2=other r3=other | DropRef { src: Reg(9) }
+[pc] Text.concat pc=207 op=0x59 | r1=other r2=other r3=other | Ret { value: Reg(14) }
+[callm-flow] A-post-primitive method=Text.concat recv=other
+[callm-flow] B-pre-array method=Text.concat
+[callm-flow] C-pre-variant-1 method=Text.concat
+[callm-flow] C1b-pre-shared-new method=Text.concat
+[callm-flow] C2-post-new-block method=concat
+[callm-flow] C3-pre-usersearch method=concat
+[pc] Text.concat pc=0 op=0x66 | r1=other r2=other r3=other | Len { dst: Reg(3), arr: Reg(1), type_hint: 5 }
+[pc] Text.concat pc=4 op=0x02 | r1=other r2=other r3=int(2) | LoadI { dst: Reg(4), value: 0 }
+[pc] Text.concat pc=7 op=0x40 | r1=other r2=other r3=int(2) | CmpI { op: Eq, dst: Reg(5), a: Reg(3), b: Reg(4) }
+[pc] Text.concat pc=11 op=0x52 | r1=other r2=other r3=int(2) | JmpNot { cond: Reg(5), offset: 14 }
+[pc] Text.concat pc=28 op=0x06 | r1=other r2=other r3=int(2) | LoadUnit { dst: Reg(2) }
+[pc] Text.concat pc=30 op=0x66 | r1=other r2=other r3=int(2) | Len { dst: Reg(4), arr: Reg(0), type_hint: 5 }
+[pc] Text.concat pc=34 op=0x02 | r1=other r2=other r3=int(2) | LoadI { dst: Reg(6), value: 0 }
+[pc] Text.concat pc=37 op=0x40 | r1=other r2=other r3=int(2) | CmpI { op: Eq, dst: Reg(7), a: Reg(4), b: Reg(6) }
+[pc] Text.concat pc=41 op=0x52 | r1=other r2=other r3=int(2) | JmpNot { cond: Reg(7), offset: 14 }
+[pc] Text.concat pc=58 op=0x06 | r1=other r2=other r3=int(2) | LoadUnit { dst: Reg(3) }
+[pc] Text.concat pc=60 op=0x66 | r1=other r2=other r3=other | Len { dst: Reg(4), arr: Reg(0), type_hint: 5 }
+[pc] Text.concat pc=64 op=0x66 | r1=other r2=other r3=other | Len { dst: Reg(6), arr: Reg(1), type_hint: 5 }
+[pc] Text.concat pc=68 op=0x10 | r1=other r2=other r3=other | BinaryI { op: Add, dst: Reg(8), a: Reg(4), b: Reg(6) }
+[pc] Text.concat pc=72 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(9), src: Reg(8) }
+[pc] Text.concat pc=75 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(10), src: Reg(9) }
+[pc] Text.concat pc=78 op=0x5b | r1=other r2=other r3=other | Call { dst: Reg(6), func_id: 21898, args: RegRange { start: Reg(10), count: 1 } }
+[trace-call] handler=Call func_id=21898 name='Text.with_capacity' descriptor.id=21898 args.count=1 bytecode_length=135
+[pc] Text.concat pc=85 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(11), src: Reg(6) }
+[pc] Text.concat pc=88 op=0x79 | r1=other r2=other r3=other | TextExtended { sub_op: 52, operands: [4, 0] }
+[pc] Text.concat pc=93 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(12), src: Reg(4) }
+[pc] Text.concat pc=96 op=0x02 | r1=other r2=other r3=other | LoadI { dst: Reg(13), value: 0 }
+[pc] Text.concat pc=99 op=0x66 | r1=other r2=other r3=other | Len { dst: Reg(14), arr: Reg(12), type_hint: 0 }
+[pc] Text.concat pc=103 op=0xcc | r1=other r2=other r3=other | NewRange { dst: Reg(15), start: Reg(13), end: Reg(14), inclusive: false }
+[pc] Text.concat pc=108 op=0xc0 | r1=other r2=other r3=other | IterNew { dst: Reg(14), iterable: Reg(15) }
+[pc] Text.concat pc=111 op=0xc1 | r1=other r2=other r3=other | IterNext { dst: Reg(13), has_next: Reg(16), iter: Reg(14) }
+[pc] Text.concat pc=115 op=0x52 | r1=other r2=other r3=other | JmpNot { cond: Reg(16), offset: 23 }
+[pc] Text.concat pc=118 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(17), src: Reg(13) }
+[pc] Text.concat pc=121 op=0x64 | r1=other r2=other r3=other | GetE { dst: Reg(18), arr: Reg(12), idx: Reg(17) }
+[pc] Text.concat pc=125 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(19), src: Reg(18) }
+[pc] Text.concat pc=128 op=0x71 | r1=other r2=other r3=other | RefMut { dst: Reg(20), src: Reg(11) }
+[pc] Text.concat pc=131 op=0x5d | r1=other r2=other r3=other | CallM { dst: Reg(18), receiver: Reg(20), method_id: 1017065, args: RegRange { start: Reg(19), count: 1 } }
+[pc] Text.concat pc=139 op=0x50 | r1=other r2=other r3=other | Jmp { offset: -30 }
+[pc] Text.concat pc=111 op=0xc1 | r1=other r2=other r3=other | IterNext { dst: Reg(13), has_next: Reg(16), iter: Reg(14) }
+[pc] Text.concat pc=115 op=0x52 | r1=other r2=other r3=other | JmpNot { cond: Reg(16), offset: 23 }
+[pc] Text.concat pc=118 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(17), src: Reg(13) }
+[pc] Text.concat pc=121 op=0x64 | r1=other r2=other r3=other | GetE { dst: Reg(18), arr: Reg(12), idx: Reg(17) }
+[pc] Text.concat pc=125 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(19), src: Reg(18) }
+[pc] Text.concat pc=128 op=0x71 | r1=other r2=other r3=other | RefMut { dst: Reg(20), src: Reg(11) }
+[pc] Text.concat pc=131 op=0x5d | r1=other r2=other r3=other | CallM { dst: Reg(18), receiver: Reg(20), method_id: 1017065, args: RegRange { start: Reg(19), count: 1 } }
+[pc] Text.concat pc=139 op=0x50 | r1=other r2=other r3=other | Jmp { offset: -30 }
+[pc] Text.concat pc=111 op=0xc1 | r1=other r2=other r3=other | IterNext { dst: Reg(13), has_next: Reg(16), iter: Reg(14) }
+[pc] Text.concat pc=115 op=0x52 | r1=other r2=other r3=other | JmpNot { cond: Reg(16), offset: 23 }
+[pc] Text.concat pc=118 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(17), src: Reg(13) }
+[pc] Text.concat pc=121 op=0x64 | r1=other r2=other r3=other | GetE { dst: Reg(18), arr: Reg(12), idx: Reg(17) }
+[pc] Text.concat pc=125 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(19), src: Reg(18) }
+[pc] Text.concat pc=128 op=0x71 | r1=other r2=other r3=other | RefMut { dst: Reg(20), src: Reg(11) }
+[pc] Text.concat pc=131 op=0x5d | r1=other r2=other r3=other | CallM { dst: Reg(18), receiver: Reg(20), method_id: 1017065, args: RegRange { start: Reg(19), count: 1 } }
+[pc] Text.concat pc=139 op=0x50 | r1=other r2=other r3=other | Jmp { offset: -30 }
+[pc] Text.concat pc=111 op=0xc1 | r1=other r2=other r3=other | IterNext { dst: Reg(13), has_next: Reg(16), iter: Reg(14) }
+[pc] Text.concat pc=115 op=0x52 | r1=other r2=other r3=other | JmpNot { cond: Reg(16), offset: 23 }
+[pc] Text.concat pc=141 op=0x06 | r1=other r2=other r3=other | LoadUnit { dst: Reg(16) }
+[pc] Text.concat pc=143 op=0x79 | r1=other r2=other r3=other | TextExtended { sub_op: 52, operands: [13, 1] }
+[pc] Text.concat pc=148 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(21), src: Reg(13) }
+[pc] Text.concat pc=151 op=0x02 | r1=other r2=other r3=other | LoadI { dst: Reg(14), value: 0 }
+[pc] Text.concat pc=154 op=0x66 | r1=other r2=other r3=other | Len { dst: Reg(15), arr: Reg(21), type_hint: 0 }
+[pc] Text.concat pc=158 op=0xcc | r1=other r2=other r3=other | NewRange { dst: Reg(17), start: Reg(14), end: Reg(15), inclusive: false }
+[pc] Text.concat pc=163 op=0xc0 | r1=other r2=other r3=other | IterNew { dst: Reg(15), iterable: Reg(17) }
+[pc] Text.concat pc=166 op=0xc1 | r1=other r2=other r3=other | IterNext { dst: Reg(14), has_next: Reg(18), iter: Reg(15) }
+[pc] Text.concat pc=170 op=0x52 | r1=other r2=other r3=other | JmpNot { cond: Reg(18), offset: 23 }
+[pc] Text.concat pc=173 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(22), src: Reg(14) }
+[pc] Text.concat pc=176 op=0x64 | r1=other r2=other r3=other | GetE { dst: Reg(20), arr: Reg(21), idx: Reg(22) }
+[pc] Text.concat pc=180 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(23), src: Reg(20) }
+[pc] Text.concat pc=183 op=0x71 | r1=other r2=other r3=other | RefMut { dst: Reg(24), src: Reg(11) }
+[pc] Text.concat pc=186 op=0x5d | r1=other r2=other r3=other | CallM { dst: Reg(20), receiver: Reg(24), method_id: 1017065, args: RegRange { start: Reg(23), count: 1 } }
+[pc] Text.concat pc=194 op=0x50 | r1=other r2=other r3=other | Jmp { offset: -30 }
+[pc] Text.concat pc=166 op=0xc1 | r1=other r2=other r3=other | IterNext { dst: Reg(14), has_next: Reg(18), iter: Reg(15) }
+[pc] Text.concat pc=170 op=0x52 | r1=other r2=other r3=other | JmpNot { cond: Reg(18), offset: 23 }
+[pc] Text.concat pc=173 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(22), src: Reg(14) }
+[pc] Text.concat pc=176 op=0x64 | r1=other r2=other r3=other | GetE { dst: Reg(20), arr: Reg(21), idx: Reg(22) }
+[pc] Text.concat pc=180 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(23), src: Reg(20) }
+[pc] Text.concat pc=183 op=0x71 | r1=other r2=other r3=other | RefMut { dst: Reg(24), src: Reg(11) }
+[pc] Text.concat pc=186 op=0x5d | r1=other r2=other r3=other | CallM { dst: Reg(20), receiver: Reg(24), method_id: 1017065, args: RegRange { start: Reg(23), count: 1 } }
+[pc] Text.concat pc=194 op=0x50 | r1=other r2=other r3=other | Jmp { offset: -30 }
+[pc] Text.concat pc=166 op=0xc1 | r1=other r2=other r3=other | IterNext { dst: Reg(14), has_next: Reg(18), iter: Reg(15) }
+[pc] Text.concat pc=170 op=0x52 | r1=other r2=other r3=other | JmpNot { cond: Reg(18), offset: 23 }
+[pc] Text.concat pc=196 op=0x06 | r1=other r2=other r3=other | LoadUnit { dst: Reg(18) }
+[pc] Text.concat pc=198 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(14), src: Reg(11) }
+[pc] Text.concat pc=201 op=0x77 | r1=other r2=other r3=other | DropRef { src: Reg(21) }
+[pc] Text.concat pc=203 op=0x77 | r1=other r2=other r3=other | DropRef { src: Reg(12) }
+[pc] Text.concat pc=205 op=0x77 | r1=other r2=other r3=other | DropRef { src: Reg(9) }
+[pc] Text.concat pc=207 op=0x59 | r1=other r2=other r3=other | Ret { value: Reg(14) }
+[callm-flow] A-post-primitive method=Text.concat recv=other
+[callm-flow] B-pre-array method=Text.concat
+[callm-flow] C-pre-variant-1 method=Text.concat
+[callm-flow] C1b-pre-shared-new method=Text.concat
+[callm-flow] C2-post-new-block method=concat
+[callm-flow] C3-pre-usersearch method=concat
+[pc] Text.concat pc=0 op=0x66 | r1=other r2=other r3=other | Len { dst: Reg(3), arr: Reg(1), type_hint: 5 }
+[pc] Text.concat pc=4 op=0x02 | r1=other r2=other r3=int(2) | LoadI { dst: Reg(4), value: 0 }
+[pc] Text.concat pc=7 op=0x40 | r1=other r2=other r3=int(2) | CmpI { op: Eq, dst: Reg(5), a: Reg(3), b: Reg(4) }
+[pc] Text.concat pc=11 op=0x52 | r1=other r2=other r3=int(2) | JmpNot { cond: Reg(5), offset: 14 }
+[pc] Text.concat pc=28 op=0x06 | r1=other r2=other r3=int(2) | LoadUnit { dst: Reg(2) }
+[pc] Text.concat pc=30 op=0x66 | r1=other r2=other r3=int(2) | Len { dst: Reg(4), arr: Reg(0), type_hint: 5 }
+[pc] Text.concat pc=34 op=0x02 | r1=other r2=other r3=int(2) | LoadI { dst: Reg(6), value: 0 }
+[pc] Text.concat pc=37 op=0x40 | r1=other r2=other r3=int(2) | CmpI { op: Eq, dst: Reg(7), a: Reg(4), b: Reg(6) }
+[pc] Text.concat pc=41 op=0x52 | r1=other r2=other r3=int(2) | JmpNot { cond: Reg(7), offset: 14 }
+[pc] Text.concat pc=58 op=0x06 | r1=other r2=other r3=int(2) | LoadUnit { dst: Reg(3) }
+[pc] Text.concat pc=60 op=0x66 | r1=other r2=other r3=other | Len { dst: Reg(4), arr: Reg(0), type_hint: 5 }
+[pc] Text.concat pc=64 op=0x66 | r1=other r2=other r3=other | Len { dst: Reg(6), arr: Reg(1), type_hint: 5 }
+[pc] Text.concat pc=68 op=0x10 | r1=other r2=other r3=other | BinaryI { op: Add, dst: Reg(8), a: Reg(4), b: Reg(6) }
+[pc] Text.concat pc=72 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(9), src: Reg(8) }
+[pc] Text.concat pc=75 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(10), src: Reg(9) }
+[pc] Text.concat pc=78 op=0x5b | r1=other r2=other r3=other | Call { dst: Reg(6), func_id: 21898, args: RegRange { start: Reg(10), count: 1 } }
+[trace-call] handler=Call func_id=21898 name='Text.with_capacity' descriptor.id=21898 args.count=1 bytecode_length=135
+[pc] Text.concat pc=85 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(11), src: Reg(6) }
+[pc] Text.concat pc=88 op=0x79 | r1=other r2=other r3=other | TextExtended { sub_op: 52, operands: [4, 0] }
+[pc] Text.concat pc=93 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(12), src: Reg(4) }
+[pc] Text.concat pc=96 op=0x02 | r1=other r2=other r3=other | LoadI { dst: Reg(13), value: 0 }
+[pc] Text.concat pc=99 op=0x66 | r1=other r2=other r3=other | Len { dst: Reg(14), arr: Reg(12), type_hint: 0 }
+[pc] Text.concat pc=103 op=0xcc | r1=other r2=other r3=other | NewRange { dst: Reg(15), start: Reg(13), end: Reg(14), inclusive: false }
+[pc] Text.concat pc=108 op=0xc0 | r1=other r2=other r3=other | IterNew { dst: Reg(14), iterable: Reg(15) }
+[pc] Text.concat pc=111 op=0xc1 | r1=other r2=other r3=other | IterNext { dst: Reg(13), has_next: Reg(16), iter: Reg(14) }
+[pc] Text.concat pc=115 op=0x52 | r1=other r2=other r3=other | JmpNot { cond: Reg(16), offset: 23 }
+[pc] Text.concat pc=118 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(17), src: Reg(13) }
+[pc] Text.concat pc=121 op=0x64 | r1=other r2=other r3=other | GetE { dst: Reg(18), arr: Reg(12), idx: Reg(17) }
+[pc] Text.concat pc=125 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(19), src: Reg(18) }
+[pc] Text.concat pc=128 op=0x71 | r1=other r2=other r3=other | RefMut { dst: Reg(20), src: Reg(11) }
+[pc] Text.concat pc=131 op=0x5d | r1=other r2=other r3=other | CallM { dst: Reg(18), receiver: Reg(20), method_id: 1017065, args: RegRange { start: Reg(19), count: 1 } }
+[pc] Text.concat pc=139 op=0x50 | r1=other r2=other r3=other | Jmp { offset: -30 }
+[pc] Text.concat pc=111 op=0xc1 | r1=other r2=other r3=other | IterNext { dst: Reg(13), has_next: Reg(16), iter: Reg(14) }
+[pc] Text.concat pc=115 op=0x52 | r1=other r2=other r3=other | JmpNot { cond: Reg(16), offset: 23 }
+[pc] Text.concat pc=118 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(17), src: Reg(13) }
+[pc] Text.concat pc=121 op=0x64 | r1=other r2=other r3=other | GetE { dst: Reg(18), arr: Reg(12), idx: Reg(17) }
+[pc] Text.concat pc=125 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(19), src: Reg(18) }
+[pc] Text.concat pc=128 op=0x71 | r1=other r2=other r3=other | RefMut { dst: Reg(20), src: Reg(11) }
+[pc] Text.concat pc=131 op=0x5d | r1=other r2=other r3=other | CallM { dst: Reg(18), receiver: Reg(20), method_id: 1017065, args: RegRange { start: Reg(19), count: 1 } }
+[pc] Text.concat pc=139 op=0x50 | r1=other r2=other r3=other | Jmp { offset: -30 }
+[pc] Text.concat pc=111 op=0xc1 | r1=other r2=other r3=other | IterNext { dst: Reg(13), has_next: Reg(16), iter: Reg(14) }
+[pc] Text.concat pc=115 op=0x52 | r1=other r2=other r3=other | JmpNot { cond: Reg(16), offset: 23 }
+[pc] Text.concat pc=118 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(17), src: Reg(13) }
+[pc] Text.concat pc=121 op=0x64 | r1=other r2=other r3=other | GetE { dst: Reg(18), arr: Reg(12), idx: Reg(17) }
+[pc] Text.concat pc=125 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(19), src: Reg(18) }
+[pc] Text.concat pc=128 op=0x71 | r1=other r2=other r3=other | RefMut { dst: Reg(20), src: Reg(11) }
+[pc] Text.concat pc=131 op=0x5d | r1=other r2=other r3=other | CallM { dst: Reg(18), receiver: Reg(20), method_id: 1017065, args: RegRange { start: Reg(19), count: 1 } }
+[pc] Text.concat pc=139 op=0x50 | r1=other r2=other r3=other | Jmp { offset: -30 }
+[pc] Text.concat pc=111 op=0xc1 | r1=other r2=other r3=other | IterNext { dst: Reg(13), has_next: Reg(16), iter: Reg(14) }
+[pc] Text.concat pc=115 op=0x52 | r1=other r2=other r3=other | JmpNot { cond: Reg(16), offset: 23 }
+[pc] Text.concat pc=118 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(17), src: Reg(13) }
+[pc] Text.concat pc=121 op=0x64 | r1=other r2=other r3=other | GetE { dst: Reg(18), arr: Reg(12), idx: Reg(17) }
+[pc] Text.concat pc=125 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(19), src: Reg(18) }
+[pc] Text.concat pc=128 op=0x71 | r1=other r2=other r3=other | RefMut { dst: Reg(20), src: Reg(11) }
+[pc] Text.concat pc=131 op=0x5d | r1=other r2=other r3=other | CallM { dst: Reg(18), receiver: Reg(20), method_id: 1017065, args: RegRange { start: Reg(19), count: 1 } }
+[pc] Text.concat pc=139 op=0x50 | r1=other r2=other r3=other | Jmp { offset: -30 }
+[pc] Text.concat pc=111 op=0xc1 | r1=other r2=other r3=other | IterNext { dst: Reg(13), has_next: Reg(16), iter: Reg(14) }
+[pc] Text.concat pc=115 op=0x52 | r1=other r2=other r3=other | JmpNot { cond: Reg(16), offset: 23 }
+[pc] Text.concat pc=118 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(17), src: Reg(13) }
+[pc] Text.concat pc=121 op=0x64 | r1=other r2=other r3=other | GetE { dst: Reg(18), arr: Reg(12), idx: Reg(17) }
+[pc] Text.concat pc=125 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(19), src: Reg(18) }
+[pc] Text.concat pc=128 op=0x71 | r1=other r2=other r3=other | RefMut { dst: Reg(20), src: Reg(11) }
+[pc] Text.concat pc=131 op=0x5d | r1=other r2=other r3=other | CallM { dst: Reg(18), receiver: Reg(20), method_id: 1017065, args: RegRange { start: Reg(19), count: 1 } }
+[pc] Text.concat pc=139 op=0x50 | r1=other r2=other r3=other | Jmp { offset: -30 }
+[pc] Text.concat pc=111 op=0xc1 | r1=other r2=other r3=other | IterNext { dst: Reg(13), has_next: Reg(16), iter: Reg(14) }
+[pc] Text.concat pc=115 op=0x52 | r1=other r2=other r3=other | JmpNot { cond: Reg(16), offset: 23 }
+[pc] Text.concat pc=141 op=0x06 | r1=other r2=other r3=other | LoadUnit { dst: Reg(16) }
+[pc] Text.concat pc=143 op=0x79 | r1=other r2=other r3=other | TextExtended { sub_op: 52, operands: [13, 1] }
+[pc] Text.concat pc=148 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(21), src: Reg(13) }
+[pc] Text.concat pc=151 op=0x02 | r1=other r2=other r3=other | LoadI { dst: Reg(14), value: 0 }
+[pc] Text.concat pc=154 op=0x66 | r1=other r2=other r3=other | Len { dst: Reg(15), arr: Reg(21), type_hint: 0 }
+[pc] Text.concat pc=158 op=0xcc | r1=other r2=other r3=other | NewRange { dst: Reg(17), start: Reg(14), end: Reg(15), inclusive: false }
+[pc] Text.concat pc=163 op=0xc0 | r1=other r2=other r3=other | IterNew { dst: Reg(15), iterable: Reg(17) }
+[pc] Text.concat pc=166 op=0xc1 | r1=other r2=other r3=other | IterNext { dst: Reg(14), has_next: Reg(18), iter: Reg(15) }
+[pc] Text.concat pc=170 op=0x52 | r1=other r2=other r3=other | JmpNot { cond: Reg(18), offset: 23 }
+[pc] Text.concat pc=173 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(22), src: Reg(14) }
+[pc] Text.concat pc=176 op=0x64 | r1=other r2=other r3=other | GetE { dst: Reg(20), arr: Reg(21), idx: Reg(22) }
+[pc] Text.concat pc=180 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(23), src: Reg(20) }
+[pc] Text.concat pc=183 op=0x71 | r1=other r2=other r3=other | RefMut { dst: Reg(24), src: Reg(11) }
+[pc] Text.concat pc=186 op=0x5d | r1=other r2=other r3=other | CallM { dst: Reg(20), receiver: Reg(24), method_id: 1017065, args: RegRange { start: Reg(23), count: 1 } }
+[pc] Text.concat pc=194 op=0x50 | r1=other r2=other r3=other | Jmp { offset: -30 }
+[pc] Text.concat pc=166 op=0xc1 | r1=other r2=other r3=other | IterNext { dst: Reg(14), has_next: Reg(18), iter: Reg(15) }
+[pc] Text.concat pc=170 op=0x52 | r1=other r2=other r3=other | JmpNot { cond: Reg(18), offset: 23 }
+[pc] Text.concat pc=173 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(22), src: Reg(14) }
+[pc] Text.concat pc=176 op=0x64 | r1=other r2=other r3=other | GetE { dst: Reg(20), arr: Reg(21), idx: Reg(22) }
+[pc] Text.concat pc=180 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(23), src: Reg(20) }
+[pc] Text.concat pc=183 op=0x71 | r1=other r2=other r3=other | RefMut { dst: Reg(24), src: Reg(11) }
+[pc] Text.concat pc=186 op=0x5d | r1=other r2=other r3=other | CallM { dst: Reg(20), receiver: Reg(24), method_id: 1017065, args: RegRange { start: Reg(23), count: 1 } }
+[pc] Text.concat pc=194 op=0x50 | r1=other r2=other r3=other | Jmp { offset: -30 }
+[pc] Text.concat pc=166 op=0xc1 | r1=other r2=other r3=other | IterNext { dst: Reg(14), has_next: Reg(18), iter: Reg(15) }
+[pc] Text.concat pc=170 op=0x52 | r1=other r2=other r3=other | JmpNot { cond: Reg(18), offset: 23 }
+[pc] Text.concat pc=196 op=0x06 | r1=other r2=other r3=other | LoadUnit { dst: Reg(18) }
+[pc] Text.concat pc=198 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(14), src: Reg(11) }
+[pc] Text.concat pc=201 op=0x77 | r1=other r2=other r3=other | DropRef { src: Reg(21) }
+[pc] Text.concat pc=203 op=0x77 | r1=other r2=other r3=other | DropRef { src: Reg(12) }
+[pc] Text.concat pc=205 op=0x77 | r1=other r2=other r3=other | DropRef { src: Reg(9) }
+[pc] Text.concat pc=207 op=0x59 | r1=other r2=other r3=other | Ret { value: Reg(14) }
+[callm-flow] A-post-primitive method=Heap.deref recv=ptr(0xc2116ad20 interior=false)
+[callm-flow] B-pre-array method=Heap.deref
+[callm-flow] C-pre-variant-1 method=Heap.deref
+[callm-flow] C0-carrier-block method=Heap.deref heapcell=true tid=20736800
+[callm-flow] C1a-heap-carrier method=Heap.deref
+[trace-call] handler=Call func_id=25483 name='core.base.semver_constraint.format_impl' descriptor.id=25483 args.count=1 bytecode_length=659
+[trace-call] handler=Call func_id=25481 name='core.base.semver_constraint.format_comparator' descriptor.id=25481 args.count=1 bytecode_length=492
+[callm-flow] A-post-primitive method=Text.concat recv=other
+[callm-flow] B-pre-array method=Text.concat
+[callm-flow] C-pre-variant-1 method=Text.concat
+[callm-flow] C1b-pre-shared-new method=Text.concat
+[callm-flow] C2-post-new-block method=concat
+[callm-flow] C3-pre-usersearch method=concat
+[pc] Text.concat pc=0 op=0x66 | r1=other r2=other r3=other | Len { dst: Reg(3), arr: Reg(1), type_hint: 5 }
+[pc] Text.concat pc=4 op=0x02 | r1=other r2=other r3=int(1) | LoadI { dst: Reg(4), value: 0 }
+[pc] Text.concat pc=7 op=0x40 | r1=other r2=other r3=int(1) | CmpI { op: Eq, dst: Reg(5), a: Reg(3), b: Reg(4) }
+[pc] Text.concat pc=11 op=0x52 | r1=other r2=other r3=int(1) | JmpNot { cond: Reg(5), offset: 14 }
+[pc] Text.concat pc=28 op=0x06 | r1=other r2=other r3=int(1) | LoadUnit { dst: Reg(2) }
+[pc] Text.concat pc=30 op=0x66 | r1=other r2=other r3=int(1) | Len { dst: Reg(4), arr: Reg(0), type_hint: 5 }
+[pc] Text.concat pc=34 op=0x02 | r1=other r2=other r3=int(1) | LoadI { dst: Reg(6), value: 0 }
+[pc] Text.concat pc=37 op=0x40 | r1=other r2=other r3=int(1) | CmpI { op: Eq, dst: Reg(7), a: Reg(4), b: Reg(6) }
+[pc] Text.concat pc=41 op=0x52 | r1=other r2=other r3=int(1) | JmpNot { cond: Reg(7), offset: 14 }
+[pc] Text.concat pc=58 op=0x06 | r1=other r2=other r3=int(1) | LoadUnit { dst: Reg(3) }
+[pc] Text.concat pc=60 op=0x66 | r1=other r2=other r3=other | Len { dst: Reg(4), arr: Reg(0), type_hint: 5 }
+[pc] Text.concat pc=64 op=0x66 | r1=other r2=other r3=other | Len { dst: Reg(6), arr: Reg(1), type_hint: 5 }
+[pc] Text.concat pc=68 op=0x10 | r1=other r2=other r3=other | BinaryI { op: Add, dst: Reg(8), a: Reg(4), b: Reg(6) }
+[pc] Text.concat pc=72 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(9), src: Reg(8) }
+[pc] Text.concat pc=75 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(10), src: Reg(9) }
+[pc] Text.concat pc=78 op=0x5b | r1=other r2=other r3=other | Call { dst: Reg(6), func_id: 21898, args: RegRange { start: Reg(10), count: 1 } }
+[trace-call] handler=Call func_id=21898 name='Text.with_capacity' descriptor.id=21898 args.count=1 bytecode_length=135
+[pc] Text.concat pc=85 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(11), src: Reg(6) }
+[pc] Text.concat pc=88 op=0x79 | r1=other r2=other r3=other | TextExtended { sub_op: 52, operands: [4, 0] }
+[pc] Text.concat pc=93 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(12), src: Reg(4) }
+[pc] Text.concat pc=96 op=0x02 | r1=other r2=other r3=other | LoadI { dst: Reg(13), value: 0 }
+[pc] Text.concat pc=99 op=0x66 | r1=other r2=other r3=other | Len { dst: Reg(14), arr: Reg(12), type_hint: 0 }
+[pc] Text.concat pc=103 op=0xcc | r1=other r2=other r3=other | NewRange { dst: Reg(15), start: Reg(13), end: Reg(14), inclusive: false }
+[pc] Text.concat pc=108 op=0xc0 | r1=other r2=other r3=other | IterNew { dst: Reg(14), iterable: Reg(15) }
+[pc] Text.concat pc=111 op=0xc1 | r1=other r2=other r3=other | IterNext { dst: Reg(13), has_next: Reg(16), iter: Reg(14) }
+[pc] Text.concat pc=115 op=0x52 | r1=other r2=other r3=other | JmpNot { cond: Reg(16), offset: 23 }
+[pc] Text.concat pc=118 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(17), src: Reg(13) }
+[pc] Text.concat pc=121 op=0x64 | r1=other r2=other r3=other | GetE { dst: Reg(18), arr: Reg(12), idx: Reg(17) }
+[pc] Text.concat pc=125 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(19), src: Reg(18) }
+[pc] Text.concat pc=128 op=0x71 | r1=other r2=other r3=other | RefMut { dst: Reg(20), src: Reg(11) }
+[pc] Text.concat pc=131 op=0x5d | r1=other r2=other r3=other | CallM { dst: Reg(18), receiver: Reg(20), method_id: 1017065, args: RegRange { start: Reg(19), count: 1 } }
+[pc] Text.concat pc=139 op=0x50 | r1=other r2=other r3=other | Jmp { offset: -30 }
+[pc] Text.concat pc=111 op=0xc1 | r1=other r2=other r3=other | IterNext { dst: Reg(13), has_next: Reg(16), iter: Reg(14) }
+[pc] Text.concat pc=115 op=0x52 | r1=other r2=other r3=other | JmpNot { cond: Reg(16), offset: 23 }
+[pc] Text.concat pc=141 op=0x06 | r1=other r2=other r3=other | LoadUnit { dst: Reg(16) }
+[pc] Text.concat pc=143 op=0x79 | r1=other r2=other r3=other | TextExtended { sub_op: 52, operands: [13, 1] }
+[pc] Text.concat pc=148 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(21), src: Reg(13) }
+[pc] Text.concat pc=151 op=0x02 | r1=other r2=other r3=other | LoadI { dst: Reg(14), value: 0 }
+[pc] Text.concat pc=154 op=0x66 | r1=other r2=other r3=other | Len { dst: Reg(15), arr: Reg(21), type_hint: 0 }
+[pc] Text.concat pc=158 op=0xcc | r1=other r2=other r3=other | NewRange { dst: Reg(17), start: Reg(14), end: Reg(15), inclusive: false }
+[pc] Text.concat pc=163 op=0xc0 | r1=other r2=other r3=other | IterNew { dst: Reg(15), iterable: Reg(17) }
+[pc] Text.concat pc=166 op=0xc1 | r1=other r2=other r3=other | IterNext { dst: Reg(14), has_next: Reg(18), iter: Reg(15) }
+[pc] Text.concat pc=170 op=0x52 | r1=other r2=other r3=other | JmpNot { cond: Reg(18), offset: 23 }
+[pc] Text.concat pc=173 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(22), src: Reg(14) }
+[pc] Text.concat pc=176 op=0x64 | r1=other r2=other r3=other | GetE { dst: Reg(20), arr: Reg(21), idx: Reg(22) }
+[pc] Text.concat pc=180 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(23), src: Reg(20) }
+[pc] Text.concat pc=183 op=0x71 | r1=other r2=other r3=other | RefMut { dst: Reg(24), src: Reg(11) }
+[pc] Text.concat pc=186 op=0x5d | r1=other r2=other r3=other | CallM { dst: Reg(20), receiver: Reg(24), method_id: 1017065, args: RegRange { start: Reg(23), count: 1 } }
+[pc] Text.concat pc=194 op=0x50 | r1=other r2=other r3=other | Jmp { offset: -30 }
+[pc] Text.concat pc=166 op=0xc1 | r1=other r2=other r3=other | IterNext { dst: Reg(14), has_next: Reg(18), iter: Reg(15) }
+[pc] Text.concat pc=170 op=0x52 | r1=other r2=other r3=other | JmpNot { cond: Reg(18), offset: 23 }
+[pc] Text.concat pc=196 op=0x06 | r1=other r2=other r3=other | LoadUnit { dst: Reg(18) }
+[pc] Text.concat pc=198 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(14), src: Reg(11) }
+[pc] Text.concat pc=201 op=0x77 | r1=other r2=other r3=other | DropRef { src: Reg(21) }
+[pc] Text.concat pc=203 op=0x77 | r1=other r2=other r3=other | DropRef { src: Reg(12) }
+[pc] Text.concat pc=205 op=0x77 | r1=other r2=other r3=other | DropRef { src: Reg(9) }
+[pc] Text.concat pc=207 op=0x59 | r1=other r2=other r3=other | Ret { value: Reg(14) }
+[callm-flow] A-post-primitive method=Text.concat recv=ptr(0xc21168ac0 interior=false)
+[callm-flow] B-pre-array method=Text.concat
+[callm-flow] C-pre-variant-1 method=Text.concat
+[callm-flow] C0-carrier-block method=Text.concat heapcell=false tid=4
+[callm-flow] C1b-pre-shared-new method=Text.concat
+[callm-flow] C2-post-new-block method=concat
+[callm-flow] C3-pre-usersearch method=concat
+[pc] core.text.Text.concat pc=0 op=0x5a | r1=other r2=bool(false) r3=other | RetV
+[trace-call] handler=Call func_id=30931 name='formatted_partial_comparators_preserve_matching' descriptor.id=30931 args.count=0 bytecode_length=226
+[trace-call] handler=Call func_id=25175 name='cargo' descriptor.id=25175 args.count=1 bytecode_length=32
+[trace-call] handler=Call func_id=25496 name='core.base.semver_constraint.parse_cargo' descriptor.id=25496 args.count=1 bytecode_length=20
+[trace-call] handler=Call func_id=25497 name='core.base.semver_constraint.parse_clause' descriptor.id=25497 args.count=2 bytecode_length=684
+[trace-call] handler=Call func_id=25505 name='core.base.semver_constraint.skip_requirement_space' descriptor.id=25505 args.count=3 bytecode_length=59
+[trace-call] handler=Call func_id=25504 name='core.base.semver_constraint.requirement_space' descriptor.id=25504 args.count=2 bytecode_length=37
+[trace-call] handler=Call func_id=25492 name='core.base.semver_constraint.operator_length' descriptor.id=25492 args.count=2 bytecode_length=192
+[trace-call] handler=Call func_id=25505 name='core.base.semver_constraint.skip_requirement_space' descriptor.id=25505 args.count=3 bytecode_length=59
+[trace-call] handler=Call func_id=25504 name='core.base.semver_constraint.requirement_space' descriptor.id=25504 args.count=2 bytecode_length=37
+[trace-call] handler=Call func_id=25504 name='core.base.semver_constraint.requirement_space' descriptor.id=25504 args.count=2 bytecode_length=37
+[trace-call] handler=Call func_id=25504 name='core.base.semver_constraint.requirement_space' descriptor.id=25504 args.count=2 bytecode_length=37
+[trace-call] handler=Call func_id=25504 name='core.base.semver_constraint.requirement_space' descriptor.id=25504 args.count=2 bytecode_length=37
+[trace-call] handler=Call func_id=25504 name='core.base.semver_constraint.requirement_space' descriptor.id=25504 args.count=2 bytecode_length=37
+[trace-call] handler=Call func_id=25506 name='core.base.semver_constraint.slice_text' descriptor.id=25506 args.count=3 bytecode_length=94
+[trace-call] handler=Call func_id=21771 name='Text.from_bytes' descriptor.id=21771 args.count=1 bytecode_length=15
+[pc] Text.from_bytes pc=0 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(1), src: Reg(0) }
+[pc] Text.from_bytes pc=3 op=0x5b | r1=other r2=other r3=other | Call { dst: Reg(2), func_id: 21784, args: RegRange { start: Reg(1), count: 1 } }
+[trace-call] handler=Call func_id=21784 name='Text.from_utf8' descriptor.id=21784 args.count=1 bytecode_length=74
+[pc] Text.from_bytes pc=10 op=0x00 | r1=other r2=ptr(@0xc013c5f20 tid=516 vtag=0) r3=other | Mov { dst: Reg(3), src: Reg(2) }
+[pc] Text.from_bytes pc=13 op=0x59 | r1=other r2=ptr(@0xc013c5f20 tid=516 vtag=0) r3=ptr(@0xc013c5f20 tid=516 vtag=0) | Ret { value: Reg(3) }
+[trace-call] handler=Call func_id=21823 name='Text.new' descriptor.id=21823 args.count=0 bytecode_length=31
+[callm-flow] A-post-primitive method=Result.unwrap_or recv=ptr(0xc013c5f20 interior=false)
+[callm-flow] B-pre-array method=Result.unwrap_or
+[callm-flow] C-pre-variant-1 method=Result.unwrap_or
+[callm-flow] C0-carrier-block method=Result.unwrap_or heapcell=false tid=516
+[callm-flow] C1b-pre-shared-new method=Result.unwrap_or
+[callm-flow] C2-post-new-block method=unwrap_or
+[callm-flow] C3-pre-usersearch method=unwrap_or
+[trace-call] handler=Call func_id=25495 name='core.base.semver_constraint.parse_atom' descriptor.id=25495 args.count=2 bytecode_length=417
+[trace-call] handler=Call func_id=25492 name='core.base.semver_constraint.operator_length' descriptor.id=25492 args.count=2 bytecode_length=192
+[trace-call] handler=Call func_id=25505 name='core.base.semver_constraint.skip_requirement_space' descriptor.id=25505 args.count=3 bytecode_length=59
+[trace-call] handler=Call func_id=25504 name='core.base.semver_constraint.requirement_space' descriptor.id=25504 args.count=2 bytecode_length=37
+[trace-call] handler=Call func_id=25506 name='core.base.semver_constraint.slice_text' descriptor.id=25506 args.count=3 bytecode_length=94
+[trace-call] handler=Call func_id=21771 name='Text.from_bytes' descriptor.id=21771 args.count=1 bytecode_length=15
+[pc] Text.from_bytes pc=0 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(1), src: Reg(0) }
+[pc] Text.from_bytes pc=3 op=0x5b | r1=other r2=other r3=other | Call { dst: Reg(2), func_id: 21784, args: RegRange { start: Reg(1), count: 1 } }
+[trace-call] handler=Call func_id=21784 name='Text.from_utf8' descriptor.id=21784 args.count=1 bytecode_length=74
+[pc] Text.from_bytes pc=10 op=0x00 | r1=other r2=ptr(@0xc013c5710 tid=516 vtag=0) r3=other | Mov { dst: Reg(3), src: Reg(2) }
+[pc] Text.from_bytes pc=13 op=0x59 | r1=other r2=ptr(@0xc013c5710 tid=516 vtag=0) r3=ptr(@0xc013c5710 tid=516 vtag=0) | Ret { value: Reg(3) }
+[trace-call] handler=Call func_id=21823 name='Text.new' descriptor.id=21823 args.count=0 bytecode_length=31
+[callm-flow] A-post-primitive method=Result.unwrap_or recv=ptr(0xc013c5710 interior=false)
+[callm-flow] B-pre-array method=Result.unwrap_or
+[callm-flow] C-pre-variant-1 method=Result.unwrap_or
+[callm-flow] C0-carrier-block method=Result.unwrap_or heapcell=false tid=516
+[callm-flow] C1b-pre-shared-new method=Result.unwrap_or
+[callm-flow] C2-post-new-block method=unwrap_or
+[callm-flow] C3-pre-usersearch method=unwrap_or
+[trace-call] handler=Call func_id=25501 name='core.base.semver_constraint.parse_partial' descriptor.id=25501 args.count=3 bytecode_length=788
+[trace-call] handler=Call func_id=25509 name='core.base.semver_constraint.split_suffix' descriptor.id=25509 args.count=2 bytecode_length=165
+[trace-call] handler=Call func_id=25509 name='core.base.semver_constraint.split_suffix' descriptor.id=25509 args.count=2 bytecode_length=165
+[trace-call] handler=Call func_id=25508 name='core.base.semver_constraint.split_dot' descriptor.id=25508 args.count=1 bytecode_length=161
+[trace-call] handler=Call func_id=25506 name='core.base.semver_constraint.slice_text' descriptor.id=25506 args.count=3 bytecode_length=94
+[trace-call] handler=Call func_id=21771 name='Text.from_bytes' descriptor.id=21771 args.count=1 bytecode_length=15
+[pc] Text.from_bytes pc=0 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(1), src: Reg(0) }
+[pc] Text.from_bytes pc=3 op=0x5b | r1=other r2=other r3=other | Call { dst: Reg(2), func_id: 21784, args: RegRange { start: Reg(1), count: 1 } }
+[trace-call] handler=Call func_id=21784 name='Text.from_utf8' descriptor.id=21784 args.count=1 bytecode_length=74
+[pc] Text.from_bytes pc=10 op=0x00 | r1=other r2=ptr(@0xc013c4d50 tid=516 vtag=0) r3=other | Mov { dst: Reg(3), src: Reg(2) }
+[pc] Text.from_bytes pc=13 op=0x59 | r1=other r2=ptr(@0xc013c4d50 tid=516 vtag=0) r3=ptr(@0xc013c4d50 tid=516 vtag=0) | Ret { value: Reg(3) }
+[trace-call] handler=Call func_id=21823 name='Text.new' descriptor.id=21823 args.count=0 bytecode_length=31
+[callm-flow] A-post-primitive method=Result.unwrap_or recv=ptr(0xc013c4d50 interior=false)
+[callm-flow] B-pre-array method=Result.unwrap_or
+[callm-flow] C-pre-variant-1 method=Result.unwrap_or
+[callm-flow] C0-carrier-block method=Result.unwrap_or heapcell=false tid=516
+[callm-flow] C1b-pre-shared-new method=Result.unwrap_or
+[callm-flow] C2-post-new-block method=unwrap_or
+[callm-flow] C3-pre-usersearch method=unwrap_or
+[trace-call] handler=Call func_id=25506 name='core.base.semver_constraint.slice_text' descriptor.id=25506 args.count=3 bytecode_length=94
+[trace-call] handler=Call func_id=21771 name='Text.from_bytes' descriptor.id=21771 args.count=1 bytecode_length=15
+[pc] Text.from_bytes pc=0 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(1), src: Reg(0) }
+[pc] Text.from_bytes pc=3 op=0x5b | r1=other r2=other r3=other | Call { dst: Reg(2), func_id: 21784, args: RegRange { start: Reg(1), count: 1 } }
+[trace-call] handler=Call func_id=21784 name='Text.from_utf8' descriptor.id=21784 args.count=1 bytecode_length=74
+[pc] Text.from_bytes pc=10 op=0x00 | r1=other r2=ptr(@0xc013c6160 tid=516 vtag=0) r3=other | Mov { dst: Reg(3), src: Reg(2) }
+[pc] Text.from_bytes pc=13 op=0x59 | r1=other r2=ptr(@0xc013c6160 tid=516 vtag=0) r3=ptr(@0xc013c6160 tid=516 vtag=0) | Ret { value: Reg(3) }
+[trace-call] handler=Call func_id=21823 name='Text.new' descriptor.id=21823 args.count=0 bytecode_length=31
+[callm-flow] A-post-primitive method=Result.unwrap_or recv=ptr(0xc013c6160 interior=false)
+[callm-flow] B-pre-array method=Result.unwrap_or
+[callm-flow] C-pre-variant-1 method=Result.unwrap_or
+[callm-flow] C0-carrier-block method=Result.unwrap_or heapcell=false tid=516
+[callm-flow] C1b-pre-shared-new method=Result.unwrap_or
+[callm-flow] C2-post-new-block method=unwrap_or
+[callm-flow] C3-pre-usersearch method=unwrap_or
+[trace-call] handler=Call func_id=25498 name='core.base.semver_constraint.parse_component' descriptor.id=25498 args.count=1 bytecode_length=407
+[trace-call] handler=Call func_id=25484 name='core.base.semver_constraint.is_wildcard' descriptor.id=25484 args.count=1 bytecode_length=98
+[trace-call] handler=Call func_id=25498 name='core.base.semver_constraint.parse_component' descriptor.id=25498 args.count=1 bytecode_length=407
+[callm-flow] A-post-primitive method=Maybe.is_none recv=ptr(0xbe9d16ce0 interior=false)
+[callm-flow] B-pre-array method=Maybe.is_none
+[callm-flow] C-pre-variant-1 method=Maybe.is_none
+[callm-flow] C0-carrier-block method=Maybe.is_none heapcell=false tid=515
+[callm-flow] C1b-pre-shared-new method=Maybe.is_none
+[callm-flow] C2-post-new-block method=is_none
+[callm-flow] C3-pre-usersearch method=is_none
+[callm-flow] A-post-primitive method=Maybe.is_some recv=ptr(0xbe9d15780 interior=false)
+[callm-flow] B-pre-array method=Maybe.is_some
+[callm-flow] C-pre-variant-1 method=Maybe.is_some
+[callm-flow] C0-carrier-block method=Maybe.is_some heapcell=false tid=515
+[callm-flow] C1b-pre-shared-new method=Maybe.is_some
+[callm-flow] C2-post-new-block method=is_some
+[callm-flow] C3-pre-usersearch method=is_some
+[callm-flow] A-post-primitive method=Maybe.is_some recv=ptr(0xbe9d148c0 interior=false)
+[callm-flow] B-pre-array method=Maybe.is_some
+[callm-flow] C-pre-variant-1 method=Maybe.is_some
+[callm-flow] C0-carrier-block method=Maybe.is_some heapcell=false tid=515
+[callm-flow] C1b-pre-shared-new method=Maybe.is_some
+[callm-flow] C2-post-new-block method=is_some
+[callm-flow] C3-pre-usersearch method=is_some
+[trace-call] handler=Call func_id=25469 name='core.base.semver_constraint.and' descriptor.id=25469 args.count=2 bytecode_length=234
+[trace-call] handler=Call func_id=25505 name='core.base.semver_constraint.skip_requirement_space' descriptor.id=25505 args.count=3 bytecode_length=59
+[trace-call] handler=Call func_id=25504 name='core.base.semver_constraint.requirement_space' descriptor.id=25504 args.count=2 bytecode_length=37
+[trace-call] handler=Call func_id=25505 name='core.base.semver_constraint.skip_requirement_space' descriptor.id=25505 args.count=3 bytecode_length=59
+[trace-call] handler=Call func_id=25504 name='core.base.semver_constraint.requirement_space' descriptor.id=25504 args.count=2 bytecode_length=37
+[trace-call] handler=Call func_id=25504 name='core.base.semver_constraint.requirement_space' descriptor.id=25504 args.count=2 bytecode_length=37
+[trace-call] handler=Call func_id=25492 name='core.base.semver_constraint.operator_length' descriptor.id=25492 args.count=2 bytecode_length=192
+[trace-call] handler=Call func_id=25505 name='core.base.semver_constraint.skip_requirement_space' descriptor.id=25505 args.count=3 bytecode_length=59
+[trace-call] handler=Call func_id=25504 name='core.base.semver_constraint.requirement_space' descriptor.id=25504 args.count=2 bytecode_length=37
+[trace-call] handler=Call func_id=25504 name='core.base.semver_constraint.requirement_space' descriptor.id=25504 args.count=2 bytecode_length=37
+[trace-call] handler=Call func_id=25506 name='core.base.semver_constraint.slice_text' descriptor.id=25506 args.count=3 bytecode_length=94
+[trace-call] handler=Call func_id=21771 name='Text.from_bytes' descriptor.id=21771 args.count=1 bytecode_length=15
+[pc] Text.from_bytes pc=0 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(1), src: Reg(0) }
+[pc] Text.from_bytes pc=3 op=0x5b | r1=other r2=other r3=other | Call { dst: Reg(2), func_id: 21784, args: RegRange { start: Reg(1), count: 1 } }
+[trace-call] handler=Call func_id=21784 name='Text.from_utf8' descriptor.id=21784 args.count=1 bytecode_length=74
+[pc] Text.from_bytes pc=10 op=0x00 | r1=other r2=ptr(@0xc013c6610 tid=516 vtag=0) r3=other | Mov { dst: Reg(3), src: Reg(2) }
+[pc] Text.from_bytes pc=13 op=0x59 | r1=other r2=ptr(@0xc013c6610 tid=516 vtag=0) r3=ptr(@0xc013c6610 tid=516 vtag=0) | Ret { value: Reg(3) }
+[trace-call] handler=Call func_id=21823 name='Text.new' descriptor.id=21823 args.count=0 bytecode_length=31
+[callm-flow] A-post-primitive method=Result.unwrap_or recv=ptr(0xc013c6610 interior=false)
+[callm-flow] B-pre-array method=Result.unwrap_or
+[callm-flow] C-pre-variant-1 method=Result.unwrap_or
+[callm-flow] C0-carrier-block method=Result.unwrap_or heapcell=false tid=516
+[callm-flow] C1b-pre-shared-new method=Result.unwrap_or
+[callm-flow] C2-post-new-block method=unwrap_or
+[callm-flow] C3-pre-usersearch method=unwrap_or
+[trace-call] handler=Call func_id=25495 name='core.base.semver_constraint.parse_atom' descriptor.id=25495 args.count=2 bytecode_length=417
+[trace-call] handler=Call func_id=25492 name='core.base.semver_constraint.operator_length' descriptor.id=25492 args.count=2 bytecode_length=192
+[trace-call] handler=Call func_id=25505 name='core.base.semver_constraint.skip_requirement_space' descriptor.id=25505 args.count=3 bytecode_length=59
+[trace-call] handler=Call func_id=25504 name='core.base.semver_constraint.requirement_space' descriptor.id=25504 args.count=2 bytecode_length=37
+[trace-call] handler=Call func_id=25506 name='core.base.semver_constraint.slice_text' descriptor.id=25506 args.count=3 bytecode_length=94
+[trace-call] handler=Call func_id=21771 name='Text.from_bytes' descriptor.id=21771 args.count=1 bytecode_length=15
+[pc] Text.from_bytes pc=0 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(1), src: Reg(0) }
+[pc] Text.from_bytes pc=3 op=0x5b | r1=other r2=other r3=other | Call { dst: Reg(2), func_id: 21784, args: RegRange { start: Reg(1), count: 1 } }
+[trace-call] handler=Call func_id=21784 name='Text.from_utf8' descriptor.id=21784 args.count=1 bytecode_length=74
+[pc] Text.from_bytes pc=10 op=0x00 | r1=other r2=ptr(@0xc013c7270 tid=516 vtag=0) r3=other | Mov { dst: Reg(3), src: Reg(2) }
+[pc] Text.from_bytes pc=13 op=0x59 | r1=other r2=ptr(@0xc013c7270 tid=516 vtag=0) r3=ptr(@0xc013c7270 tid=516 vtag=0) | Ret { value: Reg(3) }
+[trace-call] handler=Call func_id=21823 name='Text.new' descriptor.id=21823 args.count=0 bytecode_length=31
+[callm-flow] A-post-primitive method=Result.unwrap_or recv=ptr(0xc013c7270 interior=false)
+[callm-flow] B-pre-array method=Result.unwrap_or
+[callm-flow] C-pre-variant-1 method=Result.unwrap_or
+[callm-flow] C0-carrier-block method=Result.unwrap_or heapcell=false tid=516
+[callm-flow] C1b-pre-shared-new method=Result.unwrap_or
+[callm-flow] C2-post-new-block method=unwrap_or
+[callm-flow] C3-pre-usersearch method=unwrap_or
+[trace-call] handler=Call func_id=25501 name='core.base.semver_constraint.parse_partial' descriptor.id=25501 args.count=3 bytecode_length=788
+[trace-call] handler=Call func_id=25509 name='core.base.semver_constraint.split_suffix' descriptor.id=25509 args.count=2 bytecode_length=165
+[trace-call] handler=Call func_id=25509 name='core.base.semver_constraint.split_suffix' descriptor.id=25509 args.count=2 bytecode_length=165
+[trace-call] handler=Call func_id=25508 name='core.base.semver_constraint.split_dot' descriptor.id=25508 args.count=1 bytecode_length=161
+[trace-call] handler=Call func_id=25506 name='core.base.semver_constraint.slice_text' descriptor.id=25506 args.count=3 bytecode_length=94
+[trace-call] handler=Call func_id=21771 name='Text.from_bytes' descriptor.id=21771 args.count=1 bytecode_length=15
+[pc] Text.from_bytes pc=0 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(1), src: Reg(0) }
+[pc] Text.from_bytes pc=3 op=0x5b | r1=other r2=other r3=other | Call { dst: Reg(2), func_id: 21784, args: RegRange { start: Reg(1), count: 1 } }
+[trace-call] handler=Call func_id=21784 name='Text.from_utf8' descriptor.id=21784 args.count=1 bytecode_length=74
+[pc] Text.from_bytes pc=10 op=0x00 | r1=other r2=ptr(@0xc013c7f60 tid=516 vtag=0) r3=other | Mov { dst: Reg(3), src: Reg(2) }
+[pc] Text.from_bytes pc=13 op=0x59 | r1=other r2=ptr(@0xc013c7f60 tid=516 vtag=0) r3=ptr(@0xc013c7f60 tid=516 vtag=0) | Ret { value: Reg(3) }
+[trace-call] handler=Call func_id=21823 name='Text.new' descriptor.id=21823 args.count=0 bytecode_length=31
+[callm-flow] A-post-primitive method=Result.unwrap_or recv=ptr(0xc013c7f60 interior=false)
+[callm-flow] B-pre-array method=Result.unwrap_or
+[callm-flow] C-pre-variant-1 method=Result.unwrap_or
+[callm-flow] C0-carrier-block method=Result.unwrap_or heapcell=false tid=516
+[callm-flow] C1b-pre-shared-new method=Result.unwrap_or
+[callm-flow] C2-post-new-block method=unwrap_or
+[callm-flow] C3-pre-usersearch method=unwrap_or
+[trace-call] handler=Call func_id=25498 name='core.base.semver_constraint.parse_component' descriptor.id=25498 args.count=1 bytecode_length=407
+[callm-flow] A-post-primitive method=Maybe.is_none recv=ptr(0xbe9d17aa0 interior=false)
+[callm-flow] B-pre-array method=Maybe.is_none
+[callm-flow] C-pre-variant-1 method=Maybe.is_none
+[callm-flow] C0-carrier-block method=Maybe.is_none heapcell=false tid=515
+[callm-flow] C1b-pre-shared-new method=Maybe.is_none
+[callm-flow] C2-post-new-block method=is_none
+[callm-flow] C3-pre-usersearch method=is_none
+[callm-flow] A-post-primitive method=Maybe.is_some recv=ptr(0xbe9d179a0 interior=false)
+[callm-flow] B-pre-array method=Maybe.is_some
+[callm-flow] C-pre-variant-1 method=Maybe.is_some
+[callm-flow] C0-carrier-block method=Maybe.is_some heapcell=false tid=515
+[callm-flow] C1b-pre-shared-new method=Maybe.is_some
+[callm-flow] C2-post-new-block method=is_some
+[callm-flow] C3-pre-usersearch method=is_some
+[callm-flow] A-post-primitive method=Maybe.is_some recv=ptr(0xbe9d16660 interior=false)
+[callm-flow] B-pre-array method=Maybe.is_some
+[callm-flow] C-pre-variant-1 method=Maybe.is_some
+[callm-flow] C0-carrier-block method=Maybe.is_some heapcell=false tid=515
+[callm-flow] C1b-pre-shared-new method=Maybe.is_some
+[callm-flow] C2-post-new-block method=is_some
+[callm-flow] C3-pre-usersearch method=is_some
+[trace-call] handler=Call func_id=25469 name='core.base.semver_constraint.and' descriptor.id=25469 args.count=2 bytecode_length=234
+[callm-flow] A-post-primitive method=Heap.new recv=other
+[callm-flow] B-pre-array method=Heap.new
+[callm-flow] C-pre-variant-1 method=Heap.new
+[callm-flow] C1b-pre-shared-new method=Heap.new
+[callm-flow] A-post-primitive method=Heap.new recv=other
+[callm-flow] B-pre-array method=Heap.new
+[callm-flow] C-pre-variant-1 method=Heap.new
+[callm-flow] C1b-pre-shared-new method=Heap.new
+[trace-call] handler=Call func_id=25505 name='core.base.semver_constraint.skip_requirement_space' descriptor.id=25505 args.count=3 bytecode_length=59
+[callm-flow] A-post-primitive method=Result.unwrap recv=ptr(0xc013c5fb0 interior=false)
+[callm-flow] B-pre-array method=Result.unwrap
+[callm-flow] C-pre-variant-1 method=Result.unwrap
+[callm-flow] C0-carrier-block method=Result.unwrap heapcell=false tid=516
+[callm-flow] C1b-pre-shared-new method=Result.unwrap
+[callm-flow] C2-post-new-block method=unwrap
+[callm-flow] C3-pre-usersearch method=unwrap
+[trace-call] handler=Call func_id=25482 name='core.base.semver_constraint.format_constraint' descriptor.id=25482 args.count=1 bytecode_length=15
+[trace-call] handler=Call func_id=25483 name='core.base.semver_constraint.format_impl' descriptor.id=25483 args.count=1 bytecode_length=659
+[callm-flow] A-post-primitive method=Heap.deref recv=ptr(0xc21168e20 interior=false)
+[callm-flow] B-pre-array method=Heap.deref
+[callm-flow] C-pre-variant-1 method=Heap.deref
+[callm-flow] C0-carrier-block method=Heap.deref heapcell=true tid=20728688
+[callm-flow] C1a-heap-carrier method=Heap.deref
+[trace-call] handler=Call func_id=25483 name='core.base.semver_constraint.format_impl' descriptor.id=25483 args.count=1 bytecode_length=659
+[trace-call] handler=Call func_id=25481 name='core.base.semver_constraint.format_comparator' descriptor.id=25481 args.count=1 bytecode_length=492
+[callm-flow] A-post-primitive method=Text.concat recv=other
+[callm-flow] B-pre-array method=Text.concat
+[callm-flow] C-pre-variant-1 method=Text.concat
+[callm-flow] C1b-pre-shared-new method=Text.concat
+[callm-flow] C2-post-new-block method=concat
+[callm-flow] C3-pre-usersearch method=concat
+[pc] Text.concat pc=0 op=0x66 | r1=other r2=other r3=other | Len { dst: Reg(3), arr: Reg(1), type_hint: 5 }
+[pc] Text.concat pc=4 op=0x02 | r1=other r2=other r3=int(1) | LoadI { dst: Reg(4), value: 0 }
+[pc] Text.concat pc=7 op=0x40 | r1=other r2=other r3=int(1) | CmpI { op: Eq, dst: Reg(5), a: Reg(3), b: Reg(4) }
+[pc] Text.concat pc=11 op=0x52 | r1=other r2=other r3=int(1) | JmpNot { cond: Reg(5), offset: 14 }
+[pc] Text.concat pc=28 op=0x06 | r1=other r2=other r3=int(1) | LoadUnit { dst: Reg(2) }
+[pc] Text.concat pc=30 op=0x66 | r1=other r2=other r3=int(1) | Len { dst: Reg(4), arr: Reg(0), type_hint: 5 }
+[pc] Text.concat pc=34 op=0x02 | r1=other r2=other r3=int(1) | LoadI { dst: Reg(6), value: 0 }
+[pc] Text.concat pc=37 op=0x40 | r1=other r2=other r3=int(1) | CmpI { op: Eq, dst: Reg(7), a: Reg(4), b: Reg(6) }
+[pc] Text.concat pc=41 op=0x52 | r1=other r2=other r3=int(1) | JmpNot { cond: Reg(7), offset: 14 }
+[pc] Text.concat pc=58 op=0x06 | r1=other r2=other r3=int(1) | LoadUnit { dst: Reg(3) }
+[pc] Text.concat pc=60 op=0x66 | r1=other r2=other r3=other | Len { dst: Reg(4), arr: Reg(0), type_hint: 5 }
+[pc] Text.concat pc=64 op=0x66 | r1=other r2=other r3=other | Len { dst: Reg(6), arr: Reg(1), type_hint: 5 }
+[pc] Text.concat pc=68 op=0x10 | r1=other r2=other r3=other | BinaryI { op: Add, dst: Reg(8), a: Reg(4), b: Reg(6) }
+[pc] Text.concat pc=72 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(9), src: Reg(8) }
+[pc] Text.concat pc=75 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(10), src: Reg(9) }
+[pc] Text.concat pc=78 op=0x5b | r1=other r2=other r3=other | Call { dst: Reg(6), func_id: 21898, args: RegRange { start: Reg(10), count: 1 } }
+[trace-call] handler=Call func_id=21898 name='Text.with_capacity' descriptor.id=21898 args.count=1 bytecode_length=135
+[pc] Text.concat pc=85 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(11), src: Reg(6) }
+[pc] Text.concat pc=88 op=0x79 | r1=other r2=other r3=other | TextExtended { sub_op: 52, operands: [4, 0] }
+[pc] Text.concat pc=93 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(12), src: Reg(4) }
+[pc] Text.concat pc=96 op=0x02 | r1=other r2=other r3=other | LoadI { dst: Reg(13), value: 0 }
+[pc] Text.concat pc=99 op=0x66 | r1=other r2=other r3=other | Len { dst: Reg(14), arr: Reg(12), type_hint: 0 }
+[pc] Text.concat pc=103 op=0xcc | r1=other r2=other r3=other | NewRange { dst: Reg(15), start: Reg(13), end: Reg(14), inclusive: false }
+[pc] Text.concat pc=108 op=0xc0 | r1=other r2=other r3=other | IterNew { dst: Reg(14), iterable: Reg(15) }
+[pc] Text.concat pc=111 op=0xc1 | r1=other r2=other r3=other | IterNext { dst: Reg(13), has_next: Reg(16), iter: Reg(14) }
+[pc] Text.concat pc=115 op=0x52 | r1=other r2=other r3=other | JmpNot { cond: Reg(16), offset: 23 }
+[pc] Text.concat pc=118 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(17), src: Reg(13) }
+[pc] Text.concat pc=121 op=0x64 | r1=other r2=other r3=other | GetE { dst: Reg(18), arr: Reg(12), idx: Reg(17) }
+[pc] Text.concat pc=125 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(19), src: Reg(18) }
+[pc] Text.concat pc=128 op=0x71 | r1=other r2=other r3=other | RefMut { dst: Reg(20), src: Reg(11) }
+[pc] Text.concat pc=131 op=0x5d | r1=other r2=other r3=other | CallM { dst: Reg(18), receiver: Reg(20), method_id: 1017065, args: RegRange { start: Reg(19), count: 1 } }
+[pc] Text.concat pc=139 op=0x50 | r1=other r2=other r3=other | Jmp { offset: -30 }
+[pc] Text.concat pc=111 op=0xc1 | r1=other r2=other r3=other | IterNext { dst: Reg(13), has_next: Reg(16), iter: Reg(14) }
+[pc] Text.concat pc=115 op=0x52 | r1=other r2=other r3=other | JmpNot { cond: Reg(16), offset: 23 }
+[pc] Text.concat pc=118 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(17), src: Reg(13) }
+[pc] Text.concat pc=121 op=0x64 | r1=other r2=other r3=other | GetE { dst: Reg(18), arr: Reg(12), idx: Reg(17) }
+[pc] Text.concat pc=125 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(19), src: Reg(18) }
+[pc] Text.concat pc=128 op=0x71 | r1=other r2=other r3=other | RefMut { dst: Reg(20), src: Reg(11) }
+[pc] Text.concat pc=131 op=0x5d | r1=other r2=other r3=other | CallM { dst: Reg(18), receiver: Reg(20), method_id: 1017065, args: RegRange { start: Reg(19), count: 1 } }
+[pc] Text.concat pc=139 op=0x50 | r1=other r2=other r3=other | Jmp { offset: -30 }
+[pc] Text.concat pc=111 op=0xc1 | r1=other r2=other r3=other | IterNext { dst: Reg(13), has_next: Reg(16), iter: Reg(14) }
+[pc] Text.concat pc=115 op=0x52 | r1=other r2=other r3=other | JmpNot { cond: Reg(16), offset: 23 }
+[pc] Text.concat pc=141 op=0x06 | r1=other r2=other r3=other | LoadUnit { dst: Reg(16) }
+[pc] Text.concat pc=143 op=0x79 | r1=other r2=other r3=other | TextExtended { sub_op: 52, operands: [13, 1] }
+[pc] Text.concat pc=148 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(21), src: Reg(13) }
+[pc] Text.concat pc=151 op=0x02 | r1=other r2=other r3=other | LoadI { dst: Reg(14), value: 0 }
+[pc] Text.concat pc=154 op=0x66 | r1=other r2=other r3=other | Len { dst: Reg(15), arr: Reg(21), type_hint: 0 }
+[pc] Text.concat pc=158 op=0xcc | r1=other r2=other r3=other | NewRange { dst: Reg(17), start: Reg(14), end: Reg(15), inclusive: false }
+[pc] Text.concat pc=163 op=0xc0 | r1=other r2=other r3=other | IterNew { dst: Reg(15), iterable: Reg(17) }
+[pc] Text.concat pc=166 op=0xc1 | r1=other r2=other r3=other | IterNext { dst: Reg(14), has_next: Reg(18), iter: Reg(15) }
+[pc] Text.concat pc=170 op=0x52 | r1=other r2=other r3=other | JmpNot { cond: Reg(18), offset: 23 }
+[pc] Text.concat pc=173 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(22), src: Reg(14) }
+[pc] Text.concat pc=176 op=0x64 | r1=other r2=other r3=other | GetE { dst: Reg(20), arr: Reg(21), idx: Reg(22) }
+[pc] Text.concat pc=180 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(23), src: Reg(20) }
+[pc] Text.concat pc=183 op=0x71 | r1=other r2=other r3=other | RefMut { dst: Reg(24), src: Reg(11) }
+[pc] Text.concat pc=186 op=0x5d | r1=other r2=other r3=other | CallM { dst: Reg(20), receiver: Reg(24), method_id: 1017065, args: RegRange { start: Reg(23), count: 1 } }
+[pc] Text.concat pc=194 op=0x50 | r1=other r2=other r3=other | Jmp { offset: -30 }
+[pc] Text.concat pc=166 op=0xc1 | r1=other r2=other r3=other | IterNext { dst: Reg(14), has_next: Reg(18), iter: Reg(15) }
+[pc] Text.concat pc=170 op=0x52 | r1=other r2=other r3=other | JmpNot { cond: Reg(18), offset: 23 }
+[pc] Text.concat pc=196 op=0x06 | r1=other r2=other r3=other | LoadUnit { dst: Reg(18) }
+[pc] Text.concat pc=198 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(14), src: Reg(11) }
+[pc] Text.concat pc=201 op=0x77 | r1=other r2=other r3=other | DropRef { src: Reg(21) }
+[pc] Text.concat pc=203 op=0x77 | r1=other r2=other r3=other | DropRef { src: Reg(12) }
+[pc] Text.concat pc=205 op=0x77 | r1=other r2=other r3=other | DropRef { src: Reg(9) }
+[pc] Text.concat pc=207 op=0x59 | r1=other r2=other r3=other | Ret { value: Reg(14) }
+[callm-flow] A-post-primitive method=Text.concat recv=other
+[callm-flow] B-pre-array method=Text.concat
+[callm-flow] C-pre-variant-1 method=Text.concat
+[callm-flow] C1b-pre-shared-new method=Text.concat
+[callm-flow] C2-post-new-block method=concat
+[callm-flow] C3-pre-usersearch method=concat
+[pc] Text.concat pc=0 op=0x66 | r1=other r2=other r3=other | Len { dst: Reg(3), arr: Reg(1), type_hint: 5 }
+[pc] Text.concat pc=4 op=0x02 | r1=other r2=other r3=int(2) | LoadI { dst: Reg(4), value: 0 }
+[pc] Text.concat pc=7 op=0x40 | r1=other r2=other r3=int(2) | CmpI { op: Eq, dst: Reg(5), a: Reg(3), b: Reg(4) }
+[pc] Text.concat pc=11 op=0x52 | r1=other r2=other r3=int(2) | JmpNot { cond: Reg(5), offset: 14 }
+[pc] Text.concat pc=28 op=0x06 | r1=other r2=other r3=int(2) | LoadUnit { dst: Reg(2) }
+[pc] Text.concat pc=30 op=0x66 | r1=other r2=other r3=int(2) | Len { dst: Reg(4), arr: Reg(0), type_hint: 5 }
+[pc] Text.concat pc=34 op=0x02 | r1=other r2=other r3=int(2) | LoadI { dst: Reg(6), value: 0 }
+[pc] Text.concat pc=37 op=0x40 | r1=other r2=other r3=int(2) | CmpI { op: Eq, dst: Reg(7), a: Reg(4), b: Reg(6) }
+[pc] Text.concat pc=41 op=0x52 | r1=other r2=other r3=int(2) | JmpNot { cond: Reg(7), offset: 14 }
+[pc] Text.concat pc=58 op=0x06 | r1=other r2=other r3=int(2) | LoadUnit { dst: Reg(3) }
+[pc] Text.concat pc=60 op=0x66 | r1=other r2=other r3=other | Len { dst: Reg(4), arr: Reg(0), type_hint: 5 }
+[pc] Text.concat pc=64 op=0x66 | r1=other r2=other r3=other | Len { dst: Reg(6), arr: Reg(1), type_hint: 5 }
+[pc] Text.concat pc=68 op=0x10 | r1=other r2=other r3=other | BinaryI { op: Add, dst: Reg(8), a: Reg(4), b: Reg(6) }
+[pc] Text.concat pc=72 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(9), src: Reg(8) }
+[pc] Text.concat pc=75 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(10), src: Reg(9) }
+[pc] Text.concat pc=78 op=0x5b | r1=other r2=other r3=other | Call { dst: Reg(6), func_id: 21898, args: RegRange { start: Reg(10), count: 1 } }
+[trace-call] handler=Call func_id=21898 name='Text.with_capacity' descriptor.id=21898 args.count=1 bytecode_length=135
+[pc] Text.concat pc=85 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(11), src: Reg(6) }
+[pc] Text.concat pc=88 op=0x79 | r1=other r2=other r3=other | TextExtended { sub_op: 52, operands: [4, 0] }
+[pc] Text.concat pc=93 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(12), src: Reg(4) }
+[pc] Text.concat pc=96 op=0x02 | r1=other r2=other r3=other | LoadI { dst: Reg(13), value: 0 }
+[pc] Text.concat pc=99 op=0x66 | r1=other r2=other r3=other | Len { dst: Reg(14), arr: Reg(12), type_hint: 0 }
+[pc] Text.concat pc=103 op=0xcc | r1=other r2=other r3=other | NewRange { dst: Reg(15), start: Reg(13), end: Reg(14), inclusive: false }
+[pc] Text.concat pc=108 op=0xc0 | r1=other r2=other r3=other | IterNew { dst: Reg(14), iterable: Reg(15) }
+[pc] Text.concat pc=111 op=0xc1 | r1=other r2=other r3=other | IterNext { dst: Reg(13), has_next: Reg(16), iter: Reg(14) }
+[pc] Text.concat pc=115 op=0x52 | r1=other r2=other r3=other | JmpNot { cond: Reg(16), offset: 23 }
+[pc] Text.concat pc=118 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(17), src: Reg(13) }
+[pc] Text.concat pc=121 op=0x64 | r1=other r2=other r3=other | GetE { dst: Reg(18), arr: Reg(12), idx: Reg(17) }
+[pc] Text.concat pc=125 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(19), src: Reg(18) }
+[pc] Text.concat pc=128 op=0x71 | r1=other r2=other r3=other | RefMut { dst: Reg(20), src: Reg(11) }
+[pc] Text.concat pc=131 op=0x5d | r1=other r2=other r3=other | CallM { dst: Reg(18), receiver: Reg(20), method_id: 1017065, args: RegRange { start: Reg(19), count: 1 } }
+[pc] Text.concat pc=139 op=0x50 | r1=other r2=other r3=other | Jmp { offset: -30 }
+[pc] Text.concat pc=111 op=0xc1 | r1=other r2=other r3=other | IterNext { dst: Reg(13), has_next: Reg(16), iter: Reg(14) }
+[pc] Text.concat pc=115 op=0x52 | r1=other r2=other r3=other | JmpNot { cond: Reg(16), offset: 23 }
+[pc] Text.concat pc=118 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(17), src: Reg(13) }
+[pc] Text.concat pc=121 op=0x64 | r1=other r2=other r3=other | GetE { dst: Reg(18), arr: Reg(12), idx: Reg(17) }
+[pc] Text.concat pc=125 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(19), src: Reg(18) }
+[pc] Text.concat pc=128 op=0x71 | r1=other r2=other r3=other | RefMut { dst: Reg(20), src: Reg(11) }
+[pc] Text.concat pc=131 op=0x5d | r1=other r2=other r3=other | CallM { dst: Reg(18), receiver: Reg(20), method_id: 1017065, args: RegRange { start: Reg(19), count: 1 } }
+[pc] Text.concat pc=139 op=0x50 | r1=other r2=other r3=other | Jmp { offset: -30 }
+[pc] Text.concat pc=111 op=0xc1 | r1=other r2=other r3=other | IterNext { dst: Reg(13), has_next: Reg(16), iter: Reg(14) }
+[pc] Text.concat pc=115 op=0x52 | r1=other r2=other r3=other | JmpNot { cond: Reg(16), offset: 23 }
+[pc] Text.concat pc=118 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(17), src: Reg(13) }
+[pc] Text.concat pc=121 op=0x64 | r1=other r2=other r3=other | GetE { dst: Reg(18), arr: Reg(12), idx: Reg(17) }
+[pc] Text.concat pc=125 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(19), src: Reg(18) }
+[pc] Text.concat pc=128 op=0x71 | r1=other r2=other r3=other | RefMut { dst: Reg(20), src: Reg(11) }
+[pc] Text.concat pc=131 op=0x5d | r1=other r2=other r3=other | CallM { dst: Reg(18), receiver: Reg(20), method_id: 1017065, args: RegRange { start: Reg(19), count: 1 } }
+[pc] Text.concat pc=139 op=0x50 | r1=other r2=other r3=other | Jmp { offset: -30 }
+[pc] Text.concat pc=111 op=0xc1 | r1=other r2=other r3=other | IterNext { dst: Reg(13), has_next: Reg(16), iter: Reg(14) }
+[pc] Text.concat pc=115 op=0x52 | r1=other r2=other r3=other | JmpNot { cond: Reg(16), offset: 23 }
+[pc] Text.concat pc=141 op=0x06 | r1=other r2=other r3=other | LoadUnit { dst: Reg(16) }
+[pc] Text.concat pc=143 op=0x79 | r1=other r2=other r3=other | TextExtended { sub_op: 52, operands: [13, 1] }
+[pc] Text.concat pc=148 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(21), src: Reg(13) }
+[pc] Text.concat pc=151 op=0x02 | r1=other r2=other r3=other | LoadI { dst: Reg(14), value: 0 }
+[pc] Text.concat pc=154 op=0x66 | r1=other r2=other r3=other | Len { dst: Reg(15), arr: Reg(21), type_hint: 0 }
+[pc] Text.concat pc=158 op=0xcc | r1=other r2=other r3=other | NewRange { dst: Reg(17), start: Reg(14), end: Reg(15), inclusive: false }
+[pc] Text.concat pc=163 op=0xc0 | r1=other r2=other r3=other | IterNew { dst: Reg(15), iterable: Reg(17) }
+[pc] Text.concat pc=166 op=0xc1 | r1=other r2=other r3=other | IterNext { dst: Reg(14), has_next: Reg(18), iter: Reg(15) }
+[pc] Text.concat pc=170 op=0x52 | r1=other r2=other r3=other | JmpNot { cond: Reg(18), offset: 23 }
+[pc] Text.concat pc=173 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(22), src: Reg(14) }
+[pc] Text.concat pc=176 op=0x64 | r1=other r2=other r3=other | GetE { dst: Reg(20), arr: Reg(21), idx: Reg(22) }
+[pc] Text.concat pc=180 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(23), src: Reg(20) }
+[pc] Text.concat pc=183 op=0x71 | r1=other r2=other r3=other | RefMut { dst: Reg(24), src: Reg(11) }
+[pc] Text.concat pc=186 op=0x5d | r1=other r2=other r3=other | CallM { dst: Reg(20), receiver: Reg(24), method_id: 1017065, args: RegRange { start: Reg(23), count: 1 } }
+[pc] Text.concat pc=194 op=0x50 | r1=other r2=other r3=other | Jmp { offset: -30 }
+[pc] Text.concat pc=166 op=0xc1 | r1=other r2=other r3=other | IterNext { dst: Reg(14), has_next: Reg(18), iter: Reg(15) }
+[pc] Text.concat pc=170 op=0x52 | r1=other r2=other r3=other | JmpNot { cond: Reg(18), offset: 23 }
+[pc] Text.concat pc=173 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(22), src: Reg(14) }
+[pc] Text.concat pc=176 op=0x64 | r1=other r2=other r3=other | GetE { dst: Reg(20), arr: Reg(21), idx: Reg(22) }
+[pc] Text.concat pc=180 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(23), src: Reg(20) }
+[pc] Text.concat pc=183 op=0x71 | r1=other r2=other r3=other | RefMut { dst: Reg(24), src: Reg(11) }
+[pc] Text.concat pc=186 op=0x5d | r1=other r2=other r3=other | CallM { dst: Reg(20), receiver: Reg(24), method_id: 1017065, args: RegRange { start: Reg(23), count: 1 } }
+[pc] Text.concat pc=194 op=0x50 | r1=other r2=other r3=other | Jmp { offset: -30 }
+[pc] Text.concat pc=166 op=0xc1 | r1=other r2=other r3=other | IterNext { dst: Reg(14), has_next: Reg(18), iter: Reg(15) }
+[pc] Text.concat pc=170 op=0x52 | r1=other r2=other r3=other | JmpNot { cond: Reg(18), offset: 23 }
+[pc] Text.concat pc=196 op=0x06 | r1=other r2=other r3=other | LoadUnit { dst: Reg(18) }
+[pc] Text.concat pc=198 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(14), src: Reg(11) }
+[pc] Text.concat pc=201 op=0x77 | r1=other r2=other r3=other | DropRef { src: Reg(21) }
+[pc] Text.concat pc=203 op=0x77 | r1=other r2=other r3=other | DropRef { src: Reg(12) }
+[pc] Text.concat pc=205 op=0x77 | r1=other r2=other r3=other | DropRef { src: Reg(9) }
+[pc] Text.concat pc=207 op=0x59 | r1=other r2=other r3=other | Ret { value: Reg(14) }
+[callm-flow] A-post-primitive method=Text.concat recv=other
+[callm-flow] B-pre-array method=Text.concat
+[callm-flow] C-pre-variant-1 method=Text.concat
+[callm-flow] C1b-pre-shared-new method=Text.concat
+[callm-flow] C2-post-new-block method=concat
+[callm-flow] C3-pre-usersearch method=concat
+[pc] Text.concat pc=0 op=0x66 | r1=other r2=other r3=other | Len { dst: Reg(3), arr: Reg(1), type_hint: 5 }
+[pc] Text.concat pc=4 op=0x02 | r1=other r2=other r3=int(2) | LoadI { dst: Reg(4), value: 0 }
+[pc] Text.concat pc=7 op=0x40 | r1=other r2=other r3=int(2) | CmpI { op: Eq, dst: Reg(5), a: Reg(3), b: Reg(4) }
+[pc] Text.concat pc=11 op=0x52 | r1=other r2=other r3=int(2) | JmpNot { cond: Reg(5), offset: 14 }
+[pc] Text.concat pc=28 op=0x06 | r1=other r2=other r3=int(2) | LoadUnit { dst: Reg(2) }
+[pc] Text.concat pc=30 op=0x66 | r1=other r2=other r3=int(2) | Len { dst: Reg(4), arr: Reg(0), type_hint: 5 }
+[pc] Text.concat pc=34 op=0x02 | r1=other r2=other r3=int(2) | LoadI { dst: Reg(6), value: 0 }
+[pc] Text.concat pc=37 op=0x40 | r1=other r2=other r3=int(2) | CmpI { op: Eq, dst: Reg(7), a: Reg(4), b: Reg(6) }
+[pc] Text.concat pc=41 op=0x52 | r1=other r2=other r3=int(2) | JmpNot { cond: Reg(7), offset: 14 }
+[pc] Text.concat pc=58 op=0x06 | r1=other r2=other r3=int(2) | LoadUnit { dst: Reg(3) }
+[pc] Text.concat pc=60 op=0x66 | r1=other r2=other r3=other | Len { dst: Reg(4), arr: Reg(0), type_hint: 5 }
+[pc] Text.concat pc=64 op=0x66 | r1=other r2=other r3=other | Len { dst: Reg(6), arr: Reg(1), type_hint: 5 }
+[pc] Text.concat pc=68 op=0x10 | r1=other r2=other r3=other | BinaryI { op: Add, dst: Reg(8), a: Reg(4), b: Reg(6) }
+[pc] Text.concat pc=72 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(9), src: Reg(8) }
+[pc] Text.concat pc=75 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(10), src: Reg(9) }
+[pc] Text.concat pc=78 op=0x5b | r1=other r2=other r3=other | Call { dst: Reg(6), func_id: 21898, args: RegRange { start: Reg(10), count: 1 } }
+[trace-call] handler=Call func_id=21898 name='Text.with_capacity' descriptor.id=21898 args.count=1 bytecode_length=135
+[pc] Text.concat pc=85 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(11), src: Reg(6) }
+[pc] Text.concat pc=88 op=0x79 | r1=other r2=other r3=other | TextExtended { sub_op: 52, operands: [4, 0] }
+[pc] Text.concat pc=93 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(12), src: Reg(4) }
+[pc] Text.concat pc=96 op=0x02 | r1=other r2=other r3=other | LoadI { dst: Reg(13), value: 0 }
+[pc] Text.concat pc=99 op=0x66 | r1=other r2=other r3=other | Len { dst: Reg(14), arr: Reg(12), type_hint: 0 }
+[pc] Text.concat pc=103 op=0xcc | r1=other r2=other r3=other | NewRange { dst: Reg(15), start: Reg(13), end: Reg(14), inclusive: false }
+[pc] Text.concat pc=108 op=0xc0 | r1=other r2=other r3=other | IterNew { dst: Reg(14), iterable: Reg(15) }
+[pc] Text.concat pc=111 op=0xc1 | r1=other r2=other r3=other | IterNext { dst: Reg(13), has_next: Reg(16), iter: Reg(14) }
+[pc] Text.concat pc=115 op=0x52 | r1=other r2=other r3=other | JmpNot { cond: Reg(16), offset: 23 }
+[pc] Text.concat pc=118 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(17), src: Reg(13) }
+[pc] Text.concat pc=121 op=0x64 | r1=other r2=other r3=other | GetE { dst: Reg(18), arr: Reg(12), idx: Reg(17) }
+[pc] Text.concat pc=125 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(19), src: Reg(18) }
+[pc] Text.concat pc=128 op=0x71 | r1=other r2=other r3=other | RefMut { dst: Reg(20), src: Reg(11) }
+[pc] Text.concat pc=131 op=0x5d | r1=other r2=other r3=other | CallM { dst: Reg(18), receiver: Reg(20), method_id: 1017065, args: RegRange { start: Reg(19), count: 1 } }
+[pc] Text.concat pc=139 op=0x50 | r1=other r2=other r3=other | Jmp { offset: -30 }
+[pc] Text.concat pc=111 op=0xc1 | r1=other r2=other r3=other | IterNext { dst: Reg(13), has_next: Reg(16), iter: Reg(14) }
+[pc] Text.concat pc=115 op=0x52 | r1=other r2=other r3=other | JmpNot { cond: Reg(16), offset: 23 }
+[pc] Text.concat pc=118 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(17), src: Reg(13) }
+[pc] Text.concat pc=121 op=0x64 | r1=other r2=other r3=other | GetE { dst: Reg(18), arr: Reg(12), idx: Reg(17) }
+[pc] Text.concat pc=125 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(19), src: Reg(18) }
+[pc] Text.concat pc=128 op=0x71 | r1=other r2=other r3=other | RefMut { dst: Reg(20), src: Reg(11) }
+[pc] Text.concat pc=131 op=0x5d | r1=other r2=other r3=other | CallM { dst: Reg(18), receiver: Reg(20), method_id: 1017065, args: RegRange { start: Reg(19), count: 1 } }
+[pc] Text.concat pc=139 op=0x50 | r1=other r2=other r3=other | Jmp { offset: -30 }
+[pc] Text.concat pc=111 op=0xc1 | r1=other r2=other r3=other | IterNext { dst: Reg(13), has_next: Reg(16), iter: Reg(14) }
+[pc] Text.concat pc=115 op=0x52 | r1=other r2=other r3=other | JmpNot { cond: Reg(16), offset: 23 }
+[pc] Text.concat pc=118 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(17), src: Reg(13) }
+[pc] Text.concat pc=121 op=0x64 | r1=other r2=other r3=other | GetE { dst: Reg(18), arr: Reg(12), idx: Reg(17) }
+[pc] Text.concat pc=125 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(19), src: Reg(18) }
+[pc] Text.concat pc=128 op=0x71 | r1=other r2=other r3=other | RefMut { dst: Reg(20), src: Reg(11) }
+[pc] Text.concat pc=131 op=0x5d | r1=other r2=other r3=other | CallM { dst: Reg(18), receiver: Reg(20), method_id: 1017065, args: RegRange { start: Reg(19), count: 1 } }
+[pc] Text.concat pc=139 op=0x50 | r1=other r2=other r3=other | Jmp { offset: -30 }
+[pc] Text.concat pc=111 op=0xc1 | r1=other r2=other r3=other | IterNext { dst: Reg(13), has_next: Reg(16), iter: Reg(14) }
+[pc] Text.concat pc=115 op=0x52 | r1=other r2=other r3=other | JmpNot { cond: Reg(16), offset: 23 }
+[pc] Text.concat pc=118 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(17), src: Reg(13) }
+[pc] Text.concat pc=121 op=0x64 | r1=other r2=other r3=other | GetE { dst: Reg(18), arr: Reg(12), idx: Reg(17) }
+[pc] Text.concat pc=125 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(19), src: Reg(18) }
+[pc] Text.concat pc=128 op=0x71 | r1=other r2=other r3=other | RefMut { dst: Reg(20), src: Reg(11) }
+[pc] Text.concat pc=131 op=0x5d | r1=other r2=other r3=other | CallM { dst: Reg(18), receiver: Reg(20), method_id: 1017065, args: RegRange { start: Reg(19), count: 1 } }
+[pc] Text.concat pc=139 op=0x50 | r1=other r2=other r3=other | Jmp { offset: -30 }
+[pc] Text.concat pc=111 op=0xc1 | r1=other r2=other r3=other | IterNext { dst: Reg(13), has_next: Reg(16), iter: Reg(14) }
+[pc] Text.concat pc=115 op=0x52 | r1=other r2=other r3=other | JmpNot { cond: Reg(16), offset: 23 }
+[pc] Text.concat pc=118 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(17), src: Reg(13) }
+[pc] Text.concat pc=121 op=0x64 | r1=other r2=other r3=other | GetE { dst: Reg(18), arr: Reg(12), idx: Reg(17) }
+[pc] Text.concat pc=125 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(19), src: Reg(18) }
+[pc] Text.concat pc=128 op=0x71 | r1=other r2=other r3=other | RefMut { dst: Reg(20), src: Reg(11) }
+[pc] Text.concat pc=131 op=0x5d | r1=other r2=other r3=other | CallM { dst: Reg(18), receiver: Reg(20), method_id: 1017065, args: RegRange { start: Reg(19), count: 1 } }
+[pc] Text.concat pc=139 op=0x50 | r1=other r2=other r3=other | Jmp { offset: -30 }
+[pc] Text.concat pc=111 op=0xc1 | r1=other r2=other r3=other | IterNext { dst: Reg(13), has_next: Reg(16), iter: Reg(14) }
+[pc] Text.concat pc=115 op=0x52 | r1=other r2=other r3=other | JmpNot { cond: Reg(16), offset: 23 }
+[pc] Text.concat pc=141 op=0x06 | r1=other r2=other r3=other | LoadUnit { dst: Reg(16) }
+[pc] Text.concat pc=143 op=0x79 | r1=other r2=other r3=other | TextExtended { sub_op: 52, operands: [13, 1] }
+[pc] Text.concat pc=148 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(21), src: Reg(13) }
+[pc] Text.concat pc=151 op=0x02 | r1=other r2=other r3=other | LoadI { dst: Reg(14), value: 0 }
+[pc] Text.concat pc=154 op=0x66 | r1=other r2=other r3=other | Len { dst: Reg(15), arr: Reg(21), type_hint: 0 }
+[pc] Text.concat pc=158 op=0xcc | r1=other r2=other r3=other | NewRange { dst: Reg(17), start: Reg(14), end: Reg(15), inclusive: false }
+[pc] Text.concat pc=163 op=0xc0 | r1=other r2=other r3=other | IterNew { dst: Reg(15), iterable: Reg(17) }
+[pc] Text.concat pc=166 op=0xc1 | r1=other r2=other r3=other | IterNext { dst: Reg(14), has_next: Reg(18), iter: Reg(15) }
+[pc] Text.concat pc=170 op=0x52 | r1=other r2=other r3=other | JmpNot { cond: Reg(18), offset: 23 }
+[pc] Text.concat pc=173 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(22), src: Reg(14) }
+[pc] Text.concat pc=176 op=0x64 | r1=other r2=other r3=other | GetE { dst: Reg(20), arr: Reg(21), idx: Reg(22) }
+[pc] Text.concat pc=180 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(23), src: Reg(20) }
+[pc] Text.concat pc=183 op=0x71 | r1=other r2=other r3=other | RefMut { dst: Reg(24), src: Reg(11) }
+[pc] Text.concat pc=186 op=0x5d | r1=other r2=other r3=other | CallM { dst: Reg(20), receiver: Reg(24), method_id: 1017065, args: RegRange { start: Reg(23), count: 1 } }
+[pc] Text.concat pc=194 op=0x50 | r1=other r2=other r3=other | Jmp { offset: -30 }
+[pc] Text.concat pc=166 op=0xc1 | r1=other r2=other r3=other | IterNext { dst: Reg(14), has_next: Reg(18), iter: Reg(15) }
+[pc] Text.concat pc=170 op=0x52 | r1=other r2=other r3=other | JmpNot { cond: Reg(18), offset: 23 }
+[pc] Text.concat pc=173 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(22), src: Reg(14) }
+[pc] Text.concat pc=176 op=0x64 | r1=other r2=other r3=other | GetE { dst: Reg(20), arr: Reg(21), idx: Reg(22) }
+[pc] Text.concat pc=180 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(23), src: Reg(20) }
+[pc] Text.concat pc=183 op=0x71 | r1=other r2=other r3=other | RefMut { dst: Reg(24), src: Reg(11) }
+[pc] Text.concat pc=186 op=0x5d | r1=other r2=other r3=other | CallM { dst: Reg(20), receiver: Reg(24), method_id: 1017065, args: RegRange { start: Reg(23), count: 1 } }
+[pc] Text.concat pc=194 op=0x50 | r1=other r2=other r3=other | Jmp { offset: -30 }
+[pc] Text.concat pc=166 op=0xc1 | r1=other r2=other r3=other | IterNext { dst: Reg(14), has_next: Reg(18), iter: Reg(15) }
+[pc] Text.concat pc=170 op=0x52 | r1=other r2=other r3=other | JmpNot { cond: Reg(18), offset: 23 }
+[pc] Text.concat pc=196 op=0x06 | r1=other r2=other r3=other | LoadUnit { dst: Reg(18) }
+[pc] Text.concat pc=198 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(14), src: Reg(11) }
+[pc] Text.concat pc=201 op=0x77 | r1=other r2=other r3=other | DropRef { src: Reg(21) }
+[pc] Text.concat pc=203 op=0x77 | r1=other r2=other r3=other | DropRef { src: Reg(12) }
+[pc] Text.concat pc=205 op=0x77 | r1=other r2=other r3=other | DropRef { src: Reg(9) }
+[pc] Text.concat pc=207 op=0x59 | r1=other r2=other r3=other | Ret { value: Reg(14) }
+[callm-flow] A-post-primitive method=Heap.deref recv=ptr(0xc21168660 interior=false)
+[callm-flow] B-pre-array method=Heap.deref
+[callm-flow] C-pre-variant-1 method=Heap.deref
+[callm-flow] C0-carrier-block method=Heap.deref heapcell=true tid=20727776
+[callm-flow] C1a-heap-carrier method=Heap.deref
+[trace-call] handler=Call func_id=25483 name='core.base.semver_constraint.format_impl' descriptor.id=25483 args.count=1 bytecode_length=659
+[trace-call] handler=Call func_id=25481 name='core.base.semver_constraint.format_comparator' descriptor.id=25481 args.count=1 bytecode_length=492
+[callm-flow] A-post-primitive method=Text.concat recv=other
+[callm-flow] B-pre-array method=Text.concat
+[callm-flow] C-pre-variant-1 method=Text.concat
+[callm-flow] C1b-pre-shared-new method=Text.concat
+[callm-flow] C2-post-new-block method=concat
+[callm-flow] C3-pre-usersearch method=concat
+[pc] Text.concat pc=0 op=0x66 | r1=other r2=other r3=other | Len { dst: Reg(3), arr: Reg(1), type_hint: 5 }
+[pc] Text.concat pc=4 op=0x02 | r1=other r2=other r3=int(1) | LoadI { dst: Reg(4), value: 0 }
+[pc] Text.concat pc=7 op=0x40 | r1=other r2=other r3=int(1) | CmpI { op: Eq, dst: Reg(5), a: Reg(3), b: Reg(4) }
+[pc] Text.concat pc=11 op=0x52 | r1=other r2=other r3=int(1) | JmpNot { cond: Reg(5), offset: 14 }
+[pc] Text.concat pc=28 op=0x06 | r1=other r2=other r3=int(1) | LoadUnit { dst: Reg(2) }
+[pc] Text.concat pc=30 op=0x66 | r1=other r2=other r3=int(1) | Len { dst: Reg(4), arr: Reg(0), type_hint: 5 }
+[pc] Text.concat pc=34 op=0x02 | r1=other r2=other r3=int(1) | LoadI { dst: Reg(6), value: 0 }
+[pc] Text.concat pc=37 op=0x40 | r1=other r2=other r3=int(1) | CmpI { op: Eq, dst: Reg(7), a: Reg(4), b: Reg(6) }
+[pc] Text.concat pc=41 op=0x52 | r1=other r2=other r3=int(1) | JmpNot { cond: Reg(7), offset: 14 }
+[pc] Text.concat pc=58 op=0x06 | r1=other r2=other r3=int(1) | LoadUnit { dst: Reg(3) }
+[pc] Text.concat pc=60 op=0x66 | r1=other r2=other r3=other | Len { dst: Reg(4), arr: Reg(0), type_hint: 5 }
+[pc] Text.concat pc=64 op=0x66 | r1=other r2=other r3=other | Len { dst: Reg(6), arr: Reg(1), type_hint: 5 }
+[pc] Text.concat pc=68 op=0x10 | r1=other r2=other r3=other | BinaryI { op: Add, dst: Reg(8), a: Reg(4), b: Reg(6) }
+[pc] Text.concat pc=72 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(9), src: Reg(8) }
+[pc] Text.concat pc=75 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(10), src: Reg(9) }
+[pc] Text.concat pc=78 op=0x5b | r1=other r2=other r3=other | Call { dst: Reg(6), func_id: 21898, args: RegRange { start: Reg(10), count: 1 } }
+[trace-call] handler=Call func_id=21898 name='Text.with_capacity' descriptor.id=21898 args.count=1 bytecode_length=135
+[pc] Text.concat pc=85 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(11), src: Reg(6) }
+[pc] Text.concat pc=88 op=0x79 | r1=other r2=other r3=other | TextExtended { sub_op: 52, operands: [4, 0] }
+[pc] Text.concat pc=93 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(12), src: Reg(4) }
+[pc] Text.concat pc=96 op=0x02 | r1=other r2=other r3=other | LoadI { dst: Reg(13), value: 0 }
+[pc] Text.concat pc=99 op=0x66 | r1=other r2=other r3=other | Len { dst: Reg(14), arr: Reg(12), type_hint: 0 }
+[pc] Text.concat pc=103 op=0xcc | r1=other r2=other r3=other | NewRange { dst: Reg(15), start: Reg(13), end: Reg(14), inclusive: false }
+[pc] Text.concat pc=108 op=0xc0 | r1=other r2=other r3=other | IterNew { dst: Reg(14), iterable: Reg(15) }
+[pc] Text.concat pc=111 op=0xc1 | r1=other r2=other r3=other | IterNext { dst: Reg(13), has_next: Reg(16), iter: Reg(14) }
+[pc] Text.concat pc=115 op=0x52 | r1=other r2=other r3=other | JmpNot { cond: Reg(16), offset: 23 }
+[pc] Text.concat pc=118 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(17), src: Reg(13) }
+[pc] Text.concat pc=121 op=0x64 | r1=other r2=other r3=other | GetE { dst: Reg(18), arr: Reg(12), idx: Reg(17) }
+[pc] Text.concat pc=125 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(19), src: Reg(18) }
+[pc] Text.concat pc=128 op=0x71 | r1=other r2=other r3=other | RefMut { dst: Reg(20), src: Reg(11) }
+[pc] Text.concat pc=131 op=0x5d | r1=other r2=other r3=other | CallM { dst: Reg(18), receiver: Reg(20), method_id: 1017065, args: RegRange { start: Reg(19), count: 1 } }
+[pc] Text.concat pc=139 op=0x50 | r1=other r2=other r3=other | Jmp { offset: -30 }
+[pc] Text.concat pc=111 op=0xc1 | r1=other r2=other r3=other | IterNext { dst: Reg(13), has_next: Reg(16), iter: Reg(14) }
+[pc] Text.concat pc=115 op=0x52 | r1=other r2=other r3=other | JmpNot { cond: Reg(16), offset: 23 }
+[pc] Text.concat pc=141 op=0x06 | r1=other r2=other r3=other | LoadUnit { dst: Reg(16) }
+[pc] Text.concat pc=143 op=0x79 | r1=other r2=other r3=other | TextExtended { sub_op: 52, operands: [13, 1] }
+[pc] Text.concat pc=148 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(21), src: Reg(13) }
+[pc] Text.concat pc=151 op=0x02 | r1=other r2=other r3=other | LoadI { dst: Reg(14), value: 0 }
+[pc] Text.concat pc=154 op=0x66 | r1=other r2=other r3=other | Len { dst: Reg(15), arr: Reg(21), type_hint: 0 }
+[pc] Text.concat pc=158 op=0xcc | r1=other r2=other r3=other | NewRange { dst: Reg(17), start: Reg(14), end: Reg(15), inclusive: false }
+[pc] Text.concat pc=163 op=0xc0 | r1=other r2=other r3=other | IterNew { dst: Reg(15), iterable: Reg(17) }
+[pc] Text.concat pc=166 op=0xc1 | r1=other r2=other r3=other | IterNext { dst: Reg(14), has_next: Reg(18), iter: Reg(15) }
+[pc] Text.concat pc=170 op=0x52 | r1=other r2=other r3=other | JmpNot { cond: Reg(18), offset: 23 }
+[pc] Text.concat pc=173 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(22), src: Reg(14) }
+[pc] Text.concat pc=176 op=0x64 | r1=other r2=other r3=other | GetE { dst: Reg(20), arr: Reg(21), idx: Reg(22) }
+[pc] Text.concat pc=180 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(23), src: Reg(20) }
+[pc] Text.concat pc=183 op=0x71 | r1=other r2=other r3=other | RefMut { dst: Reg(24), src: Reg(11) }
+[pc] Text.concat pc=186 op=0x5d | r1=other r2=other r3=other | CallM { dst: Reg(20), receiver: Reg(24), method_id: 1017065, args: RegRange { start: Reg(23), count: 1 } }
+[pc] Text.concat pc=194 op=0x50 | r1=other r2=other r3=other | Jmp { offset: -30 }
+[pc] Text.concat pc=166 op=0xc1 | r1=other r2=other r3=other | IterNext { dst: Reg(14), has_next: Reg(18), iter: Reg(15) }
+[pc] Text.concat pc=170 op=0x52 | r1=other r2=other r3=other | JmpNot { cond: Reg(18), offset: 23 }
+[pc] Text.concat pc=196 op=0x06 | r1=other r2=other r3=other | LoadUnit { dst: Reg(18) }
+[pc] Text.concat pc=198 op=0x00 | r1=other r2=other r3=other | Mov { dst: Reg(14), src: Reg(11) }
+[pc] Text.concat pc=201 op=0x77 | r1=other r2=other r3=other | DropRef { src: Reg(21) }
+[pc] Text.concat pc=203 op=0x77 | r1=other r2=other r3=other | DropRef { src: Reg(12) }
+[pc] Text.concat pc=205 op=0x77 | r1=other r2=other r3=other | DropRef { src: Reg(9) }
+[pc] Text.concat pc=207 op=0x59 | r1=other r2=other r3=other | Ret { value: Reg(14) }
+[callm-flow] A-post-primitive method=Text.concat recv=ptr(0xc2116ab40 interior=false)
+[callm-flow] B-pre-array method=Text.concat
+[callm-flow] C-pre-variant-1 method=Text.concat
+[callm-flow] C0-carrier-block method=Text.concat heapcell=false tid=4
+[callm-flow] C1b-pre-shared-new method=Text.concat
+[callm-flow] C2-post-new-block method=concat
+[callm-flow] C3-pre-usersearch method=concat
+[pc] core.text.Text.concat pc=0 op=0x5a | r1=other r2=bool(false) r3=other | RetV
+[trace-call] handler=Call func_id=25496 name='core.base.semver_constraint.parse_cargo' descriptor.id=25496 args.count=1 bytecode_length=20
+[trace-call] handler=Call func_id=25497 name='core.base.semver_constraint.parse_clause' descriptor.id=25497 args.count=2 bytecode_length=684
+[trace-call] handler=Call func_id=25505 name='core.base.semver_constraint.skip_requirement_space' descriptor.id=25505 args.count=3 bytecode_length=59
+[callm-flow] A-post-primitive method=Result.unwrap recv=ptr(0xc013c6df0 interior=false)
+[callm-flow] B-pre-array method=Result.unwrap
+[callm-flow] C-pre-variant-1 method=Result.unwrap
+[callm-flow] C0-carrier-block method=Result.unwrap heapcell=false tid=516
+[callm-flow] C1b-pre-shared-new method=Result.unwrap
+[callm-flow] C2-post-new-block method=unwrap
+[callm-flow] C3-pre-usersearch method=unwrap
+[trace-call] handler=Call func_id=25417 name='core.base.panic.panic' descriptor.id=25417 args.count=1 bytecode_length=33
+[trace-call] handler=Call func_id=25421 name='core.base.panic.panic_impl' descriptor.id=25421 args.count=4 bytecode_length=145
+error: VBC execution error: Panic: called unwrap() on Err: InvalidConstraint(missing comparator)

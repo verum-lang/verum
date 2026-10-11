@@ -1,0 +1,154 @@
+{
+  "stage": "stage23",
+  "task": "T1663",
+  "fixture": "options",
+  "language_commit": "7a8c86f90a493a3b7352359314fc5f0d628aaa1b",
+  "engine_tree": "f4ae3bc7d1c6e78685adfd6652c6e5604bb1c734",
+  "source_origin_commit": "2bceef7a036b54159c51f47755e350f7757e3755",
+  "source_inputs": {
+    "Cargo.lock": "1383eaade9056881958fb1ef023cb8326fdccff1204ad1ad5bcdf9a341be3741",
+    "grammar/verum.ebnf": "2e67b79c26cfb766c79caa13b5791e8d49b690d710a9a321b44c5df3c694b00e",
+    "core/base/semver.vr": "ccf137aa686f92bb4245a49fe1d8907530d5a9f7b1b1e92aae7f01fd3b03a6cc",
+    "core/base/semver_constraint.vr": "c81ddbdd22c91409d4fccb35d2f5f88db637ed6463478e9b99347053a6897a4d",
+    "core-tests/base/semver_constraint/publication_cases.json": "348af2dff9ca7af3237653a6be8b9e57efad970f95b85fedcdfff96b69b0dc51",
+    "core-tests/base/semver_constraint/numeric_prerelease_cases.json": "332394b26249800dc1db7210079f034f2f935400e8dd87ca69c568c5e306b13d",
+    "core-tests/base/semver_constraint/contract_options_test.vr": "56efdfde59d863414287e0b72e8bc322119237c7bf269145b9b0a01959b96666",
+    "core-tests/base/semver/numeric_prerelease_test.vr": "8b070f5eb5e6085d12ab1ff5ac1c87e0ed6b9e8c16982a6fddc7eee2058973fb",
+    "scripts/ci/check_semver_publication.py": "ae4bcc75e65be67bc028e5efe3cb2101c064a2b4eae33d98b492d969983d2439"
+  },
+  "plan_sha256": "ab8dfc532e4d97622348a2d5151f8492e04ae6a4d883065d8f9351ddac05fc49",
+  "build_manifest_sha256": "3df266cba9190c9d201e03cb51404b28a1d1864f784d32e18421d6fb2083faef",
+  "cli": {
+    "path": "/private/tmp/verum-registry-stage23-canonical-owners/verum-7a8c86f90",
+    "bytes": 548330184,
+    "sha256": "c13b23c1aa15c9d85a29675e74c3623ff5315eb5c1d139a61e6686671364313d"
+  },
+  "schema": "v54-2026-10-10-declared-field-visibility",
+  "artifacts": {
+    "runtime.vbca": {
+      "bytes": 40545239,
+      "sha256": "48d2cd1e07ac1cbbe5cb74eadcaf37ba84523d1dc99f68ddcc9eb067a8986d78"
+    },
+    "runtime.core_metadata": {
+      "bytes": 118793446,
+      "sha256": "7f021e1463de5414d9c7d84228357485e7db68c7aa9f5bb521cf550eff471acf"
+    },
+    "runtime.symbol_graph": {
+      "bytes": 6995428,
+      "sha256": "e44ff2b708e0c36d89b1567284fafd6146b36ede30ad520b0bdffd0035c8d27a"
+    },
+    "runtime.vbca.checksum": {
+      "bytes": 64,
+      "sha256": "603d89a857d4d0eb6a7ef9180545ccb94eb30009e0cc11ec401c78d75bfb5833"
+    },
+    "runtime.vbca.schema": {
+      "bytes": 40,
+      "sha256": "1c3b3d0a7b02c7c0f4001b49068bc4a69cd1ce368a547335fbf4186391971e4c"
+    }
+  },
+  "source_fingerprint_blake3": "91978f2a36c3f4fc4fef6a27264edaef67178d42e792f7c112545bad14e54853",
+  "producer_before": {
+    "manifest": "/private/tmp/verum-registry-stage23-canonical-owners/producer-before/identity.json",
+    "bytes": 201854,
+    "sha256": "d2e3edb3409d1edc04d386b5c315467501cb09621b0155774c036ebbf2642d3c",
+    "nested_precompiler": {
+      "source": "/Users/taaliman/.tmp/verum-codex-01a10248/native-target/precompile-bootstrap/release/verum_stdlib_precompiler",
+      "exists": true,
+      "bytes": 158844392,
+      "sha256": "310090a7e3cec76c28323fac801e0eb917f27bc571e98bcfea02b964cb4cf041",
+      "mode": "0o755",
+      "mtime_ns": 1791605032394866884,
+      "retained": "/private/tmp/verum-registry-stage23-canonical-owners/producer-before/verum_stdlib_precompiler",
+      "retained_sha256": "310090a7e3cec76c28323fac801e0eb917f27bc571e98bcfea02b964cb4cf041"
+    },
+    "unit_count": 82
+  },
+  "producer_after": {
+    "manifest": "/private/tmp/verum-registry-stage23-canonical-owners/producer-after/identity.json",
+    "bytes": 201485,
+    "sha256": "5d376963b8810efb950191e9fceb2729c6c5c6b00d568fdb5c2faa6a74701a0a",
+    "nested_precompiler": {
+      "source": "/Users/taaliman/.tmp/verum-codex-01a10248/native-target/precompile-bootstrap/release/verum_stdlib_precompiler",
+      "exists": true,
+      "bytes": 158865672,
+      "sha256": "6d3c2f9d880234ab88082aee57a9b6a6be362b663a1de8e2ab035a35ac2079ad",
+      "mode": "0o755",
+      "mtime_ns": 1791616020388318874,
+      "retained": "/private/tmp/verum-registry-stage23-canonical-owners/producer-after/verum_stdlib_precompiler",
+      "retained_sha256": "6d3c2f9d880234ab88082aee57a9b6a6be362b663a1de8e2ab035a35ac2079ad"
+    },
+    "unit_count": 82
+  },
+  "runner_sha256": "118e3d9ad34b20ae106176cf913e169aaee4a10ba5c4908c3c605e245387cc4f",
+  "validator_sha256": "a373e37f6f388b1ea753af2e78fde8545564cdac40c7f2c58b8fa83718a4feff",
+  "comparator_sha256": "ae4bcc75e65be67bc028e5efe3cb2101c064a2b4eae33d98b492d969983d2439",
+  "selected_fixture": {
+    "path": "options.vr",
+    "sha256": "56efdfde59d863414287e0b72e8bc322119237c7bf269145b9b0a01959b96666",
+    "kind": "exact_stdout",
+    "source_path": "core-tests/base/semver_constraint/contract_options_test.vr",
+    "expected_stdout": "semver-options: 14 passed\n",
+    "declared_controls": [
+      "strict_and_extended_entries_keep_distinct_syntax",
+      "operator_spaces_do_not_split_comparators",
+      "strict_spaces_and_extended_tabs_are_explicit",
+      "prerelease_admission_is_shared_within_a_conjunction",
+      "failing_alternative_cannot_lend_prerelease_admission",
+      "wildcard_alternative_preserves_an_explicit_prerelease_branch",
+      "caret_zero_patch_prerelease_admits_its_release",
+      "constructor_bounds_do_not_overflow_uint64",
+      "omitted_constructor_components_retain_their_scope",
+      "options_lift_admission_without_changing_comparison_order",
+      "exact_constructor_keeps_its_atom_and_ignores_build_precedence",
+      "release_composition_keeps_identity_and_absorption",
+      "formatted_partial_comparators_preserve_matching",
+      "extensions_share_identifier_and_empty_clause_validation"
+    ]
+  },
+  "deadline_seconds": 600.0,
+  "scope": "Nine distinct interpreter controls. Publication reference, declared extensions, options/algebra and wide prereleases stay separate. No registry adoption or AOT.",
+  "command": [
+    "/private/tmp/verum-registry-stage23-canonical-owners/verum-7a8c86f90",
+    "run",
+    "--tier",
+    "interpret",
+    "/private/tmp/verum-stage23-semver-mr59i7a9/options.vr"
+  ],
+  "cwd": "/private/tmp/verum-stage23-semver-mr59i7a9",
+  "environment_overrides": {
+    "TMPDIR": "/private/tmp",
+    "NO_COLOR": "1",
+    "VERUM_NO_OBJECT_CACHE": "1"
+  },
+  "removed_environment_keys": [],
+  "returncode": 1,
+  "timed_out": false,
+  "interrupted": false,
+  "runner_error": null,
+  "seconds": 94.016,
+  "checks": {
+    "prepared_inputs_unchanged": true,
+    "committed_sources_unchanged": true,
+    "runtime_inputs_unchanged": true,
+    "retained_inputs_unchanged": true,
+    "retained_plan_unchanged": true,
+    "runner_unchanged": true,
+    "validator_unchanged": true,
+    "comparator_unchanged": true,
+    "retained_manifest_unchanged": true,
+    "build_and_artifacts_unchanged": true
+  },
+  "errors": {},
+  "classification": "CLI_FAILURE",
+  "status": "failed",
+  "comparison": {
+    "complete": false,
+    "differences": [],
+    "observed_controls": 0
+  },
+  "logs": {
+    "stdout.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderr.log": "4e2fee150a5a2738aa5c2795263b475fe3abbb664475bd2fbebc6b4e873a1877",
+    "comparison.json": "e1120ce1d9ec81741d590873e64bb486d3212a5acfceeaf7a989d0b381073418"
+  }
+}

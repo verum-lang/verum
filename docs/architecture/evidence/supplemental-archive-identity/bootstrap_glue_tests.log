@@ -1,0 +1,7 @@
+
+running 2 tests
+test archive_ctx_loader::bootstrap_glue_tests::missing_qualified_glue_does_not_borrow_an_ancestor_or_sibling ... ok
+test archive_ctx_loader::bootstrap_glue_tests::named_external_glue_is_kept_by_exact_declaring_file_identity ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 1272 filtered out; finished in 0.00s
+

@@ -1,0 +1,11 @@
+{
+  "plan_sha256": "38874ee0c49649edf55571cb353d55ccf87b7ef4df3dba9d2baecf626e469537",
+  "removed": [
+    "/Users/taaliman/.tmp/verum-codex-01a10248/native-target/debug/build/verum_types/3a1b18565cab8221/fingerprint/lib-verum_types",
+    "/Users/taaliman/.tmp/verum-codex-01a10248/native-target/debug/build/verum_smt/2fa318ecbfbc345d/fingerprint/lib-verum_smt",
+    "/Users/taaliman/.tmp/verum-codex-01a10248/native-target/debug/build/verum_verification/2e12039d338ae75c/fingerprint/lib-verum_verification",
+    "/Users/taaliman/.tmp/verum-codex-01a10248/native-target/debug/build/verum_codegen/b33518e7735e2b9e/fingerprint/lib-verum_codegen",
+    "/Users/taaliman/.tmp/verum-codex-01a10248/native-target/debug/build/verum_compiler/c6ca94c7409ab771/fingerprint/test-lib-verum_compiler"
+  ],
+  "backup": "/private/tmp/verum-T1744-unit-provenance/fingerprints-before"
+}

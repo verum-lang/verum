@@ -1,0 +1,5 @@
+[
+  {
+    "kind": "only main body replaced; retain original declarations and compare direct Text, direct parsed and helper-returned values"
+  }
+]

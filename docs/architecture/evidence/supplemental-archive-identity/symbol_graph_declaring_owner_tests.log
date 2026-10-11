@@ -1,0 +1,11 @@
+
+running 6 tests
+test archive_ctx_loader::symbol_graph_declaring_owner_tests::absent_origin_keeps_legacy_entry_qualification ... ok
+test archive_ctx_loader::symbol_graph_declaring_owner_tests::encoded_sidecar_roundtrip_keeps_the_declaring_owner_and_edges ... ok
+test archive_ctx_loader::symbol_graph_declaring_owner_tests::exact_declaring_owner_carries_its_transitive_call_edges_in_both_orders ... ok
+test archive_ctx_loader::symbol_graph_declaring_owner_tests::promoted_names_preserve_overlapping_module_segments_once ... ok
+test archive_ctx_loader::symbol_graph_declaring_owner_tests::scan_retains_declaring_owner_and_existing_descriptor_spellings ... ok
+test archive_ctx_loader::symbol_graph_declaring_owner_tests::two_declarers_in_one_umbrella_keep_distinct_edges ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 1268 filtered out; finished in 0.00s
+

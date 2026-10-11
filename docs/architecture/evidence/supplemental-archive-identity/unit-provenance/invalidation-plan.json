@@ -1,0 +1,225 @@
+{
+  "source_commit": "20857b0e5",
+  "selected": [
+    {
+      "crate": "verum_types",
+      "unit": "3a1b18565cab8221",
+      "marker": "/Users/taaliman/.tmp/verum-codex-01a10248/native-target/debug/build/verum_types/3a1b18565cab8221/fingerprint/lib-verum_types",
+      "companions": {
+        "verum_types/3a1b18565cab8221/fingerprint/dep-lib-verum_types": {
+          "sha256": "e390d3a0934ca7362e8031f94836136d1e3c5022c650dee527752005c98d9bda",
+          "bytes": 3160,
+          "mode": 420,
+          "mtime_ns": 1791613081904648818
+        },
+        "verum_types/3a1b18565cab8221/fingerprint/invoked.timestamp": {
+          "sha256": "5a109e6643e8d3e88642e3f35e85d2a83e639d07523aa6e99166c48178e965c3",
+          "bytes": 48,
+          "mode": 420,
+          "mtime_ns": 1791613081904648818
+        },
+        "verum_types/3a1b18565cab8221/fingerprint/lib-verum_types": {
+          "sha256": "d26691c43b0db093c42d021282314f6164f8713e96479b9732bfa4e400e3214c",
+          "bytes": 16,
+          "mode": 420,
+          "mtime_ns": 1791613095092196387
+        },
+        "verum_types/3a1b18565cab8221/fingerprint/lib-verum_types.json": {
+          "sha256": "b3a0d13c20e7b7d47381449e467551f5ee90d6e6ce9819a667c29797ab203d12",
+          "bytes": 1323,
+          "mode": 420,
+          "mtime_ns": 1791613095092285429
+        }
+      },
+      "output_identities": {
+        "verum_types/3a1b18565cab8221/out/libverum_types-3a1b18565cab8221.rlib": {
+          "sha256": "00e19bf032309d14d3dde0638265ba4671f35b4953d519674b8ca6e7e87f9ada",
+          "bytes": 88795568,
+          "mode": 420,
+          "mtime_ns": 1791613095064703097
+        },
+        "verum_types/3a1b18565cab8221/out/libverum_types-3a1b18565cab8221.rmeta": {
+          "sha256": "43817ff619275590943944e5e3b015ec4d75605c6842de168eefa628c31e8bd7",
+          "bytes": 11110058,
+          "mode": 420,
+          "mtime_ns": 1791613088487419670
+        }
+      }
+    },
+    {
+      "crate": "verum_smt",
+      "unit": "2fa318ecbfbc345d",
+      "marker": "/Users/taaliman/.tmp/verum-codex-01a10248/native-target/debug/build/verum_smt/2fa318ecbfbc345d/fingerprint/lib-verum_smt",
+      "companions": {
+        "verum_smt/2fa318ecbfbc345d/fingerprint/dep-lib-verum_smt": {
+          "sha256": "74e9ec71144435434a245ee7a062fd4ecf0c37cbd721b1c05ed8a554e8d26e8d",
+          "bytes": 2762,
+          "mode": 420,
+          "mtime_ns": 1791613121169584217
+        },
+        "verum_smt/2fa318ecbfbc345d/fingerprint/invoked.timestamp": {
+          "sha256": "5a109e6643e8d3e88642e3f35e85d2a83e639d07523aa6e99166c48178e965c3",
+          "bytes": 48,
+          "mode": 420,
+          "mtime_ns": 1791613121169584217
+        },
+        "verum_smt/2fa318ecbfbc345d/fingerprint/lib-verum_smt": {
+          "sha256": "cef09f13f93b9a531176e822991b259edce648d5dcdea9740c5bd57dd24d87c6",
+          "bytes": 16,
+          "mode": 420,
+          "mtime_ns": 1791613129633827199
+        },
+        "verum_smt/2fa318ecbfbc345d/fingerprint/lib-verum_smt.json": {
+          "sha256": "833b51a47e0bd49182f507809fd8ef4f228b069a39be3c83caf24f345daa411d",
+          "bytes": 2319,
+          "mode": 420,
+          "mtime_ns": 1791613129633900117
+        }
+      },
+      "output_identities": {
+        "verum_smt/2fa318ecbfbc345d/out/libverum_smt-2fa318ecbfbc345d.rlib": {
+          "sha256": "17322fe4e5bf956f6694fe43cc97d21d38816f677d3eb376e5fff8be69c4dd55",
+          "bytes": 51424432,
+          "mode": 420,
+          "mtime_ns": 1791613129617815138
+        },
+        "verum_smt/2fa318ecbfbc345d/out/libverum_smt-2fa318ecbfbc345d.rmeta": {
+          "sha256": "4047b10f295c5a5f2b407ce753dd3dd452555061d6b04e4ecaf5f65c349bc92f",
+          "bytes": 11331351,
+          "mode": 420,
+          "mtime_ns": 1791613125624774011
+        }
+      }
+    },
+    {
+      "crate": "verum_verification",
+      "unit": "2e12039d338ae75c",
+      "marker": "/Users/taaliman/.tmp/verum-codex-01a10248/native-target/debug/build/verum_verification/2e12039d338ae75c/fingerprint/lib-verum_verification",
+      "companions": {
+        "verum_verification/2e12039d338ae75c/fingerprint/dep-lib-verum_verification": {
+          "sha256": "9fb4c594584b05ed93b3d48d6ccce8502a8a47318fed5f34b2b951ed1b836fba",
+          "bytes": 1234,
+          "mode": 420,
+          "mtime_ns": 1791613148089740139
+        },
+        "verum_verification/2e12039d338ae75c/fingerprint/invoked.timestamp": {
+          "sha256": "5a109e6643e8d3e88642e3f35e85d2a83e639d07523aa6e99166c48178e965c3",
+          "bytes": 48,
+          "mode": 420,
+          "mtime_ns": 1791613148089740139
+        },
+        "verum_verification/2e12039d338ae75c/fingerprint/lib-verum_verification": {
+          "sha256": "27ba2e845a66d63cc8485330928920df5976989d241d16d0a5594a9e096cb218",
+          "bytes": 16,
+          "mode": 420,
+          "mtime_ns": 1791613155005612587
+        },
+        "verum_verification/2e12039d338ae75c/fingerprint/lib-verum_verification.json": {
+          "sha256": "7e83cfeef4b17efd2c524d87047a05621344a77739530b1aa0f6b33ca114c3d7",
+          "bytes": 1505,
+          "mode": 420,
+          "mtime_ns": 1791613155005876923
+        }
+      },
+      "output_identities": {
+        "verum_verification/2e12039d338ae75c/out/libverum_verification-2e12039d338ae75c.rlib": {
+          "sha256": "e365e6d8f3554654d7b8e73a12fa4340960919ff28234b64b0238fce3c293dfd",
+          "bytes": 36449008,
+          "mode": 420,
+          "mtime_ns": 1791613154985972202
+        },
+        "verum_verification/2e12039d338ae75c/out/libverum_verification-2e12039d338ae75c.rmeta": {
+          "sha256": "9bbd4f97b0379c9a4ffe3c0cad750bc7927492dcb46b8e8339e35d09de8c6b23",
+          "bytes": 12607233,
+          "mode": 420,
+          "mtime_ns": 1791613152173213622
+        }
+      }
+    },
+    {
+      "crate": "verum_codegen",
+      "unit": "b33518e7735e2b9e",
+      "marker": "/Users/taaliman/.tmp/verum-codex-01a10248/native-target/debug/build/verum_codegen/b33518e7735e2b9e/fingerprint/lib-verum_codegen",
+      "companions": {
+        "verum_codegen/b33518e7735e2b9e/fingerprint/dep-lib-verum_codegen": {
+          "sha256": "415db50284123af668662023050e0491e08d1773b162403d0d08a24577b9f0d3",
+          "bytes": 1952,
+          "mode": 420,
+          "mtime_ns": 1791613129972374210
+        },
+        "verum_codegen/b33518e7735e2b9e/fingerprint/invoked.timestamp": {
+          "sha256": "5a109e6643e8d3e88642e3f35e85d2a83e639d07523aa6e99166c48178e965c3",
+          "bytes": 48,
+          "mode": 420,
+          "mtime_ns": 1791613129972374210
+        },
+        "verum_codegen/b33518e7735e2b9e/fingerprint/lib-verum_codegen": {
+          "sha256": "9cd5f29e21b8e4da9b656b1cc9d4930f2e50581a37314be9975fd564c6c63e1b",
+          "bytes": 16,
+          "mode": 420,
+          "mtime_ns": 1791613140050837284
+        },
+        "verum_codegen/b33518e7735e2b9e/fingerprint/lib-verum_codegen.json": {
+          "sha256": "03b670d5c2dd362c0320e9f55847fb06de8a8c611a9019a49f44899ec5153fd2",
+          "bytes": 2054,
+          "mode": 420,
+          "mtime_ns": 1791613140050988619
+        }
+      },
+      "output_identities": {
+        "verum_codegen/b33518e7735e2b9e/out/libverum_codegen-b33518e7735e2b9e.rlib": {
+          "sha256": "2e496845bf35bbaeb5458e28021b8bec84f68b93328f994e64a8401b59775eba",
+          "bytes": 36314944,
+          "mode": 420,
+          "mtime_ns": 1791613140031392402
+        },
+        "verum_codegen/b33518e7735e2b9e/out/libverum_codegen-b33518e7735e2b9e.rmeta": {
+          "sha256": "c980375f4f86edf0a1602ed648ae2be7e040699bb3f779675ff598658e2e3d16",
+          "bytes": 6113305,
+          "mode": 420,
+          "mtime_ns": 1791613136321389204
+        }
+      }
+    },
+    {
+      "crate": "verum_compiler",
+      "unit": "c6ca94c7409ab771",
+      "marker": "/Users/taaliman/.tmp/verum-codex-01a10248/native-target/debug/build/verum_compiler/c6ca94c7409ab771/fingerprint/test-lib-verum_compiler",
+      "companions": {
+        "verum_compiler/c6ca94c7409ab771/fingerprint/dep-test-lib-verum_compiler": {
+          "sha256": "506cb66c858ff01eef8517bc8a0ddeb7038be26b28e2966c0c2ee485c73e0563",
+          "bytes": 10232,
+          "mode": 420,
+          "mtime_ns": 1791610662406343576
+        },
+        "verum_compiler/c6ca94c7409ab771/fingerprint/invoked.timestamp": {
+          "sha256": "5a109e6643e8d3e88642e3f35e85d2a83e639d07523aa6e99166c48178e965c3",
+          "bytes": 48,
+          "mode": 420,
+          "mtime_ns": 1791610662406343576
+        },
+        "verum_compiler/c6ca94c7409ab771/fingerprint/test-lib-verum_compiler": {
+          "sha256": "76d2ab447dc6a99c84e5546356adb653c14702d58dc246935efea8bc5aa920b9",
+          "bytes": 16,
+          "mode": 420,
+          "mtime_ns": 1791610723204345520
+        },
+        "verum_compiler/c6ca94c7409ab771/fingerprint/test-lib-verum_compiler.json": {
+          "sha256": "60a59df6347b3e17efc7161d18c8b4a11d2fa0f4810647abe27b7d049aea8f9f",
+          "bytes": 3250,
+          "mode": 420,
+          "mtime_ns": 1791610723204488397
+        }
+      },
+      "output_identities": {
+        "verum_compiler/c6ca94c7409ab771/out/verum_compiler-c6ca94c7409ab771": {
+          "sha256": "7b4a9e97bb200abbee20aa354a74ff31b899fc7b73995ecc25f7070da8fac96b",
+          "bytes": 433950912,
+          "mode": 493,
+          "mtime_ns": 1791610683863553194
+        }
+      }
+    }
+  ],
+  "scope": "Five selected local Rust readiness markers only; outputs and native/bootstrap caches are not removed."
+}

@@ -1,0 +1,678 @@
+{
+  "base_source_inputs": "source-inputs.json",
+  "runs": [
+    {
+      "label": "baseline",
+      "original_receipt_sha256": "724bbb48c74fecfff169400f20828b43d097ec7d74edd096e2806ec19daa8044",
+      "original_receipt_canonical_sha256": "1e95f1e85182a4a5d443e7d10d102a07f00e3292824c090b193ac8825a9a3578",
+      "source_input_delta": {},
+      "output_file": "baseline-output.txt",
+      "receipt": {
+        "task": "T1744",
+        "source_commit": "20857b0e578dc285ce0c4cb9575edf11bec02a46",
+        "source_tree": "0c06a852bbe7745efb2a638aad8388b6b72dd7fb",
+        "command": [
+          "cargo",
+          "+nightly-2026-08-20",
+          "test",
+          "-vv",
+          "--offline",
+          "--locked",
+          "--message-format=json-render-diagnostics",
+          "--manifest-path",
+          "/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/Cargo.toml",
+          "-p",
+          "verum_compiler",
+          "--lib",
+          "supplemental_function_identity::",
+          "--",
+          "--test-threads=1",
+          "--nocapture"
+        ],
+        "environment": {
+          "CARGO_TARGET_DIR": "/Users/taaliman/.tmp/verum-codex-01a10248/native-target",
+          "CARGO_BUILD_JOBS": "1",
+          "CARGO_INCREMENTAL": "0",
+          "VERUM_NO_AUTO_PRECOMPILE": "1",
+          "RUST_MIN_STACK": "16777216",
+          "VERUM_LLVM_DIR": "/Users/taaliman/projects/oldman/verum-lang/verum/llvm/install"
+        },
+        "deadline_seconds": 600,
+        "runner_sha256": "500d7487394d082f3a04d65935b04d36714d0d4cf1dbddac20a1d2448e4c1a11",
+        "artifacts_before": {
+          "runtime.vbca": {
+            "bytes": 40545239,
+            "sha256": "48d2cd1e07ac1cbbe5cb74eadcaf37ba84523d1dc99f68ddcc9eb067a8986d78"
+          },
+          "runtime.core_metadata": {
+            "bytes": 118793446,
+            "sha256": "7f021e1463de5414d9c7d84228357485e7db68c7aa9f5bb521cf550eff471acf"
+          },
+          "runtime.symbol_graph": {
+            "bytes": 6995428,
+            "sha256": "e44ff2b708e0c36d89b1567284fafd6146b36ede30ad520b0bdffd0035c8d27a"
+          },
+          "runtime.vbca.checksum": {
+            "bytes": 64,
+            "sha256": "603d89a857d4d0eb6a7ef9180545ccb94eb30009e0cc11ec401c78d75bfb5833"
+          },
+          "runtime.vbca.schema": {
+            "bytes": 40,
+            "sha256": "1c3b3d0a7b02c7c0f4001b49068bc4a69cd1ce368a547335fbf4186391971e4c"
+          }
+        },
+        "selected_test_count": 6,
+        "artifact_origin_receipt": "/private/tmp/verum-registry-stage23-canonical-owners/build-manifest.json",
+        "artifact_origin_receipt_sha256": "3df266cba9190c9d201e03cb51404b28a1d1864f784d32e18421d6fb2083faef",
+        "artifact_origin_source": "7a8c86f90a493a3b7352359314fc5f0d628aaa1b",
+        "target_precompiled_directory_present": true,
+        "artifact_schema": "v54-2026-10-10-declared-field-visibility",
+        "disk_free_before": 6217101312,
+        "scope": "Parsed-source synthetic archive primary/supplemental loader controls only; their exact scanned graph is installed without using the embedded sidecar. Compiler embeds unchanged Stage23 v54 artifacts under no-auto. No ordinary CLI, automatic bake, AOT or native dependency bootstrap.",
+        "exit_code": 101,
+        "wall_seconds": 109.13,
+        "interrupted": null,
+        "harness_errors": [],
+        "executables": {},
+        "source_unchanged": true,
+        "source_paths_unchanged": true,
+        "artifacts_after": {
+          "runtime.vbca": {
+            "bytes": 40545239,
+            "sha256": "48d2cd1e07ac1cbbe5cb74eadcaf37ba84523d1dc99f68ddcc9eb067a8986d78"
+          },
+          "runtime.core_metadata": {
+            "bytes": 118793446,
+            "sha256": "7f021e1463de5414d9c7d84228357485e7db68c7aa9f5bb521cf550eff471acf"
+          },
+          "runtime.symbol_graph": {
+            "bytes": 6995428,
+            "sha256": "e44ff2b708e0c36d89b1567284fafd6146b36ede30ad520b0bdffd0035c8d27a"
+          },
+          "runtime.vbca.checksum": {
+            "bytes": 64,
+            "sha256": "603d89a857d4d0eb6a7ef9180545ccb94eb30009e0cc11ec401c78d75bfb5833"
+          },
+          "runtime.vbca.schema": {
+            "bytes": 40,
+            "sha256": "1c3b3d0a7b02c7c0f4001b49068bc4a69cd1ce368a547335fbf4186391971e4c"
+          }
+        },
+        "log_sha256": "958368b9cf06a2c2ce3cb6eac7787ef1c2a5c9f74a081884abca027a167c863a",
+        "test_results": [],
+        "announced_test_counts": [],
+        "individual_failures": [],
+        "cargo_compilations": [
+          "verum_error v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_error)",
+          "verum_tblgen v21.0.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/llvm/verum_tblgen)",
+          "verum_mlir_macro v21.0.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/llvm/verum_mlir_macro)",
+          "verum_llvm_sys v21.0.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/llvm/verum_llvm_sys)",
+          "verum_mlir_sys v21.0.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/llvm/verum_mlir_sys)",
+          "verum_types v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_types)",
+          "verum_cbgr v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_cbgr)",
+          "verum_mlir v21.0.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/llvm/verum_mlir)",
+          "verum_llvm v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/llvm/verum_llvm)",
+          "verum_vbc v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_vbc)",
+          "verum_smt v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_smt)",
+          "verum_compiler v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_compiler)",
+          "verum_codegen v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_codegen)",
+          "verum_verification v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_verification)"
+        ],
+        "disk_free_after": 5438152704,
+        "artifacts_unchanged": true,
+        "selected_tests_complete": false,
+        "retained_archive_files": {}
+      }
+    },
+    {
+      "label": "corrected-baseline",
+      "original_receipt_sha256": "4807109b7ac75ef84a45d35f5909ed75f717d62592f5eb8149d4fea4c26f34f2",
+      "original_receipt_canonical_sha256": "7401391b8b7bace72798547465b72ab818849a21799391704cddace7fb8997cb",
+      "source_input_delta": {
+        "crates/verum_compiler/tests/archive/supplemental_function_identity.rs": "be9ebb56d43d06d41510ca92f570ec73c7ceccc5bc488dae4906112ced6d2132"
+      },
+      "output_file": "corrected-baseline-output.txt",
+      "receipt": {
+        "task": "T1744",
+        "source_commit": "f0ed774a7e0534d2aeb66b51ce6b77a1ffd8c570",
+        "source_tree": "dadc633e6c602204e2609cde6ed590d99eb6163f",
+        "command": [
+          "cargo",
+          "+nightly-2026-08-20",
+          "test",
+          "-vv",
+          "--offline",
+          "--locked",
+          "--message-format=json-render-diagnostics",
+          "--manifest-path",
+          "/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/Cargo.toml",
+          "-p",
+          "verum_compiler",
+          "--lib",
+          "supplemental_function_identity::",
+          "--",
+          "--test-threads=1",
+          "--nocapture"
+        ],
+        "environment": {
+          "CARGO_TARGET_DIR": "/Users/taaliman/.tmp/verum-codex-01a10248/native-target",
+          "CARGO_BUILD_JOBS": "1",
+          "CARGO_INCREMENTAL": "0",
+          "VERUM_NO_AUTO_PRECOMPILE": "1",
+          "RUST_MIN_STACK": "16777216",
+          "VERUM_LLVM_DIR": "/Users/taaliman/projects/oldman/verum-lang/verum/llvm/install"
+        },
+        "deadline_seconds": 600,
+        "runner_sha256": "500d7487394d082f3a04d65935b04d36714d0d4cf1dbddac20a1d2448e4c1a11",
+        "artifacts_before": {
+          "runtime.vbca": {
+            "bytes": 40545239,
+            "sha256": "48d2cd1e07ac1cbbe5cb74eadcaf37ba84523d1dc99f68ddcc9eb067a8986d78"
+          },
+          "runtime.core_metadata": {
+            "bytes": 118793446,
+            "sha256": "7f021e1463de5414d9c7d84228357485e7db68c7aa9f5bb521cf550eff471acf"
+          },
+          "runtime.symbol_graph": {
+            "bytes": 6995428,
+            "sha256": "e44ff2b708e0c36d89b1567284fafd6146b36ede30ad520b0bdffd0035c8d27a"
+          },
+          "runtime.vbca.checksum": {
+            "bytes": 64,
+            "sha256": "603d89a857d4d0eb6a7ef9180545ccb94eb30009e0cc11ec401c78d75bfb5833"
+          },
+          "runtime.vbca.schema": {
+            "bytes": 40,
+            "sha256": "1c3b3d0a7b02c7c0f4001b49068bc4a69cd1ce368a547335fbf4186391971e4c"
+          }
+        },
+        "selected_test_count": 6,
+        "artifact_origin_receipt": "/private/tmp/verum-registry-stage23-canonical-owners/build-manifest.json",
+        "artifact_origin_receipt_sha256": "3df266cba9190c9d201e03cb51404b28a1d1864f784d32e18421d6fb2083faef",
+        "artifact_origin_source": "7a8c86f90a493a3b7352359314fc5f0d628aaa1b",
+        "target_precompiled_directory_present": true,
+        "artifact_schema": "v54-2026-10-10-declared-field-visibility",
+        "disk_free_before": 5380915200,
+        "scope": "Parsed-source synthetic archive primary/supplemental loader controls only; their exact scanned graph is installed without using the embedded sidecar. Compiler embeds unchanged Stage23 v54 artifacts under no-auto. No ordinary CLI, automatic bake, AOT or native dependency bootstrap.",
+        "exit_code": 101,
+        "wall_seconds": 161.033,
+        "interrupted": null,
+        "harness_errors": [],
+        "executables": {
+          "verum_compiler": {
+            "path": "/Users/taaliman/.tmp/verum-codex-01a10248/native-target/debug/build/verum_compiler/c6ca94c7409ab771/out/verum_compiler-c6ca94c7409ab771",
+            "sha256": "75ee7fef02d459d7c20a44d800f5223f15b750b75c4eeb9de9ec8d94a5403134",
+            "retained": "/private/tmp/verum-T1744-corrected-baseline/verum_compiler-c6ca94c7409ab771",
+            "retained_sha256": "75ee7fef02d459d7c20a44d800f5223f15b750b75c4eeb9de9ec8d94a5403134",
+            "fresh": false
+          }
+        },
+        "source_unchanged": true,
+        "source_paths_unchanged": true,
+        "artifacts_after": {
+          "runtime.vbca": {
+            "bytes": 40545239,
+            "sha256": "48d2cd1e07ac1cbbe5cb74eadcaf37ba84523d1dc99f68ddcc9eb067a8986d78"
+          },
+          "runtime.core_metadata": {
+            "bytes": 118793446,
+            "sha256": "7f021e1463de5414d9c7d84228357485e7db68c7aa9f5bb521cf550eff471acf"
+          },
+          "runtime.symbol_graph": {
+            "bytes": 6995428,
+            "sha256": "e44ff2b708e0c36d89b1567284fafd6146b36ede30ad520b0bdffd0035c8d27a"
+          },
+          "runtime.vbca.checksum": {
+            "bytes": 64,
+            "sha256": "603d89a857d4d0eb6a7ef9180545ccb94eb30009e0cc11ec401c78d75bfb5833"
+          },
+          "runtime.vbca.schema": {
+            "bytes": 40,
+            "sha256": "1c3b3d0a7b02c7c0f4001b49068bc4a69cd1ce368a547335fbf4186391971e4c"
+          }
+        },
+        "log_sha256": "e0f300cdda9850ab143dd77874c845a46c61efe87d086fdb0ebd4e15603806a0",
+        "test_results": [
+          "test result: FAILED. 0 passed; 6 failed; 0 ignored; 0 measured; 1265 filtered out; finished in 1.48s"
+        ],
+        "announced_test_counts": [
+          6
+        ],
+        "individual_failures": [],
+        "cargo_compilations": [
+          "verum_error v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_error)",
+          "verum_tblgen v21.0.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/llvm/verum_tblgen)",
+          "verum_mlir_macro v21.0.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/llvm/verum_mlir_macro)",
+          "verum_llvm_sys v21.0.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/llvm/verum_llvm_sys)",
+          "verum_mlir_sys v21.0.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/llvm/verum_mlir_sys)",
+          "verum_types v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_types)",
+          "verum_cbgr v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_cbgr)",
+          "verum_mlir v21.0.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/llvm/verum_mlir)",
+          "verum_llvm v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/llvm/verum_llvm)",
+          "verum_vbc v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_vbc)",
+          "verum_smt v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_smt)",
+          "verum_codegen v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_codegen)",
+          "verum_compiler v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_compiler)",
+          "verum_verification v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_verification)"
+        ],
+        "disk_free_after": 4674121728,
+        "artifacts_unchanged": true,
+        "selected_tests_complete": true,
+        "retained_archive_files": {}
+      }
+    },
+    {
+      "label": "eight-baseline",
+      "original_receipt_sha256": "ba2b7d051ddf7edaac709b6d603751d4c8b1dca538b3eab0ae3e9d3a4fd03624",
+      "original_receipt_canonical_sha256": "2cd2f1e77aaba2e11e915d5be4b0afc0ad18062e72f3f7e22a2fc7a29a121fe2",
+      "source_input_delta": {
+        "crates/verum_compiler/tests/archive/supplemental_function_identity.rs": "e46b76411195b31e5be113f5e1656b1d317c61ae51c7cbb6849023ab1a539ac0"
+      },
+      "output_file": "eight-baseline-output.txt",
+      "receipt": {
+        "task": "T1744",
+        "source_commit": "187554512a5ac2c26d97c89f55760a0888659198",
+        "source_tree": "1625c28d397a393f3695452fc4febcabf3cb5a6d",
+        "command": [
+          "cargo",
+          "+nightly-2026-08-20",
+          "test",
+          "-vv",
+          "--offline",
+          "--locked",
+          "--message-format=json-render-diagnostics",
+          "--manifest-path",
+          "/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/Cargo.toml",
+          "-p",
+          "verum_compiler",
+          "--lib",
+          "supplemental_function_identity::",
+          "--",
+          "--test-threads=1",
+          "--nocapture"
+        ],
+        "environment": {
+          "CARGO_TARGET_DIR": "/Users/taaliman/.tmp/verum-codex-01a10248/native-target",
+          "CARGO_BUILD_JOBS": "1",
+          "CARGO_INCREMENTAL": "0",
+          "VERUM_NO_AUTO_PRECOMPILE": "1",
+          "RUST_MIN_STACK": "16777216",
+          "VERUM_LLVM_DIR": "/Users/taaliman/projects/oldman/verum-lang/verum/llvm/install"
+        },
+        "deadline_seconds": 600,
+        "runner_sha256": "81d162510551c5b854478f1b9e527a8ac7fe22b90e1663f04b85b9a49685754a",
+        "artifacts_before": {
+          "runtime.vbca": {
+            "bytes": 40545239,
+            "sha256": "48d2cd1e07ac1cbbe5cb74eadcaf37ba84523d1dc99f68ddcc9eb067a8986d78"
+          },
+          "runtime.core_metadata": {
+            "bytes": 118793446,
+            "sha256": "7f021e1463de5414d9c7d84228357485e7db68c7aa9f5bb521cf550eff471acf"
+          },
+          "runtime.symbol_graph": {
+            "bytes": 6995428,
+            "sha256": "e44ff2b708e0c36d89b1567284fafd6146b36ede30ad520b0bdffd0035c8d27a"
+          },
+          "runtime.vbca.checksum": {
+            "bytes": 64,
+            "sha256": "603d89a857d4d0eb6a7ef9180545ccb94eb30009e0cc11ec401c78d75bfb5833"
+          },
+          "runtime.vbca.schema": {
+            "bytes": 40,
+            "sha256": "1c3b3d0a7b02c7c0f4001b49068bc4a69cd1ce368a547335fbf4186391971e4c"
+          }
+        },
+        "selected_test_count": 8,
+        "artifact_origin_receipt": "/private/tmp/verum-registry-stage23-canonical-owners/build-manifest.json",
+        "artifact_origin_receipt_sha256": "3df266cba9190c9d201e03cb51404b28a1d1864f784d32e18421d6fb2083faef",
+        "artifact_origin_source": "7a8c86f90a493a3b7352359314fc5f0d628aaa1b",
+        "target_precompiled_directory_present": true,
+        "artifact_schema": "v54-2026-10-10-declared-field-visibility",
+        "disk_free_before": 7083728896,
+        "scope": "Parsed-source synthetic archive primary/supplemental loader controls only; their exact scanned graph is installed without using the embedded sidecar. Compiler embeds unchanged Stage23 v54 artifacts under no-auto. No ordinary CLI, automatic bake, AOT or native dependency bootstrap.",
+        "exit_code": 101,
+        "wall_seconds": 177.861,
+        "interrupted": null,
+        "harness_errors": [],
+        "executables": {
+          "verum_compiler": {
+            "path": "/Users/taaliman/.tmp/verum-codex-01a10248/native-target/debug/build/verum_compiler/c6ca94c7409ab771/out/verum_compiler-c6ca94c7409ab771",
+            "sha256": "beefa52105f906724c3629e63ab7ff4ff9c2e7c980ada6f5ca780da3909e8024",
+            "retained": "/private/tmp/verum-T1744-eight-baseline/verum_compiler-c6ca94c7409ab771",
+            "retained_sha256": "beefa52105f906724c3629e63ab7ff4ff9c2e7c980ada6f5ca780da3909e8024",
+            "fresh": false
+          }
+        },
+        "source_unchanged": true,
+        "source_paths_unchanged": true,
+        "artifacts_after": {
+          "runtime.vbca": {
+            "bytes": 40545239,
+            "sha256": "48d2cd1e07ac1cbbe5cb74eadcaf37ba84523d1dc99f68ddcc9eb067a8986d78"
+          },
+          "runtime.core_metadata": {
+            "bytes": 118793446,
+            "sha256": "7f021e1463de5414d9c7d84228357485e7db68c7aa9f5bb521cf550eff471acf"
+          },
+          "runtime.symbol_graph": {
+            "bytes": 6995428,
+            "sha256": "e44ff2b708e0c36d89b1567284fafd6146b36ede30ad520b0bdffd0035c8d27a"
+          },
+          "runtime.vbca.checksum": {
+            "bytes": 64,
+            "sha256": "603d89a857d4d0eb6a7ef9180545ccb94eb30009e0cc11ec401c78d75bfb5833"
+          },
+          "runtime.vbca.schema": {
+            "bytes": 40,
+            "sha256": "1c3b3d0a7b02c7c0f4001b49068bc4a69cd1ce368a547335fbf4186391971e4c"
+          }
+        },
+        "log_sha256": "eb961057309dd4511020b8e774d06ef5dc7330eb15bd179a9e7b2e5904e73c25",
+        "test_results": [
+          "test result: FAILED. 1 passed; 7 failed; 0 ignored; 0 measured; 1265 filtered out; finished in 1.48s"
+        ],
+        "announced_test_counts": [
+          8
+        ],
+        "individual_failures": [],
+        "cargo_compilations": [
+          "verum_error v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_error)",
+          "verum_tblgen v21.0.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/llvm/verum_tblgen)",
+          "verum_mlir_macro v21.0.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/llvm/verum_mlir_macro)",
+          "verum_llvm_sys v21.0.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/llvm/verum_llvm_sys)",
+          "verum_mlir_sys v21.0.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/llvm/verum_mlir_sys)",
+          "verum_types v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_types)",
+          "verum_cbgr v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_cbgr)",
+          "verum_mlir v21.0.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/llvm/verum_mlir)",
+          "verum_llvm v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/llvm/verum_llvm)",
+          "verum_vbc v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_vbc)",
+          "verum_smt v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_smt)",
+          "verum_codegen v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_codegen)",
+          "verum_compiler v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_compiler)",
+          "verum_verification v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_verification)"
+        ],
+        "disk_free_after": 6006935552,
+        "artifacts_unchanged": true,
+        "selected_tests_complete": true,
+        "retained_archive_files": {}
+      }
+    },
+    {
+      "label": "metadata-wave-baseline",
+      "original_receipt_sha256": "b5411c90cd8d9a3da6909569b1386f5f00a49d6df07048ff1788d4437e88cffa",
+      "original_receipt_canonical_sha256": "b636ad357d4781b58d5130552b56a1f48a77b47967e4ff1f177935d5e9bb9eee",
+      "source_input_delta": {
+        "crates/verum_compiler/tests/archive/supplemental_function_identity.rs": "418fd64f87fb92d09d87b7d2bac11b5f6bcae1b1fb5247ecfc87144f55d947f9"
+      },
+      "output_file": "metadata-wave-baseline-output.txt",
+      "receipt": {
+        "task": "T1744",
+        "source_commit": "d6f389822038100c5c8516d9c4942fc11fd4d357",
+        "source_tree": "897e2888abaece0bb905a1844de2a919cf661233",
+        "command": [
+          "cargo",
+          "+nightly-2026-08-20",
+          "test",
+          "-vv",
+          "--offline",
+          "--locked",
+          "--message-format=json-render-diagnostics",
+          "--manifest-path",
+          "/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/Cargo.toml",
+          "-p",
+          "verum_compiler",
+          "--lib",
+          "supplemental_function_identity::",
+          "--",
+          "--test-threads=1",
+          "--nocapture"
+        ],
+        "environment": {
+          "CARGO_TARGET_DIR": "/Users/taaliman/.tmp/verum-codex-01a10248/native-target",
+          "CARGO_BUILD_JOBS": "1",
+          "CARGO_INCREMENTAL": "0",
+          "VERUM_NO_AUTO_PRECOMPILE": "1",
+          "RUST_MIN_STACK": "16777216",
+          "VERUM_LLVM_DIR": "/Users/taaliman/projects/oldman/verum-lang/verum/llvm/install"
+        },
+        "deadline_seconds": 600,
+        "runner_sha256": "81d162510551c5b854478f1b9e527a8ac7fe22b90e1663f04b85b9a49685754a",
+        "artifacts_before": {
+          "runtime.vbca": {
+            "bytes": 40545239,
+            "sha256": "48d2cd1e07ac1cbbe5cb74eadcaf37ba84523d1dc99f68ddcc9eb067a8986d78"
+          },
+          "runtime.core_metadata": {
+            "bytes": 118793446,
+            "sha256": "7f021e1463de5414d9c7d84228357485e7db68c7aa9f5bb521cf550eff471acf"
+          },
+          "runtime.symbol_graph": {
+            "bytes": 6995428,
+            "sha256": "e44ff2b708e0c36d89b1567284fafd6146b36ede30ad520b0bdffd0035c8d27a"
+          },
+          "runtime.vbca.checksum": {
+            "bytes": 64,
+            "sha256": "603d89a857d4d0eb6a7ef9180545ccb94eb30009e0cc11ec401c78d75bfb5833"
+          },
+          "runtime.vbca.schema": {
+            "bytes": 40,
+            "sha256": "1c3b3d0a7b02c7c0f4001b49068bc4a69cd1ce368a547335fbf4186391971e4c"
+          }
+        },
+        "selected_test_count": 8,
+        "artifact_origin_receipt": "/private/tmp/verum-registry-stage23-canonical-owners/build-manifest.json",
+        "artifact_origin_receipt_sha256": "3df266cba9190c9d201e03cb51404b28a1d1864f784d32e18421d6fb2083faef",
+        "artifact_origin_source": "7a8c86f90a493a3b7352359314fc5f0d628aaa1b",
+        "target_precompiled_directory_present": true,
+        "artifact_schema": "v54-2026-10-10-declared-field-visibility",
+        "disk_free_before": 6253010944,
+        "scope": "Parsed-source synthetic archive primary/supplemental loader controls only; their exact scanned graph is installed without using the embedded sidecar. Compiler embeds unchanged Stage23 v54 artifacts under no-auto. No ordinary CLI, automatic bake, AOT or native dependency bootstrap.",
+        "exit_code": 101,
+        "wall_seconds": 181.799,
+        "interrupted": null,
+        "harness_errors": [],
+        "executables": {
+          "verum_compiler": {
+            "path": "/Users/taaliman/.tmp/verum-codex-01a10248/native-target/debug/build/verum_compiler/c6ca94c7409ab771/out/verum_compiler-c6ca94c7409ab771",
+            "sha256": "df269e6bf39d5f4a7076f85651adb9f11f6d68a8d3db873b14c028613ab047eb",
+            "retained": "/private/tmp/verum-T1744-metadata-wave-baseline/verum_compiler-c6ca94c7409ab771",
+            "retained_sha256": "df269e6bf39d5f4a7076f85651adb9f11f6d68a8d3db873b14c028613ab047eb",
+            "fresh": false
+          }
+        },
+        "source_unchanged": true,
+        "source_paths_unchanged": true,
+        "artifacts_after": {
+          "runtime.vbca": {
+            "bytes": 40545239,
+            "sha256": "48d2cd1e07ac1cbbe5cb74eadcaf37ba84523d1dc99f68ddcc9eb067a8986d78"
+          },
+          "runtime.core_metadata": {
+            "bytes": 118793446,
+            "sha256": "7f021e1463de5414d9c7d84228357485e7db68c7aa9f5bb521cf550eff471acf"
+          },
+          "runtime.symbol_graph": {
+            "bytes": 6995428,
+            "sha256": "e44ff2b708e0c36d89b1567284fafd6146b36ede30ad520b0bdffd0035c8d27a"
+          },
+          "runtime.vbca.checksum": {
+            "bytes": 64,
+            "sha256": "603d89a857d4d0eb6a7ef9180545ccb94eb30009e0cc11ec401c78d75bfb5833"
+          },
+          "runtime.vbca.schema": {
+            "bytes": 40,
+            "sha256": "1c3b3d0a7b02c7c0f4001b49068bc4a69cd1ce368a547335fbf4186391971e4c"
+          }
+        },
+        "log_sha256": "0565e18bb4bc5dcd7df7557a80339a595eafddc8f77e4f7cda7ece11aabcfa69",
+        "test_results": [
+          "test result: FAILED. 1 passed; 7 failed; 0 ignored; 0 measured; 1265 filtered out; finished in 1.48s"
+        ],
+        "announced_test_counts": [
+          8
+        ],
+        "individual_failures": [],
+        "cargo_compilations": [
+          "verum_error v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_error)",
+          "verum_tblgen v21.0.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/llvm/verum_tblgen)",
+          "verum_mlir_macro v21.0.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/llvm/verum_mlir_macro)",
+          "verum_llvm_sys v21.0.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/llvm/verum_llvm_sys)",
+          "verum_mlir_sys v21.0.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/llvm/verum_mlir_sys)",
+          "verum_types v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_types)",
+          "verum_cbgr v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_cbgr)",
+          "verum_mlir v21.0.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/llvm/verum_mlir)",
+          "verum_llvm v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/llvm/verum_llvm)",
+          "verum_vbc v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_vbc)",
+          "verum_smt v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_smt)",
+          "verum_codegen v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_codegen)",
+          "verum_compiler v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_compiler)",
+          "verum_verification v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_verification)"
+        ],
+        "disk_free_after": 5379579904,
+        "artifacts_unchanged": true,
+        "selected_tests_complete": true,
+        "retained_archive_files": {}
+      }
+    },
+    {
+      "label": "compilation-owned-fixed",
+      "original_receipt_sha256": "700c87fe188190a312ab6cb95cdef8573cba289527963a8e79a2b7fafb4f6357",
+      "original_receipt_canonical_sha256": "78797aacad5fd37834dd6c9e7578af2d1b8f6dd6d687af42185a659528253850",
+      "source_input_delta": {
+        "crates/verum_compiler/src/archive_ctx_loader.rs": "bc41b5c5ce2f49376c2bbe250da4cf333382dc5611302cbebd5e7be05b29800e",
+        "crates/verum_compiler/tests/archive/supplemental_function_identity.rs": "f16cd76dbd28e1d78ef4795bd5b1a77bba523b3178dd7f45db9dab421cd13cb9",
+        "crates/verum_vbc/src/codegen/context.rs": "e8bdfff48794495ec5c3fd28b307de7fbbed79efa460869a9d44633f2b01ff9b"
+      },
+      "output_file": "compilation-owned-fixed-output.txt",
+      "receipt": {
+        "task": "T1744",
+        "source_commit": "2565d34b4823ca7f140ba34ef9eabc1fd0cf09e3",
+        "source_tree": "0ab4b004f77bd6562f0bc8cfa1b3f465e8edd1a8",
+        "command": [
+          "cargo",
+          "+nightly-2026-08-20",
+          "test",
+          "-vv",
+          "--offline",
+          "--locked",
+          "--message-format=json-render-diagnostics",
+          "--manifest-path",
+          "/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/Cargo.toml",
+          "-p",
+          "verum_compiler",
+          "--lib",
+          "supplemental_function_identity::",
+          "--",
+          "--test-threads=1",
+          "--nocapture"
+        ],
+        "environment": {
+          "CARGO_TARGET_DIR": "/Users/taaliman/.tmp/verum-codex-01a10248/native-target",
+          "CARGO_BUILD_JOBS": "1",
+          "CARGO_INCREMENTAL": "0",
+          "VERUM_NO_AUTO_PRECOMPILE": "1",
+          "RUST_MIN_STACK": "16777216",
+          "VERUM_LLVM_DIR": "/Users/taaliman/projects/oldman/verum-lang/verum/llvm/install"
+        },
+        "deadline_seconds": 600,
+        "runner_sha256": "24ce603abed90093daad800aa06aeac5c6882f848f3b158db24c612e471786c8",
+        "artifacts_before": {
+          "runtime.vbca": {
+            "bytes": 40545239,
+            "sha256": "48d2cd1e07ac1cbbe5cb74eadcaf37ba84523d1dc99f68ddcc9eb067a8986d78"
+          },
+          "runtime.core_metadata": {
+            "bytes": 118793446,
+            "sha256": "7f021e1463de5414d9c7d84228357485e7db68c7aa9f5bb521cf550eff471acf"
+          },
+          "runtime.symbol_graph": {
+            "bytes": 6995428,
+            "sha256": "e44ff2b708e0c36d89b1567284fafd6146b36ede30ad520b0bdffd0035c8d27a"
+          },
+          "runtime.vbca.checksum": {
+            "bytes": 64,
+            "sha256": "603d89a857d4d0eb6a7ef9180545ccb94eb30009e0cc11ec401c78d75bfb5833"
+          },
+          "runtime.vbca.schema": {
+            "bytes": 40,
+            "sha256": "1c3b3d0a7b02c7c0f4001b49068bc4a69cd1ce368a547335fbf4186391971e4c"
+          }
+        },
+        "selected_test_count": 9,
+        "artifact_origin_receipt": "/private/tmp/verum-registry-stage23-canonical-owners/build-manifest.json",
+        "artifact_origin_receipt_sha256": "3df266cba9190c9d201e03cb51404b28a1d1864f784d32e18421d6fb2083faef",
+        "artifact_origin_source": "7a8c86f90a493a3b7352359314fc5f0d628aaa1b",
+        "target_precompiled_directory_present": true,
+        "artifact_schema": "v54-2026-10-10-declared-field-visibility",
+        "disk_free_before": 5371727872,
+        "scope": "Parsed-source synthetic archive primary/supplemental loader controls only; their exact scanned graph is installed without using the embedded sidecar. Compiler embeds unchanged Stage23 v54 artifacts under no-auto. No ordinary CLI, automatic bake, AOT or native dependency bootstrap.",
+        "exit_code": 0,
+        "wall_seconds": 166.835,
+        "interrupted": null,
+        "harness_errors": [],
+        "executables": {
+          "verum_compiler": {
+            "path": "/Users/taaliman/.tmp/verum-codex-01a10248/native-target/debug/build/verum_compiler/c6ca94c7409ab771/out/verum_compiler-c6ca94c7409ab771",
+            "sha256": "43fcdf546e68b6fb12b6b59f8d84a549d1854018e76268058874e89306aac991",
+            "retained": "/private/tmp/verum-T1744-compilation-owned-fixed/verum_compiler-c6ca94c7409ab771",
+            "retained_sha256": "43fcdf546e68b6fb12b6b59f8d84a549d1854018e76268058874e89306aac991",
+            "fresh": false
+          }
+        },
+        "source_unchanged": true,
+        "source_paths_unchanged": true,
+        "artifacts_after": {
+          "runtime.vbca": {
+            "bytes": 40545239,
+            "sha256": "48d2cd1e07ac1cbbe5cb74eadcaf37ba84523d1dc99f68ddcc9eb067a8986d78"
+          },
+          "runtime.core_metadata": {
+            "bytes": 118793446,
+            "sha256": "7f021e1463de5414d9c7d84228357485e7db68c7aa9f5bb521cf550eff471acf"
+          },
+          "runtime.symbol_graph": {
+            "bytes": 6995428,
+            "sha256": "e44ff2b708e0c36d89b1567284fafd6146b36ede30ad520b0bdffd0035c8d27a"
+          },
+          "runtime.vbca.checksum": {
+            "bytes": 64,
+            "sha256": "603d89a857d4d0eb6a7ef9180545ccb94eb30009e0cc11ec401c78d75bfb5833"
+          },
+          "runtime.vbca.schema": {
+            "bytes": 40,
+            "sha256": "1c3b3d0a7b02c7c0f4001b49068bc4a69cd1ce368a547335fbf4186391971e4c"
+          }
+        },
+        "log_sha256": "fa622f1f0491762ac42fc4fe17d27caab505f2be91a4375fb3d3280e7871a3ba",
+        "test_results": [
+          "test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 1265 filtered out; finished in 1.72s"
+        ],
+        "announced_test_counts": [
+          9
+        ],
+        "individual_failures": [],
+        "cargo_compilations": [
+          "verum_error v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_error)",
+          "verum_tblgen v21.0.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/llvm/verum_tblgen)",
+          "verum_mlir_macro v21.0.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/llvm/verum_mlir_macro)",
+          "verum_llvm_sys v21.0.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/llvm/verum_llvm_sys)",
+          "verum_mlir_sys v21.0.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/llvm/verum_mlir_sys)",
+          "verum_types v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_types)",
+          "verum_cbgr v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_cbgr)",
+          "verum_mlir v21.0.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/llvm/verum_mlir)",
+          "verum_llvm v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/llvm/verum_llvm)",
+          "verum_vbc v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_vbc)",
+          "verum_smt v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_smt)",
+          "verum_codegen v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_codegen)",
+          "verum_compiler v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_compiler)",
+          "verum_verification v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_verification)"
+        ],
+        "disk_free_after": 5010874368,
+        "artifacts_unchanged": true,
+        "selected_tests_complete": true,
+        "retained_archive_files": {}
+      }
+    }
+  ]
+}

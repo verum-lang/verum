@@ -1,0 +1,105 @@
+{
+  "task": "T1744",
+  "scope": "Diagnostic only: direct Text.concat and direct/helper parsed values in unchanged declaration context; Text-only opcode plus existing registration/stub/parent diagnostics, no options acceptance.",
+  "source_commit": "7a8c86f90a493a3b7352359314fc5f0d628aaa1b",
+  "source_inputs": {
+    "Cargo.lock": "1383eaade9056881958fb1ef023cb8326fdccff1204ad1ad5bcdf9a341be3741",
+    "grammar/verum.ebnf": "2e67b79c26cfb766c79caa13b5791e8d49b690d710a9a321b44c5df3c694b00e",
+    "core/base/semver.vr": "ccf137aa686f92bb4245a49fe1d8907530d5a9f7b1b1e92aae7f01fd3b03a6cc",
+    "core/base/semver_constraint.vr": "c81ddbdd22c91409d4fccb35d2f5f88db637ed6463478e9b99347053a6897a4d",
+    "core-tests/base/semver_constraint/publication_cases.json": "348af2dff9ca7af3237653a6be8b9e57efad970f95b85fedcdfff96b69b0dc51",
+    "core-tests/base/semver_constraint/numeric_prerelease_cases.json": "332394b26249800dc1db7210079f034f2f935400e8dd87ca69c568c5e306b13d",
+    "core-tests/base/semver_constraint/contract_options_test.vr": "56efdfde59d863414287e0b72e8bc322119237c7bf269145b9b0a01959b96666",
+    "core-tests/base/semver/numeric_prerelease_test.vr": "8b070f5eb5e6085d12ab1ff5ac1c87e0ed6b9e8c16982a6fddc7eee2058973fb",
+    "scripts/ci/check_semver_publication.py": "ae4bcc75e65be67bc028e5efe3cb2101c064a2b4eae33d98b492d969983d2439"
+  },
+  "original_result_sha256": "4e6f79e301b26be528c195b989e786cf54d2100cad82f3febfab6b64b266b6e2",
+  "original_sha256": "56efdfde59d863414287e0b72e8bc322119237c7bf269145b9b0a01959b96666",
+  "transformed_sha256": "99d75ff42c1fc9c95ca19a84e66e0847a0c2c0b8a7658a8d949539db317feecc",
+  "statement_map_sha256": "b24eb40382957f7dc56623edb68e859d7106787bded27f40d7b3371e12255f34",
+  "runner_sha256": "b812fb730375570cb1d072cbec325afebb808691f518b16490b1d8274eb3f83a",
+  "validator_sha256": "a373e37f6f388b1ea753af2e78fde8545564cdac40c7f2c58b8fa83718a4feff",
+  "build_manifest_sha256": "3df266cba9190c9d201e03cb51404b28a1d1864f784d32e18421d6fb2083faef",
+  "cli": {
+    "path": "/private/tmp/verum-registry-stage23-canonical-owners/verum-7a8c86f90",
+    "bytes": 548330184,
+    "sha256": "c13b23c1aa15c9d85a29675e74c3623ff5315eb5c1d139a61e6686671364313d"
+  },
+  "artifacts": {
+    "runtime.vbca": {
+      "bytes": 40545239,
+      "sha256": "48d2cd1e07ac1cbbe5cb74eadcaf37ba84523d1dc99f68ddcc9eb067a8986d78"
+    },
+    "runtime.core_metadata": {
+      "bytes": 118793446,
+      "sha256": "7f021e1463de5414d9c7d84228357485e7db68c7aa9f5bb521cf550eff471acf"
+    },
+    "runtime.symbol_graph": {
+      "bytes": 6995428,
+      "sha256": "e44ff2b708e0c36d89b1567284fafd6146b36ede30ad520b0bdffd0035c8d27a"
+    },
+    "runtime.vbca.checksum": {
+      "bytes": 64,
+      "sha256": "603d89a857d4d0eb6a7ef9180545ccb94eb30009e0cc11ec401c78d75bfb5833"
+    },
+    "runtime.vbca.schema": {
+      "bytes": 40,
+      "sha256": "1c3b3d0a7b02c7c0f4001b49068bc4a69cd1ce368a547335fbf4186391971e4c"
+    }
+  },
+  "artifact_snapshot": "/private/tmp/verum-registry-stage23-canonical-owners/artifacts",
+  "schema": "v54-2026-10-10-declared-field-visibility",
+  "command": [
+    "/private/tmp/verum-registry-stage23-canonical-owners/verum-7a8c86f90",
+    "run",
+    "--tier",
+    "interpret",
+    "/private/tmp/verum-T1744-concat-registration/runtime/options_trace.vr"
+  ],
+  "cwd": "/private/tmp/verum-T1744-concat-registration/runtime",
+  "environment_overrides": {
+    "TMPDIR": "/private/tmp",
+    "NO_COLOR": "1",
+    "VERUM_NO_OBJECT_CACHE": "1",
+    "VERUM_TRACE_CALLS": "1",
+    "VERUM_TRACE_CALLM_FLOW": "1",
+    "VERUM_TRACE_PC": "Text.",
+    "VERUM_TRACE_PC_DECODE": "1",
+    "VERUM_TRACE_STRDICE": "Text.concat",
+    "VERUM_TRACE_FNREG": "Text.concat",
+    "VERUM_TRACE_TIEBREAK": "1"
+  },
+  "deadline_seconds": 600,
+  "returncode": 1,
+  "timed_out": false,
+  "interrupted": false,
+  "runner_error": null,
+  "seconds": 88.336,
+  "checks": {
+    "source_head_unchanged": true,
+    "source_clean": true,
+    "source_inputs_unchanged": true,
+    "retained_sources_unchanged": true,
+    "original_fixture_unchanged": true,
+    "original_result_unchanged": true,
+    "transformed_input_unchanged": true,
+    "runner_unchanged": true,
+    "validator_unchanged": true,
+    "build_and_five_artifacts_unchanged": true
+  },
+  "last_markers": [
+    ">=1.2",
+    "text-boundary: direct concat end",
+    "text-boundary: direct formatter begin",
+    "()",
+    "text-boundary: direct formatter end",
+    "text-boundary: wrapped formatter begin",
+    "()",
+    "text-boundary: wrapped formatter end"
+  ],
+  "logs": {
+    "stdout.log": "2e27484d0212dcc055871f3f995f1d2dc839e0b069ba77bd308470cd83fa1e6c",
+    "stderr.log": "63822d2a4d7d081394696f47f3919825e109f7b17e1800157a3e543dc9f23c43"
+  },
+  "classification": "DIAGNOSTIC_OBSERVATION"
+}

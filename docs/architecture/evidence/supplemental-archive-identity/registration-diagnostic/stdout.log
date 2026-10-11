@@ -1,0 +1,9 @@
+text-boundary: direct concat begin
+>=1.2
+text-boundary: direct concat end
+text-boundary: direct formatter begin
+()
+text-boundary: direct formatter end
+text-boundary: wrapped formatter begin
+()
+text-boundary: wrapped formatter end

@@ -1,0 +1,7 @@
+error: unexpected argument '--build-plan' found
+
+  tip: to pass '--build-plan' as a value, use '-- --build-plan'
+
+Usage: cargo test --offline --locked -Z <FLAG> [TESTNAME] [-- [ARGS]...]
+
+For more information, try '--help'.

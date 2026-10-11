@@ -1,0 +1,41 @@
+{
+  "task": "T1744",
+  "target": "/Users/taaliman/.tmp/verum-codex-01a10248/native-target",
+  "released": true,
+  "source_commit": "2565d34b4823ca7f140ba34ef9eabc1fd0cf09e3",
+  "focused_receipt_sha256": "700c87fe188190a312ab6cb95cdef8573cba289527963a8e79a2b7fafb4f6357",
+  "adjacent_receipt_sha256": "863a8f2f3d40010372d696afca92807b3126cc112f844c484f54539583f8bbbe",
+  "focused": "9 passed;0 failed;0 ignored",
+  "adjacent": "16 passed;0 failed;1 existing ignored measurement",
+  "process_scan_matches": [],
+  "precompiled_artifact_identity": {
+    "runtime.vbca": {
+      "bytes": 40545239,
+      "sha256": "48d2cd1e07ac1cbbe5cb74eadcaf37ba84523d1dc99f68ddcc9eb067a8986d78"
+    },
+    "runtime.core_metadata": {
+      "bytes": 118793446,
+      "sha256": "7f021e1463de5414d9c7d84228357485e7db68c7aa9f5bb521cf550eff471acf"
+    },
+    "runtime.symbol_graph": {
+      "bytes": 6995428,
+      "sha256": "e44ff2b708e0c36d89b1567284fafd6146b36ede30ad520b0bdffd0035c8d27a"
+    },
+    "runtime.vbca.checksum": {
+      "bytes": 64,
+      "sha256": "603d89a857d4d0eb6a7ef9180545ccb94eb30009e0cc11ec401c78d75bfb5833"
+    },
+    "runtime.vbca.schema": {
+      "bytes": 40,
+      "sha256": "1c3b3d0a7b02c7c0f4001b49068bc4a69cd1ce368a547335fbf4186391971e4c"
+    }
+  },
+  "retained_executable": {
+    "path": "/Users/taaliman/.tmp/verum-codex-01a10248/native-target/debug/build/verum_compiler/c6ca94c7409ab771/out/verum_compiler-c6ca94c7409ab771",
+    "sha256": "43fcdf546e68b6fb12b6b59f8d84a549d1854018e76268058874e89306aac991",
+    "retained": "/private/tmp/verum-T1744-compilation-owned-fixed/verum_compiler-c6ca94c7409ab771",
+    "retained_sha256": "43fcdf546e68b6fb12b6b59f8d84a549d1854018e76268058874e89306aac991",
+    "fresh": false
+  },
+  "disk_free_bytes": 4857372672
+}

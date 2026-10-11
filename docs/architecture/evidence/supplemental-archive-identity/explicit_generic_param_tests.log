@@ -1,0 +1,7 @@
+
+running 2 tests
+test archive_ctx_loader::explicit_generic_param_tests::archive_loaders_preserve_callable_parameter_declaration_identity ... ok
+test archive_ctx_loader::explicit_generic_param_tests::archive_loaders_preserve_declared_generic_slots ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 1272 filtered out; finished in 0.01s
+
