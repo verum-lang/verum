@@ -309,6 +309,14 @@ pub(super) fn shared_inner_cell_result(
     if header.type_id != TypeId::SHARED {
         return Err("carrier type_id is not SHARED");
     }
+    if !header.is_valid() {
+        return Err("carrier header is invalid");
+    }
+    // Only slot 0 is read from the carrier; the inner three-slot extent is
+    // validated separately. Do not require unused generation/epoch fields.
+    if (header.size as usize) < std::mem::size_of::<Value>() {
+        return Err("carrier is shorter than its pointer field");
+    }
     // **SHARED-IS-TWO-HOPS-1 (T1202).**  A `Shared<T>` is TWO objects and
     // this used to read one hop into the first:
     //
@@ -368,7 +376,8 @@ fn shared_extent_base(
 ) -> Result<*mut Value, &'static str> {
     // Hop 1: the `ptr` field.  `cbgr_alloc` returns an INT-tagged address
     // (T0108) — which is also why `is_ptr()` on this slot says false.
-    // SAFETY: SHARED type-id and alignment established by the caller.
+    // SAFETY: exact heap ownership, a valid SHARED header and one complete
+    // payload Value were established by the caller.
     let carrier = unsafe { *(base_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value) };
     let addr = (carrier.bits() & crate::value::PAYLOAD_MASK) as usize;
     if addr == 0 {
