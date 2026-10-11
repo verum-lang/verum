@@ -1195,3 +1195,14 @@ remains inconclusive on the same consumer: expected E310 accompanies an
 unlocated E103 for unresolved `archive` access (263.481 seconds, exit 101).
 The exact input and diagnostic oracle are preserved; the unrelated error
 is not counted as the required specific refusal.
+
+### Explicit owned snapshot candidate requires runtime repair
+
+The [owned-snapshot candidate](evidence/prepared-publication-owned-snapshot/README.md)
+reconstructs the publication's mutable layers and removes borrowed projections.
+Its first ordinary five-case run fails an assertion at pc 28 after 369.01 seconds,
+with no standard output and all source/project/CLI/artifact identities unchanged.
+The failing function and source site are not recorded by this diagnostic;
+no completed mutation or isolation property is inferred. The original mutation
+requirements and marker remain intact, and the candidate stays unintegrated.
+Separate diagnostic localization is required before further acceptance runs.
