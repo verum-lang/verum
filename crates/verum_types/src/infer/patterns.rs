@@ -1042,7 +1042,17 @@ impl TypeChecker {
                 //     error<E404>: Ambiguous type for `s`
                 //
                 // while the same match spelled `Some(t)` compiles.
-                let scrutinee_has_tag = match &expanded_ty {
+                // The reference wrapper preserves the same instantiated payload.
+                // Inspect through it without replacing the original type: the
+                // binding mode below still needs to see that wrapper.
+                let mut scrutinee_variant = &expanded_ty;
+                while let Type::Reference { inner, .. }
+                | Type::CheckedReference { inner, .. }
+                | Type::UnsafeReference { inner, .. } = scrutinee_variant
+                {
+                    scrutinee_variant = inner;
+                }
+                let scrutinee_has_tag = match scrutinee_variant {
                     Type::Variant(variants) => variants.contains_key(tag),
                     _ => false,
                 };
