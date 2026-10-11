@@ -132,12 +132,13 @@ implement Crc32 {
     /// Feed `chunk` into the CRC. Safe to call repeatedly; the internal
     /// state carries across calls.
     public fn update(&mut self, chunk: &[Byte]) {
+        let table = TABLE;
         let mut s: UInt32 = self.state;
         let mut i: Int = 0;
         while i < chunk.len() {
             let b: UInt32 = chunk[i] as UInt32;
             let idx: Int = ((s ^ b) & 0xFF_u32) as Int;
-            s = (s >> 8) ^ TABLE[idx];
+            s = (s >> 8) ^ table[idx];
             i = i + 1;
         }
         self.state = s;
