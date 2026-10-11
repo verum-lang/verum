@@ -212,6 +212,10 @@ pub(super) mod simd_extended;
 pub(super) mod tensor_extended;
 pub(super) mod text_extended;
 
+#[cfg(test)]
+#[path = "../../../../tests/unit/shared_carrier_authority_tests.rs"]
+mod shared_carrier_authority_tests;
+
 #[cfg(all(test, feature = "codegen"))]
 #[path = "../../../../tests/unit/structural_key_tests.rs"]
 mod structural_key_tests;
