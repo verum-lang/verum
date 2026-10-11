@@ -1174,3 +1174,18 @@ uses the five explicitly retained Stage23 stdlib artifacts; source and artifact
 identities remain unchanged. This closes the measured ordinary interpreter
 `get_mut` failure, while entry APIs, representation consolidation, invalidated
 borrow detection, native AOT and registry publication remain separately open.
+
+### Prepared publication copies still alias retained input
+
+The [unchanged preparation-copy replay](evidence/prepared-publication-copy-isolation/README.md)
+now completes all five mutation paths, then fails all five retained-input
+isolation checks. It exits 1 in 396.2 seconds with the original source,
+assembled project, runner and output oracle unchanged. The previous variant
+allocation-guard failure is absent on this consumer; snapshot isolation is
+still unaccepted.
+
+The one-level language copy contract does not recursively isolate nested
+records and containers. Explicit dereference-place copy emission (T1753)
+and the registry's stronger domain snapshot boundary (T1722) are distinct
+obligations. The authentication/preparation candidate remains unintegrated
+until its required runtime and visibility controls pass.

@@ -1,0 +1,245 @@
+{
+  "tasks": [
+    "T1635",
+    "T1722",
+    "T1753"
+  ],
+  "status": "isolation-failed",
+  "registry_commit": "6c055769bab8deca3787b55e782e7ca61a7ce2c4",
+  "registry_tree": "0a8e4d476bfbef99df285b3d5b34640494816cf3",
+  "consumer_commit": "6a0bf542b9a2a3158d78b4015cf1b533eecfd13e",
+  "cli": {
+    "bytes": 548277624,
+    "path": "/private/tmp/verum-T1196-consumer-cli/verum-consumer-6a0bf542b",
+    "sha256": "2da19e172e64584c4063974f2eb2038d3ec0e6360776b84fc1333adf0cc63d57"
+  },
+  "stdlib_producer_commit": "7a8c86f90a493a3b7352359314fc5f0d628aaa1b",
+  "automatic_precompile": false,
+  "seconds": 396.2,
+  "returncode": 1,
+  "completed_mutation_cases": 5,
+  "failed_retained_isolation_cases": 5,
+  "verified_original_source_inputs": 8,
+  "verified_project_inputs": 7,
+  "source_and_project_identical_to_prior": true,
+  "files": [
+    {
+      "path": "current/component/result.json.gz",
+      "original_bytes": 5178,
+      "original_sha256": "1d5477548f99132fe42fc0e102457a679160d76000df42b9e35ec9a7a8348ae8",
+      "stored_bytes": 1605,
+      "stored_sha256": "da2db5ec99e3454565aa0f3dade4c324666056f5173b08fa99248554803125e1"
+    },
+    {
+      "path": "current/component/started.json.gz",
+      "original_bytes": 2945,
+      "original_sha256": "a9d7d3e1a3a9d5b94428ccfc4348672f5a24e60baf12d6ce5e0a0f8d26f2fe92",
+      "stored_bytes": 1326,
+      "stored_sha256": "7b3e96ebe66e2b2a506e8785295fc39629a4141f991c0517f17a1f196c41ceca"
+    },
+    {
+      "path": "current/component/stderr.log.gz",
+      "original_bytes": 166,
+      "original_sha256": "6d1b3d928e0efeda72ae6b2c8788f86b3a0ac25493f40477a359e12da2c75da1",
+      "stored_bytes": 145,
+      "stored_sha256": "1ef826817a64311b02567251a5b279849e5063b35e9fac2f1689c6218b4e9651"
+    },
+    {
+      "path": "current/component/stdout.log.gz",
+      "original_bytes": 297,
+      "original_sha256": "413a5314a839bbf18b6c09926448e52f2d3f24d27cf7a61f5b05129b1bd3de68",
+      "stored_bytes": 106,
+      "stored_sha256": "992f02d5661b4cf3bf82ec39f3574dfe11196b1dd60ba12cf60c522718bcf348"
+    },
+    {
+      "path": "current/credential-wrapper.py.gz",
+      "original_bytes": 12712,
+      "original_sha256": "ac9ab2e13794a4c82b8026a16ccdfea7183af7fa4438fb2643d80312cbeeb9ca",
+      "stored_bytes": 4039,
+      "stored_sha256": "4fd68b978c30190f1a3d08c62850821a0248fd3ae20ce06fa8a2161b9804f8f1"
+    },
+    {
+      "path": "current/inputs/project/src/main.vr.gz",
+      "original_bytes": 9026,
+      "original_sha256": "316397e48e50caf6667ee36b3beb859e470c2bc2f24868aeea18963d82a13007",
+      "stored_bytes": 2268,
+      "stored_sha256": "6b08e5091bf1ce43d2db30826a45f2adf8a4b00c448f67898b6384d505a00166"
+    },
+    {
+      "path": "current/inputs/project/src/node/publication_auth.vr.gz",
+      "original_bytes": 16622,
+      "original_sha256": "183f3034e3cb6ab6e638082ef66aa369318847e6cfa47d6930a66ff58e8f7a85",
+      "stored_bytes": 3707,
+      "stored_sha256": "4932c4d5ee94d8832865a811b31e0cf545e4dd2289c431a54d00c84c4115127b"
+    },
+    {
+      "path": "current/inputs/project/src/node/publication_prepare.vr.gz",
+      "original_bytes": 8049,
+      "original_sha256": "960840d6cc4399eab6e1750cdda0cc2ae6585a7916df1ee757b70839f2da5338",
+      "stored_bytes": 2441,
+      "stored_sha256": "f8438eeb2881270133262ded68c8c0fcd455d750629e178657a98d30b0c508d9"
+    },
+    {
+      "path": "current/inputs/project/src/protocol/authority.vr.gz",
+      "original_bytes": 9924,
+      "original_sha256": "d01dc3e14f8066405e567e8320cc8c2a7e95f4a33910da54d97a12a0d3113d07",
+      "stored_bytes": 3406,
+      "stored_sha256": "6844b0f017bd8eb230cd68f6ed82e7fa4d534b37ed66c37f99516ee1870eeeba"
+    },
+    {
+      "path": "current/inputs/project/src/protocol/publication.vr.gz",
+      "original_bytes": 4423,
+      "original_sha256": "05fed152d9b69d3b80c637bedacb54c2ac0a0a1192bfcf01d6448b55ec9f3b3d",
+      "stored_bytes": 1422,
+      "stored_sha256": "b3873a587c4349dda21206b77f3c9022ef6e9026430870a7891029c0b5c14208"
+    },
+    {
+      "path": "current/inputs/project/src/protocol/publication_metadata.vr.gz",
+      "original_bytes": 10612,
+      "original_sha256": "e5a315f02d0b1ca3add25ba29dbf02cbec20a5f8174c303e3696e397010d04c5",
+      "stored_bytes": 2517,
+      "stored_sha256": "f0e66c7d30018ac681920d7abd6b34528ff01cfa20d3b3749638d9c29cac72ae"
+    },
+    {
+      "path": "current/inputs/project/verum.toml.gz",
+      "original_bytes": 65,
+      "original_sha256": "1d99c409b02e7bdb88b9765716721b42e2360e7ecd55f9bbe2a4b18213f97ab2",
+      "stored_bytes": 76,
+      "stored_sha256": "7a53c0d444b75b7e8877acf5caeaa96dba6d37f114b1dce115af982bcf057557"
+    },
+    {
+      "path": "current/inputs/source/src/node/publication_auth.vr.gz",
+      "original_bytes": 16622,
+      "original_sha256": "183f3034e3cb6ab6e638082ef66aa369318847e6cfa47d6930a66ff58e8f7a85",
+      "stored_bytes": 3707,
+      "stored_sha256": "4932c4d5ee94d8832865a811b31e0cf545e4dd2289c431a54d00c84c4115127b"
+    },
+    {
+      "path": "current/inputs/source/src/node/publication_prepare.vr.gz",
+      "original_bytes": 8049,
+      "original_sha256": "960840d6cc4399eab6e1750cdda0cc2ae6585a7916df1ee757b70839f2da5338",
+      "stored_bytes": 2441,
+      "stored_sha256": "f8438eeb2881270133262ded68c8c0fcd455d750629e178657a98d30b0c508d9"
+    },
+    {
+      "path": "current/inputs/source/src/protocol/authority.vr.gz",
+      "original_bytes": 9924,
+      "original_sha256": "d01dc3e14f8066405e567e8320cc8c2a7e95f4a33910da54d97a12a0d3113d07",
+      "stored_bytes": 3406,
+      "stored_sha256": "6844b0f017bd8eb230cd68f6ed82e7fa4d534b37ed66c37f99516ee1870eeeba"
+    },
+    {
+      "path": "current/inputs/source/src/protocol/publication.vr.gz",
+      "original_bytes": 4423,
+      "original_sha256": "05fed152d9b69d3b80c637bedacb54c2ac0a0a1192bfcf01d6448b55ec9f3b3d",
+      "stored_bytes": 1422,
+      "stored_sha256": "b3873a587c4349dda21206b77f3c9022ef6e9026430870a7891029c0b5c14208"
+    },
+    {
+      "path": "current/inputs/source/src/protocol/publication_metadata.vr.gz",
+      "original_bytes": 10612,
+      "original_sha256": "e5a315f02d0b1ca3add25ba29dbf02cbec20a5f8174c303e3696e397010d04c5",
+      "stored_bytes": 2517,
+      "stored_sha256": "f0e66c7d30018ac681920d7abd6b34528ff01cfa20d3b3749638d9c29cac72ae"
+    },
+    {
+      "path": "current/inputs/source/tests/publication_prepare_copy.expected.gz",
+      "original_bytes": 29,
+      "original_sha256": "6095da26468e7d2d7b2c87ad0dfd0351ab9ef3a6b2345247e696a0c47acbf4e5",
+      "stored_bytes": 49,
+      "stored_sha256": "107adb725e8573cdd84fcb5c25fdbcb710eccc814a91081159c3730bcc83182c"
+    },
+    {
+      "path": "current/inputs/source/tests/publication_prepare_copy.vr.gz",
+      "original_bytes": 9052,
+      "original_sha256": "58fb5903665328ff0868374565afadd7f91b93628bb58616a12fc40bb1ce62a0",
+      "stored_bytes": 2275,
+      "stored_sha256": "48feb5355bf6d87e9e94ec1b56138b1efaeee941ff8ac5488429fd1cdb19dfa6"
+    },
+    {
+      "path": "current/inputs/source/tools/run_publication_envelope.py.gz",
+      "original_bytes": 17331,
+      "original_sha256": "b7cf8368cb930a8fcef8357b8b5ce608c313754ab2df99e5ea19625ed56e4a8b",
+      "stored_bytes": 4794,
+      "stored_sha256": "c1fb948a11dac93a3c5226c84d134279d1be863242d7d5d57a938397be20ec78"
+    },
+    {
+      "path": "current/result.json.gz",
+      "original_bytes": 4390,
+      "original_sha256": "1164a9fe6b9aa66f12e42ed705932e34cd8676d31031ae6849655517e6e62516",
+      "stored_bytes": 1887,
+      "stored_sha256": "835f7f1cb24cb791b14388497a687755b2894561b4f3ad7a0852890fff9e1d57"
+    },
+    {
+      "path": "current/runtime-build-manifest.json.gz",
+      "original_bytes": 656962,
+      "original_sha256": "289d4a18670f67a014ccc6ad12315f2c4dbe15cad8addbc1ba3d03aea3e63ffa",
+      "stored_bytes": 262788,
+      "stored_sha256": "1738ecd60b9d894efe9b74fde7f264a36b09c8c6ab860975abdfecfce4674eb2"
+    },
+    {
+      "path": "current/stage23-build-manifest.json.gz",
+      "original_bytes": 651160,
+      "original_sha256": "3df266cba9190c9d201e03cb51404b28a1d1864f784d32e18421d6fb2083faef",
+      "stored_bytes": 260423,
+      "stored_sha256": "eea94be1411bf95c876e0ff9c53b4d2e329383086e13a522ac1794f13e883b70"
+    },
+    {
+      "path": "current/started.json.gz",
+      "original_bytes": 3761,
+      "original_sha256": "207e5a7dda1a526600f56a4868563acf49f550c7269424b984139ff042606485",
+      "stored_bytes": 1668,
+      "stored_sha256": "5337892f41f786d2e80ed756c80fdff407c253542f206a6ee4ede6d8f8554dd9"
+    },
+    {
+      "path": "current/wrapper.py.gz",
+      "original_bytes": 13172,
+      "original_sha256": "4efe2be40eb352efe4bd01bf3eec7a7f501d0efd645894d857f8531a96fe1f69",
+      "stored_bytes": 4237,
+      "stored_sha256": "7836b470b4f8699c1d7d4f8841b1274e48320af469e42f159e97e7855d3d3e06"
+    },
+    {
+      "path": "prior/result.json.gz",
+      "original_bytes": 4392,
+      "original_sha256": "44ec9827ddbae576d57e03250583f64aa4ff5ff3f5f02b012bdc6233a997aa5a",
+      "stored_bytes": 1894,
+      "stored_sha256": "3f7c0f145e7e6b68d53315fcdc2aee819ff8be74f0522f726589787351634ae2"
+    },
+    {
+      "path": "prior/component/result.json.gz",
+      "original_bytes": 5177,
+      "original_sha256": "38ab84d97e9d2bfb4c1d1d50e87d7562fcb4975d598a050ac4e43421644b0284",
+      "stored_bytes": 1606,
+      "stored_sha256": "e2f277f4f6777d5a59e3c11a58b1e28a79eec7c98152bf924e27ac607c42e979"
+    },
+    {
+      "path": "prior/component/stdout.log.gz",
+      "original_bytes": 0,
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stored_bytes": 20,
+      "stored_sha256": "f1b651238a58fe290baec6c5e32f3bdb1943dd2bd582f02569231f7a757c7837"
+    },
+    {
+      "path": "prior/component/stderr.log.gz",
+      "original_bytes": 178,
+      "original_sha256": "cfc9a1aaf02ce19b63f1cccf57d0bb2ae7583995ba666293e969fd0e44873689",
+      "stored_bytes": 155,
+      "stored_sha256": "47f6954563379c9cb1694408c31405203e62a6bccf3a4563358eac7b44156dc7"
+    },
+    {
+      "path": "reviewed-value-copy-contract.md.gz",
+      "original_bytes": 9019,
+      "original_sha256": "cc65da858e0a8c9933ac4d95e8ae47a23a4bfcfb24cdb847b8c955eb91110682",
+      "stored_bytes": 4265,
+      "stored_sha256": "95776e9e29944d03e9963032e5b3f7ca5deaaedce5fe3de57be593f9a42b0c7b"
+    },
+    {
+      "path": "retain-and-verify.py.gz",
+      "original_bytes": 8772,
+      "original_sha256": "72d0ddd8d43c5521bce15d905a104f70b94a52bad2b56e2355e0883eb5ab4c7d",
+      "stored_bytes": 3188,
+      "stored_sha256": "56d86ab398d03ead1aec461f987b4e7d53e6bbcad3da2cc853295585a38522e1"
+    }
+  ],
+  "scope": "Original domain copy-isolation oracle fails after all mutation paths complete. No deep-copy language guarantee, broad allocation-guard closure, fresh bake, AOT or registry service acceptance."
+}
