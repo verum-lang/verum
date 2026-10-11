@@ -269,3 +269,105 @@ fn a_new_compilation_epoch_does_not_reuse_previous_consumer_ids() {
         "new consumer allocation space must be respected"
     );
 }
+
+#[test]
+fn interleaved_compilations_keep_their_own_function_ids_and_bodies() {
+    let archive = archive(&[source("alpha", 37)]);
+    let cache = cache(&archive);
+    let mut first = primary(&cache, &archive, "fn main() -> Int { original() }", 0);
+    let first_original = id(&mut first, "alpha.original");
+    let mut second = primary(&cache, &archive, "fn main() -> Int { original() }", 1000);
+    let second_original = id(&mut second, "alpha.original");
+    assert_ne!(first_original, second_original);
+
+    supplement(&cache, &archive, &mut first, "alpha.later");
+    supplement(&cache, &archive, &mut second, "alpha.later");
+    assert_eq!(id(&mut first, "alpha.original"), first_original);
+    assert_eq!(id(&mut second, "alpha.original"), second_original);
+    assert_ne!(
+        id(&mut first, "alpha.later"),
+        id(&mut second, "alpha.later")
+    );
+    for codegen in [&mut first, &mut second] {
+        let module = finish(codegen);
+        assert!(
+            call_targets(&module, "alpha.later").contains(&wire_id(&module, "alpha.original").0)
+        );
+        assert_result(&module, "alpha.original", 37);
+        assert_result(&module, "alpha.later", 42);
+    }
+}
+
+#[test]
+fn a_later_name_registration_preserves_remapped_nominal_signatures() {
+    use verum_vbc::types::TypeRef;
+
+    let ast = Parser::new(
+        "module alpha; public type Parcel is { value: Int }; \
+         public fn original() -> Int { 37 } \
+         public fn make() -> Parcel { Parcel { value: 37 } } \
+         public fn echo(value: Parcel) -> Parcel { value }",
+    )
+    .parse_module()
+    .expect("parse nominal archive producer");
+    let producer = VbcCodegen::with_config(CodegenConfig::new("alpha"))
+        .compile_module(&ast)
+        .expect("compile nominal archive producer");
+    let source_type = producer
+        .types
+        .iter()
+        .find(|ty| producer.get_string(ty.name) == Some("Parcel"))
+        .expect("declared producer Parcel")
+        .id;
+    let archive = archive(&[producer]);
+    let cache = cache(&archive);
+    let consumer = Parser::new("fn main() -> Int { original() }")
+        .parse_module()
+        .expect("parse nominal consumer");
+    let mut codegen = VbcCodegen::with_config(CodegenConfig::new("consumer"));
+    // Import an unrelated declared record first, so consumer IDs cannot
+    // accidentally equal the archive-local Parcel ID.
+    codegen.import_archive_module_types(&source("occupier", 99));
+    let (modules, _) = cache.apply_lazy_with_types(&archive, &mut codegen, &consumer, &[]);
+    assert!(modules > 0);
+    supplement(&cache, &archive, &mut codegen, "alpha.make");
+    let expected = codegen
+        .ctx_mut()
+        .lookup_function("alpha.make")
+        .expect("first supplemental nominal return")
+        .return_type
+        .clone()
+        .expect("declared return type");
+    assert_ne!(
+        expected,
+        TypeRef::Concrete(source_type),
+        "fixture must shift the nominal ID"
+    );
+    assert!(codegen.ctx_mut().lookup_function("alpha.echo").is_none());
+
+    // The first supplemental wave merges the complete entry. This later
+    // wave may add only names/signatures, but they still need consumer IDs.
+    cache.apply_lazy_supplemental(
+        &archive,
+        &mut codegen,
+        ["alpha.echo".to_owned()].into_iter().collect(),
+    );
+    for name in ["alpha.make", "make", "alpha.echo", "echo"] {
+        let info = codegen.ctx_mut().lookup_function(name).expect(name);
+        assert_eq!(
+            info.return_type.as_ref(),
+            Some(&expected),
+            "return owner for {name}"
+        );
+    }
+    let echo = id(&mut codegen, "alpha.echo");
+    assert_eq!(
+        codegen
+            .ctx_mut()
+            .archive_fn_param_types
+            .get(&echo.0)
+            .map(|params| params.as_slice()),
+        Some(&[expected][..]),
+        "parameter owner for alpha.echo"
+    );
+}
