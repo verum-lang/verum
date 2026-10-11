@@ -1189,3 +1189,9 @@ records and containers. Explicit dereference-place copy emission (T1753)
 and the registry's stronger domain snapshot boundary (T1722) are distinct
 obligations. The authentication/preparation candidate remains unintegrated
 until its required runtime and visibility controls pass.
+
+The [unchanged affine-reuse project replay](evidence/prepared-publication-affine-replay/README.md)
+remains inconclusive on the same consumer: expected E310 accompanies an
+unlocated E103 for unresolved `archive` access (263.481 seconds, exit 101).
+The exact input and diagnostic oracle are preserved; the unrelated error
+is not counted as the required specific refusal.

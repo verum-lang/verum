@@ -1,0 +1,260 @@
+{
+  "task": "T1635",
+  "related_tasks": [
+    "T1713",
+    "T1722"
+  ],
+  "status": "inconclusive_unexpected_diagnostics",
+  "case": "publication_prepare_affine_reuse",
+  "consumer_commit": "6a0bf542b9a2a3158d78b4015cf1b533eecfd13e",
+  "registry_commit": "6c055769bab8deca3787b55e782e7ca61a7ce2c4",
+  "seconds": 263.481,
+  "returncode": 101,
+  "original_project_and_oracle_unchanged": true,
+  "diagnostics": [
+    {
+      "code": "E103",
+      "message": "Cannot access field 'archive' on an unresolved type; declare a record type or use a protocol method",
+      "locations": [],
+      "moved_at": [],
+      "used_at": []
+    },
+    {
+      "code": "E310",
+      "message": "value `prepared` used after move",
+      "locations": [
+        [
+          "/private/tmp/verum-T1635-affine-consumer-replay/project/src/main.vr",
+          "6",
+          "17"
+        ]
+      ],
+      "moved_at": [
+        "237"
+      ],
+      "used_at": [
+        "277"
+      ]
+    }
+  ],
+  "files": [
+    {
+      "path": "replay/build-manifest.json.gz",
+      "original_bytes": 656962,
+      "original_sha256": "289d4a18670f67a014ccc6ad12315f2c4dbe15cad8addbc1ba3d03aea3e63ffa",
+      "stored_bytes": 262788,
+      "stored_sha256": "1738ecd60b9d894efe9b74fde7f264a36b09c8c6ab860975abdfecfce4674eb2"
+    },
+    {
+      "path": "replay/build-validator.py.gz",
+      "original_bytes": 13172,
+      "original_sha256": "4efe2be40eb352efe4bd01bf3eec7a7f501d0efd645894d857f8531a96fe1f69",
+      "stored_bytes": 4237,
+      "stored_sha256": "7836b470b4f8699c1d7d4f8841b1274e48320af469e42f159e97e7855d3d3e06"
+    },
+    {
+      "path": "replay/classifier.py.gz",
+      "original_bytes": 25223,
+      "original_sha256": "a373e37f6f388b1ea753af2e78fde8545564cdac40c7f2c58b8fa83718a4feff",
+      "stored_bytes": 7331,
+      "stored_sha256": "7583544ccc9636baacfe886e7699709d0451cd63362d7e1428633036adfaae6d"
+    },
+    {
+      "path": "replay/prior-result.json.gz",
+      "original_bytes": 8424,
+      "original_sha256": "12174da7c5a2b1c54d5c13882f17c6d27fd32c5e487ff0b6ce89a5685cdc44ad",
+      "stored_bytes": 3272,
+      "stored_sha256": "9fe75f3c315e02b269f60a1c20e1dd5cd607f15cdcd443833169b180c24f8f87"
+    },
+    {
+      "path": "replay/prior-stderr.log.gz",
+      "original_bytes": 979,
+      "original_sha256": "9ce65d0afe65f0c10dc74478cf9e8ae31ebdeccbe2763f04afd3a35eb48dbeee",
+      "stored_bytes": 503,
+      "stored_sha256": "a22b6eb8a697fc6f855f6d89a1a9988068644859267a6816c82596923c2b323e"
+    },
+    {
+      "path": "replay/prior-stdout.log.gz",
+      "original_bytes": 3,
+      "original_sha256": "6a3cf5192354f71615ac51034b3e97c20eda99643fcaf5bbe6d41ad59bd12167",
+      "stored_bytes": 23,
+      "stored_sha256": "7be736381a238897b1c50233ca4536ef7e2ac7b5ea6eaad9f4baace011d5ca60"
+    },
+    {
+      "path": "replay/project/src/main.vr.gz",
+      "original_bytes": 390,
+      "original_sha256": "a13e58abde912a7757404f445b6107aa6900f6e2c8cc5cb309cdce648f255b1d",
+      "stored_bytes": 218,
+      "stored_sha256": "0a18507e6f4935a0eae1cadc334aced98618cc4d0a92bb730f29624bff1a6993"
+    },
+    {
+      "path": "replay/project/src/node/publication_auth.vr.gz",
+      "original_bytes": 16622,
+      "original_sha256": "183f3034e3cb6ab6e638082ef66aa369318847e6cfa47d6930a66ff58e8f7a85",
+      "stored_bytes": 3707,
+      "stored_sha256": "4932c4d5ee94d8832865a811b31e0cf545e4dd2289c431a54d00c84c4115127b"
+    },
+    {
+      "path": "replay/project/src/node/publication_prepare.vr.gz",
+      "original_bytes": 8049,
+      "original_sha256": "960840d6cc4399eab6e1750cdda0cc2ae6585a7916df1ee757b70839f2da5338",
+      "stored_bytes": 2441,
+      "stored_sha256": "f8438eeb2881270133262ded68c8c0fcd455d750629e178657a98d30b0c508d9"
+    },
+    {
+      "path": "replay/project/src/protocol/authority.vr.gz",
+      "original_bytes": 9924,
+      "original_sha256": "d01dc3e14f8066405e567e8320cc8c2a7e95f4a33910da54d97a12a0d3113d07",
+      "stored_bytes": 3406,
+      "stored_sha256": "6844b0f017bd8eb230cd68f6ed82e7fa4d534b37ed66c37f99516ee1870eeeba"
+    },
+    {
+      "path": "replay/project/src/protocol/publication.vr.gz",
+      "original_bytes": 4423,
+      "original_sha256": "05fed152d9b69d3b80c637bedacb54c2ac0a0a1192bfcf01d6448b55ec9f3b3d",
+      "stored_bytes": 1422,
+      "stored_sha256": "b3873a587c4349dda21206b77f3c9022ef6e9026430870a7891029c0b5c14208"
+    },
+    {
+      "path": "replay/project/src/protocol/publication_metadata.vr.gz",
+      "original_bytes": 10612,
+      "original_sha256": "e5a315f02d0b1ca3add25ba29dbf02cbec20a5f8174c303e3696e397010d04c5",
+      "stored_bytes": 2517,
+      "stored_sha256": "f0e66c7d30018ac681920d7abd6b34528ff01cfa20d3b3749638d9c29cac72ae"
+    },
+    {
+      "path": "replay/project/verum.toml.gz",
+      "original_bytes": 65,
+      "original_sha256": "1d99c409b02e7bdb88b9765716721b42e2360e7ecd55f9bbe2a4b18213f97ab2",
+      "stored_bytes": 76,
+      "stored_sha256": "7a53c0d444b75b7e8877acf5caeaa96dba6d37f114b1dce115af982bcf057557"
+    },
+    {
+      "path": "replay/result.json.gz",
+      "original_bytes": 4950,
+      "original_sha256": "17b41509470c833ae0993cdbb03687f3603b6ff9561b91812a4b93b660009a4a",
+      "stored_bytes": 2184,
+      "stored_sha256": "b30d1c983120514755e065987597690b23e7effa3a7c755caa807604a69111f9"
+    },
+    {
+      "path": "replay/runner.py.gz",
+      "original_bytes": 6767,
+      "original_sha256": "4b9d7ff2ca1831d5e6024fae043da8a88e91076cf2384d138bd85c696a50395c",
+      "stored_bytes": 2622,
+      "stored_sha256": "4f1765dd5f88694cf9567d21e33eee3d98c72a06ced7fa0087e82e24c941a0e6"
+    },
+    {
+      "path": "replay/started.json.gz",
+      "original_bytes": 3877,
+      "original_sha256": "1289c50f61fa49e3c9822dca7fd0331259b79b16701a536a4b309156258988b5",
+      "stored_bytes": 1737,
+      "stored_sha256": "4375ff2da3f8277db72a1108fd33f2112c2e89c27a8becc6d33907eb161b73bd"
+    },
+    {
+      "path": "replay/stderr.log.gz",
+      "original_bytes": 915,
+      "original_sha256": "a540c198d96ef44f9f776a8cf6946d8c3b255daca0af269916dfe068aa53f744",
+      "stored_bytes": 492,
+      "stored_sha256": "fddff98da8eb47f5ee749ef604d23e64c4f001bb23c544613e0bcb2f25f543db"
+    },
+    {
+      "path": "replay/stdout.log.gz",
+      "original_bytes": 3,
+      "original_sha256": "6a3cf5192354f71615ac51034b3e97c20eda99643fcaf5bbe6d41ad59bd12167",
+      "stored_bytes": 23,
+      "stored_sha256": "7be736381a238897b1c50233ca4536ef7e2ac7b5ea6eaad9f4baace011d5ca60"
+    },
+    {
+      "path": "prior-source-roster/src/protocol/authority.vr.gz",
+      "original_bytes": 9924,
+      "original_sha256": "d01dc3e14f8066405e567e8320cc8c2a7e95f4a33910da54d97a12a0d3113d07",
+      "stored_bytes": 3406,
+      "stored_sha256": "6844b0f017bd8eb230cd68f6ed82e7fa4d534b37ed66c37f99516ee1870eeeba"
+    },
+    {
+      "path": "prior-source-roster/src/protocol/publication.vr.gz",
+      "original_bytes": 4423,
+      "original_sha256": "05fed152d9b69d3b80c637bedacb54c2ac0a0a1192bfcf01d6448b55ec9f3b3d",
+      "stored_bytes": 1422,
+      "stored_sha256": "b3873a587c4349dda21206b77f3c9022ef6e9026430870a7891029c0b5c14208"
+    },
+    {
+      "path": "prior-source-roster/src/protocol/publication_metadata.vr.gz",
+      "original_bytes": 10612,
+      "original_sha256": "e5a315f02d0b1ca3add25ba29dbf02cbec20a5f8174c303e3696e397010d04c5",
+      "stored_bytes": 2517,
+      "stored_sha256": "f0e66c7d30018ac681920d7abd6b34528ff01cfa20d3b3749638d9c29cac72ae"
+    },
+    {
+      "path": "prior-source-roster/src/node/publication_auth.vr.gz",
+      "original_bytes": 16622,
+      "original_sha256": "183f3034e3cb6ab6e638082ef66aa369318847e6cfa47d6930a66ff58e8f7a85",
+      "stored_bytes": 3707,
+      "stored_sha256": "4932c4d5ee94d8832865a811b31e0cf545e4dd2289c431a54d00c84c4115127b"
+    },
+    {
+      "path": "prior-source-roster/src/node/publication_prepare.vr.gz",
+      "original_bytes": 8049,
+      "original_sha256": "960840d6cc4399eab6e1750cdda0cc2ae6585a7916df1ee757b70839f2da5338",
+      "stored_bytes": 2441,
+      "stored_sha256": "f8438eeb2881270133262ded68c8c0fcd455d750629e178657a98d30b0c508d9"
+    },
+    {
+      "path": "prior-source-roster/tools/run_publication_envelope.py.gz",
+      "original_bytes": 17331,
+      "original_sha256": "b7cf8368cb930a8fcef8357b8b5ce608c313754ab2df99e5ea19625ed56e4a8b",
+      "stored_bytes": 4794,
+      "stored_sha256": "c1fb948a11dac93a3c5226c84d134279d1be863242d7d5d57a938397be20ec78"
+    },
+    {
+      "path": "prior-source-roster/tests/language/publication_prepare_consume.vr.gz",
+      "original_bytes": 356,
+      "original_sha256": "2dbe8ce6cf8066986f929a23e30c18735219e69258c07981103da1312b21d3fd",
+      "stored_bytes": 232,
+      "stored_sha256": "4471de9ee1f8bf9b9fe47be27332f3f48241def798dcc24f33d9bb2beaa0a0b0"
+    },
+    {
+      "path": "prior-source-roster/tests/language/publication_auth_private_store.vr.gz",
+      "original_bytes": 291,
+      "original_sha256": "56317ef4fca4529a7cb56f49a7fef130354fd83a95c321c0b6bfd3337116395a",
+      "stored_bytes": 194,
+      "stored_sha256": "181000557b3cd71b246bb0f90a1bfdd20215a135ccb82070cced65aa1c652f50"
+    },
+    {
+      "path": "prior-source-roster/tests/language/publication_auth_construct_store.vr.gz",
+      "original_bytes": 323,
+      "original_sha256": "f8e68bfa14d3dfa72ecd8384b298150145bcb31f6a58a30908564ec49cf3c06b",
+      "stored_bytes": 216,
+      "stored_sha256": "d5b92ae599505aca3700a05fd7a4de993aff9446c1691098b280f4ddb366250e"
+    },
+    {
+      "path": "prior-source-roster/tests/language/publication_prepare_construct.vr.gz",
+      "original_bytes": 550,
+      "original_sha256": "3a05b847a71afadf53881087ac2a0e7ea6583c3aae59b105f4672515cd06b347",
+      "stored_bytes": 254,
+      "stored_sha256": "52eb2e100125a6cc90fe7ba8b2d4eb3e00efe00114f49039f6527d7d7d2b1d40"
+    },
+    {
+      "path": "prior-source-roster/tests/language/publication_prepare_private_field.vr.gz",
+      "original_bytes": 309,
+      "original_sha256": "fb37be3da0652941d40422a9edb9a45abe716f61c62d9043a3b8d6dbccc07a64",
+      "stored_bytes": 204,
+      "stored_sha256": "42884c6d5d14818455100ab20ae0827939e25fc435b651d1c271b87717a9f7f0"
+    },
+    {
+      "path": "prior-source-roster/tests/language/publication_prepare_affine_reuse.vr.gz",
+      "original_bytes": 424,
+      "original_sha256": "0e8efdcbab496f22a90ae685f760b3922f03a22520f9422a8fa9a91c8f6b3d21",
+      "stored_bytes": 228,
+      "stored_sha256": "460a1f481d957c45917933e74312fd2b6ed4dedb594887912df5eb63c81b31fb"
+    },
+    {
+      "path": "retain-and-verify.py.gz",
+      "original_bytes": 5113,
+      "original_sha256": "d600cb93e01e40a4930123316c881d31ca0633d5a8ed17eaffe6ec153d8b5fd4",
+      "stored_bytes": 2087,
+      "stored_sha256": "ab811d78c7b63e1050cda3e6e8fac25dd4b31f4e7bf47c491a63bdabba2efa86"
+    }
+  ],
+  "scope": "One unchanged previously inconclusive affine project control, preserving the exact diagnostic oracle. Explicit reused Stage23 archives; no runtime, fresh bake, snapshot isolation, AOT or service acceptance."
+}
