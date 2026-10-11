@@ -1,0 +1,350 @@
+{
+  "task": "T1196",
+  "related_tasks": [
+    "T1245",
+    "T1752",
+    "T0379"
+  ],
+  "tested_source": "66d52cf253c414b049e5e96936ebc73a8953f013",
+  "production_commit": "ad9a5e9c8",
+  "test_commits": [
+    "af68bf321",
+    "276f7b7af"
+  ],
+  "shared_guard_original_commits": [
+    "1c50021c5",
+    "43a5272a8",
+    "af4afaab2",
+    "dafa26c93"
+  ],
+  "same_integration_test_sha256": "a1ba6e743be23c1157e1faaae9b0217d4d4267677a96a457233b8ad704197226",
+  "source_binding_verification": "Every receipt input was independently rehashed from its exact Git commit; retained executables and raw logs were independently rehashed.",
+  "scope": "Map literal/NewMap parsed-source and decoded-wire interpreter controls plus direct flat-slot helper extent controls. Ordinary archive-backed Map.new, DropRef authority, live-borrow shape mutation, entry/or_insert_with, lifetime verifier and AOT remain outside this packet.",
+  "cases": [
+    {
+      "source_commit": "a8c2ca05cf5fb58cb10d1f352809a95b52630e97",
+      "source_tree": "c21db5b3aff488bd369deb2eab6fd23fb8ef97e8",
+      "kind": "integration",
+      "command": [
+        "cargo",
+        "+nightly-2026-08-20",
+        "test",
+        "-vv",
+        "--offline",
+        "--locked",
+        "--message-format=json-render-diagnostics",
+        "--manifest-path",
+        "/Users/taaliman/.codex/worktrees/map-mutable-slot/verum/Cargo.toml",
+        "-p",
+        "verum_vbc",
+        "--test",
+        "map_mutable_value_slots",
+        "--no-default-features",
+        "--features",
+        "codegen,table_dispatch",
+        "--",
+        "--test-threads=1",
+        "--nocapture"
+      ],
+      "environment": {
+        "CARGO_TARGET_DIR": "/Users/taaliman/.tmp/verum-codex-01a10248-types/checker-target",
+        "CARGO_BUILD_JOBS": "1",
+        "CARGO_INCREMENTAL": "0",
+        "VERUM_NO_AUTO_PRECOMPILE": "1",
+        "RUST_MIN_STACK": "16777216"
+      },
+      "deadline_seconds": 600,
+      "maximum_log_bytes": 16777216,
+      "exit_code": 101,
+      "wall_seconds": 54.134,
+      "test_results": [
+        "test result: FAILED. 1 passed; 9 failed; 0 ignored; 0 measured; 0 filtered out; finished in 21.04s"
+      ],
+      "announced_test_counts": [
+        10
+      ],
+      "executables": {
+        "integration": {
+          "path": "/Users/taaliman/.tmp/verum-codex-01a10248-types/checker-target/debug/build/verum_vbc/0bad3fce264b5c7d/out/map_mutable_value_slots-0bad3fce264b5c7d",
+          "sha256": "b6a5646374e345b27473f5e657daa6cddc7761a08fbfc6fc7e6f58b75e56dbad",
+          "retained": "/private/tmp/verum-T1196-map-carrier-baseline/map_mutable_value_slots-0bad3fce264b5c7d",
+          "retained_sha256": "b6a5646374e345b27473f5e657daa6cddc7761a08fbfc6fc7e6f58b75e56dbad",
+          "fresh": false
+        }
+      },
+      "cargo_compilations": [
+        "verum_error v0.1.0 (/Users/taaliman/.codex/worktrees/map-mutable-slot/verum/crates/verum_error)",
+        "verum_cbgr v0.1.0 (/Users/taaliman/.codex/worktrees/map-mutable-slot/verum/crates/verum_cbgr)",
+        "verum_vbc v0.1.0 (/Users/taaliman/.codex/worktrees/map-mutable-slot/verum/crates/verum_vbc)"
+      ],
+      "source_unchanged": true,
+      "source_paths_unchanged": true,
+      "artifacts_unchanged": true,
+      "selected_tests_complete": true,
+      "artifact_origin_source": "7a8c86f90a493a3b7352359314fc5f0d628aaa1b",
+      "artifact_origin_receipt_sha256": "3df266cba9190c9d201e03cb51404b28a1d1864f784d32e18421d6fb2083faef",
+      "artifact_schema": "v54-2026-10-10-declared-field-visibility",
+      "artifacts_before": {
+        "runtime.vbca": {
+          "bytes": 40545239,
+          "sha256": "48d2cd1e07ac1cbbe5cb74eadcaf37ba84523d1dc99f68ddcc9eb067a8986d78"
+        },
+        "runtime.core_metadata": {
+          "bytes": 118793446,
+          "sha256": "7f021e1463de5414d9c7d84228357485e7db68c7aa9f5bb521cf550eff471acf"
+        },
+        "runtime.symbol_graph": {
+          "bytes": 6995428,
+          "sha256": "e44ff2b708e0c36d89b1567284fafd6146b36ede30ad520b0bdffd0035c8d27a"
+        },
+        "runtime.vbca.checksum": {
+          "bytes": 64,
+          "sha256": "603d89a857d4d0eb6a7ef9180545ccb94eb30009e0cc11ec401c78d75bfb5833"
+        },
+        "runtime.vbca.schema": {
+          "bytes": 40,
+          "sha256": "1c3b3d0a7b02c7c0f4001b49068bc4a69cd1ce368a547335fbf4186391971e4c"
+        }
+      },
+      "label": "baseline",
+      "source_bindings_verified_at_commit": 5322
+    },
+    {
+      "source_commit": "66d52cf253c414b049e5e96936ebc73a8953f013",
+      "source_tree": "1d3645111cba9062bf547c1c22d08cd18aa7691d",
+      "kind": "integration",
+      "command": [
+        "cargo",
+        "+nightly-2026-08-20",
+        "test",
+        "-vv",
+        "--offline",
+        "--locked",
+        "--message-format=json-render-diagnostics",
+        "--manifest-path",
+        "/Users/taaliman/.codex/worktrees/map-mutable-slot/verum/Cargo.toml",
+        "-p",
+        "verum_vbc",
+        "--test",
+        "map_mutable_value_slots",
+        "--no-default-features",
+        "--features",
+        "codegen,table_dispatch",
+        "--",
+        "--test-threads=1",
+        "--nocapture"
+      ],
+      "environment": {
+        "CARGO_TARGET_DIR": "/Users/taaliman/.tmp/verum-codex-01a10248-types/checker-target",
+        "CARGO_BUILD_JOBS": "1",
+        "CARGO_INCREMENTAL": "0",
+        "VERUM_NO_AUTO_PRECOMPILE": "1",
+        "RUST_MIN_STACK": "16777216"
+      },
+      "deadline_seconds": 600,
+      "maximum_log_bytes": 16777216,
+      "exit_code": 0,
+      "wall_seconds": 58.068,
+      "test_results": [
+        "test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 28.17s"
+      ],
+      "announced_test_counts": [
+        10
+      ],
+      "executables": {
+        "integration": {
+          "path": "/Users/taaliman/.tmp/verum-codex-01a10248-types/checker-target/debug/build/verum_vbc/0bad3fce264b5c7d/out/map_mutable_value_slots-0bad3fce264b5c7d",
+          "sha256": "1134101a05b2007842e9ebf9fe9fa88f862984b677eb2bc932fc33c0fcb4e41e",
+          "retained": "/private/tmp/verum-T1196-map-carrier-fixed/map_mutable_value_slots-0bad3fce264b5c7d",
+          "retained_sha256": "1134101a05b2007842e9ebf9fe9fa88f862984b677eb2bc932fc33c0fcb4e41e",
+          "fresh": false
+        }
+      },
+      "cargo_compilations": [
+        "verum_error v0.1.0 (/Users/taaliman/.codex/worktrees/map-mutable-slot/verum/crates/verum_error)",
+        "verum_cbgr v0.1.0 (/Users/taaliman/.codex/worktrees/map-mutable-slot/verum/crates/verum_cbgr)",
+        "verum_vbc v0.1.0 (/Users/taaliman/.codex/worktrees/map-mutable-slot/verum/crates/verum_vbc)"
+      ],
+      "source_unchanged": true,
+      "source_paths_unchanged": true,
+      "artifacts_unchanged": true,
+      "selected_tests_complete": true,
+      "artifact_origin_source": "7a8c86f90a493a3b7352359314fc5f0d628aaa1b",
+      "artifact_origin_receipt_sha256": "3df266cba9190c9d201e03cb51404b28a1d1864f784d32e18421d6fb2083faef",
+      "artifact_schema": "v54-2026-10-10-declared-field-visibility",
+      "artifacts_before": {
+        "runtime.vbca": {
+          "bytes": 40545239,
+          "sha256": "48d2cd1e07ac1cbbe5cb74eadcaf37ba84523d1dc99f68ddcc9eb067a8986d78"
+        },
+        "runtime.core_metadata": {
+          "bytes": 118793446,
+          "sha256": "7f021e1463de5414d9c7d84228357485e7db68c7aa9f5bb521cf550eff471acf"
+        },
+        "runtime.symbol_graph": {
+          "bytes": 6995428,
+          "sha256": "e44ff2b708e0c36d89b1567284fafd6146b36ede30ad520b0bdffd0035c8d27a"
+        },
+        "runtime.vbca.checksum": {
+          "bytes": 64,
+          "sha256": "603d89a857d4d0eb6a7ef9180545ccb94eb30009e0cc11ec401c78d75bfb5833"
+        },
+        "runtime.vbca.schema": {
+          "bytes": 40,
+          "sha256": "1c3b3d0a7b02c7c0f4001b49068bc4a69cd1ce368a547335fbf4186391971e4c"
+        }
+      },
+      "label": "fixed",
+      "source_bindings_verified_at_commit": 5324
+    },
+    {
+      "source_commit": "66d52cf253c414b049e5e96936ebc73a8953f013",
+      "source_tree": "1d3645111cba9062bf547c1c22d08cd18aa7691d",
+      "kind": "extent",
+      "command": [
+        "cargo",
+        "+nightly-2026-08-20",
+        "test",
+        "-vv",
+        "--offline",
+        "--locked",
+        "--message-format=json-render-diagnostics",
+        "--manifest-path",
+        "/Users/taaliman/.codex/worktrees/map-mutable-slot/verum/Cargo.toml",
+        "-p",
+        "verum_vbc",
+        "--lib",
+        "--no-default-features",
+        "--features",
+        "codegen,table_dispatch",
+        "--",
+        "map_slot_extent_tests::",
+        "--test-threads=1",
+        "--nocapture"
+      ],
+      "environment": {
+        "CARGO_TARGET_DIR": "/Users/taaliman/.tmp/verum-codex-01a10248-types/checker-target",
+        "CARGO_BUILD_JOBS": "1",
+        "CARGO_INCREMENTAL": "0",
+        "VERUM_NO_AUTO_PRECOMPILE": "1",
+        "RUST_MIN_STACK": "16777216"
+      },
+      "deadline_seconds": 600,
+      "maximum_log_bytes": 16777216,
+      "exit_code": 0,
+      "wall_seconds": 36.875,
+      "test_results": [
+        "test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 2101 filtered out; finished in 0.00s"
+      ],
+      "announced_test_counts": [
+        8
+      ],
+      "executables": {
+        "extent": {
+          "path": "/Users/taaliman/.tmp/verum-codex-01a10248-types/checker-target/debug/build/verum_vbc/6726a96ef21af866/out/verum_vbc-6726a96ef21af866",
+          "sha256": "20125cf167d3099f2aea5dca3d6e6058ff66270f271e0e8615eb111f41683989",
+          "retained": "/private/tmp/verum-T1196-map-extent-fixed/verum_vbc-6726a96ef21af866",
+          "retained_sha256": "20125cf167d3099f2aea5dca3d6e6058ff66270f271e0e8615eb111f41683989",
+          "fresh": false
+        }
+      },
+      "cargo_compilations": [
+        "verum_error v0.1.0 (/Users/taaliman/.codex/worktrees/map-mutable-slot/verum/crates/verum_error)",
+        "verum_cbgr v0.1.0 (/Users/taaliman/.codex/worktrees/map-mutable-slot/verum/crates/verum_cbgr)",
+        "verum_vbc v0.1.0 (/Users/taaliman/.codex/worktrees/map-mutable-slot/verum/crates/verum_vbc)"
+      ],
+      "source_unchanged": true,
+      "source_paths_unchanged": true,
+      "artifacts_unchanged": true,
+      "selected_tests_complete": true,
+      "artifact_origin_source": "7a8c86f90a493a3b7352359314fc5f0d628aaa1b",
+      "artifact_origin_receipt_sha256": "3df266cba9190c9d201e03cb51404b28a1d1864f784d32e18421d6fb2083faef",
+      "artifact_schema": "v54-2026-10-10-declared-field-visibility",
+      "artifacts_before": {
+        "runtime.vbca": {
+          "bytes": 40545239,
+          "sha256": "48d2cd1e07ac1cbbe5cb74eadcaf37ba84523d1dc99f68ddcc9eb067a8986d78"
+        },
+        "runtime.core_metadata": {
+          "bytes": 118793446,
+          "sha256": "7f021e1463de5414d9c7d84228357485e7db68c7aa9f5bb521cf550eff471acf"
+        },
+        "runtime.symbol_graph": {
+          "bytes": 6995428,
+          "sha256": "e44ff2b708e0c36d89b1567284fafd6146b36ede30ad520b0bdffd0035c8d27a"
+        },
+        "runtime.vbca.checksum": {
+          "bytes": 64,
+          "sha256": "603d89a857d4d0eb6a7ef9180545ccb94eb30009e0cc11ec401c78d75bfb5833"
+        },
+        "runtime.vbca.schema": {
+          "bytes": 40,
+          "sha256": "1c3b3d0a7b02c7c0f4001b49068bc4a69cd1ce368a547335fbf4186391971e4c"
+        }
+      },
+      "label": "extent",
+      "source_bindings_verified_at_commit": 5324
+    }
+  ],
+  "files": [
+    {
+      "path": "baseline/result.json.gz",
+      "raw_bytes": 655260,
+      "raw_sha256": "70033a4ba61e5bab4e4b94a94ad396422dccf8d72b83fff8c977f47e7b971b2e",
+      "gzip_sha256": "13af7ae9744dddd221fcc86c5f699a5ff37a9ba288b73b0cb6fbc25aafda653e"
+    },
+    {
+      "path": "baseline/gate.log.gz",
+      "raw_bytes": 247378,
+      "raw_sha256": "2a76069c8d4cabe909b7933ef424fbda4027285d0e62b5104549da7c8de209d9",
+      "gzip_sha256": "673b65673fe5f90493562d953080f8772298a267297125b521a58ded978212c1"
+    },
+    {
+      "path": "fixed/result.json.gz",
+      "raw_bytes": 655517,
+      "raw_sha256": "178c39b9f086fd2766f490a0b213384a72759ea9b1392e894e6610d28c5e9744",
+      "gzip_sha256": "85175a220583b1bc23ce31ee2204c75e9c62a30d4ef5cdf465db0fb7054e335b"
+    },
+    {
+      "path": "fixed/gate.log.gz",
+      "raw_bytes": 238940,
+      "raw_sha256": "aa56310a76ffcaa4e245ed6ba105690fad87903ea3d26267dc2bc71e243b426f",
+      "gzip_sha256": "7a5d5a0fd2a40c9eb84059d545cc407bdfd46d8af28721a403a0f63411ac2d1d"
+    },
+    {
+      "path": "extent/result.json.gz",
+      "raw_bytes": 654091,
+      "raw_sha256": "03f3087c22f243bb35b99e1ec2b885f20bf6334041b8b59aa9be2beef3de8d97",
+      "gzip_sha256": "837bd63a880648a23a42791667a247d81860b59ffae80b826abd3ab7f988f1ca"
+    },
+    {
+      "path": "extent/gate.log.gz",
+      "raw_bytes": 223556,
+      "raw_sha256": "e70be6a5273704a977f14efe044247e424f88e06fb43f42e7095d5d0d43378d6",
+      "gzip_sha256": "5206c8e038e466cdfd1ef5e9335b69319ec5ddb14ef1fb3f7987fe633a0f0703"
+    },
+    {
+      "path": "runner.py.gz",
+      "raw_bytes": 10884,
+      "raw_sha256": "6c44a179fbdfffa5b8f46f8c51ff17299cf5d2d67fc1fec288c746905647a429",
+      "gzip_sha256": "c51774f275aa27ba56ab39075878dae9a3cba8d0f6833b87d8c5a53e96d9d8f7"
+    },
+    {
+      "path": "release.json.gz",
+      "raw_bytes": 357,
+      "raw_sha256": "c76ac5f22a5d0e9eb0d04c1b306812f65c84e879ca8ca9bf085c7d34198f0056",
+      "gzip_sha256": "ce42fff794a55a1b7abc102269f93904e0461784b3de71c32263a37946f57fc0"
+    },
+    {
+      "path": "source-gates.log.gz",
+      "raw_bytes": 3630,
+      "raw_sha256": "9a55343d3edb1066a1498e7ce2a4a8f23f805ee525c45df8110d10237af3aaa6",
+      "gzip_sha256": "5bd3d90c6f1bcf784b747db1ba35d06bc32f4d40aca665d97cc44d7a35b353b5"
+    }
+  ],
+  "source_gate": {
+    "command": "make check-internal-refs",
+    "exit_code": 0,
+    "new_packet_tracked_in_index": true
+  }
+}
