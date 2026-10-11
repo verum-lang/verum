@@ -1,0 +1,46 @@
+{
+  "task": "T1752",
+  "manifest_sha256": "4551a3708cae5e902e699c34519e2e8999418d8a266d7f4eb7a2208824141eb6",
+  "source_bindings_verified": 31932,
+  "unique_git_blobs_verified": 5325,
+  "payloads_verified": 12,
+  "executables_verified": 8,
+  "runs": [
+    {
+      "name": "baseline",
+      "passed": 4,
+      "failed": 3,
+      "seconds": 32.229
+    },
+    {
+      "name": "ownership-fixed",
+      "passed": 7,
+      "failed": 0,
+      "seconds": 32.216
+    },
+    {
+      "name": "ownership-adjacent",
+      "passed": 13,
+      "failed": 0,
+      "seconds": 29.226
+    },
+    {
+      "name": "extent-baseline",
+      "passed": 8,
+      "failed": 2,
+      "seconds": 34.372
+    },
+    {
+      "name": "final",
+      "passed": 10,
+      "failed": 0,
+      "seconds": 32.34
+    },
+    {
+      "name": "final-adjacent",
+      "passed": 13,
+      "failed": 0,
+      "seconds": 30.307
+    }
+  ]
+}

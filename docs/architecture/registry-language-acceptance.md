@@ -1144,3 +1144,23 @@ byte offset 114; the backtrace cursor is 118. The read oracle succeeds,
 and the mutation oracle remains unmet. T1196 and the broader representation
 consolidation in T1245 remain open. No AOT or registry-publication acceptance
 is inferred from this diagnostic.
+
+## Checked Map value-slot references
+
+The interpreter now resolves `Map.get` and `Map.get_mut` through the same
+bounded lookup over its existing flat runtime carrier. `get_mut` returns
+the stored value-slot address, so scalar replacement and nested mutation
+write through to the original map. Exact owned receiver and backing
+extents distinguish this carrier from the incompatible declared Slot layout.
+
+Shared dereference and reference cleanup now require heap-object authority
+before reading headers. The shared extent helper checks its pointer-field
+bound for both read/write and drop callers. Genuine Shared drops complete
+register cleanup without treating interior value bits as an object header.
+
+The [main integration record](evidence/map-reference-main-landing/README.md)
+contains 50 passing focused and adjacent controls at `0599d67bc`, including
+parsed-source and decoded-wire Map mutation. These gates do not close
+T1196's entry/AOT requirements, T1245's representation consolidation,
+T0379's broader header audit, or the registry's prepared-copy and durable
+publication acceptance. Ordinary consumer replays are recorded separately.

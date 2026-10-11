@@ -1,0 +1,28 @@
+{
+  "task": "T1196",
+  "manifest_sha256": "a484c19d525fff470026c6052d6f7c6316157d5b6d75b2289b4f1d6d6199ac92",
+  "source_bindings_verified": 15970,
+  "unique_git_blobs_verified": 5327,
+  "payloads_verified": 9,
+  "executables_verified": 3,
+  "runs": [
+    {
+      "name": "baseline",
+      "passed": 1,
+      "failed": 9,
+      "seconds": 54.134
+    },
+    {
+      "name": "fixed",
+      "passed": 10,
+      "failed": 0,
+      "seconds": 58.068
+    },
+    {
+      "name": "extent",
+      "passed": 8,
+      "failed": 0,
+      "seconds": 36.875
+    }
+  ]
+}

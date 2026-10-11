@@ -1,0 +1,46 @@
+{
+  "task": "T0379",
+  "manifest_sha256": "464127a37d4a87b2ece16b26930c53e547a4efd7e9075c252beb7522828ea428",
+  "source_bindings_verified": 31938,
+  "unique_git_blobs_verified": 5326,
+  "payloads_verified": 14,
+  "executables_verified": 6,
+  "runs": [
+    {
+      "name": "baseline",
+      "passed": 3,
+      "failed": 6,
+      "seconds": 33.318
+    },
+    {
+      "name": "fixed-before-oracle-correction",
+      "passed": 8,
+      "failed": 1,
+      "seconds": 37.264
+    },
+    {
+      "name": "final",
+      "passed": 9,
+      "failed": 0,
+      "seconds": 33.229
+    },
+    {
+      "name": "retained-adjacent",
+      "passed": 12,
+      "failed": 0,
+      "seconds": 0.994
+    },
+    {
+      "name": "receiver-adjacent",
+      "passed": 13,
+      "failed": 0,
+      "seconds": 31.338
+    },
+    {
+      "name": "owned-drop-adjacent",
+      "passed": 1,
+      "failed": 0,
+      "seconds": 30.278
+    }
+  ]
+}

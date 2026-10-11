@@ -1,0 +1,103 @@
+{
+  "tasks": [
+    "T1196",
+    "T1752",
+    "T0379"
+  ],
+  "tested_source": "0599d67bc2be9fe2b1762772e7a6008863579f6f",
+  "distinct_passing_tests": 50,
+  "runs": [
+    {
+      "name": "unit",
+      "passed": 27,
+      "seconds": 36.356,
+      "source_bindings": 5304,
+      "source_paths_unchanged_after_evidence_import": true,
+      "test_results": [
+        "test result: ok. 27 passed; 0 failed; 0 ignored; 0 measured; 2091 filtered out; finished in 0.01s"
+      ],
+      "files": {
+        "result.json": {
+          "path": "unit/result.json.gz",
+          "original_bytes": 639699,
+          "original_sha256": "6dbc27de5f48b3e03701511e34814c1d7eb99c493855da2360b03634703243b1",
+          "stored_bytes": 256401,
+          "stored_sha256": "32dc43f2cd8945e3b5062315f2fc6b6800dbfba5d910b6465b5f0bce40e7b972"
+        },
+        "gate.log": {
+          "path": "unit/gate.log.gz",
+          "original_bytes": 227145,
+          "original_sha256": "5a01ab752275940e97a700b741a5965a660a84fad1a0aa38b8c85c261a96281a",
+          "stored_bytes": 20353,
+          "stored_sha256": "4871f83e0c741d0d6a33d4a0ab929a5031a9dabac46a88b83e6b65e0963d778e"
+        },
+        "runner.py": {
+          "path": "unit/runner.py.gz",
+          "original_bytes": 10003,
+          "original_sha256": "874779ebf4ab049c9ec2b2e5450466807688a4218209bbf8d57e39ef539f6f5d",
+          "stored_bytes": 3763,
+          "stored_sha256": "ecf9c6f4a8f1567067d8858fa0a6779c4899a8e10f5063c46f5d2f1b8920fd55"
+        }
+      }
+    },
+    {
+      "name": "source",
+      "passed": 23,
+      "seconds": 59.608,
+      "source_bindings": 5304,
+      "source_paths_unchanged_after_evidence_import": true,
+      "test_results": [
+        "test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 24.51s",
+        "test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s",
+        "test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s"
+      ],
+      "files": {
+        "result.json": {
+          "path": "source/result.json.gz",
+          "original_bytes": 641134,
+          "original_sha256": "6ea7d65864bf35f2c90e86c481a8415473bc7a160007f9e9024172f40a417d4a",
+          "stored_bytes": 256627,
+          "stored_sha256": "f206fe5121ae956ede5cd79fa4e636edc0b9454951f3f0f685114879f7b3feb9"
+        },
+        "gate.log": {
+          "path": "source/gate.log.gz",
+          "original_bytes": 294388,
+          "original_sha256": "2846bba1c12ab5f8b8190d16ae07a8e22af785817643824a289f76c3d89ee33b",
+          "stored_bytes": 22531,
+          "stored_sha256": "9deeb594e2ba7d1f4a8a35fe9dc960ad224023189d697995421f41513332af94"
+        },
+        "runner.py": {
+          "path": "source/runner.py.gz",
+          "original_bytes": 10306,
+          "original_sha256": "e4c768c88bd5628412293410361199d3d4d7f46f4fe56204f3a81d2b409bd1ee",
+          "stored_bytes": 3858,
+          "stored_sha256": "695ff37630ee298514a52e4668702776eb431d2100beb3dc4a41becc4fcd1675"
+        }
+      }
+    }
+  ],
+  "parent_reviews": [
+    {
+      "path": "review/T1196-carrier.json",
+      "original_bytes": 555,
+      "original_sha256": "f09914b7f44b839d3de7ea21e33aa524cbf91f197d081d0978635964adbf5b9e",
+      "stored_bytes": 555,
+      "stored_sha256": "f09914b7f44b839d3de7ea21e33aa524cbf91f197d081d0978635964adbf5b9e"
+    },
+    {
+      "path": "review/T1752.json",
+      "original_bytes": 892,
+      "original_sha256": "3bb365e02f03b151dc5ed175a95db1dd832d89d1f55582c69e5ec506fc26f62b",
+      "stored_bytes": 892,
+      "stored_sha256": "3bb365e02f03b151dc5ed175a95db1dd832d89d1f55582c69e5ec506fc26f62b"
+    },
+    {
+      "path": "review/T0379.json",
+      "original_bytes": 912,
+      "original_sha256": "97862c1be9887bda8319892390daebf6d05d1b835ec4588b1345f11d7c8333ba",
+      "stored_bytes": 912,
+      "stored_sha256": "97862c1be9887bda8319892390daebf6d05d1b835ec4588b1345f11d7c8333ba"
+    }
+  ],
+  "scope": "Main-based minimal-feature interpreter/source/wire regression gates. No ordinary consumer, fresh automatic stdlib bake, native AOT, full VBC suite, entry API, registry publication or stale-borrow lifetime acceptance."
+}
