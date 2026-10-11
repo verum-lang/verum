@@ -127,6 +127,7 @@ fn module_errors(mut checker: TypeChecker, source: &str, preload: bool) -> List<
     checker.register_primitives();
     // The production loader supplies the module registry before processing
     // mounts. Keep actual source module bodies, not injected type bindings.
+    // Inline children belong to their parent path, as in register_inline_modules.
     let mut registry = verum_modules::ModuleRegistry::new();
     registry.register(verum_modules::ModuleInfo::new(
         verum_modules::ModuleId::new(0),
@@ -142,7 +143,7 @@ fn module_errors(mut checker: TypeChecker, source: &str, preload: bool) -> List<
                 body.items = items.clone();
                 registry.register(verum_modules::ModuleInfo::new(
                     verum_modules::ModuleId::new((index + 1) as u32),
-                    verum_modules::ModulePath::from_str(module.name.name.as_str()),
+                    verum_modules::ModulePath::from_str("cog").join(module.name.name.as_str()),
                     body,
                     verum_ast::FileId::new(0),
                     source.into(),
@@ -194,7 +195,20 @@ fn module_alias_properties_use_the_actual_type_declaration() {
         assert!(problems.is_empty(), "{source}: {problems:?}");
     }
     let source = "module alpha { public type Cell is { size: Bool }; } mount alpha as short; type Root is { Cell: alpha.Cell }; fn probe(short: Root) -> Bool { short.Cell.size }";
-    assert!(module_errors(TypeChecker::new(), source, false).is_empty());
+    let problems = module_errors(TypeChecker::new(), source, false);
+    // The parameter shadows the module alias, but does not grant access to
+    // alpha's private field. Keep that refusal separate from property lookup.
+    assert!(
+        problems.iter().any(|problem| {
+            problem.contains("VisibilityError")
+                && problem.contains("name: Text { inner: \"size\" }")
+                && problem.contains("module_path: Text { inner: \"cog.alpha\" }")
+        }),
+        "{source}: {problems:?}"
+    );
+    let public_source = source.replace("size: Bool", "public size: Bool");
+    let problems = module_errors(TypeChecker::new(), &public_source, false);
+    assert!(problems.is_empty(), "{public_source}: {problems:?}");
 }
 
 fn property_metadata() -> verum_types::core_metadata::CoreMetadata {

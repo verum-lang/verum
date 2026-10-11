@@ -50,15 +50,15 @@
 //
 
 // ```
-// let v: SemVer = semver.parse(&Text.from("1.2.3-beta.1+build.5"))?;
-// assert(v.major == 1);
-// assert(v.pre_release.len() == 2); // ["beta", "1"]
+// let v: SemVer = SemVer.parse(&Text.from("1.2.3-beta.1+build.5"))?;
+// assert(v.major() == 1);
+// assert(v.prerelease_identifiers().len() == 2); // ["beta", "1"]
 //
 
 // // Total ordering.
-// let a = semver.parse(&Text.from("1.0.0-alpha"))?;
-// let b = semver.parse(&Text.from("1.0.0"))?;
-// assert(semver.cmp(&a, &b) is Less); // prerelease < release
+// let a = SemVer.parse(&Text.from("1.0.0-alpha"))?;
+// let b = SemVer.parse(&Text.from("1.0.0"))?;
+// assert(a.cmp(&b) is Less); // prerelease < release
 // ```
 //
 
@@ -129,7 +129,7 @@ implement Eq for SemVerError {
 }
 
 // UInt64.MAX = 18_446_744_073_709_551_615 — exactly 20 decimal digits.
-// Any decimal string longer than 20 digits cannot fit; reject pre-loop.
+// A major/minor/patch component longer than 20 digits cannot fit; reject pre-loop.
 const MAX_NUMERIC_DIGITS: Int = 20;
 // UInt64.MAX / 10 — the per-step guard against `v * 10` overflowing the
 // next iteration. SemVer §9 numeric identifiers carry no semantic upper
@@ -275,12 +275,8 @@ fn validate_prerelease_id(b: &[Byte], start: Int, end: Int) -> Result<(), SemVer
     if is_numeric && (end - start) > 1 && b[start] == ('0' as Byte) {
         return Result.Err(SemVerError.LeadingZero(slice_text(b, start, end)));
     }
-    // Numeric prerelease IDs are compared as decimals via §11.4.1, which
-    // routes through `parse_u64_unchecked`. Reject digit-counts past
-    // UInt64 width here so the comparator stays sound by precondition.
-    if is_numeric && (end - start) > MAX_NUMERIC_DIGITS {
-        return Result.Err(SemVerError.Overflow(slice_text(b, start, end)));
-    }
+    // Prerelease identifiers are text, with no UInt64 width restriction.
+    // Their numeric order uses decimal length and lexicographic comparison.
     Result.Ok(())
 }
 
@@ -332,8 +328,12 @@ fn compare(a: &SemVer, b: &SemVer) -> Ordering {
     let c = cmp_u64(a.patch, b.patch);
     if c != Equal { return c; }
 
+    compare_prerelease_identifiers(&a.pre_release, &b.pre_release)
+}
+
+fn compare_prerelease_identifiers(a: &List<Text>, b: &List<Text>) -> Ordering {
     // Pre-release: none > any prerelease (§11.3).
-    match (a.pre_release.len() == 0, b.pre_release.len() == 0) {
+    match (a.len() == 0, b.len() == 0) {
         (true,  true)  => { return Equal; },
         (true,  false) => { return Greater; },
         (false, true)  => { return Less; },
@@ -342,15 +342,15 @@ fn compare(a: &SemVer, b: &SemVer) -> Ordering {
 
     // Compare identifier-by-identifier (§11.4).
     let mut i: Int = 0;
-    while i < a.pre_release.len() && i < b.pre_release.len() {
-        let x = &a.pre_release[i];
-        let y = &b.pre_release[i];
+    while i < a.len() && i < b.len() {
+        let x = &a[i];
+        let y = &b[i];
         let c = cmp_prerelease_id(x, y);
         if c != Equal { return c; }
         i = i + 1;
     }
     // §11.4.4: longer set > shorter when common prefix equal.
-    cmp_int(a.pre_release.len(), b.pre_release.len())
+    cmp_int(a.len(), b.len())
 }
 
 fn cmp_prerelease_id(a: &Text, b: &Text) -> Ordering {
@@ -361,13 +361,13 @@ fn cmp_prerelease_id(a: &Text, b: &Text) -> Ordering {
     // Numeric < alphanumeric (§11.4.3).
     if a_num && !b_num { return Less; }
     if !a_num && b_num { return Greater; }
-    if a_num && b_num {
-        // Both numeric — compare as decimal (§11.4.1).
-        let av = parse_u64_unchecked(ab);
-        let bv = parse_u64_unchecked(bb);
-        return cmp_u64(av, bv);
+    if a_num && b_num && ab.len() != bb.len() {
+        // Leading zeroes are rejected by the parser, so decimal length is
+        // numerical significance. Equal-length digits use the same ASCII
+        // comparison below; no fixed-width conversion or saturation occurs.
+        return cmp_int(ab.len(), bb.len());
     }
-    // Both alphanumeric — ASCII lexicographic (§11.4.2).
+    // Equal-length numeric or two alphanumeric identifiers: ASCII order.
     let mut i: Int = 0;
     while i < ab.len() && i < bb.len() {
         if ab[i] < bb[i] { return Less; }
@@ -385,33 +385,6 @@ fn is_all_numeric(b: &[Byte]) -> Bool {
         i = i + 1;
     }
     true
-}
-
-// SAFETY (precondition): only called from `cmp_prerelease_id` after
-// `validate_prerelease_id` has rejected numeric identifiers with more
-// than MAX_NUMERIC_DIGITS digits. So `b.len() ≤ 20`, which on its own
-// still admits values past UInt64.MAX (`99...9`, 20 nines), but `cmp`
-// is comparing two such values for ordering — wrap-around would silently
-// invert the order. Per-step guard kept defence-in-depth: on overflow
-// we saturate at UInt64.MAX so the comparator at least preserves the
-// `≥` direction across overflowed inputs. In practice no validator-
-// approved input reaches this path because §9 leading-zero rule + §11.4
-// numeric-vs-alphanumeric split keeps prerelease IDs short.
-fn parse_u64_unchecked(b: &[Byte]) -> UInt64 {
-    let mut v: UInt64 = 0_u64;
-    let mut i: Int = 0;
-    while i < b.len() {
-        if v > U64_MAX_DIV_10 {
-            return 18_446_744_073_709_551_615_u64;
-        }
-        let next = v * 10_u64 + ((b[i] - ('0' as Byte)) as UInt64);
-        if next < v {
-            return 18_446_744_073_709_551_615_u64;
-        }
-        v = next;
-        i = i + 1;
-    }
-    v
 }
 
 fn cmp_u64(a: UInt64, b: UInt64) -> Ordering {
@@ -452,7 +425,7 @@ fn render(v: &SemVer) -> Text {
 // =============================================================================
 //
 // SemVer's entire API is reached through the TYPE (`SemVer.parse`,
-// `SemVer.zero`) or through the LANGUAGE's own protocols (`Display`
+// `SemVer.zero` and read-only instance methods) or through the LANGUAGE's own protocols (`Display`
 // for rendering, `Ord`/`Eq` for comparison).  Nothing here is a free
 // function: a bare `parse` / `format` / `cmp` in the ambient namespace
 // binds silently across unrelated domains (five stdlib modules used to
@@ -460,6 +433,26 @@ fn render(v: &SemVer) -> Text {
 // («No Magic: all dependencies explicit») forbids.
 
 implement SemVer {
+    /// Major component of this parsed version.
+    public fn major(&self) -> UInt64 { self.major }
+
+    /// Minor component of this parsed version.
+    public fn minor(&self) -> UInt64 { self.minor }
+
+    /// Patch component of this parsed version.
+    public fn patch(&self) -> UInt64 { self.patch }
+
+    /// Borrow the parsed prerelease identifiers without permitting mutation.
+    /// An empty list denotes a release version.
+    public fn prerelease_identifiers(&self) -> &List<Text> { &self.pre_release }
+
+    /// Compare prerelease precedence with already parsed identifiers.
+    /// Empty denotes a release. This shares Ord's identifier ordering and does
+    /// not parse or validate the supplied identifiers or compare core numbers.
+    public fn compare_prerelease(&self, identifiers: &List<Text>) -> Ordering {
+        compare_prerelease_identifiers(&self.pre_release, identifiers)
+    }
+
     /// Parse a canonical SemVer 2.0.0 string.
     public fn parse(s: &Text) -> Result<SemVer, SemVerError> {
         parse_text(s)

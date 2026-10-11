@@ -657,6 +657,9 @@ impl TypeChecker {
                 fields: field_patterns,
                 rest,
             } => {
+                for field in field_patterns {
+                    self.check_record_field_visibility(&scheme.ty, field.name.name.as_str(), field.span)?;
+                }
                 // First, try to resolve as a record type (the original behavior)
                 if let Some(field_types) = self.resolve_to_record_type(&scheme.ty) {
                     for field_pat in field_patterns {

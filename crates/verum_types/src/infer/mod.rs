@@ -14,6 +14,7 @@
 
 // Submodules containing impl TypeChecker method groups
 mod source_declarations;
+mod field_visibility;
 pub(crate) mod decls;           // Type declaration registration (register_type_declaration*, …)
 pub(crate) mod env;             // Environment management (stdlib bootstrap, pre-register, constraints)
 pub(crate) mod expr;            // Expression inference (synth_expr, check_expr, infer_expr*)
@@ -824,6 +825,7 @@ pub struct TypeChecker {
     /// Resolve imported signatures in their declaring source scope.
     pub(crate) resolving_source_signature: bool,
     loaded_source_receiver_methods: Set<Text>,
+    source_record_field_visibility: Map<Text, field_visibility::RecordVisibility>,
     /// Registry of inline module declarations for qualified path resolution
     /// Maps module path (e.g., "cog.api.v1") to its declaration
     /// Module declaration: inline "module name { ... }" or file-based (foo.vr defines module foo) — Inline Modules

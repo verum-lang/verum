@@ -546,6 +546,25 @@ impl Unifier {
         self.family_contains(&self.array_coercible_types, name)
     }
 
+    /// Return the element of an already registered array-coercible collection.
+    /// This uses the same head predicates as array/slice unification so checker
+    /// authority checks do not infer coercibility from a name or record shape.
+    pub(crate) fn array_coercible_element<'a>(&self, ty: &'a Type) -> Maybe<&'a Type> {
+        match ty {
+            Type::Generic { name, args }
+                if args.len() == 1 && self.is_array_coercible(name.as_str()) =>
+            {
+                Some(&args[0])
+            }
+            Type::Named { path, args }
+                if args.len() == 1 && self.path_is_array_coercible(path) =>
+            {
+                Some(&args[0])
+            }
+            _ => None,
+        }
+    }
+
     /// Register a type name as part of the tensor family (coerces with other tensor
     /// types and with scalar primitives). Default set includes DynTensor, Tensor, etc.
     pub fn register_tensor_family_type(&mut self, type_name: Text) {

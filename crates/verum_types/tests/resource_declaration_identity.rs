@@ -153,7 +153,7 @@ fn alias_preserves_linear_must_consume_constraint() {
     for reverse in [false, true] {
         let errors = errors_with_declarations(
             reverse,
-            "public type linear Token is { id: Int };",
+            "public type linear Token is { public id: Int };",
             "public type Token is { pad: Int, id: Int };",
             "type Alias is alpha.Token; fn make() -> Alias { alpha.Token { id: 1 } } fn probe() { let token = make(); }",
         );

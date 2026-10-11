@@ -1672,7 +1672,27 @@ fn substitute_refinement_binder(
             else { unreachable!() };
                 // Generic type with arguments: List<T>, Tensor<Float, [2, 3]>
                 // Subtyping: structural subtyping for records, refinement subtyping (T{P} <: T when P holds), protocol-based nominal subtyping — .2 - Generic type arguments
-                let base_ty = self.ast_to_type(base)?;
+                // Keep the selected declaration's parameter namespace before
+                // resolving arguments can enter another declaration. A structural
+                // sum no longer carries an owner once this base is expanded.
+                let (base_ty, parameter_key) = if let TypeKind::Path(path) = &base.kind {
+                    let builtin = if path.segments.len() == 1 {
+                        match &path.segments[0] {
+                            verum_ast::ty::PathSegment::Name(name) =>
+                                resolve_builtin_meta_type(name.name.as_str()),
+                            _ => None,
+                        }
+                    } else {
+                        None
+                    };
+                    if let Some(builtin) = builtin {
+                        (builtin, None)
+                    } else {
+                        self.resolve_qualified_type_with_parameter_key(path, base.span)?
+                    }
+                } else {
+                    (self.ast_to_type(base)?, None)
+                };
 
                 // DEBUG: trace HKT TypeApp construction
 
@@ -1732,23 +1752,9 @@ fn substitute_refinement_binder(
                     }
                 }
 
-                // Validate generic arity when we have declaration info.
-                // Prevents silent acceptance of `List<Int, Int>` when List<T>
-                // expects exactly one type argument. We only error when the
-                // expected count is known (stored TypeVar order), otherwise
-                // we stay permissive to avoid regressions.
-                // Validate generic arity when we can determine the expected
-                // parameter count. Prevents silent acceptance of things like
-                // `List<Int, Int>` where List<T> only expects one type arg.
-                // Expected count comes from `__type_params_{name}` (records)
-                // or `__type_var_order_{name}` (variant types).
-                if let verum_ast::ty::TypeKind::Path(path) = &base.kind {
-                    let name_opt: Option<verum_common::Text> =
-                        path.segments.last().and_then(|seg| match seg {
-                            verum_ast::ty::PathSegment::Name(ident) => Some(ident.name.clone()),
-                            _ => None,
-                        });
-                    if let Some(type_name) = name_opt {
+                // Validate and default arguments using the registration selected
+                // with this exact template, including phantom parameter slots.
+                if let Some(type_name) = parameter_key.as_ref() {
                         let params_key = format!("__type_params_{}", type_name);
                         let order_key = format!("__type_var_order_{}", type_name);
                         let expected: Option<usize> = match self.ctx.lookup_type(&params_key) {
@@ -1804,41 +1810,9 @@ fn substitute_refinement_binder(
                                 .iter()
                                 .filter(|t| !matches!(t, Type::Lifetime { .. }))
                                 .count();
-                            // BRACKETS ARE AN APPLICATION, so the count has
-                            // to match in BOTH directions. This used to ask
-                            // only `provided > expected`, which let
-                            // `Pair<Int>` through for a two-parameter `Pair`
-                            // — and an under-applied constructor is worse
-                            // than a loud one, because the free parameter is
-                            // then unified with whatever arrives first and
-                            // the program quietly means something else.
-                            //
-                            // Under-application is not itself an error: a
-                            // BARE `List` is the unapplied constructor, and
-                            // higher-kinded positions want exactly that.
-                            // Writing the brackets is what says "applied",
-                            // which is why this fires on `provided != 0`
-                            // and a bare name never reaches here at all.
-                            // TWO-SIDED IS THE RULE, ONE-SIDED IS WHAT
-                            // SHIPS TODAY. `provided < expected` is a real
-                            // error and the checker can already see it, but
-                            // turning it on refuses 194 uses of `Result<T>`
-                            // across 31 core/ files, where `Result<T, E>`
-                            // takes two. Those sites are not typos: the
-                            // stdlib is written as if `E` had a default,
-                            // the way `io::Result<T>` reads in Rust — and
-                            // the grammar has no default for a type
-                            // parameter (`extended_type_param` carries
-                            // bounds, never `= Type`).
-                            //
-                            // So the missing half of the arity rule is
-                            // blocked on a missing LANGUAGE FEATURE, not on
-                            // this condition. Landing it here without the
-                            // feature would refuse a correct-looking stdlib
-                            // and teach authors to spell an error type the
-                            // language should be defaulting. T0922 carries
-                            // the design; flip `>` to `!=` once
-                            // `type Result<T, E = Error>` is writable.
+                            // Brackets apply a constructor. Omitted trailing
+                            // parameters have already received their defaults;
+                            // every remaining declaration slot needs an argument.
                             if expected_count > 0 && provided != expected_count {
                                 return Err(TypeError::OtherWithCodeSpanned {
                                     code: verum_common::Text::from("E407"),
@@ -1866,7 +1840,6 @@ fn substitute_refinement_binder(
                             args,
                             ast_ty.span,
                         )?;
-                    }
                 }
 
                 // APPLYING TYPE ARGUMENTS TO A TYPE ALIAS IS A SUBSTITUTION,
@@ -1892,9 +1865,9 @@ fn substitute_refinement_binder(
                 // the one correct implementation do the work.  For anything
                 // that is not an alias `try_expand_alias` returns None and
                 // the arms below run unchanged.
-                if let verum_ast::ty::TypeKind::Path(base_path) = &base.kind {
+                if let Some(key) = parameter_key.as_ref() {
                     let unexpanded = Type::Named {
-                        path: base_path.clone(),
+                        path: Self::text_to_path(key),
                         args: type_args.clone(),
                     };
                     if let Some(expanded) = self.unifier.try_expand_alias(&unexpanded) {
@@ -1944,175 +1917,23 @@ fn substitute_refinement_binder(
                         constructor: Box::new(base_ty.clone()),
                         args: type_args.clone(),
                     },
-                    // CRITICAL FIX: For Variant base types (like Maybe, Result), we need to
-                    // substitute the type arguments into the variant payloads.
-                    // This ensures Maybe<Maybe<Int>> has correctly substituted inner types.
-                    // For Result<T, E>, Ok(T) should substitute T and Err(E) should substitute E.
-                    Type::Variant(variants) => {
-                        // Build type parameter substitution from original type definition
-                        // This requires looking up the original type's parameter names
-                        if !type_args.is_empty() {
-                            // CRITICAL FIX: Get TypeVars in declaration order for proper substitution.
-                            // Type arguments come in declaration order (e.g., for Validated<E, A>, first
-                            // arg is E, second is A). We need to map TypeVars to args in the same order.
-                            //
-
-                            // Strategy:
-                            // 1. Try to look up stored TypeVar order from __type_var_order_{type_name}
-                            // 2. Fall back to collecting TypeVars recursively from variant payloads
-                            //
-
-                            // The stored order is authoritative when available because it was created
-                            // at type registration time with the correct declaration order.
-                            let type_var_order: List<TypeVar> = {
-                                // Extract the type name directly from the AST base node.
-                                // This avoids variant_type_names collisions when different types
-                                // share the same variant constructor names (e.g., Validated vs Validation
-                                // both having Valid/Invalid).
-                                let maybe_type_name: Option<verum_common::Text> =
-                                    if let verum_ast::ty::TypeKind::Path(path) = &base.kind {
-                                        path.segments.last().and_then(|seg| match seg {
-                                            verum_ast::ty::PathSegment::Name(id) => {
-                                                Some(id.name.clone())
-                                            }
-                                            _ => None,
-                                        })
-                                    } else {
-                                        // Fallback: use variant_type_names registry
-                                        let variant_type = Type::Variant(variants.clone());
-                                        let sig_opt = Self::variant_type_signature(&variant_type);
-                                        if let Some(ref sig) = sig_opt {
-                                            self.variant_type_names.get(sig).cloned()
-                                        } else {
-                                            None
-                                        }
-                                    };
-                                // Try stored TypeVar order if type name is available
-                                let stored_order: Option<List<TypeVar>> =
-                                    maybe_type_name.as_ref().and_then(|type_name| {
-                                        let type_var_order_key =
-                                            format!("__type_var_order_{}", type_name);
-                                        match self.ctx.lookup_type(&type_var_order_key) {
-                                            verum_common::Maybe::Some(Type::Tuple(type_vars)) => {
-                                                let vars: List<TypeVar> = type_vars
-                                                    .iter()
-                                                    .filter_map(|t| {
-                                                        if let Type::Var(tv) = t {
-                                                            Some(*tv)
-                                                        } else {
-                                                            None
-                                                        }
-                                                    })
-                                                    .collect();
-                                                if !vars.is_empty() { Some(vars) } else { None }
-                                            }
-                                            _ => None,
-                                        }
-                                    });
-
-                                if let Some(order) = stored_order {
-                                    order
-                                } else {
-                                    // Fallback: Collect type variables recursively from variant payloads.
-                                    // This preserves order of first appearance but may not match declaration
-                                    // order if variants are declared differently than type params.
-                                    fn collect_type_vars_ordered(
-                                        ty: &Type,
-                                        vars: &mut List<TypeVar>,
-                                    ) {
-                                        match ty {
-                                            Type::Var(tv) => {
-                                                if !vars.iter().any(|v| v == tv) {
-                                                    vars.push(*tv);
-                                                }
-                                            }
-                                            Type::Function {
-                                                params,
-                                                return_type,
-                                                ..
-                                            } => {
-                                                for p in params {
-                                                    collect_type_vars_ordered(p, vars);
-                                                }
-                                                collect_type_vars_ordered(return_type, vars);
-                                            }
-                                            Type::Tuple(types) => {
-                                                for t in types {
-                                                    collect_type_vars_ordered(t, vars);
-                                                }
-                                            }
-                                            Type::Array { element, .. }
-                                            | Type::Slice { element } => {
-                                                collect_type_vars_ordered(element, vars);
-                                            }
-                                            Type::Record(fields) => {
-                                                for t in fields.values() {
-                                                    collect_type_vars_ordered(t, vars);
-                                                }
-                                            }
-                                            Type::Variant(inner_variants) => {
-                                                for t in inner_variants.values() {
-                                                    collect_type_vars_ordered(t, vars);
-                                                }
-                                            }
-                                            Type::Reference { inner, .. }
-                                            | Type::CheckedReference { inner, .. }
-                                            | Type::UnsafeReference { inner, .. }
-                                            | Type::Ownership { inner, .. }
-                                            | Type::Pointer { inner, .. }
-                                            | Type::VolatilePointer { inner, .. } => {
-                                                collect_type_vars_ordered(inner, vars);
-                                            }
-                                            Type::Named { args, .. }
-                                            | Type::Generic { args, .. } => {
-                                                for arg in args {
-                                                    collect_type_vars_ordered(arg, vars);
-                                                }
-                                            }
-                                            Type::Future { output } => {
-                                                collect_type_vars_ordered(output, vars);
-                                            }
-                                            Type::TypeApp { constructor, args } => {
-                                                collect_type_vars_ordered(constructor, vars);
-                                                for arg in args {
-                                                    collect_type_vars_ordered(arg, vars);
-                                                }
-                                            }
-                                            _ => {}
-                                        }
-                                    }
-
-                                    let mut vars: List<TypeVar> = List::new();
-                                    for (_, payload_ty) in variants.iter() {
-                                        collect_type_vars_ordered(payload_ty, &mut vars);
-                                    }
-                                    vars
-                                }
-                            };
-
-                            // Build substitution map from type variables to type arguments
-                            // Note: Substitution is IndexMap<TypeVar, Type> per ty.rs
-                            let mut subst_map: indexmap::IndexMap<TypeVar, Type> =
-                                indexmap::IndexMap::new();
-                            for (idx, tv) in type_var_order.iter().enumerate() {
-                                if let Some(arg_ty) = type_args.get(idx) {
-                                    subst_map.insert(*tv, arg_ty.clone());
-                                }
-                            }
-
-                            // CRITICAL FIX: Apply substitution RECURSIVELY to each variant payload
-                            // using Type::apply_subst which handles all nested types correctly.
-                            // Previous implementation only substituted top-level Type::Var payloads.
-                            let mut new_variants = indexmap::IndexMap::new();
-                            for (variant_name, payload_ty) in variants {
-                                let new_payload = payload_ty.apply_subst(&subst_map);
-                                new_variants.insert(variant_name.clone(), new_payload);
-                            }
-                            Type::Variant(new_variants)
-                        } else {
-                            base_ty.clone()
-                        }
-                    }
+                    // Sum payloads use the same exact declaration slots as
+                    // aliases and records. Declaration order includes unused
+                    // parameters; scanning payload variables cannot recover it.
+                    Type::Variant(_) => match parameter_key.as_ref() {
+                        Some(key) => self.substitute_with_params(
+                            key.as_str(), &base_ty, &type_args,
+                        ),
+                        None if type_args.is_empty() => base_ty.clone(),
+                        None => return Err(TypeError::OtherWithCodeSpanned {
+                            code: "E407".into(),
+                            msg: format!(
+                                "cannot resolve generic parameters for type `{}`",
+                                verum_ast::pretty::format_type(base),
+                            ).into(),
+                            span: ast_ty.span,
+                        }),
+                    },
                     // CRITICAL FIX: When base resolves to Placeholder (forward reference during
                     // two-pass compilation), preserve type arguments by creating a Generic type.
                     // This ensures Rev<Self> correctly preserves the Self argument rather than

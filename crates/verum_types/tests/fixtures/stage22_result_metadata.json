@@ -1,0 +1,326 @@
+{
+  "types": {
+    "Result": {
+      "name": "Result",
+      "module_path": "core.action",
+      "origin_module_path": "core.base.result",
+      "generic_params": [
+        {
+          "name": "T",
+          "bounds": [],
+          "default": null,
+          "type_bounds": [],
+          "pid": 0
+        },
+        {
+          "name": "E",
+          "bounds": [],
+          "default": null,
+          "type_bounds": [],
+          "pid": 1
+        }
+      ],
+      "kind": {
+        "Variant": {
+          "cases": [
+            {
+              "name": "Ok",
+              "payload": {
+                "Tuple": [
+                  "T"
+                ]
+              }
+            },
+            {
+              "name": "Err",
+              "payload": {
+                "Tuple": [
+                  "E"
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "size": null,
+      "alignment": 1,
+      "methods": [
+        "and",
+        "and_then",
+        "as_mut",
+        "as_ref",
+        "branch",
+        "clamp",
+        "clone",
+        "clone_from",
+        "cmp",
+        "contains",
+        "contains_err",
+        "context",
+        "default",
+        "eq",
+        "err",
+        "expect",
+        "expect_err",
+        "flat_map",
+        "flatten",
+        "flip",
+        "fmt",
+        "fmt_debug",
+        "fold",
+        "from",
+        "from_output",
+        "from_residual",
+        "from_residual#impl2",
+        "from_residual#impl3",
+        "ge",
+        "gt",
+        "hash",
+        "hash_value",
+        "inspect",
+        "inspect_err",
+        "into_iter",
+        "into_iter#impl2",
+        "is_err",
+        "is_err_and",
+        "is_ok",
+        "is_ok_and",
+        "iter",
+        "iter_mut",
+        "le",
+        "lt",
+        "map",
+        "map_err",
+        "map_or",
+        "map_or_else",
+        "max",
+        "min",
+        "ne",
+        "ok",
+        "or",
+        "or_else",
+        "partial_cmp",
+        "recover",
+        "recover_with",
+        "tap",
+        "tap_both",
+        "tap_err",
+        "to_string",
+        "unwrap",
+        "unwrap_err",
+        "unwrap_or",
+        "unwrap_or_default",
+        "unwrap_or_else",
+        "with_context"
+      ],
+      "implements": [
+        "IntoIterator",
+        "Eq",
+        "Ord",
+        "Clone",
+        "Copy",
+        "Hash",
+        "Debug",
+        "Display",
+        "From",
+        "Default",
+        "Try",
+        "FromResidual",
+        "FromResidual",
+        "FromResidual"
+      ],
+      "decl_span": {
+        "file": "base/result.vr",
+        "start": 1073,
+        "end": 1074
+      },
+      "is_transparent_wrapper": false,
+      "resource_discipline": "Unrestricted",
+      "is_public": true
+    },
+    "core.base.result.Result": {
+      "name": "Result",
+      "module_path": "core.action",
+      "origin_module_path": "core.base.result",
+      "generic_params": [
+        {
+          "name": "T",
+          "bounds": [],
+          "default": null,
+          "type_bounds": [],
+          "pid": 0
+        },
+        {
+          "name": "E",
+          "bounds": [],
+          "default": null,
+          "type_bounds": [],
+          "pid": 1
+        }
+      ],
+      "kind": {
+        "Variant": {
+          "cases": [
+            {
+              "name": "Ok",
+              "payload": {
+                "Tuple": [
+                  "T"
+                ]
+              }
+            },
+            {
+              "name": "Err",
+              "payload": {
+                "Tuple": [
+                  "E"
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "size": null,
+      "alignment": 1,
+      "methods": [
+        "and",
+        "and_then",
+        "as_mut",
+        "as_ref",
+        "branch",
+        "clamp",
+        "clone",
+        "clone_from",
+        "cmp",
+        "contains",
+        "contains_err",
+        "context",
+        "default",
+        "eq",
+        "err",
+        "expect",
+        "expect_err",
+        "flat_map",
+        "flatten",
+        "flip",
+        "fmt",
+        "fmt_debug",
+        "fold",
+        "from",
+        "from_output",
+        "from_residual",
+        "from_residual#impl2",
+        "from_residual#impl3",
+        "ge",
+        "gt",
+        "hash",
+        "hash_value",
+        "inspect",
+        "inspect_err",
+        "into_iter",
+        "into_iter#impl2",
+        "is_err",
+        "is_err_and",
+        "is_ok",
+        "is_ok_and",
+        "iter",
+        "iter_mut",
+        "le",
+        "lt",
+        "map",
+        "map_err",
+        "map_or",
+        "map_or_else",
+        "max",
+        "min",
+        "ne",
+        "ok",
+        "or",
+        "or_else",
+        "partial_cmp",
+        "recover",
+        "recover_with",
+        "tap",
+        "tap_both",
+        "tap_err",
+        "to_string",
+        "unwrap",
+        "unwrap_err",
+        "unwrap_or",
+        "unwrap_or_default",
+        "unwrap_or_else",
+        "with_context"
+      ],
+      "implements": [
+        "IntoIterator",
+        "Eq",
+        "Ord",
+        "Clone",
+        "Copy",
+        "Hash",
+        "Debug",
+        "Display",
+        "From",
+        "Default",
+        "Try",
+        "FromResidual",
+        "FromResidual",
+        "FromResidual"
+      ],
+      "decl_span": {
+        "file": "base/result.vr",
+        "start": 1073,
+        "end": 1074
+      },
+      "is_transparent_wrapper": false,
+      "resource_discipline": "Unrestricted",
+      "is_public": true
+    }
+  },
+  "type_declaration_order": [],
+  "protocols": {},
+  "functions": {},
+  "implementations": [],
+  "statics": {},
+  "monomorphizations": {},
+  "version": 0,
+  "content_hash": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+  ],
+  "context_declarations": [],
+  "context_decl_nodes": {},
+  "context_declaring_modules": {},
+  "module_reexports": {},
+  "blanket_impls": []
+}

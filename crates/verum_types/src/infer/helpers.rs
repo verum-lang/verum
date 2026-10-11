@@ -2222,6 +2222,46 @@ pub(crate) fn split_top_level_commas(s: &str) -> Vec<&str> {
     out
 }
 
+/// The payload template and inductive constructors describe one declaration.
+/// Reuse its exact ordered slots regardless of which producer runs first;
+/// freshening belongs to constructor/application use sites.
+pub(crate) fn metadata_variant_parameters(
+    checker: &TypeChecker,
+    name: &Text,
+    descriptor: &crate::core_metadata::TypeDescriptor,
+) -> indexmap::IndexMap<Text, crate::ty::TypeVar> {
+    let parameters = &descriptor.generic_params;
+    if let Some(Type::Tuple(slots)) = checker.ctx.lookup_type(&format!("__type_var_order_{name}"))
+        && slots.len() == parameters.len()
+    {
+        let ordered: Option<indexmap::IndexMap<_, _>> = parameters.iter().zip(slots.iter())
+            .map(|(parameter, slot)| match slot {
+                Type::Var(var) => Some((parameter.name.clone(), *var)),
+                _ => None,
+            }).collect();
+        if let Some(ordered) = ordered {
+            return ordered;
+        }
+    }
+    // The lazy preload can register constructors before loading their type
+    // template. That producer already records these exact named variables.
+    if let Some(Type::Record(slots)) = checker.ctx.lookup_type(&format!("__type_params_{name}"))
+        && slots.len() == parameters.len()
+    {
+        let ordered: Option<indexmap::IndexMap<_, _>> = parameters.iter()
+            .map(|parameter| match slots.get(&parameter.name) {
+                Some(Type::Var(var)) => Some((parameter.name.clone(), *var)),
+                _ => None,
+            }).collect();
+        if let Some(ordered) = ordered {
+            return ordered;
+        }
+    }
+    parameters.iter()
+        .map(|parameter| (parameter.name.clone(), crate::ty::TypeVar::fresh()))
+        .collect()
+}
+
 /// Per-variant signature registration extracted from
 /// `load_stdlib_from_metadata` so the lazy loader can register one
 /// type's variants without walking the entire stdlib.  Mirrors the
@@ -2276,7 +2316,7 @@ pub(crate) fn register_variant_signature_for_lazy(
     // #126 — generic-parameter substitution at variant construction.
     //
     // Map every parent generic-param NAME (e.g. `"T"`, `"A"`, `"E"`)
-    // to a freshly-allocated `TypeVar`.  The variant payload types
+    // to its declaration's shared `TypeVar`. The variant payload types
     // are then built using these vars instead of literal
     // `Type::Named { path: "T" }` placeholders.  When the unit-variant
     // env entry is inserted as a `TypeScheme::poly` quantified over
@@ -2291,11 +2331,7 @@ pub(crate) fn register_variant_signature_for_lazy(
     // (rigid name) with no rule to unify.
     use indexmap::IndexMap;
     use crate::ty::TypeVar;
-    let param_to_var: IndexMap<Text, TypeVar> = type_desc
-        .generic_params
-        .iter()
-        .map(|gp| (gp.name.clone(), TypeVar::fresh()))
-        .collect();
+    let param_to_var = metadata_variant_parameters(checker, name, type_desc);
     // Task #41 — payload type strings like "List<Byte>" / "Maybe<Text>"
     // / "Result<T, E>" MUST go through the structural parser so the
     // generic head and args land in `Type::Named { path, args }` shape

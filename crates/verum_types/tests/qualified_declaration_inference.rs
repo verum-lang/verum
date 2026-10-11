@@ -127,7 +127,7 @@ fn explicit_type_argument_still_rejects_an_unrelated_value() {
 fn sibling_errors(reverse: bool, source: &str) -> List<Text> {
     let alpha = Parser::new(
         r#"
-        public type State<T> is { value: T, alpha_only: Int };
+        public type State<T> is { public value: T, public alpha_only: Int };
         implement<T> State<T> {
             fn choose<Output>(self, value: Output) -> Output { value }
             fn own_value(&self) -> T { self.value }
@@ -138,7 +138,7 @@ fn sibling_errors(reverse: bool, source: &str) -> List<Text> {
     .expect("alpha source");
     let beta = Parser::new(
         r#"
-        public type State<T> is { beta_only: Int, value: Bool };
+        public type State<T> is { beta_only: Int, public value: Bool };
         implement<T> State<T> {
             fn choose(self, value: Bool) -> Bool { value }
             fn own_value(&self) -> Bool { self.value }

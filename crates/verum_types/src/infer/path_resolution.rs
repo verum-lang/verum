@@ -122,13 +122,22 @@ impl TypeChecker {
     }
 
     pub(crate) fn resolve_type_name(&mut self, name: &str, span: Span) -> Result<Type> {
+        self.resolve_type_name_with_parameter_key(name, span)
+            .map(|(ty, _)| ty)
+    }
+
+    fn resolve_type_name_with_parameter_key(
+        &mut self,
+        name: &str,
+        span: Span,
+    ) -> Result<(Type, Option<Text>)> {
         // CRITICAL FIX: Resolve "Self" to the concrete type from current_self_type.
         // When inside an implement block, Self should resolve to the implementing type
         // (e.g., RetryPolicy, AtomicU8) rather than remaining as Type::Named("Self").
         // This prevents type mismatch errors like "expected 'RetryPolicy', found 'Self'".
         if name == "Self" {
             if let Maybe::Some(ref self_ty) = self.current_self_type {
-                return Ok(self_ty.clone());
+                return Ok((self_ty.clone(), None));
             }
         }
 
@@ -141,11 +150,11 @@ impl TypeChecker {
         // triggered it (T0683). Checked before import-ambiguity —
         // a parameter is more local than any import.
         if let Some(ty) = self.lookup_decl_param(name) {
-            return Ok(ty.clone());
+            return Ok((ty.clone(), None));
         }
 
         if self.resolving_source_signature {
-            return self.resolve_declaring_source_type(name, span);
+            return self.resolve_declaring_source_type_with_parameter_key(name, span);
         }
 
         // Check for import ambiguity first
@@ -181,7 +190,7 @@ impl TypeChecker {
         if !mod_path.as_str().is_empty() && mod_path.as_str() != "cog" {
             let qualified: verum_common::Text = format!("{}.{}", mod_path, name).into();
             if let Some(ty) = self.ctx.lookup_type(qualified.as_str()) {
-                return Ok(ty.clone());
+                return Ok((ty.clone(), Some(qualified)));
             }
         }
 
@@ -197,7 +206,23 @@ impl TypeChecker {
         // slot in `core_metadata.types` (Step 1.5's lazy load).
         // Unmounted names skip this in one map probe; declaring
         // modules still win via Step 0 above.
-        if let Some(ty) = self.resolve_type_name_mount_scoped(name) {
+        // A source rename is a mount binding, not a new type alias with its
+        // own generic parameters. Resolve its declaration before the flat
+        // redirect loses that distinction. Lexical binders still win.
+        let lexical_binder = self.ctx.type_defs.get(&Text::from(name)).is_some_and(|ty| {
+            matches!(ty, Type::Var(_) | Type::TypeConstructor { .. })
+        });
+        if !lexical_binder
+            && self.imports_in_progress.is_empty()
+            && self.glob_imports_in_progress.is_empty()
+            && self.imported_names.contains_key(&Text::from(name))
+            && let Some((declaration, owner)) = self.declaring_source_type_declaration(name)
+        {
+            return self
+                .load_source_type_declaration_with_parameter_key(&declaration, &owner, span)
+                .map(|(ty, key)| (ty, Some(key)));
+        }
+        if let Some((ty, key)) = self.resolve_type_name_mount_scoped_with_parameter_key(name) {
             if std::env::var("VERUM_TRACE_MOUNT_AUTH")
                 .is_ok_and(|v| v == "1" || v == name)
             {
@@ -206,7 +231,7 @@ impl TypeChecker {
                     name, ty
                 );
             }
-            return Ok(ty);
+            return Ok((ty, Some(key)));
         }
 
         // Step 1: Try current module first (fast path)
@@ -220,7 +245,9 @@ impl TypeChecker {
                     name, ty
                 );
             }
-            return Ok(ty.clone());
+            let key = (!matches!(ty, Type::Var(_) | Type::TypeConstructor { .. }))
+                .then(|| Text::from(name));
+            return Ok((ty.clone(), key));
         }
 
         // Step 1.5: VBCA lookup-on-miss for stdlib types (#128).
@@ -252,7 +279,9 @@ impl TypeChecker {
         }
         if let Maybe::Some(ty) = self.ctx.lookup_type(name) {
             self.report_ambient_use(name, &ty);
-            return Ok(ty.clone());
+            let key = (!matches!(ty, Type::Var(_) | Type::TypeConstructor { .. }))
+                .then(|| Text::from(name));
+            return Ok((ty.clone(), key));
         }
 
         // Step 2: Use module resolver to find the type
@@ -271,7 +300,8 @@ impl TypeChecker {
                     // Step 3: Load type from module registry
                     let module_id = resolved.module_id;
                     if let Maybe::Some(ty) = self.ctx.lookup_module_type(module_id, name) {
-                        return Ok(ty.clone());
+                        // This legacy cache records no parameter-registration key.
+                        return Ok((ty.clone(), None));
                     }
 
                     // Try loading from module registry directly.
@@ -296,7 +326,7 @@ impl TypeChecker {
                                     let ty_cloned = existing_ty.clone();
                                     self.ctx
                                         .define_module_type(module_id, name, ty_cloned.clone());
-                                    return Ok(ty_cloned);
+                                    return Ok((ty_cloned, Some(name.into())));
                                 }
 
                                 // Register the type declaration to resolve type aliases.
@@ -328,7 +358,7 @@ impl TypeChecker {
                                         args: List::new(),
                                     };
                                     self.ctx.define_module_type(module_id, name, ty.clone());
-                                    return Ok(ty);
+                                    return Ok((ty, None));
                                 }
 
                                 // Type was registered - look it up again
@@ -337,7 +367,7 @@ impl TypeChecker {
                                     // Also store in module_type_defs for future qualified lookups
                                     self.ctx
                                         .define_module_type(module_id, name, ty_cloned.clone());
-                                    return Ok(ty_cloned);
+                                    return Ok((ty_cloned, Some(name.into())));
                                 }
 
                                 // Type was registered but not found in lookup.
@@ -350,7 +380,7 @@ impl TypeChecker {
                                     )),
                                     args: List::new(),
                                 };
-                                return Ok(ty);
+                                return Ok((ty, None));
                             }
                         }
                     }
@@ -366,7 +396,7 @@ impl TypeChecker {
                     // rather than erroring. This handles stdlib types that are used in
                     // test files but not explicitly imported.
                     match wellknown_forward_reference(name, span) {
-                        Some(ty) => Ok(ty),
+                        Some(ty) => Ok((ty, None)),
                         None => Err(TypeError::TypeNotFound {
                             name: name.to_text(),
                             span,
@@ -377,7 +407,7 @@ impl TypeChecker {
         } else {
             // No module context - for well-known types, create forward references
             match wellknown_forward_reference(name, span) {
-                Some(ty) => Ok(ty),
+                Some(ty) => Ok((ty, None)),
                 None => Err(TypeError::TypeNotFound {
                     name: name.to_text(),
                     span,
@@ -389,6 +419,18 @@ impl TypeChecker {
     /// Resolve a qualified type path (e.g., "std.collections.List")
     /// Name resolution across modules: qualified paths, import disambiguation, re-exports, path resolution in imports — .2 - Qualified path resolution
     pub(crate) fn resolve_qualified_type(&mut self, path: &Path, span: Span) -> Result<Type> {
+        self.resolve_qualified_type_with_parameter_key(path, span)
+            .map(|(ty, _)| ty)
+    }
+
+    /// Resolve the base and the declaration registration whose parameter
+    /// slots describe that exact template. Forward references, projections
+    /// and lexical type constructors have no selected declaration template.
+    pub(super) fn resolve_qualified_type_with_parameter_key(
+        &mut self,
+        path: &Path,
+        span: Span,
+    ) -> Result<(Type, Option<Text>)> {
         use verum_ast::ty::PathSegment;
 
         if path.segments.is_empty() {
@@ -403,12 +445,12 @@ impl TypeChecker {
             match &path.segments[0] {
                 PathSegment::Name(ident) => {
                     // Simple name resolution for regular identifiers
-                    return self.resolve_type_name(ident.name.as_str(), span);
+                    return self.resolve_type_name_with_parameter_key(ident.name.as_str(), span);
                 }
                 PathSegment::SelfValue => {
                     // `self` as a type refers to the current self type in an impl block
                     if let Maybe::Some(self_ty) = &self.current_self_type {
-                        return Ok(self_ty.clone());
+                        return Ok((self_ty.clone(), None));
                     }
                     return Err(TypeError::Other(
                         "Cannot use `self` as a type outside of an implement block".into(),
@@ -481,18 +523,28 @@ impl TypeChecker {
                     // Format: Type::Generic { name: "::Item", args: [Self] }
                     // The "::" prefix indicates this is an associated type projection
                     let assoc_name: Text = Text::from(format!("::{}", assoc_parts.join(".")));
-                    return Ok(Type::Generic {
-                        name: assoc_name,
-                        args: List::from(vec![self_type]),
-                    });
+                    return Ok((
+                        Type::Generic {
+                            name: assoc_name,
+                            args: List::from(vec![self_type]),
+                        },
+                        None,
+                    ));
                 }
             }
         }
 
-        // Published exact source identity wins over legacy leaf fallbacks.
+        // Resolve source authority before cached templates so an earlier
+        // owner-local load cannot make a private declaration visible elsewhere.
         let qualified = self.path_to_string(path);
+        if let Some((ty, key)) =
+            self.resolve_qualified_source_type_with_parameter_key(&qualified, span)?
+        {
+            return Ok((ty, Some(key)));
+        }
+        // Published exact archive identity wins over legacy leaf fallbacks.
         if let Some(ty) = self.ctx.lookup_type(qualified.as_str()) {
-            return Ok(ty.clone());
+            return Ok((ty.clone(), Some(qualified)));
         }
 
         // Try resolving via inline modules first for qualified type paths
@@ -581,8 +633,12 @@ impl TypeChecker {
                                             e
                                         );
                                     }
+                                    let key: Text = format!("{module_key}.{type_name}").into();
+                                    if let Some(ty) = self.ctx.lookup_type(key.as_str()) {
+                                        return Ok((ty.clone(), Some(key)));
+                                    }
                                     if let Maybe::Some(ty) = self.ctx.lookup_type(&type_name) {
-                                        return Ok(ty.clone());
+                                        return Ok((ty.clone(), Some(type_name.into())));
                                     }
                                 }
                             }
@@ -602,10 +658,13 @@ impl TypeChecker {
                         let last_name = ident.name.as_str();
                         if last_name.chars().next().is_some_and(|c| c.is_uppercase()) {
                             // Create a forward reference for the type
-                            return Ok(Type::Named {
-                                path: path.clone(),
-                                args: List::new(),
-                            });
+                            return Ok((
+                                Type::Named {
+                                    path: path.clone(),
+                                    args: List::new(),
+                                },
+                                None,
+                            ));
                         }
                     }
                 }
@@ -630,7 +689,8 @@ impl TypeChecker {
                     if let Maybe::Some(ty) =
                         self.ctx.lookup_module_type(resolved.module_id, type_name)
                     {
-                        return Ok(ty.clone());
+                        // This legacy cache records no parameter-registration key.
+                        return Ok((ty.clone(), None));
                     }
 
                     // CRITICAL FIX: Fall back to unqualified lookup for imported types
@@ -638,14 +698,17 @@ impl TypeChecker {
                     // with define_type (unqualified) rather than define_module_type (qualified).
                     // This ensures we can find them even if they weren't stored in module_type_defs.
                     if let Maybe::Some(ty) = self.ctx.lookup_type(type_name) {
-                        return Ok(ty.clone());
+                        return Ok((ty.clone(), Some(type_name.into())));
                     }
 
                     // Type exists but not yet loaded - return named type reference
-                    Ok(Type::Named {
-                        path: path.clone(),
-                        args: List::new(),
-                    })
+                    Ok((
+                        Type::Named {
+                            path: path.clone(),
+                            args: List::new(),
+                        },
+                        None,
+                    ))
                 }
                 Err(_module_err) => {
                     // Path not resolved - try fallback strategies before error
@@ -659,10 +722,13 @@ impl TypeChecker {
                             // Only do this if the last segment looks like a type name (starts uppercase)
                             if last_name.chars().next().is_some_and(|c| c.is_uppercase()) {
                                 // Create a forward reference with its original owner.
-                                return Ok(Type::Named {
-                                    path: path.clone(),
-                                    args: List::new(),
-                                });
+                                return Ok((
+                                    Type::Named {
+                                        path: path.clone(),
+                                        args: List::new(),
+                                    },
+                                    None,
+                                ));
                             }
                         }
                     }
@@ -680,10 +746,13 @@ impl TypeChecker {
                 if let PathSegment::Name(ident) = last_seg {
                     let last_name = ident.name.as_str();
                     if last_name.chars().next().is_some_and(|c| c.is_uppercase()) {
-                        return Ok(Type::Named {
-                            path: path.clone(),
-                            args: List::new(),
-                        });
+                        return Ok((
+                            Type::Named {
+                                path: path.clone(),
+                                args: List::new(),
+                            },
+                            None,
+                        ));
                     }
                 }
             }

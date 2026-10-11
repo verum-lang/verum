@@ -2053,9 +2053,27 @@ impl TypeChecker {
                         false
                     };
 
-                if is_variant_constructor {
+                // Aliases do not publish a second constructor function. Use
+                // their resolved parent declaration before the record guard;
+                // the existing variant checker validates the selected payload.
+                let is_aliased_variant_constructor = if lookup_path.segments.len() == 2
+                    && let (
+                        verum_ast::ty::PathSegment::Name(parent),
+                        verum_ast::ty::PathSegment::Name(variant),
+                    ) = (&lookup_path.segments[0], &lookup_path.segments[1])
+                    && let Ok(parent_ty) = self.resolve_type_name(parent.name.as_str(), expr.span)
+                    && self.resolve_to_record_type(&parent_ty).is_none()
+                    && let Type::Variant(variants) = self.expand_generic_to_variant(&parent_ty)
+                {
+                    variants.contains_key(variant.name.as_str())
+                } else {
+                    false
+                };
+                if is_variant_constructor || is_aliased_variant_constructor {
                     return self.synth_and_check(expr, expected);
                 }
+                let declaration_ty = self.lookup_record_type(lookup_path, expr.span)?;
+                self.check_record_construction_visibility(&declaration_ty, expr.span)?;
 
                 // Get the stored field types (may contain type variables like T)
                 //
@@ -2531,6 +2549,7 @@ impl TypeChecker {
 
         let result = self.synth_expr(expr)?;
         self.check_capability_attenuation(&result.ty, expected, expr.span)?;
+        self.check_record_conversion_visibility(&result.ty, expected, expr.span)?;
         if std::env::var("VERUM_TRACE_QUALPATH").is_ok()
             && matches!(&expr.kind, ExprKind::MethodCall { .. })
         {
@@ -7384,7 +7403,7 @@ impl TypeChecker {
     /// does not flag a `::`-projection node, so `normalize_type` never fired for
     /// it either — this walk is the single place the nested case is driven.
     /// Stdlib-agnostic: resolution flows through `try_find_associated_type`.
-    fn resolve_assoc_projections_deep(&self, ty: &Type) -> Type {
+    pub(super) fn resolve_assoc_projections_deep(&self, ty: &Type) -> Type {
         if let Type::Generic { name, args } = ty {
             // Recognise BOTH the `::Assoc` form the VBC serializer emits AND
             // the LEGACY bare-name form (`Generic{"Item",[Iter]}`) the
@@ -9298,7 +9317,7 @@ impl TypeChecker {
             .collect();
         let names = names?;
         let root = names.first()?;
-        if self.ctx.env.is_locally_bound_value(root.as_str()) {
+        if self.ctx.env.is_bound_value(root.as_str()) {
             return None;
         }
         // A declared generic root also wins over a same-spelled module alias.
@@ -9696,6 +9715,7 @@ impl TypeChecker {
         if let ExprKind::Path(path) = &obj.kind
             && path.segments.len() == 1
             && let verum_ast::ty::PathSegment::Name(ident) = &path.segments[0]
+            && !self.ctx.env.is_bound_value(ident.name.as_str())
         {
             let type_name = ident.name.as_str();
             let field_name = field.name.as_str();
@@ -10008,6 +10028,7 @@ impl TypeChecker {
         if let ExprKind::Path(path) = &obj.kind
             && path.segments.len() == 1
             && let verum_ast::ty::PathSegment::Name(ident) = &path.segments[0]
+            && !self.ctx.env.is_bound_value(ident.name.as_str())
         {
             let name = ident.name.as_str();
             let field_name = field.name.as_str();
@@ -10102,6 +10123,7 @@ impl TypeChecker {
         // When we have `Wrapper<τ59>` and τ59 was unified with Text, we need to
         // resolve to `Wrapper<Text>` so field access gets the correct field type.
         let resolved_ty = self.unifier.apply(&obj_result.ty);
+        self.check_record_field_visibility(&resolved_ty, field.name.as_str(), expr.span)?;
 
         // CRITICAL FIX: Unwrap reference types before field access
         // When we have `&Point`, we need to dereference to get `Point` first
@@ -10435,7 +10457,7 @@ impl TypeChecker {
                                     args: args.clone(),
                                 };
                                 if let Some((t, hops)) = self
-                                    .field_type_through_deref(&recv_ty, field.name.as_str())
+                                    .field_type_through_deref(&recv_ty, field.name.as_str(), expr.span)?
                                 {
                                     self.record_deref_adjustment(obj.span, hops);
                                     return Ok(InferResult::new(t));
@@ -10531,7 +10553,7 @@ impl TypeChecker {
                 ) {
                     Ok(InferResult::new(t))
                 } else if let Some((t, hops)) = self
-                    .field_type_through_deref(&normalized_ty, field.name.as_str())
+                    .field_type_through_deref(&normalized_ty, field.name.as_str(), expr.span)?
                 {
                     self.record_deref_adjustment(obj.span, hops);
                     // AUTO-DEREF, second of the two field-access paths.  A
@@ -10663,15 +10685,21 @@ impl TypeChecker {
                             }
                         }
                         {
-                            // For unresolved/unknown types and Variant types,
-                            // allow field access with a fresh type variable
+                            // An unconstrained receiver cannot establish a
+                            // field's type or declaration authority. Inventing
+                            // a result variable also admits private fields when
+                            // that generic function is later instantiated.
                             if matches!(
                                 &normalized_ty,
                                 Type::Var(_) | Type::Unknown | Type::Placeholder { .. }
                             ) {
-                                return Ok(InferResult::new(Type::Var(
-                                    TypeVar::fresh(),
-                                )));
+                                return Err(TypeError::OtherWithCode {
+                                    code: "E103".into(),
+                                    msg: format!(
+                                        "Cannot access field '{}' on an unresolved type; declare a record type or use a protocol method",
+                                        field.name
+                                    ).into(),
+                                });
                             }
                             // For Variant types, the field may be on the inner record
                             if matches!(&normalized_ty, Type::Variant(_)) {
@@ -10688,7 +10716,8 @@ impl TypeChecker {
                                 .field_type_through_deref(
                                     &normalized_ty,
                                     field.name.as_str(),
-                                )
+                                    expr.span,
+                                )?
                             {
                                 self.record_deref_adjustment(obj.span, hops);
                                 return Ok(InferResult::new(t));
@@ -11842,12 +11871,19 @@ impl TypeChecker {
         // Not a variant constructor, proceed with regular record type handling
         // Step 1: Lookup record type definition from path
         let record_ty = self.lookup_record_type(path, expr.span)?;
+        self.check_record_construction_visibility(&record_ty, expr.span)?;
 
         // Step 2: Extract expected field types from record definition
         // Clone to avoid borrow issues
         let expected_fields: indexmap::IndexMap<verum_common::Text, Type> =
             match &record_ty {
                 Type::Record(field_types) => field_types.clone(),
+                Type::Generic { name, .. } => self.resolve_to_record_type(&Type::Generic {
+                    name: name.clone(),
+                    args: List::new(),
+                }).ok_or_else(|| TypeError::Other(format!(
+                    "Expected record type, found: {record_ty}"
+                ).into()))?,
                 Type::Named {
                     path: type_path, ..
                 } => {
@@ -11966,32 +12002,15 @@ impl TypeChecker {
         // 2. Create fresh type variables for each
         // 3. Substitute them in the field types
         // This enables bidirectional type inference for generic struct instantiation
-        // NOTE: Use resolved type name (handles Self -> actual type)
-        let type_name = if let Type::Named {
-            path: resolved_path,
-            ..
-        } = &record_ty
-        {
-            self.path_to_string(resolved_path)
-        } else {
-            self.path_to_string(path)
+        // Parameter ownership follows the resolved declaration, including a
+        // renamed mount. A same-leaf record cannot supply absent parameters.
+        let type_name = match &record_ty {
+            Type::Named { path, .. } => self.path_to_string(path),
+            Type::Generic { name, .. } => name.clone(),
+            _ => self.path_to_string(path),
         };
-
-        // Try to look up type parameters - first try full path, then try simple name
-        let type_params_key = format!("__type_params_{}", type_name);
-        let type_params_lookup =
-            self.ctx.lookup_type(type_params_key.as_str()).or_else(|| {
-                // CRITICAL FIX: If full path lookup fails, try simple name (last segment)
-                // Type parameters are registered under simple names, but paths may be qualified
-                let simple_name = if let Some(last_dot) = type_name.as_str().rfind('.')
-                {
-                    &type_name.as_str()[last_dot + 1..]
-                } else {
-                    type_name.as_str()
-                };
-                let simple_key = format!("__type_params_{}", simple_name);
-                self.ctx.lookup_type(simple_key.as_str())
-            });
+        let type_params_key = format!("__type_params_{type_name}");
+        let type_params_lookup = self.ctx.lookup_type(type_params_key.as_str());
 
         let (expected_fields, type_param_vars): (
             indexmap::IndexMap<verum_common::Text, Type>,
@@ -12133,21 +12152,12 @@ impl TypeChecker {
                 .iter()
                 .map(|tv| self.unifier.apply(tv))
                 .collect();
-            // Resolve Self to actual type path if needed
-            let resolved_path = if path.segments.len() == 1
-                && matches!(path.segments[0], verum_ast::ty::PathSegment::SelfValue)
-            {
-                // Get path from self type
-                if let Maybe::Some(Type::Named {
-                    path: self_path, ..
-                }) = &self.current_self_type
-                {
-                    self_path.clone()
-                } else {
-                    path.clone()
-                }
-            } else {
-                path.clone()
+            // Keep the owner selected during lookup. Reconstructing the
+            // caller's alias spelling would give this instance a new name.
+            let resolved_path = match &record_ty {
+                Type::Named { path, .. } => path.clone(),
+                Type::Generic { name, .. } => Self::text_to_path(name),
+                _ => path.clone(),
             };
             Type::Named {
                 path: resolved_path,
@@ -13196,6 +13206,7 @@ impl TypeChecker {
             {
                 // This is `result?.field` inside try-recover — unwrap to success type
                 let success_ty = try_resolution.output;
+                self.check_record_field_visibility(&success_ty, field.name.as_str(), expr.span)?;
                 let dereferenced_ty = self.unwrap_reference_type(&success_ty);
                 let field_ty = self
                     .lookup_field_type(dereferenced_ty, field.name.as_str())
@@ -13220,6 +13231,7 @@ impl TypeChecker {
         };
 
         // Unwrap reference types before field access (Maybe<&Point>?.field)
+        self.check_record_field_visibility(&inner_ty, field.name.as_str(), expr.span)?;
         let dereferenced_ty = self.unwrap_reference_type(&inner_ty);
 
         // Look up field on the inner type

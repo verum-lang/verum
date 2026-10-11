@@ -11,8 +11,9 @@ use verum_types::core_metadata::{
 };
 use verum_types::{Type, TypeChecker};
 
+// These positive owner-resolution controls intentionally expose the selected fields.
 const DECLARATION: &str = r#"
-    public type Cache is { value: Int };
+    public type Cache is { public value: Int };
     implement Cache { public fn empty() -> Cache { Cache { value: 37 } } }
 "#;
 
@@ -405,7 +406,7 @@ fn assert_static_receiver_case(declaration: &str, probe: &str, mounted: bool, re
 
 #[test]
 fn explicit_static_receiver_arguments_are_checked_locally_and_when_mounted() {
-    let declaration = "public type Cache<T> is { value: T }; implement<T> Cache<T> { public fn from_value(value: T) -> Cache<T> { Cache { value } } }";
+    let declaration = "public type Cache<T> is { public value: T }; implement<T> Cache<T> { public fn from_value(value: T) -> Cache<T> { Cache { value } } }";
     for mounted in [false, true] {
         assert_static_receiver_case(
             declaration,
@@ -424,7 +425,7 @@ fn explicit_static_receiver_arguments_are_checked_locally_and_when_mounted() {
 
 #[test]
 fn static_result_can_deliberately_differ_from_receiver_arguments() {
-    let declaration = "public type Cache<T> is { value: T }; implement<T> Cache<T> { public fn fixed() -> Cache<Int> { Cache { value: 37 } } }";
+    let declaration = "public type Cache<T> is { public value: T }; implement<T> Cache<T> { public fn fixed() -> Cache<Int> { Cache { value: 37 } } }";
     for mounted in [false, true] {
         assert_static_receiver_case(
             declaration,
@@ -437,7 +438,7 @@ fn static_result_can_deliberately_differ_from_receiver_arguments() {
 
 #[test]
 fn static_receiver_uses_declared_reordered_impl_arguments() {
-    let declaration = "public type Cache<First, Second> is { first: First, second: Second }; implement<Left, Right> Cache<Right, Left> { public fn from_values(first: Right, second: Left) -> Cache<Right, Left> { Cache { first, second } } }";
+    let declaration = "public type Cache<First, Second> is { first: First, public second: Second }; implement<Left, Right> Cache<Right, Left> { public fn from_values(first: Right, second: Left) -> Cache<Right, Left> { Cache { first, second } } }";
     for mounted in [false, true] {
         assert_static_receiver_case(
             declaration,
@@ -456,7 +457,7 @@ fn static_receiver_uses_declared_reordered_impl_arguments() {
 
 #[test]
 fn static_receiver_uses_nested_impl_arguments() {
-    let declaration = "public type Cache<T> is { value: T }; implement<T> Cache<(T, Bool)> { public fn from_value(value: T) -> Cache<(T, Bool)> { Cache { value: (value, true) } } }";
+    let declaration = "public type Cache<T> is { public value: T }; implement<T> Cache<(T, Bool)> { public fn from_value(value: T) -> Cache<(T, Bool)> { Cache { value: (value, true) } } }";
     for mounted in [false, true] {
         assert_static_receiver_case(
             declaration,
@@ -507,7 +508,7 @@ fn static_receiver_refuses_the_wrong_fixed_impl_specialization() {
 
 #[test]
 fn static_receiver_instantiations_do_not_bind_the_declaration() {
-    let declaration = "public type Cache<T> is { value: T }; implement<T> Cache<T> { public fn from_value(value: T) -> Cache<T> { Cache { value } } }";
+    let declaration = "public type Cache<T> is { public value: T }; implement<T> Cache<T> { public fn from_value(value: T) -> Cache<T> { Cache { value } } }";
     for mounted in [false, true] {
         assert_static_receiver_case(
             declaration,
@@ -520,7 +521,7 @@ fn static_receiver_instantiations_do_not_bind_the_declaration() {
 
 #[test]
 fn shadowed_static_method_parameter_does_not_replace_the_impl_parameter() {
-    let declaration = "public type Cache<T> is { value: T }; implement<T> Cache<T> { public fn keep<T>(value: T) -> T { value } public fn from_value(value: T) -> Cache<T> { Cache { value } } }";
+    let declaration = "public type Cache<T> is { public value: T }; implement<T> Cache<T> { public fn keep<T>(value: T) -> T { value } public fn from_value(value: T) -> Cache<T> { Cache { value } } }";
     for mounted in [false, true] {
         assert_static_receiver_case(
             declaration,

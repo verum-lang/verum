@@ -319,7 +319,7 @@ impl TypeChecker {
                 // Add to context
                 self.ctx
                     .env
-                    .insert(const_decl.name.name.as_str(), TypeScheme::mono(expected));
+                    .insert_value(const_decl.name.name.as_str(), TypeScheme::mono(expected));
                 Ok(())
             }
             ItemKind::Static(static_decl) => {
@@ -328,7 +328,7 @@ impl TypeChecker {
                 // Register the static variable BEFORE checking the value expression.
                 // This prevents cascading "unbound variable" errors when the value
                 // expression fails to type-check (e.g., due to @null() or other issues).
-                self.ctx.env.insert(
+                self.ctx.env.insert_value(
                     static_decl.name.name.as_str(),
                     TypeScheme::mono(expected.clone()),
                 );
@@ -1339,10 +1339,7 @@ impl TypeChecker {
             self.define_type_in_current_module(alias_text.clone(), named);
         }
         // VALUE / function alias — re-bind the original's scheme.
-        let orig: Text = Text::from(item_name);
-        if let Some(scheme) = self.ctx.env.lookup(&orig).cloned() {
-            self.ctx.env.insert(alias_text.clone(), scheme);
-        }
+        self.ctx.env.insert_binding_alias(alias_text, item_name);
 
     }
 
@@ -1560,7 +1557,7 @@ impl TypeChecker {
                         let const_ty = self.ast_to_type(&const_decl.ty)?;
                         self.ctx
                             .env
-                            .insert(item_name, crate::context::TypeScheme::mono(const_ty));
+                            .insert_value(item_name, crate::context::TypeScheme::mono(const_ty));
 
                         // Record the full path of the imported constant for dependency tracking
                         // When we later reference this constant, we can look up its full path
@@ -2759,7 +2756,7 @@ impl TypeChecker {
                         crate::infer::helpers::parse_descriptor_type_string(sd.ty.as_str());
                     self.ctx
                         .env
-                        .insert(bind, crate::context::TypeScheme::mono(ty));
+                        .insert_value(bind, crate::context::TypeScheme::mono(ty));
                 }
             }
         }
@@ -2987,7 +2984,7 @@ impl TypeChecker {
                             );
                             self.ctx
                                 .env
-                                .insert(bind_name, crate::context::TypeScheme::mono(ty));
+                                .insert_value(bind_name, crate::context::TypeScheme::mono(ty));
                             value_bound_from_metadata = true;
                         }
                     }
@@ -3590,7 +3587,7 @@ impl TypeChecker {
                             }
                             self.ctx
                                 .env
-                                .insert(register_name, TypeScheme::mono(const_type));
+                                .insert_value(register_name, TypeScheme::mono(const_type));
                         } else {
                             // Not found directly — follow re-export chain through submodules.
                             // This handles glob re-exports like `public mount atomic.*` in mod.vr
@@ -3609,7 +3606,7 @@ impl TypeChecker {
                                 }
                                 self.ctx
                                     .env
-                                    .insert(register_name, TypeScheme::mono(const_type));
+                                    .insert_value(register_name, TypeScheme::mono(const_type));
                             } else if std::env::var("VERUM_TRACE_IMPORT").is_ok() {
                                 eprintln!("[trace-import] Const NOT FOUND for '{}'", item_name);
                             }
@@ -4249,7 +4246,7 @@ impl TypeChecker {
                             );
                             self.ctx
                                 .env
-                                .insert(bind, crate::context::TypeScheme::mono(ty));
+                                .insert_value(bind, crate::context::TypeScheme::mono(ty));
                             return Ok(());
                         }
                     }
@@ -4706,14 +4703,15 @@ impl TypeChecker {
                         // record types get their field information, etc.
                         // Try to find the type declaration, following re-export chains if needed
                         let mut registered_successfully = false;
-                        if let Some((type_decl, source_module_path)) = self
+                        let source_declaration = self
                             .find_type_declaration_with_source_module(
                                 &module_info.ast,
                                 item_name,
                                 &resolved_module_path,
                                 registry,
-                            )
-                        {
+                            );
+                        let has_source_declaration = source_declaration.is_some();
+                        if let Some((type_decl, source_module_path)) = source_declaration {
                             // CRITICAL: Import transitive type dependencies BEFORE registering the type.
                             // This ensures types used in field types (like `SemVer` in
                             // `Package.versions: List<SemVer>`) are available for resolution.
@@ -5079,7 +5077,7 @@ impl TypeChecker {
                                 } else {
                                     scheme.with_type_bounds(extracted_bounds)
                                 };
-                                self.ctx.env.insert(register_name, scheme);
+                                self.ctx.env.insert_value(register_name, scheme);
                                 registered_successfully = true;
                             } else {
                                 if let Some(metadata) = self.core_metadata.clone() {
@@ -5103,6 +5101,32 @@ impl TypeChecker {
                                         registered_successfully = true;
                                     }
                                 }
+                            }
+                        }
+                        // An archive export table can declare a type while its
+                        // module AST is empty. Load that exact mounted type before
+                        // publishing a placeholder: replacing its qualified Named
+                        // with the leaf would discard declaration/field authority.
+                        // A failed source declaration keeps its own error path.
+                        if !registered_successfully && !has_source_declaration {
+                            if let Some(ty) = self.ensure_mounted_type_loaded_qualified(
+                                item_name,
+                                resolved_module_path.as_str(),
+                            ) {
+                                self.ctx.define_type(register_name, ty);
+                                registered_successfully = true;
+                            } else if self.core_metadata.is_some() {
+                                // An archive export is not a declaration. Do not
+                                // keep a bare Generic/Variant belonging to another
+                                // module when the requested declaration is absent.
+                                return Err(TypeError::ImportItemNotFound {
+                                    item_name: item_name.into(),
+                                    module_path: resolved_module_path.clone(),
+                                    available_items: module_info.exports.public_exports()
+                                        .map(|export| export.name.clone()).collect(),
+                                    declared_in: self.modules_declaring(item_name),
+                                    span: import_span.unwrap_or_else(Span::dummy),
+                                });
                             }
                         }
                         if !registered_successfully {
@@ -6503,7 +6527,7 @@ impl TypeChecker {
 
             // Register associated constants in the outer scope
             for (qualified_name, const_scheme) in const_registrations {
-                self.ctx.env.insert(qualified_name.as_str(), const_scheme);
+                self.ctx.env.insert_value(qualified_name.as_str(), const_scheme);
 
                 tracing::debug!(
                     "Registered associated constant {} in outer scope",
@@ -7392,6 +7416,13 @@ impl TypeChecker {
         use verum_ast::decl::{MountTreeKind, Visibility as AstVisibility};
         use verum_ast::ty::PathSegment;
 
+        // A mount spelling may be an alias. Declaration identity, relative
+        // mounts and cycle detection belong to the resolved registry module.
+        let canonical_owner = self
+            .get_module_with_path_aliases(current_module_path, registry)
+            .map(|module| Text::from(module.path.to_string()));
+        let current_module_path = canonical_owner.as_ref().unwrap_or(current_module_path);
+
         // Cycle guard: if we are already walking the re-export chain for this
         // (module, type) pair, return None to break the recursion. Returning
         // None is safe — callers fall through to their next strategy (e.g.,
@@ -7602,7 +7633,7 @@ impl TypeChecker {
                                 if let Some(decl) = self
                                     .find_type_declaration_in_module(&parent_module.ast, true_name)
                                 {
-                                    return Some((decl, verum_common::Text::from(parent_path)));
+                                    return Some((decl, Text::from(parent_module.path.to_string())));
                                 }
                             }
                         }
@@ -14762,6 +14793,17 @@ impl TypeChecker {
         name: &str,
         key_prefix: &str,
     ) -> Option<Type> {
+        self.lookup_type_mount_scoped_with_key(name, key_prefix)
+            .map(|(ty, _)| ty)
+    }
+
+    /// Return the exact context key used by this lookup, before structural
+    /// templates lose their declaration identity.
+    pub(super) fn lookup_type_mount_scoped_with_key(
+        &self,
+        name: &str,
+        key_prefix: &str,
+    ) -> Option<(Type, Text)> {
         // `VERUM_TRACE_MOUNT_SCOPED=<name>` (or `=1`) — this helper has
         // SEVEN ways to decline and returned a bare `None` for all of
         // them, so a caller that fell back could not tell "not mounted"
@@ -14813,7 +14855,7 @@ impl TypeChecker {
                     key_prefix, name, direct_qualified
                 );
             }
-            return Some(ty.clone());
+            return Some((ty.clone(), direct_qualified.into()));
         }
         if trace {
             eprintln!(
@@ -14865,7 +14907,7 @@ impl TypeChecker {
                     key_prefix, name, owning_qualified
                 );
             }
-            return Some(ty.clone());
+            return Some((ty.clone(), owning_qualified.into()));
         }
         // Fallback: when the export table's `source_module` points
         // at a re-exporter (e.g. `core.text` mod.vr exporting
@@ -14901,7 +14943,7 @@ impl TypeChecker {
                         key_prefix, name, candidate
                     );
                 }
-                return Some(ty.clone());
+                return Some((ty.clone(), candidate.into()));
             }
         }
         decline!(format!(
@@ -14977,6 +15019,14 @@ impl TypeChecker {
         &mut self,
         name: &str,
     ) -> Option<Type> {
+        self.resolve_type_name_mount_scoped_with_parameter_key(name)
+            .map(|(ty, _)| ty)
+    }
+
+    pub(super) fn resolve_type_name_mount_scoped_with_parameter_key(
+        &mut self,
+        name: &str,
+    ) -> Option<(Type, Text)> {
         if !self.imports_in_progress.is_empty()
             || !self.glob_imports_in_progress.is_empty()
         {
@@ -15052,8 +15102,8 @@ impl TypeChecker {
         // fall back to it only when metadata has nothing.
         let trace = std::env::var("VERUM_TRACE_MOUNT_AUTH")
             .is_ok_and(|v| v == "1" || v == name);
-        let mut scoped_fallback: Option<Type> = None;
-        if let Some(ty) = self.lookup_type_mount_scoped(name, "") {
+        let mut scoped_fallback: Option<(Type, Text)> = None;
+        if let Some((ty, key)) = self.lookup_type_mount_scoped_with_key(name, "") {
             if !Self::is_opaque_qualified_self_ref(&ty, name) {
                 if trace {
                     eprintln!(
@@ -15061,7 +15111,7 @@ impl TypeChecker {
                         name, ty
                     );
                 }
-                return Some(ty);
+                return Some((ty, key));
             }
             if trace {
                 eprintln!(
@@ -15069,7 +15119,7 @@ impl TypeChecker {
                     name, ty
                 );
             }
-            scoped_fallback = Some(ty);
+            scoped_fallback = Some((ty, key));
         }
         let source_str = source.as_str();
         let canonical = source_str
@@ -15080,7 +15130,7 @@ impl TypeChecker {
             return scoped_fallback;
         }
         let loaded =
-            self.ensure_mounted_type_loaded_qualified(name, canonical.as_str());
+            self.ensure_mounted_type_loaded_with_parameter_key(name, canonical.as_str());
         if trace {
             eprintln!(
                 "[mount-auth] '{}': metadata loader (canonical='{}') -> {:?} (fallback: {:?})",
@@ -15358,29 +15408,7 @@ impl TypeChecker {
     /// Returns the field type if found, None otherwise.
     /// Spec: Field access type resolution
     pub(super) fn lookup_field_type(&self, ty: &Type, field_name: &str) -> Option<Type> {
-        let field_key = verum_common::Text::from(field_name);
-        match ty {
-            Type::Record(fields) => fields.get(&field_key).cloned(),
-            Type::Named { path, .. } => {
-                let type_name = self.path_to_string(path);
-                let struct_key = format!("__struct_fields_{}", type_name);
-                // Try struct fields first
-                if let Option::Some(Type::Record(fields)) =
-                    self.ctx.lookup_type(struct_key.as_str())
-                {
-                    if let Some(field_ty) = fields.get(&field_key) {
-                        return Some(field_ty.clone());
-                    }
-                }
-                // Try direct type lookup
-                if let Option::Some(Type::Record(fields)) = self.ctx.lookup_type(type_name.as_str())
-                {
-                    return fields.get(&field_key).cloned();
-                }
-                None
-            }
-            _ => None,
-        }
+        self.resolve_to_record_type(ty)?.get(field_name).cloned()
     }
 
     /// Register a variant type name mapping with first-registered-wins semantics.
@@ -15945,68 +15973,52 @@ impl TypeChecker {
         }
     }
 
-    /// Resolve a type alias to its underlying record type, if applicable.
-    /// Returns None if the type is not a record (directly or via alias).
+    /// Resolve the exact nominal record or alias, instantiating only its
+    /// declared parameter slots. The shape does not confer access permission.
     pub(crate) fn resolve_to_record_type(
         &self,
         ty: &Type,
-    ) -> Option<indexmap::IndexMap<verum_common::Text, Type>> {
-        self.resolve_to_record_type_with_visited(ty, &mut std::collections::HashSet::new())
+    ) -> Option<indexmap::IndexMap<Text, Type>> {
+        self.resolve_to_record_type_with_visited(ty, &mut List::new())
     }
 
-    /// Inner implementation with cycle detection to prevent infinite recursion.
     fn resolve_to_record_type_with_visited(
         &self,
         ty: &Type,
-        visited: &mut std::collections::HashSet<Text>,
-    ) -> Option<indexmap::IndexMap<verum_common::Text, Type>> {
-        match ty {
-            Type::Record(field_types) => Some(field_types.clone()),
-            Type::Named { path, .. } => {
-                // Try to resolve the named type to its definition
-                let name = self.path_to_string(path);
-
-                // Cycle detection: if we've already seen this type, stop recursion
-                if visited.contains(&name) {
-                    return None;
-                }
-                visited.insert(name.clone());
-
-                // §Y close: mount-scoped probe FIRST so user mounts
-                // take precedence over the last-write-wins bare slot.
-                // Covers pattern-record destructure and every other
-                // caller of `resolve_to_record_type`.
-                if let Some(Type::Record(field_types)) = self
-                    .lookup_type_mount_scoped(name.as_str(), "__struct_fields_")
-                {
-                    return Some(field_types);
-                }
-                if let Some(ty) = self.lookup_type_mount_scoped(name.as_str(), "") {
-                    if let Some(rec) = self
-                        .resolve_to_record_type_with_visited(&ty, visited)
-                    {
-                        return Some(rec);
-                    }
-                }
-
-                // First try __struct_fields_Name convention
-                let struct_key = format!("__struct_fields_{}", name);
-                if let Option::Some(Type::Record(field_types)) =
-                    self.ctx.lookup_type(struct_key.as_str())
-                {
-                    return Some(field_types.clone());
-                }
-
-                // Fall back to direct type lookup
-                if let Option::Some(resolved_ty) = self.ctx.lookup_type(name.as_str()) {
-                    // Recursively resolve in case it's an alias to another alias
-                    self.resolve_to_record_type_with_visited(resolved_ty, visited)
-                } else {
-                    None
-                }
-            }
-            _ => None,
+        visited: &mut List<Type>,
+    ) -> Option<indexmap::IndexMap<Text, Type>> {
+        if let Type::Record(fields) = ty {
+            return Some(fields.clone());
         }
+        let (name, args) = match ty {
+            Type::Named { path, args } => (self.path_to_string(path), args),
+            Type::Generic { name, args } => (name.clone(), args),
+            _ => return None,
+        };
+        // The full instance matters: Identity<Identity<Record>> is finite.
+        // Bound expanding recursive aliases as well as literal cycles.
+        if visited.len() >= 64 || visited.contains(ty) {
+            return None;
+        }
+        visited.push(ty.clone());
+
+        let struct_key = format!("__struct_fields_{name}");
+        let fields = self.lookup_type_mount_scoped(name.as_str(), "__struct_fields_")
+            .or_else(|| self.ctx.lookup_type(&struct_key).cloned());
+        if let Some(Type::Record(fields)) = fields {
+            return match self.substitute_with_params(name.as_str(), &Type::Record(fields), args) {
+                Type::Record(fields) => Some(fields),
+                _ => None,
+            };
+        }
+
+        // Expand one exact alias hop at a time so every declaration applies
+        // its own arguments before the next owner's fields are inspected.
+        let target = self.ctx.type_aliases.get(&name).cloned()
+            .or_else(|| self.lookup_type_mount_scoped(name.as_str(), ""))
+            .or_else(|| self.ctx.lookup_type(name.as_str()).cloned())?;
+        let target = self.substitute_with_params(name.as_str(), &target, args);
+        self.resolve_to_record_type_with_visited(&target, visited)
     }
 
     /// Substitute type variables with their replacements.
@@ -16741,115 +16753,12 @@ impl TypeChecker {
         }
     }
 
-    /// `Labeled<Text>` -> the record it names, with `Text` substituted.
-    ///
-    /// The variant sibling below has existed since the archive gained
-    /// generic payloads; the record case had no counterpart, so a
-    /// parameter annotated with a GENERIC record FROM THE ARCHIVE stayed
-    /// `Type::Generic { name, args }` and field access on it reported
-    /// `E103: Cannot access field 'value' on non-record type:
-    /// Labeled<Text>` (T1105).
-    ///
-    /// Isolated to exactly three conditions holding together — archive,
-    /// generic, parameter position — by five controls, two of them
-    /// measured by another session:
-    ///
-    /// ```text
-    ///     param of an ARCHIVE generic record      E103
-    ///     param of a PROJECT generic record       works
-    ///     param of an archive NON-generic record  works
-    ///     LOCAL BINDING of the same archive value works
-    ///     all three mount forms                   identical, so the
-    ///                                             mount form is not it
-    /// ```
-    ///
-    /// Substitution reuses `substitute_variant_args_positionally`'s
-    /// staging by construction: the record is wrapped as a one-case
-    /// variant, substituted, and unwrapped. One carrier for the four
-    /// stages (named params, template vars, free vars, bare-Named
-    /// placeholders) rather than a second copy that drifts.
+    /// Both applied nominal spellings share exact owner and parameter lookup.
     pub(crate) fn expand_generic_to_record(&self, ty: &Type) -> Option<Type> {
-        if std::env::var_os("VERUM_TRACE_GENREC").is_some() {
-            // FIRST line on purpose. The first version of this trace sat
-            // after the `match ty { … _ => return None }`, so every shape
-            // that took the early return reported nothing — and "no trace
-            // at all" read as "the function is never called".
-            eprintln!(
-                "[genrec] ty={}",
-                format!("{:?}", ty).chars().take(110).collect::<String>()
-            );
-        }
-        // BOTH spellings of an applied named type. The first version
-        // handled only `Type::Generic` and was INERT: the annotation
-        // resolver produces `Type::Named { path, args }` for a mounted
-        // head, and the old arm's wording ("Cannot access field … on
-        // non-record type") in the failing output is what said the new
-        // branch had never run.
-        let (head, args) = match ty {
-            Type::Generic { name, args } => (name.clone(), args.clone()),
-            Type::Named { path, args } => match path.segments.last() {
-                Some(verum_ast::ty::PathSegment::Name(ident)) => {
-                    (ident.name.clone(), args.clone())
-                }
-                _ => return None,
-            },
-            _ => return None,
-        };
-        let name = &head;
-        // WHERE THE FIELDS ACTUALLY LIVE. The bare name does NOT hold
-        // them: measured, `lookup_type("Labeled")` returns
-        // `Generic { name: "Labeled", args: [Var(_)] }` — a
-        // self-referential placeholder, not a body. That is by design;
-        // `core.rs` explains it beside the registration —
-        // `type_descriptor_to_type` returns the nominal form for
-        // records and "doesn't carry the field-type map", so the map is
-        // written separately under `__struct_fields_<name>`.
-        //
-        // `lookup_field_type` already consults that key — for a
-        // `Type::Named` receiver. A `Type::Generic` receiver, which is
-        // what an APPLIED archive record resolves to, reached no
-        // consumer of it at all. That is the whole of T1105: the fields
-        // were never lost, they were behind a key this shape never
-        // asked.
-        let fields_key: verum_common::Text =
-            format!("__struct_fields_{}", name).into();
-        let looked = match self.ctx.lookup_type(fields_key.as_str()) {
-            Option::Some(t) => Option::Some(t),
-            Option::None => self.ctx.lookup_type(name.as_str()),
-        };
-        if std::env::var_os("VERUM_TRACE_GENREC").is_some() {
-            eprintln!(
-                "[genrec] head={} via={} lookup={}",
-                name,
-                if self.ctx.lookup_type(fields_key.as_str()).is_some() {
-                    "__struct_fields_"
-                } else {
-                    "bare"
-                },
-                looked
-                    .as_ref()
-                    .map(|t| format!("{:?}", t).chars().take(110).collect::<String>())
-                    .unwrap_or_else(|| "<none>".to_string())
-            );
-        }
-        let Option::Some(Type::Record(fields)) = looked else {
-            return None;
-        };
-        if args.is_empty() {
-            return Some(Type::Record(fields.clone()));
-        }
-        let mut wrapper: indexmap::IndexMap<verum_common::Text, Type> =
-            indexmap::IndexMap::new();
-        wrapper.insert(
-            verum_common::Text::from("__record"),
-            Type::Record(fields.clone()),
-        );
-        match self.substitute_variant_args_positionally(&wrapper, &args, name.as_str()) {
-            Type::Variant(v) => match v.get(&verum_common::Text::from("__record")) {
-                Some(Type::Record(substituted)) => Some(Type::Record(substituted.clone())),
-                _ => Some(Type::Record(fields.clone())),
-            },
-            _ => Some(Type::Record(fields.clone())),
+        match ty {
+            Type::Named { .. } | Type::Generic { .. } =>
+                self.resolve_to_record_type(ty).map(Type::Record),
+            _ => None,
         }
     }
 
@@ -19645,10 +19554,25 @@ impl TypeChecker {
             }
         }
 
-        // Step 2: Get receiver type — either from context resolution
-        // (step 1), pre-computed chain, or synth_expr.
+        // A first-step mounted type still owns receiver fallback after an
+        // exact static-method miss. Expression precomputation can contain the
+        // ambient bare homonym; only later chain steps own an intermediate value.
+        let mounted_recv_ty = if !skip_static_lookup
+            && let ExprKind::Path(path) = &receiver.kind
+            && let Some(ident) = path.as_ident()
+            && self.explicit_imports.contains(ident.name.as_str())
+            && !self.ctx.env.is_locally_bound(ident.name.as_str())
+        {
+            self.resolve_type_name_mount_scoped(ident.name.as_str())
+        } else {
+            None
+        };
+        // Step 2: prefer context/mounted declaration authority, then the
+        // precomputed chain value or ordinary expression synthesis.
         let recv_ty_raw = if let Some(ctx_ty) = context_recv_ty {
             ctx_ty
+        } else if let Some(mounted) = mounted_recv_ty {
+            self.unifier.apply(&mounted)
         } else if let Some(precomputed) = precomputed_recv_ty {
             self.unifier.apply(&precomputed)
         } else {
@@ -22846,7 +22770,7 @@ impl TypeChecker {
         {
             return Err(self.arity_error(name, expected, actual, aspan));
         }
-        if let Some(r) = self.try_type_var_bound_dispatch(&recv_ty, method, type_args, args, span)? {
+        if let Some(r) = self.try_type_var_bound_dispatch(&recv_ty, recv_ty_raw, method, type_args, args, span)? {
             return Ok(r);
         }
 
@@ -23401,6 +23325,7 @@ impl TypeChecker {
     fn try_type_var_bound_dispatch(
         &mut self,
         recv_ty: &Type,
+        declaration_receiver: &Type,
         method: &Ident,
         type_args: &List<verum_ast::ty::GenericArg>,
         args: &[Expr],
@@ -23706,6 +23631,9 @@ impl TypeChecker {
                 if let Some(field_ty) =
                     fields.get(&verum_common::Text::from(method.name.as_str()))
                 {
+                    // Only this fallback selects a field. A public inherent
+                    // method with the same spelling has already had priority.
+                    self.check_record_field_visibility(declaration_receiver, method.name.as_str(), span)?;
                     // Field access to function: treat as method call
                     if let Type::Function {
                         params,
@@ -25850,69 +25778,22 @@ bake to have this verified.",
                 .strip_prefix("core.")
                 .map(|rest| format!("{}.{}", rest, method_name).into());
 
-            // Bare `<Type>.<method>` canonical form: when
-            // `mount core.collections.map.Map` registers `Map` in
-            // module_aliases pointing to `core.collections.map.Map`,
-            // the function is registered under the bare `Map.new` form
-            // by `register_stdlib_static_methods_from_metadata` (env
-            // side) and `archive_ctx_loader::register_module` Type.method
-            // canonical form (codegen side, commit `74312ed4e`).  The
-            // full qualified probes above miss because the module_path
-            // here ends in the TYPE name, not a real module path.
-            let type_method_form: Option<Text> = {
-                let last_seg = module_path.as_str().rsplit('.').next();
-                last_seg.map(|t| format!("{}.{}", t, method_name).into())
-            };
-
-            // Fast path: the function may already have been imported into
-            // the type env under its qualified-module form by
-            // `import_all_from_module` when the mount was processed.
+            // A module/type mount carries its full owner through lookup.
+            // The lazy metadata loader may use a legacy bare descriptor only
+            // after checking its declared parent; a bare env slot has no such
+            // provenance and cannot satisfy this qualified request.
             let env_hit = self
                 .ctx
                 .env
                 .lookup(&qualified)
                 .cloned()
                 .or_else(|| stripped.as_ref().and_then(|s| self.ctx.env.lookup(s).cloned()))
-                .or_else(|| {
-                    type_method_form
-                        .as_ref()
-                        .and_then(|s| self.ctx.env.lookup(s).cloned())
-                })
-                .or_else(|| {
-                    if let Maybe::Some(s) =
-                        self.lookup_function_in_module(qualified.as_str())
-                    {
-                        Some(s)
-                    } else {
-                        None
-                    }
-                })
-                .or_else(|| {
-                    stripped.as_ref().and_then(|s| {
-                        if let Maybe::Some(scheme) = self.lookup_function_in_module(s.as_str()) {
-                            Some(scheme)
-                        } else {
-                            None
-                        }
-                    })
-                })
-                .or_else(|| {
-                    type_method_form.as_ref().and_then(|s| {
-                        if let Maybe::Some(scheme) = self.lookup_function_in_module(s.as_str()) {
-                            Some(scheme)
-                        } else {
-                            None
-                        }
-                    })
-                });
-            // Lazy stdlib static-fn scheme (the retired eager 30k scan's
-            // on-demand twin) — separate step because the loader needs
-            // `&mut self`, which the `.or_else` closures above hold off.
+                .or_else(|| self.lookup_function_in_module(qualified.as_str()))
+                .or_else(|| stripped.as_ref()
+                    .and_then(|s| self.lookup_function_in_module(s.as_str())));
             let env_hit = match env_hit {
                 Some(s) => Some(s),
-                None => type_method_form
-                    .as_ref()
-                    .and_then(|s| self.lookup_static_or_load_from_metadata(s.as_str())),
+                None => self.lookup_static_or_load_from_metadata(qualified.as_str()),
             };
             // T1032 — LAST RESORT: mount the path on demand, the way the
             // fully-qualified form already does.
@@ -27050,6 +26931,23 @@ bake to have this verified.",
                 } else {
                     type_name.as_str()
                 };
+                // A private metadata declaration cannot acquire a public
+                // constructor by falling through to a same-leaf inherent bucket.
+                if let Some(metadata) = &self.core_metadata
+                    && let Some(descriptor) = metadata.types.get(&Text::from(type_name))
+                    && !descriptor.is_public
+                {
+                    let owner = descriptor.origin_module_path.as_ref()
+                        .filter(|module| !module.is_empty()).unwrap_or(&descriptor.module_path);
+                    if owner != &self.current_module_path {
+                        return Err(TypeError::VisibilityError {
+                            name: Text::from(type_name),
+                            visibility: "private".into(),
+                            module_path: owner.clone(),
+                            span,
+                        });
+                    }
+                }
                 let method_name = method.name.as_str();
                 let qualified_name = format!("{}.{}", type_name, method_name);
 

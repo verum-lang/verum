@@ -127,14 +127,9 @@ impl TypeChecker {
                 // instantiation boundary (`GENERIC-CTOR-FRESHNESS-1`,
                 // standard ML instantiate-at-use), so two call sites
                 // never share these variables.
-                let param_to_var: indexmap::IndexMap<
-                    verum_common::Text,
-                    crate::ty::TypeVar,
-                > = type_desc
-                    .generic_params
-                    .iter()
-                    .map(|gp| (gp.name.clone(), crate::ty::TypeVar::fresh()))
-                    .collect();
+                let param_to_var = crate::infer::helpers::metadata_variant_parameters(
+                    self, type_name, type_desc,
+                );
                 let result_type = if type_desc.generic_params.is_empty() {
                     Type::Named {
                         path: Self::text_to_path(type_name),
@@ -328,60 +323,11 @@ impl TypeChecker {
         self.ctx.register_inductive_type("Unit", unit_constructors);
     }
 
-    /// #97 — Register every stdlib const (`is_const = true`) from
-    /// CoreMetadata as a monomorphic value in the type environment.
-    ///
-    /// The precompiled archive carries `public const X: T = N;`
-    /// declarations as zero-arg [`FunctionDescriptor`]s with the
-    /// `is_const` flag set; without the metadata-driven registration
-    /// here, the archive-driven typechecker can't tell the const from
-    /// a real zero-arg function and either rejects bare `let x = X;`
-    /// references (`unbound variable: X`) or mistypes them as
-    /// callables (`() -> Int` instead of `Int`).
-    ///
-    /// Eagerly registering every const is cheap (Map<Text, Type>
-    /// inserts, sub-millisecond for the full stdlib's ≈3000 consts)
-    /// and matches the semantics of the source-driven Pass 6 in
-    /// `core_pipeline::register_all_global_passes`, where every const
-    /// in every loaded `.vr` AST is registered up-front.
-    /// Register every stdlib `<Type>.<method>` static fn from
-    /// CoreMetadata as a polymorphic scheme in env under the bare
-    /// `<Type>.<method>` canonical key.  This bridges the
-    /// typechecker-side env to the codegen-side ctx.functions form
-    /// registered by archive_ctx_loader's Type.method canonical-form
-    /// path (commit `74312ed4e`).  Without this, the field-access
-    /// resolver at `expr.rs::infer_expr_field`'s module-alias branch
-    /// probes `env.lookup("Map.new")` and misses — even though
-    /// `metadata.functions["Map.new"]` IS populated by
-    /// `archive_metadata::register_module_metadata`'s Pass 2
-    /// (line ~613).
-    ///
-    /// Heuristic: a metadata.functions key with shape `<Type>.<method>`
-    /// where `<Type>` is a WKT or is in `metadata.types` AND the fn
-    /// is NOT a const is a candidate.  Inserts both the bare
-    /// `<Type>.<method>` key + the `$static$<method>` key under the
-    /// inherent_methods bucket so both field-access and instance-method
-    /// dispatch paths find it.
-    ///
-    /// Idempotent — first-wins insert via `insert_mono`.
-    /// Lazy twin of the retired eager
-    /// `register_stdlib_static_methods_from_metadata` scan
-    /// (T2-extended-perf follow-up): resolve ONE `<Type>.<method>`
-    /// static-fn scheme from the baked metadata at its lookup site,
-    /// registering it into env on first use.
-    ///
-    /// The eager scan built ~30 500 schemes on EVERY cold start
-    /// (~290 ms of `scheme_from_function_descriptor` alone, measured
-    /// 2026-08-23) so that a handful of multi-mount field-access
-    /// paths could `env.lookup("Map.new")`.  The lookup sites now
-    /// call this instead: an env hit costs one map probe, a metadata
-    /// hit builds exactly the scheme the program touches, and a miss
-    /// stays a miss.
-    ///
-    /// The carrier filter mirrors the old scan: the name must be a
-    /// single-dot `<Type>.<method>` whose prefix is a metadata type
-    /// or a primitive WKT — free fns (`core.shell.exec.run`) never
-    /// match.
+    /// Load one static-method scheme at its lookup site. Exact source env
+    /// registrations take precedence; metadata requests retain their declaring
+    /// owner and cache only the requested spelling. A legacy bare descriptor
+    /// can serve a qualified request only when its declared parent agrees.
+    /// Free functions are handled by the module-function resolver.
     pub(super) fn lookup_static_or_load_from_metadata(
         &mut self,
         qualified_name: &str,
@@ -396,48 +342,47 @@ impl TypeChecker {
             verum_common::Maybe::Some(m) => std::sync::Arc::clone(m),
             verum_common::Maybe::None => return None,
         };
-        // Normalise to the bare `<Type>.<method>` spelling the baked
-        // descriptors use: a module-qualified caller form
-        // (`core.collections.map.Map.new`) keeps only its LAST two
-        // segments.  The carrier check then guards against free fns
-        // whose penultimate segment is a module, not a type
-        // (`core.shell.exec.run` → `exec` is no metadata type).
-        let dot_idx = qualified_name.rfind('.')?;
-        let method_part = &qualified_name[dot_idx + 1..];
-        let head = &qualified_name[..dot_idx];
-        let type_part = match head.rfind('.') {
-            Some(i) => &head[i + 1..],
-            None => head,
-        };
+        // Keep the requested declaring owner. The bare metadata spelling is
+        // a compatibility index, not permission to select another declaration.
+        let (head, method_part) = qualified_name.rsplit_once('.')?;
+        let type_part = head.rsplit('.').next()?;
         if type_part.is_empty() {
             return None;
         }
-        let is_carrier = metadata
-            .types
-            .contains_key(&verum_common::Text::from(type_part))
+        let requested_type = metadata.types.get(&Text::from(head));
+        let is_carrier = requested_type.is_some()
+            || metadata.types.contains_key(&Text::from(type_part))
             || verum_common::well_known_types::WellKnownType::from_name(type_part).is_some();
         if !is_carrier {
             return None;
         }
-        let bare = format!("{type_part}.{method_part}");
-        let fd = metadata.functions.get(&verum_common::Text::from(qualified_name))
-            .or_else(|| metadata.functions.get(&verum_common::Text::from(bare.as_str())))?;
+        let requested_owner = requested_type.map(Self::metadata_declaring_key)
+            .unwrap_or_else(|| Text::from(head));
+        let owner_is_qualified = head.contains('.');
+        let bare: Text = format!("{type_part}.{method_part}").into();
+        let fd = metadata.functions.get(&Text::from(qualified_name))
+            .or_else(|| metadata.functions.get(&bare))?;
         if fd.is_const {
             return None;
         }
-        let scheme = Self::scheme_from_function_descriptor(fd, &metadata);
-        // Register under the BARE canonical spelling (what the eager
-        // scan used), plus the caller's spelling when it differs, so
-        // repeat lookups through either form are env hits.
-        self.ctx
-            .env
-            .insert(verum_common::Text::from(bare.as_str()), scheme.clone());
-        if bare.as_str() != qualified_name {
-            self.ctx
-                .env
-                .insert(verum_common::Text::from(qualified_name), scheme.clone());
+        if owner_is_qualified {
+            let owner = Self::metadata_function_owner(fd, &metadata)?;
+            if Self::metadata_declaring_key(owner) != requested_owner {
+                return None;
+            }
+            let defining_module = owner.origin_module_path.as_ref()
+                .filter(|module| !module.is_empty()).unwrap_or(&owner.module_path);
+            if defining_module != &self.current_module_path
+                && (!owner.is_public || !fd.is_public)
+            {
+                return None;
+            }
         }
-        self.register_required_params_from_descriptor(bare.as_str(), fd);
+        let scheme = Self::scheme_from_function_descriptor(fd, &metadata);
+        // A qualified lookup owns only its qualified cache entry. Caching it
+        // under the global leaf would make the next mounted owner order-dependent.
+        self.ctx.env.insert(Text::from(qualified_name), scheme.clone());
+        self.register_required_params_from_descriptor(qualified_name, fd);
         Some(scheme)
     }
 
@@ -604,19 +549,30 @@ impl TypeChecker {
         scheme.explicit_method_vars = Some(slots);
     }
 
-    pub(super) fn scheme_from_function_descriptor(
+    /// Resolve a method's declaration from its explicit parent and source
+    /// provenance. Both selection and signature reconnection use this authority;
+    /// a return type need not be the method's owning type.
+    pub(super) fn metadata_function_owner<'a>(
         fd: &crate::core_metadata::FunctionDescriptor,
-        metadata: &crate::core_metadata::CoreMetadata,
-    ) -> crate::context::TypeScheme {
-        let owner = fd.parent_type.as_ref().and_then(|parent| {
-            let module = fd.origin_module_path.as_ref().unwrap_or(&fd.module_path);
+        metadata: &'a crate::core_metadata::CoreMetadata,
+    ) -> Option<&'a crate::core_metadata::TypeDescriptor> {
+        fd.parent_type.as_ref().and_then(|parent| {
+            let module = fd.origin_module_path.as_ref()
+                .filter(|module| !module.is_empty()).unwrap_or(&fd.module_path);
             let key = verum_common::qualified_name::qualify_module_name(module, parent.as_str());
             metadata.types.get(parent)
                 .filter(|descriptor| Self::metadata_declaring_key(descriptor) == *parent)
                 .or_else(|| metadata.types.get(&key))
                 .or_else(|| metadata.types.get(parent)
                     .filter(|descriptor| Self::metadata_declaring_key(descriptor) == key))
-        });
+        })
+    }
+
+    pub(super) fn scheme_from_function_descriptor(
+        fd: &crate::core_metadata::FunctionDescriptor,
+        metadata: &crate::core_metadata::CoreMetadata,
+    ) -> crate::context::TypeScheme {
+        let owner = Self::metadata_function_owner(fd, metadata);
         // LITERAL-SIZED-ALIAS-COERCE-1 oracle: dump the RAW descriptor
         // strings for a named fn (`VERUM_TRACE_FNSCHEME=ptr_add`).
         if let Ok(want) = std::env::var("VERUM_TRACE_FNSCHEME") {
@@ -785,6 +741,22 @@ impl TypeChecker {
         scheme
     }
 
+    /// #97 — Register every stdlib const (`is_const = true`) from
+    /// CoreMetadata as a monomorphic value in the type environment.
+    ///
+    /// The precompiled archive carries `public const X: T = N;`
+    /// declarations as zero-arg [`FunctionDescriptor`]s with the
+    /// `is_const` flag set; without the metadata-driven registration
+    /// here, the archive-driven typechecker can't tell the const from
+    /// a real zero-arg function and either rejects bare `let x = X;`
+    /// references (`unbound variable: X`) or mistypes them as
+    /// callables (`() -> Int` instead of `Int`).
+    ///
+    /// Eagerly registering every const is cheap (Map<Text, Type>
+    /// inserts, sub-millisecond for the full stdlib's ≈3000 consts)
+    /// and matches the semantics of the source-driven Pass 6 in
+    /// `core_pipeline::register_all_global_passes`, where every const
+    /// in every loaded source AST is registered up-front.
     pub(super) fn register_stdlib_consts_from_metadata(
         &mut self,
         metadata: &crate::core_metadata::CoreMetadata,
@@ -815,7 +787,7 @@ impl TypeChecker {
                 .unwrap_or_else(|| qualified_name.as_str());
             self.ctx
                 .env
-                .insert_mono(simple_name, const_type.clone());
+                .insert_value(simple_name, TypeScheme::mono(const_type.clone()));
 
             // ALSO register under the qualified `Type.CONST` form so
             // associated-constant lookup at `infer/expr.rs:6934`
@@ -832,7 +804,7 @@ impl TypeChecker {
             if qualified_name.as_str() != simple_name {
                 self.ctx
                     .env
-                    .insert_mono(qualified_name.as_str(), const_type);
+                    .insert_value(qualified_name.as_str(), TypeScheme::mono(const_type));
             }
         }
     }
@@ -952,6 +924,7 @@ impl TypeChecker {
             current_module_path: verum_common::Text::from("cog"),
             resolving_source_signature: false,
             loaded_source_receiver_methods: Set::new(),
+            source_record_field_visibility: Map::new(),
             meta_param_refinements: std::collections::HashMap::new(),
             inline_modules: Map::new(),
             module_aliases: Map::new(),
@@ -1102,6 +1075,7 @@ impl TypeChecker {
             current_module_path: verum_common::Text::from("cog"),
             resolving_source_signature: false,
             loaded_source_receiver_methods: Set::new(),
+            source_record_field_visibility: Map::new(),
             meta_param_refinements: std::collections::HashMap::new(),
             inline_modules: Map::new(),
             module_aliases: Map::new(),
@@ -1253,6 +1227,7 @@ impl TypeChecker {
             current_module_path: verum_common::Text::from("cog"),
             resolving_source_signature: false,
             loaded_source_receiver_methods: Set::new(),
+            source_record_field_visibility: Map::new(),
             meta_param_refinements: std::collections::HashMap::new(),
             inline_modules: Map::new(),
             module_aliases: Map::new(),
@@ -2472,6 +2447,7 @@ impl TypeChecker {
                     let name = id.name.as_str();
                     if let Some(scheme) = self.ctx.env.lookup(name) {
                         let ty = scheme.instantiate();
+                        self.check_record_conversion_visibility(expected, &ty, expr.span)?;
                         self.unifier.unify(&ty, expected, expr.span)?;
                         return Ok(InferResult::new(ty));
                     }
@@ -2484,6 +2460,7 @@ impl TypeChecker {
             ExprKind::Field { expr: obj, field } => {
                 // Get the object type without init checking
                 let obj_result = self.synth_expr_for_field_access(obj)?;
+                self.check_record_field_visibility(&obj_result.ty, field.name.as_str(), expr.span)?;
                 let dereferenced_ty = self.unwrap_reference_type(&obj_result.ty);
                 let mut normalized_ty = self.normalize_type(dereferenced_ty);
 
@@ -2515,6 +2492,7 @@ impl TypeChecker {
                         };
                         match next {
                             Some(target) => {
+                                self.check_record_field_visibility(&target, field.name.as_str(), expr.span)?;
                                 let unwrapped = self.unwrap_reference_type(&target);
                                 normalized_ty = self.normalize_type(unwrapped);
                                 hops += 1;
@@ -2530,6 +2508,7 @@ impl TypeChecker {
                         if let Some(field_ty) =
                             fields.get(&verum_common::Text::from(field.name.as_str()))
                         {
+                            self.check_record_conversion_visibility(expected, field_ty, expr.span)?;
                             self.unifier.unify(field_ty, expected, expr.span)?;
                             Ok(InferResult::new(field_ty.clone()))
                         } else {
@@ -2608,6 +2587,11 @@ impl TypeChecker {
                                 // Apply type parameter substitution to get concrete field type
                                 let resolved_ty =
                                     self.substitute_type_params(field_ty, &param_subst);
+                                self.check_record_conversion_visibility(
+                                    expected,
+                                    &resolved_ty,
+                                    expr.span,
+                                )?;
                                 self.unifier.unify(&resolved_ty, expected, expr.span)?;
                                 return Ok(InferResult::new(resolved_ty));
                             }
@@ -2627,6 +2611,11 @@ impl TypeChecker {
                         if let Some(Type::Record(fields)) = self.ctx.lookup_type(&struct_key) {
                             let field_name_key = verum_common::Text::from(field.name.as_str());
                             if let Some(field_ty) = fields.get(&field_name_key).cloned() {
+                                self.check_record_conversion_visibility(
+                                    expected,
+                                    &field_ty,
+                                    expr.span,
+                                )?;
                                 self.unifier.unify(&field_ty, expected, expr.span)?;
                                 return Ok(InferResult::new(field_ty));
                             }
@@ -2662,6 +2651,11 @@ impl TypeChecker {
                     Type::Tuple(types) => {
                         let idx = *index as usize;
                         if idx < types.len() {
+                            self.check_record_conversion_visibility(
+                                expected,
+                                &types[idx],
+                                expr.span,
+                            )?;
                             self.unifier.unify(&types[idx], expected, expr.span)?;
                             Ok(InferResult::new(types[idx].clone()))
                         } else {
@@ -2689,6 +2683,11 @@ impl TypeChecker {
 
                         if let Option::Some(Type::Tuple(types)) = found_tuple {
                             if idx < types.len() {
+                                self.check_record_conversion_visibility(
+                                    expected,
+                                    &types[idx],
+                                    expr.span,
+                                )?;
                                 self.unifier.unify(&types[idx], expected, expr.span)?;
                                 Ok(InferResult::new(types[idx].clone()))
                             } else {
@@ -2752,6 +2751,11 @@ impl TypeChecker {
 
                             if let Some(inner_ty) = found_inner {
                                 if idx == 0 {
+                                    self.check_record_conversion_visibility(
+                                        expected,
+                                        &inner_ty,
+                                        expr.span,
+                                    )?;
                                     self.unifier.unify(&inner_ty, expected, expr.span)?;
                                     Ok(InferResult::new(inner_ty))
                                 } else {
@@ -2783,6 +2787,11 @@ impl TypeChecker {
                                 self.ctx.lookup_type(tuple_fields_key.as_str())
                             {
                                 if idx < types.len() {
+                                    self.check_record_conversion_visibility(
+                                        expected,
+                                        &types[idx],
+                                        expr.span,
+                                    )?;
                                     self.unifier.unify(&types[idx], expected, expr.span)?;
                                     Ok(InferResult::new(types[idx].clone()))
                                 } else {
@@ -2807,6 +2816,11 @@ impl TypeChecker {
 
                                 if let Option::Some(inner_ty) = found_inner {
                                     if idx == 0 {
+                                        self.check_record_conversion_visibility(
+                                            expected,
+                                            inner_ty,
+                                            expr.span,
+                                        )?;
                                         self.unifier.unify(inner_ty, expected, expr.span)?;
                                         Ok(InferResult::new(inner_ty.clone()))
                                     } else {
@@ -2826,6 +2840,11 @@ impl TypeChecker {
                             // Also handle reference to bare tuple
                             let idx = *index as usize;
                             if idx < types.len() {
+                                self.check_record_conversion_visibility(
+                                    expected,
+                                    &types[idx],
+                                    expr.span,
+                                )?;
                                 self.unifier.unify(&types[idx], expected, expr.span)?;
                                 Ok(InferResult::new(types[idx].clone()))
                             } else {
@@ -2895,6 +2914,11 @@ impl TypeChecker {
                         // Check the index has the appropriate type
                         self.check_expr(index, &resolution.key)?;
                         // Unify output with expected and return
+                        self.check_record_conversion_visibility(
+                            expected,
+                            &resolution.output,
+                            expr.span,
+                        )?;
                         self.unifier
                             .unify(&resolution.output, expected, expr.span)?;
                         Ok(InferResult::new(resolution.output))
@@ -6762,6 +6786,8 @@ impl TypeChecker {
     ///  * Everything else: plain insert.
     ///
     /// Returns whether the insert happened.
+    /// Callers resolve actual function, axiom or exported variant declarations.
+    /// Type-owned constructor mirrors use the separate type-registration path.
     pub(crate) fn insert_fn_scheme_guarded(
         &mut self,
         name: &str,
@@ -6780,7 +6806,7 @@ impl TypeChecker {
             false
         };
         if !should_skip {
-            self.ctx.env.insert(verum_common::Text::from(name), scheme);
+            self.ctx.env.insert_value(name, scheme);
             // T0661: the occupant is no longer the ambient builtin —
             // drop the provenance so rib-order consumers (and the
             // vacancy gates below) see a REAL binding from here on.
@@ -6834,7 +6860,7 @@ impl TypeChecker {
         if declaring_module_is_stdlib {
             return self.insert_fn_scheme_guarded(name, scheme);
         }
-        self.ctx.env.insert(verum_common::Text::from(name), scheme);
+        self.ctx.env.insert_value(name, scheme);
         self.meta_builtin_names
             .remove(&verum_common::Text::from(name));
         true
@@ -10515,7 +10541,7 @@ impl TypeChecker {
     /// Instantiate only the slots owned by this exact declaration. Metadata
     /// templates record their minted variables when registered; source aliases
     /// also retain parameter names, including unused or reordered parameters.
-    fn substitute_with_params(&self, type_name: &str, def: &Type, args: &[Type]) -> Type {
+    pub(super) fn substitute_with_params(&self, type_name: &str, def: &Type, args: &[Type]) -> Type {
         let mut parameters: Map<Text, Type> = Map::new();
         let params_key = format!("__type_params_{type_name}");
         if let Some(Type::Record(declared)) = self.ctx.lookup_type(&params_key) {
@@ -13146,14 +13172,18 @@ with .to_float() or .to_int() (at {:?})",
         &self,
         recv: &Type,
         field: &str,
-    ) -> Option<(Type, usize)> {
+        span: Span,
+    ) -> Result<Option<(Type, usize)>> {
         const MAX_DEREF_CHAIN: usize = 16;
         let mut hops = if recv.is_transparent_carrier() { 0 } else { 1 };
-        let mut current = self.find_deref_target_type(recv)?;
+        let Some(mut current) = self.find_deref_target_type(recv) else {
+            return Ok(None);
+        };
         for _ in 0..MAX_DEREF_CHAIN {
             if let Type::Record(fields) = &current {
                 if let Option::Some(t) = fields.get(field) {
-                    return Some((t.clone(), hops));
+                    self.check_record_field_visibility(&current, field, span)?;
+                    return Ok(Some((t.clone(), hops)));
                 }
             }
             let name: Text = match &current {
@@ -13174,16 +13204,20 @@ with .to_float() or .to_int() (at {:?})",
                 };
                 if let Some(f) = fields {
                     if let Option::Some(t) = f.get(field) {
-                        return Some((t.clone(), hops));
+                        self.check_record_field_visibility(&current, field, span)?;
+                        return Ok(Some((t.clone(), hops)));
                     }
                 }
             }
             if !current.is_transparent_carrier() {
                 hops += 1;
             }
-            current = self.find_deref_target_type(&current)?;
+            let Some(next) = self.find_deref_target_type(&current) else {
+                return Ok(None);
+            };
+            current = next;
         }
-        None
+        Ok(None)
     }
 
     /// Bind an impl head against a receiver.  Delegates to the single

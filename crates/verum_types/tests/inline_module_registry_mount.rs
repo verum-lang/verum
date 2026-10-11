@@ -85,8 +85,8 @@ fn root_inline_alias_is_known_before_the_checker_visits_module_bodies() {
 #[test]
 fn inline_aliases_keep_same_leaf_types_and_lexical_values_distinct() {
     for reverse in [false, true] {
-        let wide = "module wide {public type Item is {left:Int,right:Int};}";
-        let narrow = "module narrow {public type Item is {left:Bool};}";
+        let wide = "module wide {public type Item is {public left:Int,public right:Int};}";
+        let narrow = "module narrow {public type Item is {public left:Bool};}";
         let declarations = if reverse {
             format!("{narrow} {wide}")
         } else {
@@ -134,9 +134,65 @@ fn file_owned_inline_module_does_not_acquire_a_root_alias() {
 
 #[test]
 fn whole_module_and_named_mounts_share_one_import_source() {
-    let source = "module wide {public type Item is {left:Int};} mount wide as short; mount cog.wide.{Item}; fn probe(value:Item)->Int {value.left}";
+    let source = "module wide {public type Item is {public left:Int};} mount wide as short; mount cog.wide.{Item}; fn probe(value:Item)->Int {value.left}";
     let errors = check(source, "cog");
     assert!(errors.is_empty(), "{errors:?}");
+}
+
+fn assert_private_left(errors: &List<Text>, owner: &str) {
+    assert_eq!(
+        errors.len(),
+        1,
+        "one declared private-field refusal: {errors:?}"
+    );
+    let error = &errors[0];
+    assert!(
+        error.contains("VisibilityError")
+            && error.contains("name: Text { inner: \"left\" }")
+            && error.contains("visibility: Text { inner: \"Private\" }")
+            && error.contains(&format!("module_path: Text {{ inner: \"{owner}\" }}")),
+        "the field must keep its exact declaring owner: {errors:?}"
+    );
+}
+
+#[test]
+fn inline_alias_private_field_keeps_its_owner_beside_a_public_homonym() {
+    for reverse in [false, true] {
+        let wide = "module wide {public type Item is {left:Int};}";
+        let narrow = "module narrow {public type Item is {public left:Bool};}";
+        let declarations = if reverse {
+            format!("{narrow} {wide}")
+        } else {
+            format!("{wide} {narrow}")
+        };
+        let source = format!(
+            "{declarations} mount wide as w; mount narrow as n; fn public_value(value:n.Item)->Bool {{value.left}} fn private_value(value:w.Item)->Int {{value.left}}"
+        );
+        assert_private_left(&check(&source, "cog"), "cog.wide");
+    }
+}
+
+#[test]
+fn named_mount_private_field_keeps_the_whole_module_owner() {
+    let source = "module wide {public type Item is {left:Int};} mount wide as short; mount cog.wide.{Item}; fn probe(value:Item)->Int {value.left}";
+    assert_private_left(&check(source, "cog"), "cog.wide");
+}
+
+#[test]
+fn missing_alias_member_cannot_acquire_an_unrelated_mounted_record() {
+    let declarations = "module wide {public type Item is {public left:Int};} module empty {public type Other is {public left:Bool};} mount empty as w; mount cog.wide.{Item};";
+    let valid = format!("{declarations} fn probe(value:w.Other)->Bool {{value.left}}");
+    let errors = check(&valid, "cog");
+    assert!(errors.is_empty(), "{errors:?}");
+    let missing = format!("{declarations} fn probe(value:w.Item)->Int {{value.left}}");
+    let errors = check(&missing, "cog");
+    assert!(
+        errors.iter().any(|error| {
+            (error.contains("VisibilityError") && error.contains("unknown declaration visibility"))
+                || error.contains("TypeNotFound")
+        }),
+        "the absent owner must not resolve through mounted Item: {errors:?}"
+    );
 }
 
 #[test]

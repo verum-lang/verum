@@ -293,7 +293,7 @@ fn renamed_reexported_target_retains_its_original_declaration_owner() {
         &[
             (
                 "demo.model",
-                "public type RegistrySource is { revision: Int };",
+                "public type RegistrySource is { public revision: Int };",
             ),
             ("demo.adapter", adapter),
         ],
@@ -335,7 +335,7 @@ fn local_impl_for_imported_alias_or_qualified_target_keeps_foreign_owner() {
             &source,
             &[(
                 "demo.model",
-                "public type RegistrySource is { revision: Int };",
+                "public type RegistrySource is { public revision: Int };",
             )],
         );
         assert!(errors.is_empty(), "{target}: {errors:?}");

@@ -1295,6 +1295,9 @@ pub struct TypeEnv {
     bindings: IndexMap<Text, TypeScheme>,
     /// Declaration-owned type parameters mirrored into the value namespace.
     type_parameter_mirrors: Set<Text>,
+    /// Roles supplied by the declaration that installed a binding. In
+    /// particular, a root value cannot be identified from its type scheme.
+    declared_values: Set<Text>,
     /// Parent environment (for nested scopes)
     parent: Option<Box<TypeEnv>>,
     /// Type parameters in scope with their bounds
@@ -1314,6 +1317,7 @@ impl TypeEnv {
         Self {
             bindings: IndexMap::new(),
             type_parameter_mirrors: Set::new(),
+            declared_values: Set::new(),
             parent: None,
             type_params: Map::new(),
             current_module: Maybe::None,
@@ -1329,6 +1333,7 @@ impl TypeEnv {
         Self {
             bindings: IndexMap::new(),
             type_parameter_mirrors: Set::new(),
+            declared_values: Set::new(),
             parent: Some(Box::new(self.clone())),
             type_params: Map::new(),
             current_module: self.current_module, // Inherit module context
@@ -1387,7 +1392,43 @@ impl TypeEnv {
     pub fn insert(&mut self, name: impl Into<Text>, scheme: TypeScheme) {
         let name_text: Text = name.into();
         self.type_parameter_mirrors.remove(&name_text);
+        self.declared_values.remove(&name_text);
         self.bindings.insert(name_text, scheme);
+    }
+
+    /// Install a binding with the role of its actual source/metadata declaration.
+    /// Replacing it through ordinary insertion deliberately discards that role.
+    pub fn insert_value(&mut self, name: impl Into<Text>, scheme: TypeScheme) {
+        let name = name.into();
+        self.insert(name.clone(), scheme);
+        self.declared_values.insert(name);
+    }
+
+    /// Rebind an existing name without inventing or discarding its declaration
+    /// role. The nearest source binding supplies both the scheme and provenance.
+    pub fn insert_binding_alias(&mut self, alias: impl Into<Text>, original: &str) -> bool {
+        let original = Text::from(original);
+        let mut scope = Some(&*self);
+        let binding = loop {
+            let Some(env) = scope else { return false; };
+            if let Some(scheme) = env.bindings.get(&original) {
+                break (
+                    scheme.clone(),
+                    env.declared_values.contains(&original),
+                    env.type_parameter_mirrors.contains(&original),
+                );
+            }
+            scope = env.parent.as_deref();
+        };
+        let alias = alias.into();
+        self.insert(alias.clone(), binding.0);
+        if binding.1 {
+            self.declared_values.insert(alias.clone());
+        }
+        if binding.2 {
+            self.type_parameter_mirrors.insert(alias);
+        }
+        true
     }
 
     /// Publish a declared type parameter in the expression environment.
@@ -1418,6 +1459,7 @@ impl TypeEnv {
             env = parent;
         }
         env.type_parameter_mirrors.remove(&name_text);
+        env.declared_values.remove(&name_text);
         env.bindings.insert(name_text, scheme);
     }
 
@@ -1435,6 +1477,7 @@ impl TypeEnv {
     pub fn remove(&mut self, name: &str) -> bool {
         let name = Text::from(name);
         self.type_parameter_mirrors.remove(&name);
+        self.declared_values.remove(&name);
         self.bindings.shift_remove(&name).is_some()
     }
 
@@ -1513,6 +1556,25 @@ impl TypeEnv {
                 return !scope.type_parameter_mirrors.contains(&key);
             }
             scope = parent;
+        }
+        false
+    }
+
+    /// The nearest binding decides whether an expression names a value.
+    /// Lexical bindings retain their value role; root declarations require
+    /// explicit provenance, and an inner type-parameter mirror
+    /// stops the search instead of exposing an outer same-spelled value.
+    pub fn is_bound_value(&self, name: &str) -> bool {
+        let key = Text::from(name);
+        let mut scope = Some(self);
+        while let Some(env) = scope {
+            if env.bindings.contains_key(&key) {
+                if env.type_parameter_mirrors.contains(&key) {
+                    return false;
+                }
+                return env.declared_values.contains(&key) || env.parent.is_some();
+            }
+            scope = env.parent.as_deref();
         }
         false
     }

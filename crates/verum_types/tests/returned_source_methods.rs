@@ -19,6 +19,14 @@ const PROVIDER: &str = r#"
 "#;
 
 fn check_with_checker(consumer: &str, modules: &[(&str, &str)]) -> (TypeChecker, List<Text>) {
+    check_with_module_aliases(consumer, modules, &[])
+}
+
+fn check_with_module_aliases(
+    consumer: &str,
+    modules: &[(&str, &str)],
+    aliases: &[(&str, &str)],
+) -> (TypeChecker, List<Text>) {
     let mut checker = TypeChecker::new();
     checker.register_primitives();
     checker.set_current_cog("demo");
@@ -38,6 +46,9 @@ fn check_with_checker(consumer: &str, modules: &[(&str, &str)]) -> (TypeChecker,
         let mut module = ModuleInfo::new(id, path.clone(), ast.clone(), file_id, (*source).into());
         module.exports = extract_exports_from_module(&ast, id, &path).expect("source exports");
         registry.register(module);
+    }
+    for (alias, owner) in aliases {
+        registry.register_path_alias(*alias, *owner);
     }
     checker.set_module_registry_direct(registry.clone());
     let ast = FastParser::new()
@@ -299,4 +310,63 @@ fn inferred_private_type_does_not_publish_its_bare_name() {
             .any(|error| error.contains("TypeNotFound") && error.contains("Receipt")),
         "the factory must not import its private return type name: {errors:?}",
     );
+}
+
+fn borrowed_generic_method_errors(method: &str, return_type: &str) -> List<Text> {
+    let model = "public type Stored<T> is { value: T }; implement<T> Stored<T> { public fn read(&self) -> T { self.value } private fn hidden(&self) -> T { self.value } }";
+    let provider = "mount demo.model.{Stored as Items}; public type Holder is { items: Items<Int> }; implement Holder { public fn items(&self) -> &Items<Int> { &self.items } }";
+    let other = "public type Items<T> is { value: Bool }; implement<T> Items<T> { public fn read(&self) -> Bool { self.value } }";
+    check(
+        &format!("mount demo.other.Items; mount demo.provider.Holder; fn probe(value: &Holder) -> {return_type} {{ value.items().{method}() }}"),
+        &[("demo.model", model), ("demo.provider", provider), ("demo.other", other)],
+    )
+}
+
+#[test]
+fn borrowed_method_result_keeps_its_generic_import_owner() {
+    let errors = borrowed_generic_method_errors("read", "Int");
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
+#[test]
+fn borrowed_method_result_cannot_use_a_same_leaf_return_type() {
+    let errors = borrowed_generic_method_errors("read", "Bool");
+    assert!(errors.iter().any(|error| error.contains("Mismatch")), "{errors:?}");
+    assert!(!errors.iter().any(|error| error.contains("MethodNotFound")), "{errors:?}");
+}
+
+#[test]
+fn borrowed_method_result_keeps_the_returned_owners_private_methods() {
+    let errors = borrowed_generic_method_errors("hidden", "Int");
+    assert_missing_method(&errors, "hidden");
+}
+
+fn module_alias_method_errors(method: &str, result: &str) -> List<Text> {
+    let model = "public type Stored<T> is { value: T }; implement<T> Stored<T> { public fn first(&self) -> T { self.value } public fn second(&self) -> T { self.value } private fn hidden(&self) -> T { self.value } }";
+    let provider = "mount short_model.{Stored as Items}; public type Holder is { items: Items<Int> }; implement Holder { public fn items(&self) -> &Items<Int> { &self.items } }";
+    let consumer = format!("mount short_provider.Holder; fn probe(value: &Holder) -> {result} {{ let first: Int = value.items().first(); value.items().{method}() }}");
+    check_with_module_aliases(
+        &consumer,
+        &[("demo.model", model), ("demo.provider", provider)],
+        &[("short_model", "demo.model"), ("short_provider", "demo.provider")],
+    ).1
+}
+
+#[test]
+fn module_path_aliases_preserve_borrowed_receiver_method_identity() {
+    let errors = module_alias_method_errors("second", "Int");
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
+#[test]
+fn module_path_aliases_preserve_borrowed_receiver_payload_type() {
+    let errors = module_alias_method_errors("second", "Bool");
+    assert!(errors.iter().any(|error| error.contains("Mismatch")), "{errors:?}");
+    assert!(!errors.iter().any(|error| error.contains("MethodNotFound")), "{errors:?}");
+}
+
+#[test]
+fn module_path_aliases_preserve_borrowed_receiver_private_methods() {
+    let errors = module_alias_method_errors("hidden", "Int");
+    assert_missing_method(&errors, "hidden");
 }

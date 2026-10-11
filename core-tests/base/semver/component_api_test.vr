@@ -1,0 +1,56 @@
+// Read-only components and prerelease comparison share the parsed SemVer value.
+mount core.base.semver.SemVer;
+
+@test
+fn parsed_components_are_available_without_record_construction() {
+    let value = SemVer.parse(&"18446744073709551615.42.7-beta.1+build.5").unwrap();
+    assert(value.major() == 18446744073709551615_u64);
+    assert(value.minor() == 42_u64);
+    assert(value.patch() == 7_u64);
+    let identifiers = value.prerelease_identifiers();
+    assert(identifiers.len() == 2);
+    assert(identifiers[0] == "beta");
+    assert(identifiers[1] == "1");
+    let release = SemVer.zero();
+    assert(release.major() == 0_u64);
+    assert(release.minor() == 0_u64);
+    assert(release.patch() == 0_u64);
+    assert(release.prerelease_identifiers().is_empty());
+}
+
+fn same_precedence(left: &Text, right: &Text, expected: Ordering) {
+    let a = SemVer.parse(left).unwrap();
+    let b = SemVer.parse(right).unwrap();
+    assert(a.compare_prerelease(b.prerelease_identifiers()) == expected);
+    assert(a.cmp(&b) == expected);
+}
+
+@test
+fn shared_prerelease_order_matches_full_comparison_for_equal_core_numbers() {
+    same_precedence(&"1.2.3-alpha", &"1.2.3-alpha.1", Ordering.Less);
+    same_precedence(&"1.2.3-alpha.1", &"1.2.3-alpha.beta", Ordering.Less);
+    same_precedence(&"1.2.3-alpha.beta", &"1.2.3-beta", Ordering.Less);
+    same_precedence(&"1.2.3-beta.2", &"1.2.3-beta.11", Ordering.Less);
+    same_precedence(&"1.2.3-beta.11", &"1.2.3-rc.1", Ordering.Less);
+    same_precedence(&"1.2.3-rc.1", &"1.2.3", Ordering.Less);
+    same_precedence(&"1.2.3", &"1.2.3-alpha", Ordering.Greater);
+    same_precedence(&"1.2.3-18446744073709551616", &"1.2.3-18446744073709551617", Ordering.Less);
+    same_precedence(&"1.2.3-999999999999999999999999", &"1.2.3-1000000000000000000000000", Ordering.Less);
+    same_precedence(&"1.2.3-alpha+one", &"1.2.3-alpha+two", Ordering.Equal);
+    same_precedence(&"1.2.3+one", &"1.2.3+two", Ordering.Equal);
+}
+
+@test
+fn prerelease_comparison_deliberately_ignores_core_numbers() {
+    let a = SemVer.parse(&"1.2.3-beta").unwrap();
+    let b = SemVer.parse(&"9.8.7-alpha").unwrap();
+    assert(a.cmp(&b) is Ordering.Less);
+    assert(a.compare_prerelease(b.prerelease_identifiers()) is Ordering.Greater);
+}
+
+fn main() {
+    parsed_components_are_available_without_record_construction();
+    shared_prerelease_order_matches_full_comparison_for_equal_core_numbers();
+    prerelease_comparison_deliberately_ignores_core_numbers();
+    print("semver-component-api: 3 passed");
+}

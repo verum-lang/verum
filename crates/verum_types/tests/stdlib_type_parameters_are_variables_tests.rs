@@ -177,3 +177,34 @@ fn one_variable_answers_for_a_parameter_in_every_case() {
         );
     }
 }
+
+#[test]
+fn a_late_template_uses_the_already_registered_constructor_parameters() {
+    let descriptor = variant_descriptor(
+        "Pair",
+        &["T"],
+        List::from_iter([tuple_case("Both", &["T", "T"]), tuple_case("One", &["T"])]),
+    );
+    let mut metadata = CoreMetadata::default();
+    metadata.types.insert("Pair".into(), descriptor);
+    metadata.type_declaration_order.push("Pair".into());
+    let mut checker = TypeChecker::new_with_core(std::sync::Arc::new(metadata));
+    let empty = verum_fast_parser::FastParser::new()
+        .parse_module_str("", verum_common::FileId::new(0)).expect("empty source");
+    checker.register_stdlib_types_for_module(&empty);
+    let before = recorded_params(&checker, "Pair");
+    checker.ensure_stdlib_type_loaded(&"Pair".into(), &mut Vec::new());
+    assert_eq!(recorded_params(&checker, "Pair"), before);
+    assert_eq!(
+        checker.lookup_type_for_testing("__type_var_order_Pair"),
+        Some(Type::Tuple(before.iter().map(|(_, ty)| ty.clone()).collect())),
+        "the later payload template must use the constructor's parameter identity",
+    );
+    checker.register_stdlib_types_for_module(&empty);
+    let expected = &before[0].1;
+    for (_, arguments) in checker.constructor_payloads_for_testing("Pair") {
+        for argument in arguments {
+            assert_eq!(&argument, expected, "repeated registration must keep the shared slot");
+        }
+    }
+}

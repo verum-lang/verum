@@ -5,40 +5,16 @@
 // Dependencies: core, base/semver, collections, text
 // =============================================================================
 //
-// SemVer 2.0 (semver.org) version-requirement language. Combines two
-// established conventions:
+// Cargo-compatible requirements use parse_cargo. parse_extended adds `||`
+// alternatives and whitespace-separated conjunctions; parse is its compatibility
+// alias. Both contracts share comparator semantics and identifier validation.
 //
-//   * **Cargo-flavoured operators** — `=`, `^`, `~`, `>`, `>=`, `<`, `<=`,
-//     `*` (wildcard), x-ranges (`1.x`, `1.2.x`).
-//   * **npm-compound** — comma-separated AND (`>=1.0, <2.0`) and `||`
-//     alternation (OR) for cross-major requirements.
-//
-// **Categorical structure.** Constraints form a Boolean algebra over
-// version sets:
-//   * `Any` is the maximum element (matches every version).
-//   * `Empty` is the minimum element (matches none).
-//   * `And(c1, c2)` is intersection.
-//   * `Or(c1, c2)` is union.
-//   * Comparison constraints (`Eq`, `Gt`, `Lt`, `Range(lo, hi)`) are atoms.
-//
-// `simplify(c)` normalises any constraint into disjunctive normal form
-// — a disjunction of intervals — for efficient matching.
-//
-// **Caret (`^`) semantics.** Per Cargo: `^X.Y.Z` matches `>=X.Y.Z` and
-// `<` (next-incompatible-major). For pre-1.0 versions, `^0.Y.Z` matches
-// `>=0.Y.Z, <0.(Y+1).0`. For pre-0.1, `^0.0.Z` matches exactly `=0.0.Z`.
-//
-// **Tilde (`~`) semantics.** `~X.Y.Z` matches `>=X.Y.Z, <X.(Y+1).0`.
-// `~X.Y` matches `>=X.Y.0, <X.(Y+1).0`. `~X` matches `>=X.0.0, <(X+1).0.0`.
-//
-// **X-ranges.** `1.x` and `1.*` are equivalent to `>=1.0.0, <2.0.0`.
-// `1.2.x` is equivalent to `>=1.2.0, <1.3.0`.
-//
-// **Pre-release ordering.** Per SemVer §11: pre-release versions sort
-// before release versions of the same triple. By default, a constraint
-// with a non-pre-release operand does NOT match pre-release versions
-// (matching Cargo's behaviour). Pass `MatchOptions.allow_prerelease`
-// to enable cross-stability matching.
+// Omitted minor/patch components remain omitted. Matching compares components
+// directly, without incrementing an upper bound that could overflow UInt64.
+// Release candidates need only satisfy the comparison predicates. By default,
+// a prerelease also needs an explicit prerelease operand with its exact version
+// triple in the same satisfied conjunction branch. MatchOptions can lift this
+// admission rule without changing comparison ordering or exact equality.
 // =============================================================================
 
 @arch_module(
@@ -80,8 +56,8 @@ mount base.semver.{SemVer, SemVerError};
 //   * `And(a,b)` — both `a` and `b` must match
 //   * `Or(a,b)`  — either `a` or `b` must match
 //
-// Convenience constructors `caret(v)`, `tilde(v)`, `x_range_major(M)`,
-// `x_range_minor(M, N)` desugar to canonical compound constraints.
+// Parsed comparators retain their declared operator and optional components.
+// The original comparison atoms remain available to programmatic callers.
 public type SemVerConstraint is
       Any
     | Empty
@@ -90,8 +66,22 @@ public type SemVerConstraint is
     | Gte(SemVer)
     | Lt(SemVer)
     | Lte(SemVer)
+    | Comparator(SemVerComparator)
     | And(Heap<SemVerConstraint>, Heap<SemVerConstraint>)
     | Or(Heap<SemVerConstraint>, Heap<SemVerConstraint>);
+
+/// Operator of a parsed requirement comparator. The payload is produced by
+/// the parsers and convenience constructors; omitted components are not zeroes.
+public type SemVerOperator is
+      Exact | Greater | GreaterEq | Less | LessEq | Tilde | Caret | Wildcard;
+
+public type SemVerComparator is {
+    operator: SemVerOperator,
+    major: UInt64,
+    minor: Maybe<UInt64>,
+    patch: Maybe<UInt64>,
+    pre_release: List<Text>,
+};
 
 public type SemVerConstraintError is
       InvalidConstraint(Text)
@@ -143,13 +133,31 @@ public fn match_options_allow_prerelease() -> MatchOptions {
 // Public API
 // =============================================================================
 
-/// Parse a constraint expression. Accepts:
-///   * Single-clause: `1.0.0`, `=1.0.0`, `^1.0.0`, `~1.2.3`, `>=1.0.0`,
-///                    `1.x`, `*`
-///   * Compound (AND): `>=1.0, <2.0`
-///   * Alternation (OR): `>=1 || >=2 <3`
+/// Compatibility entry point for the extended requirement grammar.
+/// Use parse_cargo when validating package publication requirements.
 public fn parse(s: &Text) -> Result<SemVerConstraint, SemVerConstraintError> {
-    parse_or(s)
+    parse_extended(s)
+}
+
+/// Parse Cargo-compatible requirements: one wildcard or at most 32 comma-
+/// separated comparators, with ASCII spaces around operators and separators.
+/// Empty text, OR and implicit whitespace-AND are rejected.
+public fn parse_cargo(s: &Text) -> Result<SemVerConstraint, SemVerConstraintError> {
+    parse_clause(s, false)
+}
+
+/// Parse the shared comparator grammar with `||` alternatives and implicit
+/// space/tab-separated AND. This is an explicit extension, not the full npm
+/// range language. Each conjunction contains at most 32 comparators.
+public fn parse_extended(s: &Text) -> Result<SemVerConstraint, SemVerConstraintError> {
+    let parts = split_by_or(s);
+    let mut acc = parse_clause(&parts[0], true)?;
+    let mut i = 1;
+    while i < parts.len() {
+        acc = or(acc, parse_clause(&parts[i], true)?);
+        i = i + 1;
+    }
+    Result.Ok(acc)
 }
 
 /// Test whether `version` satisfies `constraint` under `options`.
@@ -182,54 +190,52 @@ public fn exact(v: SemVer) -> SemVerConstraint {
     SemVerConstraint.Eq(v)
 }
 
-/// `^X.Y.Z` per Cargo semantics:
-///   * X >= 1: matches `>=X.Y.Z, <(X+1).0.0`
-///   * X = 0, Y >= 1: matches `>=0.Y.Z, <0.(Y+1).0`
-///   * X = 0, Y = 0: matches `=0.0.Z`
+/// `^X.Y.Z` using Cargo compatibility, including prerelease operands.
 public fn caret(v: SemVer) -> SemVerConstraint {
-    if v.major != 0 {
-        let upper = SemVer { major: v.major + 1, minor: 0, patch: 0,
-                             pre_release: List.new(), build_meta: List.new() };
-        and(SemVerConstraint.Gte(v), SemVerConstraint.Lt(upper))
-    } else if v.minor != 0 {
-        let upper = SemVer { major: 0, minor: v.minor + 1, patch: 0,
-                             pre_release: List.new(), build_meta: List.new() };
-        and(SemVerConstraint.Gte(v), SemVerConstraint.Lt(upper))
-    } else {
-        SemVerConstraint.Eq(v)
-    }
+    comparator_from_version(SemVerOperator.Caret, v)
 }
 
-/// `~X.Y.Z`: matches `>=X.Y.Z, <X.(Y+1).0`.
+/// `~X.Y.Z` without incrementing the minor component.
 public fn tilde(v: SemVer) -> SemVerConstraint {
-    let upper = SemVer { major: v.major, minor: v.minor + 1, patch: 0,
-                         pre_release: List.new(), build_meta: List.new() };
-    and(SemVerConstraint.Gte(v), SemVerConstraint.Lt(upper))
+    comparator_from_version(SemVerOperator.Tilde, v)
 }
 
-/// `~X.Y`: matches `>=X.Y.0, <X.(Y+1).0`.
+/// `~X.Y` retains its omitted patch component.
 public fn tilde_minor(major: UInt64, minor: UInt64) -> SemVerConstraint {
-    let lower = SemVer { major: major, minor: minor, patch: 0,
-                         pre_release: List.new(), build_meta: List.new() };
-    let upper = SemVer { major: major, minor: minor + 1, patch: 0,
-                         pre_release: List.new(), build_meta: List.new() };
-    and(SemVerConstraint.Gte(lower), SemVerConstraint.Lt(upper))
+    partial_comparator(SemVerOperator.Tilde, major, Maybe.Some(minor), Maybe.None)
 }
 
-/// `~X`: matches `>=X.0.0, <(X+1).0.0`.
+/// `~X` retains its omitted minor and patch components.
 public fn tilde_major(major: UInt64) -> SemVerConstraint {
-    let lower = SemVer { major: major, minor: 0, patch: 0,
-                         pre_release: List.new(), build_meta: List.new() };
-    let upper = SemVer { major: major + 1, minor: 0, patch: 0,
-                         pre_release: List.new(), build_meta: List.new() };
-    and(SemVerConstraint.Gte(lower), SemVerConstraint.Lt(upper))
+    partial_comparator(SemVerOperator.Tilde, major, Maybe.None, Maybe.None)
 }
 
-/// `X.x` / `X.*`: matches `>=X.0.0, <(X+1).0.0`.
-public fn x_range_major(major: UInt64) -> SemVerConstraint { tilde_major(major) }
+/// `X.x` / `X.*` fixes only the major component.
+public fn x_range_major(major: UInt64) -> SemVerConstraint {
+    partial_comparator(SemVerOperator.Wildcard, major, Maybe.None, Maybe.None)
+}
 
-/// `X.Y.x` / `X.Y.*`: matches `>=X.Y.0, <X.(Y+1).0`.
-public fn x_range_minor(major: UInt64, minor: UInt64) -> SemVerConstraint { tilde_minor(major, minor) }
+/// `X.Y.x` / `X.Y.*` fixes only the major and minor components.
+public fn x_range_minor(major: UInt64, minor: UInt64) -> SemVerConstraint {
+    partial_comparator(SemVerOperator.Wildcard, major, Maybe.Some(minor), Maybe.None)
+}
+
+fn comparator_from_version(operator: SemVerOperator, v: SemVer) -> SemVerConstraint {
+    SemVerConstraint.Comparator(SemVerComparator {
+        operator: operator, major: v.major(),
+        minor: Maybe.Some(v.minor()), patch: Maybe.Some(v.patch()),
+        pre_release: v.prerelease_identifiers().clone(),
+    })
+}
+
+fn partial_comparator(
+    operator: SemVerOperator, major: UInt64, minor: Maybe<UInt64>, patch: Maybe<UInt64>,
+) -> SemVerConstraint {
+    SemVerConstraint.Comparator(SemVerComparator {
+        operator: operator, major: major, minor: minor, patch: patch,
+        pre_release: List.new(),
+    })
+}
 
 /// AND helper that flattens `Any` and absorbs `Empty`.
 public fn and(a: SemVerConstraint, b: SemVerConstraint) -> SemVerConstraint {
@@ -242,11 +248,9 @@ public fn and(a: SemVerConstraint, b: SemVerConstraint) -> SemVerConstraint {
     }
 }
 
-/// OR helper that flattens `Empty` and absorbs `Any`.
+/// OR helper that flattens `Empty` while retaining each branch's prerelease admission.
 public fn or(a: SemVerConstraint, b: SemVerConstraint) -> SemVerConstraint {
     match (&a, &b) {
-        (SemVerConstraint.Any, _)   => SemVerConstraint.Any,
-        (_, SemVerConstraint.Any)   => SemVerConstraint.Any,
         (SemVerConstraint.Empty, _) => b,
         (_, SemVerConstraint.Empty) => a,
         _ => SemVerConstraint.Or(Heap.new(a), Heap.new(b)),
@@ -258,334 +262,352 @@ public fn or(a: SemVerConstraint, b: SemVerConstraint) -> SemVerConstraint {
 // =============================================================================
 
 fn matches_impl(c: &SemVerConstraint, v: &SemVer, opts: &MatchOptions) -> Bool {
+    let (accepts, admits_prerelease) = match_evidence(c, v);
+    accepts && (v.prerelease_identifiers().is_empty() || opts.allow_prerelease || admits_prerelease)
+}
+
+// The second component records an admitting operand only on a satisfied path.
+// And combines admission within that branch; Or never borrows admission from
+// a failing alternative. This also handles programmatically nested trees
+// without expanding them into disjunctive normal form.
+fn match_evidence(c: &SemVerConstraint, v: &SemVer) -> (Bool, Bool) {
     match c {
-        SemVerConstraint.Any   => allow_prerelease_check(v, opts, &Maybe.None),
-        SemVerConstraint.Empty => false,
-        SemVerConstraint.Eq(target) => {
-            // Eq with a pre-release operand always allows pre-release input
-            // for that exact tuple. Otherwise: the input version must
-            // structurally equal the operand (build_meta ignored per §10).
-            v.cmp(target) is Equal
-        }
-        SemVerConstraint.Gt(target) => {
-            v.cmp(target) is Greater
-                && allow_prerelease_check(v, opts, &Maybe.Some(target.clone()))
-        }
-        SemVerConstraint.Gte(target) => {
-            !(v.cmp(target) is Less)
-                && allow_prerelease_check(v, opts, &Maybe.Some(target.clone()))
-        }
-        SemVerConstraint.Lt(target) => {
-            v.cmp(target) is Less
-                && allow_prerelease_check(v, opts, &Maybe.Some(target.clone()))
-        }
-        SemVerConstraint.Lte(target) => {
-            !(v.cmp(target) is Greater)
-                && allow_prerelease_check(v, opts, &Maybe.Some(target.clone()))
-        }
+        SemVerConstraint.Any => (true, false),
+        SemVerConstraint.Empty => (false, false),
+        SemVerConstraint.Eq(target) => atom_evidence(v.cmp(target) is Ordering.Equal, compatible_operand(v, target)),
+        SemVerConstraint.Gt(target) => atom_evidence(v.cmp(target) is Ordering.Greater, compatible_operand(v, target)),
+        SemVerConstraint.Gte(target) => atom_evidence(!(v.cmp(target) is Ordering.Less), compatible_operand(v, target)),
+        SemVerConstraint.Lt(target) => atom_evidence(v.cmp(target) is Ordering.Less, compatible_operand(v, target)),
+        SemVerConstraint.Lte(target) => atom_evidence(!(v.cmp(target) is Ordering.Greater), compatible_operand(v, target)),
+        SemVerConstraint.Comparator(comparator) => {
+            atom_evidence(comparator_matches(comparator, v), compatible_comparator(comparator, v))
+        },
         SemVerConstraint.And(a, b) => {
-            matches_impl(&**a, v, opts) && matches_impl(&**b, v, opts)
-        }
+            let (left, left_pre) = match_evidence(&**a, v);
+            let (right, right_pre) = match_evidence(&**b, v);
+            (left && right, left && right && (left_pre || right_pre))
+        },
         SemVerConstraint.Or(a, b) => {
-            matches_impl(&**a, v, opts) || matches_impl(&**b, v, opts)
-        }
+            let (left, left_pre) = match_evidence(&**a, v);
+            let (right, right_pre) = match_evidence(&**b, v);
+            (left || right, left_pre || right_pre)
+        },
     }
 }
 
-// Pre-release admissibility check: per Cargo/npm semantics, a constraint
-// without explicit pre-release-tagged operands does NOT match pre-release
-// versions. Override via MatchOptions.allow_prerelease.
-fn allow_prerelease_check(
-    v: &SemVer,
-    opts: &MatchOptions,
-    operand: &Maybe<SemVer>,
-) -> Bool {
-    if v.pre_release.is_empty() { return true; }
-    if opts.allow_prerelease { return true; }
-    match operand {
-        Maybe.Some(op) => {
-            // The input is a pre-release; allow only when the operand
-            // itself is a pre-release of the same (major, minor, patch)
-            // triple.
-            !op.pre_release.is_empty()
-                && op.major == v.major
-                && op.minor == v.minor
-                && op.patch == v.patch
-        }
-        Maybe.None => false,
+fn atom_evidence(accepts: Bool, admits: Bool) -> (Bool, Bool) {
+    (accepts, accepts && admits)
+}
+
+fn compatible_operand(v: &SemVer, operand: &SemVer) -> Bool {
+    !operand.prerelease_identifiers().is_empty()
+        && operand.major() == v.major() && operand.minor() == v.minor() && operand.patch() == v.patch()
+}
+
+fn compatible_comparator(c: &SemVerComparator, v: &SemVer) -> Bool {
+    if c.pre_release.is_empty() || c.major != v.major() { return false; }
+    match (&c.minor, &c.patch) {
+        (Maybe.Some(minor), Maybe.Some(patch)) => *minor == v.minor() && *patch == v.patch(),
+        _ => false,
     }
 }
 
-// =============================================================================
-// Parser — tokenises by whitespace, then recursive-descent on operators
-// =============================================================================
-//
-// Grammar:
-//   constraint  := or_clause ('||' or_clause)*
-//   or_clause   := and_clause (',' and_clause)*
-//   and_clause  := atom (' ' atom)*    // implicit AND on whitespace
-//   atom        := op partial_version | partial_version | '*'
-//   op          := '=' | '^' | '~' | '>=' | '<=' | '>' | '<'
-//   partial_version := X[.Y[.Z[-pre[+build]]]] | 'X' | 'X.Y' | 'X.Y.Z'
-//
-// Whitespace inside compound constraints separates AND-clauses.
-// `||` separates OR-clauses (with optional surrounding whitespace).
+fn comparator_matches(c: &SemVerComparator, v: &SemVer) -> Bool {
+    match c.operator {
+        SemVerOperator.Exact => comparator_exact(c, v),
+        SemVerOperator.Wildcard => comparator_exact(c, v),
+        SemVerOperator.Greater => comparator_order(c, v, true),
+        SemVerOperator.GreaterEq => comparator_exact(c, v) || comparator_order(c, v, true),
+        SemVerOperator.Less => comparator_order(c, v, false),
+        SemVerOperator.LessEq => comparator_exact(c, v) || comparator_order(c, v, false),
+        SemVerOperator.Tilde => comparator_tilde(c, v),
+        SemVerOperator.Caret => comparator_caret(c, v),
+    }
+}
 
-fn parse_or(s: &Text) -> Result<SemVerConstraint, SemVerConstraintError> {
-    let parts = split_by_or(s);
-    if parts.is_empty() {
-        return Result.Err(SemVerConstraintError.InvalidConstraint("empty constraint".to_text()));
+fn comparator_exact(c: &SemVerComparator, v: &SemVer) -> Bool {
+    if v.major() != c.major { return false; }
+    match &c.minor {
+        Maybe.Some(minor) => { if v.minor() != *minor { return false; } },
+        Maybe.None => {},
     }
-    let mut acc = parse_and(parts.get(0).unwrap())?;
-    let mut i = 1;
-    while i < parts.len() {
-        acc = or(acc, parse_and(parts.get(i).unwrap())?);
-        i = i + 1;
+    match &c.patch {
+        Maybe.Some(patch) => { if v.patch() != *patch { return false; } },
+        Maybe.None => {},
     }
-    Result.Ok(acc)
+    prerelease_order(c, v) is Ordering.Equal
+}
+
+fn comparator_order(c: &SemVerComparator, v: &SemVer, greater: Bool) -> Bool {
+    if v.major() != c.major {
+        return if greater { v.major() > c.major } else { v.major() < c.major };
+    }
+    match &c.minor {
+        Maybe.None => return false,
+        Maybe.Some(minor) => {
+            if v.minor() != *minor {
+                return if greater { v.minor() > *minor } else { v.minor() < *minor };
+            }
+        },
+    }
+    match &c.patch {
+        Maybe.None => return false,
+        Maybe.Some(patch) => {
+            if v.patch() != *patch {
+                return if greater { v.patch() > *patch } else { v.patch() < *patch };
+            }
+        },
+    }
+    if greater { prerelease_order(c, v) is Ordering.Greater } else { prerelease_order(c, v) is Ordering.Less }
+}
+
+fn comparator_tilde(c: &SemVerComparator, v: &SemVer) -> Bool {
+    if v.major() != c.major { return false; }
+    match &c.minor {
+        Maybe.Some(minor) => { if v.minor() != *minor { return false; } },
+        Maybe.None => {},
+    }
+    match &c.patch {
+        Maybe.Some(patch) => { if v.patch() != *patch { return v.patch() > *patch; } },
+        Maybe.None => {},
+    }
+    !(prerelease_order(c, v) is Ordering.Less)
+}
+
+fn comparator_caret(c: &SemVerComparator, v: &SemVer) -> Bool {
+    if v.major() != c.major { return false; }
+    let minor = match &c.minor {
+        Maybe.Some(value) => *value,
+        Maybe.None => return true,
+    };
+    let patch = match &c.patch {
+        Maybe.Some(value) => *value,
+        Maybe.None => return if c.major > 0 { v.minor() >= minor } else { v.minor() == minor },
+    };
+    if c.major > 0 {
+        if v.minor() != minor { return v.minor() > minor; }
+        if v.patch() != patch { return v.patch() > patch; }
+    } else if minor > 0 {
+        if v.minor() != minor { return false; }
+        if v.patch() != patch { return v.patch() > patch; }
+    } else if v.minor() != minor || v.patch() != patch {
+        return false;
+    }
+    !(prerelease_order(c, v) is Ordering.Less)
+}
+
+// Compare only prerelease precedence through SemVer's shared ordering API.
+fn prerelease_order(c: &SemVerComparator, v: &SemVer) -> Ordering {
+    v.compare_prerelease(&c.pre_release)
+}
+
+// =============================================================================
+// Shared scanner and comparator parser
+// =============================================================================
+
+fn requirement_space(b: Byte, extended: Bool) -> Bool {
+    b == 0x20_u8 || (extended && b == 0x09_u8)
+}
+
+fn skip_requirement_space(bytes: &[Byte], start: Int, extended: Bool) -> Int {
+    let mut i = start;
+    while i < bytes.len() && requirement_space(bytes[i], extended) { i = i + 1; }
+    i
+}
+
+fn operator_length(bytes: &[Byte], start: Int) -> Int {
+    if start >= bytes.len() { return 0; }
+    let b = bytes[start];
+    if b == 0x3E_u8 || b == 0x3C_u8 {
+        if start + 1 < bytes.len() && bytes[start + 1] == 0x3D_u8 { return 2; }
+        return 1;
+    }
+    if b == 0x3D_u8 || b == 0x5E_u8 || b == 0x7E_u8 { return 1; }
+    0
+}
+
+fn parse_clause(s: &Text, extended: Bool) -> Result<SemVerConstraint, SemVerConstraintError> {
+    let bytes = s.as_bytes();
+    let mut cursor = skip_requirement_space(bytes, 0, extended);
+    let mut count = 0;
+    let mut saw_any = false;
+    let mut acc = SemVerConstraint.Any;
+    loop {
+        if cursor >= bytes.len() {
+            return Result.Err(SemVerConstraintError.InvalidConstraint("missing comparator".to_text()));
+        }
+        if count == 32 {
+            return Result.Err(SemVerConstraintError.InvalidConstraint("too many comparators".to_text()));
+        }
+        let body_start = skip_requirement_space(bytes, cursor + operator_length(bytes, cursor), extended);
+        let mut end = body_start;
+        while end < bytes.len() && !requirement_space(bytes[end], extended) && bytes[end] != 0x2C_u8 {
+            end = end + 1;
+        }
+        if end == body_start {
+            return Result.Err(SemVerConstraintError.InvalidConstraint("missing version".to_text()));
+        }
+        let atom = parse_atom(&slice_text(bytes, cursor, end), extended)?;
+        let is_any = atom is SemVerConstraint.Any;
+        if !extended && count > 0 && (saw_any || is_any) {
+            return Result.Err(SemVerConstraintError.InvalidConstraint("wildcard must be the only comparator".to_text()));
+        }
+        saw_any = saw_any || is_any;
+        acc = and(acc, atom);
+        count = count + 1;
+        cursor = skip_requirement_space(bytes, end, extended);
+        if cursor == bytes.len() { return Result.Ok(acc); }
+        if bytes[cursor] == 0x2C_u8 {
+            cursor = skip_requirement_space(bytes, cursor + 1, extended);
+        } else if !extended || cursor == end {
+            return Result.Err(SemVerConstraintError.InvalidConstraint("expected comma between comparators".to_text()));
+        }
+    }
 }
 
 fn split_by_or(s: &Text) -> List<Text> {
-    let bs = s.as_bytes();
+    let bytes = s.as_bytes();
     let mut parts: List<Text> = List.new();
     let mut start = 0;
     let mut i = 0;
-    while i + 1 < bs.len() {
-        if bs[i] == 0x7C_u8 && bs[i + 1] == 0x7C_u8 {
-            parts.push(slice_text(bs, start, i));
+    while i + 1 < bytes.len() {
+        if bytes[i] == 0x7C_u8 && bytes[i + 1] == 0x7C_u8 {
+            parts.push(slice_text(bytes, start, i));
             i = i + 2;
             start = i;
         } else {
             i = i + 1;
         }
     }
-    parts.push(slice_text(bs, start, bs.len()));
+    parts.push(slice_text(bytes, start, bytes.len()));
     parts
 }
 
-fn parse_and(s: &Text) -> Result<SemVerConstraint, SemVerConstraintError> {
-    // Split on commas + whitespace; both delimit AND-clauses.
-    let atoms = tokenise_atoms(s);
-    if atoms.is_empty() {
-        return Result.Err(SemVerConstraintError.InvalidConstraint("empty AND-clause".to_text()));
-    }
-    let mut acc = parse_atom(atoms.get(0).unwrap())?;
-    let mut i = 1;
-    while i < atoms.len() {
-        acc = and(acc, parse_atom(atoms.get(i).unwrap())?);
-        i = i + 1;
-    }
-    Result.Ok(acc)
-}
-
-fn tokenise_atoms(s: &Text) -> List<Text> {
-    let bs = s.as_bytes();
-    let mut atoms: List<Text> = List.new();
-    let mut cur = Text.new();
-    let mut i = 0;
-    while i < bs.len() {
-        let b = bs[i];
-        if b == 0x20_u8 || b == 0x09_u8 || b == 0x2C_u8 {
-            if !cur.is_empty() { atoms.push(cur.clone()); cur = Text.new(); }
+fn parse_atom(s: &Text, extended: Bool) -> Result<SemVerConstraint, SemVerConstraintError> {
+    let bytes = s.as_bytes();
+    let op_len = operator_length(bytes, 0);
+    let operator = if op_len == 0 { SemVerOperator.Caret }
+        else if bytes[0] == 0x3D_u8 { SemVerOperator.Exact }
+        else if bytes[0] == 0x5E_u8 { SemVerOperator.Caret }
+        else if bytes[0] == 0x7E_u8 { SemVerOperator.Tilde }
+        else if bytes[0] == 0x3E_u8 {
+            if op_len == 2 { SemVerOperator.GreaterEq } else { SemVerOperator.Greater }
         } else {
-            cur.push_byte(b);
-        }
-        i = i + 1;
-    }
-    if !cur.is_empty() { atoms.push(cur); }
-    atoms
+            if op_len == 2 { SemVerOperator.LessEq } else { SemVerOperator.Less }
+        };
+    let offset = skip_requirement_space(bytes, op_len, extended);
+    let version = slice_text(bytes, offset, bytes.len());
+    if op_len == 0 && is_wildcard(&version) { return Result.Ok(SemVerConstraint.Any); }
+    parse_partial(&version, operator, op_len == 0)
 }
 
-fn parse_atom(s: &Text) -> Result<SemVerConstraint, SemVerConstraintError> {
-    let trimmed = trim_text(s);
-    if trimmed.is_empty() {
-        return Result.Err(SemVerConstraintError.InvalidConstraint("empty atom".to_text()));
-    }
-    let bs = trimmed.as_bytes();
-    // '*' is the wildcard.
-    if bs.len() == 1 && bs[0] == 0x2A_u8 {
-        return Result.Ok(SemVerConstraint.Any);
-    }
-    // Determine operator prefix.
-    let (op, rest_off) = if bs.len() >= 2 && bs[0] == 0x3E_u8 && bs[1] == 0x3D_u8 {
-        ("gte", 2)
-    } else if bs.len() >= 2 && bs[0] == 0x3C_u8 && bs[1] == 0x3D_u8 {
-        ("lte", 2)
-    } else if bs[0] == 0x3E_u8 {
-        ("gt", 1)
-    } else if bs[0] == 0x3C_u8 {
-        ("lt", 1)
-    } else if bs[0] == 0x3D_u8 {
-        ("eq", 1)
-    } else if bs[0] == 0x5E_u8 {
-        ("caret", 1)
-    } else if bs[0] == 0x7E_u8 {
-        ("tilde", 1)
-    } else {
-        // Bare partial version — equivalent to `^v` when version is full,
-        // or x-range when contains 'x' / '*'.
-        ("default", 0)
-    };
-    let rest = slice_text(bs, rest_off, bs.len());
-    parse_atom_with_op(op, &rest)
+fn is_wildcard(s: &Text) -> Bool {
+    let bytes = s.as_bytes();
+    bytes.len() == 1 && (bytes[0] == 0x2A_u8 || bytes[0] == 0x78_u8 || bytes[0] == 0x58_u8)
 }
 
-fn parse_atom_with_op(op: &Text, rest: &Text) -> Result<SemVerConstraint, SemVerConstraintError> {
-    // Detect x-range: the version contains 'x', 'X', or '*' as a component.
-    let x_ranged = is_x_ranged(rest);
-    if x_ranged {
-        let pv = parse_partial_version(rest)?;
-        return Result.Ok(partial_to_x_range(&pv));
+fn parse_partial(
+    s: &Text, operator: SemVerOperator, default_operator: Bool,
+) -> Result<SemVerConstraint, SemVerConstraintError> {
+    let (before_build, build) = split_suffix(s, 0x2B_u8);
+    let (core_part, prerelease) = split_suffix(&before_build, 0x2D_u8);
+    let parts = split_dot(&core_part);
+    if parts.len() > 3 {
+        return Result.Err(SemVerConstraintError.InvalidConstraint("too many version components".to_text()));
     }
-    let pv = parse_partial_version(rest)?;
-    let v = partial_to_semver(&pv);
-    if      op == "eq"     { Result.Ok(SemVerConstraint.Eq(v)) }
-    else if op == "gt"     { Result.Ok(SemVerConstraint.Gt(v)) }
-    else if op == "gte"    { Result.Ok(SemVerConstraint.Gte(v)) }
-    else if op == "lt"     { Result.Ok(SemVerConstraint.Lt(v)) }
-    else if op == "lte"    { Result.Ok(SemVerConstraint.Lte(v)) }
-    else if op == "caret"  { Result.Ok(caret(v)) }
-    else if op == "tilde"  {
-        match (pv.minor_present, pv.patch_present) {
-            (true, true)  => Result.Ok(tilde(v)),
-            (true, false) => Result.Ok(tilde_minor(v.major, v.minor)),
-            _             => Result.Ok(tilde_major(v.major)),
+    let major = parse_component(&parts[0])?;
+    let mut minor: Maybe<UInt64> = Maybe.None;
+    let mut patch: Maybe<UInt64> = Maybe.None;
+    let mut minor_wildcard = false;
+    let mut has_wildcard = false;
+    if parts.len() > 1 {
+        if is_wildcard(&parts[1]) {
+            minor_wildcard = true;
+            has_wildcard = true;
+        } else {
+            minor = Maybe.Some(parse_component(&parts[1])?);
         }
     }
-    else { // default
-        // Cargo: bare version = caret. npm: bare version = exact. We follow
-        // Cargo (since this is a Verum cog registry, Cargo-aligned).
-        Result.Ok(caret(v))
-    }
-}
-
-// Partial version: `X[.Y[.Z[-pre[+build]]]]`, allowing `x`/`X`/`*` for
-// any wildcard component (the rest becoming implicit-zero).
-type PartialVersion is {
-    major:          UInt64,
-    minor:          UInt64,
-    patch:          UInt64,
-    minor_present:  Bool,
-    patch_present:  Bool,
-    pre_release:    List<Text>,
-    build_meta:     List<Text>,
-    minor_x:        Bool,
-    patch_x:        Bool,
-};
-
-fn is_x_ranged(s: &Text) -> Bool {
-    let bs = s.as_bytes();
-    let mut i = 0;
-    while i < bs.len() {
-        let b = bs[i];
-        if b == 0x78_u8 || b == 0x58_u8 || b == 0x2A_u8 {
-            // Must be at component boundary: prev char is '.' or start
-            let prev_ok = i == 0 || bs[i - 1] == 0x2E_u8;
-            let next_ok = i + 1 == bs.len() || bs[i + 1] == 0x2E_u8 || bs[i + 1] == 0x2D_u8;
-            if prev_ok && next_ok { return true; }
+    if parts.len() > 2 {
+        if is_wildcard(&parts[2]) {
+            has_wildcard = true;
+        } else if minor_wildcard {
+            return Result.Err(SemVerConstraintError.InvalidConstraint("numeric component after wildcard".to_text()));
+        } else {
+            patch = Maybe.Some(parse_component(&parts[2])?);
         }
-        i = i + 1;
     }
-    false
-}
-
-fn parse_partial_version(s: &Text) -> Result<PartialVersion, SemVerConstraintError> {
-    let trimmed = trim_text(s);
-    if trimmed.is_empty() {
-        return Result.Err(SemVerConstraintError.InvalidConstraint("missing version".to_text()));
+    if patch.is_none() && (prerelease.is_some() || build.is_some()) {
+        return Result.Err(SemVerConstraintError.InvalidConstraint("suffix requires a complete version".to_text()));
     }
-    // Split out `+build` first.
-    let (pre_part, build_part) = split_at_byte(&trimmed, 0x2B_u8);
-    // Then split `-pre`.
-    let (core_part, pre_part2) = split_at_byte(&pre_part, 0x2D_u8);
-    let core_bytes = core_part.as_bytes();
-    let dots = collect_dots(core_bytes);
-    let major_text = slice_text(core_bytes, 0, if dots.len() >= 1 { dots.get(0).unwrap() } else { core_bytes.len() });
-    let minor_text = if dots.len() >= 1 {
-        let m_start = dots.get(0).unwrap() + 1;
-        let m_end = if dots.len() >= 2 { dots.get(1).unwrap() } else { core_bytes.len() };
-        Maybe.Some(slice_text(core_bytes, m_start, m_end))
-    } else { Maybe.None };
-    let patch_text = if dots.len() >= 2 {
-        let p_start = dots.get(1).unwrap() + 1;
-        Maybe.Some(slice_text(core_bytes, p_start, core_bytes.len()))
-    } else { Maybe.None };
-
-    let (major, _major_x) = parse_uint_or_x(&major_text)?;
-    let (minor, minor_x) = match &minor_text {
-        Maybe.Some(t) => parse_uint_or_x(t)?,
-        Maybe.None    => (0_u64, false),
+    let pre_release = match &prerelease {
+        Maybe.Some(text) => parse_identifiers(text, true)?,
+        Maybe.None => List.new(),
     };
-    let (patch, patch_x) = match &patch_text {
-        Maybe.Some(t) => parse_uint_or_x(t)?,
-        Maybe.None    => (0_u64, false),
-    };
-    let pre_release = match pre_part2.is_empty() {
-        true  => List.new(),
-        false => split_dot(&pre_part2),
-    };
-    let build_meta = match build_part.is_empty() {
-        true  => List.new(),
-        false => split_dot(&build_part),
-    };
-    Result.Ok(PartialVersion {
-        major: major, minor: minor, patch: patch,
-        minor_present: minor_text.is_some(),
-        patch_present: patch_text.is_some(),
+    match &build {
+        Maybe.Some(text) => { parse_identifiers(text, false)?; },
+        Maybe.None => {},
+    }
+    let selected_operator = if default_operator && has_wildcard { SemVerOperator.Wildcard } else { operator };
+    Result.Ok(SemVerConstraint.Comparator(SemVerComparator {
+        operator: selected_operator, major: major, minor: minor, patch: patch,
         pre_release: pre_release,
-        build_meta: build_meta,
-        minor_x: minor_x,
-        patch_x: patch_x,
-    })
+    }))
 }
 
-fn parse_uint_or_x(s: &Text) -> Result<(UInt64, Bool), SemVerConstraintError> {
-    if s.is_empty() {
+fn parse_component(s: &Text) -> Result<UInt64, SemVerConstraintError> {
+    let bytes = s.as_bytes();
+    if bytes.is_empty() {
         return Result.Err(SemVerConstraintError.InvalidConstraint("empty version component".to_text()));
     }
-    let bs = s.as_bytes();
-    if bs.len() == 1 && (bs[0] == 0x78_u8 || bs[0] == 0x58_u8 || bs[0] == 0x2A_u8) {
-        return Result.Ok((0_u64, true));
+    if bytes.len() > 1 && bytes[0] == 0x30_u8 {
+        return Result.Err(SemVerConstraintError.InvalidConstraint("leading zero in version component".to_text()));
     }
-    let mut acc: UInt64 = 0;
+    let mut value: UInt64 = 0_u64;
     let mut i = 0;
-    while i < bs.len() {
-        let b = bs[i];
+    while i < bytes.len() {
+        let b = bytes[i];
         if b < 0x30_u8 || b > 0x39_u8 {
-            return Result.Err(SemVerConstraintError.InvalidConstraint(
-                "non-digit in version component: ".to_text().concat(s)
-            ));
+            return Result.Err(SemVerConstraintError.InvalidConstraint("non-digit in version component".to_text()));
         }
-        acc = acc * 10 + ((b - 0x30_u8) as UInt64);
+        let digit = (b - 0x30_u8) as UInt64;
+        // Check before multiplication/addition; no wrapping or saturating parse.
+        if value > 1_844_674_407_370_955_161_u64
+            || (value == 1_844_674_407_370_955_161_u64 && digit > 5_u64) {
+            return Result.Err(SemVerConstraintError.InvalidConstraint("version component overflows UInt64".to_text()));
+        }
+        value = value * 10_u64 + digit;
         i = i + 1;
     }
-    Result.Ok((acc, false))
+    Result.Ok(value)
 }
 
-fn partial_to_semver(p: &PartialVersion) -> SemVer {
-    SemVer {
-        major: p.major, minor: p.minor, patch: p.patch,
-        pre_release: p.pre_release.clone(),
-        build_meta:  p.build_meta.clone(),
+fn parse_identifiers(s: &Text, prerelease: Bool) -> Result<List<Text>, SemVerConstraintError> {
+    let identifiers = split_dot(s);
+    let mut i = 0;
+    while i < identifiers.len() {
+        let bytes = identifiers[i].as_bytes();
+        if bytes.is_empty() {
+            return Result.Err(SemVerConstraintError.InvalidConstraint("empty identifier".to_text()));
+        }
+        let mut numeric = true;
+        let mut j = 0;
+        while j < bytes.len() {
+            let b = bytes[j];
+            let digit = b >= 0x30_u8 && b <= 0x39_u8;
+            let letter = (b >= 0x41_u8 && b <= 0x5A_u8) || (b >= 0x61_u8 && b <= 0x7A_u8);
+            if !digit && !letter && b != 0x2D_u8 {
+                return Result.Err(SemVerConstraintError.InvalidConstraint("invalid identifier character".to_text()));
+            }
+            if !digit { numeric = false; }
+            j = j + 1;
+        }
+        if prerelease && numeric && bytes.len() > 1 && bytes[0] == 0x30_u8 {
+            return Result.Err(SemVerConstraintError.InvalidConstraint("leading zero in prerelease identifier".to_text()));
+        }
+        i = i + 1;
     }
-}
-
-// X-range desugaring per the table in npm's documentation:
-//   "1.x"      = ">=1.0.0, <2.0.0"
-//   "1.2.x"    = ">=1.2.0, <1.3.0"
-//   "*"        = ">=0.0.0"  (Any)
-//   omitted    = treated as wildcard (tilde-major / tilde-minor)
-fn partial_to_x_range(p: &PartialVersion) -> SemVerConstraint {
-    if !p.minor_present || p.minor_x {
-        // X.x / *
-        x_range_major(p.major)
-    } else if !p.patch_present || p.patch_x {
-        // X.Y.x
-        x_range_minor(p.major, p.minor)
-    } else {
-        // Should not reach: partial_to_x_range called only when x_ranged
-        partial_to_semver(p) |> exact
-    }
+    Result.Ok(identifiers)
 }
 
 // =============================================================================
@@ -601,9 +623,40 @@ fn format_impl(c: &SemVerConstraint) -> Text {
         SemVerConstraint.Gte(v)     => ">=".to_text().concat(&f"{v}"),
         SemVerConstraint.Lt(v)      => "<".to_text().concat(&f"{v}"),
         SemVerConstraint.Lte(v)     => "<=".to_text().concat(&f"{v}"),
+        SemVerConstraint.Comparator(c) => format_comparator(c),
         SemVerConstraint.And(a, b)  => format_impl(&**a).concat(&", ".to_text()).concat(&format_impl(&**b)),
         SemVerConstraint.Or(a, b)   => format_impl(&**a).concat(&" || ".to_text()).concat(&format_impl(&**b)),
     }
+}
+
+fn format_comparator(c: &SemVerComparator) -> Text {
+    let prefix = match c.operator {
+        SemVerOperator.Exact => "=",
+        SemVerOperator.Greater => ">",
+        SemVerOperator.GreaterEq => ">=",
+        SemVerOperator.Less => "<",
+        SemVerOperator.LessEq => "<=",
+        SemVerOperator.Tilde => "~",
+        SemVerOperator.Caret => "^",
+        SemVerOperator.Wildcard => "",
+    };
+    let mut out = prefix.to_text().concat(&f"{c.major}");
+    match &c.minor {
+        Maybe.Some(minor) => { out = out.concat(&f".{*minor}"); },
+        Maybe.None => {},
+    }
+    match &c.patch {
+        Maybe.Some(patch) => { out = out.concat(&f".{*patch}"); },
+        Maybe.None => {},
+    }
+    if c.operator is SemVerOperator.Wildcard { out = out.concat(&".*"); }
+    let mut i = 0;
+    while i < c.pre_release.len() {
+        let separator = if i == 0 { "-" } else { "." };
+        out = out.concat(&separator).concat(&c.pre_release[i]);
+        i = i + 1;
+    }
+    out
 }
 
 // =============================================================================
@@ -617,25 +670,16 @@ fn slice_text(bytes: &[Byte], start: Int, end: Int) -> Text {
     Text.from_bytes(&buf).unwrap_or(Text.new())
 }
 
-fn trim_text(s: &Text) -> Text {
-    let bs = s.as_bytes();
-    let mut start = 0;
-    while start < bs.len() && (bs[start] == 0x20_u8 || bs[start] == 0x09_u8) { start = start + 1; }
-    let mut end = bs.len();
-    while end > start && (bs[end - 1] == 0x20_u8 || bs[end - 1] == 0x09_u8) { end = end - 1; }
-    slice_text(bs, start, end)
-}
-
-fn split_at_byte(s: &Text, b: Byte) -> (Text, Text) {
-    let bs = s.as_bytes();
+fn split_suffix(s: &Text, delimiter: Byte) -> (Text, Maybe<Text>) {
+    let bytes = s.as_bytes();
     let mut i = 0;
-    while i < bs.len() {
-        if bs[i] == b {
-            return (slice_text(bs, 0, i), slice_text(bs, i + 1, bs.len()));
+    while i < bytes.len() {
+        if bytes[i] == delimiter {
+            return (slice_text(bytes, 0, i), Maybe.Some(slice_text(bytes, i + 1, bytes.len())));
         }
         i = i + 1;
     }
-    (s.clone(), Text.new())
+    (s.clone(), Maybe.None)
 }
 
 fn split_dot(s: &Text) -> List<Text> {
@@ -653,18 +697,4 @@ fn split_dot(s: &Text) -> List<Text> {
     parts.push(slice_text(bs, start, bs.len()));
     parts
 }
-
-fn collect_dots(bytes: &[Byte]) -> List<Int> {
-    let mut dots: List<Int> = List.new();
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == 0x2E_u8 { dots.push(i); }
-        i = i + 1;
-    }
-    dots
-}
-
-// =============================================================================
-// Tests
-// =============================================================================
 

@@ -1,0 +1,43 @@
+// Numeric prerelease identifiers have decimal ordering, not UInt64 storage.
+mount core.base.semver.SemVer;
+
+@test
+fn distinct_twenty_digit_prereleases_do_not_saturate() {
+    let lower = SemVer.parse(&"1.2.3-18446744073709551616").unwrap();
+    let higher = SemVer.parse(&"1.2.3-18446744073709551617").unwrap();
+    assert(lower.cmp(&higher) is Ordering.Less);
+    assert(higher.cmp(&lower) is Ordering.Greater);
+    assert(!(lower.cmp(&higher) is Ordering.Equal));
+}
+
+@test
+fn numeric_prereleases_are_not_limited_to_uint64_width() {
+    let lower = SemVer.parse(&"1.2.3-999999999999999999999999").unwrap();
+    let higher = SemVer.parse(&"1.2.3-1000000000000000000000000").unwrap();
+    assert(lower.cmp(&higher) is Ordering.Less);
+    assert(lower.cmp(&lower) is Ordering.Equal);
+    assert(higher.cmp(&SemVer.parse(&"1.2.3-alpha").unwrap()) is Ordering.Less);
+}
+
+@test
+fn numeric_prerelease_leading_zero_remains_invalid() {
+    assert(SemVer.parse(&"1.2.3-0123456789012345678901234").is_err());
+    assert(SemVer.parse(&"1.2.3-0").is_ok());
+    assert(SemVer.parse(&"1.2.3-00alpha").is_ok());
+}
+
+@test
+fn core_components_keep_uint64_bounds() {
+    assert(SemVer.parse(&"18446744073709551615.0.0").is_ok());
+    assert(SemVer.parse(&"18446744073709551616.0.0").is_err());
+    assert(SemVer.parse(&"0.18446744073709551616.0").is_err());
+    assert(SemVer.parse(&"0.0.18446744073709551616").is_err());
+}
+
+fn main() {
+    distinct_twenty_digit_prereleases_do_not_saturate();
+    numeric_prereleases_are_not_limited_to_uint64_width();
+    numeric_prerelease_leading_zero_remains_invalid();
+    core_components_keep_uint64_bounds();
+    print("semver-prerelease: 4 passed");
+}

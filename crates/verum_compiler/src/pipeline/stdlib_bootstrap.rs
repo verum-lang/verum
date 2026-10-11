@@ -2966,3 +2966,7 @@ mod alias_declaring_scope_tests;
 #[cfg(test)]
 #[path = "../../tests/bootstrap/field_visibility.rs"]
 mod field_visibility_tests;
+
+#[cfg(test)]
+#[path = "../../tests/bootstrap/semver_requirements.rs"]
+mod semver_requirement_tests;

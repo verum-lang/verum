@@ -928,6 +928,7 @@ impl TypeChecker {
             current_module_path: verum_common::Text::from("cog"),
             resolving_source_signature: false,
             loaded_source_receiver_methods: Set::new(),
+            source_record_field_visibility: Map::new(),
             inline_modules: Map::new(),
             module_aliases: Map::new(),
             resolved_mount_bindings: Map::new(),
@@ -1396,6 +1397,85 @@ impl TypeChecker {
         }
     }
 
+    /// Read a descriptor by its declaration identity. Older metadata can index
+    /// a leaf declaration under its archive bundle or a root-stripped key;
+    /// those keys are conveniences, never proof of another declaring owner.
+    /// Probe only the existing ordered index along the module's ancestors, so
+    /// a field lookup does not scan the complete archive.
+    pub(super) fn metadata_type_with_declaring_key<'a>(
+        metadata: &'a crate::core_metadata::CoreMetadata,
+        declaring_key: &Text,
+    ) -> Maybe<&'a crate::core_metadata::TypeDescriptor> {
+        let exact = |key: &Text| {
+            metadata
+                .types
+                .get(key)
+                .filter(|descriptor| Self::metadata_declaring_key(descriptor) == *declaring_key)
+        };
+        if let Some(descriptor) = exact(declaring_key) {
+            return Some(descriptor);
+        }
+        let (mut module, name) = declaring_key.rsplit_once('.')?;
+        loop {
+            if let Some((_, stripped)) = module.split_once('.')
+                && let Some(descriptor) = exact(&format!("{stripped}.{name}").into())
+            {
+                return Some(descriptor);
+            }
+            let Some((parent, _)) = module.rsplit_once('.') else {
+                return None;
+            };
+            module = parent;
+            if let Some(descriptor) = exact(&format!("{module}.{name}").into()) {
+                return Some(descriptor);
+            }
+        }
+    }
+
+    /// A nominal record and its field template are separate registrations.
+    /// Publish the template under the descriptor's declaring key even when a
+    /// flat-name registration already exists or the archive bundles several
+    /// source modules. Consumers must not recover it from a same-leaf winner.
+    fn register_metadata_record_shape(
+        &mut self,
+        descriptor: &crate::core_metadata::TypeDescriptor,
+    ) {
+        let crate::core_metadata::TypeDescriptorKind::Record { fields } = &descriptor.kind else {
+            return;
+        };
+        if descriptor.is_transparent_wrapper {
+            return;
+        }
+        let owner = Self::metadata_declaring_key(descriptor);
+        // Legacy descriptors without an owner share the lexical namespace.
+        // Preserve the lazy loader's existing source-declaration precedence;
+        // an absent auxiliary slot is not permission to claim that name.
+        if !owner.contains(".") && self.current_module_declared_types.contains(owner.as_str()) {
+            return;
+        }
+        let key: Text = format!("__struct_fields_{owner}").into();
+        if self.ctx.lookup_type(key.as_str()).is_none() {
+            let field_map = fields.iter().map(|field| {
+                let ty = if field.ty.is_empty() {
+                    Type::Var(crate::ty::TypeVar::fresh())
+                } else {
+                    parse_descriptor_type_string(field.ty.as_str())
+                };
+                (field.name.clone(), ty)
+            }).collect();
+            self.ctx.define_type(key, Type::Record(field_map));
+        }
+        if !descriptor.generic_params.is_empty() {
+            self.type_generics_count.insert(owner.clone(), descriptor.generic_params.len());
+            let key: Text = format!("__type_params_{owner}").into();
+            if self.ctx.lookup_type(key.as_str()).is_none() {
+                let parameters = descriptor.generic_params.iter()
+                    .map(|parameter| (parameter.name.clone(), Type::Int)).collect();
+                self.ctx.define_type(key, Type::Record(parameters));
+            }
+        }
+    }
+
     /// Preserve the variables minted for a nominal metadata template in its
     /// declaration order. Alias and variant payloads have their own parameter
     /// registration paths and must not borrow this template's variables.
@@ -1421,6 +1501,79 @@ impl TypeChecker {
                 Type::Tuple(args.clone()),
             );
         }
+    }
+
+    /// Parameter names/defaults belong to the selected descriptor key, even
+    /// when another declaring owner occupies its simple-name registration.
+    fn register_metadata_parameters(
+        &mut self,
+        key: &Text,
+        descriptor: &crate::core_metadata::TypeDescriptor,
+    ) {
+        if descriptor.generic_params.is_empty() {
+            return;
+        }
+        self.type_generics_count.insert(key.clone(), descriptor.generic_params.len());
+        let parameters_key = format!("__type_params_{key}");
+        if self.ctx.lookup_type(&parameters_key).is_none() {
+            let is_sum = matches!(descriptor.kind, crate::core_metadata::TypeDescriptorKind::Variant { .. });
+            // Constructor recovery reads these values as well as their names.
+            // A sum's ordered payload variables come only from its signature
+            // producer; publishing placeholders first would suppress them.
+            let sum_slots = match self.ctx.lookup_type(&format!("__type_var_order_{key}")) {
+                Some(Type::Tuple(slots)) if is_sum && slots.len() == descriptor.generic_params.len() => Some(slots),
+                _ => None,
+            };
+            if !is_sum || sum_slots.is_some() {
+                let parameters = descriptor.generic_params.iter().enumerate()
+                    .map(|(index, parameter)| (parameter.name.clone(), sum_slots.map_or(Type::Int, |slots| slots[index].clone())))
+                    .collect();
+                self.ctx.define_type(parameters_key, Type::Record(parameters));
+            }
+        }
+        let defaults_key = format!("__type_param_defaults_{key}");
+        if self.ctx.lookup_type(&defaults_key).is_none() {
+            let mut any_default = false;
+            let defaults = descriptor.generic_params.iter().map(|parameter| {
+                match &parameter.default {
+                    Some(default) if !default.is_empty() => {
+                        any_default = true;
+                        parse_descriptor_type_string(default.as_str())
+                    }
+                    _ => Type::Unknown,
+                }
+            }).collect();
+            if any_default {
+                self.ctx.define_type(defaults_key, Type::Tuple(defaults));
+            }
+        }
+    }
+
+    /// Both simple and mounted archive aliases use the same target and the
+    /// alias declaration's own ordered parameters, before target expansion.
+    fn register_metadata_alias(
+        &mut self,
+        key: &Text,
+        descriptor: &crate::core_metadata::TypeDescriptor,
+    ) -> Option<Text> {
+        let crate::core_metadata::TypeDescriptorKind::Alias { target } = &descriptor.kind else {
+            return None;
+        };
+        let target_ty = parse_descriptor_type_string(target.as_str());
+        if std::env::var("VERUM_TRACE_ALIAS").is_ok() {
+            eprintln!(
+                "[alias-trace] lazy register alias '{}' -> '{}' (parsed: {:?})",
+                key, target, target_ty
+            );
+        }
+        self.ctx.define_alias(key.clone(), target_ty.clone());
+        self.unifier.register_type_alias(key.clone(), target_ty);
+        let parameters: List<Text> = descriptor.generic_params.iter()
+            .map(|parameter| parameter.name.clone()).collect();
+        if !parameters.is_empty() {
+            self.unifier.register_type_alias_params(key.clone(), parameters);
+        }
+        Some(target.clone())
     }
 
     fn register_metadata_resource_discipline(&mut self, descriptor: &crate::core_metadata::TypeDescriptor) {
@@ -1524,6 +1677,7 @@ impl TypeChecker {
             }
         };
         self.register_metadata_resource_discipline(type_desc);
+        self.register_metadata_record_shape(type_desc);
         // A registered alias does not prove its target was loaded: eager
         // registration and lazy dependency loading are separate operations.
         if let crate::core_metadata::TypeDescriptorKind::Alias { target } = &type_desc.kind {
@@ -1568,15 +1722,10 @@ impl TypeChecker {
         //
         // The presence of the TYPE and the presence of its PARAMS are two
         // facts; one guard cannot stand for both.
-        // NARROWED to RECORD descriptors (T0724 follow-up). Hoisting this
-        // for EVERY kind changed inference for already-loaded types and broke
-        // `L0-critical/modules/mount_alias_shadows_builtin.vr` with
-        // `expected 'Maybe', found 'Maybe<_>'` — measured by building the
-        // same tree with and without the hoist and running that spec through
-        // both binaries. `Maybe` is a Variant; the defect this hoist repairs
-        // is the generic RECORD literal (`Edge { src, tgt, label }` arriving
-        // with `L` unsubstituted), so restricting it to records keeps the fix
-        // and leaves every sum type resolving exactly as before.
+        // Sums and aliases also carry declared defaults and arity. The
+        // selected template key now travels with generic resolution, so these
+        // facts must be published for every descriptor kind. Keep source-name
+        // ownership below: an ambient descriptor cannot redefine a local type.
         // A DECLARATION OWNS ITS NAME (T0780).
         //
         // How many parameters a type has is a fact of its DECLARATION,
@@ -1599,71 +1748,6 @@ impl TypeChecker {
         let declared_here = self
             .current_module_declared_types
             .contains(name.as_str());
-        if !declared_here
-            && !type_desc.generic_params.is_empty()
-            && matches!(
-                type_desc.kind,
-                crate::core_metadata::TypeDescriptorKind::Record { .. }
-            )
-        {
-            self.type_generics_count
-                .insert(name.clone(), type_desc.generic_params.len());
-            // Mirror the eager `__type_params_<name>` record too —
-            // ordered param names drive by-name substitution in
-            // `expand_generic_to_variant` / ctor resolution /
-            // `try_build_variant_from_constructors` (#47 class B;
-            // twin write in env.rs `register_stdlib_constructors_
-            // from_metadata`).
-            let type_params_key: verum_common::Text =
-                format!("__type_params_{}", name).into();
-            if self.ctx.lookup_type(type_params_key.as_str()).is_none() {
-                let mut param_record: indexmap::IndexMap<
-                    verum_common::Text,
-                    crate::ty::Type,
-                > = indexmap::IndexMap::new();
-                for gp in type_desc.generic_params.iter() {
-                    param_record
-                        .insert(gp.name.clone(), crate::ty::Type::Int);
-                }
-                self.ctx.define_type(
-                    type_params_key,
-                    crate::ty::Type::Record(param_record),
-                );
-            }
-
-            // A parameter's DEFAULT, from the archive. Mirror of the
-            // source-declaration write in `decls.rs`
-            // (`record_type_param_defaults`) — the two paths have to
-            // agree, or `Result<T>` means one thing when core/ is
-            // compiled from source and another when it comes from the
-            // baked archive, which is the worst kind of disagreement
-            // because only one of the two is ever exercised at a time.
-            let defaults_key: verum_common::Text =
-                format!("__type_param_defaults_{}", name).into();
-            if self.ctx.lookup_type(defaults_key.as_str()).is_none() {
-                let mut defaults: verum_common::List<crate::ty::Type> =
-                    verum_common::List::new();
-                let mut any = false;
-                for gp in type_desc.generic_params.iter() {
-                    match &gp.default {
-                        Maybe::Some(text) if !text.is_empty() => {
-                            defaults.push(
-                                crate::infer::helpers::parse_descriptor_type_string(
-                                    text.as_str(),
-                                ),
-                            );
-                            any = true;
-                        }
-                        _ => defaults.push(crate::ty::Type::Unknown),
-                    }
-                }
-                if any {
-                    self.ctx
-                        .define_type(defaults_key, crate::ty::Type::Tuple(defaults));
-                }
-            }
-        }
-
         if self.ctx.lookup_type(name.as_str()).is_none() {
             // Convert + register this single type.  Mirror of the body
             // of `load_stdlib_from_metadata` reduced to one entry.
@@ -1698,40 +1782,8 @@ impl TypeChecker {
             // (`match res { Ok(p) => …, Err(e) => … }` on
             // `IoResult<Text>`) failed `Pattern expects a variant
             // type, but scrutinee has type IoResult<...>`.
-            if let crate::core_metadata::TypeDescriptorKind::Alias { target } =
-                &type_desc.kind
-            {
-                // Parse the target via `parse_descriptor_type_string`
-                // so generic-instantiated aliases (`Bytes = List<Byte>`,
-                // `IoResult<T> = Result<T, IoError>`) produce the right
-                // structural shape — `Type::Generic { name, args }` —
-                // instead of a malformed `Type::Named { path:
-                // "List<Byte>", args: [] }`.  Pre-fix the unifier's
-                // `resolve_aliased_head_name` couldn't walk the Generic
-                // head of these aliases (Bytes never resolved to "List"),
-                // so the alias-aware method-bucket lookup at
-                // `infer_method_call_inner_impl` missed.  Mirrors the
-                // eager loader's parse path at line ~696.
-                let target_ty = parse_descriptor_type_string(target.as_str());
-                if std::env::var("VERUM_TRACE_ALIAS").is_ok() {
-                    eprintln!(
-                        "[alias-trace] lazy register alias '{}' -> '{}' (parsed: {:?})",
-                        name, target, target_ty
-                    );
-                }
-                self.ctx.define_alias(name.clone(), target_ty.clone());
-                self.unifier
-                    .register_type_alias(name.clone(), target_ty);
-                let param_names: List<Text> = type_desc
-                    .generic_params
-                    .iter()
-                    .map(|gp| gp.name.clone())
-                    .collect();
-                if !param_names.is_empty() {
-                    self.unifier
-                        .register_type_alias_params(name.clone(), param_names);
-                }
-                pending.push(target.clone());
+            if let Some(target) = self.register_metadata_alias(name, type_desc) {
+                pending.push(target);
             }
 
             // Variant signatures — same logic as the eager loader, gated
@@ -1754,6 +1806,10 @@ impl TypeChecker {
                     pending.push(default_text.clone());
                 }
             }
+        }
+
+        if !declared_here {
+            self.register_metadata_parameters(name, type_desc);
         }
 
         // FUNDAMENTAL #3 — transparent-wrapper newtype inner type
@@ -2030,8 +2086,8 @@ impl TypeChecker {
     ///
     /// Registers ONLY qualified ctx slots — the flat simple-name
     /// table is left untouched, so unmounted files (and every other
-    /// simple-name consumer) keep today's behavior.  Idempotent:
-    /// re-probes `ctx.lookup_type(<qualified>)` first.
+    /// simple-name consumer) keep today's behavior. Declaration authority is
+    /// rechecked before reusing the flat or qualified registrations.
     ///
     /// Stdlib-agnostic per `crates/verum_types/src/CLAUDE.md`: the
     /// mapping comes from `imported_names` (caller) + metadata keys,
@@ -2041,90 +2097,33 @@ impl TypeChecker {
         name: &str,
         canonical_module: &str,
     ) -> Option<Type> {
+        self.ensure_mounted_type_loaded_with_parameter_key(name, canonical_module)
+            .map(|(ty, _)| ty)
+    }
+
+    /// Keep the selected registration key with its template. A same-owner
+    /// flat template and a separately loaded qualified template may contain
+    /// different parameter variables even though they denote one declaration.
+    pub(super) fn ensure_mounted_type_loaded_with_parameter_key(
+        &mut self,
+        name: &str,
+        canonical_module: &str,
+    ) -> Option<(Type, Text)> {
         let metadata = match &self.core_metadata {
             Maybe::Some(m) => m.clone(),
             Maybe::None => return None,
         };
         let direct_key: Text =
             format!("{}.{}", canonical_module, name).into();
-        // A ctx hit is only a usable RESOLUTION result when it is
-        // not an opaque QUALIFIED self-referential Named placeholder
-        // (published under qualified keys as either a multi-segment
-        // path or a single dotted Ident; no alias chain expands a
-        // dotted head, so annotations typed with one mismatch every
-        // value).  Skip those and continue to the metadata
-        // descriptor.
-        let usable = |ty: &Type, name: &str| -> bool {
-            !Self::is_opaque_qualified_self_ref(ty, name)
-        };
-        if let Some(ty) = self.ctx.lookup_type(direct_key.as_str())
-            && usable(ty, name)
-        {
-            return Some(ty.clone());
-        }
-
-        // Candidate module prefixes, most-specific first.
-        //
-        // The mount path names the LEAF `.vr` module
-        // (`core.meta.diakrisis_attrs`) while the archive's
-        // `module.types` tables — hence the qualified keys in
-        // `metadata.types` — are keyed by the enclosing ARCHIVE
-        // module (directory-granular: the alias above lives under
-        // `core.meta.EffectKind`).  Walking the ancestor prefixes
-        // bridges the two key spaces without any name knowledge.
-        // Each prefix is probed as-is and with the first segment
-        // stripped — the embedded-stdlib key spaces are
-        // inconsistent about the leading `core.` segment (see
-        // `resolve_function_via_metadata_reexports`).
-        //
-        // A re-export hop target (umbrella `mount core.x.{Name}`
-        // where `core/x/mod.vr` re-exports from `core.x.leaf`) is
-        // appended and expanded the same way.
-        let mut prefixes: Vec<String> = Vec::new();
-        let push_with_ancestors = |root: &str, out: &mut Vec<String>| {
-            let mut cur = root.to_string();
-            loop {
-                if !cur.is_empty() && !out.iter().any(|p| p == &cur) {
-                    out.push(cur.clone());
-                    if let Some(stripped) = cur.split_once('.').map(|(_, rest)| rest)
-                        && !stripped.is_empty()
-                        && !out.iter().any(|p| p == stripped)
-                    {
-                        out.push(stripped.to_string());
-                    }
-                }
-                match cur.rfind('.') {
-                    Some(pos) => cur.truncate(pos),
-                    None => break,
-                }
-            }
-        };
-        push_with_ancestors(canonical_module, &mut prefixes);
-        // T0244: `reexport_source_module_for` now also returns the
-        // item's true (pre-rename) name; this call site only needs
-        // the source module for the ancestor-prefix walk below.
-        if let Some((_true_name, source_module)) =
-            self.reexport_source_module_for(canonical_module, name)
-        {
-            push_with_ancestors(source_module.as_str(), &mut prefixes);
-        }
-
-        let mut owning_key = direct_key.clone();
-        let mut desc = None;
-        for prefix in &prefixes {
-            let key: Text = format!("{}.{}", prefix, name).into();
-            if let Some(ty) = self.ctx.lookup_type(key.as_str())
-                && usable(ty, name)
-            {
-                return Some(ty.clone());
-            }
-            if let Some(d) = metadata.types.get(&key) {
-                desc = Some(d.clone());
-                owning_key = key;
-                break;
-            }
-        }
-        let desc = desc?;
+        // Re-export metadata supplies both the actual declaration name and
+        // owner. An ancestor index or cached context entry cannot establish
+        // that authority merely because its trailing name matches.
+        let (declared_name, declared_module) = self
+            .reexport_source_module_for(canonical_module, name)
+            .unwrap_or_else(|| (name.into(), canonical_module.into()));
+        let owning_key: Text = format!("{declared_module}.{declared_name}").into();
+        let desc = Self::metadata_type_with_declaring_key(&metadata, &owning_key)?.clone();
+        self.register_metadata_record_shape(&desc);
 
         // Run the standard SIMPLE-name lazy load first (bounded
         // transitive drain, mirror of `resolve_type_name` step 1.5).
@@ -2137,7 +2136,7 @@ impl TypeChecker {
         // net addition; in the colliding case the bare slots behave
         // exactly as today while the RESOLUTION (our return value +
         // the qualified keys) is mount-accurate.
-        let name_text = Text::from(name);
+        let name_text = declared_name;
         let mut pending: Vec<Text> = Vec::new();
         self.ensure_stdlib_type_loaded(&name_text, &mut pending);
         let mut bound = 256usize;
@@ -2150,8 +2149,9 @@ impl TypeChecker {
         }
 
         // Non-colliding fast path: when the metadata SIMPLE slot
-        // holds THIS SAME descriptor (module_path + name + kind
-        // match), the flat path already resolves the mounted name
+        // holds THIS SAME declaring owner (including its source-module
+        // origin, not merely its archive bundle) and kind, the flat path
+        // already resolves the mounted name
         // correctly — return the bare ctx registration VERBATIM and
         // register NO qualified keys.  Every §Y consumer's hit/miss
         // pattern then stays byte-identical to pre-fix behavior for
@@ -2192,26 +2192,81 @@ impl TypeChecker {
         // sufficient; lookup is the other half, and until lookup prefers a
         // qualified entry, publishing one does harm.
         if let Some(simple_desc) = metadata.types.get(&name_text)
-            && simple_desc.module_path == desc.module_path
-            && simple_desc.name == desc.name
+            && Self::metadata_declaring_key(simple_desc) == Self::metadata_declaring_key(&desc)
             && std::mem::discriminant(&simple_desc.kind)
                 == std::mem::discriminant(&desc.kind)
         {
-            if let Some(existing) = self.ctx.lookup_type(name) {
-                return Some(existing.clone());
+            if let Some(existing) = self.ctx.lookup_type(name_text.as_str()) {
+                // The flat context may have recovered a different public
+                // homonym. Reuse structural/legacy carriers, but never an
+                // explicitly qualified nominal belonging to another owner.
+                let existing_owner = match existing {
+                    Type::Named { path, .. } => Some(self.path_to_string(path)),
+                    Type::Generic { name, .. } => Some(name.clone()),
+                    _ => None,
+                };
+                if existing_owner.is_none_or(|owner| {
+                    !owner.contains(".") || owner == Self::metadata_declaring_key(&desc)
+                }) {
+                    let ty = existing.clone();
+                    self.register_metadata_parameters(&name_text, &desc);
+                    return Some((ty, name_text));
+                }
+            } else {
+                self.register_metadata_parameters(&name_text, &desc);
+                return Some((self.type_descriptor_to_type(&desc), name_text));
             }
-            return Some(self.type_descriptor_to_type(&desc));
         }
 
-        let ty = self.type_descriptor_to_type(&desc);
-        self.register_metadata_nominal_parameter_slots(&owning_key, &desc, &ty);
-        self.ctx.define_type(owning_key.clone(), ty.clone());
+        self.register_metadata_parameters(&owning_key, &desc);
+        let ty = if let Some(existing) = self.ctx.lookup_type(owning_key.as_str()) {
+            existing.clone()
+        } else {
+            let ty = self.type_descriptor_to_type(&desc);
+            self.register_metadata_nominal_parameter_slots(&owning_key, &desc, &ty);
+            self.ctx.define_type(owning_key.clone(), ty.clone());
+            ty
+        };
+        // A sum's payload variables and their order must be minted together.
+        // Reuse the ordinary descriptor producer, never recover variable order
+        // by walking a structural payload that may contain foreign parameters.
+        let ty = if let crate::core_metadata::TypeDescriptorKind::Variant { cases } = &desc.kind
+            && !desc.generic_params.is_empty()
+            && self.ctx.lookup_type(&format!("__type_var_order_{owning_key}")).is_none()
+        {
+            register_variant_signature_for_lazy(self, &owning_key, &desc, cases, &mut pending);
+            self.register_metadata_parameters(&owning_key, &desc);
+            self.ctx.lookup_type(owning_key.as_str()).cloned().unwrap_or(ty)
+        } else {
+            ty
+        };
+        if self.unifier.alias_binding(owning_key.as_str()).0.is_none()
+            && let Some(target) = self.register_metadata_alias(&owning_key, &desc)
+        {
+            pending.push(target);
+        }
         if owning_key != direct_key {
-            // Publish under the mount-path key too so subsequent
-            // probes (this fn + `lookup_type_mount_scoped`'s direct
-            // qualified probe) fast-path.
+            // The re-export key names this exact same template. Preserve its
+            // slots/defaults as well as the body when publishing that binding.
+            self.register_metadata_parameters(&direct_key, &desc);
             self.register_metadata_nominal_parameter_slots(&direct_key, &desc, &ty);
+            if let Some(order) = self.ctx.lookup_type(&format!("__type_var_order_{owning_key}")).cloned() {
+                self.ctx.define_type(format!("__type_var_order_{direct_key}"), order);
+            }
             self.ctx.define_type(direct_key.clone(), ty.clone());
+            if self.unifier.alias_binding(direct_key.as_str()).0.is_none() {
+                self.register_metadata_alias(&direct_key, &desc);
+            }
+        }
+        // Dependencies discovered by the shared sum/alias registration obey
+        // the same bounded transitive loader as the initial simple-name load.
+        let mut bound = 256usize;
+        while let Some(next) = pending.pop() {
+            bound = bound.saturating_sub(1);
+            if bound == 0 {
+                break;
+            }
+            self.ensure_stdlib_type_loaded(&next, &mut pending);
         }
 
         // Qualified record-fields key for the mount-scoped record
@@ -2236,38 +2291,14 @@ impl TypeChecker {
                 };
                 field_map.insert(f.name.clone(), field_ty);
             }
-            let owning_prefix = owning_key
-                .as_str()
-                .strip_suffix(name)
-                .unwrap_or("")
-                .to_string();
-            if !owning_prefix.is_empty() {
-                let fields_key: Text = format!(
-                    "{}__struct_fields_{}",
-                    owning_prefix, name
-                )
-                .into();
+            for base_key in [&owning_key, &direct_key] {
+                let Some((owner, item)) = base_key.rsplit_once('.') else {
+                    continue;
+                };
+                let fields_key: Text = format!("{owner}.__struct_fields_{item}").into();
                 if self.ctx.lookup_type(fields_key.as_str()).is_none() {
                     self.ctx
                         .define_type(fields_key, Type::Record(field_map.clone()));
-                }
-            }
-            if owning_key != direct_key {
-                let direct_prefix = direct_key
-                    .as_str()
-                    .strip_suffix(name)
-                    .unwrap_or("")
-                    .to_string();
-                if !direct_prefix.is_empty() {
-                    let fields_key: Text = format!(
-                        "{}__struct_fields_{}",
-                        direct_prefix, name
-                    )
-                    .into();
-                    if self.ctx.lookup_type(fields_key.as_str()).is_none() {
-                        self.ctx
-                            .define_type(fields_key, Type::Record(field_map));
-                    }
                 }
             }
         }
@@ -2294,22 +2325,17 @@ impl TypeChecker {
                 first_field.ty.as_str(),
             );
             for base_key in [&owning_key, &direct_key] {
-                let prefix = base_key
-                    .as_str()
-                    .strip_suffix(name)
-                    .unwrap_or("")
-                    .to_string();
-                if prefix.is_empty() {
+                let Some((owner, item)) = base_key.rsplit_once('.') else {
                     continue;
-                }
+                };
                 let inner_key: Text =
-                    format!("{}__newtype_inner_{}", prefix, name).into();
+                    format!("{owner}.__newtype_inner_{item}").into();
                 if self.ctx.lookup_type(inner_key.as_str()).is_none() {
                     self.ctx.define_type(inner_key, inner_ty.clone());
                 }
             }
         }
-        Some(ty)
+        Some((ty, owning_key))
     }
 
     /// Register the body of a single stdlib protocol from
@@ -3162,6 +3188,15 @@ impl TypeChecker {
                     None => continue,
                 },
             };
+            // An index key does not override the descriptor's declaring
+            // parent. Share static selection's owner authority before placing
+            // a method into this type's inherent bucket. Legacy descriptors
+            // without a resolvable parent retain their existing registration.
+            if let Some(owner) = Self::metadata_function_owner(fn_desc, metadata)
+                && Self::metadata_declaring_key(owner) != Self::metadata_declaring_key(type_desc)
+            {
+                continue;
+            }
             // Build the function type from the descriptor.
             // `parse_descriptor_type_string` handles primitives,
             // bare names, generic instantiations
@@ -3944,6 +3979,7 @@ impl TypeChecker {
             current_module_path: verum_common::Text::from("cog"),
             resolving_source_signature: false,
             loaded_source_receiver_methods: Set::new(),
+            source_record_field_visibility: Map::new(),
             inline_modules: Map::new(),
             module_aliases: Map::new(),
             resolved_mount_bindings: Map::new(),
@@ -4083,6 +4119,10 @@ impl TypeChecker {
         let ordered_types = Self::stdlib_iteration_order(metadata);
         for (name, type_desc) in ordered_types {
             self.register_metadata_resource_discipline(type_desc);
+            self.register_metadata_record_shape(type_desc);
+            // Publish defaults before the generic-sum branch can finish this
+            // descriptor. Eager and lazy registration share the same contract.
+            self.register_metadata_parameters(name, type_desc);
             // Convert core_metadata::TypeDescriptor to Type
             let ty = self.type_descriptor_to_type(type_desc);
             self.register_metadata_nominal_parameter_slots(name, type_desc, &ty);
@@ -4112,6 +4152,7 @@ impl TypeChecker {
                     crate::infer::helpers::register_variant_signature_for_lazy(
                         self, name, type_desc, cases, &mut pending_payload_deps,
                     );
+                    self.register_metadata_parameters(name, type_desc);
                     // Eager loader handles dep ordering globally — the
                     // pending list is per-call diagnostic only.
                     drop(pending_payload_deps);
@@ -4668,3 +4709,7 @@ impl Default for TypeChecker {
 #[cfg(test)]
 #[path = "../../tests/unit/nominal_head_identity.rs"]
 mod nominal_head_identity_tests;
+
+#[cfg(test)]
+#[path = "../../tests/unit/metadata_record_shape_precedence.rs"]
+mod metadata_record_shape_precedence;

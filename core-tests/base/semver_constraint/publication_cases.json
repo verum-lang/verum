@@ -1,0 +1,1391 @@
+{
+  "schema": 1,
+  "reference": {
+    "crate": "semver",
+    "version": "1.0.28",
+    "cargo_checksum": "8a7852d02fc848982e0c167ef163aaff9cd91dc640ba85e263cb1ce46fae51cd"
+  },
+  "contract": "Publication follows the Cargo-locked Rust VersionReq parser and matches method. Extension cases separately preserve declared OR and implicit-AND behavior; they are rejected by the publication reference. Missing metadata is not a requirement string; empty text is a negative.",
+  "cases": [
+    {
+      "id": "bare_zero",
+      "track": "publication",
+      "requirement": "0",
+      "accepts": true,
+      "candidates": [
+        {
+          "version": "0.0.0",
+          "matches": true
+        },
+        {
+          "version": "0.0.1",
+          "matches": true
+        },
+        {
+          "version": "0.1.0",
+          "matches": true
+        },
+        {
+          "version": "0.99.99",
+          "matches": true
+        },
+        {
+          "version": "1.0.0",
+          "matches": false
+        },
+        {
+          "version": "0.1.0-alpha",
+          "matches": false
+        }
+      ]
+    },
+    {
+      "id": "caret_zero",
+      "track": "publication",
+      "requirement": "^0",
+      "accepts": true,
+      "candidates": [
+        {
+          "version": "0.0.0",
+          "matches": true
+        },
+        {
+          "version": "0.0.1",
+          "matches": true
+        },
+        {
+          "version": "0.1.0",
+          "matches": true
+        },
+        {
+          "version": "1.0.0",
+          "matches": false
+        }
+      ]
+    },
+    {
+      "id": "caret_zero_minor",
+      "track": "publication",
+      "requirement": "^0.0",
+      "accepts": true,
+      "candidates": [
+        {
+          "version": "0.0.0",
+          "matches": true
+        },
+        {
+          "version": "0.0.1",
+          "matches": true
+        },
+        {
+          "version": "0.0.99",
+          "matches": true
+        },
+        {
+          "version": "0.1.0",
+          "matches": false
+        }
+      ]
+    },
+    {
+      "id": "bare_zero_minor",
+      "track": "publication",
+      "requirement": "0.1",
+      "accepts": true,
+      "candidates": [
+        {
+          "version": "0.1.0",
+          "matches": true
+        },
+        {
+          "version": "0.1.99",
+          "matches": true
+        },
+        {
+          "version": "0.0.9",
+          "matches": false
+        },
+        {
+          "version": "0.2.0",
+          "matches": false
+        }
+      ]
+    },
+    {
+      "id": "bare_major",
+      "track": "publication",
+      "requirement": "1",
+      "accepts": true,
+      "candidates": [
+        {
+          "version": "1.0.0",
+          "matches": true
+        },
+        {
+          "version": "1.99.99",
+          "matches": true
+        },
+        {
+          "version": "0.99.99",
+          "matches": false
+        },
+        {
+          "version": "2.0.0",
+          "matches": false
+        }
+      ]
+    },
+    {
+      "id": "bare_minor",
+      "track": "publication",
+      "requirement": "1.2",
+      "accepts": true,
+      "candidates": [
+        {
+          "version": "1.2.0",
+          "matches": true
+        },
+        {
+          "version": "1.3.0",
+          "matches": true
+        },
+        {
+          "version": "1.1.99",
+          "matches": false
+        },
+        {
+          "version": "2.0.0",
+          "matches": false
+        }
+      ]
+    },
+    {
+      "id": "bare_full",
+      "track": "publication",
+      "requirement": "1.2.3",
+      "accepts": true,
+      "candidates": [
+        {
+          "version": "1.2.3",
+          "matches": true
+        },
+        {
+          "version": "1.9.0",
+          "matches": true
+        },
+        {
+          "version": "1.2.2",
+          "matches": false
+        },
+        {
+          "version": "2.0.0",
+          "matches": false
+        },
+        {
+          "version": "1.3.0-alpha",
+          "matches": false
+        }
+      ]
+    },
+    {
+      "id": "caret_patch_zero",
+      "track": "publication",
+      "requirement": "^0.0.3",
+      "accepts": true,
+      "candidates": [
+        {
+          "version": "0.0.3",
+          "matches": true
+        },
+        {
+          "version": "0.0.2",
+          "matches": false
+        },
+        {
+          "version": "0.0.4",
+          "matches": false
+        },
+        {
+          "version": "0.1.0",
+          "matches": false
+        }
+      ]
+    },
+    {
+      "id": "exact_major",
+      "track": "publication",
+      "requirement": "=1",
+      "accepts": true,
+      "candidates": [
+        {
+          "version": "1.0.0",
+          "matches": true
+        },
+        {
+          "version": "1.99.99",
+          "matches": true
+        },
+        {
+          "version": "0.99.99",
+          "matches": false
+        },
+        {
+          "version": "2.0.0",
+          "matches": false
+        }
+      ]
+    },
+    {
+      "id": "exact_minor",
+      "track": "publication",
+      "requirement": "=1.2",
+      "accepts": true,
+      "candidates": [
+        {
+          "version": "1.2.0",
+          "matches": true
+        },
+        {
+          "version": "1.2.99",
+          "matches": true
+        },
+        {
+          "version": "1.1.99",
+          "matches": false
+        },
+        {
+          "version": "1.3.0",
+          "matches": false
+        }
+      ]
+    },
+    {
+      "id": "exact_full",
+      "track": "publication",
+      "requirement": "=1.2.3",
+      "accepts": true,
+      "candidates": [
+        {
+          "version": "1.2.3",
+          "matches": true
+        },
+        {
+          "version": "1.2.3+other",
+          "matches": true
+        },
+        {
+          "version": "1.2.2",
+          "matches": false
+        },
+        {
+          "version": "1.2.4",
+          "matches": false
+        },
+        {
+          "version": "1.2.3-alpha",
+          "matches": false
+        }
+      ]
+    },
+    {
+      "id": "tilde_major",
+      "track": "publication",
+      "requirement": "~1",
+      "accepts": true,
+      "candidates": [
+        {
+          "version": "1.0.0",
+          "matches": true
+        },
+        {
+          "version": "1.99.99",
+          "matches": true
+        },
+        {
+          "version": "0.99.99",
+          "matches": false
+        },
+        {
+          "version": "2.0.0",
+          "matches": false
+        }
+      ]
+    },
+    {
+      "id": "tilde_minor",
+      "track": "publication",
+      "requirement": "~1.2",
+      "accepts": true,
+      "candidates": [
+        {
+          "version": "1.2.0",
+          "matches": true
+        },
+        {
+          "version": "1.2.99",
+          "matches": true
+        },
+        {
+          "version": "1.1.99",
+          "matches": false
+        },
+        {
+          "version": "1.3.0",
+          "matches": false
+        }
+      ]
+    },
+    {
+      "id": "tilde_full",
+      "track": "publication",
+      "requirement": "~1.2.3",
+      "accepts": true,
+      "candidates": [
+        {
+          "version": "1.2.3",
+          "matches": true
+        },
+        {
+          "version": "1.2.99",
+          "matches": true
+        },
+        {
+          "version": "1.2.2",
+          "matches": false
+        },
+        {
+          "version": "1.3.0",
+          "matches": false
+        }
+      ]
+    },
+    {
+      "id": "gt_major",
+      "track": "publication",
+      "requirement": ">1",
+      "accepts": true,
+      "candidates": [
+        {
+          "version": "2.0.0",
+          "matches": true
+        },
+        {
+          "version": "3.0.0",
+          "matches": true
+        },
+        {
+          "version": "1.0.0",
+          "matches": false
+        },
+        {
+          "version": "1.99.99",
+          "matches": false
+        }
+      ]
+    },
+    {
+      "id": "gt_minor",
+      "track": "publication",
+      "requirement": ">1.2",
+      "accepts": true,
+      "candidates": [
+        {
+          "version": "1.3.0",
+          "matches": true
+        },
+        {
+          "version": "2.0.0",
+          "matches": true
+        },
+        {
+          "version": "1.2.0",
+          "matches": false
+        },
+        {
+          "version": "1.2.99",
+          "matches": false
+        }
+      ]
+    },
+    {
+      "id": "gt_full",
+      "track": "publication",
+      "requirement": ">1.2.3",
+      "accepts": true,
+      "candidates": [
+        {
+          "version": "1.2.4",
+          "matches": true
+        },
+        {
+          "version": "2.0.0",
+          "matches": true
+        },
+        {
+          "version": "1.2.3",
+          "matches": false
+        }
+      ]
+    },
+    {
+      "id": "gte_major",
+      "track": "publication",
+      "requirement": ">=1",
+      "accepts": true,
+      "candidates": [
+        {
+          "version": "1.0.0",
+          "matches": true
+        },
+        {
+          "version": "1.99.99",
+          "matches": true
+        },
+        {
+          "version": "2.0.0",
+          "matches": true
+        },
+        {
+          "version": "0.99.99",
+          "matches": false
+        }
+      ]
+    },
+    {
+      "id": "gte_minor",
+      "track": "publication",
+      "requirement": ">=1.2",
+      "accepts": true,
+      "candidates": [
+        {
+          "version": "1.2.0",
+          "matches": true
+        },
+        {
+          "version": "1.2.99",
+          "matches": true
+        },
+        {
+          "version": "2.0.0",
+          "matches": true
+        },
+        {
+          "version": "1.1.99",
+          "matches": false
+        }
+      ]
+    },
+    {
+      "id": "lt_major",
+      "track": "publication",
+      "requirement": "<1",
+      "accepts": true,
+      "candidates": [
+        {
+          "version": "0.99.99",
+          "matches": true
+        },
+        {
+          "version": "1.0.0",
+          "matches": false
+        },
+        {
+          "version": "1.99.99",
+          "matches": false
+        }
+      ]
+    },
+    {
+      "id": "lt_minor",
+      "track": "publication",
+      "requirement": "<1.2",
+      "accepts": true,
+      "candidates": [
+        {
+          "version": "1.1.99",
+          "matches": true
+        },
+        {
+          "version": "1.2.0",
+          "matches": false
+        },
+        {
+          "version": "1.2.99",
+          "matches": false
+        }
+      ]
+    },
+    {
+      "id": "lte_major",
+      "track": "publication",
+      "requirement": "<=1",
+      "accepts": true,
+      "candidates": [
+        {
+          "version": "0.99.99",
+          "matches": true
+        },
+        {
+          "version": "1.0.0",
+          "matches": true
+        },
+        {
+          "version": "1.99.99",
+          "matches": true
+        },
+        {
+          "version": "2.0.0",
+          "matches": false
+        }
+      ]
+    },
+    {
+      "id": "lte_minor",
+      "track": "publication",
+      "requirement": "<=1.2",
+      "accepts": true,
+      "candidates": [
+        {
+          "version": "1.1.99",
+          "matches": true
+        },
+        {
+          "version": "1.2.0",
+          "matches": true
+        },
+        {
+          "version": "1.2.99",
+          "matches": true
+        },
+        {
+          "version": "1.3.0",
+          "matches": false
+        }
+      ]
+    },
+    {
+      "id": "lte_full",
+      "track": "publication",
+      "requirement": "<=1.2.3",
+      "accepts": true,
+      "candidates": [
+        {
+          "version": "1.2.2",
+          "matches": true
+        },
+        {
+          "version": "1.2.3",
+          "matches": true
+        },
+        {
+          "version": "1.2.4",
+          "matches": false
+        }
+      ]
+    },
+    {
+      "id": "operator_spaces",
+      "track": "publication",
+      "requirement": " >= 1.2 , < 2 ",
+      "accepts": true,
+      "candidates": [
+        {
+          "version": "1.2.0",
+          "matches": true
+        },
+        {
+          "version": "1.99.99",
+          "matches": true
+        },
+        {
+          "version": "1.1.99",
+          "matches": false
+        },
+        {
+          "version": "2.0.0",
+          "matches": false
+        }
+      ]
+    },
+    {
+      "id": "caret_space",
+      "track": "publication",
+      "requirement": "^ 0.0",
+      "accepts": true,
+      "candidates": [
+        {
+          "version": "0.0.0",
+          "matches": true
+        },
+        {
+          "version": "0.0.99",
+          "matches": true
+        },
+        {
+          "version": "0.1.0",
+          "matches": false
+        }
+      ]
+    },
+    {
+      "id": "tilde_space",
+      "track": "publication",
+      "requirement": "~ 1.2",
+      "accepts": true,
+      "candidates": [
+        {
+          "version": "1.2.0",
+          "matches": true
+        },
+        {
+          "version": "1.2.99",
+          "matches": true
+        },
+        {
+          "version": "1.3.0",
+          "matches": false
+        }
+      ]
+    },
+    {
+      "id": "exact_space",
+      "track": "publication",
+      "requirement": "= 1.2",
+      "accepts": true,
+      "candidates": [
+        {
+          "version": "1.2.0",
+          "matches": true
+        },
+        {
+          "version": "1.2.99",
+          "matches": true
+        },
+        {
+          "version": "1.3.0",
+          "matches": false
+        }
+      ]
+    },
+    {
+      "id": "star",
+      "track": "publication",
+      "requirement": "*",
+      "accepts": true,
+      "candidates": [
+        {
+          "version": "0.0.0",
+          "matches": true
+        },
+        {
+          "version": "9.9.9",
+          "matches": true
+        },
+        {
+          "version": "1.0.0-alpha",
+          "matches": false
+        }
+      ]
+    },
+    {
+      "id": "lower_x",
+      "track": "publication",
+      "requirement": "x",
+      "accepts": true,
+      "candidates": [
+        {
+          "version": "0.0.0",
+          "matches": true
+        },
+        {
+          "version": "9.9.9",
+          "matches": true
+        },
+        {
+          "version": "1.0.0-alpha",
+          "matches": false
+        }
+      ]
+    },
+    {
+      "id": "upper_x",
+      "track": "publication",
+      "requirement": "X",
+      "accepts": true,
+      "candidates": [
+        {
+          "version": "0.0.0",
+          "matches": true
+        },
+        {
+          "version": "9.9.9",
+          "matches": true
+        },
+        {
+          "version": "1.0.0-alpha",
+          "matches": false
+        }
+      ]
+    },
+    {
+      "id": "major_x",
+      "track": "publication",
+      "requirement": "1.x",
+      "accepts": true,
+      "candidates": [
+        {
+          "version": "1.0.0",
+          "matches": true
+        },
+        {
+          "version": "1.99.99",
+          "matches": true
+        },
+        {
+          "version": "0.99.99",
+          "matches": false
+        },
+        {
+          "version": "2.0.0",
+          "matches": false
+        }
+      ]
+    },
+    {
+      "id": "minor_star",
+      "track": "publication",
+      "requirement": "1.2.*",
+      "accepts": true,
+      "candidates": [
+        {
+          "version": "1.2.0",
+          "matches": true
+        },
+        {
+          "version": "1.2.99",
+          "matches": true
+        },
+        {
+          "version": "1.3.0",
+          "matches": false
+        }
+      ]
+    },
+    {
+      "id": "double_star",
+      "track": "publication",
+      "requirement": "1.*.*",
+      "accepts": true,
+      "candidates": [
+        {
+          "version": "1.0.0",
+          "matches": true
+        },
+        {
+          "version": "1.99.99",
+          "matches": true
+        },
+        {
+          "version": "2.0.0",
+          "matches": false
+        }
+      ]
+    },
+    {
+      "id": "gte_star",
+      "track": "publication",
+      "requirement": ">=1.*",
+      "accepts": true,
+      "candidates": [
+        {
+          "version": "1.0.0",
+          "matches": true
+        },
+        {
+          "version": "2.0.0",
+          "matches": true
+        },
+        {
+          "version": "0.99.99",
+          "matches": false
+        }
+      ]
+    },
+    {
+      "id": "gt_patch_star",
+      "track": "publication",
+      "requirement": ">1.2.*",
+      "accepts": true,
+      "candidates": [
+        {
+          "version": "1.3.0",
+          "matches": true
+        },
+        {
+          "version": "2.0.0",
+          "matches": true
+        },
+        {
+          "version": "1.2.0",
+          "matches": false
+        },
+        {
+          "version": "1.2.99",
+          "matches": false
+        }
+      ]
+    },
+    {
+      "id": "caret_star",
+      "track": "publication",
+      "requirement": "^0.*",
+      "accepts": true,
+      "candidates": [
+        {
+          "version": "0.0.0",
+          "matches": true
+        },
+        {
+          "version": "0.99.99",
+          "matches": true
+        },
+        {
+          "version": "1.0.0",
+          "matches": false
+        }
+      ]
+    },
+    {
+      "id": "build_ignored",
+      "track": "publication",
+      "requirement": "=1.2.3+001.sha-ABC",
+      "accepts": true,
+      "candidates": [
+        {
+          "version": "1.2.3",
+          "matches": true
+        },
+        {
+          "version": "1.2.3+different",
+          "matches": true
+        },
+        {
+          "version": "1.2.4",
+          "matches": false
+        }
+      ]
+    },
+    {
+      "id": "prerelease_exact",
+      "track": "publication",
+      "requirement": "=1.2.3-alpha.1",
+      "accepts": true,
+      "candidates": [
+        {
+          "version": "1.2.3-alpha.1",
+          "matches": true
+        },
+        {
+          "version": "1.2.3-alpha.1+build",
+          "matches": true
+        },
+        {
+          "version": "1.2.3-alpha",
+          "matches": false
+        },
+        {
+          "version": "1.2.3-alpha.2",
+          "matches": false
+        },
+        {
+          "version": "1.2.3",
+          "matches": false
+        }
+      ]
+    },
+    {
+      "id": "prerelease_caret",
+      "track": "publication",
+      "requirement": "^0.0.3-alpha",
+      "accepts": true,
+      "candidates": [
+        {
+          "version": "0.0.3-alpha",
+          "matches": true
+        },
+        {
+          "version": "0.0.3-beta",
+          "matches": true
+        },
+        {
+          "version": "0.0.3",
+          "matches": true
+        },
+        {
+          "version": "0.0.2",
+          "matches": false
+        },
+        {
+          "version": "0.0.4-alpha",
+          "matches": false
+        },
+        {
+          "version": "0.0.4",
+          "matches": false
+        }
+      ]
+    },
+    {
+      "id": "prerelease_and",
+      "track": "publication",
+      "requirement": ">1.0.0-alpha, <1.0.0",
+      "accepts": true,
+      "candidates": [
+        {
+          "version": "1.0.0-beta",
+          "matches": true
+        },
+        {
+          "version": "1.0.0-alpha",
+          "matches": false
+        },
+        {
+          "version": "1.0.0",
+          "matches": false
+        },
+        {
+          "version": "0.9.9-beta",
+          "matches": false
+        }
+      ]
+    },
+    {
+      "id": "prerelease_and_partial",
+      "track": "publication",
+      "requirement": ">=0.5.1-alpha.3, <0.6",
+      "accepts": true,
+      "candidates": [
+        {
+          "version": "0.5.1-alpha.3",
+          "matches": true
+        },
+        {
+          "version": "0.5.1-beta",
+          "matches": true
+        },
+        {
+          "version": "0.5.1",
+          "matches": true
+        },
+        {
+          "version": "0.5.5",
+          "matches": true
+        },
+        {
+          "version": "0.5.1-alpha.2",
+          "matches": false
+        },
+        {
+          "version": "0.5.2-alpha.3",
+          "matches": false
+        },
+        {
+          "version": "0.6.0",
+          "matches": false
+        }
+      ]
+    },
+    {
+      "id": "contradiction",
+      "track": "publication",
+      "requirement": ">=2, <1",
+      "accepts": true,
+      "candidates": [
+        {
+          "version": "0.0.0",
+          "matches": false
+        },
+        {
+          "version": "1.0.0",
+          "matches": false
+        },
+        {
+          "version": "2.0.0",
+          "matches": false
+        },
+        {
+          "version": "3.0.0",
+          "matches": false
+        }
+      ]
+    },
+    {
+      "id": "u64_max_major",
+      "track": "publication",
+      "requirement": ">=18446744073709551615.0.0",
+      "accepts": true,
+      "candidates": [
+        {
+          "version": "18446744073709551615.0.0",
+          "matches": true
+        },
+        {
+          "version": "18446744073709551614.99.99",
+          "matches": false
+        }
+      ]
+    },
+    {
+      "id": "u64_max_tilde",
+      "track": "publication",
+      "requirement": "~18446744073709551615",
+      "accepts": true,
+      "candidates": [
+        {
+          "version": "18446744073709551615.0.0",
+          "matches": true
+        },
+        {
+          "version": "18446744073709551615.1.0",
+          "matches": true
+        },
+        {
+          "version": "0.0.0",
+          "matches": false
+        }
+      ]
+    },
+    {
+      "id": "u64_max_patch",
+      "track": "publication",
+      "requirement": "=1.2.18446744073709551615",
+      "accepts": true,
+      "candidates": [
+        {
+          "version": "1.2.18446744073709551615",
+          "matches": true
+        },
+        {
+          "version": "1.2.18446744073709551614",
+          "matches": false
+        }
+      ]
+    },
+    {
+      "id": "comparator_limit",
+      "track": "publication",
+      "requirement": ">=0, >=0, >=0, >=0, >=0, >=0, >=0, >=0, >=0, >=0, >=0, >=0, >=0, >=0, >=0, >=0, >=0, >=0, >=0, >=0, >=0, >=0, >=0, >=0, >=0, >=0, >=0, >=0, >=0, >=0, >=0, >=0",
+      "accepts": true,
+      "candidates": [
+        {
+          "version": "0.0.0",
+          "matches": true
+        },
+        {
+          "version": "1.0.0",
+          "matches": true
+        },
+        {
+          "version": "1.0.0-alpha",
+          "matches": false
+        }
+      ]
+    },
+    {
+      "id": "empty",
+      "track": "publication",
+      "requirement": "",
+      "accepts": false,
+      "candidates": []
+    },
+    {
+      "id": "blank",
+      "track": "publication",
+      "requirement": "   ",
+      "accepts": false,
+      "candidates": []
+    },
+    {
+      "id": "missing_operand",
+      "track": "publication",
+      "requirement": ">=",
+      "accepts": false,
+      "candidates": []
+    },
+    {
+      "id": "missing_component",
+      "track": "publication",
+      "requirement": "1.",
+      "accepts": false,
+      "candidates": []
+    },
+    {
+      "id": "leading_zero_major",
+      "track": "publication",
+      "requirement": "01",
+      "accepts": false,
+      "candidates": []
+    },
+    {
+      "id": "leading_zero_minor",
+      "track": "publication",
+      "requirement": "1.02",
+      "accepts": false,
+      "candidates": []
+    },
+    {
+      "id": "leading_zero_patch",
+      "track": "publication",
+      "requirement": "1.2.03",
+      "accepts": false,
+      "candidates": []
+    },
+    {
+      "id": "leading_zero_prerelease",
+      "track": "publication",
+      "requirement": "1.2.3-01",
+      "accepts": false,
+      "candidates": []
+    },
+    {
+      "id": "empty_prerelease",
+      "track": "publication",
+      "requirement": "1.2.3-",
+      "accepts": false,
+      "candidates": []
+    },
+    {
+      "id": "empty_build",
+      "track": "publication",
+      "requirement": "1.2.3+",
+      "accepts": false,
+      "candidates": []
+    },
+    {
+      "id": "empty_pre_segment",
+      "track": "publication",
+      "requirement": "1.2.3-alpha..1",
+      "accepts": false,
+      "candidates": []
+    },
+    {
+      "id": "empty_build_segment",
+      "track": "publication",
+      "requirement": "1.2.3+build..1",
+      "accepts": false,
+      "candidates": []
+    },
+    {
+      "id": "invalid_pre_character",
+      "track": "publication",
+      "requirement": "1.2.3-alpha_1",
+      "accepts": false,
+      "candidates": []
+    },
+    {
+      "id": "invalid_build_character",
+      "track": "publication",
+      "requirement": "1.2.3+build_1",
+      "accepts": false,
+      "candidates": []
+    },
+    {
+      "id": "non_ascii_identifier",
+      "track": "publication",
+      "requirement": "1.2.3-α",
+      "accepts": false,
+      "candidates": []
+    },
+    {
+      "id": "partial_prerelease",
+      "track": "publication",
+      "requirement": "1.2-alpha",
+      "accepts": false,
+      "candidates": []
+    },
+    {
+      "id": "partial_build",
+      "track": "publication",
+      "requirement": "1+build",
+      "accepts": false,
+      "candidates": []
+    },
+    {
+      "id": "overflow_major",
+      "track": "publication",
+      "requirement": "18446744073709551616",
+      "accepts": false,
+      "candidates": []
+    },
+    {
+      "id": "overflow_minor",
+      "track": "publication",
+      "requirement": "1.18446744073709551616",
+      "accepts": false,
+      "candidates": []
+    },
+    {
+      "id": "overflow_patch",
+      "track": "publication",
+      "requirement": "1.2.18446744073709551616",
+      "accepts": false,
+      "candidates": []
+    },
+    {
+      "id": "numeric_after_wildcard",
+      "track": "publication",
+      "requirement": "1.x.2",
+      "accepts": false,
+      "candidates": []
+    },
+    {
+      "id": "wildcard_in_and",
+      "track": "publication",
+      "requirement": "*, >=1",
+      "accepts": false,
+      "candidates": []
+    },
+    {
+      "id": "operator_star",
+      "track": "publication",
+      "requirement": ">=*",
+      "accepts": false,
+      "candidates": []
+    },
+    {
+      "id": "trailing_comma",
+      "track": "publication",
+      "requirement": ">=1,",
+      "accepts": false,
+      "candidates": []
+    },
+    {
+      "id": "leading_comma",
+      "track": "publication",
+      "requirement": ",>=1",
+      "accepts": false,
+      "candidates": []
+    },
+    {
+      "id": "empty_comparator",
+      "track": "publication",
+      "requirement": ">=1,,<2",
+      "accepts": false,
+      "candidates": []
+    },
+    {
+      "id": "hyphen_range",
+      "track": "publication",
+      "requirement": "1.2.3 - 2.3.4",
+      "accepts": false,
+      "candidates": []
+    },
+    {
+      "id": "empty_or_branch",
+      "track": "publication",
+      "requirement": "^1 ||",
+      "accepts": false,
+      "candidates": []
+    },
+    {
+      "id": "empty_or_prefix",
+      "track": "publication",
+      "requirement": "|| ^1",
+      "accepts": false,
+      "candidates": []
+    },
+    {
+      "id": "tab_after_operator",
+      "track": "publication",
+      "requirement": ">=\t1.2",
+      "accepts": false,
+      "candidates": []
+    },
+    {
+      "id": "newline_after_operator",
+      "track": "publication",
+      "requirement": ">=\n1.2",
+      "accepts": false,
+      "candidates": []
+    },
+    {
+      "id": "excessive_comparators",
+      "track": "publication",
+      "requirement": ">=0, >=0, >=0, >=0, >=0, >=0, >=0, >=0, >=0, >=0, >=0, >=0, >=0, >=0, >=0, >=0, >=0, >=0, >=0, >=0, >=0, >=0, >=0, >=0, >=0, >=0, >=0, >=0, >=0, >=0, >=0, >=0, >=0",
+      "accepts": false,
+      "candidates": []
+    },
+    {
+      "id": "extension_or",
+      "track": "extension",
+      "requirement": "^1 || ^3",
+      "accepts": true,
+      "candidates": [
+        {
+          "version": "1.2.0",
+          "matches": true
+        },
+        {
+          "version": "3.2.0",
+          "matches": true
+        },
+        {
+          "version": "2.0.0",
+          "matches": false
+        },
+        {
+          "version": "4.0.0",
+          "matches": false
+        }
+      ]
+    },
+    {
+      "id": "extension_implicit_and",
+      "track": "extension",
+      "requirement": ">=1 <2",
+      "accepts": true,
+      "candidates": [
+        {
+          "version": "1.0.0",
+          "matches": true
+        },
+        {
+          "version": "1.99.99",
+          "matches": true
+        },
+        {
+          "version": "0.99.99",
+          "matches": false
+        },
+        {
+          "version": "2.0.0",
+          "matches": false
+        }
+      ]
+    },
+    {
+      "id": "extension_and_tab",
+      "track": "extension",
+      "requirement": ">=1\t<2",
+      "accepts": true,
+      "candidates": [
+        {
+          "version": "1.0.0",
+          "matches": true
+        },
+        {
+          "version": "1.99.99",
+          "matches": true
+        },
+        {
+          "version": "0.99.99",
+          "matches": false
+        },
+        {
+          "version": "2.0.0",
+          "matches": false
+        }
+      ]
+    }
+  ]
+}

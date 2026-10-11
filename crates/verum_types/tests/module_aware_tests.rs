@@ -195,3 +195,37 @@ fn test_module_context_inheritance_in_scopes() {
     // Module context should still be there
     assert_eq!(ctx.current_module(), Maybe::Some(module_id));
 }
+
+// A module-ID cache predates declaration parameter metadata. Reading a bare
+// type is valid, but applying arguments must not silently reuse its free slot.
+fn cached_sum_annotation(annotation: &str) -> verum_types::Result<Type> {
+    use verum_modules::{ModulePath, resolver::{NameKind, ResolvedName}};
+    let mut checker = TypeChecker::new();
+    checker.register_primitives();
+    let caller = ModuleId::new(41);
+    let owner = ModuleId::new(42);
+    checker.set_current_module(caller);
+    checker.name_resolver_mut().create_scope(caller).add_binding(
+        "Cached",
+        ResolvedName::new(owner, ModulePath::from_str("demo.owner.Cached"), NameKind::Type, "Cached"),
+    );
+    let mut variants = IndexMap::new();
+    variants.insert("Item".into(), Type::Var(verum_types::TypeVar::fresh()));
+    checker.define_module_type(owner, "Cached", Type::Variant(variants));
+    let annotation = verum_fast_parser::Parser::new(annotation)
+        .parse_type().expect("source annotation");
+    checker.ast_to_type(&annotation)
+}
+
+#[test]
+fn bare_module_cached_sum_remains_available() {
+    assert!(matches!(cached_sum_annotation("Cached"), Ok(Type::Variant(_))));
+}
+
+#[test]
+fn module_cached_sum_cannot_discard_generic_arguments() {
+    let error = cached_sum_annotation("Cached<Int>")
+        .expect_err("a sum without declared parameter slots cannot instantiate arguments");
+    assert!(matches!(error, verum_types::TypeError::OtherWithCodeSpanned { ref code, .. }
+        if code.as_str() == "E407"), "{error:?}");
+}

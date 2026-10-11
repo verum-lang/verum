@@ -140,6 +140,25 @@ impl TypeChecker {
             }
         }
 
+        self.record_declared_meta_refinements(type_name, generics);
+
+        let arity = param_record.len();
+        self.define_declared_type_metadata(
+            "__type_params_",
+            type_name.as_str(),
+            Type::Record(param_record),
+        );
+        arity
+    }
+
+    /// Record constraints independently of the representation used for
+    /// parameter slots: sums store actual variables rather than arity markers.
+    fn record_declared_meta_refinements(
+        &mut self,
+        type_name: &Text,
+        generics: &List<verum_ast::ty::GenericParam>,
+    ) {
+        use verum_ast::ty::GenericParamKind;
         // A refinement written on a META parameter is recorded by
         // POSITION, so the argument supplied at a use site can be
         // checked against it. The AST has carried this predicate all
@@ -171,20 +190,15 @@ impl TypeChecker {
             }
             index += 1;
         }
-        if refinements.is_empty() {
-            self.meta_param_refinements.remove(type_name.as_str());
-        } else {
-            self.meta_param_refinements
-                .insert(type_name.as_str().to_string(), refinements);
+        for key in [type_name.clone(), self.declared_type_key(type_name.as_str())] {
+            if refinements.is_empty() {
+                self.meta_param_refinements.remove(key.as_str());
+            } else {
+                self.meta_param_refinements
+                    .insert(key.to_string(), refinements.clone());
+            }
         }
 
-        let arity = param_record.len();
-        self.define_declared_type_metadata(
-            "__type_params_",
-            type_name.as_str(),
-            Type::Record(param_record),
-        );
-        arity
     }
 
     /// Register a type declaration (type alias, ADT, etc.)
@@ -325,8 +339,9 @@ impl TypeChecker {
         if !any {
             return;
         }
-        let key: verum_common::Text = format!("__type_param_defaults_{}", type_name).into();
-        self.ctx.define_type(key, Type::Tuple(defaults));
+        self.define_declared_type_metadata(
+            "__type_param_defaults_", type_name, Type::Tuple(defaults),
+        );
     }
 
     fn register_type_declaration_inner(&mut self, type_decl: &verum_ast::TypeDecl) -> Result<()> {
@@ -1255,6 +1270,8 @@ impl TypeChecker {
                     }
                 }
 
+                self.record_declared_meta_refinements(&type_name, &type_decl.generics);
+
                 // CRITICAL: Store type parameter information for generic variant type substitution.
                 // This enables proper substitution when using generic variant types like Validated<E, A>.
                 // We store:
@@ -1274,9 +1291,9 @@ impl TypeChecker {
                         // no template var to store.
                         param_record.insert(name.clone(), Type::Var(*var));
                     }
-                    let type_params_key: Text = format!("__type_params_{}", type_name).into();
-                    self.ctx
-                        .define_type(type_params_key, Type::Record(param_record));
+                    self.define_declared_type_metadata(
+                        "__type_params_", type_name.as_str(), Type::Record(param_record),
+                    );
 
                     // CRITICAL: Store TypeVars in declaration order for proper substitution.
                     // When a Variant base type is instantiated with type args (e.g., Validated<E, A>),
@@ -1285,9 +1302,9 @@ impl TypeChecker {
                     // TypeVars in that order and store them as a Tuple type.
                     let type_vars_in_order: List<Type> =
                         type_param_vars.values().map(|tv| Type::Var(*tv)).collect();
-                    let type_var_order_key: Text = format!("__type_var_order_{}", type_name).into();
-                    self.ctx
-                        .define_type(type_var_order_key, Type::Tuple(type_vars_in_order));
+                    self.define_declared_type_metadata(
+                        "__type_var_order_", type_name.as_str(), Type::Tuple(type_vars_in_order),
+                    );
                 } else {
                     // No parameters. Say so in the shared key rather than
                     // staying silent, which would leave a same-named type's
@@ -1619,6 +1636,7 @@ impl TypeChecker {
         use verum_common::Text;
         let TypeDeclBody::Record(fields) = &type_decl.body
             else { unreachable!() };
+        self.register_record_field_visibility(type_name.as_str(), fields);
         let type_name = type_name.clone();
                 // CRITICAL: Register a placeholder type FIRST to handle recursive type definitions
                 // and prevent infinite recursion when processing field types.
@@ -2737,25 +2755,26 @@ impl TypeChecker {
             type_param_names.push(param_name);
         }
 
-        // CRITICAL FIX: Update __type_var_order_ with pass-2 TypeVars.
-        // Pass 1 (register_type_declaration_body) stores __type_var_order_ with its own TypeVars.
-        // Pass 2 (this function) creates NEW fresh TypeVars for the variant body.
-        // If we don't update __type_var_order_, the stored TypeVars won't match the
-        // variant body TypeVars, causing substitution failures in ast_to_type.
-        // E.g., Validation<E, A> would get E and A swapped because pass-1 TypeVars
-        // can't be found in the pass-2 variant body during apply_subst.
-        if is_variant_type && !type_param_names.is_empty() {
-            let mut new_type_vars: List<Type> = List::new();
-            for param_name in &type_param_names {
-                if let Some(Type::Var(tv)) = param_frame.get(param_name.as_str()) {
-                    new_type_vars.push(Type::Var(*tv));
+        // Pass 2 creates fresh sum parameter variables. Publish those same
+        // slots with the replacement body, including an empty declaration:
+        // otherwise a nongeneric namesake can retain the prior body's arity.
+        if is_variant_type {
+            self.record_declared_meta_refinements(&type_name, &type_decl.generics);
+            let new_type_vars: List<Type> = type_param_names.iter().filter_map(|name| {
+                match param_frame.get(name.as_str()) {
+                    Some(Type::Var(variable)) => Some(Type::Var(*variable)),
+                    _ => None,
                 }
-            }
-            if !new_type_vars.is_empty() {
-                let type_var_order_key: Text = format!("__type_var_order_{}", type_name).into();
-                self.ctx
-                    .define_type(type_var_order_key, Type::Tuple(new_type_vars));
-            }
+            }).collect();
+            self.define_declared_type_metadata(
+                "__type_var_order_", type_name.as_str(), Type::Tuple(new_type_vars),
+            );
+            let parameters = type_param_names.iter().filter_map(|name| {
+                param_frame.get(name.as_str()).cloned().map(|ty| (name.clone(), ty))
+            }).collect();
+            self.define_declared_type_metadata(
+                "__type_params_", type_name.as_str(), Type::Record(parameters),
+            );
         }
 
         // Same frame discipline as `register_type_declaration_body`
@@ -3412,6 +3431,7 @@ impl TypeChecker {
         use verum_common::Text;
         let verum_ast::decl::TypeDeclBody::Record(fields) = &type_decl.body
             else { unreachable!() };
+        self.register_record_field_visibility(type_name.as_str(), fields);
         let type_name = type_name.clone();
                 // CRITICAL: Register a placeholder type FIRST to handle recursive type definitions
                 // and prevent infinite recursion when processing field types.
@@ -6068,7 +6088,7 @@ impl TypeChecker {
                             };
 
                             // Register in environment with qualified name
-                            self.ctx.env.insert(qualified_name.as_str(), const_scheme);
+                            self.ctx.env.insert_value(qualified_name.as_str(), const_scheme);
 
                             tracing::debug!("Registered associated constant: {}", qualified_name);
                         }
@@ -6916,7 +6936,7 @@ impl TypeChecker {
         if let Ok(const_ty) = self.ast_to_type(&const_decl.ty) {
             self.ctx
                 .env
-                .insert(const_decl.name.name.as_str(), TypeScheme::mono(const_ty));
+                .insert_value(const_decl.name.name.as_str(), TypeScheme::mono(const_ty));
         }
     }
 
@@ -6931,7 +6951,7 @@ impl TypeChecker {
         self.ctx.define_type(verum_common::Text::from(name), ty);
     }
     pub fn pre_register_static(&mut self, name: &verum_common::Text, ty: Type) {
-        self.ctx.env.insert(name.as_str(), TypeScheme::mono(ty));
+        self.ctx.env.insert_value(name.as_str(), TypeScheme::mono(ty));
     }
 
     /// Fold a function's `where` clause into the bound maps a scheme is
@@ -7511,7 +7531,7 @@ impl TypeChecker {
         };
 
         // Register using the INTRINSIC NAME, not the function name
-        self.ctx.env.insert(intrinsic_name, scheme);
+        self.ctx.env.insert_value(intrinsic_name, scheme);
 
         // Restore previous types instead of removing
         for (name, saved) in saved_types {
@@ -7541,7 +7561,7 @@ impl TypeChecker {
         // Register the constant as a monomorphic value
         self.ctx
             .env
-            .insert_mono(const_decl.name.name.as_str(), const_type);
+            .insert_value(const_decl.name.name.as_str(), TypeScheme::mono(const_type));
 
         tracing::debug!("Registered const: {}", const_decl.name.name);
         Ok(())
@@ -7560,7 +7580,7 @@ impl TypeChecker {
     /// `type_text` is the descriptor text (e.g. `"Int"` or `"Maybe<Int>"`).
     pub fn register_const_from_metadata(&mut self, name: &str, type_text: &str) -> Result<()> {
         let const_type = crate::infer::helpers::parse_descriptor_type_string(type_text);
-        self.ctx.env.insert_mono(name, const_type);
+        self.ctx.env.insert_value(name, TypeScheme::mono(const_type));
         tracing::debug!("Registered const from metadata: {}", name);
         Ok(())
     }

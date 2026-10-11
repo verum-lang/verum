@@ -25,9 +25,9 @@
 //! because `core/` is checked in the lenient `stdlib_single_file_mode`;
 //! under `VERUM_STRICT_STDLIB=1` the same file reports E409 at that line.
 //!
-//! The last test is the control that keeps E409 meaningful: a `Named`
-//! type that is NOT a primitive value must still be refused. A fix that
-//! silenced the diagnostic everywhere would pass the sweep and be wrong.
+//! Borrowed record payloads also support dereference: pattern bindings
+//! retain the scrutinee's reference. An owned record is the negative
+//! control that keeps E409 meaningful.
 
 use verum_fast_parser::Parser;
 use verum_types::infer::TypeChecker;
@@ -128,10 +128,8 @@ fn every_primitive_field_type_gets_the_same_answer() {
     );
 }
 
-/// The control. E409 exists to catch a real mistake and must keep
-/// catching it.
 #[test]
-fn a_non_primitive_named_type_is_still_refused() {
+fn a_borrowed_record_payload_can_be_dereferenced() {
     let errs = check_errors(
         r#"
 type Thing is { a: Int };
@@ -145,12 +143,23 @@ fn read(s: &Sum) -> Int {
 }
 "#,
     );
+    assert!(errs.is_empty(), "borrowed record payload: {errs:?}");
+}
+
+#[test]
+fn an_owned_record_is_still_refused() {
+    let errs = check_errors(
+        r#"
+type Thing is { a: Int };
+
+fn read(t: Thing) -> Int {
+    (*t).a
+}
+"#,
+    );
+    assert_eq!(errs.len(), 1, "owned record dereference: {errs:?}");
     assert!(
-        errs.iter().any(|e| e.contains("Cannot dereference")),
-        "dereferencing a `Thing` — a named type that is not a primitive \
-         value — must still be E409; if this stops firing the fix has \
-         silenced the diagnostic instead of correcting who it applies to. \
-         Errors seen: {:?}",
-        errs
+        errs[0].contains("Cannot dereference"),
+        "an owned record must still receive E409: {errs:?}"
     );
 }
