@@ -377,7 +377,7 @@ fn shared_extent_base(
     // Hop 1: the `ptr` field.  `cbgr_alloc` returns an INT-tagged address
     // (T0108) — which is also why `is_ptr()` on this slot says false.
     // SAFETY: exact heap ownership, a valid SHARED header and one complete
-    // payload Value were established by the caller.
+    // payload Value were established by the checks above.
     let carrier = unsafe { *(base_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value) };
     let addr = (carrier.bits() & crate::value::PAYLOAD_MASK) as usize;
     if addr == 0 {
