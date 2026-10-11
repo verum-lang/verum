@@ -26,21 +26,16 @@
 // 3. `Algorithm` sum-type — runtime-selectable (negotiated at wire-level).
 //
 
-// Implementations dispatch through `@intrinsic("verum.compress.*")` symbols
-// that resolve at link time to:
+// Gzip and raw DEFLATE decoding are implemented in Verum by mod_gzip. Their
+// positive output limit bounds bytes appended; decode failure preserves out.
+// Gzip.decode consumes and validates all concatenated members, refusing
+// non-member trailing bytes including zero padding. Gzip.decode_single also
+// refuses a second member.
 //
-
-// | Algorithm | Backend | Feature flag |
-// | gzip | zlib / miniz | `compress-zlib` (default) |
-// | brotli | libbrotli | `compress-brotli` |
-// | zstd | libzstd | `compress-zstd` |
-// | lz4 | liblz4 | `compress-lz4` |
-//
-
-// Absence of a feature flag → the corresponding functions return
-// `Result.Err(CompressError.UnsupportedAlgorithm)` at runtime. Core algorithm
-// surface is declared unconditionally so user code can branch on
-// `Algorithm` values without `@cfg`-guarded call sites.
+// The concrete codec encoders, zlib adapter and other compressed codecs call
+// `verum.compress.*` intrinsics without registered implementations. Reaching
+// those calls traps; these declarations do not select a system library or a
+// bundled C backend, and UnsupportedAlgorithm is not an availability probe.
 //
 
 // # Levels
@@ -127,7 +122,7 @@ implement Algorithm {
 // =============================================================================
 
 public type CompressError is
-    /// Algorithm not available (backend feature-flag not enabled).
+    /// The requested algorithm is unavailable.
     | UnsupportedAlgorithm(Algorithm)
     /// Invalid input — corrupt data, bad header, premature EOF.
     | CorruptInput(Text)
@@ -267,15 +262,7 @@ public fn encode(algo: Algorithm, input: &[Byte], level: Int, out: &mut List<Byt
 public fn decode(algo: Algorithm, input: &[Byte], max_output_bytes: Int, out: &mut List<Byte>)
     -> Result<Int, CompressError>
 {
-    // Validate max_output_bytes at the dispatch site BEFORE any
-    // intrinsic call. Without this guard a caller passing 0 or
-    // negative could trigger ambiguous backend behaviour:
-    //  * Some C zlib bindings interpret 0 as "no limit", silently
-    //  defeating the zip-bomb defence.
-    //  * Negative values are at best a wraparound trap and at worst
-    //  an unsafe cast through to a size_t parameter.
-    // Reject explicitly so the contract is enforced uniformly across
-    // every backend.
+    // Enforce the same positive output bound before selecting any algorithm.
     if max_output_bytes <= 0 {
         return Result.Err(CompressError.OutputTooLarge { limit: max_output_bytes });
     }

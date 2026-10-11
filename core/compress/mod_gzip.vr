@@ -1,8 +1,9 @@
 // =============================================================================
 // compress/mod_gzip.vr — gzip / deflate / zlib (RFC 1950/1951/1952)
 // =============================================================================
-// Backend: `compress-zlib` feature — default. Falls through to miniz-style
-// pure-C bundled sources when no system zlib is present.
+// Gzip and raw DEFLATE decoding use the bounded Verum implementation below.
+// Encoding and the zlib adapter still name unimplemented intrinsics;
+// no bundled C/miniz or system-zlib backend is selected by this module.
 // =============================================================================
 
 @arch_module(
@@ -12,6 +13,7 @@
 )
 module core.compress.mod_gzip;
 mount core.compress.{Algorithm, CompressError};
+mount core.hash.checksum.crc32.{crc32};
 
 const GZIP_DEFAULT_LEVEL: Int = 6;
 
@@ -28,10 +30,21 @@ implement Gzip {
         @intrinsic("verum.compress.gzip_encode", input, l, out)
     }
 
+    /// Validate and decode every gzip member, consuming all input. Non-member
+    /// trailing bytes, including zero padding, are refused. The positive limit
+    /// caps cumulative bytes appended. Any failure leaves out unchanged.
     public fn decode(input: &[Byte], max_output_bytes: Int, out: &mut List<Byte>)
         -> Result<Int, CompressError>
     {
-        @intrinsic("verum.compress.gzip_decode", input, max_output_bytes, out)
+        decode_gzip(input, max_output_bytes, false, out)
+    }
+
+    /// Decode exactly one complete member. A second member or any trailing byte
+    /// is refused. CRC32 and ISIZE validate framing, not publication authority.
+    public fn decode_single(input: &[Byte], max_output_bytes: Int, out: &mut List<Byte>)
+        -> Result<Int, CompressError>
+    {
+        decode_gzip(input, max_output_bytes, true, out)
     }
 }
 
@@ -48,11 +61,427 @@ implement Deflate {
         @intrinsic("verum.compress.deflate_encode", input, l, out)
     }
 
+    /// Decode one complete raw stream. Nonpositive limits and trailing bytes
+    /// are refused; failures preserve every byte already present in out.
     public fn decode(input: &[Byte], max_output_bytes: Int, out: &mut List<Byte>)
         -> Result<Int, CompressError>
     {
-        @intrinsic("verum.compress.deflate_decode", input, max_output_bytes, out)
+        if max_output_bytes <= 0 {
+            return Result.Err(CompressError.OutputTooLarge { limit: max_output_bytes });
+        }
+        let mut decoded: List<Byte> = List.new();
+        let consumed = inflate_stream(input, 0, max_output_bytes, &mut decoded)?;
+        if consumed != input.len() {
+            return Result.Err(CompressError.CorruptInput("trailing DEFLATE bytes"));
+        }
+        append_decoded(&decoded, max_output_bytes, out)
     }
+}
+
+// The reader never speculatively fetches another byte while decoding a Huffman
+// symbol. The returned byte position therefore still identifies a gzip trailer.
+type BitCursor is { byte: Int, bit: Int };
+
+fn read_bits(input: &[Byte], cursor: &mut BitCursor, width: Int)
+    -> Result<Int, CompressError>
+{
+    let mut value: Int = 0;
+    let mut i = 0;
+    while i < width {
+        if cursor.byte >= input.len() {
+            return Result.Err(CompressError.CorruptInput("truncated DEFLATE bits"));
+        }
+        let bit = ((input[cursor.byte] as Int) >> cursor.bit) & 1;
+        value = value | (bit << i);
+        cursor.bit = cursor.bit + 1;
+        if cursor.bit == 8 {
+            cursor.bit = 0;
+            cursor.byte = cursor.byte + 1;
+        }
+        i = i + 1;
+    }
+    Result.Ok(value)
+}
+
+fn align_byte(cursor: &mut BitCursor) {
+    if cursor.bit != 0 {
+        cursor.byte = cursor.byte + 1;
+        cursor.bit = 0;
+    }
+}
+
+fn ensure_room(out: &List<Byte>, count: Int, limit: Int) -> Result<(), CompressError> {
+    // Subtract only after establishing the current size is within the limit.
+    if count < 0 || out.len() > limit || count > limit - out.len() {
+        return Result.Err(CompressError.OutputTooLarge { limit: limit });
+    }
+    Result.Ok(())
+}
+
+fn append_decoded(decoded: &List<Byte>, limit: Int, out: &mut List<Byte>)
+    -> Result<Int, CompressError>
+{
+    // Decoding is transactional with respect to the caller's output. Check the
+    // actual append count, not out.len() + the potentially much larger limit.
+    if decoded.len() > Int.MAX - out.len() {
+        return Result.Err(CompressError.OutputTooLarge { limit: limit });
+    }
+    let mut i = 0;
+    while i < decoded.len() {
+        out.push(decoded[i]);
+        i = i + 1;
+    }
+    Result.Ok(decoded.len())
+}
+
+type HuffmanKind is CodeLengths | Literals | Distances;
+type Huffman is { counts: List<Int>, symbols: List<Int>, max_bits: Int };
+type HuffmanPair is { literals: Huffman, distances: Huffman };
+
+fn zero_counts(count: Int) -> List<Int> {
+    let mut values: List<Int> = List.new();
+    let mut i = 0;
+    while i < count { values.push(0); i = i + 1; }
+    values
+}
+
+fn huffman(lengths: &List<Int>, kind: HuffmanKind) -> Result<Huffman, CompressError> {
+    let mut counts = zero_counts(16);
+    let mut max_bits = 0;
+    let mut used = 0;
+    let mut i = 0;
+    while i < lengths.len() {
+        let width = lengths[i];
+        if width < 0 || width > 15 {
+            return Result.Err(CompressError.CorruptInput("invalid Huffman code length"));
+        }
+        if width != 0 {
+            counts[width] = counts[width] + 1;
+            used = used + 1;
+            if width > max_bits { max_bits = width; }
+        }
+        i = i + 1;
+    }
+    if used == 0 {
+        // A literal-only block may declare no distance codes. Trying to use
+        // that empty alphabet is still an error in read_symbol.
+        if kind is HuffmanKind.Distances {
+            return Result.Ok(Huffman { counts: counts, symbols: List.new(), max_bits: 0 });
+        }
+        return Result.Err(CompressError.CorruptInput("empty Huffman tree"));
+    }
+    let mut remaining = 1;
+    let mut width = 1;
+    while width <= 15 {
+        remaining = (remaining << 1) - counts[width];
+        if remaining < 0 {
+            return Result.Err(CompressError.CorruptInput("oversubscribed Huffman tree"));
+        }
+        width = width + 1;
+    }
+    // RFC 1951 permits one-symbol literal/distance trees with one code bit.
+    // Code-length alphabets must be complete, even when only one value occurs.
+    if remaining != 0 && ((kind is HuffmanKind.CodeLengths) || max_bits != 1 || used != 1) {
+        return Result.Err(CompressError.CorruptInput("incomplete Huffman tree"));
+    }
+    let mut offsets = zero_counts(16);
+    width = 1;
+    while width < 15 {
+        offsets[width + 1] = offsets[width] + counts[width];
+        width = width + 1;
+    }
+    let mut symbols = zero_counts(used);
+    i = 0;
+    while i < lengths.len() {
+        let bits = lengths[i];
+        if bits != 0 {
+            symbols[offsets[bits]] = i;
+            offsets[bits] = offsets[bits] + 1;
+        }
+        i = i + 1;
+    }
+    Result.Ok(Huffman { counts: counts, symbols: symbols, max_bits: max_bits })
+}
+
+fn read_symbol(input: &[Byte], cursor: &mut BitCursor, tree: &Huffman)
+    -> Result<Int, CompressError>
+{
+    let mut code = 0;
+    let mut first = 0;
+    let mut offset = 0;
+    let mut width = 1;
+    while width <= tree.max_bits {
+        code = code | read_bits(input, cursor, 1)?;
+        let count = tree.counts[width];
+        if code >= first && code - first < count {
+            return Result.Ok(tree.symbols[offset + code - first]);
+        }
+        offset = offset + count;
+        first = (first + count) << 1;
+        code = code << 1;
+        width = width + 1;
+    }
+    Result.Err(CompressError.CorruptInput("invalid Huffman symbol"))
+}
+
+fn fixed_trees() -> Result<HuffmanPair, CompressError> {
+    let mut literal_lengths: List<Int> = List.new();
+    let mut i = 0;
+    while i < 288 {
+        let width = if i < 144 { 8 } else if i < 256 { 9 } else if i < 280 { 7 } else { 8 };
+        literal_lengths.push(width);
+        i = i + 1;
+    }
+    let mut distance_lengths: List<Int> = List.new();
+    i = 0;
+    while i < 32 { distance_lengths.push(5); i = i + 1; }
+    Result.Ok(HuffmanPair {
+        literals: huffman(&literal_lengths, HuffmanKind.Literals)?,
+        distances: huffman(&distance_lengths, HuffmanKind.Distances)?,
+    })
+}
+
+const CODE_LENGTH_ORDER: [Int; 19] = [16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15];
+
+fn dynamic_trees(input: &[Byte], cursor: &mut BitCursor) -> Result<HuffmanPair, CompressError> {
+    let literal_count = read_bits(input, cursor, 5)? + 257;
+    let distance_count = read_bits(input, cursor, 5)? + 1;
+    let code_count = read_bits(input, cursor, 4)? + 4;
+    if literal_count > 286 {
+        return Result.Err(CompressError.CorruptInput("reserved literal alphabet size"));
+    }
+    let mut code_lengths = zero_counts(19);
+    let mut i = 0;
+    while i < code_count {
+        code_lengths[CODE_LENGTH_ORDER[i]] = read_bits(input, cursor, 3)?;
+        i = i + 1;
+    }
+    let code_tree = huffman(&code_lengths, HuffmanKind.CodeLengths)?;
+    let total = literal_count + distance_count; // bounded by 286 + 32
+    let mut lengths: List<Int> = List.new();
+    while lengths.len() < total {
+        let symbol = read_symbol(input, cursor, &code_tree)?;
+        if symbol <= 15 {
+            lengths.push(symbol);
+        } else {
+            let mut value = 0;
+            let copies = if symbol == 16 {
+                if lengths.is_empty() {
+                    return Result.Err(CompressError.CorruptInput("Huffman repeat has no previous length"));
+                }
+                value = lengths[lengths.len() - 1];
+                read_bits(input, cursor, 2)? + 3
+            } else if symbol == 17 {
+                read_bits(input, cursor, 3)? + 3
+            } else {
+                read_bits(input, cursor, 7)? + 11
+            };
+            if copies > total - lengths.len() {
+                return Result.Err(CompressError.CorruptInput("Huffman repeat exceeds alphabet"));
+            }
+            let mut copied = 0;
+            while copied < copies { lengths.push(value); copied = copied + 1; }
+        }
+    }
+    if lengths[256] == 0 {
+        return Result.Err(CompressError.CorruptInput("missing DEFLATE end-of-block code"));
+    }
+    let mut literal_lengths: List<Int> = List.new();
+    let mut distance_lengths: List<Int> = List.new();
+    i = 0;
+    while i < literal_count { literal_lengths.push(lengths[i]); i = i + 1; }
+    while i < total { distance_lengths.push(lengths[i]); i = i + 1; }
+    Result.Ok(HuffmanPair {
+        literals: huffman(&literal_lengths, HuffmanKind.Literals)?,
+        distances: huffman(&distance_lengths, HuffmanKind.Distances)?,
+    })
+}
+
+fn inflate_codes(input: &[Byte], cursor: &mut BitCursor, trees: &HuffmanPair,
+                 history_start: Int, limit: Int, out: &mut List<Byte>)
+    -> Result<(), CompressError>
+{
+    loop {
+        let symbol = read_symbol(input, cursor, &trees.literals)?;
+        if symbol < 256 {
+            ensure_room(out, 1, limit)?;
+            out.push(symbol as Byte);
+        } else if symbol == 256 {
+            return Result.Ok(());
+        } else {
+            if symbol > 285 {
+                return Result.Err(CompressError.CorruptInput("reserved DEFLATE length code"));
+            }
+            let count = if symbol <= 264 { symbol - 254 }
+                        else if symbol == 285 { 258 }
+                        else {
+                            let group = symbol - 265;
+                            let extra = group / 4 + 1;
+                            (1 << (extra + 2)) + 3 + ((group % 4) << extra)
+                                + read_bits(input, cursor, extra)?
+                        };
+            let distance_symbol = read_symbol(input, cursor, &trees.distances)?;
+            if distance_symbol > 29 {
+                return Result.Err(CompressError.CorruptInput("reserved DEFLATE distance code"));
+            }
+            let distance = if distance_symbol < 4 { distance_symbol + 1 }
+                           else {
+                               let extra = distance_symbol / 2 - 1;
+                               (1 << (extra + 1)) + 1 + ((distance_symbol & 1) << extra)
+                                   + read_bits(input, cursor, extra)?
+                           };
+            if distance > 32768 || distance > out.len() - history_start {
+                return Result.Err(CompressError.CorruptInput("DEFLATE distance exceeds member history"));
+            }
+            ensure_room(out, count, limit)?;
+            let mut copied = 0;
+            while copied < count {
+                // Recompute from the growing output: overlap is part of LZ77,
+                // and a slice copy would give the wrong answer for distance 1.
+                let byte = out[out.len() - distance];
+                out.push(byte);
+                copied = copied + 1;
+            }
+        }
+    }
+}
+
+fn inflate_stream(input: &[Byte], start: Int, limit: Int, out: &mut List<Byte>)
+    -> Result<Int, CompressError>
+{
+    let mut cursor = BitCursor { byte: start, bit: 0 };
+    let history_start = out.len();
+    let mut final_block = false;
+    while !final_block {
+        final_block = read_bits(input, &mut cursor, 1)? != 0;
+        let kind = read_bits(input, &mut cursor, 2)?;
+        if kind == 0 {
+            align_byte(&mut cursor);
+            let count = read_bits(input, &mut cursor, 16)?;
+            let complement = read_bits(input, &mut cursor, 16)?;
+            if (count ^ complement) != 65535 {
+                return Result.Err(CompressError.CorruptInput("invalid stored DEFLATE length"));
+            }
+            if count > input.len() - cursor.byte {
+                return Result.Err(CompressError.CorruptInput("truncated stored DEFLATE block"));
+            }
+            ensure_room(out, count, limit)?;
+            let mut i = 0;
+            while i < count {
+                out.push(input[cursor.byte]);
+                cursor.byte = cursor.byte + 1;
+                i = i + 1;
+            }
+        } else if kind == 1 || kind == 2 {
+            let trees = if kind == 1 { fixed_trees()? } else { dynamic_trees(input, &mut cursor)? };
+            inflate_codes(input, &mut cursor, &trees, history_start, limit, out)?;
+        } else {
+            return Result.Err(CompressError.CorruptInput("reserved DEFLATE block kind"));
+        }
+    }
+    align_byte(&mut cursor);
+    Result.Ok(cursor.byte)
+}
+
+fn require_bytes(input: &[Byte], position: Int, count: Int) -> Result<(), CompressError> {
+    if position < 0 || position > input.len() || count < 0 || count > input.len() - position {
+        return Result.Err(CompressError.CorruptInput("truncated gzip member"));
+    }
+    Result.Ok(())
+}
+
+fn read_le16(input: &[Byte], position: Int) -> Result<Int, CompressError> {
+    require_bytes(input, position, 2)?;
+    Result.Ok((input[position] as Int) | ((input[position + 1] as Int) << 8))
+}
+
+fn read_le32(input: &[Byte], position: Int) -> Result<UInt32, CompressError> {
+    require_bytes(input, position, 4)?;
+    let mut value: UInt32 = 0_u32;
+    let mut i = 0;
+    while i < 4 {
+        value = value | ((input[position + i] as UInt32) << (i * 8));
+        i = i + 1;
+    }
+    Result.Ok(value)
+}
+
+fn skip_zero_terminated(input: &[Byte], start: Int) -> Result<Int, CompressError> {
+    let mut position = start;
+    while position < input.len() {
+        let byte = input[position];
+        position = position + 1;
+        if byte == 0_u8 { return Result.Ok(position); }
+    }
+    Result.Err(CompressError.CorruptInput("unterminated gzip header field"))
+}
+
+fn gzip_header(input: &[Byte], start: Int) -> Result<Int, CompressError> {
+    require_bytes(input, start, 10)?;
+    if input[start] != 31_u8 || input[start + 1] != 139_u8 {
+        return Result.Err(CompressError.CorruptInput("invalid gzip magic"));
+    }
+    if input[start + 2] != 8_u8 {
+        return Result.Err(CompressError.CorruptInput("unsupported gzip compression method"));
+    }
+    let flags = input[start + 3] as Int;
+    if (flags & 224) != 0 {
+        return Result.Err(CompressError.CorruptInput("reserved gzip flags"));
+    }
+    // MTIME, XFL, OS and the FTEXT hint do not alter decoded bytes.
+    let mut position = start + 10;
+    if (flags & 4) != 0 {
+        let count = read_le16(input, position)?;
+        position = position + 2;
+        require_bytes(input, position, count)?;
+        position = position + count;
+    }
+    if (flags & 8) != 0 { position = skip_zero_terminated(input, position)?; }
+    if (flags & 16) != 0 { position = skip_zero_terminated(input, position)?; }
+    if (flags & 2) != 0 {
+        let expected = read_le16(input, position)?;
+        let actual = (crc32(&input[start..position]) & 65535_u32) as Int;
+        if actual != expected {
+            return Result.Err(CompressError.CorruptInput("gzip header CRC16 mismatch"));
+        }
+        position = position + 2;
+    }
+    Result.Ok(position)
+}
+
+fn decode_gzip(input: &[Byte], limit: Int, single_member: Bool, out: &mut List<Byte>)
+    -> Result<Int, CompressError>
+{
+    if limit <= 0 {
+        return Result.Err(CompressError.OutputTooLarge { limit: limit });
+    }
+    if input.is_empty() {
+        return Result.Err(CompressError.CorruptInput("missing gzip member"));
+    }
+    let mut decoded: List<Byte> = List.new();
+    let mut position = 0;
+    while position < input.len() {
+        let payload_start = gzip_header(input, position)?;
+        let history_start = decoded.len();
+        let trailer = inflate_stream(input, payload_start, limit, &mut decoded)?;
+        require_bytes(input, trailer, 8)?;
+        let expected_crc = read_le32(input, trailer)?;
+        let expected_size = read_le32(input, trailer + 4)?;
+        let actual_crc = crc32(&decoded[history_start..decoded.len()]);
+        if actual_crc != expected_crc {
+            return Result.Err(CompressError.CorruptInput("gzip CRC32 mismatch"));
+        }
+        // ISIZE is the member's expanded size modulo 2^32, not the aggregate.
+        let actual_size = ((decoded.len() - history_start) & 4294967295) as UInt32;
+        if actual_size != expected_size {
+            return Result.Err(CompressError.CorruptInput("gzip ISIZE mismatch"));
+        }
+        position = trailer + 8;
+        if single_member && position != input.len() {
+            return Result.Err(CompressError.CorruptInput("trailing bytes after single gzip member"));
+        }
+    }
+    append_decoded(&decoded, limit, out)
 }
 
 /// zlib container (RFC 1950) — deflate + 2-byte header + 4-byte Adler-32.
