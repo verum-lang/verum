@@ -1,0 +1,257 @@
+{
+  "tasks": [
+    "T1744",
+    "T1747",
+    "T1749"
+  ],
+  "source_commit": "abfb5fc88374eadce2ebcbbbc36235149ef5c2cb",
+  "build_kind": "consumer-cli-with-explicit-reused-stdlib",
+  "build_seconds": 277.902,
+  "build_manifest_sha256": "4529dd07859ad0fc6a1d10504ad1fbde8a91433c5544a370774be31086afb691",
+  "source_bindings_verified": 5388,
+  "cli": {
+    "bytes": 548275272,
+    "path": "/private/tmp/verum-T1749-descriptor-consumer-cli/verum-consumer-abfb5fc88",
+    "sha256": "0c81394ec687520e196fa96b31b39a5547e2fcc62e9879ce2855eba46c45ebb7"
+  },
+  "stdlib_producer": "7a8c86f90a493a3b7352359314fc5f0d628aaa1b",
+  "artifacts": {
+    "runtime.core_metadata": {
+      "bytes": 118793446,
+      "sha256": "7f021e1463de5414d9c7d84228357485e7db68c7aa9f5bb521cf550eff471acf"
+    },
+    "runtime.symbol_graph": {
+      "bytes": 6995428,
+      "sha256": "e44ff2b708e0c36d89b1567284fafd6146b36ede30ad520b0bdffd0035c8d27a"
+    },
+    "runtime.vbca": {
+      "bytes": 40545239,
+      "sha256": "48d2cd1e07ac1cbbe5cb74eadcaf37ba84523d1dc99f68ddcc9eb067a8986d78"
+    },
+    "runtime.vbca.checksum": {
+      "bytes": 64,
+      "sha256": "603d89a857d4d0eb6a7ef9180545ccb94eb30009e0cc11ec401c78d75bfb5833"
+    },
+    "runtime.vbca.schema": {
+      "bytes": 40,
+      "sha256": "1c3b3d0a7b02c7c0f4001b49068bc4a69cd1ce368a547335fbf4186391971e4c"
+    }
+  },
+  "runs": {
+    "options": {
+      "seconds": 99.875,
+      "returncode": 0,
+      "status": "passed",
+      "stdout": "semver-options: 14 passed\n",
+      "source_sha256": "56efdfde59d863414287e0b72e8bc322119237c7bf269145b9b0a01959b96666",
+      "result_sha256": "499dcc6b4d286781a7b180d39453b3c995b86477b275ebe94c1e36c5561e8920"
+    },
+    "map": {
+      "seconds": 86.772,
+      "returncode": 1,
+      "status": "failed",
+      "stdout": "map-read: ok\n",
+      "source_sha256": "1e8d82f8bf49013bc97d1579234acbb225b951fdc8709e614d808cfe514e4d0b",
+      "result_sha256": "5cb668d222486db8f4ac9a0c3abe336e8eb19dca966d24fcf92cc0c2af732c89"
+    }
+  },
+  "files": {
+    "build/build-manifest.json.gz": {
+      "original": "/private/tmp/verum-T1749-descriptor-consumer-cli/build-manifest.json",
+      "bytes": 654796,
+      "sha256": "4529dd07859ad0fc6a1d10504ad1fbde8a91433c5544a370774be31086afb691",
+      "gzip_bytes": 262068,
+      "gzip_sha256": "44b43c7c0e4e32ff8e41d3091992c5feaa16816300b583bdae8c594f27f10856"
+    },
+    "build/started.json.gz": {
+      "original": "/private/tmp/verum-T1749-descriptor-consumer-cli/started.json",
+      "bytes": 652899,
+      "sha256": "e5815521b364f2011a62f297ff2dce7c9b9bc74ba202719cd3b4386ea15cf341",
+      "gzip_bytes": 261684,
+      "gzip_sha256": "3c6f16708106e3bbf443a767fc2fa7003fe000ec06b9456160fae63a733b83c8"
+    },
+    "build/reviewed-plan.json.gz": {
+      "original": "/private/tmp/verum-T1749-descriptor-consumer-cli/reviewed-plan.json",
+      "bytes": 1728,
+      "sha256": "40774d522b960c37557b82385f309e478b803b900ee478539fc3231503024227",
+      "gzip_bytes": 611,
+      "gzip_sha256": "ccf250ce4d2ac97bfaa45be1d677ecd68f0b92a6c82dc1ee6c059dbdf3f6eadf"
+    },
+    "build/runner.py.gz": {
+      "original": "/private/tmp/verum-T1749-descriptor-consumer-cli/runner.py",
+      "bytes": 14388,
+      "sha256": "21bc3d3889a3b0c9352bde13abf63b606ad09c5bf74f9b240b3843f18ad04439",
+      "gzip_bytes": 4655,
+      "gzip_sha256": "b0f97b7bd47870f6927c1a987a184ff4e944d94e33ceb0874e0b5a33e094c10e"
+    },
+    "build/source-hashes.json.gz": {
+      "original": "/private/tmp/verum-T1749-descriptor-consumer-cli/source-hashes.json",
+      "bytes": 635133,
+      "sha256": "d4616d63424aa835e89ecf36b74e4b5d104ef7848ae4755e5ff28aca7a996d9e",
+      "gzip_bytes": 258138,
+      "gzip_sha256": "fa0f64d065b880714f6b699f4cfa3cd060ad75bac6d8c1dc2d57c3834df8ae16"
+    },
+    "build/stage23-build-manifest.json.gz": {
+      "original": "/private/tmp/verum-T1749-descriptor-consumer-cli/stage23-build-manifest.json",
+      "bytes": 651160,
+      "sha256": "3df266cba9190c9d201e03cb51404b28a1d1864f784d32e18421d6fb2083faef",
+      "gzip_bytes": 260423,
+      "gzip_sha256": "eea94be1411bf95c876e0ff9c53b4d2e329383086e13a522ac1794f13e883b70"
+    },
+    "build/prior-consumer-build-manifest.json.gz": {
+      "original": "/private/tmp/verum-T1749-descriptor-consumer-cli/prior-consumer-build-manifest.json",
+      "bytes": 654349,
+      "sha256": "c9526885a7b5de1882331064085a05cae3cda881debe31dff4e83b2f47466cf8",
+      "gzip_bytes": 261940,
+      "gzip_sha256": "717faf7fc96f59591706ec703317f5b33b3666788732905e941877e0b2c8d9cc"
+    },
+    "build/stdout.log.gz": {
+      "original": "/private/tmp/verum-T1749-descriptor-consumer-cli/stdout.log",
+      "bytes": 1070355,
+      "sha256": "cbb6a0541eb574b05e42e2865eeddea31b70d4bfcb466ca0119ccade831ee5da",
+      "gzip_bytes": 71606,
+      "gzip_sha256": "638e2ef60d4b118a173479776dc356dc16408c4fac05734dcb28e7e0989dd554"
+    },
+    "build/stderr.log.gz": {
+      "original": "/private/tmp/verum-T1749-descriptor-consumer-cli/stderr.log",
+      "bytes": 535397,
+      "sha256": "0ce6eab02988e97040d45bfa000fa0a9d921f9fdf0722fa06854ec5d9a3c2a49",
+      "gzip_bytes": 75643,
+      "gzip_sha256": "04ccdea8529bfe36bc9b850ec5227a30e35536d7ce9a7ee723bc07c32cd0c905"
+    },
+    "build/local-cargo-artifacts.json.gz": {
+      "original": "/private/tmp/verum-T1749-descriptor-consumer-cli/local-cargo-artifacts.json",
+      "bytes": 47933,
+      "sha256": "41d0251ebb4391418ac151bc255d8701b5e9c65173eca8c32a751b0df27a176d",
+      "gzip_bytes": 2727,
+      "gzip_sha256": "7acadb4c566427ef12077c877b03d9459d2e6a2ca35f9ca02d6ff829762d7370"
+    },
+    "options/result.json.gz": {
+      "original": "/private/tmp/verum-T1749-unchanged-options-consumer/result.json",
+      "bytes": 1858,
+      "sha256": "499dcc6b4d286781a7b180d39453b3c995b86477b275ebe94c1e36c5561e8920",
+      "gzip_bytes": 992,
+      "gzip_sha256": "b9ca24052e4154da17ee631c15967b3fffe54a53dce1606d00d919d7dae15668"
+    },
+    "options/started.json.gz": {
+      "original": "/private/tmp/verum-T1749-unchanged-options-consumer/started.json",
+      "bytes": 1536,
+      "sha256": "48a0be28846cb54b66b2d4146b9275a785c00ac0dad4c1db9f2592f5780e5d73",
+      "gzip_bytes": 826,
+      "gzip_sha256": "3e2b2b94be2d9472fd77631bf58058a57d6c911635ff560802ddd124da7d0107"
+    },
+    "options/runner.py.gz": {
+      "original": "/private/tmp/verum-T1749-unchanged-options-consumer/runner.py",
+      "bytes": 7522,
+      "sha256": "3b428f32a4202c0545cfa386ffe6402801c6a70a43fefd737f084edecacd3a40",
+      "gzip_bytes": 2876,
+      "gzip_sha256": "17f474773b4072a10147a8b21f3a9471c34ec4cd4e464ac30554dc3a14bcc86e"
+    },
+    "options/baseline-result.json.gz": {
+      "original": "/private/tmp/verum-T1749-unchanged-options-consumer/baseline-result.json",
+      "bytes": 7215,
+      "sha256": "4e6f79e301b26be528c195b989e786cf54d2100cad82f3febfab6b64b266b6e2",
+      "gzip_bytes": 2941,
+      "gzip_sha256": "138c8f7bbf3ca158623c8138c0199dca1a88d806223bf66bbf3c90ba47fb454c"
+    },
+    "options/prior-consumer-result.json.gz": {
+      "original": "/private/tmp/verum-T1749-unchanged-options-consumer/prior-consumer-result.json",
+      "bytes": 1733,
+      "sha256": "97439255abad0bc8dd60dd7067c4d88eb1ed633a9a280c6716ee0216d957d132",
+      "gzip_bytes": 936,
+      "gzip_sha256": "a699b0ade1f3803d9ff3f555199579c9292e26c1f428fd41d59ab8f25c82335a"
+    },
+    "options/expected.stdout.gz": {
+      "original": "/private/tmp/verum-T1749-unchanged-options-consumer/expected.stdout",
+      "bytes": 26,
+      "sha256": "7b5bc82ecc853d4051141aa7ca30a9eb8daf4c178172f99b3c452dbfc0b580a9",
+      "gzip_bytes": 46,
+      "gzip_sha256": "b135f3e20e996b60c3be64e8828e31d90da57fd222a594b89d0fa1c040dab8ab"
+    },
+    "options/stdout.log.gz": {
+      "original": "/private/tmp/verum-T1749-unchanged-options-consumer/stdout.log",
+      "bytes": 26,
+      "sha256": "7b5bc82ecc853d4051141aa7ca30a9eb8daf4c178172f99b3c452dbfc0b580a9",
+      "gzip_bytes": 46,
+      "gzip_sha256": "b135f3e20e996b60c3be64e8828e31d90da57fd222a594b89d0fa1c040dab8ab"
+    },
+    "options/stderr.log.gz": {
+      "original": "/private/tmp/verum-T1749-unchanged-options-consumer/stderr.log",
+      "bytes": 98,
+      "sha256": "20430ce2a39eaba125f932193b568443355c34ec4dd641c6e1112002046177c9",
+      "gzip_bytes": 105,
+      "gzip_sha256": "94f2dfa413aeaf44c463064cd12c5151c6f923d2208473d7763e5157c5aa07e3"
+    },
+    "options/source.vr.gz": {
+      "original": "/private/tmp/verum-T1749-unchanged-options-consumer/runtime/options.vr",
+      "bytes": 6262,
+      "sha256": "56efdfde59d863414287e0b72e8bc322119237c7bf269145b9b0a01959b96666",
+      "gzip_bytes": 1452,
+      "gzip_sha256": "3d7178ab9fc090e610c79f0c88bec33f8f7d9956c0f2e97d97356cf576013098"
+    },
+    "map/result.json.gz": {
+      "original": "/private/tmp/verum-T1749-unchanged-map-consumer/result.json",
+      "bytes": 1833,
+      "sha256": "5cb668d222486db8f4ac9a0c3abe336e8eb19dca966d24fcf92cc0c2af732c89",
+      "gzip_bytes": 989,
+      "gzip_sha256": "4283c8f7f4136aa56270077d1f9e345509aaa5682425d9830cfe4ee2d4e705c4"
+    },
+    "map/started.json.gz": {
+      "original": "/private/tmp/verum-T1749-unchanged-map-consumer/started.json",
+      "bytes": 1510,
+      "sha256": "2020222ae33fee91d1e081c7f399030c22062c3fe0d5f02274a438d14137ed2e",
+      "gzip_bytes": 823,
+      "gzip_sha256": "6e9f0dc6106fef6673604f8c1e2bccdb6f7dd6bd6ab2b04ddf60597645afb526"
+    },
+    "map/runner.py.gz": {
+      "original": "/private/tmp/verum-T1749-unchanged-map-consumer/runner.py",
+      "bytes": 7522,
+      "sha256": "3b428f32a4202c0545cfa386ffe6402801c6a70a43fefd737f084edecacd3a40",
+      "gzip_bytes": 2876,
+      "gzip_sha256": "17f474773b4072a10147a8b21f3a9471c34ec4cd4e464ac30554dc3a14bcc86e"
+    },
+    "map/baseline-result.json.gz": {
+      "original": "/private/tmp/verum-T1749-unchanged-map-consumer/baseline-result.json",
+      "bytes": 2958,
+      "sha256": "ca35f2da56ee28a439008f2ae0b670d8ead7a2552536159f49d0f7bc3fa11a67",
+      "gzip_bytes": 1420,
+      "gzip_sha256": "43b088b4467518ff71a0b71552fb0aa02741e729efb0c729300f11ec7f80af6b"
+    },
+    "map/prior-consumer-result.json.gz": {
+      "original": "/private/tmp/verum-T1749-unchanged-map-consumer/prior-consumer-result.json",
+      "bytes": 1707,
+      "sha256": "df18033be70f04bbc7d63e138798a456b145905e250cfd75546fc43dfd0be780",
+      "gzip_bytes": 929,
+      "gzip_sha256": "a819a7aad8a4dee6a8a70c081ebabd6639d1bdfac379acef8ce06672f1af6948"
+    },
+    "map/expected.stdout.gz": {
+      "original": "/private/tmp/verum-T1749-unchanged-map-consumer/expected.stdout",
+      "bytes": 28,
+      "sha256": "5ab11b5a7765bb1e232c7b92ae700316be267f80010f2457a3090f486aa71c09",
+      "gzip_bytes": 43,
+      "gzip_sha256": "3679cb4982339af8cc5fde35b4c7309c64fe979a49cdb27cfab8f1bc9bd31f8f"
+    },
+    "map/stdout.log.gz": {
+      "original": "/private/tmp/verum-T1749-unchanged-map-consumer/stdout.log",
+      "bytes": 13,
+      "sha256": "32bd0b6f4e1006c5878c035eeac3fcb8e57095968491937183d7597f6a7ce903",
+      "gzip_bytes": 33,
+      "gzip_sha256": "95d6ade0a2e4be79a7dba339cd52aabcbde0bcd295753f20a67d2c510fa1a2e8"
+    },
+    "map/stderr.log.gz": {
+      "original": "/private/tmp/verum-T1749-unchanged-map-consumer/stderr.log",
+      "bytes": 332,
+      "sha256": "6f5ac2e370602fe81389c0ed002abe5400073cc43f1811b65515e2a533da71d4",
+      "gzip_bytes": 272,
+      "gzip_sha256": "526a45e23a174f06234649a159f5419141d3e62b895f8fd9f7420650ead13cf1"
+    },
+    "map/source.vr.gz": {
+      "original": "/private/tmp/verum-T1749-unchanged-map-consumer/runtime/map.vr",
+      "bytes": 1424,
+      "sha256": "1e8d82f8bf49013bc97d1579234acbb225b951fdc8709e614d808cfe514e4d0b",
+      "gzip_bytes": 560,
+      "gzip_sha256": "eda4c8e4fac9e98607c41ce18e084403b8d81a539205ee159f7f98de330534e8"
+    }
+  },
+  "scope": "Verified rebuilt consumer with unchanged source/oracles. SemVer options passes all14. Map concrete read succeeds; mutation fails in Map.get_mut on a Unit descriptor. No mutation/copy isolation, fresh automatic bake, full registry, durable publication or AOT acceptance."
+}

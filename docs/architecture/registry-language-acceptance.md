@@ -1119,8 +1119,16 @@ and the initial Rust compilation failure. The corrected source passes all
 tests. The final source, retained executables and five Stage23 artifacts are
 bound by exact hashes.
 
-These checks establish source/wire/bootstrap descriptor assembly and strict
-finalization. They do not establish acceptance of the actual Stage23 carrier
-or unchanged ordinary SemVer options/Map execution. No fresh standard-library
-bake, general conflicting-record schema validation, or AOT acceptance is
+The [rebuilt consumer replay](evidence/registry-consumer-replays/text-coherence/README.md)
+at `abfb5fc88` passes all 14 unchanged SemVer options with exact output.
+The unchanged Map probe prints its concrete read oracle, then fails in
+`Map.get_mut@pc=118`: field index 2 is read from a zero-size `Unit` value.
+Its mutation oracle remains unmet. This runtime blocker is separate from
+the resolved E103 checker failure and Text descriptor collision, and from
+the original prepared-copy allocation-guard failure.
+
+The main-based integration checks also pass all nine compiler archive-identity
+controls and 19 Text controls; the borrowed-payload checker previously passed
+all 15 main-based controls. No fresh standard-library bake, general conflicting
+record-schema validation, Map mutation, whole-registry or AOT acceptance is
 claimed by this slice.
