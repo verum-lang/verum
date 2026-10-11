@@ -22,7 +22,7 @@ fn declaration(owner: &str) -> VbcModule {
     declaration_with_protocol(owner, "")
 }
 
-fn declaration_with_protocol(owner: &str, protocol: &str) -> VbcModule {
+fn declaration_ast(owner: &str, protocol: &str) -> verum_ast::Module {
     // Keep the exact production record and module declaration. Only the
     // negative twins change the declaring module; the test methods are local.
     let source = TEXT_SOURCE.replace("module core.text.text;", &format!("module {owner};"));
@@ -47,8 +47,12 @@ fn declaration_with_protocol(owner: &str, protocol: &str) -> VbcModule {
             .expect("parse record protocol")
             .items,
     );
+    ast
+}
+
+fn declaration_with_protocol(owner: &str, protocol: &str) -> VbcModule {
     let module = VbcCodegen::with_config(CodegenConfig::new(owner))
-        .compile_module(&ast)
+        .compile_module(&declaration_ast(owner, protocol))
         .expect("compile production Text declaration");
     let record = text(&module, Some(owner));
     assert_eq!(record.kind, TypeKind::Record);
@@ -256,6 +260,12 @@ fn bootstrap_dependency_keeps_canonical_text_identity() {
     assert_eq!(text(&wire(&imported), Some(OWNER)).id, TypeId::TEXT);
 }
 
+fn strict_codegen(name: &str) -> VbcCodegen {
+    let mut config = CodegenConfig::new(name);
+    config.strict_codegen = true;
+    VbcCodegen::with_config(config)
+}
+
 const LOCAL_PROTOCOL: &str = "type DeclaredOnly is protocol { type Output; }; \
     implement DeclaredOnly for Text { type Output = Int; }";
 const EXTENSION_SOURCE: &str = "module text_extension; type ExtensionOnly is protocol { type Output; }; \
@@ -373,14 +383,18 @@ fn source_extension_attaches_to_an_imported_canonical_record() {
     let ast = Parser::new(EXTENSION_SOURCE)
         .parse_module()
         .expect("parse source attachment");
-    let mut codegen = VbcCodegen::with_config(CodegenConfig::new("text_extension"));
+    let mut codegen = strict_codegen("text_extension");
     codegen.import_archive_module_types(&source);
     codegen
         .collect_unit_declarations(&[&ast])
         .expect("collect Text implementation");
-    let module = codegen
+    let before = codegen
         .compile_function_bodies(&ast)
-        .expect("finalize source attachment");
+        .expect("compile source attachment");
+    assert_record_and_extensions(&before);
+    let module = codegen
+        .finalize_module()
+        .expect("strict source attachment finalization");
     assert_record_and_extensions(&module);
     assert_record_and_extensions(&wire(&module));
 }
@@ -391,7 +405,7 @@ fn bootstrap_and_carrier(carrier_first: bool) {
     let ast = Parser::new(
         "module consumer; mount core.text.text.Text; public fn relay(value: Text) -> Text { value }"
     ).parse_module().expect("parse bootstrap declaration consumer");
-    let mut codegen = VbcCodegen::with_config(CodegenConfig::new("consumer"));
+    let mut codegen = strict_codegen("consumer");
     if carrier_first {
         codegen.import_archive_module_types(&carrier);
     }
@@ -404,9 +418,13 @@ fn bootstrap_and_carrier(carrier_first: bool) {
     codegen
         .collect_unit_declarations(&[&ast])
         .expect("collect bootstrap consumer");
-    let module = codegen
+    let before = codegen
         .compile_function_bodies(&ast)
-        .expect("finalize bootstrap coexistence");
+        .expect("compile bootstrap coexistence");
+    assert_record_and_extensions(&before);
+    let module = codegen
+        .finalize_module()
+        .expect("strict bootstrap coexistence finalization");
     assert_record_and_extensions(&module);
     assert_record_and_extensions(&wire(&module));
 }
@@ -423,10 +441,14 @@ fn primitive_extension_then_bootstrap_record_preserves_all_protocols() {
 
 #[test]
 fn later_bootstrap_carrier_preserves_record_authority_and_resolved_drop_glue() {
-    let source = wire(&declaration_with_protocol(
-        OWNER,
-        "type Drop is protocol { fn drop(&mut self); }; implement Drop for Text { fn drop(&mut self) {} }",
-    ));
+    let mut producer = VbcCodegen::with_config(CodegenConfig::new(OWNER));
+    let source = wire(&producer.compile_module(&declaration_ast(OWNER,
+        "type Drop is protocol { fn drop(&mut self); }; implement Drop for Text { fn drop(&mut self) {} }"
+    )).expect("compile declared Drop body"));
+    assert!(
+        text(&source, Some(OWNER)).drop_fn.is_some(),
+        "source has declared Drop glue"
+    );
     let carrier = wire(&extension());
     let record_ast = Parser::new("module consumer; mount core.text.text.Text;")
         .parse_module()
@@ -434,10 +456,28 @@ fn later_bootstrap_carrier_preserves_record_authority_and_resolved_drop_glue() {
     let carrier_ast = Parser::new("module consumer; mount text_extension.Text;")
         .parse_module()
         .expect("parse carrier bootstrap mount");
-    let mut codegen = VbcCodegen::with_config(CodegenConfig::new("consumer"));
+    let mut codegen = strict_codegen("consumer");
+    // Bootstrap resolves source glue through the real declaration registry.
+    codegen.import_functions(&producer.export_functions());
     codegen
         .import_bootstrap_nominal_dependencies(&[&record_ast], &[&source])
         .expect("import declared record with drop glue");
+    let remap = source
+        .functions
+        .iter()
+        .map(|function| {
+            let leaf = source
+                .get_string(function.name)
+                .expect("source function name");
+            let qualified = format!("{OWNER}.{leaf}");
+            let info = codegen
+                .ctx_mut()
+                .lookup_function(&qualified)
+                .expect("declared source registry identity");
+            (function.id.0, info.id)
+        })
+        .collect();
+    codegen.merge_archive_function_bodies(&source, &remap);
     let before = codegen
         .finalize_module_from_state()
         .expect("record snapshot");
@@ -460,6 +500,33 @@ fn later_bootstrap_carrier_preserves_record_authority_and_resolved_drop_glue() {
     assert_eq!(record.clone_fn, before_record.clone_fn);
     assert_eq!(record.fields.len(), 3);
     assert_eq!(record.declared_layout, before_record.declared_layout);
+    let mut names: List<Text> = record
+        .protocols
+        .iter()
+        .map(|implementation| {
+            let protocol = after
+                .get_type(TypeId(implementation.protocol.0))
+                .expect("carried protocol");
+            let name = after.get_string(protocol.name).expect("protocol name");
+            if name == "ExtensionOnly" {
+                assert_eq!(implementation.associated_types.len(), 1);
+                assert_eq!(
+                    after.get_string(implementation.associated_types[0].0),
+                    Some("Output")
+                );
+                assert_eq!(
+                    implementation.associated_types[0].1,
+                    verum_vbc::types::TypeRef::Concrete(TypeId::BYTE)
+                );
+            }
+            name.into()
+        })
+        .collect();
+    names.sort();
+    assert_eq!(
+        names.as_slice(),
+        &[Text::from("Drop"), Text::from("ExtensionOnly")]
+    );
     assert_eq!(
         after
             .types
@@ -468,4 +535,115 @@ fn later_bootstrap_carrier_preserves_record_authority_and_resolved_drop_glue() {
             .count(),
         1
     );
+}
+
+fn glue_carrier() -> VbcModule {
+    let source = format!(
+        "{EXTENSION_SOURCE} type Drop is protocol {{ fn drop(&mut self); }}; \
+        implement Drop for Text {{ fn drop(&mut self) {{}} }}"
+    );
+    let ast = Parser::new(&source)
+        .parse_module()
+        .expect("parse real carrier Drop");
+    let module = wire(
+        &VbcCodegen::with_config(CodegenConfig::new("text_extension"))
+            .compile_module(&ast)
+            .expect("compile glue-bearing carrier"),
+    );
+    assert!(
+        text(&module, Some("text_extension")).drop_fn.is_some(),
+        "raw carrier claims real source glue"
+    );
+    module
+}
+
+fn conflicting_glue(reverse: bool, bootstrap: bool) {
+    let record = wire(&declaration(OWNER));
+    let carrier = glue_carrier();
+    let mut codegen = strict_codegen("consumer");
+    if bootstrap {
+        // Deliberately do not import the producer function registry. An
+        // unresolved original glue ID must not become proof of its absence.
+        let record_ast = Parser::new("module consumer; mount core.text.text.Text;")
+            .parse_module()
+            .unwrap();
+        let carrier_ast = Parser::new("module consumer; mount text_extension.Text;")
+            .parse_module()
+            .unwrap();
+        let sequence = if reverse {
+            [(&carrier_ast, &carrier), (&record_ast, &record)]
+        } else {
+            [(&record_ast, &record), (&carrier_ast, &carrier)]
+        };
+        for (ast, source) in sequence {
+            codegen
+                .import_bootstrap_nominal_dependencies(&[ast], &[source])
+                .expect("bootstrap raw claim");
+        }
+    } else {
+        let sequence = if reverse {
+            [&carrier, &record]
+        } else {
+            [&record, &carrier]
+        };
+        for source in sequence {
+            codegen.import_archive_module_types(source);
+        }
+    }
+    let error = codegen
+        .finalize_module()
+        .expect_err("independent raw glue is not implementation-only");
+    assert!(error.to_string().contains("duplicate TypeId(4)"), "{error}");
+}
+
+#[test]
+fn raw_glue_carrier_then_canonical_record_remains_a_conflict() {
+    conflicting_glue(true, false);
+}
+#[test]
+fn canonical_record_then_raw_glue_carrier_remains_a_conflict() {
+    conflicting_glue(false, false);
+}
+#[test]
+fn unresolved_bootstrap_glue_then_canonical_record_remains_a_conflict() {
+    conflicting_glue(true, true);
+}
+#[test]
+fn canonical_record_then_unresolved_bootstrap_glue_remains_a_conflict() {
+    conflicting_glue(false, true);
+}
+
+#[test]
+fn carrier_eligibility_survives_finalize_and_clears_on_codegen_reset() {
+    let record = wire(&declaration_with_protocol(OWNER, LOCAL_PROTOCOL));
+    let bad_carrier = glue_carrier();
+    let carrier = wire(&extension());
+    let mut codegen = strict_codegen("consumer");
+    codegen.import_archive_module_types(&bad_carrier);
+    // The take/rebuild at finalization must retain the original denial.
+    codegen
+        .finalize_module()
+        .expect("one carrier alone has no collision");
+    codegen.import_archive_module_types(&record);
+    assert!(
+        codegen.finalize_module().is_err(),
+        "finalization lost raw eligibility"
+    );
+    let empty = Parser::new("module consumer; public fn noop() {}")
+        .parse_module()
+        .unwrap();
+    codegen
+        .compile_module(&empty)
+        .expect("new compilation resets descriptor state");
+    for source in [&carrier, &record] {
+        codegen.import_archive_module_types(source);
+    }
+    let output = codegen
+        .finalize_module()
+        .expect("old slot denial must not poison a new compilation");
+    assert_record_and_extensions(&output);
+    let again = codegen
+        .finalize_module()
+        .expect("repeated runtime finalization");
+    assert_record_and_extensions(&again);
 }
