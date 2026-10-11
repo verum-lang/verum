@@ -5570,6 +5570,10 @@ fn map_value_slot(
     Ok(None)
 }
 
+#[cfg(test)]
+#[path = "../../../../tests/unit/map_slot_extent_tests.rs"]
+mod map_slot_extent_tests;
+
 /// Read the capacity of a Text Value, dispatching by representation.
 /// Returns the byte budget the buffer can hold without reallocating.
 ///
