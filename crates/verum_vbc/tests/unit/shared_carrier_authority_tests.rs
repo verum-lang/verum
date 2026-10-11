@@ -258,3 +258,54 @@ fn owned_non_shared_object_is_not_a_shared_carrier() {
     );
     assert!(shared_inner_cell_result(&fixture.state, object.as_ptr().cast()).is_err());
 }
+
+#[test]
+fn short_shared_carrier_is_refused_before_reading_its_pointer_field() {
+    let mut fixture = Fixture::new();
+    for size in 0..VALUE_BYTES {
+        let (mut padded, _) = fixture.shared(Value::from_i64(77));
+        let allocated_size = padded.header().size;
+        padded.header_mut().size = size as u32;
+        // The physical allocation remains padded, so old code can read slot0
+        // safely. Restore allocation geometry before any assertion or drop.
+        let result = shared_inner_cell_result(&fixture.state, padded.as_ptr().cast());
+        padded.header_mut().size = allocated_size;
+        assert!(
+            result.is_err(),
+            "declared carrier payload is only {size} bytes"
+        );
+
+        // Only the bounded implementation reaches these real short objects.
+        let short = fixture
+            .state
+            .heap
+            .alloc(TypeId::SHARED, size)
+            .expect("short carrier");
+        assert!(shared_inner_cell_result(&fixture.state, short.as_ptr().cast()).is_err());
+    }
+}
+
+#[test]
+fn invalid_shared_header_cannot_authorize_a_live_inner_extent() {
+    let mut fixture = Fixture::new();
+    let (mut carrier, _) = fixture.shared(Value::from_i64(77));
+    let flags = carrier.header().flags;
+    carrier.header_mut().flags.insert(heap::ObjectFlags::FREED);
+    let result = shared_inner_cell_result(&fixture.state, carrier.as_ptr().cast());
+    carrier.header_mut().flags = flags;
+    assert!(
+        result.is_err(),
+        "invalid carrier must not authorize its pointer field"
+    );
+}
+
+#[test]
+fn one_pointer_slot_is_sufficient_for_the_existing_shared_peel() {
+    let mut fixture = Fixture::new();
+    let (_, inner) = fixture.shared(Value::from_i64(77));
+    let carrier = fixture.object(TypeId::SHARED, &[Value::from_i64(inner as i64)]);
+    // This helper reads only ptr, not the source carrier's generation/epoch.
+    assert_eq!(fixture.read(carrier.as_ptr().cast()).try_as_i64(), Some(77));
+    fixture.write(carrier.as_ptr().cast(), Value::from_i64(41));
+    assert_eq!(fixture.read(carrier.as_ptr().cast()).try_as_i64(), Some(41));
+}
