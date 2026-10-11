@@ -283,40 +283,6 @@ pub(super) fn shared_inner_cell_result(
     state: &InterpreterState,
     base_ptr: *mut u8,
 ) -> Result<*mut Value, &'static str> {
-    if base_ptr.is_null() {
-        return Err("base is null");
-    }
-    // A CBGR `Heap<T>` cell is not a Shared carrier; its data pointer is not
-    // an ObjectHeader, so never read a SHARED type_id out of it.
-    let is_cbgr_cell = state.cbgr_allocations.contains(
-        &(base_ptr as usize)
-            .wrapping_sub(verum_common::layout::ALLOCATION_HEADER_SIZE as usize),
-    );
-    if is_cbgr_cell {
-        return Err("base is a CBGR Heap cell, not a Shared carrier");
-    }
-    if !(base_ptr as usize).is_multiple_of(std::mem::align_of::<heap::ObjectHeader>()) {
-        return Err("base is misaligned for an ObjectHeader");
-    }
-    // A pointer-tagged reference may name an interior Value, including the
-    // final slot of an allocation. Its value bits cannot establish a header
-    // or authorize the following Shared.ptr read (T1752).
-    if !state.heap.contains(base_ptr.cast::<heap::ObjectHeader>()) {
-        return Err("base is not a live heap-object header");
-    }
-    // SAFETY: exact heap membership establishes a live, aligned ObjectHeader.
-    let header = unsafe { heap::ObjectHeader::ref_or_stub(base_ptr) };
-    if header.type_id != TypeId::SHARED {
-        return Err("carrier type_id is not SHARED");
-    }
-    if !header.is_valid() {
-        return Err("carrier header is invalid");
-    }
-    // Only slot 0 is read from the carrier; the inner three-slot extent is
-    // validated separately. Do not require unused generation/epoch fields.
-    if (header.size as usize) < std::mem::size_of::<Value>() {
-        return Err("carrier is shorter than its pointer field");
-    }
     // **SHARED-IS-TWO-HOPS-1 (T1202).**  A `Shared<T>` is TWO objects and
     // this used to read one hop into the first:
     //
@@ -374,6 +340,40 @@ fn shared_extent_base(
     state: &InterpreterState,
     base_ptr: *mut u8,
 ) -> Result<*mut Value, &'static str> {
+    if base_ptr.is_null() {
+        return Err("base is null");
+    }
+    // A CBGR `Heap<T>` cell is not a Shared carrier; its data pointer is not
+    // an ObjectHeader, so never read a SHARED type_id out of it.
+    let is_cbgr_cell = state.cbgr_allocations.contains(
+        &(base_ptr as usize)
+            .wrapping_sub(verum_common::layout::ALLOCATION_HEADER_SIZE as usize),
+    );
+    if is_cbgr_cell {
+        return Err("base is a CBGR Heap cell, not a Shared carrier");
+    }
+    if !(base_ptr as usize).is_multiple_of(std::mem::align_of::<heap::ObjectHeader>()) {
+        return Err("base is misaligned for an ObjectHeader");
+    }
+    // A pointer-tagged reference may name an interior Value, including the
+    // final slot of an allocation. Its value bits cannot establish a header
+    // or authorize the following Shared.ptr read (T1752).
+    if !state.heap.contains(base_ptr.cast::<heap::ObjectHeader>()) {
+        return Err("base is not a live heap-object header");
+    }
+    // SAFETY: exact heap membership establishes a live, aligned ObjectHeader.
+    let header = unsafe { heap::ObjectHeader::ref_or_stub(base_ptr) };
+    if header.type_id != TypeId::SHARED {
+        return Err("carrier type_id is not SHARED");
+    }
+    if !header.is_valid() {
+        return Err("carrier header is invalid");
+    }
+    // Only slot 0 is read from the carrier; the inner three-slot extent is
+    // validated separately. Do not require unused generation/epoch fields.
+    if (header.size as usize) < std::mem::size_of::<Value>() {
+        return Err("carrier is shorter than its pointer field");
+    }
     // Hop 1: the `ptr` field.  `cbgr_alloc` returns an INT-tagged address
     // (T0108) — which is also why `is_ptr()` on this slot says false.
     // SAFETY: exact heap ownership, a valid SHARED header and one complete
@@ -1350,37 +1350,15 @@ pub(in super::super) fn handle_drop_ref(
             .cbgr_allocations
             .contains(&(obj_ptr as usize).wrapping_sub(verum_common::layout::ALLOCATION_HEADER_SIZE as usize));
 
-        if !is_cbgr_alloc {
+        if !is_cbgr_alloc && state.heap.contains(obj_ptr.cast::<heap::ObjectHeader>()) {
             // Standard heap objects: the pointer points directly to the ObjectHeader
             // (see handle_new which stores obj.as_ptr() - the header pointer)
             let header_ptr = obj_ptr;
 
-            // Alignment-checked header read.  `ObjectHeader` is
-            // `#[repr(C, align(8))]`, so every legitimate header is 8-
-            // byte aligned.  Any value classified `is_regular_ptr() ==
-            // true` but pointing at a non-header location (e.g. an
-            // interior pointer produced by ad-hoc casts in user code
-            // or `&arr[i]` constructs) would trip
-            // `panic_misaligned_pointer_dereference` and abort the
-            // whole interpreter via SIGABRT, losing every parallel
-            // test in the same `verum test --interp` invocation.  The
-            // aligned-or-skip path is the architecturally honest
-            // answer: a misaligned pointer cannot be a valid
-            // ObjectHeader, so there is no Drop impl to invoke; fall
-            // through to the existing CBGR cleanup path which
-            // operates on the raw bits independent of header
-            // structure.
-            let type_id = match unsafe { heap::ObjectHeader::try_type_id(header_ptr) } {
-                Some(tid) => tid,
-                None => {
-                    tracing::trace!(
-                        "[drop_ref] skipping Drop check on misaligned/null ptr {:p}; \
-                         value still goes through CBGR cleanup",
-                        header_ptr
-                    );
-                    return Ok(DispatchResult::Continue);
-                }
-            };
+            // SAFETY: exact heap membership establishes the header. A regular
+            // pointer can also be an interior Value slot; those references
+            // skip object dispatch and reach register cleanup below (T0379).
+            let type_id = unsafe { (*obj_ptr.cast::<heap::ObjectHeader>()).type_id };
 
             // **SHARED-STRONGCOUNT-1 (drop leg)** — Shared<T> binding
             // drop decrements the strong count that `clone` bumped.
@@ -1424,7 +1402,8 @@ pub(in super::super) fn handle_drop_ref(
                         }
                     }
                 }
-                return Ok(DispatchResult::Continue);
+                // Continue through register generation/clear after this one
+                // owned drop, including when the checked carrier is refused.
             }
 
             // **T0202 TENSOR-HANDLE-OBJECT-1 (drop leg)** — the tensor
@@ -1699,12 +1678,13 @@ pub(in super::super) fn handle_drop_ref(
             .contains(&(obj_ptr as usize).wrapping_sub(verum_common::layout::ALLOCATION_HEADER_SIZE as usize));
 
         if !is_cbgr_alloc
+            && state.heap.contains(obj_ptr.cast::<heap::ObjectHeader>())
             && let Some(header) = unsafe { heap::ObjectHeader::try_from_ptr(obj_ptr) }
             && header.type_id == TypeId::TUPLE
         {
-            // Tuple branch entered only when the pointer is aligned
-            // and points at a TUPLE header — same alignment-gated
-            // discipline as the user-defined-Drop branch above.  Tuple
+            // Exact heap ownership establishes the TUPLE header, matching
+            // the user-defined-Drop branch above. Interior references never
+            // enter this object-layout path. Tuple
             // layout: [ObjectHeader][elem0][elem1][elem2]…
             let elem_count = header.size as usize / std::mem::size_of::<Value>();
             let data_ptr = unsafe { obj_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
