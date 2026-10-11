@@ -17198,8 +17198,26 @@ impl VbcCodegen {
         value_expr: Option<&verum_ast::Expr>,
         const_type: Option<&verum_ast::ty::Type>,
     ) -> CodegenResult<()> {
-        let id = FunctionId(self.next_func_id);
-        self.next_func_id = self.next_func_id.saturating_add(1);
+        // Mounts can collect a source declaration before its module is compiled.
+        // Keep one identity for that declaration: a fresh ID would leave calls
+        // using a stub while the qualified initializer retained the original ID.
+        let declared_id = if self.ctx.current_function.is_none() {
+            self.module_constant_bindings
+                .get(&(
+                    verum_common::Text::from(
+                        self.ctx.current_source_module.as_deref().unwrap_or_default(),
+                    ),
+                    verum_common::Text::from(name),
+                ))
+                .map(|info| info.id)
+        } else {
+            None
+        };
+        let id = declared_id.unwrap_or_else(|| {
+            let id = FunctionId(self.next_func_id);
+            self.next_func_id = self.next_func_id.saturating_add(1);
+            id
+        });
 
         if let Some(expr) = value_expr {
             let mut bindings = verum_common::Map::new();
