@@ -167,11 +167,9 @@ pub(in super::super) fn handle_ref_mut(
 /// field-access helper here would target the inner object's header (or, for an
 /// immediate inner `T`, the carrier header) — both wrong for a whole write.
 ///
-/// Guard: a `Heap<T>` CBGR cell's data pointer addresses its inner Value
-/// directly (there is no `ObjectHeader` there), so its out-of-bounds "header"
-/// bits could coincide with `TypeId::SHARED`. The `cbgr_allocations`
-/// membership test excludes those cells — the same live-allocation guard the
-/// T0107 `handle_clone` SHARED arm uses.
+/// Only an exact live heap-object base can carry a Shared header. CBGR
+/// cells and interior Value slots address payload data instead; their bits
+/// can coincide with `TypeId::SHARED` without granting header authority.
 ///
 /// Shared layout, MEASURED 2026-09-06 and not the one this comment carried
 /// until T1202: the CARRIER object is `[ObjectHeader][ptr][generation][epoch]`
@@ -300,8 +298,13 @@ pub(super) fn shared_inner_cell_result(
     if !(base_ptr as usize).is_multiple_of(std::mem::align_of::<heap::ObjectHeader>()) {
         return Err("base is misaligned for an ObjectHeader");
     }
-    // SAFETY: alignment verified; every VBC heap object begins with an
-    // ObjectHeader.
+    // A pointer-tagged reference may name an interior Value, including the
+    // final slot of an allocation. Its value bits cannot establish a header
+    // or authorize the following Shared.ptr read (T1752).
+    if !state.heap.contains(base_ptr.cast::<heap::ObjectHeader>()) {
+        return Err("base is not a live heap-object header");
+    }
+    // SAFETY: exact heap membership establishes a live, aligned ObjectHeader.
     let header = unsafe { heap::ObjectHeader::ref_or_stub(base_ptr) };
     if header.type_id != TypeId::SHARED {
         return Err("carrier type_id is not SHARED");
