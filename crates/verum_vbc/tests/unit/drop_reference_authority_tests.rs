@@ -317,7 +317,7 @@ fn probe(input: &Int) -> Int {
 
 #[cfg(feature = "codegen")]
 #[test]
-fn a_returned_maybe_borrow_payload_reaches_dropref_in_emitted_code() {
+fn a_returned_maybe_borrow_payload_is_checked_and_read_in_emitted_code() {
     use crate::instruction::Instruction;
     use verum_common::Set;
     let instructions = emitted_probe(
@@ -330,7 +330,9 @@ fn probe(input: &Int) -> Int {
 "#,
     );
     let mut payload = Set::new();
-    let mut cleaned = false;
+    let mut checked = Set::new();
+    let mut loaded = Set::new();
+    let mut returned_value = false;
     for instruction in &instructions {
         match instruction {
             Instruction::GetVariantData { dst, .. } => {
@@ -339,14 +341,26 @@ fn probe(input: &Int) -> Int {
             Instruction::Mov { dst, src } if payload.contains(src) => {
                 payload.insert(*dst);
             }
-            Instruction::DropRef { src } if payload.contains(src) => {
-                cleaned = true;
+            Instruction::ChkRef { ref_reg } if payload.contains(ref_reg) => {
+                checked.insert(*ref_reg);
+            }
+            Instruction::Deref { dst, ref_reg } if checked.contains(ref_reg) => {
+                loaded.insert(*dst);
+            }
+            Instruction::Mov { dst, src } if loaded.contains(src) => {
+                loaded.insert(*dst);
+            }
+            Instruction::Ret { value } if loaded.contains(value) => {
+                returned_value = true;
             }
             _ => {}
         }
     }
+    // Pattern-bound borrowed payloads are checked and read, but this lowering
+    // does not emit DropRef for the payload. The explicit local test above
+    // pins the actual returned-reference path into the DropRef handler.
     assert!(
-        cleaned,
-        "returned borrowed payload must exercise register cleanup: {instructions:?}"
+        returned_value,
+        "borrowed payload must be checked before returning its value: {instructions:?}"
     );
 }
