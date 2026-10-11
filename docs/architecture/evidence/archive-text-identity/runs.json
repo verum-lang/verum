@@ -1,0 +1,637 @@
+{
+  "base_source_inputs": "source-inputs.json",
+  "runs": [
+    {
+      "label": "baseline",
+      "original_receipt_sha256": "898883642011c9c7c0bf60273d3c07b8d98adbae81b5a2072e5fbca8b6ba8bb7",
+      "original_receipt_canonical_sha256": "4e4ac56ac5278540d38bbb01b16661f7c216bffd036500a521926960bbc4bea0",
+      "source_input_delta": {},
+      "receipt": {
+        "task": "T1745",
+        "source_commit": "866ead5f79505266860e6a142c530e5631f386ec",
+        "source_tree": "444fd698acc30e4bdfe95ed42ebec6af55d391d1",
+        "command": [
+          "cargo",
+          "+nightly-2026-08-20",
+          "test",
+          "-vv",
+          "--offline",
+          "--locked",
+          "--message-format=json-render-diagnostics",
+          "--manifest-path",
+          "/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/Cargo.toml",
+          "-p",
+          "verum_vbc",
+          "--test",
+          "archive_text_identity",
+          "--no-default-features",
+          "--features",
+          "codegen,table_dispatch",
+          "--",
+          "--test-threads=1",
+          "--nocapture"
+        ],
+        "environment": {
+          "CARGO_TARGET_DIR": "/Users/taaliman/.tmp/verum-codex-01a10248-types/checker-target",
+          "CARGO_BUILD_JOBS": "1",
+          "CARGO_INCREMENTAL": "0",
+          "VERUM_NO_AUTO_PRECOMPILE": "1",
+          "RUST_MIN_STACK": "16777216"
+        },
+        "deadline_seconds": 600,
+        "runner_sha256": "cdaa7d36ef03289215706050d3fad9e76fb5ece15f1a14b8e5cd39cfe5e15b4d",
+        "artifacts_before": {
+          "runtime.vbca": {
+            "bytes": 40545239,
+            "sha256": "48d2cd1e07ac1cbbe5cb74eadcaf37ba84523d1dc99f68ddcc9eb067a8986d78"
+          },
+          "runtime.core_metadata": {
+            "bytes": 118793446,
+            "sha256": "7f021e1463de5414d9c7d84228357485e7db68c7aa9f5bb521cf550eff471acf"
+          },
+          "runtime.symbol_graph": {
+            "bytes": 6995428,
+            "sha256": "e44ff2b708e0c36d89b1567284fafd6146b36ede30ad520b0bdffd0035c8d27a"
+          },
+          "runtime.vbca.checksum": {
+            "bytes": 64,
+            "sha256": "603d89a857d4d0eb6a7ef9180545ccb94eb30009e0cc11ec401c78d75bfb5833"
+          },
+          "runtime.vbca.schema": {
+            "bytes": 40,
+            "sha256": "1c3b3d0a7b02c7c0f4001b49068bc4a69cd1ce368a547335fbf4186391971e4c"
+          }
+        },
+        "selected_test_count": 6,
+        "artifact_origin_receipt": "/private/tmp/verum-registry-stage23-canonical-owners/build-manifest.json",
+        "artifact_origin_receipt_sha256": "3df266cba9190c9d201e03cb51404b28a1d1864f784d32e18421d6fb2083faef",
+        "artifact_origin_source": "7a8c86f90a493a3b7352359314fc5f0d628aaa1b",
+        "target_precompiled_directory_present": false,
+        "artifact_schema": "v54-2026-10-10-declared-field-visibility",
+        "disk_free_before": 8652554240,
+        "scope": "Parsed actual Text declaration and source/wire VBC import controls only. No embedded archive is consumed by this target. No ordinary CLI, automatic bake, AOT or native dependency bootstrap. Immutable Stage23 artifacts are independently pinned and must stay unchanged.",
+        "exit_code": 101,
+        "wall_seconds": 34.368,
+        "interrupted": null,
+        "harness_errors": [],
+        "executables": {
+          "archive_text_identity": {
+            "path": "/Users/taaliman/.tmp/verum-codex-01a10248-types/checker-target/debug/build/verum_vbc/077fd62a1e02383f/out/archive_text_identity-077fd62a1e02383f",
+            "sha256": "efc34d7add1748f43c197323a754d2d8bb7012fd81c5f6d963397cbebaf6c93e",
+            "retained": "/private/tmp/verum-T1745-baseline/archive_text_identity-077fd62a1e02383f",
+            "retained_sha256": "efc34d7add1748f43c197323a754d2d8bb7012fd81c5f6d963397cbebaf6c93e",
+            "fresh": false
+          }
+        },
+        "source_unchanged": true,
+        "source_paths_unchanged": true,
+        "artifacts_after": {
+          "runtime.vbca": {
+            "bytes": 40545239,
+            "sha256": "48d2cd1e07ac1cbbe5cb74eadcaf37ba84523d1dc99f68ddcc9eb067a8986d78"
+          },
+          "runtime.core_metadata": {
+            "bytes": 118793446,
+            "sha256": "7f021e1463de5414d9c7d84228357485e7db68c7aa9f5bb521cf550eff471acf"
+          },
+          "runtime.symbol_graph": {
+            "bytes": 6995428,
+            "sha256": "e44ff2b708e0c36d89b1567284fafd6146b36ede30ad520b0bdffd0035c8d27a"
+          },
+          "runtime.vbca.checksum": {
+            "bytes": 64,
+            "sha256": "603d89a857d4d0eb6a7ef9180545ccb94eb30009e0cc11ec401c78d75bfb5833"
+          },
+          "runtime.vbca.schema": {
+            "bytes": 40,
+            "sha256": "1c3b3d0a7b02c7c0f4001b49068bc4a69cd1ce368a547335fbf4186391971e4c"
+          }
+        },
+        "log_sha256": "b5206818912b7bb74bc82433c858302dd446a2cde512a3fff97b206e59b82563",
+        "test_results": [
+          "test result: FAILED. 2 passed; 4 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.16s"
+        ],
+        "announced_test_counts": [
+          6
+        ],
+        "individual_failures": [],
+        "cargo_compilations": [
+          "verum_error v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_error)",
+          "verum_cbgr v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_cbgr)",
+          "verum_vbc v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_vbc)"
+        ],
+        "disk_free_after": 9217708032,
+        "artifacts_unchanged": true,
+        "selected_tests_complete": true,
+        "retained_archive_files": {}
+      },
+      "retained_log": "baseline-output.txt"
+    },
+    {
+      "label": "corrected-baseline",
+      "original_receipt_sha256": "2ec582312f97f1357adf23478948bbad0a4666fd24d5a013ff6c633c48f66d6f",
+      "original_receipt_canonical_sha256": "cc84a973c3d1fe0c2408d4f50f166cebace65e5c24a804524cf35948c149379f",
+      "source_input_delta": {
+        "crates/verum_vbc/tests/archive_text_identity.rs": "5539c2331ade625e13aff31c5aeb1d9632a6c9c819e0319c53c9e7241f1b7d5e"
+      },
+      "receipt": {
+        "task": "T1745",
+        "source_commit": "912cd1f2d9d5fdf47b6ae3dd2f9ee234f61370de",
+        "source_tree": "9b88d50aa78f89667776e956fa2049a8f7be3924",
+        "command": [
+          "cargo",
+          "+nightly-2026-08-20",
+          "test",
+          "-vv",
+          "--offline",
+          "--locked",
+          "--message-format=json-render-diagnostics",
+          "--manifest-path",
+          "/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/Cargo.toml",
+          "-p",
+          "verum_vbc",
+          "--test",
+          "archive_text_identity",
+          "--no-default-features",
+          "--features",
+          "codegen,table_dispatch",
+          "--",
+          "--test-threads=1",
+          "--nocapture"
+        ],
+        "environment": {
+          "CARGO_TARGET_DIR": "/Users/taaliman/.tmp/verum-codex-01a10248-types/checker-target",
+          "CARGO_BUILD_JOBS": "1",
+          "CARGO_INCREMENTAL": "0",
+          "VERUM_NO_AUTO_PRECOMPILE": "1",
+          "RUST_MIN_STACK": "16777216"
+        },
+        "deadline_seconds": 600,
+        "runner_sha256": "459bf25df6028a265968b20233e9fc810453875c6a401d5f75d4d67190d39d0b",
+        "artifacts_before": {
+          "runtime.vbca": {
+            "bytes": 40545239,
+            "sha256": "48d2cd1e07ac1cbbe5cb74eadcaf37ba84523d1dc99f68ddcc9eb067a8986d78"
+          },
+          "runtime.core_metadata": {
+            "bytes": 118793446,
+            "sha256": "7f021e1463de5414d9c7d84228357485e7db68c7aa9f5bb521cf550eff471acf"
+          },
+          "runtime.symbol_graph": {
+            "bytes": 6995428,
+            "sha256": "e44ff2b708e0c36d89b1567284fafd6146b36ede30ad520b0bdffd0035c8d27a"
+          },
+          "runtime.vbca.checksum": {
+            "bytes": 64,
+            "sha256": "603d89a857d4d0eb6a7ef9180545ccb94eb30009e0cc11ec401c78d75bfb5833"
+          },
+          "runtime.vbca.schema": {
+            "bytes": 40,
+            "sha256": "1c3b3d0a7b02c7c0f4001b49068bc4a69cd1ce368a547335fbf4186391971e4c"
+          }
+        },
+        "selected_test_count": 8,
+        "artifact_origin_receipt": "/private/tmp/verum-registry-stage23-canonical-owners/build-manifest.json",
+        "artifact_origin_receipt_sha256": "3df266cba9190c9d201e03cb51404b28a1d1864f784d32e18421d6fb2083faef",
+        "artifact_origin_source": "7a8c86f90a493a3b7352359314fc5f0d628aaa1b",
+        "target_precompiled_directory_present": false,
+        "artifact_schema": "v54-2026-10-10-declared-field-visibility",
+        "disk_free_before": 10280677376,
+        "scope": "Parsed actual Text declaration and source/wire VBC import controls only. No embedded archive is consumed by this target. No ordinary CLI, automatic bake, AOT or native dependency bootstrap. Immutable Stage23 artifacts are independently pinned and must stay unchanged.",
+        "exit_code": 101,
+        "wall_seconds": 31.285,
+        "interrupted": null,
+        "harness_errors": [],
+        "executables": {
+          "archive_text_identity": {
+            "path": "/Users/taaliman/.tmp/verum-codex-01a10248-types/checker-target/debug/build/verum_vbc/077fd62a1e02383f/out/archive_text_identity-077fd62a1e02383f",
+            "sha256": "fb187817eb6228a16ceea77a841af1406cafb8d44c9c51b4c66147a4eb226804",
+            "retained": "/private/tmp/verum-T1745-corrected-baseline/archive_text_identity-077fd62a1e02383f",
+            "retained_sha256": "fb187817eb6228a16ceea77a841af1406cafb8d44c9c51b4c66147a4eb226804",
+            "fresh": false
+          }
+        },
+        "source_unchanged": true,
+        "source_paths_unchanged": true,
+        "artifacts_after": {
+          "runtime.vbca": {
+            "bytes": 40545239,
+            "sha256": "48d2cd1e07ac1cbbe5cb74eadcaf37ba84523d1dc99f68ddcc9eb067a8986d78"
+          },
+          "runtime.core_metadata": {
+            "bytes": 118793446,
+            "sha256": "7f021e1463de5414d9c7d84228357485e7db68c7aa9f5bb521cf550eff471acf"
+          },
+          "runtime.symbol_graph": {
+            "bytes": 6995428,
+            "sha256": "e44ff2b708e0c36d89b1567284fafd6146b36ede30ad520b0bdffd0035c8d27a"
+          },
+          "runtime.vbca.checksum": {
+            "bytes": 64,
+            "sha256": "603d89a857d4d0eb6a7ef9180545ccb94eb30009e0cc11ec401c78d75bfb5833"
+          },
+          "runtime.vbca.schema": {
+            "bytes": 40,
+            "sha256": "1c3b3d0a7b02c7c0f4001b49068bc4a69cd1ce368a547335fbf4186391971e4c"
+          }
+        },
+        "log_sha256": "a711c1613942d26994bf6a9caaa7c14d6492a41e3d3366c8ec15aeb6747bfb62",
+        "test_results": [
+          "test result: FAILED. 3 passed; 5 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.19s"
+        ],
+        "announced_test_counts": [
+          8
+        ],
+        "individual_failures": [],
+        "cargo_compilations": [
+          "verum_error v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_error)",
+          "verum_cbgr v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_cbgr)",
+          "verum_vbc v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_vbc)"
+        ],
+        "disk_free_after": 10248802304,
+        "artifacts_unchanged": true,
+        "selected_tests_complete": true,
+        "retained_archive_files": {}
+      },
+      "retained_log": "corrected-baseline-output.txt"
+    },
+    {
+      "label": "bootstrap-baseline",
+      "original_receipt_sha256": "5f79a295a7da0e16672a2e225bbf21fd4c903c85b03893e1edb2392054d6bd34",
+      "original_receipt_canonical_sha256": "0a630113c1879c201075aa760988271be7a8a315eca9cf3599828c6d8ed5bcef",
+      "source_input_delta": {
+        "crates/verum_vbc/tests/archive_text_identity.rs": "1ace09e2007158cce44cffd7344a88a23f4c6e7cd09faf44268a5d833ee8bfdc"
+      },
+      "receipt": {
+        "task": "T1745",
+        "source_commit": "1306899551fbb2d69710a45a7faf2146576460f4",
+        "source_tree": "7269b9d6fceefeb83b3ec5bc66ee8f9754a3ecae",
+        "command": [
+          "cargo",
+          "+nightly-2026-08-20",
+          "test",
+          "-vv",
+          "--offline",
+          "--locked",
+          "--message-format=json-render-diagnostics",
+          "--manifest-path",
+          "/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/Cargo.toml",
+          "-p",
+          "verum_vbc",
+          "--test",
+          "archive_text_identity",
+          "--no-default-features",
+          "--features",
+          "codegen,table_dispatch",
+          "--",
+          "--test-threads=1",
+          "--nocapture"
+        ],
+        "environment": {
+          "CARGO_TARGET_DIR": "/Users/taaliman/.tmp/verum-codex-01a10248-types/checker-target",
+          "CARGO_BUILD_JOBS": "1",
+          "CARGO_INCREMENTAL": "0",
+          "VERUM_NO_AUTO_PRECOMPILE": "1",
+          "RUST_MIN_STACK": "16777216"
+        },
+        "deadline_seconds": 600,
+        "runner_sha256": "459bf25df6028a265968b20233e9fc810453875c6a401d5f75d4d67190d39d0b",
+        "artifacts_before": {
+          "runtime.vbca": {
+            "bytes": 40545239,
+            "sha256": "48d2cd1e07ac1cbbe5cb74eadcaf37ba84523d1dc99f68ddcc9eb067a8986d78"
+          },
+          "runtime.core_metadata": {
+            "bytes": 118793446,
+            "sha256": "7f021e1463de5414d9c7d84228357485e7db68c7aa9f5bb521cf550eff471acf"
+          },
+          "runtime.symbol_graph": {
+            "bytes": 6995428,
+            "sha256": "e44ff2b708e0c36d89b1567284fafd6146b36ede30ad520b0bdffd0035c8d27a"
+          },
+          "runtime.vbca.checksum": {
+            "bytes": 64,
+            "sha256": "603d89a857d4d0eb6a7ef9180545ccb94eb30009e0cc11ec401c78d75bfb5833"
+          },
+          "runtime.vbca.schema": {
+            "bytes": 40,
+            "sha256": "1c3b3d0a7b02c7c0f4001b49068bc4a69cd1ce368a547335fbf4186391971e4c"
+          }
+        },
+        "selected_test_count": 8,
+        "artifact_origin_receipt": "/private/tmp/verum-registry-stage23-canonical-owners/build-manifest.json",
+        "artifact_origin_receipt_sha256": "3df266cba9190c9d201e03cb51404b28a1d1864f784d32e18421d6fb2083faef",
+        "artifact_origin_source": "7a8c86f90a493a3b7352359314fc5f0d628aaa1b",
+        "target_precompiled_directory_present": false,
+        "artifact_schema": "v54-2026-10-10-declared-field-visibility",
+        "disk_free_before": 10243543040,
+        "scope": "Parsed actual Text declaration and source/wire VBC import controls only. No embedded archive is consumed by this target. No ordinary CLI, automatic bake, AOT or native dependency bootstrap. Immutable Stage23 artifacts are independently pinned and must stay unchanged.",
+        "exit_code": 101,
+        "wall_seconds": 29.273,
+        "interrupted": null,
+        "harness_errors": [],
+        "executables": {
+          "archive_text_identity": {
+            "path": "/Users/taaliman/.tmp/verum-codex-01a10248-types/checker-target/debug/build/verum_vbc/077fd62a1e02383f/out/archive_text_identity-077fd62a1e02383f",
+            "sha256": "a40a0810ebca240f6e74d73586b3f1378adad9566b4fdcc04e5884582564ad5b",
+            "retained": "/private/tmp/verum-T1745-bootstrap-baseline/archive_text_identity-077fd62a1e02383f",
+            "retained_sha256": "a40a0810ebca240f6e74d73586b3f1378adad9566b4fdcc04e5884582564ad5b",
+            "fresh": false
+          }
+        },
+        "source_unchanged": true,
+        "source_paths_unchanged": true,
+        "artifacts_after": {
+          "runtime.vbca": {
+            "bytes": 40545239,
+            "sha256": "48d2cd1e07ac1cbbe5cb74eadcaf37ba84523d1dc99f68ddcc9eb067a8986d78"
+          },
+          "runtime.core_metadata": {
+            "bytes": 118793446,
+            "sha256": "7f021e1463de5414d9c7d84228357485e7db68c7aa9f5bb521cf550eff471acf"
+          },
+          "runtime.symbol_graph": {
+            "bytes": 6995428,
+            "sha256": "e44ff2b708e0c36d89b1567284fafd6146b36ede30ad520b0bdffd0035c8d27a"
+          },
+          "runtime.vbca.checksum": {
+            "bytes": 64,
+            "sha256": "603d89a857d4d0eb6a7ef9180545ccb94eb30009e0cc11ec401c78d75bfb5833"
+          },
+          "runtime.vbca.schema": {
+            "bytes": 40,
+            "sha256": "1c3b3d0a7b02c7c0f4001b49068bc4a69cd1ce368a547335fbf4186391971e4c"
+          }
+        },
+        "log_sha256": "f941af316f5fce509d17f53c9411e0e5684835be5d5dda0abc9bd2927eb2aa4a",
+        "test_results": [
+          "test result: FAILED. 3 passed; 5 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.19s"
+        ],
+        "announced_test_counts": [
+          8
+        ],
+        "individual_failures": [],
+        "cargo_compilations": [
+          "verum_error v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_error)",
+          "verum_cbgr v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_cbgr)",
+          "verum_vbc v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_vbc)"
+        ],
+        "disk_free_after": 10214838272,
+        "artifacts_unchanged": true,
+        "selected_tests_complete": true,
+        "retained_archive_files": {}
+      },
+      "retained_log": "bootstrap-baseline-output.txt"
+    },
+    {
+      "label": "fixed",
+      "original_receipt_sha256": "3a116df0f25d7d175c1c6af5b39cf834edb3ac2a251b98f6ae3851e9091ea55d",
+      "original_receipt_canonical_sha256": "c198010bb0dcda715569ad483026e8749ba8fc7f0deedf8e80037c5c70ac1a6c",
+      "source_input_delta": {
+        "crates/verum_vbc/src/codegen/bootstrap_types.rs": "0badd2eef632884fdbf1bf6c515158f477f3038cfce2584712179d0570672162",
+        "crates/verum_vbc/src/codegen/mod.rs": "522320ad80655b7a711f8f1f12c8970c208c955e76e7bed6d78b141c80d14c07",
+        "crates/verum_vbc/src/types.rs": "4260cf442deb480805f3f184580965640924641e60eb7bf64892975dfe9ec89b",
+        "crates/verum_vbc/tests/archive_text_identity.rs": "1ace09e2007158cce44cffd7344a88a23f4c6e7cd09faf44268a5d833ee8bfdc"
+      },
+      "receipt": {
+        "task": "T1745",
+        "source_commit": "d6cb4cd8a32854cfa709cc72fbeb8d22e286a7ab",
+        "source_tree": "1adb38e393f99d7608d79fd3b10032455218aad1",
+        "command": [
+          "cargo",
+          "+nightly-2026-08-20",
+          "test",
+          "-vv",
+          "--offline",
+          "--locked",
+          "--message-format=json-render-diagnostics",
+          "--manifest-path",
+          "/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/Cargo.toml",
+          "-p",
+          "verum_vbc",
+          "--test",
+          "archive_text_identity",
+          "--no-default-features",
+          "--features",
+          "codegen,table_dispatch",
+          "--",
+          "--test-threads=1",
+          "--nocapture"
+        ],
+        "environment": {
+          "CARGO_TARGET_DIR": "/Users/taaliman/.tmp/verum-codex-01a10248-types/checker-target",
+          "CARGO_BUILD_JOBS": "1",
+          "CARGO_INCREMENTAL": "0",
+          "VERUM_NO_AUTO_PRECOMPILE": "1",
+          "RUST_MIN_STACK": "16777216"
+        },
+        "deadline_seconds": 600,
+        "runner_sha256": "459bf25df6028a265968b20233e9fc810453875c6a401d5f75d4d67190d39d0b",
+        "artifacts_before": {
+          "runtime.vbca": {
+            "bytes": 40545239,
+            "sha256": "48d2cd1e07ac1cbbe5cb74eadcaf37ba84523d1dc99f68ddcc9eb067a8986d78"
+          },
+          "runtime.core_metadata": {
+            "bytes": 118793446,
+            "sha256": "7f021e1463de5414d9c7d84228357485e7db68c7aa9f5bb521cf550eff471acf"
+          },
+          "runtime.symbol_graph": {
+            "bytes": 6995428,
+            "sha256": "e44ff2b708e0c36d89b1567284fafd6146b36ede30ad520b0bdffd0035c8d27a"
+          },
+          "runtime.vbca.checksum": {
+            "bytes": 64,
+            "sha256": "603d89a857d4d0eb6a7ef9180545ccb94eb30009e0cc11ec401c78d75bfb5833"
+          },
+          "runtime.vbca.schema": {
+            "bytes": 40,
+            "sha256": "1c3b3d0a7b02c7c0f4001b49068bc4a69cd1ce368a547335fbf4186391971e4c"
+          }
+        },
+        "selected_test_count": 8,
+        "artifact_origin_receipt": "/private/tmp/verum-registry-stage23-canonical-owners/build-manifest.json",
+        "artifact_origin_receipt_sha256": "3df266cba9190c9d201e03cb51404b28a1d1864f784d32e18421d6fb2083faef",
+        "artifact_origin_source": "7a8c86f90a493a3b7352359314fc5f0d628aaa1b",
+        "target_precompiled_directory_present": false,
+        "artifact_schema": "v54-2026-10-10-declared-field-visibility",
+        "disk_free_before": 10212061184,
+        "scope": "Parsed actual Text declaration and source/wire VBC import controls only. No embedded archive is consumed by this target. No ordinary CLI, automatic bake, AOT or native dependency bootstrap. Immutable Stage23 artifacts are independently pinned and must stay unchanged.",
+        "exit_code": 101,
+        "wall_seconds": 17.166,
+        "interrupted": null,
+        "harness_errors": [],
+        "executables": {},
+        "source_unchanged": true,
+        "source_paths_unchanged": true,
+        "artifacts_after": {
+          "runtime.vbca": {
+            "bytes": 40545239,
+            "sha256": "48d2cd1e07ac1cbbe5cb74eadcaf37ba84523d1dc99f68ddcc9eb067a8986d78"
+          },
+          "runtime.core_metadata": {
+            "bytes": 118793446,
+            "sha256": "7f021e1463de5414d9c7d84228357485e7db68c7aa9f5bb521cf550eff471acf"
+          },
+          "runtime.symbol_graph": {
+            "bytes": 6995428,
+            "sha256": "e44ff2b708e0c36d89b1567284fafd6146b36ede30ad520b0bdffd0035c8d27a"
+          },
+          "runtime.vbca.checksum": {
+            "bytes": 64,
+            "sha256": "603d89a857d4d0eb6a7ef9180545ccb94eb30009e0cc11ec401c78d75bfb5833"
+          },
+          "runtime.vbca.schema": {
+            "bytes": 40,
+            "sha256": "1c3b3d0a7b02c7c0f4001b49068bc4a69cd1ce368a547335fbf4186391971e4c"
+          }
+        },
+        "log_sha256": "196f419de66ddea8d6da6254fa0ddc3f4329643eacb73d4f1a879977564b052e",
+        "test_results": [],
+        "announced_test_counts": [],
+        "individual_failures": [],
+        "cargo_compilations": [
+          "verum_error v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_error)",
+          "verum_cbgr v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_cbgr)",
+          "verum_vbc v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_vbc)"
+        ],
+        "disk_free_after": 10308022272,
+        "artifacts_unchanged": true,
+        "selected_tests_complete": false,
+        "retained_archive_files": {}
+      },
+      "retained_log": "fixed-output.txt"
+    },
+    {
+      "label": "fixed-corrected",
+      "original_receipt_sha256": "48b65f78096b5104bf677a156c3a5ce6243a621454ea6d00f56d35b59a37dba4",
+      "original_receipt_canonical_sha256": "df7e918ae4653f2eb3c9bc985ac11b8fb5407fb5b35edc124ff64e501db6d484",
+      "source_input_delta": {
+        "crates/verum_vbc/src/codegen/bootstrap_types.rs": "0badd2eef632884fdbf1bf6c515158f477f3038cfce2584712179d0570672162",
+        "crates/verum_vbc/src/codegen/mod.rs": "522320ad80655b7a711f8f1f12c8970c208c955e76e7bed6d78b141c80d14c07",
+        "crates/verum_vbc/src/types.rs": "cea472a750442769c7bfefe47321cb21a82a2e2b906a554cc5f3387a1559a46c",
+        "crates/verum_vbc/tests/archive_text_identity.rs": "1ace09e2007158cce44cffd7344a88a23f4c6e7cd09faf44268a5d833ee8bfdc"
+      },
+      "receipt": {
+        "task": "T1745",
+        "source_commit": "13d6e2f39801ede07ff60f55b3186dc2dc9e2a23",
+        "source_tree": "42d0a4207c81f25fc86d09ccf902a8ec6a9a5dd9",
+        "command": [
+          "cargo",
+          "+nightly-2026-08-20",
+          "test",
+          "-vv",
+          "--offline",
+          "--locked",
+          "--message-format=json-render-diagnostics",
+          "--manifest-path",
+          "/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/Cargo.toml",
+          "-p",
+          "verum_vbc",
+          "--test",
+          "archive_text_identity",
+          "--no-default-features",
+          "--features",
+          "codegen,table_dispatch",
+          "--",
+          "--test-threads=1",
+          "--nocapture"
+        ],
+        "environment": {
+          "CARGO_TARGET_DIR": "/Users/taaliman/.tmp/verum-codex-01a10248-types/checker-target",
+          "CARGO_BUILD_JOBS": "1",
+          "CARGO_INCREMENTAL": "0",
+          "VERUM_NO_AUTO_PRECOMPILE": "1",
+          "RUST_MIN_STACK": "16777216"
+        },
+        "deadline_seconds": 600,
+        "runner_sha256": "459bf25df6028a265968b20233e9fc810453875c6a401d5f75d4d67190d39d0b",
+        "artifacts_before": {
+          "runtime.vbca": {
+            "bytes": 40545239,
+            "sha256": "48d2cd1e07ac1cbbe5cb74eadcaf37ba84523d1dc99f68ddcc9eb067a8986d78"
+          },
+          "runtime.core_metadata": {
+            "bytes": 118793446,
+            "sha256": "7f021e1463de5414d9c7d84228357485e7db68c7aa9f5bb521cf550eff471acf"
+          },
+          "runtime.symbol_graph": {
+            "bytes": 6995428,
+            "sha256": "e44ff2b708e0c36d89b1567284fafd6146b36ede30ad520b0bdffd0035c8d27a"
+          },
+          "runtime.vbca.checksum": {
+            "bytes": 64,
+            "sha256": "603d89a857d4d0eb6a7ef9180545ccb94eb30009e0cc11ec401c78d75bfb5833"
+          },
+          "runtime.vbca.schema": {
+            "bytes": 40,
+            "sha256": "1c3b3d0a7b02c7c0f4001b49068bc4a69cd1ce368a547335fbf4186391971e4c"
+          }
+        },
+        "selected_test_count": 8,
+        "artifact_origin_receipt": "/private/tmp/verum-registry-stage23-canonical-owners/build-manifest.json",
+        "artifact_origin_receipt_sha256": "3df266cba9190c9d201e03cb51404b28a1d1864f784d32e18421d6fb2083faef",
+        "artifact_origin_source": "7a8c86f90a493a3b7352359314fc5f0d628aaa1b",
+        "target_precompiled_directory_present": false,
+        "artifact_schema": "v54-2026-10-10-declared-field-visibility",
+        "disk_free_before": 10404360192,
+        "scope": "Parsed actual Text declaration and source/wire VBC import controls only. No embedded archive is consumed by this target. No ordinary CLI, automatic bake, AOT or native dependency bootstrap. Immutable Stage23 artifacts are independently pinned and must stay unchanged.",
+        "exit_code": 0,
+        "wall_seconds": 29.326,
+        "interrupted": null,
+        "harness_errors": [],
+        "executables": {
+          "archive_text_identity": {
+            "path": "/Users/taaliman/.tmp/verum-codex-01a10248-types/checker-target/debug/build/verum_vbc/077fd62a1e02383f/out/archive_text_identity-077fd62a1e02383f",
+            "sha256": "0ecab86e2e428575395c156a9fddd0e27ffc7520305375ab6d11c540305b6a61",
+            "retained": "/private/tmp/verum-T1745-fixed-corrected/archive_text_identity-077fd62a1e02383f",
+            "retained_sha256": "0ecab86e2e428575395c156a9fddd0e27ffc7520305375ab6d11c540305b6a61",
+            "fresh": false
+          }
+        },
+        "source_unchanged": true,
+        "source_paths_unchanged": true,
+        "artifacts_after": {
+          "runtime.vbca": {
+            "bytes": 40545239,
+            "sha256": "48d2cd1e07ac1cbbe5cb74eadcaf37ba84523d1dc99f68ddcc9eb067a8986d78"
+          },
+          "runtime.core_metadata": {
+            "bytes": 118793446,
+            "sha256": "7f021e1463de5414d9c7d84228357485e7db68c7aa9f5bb521cf550eff471acf"
+          },
+          "runtime.symbol_graph": {
+            "bytes": 6995428,
+            "sha256": "e44ff2b708e0c36d89b1567284fafd6146b36ede30ad520b0bdffd0035c8d27a"
+          },
+          "runtime.vbca.checksum": {
+            "bytes": 64,
+            "sha256": "603d89a857d4d0eb6a7ef9180545ccb94eb30009e0cc11ec401c78d75bfb5833"
+          },
+          "runtime.vbca.schema": {
+            "bytes": 40,
+            "sha256": "1c3b3d0a7b02c7c0f4001b49068bc4a69cd1ce368a547335fbf4186391971e4c"
+          }
+        },
+        "log_sha256": "909e3c997bf6e4b1de36ea1862ec0c17876f319c93fbe82d3c1db032a2d80917",
+        "test_results": [
+          "test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.19s"
+        ],
+        "announced_test_counts": [
+          8
+        ],
+        "individual_failures": [],
+        "cargo_compilations": [
+          "verum_error v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_error)",
+          "verum_cbgr v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_cbgr)",
+          "verum_vbc v0.1.0 (/Users/taaliman/.codex/worktrees/configured-registry-downloads/verum/crates/verum_vbc)"
+        ],
+        "disk_free_after": 10283393024,
+        "artifacts_unchanged": true,
+        "selected_tests_complete": true,
+        "retained_archive_files": {}
+      },
+      "retained_log": "fixed-corrected-output.txt"
+    }
+  ]
+}

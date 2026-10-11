@@ -1,0 +1,17 @@
+{
+  "source_commit": "13d6e2f39801ede07ff60f55b3186dc2dc9e2a23",
+  "target": "/Users/taaliman/.tmp/verum-codex-01a10248-types/checker-target",
+  "target_released": true,
+  "remaining_target_processes": [],
+  "result_sha256": "48b65f78096b5104bf677a156c3a5ce6243a621454ea6d00f56d35b59a37dba4",
+  "executables": {
+    "archive_text_identity": {
+      "path": "/Users/taaliman/.tmp/verum-codex-01a10248-types/checker-target/debug/build/verum_vbc/077fd62a1e02383f/out/archive_text_identity-077fd62a1e02383f",
+      "sha256": "0ecab86e2e428575395c156a9fddd0e27ffc7520305375ab6d11c540305b6a61",
+      "retained": "/private/tmp/verum-T1745-fixed-corrected/archive_text_identity-077fd62a1e02383f",
+      "retained_sha256": "0ecab86e2e428575395c156a9fddd0e27ffc7520305375ab6d11c540305b6a61",
+      "fresh": false
+    }
+  },
+  "artifacts_unchanged": true
+}
