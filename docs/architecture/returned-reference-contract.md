@@ -89,8 +89,8 @@ itself, establish borrow-lifetime or container-invalidation enforcement.
 
 The native lowering performs the load and marks the register
 `interior_list_ref`, so its `Deref` arm passes the value through instead
-of loading a second time (`DEREF-INTERIOR-1`). That native convention is
-correct within a function and requires preservation at call boundaries.
+of loading a second time (`DEREF-INTERIOR-1`). Native consumers rely on
+that register mark within a function and on its preservation at call boundaries.
 The table records the current handler and lowering paths; an interpreter
 result does not validate the native carrier.
 
@@ -134,7 +134,7 @@ time:
   answer. The record descriptor is the discriminator, and an UNKNOWN
   pointee keeps the address it had — rule 4.
 
-#### The one producer whose convention is TIER-DEPENDENT, and why
+#### Why the raw-slot producer differs between backends
 
 `DerefValue` performs the load at Tier 0 and NOTHING at Tier 1. That is
 not an oversight: the opcode states "this register is a reference to a
