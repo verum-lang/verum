@@ -11892,8 +11892,19 @@ impl ProtocolChecker {
 
             // Named types: check constructor and arguments
             (Type::Named { path: p1, args: a1 }, Type::Named { path: p2, args: a2 }) => {
-                // Check if type constructors are the same
-                let same_constructor = format!("{:?}", p1) == format!("{:?}", p2);
+                // Declaration identity includes every owner segment, but not
+                // source locations. Comparing Debug text both allocated in
+                // this hot path and missed overlaps at different use sites.
+                let same_constructor = p1.segments.len() == p2.segments.len()
+                    && p1.segments.iter().zip(p2.segments.iter()).all(|(left, right)| {
+                        match (left, right) {
+                            (
+                                verum_ast::ty::PathSegment::Name(left),
+                                verum_ast::ty::PathSegment::Name(right),
+                            ) => left.name == right.name,
+                            _ => left == right,
+                        }
+                    });
                 if !same_constructor {
                     return false;
                 }

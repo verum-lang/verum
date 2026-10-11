@@ -243,3 +243,103 @@ fn orphan_rules_still_precede_overlap_checks_in_strict_and_lenient_modes() {
     );
     assert_eq!(checker.impls.len(), 1);
 }
+
+fn nominal_target(owner: &str, arguments: List<Type>, offset: u32) -> Type {
+    let span = Span::new(offset, offset + 1, FileId::new(offset));
+    Type::Named {
+        path: Path::new(
+            owner
+                .split('.')
+                .map(|part| PathSegment::Name(Ident::new(part, span)))
+                .collect(),
+            span,
+        ),
+        args: arguments,
+    }
+}
+
+#[test]
+fn nominal_duplicate_ignores_source_locations() {
+    let mut checker = ProtocolChecker::new_empty();
+    checker
+        .register_impl(implementation(
+            "Selected",
+            nominal_target("package.Item", List::new(), 10),
+        ))
+        .unwrap();
+    assert!(matches!(
+        checker.register_impl(implementation(
+            "Selected",
+            nominal_target("package.Item", List::new(), 20),
+        )),
+        Err(CoherenceError::OverlappingImplementations { .. }),
+    ));
+    assert_eq!(checker.impls.len(), 1);
+}
+
+#[test]
+fn nominal_blanket_overlap_ignores_source_locations() {
+    let mut checker = ProtocolChecker::new_empty();
+    checker
+        .register_impl(implementation(
+            "Selected",
+            nominal_target("package.Item", List::from_iter([Type::Var(TypeVar::fresh())]), 10),
+        ))
+        .unwrap();
+    assert!(matches!(
+        checker.register_impl(implementation(
+            "Selected",
+            nominal_target("package.Item", List::from_iter([Type::Int]), 20),
+        )),
+        Err(CoherenceError::OverlappingImplementations { .. }),
+    ));
+    assert_eq!(checker.impls.len(), 1);
+}
+
+#[test]
+fn nominal_protocol_arguments_ignore_source_locations() {
+    let mut checker = ProtocolChecker::new_empty();
+    let mut first = implementation("Selected", Type::Bool);
+    first.protocol_args.push(nominal_target("package.Input", List::new(), 10));
+    checker.register_impl(first).unwrap();
+    let mut second = implementation("Selected", Type::Bool);
+    second.protocol_args.push(nominal_target("package.Input", List::new(), 20));
+    assert!(matches!(
+        checker.register_impl(second),
+        Err(CoherenceError::OverlappingImplementations { .. }),
+    ));
+    assert_eq!(checker.impls.len(), 1);
+}
+
+#[test]
+fn nominal_coherence_keeps_owners_and_arguments_distinct() {
+    let mut checker = ProtocolChecker::new_empty();
+    for owner in ["alpha.Item", "beta.Item", "alpha.nested.Item", "Item"] {
+        for argument in [Type::Int, Type::Text] {
+            checker
+                .register_impl(implementation(
+                    "Selected",
+                    nominal_target(owner, List::from_iter([argument]), 10),
+                ))
+                .unwrap();
+        }
+    }
+    assert_eq!(checker.impls.len(), 8);
+}
+
+#[test]
+fn disjoint_nominal_targets_share_a_protocol() {
+    let mut checker = ProtocolChecker::new_empty();
+    let started = std::time::Instant::now();
+    for index in 0..256 {
+        checker
+            .register_impl(implementation(
+                "Selected",
+                nominal_target(&format!("package.Type{index}"), List::new(), index),
+            ))
+            .unwrap();
+    }
+    assert_eq!(checker.impls.len(), 256);
+    assert_eq!(checker.registration_overlap_comparisons, 256 * 255 / 2);
+    eprintln!("256 nominal targets, 32640 coherence comparisons: {:?}", started.elapsed());
+}
