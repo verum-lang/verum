@@ -16,6 +16,7 @@ use verum_common::{List, Map, Text};
 
 const CHILD: &str = "cog::publication_dependencies::isolated_dependency_publication";
 const CASE_ENV: &str = "VERUM_T1651_PUBLICATION_CASE";
+const PROJECT_ENV: &str = "VERUM_T1651_PROJECT_ROOT";
 const DETAILED: &str = r#"codec = { version = "^1.2", features = ["decode", "utf8"], optional = true, default-features = false }"#;
 
 fn metadata(dependencies: &str) -> Result<CogMetadata> {
@@ -206,9 +207,15 @@ fn workspace_dependency_dry_run_accepts_representable_options() {
 }
 
 fn child_case(case: &str) {
+    let projects = TempDir::new().unwrap();
+    let archives = TempDir::new().unwrap();
     let result = Command::new(std::env::current_exe().unwrap())
         .args(["--exact", CHILD, "--nocapture"])
         .env(CASE_ENV, case)
+        .env(PROJECT_ENV, projects.path())
+        .env("TMPDIR", archives.path())
+        .env("TMP", archives.path())
+        .env("TEMP", archives.path())
         .env("VERUM_REGISTRY_TOKEN", "fixture-dependency-token")
         .env("NO_PROXY", "127.0.0.1")
         .env("no_proxy", "127.0.0.1")
@@ -226,6 +233,11 @@ fn child_case(case: &str) {
         std::str::from_utf8(&result.stderr).unwrap()
     );
     assert!(result.status.success(), "{case}: {output}");
+    assert_eq!(
+        std::fs::read_dir(archives.path()).unwrap().count(),
+        0,
+        "{case}: publication must clean up every temporary archive"
+    );
     if case == "workspace_valid" {
         assert!(
             output.contains("Would publish dependency-member v1.2.3"),
@@ -253,14 +265,13 @@ fn isolated_dependency_publication() {
     let Ok(case) = std::env::var(CASE_ENV) else {
         return;
     };
-    let project = TempDir::new().unwrap();
+    let project = TempDir::new_in(std::env::var_os(PROJECT_ENV).unwrap()).unwrap();
     std::env::set_current_dir(project.path()).unwrap();
     if case.starts_with("workspace_") {
         workspace_dry_run(&case, project.path());
         return;
     }
     let name = format!("dependency-publication-{}", std::process::id());
-    let archive_path = std::env::temp_dir().join(format!("{name}-1.2.3.vr"));
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     listener.set_nonblocking(true).unwrap();
     let registry = format!("http://{}/private", listener.local_addr().unwrap());
@@ -294,30 +305,18 @@ fn isolated_dependency_publication() {
         drop(listener);
         for dry_run in [true, false] {
             let result = publish_with_signing_keys(dry_run, true, &[]);
-            let archive_created = archive_path.exists();
-            let _ = std::fs::remove_file(&archive_path);
             let error = result.unwrap_err();
             assert!(matches!(error, CliError::ConfigParse(_)), "{case}: {error}");
-            assert!(
-                !archive_created,
-                "{case}: dependency intent vanished before publication"
-            );
         }
         return;
     }
 
     if case == "refuse" {
         let result = publish_with_signing_keys(true, true, &[]);
-        let archive_created = archive_path.exists();
-        let _ = std::fs::remove_file(&archive_path);
         let message = result.unwrap_err().to_string();
         assert!(
             message.contains("codec") && message.contains("source"),
             "{message}"
-        );
-        assert!(
-            !archive_created,
-            "invalid dependencies must fail before creating an archive"
         );
         assert_eq!(
             listener.accept().unwrap_err().kind(),
@@ -329,7 +328,6 @@ fn isolated_dependency_publication() {
     let worker = thread::spawn(move || capture_publication(listener));
     let result = publish_with_signing_keys(false, true, &[]);
     let capture = worker.join().expect("publication capture");
-    let _ = std::fs::remove_file(&archive_path);
     result.expect("loopback publication must complete through receipt validation");
     assert_eq!(capture.metadata["name"], name);
     assert_eq!(

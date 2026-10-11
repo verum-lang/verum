@@ -81,7 +81,7 @@ fn publish_with_signing_keys(
     }
 
     // Create cog tarball
-    let cog_file = create_cog_tarball(&manifest_dir, &manifest)?;
+    let cog_file = create_cog_tarball(&manifest_dir)?;
     ui::success("Created cog archive");
 
     // Calculate checksum
@@ -101,11 +101,7 @@ fn publish_with_signing_keys(
     if dry_run {
         // A dry run must obey the same wire admission rules as the upload.
         // In particular, signing locally does not imply v1 accepts signatures.
-        let validation = client.validate_publication(&metadata, &cog_file);
-        if let Err(error) = validation {
-            let _ = fs::remove_file(&cog_file);
-            return Err(error);
-        }
+        client.validate_publication(&metadata, &cog_file)?;
         ui::info("");
         ui::info(&format!("{}", "[DRY RUN] Would publish:".bold()));
         ui::info(&format!("  Name: {}", manifest.cog.name));
@@ -115,8 +111,6 @@ fn publish_with_signing_keys(
         ui::info("");
         ui::success("Dry run complete - cog is valid for publishing");
 
-        // Clean up temp file
-        let _ = fs::remove_file(&cog_file);
         return Ok(());
     }
 
@@ -126,9 +120,6 @@ fn publish_with_signing_keys(
     // Upload to registry
     ui::step("Uploading to registry");
     client.publish(&metadata, &cog_file, token.as_str())?;
-
-    // Clean up temp file
-    let _ = fs::remove_file(&cog_file);
 
     ui::success(&format!(
         "Published {} v{}",
@@ -375,36 +366,49 @@ fn check_git_status(dir: &Path) -> Result<()> {
 }
 
 /// Create cog tarball (.vr archive)
-fn create_cog_tarball(manifest_dir: &Path, manifest: &Manifest) -> Result<PathBuf> {
+fn create_cog_tarball(manifest_dir: &Path) -> Result<tempfile::TempPath> {
     use flate2::Compression;
     use flate2::write::GzEncoder;
     use tar::Builder;
 
-    let cog_name = format!("{}-{}.vr", manifest.cog.name, manifest.cog.version);
-    let cog_path = std::env::temp_dir().join(&cog_name);
-
-    let file = fs::File::create(&cog_path)?;
+    // Keep ownership until validation/upload returns, including every error
+    // path. Independent publishers must never share or truncate an archive.
+    let temporary = tempfile::Builder::new()
+        .prefix("verum-cog-")
+        .suffix(".vr")
+        .tempfile()?;
+    let (file, cog_path) = temporary.into_parts();
     let encoder = GzEncoder::new(file, Compression::best());
     let mut archive = Builder::new(encoder);
+    archive.follow_symlinks(false);
 
     // Add the manifest under its canonical Verum.toml entry name even
     // if the on-disk file uses the legacy lowercase spelling.
-    archive.append_path_with_name(
+    append_source_file(
+        &mut archive,
         Manifest::manifest_path(&manifest_dir),
         Manifest::MANIFEST_FILENAME,
     )?;
 
     // Add src directory
     let src_dir = manifest_dir.join("src");
-    if src_dir.exists() {
-        add_directory_to_archive(&mut archive, &src_dir, "src")?;
+    match fs::symlink_metadata(&src_dir) {
+        Ok(metadata) if metadata.is_dir() => {
+            add_directory_to_archive(&mut archive, &src_dir, "src")?;
+        }
+        Ok(_) => {
+            return Err(CliError::Custom(
+                "Cannot publish: src must be a directory, not a symlink or file".into(),
+            ));
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error.into()),
     }
 
     // Add README if exists
     for readme in &["README.md", "README.txt", "README"] {
         let readme_path = manifest_dir.join(readme);
-        if readme_path.exists() {
-            archive.append_path_with_name(&readme_path, readme)?;
+        if append_optional_source_file(&mut archive, &readme_path, readme)? {
             break;
         }
     }
@@ -412,8 +416,7 @@ fn create_cog_tarball(manifest_dir: &Path, manifest: &Manifest) -> Result<PathBu
     // Add LICENSE if exists
     for license in &["LICENSE", "LICENSE.md", "LICENSE.txt"] {
         let license_path = manifest_dir.join(license);
-        if license_path.exists() {
-            archive.append_path_with_name(&license_path, license)?;
+        if append_optional_source_file(&mut archive, &license_path, license)? {
             break;
         }
     }
@@ -423,24 +426,75 @@ fn create_cog_tarball(manifest_dir: &Path, manifest: &Manifest) -> Result<PathBu
     Ok(cog_path)
 }
 
+fn append_source_file<W: IoWrite>(
+    archive: &mut tar::Builder<W>,
+    path: impl AsRef<Path>,
+    archive_path: impl AsRef<Path>,
+) -> Result<()> {
+    let path = path.as_ref();
+    if !fs::symlink_metadata(path)?.file_type().is_file() {
+        return Err(CliError::Custom(format!(
+            "Cannot publish non-regular source entry '{}' (symlinks are unsupported)",
+            path.display()
+        )));
+    }
+    archive.append_path_with_name(path, archive_path)?;
+    Ok(())
+}
+
+fn append_optional_source_file<W: IoWrite>(
+    archive: &mut tar::Builder<W>,
+    path: &Path,
+    archive_path: &str,
+) -> Result<bool> {
+    match fs::symlink_metadata(path) {
+        Ok(_) => {
+            append_source_file(archive, path, archive_path)?;
+            Ok(true)
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error.into()),
+    }
+}
+
 /// Recursively add directory to tar archive
 fn add_directory_to_archive<W: IoWrite>(
     archive: &mut tar::Builder<W>,
     dir: &Path,
     prefix: &str,
 ) -> Result<()> {
-    for entry in walkdir::WalkDir::new(dir)
-        .follow_links(false)
-        .into_iter()
-        .filter_map(|e| e.ok())
-    {
+    for entry in walkdir::WalkDir::new(dir).follow_links(false) {
+        let entry = entry?;
         let path = entry.path();
-        let relative = path.strip_prefix(dir).unwrap_or(path);
-        let archive_path = format!("{}/{}", prefix, relative.display());
-
-        if path.is_file() {
-            archive.append_path_with_name(path, &archive_path)?;
+        if entry.file_type().is_symlink() {
+            return Err(CliError::Custom(format!(
+                "Cannot publish source symlink '{}'; include the source file or directory directly",
+                path.display()
+            )));
         }
+        if entry.file_type().is_dir() {
+            continue;
+        }
+        if !entry.file_type().is_file() {
+            return Err(CliError::Custom(format!(
+                "Cannot publish non-regular source entry '{}'",
+                path.display()
+            )));
+        }
+        let relative = path.strip_prefix(dir).map_err(|error| {
+            CliError::Custom(format!(
+                "Invalid source archive path '{}': {error}",
+                path.display()
+            ))
+        })?;
+        let relative = relative.to_str().ok_or_else(|| {
+            CliError::Custom(format!(
+                "Cannot publish source path that is not UTF-8: '{}'",
+                path.display()
+            ))
+        })?;
+        let archive_path = format!("{prefix}/{relative}");
+        append_source_file(archive, path, &archive_path)?;
     }
     Ok(())
 }
@@ -704,3 +758,7 @@ mod publication_dependencies;
 #[cfg(test)]
 #[path = "../tests/cog/source_archive_finalization.rs"]
 mod source_archive_finalization;
+
+#[cfg(test)]
+#[path = "../tests/cog/source_archive_lifetime.rs"]
+mod source_archive_lifetime;

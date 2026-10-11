@@ -13,14 +13,6 @@ use verum_common::{List, Map, Text};
 
 const RETAIN_ENV: &str = "VERUM_T1742_ARCHIVE_FIXTURE_DIR";
 
-struct RemoveArchive(PathBuf);
-
-impl Drop for RemoveArchive {
-    fn drop(&mut self) {
-        let _ = fs::remove_file(&self.0);
-    }
-}
-
 fn sha256(bytes: &[u8]) -> Text {
     hex::encode(Sha256::digest(bytes)).into()
 }
@@ -96,12 +88,7 @@ fn actual_source_cog_preserves_short_long_and_binary_entries() {
         fs::create_dir_all(input.parent().unwrap()).unwrap();
         fs::write(input, content.as_slice()).unwrap();
     }
-    let manifest = Manifest::from_file(&project.path().join(Manifest::MANIFEST_FILENAME)).unwrap();
-    // Register cleanup before invoking the producer so even a partial output
-    // from a failed assertion or packaging error is removed from the temp root.
-    let cleanup = RemoveArchive(std::env::temp_dir().join(format!("{name}-1.2.3.vr")));
-    let archive_path = create_cog_tarball(project.path(), &manifest).unwrap();
-    assert_eq!(archive_path, cleanup.0);
+    let archive_path = create_cog_tarball(project.path()).unwrap();
     let compressed: List<u8> = fs::read(&archive_path).unwrap().into();
     let mut tar_bytes: List<u8> = List::new();
     io::copy(&mut GzDecoder::new(compressed.as_slice()), &mut tar_bytes).unwrap();
