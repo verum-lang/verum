@@ -213,6 +213,10 @@ pub(super) mod tensor_extended;
 pub(super) mod text_extended;
 
 #[cfg(test)]
+#[path = "../../../../tests/unit/drop_reference_authority_tests.rs"]
+mod drop_reference_authority_tests;
+
+#[cfg(test)]
 #[path = "../../../../tests/unit/shared_carrier_authority_tests.rs"]
 mod shared_carrier_authority_tests;
 
