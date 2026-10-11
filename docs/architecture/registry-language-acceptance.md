@@ -1132,3 +1132,15 @@ controls and 19 Text controls; the borrowed-payload checker previously passed
 all 15 main-based controls. No fresh standard-library bake, general conflicting
 record-schema validation, Map mutation, whole-registry or AOT acceptance is
 claimed by this slice.
+
+
+## Mutable Map diagnostic (T1196)
+
+The [bounded instruction diagnostic](evidence/map-mutable-slots/diagnostic/README.md)
+reproduces the unchanged Map mutation failure. Its selected source
+`Map.get_mut` body uses four-field slots with stride 32, while the runtime
+Map producer uses two `Value` words per entry. The guard fails at `GetF`
+byte offset 114; the backtrace cursor is 118. The read oracle succeeds,
+and the mutation oracle remains unmet. T1196 and the broader representation
+consolidation in T1245 remain open. No AOT or registry-publication acceptance
+is inferred from this diagnostic.

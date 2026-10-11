@@ -1,0 +1,84 @@
+{
+  "task": "T1196",
+  "engine_commit": "abfb5fc88374eadce2ebcbbbc36235149ef5c2cb",
+  "receipt_sha256": "7156bdea69009c95c46a351d19daef5114253a483617f2ede3288548c7a72d25",
+  "cli": {
+    "bytes": 548275272,
+    "path": "/private/tmp/verum-T1749-descriptor-consumer-cli/verum-consumer-abfb5fc88",
+    "sha256": "0c81394ec687520e196fa96b31b39a5547e2fcc62e9879ce2855eba46c45ebb7"
+  },
+  "source_sha256": "1e8d82f8bf49013bc97d1579234acbb225b951fdc8709e614d808cfe514e4d0b",
+  "seconds": 86.079,
+  "returncode": 1,
+  "diagnostic_reproduced": true,
+  "consumer_passed": false,
+  "files": {
+    "result.json.gz": {
+      "bytes": 1998,
+      "sha256": "7156bdea69009c95c46a351d19daef5114253a483617f2ede3288548c7a72d25",
+      "gzip_bytes": 1057,
+      "gzip_sha256": "f987fd7ac0f84e71e3b58d839dc9641c81aab1ceb6d978e6c0994c8703fe9ffe"
+    },
+    "started.json.gz": {
+      "bytes": 1642,
+      "sha256": "5fb44e9bd5c4b8c1305f69c8c0be63e0f98daca929ffd79c66dd675989dc3d3b",
+      "gzip_bytes": 877,
+      "gzip_sha256": "10453a1ae298d55cc918118d1c7d6705042ddd352dd1c5be0a06c4ca4c3f99be"
+    },
+    "runner.py.gz": {
+      "bytes": 8116,
+      "sha256": "1fb1af505fb4e7e6726624503b5287c63f0a23c855bc782526df59d32cb778f0",
+      "gzip_bytes": 3067,
+      "gzip_sha256": "09a0d65a51c76dd79089f535cddad89c9518163a1ec6df444d31ba0c061ba3b9"
+    },
+    "baseline-result.json.gz": {
+      "bytes": 2958,
+      "sha256": "ca35f2da56ee28a439008f2ae0b670d8ead7a2552536159f49d0f7bc3fa11a67",
+      "gzip_bytes": 1420,
+      "gzip_sha256": "43b088b4467518ff71a0b71552fb0aa02741e729efb0c729300f11ec7f80af6b"
+    },
+    "prior-consumer-result.json.gz": {
+      "bytes": 1833,
+      "sha256": "5cb668d222486db8f4ac9a0c3abe336e8eb19dca966d24fcf92cc0c2af732c89",
+      "gzip_bytes": 989,
+      "gzip_sha256": "4283c8f7f4136aa56270077d1f9e345509aaa5682425d9830cfe4ee2d4e705c4"
+    },
+    "consumer-build-manifest.json.gz": {
+      "bytes": 654796,
+      "sha256": "4529dd07859ad0fc6a1d10504ad1fbde8a91433c5544a370774be31086afb691",
+      "gzip_bytes": 262068,
+      "gzip_sha256": "44b43c7c0e4e32ff8e41d3091992c5feaa16816300b583bdae8c594f27f10856"
+    },
+    "stdlib-build-manifest.json.gz": {
+      "bytes": 651160,
+      "sha256": "3df266cba9190c9d201e03cb51404b28a1d1864f784d32e18421d6fb2083faef",
+      "gzip_bytes": 260423,
+      "gzip_sha256": "eea94be1411bf95c876e0ff9c53b4d2e329383086e13a522ac1794f13e883b70"
+    },
+    "expected.stdout.gz": {
+      "bytes": 28,
+      "sha256": "5ab11b5a7765bb1e232c7b92ae700316be267f80010f2457a3090f486aa71c09",
+      "gzip_bytes": 43,
+      "gzip_sha256": "3679cb4982339af8cc5fde35b4c7309c64fe979a49cdb27cfab8f1bc9bd31f8f"
+    },
+    "stdout.log.gz": {
+      "bytes": 13,
+      "sha256": "32bd0b6f4e1006c5878c035eeac3fcb8e57095968491937183d7597f6a7ce903",
+      "gzip_bytes": 33,
+      "gzip_sha256": "95d6ade0a2e4be79a7dba339cd52aabcbde0bcd295753f20a67d2c510fa1a2e8"
+    },
+    "stderr.log.gz": {
+      "bytes": 39113,
+      "sha256": "f6c1fd4a2ef7e4f84cb31f012e54947f7ce7e12465fc8d3eeded231a34c8fb29",
+      "gzip_bytes": 2766,
+      "gzip_sha256": "4c51fc54d5f53bc43048272e99715fb14240bdd084522ea4e6e2e0db16f7c2bd"
+    },
+    "runtime/map.vr.gz": {
+      "bytes": 1424,
+      "sha256": "1e8d82f8bf49013bc97d1579234acbb225b951fdc8709e614d808cfe514e4d0b",
+      "gzip_bytes": 560,
+      "gzip_sha256": "eda4c8e4fac9e98607c41ce18e084403b8d81a539205ee159f7f98de330534e8"
+    }
+  },
+  "scope": "Unchanged Map source and consumer CLI with scoped instruction tracing. Confirms source get_mut path and preserves the original failed mutation oracle. No reference fix, fresh stdlib bake, registry or AOT acceptance."
+}
