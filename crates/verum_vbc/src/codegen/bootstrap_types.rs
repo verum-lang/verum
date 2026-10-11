@@ -450,6 +450,11 @@ impl VbcCodegen {
             let (mi, ti) = catalog[key];
             let module = available[mi];
             let mut ty = module.types[ti].clone();
+            // Retain this fact from the original descriptor: unresolved glue
+            // becomes None below, but that loss cannot authorize absorption.
+            let carrier_eligible = key.rsplit('.').next().is_some_and(|leaf| {
+                module.types[ti].is_impl_only_scalar_carrier(leaf)
+            });
             let remap = &maps[mi];
             let tr = |value: &TypeRef| remap_type_ref_archive(value, remap);
             copy_remapped_data_type_carriers(&module.types[ti], &mut ty, remap);
@@ -476,11 +481,12 @@ impl VbcCodegen {
                 .origin_module
                 .and_then(|id| module.strings.get(id))
                 .unwrap_or(&module.name);
-            self.import_archive_type_with_protocol_remap_qualified(
+            self.import_archive_type_with_carrier_eligibility(
                 &ty,
                 &module.strings,
                 &HashMap::new(),
                 Some(owner),
+                Some(carrier_eligible),
             );
             let local = target_ids[key];
             // Old descriptors without origin still have a known owning unit.

@@ -7066,7 +7066,9 @@ impl VbcCodegen {
             }
             if incoming_record != existing_record {
                 // Keep incompatible claims visible to strict finalization.
-                if !eligible { self.ineligible_record_carriers.insert(self.types.len()); }
+                if !eligible && ty.kind == crate::types::TypeKind::Primitive {
+                    self.ineligible_record_carriers.insert(self.types.len());
+                }
                 self.push_type_descriptor(ty);
                 return;
             }
@@ -26444,6 +26446,19 @@ impl VbcCodegen {
         >,
         module_prefix: Option<&str>,
     ) {
+        self.import_archive_type_with_carrier_eligibility(
+            ty, archive_strings, protocol_id_remap, module_prefix, None,
+        );
+    }
+
+    fn import_archive_type_with_carrier_eligibility(
+        &mut self,
+        ty: &TypeDescriptor,
+        archive_strings: &crate::module::StringTable,
+        protocol_id_remap: &Map<TypeId, TypeId>,
+        module_prefix: Maybe<&str>,
+        original_carrier_eligible: Maybe<bool>,
+    ) {
         let intern = |this: &mut Self, sid: crate::types::StringId| -> crate::types::StringId {
             let name = match archive_strings.get(sid) {
                 Some(s) => s.to_string(),
@@ -26477,7 +26492,9 @@ impl VbcCodegen {
             .unwrap_or(&name_str).to_owned();
         let scalar_id = ty.canonical_scalar_type_id(&name_str);
         // Record eligibility before clearing source-local glue IDs below.
-        let carrier_eligible = ty.is_impl_only_scalar_carrier(&name_str);
+        let carrier_eligible = original_carrier_eligible.unwrap_or_else(|| {
+            ty.is_impl_only_scalar_carrier(&name_str)
+        });
         let canonical_id = scalar_id.or_else(|| {
             ty.canonical_record_type_id(&name_str, source_owner)
         });
