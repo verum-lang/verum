@@ -138,7 +138,7 @@ fn assert_result(module: &VbcModule, name: &str, expected: i64) {
 fn supplemental_registration_preserves_primary_qualified_and_bare_ids() {
     let archive = archive(&[source("alpha", 37)]);
     let cache = cache(&archive);
-    let mut codegen = primary(&cache, &archive, "fn main() -> Int { alpha.original() }", 0);
+    let mut codegen = primary(&cache, &archive, "fn main() -> Int { original() }", 0);
     let original = id(&mut codegen, "alpha.original");
     assert_eq!(id(&mut codegen, "original"), original);
     supplement(&cache, &archive, &mut codegen, "alpha.later");
@@ -154,7 +154,7 @@ fn supplemental_registration_preserves_primary_qualified_and_bare_ids() {
 fn a_new_body_calls_the_original_consumer_id() {
     let archive = archive(&[source("alpha", 37)]);
     let cache = cache(&archive);
-    let mut codegen = primary(&cache, &archive, "fn main() -> Int { alpha.original() }", 0);
+    let mut codegen = primary(&cache, &archive, "fn main() -> Int { original() }", 0);
     let original = id(&mut codegen, "alpha.original");
     supplement(&cache, &archive, &mut codegen, "alpha.later");
     assert_ne!(id(&mut codegen, "alpha.later"), original);
@@ -173,7 +173,7 @@ fn declared_method_aliases_and_real_empty_bodies_survive_supplemental_load() {
     let mut codegen = primary(
         &cache,
         &archive,
-        "mount alpha.Counter; fn main() -> Int { alpha.original() }",
+        "fn main(counter: &Counter) -> Int { counter.empty(); counter.value() + original() }",
         0,
     );
     let names = ["Counter.value", "Counter.empty"];
@@ -206,12 +206,7 @@ fn same_leaf_foreign_functions_remain_distinct_in_both_archive_orders() {
         }
         let archive = archive(&modules);
         let cache = cache(&archive);
-        let mut codegen = primary(
-            &cache,
-            &archive,
-            "fn main() -> Int { alpha.original() + beta.original() }",
-            0,
-        );
+        let mut codegen = primary(&cache, &archive, "fn main() -> Int { original() }", 0);
         let alpha = id(&mut codegen, "alpha.original");
         let beta = id(&mut codegen, "beta.original");
         assert_ne!(alpha, beta);
@@ -228,7 +223,7 @@ fn same_leaf_foreign_functions_remain_distinct_in_both_archive_orders() {
 fn later_supplemental_waves_reuse_the_same_call_closure() {
     let archive = archive(&[source("alpha", 37)]);
     let cache = cache(&archive);
-    let mut codegen = primary(&cache, &archive, "fn main() -> Int { alpha.original() }", 0);
+    let mut codegen = primary(&cache, &archive, "fn main() -> Int { original() }", 0);
     let original = id(&mut codegen, "alpha.original");
     supplement(&cache, &archive, &mut codegen, "alpha.later");
     let later = id(&mut codegen, "alpha.later");
@@ -257,12 +252,7 @@ fn a_new_compilation_epoch_does_not_reuse_previous_consumer_ids() {
     let cache = cache(&archive);
     let mut originals = List::new();
     for offset in [0, 1000] {
-        let mut codegen = primary(
-            &cache,
-            &archive,
-            "fn main() -> Int { alpha.original() }",
-            offset,
-        );
+        let mut codegen = primary(&cache, &archive, "fn main() -> Int { original() }", offset);
         let original = id(&mut codegen, "alpha.original");
         originals.push(original);
         supplement(&cache, &archive, &mut codegen, "alpha.later");
