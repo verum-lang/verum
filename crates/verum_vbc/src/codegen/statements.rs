@@ -370,36 +370,34 @@ impl VbcCodegen {
         }
     }
 
-    /// Compiles a let binding.
-    /// Does `let <pat> = <expr>` duplicate a value that keeps living
-    /// under its own name — i.e. is the initializer a PLACE?
-    ///
-    /// A place is a variable: after `let b = a`, `a` is still there and
-    /// still owns its record, so `b` must get one of its own. Everything
-    /// else an initializer can be — a literal, a call result, an
-    /// arithmetic expression, a freshly built record — is a temporary
-    /// nobody else can name, and copying it would be pure cost.
-    ///
-    /// Two kinds of variable are excluded, both because copying them
-    /// would change what the program means rather than preserve it:
-    ///
-    /// * A REFERENCE (`let s = r` where `r: &Row`). Copying a reference
-    ///   yields a reference to the same object — that IS its value
-    ///   semantics. Deep-copying the pointee would silently turn an
-    ///   alias into a snapshot. `reference_bindings` carries this fact.
-    /// * A RAW POINTER, for the reason `compile_record` states at its
-    ///   own `Clone` site: the bytes behind it are not an `ObjectHeader`,
-    ///   so a deep copy would read the user's payload as one.
-    pub(super) fn binds_a_copy_of_a_place(&self, init: &verum_ast::Expr, reg: Reg) -> bool {
-        let verum_ast::ExprKind::Path(path) = &init.kind else {
-            return false;
-        };
-        let [verum_ast::ty::PathSegment::Name(ident)] = path.segments.as_slice() else {
-            // A qualified path (`Maybe.None`, `Color.Red`, `module.CONST`)
-            // names a constructor or an item, not a local place.
-            return false;
-        };
-        self.copies_from_named_place(ident.name.as_str(), reg)
+    /// Preserve named-place behavior. A new dereference copy additionally needs
+    /// semantic value authority and unrestricted use from the exact declaration.
+    pub(super) fn binds_a_copy_of_a_place(
+        &self, init: &verum_ast::Expr, reg: Reg, ty: Option<&crate::types::TypeRef>,
+    ) -> CodegenResult<bool> {
+        use verum_ast::{ExprKind, UnOp};
+        match &Self::normalized_place(init).kind {
+            ExprKind::Path(path) => {
+                let [verum_ast::ty::PathSegment::Name(ident)] = path.segments.as_slice() else {
+                    return Ok(false);
+                };
+                Ok(self.copies_from_named_place(ident.name.as_str(), reg))
+            }
+            ExprKind::Unary { op: UnOp::Deref, .. } => {
+                let Some(ty) = ty else { return Ok(false); };
+                if matches!(ty, crate::types::TypeRef::Reference { .. }) { return Ok(false); }
+                if self.ctx.is_raw_pointer(reg) { return Ok(false); }
+                match crate::resource_discipline::resource_discipline_with(ty, |id| self.type_by_id(id)) {
+                    verum_common::ResourceDiscipline::Unrestricted => Ok(self.copy_type_is_value(ty)),
+                    verum_common::ResourceDiscipline::Affine | verum_common::ResourceDiscipline::Linear =>
+                        Err(CodegenError::with_span(super::error::CodegenErrorKind::UnsupportedExpr(
+                            "dereference copy requires an unrestricted value; an exclusive borrowed owner cannot be copied or transferred".into(),
+                        ), init.span)),
+                    verum_common::ResourceDiscipline::Unknown => Ok(false),
+                }
+            }
+            _ => Ok(false),
+        }
     }
 
     /// The same question asked about a NAME rather than an expression —
@@ -1440,6 +1438,7 @@ impl VbcCodegen {
             }
         }
 
+        let copy_start = self.ctx.instructions.len();
         let mut init_reg = if let Some(expr) = value {
             self.compile_expr(expr)?
         } else {
@@ -1448,6 +1447,9 @@ impl VbcCodegen {
             self.ctx.emit(Instruction::LoadUnit { dst: reg });
             Some(reg)
         };
+        // Capture before destination shadowing or subsequent emissions.
+        let inferred_copy_type = value.zip(init_reg).and_then(|(expr, reg)|
+            self.copy_source_type(expr, reg, copy_start, self.ctx.instructions.len()));
         // Block locals and callable bodies establish result types during
         // compilation. Consume those facts after the initializer, rather
         // than retaining a pre-compilation guess or generic placeholder.
@@ -1591,7 +1593,7 @@ impl VbcCodegen {
                 ..
             }) && value.is_some_and(|expr| self.consumes_named_place(expr, reg));
             let bound = match value {
-                Some(expr) if !transfer && self.binds_a_copy_of_a_place(expr, reg) => {
+                Some(expr) if !transfer && self.binds_a_copy_of_a_place(expr, reg, inferred_copy_type.as_ref())? => {
                     let owned = self.ctx.alloc_temp();
                     self.ctx.emit(Instruction::Clone {
                         dst: owned,
@@ -1610,6 +1612,17 @@ impl VbcCodegen {
         if let verum_ast::PatternKind::Ident { name, .. } = &pattern.kind {
             if let Some(ty) = ty {
                 self.publish_binding_type(name.name.as_str(), ty);
+            } else if let Some(inferred) = inferred_copy_type {
+                if let Some(reg) = self.ctx.lookup_var(name.name.as_str()).map(|v| v.reg) {
+                    // A type fact does not grant a new transfer or destruction
+                    // obligation to an inferred local.
+                    let discipline = source_value_fact.as_ref().map(|fact| fact.discipline)
+                        .unwrap_or(verum_common::ResourceDiscipline::Unknown);
+                    if matches!(inferred, crate::types::TypeRef::Reference { .. }) {
+                        self.ctx.reference_bindings.insert(name.name.to_string());
+                    }
+                    self.ctx.registers.value_uses.set_type(reg, inferred, discipline);
+                }
             } else if let Some(fact) = source_value_fact {
                 if let (Some(ty), Some(reg)) = (fact.declaration_type, self.ctx.lookup_var(name.name.as_str()).map(|v| v.reg)) {
                     self.ctx.registers.value_uses.set_type(reg, ty, fact.discipline);

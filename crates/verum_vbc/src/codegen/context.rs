@@ -1107,7 +1107,7 @@ pub struct FunctionInfo {
     /// True only when the selected declaration has a source body, including {}.
     /// Synthetic bytecode and legacy descriptors do not establish this fact.
     pub has_source_body: bool,
-    /// Proven user-visible closure signature, excluding its hidden environment.
+    /// Proven source callable signature, excluding a closure's hidden environment.
     /// None means unknown, independently of the descriptor's legacy ABI defaults.
     pub callable_signature: Option<TypeRef>,
     /// Function ID in module.
@@ -2132,6 +2132,11 @@ impl CodegenContext {
         self.label_counter += 1;
         self.stats.labels_generated += 1;
         label
+    }
+
+    /// A label can join another control-flow path into a result interval.
+    pub(super) fn has_label_in_instruction_range(&self, start: usize, end: usize) -> bool {
+        self.labels.values().any(|position| *position >= start && *position <= end)
     }
 
     /// Defines a label at the current instruction position.

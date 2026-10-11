@@ -230,7 +230,7 @@ impl super::VbcCodegen {
     /// change program semantics. Captured cells and unknown/generic carriers
     /// need their own producer contract and are deliberately excluded.
     pub(super) fn consumes_named_place(&self, expr: &verum_ast::Expr, reg: Reg) -> bool {
-        let verum_ast::ExprKind::Path(path) = &expr.kind else {
+        let verum_ast::ExprKind::Path(path) = &Self::normalized_place(expr).kind else {
             return false;
         };
         let [verum_ast::ty::PathSegment::Name(name)] = path.segments.as_slice() else {

@@ -71,6 +71,23 @@ fn declaration_parameter_classification_changes_the_key_without_core_or_schema_c
 }
 
 #[test]
+fn dereference_copy_semantics_invalidate_the_archive_without_schema_changes() {
+    const PATH: &str = "crates/verum_vbc/src/codegen/place_copies.rs";
+    const SOURCE: &str = include_str!("../../verum_vbc/src/codegen/place_copies.rs");
+    let root = tempfile::tempdir().unwrap();
+    let with_copy = "TypeRef::Reference { inner, .. } => Some(*inner)";
+    let without_copy = "TypeRef::Reference { .. } => None";
+    assert_eq!(SOURCE.matches(with_copy).count(), 1);
+    write(root.path(), PATH, SOURCE.replace(with_copy, without_copy));
+    let before = key(root.path(), SCHEMA, CORE).0;
+    write(root.path(), PATH, SOURCE);
+    let (after, dependencies) = key(root.path(), SCHEMA, CORE);
+    assert_ne!(before, after, "dereference-copy semantics are an archive producer input");
+    assert_eq!(after, key(root.path(), SCHEMA, CORE).0);
+    assert_eq!(dependencies.iter().filter(|path| **path == root.path().join(PATH)).count(), 1);
+}
+
+#[test]
 fn missing_parser_input_is_tracked_and_differs_from_an_empty_file() {
     let root = tempfile::tempdir().unwrap();
     let (missing, dependencies) = key(root.path(), SCHEMA, CORE);

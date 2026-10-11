@@ -25,6 +25,45 @@ impl VbcCodegen {
         result
     }
 
+    /// The existing callable signature stores source meaning independently of
+    /// ABI layouts. Only complete, supported declarations establish it.
+    pub(super) fn source_callable_signature(
+        &self,
+        function: &FunctionDecl,
+        scope: &std::collections::HashMap<String, u16>,
+        receiver_scope: &std::collections::HashMap<String, u16>,
+        declared_ids: &[TypeParamId],
+    ) -> Option<TypeRef> {
+        if function.is_async || function.is_generator || !function.contexts.is_empty() {
+            return None;
+        }
+        let return_type = self.semantic_formal_type(function.return_type.as_ref()?, scope, declared_ids)?;
+        let params = self.source_semantic_parameters(function, scope, receiver_scope, declared_ids)
+            .into_iter().collect::<Option<List<_>>>()?;
+        Some(TypeRef::Function {
+            params: params.into_iter().collect(),
+            return_type: Box::new(return_type),
+            contexts: Default::default(),
+        })
+    }
+
+    pub(super) fn register_declared_impl_function(
+        &mut self,
+        function: &FunctionDecl,
+        implementation: &verum_ast::decl::ImplKind,
+        name: &str,
+        generics: &[String],
+    ) -> super::CodegenResult<()> {
+        let target = match implementation {
+            verum_ast::decl::ImplKind::Inherent(target) => target,
+            verum_ast::decl::ImplKind::Protocol { for_type, .. } => for_type,
+        };
+        let saved = self.current_impl_semantic_target.replace(target.clone());
+        let result = self.register_impl_function(function, name, generics);
+        self.current_impl_semantic_target = saved;
+        result
+    }
+
     pub(super) fn source_semantic_parameters(
         &self,
         function: &FunctionDecl,
@@ -127,7 +166,7 @@ impl VbcCodegen {
             .is_some_and(|id| id.is_builtin())
     }
 
-    fn semantic_formal_type(
+    pub(super) fn semantic_formal_type(
         &self,
         ast: &verum_ast::Type,
         scope: &std::collections::HashMap<String, u16>,

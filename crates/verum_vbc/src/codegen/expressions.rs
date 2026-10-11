@@ -3783,9 +3783,11 @@ impl VbcCodegen {
             self.ctx.push_disambig_context(Some(base))
         });
         // Evaluate value first
+        let copy_start = self.ctx.instructions.len();
         let value_reg = self
             .compile_expr(value)?
             .or_internal("assignment value has no value")?;
+        let copy_type = self.copy_source_type(value, value_reg, copy_start, self.ctx.instructions.len());
         if let Some(saved) = saved_assign_rt {
             self.ctx.pop_disambig_context(saved);
         }
@@ -3827,7 +3829,7 @@ impl VbcCodegen {
                     // `dst = src` duplicates a value that keeps living
                     // under its own name, exactly as `let dst = src`
                     // does, and copies for the same reason (T0832).
-                    let stored = if self.binds_a_copy_of_a_place(value, value_reg) {
+                    let stored = if self.binds_a_copy_of_a_place(value, value_reg, copy_type.as_ref())? {
                         let owned = self.ctx.alloc_temp();
                         self.ctx.emit(Instruction::Clone {
                             dst: owned,
@@ -15560,6 +15562,8 @@ impl VbcCodegen {
                 fi
             }
         });
+        let stores_arguments = matches!(method.name.as_str(), "push" | "push_back" | "push_front" | "append" | "insert" | "add" | "enqueue" | "send");
+        let mut copy_arguments = verum_common::List::new();
         let args_start = if !args.is_empty() {
             let mut arg_vals: Vec<Reg> = Vec::with_capacity(args.len());
             for (i, arg) in args.iter().enumerate() {
@@ -15576,9 +15580,12 @@ impl VbcCodegen {
                 } else {
                     None
                 };
+                let copy_start = self.ctx.instructions.len();
                 let arg_val = self
                     .compile_expr(arg)?
                     .or_internal("method arg has no value")?;
+                let copy_type = self.copy_source_type(arg, arg_val, copy_start, self.ctx.instructions.len());
+                copy_arguments.push(stores_arguments && self.binds_a_copy_of_a_place(arg, arg_val, copy_type.as_ref())?);
                 if let Some(saved) = saved_disambig {
                     self.ctx.pop_disambig_context(saved);
                 }
@@ -15612,20 +15619,10 @@ impl VbcCodegen {
             // intercepted by the runtime and have no Verum body to carry
             // a prologue. The list is the take-ownership surface: every
             // one of them stores its argument rather than reading it.
-            if matches!(
-                method.name.as_str(),
-                "push"
-                    | "push_back"
-                    | "push_front"
-                    | "append"
-                    | "insert"
-                    | "add"
-                    | "enqueue"
-                    | "send"
-            ) {
-                for (i, arg) in args.iter().enumerate() {
+            if stores_arguments {
+                for i in 0..args.len() {
                     let reg = Reg(first.0 + i as u16);
-                    if self.binds_a_copy_of_a_place(arg, reg) {
+                    if copy_arguments[i] {
                         self.ctx.emit(Instruction::Clone {
                             dst: reg,
                             src: reg,
@@ -26154,6 +26151,7 @@ impl VbcCodegen {
                 // other types exporting the same variant.
                 let saved_field_type = self.push_field_type_context(&type_name, &field.name.name);
 
+                let copy_start = self.ctx.instructions.len();
                 let value_reg = if let Some(ref v) = field.value {
                     if matches!(v.kind, ExprKind::Closure { .. } | ExprKind::Paren(_))
                         && let Some(hint) = self.field_type_name(&type_name, &field.name.name)
@@ -26203,6 +26201,8 @@ impl VbcCodegen {
                     self.ctx.get_var_reg(&field.name.name)?
                 };
 
+                let copy_type = field.value.as_ref().and_then(|expr|
+                    self.copy_source_type(expr, value_reg, copy_start, self.ctx.instructions.len()));
                 self.pop_field_type_context(saved_field_type);
 
                 // Field-write strategy:
@@ -26273,7 +26273,7 @@ impl VbcCodegen {
                 // Only PLACES copy: a field initialized from a literal,
                 // a call or a nested literal already owns its value.
                 let is_place = match &field.value {
-                    Some(expr) => self.binds_a_copy_of_a_place(expr, value_reg),
+                    Some(expr) => self.binds_a_copy_of_a_place(expr, value_reg, copy_type.as_ref())?,
                     // Shorthand (`Point { x, y }`) names its source
                     // without an expression node.
                     None => self

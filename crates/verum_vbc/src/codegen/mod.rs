@@ -62,6 +62,7 @@ mod parsed_field_types;
 mod associated_types;
 mod statements;
 mod value_uses;
+mod place_copies;
 mod formal_parameters;
 mod field_visibility;
 
@@ -9826,7 +9827,7 @@ impl VbcCodegen {
                             // and method resolution. We do NOT register by simple name to avoid
                             // collisions with standalone functions of the same name.
                             if let Some(ref ty_name) = type_name {
-                                self.register_impl_function(func, ty_name, &self.resolve_impl_generics(impl_decl).0)?;
+                                self.register_declared_impl_function(func, &impl_decl.kind, ty_name, &self.resolve_impl_generics(impl_decl).0)?;
 
                                 // If this is a Drop impl and the function is named "drop",
                                 // record the drop function ID in the TypeDescriptor
@@ -11198,9 +11199,12 @@ impl VbcCodegen {
             func, &signature_scope, &dense, &Self::ordered_generic_param_ids(&dense, &shadow),
         );
         self.ctx.semantic_fn_params.insert(id, semantic_params);
+        let callable_signature = self.source_callable_signature(
+            func, &signature_scope, &dense, &Self::ordered_generic_param_ids(&dense, &shadow),
+        );
         let info = FunctionInfo {
             has_source_body: func.body.is_some(),
-            callable_signature: None,
+            callable_signature,
             type_param_ids: Self::ordered_generic_param_ids(&dense, &shadow),
             explicit_type_param_ids: Self::explicit_generic_param_ids(func, &dense, &shadow),
             id,
@@ -13803,10 +13807,13 @@ impl VbcCodegen {
         let saved_impl = self.ctx.current_impl_type_name.replace(type_name.to_owned());
         let return_type = func.return_type.as_ref()
             .map(|ty| self.resolve_field_type_ref(ty, &signature_scope));
+        let callable_signature = self.source_callable_signature(
+            func, &signature_scope, &dense, &Self::ordered_generic_param_ids(&dense, &shadow),
+        );
         self.ctx.current_impl_type_name = saved_impl;
         let info = FunctionInfo {
             has_source_body: func.body.is_some(),
-            callable_signature: None,
+            callable_signature,
             type_param_ids: Self::ordered_generic_param_ids(&dense, &shadow),
             explicit_type_param_ids: Self::explicit_generic_param_ids(func, &dense, &shadow),
             id,

@@ -93,6 +93,7 @@ pub(crate) fn compute_archive_key<'a>(
         "crates/verum_vbc/src/codegen/bootstrap_types.rs",
         "crates/verum_vbc/src/codegen/parsed_field_types.rs",
         "crates/verum_vbc/src/codegen/value_uses.rs",
+        "crates/verum_vbc/src/codegen/place_copies.rs",
         "crates/verum_vbc/src/codegen/formal_parameters.rs",
         "crates/verum_vbc/src/value_use.rs",
         "crates/verum_vbc/src/resource_discipline.rs",
