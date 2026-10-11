@@ -2,7 +2,10 @@
 //!
 //! Compile the complete production Map module and its caller without filtering or
 //! replacing the Slot/get_mut declarations. The mount loader supplies dependency
-//! declarations; each executed case must reach its own scalar oracle. This is a
+//! declarations. Callers use real map literals (NewMap) to select the runtime
+//! carrier; source-only Map.new takes a different route from the ordinary
+//! archive compiler. No production body is filtered or replaced. Each executed
+//! case must reach its own scalar oracle. This is a
 //! source/wire interpreter gate, not a type-checker, AOT or lifetime-verifier gate.
 #![cfg(feature = "codegen")]
 
@@ -58,15 +61,13 @@ fn read_dependency(values: &Map<Text, Dependency>) -> Int {
 }
 
 fn read_control() -> Int {
-    let mut values: Map<Text, Int> = Map.new();
-    values.insert("codec", 7);
+    let mut values: Map<Text, Int> = { "codec": 7 };
     values.insert("other", 19);
     read_int(&values, "codec") * 100 + read_int(&values, "other")
 }
 
 fn direct_write_through() -> Int {
-    let mut values: Map<Text, Int> = Map.new();
-    values.insert("codec", 7);
+    let mut values: Map<Text, Int> = { "codec": 7 };
     values.insert("other", 19);
     match values.get_mut(&"codec") {
         Maybe.Some(value) => {
@@ -81,7 +82,8 @@ fn direct_write_through() -> Int {
 }
 
 fn empty_and_missing_keys() -> Int {
-    let mut values: Map<Text, Int> = Map.new();
+    let mut values: Map<Text, Int> = { "removed": 0 };
+    values.clear();
     assert(values.get_mut(&"absent") is Maybe.None);
     values.insert("codec", 7);
     assert(values.get_mut(&"absent") is Maybe.None);
@@ -90,16 +92,14 @@ fn empty_and_missing_keys() -> Int {
 }
 
 fn forwarded_mutable_receiver_and_key() -> Int {
-    let mut values: Map<Text, Int> = Map.new();
-    values.insert("codec", 7);
+    let mut values: Map<Text, Int> = { "codec": 7 };
     let key = "codec";
     assert_eq(replace(&mut values, &key, 43), 7);
     read_int(&values, key)
 }
 
 fn record_field_receiver_and_key() -> Int {
-    let mut values: Map<Text, Int> = Map.new();
-    values.insert("codec", 7);
+    let mut values: Map<Text, Int> = { "codec": 7 };
     let mut holder = Holder { padding: 991, values: values, key: "codec" };
     assert_eq(replace(&mut holder.values, &holder.key, 43), 7);
     assert_eq(holder.padding, 991);
@@ -107,12 +107,11 @@ fn record_field_receiver_and_key() -> Int {
 }
 
 fn whole_variant_replacement() -> Int {
-    let mut values: Map<Text, Dependency> = Map.new();
-    values.insert("codec", Dependency.Detailed(Options {
+    let mut values: Map<Text, Dependency> = { "codec": Dependency.Detailed(Options {
         version: 13,
         features: Maybe.Some(Cell { padding: 93, value: 7 }),
         optional: Maybe.Some(false),
-    }));
+    }) };
     assert_eq(read_dependency(&values), 139307);
     match values.get_mut(&"codec") {
         Maybe.Some(value) => *value = Dependency.Requirement(61),
@@ -122,12 +121,11 @@ fn whole_variant_replacement() -> Int {
 }
 
 fn nested_payload_mutation() -> Int {
-    let mut values: Map<Text, Dependency> = Map.new();
-    values.insert("codec", Dependency.Detailed(Options {
+    let mut values: Map<Text, Dependency> = { "codec": Dependency.Detailed(Options {
         version: 13,
         features: Maybe.Some(Cell { padding: 93, value: 7 }),
         optional: Maybe.Some(false),
-    }));
+    }) };
     assert_eq(read_dependency(&values), 139307);
     match values.get_mut(&"codec") {
         Maybe.Some(Dependency.Detailed(options)) => {
@@ -144,6 +142,50 @@ fn nested_payload_mutation() -> Int {
     }
     read_dependency(&values)
 }
+
+fn collision_chain() -> Int {
+    let mut values: Map<Int, Int> = { 1: 7, 17: 19 };
+    match values.get_mut(&17) {
+        Maybe.Some(value) => *value = 43,
+        Maybe.None => panic("collision key lost"),
+    }
+    assert(values.get_mut(&33) is Maybe.None);
+    let first = match values.get(1) { Maybe.Some(value) => value, _ => -1000 };
+    let second = match values.get(17) { Maybe.Some(value) => value, _ => -2000 };
+    assert_eq(values.len(), 2);
+    first * 100 + second
+}
+
+fn shared_tag_scalar() -> Int {
+    let mut values: Map<Int, Int> = { 10: 520 };
+    match values.get_mut(&10) {
+        Maybe.Some(value) => {
+            assert_eq(*value, 520);
+            *value = 731;
+            assert_eq(*value, 731);
+        },
+        Maybe.None => panic("scalar key lost"),
+    }
+    match values.get(10) { Maybe.Some(value) => value, _ => -1 }
+}
+
+fn grow_after_borrow_ends() -> Int {
+    let mut values: Map<Int, Int> = { 1: 7 };
+    match values.get_mut(&1) {
+        Maybe.Some(value) => *value = 43,
+        Maybe.None => panic("initial key lost"),
+    }
+    for key in 2..66 { values.insert(key, key + 100); }
+    assert_eq(values.len(), 65);
+    assert_eq(match values.get(1) { Maybe.Some(value) => value, _ => -1 }, 43);
+    assert_eq(match values.get(65) { Maybe.Some(value) => value, _ => -1 }, 165);
+    match values.get_mut(&65) {
+        Maybe.Some(value) => *value = 211,
+        Maybe.None => panic("grown key lost"),
+    }
+    match values.get(65) { Maybe.Some(value) => value, _ => -1 }
+}
+
 "#;
 
 fn source() -> Arc<VbcModule> {
@@ -171,6 +213,7 @@ fn source() -> Arc<VbcModule> {
             let mut module = codegen.finalize_module().expect("complete module");
             module.resolve_protocol_dispatch();
             assert_real_mutable_body(&module);
+            assert_runtime_carrier_callers(&module);
             Arc::new(module)
         })
         .clone()
@@ -183,6 +226,7 @@ fn wire() -> Arc<VbcModule> {
             let bytes = verum_vbc::serialize::serialize_module(&source()).expect("wire writer");
             let module = verum_vbc::deserialize::deserialize_module(&bytes).expect("wire reader");
             assert_real_mutable_body(&module);
+            assert_runtime_carrier_callers(&module);
             Arc::new(module)
         })
         .clone()
@@ -217,6 +261,54 @@ fn assert_real_mutable_body(module: &VbcModule) {
             .any(|instruction| matches!(instruction, Instruction::LoadI { value: 32, .. })),
         "source Slot stride retained"
     );
+}
+
+fn assert_runtime_carrier_callers(module: &VbcModule) {
+    for name in [
+        "read_control",
+        "direct_write_through",
+        "empty_and_missing_keys",
+        "forwarded_mutable_receiver_and_key",
+        "record_field_receiver_and_key",
+        "whole_variant_replacement",
+        "nested_payload_mutation",
+        "collision_chain",
+        "shared_tag_scalar",
+        "grow_after_borrow_ends",
+    ] {
+        let qualified = format!("mutable_map_values.{name}");
+        let function = module
+            .functions
+            .iter()
+            .find(|function| module.get_string(function.name) == Some(qualified.as_str()))
+            .expect("exact caller body");
+        let start = function.bytecode_offset as usize;
+        let end = start + function.bytecode_length as usize;
+        let instructions = decode_instructions(&module.bytecode[start..end]).expect("caller body");
+        assert!(
+            instructions
+                .iter()
+                .any(|instruction| matches!(instruction, Instruction::NewMap { .. })),
+            "{name}: real literal constructor selects runtime Map carrier"
+        );
+        if name != "read_control" {
+            assert!(
+                instructions.iter().any(|instruction| match instruction {
+                    Instruction::CallM { method_id, .. } => module
+                        .get_string(verum_vbc::types::StringId(*method_id))
+                        .is_some_and(|method| method == "get_mut" || method.ends_with(".get_mut")),
+                    // Two cases intentionally call the parsed forwarding helper.
+                    Instruction::Call { func_id, .. } =>
+                        module
+                            .get_function(verum_vbc::module::FunctionId(*func_id))
+                            .and_then(|callee| module.get_string(callee.name))
+                            == Some("mutable_map_values.replace"),
+                    _ => false,
+                }),
+                "{name}: selected mutable method or reference-forwarding helper"
+            );
+        }
+    }
 }
 
 fn check(name: &str, expected: i64) {
@@ -265,4 +357,17 @@ fn replacing_a_variant_replaces_the_stored_value() {
 #[test]
 fn nested_variant_mutation_is_observable_through_the_original_map() {
     check("nested_payload_mutation", 173711);
+}
+
+#[test]
+fn colliding_keys_and_missing_chain_keep_their_own_slots() {
+    check("collision_chain", 743);
+}
+#[test]
+fn scalar_with_shared_type_bits_is_still_a_value_slot() {
+    check("shared_tag_scalar", 731);
+}
+#[test]
+fn growth_after_the_borrow_ends_preserves_prior_writes() {
+    check("grow_after_borrow_ends", 211);
 }
