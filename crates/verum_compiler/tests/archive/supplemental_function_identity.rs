@@ -61,9 +61,9 @@ fn supplement(cache: &ArchiveCtxCache, archive: &VbcArchive, codegen: &mut VbcCo
         codegen.ctx_mut().lookup_function(name).is_none(),
         "new requested name {name}"
     );
-    let merged =
-        cache.apply_lazy_supplemental(archive, codegen, [name.to_owned()].into_iter().collect());
-    assert!(merged > 0, "supplemental pass must load {name}");
+    // A new name may refer to a body already copied by an earlier wave.
+    // Registration, stable identity and execution are the success oracles.
+    cache.apply_lazy_supplemental(archive, codegen, [name.to_owned()].into_iter().collect());
     assert!(
         codegen.ctx_mut().lookup_function(name).is_some(),
         "requested declaration {name}"
