@@ -1,0 +1,27 @@
+{
+  "task": "T1744",
+  "status": "verified",
+  "runs": [
+    {
+      "label": "metadata-wave-baseline",
+      "source_commit": "d6f389822038100c5c8516d9c4942fc11fd4d357",
+      "receipt_sha256": "b5411c90cd8d9a3da6909569b1386f5f00a49d6df07048ff1788d4437e88cffa",
+      "source_bindings_verified": 5317,
+      "test_results": [
+        "test result: FAILED. 1 passed; 7 failed; 0 ignored; 0 measured; 1265 filtered out; finished in 1.48s"
+      ],
+      "elapsed_seconds": 181.799
+    },
+    {
+      "label": "compilation-owned-fixed",
+      "source_commit": "2565d34b4823ca7f140ba34ef9eabc1fd0cf09e3",
+      "receipt_sha256": "700c87fe188190a312ab6cb95cdef8573cba289527963a8e79a2b7fafb4f6357",
+      "source_bindings_verified": 5317,
+      "test_results": [
+        "test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 1265 filtered out; finished in 1.72s"
+      ],
+      "elapsed_seconds": 166.835
+    }
+  ],
+  "scope": "Independent historical source, original receipt, raw log and retained executable review. Eight causal baseline controls show seven failures; those controls plus a new same-codegen reset control pass after the repair. No ordinary CLI, fresh stdlib bake or AOT acceptance."
+}
