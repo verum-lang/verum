@@ -1,0 +1,50 @@
+{
+  "status": "verified",
+  "task": "T1745",
+  "runs": [
+    {
+      "label": "baseline",
+      "source_commit": "866ead5f79505266860e6a142c530e5631f386ec",
+      "source_bindings_verified": 5316,
+      "receipt_sha256": "898883642011c9c7c0bf60273d3c07b8d98adbae81b5a2072e5fbca8b6ba8bb7",
+      "test_results": [
+        "test result: FAILED. 2 passed; 4 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.16s"
+      ]
+    },
+    {
+      "label": "corrected-baseline",
+      "source_commit": "912cd1f2d9d5fdf47b6ae3dd2f9ee234f61370de",
+      "source_bindings_verified": 5316,
+      "receipt_sha256": "2ec582312f97f1357adf23478948bbad0a4666fd24d5a013ff6c633c48f66d6f",
+      "test_results": [
+        "test result: FAILED. 3 passed; 5 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.19s"
+      ]
+    },
+    {
+      "label": "bootstrap-baseline",
+      "source_commit": "1306899551fbb2d69710a45a7faf2146576460f4",
+      "source_bindings_verified": 5316,
+      "receipt_sha256": "5f79a295a7da0e16672a2e225bbf21fd4c903c85b03893e1edb2392054d6bd34",
+      "test_results": [
+        "test result: FAILED. 3 passed; 5 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.19s"
+      ]
+    },
+    {
+      "label": "fixed",
+      "source_commit": "d6cb4cd8a32854cfa709cc72fbeb8d22e286a7ab",
+      "source_bindings_verified": 5316,
+      "receipt_sha256": "3a116df0f25d7d175c1c6af5b39cf834edb3ac2a251b98f6ae3851e9091ea55d",
+      "test_results": []
+    },
+    {
+      "label": "fixed-corrected",
+      "source_commit": "13d6e2f39801ede07ff60f55b3186dc2dc9e2a23",
+      "source_bindings_verified": 5316,
+      "receipt_sha256": "48b65f78096b5104bf677a156c3a5ce6243a621454ea6d00f56d35b59a37dba4",
+      "test_results": [
+        "test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.19s"
+      ]
+    }
+  ],
+  "scope": "Independent historical Git source, original and reconstructed receipt, raw log and retained executable review. Eight focused source/wire import controls pass; ordinary CLI, full VBC and fresh baking remain separate."
+}

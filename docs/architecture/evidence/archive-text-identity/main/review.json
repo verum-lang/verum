@@ -1,0 +1,64 @@
+{
+  "task": "T1745",
+  "status": "passed",
+  "main_base": "de2165a18",
+  "tested_source": "1d6153d4b0d20408b960ba47e1a652d7eadab5bb",
+  "source_bindings_verified": 5298,
+  "tests_passed": 8,
+  "tests_failed": 0,
+  "tests_ignored": 0,
+  "elapsed_seconds": 35.223,
+  "cached_solver_units": [
+    {
+      "package": "registry+https://github.com/rust-lang/crates.io-index#z3-src@416.0.2",
+      "target": "z3_src",
+      "fresh": true
+    },
+    {
+      "package": "registry+https://github.com/rust-lang/crates.io-index#z3-sys@0.11.0",
+      "target": "build-script-build",
+      "fresh": true
+    },
+    {
+      "package": "registry+https://github.com/rust-lang/crates.io-index#z3-sys@0.11.0",
+      "target": "z3_sys",
+      "fresh": true
+    },
+    {
+      "package": "registry+https://github.com/rust-lang/crates.io-index#z3@0.20.2",
+      "target": "z3",
+      "fresh": true
+    }
+  ],
+  "files": {
+    "gate.log.gz": {
+      "original": "/private/tmp/verum-T1745-main-acceptance/gate.log",
+      "bytes": 239074,
+      "sha256": "9306ac2ef6fcf01ab738a7aef4746e61bcfb82262aa2eedc8fb973b292bcf1a1",
+      "gzip_bytes": 21323,
+      "gzip_sha256": "fd76253a01b369b21c9d39cfd5758cd0bf3f93380e0537bfa42972f76ea947f9"
+    },
+    "result.json.gz": {
+      "original": "/private/tmp/verum-T1745-main-acceptance/result.json",
+      "bytes": 638669,
+      "sha256": "b79dc7c95d627c932a884dde1a1a350c95cbb66db7e966c26855fe8ee445412d",
+      "gzip_bytes": 255959,
+      "gzip_sha256": "c1600ac633e5d6af14fed8bf27efb3009b3a218f6c9582443a3f068367e0e791"
+    },
+    "runner.py.gz": {
+      "original": "/private/tmp/verum-T1745-main-gate.py",
+      "bytes": 9502,
+      "sha256": "e49823dce22ff68d69824db2c3fe5e7cdefd08de31085272839effe05d454034",
+      "gzip_bytes": 3546,
+      "gzip_sha256": "d566bb78d2ab5be5f67f6172be7741decfbbbe5898394c141acab32bd6a4dc66"
+    },
+    "unit-graph.json.gz": {
+      "original": "/private/tmp/verum-T1745-main-unit-graph.json",
+      "bytes": 166425,
+      "sha256": "fe4a99ba324a2d6a98e25336754f9ea5431af487a2e218fbe64452d02bb2a176",
+      "gzip_bytes": 7654,
+      "gzip_sha256": "ce444468bc9914accb14eba17bf7a51f79703f39bcea58ad7a7402dd816c2acd"
+    }
+  },
+  "scope": "Main-based parsed declaration and source/wire archive-import controls. Identical reviewed implementation. Existing solver dependencies were fresh in Cargo; no native bootstrap or embedded stdlib consumption. Ordinary CLI, fresh automatic baking and AOT remain separate."
+}
