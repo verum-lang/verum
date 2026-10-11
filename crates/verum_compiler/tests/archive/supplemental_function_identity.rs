@@ -94,8 +94,18 @@ fn function(module: &VbcModule, id: FunctionId) -> &FunctionDescriptor {
     matches[0]
 }
 
-fn call_targets(module: &VbcModule, id: FunctionId) -> List<u32> {
-    let body = function(module, id);
+fn wire_id(module: &VbcModule, name: &str) -> FunctionId {
+    let matches: List<_> = module
+        .functions
+        .iter()
+        .filter(|function| module.get_string(function.name) == Some(name))
+        .collect();
+    assert_eq!(matches.len(), 1, "exact serialized declaration: {name}");
+    matches[0].id
+}
+
+fn call_targets(module: &VbcModule, name: &str) -> List<u32> {
+    let body = function(module, wire_id(module, name));
     let start = body.bytecode_offset as usize;
     verum_vbc::bytecode::decode_instructions(
         &module.bytecode[start..start + body.bytecode_length as usize],
@@ -109,13 +119,16 @@ fn call_targets(module: &VbcModule, id: FunctionId) -> List<u32> {
     .collect()
 }
 
-fn assert_result(module: &VbcModule, id: FunctionId, expected: i64) {
+fn assert_result(module: &VbcModule, name: &str, expected: i64) {
+    // Final serialization assigns contiguous IDs. Keep registration identity
+    // checks before this boundary, then resolve the exact declaration anew.
+    let id = wire_id(module, name);
     function(module, id);
     let result = verum_vbc::interpreter::Interpreter::new(Shared::new(module.clone()).into_arc())
         .execute_function(id)
         .expect("execute imported source body");
     assert_eq!(
-        result.as_int(),
+        result.try_as_i64(),
         Some(expected),
         "wrong declaration result for {id:?}"
     );
@@ -131,10 +144,10 @@ fn supplemental_registration_preserves_primary_qualified_and_bare_ids() {
     supplement(&cache, &archive, &mut codegen, "alpha.later");
     assert_eq!(id(&mut codegen, "alpha.original"), original);
     assert_eq!(id(&mut codegen, "original"), original);
-    let later = id(&mut codegen, "alpha.later");
+    assert_ne!(id(&mut codegen, "alpha.later"), original);
     let module = finish(&mut codegen);
-    assert_result(&module, original, 37);
-    assert_result(&module, later, 42);
+    assert_result(&module, "alpha.original", 37);
+    assert_result(&module, "alpha.later", 42);
 }
 
 #[test]
@@ -144,13 +157,13 @@ fn a_new_body_calls_the_original_consumer_id() {
     let mut codegen = primary(&cache, &archive, "fn main() -> Int { alpha.original() }", 0);
     let original = id(&mut codegen, "alpha.original");
     supplement(&cache, &archive, &mut codegen, "alpha.later");
-    let later = id(&mut codegen, "alpha.later");
+    assert_ne!(id(&mut codegen, "alpha.later"), original);
     let module = finish(&mut codegen);
     assert!(
-        call_targets(&module, later).contains(&original.0),
+        call_targets(&module, "alpha.later").contains(&wire_id(&module, "alpha.original").0),
         "local call lost its existing body identity"
     );
-    assert_result(&module, later, 42);
+    assert_result(&module, "alpha.later", 42);
 }
 
 #[test]
@@ -179,8 +192,8 @@ fn declared_method_aliases_and_real_empty_bodies_survive_supplemental_load() {
         assert_eq!(id(&mut codegen, name), *original);
     }
     let module = finish(&mut codegen);
-    for original in original {
-        function(&module, original);
+    for name in names {
+        function(&module, wire_id(&module, name));
     }
 }
 
@@ -206,8 +219,8 @@ fn same_leaf_foreign_functions_remain_distinct_in_both_archive_orders() {
         assert_eq!(id(&mut codegen, "alpha.original"), alpha);
         assert_eq!(id(&mut codegen, "beta.original"), beta);
         let module = finish(&mut codegen);
-        assert_result(&module, alpha, 37);
-        assert_result(&module, beta, 99);
+        assert_result(&module, "alpha.original", 37);
+        assert_result(&module, "beta.original", 99);
     }
 }
 
@@ -222,7 +235,7 @@ fn later_supplemental_waves_reuse_the_same_call_closure() {
     supplement(&cache, &archive, &mut codegen, "alpha.latest");
     assert_eq!(id(&mut codegen, "alpha.original"), original);
     assert_eq!(id(&mut codegen, "alpha.later"), later);
-    let latest = id(&mut codegen, "alpha.latest");
+    assert_ne!(id(&mut codegen, "alpha.latest"), later);
     let next = *codegen.next_func_id_mut();
     assert_eq!(
         cache.apply_lazy_supplemental(
@@ -234,8 +247,8 @@ fn later_supplemental_waves_reuse_the_same_call_closure() {
     );
     assert_eq!(*codegen.next_func_id_mut(), next);
     let module = finish(&mut codegen);
-    assert!(call_targets(&module, latest).contains(&later.0));
-    assert_result(&module, latest, 43);
+    assert!(call_targets(&module, "alpha.latest").contains(&wire_id(&module, "alpha.later").0));
+    assert_result(&module, "alpha.latest", 43);
 }
 
 #[test]
@@ -254,10 +267,12 @@ fn a_new_compilation_epoch_does_not_reuse_previous_consumer_ids() {
         originals.push(original);
         supplement(&cache, &archive, &mut codegen, "alpha.later");
         assert_eq!(id(&mut codegen, "alpha.original"), original);
-        let later = id(&mut codegen, "alpha.later");
+        assert_ne!(id(&mut codegen, "alpha.later"), original);
         let module = finish(&mut codegen);
-        assert!(call_targets(&module, later).contains(&original.0));
-        assert_result(&module, later, 42);
+        assert!(
+            call_targets(&module, "alpha.later").contains(&wire_id(&module, "alpha.original").0)
+        );
+        assert_result(&module, "alpha.later", 42);
     }
     assert_ne!(
         originals[0], originals[1],
