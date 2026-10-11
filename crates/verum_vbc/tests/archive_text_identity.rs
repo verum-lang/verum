@@ -2,7 +2,7 @@
 #![cfg(feature = "codegen")]
 
 use verum_ast::ItemKind;
-use verum_common::{List, Maybe};
+use verum_common::{List, Maybe, Text};
 use verum_fast_parser::Parser;
 use verum_vbc::codegen::{CodegenConfig, VbcCodegen};
 use verum_vbc::module::{FunctionDescriptor, FunctionId, VbcModule};
@@ -19,6 +19,10 @@ fn wire(module: &VbcModule) -> VbcModule {
 }
 
 fn declaration(owner: &str) -> VbcModule {
+    declaration_with_protocol(owner, "")
+}
+
+fn declaration_with_protocol(owner: &str, protocol: &str) -> VbcModule {
     // Keep the exact production record and module declaration. Only the
     // negative twins change the declaring module; the test methods are local.
     let source = TEXT_SOURCE.replace("module core.text.text;", &format!("module {owner};"));
@@ -37,6 +41,12 @@ fn declaration(owner: &str) -> VbcModule {
     .parse_module()
     .expect("parse declared method controls");
     ast.items.extend(methods.items);
+    ast.items.extend(
+        Parser::new(protocol)
+            .parse_module()
+            .expect("parse record protocol")
+            .items,
+    );
     let module = VbcCodegen::with_config(CodegenConfig::new(owner))
         .compile_module(&ast)
         .expect("compile production Text declaration");
@@ -238,4 +248,143 @@ fn bootstrap_dependency_keeps_canonical_text_identity() {
         verum_vbc::types::TypeRef::Concrete(TypeId::TEXT)
     );
     assert_eq!(text(&wire(&imported), Some(OWNER)).id, TypeId::TEXT);
+}
+
+const LOCAL_PROTOCOL: &str = "type DeclaredOnly is protocol {}; implement DeclaredOnly for Text {}";
+const EXTENSION_SOURCE: &str = "module text_extension; type ExtensionOnly is protocol {}; \
+                               implement ExtensionOnly for Text {}";
+
+fn extension() -> VbcModule {
+    let ast = Parser::new(EXTENSION_SOURCE)
+        .parse_module()
+        .expect("parse Text extension");
+    let module = VbcCodegen::with_config(CodegenConfig::new("text_extension"))
+        .compile_module(&ast)
+        .expect("compile scalar implementation carrier");
+    let carrier = text(&module, Some("text_extension"));
+    assert_eq!(carrier.kind, TypeKind::Primitive);
+    assert_eq!(carrier.id, TypeId::TEXT);
+    assert_eq!(carrier.protocols.len(), 1);
+    module
+}
+
+fn assert_record_and_extensions(module: &VbcModule) {
+    let record = text(module, Some(OWNER));
+    assert_eq!(record.id, TypeId::TEXT);
+    assert_eq!(record.kind, TypeKind::Record);
+    let fields: List<_> = record
+        .fields
+        .iter()
+        .map(|field| module.get_string(field.name).unwrap())
+        .collect();
+    assert_eq!(fields.as_slice(), &["ptr", "len", "cap"]);
+    assert_eq!(
+        module
+            .types
+            .iter()
+            .filter(|ty| ty.id == TypeId::TEXT)
+            .count(),
+        1,
+        "one authoritative runtime Text descriptor before and after the wire boundary"
+    );
+    let mut protocols: List<Text> = record
+        .protocols
+        .iter()
+        .map(|implementation| {
+            let protocol = module
+                .get_type(TypeId(implementation.protocol.0))
+                .expect("remapped protocol descriptor");
+            module
+                .get_string(protocol.name)
+                .expect("protocol name")
+                .into()
+        })
+        .collect();
+    protocols.sort();
+    assert_eq!(
+        protocols.as_slice(),
+        &[Text::from("DeclaredOnly"), Text::from("ExtensionOnly")]
+    );
+}
+
+fn record_and_carrier(reverse: bool) {
+    let declaration = declaration_with_protocol(OWNER, LOCAL_PROTOCOL);
+    let carrier = extension();
+    for (record, carrier) in [
+        (&declaration, &carrier),
+        (&wire(&declaration), &wire(&carrier)),
+    ] {
+        let imported = if reverse {
+            import(&[carrier, record])
+        } else {
+            import(&[record, carrier])
+        };
+        assert_canonical(&imported);
+        assert_record_and_extensions(&imported);
+        assert_record_and_extensions(&wire(&imported));
+    }
+}
+
+#[test]
+fn canonical_record_then_primitive_extension_preserves_one_record_and_all_protocols() {
+    record_and_carrier(false);
+}
+
+#[test]
+fn primitive_extension_then_canonical_record_preserves_all_protocols() {
+    record_and_carrier(true);
+}
+
+#[test]
+fn source_extension_attaches_to_an_imported_canonical_record() {
+    let source = wire(&declaration_with_protocol(OWNER, LOCAL_PROTOCOL));
+    let ast = Parser::new(EXTENSION_SOURCE)
+        .parse_module()
+        .expect("parse source attachment");
+    let mut codegen = VbcCodegen::with_config(CodegenConfig::new("text_extension"));
+    codegen.import_archive_module_types(&source);
+    codegen
+        .collect_unit_declarations(&[&ast])
+        .expect("collect Text implementation");
+    let module = codegen
+        .compile_function_bodies(&ast)
+        .expect("finalize source attachment");
+    assert_record_and_extensions(&module);
+    assert_record_and_extensions(&wire(&module));
+}
+
+fn bootstrap_and_carrier(carrier_first: bool) {
+    let source = wire(&declaration_with_protocol(OWNER, LOCAL_PROTOCOL));
+    let carrier = wire(&extension());
+    let ast = Parser::new(
+        "module consumer; mount core.text.text.Text; public fn relay(value: Text) -> Text { value }"
+    ).parse_module().expect("parse bootstrap declaration consumer");
+    let mut codegen = VbcCodegen::with_config(CodegenConfig::new("consumer"));
+    if carrier_first {
+        codegen.import_archive_module_types(&carrier);
+    }
+    codegen
+        .import_bootstrap_nominal_dependencies(&[&ast], &[&source])
+        .expect("import canonical bootstrap dependency");
+    if !carrier_first {
+        codegen.import_archive_module_types(&carrier);
+    }
+    codegen
+        .collect_unit_declarations(&[&ast])
+        .expect("collect bootstrap consumer");
+    let module = codegen
+        .compile_function_bodies(&ast)
+        .expect("finalize bootstrap coexistence");
+    assert_record_and_extensions(&module);
+    assert_record_and_extensions(&wire(&module));
+}
+
+#[test]
+fn bootstrap_record_then_primitive_extension_preserves_one_descriptor() {
+    bootstrap_and_carrier(false);
+}
+
+#[test]
+fn primitive_extension_then_bootstrap_record_preserves_all_protocols() {
+    bootstrap_and_carrier(true);
 }
