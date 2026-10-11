@@ -371,3 +371,38 @@ fn a_later_name_registration_preserves_remapped_nominal_signatures() {
         "parameter owner for alpha.echo"
     );
 }
+
+#[test]
+fn resetting_the_same_codegen_starts_a_new_archive_identity_space() {
+    let archive = archive(&[source("alpha", 37)]);
+    let cache = cache(&archive);
+    let mut codegen = primary(&cache, &archive, "fn main() -> Int { original() }", 0);
+    let previous = id(&mut codegen, "alpha.original");
+    supplement(&cache, &archive, &mut codegen, "alpha.later");
+    assert_result(&finish(&mut codegen), "alpha.later", 42);
+
+    let reset = Parser::new("fn reset_marker() -> Int { 0 }")
+        .parse_module()
+        .expect("parse reset boundary");
+    codegen
+        .compile_module(&reset)
+        .expect("reset and compile a new module");
+    assert!(
+        codegen
+            .ctx_mut()
+            .lookup_function("alpha.original")
+            .is_none()
+    );
+    *codegen.next_func_id_mut() += 1000;
+    let consumer = Parser::new("fn main() -> Int { original() }")
+        .parse_module()
+        .expect("parse new consumer");
+    let (modules, _) = cache.apply_lazy_with_types(&archive, &mut codegen, &consumer, &[]);
+    assert!(modules > 0);
+    let current = id(&mut codegen, "alpha.original");
+    assert!(current.0 >= 1000, "reset must use the new allocator space");
+    assert_ne!(current, previous);
+    supplement(&cache, &archive, &mut codegen, "alpha.later");
+    assert_eq!(id(&mut codegen, "alpha.original"), current);
+    assert_result(&finish(&mut codegen), "alpha.later", 42);
+}
