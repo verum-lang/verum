@@ -82,7 +82,7 @@ fn method<'a>(module: &'a VbcModule, parent: TypeId, suffix: &str) -> &'a Functi
         .expect("exact parent-owned method")
 }
 
-fn import(sources: &[&VbcModule]) -> VbcModule {
+fn import_codegen(sources: &[&VbcModule]) -> VbcCodegen {
     let mut codegen = VbcCodegen::with_config(CodegenConfig::new("consumer"));
     for source in sources {
         codegen.import_archive_module_types(source);
@@ -102,6 +102,10 @@ fn import(sources: &[&VbcModule]) -> VbcModule {
         codegen.merge_archive_function_bodies(source, &remap);
     }
     codegen
+}
+
+fn import(sources: &[&VbcModule]) -> VbcModule {
+    import_codegen(sources)
         .finalize_module_from_state()
         .expect("finalize imported bodies")
 }
@@ -250,9 +254,10 @@ fn bootstrap_dependency_keeps_canonical_text_identity() {
     assert_eq!(text(&wire(&imported), Some(OWNER)).id, TypeId::TEXT);
 }
 
-const LOCAL_PROTOCOL: &str = "type DeclaredOnly is protocol {}; implement DeclaredOnly for Text {}";
-const EXTENSION_SOURCE: &str = "module text_extension; type ExtensionOnly is protocol {}; \
-                               implement ExtensionOnly for Text {}";
+const LOCAL_PROTOCOL: &str = "type DeclaredOnly is protocol { type Output; }; \
+    implement DeclaredOnly for Text { type Output = Int; }";
+const EXTENSION_SOURCE: &str = "module text_extension; type ExtensionOnly is protocol { type Output; }; \
+    implement ExtensionOnly for Text { type Output = Byte; }";
 
 fn extension() -> VbcModule {
     let ast = Parser::new(EXTENSION_SOURCE)
@@ -294,10 +299,17 @@ fn assert_record_and_extensions(module: &VbcModule) {
             let protocol = module
                 .get_type(TypeId(implementation.protocol.0))
                 .expect("remapped protocol descriptor");
-            module
-                .get_string(protocol.name)
-                .expect("protocol name")
-                .into()
+            let name = module.get_string(protocol.name).expect("protocol name");
+            assert_eq!(implementation.associated_types.len(), 1);
+            let (binding, value) = &implementation.associated_types[0];
+            assert_eq!(module.get_string(*binding), Some("Output"));
+            let expected = if name == "DeclaredOnly" {
+                TypeId::INT
+            } else {
+                TypeId::BYTE
+            };
+            assert_eq!(*value, verum_vbc::types::TypeRef::Concrete(expected));
+            name.into()
         })
         .collect();
     protocols.sort();
@@ -314,11 +326,15 @@ fn record_and_carrier(reverse: bool) {
         (&declaration, &carrier),
         (&wire(&declaration), &wire(&carrier)),
     ] {
-        let imported = if reverse {
-            import(&[carrier, record])
+        let mut codegen = if reverse {
+            import_codegen(&[carrier, record])
         } else {
-            import(&[record, carrier])
+            import_codegen(&[record, carrier])
         };
+        let imported = codegen
+            .finalize_module()
+            .expect("strict runtime finalization");
+        assert!(codegen.verify_global_type_table_consistency().is_clean());
         assert_canonical(&imported);
         assert_record_and_extensions(&imported);
         assert_record_and_extensions(&wire(&imported));
