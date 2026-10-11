@@ -30,3 +30,9 @@ sample nor the focused build durations establish an end-to-end speedup; a fresh
 ordinary CLI replay remains a separate acceptance step. The existing pointer
 preconditions and network interceptor behavior remain outside this lookup
 change.
+
+The [main integration check](main/review.json) passes the same eight
+controls on an isolated branch based directly on main, with no failures
+or ignored tests in 37.147 seconds. Its 849 local source and dependency
+inputs match the retained hashes. The implementation is identical to
+the reviewed runtime candidate; this gate does not replay the registry.

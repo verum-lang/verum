@@ -1,0 +1,22 @@
+{
+  "status": "verified",
+  "scope": "Independent committed source, retained executable, log and producer-fixture hash review. Runtime and source acceptance scopes remain those of the original receipts.",
+  "runs": {
+    "baseline": {
+      "commit": "5dd9d685e8348fbd91eab7899add028d1933bbb0",
+      "source_bindings": 850,
+      "exit_code": 101,
+      "test_results": [
+        "test result: FAILED. 5 passed; 3 failed; 0 ignored; 0 measured; 1325 filtered out; finished in 0.10s"
+      ]
+    },
+    "fixed": {
+      "commit": "0dc7a4ad328e5a410dab42ea572a956dba4838bb",
+      "source_bindings": 850,
+      "exit_code": 0,
+      "test_results": [
+        "test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 1325 filtered out; finished in 0.03s"
+      ]
+    }
+  }
+}

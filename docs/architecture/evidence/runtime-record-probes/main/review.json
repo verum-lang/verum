@@ -1,0 +1,62 @@
+{
+  "task": "T1743",
+  "status": "passed",
+  "main_base": "6eae590c23a445931f9652397ebe8e3f3e57e16e",
+  "tested_source": "d7f25addd08b02dedc9479131b6dd1e2d63a162c",
+  "source_bindings_verified": 849,
+  "tests_passed": 8,
+  "tests_failed": 0,
+  "tests_ignored": 0,
+  "elapsed_seconds": 37.14736966698547,
+  "executable": {
+    "original": "/Users/taaliman/.tmp/verum-codex-01a10248-types/checker-target/debug/build/verum_vbc/8a01e7da3899a55f/out/verum_vbc-8a01e7da3899a55f",
+    "retained": "/private/tmp/verum-T1743-main-acceptance/verum_vbc-libtest",
+    "sha256": "9a40f4393b55139d200ceec46a056eccee343eea487382c63b4f744e2b8e2463",
+    "size": 26666936
+  },
+  "files": {
+    "result.json.gz": {
+      "original": "/private/tmp/verum-T1743-main-acceptance/result.json",
+      "bytes": 1664,
+      "sha256": "298328093cc56aa836be5573d31de1ac7cb79838d8c86e44be744d5a409d8e17",
+      "gzip_bytes": 924,
+      "gzip_sha256": "2bcbfc7d48c51f31f7d8e2764c554c76a6e83d4904cc6c41fe2f03f5da237233"
+    },
+    "runner.py.gz": {
+      "original": "/private/tmp/verum-T1743-main-acceptance/runner.py",
+      "bytes": 5500,
+      "sha256": "eb9d4aa22117aa7882843eeaa08234eecf1d5fd2ab13706fe4d14c7554184df9",
+      "gzip_bytes": 2387,
+      "gzip_sha256": "4704329fb1181826b2289a19346684dbfac7027746694439707ab176a7bfb7d7"
+    },
+    "source-hashes.json.gz": {
+      "original": "/private/tmp/verum-T1743-main-acceptance/source-hashes.json",
+      "bytes": 104932,
+      "sha256": "ab43171839c31b53a143f169f55667e6ff7107235153c6a1af10893352f470e1",
+      "gzip_bytes": 41988,
+      "gzip_sha256": "04f97b90cafa874920a55e1d003f59e6b138371794ab13eeccde14eb5b5afcf7"
+    },
+    "stderr.log.gz": {
+      "original": "/private/tmp/verum-T1743-main-acceptance/stderr.log",
+      "bytes": 2309,
+      "sha256": "909960b556048ada21e0a8804844155cafaab3a3655fac4e19454fd6e4b3897f",
+      "gzip_bytes": 578,
+      "gzip_sha256": "6d87e49d04c4e282e51ceeb0e9bc0bfb37c26571e818c3c4d08ca2488ba8244b"
+    },
+    "stdout.log.gz": {
+      "original": "/private/tmp/verum-T1743-main-acceptance/stdout.log",
+      "bytes": 165763,
+      "sha256": "71a8bb2f22889267d64fc80db1594fc448bf51cec69b2e05bc637287d8950164",
+      "gzip_bytes": 12328,
+      "gzip_sha256": "550c2f85eac0c0d2dd8a8ba14c87c791b01f3d2e9102cb3220c72077610879ec"
+    },
+    "unit-graph.json.gz": {
+      "original": "/private/tmp/verum-T1743-main-acceptance/unit-graph.json",
+      "bytes": 164080,
+      "sha256": "d5ff0d24773f4a463cc28cb3bdac518f5bff6663dd0fe85e5e2eba7233c7006e",
+      "gzip_bytes": 7588,
+      "gzip_sha256": "6169a492a969b310e1ec610b18d81807bca1c87dfe6f06cd67e63e59da92fd54"
+    }
+  },
+  "scope": "Eight focused record-probe controls on a clean main-based branch. Source and dependency graph are bound to this branch; implementation matches the reviewed runtime candidate. No fresh stdlib bake, ordinary registry replay, AOT or end-to-end performance claim."
+}
