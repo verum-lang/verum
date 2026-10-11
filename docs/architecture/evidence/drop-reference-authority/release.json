@@ -1,0 +1,14 @@
+{
+  "task": "T0379",
+  "target": "/Users/taaliman/.tmp/verum-codex-01a10248-types/checker-target",
+  "released_to": "root",
+  "active_target_processes": [],
+  "tested_source": "f23a8db072e3fac8779917e2101779e2fff8144f",
+  "comment_only_endpoint": "1ae1e7e337a154d90577c7af3d642b614400abde",
+  "comment_only_equivalence": true,
+  "last_gate_receipt": "/private/tmp/verum-T0379-owned-drop-adjacent/result.json",
+  "last_gate_receipt_sha256": "5280198cae5c2e1ddabaf25c3802b5be2c072585587590fab817f807755f3def",
+  "all_gates_complete": true,
+  "source_artifacts_unchanged_during_gates": true,
+  "scope": "Exclusive checker lease released; no further build/test use without a new lease."
+}

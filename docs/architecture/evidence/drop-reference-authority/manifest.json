@@ -1,0 +1,223 @@
+{
+  "task": "T0379",
+  "tested_source": "f23a8db072e3fac8779917e2101779e2fff8144f",
+  "production_source": "0e074994506ad1d7f96310c49c4d48eafb42fa76",
+  "scope": "Bounded DropRef object-header authority, checked Shared extent and register cleanup. This does not complete the global T0379 sweep, tuple pending-drop scheduling, ordinary CLI, automatic bake, AOT, source borrow checking, or stale-reference lifetime acceptance.",
+  "historical_source_bindings_verified": 31938,
+  "unique_git_blobs_verified": 5326,
+  "runs": [
+    {
+      "name": "baseline",
+      "note": "3 pass / 6 fail: five deterministic runtime authority/cleanup failures plus one incorrect assumption that a Maybe pattern payload emits DropRef.",
+      "original_receipt": "/private/tmp/verum-T0379-drop-baseline/result.json",
+      "source_commit": "786f1de59b9f1957964c1423180c02aebaf6fb70",
+      "exit_code": 101,
+      "wall_seconds": 33.318,
+      "test_results": [
+        "test result: FAILED. 3 passed; 6 failed; 0 ignored; 0 measured; 2101 filtered out; finished in 0.02s"
+      ],
+      "source_bindings": 5323,
+      "files": {
+        "result.json": {
+          "path": "baseline/result.json.gz",
+          "original_bytes": 642152,
+          "original_sha256": "4b5ebab6c87a54fc96b2b17797d260d1dc964ea4da89dd6786e78a6aec3e5a73",
+          "stored_bytes": 257375,
+          "stored_sha256": "3a0e2d55bf70f6133c567f70abec8660faae1f757f06fd3e0a7ec7321d92b28e"
+        },
+        "gate.log": {
+          "path": "baseline/gate.log.gz",
+          "original_bytes": 228077,
+          "original_sha256": "b6c5ac151c9a3b088e161869f9f14700d139a1998796ecbeaa81ebaa4601f0b4",
+          "stored_bytes": 19882,
+          "stored_sha256": "6260148bffca93fb4094598b308523c527a7dda2d67a6abd28434dbab9442fe7"
+        }
+      },
+      "runner": {
+        "path": "verum-T0379-run-gate.py",
+        "sha256": "ed92127b5e98a49c24a5554a1f0c14ff2ccde73e2b900300d2d2389a2aa301db"
+      }
+    },
+    {
+      "name": "fixed-before-oracle-correction",
+      "note": "8 pass / 1 fail: every runtime control passes; the revised source oracle conflates registers in mutually exclusive match arms. Production is unchanged afterward.",
+      "original_receipt": "/private/tmp/verum-T0379-drop-fixed/result.json",
+      "source_commit": "0e074994506ad1d7f96310c49c4d48eafb42fa76",
+      "exit_code": 101,
+      "wall_seconds": 37.264,
+      "test_results": [
+        "test result: FAILED. 8 passed; 1 failed; 0 ignored; 0 measured; 2101 filtered out; finished in 0.01s"
+      ],
+      "source_bindings": 5323,
+      "files": {
+        "result.json": {
+          "path": "fixed-before-oracle-correction/result.json.gz",
+          "original_bytes": 642149,
+          "original_sha256": "5729f444f83b2d192ff836eb7489288e9b1e54fc41aa9c6ed587c1642bab09ed",
+          "stored_bytes": 257372,
+          "stored_sha256": "7364c7b74f042df99bacbd594e4dcca08e0744efd641e4741fa365a9b64af2dd"
+        },
+        "gate.log": {
+          "path": "fixed-before-oracle-correction/gate.log.gz",
+          "original_bytes": 225540,
+          "original_sha256": "8b0b1a24ba5d4918cd925bd9db0c6ca2397dd92c21c5597b7cc1df4e1e914a59",
+          "stored_bytes": 19955,
+          "stored_sha256": "c8da676e28d74dcda9bb129f06a35777c6c50a8e046663c511b950037631af1c"
+        }
+      },
+      "runner": {
+        "path": "verum-T0379-run-gate.py",
+        "sha256": "ed92127b5e98a49c24a5554a1f0c14ff2ccde73e2b900300d2d2389a2aa301db"
+      }
+    },
+    {
+      "name": "final",
+      "note": "9 pass: seven direct runtime controls, one source/wire returned local reaching DropRef, and one explicitly bounded checked Maybe payload-read inspection.",
+      "original_receipt": "/private/tmp/verum-T0379-drop-final/result.json",
+      "source_commit": "f23a8db072e3fac8779917e2101779e2fff8144f",
+      "exit_code": 0,
+      "wall_seconds": 33.229,
+      "test_results": [
+        "test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 2101 filtered out; finished in 0.01s"
+      ],
+      "source_bindings": 5323,
+      "files": {
+        "result.json": {
+          "path": "final/result.json.gz",
+          "original_bytes": 642143,
+          "original_sha256": "7255db61b93fb6655b37a390981ddaf3ff167e5906a5e5a91f8e61038a278c11",
+          "stored_bytes": 257365,
+          "stored_sha256": "16ba61e2255ef5fd58be47865fee167b167c86857abedbb18e13d7deb89208b5"
+        },
+        "gate.log": {
+          "path": "final/gate.log.gz",
+          "original_bytes": 224912,
+          "original_sha256": "814dd814081e61e3e55c68911b0e6d90a947c2979e12b2f97119f81c51c7fd39",
+          "stored_bytes": 19734,
+          "stored_sha256": "538ead0ef38e61c07ed4405b7fba1143b7dd17b23c8460092d83e96ae8a6d028"
+        }
+      },
+      "runner": {
+        "path": "verum-T0379-run-gate.py",
+        "sha256": "ed92127b5e98a49c24a5554a1f0c14ff2ccde73e2b900300d2d2389a2aa301db"
+      }
+    },
+    {
+      "name": "retained-adjacent",
+      "note": "12 pass in the final retained library executable: ten T1752 Shared authority controls and two existing descriptor-layout guards.",
+      "original_receipt": "/private/tmp/verum-T0379-retained-adjacent/result.json",
+      "source_commit": "f23a8db072e3fac8779917e2101779e2fff8144f",
+      "exit_code": null,
+      "wall_seconds": 0.994,
+      "test_results": [
+        "test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 2100 filtered out; finished in 0.00s",
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 2109 filtered out; finished in 0.00s",
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 2109 filtered out; finished in 0.00s"
+      ],
+      "source_bindings": 5323,
+      "files": {
+        "result.json": {
+          "path": "retained-adjacent/result.json.gz",
+          "original_bytes": 643637,
+          "original_sha256": "ee1255ec0b5d9b5bf79af4b1ebde8076ef6ff635182e2ab3d4030cfaa740fe1f",
+          "stored_bytes": 257123,
+          "stored_sha256": "a69ae90800ab1dc1e16016104006c5be92d643b4b7b06b3ec073111692820cca"
+        },
+        "1.log": {
+          "path": "retained-adjacent/1.log.gz",
+          "original_bytes": 1541,
+          "original_sha256": "905aed58fc28553ed2492293ed7e030bd9109d1d164be4ad364b6975de51cace",
+          "stored_bytes": 450,
+          "stored_sha256": "c6fe4f330451d155d3382858e248ce0d56a5a717f946fee9a33038b81fc57afa"
+        },
+        "2.log": {
+          "path": "retained-adjacent/2.log.gz",
+          "original_bytes": 183,
+          "original_sha256": "f05fa2364d6c21700cd734df7a1448a553c38b2a25ff0d50b4114965f973c607",
+          "stored_bytes": 149,
+          "stored_sha256": "21402935c9e06895df9599cf7248b2af1bf731c1c8e6610370f24478fcd69c91"
+        },
+        "3.log": {
+          "path": "retained-adjacent/3.log.gz",
+          "original_bytes": 184,
+          "original_sha256": "6d0d6a62f69f2e5949fae35ec5e8c842127660ad5d590505ac3d6d13ca90fdec",
+          "stored_bytes": 150,
+          "stored_sha256": "8fc1a44d7ea656aeecf872419c1efd9a28bea710cbcd94e6268471abb2277ee5"
+        }
+      },
+      "runner": {
+        "path": "verum-T0379-retained-adjacent.py",
+        "sha256": "57222a422f11718ae9fdfc2e4d72936d5d6e0402be9278d59fbca8ad03491756"
+      }
+    },
+    {
+      "name": "receiver-adjacent",
+      "note": "13 pass: six local Shared receiver codegen controls plus seven parsed reference-receiver interpreter controls.",
+      "original_receipt": "/private/tmp/verum-T0379-receiver-adjacent/result.json",
+      "source_commit": "f23a8db072e3fac8779917e2101779e2fff8144f",
+      "exit_code": 0,
+      "wall_seconds": 31.338,
+      "test_results": [
+        "test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s",
+        "test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s"
+      ],
+      "source_bindings": 5323,
+      "files": {
+        "result.json": {
+          "path": "receiver-adjacent/result.json.gz",
+          "original_bytes": 642936,
+          "original_sha256": "5d3a839e1a31c1a976e196fcc1bc7c87da5001af7ea1265661eeafe923b89219",
+          "stored_bytes": 257464,
+          "stored_sha256": "741c74463a3961d62a9dbf7f7f241ddaf529f8eb39e3b2ce015b6a5e100e93e1"
+        },
+        "gate.log": {
+          "path": "receiver-adjacent/gate.log.gz",
+          "original_bytes": 267169,
+          "original_sha256": "da233ff30ef888f549bb58d7473b9af705e30a960d251ef65d38a0ce9a2964a8",
+          "stored_bytes": 21853,
+          "stored_sha256": "68ef60240ad964a86b1535d08e65d05f631b5e44c7ea4e1ed6ba38936b01807f"
+        }
+      },
+      "runner": {
+        "path": "verum-T0379-adjacent-run-gate.py",
+        "sha256": "d0f2818342173ac06779351db1ea725cd4ece4189efe016f1730922024408efb"
+      }
+    },
+    {
+      "name": "owned-drop-adjacent",
+      "note": "One existing source/wire interpreter control preserves actual declared Drop and defer order; all other tests in that target are filtered.",
+      "original_receipt": "/private/tmp/verum-T0379-owned-drop-adjacent/result.json",
+      "source_commit": "f23a8db072e3fac8779917e2101779e2fff8144f",
+      "exit_code": 0,
+      "wall_seconds": 30.278,
+      "test_results": [
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 15 filtered out; finished in 0.01s"
+      ],
+      "source_bindings": 5323,
+      "files": {
+        "result.json": {
+          "path": "owned-drop-adjacent/result.json.gz",
+          "original_bytes": 642278,
+          "original_sha256": "5280198cae5c2e1ddabaf25c3802b5be2c072585587590fab817f807755f3def",
+          "stored_bytes": 257380,
+          "stored_sha256": "12fdbb8e585d6c92efba4e12db5938ca76ff03634f5f7fa498f65d6c88bb4bda"
+        },
+        "gate.log": {
+          "path": "owned-drop-adjacent/gate.log.gz",
+          "original_bytes": 239106,
+          "original_sha256": "20f5a60eb78e4f7f225cd72656837e48ace8459a70313fcb5b23c0ed1a248419",
+          "stored_bytes": 21181,
+          "stored_sha256": "41da583047ff38046873bdca9c1a2090995a2fc0a8184876b85f18179ca1ea7e"
+        }
+      },
+      "runner": {
+        "path": "verum-T0379-owned-drop-run-gate.py",
+        "sha256": "81a5677aa30d59e8e7cf73a69528d187179c1a3d33fab37fa9524be88e5745b9"
+      }
+    }
+  ],
+  "release": {
+    "path": "release.json",
+    "sha256": "597cd5f0b5a01afc689f362dd202f294f682c0d6ed964f74874daa5c713516f2"
+  }
+}
