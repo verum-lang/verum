@@ -10,6 +10,7 @@ use super::bytecode_io::*;
 use crate::interpreter::heap;
 use crate::module::{ConstId, Constant};
 use crate::value::Value;
+use verum_common::Text;
 
 // ============================================================================
 // Handler Implementations - Debug and Assertions
@@ -66,6 +67,11 @@ pub(in super::super) fn handle_assert(
         return Err(InterpreterError::AssertionFailed {
             message,
             pc: state.pc() as usize,
+            function: state
+                .call_stack
+                .current_function_name(&state.module)
+                .filter(|name| !name.is_empty())
+                .map(Text::from),
         });
     }
 

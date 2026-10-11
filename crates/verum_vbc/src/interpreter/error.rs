@@ -2,6 +2,8 @@
 
 use std::fmt;
 
+use verum_common::{Maybe, Text};
+
 use crate::instruction::{Opcode, Reg};
 use crate::module::FunctionId;
 use crate::types::TypeId;
@@ -184,10 +186,12 @@ pub enum InterpreterError {
 
     /// Assertion failed.
     AssertionFailed {
-        /// Assertion message.
+        /// Assertion message, also retained as the caught panic payload.
         message: String,
-        /// Program counter.
+        /// Function-local program counter after the assertion operands.
         pc: usize,
+        /// Exact active function name, when its descriptor has a name.
+        function: Maybe<Text>,
     },
 
     /// Explicit panic.
@@ -469,8 +473,16 @@ impl fmt::Display for InterpreterError {
                     reason, type_id.0, tag, got_field_count
                 ),
             },
-            Self::AssertionFailed { message, pc } => {
-                write!(f, "Assertion failed at pc {}: {}", pc, message)
+            Self::AssertionFailed {
+                message,
+                pc,
+                function,
+            } => {
+                write!(f, "Assertion failed at pc {}", pc)?;
+                if let Some(function) = function {
+                    write!(f, " in {}", function)?;
+                }
+                write!(f, ": {}", message)
             }
             Self::Panic { message } => {
                 write!(f, "Panic: {}", message)
@@ -678,6 +690,7 @@ mod tests {
             InterpreterError::AssertionFailed {
                 message: "test".to_string(),
                 pc: 0,
+                function: None,
             },
             InterpreterError::Panic {
                 message: "test".to_string(),

@@ -66,6 +66,7 @@ enum Body {
 ///  * fn 2 `victim` — the callee.
 fn build_module(callable: Callable, body: Body) -> Arc<VbcModule> {
     let mut module = VbcModule::new("catch_unwind_closure_pin".to_string());
+    let message_id = module.intern_string("kept").0;
 
     // main: r1 = <callable>; r0 = catch_unwind(r1); ret r0
     let materialise = match callable {
@@ -89,12 +90,12 @@ fn build_module(callable: Callable, body: Body) -> Arc<VbcModule> {
     ]);
 
     let victim_body = encode(&match body {
-        Body::Panic => vec![Instruction::Panic { message_id: 0 }],
+        Body::Panic => vec![Instruction::Panic { message_id }],
         Body::AssertFalse => vec![
             Instruction::LoadFalse { dst: Reg(0) },
             Instruction::Assert {
                 cond: Reg(0),
-                message_id: 0,
+                message_id,
             },
             Instruction::Ret { value: Reg(0) },
         ],
@@ -240,6 +241,31 @@ fn catch_unwind_catches_builtin_assert_failure() {
         .execute_function(FunctionId(0))
         .expect("a failed builtin assert is a panic and must be catchable");
     assert_eq!(result_tag(&interp, v), 1, "assert failure must yield Result.Err");
+
+    // T1756: diagnostic context must not become part of PanicInfo.message.
+    // This fixture explicitly interns "kept", while its active function is
+    // "victim"; the distinction catches accidental Display use.
+    use verum_common::layout::VARIANT_PAYLOAD_OFFSET;
+    use verum_vbc::Value;
+    use verum_vbc::interpreter::OBJECT_HEADER_SIZE;
+    let result = interp
+        .state
+        .heap
+        .get_object(v.as_ptr::<u8>().wrapping_add(OBJECT_HEADER_SIZE))
+        .expect("caught Result belongs to the interpreter heap");
+    let payload_offset = VARIANT_PAYLOAD_OFFSET as usize - OBJECT_HEADER_SIZE;
+    let payload_bytes = &result.data_slice()[payload_offset..payload_offset + size_of::<Value>()];
+    let info = Value::from_bits(u64::from_ne_bytes(payload_bytes.try_into().unwrap()));
+    assert!(info.is_ptr() && !info.is_nil());
+    let info = interp
+        .state
+        .heap
+        .get_object(info.as_ptr::<u8>().wrapping_add(OBJECT_HEADER_SIZE))
+        .expect("PanicInfo belongs to the interpreter heap");
+    let message_bytes = &info.data_slice()[..size_of::<Value>()];
+    let message = Value::from_bits(u64::from_ne_bytes(message_bytes.try_into().unwrap()));
+    assert!(message.is_small_string(), "four-byte fixture message stays inline");
+    assert_eq!(message.as_small_string().as_str(), "kept");
 }
 
 #[test]
