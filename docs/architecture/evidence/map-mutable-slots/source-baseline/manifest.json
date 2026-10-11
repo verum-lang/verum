@@ -1,0 +1,53 @@
+{
+  "task": "T1196",
+  "source_commit": "16e61c2d5e8af1d3de5f6b5408bd3f849cd99cbb",
+  "source_tree": "1a9648a5136e9e30a05c89371f1e725aeb99e59a",
+  "scope": "Complete-source caller harness refusal before Map.get_mut; not a causal get_mut baseline or acceptance. Ordinary compiler diagnostic remains separate.",
+  "outcome": {
+    "exit_code": 101,
+    "seconds": 73.175,
+    "tests": [
+      "test result: FAILED. 0 passed; 7 failed; 0 ignored; 0 measured; 0 filtered out; finished in 26.82s"
+    ],
+    "source_unchanged": true,
+    "source_paths_unchanged": true,
+    "artifacts_unchanged": true
+  },
+  "failure": "All seven controls fail while populating the map in source Map.insert_internal; the owned-get positive also fails. Source and decoded-wire routes were both attempted.",
+  "source_bindings": 5322,
+  "executables": {
+    "map_mutable_value_slots": {
+      "path": "/Users/taaliman/.tmp/verum-codex-01a10248-types/checker-target/debug/build/verum_vbc/0bad3fce264b5c7d/out/map_mutable_value_slots-0bad3fce264b5c7d",
+      "sha256": "6d00269a79e54043225c72de0aa788745f724b58c61dc341ca4622ef330c841a",
+      "retained": "/private/tmp/verum-T1196-map-baseline/map_mutable_value_slots-0bad3fce264b5c7d",
+      "retained_sha256": "6d00269a79e54043225c72de0aa788745f724b58c61dc341ca4622ef330c841a",
+      "fresh": false
+    }
+  },
+  "files": [
+    {
+      "path": "result.json.gz",
+      "raw_bytes": 655753,
+      "raw_sha256": "ad68b0df4510cdbd33d8373fadc8a93bf32149634529e5cb7bd4f2d203ea33ea",
+      "gzip_sha256": "9f9b80aa862f1bd6bb77292b14bb4db5515244201f1d376111e994557a55466b"
+    },
+    {
+      "path": "gate.log.gz",
+      "raw_bytes": 272144,
+      "raw_sha256": "4cb9707821ad70309c3a391b56b05694713f5b2f331408707372cd6faaba6b7d",
+      "gzip_sha256": "cc3dcdca042ac0e3707b7e56b3e551ad91d77459c4161eec1ead74c6fa74611f"
+    },
+    {
+      "path": "runner.py.gz",
+      "raw_bytes": 10767,
+      "raw_sha256": "377f722078f087cedd19f9081c8f4ca108a05e2339ae2e919726351a24d60f26",
+      "gzip_sha256": "0eae2cdd3d4172b30c06a01247e9de21ecaac0d7f01031c07f8c10bf5fbdbd61"
+    },
+    {
+      "path": "release.json.gz",
+      "raw_bytes": 127,
+      "raw_sha256": "0517a72a38841c80344c7b9478fc7dde948539f0afe68475796e74221449a9ab",
+      "gzip_sha256": "b7535d23aecb43255cfc8ac87e03553dd1b2bc325a7c64a60e25e13c0095fc86"
+    }
+  ]
+}
