@@ -54,3 +54,8 @@ T1747 still requires the unchanged ordinary Map probe to be replayed with the
 fresh compiler. T1746 separately requires investigation of the original
 preparation-copy allocation panic. This checker gate provides no Map mutation,
 copy-isolation, service, native or AOT acceptance, and changes no runtime guard.
+
+The [main-based checker gate](main/review.json) independently passes all 15
+focused controls in 31.227 seconds. All 5,300 source bindings, the retained
+executable and unchanged standard-library artifacts are verified. This
+checks the isolated main candidate without the pending visibility changes.

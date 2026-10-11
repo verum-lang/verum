@@ -1,0 +1,32 @@
+{
+  "task": "T1747",
+  "status": "passed",
+  "main_base": "271d150626af100a374a06c02e616128547cb737",
+  "source_commit": "62db806493b191aa061829ea8af6e958f8c18440",
+  "source_bindings_verified": 5300,
+  "tests_passed": 15,
+  "tests_failed": 0,
+  "tests_ignored": 0,
+  "elapsed_seconds": 31.227,
+  "files": {
+    "result.json.gz": {
+      "bytes": 639157,
+      "sha256": "396d8a8a3345aa2d186f8ae57b2733b58548d086368c25b604ecb97885dda6f5",
+      "gzip_bytes": 256146,
+      "gzip_sha256": "8bec9d989d06ddb6234dc5e0f9211cb25bc1a6896cefc58e47df6f7d117a83ad"
+    },
+    "gate.log.gz": {
+      "bytes": 299533,
+      "sha256": "925ff5985482c71dfd09d8d0a3a401a5b9a9ab09d896ca7ddea47a70ae3da212",
+      "gzip_bytes": 27023,
+      "gzip_sha256": "23830751205b79a026159d77c0ce7e9a479e0e6b864ec1d5e4f91e3f58b5ca80"
+    },
+    "runner.py.gz": {
+      "bytes": 11266,
+      "sha256": "0ddf9a4cbe0f8c6c859306c0d1565b9dbd8307e1ef573e3906345445a70682fb",
+      "gzip_bytes": 4047,
+      "gzip_sha256": "9685b5069ebca17dea3334f0b19dbc9867e2c6855572a2645a91847400c38d43"
+    }
+  },
+  "scope": "Independent main-based parsed-source checker acceptance. Ordinary Map execution and the separate allocation-guard/copy task remain unaccepted."
+}

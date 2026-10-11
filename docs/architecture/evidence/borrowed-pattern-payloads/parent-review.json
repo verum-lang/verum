@@ -1,0 +1,108 @@
+{
+  "task": "T1747",
+  "related_task": "T1746",
+  "status": "verified",
+  "manifest_sha256": "c210483f74596f9a6efdeb1627b0f9828658853f29e3552435f0d861adaabda0",
+  "compressed_payloads_verified": 67,
+  "runs": [
+    {
+      "label": "adjacent-generic",
+      "commit": "6fb57964d80595c1f756212ec9505086ef6572b0",
+      "source_bindings_verified": 1253,
+      "receipt_sha256": "d56832e9bf8966669ccfcdbf49dea047864a56f5fe40c178a9788971564d019d",
+      "test_counts": {
+        "failed": 0,
+        "filtered": 0,
+        "ignored": 0,
+        "measured": 0,
+        "passed": 4,
+        "status": "ok"
+      }
+    },
+    {
+      "label": "adjacent-imported",
+      "commit": "6fb57964d80595c1f756212ec9505086ef6572b0",
+      "source_bindings_verified": 1253,
+      "receipt_sha256": "86ef3a34b8c3c8b354cc31287153a3c59b55de5a7eef866b656c5d6ae23a8889",
+      "test_counts": {
+        "failed": 0,
+        "filtered": 0,
+        "ignored": 0,
+        "measured": 0,
+        "passed": 16,
+        "status": "ok"
+      }
+    },
+    {
+      "label": "adjacent-patterns",
+      "commit": "6fb57964d80595c1f756212ec9505086ef6572b0",
+      "source_bindings_verified": 1253,
+      "receipt_sha256": "f6d011ec3467ee9bceeb57724e04aab6fcb1d29c558714c3872b44c924d8867b",
+      "test_counts": {
+        "failed": 0,
+        "filtered": 0,
+        "ignored": 0,
+        "measured": 0,
+        "passed": 17,
+        "status": "ok"
+      }
+    },
+    {
+      "label": "baseline",
+      "commit": "f7becbe2e59b04009781b4d5403159b81670e8e2",
+      "source_bindings_verified": 1253,
+      "receipt_sha256": "13b8a21c5a9f36b86c09fb6e3956cce9f368fa676b50c186563b957f43a2342c",
+      "test_counts": {
+        "failed": 7,
+        "filtered": 0,
+        "ignored": 0,
+        "measured": 0,
+        "passed": 3,
+        "status": "FAILED"
+      }
+    },
+    {
+      "label": "extended-oracle-failure",
+      "commit": "ef56bfac9e7d79618a0d8c7d2d77125532fe2431",
+      "source_bindings_verified": 1253,
+      "receipt_sha256": "f90fe13aceab05c1c390147b4d09d368c6cbac28c8563e3d7ba8e60204c033a0",
+      "test_counts": {
+        "failed": 1,
+        "filtered": 0,
+        "ignored": 0,
+        "measured": 0,
+        "passed": 14,
+        "status": "FAILED"
+      }
+    },
+    {
+      "label": "final-fifteen",
+      "commit": "6fb57964d80595c1f756212ec9505086ef6572b0",
+      "source_bindings_verified": 1253,
+      "receipt_sha256": "990dd32d87c3ee7afaae66f5f56ce0737e4c7b76d7840dd72ed19f151104ce0f",
+      "test_counts": {
+        "failed": 0,
+        "filtered": 0,
+        "ignored": 0,
+        "measured": 0,
+        "passed": 15,
+        "status": "ok"
+      }
+    },
+    {
+      "label": "fixed-ten",
+      "commit": "e8565a5ba88557d4c12c46ba8514ec2ce382c945",
+      "source_bindings_verified": 1253,
+      "receipt_sha256": "3dbc4656ba1c83df25c48e5dba948b6429b5cd53175c5686580a0c16bafb4cbb",
+      "test_counts": {
+        "failed": 0,
+        "filtered": 0,
+        "ignored": 0,
+        "measured": 0,
+        "passed": 10,
+        "status": "ok"
+      }
+    }
+  ],
+  "scope": "Independent original payload, historical source and retained executable verification. Checker acceptance is separate from the ordinary Map replay and original allocation-guard failure."
+}
