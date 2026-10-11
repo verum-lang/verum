@@ -258,9 +258,10 @@ fn inspect(value: &Choice<Flag>) -> Int {
 "#,
     );
     assert!(
-        errors
-            .iter()
-            .any(|error| error.contains("padding") && error.contains("not found")),
+        errors.iter().any(|error| error.contains("UnknownField")
+            && error.contains("probe.Flag")
+            && error.contains("padding")
+            && error.contains("enabled")),
         "{errors:?}"
     );
     assert!(
