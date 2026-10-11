@@ -494,7 +494,9 @@ impl VbcCodegen {
                 .filter(|name| ty.canonical_scalar_type_id(name).is_some())
                 .map(|name| crate::types::StringId(self.ctx.intern_string_raw(name)));
             if let Some(imported) = self.types.iter_mut().find(|imported| {
-                imported.id == local && scalar_name.is_none_or(|name| imported.name == name)
+                imported.id == local && scalar_name.is_none_or(|name| {
+                    imported.name == name && imported.kind == ty.kind
+                })
             }) {
                 imported.origin_module = Some(origin);
                 // Unlike a general archive import, these two fields have

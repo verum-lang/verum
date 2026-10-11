@@ -374,7 +374,7 @@ pub use registers::{RegisterAllocator, RegisterInfo, RegisterKind, RegisterSnaps
 
 use crate::types::CbgrTier;
 use verum_ast::cfg::{CfgEvaluator, TargetConfig};
-use verum_common::{Map, Maybe, Text};
+use verum_common::{Map, Maybe, Set, Text};
 use verum_common::well_known_types::WellKnownType as WKT;
 
 use crate::instruction::{Instruction, Reg};
@@ -754,6 +754,11 @@ pub struct VbcCodegen {
     /// cost time — never produce the wrong descriptor.  That property is
     /// what makes it safe to add to a table mutated from eleven places.
     type_index: std::collections::HashMap<u32, usize>,
+
+    /// Slots whose original scalar descriptor carried more than implementations.
+    /// Lazy import clears unresolved glue IDs, so the remapped shape alone
+    /// cannot prove eligibility for absorption into a canonical runtime record.
+    ineligible_record_carriers: Set<usize>,
 
     /// Next function ID.
     next_func_id: u32,
@@ -2232,6 +2237,7 @@ impl VbcCodegen {
             functions: Vec::new(),
             types: Vec::new(),
             type_index: std::collections::HashMap::new(),
+            ineligible_record_carriers: Set::new(),
             next_func_id: 0,
             next_type_id: 0,
             closure_counter: 0,
@@ -6005,10 +6011,12 @@ impl VbcCodegen {
         }
 
         let original = std::mem::take(&mut self.types);
+        let ineligible = std::mem::take(&mut self.ineligible_record_carriers);
         self.types.reserve(original.len());
         self.type_index.clear();
         let mut scalar_slots = Map::<TypeId, usize>::new();
-        for ty in original {
+        for (original_slot, ty) in original.into_iter().enumerate() {
+            let carrier_ineligible = ineligible.contains(&original_slot);
             let scalar = self
                 .ctx
                 .strings
@@ -6017,6 +6025,9 @@ impl VbcCodegen {
             if let Some(id) = scalar {
                 if let Some(&slot) = scalar_slots.get(&id) {
                     if runtime_shape(&self.types[slot]) == runtime_shape(&ty) {
+                        if carrier_ineligible {
+                            self.ineligible_record_carriers.insert(slot);
+                        }
                         for implementation in ty.protocols {
                             if !self.types[slot].protocols.contains(&implementation) {
                                 self.types[slot].protocols.push(implementation);
@@ -6027,6 +6038,9 @@ impl VbcCodegen {
                 } else {
                     scalar_slots.insert(id, self.types.len());
                 }
+            }
+            if carrier_ineligible {
+                self.ineligible_record_carriers.insert(self.types.len());
             }
             self.push_type_descriptor(ty);
         }
@@ -7004,23 +7018,77 @@ impl VbcCodegen {
     /// that id (modulo whichever variants/fields the first one
     /// happened to register, which is the existing well-known
     /// alias semantic).
+    fn canonical_runtime_record_id(&self, ty: &TypeDescriptor) -> Maybe<TypeId> {
+        let name = self.ctx.strings.get(ty.name.0 as usize)?;
+        let owner = ty.origin_module.and_then(|id| self.ctx.strings.get(id.0 as usize));
+        ty.canonical_record_type_id(name, owner.map(String::as_str))
+    }
+
+    fn impl_only_scalar_carrier(&self, ty: &TypeDescriptor) -> bool {
+        self.ctx.strings.get(ty.name.0 as usize)
+            .is_some_and(|name| ty.is_impl_only_scalar_carrier(name))
+    }
+
     fn push_type_dedupe(&mut self, ty: crate::types::TypeDescriptor) {
+        let eligible = self.impl_only_scalar_carrier(&ty);
+        self.push_type_with_carrier_eligibility(ty, eligible);
+    }
+
+    fn push_type_with_carrier_eligibility(&mut self, mut ty: TypeDescriptor, eligible: bool) {
+        // A runtime record owns its layout and policy. Its scalar ABI carrier
+        // may add complete implementation records, but cannot replace that
+        // declaration or independently claim fields/glue. Check at insertion,
+        // before either indexed or linear lookups can observe a second owner.
+        if let Some(index) = self.types.iter().position(|existing| {
+            existing.id == ty.id && existing.name == ty.name
+        }) {
+            let incoming_record = self.canonical_runtime_record_id(&ty) == Some(ty.id);
+            let existing_record = self.canonical_runtime_record_id(&self.types[index]) == Some(ty.id);
+            if existing_record && eligible && self.impl_only_scalar_carrier(&ty) {
+                for implementation in ty.protocols {
+                    if !self.types[index].protocols.contains(&implementation) {
+                        self.types[index].protocols.push(implementation);
+                    }
+                }
+                return;
+            }
+            if incoming_record && !self.ineligible_record_carriers.contains(&index)
+                && self.impl_only_scalar_carrier(&self.types[index])
+            {
+                for implementation in &self.types[index].protocols {
+                    if !ty.protocols.contains(implementation) {
+                        ty.protocols.push(implementation.clone());
+                    }
+                }
+                self.types[index] = ty;
+                self.ineligible_record_carriers.remove(&index);
+                return;
+            }
+            if incoming_record != existing_record {
+                // Keep incompatible claims visible to strict finalization.
+                if !eligible { self.ineligible_record_carriers.insert(self.types.len()); }
+                self.push_type_descriptor(ty);
+                return;
+            }
+        }
         // T1546: scalar carriers may contribute impls from several modules.
         // Merge the same spelling additively, retaining distinct alias
         // spellings (Byte/UInt8, USize/ISize) for name-keyed metadata readers.
         let scalar = self.ctx.strings.get(ty.name.0 as usize)
             .and_then(|name| ty.canonical_scalar_type_id(name));
         if scalar.is_some() {
-            if let Some(existing) = self.types.iter_mut().find(|existing| {
+            if let Some(index) = self.types.iter().position(|existing| {
                 existing.id == ty.id && existing.name == ty.name
                     && existing.kind == crate::types::TypeKind::Primitive
             }) {
+                if !eligible { self.ineligible_record_carriers.insert(index); }
                 for implementation in ty.protocols {
-                    if !existing.protocols.contains(&implementation) {
-                        existing.protocols.push(implementation);
+                    if !self.types[index].protocols.contains(&implementation) {
+                        self.types[index].protocols.push(implementation);
                     }
                 }
             } else {
+                if !eligible { self.ineligible_record_carriers.insert(self.types.len()); }
                 self.push_type_descriptor(ty);
             }
             return;
@@ -7079,6 +7147,7 @@ impl VbcCodegen {
                 let mut ty = ty;
                 preserve_protocols(&mut self.types[idx], &mut ty);
                 self.types[idx] = ty;
+                self.ineligible_record_carriers.remove(&idx);
             } else if !existing_empty {
                 // The existing descriptor has structure, but it can still be
                 // SHALLOWER than the incoming one: a sum type's variants may
@@ -7164,6 +7233,7 @@ impl VbcCodegen {
                     let mut ty = ty;
                     preserve_protocols(&mut self.types[idx], &mut ty);
                     self.types[idx] = ty;
+                    self.ineligible_record_carriers.remove(&idx);
                 }
             }
             return;
@@ -9211,6 +9281,7 @@ impl VbcCodegen {
         self.functions.clear();
         self.types.clear();
         self.type_index.clear();
+        self.ineligible_record_carriers.clear();
         self.next_func_id = 0;
         self.next_type_id = 0;
         self.closure_counter = 0;
@@ -9582,7 +9653,7 @@ impl VbcCodegen {
             // `self.types.push` in the crate, and this site was the
             // exception that made the claim false. `type_by_id` is
             // defensive and degraded to a scan for exactly this carrier.
-            self.push_type_descriptor(carrier);
+            self.push_type_dedupe(carrier);
             return Ok(());
         }
 
@@ -10313,8 +10384,8 @@ impl VbcCodegen {
                                     self.types.iter().position(|ty| {
                                         ty.id == id
                                             && (!scalar
-                                                || (ty.canonical_scalar_type_id(&ty_name)
-                                                    == Some(id)
+                                                || ((ty.canonical_scalar_type_id(&ty_name) == Some(id)
+                                                    || self.canonical_runtime_record_id(ty) == Some(id))
                                                     && self.ctx.strings.get(ty.name.0 as usize)
                                                         .map(String::as_str)
                                                         == Some(ty_name.as_str())))
@@ -26405,6 +26476,8 @@ impl VbcCodegen {
             .and_then(|(owner, name)| name.strip_prefix(&format!("{owner}.")))
             .unwrap_or(&name_str).to_owned();
         let scalar_id = ty.canonical_scalar_type_id(&name_str);
+        // Record eligibility before clearing source-local glue IDs below.
+        let carrier_eligible = ty.is_impl_only_scalar_carrier(&name_str);
         let canonical_id = scalar_id.or_else(|| {
             ty.canonical_record_type_id(&name_str, source_owner)
         });
@@ -26454,7 +26527,9 @@ impl VbcCodegen {
         if scalar_id.is_none()
             && let Some(q) = qualified_key.as_deref()
             && let Some(&qid) = self.type_name_to_id.get(q)
-            && self.type_by_id(qid).is_some()
+            && self.type_by_id(qid).is_some_and(|existing| {
+                canonical_id.is_none() || self.canonical_runtime_record_id(existing) == canonical_id
+            })
         {
             if let Some(bundle_key) = bundle_key {
                 self.type_name_to_id.entry(bundle_key).or_insert(qid);
@@ -26904,7 +26979,7 @@ impl VbcCodegen {
         // archive-local TypeIds that codegen-side `self.types`
         // doesn't have at this point in the per-type-import loop).
 
-        self.push_type_dedupe(imported);
+        self.push_type_with_carrier_eligibility(imported, carrier_eligible);
     }
 
     /// Translate only identities declared by this archive module. A same-leaf

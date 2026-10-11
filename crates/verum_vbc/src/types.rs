@@ -1063,6 +1063,19 @@ impl TypeDescriptor {
             .filter(|id| *id == self.id)
     }
 
+    /// Whether a scalar descriptor contributes only implementations, without
+    /// claiming independent shape, lifecycle glue or declaration policy.
+    pub(crate) fn is_impl_only_scalar_carrier(&self, declared_name: &str) -> bool {
+        if self.canonical_scalar_type_id(declared_name).is_none() {
+            return false;
+        }
+        let mut shape = self.clone();
+        shape.name = StringId::EMPTY;
+        shape.origin_module = None;
+        shape.protocols.clear();
+        shape == Self { id: self.id, kind: TypeKind::Primitive, ..Self::default() }
+    }
+
     /// A runtime record carrier is identified by its explicit declaration,
     /// independently of the producer's local type number. An archive bundle
     /// or a same-spelled foreign record cannot establish that ownership.
