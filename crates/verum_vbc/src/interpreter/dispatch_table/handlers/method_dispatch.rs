@@ -5475,6 +5475,101 @@ fn map_entries_data(header_ptr: *const Value, capacity: usize) -> *mut Value {
     std::ptr::null_mut()
 }
 
+/// Locate a value in the interpreter's flat Map carrier (T1196).
+///
+/// This is the shared lookup authority for owned and borrowed access. The
+/// declared `Slot<K, V>` body has a different layout; raw buffers or a four-Value
+/// Slot table must not be read as this allocator-owned key/value array.
+/// The returned address is valid only while the caller preserves table shape,
+/// as required by the public `Map.get_mut` borrow contract.
+fn map_value_slot(
+    state: &InterpreterState,
+    receiver: Value,
+    key: Value,
+) -> InterpreterResult<verum_common::Maybe<*mut Value>> {
+    let invalid = |detail: &str| InterpreterError::Panic {
+        message: format!("invalid Map lookup storage: {detail}"),
+    };
+    if !receiver.is_regular_ptr()
+        || receiver.is_nil()
+        || !state.heap.contains(receiver.as_ptr::<heap::ObjectHeader>())
+    {
+        return Err(invalid("receiver is not an owned object"));
+    }
+    // SAFETY: exact heap membership establishes a live ObjectHeader.
+    let header = unsafe { &*receiver.as_ptr::<heap::ObjectHeader>() };
+    let value_size = std::mem::size_of::<Value>();
+    if header.type_id != TypeId::MAP
+        || !header.is_valid()
+        || header.flags.contains(heap::ObjectFlags::VARIANT)
+        || (header.size as usize != 3 * value_size && header.size as usize != 4 * value_size)
+    {
+        return Err(invalid("receiver does not have a flat Map header"));
+    }
+    // SAFETY: both supported runtime headers contain these three Value slots.
+    let fields = unsafe {
+        receiver.as_ptr::<u8>().add(heap::OBJECT_HEADER_SIZE).cast::<Value>()
+    };
+    // SAFETY: the same three-slot extent was established above.
+    let (length, capacity, backing) = unsafe { (*fields, *fields.add(1), *fields.add(2)) };
+    if !length.is_int() || !capacity.is_int() || length.as_i64() < 0 || capacity.as_i64() < 0 {
+        return Err(invalid("length and capacity must be nonnegative integers"));
+    }
+    let capacity = usize::try_from(capacity.as_i64())
+        .map_err(|_| invalid("capacity exceeds the address space"))?;
+    if length.as_i64() as u64 > capacity as u64 {
+        return Err(invalid("length exceeds capacity"));
+    }
+    if capacity == 0 {
+        // The source constructor uses integer zero; runtime constructors may
+        // use nil. Neither authorizes a header read from an absent allocation.
+        if backing.is_nil() || (backing.is_int() && backing.as_i64() == 0) {
+            return Ok(None);
+        }
+        return Err(invalid("zero capacity has a backing allocation"));
+    }
+    let bytes = capacity.checked_mul(2)
+        .and_then(|slots| slots.checked_mul(value_size))
+        .ok_or_else(|| invalid("capacity byte size overflows"))?;
+    if !backing.is_regular_ptr()
+        || backing.is_nil()
+        || !state.heap.contains(backing.as_ptr::<heap::ObjectHeader>())
+    {
+        return Err(invalid("backing is not an owned object"));
+    }
+    // SAFETY: exact heap membership establishes the backing header. The two
+    // TypeIds are emitted by static Map.new and NewMap respectively; both
+    // allocate precisely two Values per bucket, unlike the declared Slot body.
+    let backing_header = unsafe { &*backing.as_ptr::<heap::ObjectHeader>() };
+    if !matches!(backing_header.type_id, TypeId::UNIT | TypeId::MAP)
+        || !backing_header.is_valid()
+        || backing_header.flags.contains(heap::ObjectFlags::VARIANT)
+        || backing_header.size as usize != bytes
+    {
+        return Err(invalid("backing does not match the flat key/value extent"));
+    }
+    // SAFETY: the validated allocation contains exactly capacity key/value
+    // pairs. Probing is finite even for a full table, and no user callback or
+    // table mutation occurs during the existing semantic hash/equality checks.
+    let entries = unsafe {
+        backing.as_ptr::<u8>().add(heap::OBJECT_HEADER_SIZE).cast::<Value>()
+    };
+    let mut index = value_hash(key, state) % capacity;
+    for _ in 0..capacity {
+        // SAFETY: index is below capacity and the complete pair extent is owned.
+        let entry_key = unsafe { *entries.add(index * 2) };
+        if entry_key.is_unit() {
+            return Ok(None);
+        }
+        if value_eq(entry_key, key, state) {
+            // SAFETY: the value follows the checked key in the same pair.
+            return Ok(Some(unsafe { entries.add(index * 2 + 1) }));
+        }
+        index = (index + 1) % capacity;
+    }
+    Ok(None)
+}
+
 /// Read the capacity of a Text Value, dispatching by representation.
 /// Returns the byte budget the buffer can hold without reallocating.
 ///
@@ -8108,66 +8203,29 @@ pub(super) fn dispatch_primitive_method(
                     };
                     return Ok(Some(result));
                 }
-                "get" if is_map => {
-                    // Map.get(&self, key: K) -> Maybe<V>
-                    //
-                    // Industry-standard semantics (Rust HashMap, Java Optional,
-                    // Scala Map): explicit presence/absence wrapping in `Maybe<V>`
-                    // — never a sentinel-zero on miss.  This handler is the
-                    // single canonical materialisation point for Map.get
-                    // dispatch reaching the runtime fast-path.  The stdlib's
-                    // `core/collections/map.vr::Map.get` carries the same
-                    // signature; reaching this handler is the perf-tier
-                    // shortcut, not a semantic-divergent overload.
-                    //
-                    // The previous implementation returned `V` directly with
-                    // zero-on-miss — a hardcode that bypassed `core.base.maybe`
-                    // entirely and silently masked the missing-key case for
-                    // every `V` whose zero value is a legitimate domain
-                    // value (every numeric type, every Option-like inner V,
-                    // every bitflag).  Eliminated as part of the Map API
-                    // canonicalisation (task #12).
-                    //
-                    // CBGR-ref auto-deref: `m.get(&key)` lowers `&key`
-                    // as a CBGR ThinRef pointing at the caller's stack
-                    // slot. Without deref the intercept's `value_hash`
-                    // / `value_eq` operate on the ref bits, which
-                    // never match any stored entry key — every present
-                    // key reported as None. Mirror of the contains /
-                    // union / intersection deref patterns elsewhere
-                    // in this file. Unblocks the toposort + union_find
-                    // regression cascade that pinned Map.get behind
-                    // this same defect class.
+                "get" | "get_mut" if is_map => {
+                    // Both methods use the same key normalization and finite
+                    // lookup. get owns a Value; get_mut carries the address of
+                    // that Value slot through Maybe, never a copied payload.
                     let caller_base = state.reg_base();
                     let key_raw = state.registers.get(caller_base, Reg(args.start.0));
                     let key = resolve_arg_value(state, key_raw);
-                    let header_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
-                    let capacity = unsafe { (*header_ptr.add(1)).as_i64() } as usize;
-                    if capacity == 0 {
-                        let none = make_none_value(state)?;
-                        return Ok(Some(none));
-                    }
-                    let entries_data = map_entries_data(header_ptr, capacity);
-                    let hash = value_hash(key, state);
-                    let mut idx = hash % capacity;
-                    let start = idx;
-                    loop {
-                        let entry_key = unsafe { *entries_data.add(idx * 2) };
-                        if entry_key.is_unit() {
-                            let none = make_none_value(state)?;
-                            return Ok(Some(none));
+                    let result = match map_value_slot(state, *receiver, key)? {
+                        None => make_none_value(state)?,
+                        Some(slot) if method == "get_mut" => {
+                            // Existing returned-reference convention shared by
+                            // RefField/RefListElement. The map borrow forbids
+                            // shape changes; address membership does not enforce
+                            // stale-borrow invalidation after a resize/removal.
+                            state.cbgr_mutable_ptrs.insert(slot as usize);
+                            make_some_value(state, Value::from_ptr(slot))?
                         }
-                        if value_eq(entry_key, key, state) {
-                            let val = unsafe { *entries_data.add(idx * 2 + 1) };
-                            let some = make_some_value(state, val)?;
-                            return Ok(Some(some));
+                        Some(slot) => {
+                            // SAFETY: map_value_slot checked the owned extent.
+                            make_some_value(state, unsafe { *slot })?
                         }
-                        idx = (idx + 1) % capacity;
-                        if idx == start {
-                            let none = make_none_value(state)?;
-                            return Ok(Some(none));
-                        }
-                    }
+                    };
+                    return Ok(Some(result));
                 }
                 "ensure_capacity" if is_map => {
                     // Map.ensure_capacity() - resize if load factor is too high
