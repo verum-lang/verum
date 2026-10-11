@@ -48,7 +48,7 @@ happened to be.
 |-----------------|--------|----------------|
 | `&self.field` | `CbgrExtended{RefField}` `0x0C` | the slot **ADDRESS** |
 | `unsafe { &(*ptr).field }` | `FfiExtended{StructFieldAddr}` `0x4F` | the slot **ADDRESS** |
-| `&self.items[i]` | `CbgrExtended{RefListElement}` `0x0B` | the element **VALUE** |
+| `&self.items[i]` | `CbgrExtended{RefListElement}` `0x0B` | the slot **ADDRESS** (Tier 0, `Value` storage) / the element **VALUE** (Tier 1) |
 | `unsafe { &*p.offset(i) }` | `MemExtended{DerefValue}` `0x1E` | the element **VALUE** (Tier 0) / the **ADDRESS** (Tier 1) |
 
 Dumped, because the source spelling does not predict the opcode and
@@ -80,11 +80,19 @@ by a different instruction because the field lives behind a raw pointer.
 A predicate that knew only `RefField` was blind to every `unsafe`
 accessor in `core/base/memory.vr`.
 
-`RefListElement` is the odd one, and deliberately so. Its lowering arm
-performs the load itself and marks its register `interior_list_ref`, so
-the `Deref` arm passes the value through instead of loading a second
-time (`DEREF-INTERIOR-1`). That is correct *within* a function and it is
-what makes the boundary dangerous.
+`RefListElement` has different carriers in the two backends. The
+interpreter returns the actual `Value` slot address and registers it in
+`cbgr_mutable_ptrs`; `Deref` reads that slot and mutation writes through it.
+Its raw-stride slice path refuses an interior reference that cannot be
+represented as a `Value` slot. This address classification does not, by
+itself, establish borrow-lifetime or container-invalidation enforcement.
+
+The native lowering performs the load and marks the register
+`interior_list_ref`, so its `Deref` arm passes the value through instead
+of loading a second time (`DEREF-INTERIOR-1`). That native convention is
+correct within a function and requires preservation at call boundaries.
+The table records the current handler and lowering paths; an interpreter
+result does not validate the native carrier.
 
 ### The fourth producer: `&*p` over an array of `Value`
 
@@ -106,9 +114,11 @@ print(f"{*a} {*b} {*c}")   ->  48624037456 48624037464 48624037472
 Teaching `*` to load would have fixed one consumer in four. `&T` is also
 `item.clone()`, `item.field`, and every method call on `item`; each of
 those reads the register on its own terms, and each read the address.
-So the producer takes the **pre-loaded VALUE** convention instead, the
-same one `RefListElement` takes for the same storage — and for the same
-reason, since `p.offset(i)` and `&self.items[i]` name the same slot.
+At Tier 0, this immutable raw-slot producer therefore takes the
+**pre-loaded VALUE** convention. The current interpreter `RefListElement`
+instead returns a classified slot address that its consumers know to load.
+Although `p.offset(i)` and `&self.items[i]` can name the same storage, their
+opcodes and backend adaptations determine the carrier.
 
 Two conditions, both checked in codegen and neither guessable at run
 time:
@@ -541,8 +551,8 @@ fn enum_over_slice(bs: &[Byte]) -> Int {
 
 `0x6c` is the byte `'l'` — the element VALUE used as an address.
 
-Both iterators declare `-> Maybe<&T>` and bind `Item = &T`, and they
-disagree about what the payload word holds:
+Both iterators declare `-> Maybe<&T>` and bind `Item = &T`. At Tier 1,
+their native lowerings disagree about what the payload word holds:
 
 | producer | body | payload word |
 |---|---|---|
