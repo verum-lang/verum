@@ -1,0 +1,220 @@
+{
+  "tasks": [
+    "T1196",
+    "T1751",
+    "T1752",
+    "T0379"
+  ],
+  "engine_commit": "6a0bf542b9a2a3158d78b4015cf1b533eecfd13e",
+  "stdlib_producer_commit": "7a8c86f90a493a3b7352359314fc5f0d628aaa1b",
+  "build_manifest_sha256": "289d4a18670f67a014ccc6ad12315f2c4dbe15cad8addbc1ba3d03aea3e63ffa",
+  "automatic_precompile": false,
+  "cli": {
+    "bytes": 548277624,
+    "path": "/private/tmp/verum-T1196-consumer-cli/verum-consumer-6a0bf542b",
+    "sha256": "2da19e172e64584c4063974f2eb2038d3ec0e6360776b84fc1333adf0cc63d57"
+  },
+  "files": [
+    {
+      "path": "build/build-manifest.json.gz",
+      "original_bytes": 656962,
+      "original_sha256": "289d4a18670f67a014ccc6ad12315f2c4dbe15cad8addbc1ba3d03aea3e63ffa",
+      "stored_bytes": 262788,
+      "stored_sha256": "0ad08fda27dca371cf78722cce25616e68c6d01065f5f7c4503083ae6a607d66"
+    },
+    {
+      "path": "build/reviewed-plan.json.gz",
+      "original_bytes": 2533,
+      "original_sha256": "cc65216e1e0a040077d4cbd9dd9b5e45bf9447407c163d94cc6b08908ba644ba",
+      "stored_bytes": 702,
+      "stored_sha256": "e5f5ce43f05879a74a1adcf54cef82e883d6ece3a54a9103728b5f5f9610b0c7"
+    },
+    {
+      "path": "build/runner.py.gz",
+      "original_bytes": 14404,
+      "original_sha256": "78f4fa504e3db27d8e58556aca9aa6c98da130e29bfd32000db8d80e5d44afd8",
+      "stored_bytes": 4658,
+      "stored_sha256": "6ad0fed58ce89757d9e69e1478313ef768793ebd7ad26f1a52a8eef133e573dc"
+    },
+    {
+      "path": "build/source-hashes.json.gz",
+      "original_bytes": 635652,
+      "original_sha256": "a64c1f9e48fe829420cd8a525d170bf2d7758cced860438a073fdc9463496844",
+      "stored_bytes": 258345,
+      "stored_sha256": "74a9a2b823c46591fae6d22948d992ff0e7509789f64017aba7c2c020d1ec1a1"
+    },
+    {
+      "path": "build/local-cargo-artifacts.json.gz",
+      "original_bytes": 47933,
+      "original_sha256": "41d0251ebb4391418ac151bc255d8701b5e9c65173eca8c32a751b0df27a176d",
+      "stored_bytes": 2727,
+      "stored_sha256": "410eaee3c49a419853569f44516d36382bce0be6d4623697a5838c65484eaaf7"
+    },
+    {
+      "path": "build/stdout.log.gz",
+      "original_bytes": 1070355,
+      "original_sha256": "73e8c1f4a660ca14ae91d85a4d06c42f63e9519b4bff93a80453624d9a9aeb81",
+      "stored_bytes": 71702,
+      "stored_sha256": "a4e43a4c26e057dc9e9769755089fb6fe9bb9bfd1a9b96643c091ea4b8c4a019"
+    },
+    {
+      "path": "build/stderr.log.gz",
+      "original_bytes": 535397,
+      "original_sha256": "beaf095fd6a8265390fa5b445bbf797d74355b284e9541ef61e990da9a5a857c",
+      "stored_bytes": 75650,
+      "stored_sha256": "1322899b31a39031a59cefd636a4522f804f53cb1a14e47d89c52206bdc70ebc"
+    },
+    {
+      "path": "build/stage23-build-manifest.json.gz",
+      "original_bytes": 651160,
+      "original_sha256": "3df266cba9190c9d201e03cb51404b28a1d1864f784d32e18421d6fb2083faef",
+      "stored_bytes": 260423,
+      "stored_sha256": "80252526b64ccef4d370b91673557a4ebf6600539a2d01e4e0efe9c0c15b5bff"
+    },
+    {
+      "path": "build/prior-consumer-build-manifest.json.gz",
+      "original_bytes": 654796,
+      "original_sha256": "4529dd07859ad0fc6a1d10504ad1fbde8a91433c5544a370774be31086afb691",
+      "stored_bytes": 262068,
+      "stored_sha256": "f3e56c0ea02d14a0776ea47755227cc7e25fe0cb9a64d9968788e4432c327d6b"
+    },
+    {
+      "path": "map/result.json.gz",
+      "original_bytes": 1823,
+      "original_sha256": "62520511b021f9b3ccd6a4d3d31c1e72a3b0d63556772259d4c1ba56266a68fb",
+      "stored_bytes": 984,
+      "stored_sha256": "7043c901f6ec2a427927bb3db17ee9a7f55c867423aedb65c5f1d45f983d0789"
+    },
+    {
+      "path": "map/started.json.gz",
+      "original_bytes": 1501,
+      "original_sha256": "f2d898029f20d5a5b572267f398a3b872ff77e9785698a2ad57c5b165c2bea9a",
+      "stored_bytes": 816,
+      "stored_sha256": "c444ab1690a47df520091327ef798438144ee2cd51164309081e5d2497676559"
+    },
+    {
+      "path": "map/stdout.log.gz",
+      "original_bytes": 28,
+      "original_sha256": "5ab11b5a7765bb1e232c7b92ae700316be267f80010f2457a3090f486aa71c09",
+      "stored_bytes": 43,
+      "stored_sha256": "77958fa72d9d552f550506b53b5434caa9aa4c032cf71e3cd75b1a6614b3ad4d"
+    },
+    {
+      "path": "map/stderr.log.gz",
+      "original_bytes": 90,
+      "original_sha256": "071cadefd2a7474ef15f4ddc9797e26c65c590e08cf76b9b233d22d205c8ebd2",
+      "stored_bytes": 101,
+      "stored_sha256": "f73e39bb2a6a40879cdec30ba284998ab7304a64d1d47a277259061e393cf240"
+    },
+    {
+      "path": "map/runner.py.gz",
+      "original_bytes": 7530,
+      "original_sha256": "5d14ff1a5308b9d2eaac04f769283f0ec48859acc44575b2f38a9c4ce85cdc56",
+      "stored_bytes": 2883,
+      "stored_sha256": "655ad3858b747a1e0213a23d1c372d3d13ba7319736c49fbb262670b77bb3e6d"
+    },
+    {
+      "path": "map/expected.stdout.gz",
+      "original_bytes": 28,
+      "original_sha256": "5ab11b5a7765bb1e232c7b92ae700316be267f80010f2457a3090f486aa71c09",
+      "stored_bytes": 43,
+      "stored_sha256": "77958fa72d9d552f550506b53b5434caa9aa4c032cf71e3cd75b1a6614b3ad4d"
+    },
+    {
+      "path": "map/runtime/map.vr.gz",
+      "original_bytes": 1424,
+      "original_sha256": "1e8d82f8bf49013bc97d1579234acbb225b951fdc8709e614d808cfe514e4d0b",
+      "stored_bytes": 560,
+      "stored_sha256": "f8e6b2437d199e6e6a4ac87b9f1a60ac5d52b374e9a53e9feb2727c19969ffe0"
+    },
+    {
+      "path": "map/prior-consumer-result.json.gz",
+      "original_bytes": 1833,
+      "original_sha256": "5cb668d222486db8f4ac9a0c3abe336e8eb19dca966d24fcf92cc0c2af732c89",
+      "stored_bytes": 989,
+      "stored_sha256": "9b85217ae146c0904501a65d46c688d33cb23333b24d1e639885474da8694ad0"
+    },
+    {
+      "path": "map/baseline-result.json.gz",
+      "original_bytes": 2958,
+      "original_sha256": "ca35f2da56ee28a439008f2ae0b670d8ead7a2552536159f49d0f7bc3fa11a67",
+      "stored_bytes": 1420,
+      "stored_sha256": "f3fe1b0c87f8790b582e2ebadcb30207b70df01096a310f5f64e65ed3ca5a945"
+    },
+    {
+      "path": "cookbook/result.json.gz",
+      "original_bytes": 1768,
+      "original_sha256": "b20dc456c92bf7bb778fb5540a5cfb54e127b17a9da1c9db21191d7b75bffb43",
+      "stored_bytes": 983,
+      "stored_sha256": "dc31e4bd4813c320aba3f6b9f2b218b87ecd41a60a862886eba454f2e2cecbcf"
+    },
+    {
+      "path": "cookbook/started.json.gz",
+      "original_bytes": 1445,
+      "original_sha256": "3e5626f9ddc2b7cc3f5fdd9fd4ef122ca99cced96145caa099707e323a5435c6",
+      "stored_bytes": 817,
+      "stored_sha256": "eadcc7c4223b255a65a49b00506b83f2d3f6871723a03897a222be56b93dca5d"
+    },
+    {
+      "path": "cookbook/stdout.log.gz",
+      "original_bytes": 15,
+      "original_sha256": "a257c5d18bce190712257b526a13c3a17ce8c72103598b01a7daf36161a72455",
+      "stored_bytes": 35,
+      "stored_sha256": "c8de4baccea2536e7b7f423d28fbbeadf86acce14e74c550ae3521596ff331ec"
+    },
+    {
+      "path": "cookbook/stderr.log.gz",
+      "original_bytes": 90,
+      "original_sha256": "a94e21b01f28569ade2ae6b4d64f8d712d45bc3037b714edfbfa2b5b3d19f168",
+      "stored_bytes": 103,
+      "stored_sha256": "846b435400824ef2365201adb4d33f1185108100f99de61aefa00318db788cb3"
+    },
+    {
+      "path": "cookbook/runner.py.gz",
+      "original_bytes": 6544,
+      "original_sha256": "fe50a0d4b6109c88262810251c458f7877220a2b61f8ceefcd3e2964f97582f7",
+      "stored_bytes": 2541,
+      "stored_sha256": "3090ef74eb8d4579676df125261d233cd60bbc1787bdbc2cc2a8aebc78ece350"
+    },
+    {
+      "path": "cookbook/expected.stdout.gz",
+      "original_bytes": 15,
+      "original_sha256": "a257c5d18bce190712257b526a13c3a17ce8c72103598b01a7daf36161a72455",
+      "stored_bytes": 35,
+      "stored_sha256": "c8de4baccea2536e7b7f423d28fbbeadf86acce14e74c550ae3521596ff331ec"
+    },
+    {
+      "path": "cookbook/runtime/map_access.vr.gz",
+      "original_bytes": 546,
+      "original_sha256": "c48149b7371e14eb681ba1eda8943777afba3846791693201f97b6004cf46807",
+      "stored_bytes": 291,
+      "stored_sha256": "e3bf138640b610965e31edeb627b1f9ff20a6f1b0961341dd4018e887065a053"
+    },
+    {
+      "path": "cookbook/page-at-execution.md.gz",
+      "original_bytes": 13831,
+      "original_sha256": "350d9536d77831978b1e97a196e696a6eeb4be38965a85a476d152b269798fa8",
+      "stored_bytes": 5488,
+      "stored_sha256": "7c9ca5477912668c6b1123a4f0fb783ac874a485228ce78634134ac92b55c511"
+    }
+  ],
+  "runs": [
+    {
+      "fixture": "map",
+      "source_sha256": "1e8d82f8bf49013bc97d1579234acbb225b951fdc8709e614d808cfe514e4d0b",
+      "seconds": 84.175,
+      "expected_stdout": "map-read: ok\nmap-mutate: ok\n",
+      "status": "passed",
+      "receipt_sha256": "62520511b021f9b3ccd6a4d3d31c1e72a3b0d63556772259d4c1ba56266a68fb"
+    },
+    {
+      "fixture": "cookbook",
+      "source_sha256": "c48149b7371e14eb681ba1eda8943777afba3846791693201f97b6004cf46807",
+      "seconds": 103.136,
+      "expected_stdout": "map-access: ok\n",
+      "status": "passed",
+      "receipt_sha256": "b20dc456c92bf7bb778fb5540a5cfb54e127b17a9da1c9db21191d7b75bffb43"
+    }
+  ],
+  "scope": "Ordinary interpreter invocations against a rebuilt consumer CLI with explicitly retained Stage23 archives. No fresh automatic bake, distribution build, native AOT, full registry, entry API, representation unification, or stale-reference invalidation acceptance."
+}

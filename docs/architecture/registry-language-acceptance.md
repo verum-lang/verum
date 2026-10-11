@@ -1164,3 +1164,13 @@ parsed-source and decoded-wire Map mutation. These gates do not close
 T1196's entry/AOT requirements, T1245's representation consolidation,
 T0379's broader header audit, or the registry's prepared-copy and durable
 publication acceptance. Ordinary consumer replays are recorded separately.
+
+### Ordinary Map and cookbook replay
+
+The [rebuilt consumer replay](evidence/map-mutable-slots/consumer-replay/README.md)
+now passes the unchanged nested Map read/mutation probe and the exact complete
+Map cookbook example. Both original output oracles are satisfied. The CLI
+uses the five explicitly retained Stage23 stdlib artifacts; source and artifact
+identities remain unchanged. This closes the measured ordinary interpreter
+`get_mut` failure, while entry APIs, representation consolidation, invalidated
+borrow detection, native AOT and registry publication remain separately open.
