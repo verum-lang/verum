@@ -1,0 +1,207 @@
+{
+  "task": "T1752",
+  "tested_source": "dafa26c9311a2eb7dddcee56b1efbb48681c33b3",
+  "scope": "Whole-value Shared Deref/DerefMut carrier authority: exact owned header, valid state and one pointer field before following the separately bounded bridge extent. Direct interpreter controls and existing receiver adjacency only; no ordinary CLI, bake, AOT, source borrow-checking or broad stale-reference acceptance. The Shared codegen adjacency uses a local declaration, not the actual compiled standard-library body.",
+  "historical_source_bindings_verified": 31932,
+  "unique_git_blobs_verified": 5325,
+  "runs": [
+    {
+      "name": "baseline",
+      "note": "Four positive controls pass; three interior-pointer authority controls fail deterministically, before true last-slot probing.",
+      "original_receipt": "/private/tmp/verum-T1752-shared-baseline/result.json",
+      "source_commit": "1c50021c5189b4cc67d1d0827730c542aeba1629",
+      "exit_code": 101,
+      "wall_seconds": 32.229,
+      "test_results": [
+        "test result: FAILED. 4 passed; 3 failed; 0 ignored; 0 measured; 2091 filtered out; finished in 0.01s"
+      ],
+      "source_bindings": 5322,
+      "files": {
+        "result.json": {
+          "path": "baseline/result.json.gz",
+          "original_bytes": 641984,
+          "original_sha256": "0bb4cbb8908323f8605cc69c2837afccfc02b17fef2a2ad5d3cdb7c741341161",
+          "stored_bytes": 257296,
+          "stored_sha256": "c32fbdf38e7fc1a09aa6ae05a0214dfafb348503243067dafd60f80751862bbb"
+        },
+        "gate.log": {
+          "path": "baseline/gate.log.gz",
+          "original_bytes": 225380,
+          "original_sha256": "27b5a18975dd9fa4c13b078094cf651809c9725fb66fc13ffaeca6b3d8296e95",
+          "stored_bytes": 19727,
+          "stored_sha256": "5c93d6cb5fc48ba624fb6bd097e53957dcca669625ffb8a7c5bd5f04db1963a5"
+        }
+      },
+      "runner": {
+        "path": "verum-T1752-run-gate.py",
+        "sha256": "1a837936f7cb4fc81366b61eada98b89b13a6984c190792fb016bdc92ae82a37"
+      }
+    },
+    {
+      "name": "ownership-fixed",
+      "note": "Seven controls pass with exact heap-base guard; payload extent and validity not yet checked.",
+      "original_receipt": "/private/tmp/verum-T1752-shared-fixed/result.json",
+      "source_commit": "43a5272a8a5732729cce482213d290e56bf147be",
+      "exit_code": 0,
+      "wall_seconds": 32.216,
+      "test_results": [
+        "test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 2091 filtered out; finished in 0.00s"
+      ],
+      "source_bindings": 5322,
+      "files": {
+        "result.json": {
+          "path": "ownership-fixed/result.json.gz",
+          "original_bytes": 641975,
+          "original_sha256": "5fc98c9e5eb627e853714d9039f3e91b6842076f431314c5c220135eb41bc7f1",
+          "stored_bytes": 257283,
+          "stored_sha256": "e31321e78759d9822ece362d104f9fea824db164954b51a0bde97256a421227d"
+        },
+        "gate.log": {
+          "path": "ownership-fixed/gate.log.gz",
+          "original_bytes": 223955,
+          "original_sha256": "774411c3d9e9df937a6255666877a0367131835267265843570d9c14385b5f34",
+          "stored_bytes": 19613,
+          "stored_sha256": "583af601d29a381618a71bc3e1decbf6f81fb1a2f3cf47da14b8862f097950d4"
+        }
+      },
+      "runner": {
+        "path": "verum-T1752-run-gate.py",
+        "sha256": "1a837936f7cb4fc81366b61eada98b89b13a6984c190792fb016bdc92ae82a37"
+      }
+    },
+    {
+      "name": "ownership-adjacent",
+      "note": "Six Shared receiver codegen and seven reference receiver interpreter controls pass on the ownership-only checkpoint.",
+      "original_receipt": "/private/tmp/verum-T1752-shared-adjacent/result.json",
+      "source_commit": "43a5272a8a5732729cce482213d290e56bf147be",
+      "exit_code": 0,
+      "wall_seconds": 29.226,
+      "test_results": [
+        "test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s",
+        "test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s"
+      ],
+      "source_bindings": 5322,
+      "files": {
+        "result.json": {
+          "path": "ownership-adjacent/result.json.gz",
+          "original_bytes": 642795,
+          "original_sha256": "1558df597c115662dd36617c6e73ad0a3602e4f638680c85510e1a32f260f503",
+          "stored_bytes": 257412,
+          "stored_sha256": "0dccdfe993b16eac1f1a7ea1e907b2c0302bea0822e7cb18e62708ec869327cc"
+        },
+        "gate.log": {
+          "path": "ownership-adjacent/gate.log.gz",
+          "original_bytes": 267169,
+          "original_sha256": "29dbdda49a80979c57da34f0bde3259502b58201db424fcb53f390a196a72c2b",
+          "stored_bytes": 21584,
+          "stored_sha256": "5d49e738215d1d953c2519f823875dd6d3d918e57572a8f1e23bd13c436236b7"
+        }
+      },
+      "runner": {
+        "path": "verum-T1752-adjacent-run-gate.py",
+        "sha256": "b48cdf189e0a1a03e998b910d020daeac577e5dc9104871d07307dd2124a536e"
+      }
+    },
+    {
+      "name": "extent-baseline",
+      "note": "Eight controls pass; padded short-declared-payload and invalid-header controls fail safely. One-pointer-slot compatibility passes.",
+      "original_receipt": "/private/tmp/verum-T1752-shared-extent-baseline/result.json",
+      "source_commit": "af4afaab25770bdb86a076fe35716b4f5f27acab",
+      "exit_code": 101,
+      "wall_seconds": 34.372,
+      "test_results": [
+        "test result: FAILED. 8 passed; 2 failed; 0 ignored; 0 measured; 2091 filtered out; finished in 0.01s"
+      ],
+      "source_bindings": 5322,
+      "files": {
+        "result.json": {
+          "path": "extent-baseline/result.json.gz",
+          "original_bytes": 641993,
+          "original_sha256": "1774ce35b45304a331ea3eb3c56cd831df24ced4b3bbaa32854412aac29b2e53",
+          "stored_bytes": 257297,
+          "stored_sha256": "e0e517861aa785428b562a7601b72127f30b0682d4462be174383720ddee73fc"
+        },
+        "gate.log": {
+          "path": "extent-baseline/gate.log.gz",
+          "original_bytes": 225498,
+          "original_sha256": "1a5f427417e88e7adad48368a8e4d9847fdba2fca96e6dfbfc5d29bd98d9c53f",
+          "stored_bytes": 19830,
+          "stored_sha256": "b9df6a1eb22d9c7ba97e8119cce86163c43a9c3a32c8e827ca6d037c9d029cd0"
+        }
+      },
+      "runner": {
+        "path": "verum-T1752-run-gate.py",
+        "sha256": "1a837936f7cb4fc81366b61eada98b89b13a6984c190792fb016bdc92ae82a37"
+      }
+    },
+    {
+      "name": "final",
+      "note": "Ten controls pass with exact ownership, header validity and one complete pointer slot required before Shared peeling.",
+      "original_receipt": "/private/tmp/verum-T1752-shared-extent-fixed/result.json",
+      "source_commit": "dafa26c9311a2eb7dddcee56b1efbb48681c33b3",
+      "exit_code": 0,
+      "wall_seconds": 32.34,
+      "test_results": [
+        "test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 2091 filtered out; finished in 0.01s"
+      ],
+      "source_bindings": 5322,
+      "files": {
+        "result.json": {
+          "path": "final/result.json.gz",
+          "original_bytes": 641984,
+          "original_sha256": "714cf67afccbb21d15f524c5348003057b01dc918a6e1ddc3c9015a1b9070fd9",
+          "stored_bytes": 257292,
+          "stored_sha256": "ef95dbcd263ba1f5dec0dbb5bbc31b79b6bb849680c6f37c77a18d5dba984f20"
+        },
+        "gate.log": {
+          "path": "final/gate.log.gz",
+          "original_bytes": 224390,
+          "original_sha256": "db470105f339fd5e2bde182420ec22d1f03eb3f5b1b47819c6bc08b7e18cc00b",
+          "stored_bytes": 19217,
+          "stored_sha256": "5e5dc4d84617509502d22776b86de46120474b9623a9bdd5e8ea6e39bc9db1d0"
+        }
+      },
+      "runner": {
+        "path": "verum-T1752-run-gate.py",
+        "sha256": "1a837936f7cb4fc81366b61eada98b89b13a6984c190792fb016bdc92ae82a37"
+      }
+    },
+    {
+      "name": "final-adjacent",
+      "note": "Thirteen unchanged receiver controls pass on the final frozen production source.",
+      "original_receipt": "/private/tmp/verum-T1752-shared-final-adjacent/result.json",
+      "source_commit": "dafa26c9311a2eb7dddcee56b1efbb48681c33b3",
+      "exit_code": 0,
+      "wall_seconds": 30.307,
+      "test_results": [
+        "test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s",
+        "test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s"
+      ],
+      "source_bindings": 5322,
+      "files": {
+        "result.json": {
+          "path": "final-adjacent/result.json.gz",
+          "original_bytes": 642807,
+          "original_sha256": "ff012928191deb2b7ae7d936837f9c04593c6a3c11915c4e94f070ce5d496da2",
+          "stored_bytes": 257421,
+          "stored_sha256": "144de6f7ca8934aa660aaee80290d78e8d9c6dd48e11a0f57c89937bd945f0d1"
+        },
+        "gate.log": {
+          "path": "final-adjacent/gate.log.gz",
+          "original_bytes": 267169,
+          "original_sha256": "018627c410272a0884295615e0a3f9625672bcebbe89e41888e7819601e2484b",
+          "stored_bytes": 21955,
+          "stored_sha256": "fc7328e7fd27cd6472e0c2b5338df28a4e09f0cf0f2510033988d039a984eaa7"
+        }
+      },
+      "runner": {
+        "path": "verum-T1752-adjacent-run-gate.py",
+        "sha256": "b48cdf189e0a1a03e998b910d020daeac577e5dc9104871d07307dd2124a536e"
+      }
+    }
+  ],
+  "release": {
+    "path": "release.json",
+    "sha256": "5f5400f91b710691fb2a3269ebad016717b2341dcc361fd5b386ab986b3b31eb"
+  }
+}
