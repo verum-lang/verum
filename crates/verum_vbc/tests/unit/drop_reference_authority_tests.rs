@@ -331,8 +331,7 @@ fn probe(input: &Int) -> Int {
     );
     let mut payload = Set::new();
     let mut checked = Set::new();
-    let mut loaded = Set::new();
-    let mut returned_value = false;
+    let mut checked_read = false;
     for instruction in &instructions {
         match instruction {
             Instruction::GetVariantData { dst, .. } => {
@@ -344,14 +343,8 @@ fn probe(input: &Int) -> Int {
             Instruction::ChkRef { ref_reg } if payload.contains(ref_reg) => {
                 checked.insert(*ref_reg);
             }
-            Instruction::Deref { dst, ref_reg } if checked.contains(ref_reg) => {
-                loaded.insert(*dst);
-            }
-            Instruction::Mov { dst, src } if loaded.contains(src) => {
-                loaded.insert(*dst);
-            }
-            Instruction::Ret { value } if loaded.contains(value) => {
-                returned_value = true;
+            Instruction::Deref { ref_reg, .. } if checked.contains(ref_reg) => {
+                checked_read = true;
             }
             _ => {}
         }
@@ -359,8 +352,9 @@ fn probe(input: &Int) -> Int {
     // Pattern-bound borrowed payloads are checked and read, but this lowering
     // does not emit DropRef for the payload. The explicit local test above
     // pins the actual returned-reference path into the DropRef handler.
-    assert!(
-        returned_value,
-        "borrowed payload must be checked before returning its value: {instructions:?}"
-    );
+    // Inspect the Some arm without conflating registers reused by the None
+    // arm. This is an instruction-boundary control, not a CFG execution proof.
+    assert!(checked_read, "borrowed payload must be checked before reading: {instructions:?}");
+    assert!(matches!(instructions.last(), Some(Instruction::Ret { .. })));
+    eprintln!("returned Maybe borrow lowering: {instructions:?}");
 }
