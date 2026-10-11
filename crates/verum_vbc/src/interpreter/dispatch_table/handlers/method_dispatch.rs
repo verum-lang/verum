@@ -30,7 +30,10 @@ use super::string_helpers::{
 };
 
 // Re-import CBGR helper functions
-use super::cbgr_helpers::{decode_cbgr_ref, is_cbgr_ref, is_cbgr_ref_mutable, resolve_arg_value};
+use super::cbgr_helpers::{
+    decode_cbgr_ref, is_cbgr_ref, is_cbgr_ref_mutable, resolve_arg_value,
+    resolve_receiver_place, write_through_ref,
+};
 
 /// FATREF-RECV-CLASSIFY-1: a FatRef viewing exactly ONE NaN-boxed Value
 /// slot (`reserved == 0 && len == 1`) is a REFERENCE to a value, not a
@@ -920,6 +923,20 @@ pub(in super::super) fn handle_call_method(
         );
     }
 
+    // Mutating Text intercepts need the current value AND the origin slot.
+    // Keep this receiver autoderef local to these methods: other dispatch and
+    // ordinary reference-valued stores retain their existing conventions.
+    let text_place = if matches!(
+        bare_method_name.as_str(),
+        "truncate" | "clear" | "pop" | "push_str" | "push" | "push_char" | "push_byte" | "reserve"
+    )
+    {
+        let (value, place) = resolve_receiver_place(state, receiver)?;
+        (value.is_small_string() || is_heap_string(&value)).then_some((value, place))
+    } else {
+        None
+    };
+
     // **Text `&mut self` shrink intercepts** — `truncate`, `clear`,
     // `pop`. The user-side bodies write `self.len = boundary` via
     // SetF on the small/static-Text shape (`{ptr, len, cap}`); when
@@ -938,9 +955,9 @@ pub(in super::super) fn handle_call_method(
     if (bare_method_name == "truncate"
         || bare_method_name == "clear"
         || bare_method_name == "pop")
-        && (dispatch_receiver.is_small_string() || is_heap_string(&dispatch_receiver))
+        && let Some((text_receiver, text_target)) = text_place
     {
-        let mut current_text = extract_string(&dispatch_receiver, state);
+        let mut current_text = extract_string(&text_receiver, state);
         let caller_base = state.reg_base();
         let popped_char: Option<char> = match bare_method_name.as_str() {
             "truncate" => {
@@ -971,10 +988,7 @@ pub(in super::super) fn handle_call_method(
             _ => unreachable!(),
         };
         let new_value = alloc_string_value(state, &current_text)?;
-        if is_cbgr_ref(&receiver) {
-            let (abs_index, _) = decode_cbgr_ref(receiver);
-            state.registers.set_absolute(abs_index, new_value);
-        } else {
+        if !write_through_ref(state, text_target, new_value) {
             state.registers.set(caller_base, receiver_reg, new_value);
         }
         // Return value depends on method:
@@ -1039,7 +1053,7 @@ pub(in super::super) fn handle_call_method(
         || bare_method_name == "push"
         || bare_method_name == "push_char"
         || bare_method_name == "push_byte")
-        && (dispatch_receiver.is_small_string() || is_heap_string(&dispatch_receiver))
+        && let Some((text_receiver, text_target)) = text_place
     {
         // BYTE-domain round trip (SSO-UTF8-SPLIT-1): `push_byte` builds
         // multi-byte UTF-8 sequences one byte at a time (stdlib
@@ -1054,7 +1068,7 @@ pub(in super::super) fn handle_call_method(
         // (mojibake). Accumulate in `Vec<u8>` and let
         // `alloc_text_bytes_value` widen not-yet-valid intermediates
         // to the byte-transparent heap blob.
-        let mut current_bytes = extract_text_bytes(&dispatch_receiver, state);
+        let mut current_bytes = extract_text_bytes(&text_receiver, state);
         let caller_base = state.reg_base();
         if crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::TracePushStr) {
             eprintln!(
@@ -1113,27 +1127,7 @@ pub(in super::super) fn handle_call_method(
             _ => unreachable!(),
         }
         let new_value = alloc_text_bytes_value(state, &current_bytes)?;
-        // Write back to receiver_reg, following CBGR ref to the
-        // caller's frame slot if present.
-        if is_cbgr_ref(&receiver) {
-            let (abs_index, _) = decode_cbgr_ref(receiver);
-            if crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::TracePushStr) {
-                eprintln!(
-                    "[push_str trace] WRITEBACK via CBGR ref, abs_index={}, new_text.len={}",
-                    abs_index,
-                    current_bytes.len(),
-                );
-            }
-            state.registers.set_absolute(abs_index, new_value);
-        } else {
-            if crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::TracePushStr) {
-                eprintln!(
-                    "[push_str trace] WRITEBACK via caller_base+receiver_reg, base={} reg={} new_text.len={}",
-                    caller_base,
-                    receiver_reg.0,
-                    current_bytes.len(),
-                );
-            }
+        if !write_through_ref(state, text_target, new_value) {
             state.registers.set(caller_base, receiver_reg, new_value);
         }
         state.set_reg(dst, Value::unit());
@@ -1157,7 +1151,7 @@ pub(in super::super) fn handle_call_method(
     // Pinned by `core-tests/text/text/regression_test.vr::
     // regression_reserve_grows_reported_capacity`.
     if bare_method_name == "reserve"
-        && (dispatch_receiver.is_small_string() || is_heap_string(&dispatch_receiver))
+        && let Some((text_receiver, text_target)) = text_place
     {
         let caller_base = state.reg_base();
         let add_raw = state.registers.get(caller_base, Reg(args.start.0));
@@ -1170,12 +1164,12 @@ pub(in super::super) fn handle_call_method(
         // Byte-exact extraction (a reserve may land mid-code-point
         // during byte-wise construction; extract_string would lossy-
         // replace the partial sequence).
-        let bytes = super::string_helpers::extract_text_bytes(&dispatch_receiver, state);
+        let bytes = super::string_helpers::extract_text_bytes(&text_receiver, state);
         let current_len = bytes.len() as i64;
         // Compute current capacity via the same dispatch-by-
         // representation logic as the "capacity" arm below — record
         // cap when grow-capable, else byte_len.
-        let current_cap = text_capacity_of(&dispatch_receiver, current_len);
+        let current_cap = text_capacity_of(&text_receiver, current_len);
         let needed_cap = current_len + additional;
         let new_cap = if needed_cap > current_cap { needed_cap } else { current_cap };
         let obj = state
@@ -1183,11 +1177,8 @@ pub(in super::super) fn handle_call_method(
             .alloc_text_with_capacity(&bytes, new_cap.max(0) as usize)?;
         state.record_allocation();
         let new_value = Value::from_ptr(obj.as_ptr() as *mut u8);
-        // Writeback via CBGR ref to the caller-frame slot.
-        if is_cbgr_ref(&receiver) {
-            let (abs_index, _) = decode_cbgr_ref(receiver);
-            state.registers.set_absolute(abs_index, new_value);
-        } else {
+        // Replace the original receiver slot, including borrowed record fields.
+        if !write_through_ref(state, text_target, new_value) {
             state.registers.set(caller_base, receiver_reg, new_value);
         }
         state.set_reg(dst, Value::unit());

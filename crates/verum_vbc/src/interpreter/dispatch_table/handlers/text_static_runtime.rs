@@ -31,6 +31,7 @@
 use super::super::super::error::InterpreterResult;
 use super::super::super::heap;
 use super::super::super::state::InterpreterState;
+use super::cbgr_helpers::{resolve_arg_value, resolve_receiver_place, write_through_ref};
 use super::heap_helpers::{extract_byte_slice, wrap_in_variant};
 use super::string_helpers::alloc_string_value;
 use crate::instruction::Reg;
@@ -139,7 +140,6 @@ pub(in super::super) fn try_intercept_text_static_runtime(
         // After the intercept, `self` holds a builder-layout heap object
         // with `len = previous_len`, `cap = max(old_cap, len + additional)`.
         "reserve" if arg_count == 2 => {
-            use super::cbgr_helpers::{decode_cbgr_ref, is_cbgr_ref};
             use super::string_helpers::extract_text_bytes;
             let self_raw = state
                 .registers
@@ -151,24 +151,7 @@ pub(in super::super) fn try_intercept_text_static_runtime(
             if additional <= 0 {
                 return Ok(Some(Value::unit()));
             }
-            // Decode receiver — may be a CBGR ref pointing into the
-            // caller's register window, OR a ThinRef pointing into
-            // some other register slot.  We need the absolute register
-            // to write the new value back into.
-            let (writeback_abs, current_val) = if is_cbgr_ref(&self_raw) {
-                let (abs, _) = decode_cbgr_ref(self_raw);
-                (Some(abs), state.registers.get_absolute(abs))
-            } else if self_raw.is_thin_ref() {
-                let tr = self_raw.as_thin_ref();
-                let v = if !tr.ptr.is_null() {
-                    unsafe { *(tr.ptr as *const Value) }
-                } else {
-                    self_raw
-                };
-                (None, v)
-            } else {
-                (None, self_raw)
-            };
+            let (current_val, target) = resolve_receiver_place(state, self_raw)?;
             // Byte-exact extraction (a reserve may land mid-code-point
             // during byte-wise construction).
             let bytes = extract_text_bytes(&current_val, state);
@@ -182,11 +165,8 @@ pub(in super::super) fn try_intercept_text_static_runtime(
             // heap-string OBJECT header, which record readers misread
             // as a bytes pointer).
             let new_val = alloc_text_capacity_record(state, &bytes, new_cap)?;
-            // Write back through the CBGR ref so the caller sees the
-            // new representation.  Without writeback the receiver
-            // register still points at the old small-string value.
-            if let Some(abs) = writeback_abs {
-                state.registers.set_absolute(abs, new_val);
+            if !write_through_ref(state, target, new_val) {
+                state.registers.set(caller_base, Reg(args_start_reg), new_val);
             }
             Ok(Some(Value::unit()))
         }
@@ -452,7 +432,6 @@ pub(in super::super) fn try_intercept_text_static_runtime(
         // those fire from CallM dispatch while push_byte arrives via
         // Call dispatch with self as arg[0].
         "push_byte" | "push_str" | "push" | "push_char" if arg_count == 2 => {
-            use super::cbgr_helpers::{decode_cbgr_ref, is_cbgr_ref};
             use super::string_helpers::{alloc_text_bytes_value, extract_string, extract_text_bytes};
             let self_raw = state
                 .registers
@@ -460,24 +439,8 @@ pub(in super::super) fn try_intercept_text_static_runtime(
             let arg_raw = state
                 .registers
                 .get(caller_base, Reg(args_start_reg + 1));
-            // Auto-deref CBGR ref / ThinRef for both receiver and arg.
-            let deref = |v: Value, st: &InterpreterState| -> Value {
-                if is_cbgr_ref(&v) {
-                    let (abs_index, _) = decode_cbgr_ref(v);
-                    st.registers.get_absolute(abs_index)
-                } else if v.is_thin_ref() {
-                    let tr = v.as_thin_ref();
-                    if !tr.ptr.is_null() {
-                        unsafe { *(tr.ptr as *const Value) }
-                    } else {
-                        v
-                    }
-                } else {
-                    v
-                }
-            };
-            let self_val = deref(self_raw, state);
-            let arg_val = deref(arg_raw, state);
+            let (self_val, target) = resolve_receiver_place(state, self_raw)?;
+            let arg_val = resolve_arg_value(state, arg_raw);
             // BYTE-domain round trip (SSO-UTF8-SPLIT-1): `push_byte`
             // builds multi-byte UTF-8 sequences one byte at a time
             // (stdlib `to_lowercase` / `to_uppercase` / `slice` /
@@ -528,17 +491,8 @@ pub(in super::super) fn try_intercept_text_static_runtime(
                 _ => unreachable!(),
             }
             let new_value = alloc_text_bytes_value(state, &current_bytes)?;
-            // Writeback via CBGR ref to the caller-frame slot — same
-            // discipline as `handle_call_method`'s push_str intercept.
-            // Without this, the mutation is local to the intercept and
-            // the caller's variable retains the pre-call value.
-            if is_cbgr_ref(&self_raw) {
-                let (abs_index, _) = decode_cbgr_ref(self_raw);
-                state.registers.set_absolute(abs_index, new_value);
-            } else {
-                state
-                    .registers
-                    .set(caller_base, Reg(args_start_reg), new_value);
+            if !write_through_ref(state, target, new_value) {
+                state.registers.set(caller_base, Reg(args_start_reg), new_value);
             }
             Ok(Some(Value::unit()))
         }

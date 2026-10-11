@@ -219,31 +219,69 @@ pub(super) fn resolve_arg_value(
         let (abs_index, _gen) = decode_cbgr_ref(val);
         return state.registers.get_absolute(abs_index);
     }
-    if val.is_ptr() && !val.is_nil() {
-        let ptr_addr = val.as_ptr::<u8>() as usize;
-        // BRIDGE MEMORY IS DATA, NOT A CELL (T0705).
-        // The `cbgr_mutable_ptrs` peel exists for pointers that hold a
-        // Value — `&arr[i]`, a deref source, a raw address cell. A live
-        // bridge allocation is the opposite: `ptr_write` stores the
-        // record's BYTES there, so loading 8 bytes from it yields the
-        // first FIELD and the reader then walks that number as if it
-        // were the object. Measured: `Shared.strong_count`'s address
-        // computation received `Int(1)` — the value of the very field it
-        // was addressing. The extent index decides, and it decides
-        // FIRST: provenance outranks the cell registry.
-        if super::cbgr::bridge_extent_room(state, ptr_addr).is_none()
-            && state.cbgr_mutable_ptrs.contains(&ptr_addr)
-        {
-            return unsafe { *(ptr_addr as *const Value) };
-        }
-    }
-    if val.is_thin_ref() {
-        let thin_ref = val.as_thin_ref();
-        if !thin_ref.ptr.is_null() {
-            return unsafe { *(thin_ref.ptr as *const Value) };
-        }
+    if let Some(slot) = reference_value_slot(state, val) {
+        // SAFETY: the reference carrier establishes an initialized Value slot.
+        return unsafe { *slot };
     }
     val
+}
+
+/// Pointer references to one Value slot. Bridge allocations carry flat data,
+/// so their extent authority takes precedence over the interior-slot registry.
+#[inline]
+fn reference_value_slot(
+    state: &super::super::super::state::InterpreterState,
+    value: Value,
+) -> Option<*mut Value> {
+    if value.is_regular_ptr() && !value.is_nil() {
+        let address = value.as_ptr::<u8>() as usize;
+        if address % std::mem::align_of::<Value>() == 0
+            && super::cbgr::bridge_extent_room(state, address).is_none()
+            && state.cbgr_mutable_ptrs.contains(&address)
+        {
+            return Some(address as *mut Value);
+        }
+    }
+    if value.is_thin_ref() {
+        let reference = value.as_thin_ref();
+        if !reference.ptr.is_null()
+            && reference.ptr as usize % std::mem::align_of::<Value>() == 0
+        {
+            return Some(reference.ptr.cast::<Value>());
+        }
+    }
+    None
+}
+
+/// Select a method receiver's current value and its writeback reference.
+/// Only receiver callers opt into layered register-reference traversal; a
+/// normal store through `&mut &T` must still replace the reference-valued slot.
+/// A pointer/ThinRef slot is loaded once, using the same authority as argument
+/// reads and single-reference stores. Plain values keep local-register fallback.
+pub(super) fn resolve_receiver_place(
+    state: &super::super::super::state::InterpreterState,
+    receiver: Value,
+) -> InterpreterResult<(Value, Value)> {
+    let mut place = receiver;
+    for _ in 0..8 {
+        if !is_cbgr_ref(&place) {
+            return Ok((resolve_arg_value(state, place), place));
+        }
+        let (absolute, _) = decode_cbgr_ref(place);
+        if absolute as usize >= state.registers.top() {
+            return Err(InterpreterError::InvalidOperand {
+                message: "method receiver register reference is out of bounds".into(),
+            });
+        }
+        let next = state.registers.get_absolute(absolute);
+        if !is_cbgr_ref(&next) && reference_value_slot(state, next).is_none() {
+            return Ok((next, place));
+        }
+        place = next;
+    }
+    Err(InterpreterError::InvalidOperand {
+        message: "method receiver reference chain is cyclic or exceeds its depth limit".into(),
+    })
 }
 
 /// Resolve a RECEIVER to its object value, peeling LAYERED indirection.
@@ -506,9 +544,6 @@ pub(super) unsafe fn variant_record_inner(ptr: *mut u8) -> InterpreterResult<*mu
 /// OUT-param (`socklen_t*`) write was silently dropped one frame up. Following
 /// the ref to its origin makes the C write land on the caller's storage.
 #[inline]
-// Only the `ffi`-gated FFI writeback loops call this; it is genuinely dead
-// (and correctly warns) in a build without the `ffi` feature.
-#[cfg_attr(not(feature = "ffi"), allow(dead_code))]
 pub(in super::super) fn write_through_ref(
     state: &mut super::super::super::state::InterpreterState,
     slot_val: Value,
@@ -519,19 +554,11 @@ pub(in super::super) fn write_through_ref(
         state.registers.set_absolute(abs_index, value);
         return true;
     }
-    if slot_val.is_ptr() && !slot_val.is_nil() {
-        let ptr_addr = slot_val.as_ptr::<u8>() as usize;
-        if state.cbgr_mutable_ptrs.contains(&ptr_addr) {
-            unsafe { *(ptr_addr as *mut Value) = value };
-            return true;
-        }
-    }
-    if slot_val.is_thin_ref() {
-        let thin_ref = slot_val.as_thin_ref();
-        if !thin_ref.ptr.is_null() {
-            unsafe { *(thin_ref.ptr as *mut Value) = value };
-            return true;
-        }
+    if let Some(slot) = reference_value_slot(state, slot_val) {
+        // SAFETY: the reference carrier establishes a writable Value slot;
+        // bridge data was excluded before considering interior-slot tracking.
+        unsafe { *slot = value };
+        return true;
     }
     false
 }
@@ -745,3 +772,7 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "../../../../tests/unit/receiver_writeback.rs"]
+mod receiver_writeback;

@@ -187,16 +187,20 @@ fn reserve_from_tracked_field_preserves_partial_utf8_bytes() {
                 count: 2,
             },
         },
-        // reserve replaces the referenced register, not Holder.word. This
-        // oracle covers raw-byte extraction, not field mutation semantics.
-        Instruction::Ret { value: Reg(1) },
+        // Read the same retained field reference after reserve. Both byte
+        // preservation and writeback must hold through actual dispatch.
+        Instruction::Deref {
+            dst: Reg(5),
+            ref_reg: Reg(1),
+        },
+        Instruction::Ret { value: Reg(5) },
     ] {
         encode_instruction(&instruction, &mut module.bytecode);
     }
     let mut probe = FunctionDescriptor::new(module.intern_string("probe"));
     probe.id = FunctionId(0);
     probe.bytecode_length = module.bytecode.len() as u32;
-    probe.register_count = 5;
+    probe.register_count = 6;
     module.functions.push(probe);
     let mut reserve = FunctionDescriptor::new(module.intern_string("Text.reserve"));
     reserve.id = FunctionId(1);
@@ -225,8 +229,7 @@ fn reserve_from_tracked_field_preserves_partial_utf8_bytes() {
             .alloc(HOLDER, 4 * std::mem::size_of::<Value>())
             .expect("live Holder");
         let slots = holder.data_ptr().cast::<Value>();
-        // SAFETY: all four slots belong to the live Holder allocation. The
-        // trailing slots also keep the existing capacity probe in bounds.
+        // SAFETY: all four slots belong to the live Holder allocation.
         unsafe {
             for index in 0..4 {
                 *slots.add(index) = Value::from_i64(0);
@@ -246,10 +249,15 @@ fn reserve_from_tracked_field_preserves_partial_utf8_bytes() {
         // SAFETY: the Holder allocation remains live during this execution.
         assert_eq!(
             unsafe { *slots.add(1) }.bits(),
-            original.bits(),
-            "{route}: source slot"
+            result.bits(),
+            "{route}: replacement reached source slot"
         );
 
+        assert_ne!(
+            result.bits(),
+            original.bits(),
+            "{route}: reserve replacement"
+        );
         assert!(result.is_ptr(), "{route}: capacity record");
         let base = result.as_ptr::<u8>();
         assert!(
