@@ -1,0 +1,60 @@
+{
+  "task": "T1749",
+  "manifest_sha256": "7309d3b7db894ff31e6ea251dea63c403c8431ff773959fab7854b13044977e1",
+  "tested_source": "da81b1ff2310728fef6f4a32f88fec79730e4ccc",
+  "source_bindings_verified": 26605,
+  "unique_git_blobs_verified": 5327,
+  "losslessly_retained_payloads_verified": 10,
+  "retained_executables_verified": 8,
+  "runs": [
+    {
+      "name": "carrier-baseline",
+      "source_commit": "2ed8f6df386cae0d6c7ae2417b0e1ee81748a355",
+      "exit_code": 101,
+      "test_results": [
+        "test result: FAILED. 8 passed; 5 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.34s"
+      ],
+      "wall_seconds": 43.32
+    },
+    {
+      "name": "authority-baseline",
+      "source_commit": "b73740dcc93e7215139e2ea8f52f80659ba04317",
+      "exit_code": 101,
+      "test_results": [
+        "test result: FAILED. 8 passed; 6 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.38s"
+      ],
+      "wall_seconds": 27.18
+    },
+    {
+      "name": "compile-failure",
+      "source_commit": "2065ff0b856136f2cf72def95ab300b6531fd595",
+      "exit_code": 101,
+      "test_results": [],
+      "wall_seconds": 16.119
+    },
+    {
+      "name": "fixed",
+      "source_commit": "da81b1ff2310728fef6f4a32f88fec79730e4ccc",
+      "exit_code": 0,
+      "test_results": [
+        "test result: ok. 19 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.80s"
+      ],
+      "wall_seconds": 31.323
+    },
+    {
+      "name": "adjacent",
+      "source_commit": "da81b1ff2310728fef6f4a32f88fec79730e4ccc",
+      "exit_code": 0,
+      "test_results": [
+        "test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s",
+        "test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s",
+        "test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s",
+        "test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s",
+        "test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s"
+      ],
+      "wall_seconds": 34.489
+    }
+  ],
+  "code_review": "Canonical record ownership, complete implementation merging, strict conflict visibility, original bootstrap glue provenance, and every descriptor vector reset/replacement/reindex reviewed by Root and Specs.",
+  "scope": "Independent focused/adjacent evidence verification; actual consumer replay, fresh standard-library bake and AOT remain separate."
+}

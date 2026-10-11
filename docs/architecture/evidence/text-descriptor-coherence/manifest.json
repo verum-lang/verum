@@ -1,0 +1,175 @@
+{
+  "task": "T1749",
+  "tested_source": "da81b1ff2310728fef6f4a32f88fec79730e4ccc",
+  "scope": "Canonical runtime Text record and eligible implementation-only scalar carrier reconciliation. Focused source/wire/bootstrap assembly and adjacent controls; no ordinary CLI, fresh bake or AOT acceptance.",
+  "historical_source_bindings_verified": 26605,
+  "unique_git_blobs_verified": 5327,
+  "runs": [
+    {
+      "name": "carrier-baseline",
+      "note": "Five causal descriptor failures; original eight identity controls pass.",
+      "original_receipt": "/private/tmp/verum-T1749-carrier-baseline/result.json",
+      "source_commit": "2ed8f6df386cae0d6c7ae2417b0e1ee81748a355",
+      "exit_code": 101,
+      "wall_seconds": 43.32,
+      "test_results": [
+        "test result: FAILED. 8 passed; 5 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.34s"
+      ],
+      "source_bindings": 5321,
+      "files": {
+        "result.json": {
+          "path": "carrier-baseline/result.json.gz",
+          "original_bytes": 642358,
+          "original_sha256": "7bc12e4e1fbfe36aa794b02f697129600eb570d322c9a2b751f09a5b324b0a9c",
+          "stored_bytes": 257276,
+          "stored_sha256": "4f4f33d46487d8fcd4f4558f1e4b0d99d534abe39edc899faa6be0fbd23618c3"
+        },
+        "gate.log": {
+          "path": "carrier-baseline/gate.log.gz",
+          "original_bytes": 263754,
+          "original_sha256": "fcbd80a39c6e59af2c99561ba834a1b73de9c639f01345f6af9b69868e7d1c91",
+          "stored_bytes": 22926,
+          "stored_sha256": "9e212e8a3564687d85123dcbee7680a2b690017a3d4b013c4e9e2c8ad8fb5aed"
+        }
+      },
+      "runner": {
+        "path": "verum-T1749-run-gate.py",
+        "sha256": "87fdb48f6d9f0ec5d76c29229104383fa26ff263e89d57c049ac72446b2fb01e"
+      }
+    },
+    {
+      "name": "authority-baseline",
+      "note": "Five causal failures plus one invalid glue-fixture prerequisite: producer function registry was omitted. The latter is not a production regression.",
+      "original_receipt": "/private/tmp/verum-T1749-authority-baseline/result.json",
+      "source_commit": "b73740dcc93e7215139e2ea8f52f80659ba04317",
+      "exit_code": 101,
+      "wall_seconds": 27.18,
+      "test_results": [
+        "test result: FAILED. 8 passed; 6 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.38s"
+      ],
+      "source_bindings": 5321,
+      "files": {
+        "result.json": {
+          "path": "authority-baseline/result.json.gz",
+          "original_bytes": 641876,
+          "original_sha256": "44bd83315929e6f05bc3acef0c64f531c8fd4425c38b925730444c07ede0f084",
+          "stored_bytes": 257240,
+          "stored_sha256": "8eea22167a6703c575232c1a515e965423409ff28291965902031319551a116c"
+        },
+        "gate.log": {
+          "path": "authority-baseline/gate.log.gz",
+          "original_bytes": 242324,
+          "original_sha256": "b3d0cf4eb19bbec184f2d82758f013e46ca7dab4778f151f6902db1264ecda68",
+          "stored_bytes": 22031,
+          "stored_sha256": "6783d2eca1651811ad0adaf61b71cf1b989cec21b6c5cbfa95e464c05d95aab2"
+        }
+      },
+      "runner": {
+        "path": "verum-T1749-authority-run-gate.py",
+        "sha256": "381336c694ce89aa73ffebbf1b4afae040556997d6801d062afa5a0cb6c0751e"
+      }
+    },
+    {
+      "name": "compile-failure",
+      "note": "Two Rust E0308 remap-boundary errors; no tests executed.",
+      "original_receipt": "/private/tmp/verum-T1749-carrier-fixed/result.json",
+      "source_commit": "2065ff0b856136f2cf72def95ab300b6531fd595",
+      "exit_code": 101,
+      "wall_seconds": 16.119,
+      "test_results": [],
+      "source_bindings": 5321,
+      "files": {
+        "result.json": {
+          "path": "compile-failure/result.json.gz",
+          "original_bytes": 641257,
+          "original_sha256": "f5397ab04d853a84c6a150f3421aab12e73e132d929e7496f32104dac7044d92",
+          "stored_bytes": 257009,
+          "stored_sha256": "7511d8cf3d57a7c5bc4023b4fb14b5ad4aa76ed98368f0fd6171d7565554d561"
+        },
+        "gate.log": {
+          "path": "compile-failure/gate.log.gz",
+          "original_bytes": 226037,
+          "original_sha256": "6f807d52d14abaa801cef4cda6b5990d972267b3739be42cbb57972bb471bd72",
+          "stored_bytes": 19717,
+          "stored_sha256": "b38608f1c59e02c41235a060d2e5e1b0ed7a615d2d23e43a3d61795228dd0c5c"
+        }
+      },
+      "runner": {
+        "path": "verum-T1749-fixed-run-gate.py",
+        "sha256": "a4793709ff5387dc8d2fbdc8ddc1d17e1671751330d8bd2aadd25cd172e97a9d"
+      }
+    },
+    {
+      "name": "fixed",
+      "note": "Nineteen focused controls pass after the one-line boundary correction.",
+      "original_receipt": "/private/tmp/verum-T1749-carrier-fixed-boundary/result.json",
+      "source_commit": "da81b1ff2310728fef6f4a32f88fec79730e4ccc",
+      "exit_code": 0,
+      "wall_seconds": 31.323,
+      "test_results": [
+        "test result: ok. 19 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.80s"
+      ],
+      "source_bindings": 5321,
+      "files": {
+        "result.json": {
+          "path": "fixed/result.json.gz",
+          "original_bytes": 641876,
+          "original_sha256": "c71e55f58bcbf395cac33f4f629ae1496da4e3cea54dc5778732ed247521c778",
+          "stored_bytes": 257226,
+          "stored_sha256": "41e10bc2af5dd49cf18bd2269cb90bf570618803c5406651f179bcb6d6dc16c0"
+        },
+        "gate.log": {
+          "path": "fixed/gate.log.gz",
+          "original_bytes": 240536,
+          "original_sha256": "334ed0fa3a9d1dbe03a0f4a051a322522168f90c38759c30e84df589026dfbf2",
+          "stored_bytes": 21610,
+          "stored_sha256": "521d8b169af81224d73a6939cdebca197889a063f99c0b5d586e794b95e69e67"
+        }
+      },
+      "runner": {
+        "path": "verum-T1749-fixed-run-gate.py",
+        "sha256": "a4793709ff5387dc8d2fbdc8ddc1d17e1671751330d8bd2aadd25cd172e97a9d"
+      }
+    },
+    {
+      "name": "adjacent",
+      "note": "Thirty-four existing scalar/archive/bootstrap controls pass on the same frozen source.",
+      "original_receipt": "/private/tmp/verum-T1749-scalar-adjacent/result.json",
+      "source_commit": "da81b1ff2310728fef6f4a32f88fec79730e4ccc",
+      "exit_code": 0,
+      "wall_seconds": 34.489,
+      "test_results": [
+        "test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s",
+        "test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s",
+        "test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s",
+        "test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s",
+        "test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s"
+      ],
+      "source_bindings": 5321,
+      "files": {
+        "result.json": {
+          "path": "adjacent/result.json.gz",
+          "original_bytes": 644732,
+          "original_sha256": "35e4e4bf133cb0c7219c3855723d1acd9dbf6601976f1db21d83d82c888f848f",
+          "stored_bytes": 257672,
+          "stored_sha256": "145806b2fbcd3b2a646c54fe71850186e6f41069b2a523c60f1b1c5a1e5f7f8f"
+        },
+        "gate.log": {
+          "path": "adjacent/gate.log.gz",
+          "original_bytes": 350371,
+          "original_sha256": "05233f6b85559c09318a94dfc3e0d302efb292286c050030b59a2a27b60387ad",
+          "stored_bytes": 23679,
+          "stored_sha256": "d7b9840edd412bde768eb05108004ee2ea05e7d60d944499309fe5210725b778"
+        }
+      },
+      "runner": {
+        "path": "verum-T1749-adjacent-run-gate.py",
+        "sha256": "ffb4ebadc31df07b542e03e1813ac5c4f1cb4530ae567f42b6c7a07039affe2b"
+      }
+    }
+  ],
+  "release": {
+    "path": "release.json",
+    "sha256": "d1e6291bf7e4d524496210e08e54c58c9ff63113404fed848cd6ca2bb57d5c11"
+  }
+}

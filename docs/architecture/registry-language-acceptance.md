@@ -1102,3 +1102,25 @@ separately recorded e86/v54 producer. These no-auto tests do not establish a new
 whole-library automatic bake, ordinary CLI, registry runtime or native/AOT
 acceptance. Cargo environment-only rerun behavior remains the separate T1735
 boundary; directly executing the disabled build script does not prove it.
+
+## Canonical Text descriptor coherence — T1749
+
+Canonical Text imports now reconcile the declaration-owned record with eligible
+implementation-only scalar carriers in either order. The record retains its
+fields, visibility policy, layout and resolved glue, while complete protocol
+bindings are preserved. Source implementation attachment and bootstrap imports
+use the same authority. Independent raw glue or schema remains a strict
+conflict, including when bootstrap cannot resolve a source-local glue ID.
+
+The [descriptor-coherence evidence](evidence/text-descriptor-coherence/README.md)
+retains five causal baseline failures, a separately classified fixture error,
+and the initial Rust compilation failure. The corrected source passes all
+19 focused controls and 34 existing scalar/bootstrap controls, with no ignored
+tests. The final source, retained executables and five Stage23 artifacts are
+bound by exact hashes.
+
+These checks establish source/wire/bootstrap descriptor assembly and strict
+finalization. They do not establish acceptance of the actual Stage23 carrier
+or unchanged ordinary SemVer options/Map execution. No fresh standard-library
+bake, general conflicting-record schema validation, or AOT acceptance is
+claimed by this slice.

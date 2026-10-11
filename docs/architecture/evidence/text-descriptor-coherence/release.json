@@ -1,0 +1,9 @@
+{
+  "task": "T1749",
+  "source_commit": "da81b1ff2310728fef6f4a32f88fec79730e4ccc",
+  "target": "/Users/taaliman/.tmp/verum-codex-01a10248-types/checker-target",
+  "active_target_processes": [],
+  "gate_receipt": "/private/tmp/verum-T1749-scalar-adjacent/result.json",
+  "gate_receipt_sha256": "35e4e4bf133cb0c7219c3855723d1acd9dbf6601976f1db21d83d82c888f848f",
+  "scope": "No further Cargo/test work will run here without a new explicit lease."
+}

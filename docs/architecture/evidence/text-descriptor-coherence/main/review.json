@@ -1,0 +1,65 @@
+{
+  "tasks": [
+    "T1744",
+    "T1749"
+  ],
+  "main_base": "271d150626af100a374a06c02e616128547cb737",
+  "tested_source": "aa797464696ed177cd425e4a7ab710f13f34990a",
+  "source_bindings_verified": 10600,
+  "unique_source_files": 5300,
+  "runs": {
+    "compiler": {
+      "count": 9,
+      "seconds": 205.462,
+      "result_sha256": "b5bf22cc29b2aa5736c572a651b689969f68a20c07b5f715815851958c5f6b3a",
+      "source_bindings": 5300,
+      "files": {
+        "result.json.gz": {
+          "bytes": 641565,
+          "sha256": "b5bf22cc29b2aa5736c572a651b689969f68a20c07b5f715815851958c5f6b3a",
+          "gzip_bytes": 256420,
+          "gzip_sha256": "0d995baea342a1bcd8c54d89251ac0da75ad0b0cd8987dda2a2e4f7ffef55477"
+        },
+        "gate.log.gz": {
+          "bytes": 1199519,
+          "sha256": "ddbf660681283694980cfd58a8206e6cfc20813527ba484b4776e282d3004798",
+          "gzip_bytes": 105795,
+          "gzip_sha256": "7f14ca9e2eb128bfe8c848a86fc14824f889f2f8057e7f951fa417df257ed166"
+        },
+        "runner.py.gz": {
+          "bytes": 11266,
+          "sha256": "0ddf9a4cbe0f8c6c859306c0d1565b9dbd8307e1ef573e3906345445a70682fb",
+          "gzip_bytes": 4047,
+          "gzip_sha256": "9685b5069ebca17dea3334f0b19dbc9867e2c6855572a2645a91847400c38d43"
+        }
+      }
+    },
+    "text": {
+      "count": 19,
+      "seconds": 30.198,
+      "result_sha256": "c76501d2fb2545dc70be539d5d67e4b1f2a0a0902c32beb1b25ea2d579998be3",
+      "source_bindings": 5300,
+      "files": {
+        "result.json.gz": {
+          "bytes": 638986,
+          "sha256": "c76501d2fb2545dc70be539d5d67e4b1f2a0a0902c32beb1b25ea2d579998be3",
+          "gzip_bytes": 256090,
+          "gzip_sha256": "0fb8a92a21207d1220c89ad70b917a25c817f7e2867e429b54bf0d9ba89f16a1"
+        },
+        "gate.log.gz": {
+          "bytes": 239861,
+          "sha256": "bc191cb31a971615d1388e4fb973d01d98c116c0ebf9367f921b90ccc2b47209",
+          "gzip_bytes": 21572,
+          "gzip_sha256": "a00535d18ea6fa7104f510b8cda8cf006bc4cdb7ec07039a377494733b6cff9c"
+        },
+        "runner.py.gz": {
+          "bytes": 10200,
+          "sha256": "b06c4e0595199f6bf9f70c326bdef8458685291f6fd4e4a4c4039b2a6deecced",
+          "gzip_bytes": 3775,
+          "gzip_sha256": "bdd53ba785505683aad71ef47704a2943467bd12d4b5f03290f255a5d530c828"
+        }
+      }
+    }
+  },
+  "scope": "Main-based focused compiler archive loading and Text descriptor finalization. Compiler consumes explicit unchanged Stage23 artifacts under no-auto; Text tests consume parsed/source/wire fixtures. No ordinary consumer replay, fresh bake, full VBC, registry or AOT acceptance."
+}
