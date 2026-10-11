@@ -16,7 +16,7 @@ use crate::module::{ConstId, FunctionId};
 use crate::types::{CbgrTier, TypeParamId, TypeRef};
 use std::collections::{HashMap, HashSet};
 use verum_cbgr::tier_types::Tier0Reason;
-use verum_common::Map;
+use verum_common::{Map, Text};
 
 /// ARCH-P2 canonical id→name choice — ONE total order over a
 /// FunctionId's registration-key set, shared by every site that picks
@@ -48,6 +48,10 @@ pub(crate) fn canonical_name_better(new: &str, cur: &str) -> bool {
 /// Tracks all state needed during function compilation.
 #[derive(Debug)]
 pub struct CodegenContext {
+    /// Archive-local identities belong to this compilation, not the shared
+    /// archive cache. Supplemental registration reuses the same consumer ID.
+    archive_function_ids: Map<Text, Map<u32, FunctionId>>,
+
     /// **Archive callee param TypeRefs** (T0330 mono-seed fallback).
     ///
     /// `record_generic_instantiation` derives a call's generic type
@@ -1658,6 +1662,7 @@ impl CodegenContext {
     /// Creates a new codegen context.
     pub fn new() -> Self {
         Self {
+            archive_function_ids: Map::new(),
             archive_fn_param_types: HashMap::new(),
             archive_fn_parameter_generics: Map::new(),
             semantic_fn_params: Map::new(),
@@ -3295,6 +3300,25 @@ impl CodegenContext {
         }
     }
 
+    /// Allocate one consumer identity per function in an immutable archive
+    /// entry. Re-registering a name must not replace its already-emitted body.
+    pub fn archive_function_id(
+        &mut self,
+        entry: &str,
+        archive_id: u32,
+        next_id: &mut u32,
+    ) -> FunctionId {
+        *self.archive_function_ids
+            .entry(entry.into())
+            .or_default()
+            .entry(archive_id)
+            .or_insert_with(|| {
+                let id = FunctionId(*next_id);
+                *next_id = next_id.saturating_add(1);
+                id
+            })
+    }
+
     /// Authoritatively register `info` under `name`, replacing any prior
     /// binding regardless of `prefer_existing_functions` and regardless of
     /// arity collision.
@@ -4840,6 +4864,7 @@ impl CodegenContext {
         self.strings.clear();
         self.string_intern.clear();
         self.functions.clear();
+        self.archive_function_ids.clear();
         self.semantic_fn_params.clear();
         self.scoped_functions.clear();
         self.unit_declared_fns.clear();

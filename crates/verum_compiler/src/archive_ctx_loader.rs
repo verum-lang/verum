@@ -2309,16 +2309,6 @@ pub struct ArchiveCtxCache {
     /// `apply_lazy_with_types` call; subsequent compilations within
     /// the process reuse the cached graph (~free).
     graph: OnceLock<SymbolGraph>,
-    /// T0706 — per-archive-entry set of archive-local function ids whose
-    /// BODIES were already merged into a user codegen this compilation.
-    /// The supplemental post-typecheck pass consults this so a second
-    /// `merge_archive_function_bodies` call over the same entry never
-    /// re-merges a body ([[duplicate-emitter]] class: emission order
-    /// wins, a duplicate is a latent misdispatch).  Keyed per
-    /// compilation epoch — `begin_compilation_epoch` clears it, because
-    /// the cache outlives compilations (REPL / watch / test-runner) but
-    /// merged-ness is a property of ONE codegen instance.
-    merged_ids: std::sync::Mutex<std::collections::BTreeMap<String, std::collections::HashSet<u32>>>,
 }
 
 impl ArchiveCtxCache {
@@ -2327,36 +2317,7 @@ impl ArchiveCtxCache {
         Self {
             table: OnceLock::new(),
             graph: OnceLock::new(),
-            merged_ids: std::sync::Mutex::new(std::collections::BTreeMap::new()),
         }
-    }
-
-    /// T0706 — reset per-compilation merge bookkeeping.  Call at the
-    /// start of every `apply_lazy_with_types` (each user compilation
-    /// constructs a fresh codegen; carried merged-ids from a previous
-    /// compilation would wrongly suppress merges into the new one).
-    fn begin_compilation_epoch(&self) {
-        self.merged_ids
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .clear();
-    }
-
-    /// T0706 — record which archive-local ids of `entry` had bodies
-    /// merged this epoch.
-    fn note_merged_ids<'a>(
-        &self,
-        entry: &str,
-        ids: impl Iterator<Item = &'a u32>,
-    ) {
-        let mut guard = self
-            .merged_ids
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
-        guard
-            .entry(entry.to_string())
-            .or_default()
-            .extend(ids.copied());
     }
 
     /// Lazily build the per-archive symbol graph (reachability index
@@ -2711,8 +2672,8 @@ impl ArchiveCtxCache {
     /// qualified name the AST never spells.  After user codegen, the
     /// emitted instruction stream IS the resolved-name oracle; this
     /// entry merges bodies for exactly those names, reusing the SAME
-    /// register/type-import/merge machinery with the epoch's
-    /// merged-ids guard suppressing re-merges.
+    /// register/type-import/merge machinery. IDs and emitted bodies belong
+    /// to the codegen compilation, independently of this shared cache.
     pub fn apply_lazy_supplemental(
         &self,
         archive: &VbcArchive,
@@ -2798,8 +2759,8 @@ impl ArchiveCtxCache {
         let mut merged_entries = 0usize;
         for (entry_name, module) in &decoded {
             let next_id_ref: &mut u32 = unsafe { &mut *next_id_ptr };
-            // Idempotent per the loader's contains_key guards — names
-            // registered by the primary pass stay first-wins.
+            // The context owns stable archive-local to consumer IDs, so
+            // registering another alias cannot detach an existing body.
             let (func_id_remap, _registered) = register_module_filtered(
                 module,
                 entry_name,
@@ -2810,34 +2771,13 @@ impl ArchiveCtxCache {
             if !module.types.is_empty() {
                 codegen.import_archive_module_types(module);
             }
-            // Merge ONLY bodies this epoch has not merged yet.
-            let already: std::collections::HashSet<u32> = self
-                .merged_ids
-                .lock()
-                .unwrap_or_else(|p| p.into_inner())
-                .get(entry_name)
-                .cloned()
-                .unwrap_or_default();
-            let fresh_remap: HashMap<u32, verum_vbc::module::FunctionId> =
-                func_id_remap
-                    .iter()
-                    .filter(|(aid, _)| !already.contains(aid))
-                    .map(|(a, u)| (*a, *u))
-                    .collect();
-            if fresh_remap.is_empty() {
-                continue;
+            // Keep the total call-target map, including already-emitted
+            // callees. The merger always remaps signatures before its
+            // codegen-owned emitted-body check; names can be new even when
+            // all bodies from this entry were loaded by an earlier wave.
+            if codegen.merge_archive_function_bodies(module, &func_id_remap) > 0 {
+                merged_entries += 1;
             }
-            for fn_desc in module.functions.iter() {
-                if let Some(&user_fid) = fresh_remap.get(&fn_desc.id.0)
-                    && let Some(name) = module.strings.get(fn_desc.name)
-                    && !name.is_empty()
-                {
-                    codegen.record_archive_function_descriptor(module, fn_desc, user_fid);
-                }
-            }
-            codegen.merge_archive_function_bodies(module, &fresh_remap);
-            self.note_merged_ids(entry_name, fresh_remap.keys());
-            merged_entries += 1;
         }
         if let Ok(filter) = std::env::var("VERUM_TRACE_WANTED") {
             eprintln!(
@@ -2902,7 +2842,6 @@ impl ArchiveCtxCache {
         sibling_modules: &[std::sync::Arc<verum_ast::Module>],
     ) -> (usize, usize) {
         let t_load = std::time::Instant::now();
-        self.begin_compilation_epoch();
         // **ONE-authority alias seeding** (T0695/T0692): every codegen
         // that loads the embedded archive gets the DECLARED type
         // aliases (`type Byte is UInt8`) and re-export renames from
@@ -3508,9 +3447,6 @@ impl ArchiveCtxCache {
         for (entry_name, pruned_remap) in &pruned_remaps {
             if let Some(module) = module_by_name.get(entry_name.as_str()).copied() {
                 codegen.merge_archive_function_bodies(module, pruned_remap);
-                // T0706: remember what this epoch merged so the
-                // supplemental post-typecheck pass never re-merges.
-                self.note_merged_ids(entry_name, pruned_remap.keys());
             }
         }
         loadcost::record("merge_bodies", t_merge.elapsed());
@@ -6235,7 +6171,7 @@ fn register_module_filtered(
             .filter(|leaf| simple_name_str.len() > leaf.len()) // 2+ segments
             .map(|leaf| wanted.contains(leaf))
             .unwrap_or(false);
-        // **Always allocate codegen-local id + insert into
+        // **Always retain a codegen-local id + insert into
         // `func_id_remap`** (regardless of whether the per-function
         // metadata-registration filter below accepts the function).
         //
@@ -6250,7 +6186,7 @@ fn register_module_filtered(
         // `Text.push_str` Calls landing on `Conv1d.parameters` /
         // `tensor_sqrt` / similar unrelated math/tensor functions).
         //
-        // Allocating the id + inserting it into `func_id_remap`
+        // Allocating once per compilation + inserting into `func_id_remap`
         // BEFORE the filter ensures the remap is total over every
         // archive-local id this module emits. Filter-rejected
         // functions still don't get a `FunctionInfo` registered into
@@ -6258,8 +6194,7 @@ fn register_module_filtered(
         // name-resolution; the finalize-time stub-emitter will
         // synthesise a `RetV` placeholder for the unregistered slot
         // — strictly more diagnosable than a wrong-target dispatch.
-        let new_id = verum_vbc::module::FunctionId(*next_id);
-        *next_id = next_id.saturating_add(1);
+        let new_id = ctx.archive_function_id(module_name, fn_desc.id.0, next_id);
         func_id_remap.insert(fn_desc.id.0, new_id);
         let last2_matches_wanted = last2_of(&qualified_borrowed)
             .map(|l2| last2_wanted.contains(l2))
