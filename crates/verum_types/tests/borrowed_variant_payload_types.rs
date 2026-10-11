@@ -1,6 +1,6 @@
 //! T1746: qualified borrowed patterns retain their instantiated payload types.
 //! This checker reduction does not establish the cause of the runtime allocation panic.
-use verum_ast::{FileId, ItemKind};
+use verum_ast::{ExprKind, FileId, ItemKind, PatternKind, VariantPatternData};
 use verum_common::{List, Text};
 use verum_fast_parser::FastParser;
 use verum_types::TypeChecker;
@@ -181,6 +181,86 @@ fn inspect(value: &Choice<Cell>) -> Bool {
         errors.iter().any(|error| error.contains("Mismatch")
             && error.contains("Int")
             && error.contains("Bool")),
+        "{errors:?}"
+    );
+    assert!(
+        !errors.iter().any(|error| error.contains("unresolved")),
+        "{errors:?}"
+    );
+}
+
+fn named_payload_accepted(receiver: &str, pattern: &str, qualified: bool) {
+    let expression = format!("match value {{ {pattern} => item.padding, _ => -1 }}");
+    let parsed = FastParser::new()
+        .parse_expr_str(&expression, FileId::new(1))
+        .expect("named payload pattern grammar");
+    let ExprKind::Match { arms, .. } = &parsed.kind else {
+        panic!("expected parsed match expression");
+    };
+    let first = &arms.first().expect("named payload arm").pattern.kind;
+    if qualified {
+        // Qualified named payloads use the same guard as tuple payloads.
+        assert!(
+            matches!(
+                first,
+                PatternKind::Variant {
+                    data: Some(VariantPatternData::Record { .. }),
+                    ..
+                }
+            ),
+            "{first:?}"
+        );
+    } else {
+        // The sibling record-pattern path has no qualifier to override.
+        assert!(matches!(first, PatternKind::Record { .. }), "{first:?}");
+    }
+    accepted(&format!(
+        "type NamedChoice<Payload> is Absent | Value {{ item: Payload }};\n\
+         fn inspect(value: {receiver}) -> Int {{ {expression} }}"
+    ));
+}
+
+#[test]
+fn owned_qualified_named_payload_preserves_its_record_type() {
+    named_payload_accepted("NamedChoice<Cell>", "NamedChoice.Value { item }", true);
+}
+
+#[test]
+fn shared_unqualified_named_payload_preserves_its_record_type() {
+    named_payload_accepted("&NamedChoice<Cell>", "Value { item }", false);
+}
+
+#[test]
+fn shared_qualified_named_payload_preserves_its_record_type() {
+    named_payload_accepted("&NamedChoice<Cell>", "NamedChoice.Value { item }", true);
+}
+
+#[test]
+fn borrowed_instances_keep_different_payload_types_in_reverse_order() {
+    accepted(
+        r#"
+fn inspect(flag: &Choice<Flag>, number: &Choice<Cell>) -> Int {
+    let enabled = match flag { Choice.Value(item) => item.enabled, _ => false };
+    let count = match number { Choice.Value(cell) => cell.padding, _ => -1 };
+    if enabled { count } else { 0 }
+}
+"#,
+    );
+}
+
+#[test]
+fn borrowed_payload_refuses_a_field_from_another_instance() {
+    let errors = check(
+        r#"
+fn inspect(value: &Choice<Flag>) -> Int {
+    match value { Choice.Value(item) => item.padding, _ => -1 }
+}
+"#,
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.contains("padding") && error.contains("not found")),
         "{errors:?}"
     );
     assert!(
