@@ -83,7 +83,9 @@ fn method<'a>(module: &'a VbcModule, parent: TypeId, suffix: &str) -> &'a Functi
 }
 
 fn import_codegen(sources: &[&VbcModule]) -> VbcCodegen {
-    let mut codegen = VbcCodegen::with_config(CodegenConfig::new("consumer"));
+    let mut config = CodegenConfig::new("consumer");
+    config.strict_codegen = true;
+    let mut codegen = VbcCodegen::with_config(config);
     for source in sources {
         codegen.import_archive_module_types(source);
     }
@@ -277,6 +279,20 @@ fn assert_record_and_extensions(module: &VbcModule) {
     let record = text(module, Some(OWNER));
     assert_eq!(record.id, TypeId::TEXT);
     assert_eq!(record.kind, TypeKind::Record);
+    let source = declaration_with_protocol(OWNER, LOCAL_PROTOCOL);
+    let original = text(&source, Some(OWNER));
+    assert_eq!(record.declared_layout, original.declared_layout);
+    assert_eq!(record.resource_discipline, original.resource_discipline);
+    assert_eq!(record.visibility, original.visibility);
+    assert_eq!(
+        (record.size, record.alignment),
+        (original.size, original.alignment)
+    );
+    for (field, source_field) in record.fields.iter().zip(&original.fields) {
+        assert_eq!(field.type_ref, source_field.type_ref);
+        assert_eq!(field.visibility, source_field.visibility);
+        assert_eq!(field.declared_visibility, source_field.declared_visibility);
+    }
     let fields: List<_> = record
         .fields
         .iter()
@@ -403,4 +419,53 @@ fn bootstrap_record_then_primitive_extension_preserves_one_descriptor() {
 #[test]
 fn primitive_extension_then_bootstrap_record_preserves_all_protocols() {
     bootstrap_and_carrier(true);
+}
+
+#[test]
+fn later_bootstrap_carrier_preserves_record_authority_and_resolved_drop_glue() {
+    let source = wire(&declaration_with_protocol(
+        OWNER,
+        "type Drop is protocol { fn drop(&mut self); }; implement Drop for Text { fn drop(&mut self) {} }",
+    ));
+    let carrier = wire(&extension());
+    let record_ast = Parser::new("module consumer; mount core.text.text.Text;")
+        .parse_module()
+        .expect("parse record bootstrap mount");
+    let carrier_ast = Parser::new("module consumer; mount text_extension.Text;")
+        .parse_module()
+        .expect("parse carrier bootstrap mount");
+    let mut codegen = VbcCodegen::with_config(CodegenConfig::new("consumer"));
+    codegen
+        .import_bootstrap_nominal_dependencies(&[&record_ast], &[&source])
+        .expect("import declared record with drop glue");
+    let before = codegen
+        .finalize_module_from_state()
+        .expect("record snapshot");
+    let before_record = text(&before, Some(OWNER));
+    assert!(
+        before_record.drop_fn.is_some(),
+        "fixture has resolved declared drop glue"
+    );
+    codegen
+        .import_bootstrap_nominal_dependencies(&[&carrier_ast], &[&carrier])
+        .expect("import later scalar carrier");
+    let after = wire(
+        &codegen
+            .finalize_module()
+            .expect("finalize late bootstrap import"),
+    );
+    let record = text(&after, Some(OWNER));
+    assert_eq!(record.kind, TypeKind::Record);
+    assert_eq!(record.drop_fn, before_record.drop_fn);
+    assert_eq!(record.clone_fn, before_record.clone_fn);
+    assert_eq!(record.fields.len(), 3);
+    assert_eq!(record.declared_layout, before_record.declared_layout);
+    assert_eq!(
+        after
+            .types
+            .iter()
+            .filter(|ty| ty.id == TypeId::TEXT)
+            .count(),
+        1
+    );
 }
