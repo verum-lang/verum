@@ -8398,3 +8398,7 @@ mod symbol_graph_declaring_owner_tests;
 #[cfg(test)]
 #[path = "../tests/archive/declared_function_bodies.rs"]
 mod declared_function_bodies;
+
+#[cfg(test)]
+#[path = "../tests/archive/supplemental_function_identity.rs"]
+mod supplemental_function_identity;
