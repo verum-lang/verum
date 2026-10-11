@@ -26455,7 +26455,7 @@ impl VbcCodegen {
         &mut self,
         ty: &TypeDescriptor,
         archive_strings: &crate::module::StringTable,
-        protocol_id_remap: &Map<TypeId, TypeId>,
+        protocol_id_remap: &std::collections::HashMap<TypeId, TypeId>,
         module_prefix: Maybe<&str>,
         original_carrier_eligible: Maybe<bool>,
     ) {
