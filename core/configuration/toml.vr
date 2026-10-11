@@ -427,7 +427,7 @@ fn is_bare_key_char(b: Byte) -> Bool {
         || (b >= 0x61_u8 && b <= 0x7A_u8)   // a-z
         || (b >= 0x30_u8 && b <= 0x39_u8)   // 0-9
         || b == 0x2D_u8                     // '-'
-        || b == 0x5F_u8;                    // '_'
+        || b == 0x5F_u8                     // '_'
 }
 
 fn parse_bare_key(p: &mut Parser) -> Result<Text, TomlError> {
