@@ -68,12 +68,12 @@ use serde::{Deserialize, Serialize};
 /// (idempotency / commutativity of `Max`, identity at `Concrete(0)`,
 /// `Max(Succ(a), Succ(b)) = Succ(Max(a, b))`, and structural
 /// flattening).  The relation is sound (no false positives) and
-/// complete on closed levels (everything reducible to a single
-/// `Concrete` is decided exactly).  Open levels with the same
+/// complete on closed levels representable by a single `Concrete`.
+/// Larger closed levels retain exact successor syntax; comparison may
+/// conservatively reject different expressions for the same level.  Open levels with the same
 /// canonical form are equal; structurally distinct expressions
 /// over the same variables are conservatively rejected — this
-/// matches the algorithm Coq / Lean / Agda use for
-/// non-cumulative-with-variables level comparison.
+/// is a conservative structural comparison, not a universe-constraint solver.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 pub enum Level {
     /// `Type@n` for a concrete non-negative `n`.
@@ -89,6 +89,10 @@ pub enum Level {
     /// `max(l1, l2)`.  Normalisation flattens nested `Max`,
     /// dedupes summands, and pulls out common `Succ` prefixes.
     Max(Box<Level>, Box<Level>),
+    /// Exact addition of a concrete offset without allocating one node
+    /// per successor. Older certificates remain readable; readers of this
+    /// new constructor must implement its addition semantics or reject it.
+    Offset(Box<Level>, u32),
 }
 
 /// Certificate-schema evolution: before universe polymorphism
@@ -109,6 +113,7 @@ impl<'de> serde::Deserialize<'de> for Level {
             Var(String),
             Succ(Box<Level>),
             Max(Box<Level>, Box<Level>),
+            Offset(Box<Level>, u32),
         }
         #[derive(serde::Deserialize)]
         #[serde(untagged)]
@@ -122,6 +127,7 @@ impl<'de> serde::Deserialize<'de> for Level {
             Repr::Structured(Structured::Var(v)) => Level::Var(v),
             Repr::Structured(Structured::Succ(l)) => Level::Succ(l),
             Repr::Structured(Structured::Max(a, b)) => Level::Max(a, b),
+            Repr::Structured(Structured::Offset(base, by)) => Level::Offset(base, by),
         })
     }
 }
@@ -171,7 +177,8 @@ impl Level {
     /// Reduce this level to a canonical form.  Idempotent.
     ///
     /// Rules applied (bottom-up):
-    ///   1. `Succ(Concrete(n))         → Concrete(n.saturating_add(1))`
+    ///   1. `Succ(Concrete(n))         → Concrete(n + 1)` if it fits;
+    ///      otherwise retain `Succ(Concrete(n))` exactly.
     ///   2. `Max(Concrete(a), C(b))    → Concrete(a.max(b))`
     ///   3. `Max(Concrete(0), x)       → x`
     ///   4. `Max(x, x)                 → x`
@@ -190,13 +197,8 @@ impl Level {
         match self {
             Level::Concrete(_) | Level::Var(_) => self,
 
-            Level::Succ(inner) => {
-                let n = inner.normalize();
-                match n {
-                    Level::Concrete(k) => Level::Concrete(k.saturating_add(1)),
-                    other => Level::Succ(Box::new(other)),
-                }
-            }
+            Level::Succ(inner) => level_add_offset(inner.normalize(), 1),
+            Level::Offset(base, by) => level_add_offset(base.normalize(), by),
 
             Level::Max(a, b) => {
                 let a = a.normalize();
@@ -217,26 +219,43 @@ impl Level {
         }
     }
 
-    /// Lift the level by `by`, in the universe-cumulativity sense:
-    /// the result is the level whose `succ`-chain is `by` levels
-    /// longer.  Concrete carriers add via `saturating_add`; symbolic
-    /// carriers wrap in `by` `Succ` constructors and renormalise.
-    /// Used by [`crate::proof_checker_meta::shift_universes`] and the
-    /// differential-fuzz universe-bump mutator.
+    /// Add `by` exactly. Large offsets are represented compactly rather
+    /// than expanded into `by` successor nodes. Work depends on the input
+    /// expression, not the numerical value of the offset. Comparison remains
+    /// conservative where different exact expressions do not normalize alike.
     pub fn shifted_by(self, by: u32) -> Self {
-        if by == 0 {
-            return self;
-        }
-        match self {
-            Level::Concrete(n) => Level::Concrete(n.saturating_add(by)),
-            other => {
-                let mut acc = other;
-                for _ in 0..by {
-                    acc = Level::Succ(Box::new(acc));
-                }
-                acc.normalize()
-            }
-        }
+        if by == 0 { return self; }
+        level_add_offset(self.normalize(), by)
+    }
+}
+
+/// Add to an already-normalized level without expanding the numerical offset.
+/// Combining two offsets that exceed u32 keeps two exact constructors; it
+/// never saturates either the mathematical value or an allocation counter.
+fn level_add_offset(base: Level, by: u32) -> Level {
+    if by == 0 { return base; }
+    match base {
+        Level::Concrete(n) => match n.checked_add(by) {
+            Some(next) => Level::Concrete(next),
+            None => level_offset_node(Level::Concrete(u32::MAX), by - (u32::MAX - n)),
+        },
+        Level::Succ(inner) => match by.checked_add(1) {
+            Some(sum) => level_add_offset(*inner, sum),
+            None => level_offset_node(Level::Succ(inner), by),
+        },
+        Level::Offset(inner, prior) => match prior.checked_add(by) {
+            Some(sum) => level_add_offset(*inner, sum),
+            None => level_offset_node(Level::Offset(inner, prior), by),
+        },
+        other => level_offset_node(other, by),
+    }
+}
+
+fn level_offset_node(base: Level, by: u32) -> Level {
+    match by {
+        0 => base,
+        1 => Level::Succ(Box::new(base)),
+        _ => Level::Offset(Box::new(base), by),
     }
 }
 
@@ -260,6 +279,7 @@ impl std::fmt::Display for Level {
             Level::Var(name) => write!(f, "{}", name),
             Level::Succ(inner) => write!(f, "succ({})", inner),
             Level::Max(a, b) => write!(f, "max({}, {})", a, b),
+            Level::Offset(base, by) => write!(f, "offset({}, {})", base, by),
         }
     }
 }
@@ -304,13 +324,12 @@ fn level_max_canonical(a: Level, b: Level) -> Level {
                 .into_iter()
                 .map(|s| level_strip_succ(s, succ_count))
                 .collect();
-            let inner = level_assemble_max(stripped_concrete, stripped_symbolic);
-            // Re-wrap in `succ_count` Succs.
-            let mut acc = inner;
-            for _ in 0..succ_count {
-                acc = Level::Succ(Box::new(acc));
-            }
-            return acc;
+            // Stripping can expose another common compact offset. Normalize
+            // the smaller interior before rewrapping, so normalization is
+            // idempotent even when the total common shift exceeds u32.
+            let inner = level_assemble_max(stripped_concrete, stripped_symbolic).normalize();
+            // Factor the common shift compactly, including large offsets.
+            return level_add_offset(inner, succ_count);
         }
     }
 
@@ -340,6 +359,7 @@ fn level_struct_cmp(a: &Level, b: &Level) -> std::cmp::Ordering {
             Level::Var(_) => 1,
             Level::Succ(_) => 2,
             Level::Max(_, _) => 3,
+            Level::Offset(_, _) => 4,
         }
     }
     match rank(a).cmp(&rank(b)) {
@@ -347,6 +367,7 @@ fn level_struct_cmp(a: &Level, b: &Level) -> std::cmp::Ordering {
             (Level::Concrete(x), Level::Concrete(y)) => x.cmp(y),
             (Level::Var(x), Level::Var(y)) => x.cmp(y),
             (Level::Succ(x), Level::Succ(y)) => level_struct_cmp(x, y),
+            (Level::Offset(x, n), Level::Offset(y, m)) => level_struct_cmp(x, y).then_with(|| n.cmp(m)),
             (Level::Max(xa, xb), Level::Max(ya, yb)) => {
                 level_struct_cmp(xa, ya).then_with(|| level_struct_cmp(xb, yb))
             }
@@ -372,30 +393,28 @@ fn level_common_succ_depth(concrete: &Option<u32>, symbolic: &[Level]) -> u32 {
 fn level_succ_depth(level: &Level) -> u32 {
     let mut depth = 0u32;
     let mut cur = level;
-    while let Level::Succ(inner) = cur {
-        depth = depth.saturating_add(1);
-        cur = inner;
+    loop {
+        match cur {
+            Level::Succ(inner) => { depth = depth.saturating_add(1); cur = inner; }
+            Level::Offset(inner, by) => { depth = depth.saturating_add(*by); cur = inner; }
+            _ => return depth,
+        }
     }
-    depth
 }
 
-/// Strip up to `count` leading `Succ` constructors.  For concrete
-/// levels (handled separately), the caller subtracts.  For
-/// symbolic levels, peels off Succs structurally.  Saturates at
-/// the bare carrier if `count` exceeds the actual depth.
+/// Strip an actually available common offset. The count is capped by u32,
+/// but subtraction remains exact even when the full prefix is larger.
 fn level_strip_succ(level: Level, count: u32) -> Level {
     let mut cur = level;
     let mut remaining = count;
     while remaining > 0 {
         match cur {
-            Level::Succ(inner) => {
-                cur = *inner;
-                remaining -= 1;
+            Level::Succ(inner) => { cur = *inner; remaining -= 1; }
+            Level::Offset(inner, by) if by <= remaining => {
+                cur = *inner; remaining -= by;
             }
-            other => {
-                cur = other;
-                break;
-            }
+            Level::Offset(inner, by) => return level_add_offset(*inner, by - remaining),
+            other => return other,
         }
     }
     cur
@@ -1549,7 +1568,7 @@ impl Certificate {
         // Step 1 — claimed_type must itself be a type.
         //
         // **Top-of-tower escape hatch.**  When `claimed_type` is at
-        // (or transitively contains) `Universe(u32::MAX)`, inferring
+        // exactly a universe such as `Universe(u32::MAX)`, inferring
         // its own kind would emit `UniverseOverflow` — but the
         // claimed_type is still a *type* (universes are types at every
         // representable level).  Differentially-tested with the Lean
@@ -1566,11 +1585,11 @@ impl Certificate {
                     });
                 }
             }
-            Err(CheckError::UniverseOverflow { .. }) => {
-                // claimed_type lives at the top of the universe
-                // tower — still a type.  Step 2 below will catch any
-                // genuine type mismatch via `def_eq` against the
-                // term's inferred type.
+            Err(CheckError::UniverseOverflow { .. })
+                if matches!(&self.claimed_type, Term::Universe(_)) => {
+                // A literal universe is itself a type. An overflow while
+                // checking an arbitrary compound expression does NOT prove
+                // that expression well-formed; never swallow that failure.
             }
             Err(other) => return Err(other),
         }
@@ -2246,15 +2265,15 @@ mod tests {
 
     #[test]
     fn shifted_by_concrete_adds() {
-        // `shifted_by(by)` on concrete adds `by` (saturating).
+        // Concrete shifts retain the exact successor beyond the carrier.
         assert_eq!(
             Level::Concrete(3).shifted_by(2),
             Level::Concrete(5),
         );
-        // Saturation at u32::MAX.
+        // Overflow retains an exact successor.
         assert_eq!(
             Level::Concrete(u32::MAX).shifted_by(1),
-            Level::Concrete(u32::MAX),
+            Level::Succ(Box::new(Level::Concrete(u32::MAX))),
         );
     }
 
@@ -2267,7 +2286,7 @@ mod tests {
         let expected = Level::Succ(Box::new(Level::Succ(Box::new(Level::Var(
             "u".to_string(),
         )))));
-        assert_eq!(shifted, expected);
+        assert_eq!(shifted, expected.normalize());
     }
 
     #[test]

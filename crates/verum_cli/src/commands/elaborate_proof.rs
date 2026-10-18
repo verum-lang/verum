@@ -55,14 +55,14 @@ pub struct ElaborationRow {
 pub enum ElaborationStatus {
     /// Certificate produced + re-verified. Paths to the emitted
     /// `.vproof` certificate and the `.vgoal` unified
-    /// VerificationGoal export (when goal translation succeeded;
-    /// `None` when the proposition fell back to placeholder).
+    /// VerificationGoal export. Source translation must succeed before
+    /// a certificate is produced.
     Verified {
         /// Path to the emitted `.vproof` certificate.
         vproof_path: PathBuf,
         /// Path to the emitted `.vgoal` JSON when the proposition
         /// translated successfully via VerificationGoal; `None` on
-        /// the placeholder fallback path.
+        /// a later diagnostic export is unavailable; never a substitute goal.
         vgoal_path: Option<PathBuf>,
     },
     /// Tactic form not yet supported by the elaborator (graceful
@@ -271,10 +271,9 @@ fn walk_and_elaborate(source_path: &Path, out_dir: &Path) -> Result<Vec<Elaborat
                 // the certificate so audit-gate dashboards and
                 // downstream verification pipelines have access to
                 // the source-agnostic verification surface. This is
-                // best-effort: the goal export is `None` when the
-                // theorem's proposition shape isn't yet supported by
-                // proposition_to_term (the matching certificate
-                // metadata records `claimed_type_source: placeholder`).
+                // best-effort as a diagnostic export. Unsupported source
+                // goals have already returned Skipped and cannot reach
+                // this certificate-producing branch.
                 let vgoal_path = match from_theorem_decl(&theorem, TheoremKind::Theorem, &ctx) {
                     Ok(goal) => {
                         let path = out_dir.join(format!("{}.vgoal", name));
@@ -401,13 +400,13 @@ mod tests {
     #[test]
     fn elaborate_proof_emits_vproof_and_vgoal_for_verifiable_theorem() {
         use verum_kernel::verification_goal::VerificationGoal;
-        // A theorem applying a kernel_v0 lemma stub elaborates cleanly
-        // because the corpus walker pre-registers those names.
+        // Native identity reflexivity survives source translation and
+        // independently checked certificate construction.
         let source = "module test_elab;\n\
                       \n\
                       public theorem witness()\n\
-                          ensures true\n\
-                          proof { apply core.verify.kernel_v0.lemmas.beta.church_rosser_confluence; };\n";
+                          ensures port == port\n\
+                          proof by reflexivity;\n";
         let mut src = tempfile::NamedTempFile::new().expect("tempfile");
         src.write_all(source.as_bytes()).expect("write");
         let vr_path = src.path().with_extension("vr");

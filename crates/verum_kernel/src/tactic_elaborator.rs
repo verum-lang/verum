@@ -57,7 +57,7 @@
 //! [`proposition_to_term`] translates the following Verum proposition
 //! shapes into kernel terms:
 //!
-//!  - `Literal(Bool::*)` → `Universe(0)` (trivially-inhabited).
+//!  - Boolean literal propositions are unsupported until faithfully encoded.
 //!  - `Path` / `Field` / `Call` — axiom resolution + App chain.
 //!  - `Binary` — opaque connective axiom application
 //!  (`__verum_kernel_<Op>` registered via
@@ -351,16 +351,6 @@ pub fn resolve_apply_target(ctx: &ElabContext, name: &str) -> Result<Term, ElabE
     Err(ElabError::UndeclaredApplyTarget(name.to_string()))
 }
 
-/// Default theorem-conclusion term — `Universe(0)` — used as a
-/// fallback when [`proposition_to_term`] can't translate the
-/// theorem's proposition. The trivial type is inhabited by every
-/// closed term-of-Universe-0; the certificate produced is therefore
-/// only weakly load-bearing. Callers should record the fallback in
-/// the certificate's metadata so reviewers can downgrade trust.
-pub fn placeholder_proposition() -> Term {
-    Term::universe(0)
-}
-
 /// **Translate a Verum proposition Expr to a kernel Term.**
 ///
 /// This is the load-bearing step that makes elaborated certificates
@@ -372,7 +362,8 @@ pub fn placeholder_proposition() -> Term {
 ///
 /// Coverage:
 ///
-///  - `Literal(Bool::*)` → `Universe(0)` (trivially-inhabited).
+///  - Boolean literals are explicitly unsupported until their logical
+///  encoding is implemented; truth and falsity must never share a term.
 ///  - `Path` / `Field` / `Call` → axiom resolution + App chain via
 ///  [`expr_to_term`].
 ///  - `Binary` / `Unary` → opaque connective axiom application.
@@ -386,11 +377,9 @@ pub fn proposition_to_term(prop: &Expr, ctx: &ElabContext) -> Result<Term, ElabE
     use verum_ast::LiteralKind;
     match &prop.kind {
         ExprKind::Literal(lit) if matches!(lit.kind, LiteralKind::Bool(_)) => {
-            // Both `true` and `false` map to `Universe(0)` — the
-            // trivially-inhabited type. The kernel doesn't yet
-            // distinguish bottom; that distinction is a future
-            // primitive-encoding upgrade.
-            Ok(Term::universe(0))
+            Err(ElabError::UnsupportedExpression(
+                "Boolean proposition has no faithful kernel encoding".into(),
+            ))
         }
         ExprKind::Path(_) | ExprKind::Field { .. } | ExprKind::Call { .. } => {
             // Predicate names or function applications — direct
@@ -940,19 +929,17 @@ fn degenerate_structured_to_tactic(s: &ProofStructure) -> Option<&TacticExpr> {
 /// 3. Build a [`crate::verification_goal::VerificationGoal`] from
 ///  the theorem. The goal's `to_term()` is the Pi-chain over
 ///  hypotheses with the proposition as conclusion — that is the
-///  certificate's claimed type. On translation failure (e.g.,
-///  a quantifier or pattern-match in the proposition), fall back
-///  to [`placeholder_proposition`] so the elaborator still
-///  produces a (weakly load-bearing) certificate.
+///  certificate's claimed type. A translation failure is returned
+///  before proof elaboration: no certificate of another proposition
+///  may stand in for the source judgment.
 /// 4. [`close_over_axioms`] wraps body and claimed type in a
 ///  matching `Lam` / `Pi` chain over the axiom registry.
 /// 5. [`finalise_certificate`] re-verifies via the kernel checker —
 ///  the load-bearing step that enforces the de Bruijn criterion.
 ///
-/// The certificate's metadata records `claimed_type_source:
-/// verification_goal` when the unified converter handled the
-/// proposition or `placeholder` when it fell back, so JSON
-/// consumers can downgrade trust accordingly.
+/// A returned certificate always records `claimed_type_source:
+/// verification_goal`. Metadata is descriptive; it cannot repair an
+/// unfaithful translation, so unsupported goals never return a certificate.
 pub fn elaborate_theorem(
     theorem: &TheoremDecl,
     ctx: &mut ElabContext,
@@ -974,21 +961,15 @@ pub fn elaborate_theorem(
     // Goal FIRST: goal-directed tactics (`reflexivity` against an
     // `Id` conclusion) need the armed conclusion while the body
     // elaborates. (T0679)
-    let goal = from_theorem_decl(theorem, TheoremKind::Theorem, ctx);
-    match &goal {
-        Ok(g) => ctx.set_goal(Some(g.conclusion.clone()), g.hypotheses.len()),
-        Err(_) => ctx.set_goal(None, 0),
-    }
+    let goal = from_theorem_decl(theorem, TheoremKind::Theorem, ctx)?;
+    ctx.set_goal(Some(goal.conclusion.clone()), goal.hypotheses.len());
     let body_term = elaborate_proof_body(body, ctx);
     // Disarm before any early return so a later theorem in the same
     // context never sees a stale goal.
     ctx.set_goal(None, 0);
     let body_term = body_term?;
 
-    let (body_type, prop_translation_status) = match goal {
-        Ok(goal) => (goal.to_term(), "verification_goal"),
-        Err(_) => (placeholder_proposition(), "placeholder"),
-    };
+    let body_type = goal.to_term();
 
     let (closed_term, closed_type) = close_over_axioms(ctx, body_term, body_type);
     let mut metadata = BTreeMap::new();
@@ -996,7 +977,7 @@ pub fn elaborate_theorem(
     metadata.insert("kernel_version".to_string(), crate::VVA_VERSION.to_string());
     metadata.insert(
         "claimed_type_source".to_string(),
-        prop_translation_status.to_string(),
+        "verification_goal".to_string(),
     );
     finalise_certificate(closed_term, closed_type, metadata)
 }
@@ -1735,63 +1716,27 @@ mod tests {
     }
 
     #[test]
-    fn elaborate_theorem_apply_axiom_round_trips() {
-        // Construct: `theorem id_proof() ensures true { proof { apply foo; } }`
-        // where foo is an axiom of type Universe(0) and proposition
-        // is `true` (Bool literal). The elaborator produces a
-        // closure-over-axioms certificate that the kernel re-verifies.
-        //
-
-        // The boolean-literal proposition `true` translates to
-        // Universe(0); the body `apply foo` produces Var(0) with
-        // type Universe(0) — they match, so the kernel accepts.
-        use verum_ast::Literal;
-        use verum_ast::decl::TheoremDecl;
+    fn elaborate_theorem_reflexivity_round_trips() {
         let span = Span::dummy();
-        // Proposition is the boolean literal `true` (translates to Universe(0)).
-        let true_prop = Expr::new(ExprKind::Literal(Literal::bool(true, span)), span);
-        let mut theorem = TheoremDecl::new(
-            Ident {
-                name: "id_proof".into(),
-                span,
-            },
-            true_prop,
-            span,
-        );
-        theorem.proof = verum_common::Maybe::Some(ProofBody::Tactic(TacticExpr::Apply {
-            lemma: verum_common::Heap::new(path_expr("foo")),
-            args: List::new(),
-        }));
-
-        let mut ctx = ElabContext::new();
-        ctx.register_axiom("foo", Term::universe(0));
-
-        let cert = elaborate_theorem(&theorem, &mut ctx).unwrap();
-        // De Bruijn criterion: certificate re-verifies via the kernel.
+        let prop = Expr::new(ExprKind::Binary {
+            op: verum_ast::BinOp::Eq,
+            left: verum_common::Heap::new(path_expr("a")),
+            right: verum_common::Heap::new(path_expr("a")),
+        }, span);
+        let mut theorem = TheoremDecl::new(Ident { name: "reflexive".into(), span }, prop, span);
+        theorem.proof = verum_common::Maybe::Some(ProofBody::Tactic(TacticExpr::Reflexivity));
+        let cert = elaborate_theorem(&theorem, &mut ElabContext::new()).unwrap();
         cert.verify().unwrap();
-        // Metadata pin
-        assert_eq!(
-            cert.metadata.get("theorem_name").map(|s| s.as_str()),
-            Some("id_proof"),
-        );
-        // Metadata records whether the claimed type came from the
-        // unified VerificationGoal path or from the placeholder
-        // fallback.
-        assert_eq!(
-            cert.metadata.get("claimed_type_source").map(|s| s.as_str()),
-            Some("verification_goal"),
-            "Bool literal proposition should translate via VerificationGoal",
-        );
+        assert_eq!(cert.metadata.get("claimed_type_source").map(|s| s.as_str()), Some("verification_goal"));
     }
 
     #[test]
-    fn proposition_to_term_handles_bool_literal_true() {
-        use verum_ast::Literal;
+    fn proposition_to_term_refuses_unencoded_boolean_literals() {
         let span = Span::dummy();
-        let prop = Expr::new(ExprKind::Literal(Literal::bool(true, span)), span);
-        let ctx = ElabContext::new();
-        let term = proposition_to_term(&prop, &ctx).unwrap();
-        assert_eq!(term, Term::universe(0));
+        for value in [false, true] {
+            let prop = Expr::new(ExprKind::Literal(verum_ast::Literal::bool(value, span)), span);
+            assert!(matches!(proposition_to_term(&prop, &ElabContext::new()), Err(ElabError::UnsupportedExpression(_))));
+        }
     }
 
     #[test]
@@ -2074,7 +2019,7 @@ mod tests {
     }
 
     #[test]
-    fn elaborate_proof_with_kernel_v0_lemma_apply_succeeds() {
+    fn kernel_v0_lemma_cannot_discharge_unencoded_boolean_proposition() {
         // A theorem that applies one of the kernel_v0 lemma stubs
         // resolves cleanly when register_kernel_v0_lemmas is called.
         use verum_ast::Literal;
@@ -2104,8 +2049,7 @@ mod tests {
         let mut ctx = ElabContext::new();
         register_kernel_v0_lemmas(&mut ctx);
 
-        let cert = elaborate_theorem(&theorem, &mut ctx).unwrap();
-        cert.verify().unwrap();
+        assert!(matches!(elaborate_theorem(&theorem, &mut ctx), Err(ElabError::UnsupportedExpression(_))));
     }
 
     #[test]
@@ -2151,11 +2095,10 @@ mod tests {
     }
 
     #[test]
-    fn elaborate_theorem_untranslatable_proposition_falls_back_to_placeholder() {
+    fn elaborate_theorem_untranslatable_proposition_is_not_exportable() {
         // A proposition the translator genuinely cannot encode —
         // arithmetic `a + b` is not a propositional connective —
-        // still falls back to the placeholder claimed type with the
-        // downgrade recorded in metadata.
+        // must refuse export rather than certify an unrelated universe.
         use verum_ast::decl::TheoremDecl;
         let span = Span::dummy();
         let prop = Expr::new(
@@ -2181,13 +2124,7 @@ mod tests {
         let mut ctx = ElabContext::new();
         ctx.register_axiom("witness", Term::universe(0));
 
-        let cert = elaborate_theorem(&theorem, &mut ctx).unwrap();
-        cert.verify().unwrap();
-        assert_eq!(
-            cert.metadata.get("claimed_type_source").map(|s| s.as_str()),
-            Some("placeholder"),
-            "untranslatable proposition should fall back with the downgrade recorded",
-        );
+        assert!(matches!(elaborate_theorem(&theorem, &mut ctx), Err(ElabError::UnsupportedExpression(_))));
     }
 
     #[test]

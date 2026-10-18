@@ -890,9 +890,10 @@ pub fn verify_certificate(
                 });
             }
         }
-        Err(CheckError::UniverseOverflow { .. }) => {
-            // claimed_type lives at the top of the universe tower
-            // — still a type.  Mirrors proof_checker.rs::verify.
+        Err(CheckError::UniverseOverflow { .. })
+            if matches!(&cert.claimed_type, Term::Universe(_)) => {
+            // Only a literal universe is known to be a type without
+            // inferring its successor. Compound overflow stays a refusal.
         }
         Err(other) => return Err(other),
     }

@@ -229,46 +229,28 @@ use verum_ast::ty::{Type, TypeKind};
 /// **Convert a theorem (or lemma / corollary) declaration to a
 /// VerificationGoal.**
 ///
-/// Hypotheses are constructed in two layers:
-///
-///  1. Generic-parameter binders, one per entry in `theorem.generics`
-///  (e.g. `<A, B>`). Each gets `Universe(0)` as a placeholder
-///  type — sufficient to thread the de Bruijn index through the
-///  Pi-chain so the conclusion can reference type variables.
-///  2. Value-parameter binders, one per entry in `theorem.params`
-///  (e.g. `(x: A, n: Int)`). Same `Universe(0)` placeholder
-///  until full type translation lands.
-///  3. `requires`-clause hypotheses, translated via
-///  [`proposition_to_term`].
-///
-/// The conclusion is the theorem's `proposition` (synthesised from
-/// `ensures` clauses), translated via [`proposition_to_term`].
-///
-/// **Why parameters become hypotheses**: a theorem
-/// `theorem id<A>(x: A) ensures x` is logically `∀A. ∀x:A. x` — the
-/// generics + params are universal quantifiers. Pi-chain encoding
-/// turns them into hypotheses of the goal so the certificate's
-/// claimed type reflects the full quantified statement, not just
-/// the proposition body.
+/// The current source bridge supports no generic or value parameters:
+/// their exact declared types and binder references are not yet translated.
+/// It refuses those declarations instead of substituting Universe(0).
+/// Source requires clauses also need binder-aware scope transport before
+/// Pi wrapping, and are explicitly unsupported. A parameter-free, premise-free
+/// proposition uses the registered proposition vocabulary.
 pub fn from_theorem_decl(
     theorem: &TheoremDecl,
     source_kind: TheoremKind,
     ctx: &ElabContext,
 ) -> Result<VerificationGoal, ElabError> {
-    let mut hypotheses: Vec<Term> = Vec::new();
-    // Generic-parameter binders. Each generic contributes one
-    // Pi-binder with `Universe(0)` as the placeholder type.
-    for _ in theorem.generics.iter() {
-        hypotheses.push(Term::universe(0));
+    if !theorem.generics.is_empty() || !theorem.params.is_empty() {
+        return Err(ElabError::UnsupportedExpression(
+            "theorem parameters require exact declared-type and binder translation".into(),
+        ));
     }
-    // Value-parameter binders. Same placeholder until the type
-    // translator produces real Term encodings of param types.
-    for _ in theorem.params.iter() {
-        hypotheses.push(Term::universe(0));
+    if !theorem.requires.is_empty() {
+        return Err(ElabError::UnsupportedExpression(
+            "theorem requires clauses need binder-aware scope transport".into(),
+        ));
     }
-    // `requires`-clause hypotheses, in source order.
-    let mut requires_terms = translate_clauses(theorem.requires.iter(), ctx)?;
-    hypotheses.append(&mut requires_terms);
+    let hypotheses = Vec::new();
     let conclusion = proposition_to_term(theorem.proposition.as_ref(), ctx)?;
     let name = theorem.name.name.to_string();
     let source = match source_kind {
@@ -291,58 +273,16 @@ pub enum TheoremKind {
     Corollary,
 }
 
-/// **Convert a function declaration to a VerificationGoal.**
-///
-/// - Hypotheses: the function's `requires` clauses translated via
-///  [`proposition_to_term`].
-/// - Conclusion: synthesised from the function's `ensures` clauses
-///  conjunctively. When `ensures` is empty, the conclusion is
-///  `Universe(0)` (vacuously true).
-/// - Source: `GoalSource::FnContract { fn_name }`.
-///
-/// **Limitation**: the function body's verification (showing the
-/// implementation actually satisfies `ensures` under `requires`) is
-/// the SMT-layer's job. This converter produces the *contract*
-/// goal; the obligation against the body is a separate pipeline.
+/// Source function contracts need exact parameter/result types, binder
+/// transport and connective semantics before they can become kernel goals.
+/// This bridge currently refuses them; it does not replace an empty postcondition
+/// or an untranslated signature with Universe(0). Runtime/SMT checking is separate.
 pub fn from_fn_decl(
-    fn_decl: &FunctionDecl,
-    ctx: &ElabContext,
+    _fn_decl: &FunctionDecl,
+    _ctx: &ElabContext,
 ) -> Result<VerificationGoal, ElabError> {
-    let hypotheses = translate_clauses(fn_decl.requires.iter(), ctx)?;
-    let conclusion = if fn_decl.ensures.is_empty() {
-        Term::universe(0)
-    } else if fn_decl.ensures.len() == 1 {
-        proposition_to_term(fn_decl.ensures.iter().next().unwrap(), ctx)?
-    } else {
-        // Multiple ensures — wrap them in the And connective axiom
-        // (registered via tactic_elaborator::register_propositional_connectives).
-        let head = match ctx.get_axiom("__verum_kernel_And") {
-            Some(_) => crate::tactic_elaborator::resolve_apply_target(ctx, "__verum_kernel_And")?,
-            None => {
-                return Err(ElabError::UnsupportedExpression(
-                    "fn with multiple ensures clauses requires \
-                     register_propositional_connectives(&mut ctx) first"
-                        .into(),
-                ));
-            }
-        };
-        let mut iter = fn_decl.ensures.iter();
-        let mut acc = proposition_to_term(iter.next().unwrap(), ctx)?;
-        for clause in iter {
-            let next = proposition_to_term(clause, ctx)?;
-            acc = Term::App(
-                Box::new(Term::App(Box::new(head.clone()), Box::new(acc))),
-                Box::new(next),
-            );
-        }
-        acc
-    };
-    Ok(VerificationGoal::new(
-        hypotheses,
-        conclusion,
-        GoalSource::FnContract {
-            fn_name: fn_decl.name.name.to_string(),
-        },
+    Err(ElabError::UnsupportedExpression(
+        "source function contracts require exact signature, result and scope translation".into(),
     ))
 }
 
@@ -357,6 +297,11 @@ pub fn from_fn_decl(
 ///  base type (e.g. `Universe(0)` for the simplest case).
 /// - `predicate`: the predicate Expr that must hold.
 /// - `ty_name`: a human-readable refinement-type tag.
+///
+/// Low-level scope contract: `base_type_term` is in the outer binder frame;
+/// `ctx` must resolve the predicate in its intended inner frame, including
+/// the refinement binder. This function does not lift references for callers
+/// and does not certify a source-language refinement declaration.
 pub fn from_refinement(
     base_type_term: Term,
     predicate: &Expr,
@@ -373,40 +318,18 @@ pub fn from_refinement(
     ))
 }
 
-/// **High-level converter: `Type::Refined` + witness → VerificationGoal.**
-///
-/// This is the load-bearing function for the
-/// "specification ≡ refinement type ≡ proof obligation" unification
-/// (#160). Given:
-///
-///  - `refined_ty`: a `Type` whose `kind` is `TypeKind::Refined { base,
-///  predicate }`. Other type kinds return
-///  [`ElabError::UnsupportedExpression`] — the caller is expected
-///  to dispatch only refined types here.
-///  - `ty_name`: a human-readable name for the refinement (e.g.
-///  `"NonNegInt"` or an auto-generated tag for an inline `T{...}`).
-///
-/// Algorithm: extract the predicate expression from
-/// `refined_ty.kind = TypeKind::Refined { predicate, .. }`, hand it
-/// to [`from_refinement`] with `Universe(0)` as the base-type term
-/// (the placeholder encoding while a full Type-to-Term translator
-/// remains future work).
-///
-/// **Why this matters for #160**: by routing every refinement-type
-/// application through [`VerificationGoal`], the type checker, the
-/// SMT dispatcher, and the audit gate see *the same shape* whether
-/// the obligation came from a `requires` clause, an `ensures`
-/// clause, a theorem proposition, or a refinement-type predicate.
-/// One verification surface, four sources.
+/// Refuse a source refinement until its actual base type and binder are
+/// translated. The explicit-Term `from_refinement` API remains available for
+/// callers supplying a correctly scoped kernel base type and predicate.
 pub fn from_refined_type(
     refined_ty: &Type,
-    ty_name: &str,
-    ctx: &ElabContext,
+    _ty_name: &str,
+    _ctx: &ElabContext,
 ) -> Result<VerificationGoal, ElabError> {
     match &refined_ty.kind {
-        TypeKind::Refined { base: _, predicate } => {
-            from_refinement(Term::universe(0), &predicate.expr, ty_name, ctx)
-        }
+        TypeKind::Refined { .. } => Err(ElabError::UnsupportedExpression(
+            "source refinement base type and binder require exact kernel translation".into(),
+        )),
         other => Err(ElabError::UnsupportedExpression(format!(
             "from_refined_type: expected TypeKind::Refined, got {:?}",
             other,
@@ -463,6 +386,7 @@ pub fn from_obligation_source(
 
 /// Translate a sequence of clauses (`requires` or `ensures` Expr
 /// list) to a `Vec<Term>`, propagating the first translation error.
+#[cfg(test)]
 fn translate_clauses<'a>(
     clauses: impl Iterator<Item = &'a Expr>,
     ctx: &ElabContext,
@@ -742,7 +666,6 @@ mod tests {
 
     // ----- AST converter tests -----
 
-    use verum_ast::Literal;
     use verum_ast::decl::TheoremDecl;
     use verum_ast::expr::ExprKind;
     use verum_ast::ty::{Ident, Path, PathSegment};
@@ -760,25 +683,30 @@ mod tests {
         Expr::new(ExprKind::Path(path), span)
     }
 
-    fn bool_true_expr() -> Expr {
-        let span = Span::dummy();
-        Expr::new(ExprKind::Literal(Literal::bool(true, span)), span)
+    fn fixture_proposition() -> Expr {
+        path_expr("fixture_predicate")
+    }
+
+    fn fixture_context() -> ElabContext {
+        let mut ctx = ElabContext::new();
+        ctx.register_axiom("fixture_predicate", Term::universe(0));
+        ctx
     }
 
     #[test]
-    fn from_theorem_decl_with_true_proposition() {
+    fn from_theorem_decl_with_declared_proposition() {
         let span = Span::dummy();
         let theorem = TheoremDecl::new(
             Ident {
                 name: "trivial".into(),
                 span,
             },
-            bool_true_expr(),
+            fixture_proposition(),
             span,
         );
-        let ctx = ElabContext::new();
+        let ctx = fixture_context();
         let goal = from_theorem_decl(&theorem, TheoremKind::Theorem, &ctx).unwrap();
-        assert_eq!(goal.conclusion, Term::universe(0));
+        assert_eq!(goal.conclusion, Term::Var(0));
         assert_eq!(goal.hypothesis_count(), 0);
         assert!(matches!(goal.source, GoalSource::Theorem { ref name } if name == "trivial"));
     }
@@ -791,10 +719,10 @@ mod tests {
                 name: "helper".into(),
                 span,
             },
-            bool_true_expr(),
+            fixture_proposition(),
             span,
         );
-        let ctx = ElabContext::new();
+        let ctx = fixture_context();
         let goal = from_theorem_decl(&theorem, TheoremKind::Lemma, &ctx).unwrap();
         assert!(matches!(goal.source, GoalSource::Lemma { ref name } if name == "helper"));
     }
@@ -817,7 +745,7 @@ mod tests {
     }
 
     #[test]
-    fn from_theorem_decl_encodes_parameters_as_hypotheses() {
+    fn from_theorem_decl_refuses_untranslated_parameter_types() {
         // A theorem with generic params + value params should produce a
         // goal whose hypothesis count = generics + params + requires.
         use verum_ast::decl::{FunctionParam, FunctionParamKind};
@@ -829,7 +757,7 @@ mod tests {
                 name: "with_params".into(),
                 span,
             },
-            bool_true_expr(),
+            fixture_proposition(),
             span,
         );
         // Add 1 generic + 2 params + 1 requires clause = 4 hypotheses.
@@ -886,16 +814,12 @@ mod tests {
         theorem.params = params;
 
         let mut requires = List::new();
-        requires.push(bool_true_expr());
+        requires.push(fixture_proposition());
         theorem.requires = requires;
 
-        let ctx = ElabContext::new();
-        let goal = from_theorem_decl(&theorem, TheoremKind::Theorem, &ctx).unwrap();
-        assert_eq!(
-            goal.hypothesis_count(),
-            4,
-            "1 generic + 2 params + 1 requires should give 4 hypotheses",
-        );
+        let ctx = fixture_context();
+        assert!(matches!(from_theorem_decl(&theorem, TheoremKind::Theorem, &ctx),
+            Err(ElabError::UnsupportedExpression(_))));
     }
 
     #[test]
@@ -913,7 +837,7 @@ mod tests {
 
     #[test]
     fn translate_clauses_handles_empty_list() {
-        let ctx = ElabContext::new();
+        let ctx = fixture_context();
         let clauses: Vec<Expr> = vec![];
         let result = translate_clauses(clauses.iter(), &ctx).unwrap();
         assert!(result.is_empty());
@@ -921,9 +845,9 @@ mod tests {
 
     #[test]
     fn translate_clauses_propagates_first_error() {
-        let ctx = ElabContext::new();
+        let ctx = fixture_context();
         // path "undeclared" is not a registered axiom.
-        let clauses: Vec<Expr> = vec![bool_true_expr(), path_expr("undeclared")];
+        let clauses: Vec<Expr> = vec![fixture_proposition(), path_expr("undeclared")];
         match translate_clauses(clauses.iter(), &ctx) {
             Err(ElabError::UndeclaredApplyTarget(name)) => assert_eq!(name, "undeclared"),
             other => panic!("expected UndeclaredApplyTarget, got {:?}", other),
@@ -996,16 +920,12 @@ mod tests {
     }
 
     #[test]
-    fn from_refined_type_extracts_predicate() {
+    fn from_refined_type_refuses_untranslated_base_type() {
         let mut ctx = ElabContext::new();
         ctx.register_axiom("is_positive", Term::universe(0));
         let ty = refined_type_with_path_predicate("is_positive");
-        let goal = from_refined_type(&ty, "PosInt", &ctx).unwrap();
-        assert_eq!(goal.hypothesis_count(), 1, "base type as hypothesis");
-        assert_eq!(goal.conclusion, Term::Var(0));
-        assert!(
-            matches!(goal.source, GoalSource::Refinement { ref ty_name } if ty_name == "PosInt")
-        );
+        assert!(matches!(from_refined_type(&ty, "PosInt", &ctx),
+            Err(ElabError::UnsupportedExpression(_))));
     }
 
     #[test]
@@ -1015,7 +935,7 @@ mod tests {
             kind: TypeKind::Int,
             span,
         };
-        let ctx = ElabContext::new();
+        let ctx = fixture_context();
         match from_refined_type(&plain_int, "PlainInt", &ctx) {
             Err(ElabError::UnsupportedExpression(msg)) => {
                 assert!(msg.contains("expected TypeKind::Refined"), "got: {}", msg,);
@@ -1032,10 +952,10 @@ mod tests {
                 name: "trivial".into(),
                 span,
             },
-            bool_true_expr(),
+            fixture_proposition(),
             span,
         );
-        let ctx = ElabContext::new();
+        let ctx = fixture_context();
         let goal = from_obligation_source(
             ObligationSource::Theorem {
                 theorem: &theorem,
@@ -1052,17 +972,9 @@ mod tests {
         let mut ctx = ElabContext::new();
         ctx.register_axiom("is_positive", Term::universe(0));
         let ty = refined_type_with_path_predicate("is_positive");
-        let goal = from_obligation_source(
-            ObligationSource::RefinedType {
-                refined_ty: &ty,
-                ty_name: "PosInt",
-            },
-            &ctx,
-        )
-        .unwrap();
-        assert!(
-            matches!(goal.source, GoalSource::Refinement { ref ty_name } if ty_name == "PosInt")
-        );
+        let result = from_obligation_source(
+            ObligationSource::RefinedType { refined_ty: &ty, ty_name: "PosInt" }, &ctx);
+        assert!(matches!(result, Err(ElabError::UnsupportedExpression(_))));
     }
 
     // FunctionDecl tests deferred to integration suite — the type
@@ -1083,7 +995,7 @@ mod tests {
                 name: name.into(),
                 span,
             },
-            bool_true_expr(),
+            fixture_proposition(),
             span,
         );
         Item::new(ItemKind::Theorem(theorem), span)
@@ -1096,7 +1008,7 @@ mod tests {
             make_theorem_item("t2"),
             make_theorem_item("t3"),
         ];
-        let ctx = ElabContext::new();
+        let ctx = fixture_context();
         let surface = module_verification_surface(&items, &ctx);
         assert_eq!(surface.total_declarations, 3);
         assert_eq!(surface.rows.len(), 3);
@@ -1117,7 +1029,7 @@ mod tests {
                     name: name.into(),
                     span,
                 },
-                bool_true_expr(),
+                fixture_proposition(),
                 span,
             );
             Item::new(ItemKind::Lemma(theorem), span)
@@ -1128,7 +1040,7 @@ mod tests {
             make_lemma("l2"),
             make_theorem_item("t2"),
         ];
-        let ctx = ElabContext::new();
+        let ctx = fixture_context();
         let surface = module_verification_surface(&items, &ctx);
         let counts = surface.count_by_kind();
         assert_eq!(counts.get("theorem"), Some(&2));
@@ -1139,7 +1051,7 @@ mod tests {
     #[test]
     fn module_verification_surface_empty_module() {
         let items: Vec<Item> = vec![];
-        let ctx = ElabContext::new();
+        let ctx = fixture_context();
         let surface = module_verification_surface(&items, &ctx);
         assert_eq!(surface.total_declarations, 0);
         assert!(surface.rows.is_empty());
@@ -1149,7 +1061,7 @@ mod tests {
     #[test]
     fn verification_surface_serde_round_trip() {
         let items = vec![make_theorem_item("trivial")];
-        let ctx = ElabContext::new();
+        let ctx = fixture_context();
         let surface = module_verification_surface(&items, &ctx);
         let json = serde_json::to_string(&surface).unwrap();
         let restored: VerificationSurface = serde_json::from_str(&json).unwrap();

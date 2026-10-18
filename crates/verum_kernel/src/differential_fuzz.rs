@@ -1009,10 +1009,14 @@ mod tests {
     }
 
     #[test]
-    fn lift_universes_saturates_at_u32_max() {
+    fn lift_universes_preserves_exact_successors_above_u32_max() {
         let t = Term::universe(u32::MAX - 1);
         let lifted = lift_universes_in_term(&t, 100);
-        assert_eq!(lifted, Term::universe(u32::MAX));
+        let mut expected = crate::proof_checker::Level::Concrete(u32::MAX);
+        for _ in 0..99 {
+            expected = crate::proof_checker::Level::Succ(Box::new(expected));
+        }
+        assert_eq!(lifted, Term::universe_at(expected.normalize()));
     }
 
     #[test]

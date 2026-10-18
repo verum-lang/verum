@@ -1,58 +1,20 @@
-//! Meta-universe lift mechanism for the proof-term checker
-//! (#158 V1 — kernel reflection / Gödel-2nd workaround foundation).
+//! Exact universe translation for the proof-term checker.
 //!
-//! ## Architectural role
+//! At lift k, replace each level l by l+k and preserve term binders.
+//! This is a syntactic transformation followed by ordinary certificate
+//! verification, not a proof of the kernel's soundness or a construction
+//! of a stronger meta-theory. An integer offset introduces no large-cardinal
+//! assumption and does not bypass any incompleteness theorem.
 //!
-//! Verum's kernel-soundness claim is necessarily proven in a
-//! slightly stronger meta-theory than the kernel itself, per
-//! Gödel's Second Incompleteness Theorem. The structured escape
-//! is to run the kernel with one extra strongly-inaccessible
-//! cardinal `κ_meta` above the working universe.
+//! The mathematical translation preserves well-formed typing derivations.
+//! Algorithmic verdict stability is conditional on supported representations
+//! and successful checking: the concrete inference ceiling and conservative
+//! conversion can reject a translated input. A differential stability test
+//! is diagnostic evidence, not a proof of metatheoretic consistency.
 //!
-//! This module ships the **algorithmic foundation** for that
-//! escape: a [`shift_universes`] helper that walks a `Term` and
-//! shifts every `Universe(n)` by a fixed offset, and the
-//! [`check_with_universe_lift`] wrapper that runs the existing
-//! [`crate::proof_checker::check`] with the shifted term + type +
-//! context. Universe-stability under lift becomes the
-//! algorithmic invariant pinning meta-soundness.
-//!
-//! ## What "running in meta-mode" means
-//!
-//! At `lift = 0` (default), the checker runs at its native universe
-//! hierarchy — every `Universe(n)` means level `n`. At `lift = k`,
-//! every `Universe(n)` is interpreted as `Universe(n + k)` —
-//! semantically: the entire term lives in the universe `k` levels
-//! above the original. Closed certificates that type-check at
-//! `lift = 0` MUST also type-check at any `lift = k > 0`, because
-//! the universe hierarchy is monotone (HTT 1.4: `U_n ⊂ U_{n+1}`).
-//!
-//! Disagreement between `lift = 0` and `lift = k` would indicate
-//! either:
-//!   * A bug in the universe-shift implementation.
-//!   * A bug in the underlying type checker that's universe-
-//!     hierarchy-dependent in a way it shouldn't be.
-//!
-//! Either way, the audit gate catches it.
-//!
-//! ## Soundness invariant (the load-bearing claim)
-//!
-//!   For every closed certificate `cert` and lift `k ≥ 0`:
-//!     `check(cert) accepts ⟺ check_with_lift(cert, k) accepts`
-//!
-//! This is the **universe-stability invariant** — kernel
-//! verdicts must be invariant under monotone universe shift.
-//!
-//! ## Use cases
-//!
-//!   * `verum check --meta-mode` — run any proof at lift = 1,
-//!     verifying it survives the meta-level interpretation.
-//!   * `verum audit --meta-universe-stability` — walk the
-//!     canonical certificate library at lifts 0/1/2/3 and check
-//!     every certificate's verdict is stable.
-//!   * Differential testing across universe levels: a regression
-//!     where a proof passes at level 0 but fails at level 1
-//!     surfaces an unsound dependence on universe identity.
+//! `verify_certificate_with_lift` validates both the translated claimed type
+//! and its witness through the same `Certificate::verify` boundary as normal
+//! mode. `check_with_universe_lift` is the lower-level contextual judgment API.
 
 use crate::proof_checker::{Certificate, CheckError, Context, Term, check};
 
@@ -70,8 +32,9 @@ use crate::proof_checker::{Certificate, CheckError, Context, Term, check};
 /// type-checking; a term valid at level 0 is valid at any
 /// higher level.
 ///
-/// **Performance**: O(n) recursive walk. Pure transformation, no
-/// allocation beyond the rebuilt Term tree.
+/// **Performance**: a recursive walk plus level normalization. Compact
+/// offsets keep allocation independent of the numerical magnitude of `lift`;
+/// input syntax depth and normalization work still consume resources.
 pub fn shift_universes(term: &Term, lift: u32) -> Term {
     if lift == 0 {
         return term.clone();
@@ -166,11 +129,9 @@ pub fn shift_universes_in_context(ctx: &Context, lift: u32) -> Context {
 ///     canonical certificate library and pin universe-stability
 ///     across multiple lifts.
 ///
-/// **Soundness invariant**: for every closed certificate `cert`
-/// and lift `k ≥ 0`,
-///   `check(cert) accepts ⟺ check_with_universe_lift(cert, k) accepts`.
-/// Disagreements indicate either a shift-implementation bug or a
-/// kernel bug with unsound universe-identity dependence.
+/// This is a contextual type judgment, not the closed-certificate boundary.
+/// It assumes a well-formed context and expected type, like `check` itself.
+/// Use `verify_certificate_with_lift` for untrusted closed certificates.
 pub fn check_with_universe_lift(
     ctx: &Context,
     term: &Term,
@@ -189,8 +150,12 @@ pub fn verify_certificate_with_lift(
     cert: &Certificate,
     lift: u32,
 ) -> Result<(), CheckError> {
-    let ctx = Context::new();
-    check_with_universe_lift(&ctx, &cert.term, &cert.claimed_type, lift)
+    Certificate {
+        term: shift_universes(&cert.term, lift),
+        claimed_type: shift_universes(&cert.claimed_type, lift),
+        // Metadata is not evidence and the verifier does not inspect it.
+        metadata: Default::default(),
+    }.verify()
 }
 
 /// **The universe-stability check** — verify that a certificate's
