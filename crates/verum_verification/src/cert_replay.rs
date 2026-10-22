@@ -1,50 +1,13 @@
-//! SMT certificate replay — backend-independent cert format +
-//! multi-backend cross-check.
+//! SMT certificate inspection and backend replay contracts.
 //!
-//! ## Goal
+//! The kernel-only adapter checks integrity, syntax and registered rule names.
+//! It does not check the premises and conclusions of those rule applications.
+//! Its successful outcome is therefore `StructuralOnly`, never proof acceptance.
+//! An integrity hash is reproducibility evidence, not a logical trust anchor.
+//! Native proof terms are checked separately by `verum_proof`.
 //!
-//! Currently SMT certificates are replayed against a single
-//! kernel re-check. Task #81 strengthens this to **multi-backend
-//! cross-validation**: a cert produced by Z3 should be replayable
-//! by CVC5 (and vice-versa), and the kernel re-check decomposes
-//! the cert into elementary kernel-rule applications so the SMT
-//! solver becomes truly external — not part of the trusted
-//! computing base.
-//!
-//! Verum joins the small group of systems (Coq's SMTCoq, Lean's
-//! lean-smt) with this guarantee, but with **multi-backend +
-//! multi-format coverage**: a cert can be cross-checked by every
-//! available solver as a sanity gate.
-//!
-//! ## Architectural pattern
-//!
-//! Same single-trait-boundary pattern as the rest of the
-//! integration arc:
-//!
-//!  * [`CertFormat`] enum — backend-independent canonical format
-//!  plus the per-backend native formats Verum can ingest.
-//!  * [`SmtCertificate`] — typed certificate (format + theory +
-//!  conclusion + raw body + content hash).
-//!  * [`ReplayBackend`] enum — Z3 / CVC5 / Verit / OpenSmt /
-//!  Mathsat / Kernel-only.
-//!  * [`CertReplayEngine`] trait — single dispatch interface;
-//!  `replay(cert) -> ReplayVerdict`.
-//!  * Reference impls: [`MockReplayEngine`] (deterministic, for
-//!  tests), [`KernelOnlyReplayEngine`] (V0 reference — verifies
-//!  the cert's own integrity hash + structural shape), per-
-//!  backend stub impls returning `ToolMissing` until production
-//!  wiring.
-//!  * [`CrossBackendVerdict`] — typed multi-backend agreement
-//!  report. Used by `@verify(certified)`-style multi-solver
-//!  gates.
-//!
-//! ## Trust contract
-//!
-//! `KernelOnlyReplayEngine` is what makes SMT solvers external to
-//! the TCB: it checks the certificate's structural invariants
-//! using only the kernel rules + the on-disk hash. If a solver
-//! claims `unsat` but emits a cert whose hash doesn't match its
-//! payload, the kernel rejects without consulting the solver.
+//! `MockReplayEngine` is a test double. The production solver adapters remain
+//! unavailable until actual replay is wired; their names grant no authority.
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -61,8 +24,8 @@ use verum_common::Text;
 #[serde(rename_all = "snake_case")]
 pub enum CertFormat {
     /// Verum's canonical, backend-independent cert format. Every
-    /// production backend produces this. The kernel re-checker
-    /// decomposes the cert into elementary kernel-rule applications.
+    /// backend can describe this. The structural adapter decomposes
+    /// rule names without establishing the validity of their applications.
     VerumCanonical,
     /// Z3's native `(proof ...)` format.
     Z3Proof,
@@ -251,6 +214,12 @@ fn hex32(bytes: &[u8]) -> String {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind")]
 pub enum ReplayVerdict {
+    /// Integrity and syntax were inspected, but inference validity was not checked.
+    StructuralOnly {
+        backend: ReplayBackend,
+        elapsed_ms: u64,
+        detail: Option<Text>,
+    },
     /// The backend re-checked the cert and accepted it.
     Accepted {
         backend: ReplayBackend,
@@ -278,7 +247,8 @@ pub enum ReplayVerdict {
 impl ReplayVerdict {
     pub fn backend(&self) -> ReplayBackend {
         match self {
-            Self::Accepted { backend, .. }
+            Self::StructuralOnly { backend, .. }
+            | Self::Accepted { backend, .. }
             | Self::Rejected { backend, .. }
             | Self::ToolMissing { backend }
             | Self::Error { backend, .. } => *backend,
@@ -1306,7 +1276,7 @@ impl CertReplayEngine for KernelOnlyReplayEngine {
             });
         }
 
-        Ok(ReplayVerdict::Accepted {
+        Ok(ReplayVerdict::StructuralOnly {
             backend: ReplayBackend::KernelOnly,
             elapsed_ms: 0,
             detail: Some(Text::from(format!(
@@ -1464,6 +1434,7 @@ impl CrossBackendVerdict {
         let mut out: BTreeMap<&'static str, Vec<ReplayBackend>> = BTreeMap::new();
         for v in &self.per_backend {
             let kind = match v {
+                ReplayVerdict::StructuralOnly { .. } => "structural_only",
                 ReplayVerdict::Accepted { .. } => "accepted",
                 ReplayVerdict::Rejected { .. } => "rejected",
                 ReplayVerdict::ToolMissing { .. } => "missing",
@@ -1476,8 +1447,8 @@ impl CrossBackendVerdict {
 }
 
 /// Run a cert through every supplied engine and aggregate. The
-/// kernel-only engine is always invoked first (its acceptance is
-/// the structural-invariant baseline).
+/// kernel-only engine is always invoked first. Structural success cannot
+/// satisfy the proof-acceptance gate.
 pub fn cross_check(
     cert: &SmtCertificate,
     engines: &[Box<dyn CertReplayEngine>],
@@ -1618,10 +1589,11 @@ mod tests {
     // ----- KernelOnlyReplayEngine -----
 
     #[test]
-    fn kernel_only_accepts_well_formed_cert() {
+    fn kernel_only_inspects_well_formed_cert() {
         let e = KernelOnlyReplayEngine::new();
         let v = e.replay(&fixture_cert()).unwrap();
-        assert!(v.is_accepted());
+        assert!(!v.is_accepted());
+        assert!(matches!(v, ReplayVerdict::StructuralOnly { .. }));
     }
 
     #[test]
@@ -1743,7 +1715,11 @@ mod tests {
     fn cross_check_kernel_only_baseline_always_runs() {
         let v = cross_check(&fixture_cert(), &[]);
         assert_eq!(v.per_backend.len(), 1);
-        assert!(v.per_backend[0].is_accepted());
+        assert!(!v.per_backend[0].is_accepted());
+        assert!(matches!(
+            v.per_backend[0],
+            ReplayVerdict::StructuralOnly { .. }
+        ));
         assert_eq!(v.per_backend[0].backend(), ReplayBackend::KernelOnly);
     }
 
@@ -1755,8 +1731,11 @@ mod tests {
         ];
         let v = cross_check(&fixture_cert(), &engines);
         assert_eq!(v.per_backend.len(), 3); // kernel + Z3 + CVC5
-        assert!(v.all_available_accept());
-        assert_eq!(v.accept_count(), 3);
+        assert!(
+            !v.all_available_accept(),
+            "structural inspection is not proof replay"
+        );
+        assert_eq!(v.accept_count(), 2);
         assert_eq!(v.reject_count(), 0);
         assert_eq!(v.missing_count(), 0);
     }
@@ -1769,7 +1748,7 @@ mod tests {
         ];
         let v = cross_check(&fixture_cert(), &engines);
         assert!(!v.all_available_accept());
-        assert_eq!(v.accept_count(), 2); // kernel + Z3
+        assert_eq!(v.accept_count(), 1); // mock Z3 only
         assert_eq!(v.reject_count(), 1); // CVC5
     }
 
@@ -1780,8 +1759,11 @@ mod tests {
             Box::new(MockReplayEngine::new(ReplayBackend::Cvc5).unavailable()),
         ];
         let v = cross_check(&fixture_cert(), &engines);
-        assert!(v.all_available_accept(), "missing tool counts as NotRun");
-        assert_eq!(v.accept_count(), 2);
+        assert!(
+            !v.all_available_accept(),
+            "missing tool cannot promote structural inspection"
+        );
+        assert_eq!(v.accept_count(), 1);
         assert_eq!(v.missing_count(), 1);
     }
 
@@ -1809,7 +1791,8 @@ mod tests {
         ];
         let v = cross_check(&fixture_cert(), &engines);
         let groups = v.by_verdict();
-        assert_eq!(groups.get("accepted").map(|v| v.len()), Some(2)); // kernel + Z3
+        assert_eq!(groups.get("accepted").map(|v| v.len()), Some(1)); // mock Z3 only
+        assert_eq!(groups.get("structural_only").map(|v| v.len()), Some(1));
         assert_eq!(groups.get("rejected").map(|v| v.len()), Some(1)); // CVC5
         assert_eq!(groups.get("missing").map(|v| v.len()), Some(1)); // Verit
     }
@@ -1833,7 +1816,7 @@ mod tests {
         // rejects → consensus broken.
         assert!(
             !v.all_available_accept(),
-            "kernel-only check is the trust anchor — must reject tampered cert"
+            "integrity inspection must reject a changed body"
         );
     }
 
@@ -2000,7 +1983,7 @@ mod tests {
             body,
         );
         let v = KernelOnlyReplayEngine::new().replay(&cert).unwrap();
-        assert!(matches!(v, ReplayVerdict::Accepted { .. }));
+        assert!(matches!(v, ReplayVerdict::StructuralOnly { .. }));
     }
 
     #[test]
@@ -2213,36 +2196,36 @@ la_generic(s2; s1) -> (>= (+ x 1) 1)
     }
 
     #[test]
-    fn kernel_only_accepts_well_formed_open_smt_body() {
+    fn kernel_only_inspects_well_formed_open_smt_body() {
         let body = "s1 := assume   : (>= x 0)\n\
                     s2 := mp s1    : (>= x 0)";
         let cert = SmtCertificate::new(CertFormat::OpenSmt, "QF_LIA", "(>= x 0)", body);
         let v = KernelOnlyReplayEngine::new().replay(&cert).unwrap();
-        assert!(matches!(v, ReplayVerdict::Accepted { .. }));
+        assert!(matches!(v, ReplayVerdict::StructuralOnly { .. }));
     }
 
     #[test]
-    fn kernel_only_accepts_well_formed_mathsat_body() {
+    fn kernel_only_inspects_well_formed_mathsat_body() {
         let body = "assume(s1) -> (>= x 0)\nmp(s2; s1) -> (>= x 0)";
         let cert = SmtCertificate::new(CertFormat::Mathsat, "QF_LIA", "(>= x 0)", body);
         let v = KernelOnlyReplayEngine::new().replay(&cert).unwrap();
-        assert!(matches!(v, ReplayVerdict::Accepted { .. }));
+        assert!(matches!(v, ReplayVerdict::StructuralOnly { .. }));
     }
 
     #[test]
-    fn kernel_only_accepts_well_formed_canonical_with_known_rules() {
+    fn kernel_only_inspects_well_formed_canonical_with_known_rules() {
         let body = "; well-formed verum_canonical\n\
                     step s1 refl : (= x x)\n\
                     step s2 mp s1 : (>= x 0)";
         let cert = SmtCertificate::new(CertFormat::VerumCanonical, "QF_UF", "(>= x 0)", body);
         let v = KernelOnlyReplayEngine::new().replay(&cert).unwrap();
         match v {
-            ReplayVerdict::Accepted { detail, .. } => {
+            ReplayVerdict::StructuralOnly { detail, .. } => {
                 let d = detail.unwrap();
                 assert!(d.as_str().contains("steps=2"));
                 assert!(d.as_str().contains("all rules registered"));
             }
-            other => panic!("expected Accepted, got {:?}", other),
+            other => panic!("expected StructuralOnly, got {:?}", other),
         }
     }
 
@@ -2251,7 +2234,7 @@ la_generic(s2; s1) -> (>= (+ x 1) 1)
         // Pin: a hostile cert whose body is non-empty + hash-valid
         // but whose rule is unknown is REJECTED by the kernel-only
         // engine BEFORE any solver replay runs. This is the
-        // structural guarantee that makes solvers external to the TCB.
+        // structural hygiene; this does not make solvers external to the TCB.
         let body = "step s1 fake_solver_rule : (false_claim)";
         let cert = SmtCertificate::new(CertFormat::VerumCanonical, "QF_UF", "false_claim", body);
         let v = KernelOnlyReplayEngine::new().replay(&cert).unwrap();

@@ -18,6 +18,7 @@ name = "verum_kernel"
 path = "src/lib.rs"
 
 [dependencies]
+verum_proof = { path = "../verum_proof" }
 verum_common = { workspace = true }
 verum_ast = { workspace = true }
 thiserror = { workspace = true }

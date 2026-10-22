@@ -94,7 +94,7 @@ pub fn run_replay(
     };
     // Always run the kernel-only check first as the structural
     // baseline — even when the user asks for a specific backend.
-    // This is what makes solvers external to the TCB.
+    // Structural inspection does not remove the solver from the TCB.
     let kernel = KernelOnlyReplayEngine::new();
     let kernel_v = kernel
         .replay(&cert)
@@ -122,9 +122,12 @@ pub fn run_replay(
     }
 
     if !kernel_v.is_accepted() {
-        return Err(CliError::VerificationFailed(
-            "kernel-only structural check rejected the cert".into(),
-        ));
+        let message = if matches!(kernel_v, ReplayVerdict::StructuralOnly { .. }) {
+            "structural inspection completed; logical inference replay is not implemented by this adapter"
+        } else {
+            "certificate inspection failed; no proof authority was established"
+        };
+        return Err(CliError::VerificationFailed(message.into()));
     }
     if !chosen_v.is_accepted() && !matches!(chosen_v, ReplayVerdict::ToolMissing { .. }) {
         return Err(CliError::VerificationFailed(format!(
@@ -161,6 +164,12 @@ fn emit_replay_plain(
 
 fn print_verdict(prefix: &str, v: &ReplayVerdict) {
     match v {
+        ReplayVerdict::StructuralOnly { .. } => {
+            println!(
+                "{}— structural inspection only; inference validity not checked",
+                prefix
+            );
+        }
         ReplayVerdict::Accepted {
             elapsed_ms, detail, ..
         } => {
@@ -221,6 +230,9 @@ fn emit_replay_markdown(
 
 fn verdict_to_markdown(v: &ReplayVerdict) -> String {
     match v {
+        ReplayVerdict::StructuralOnly { .. } => {
+            "— structural inspection only; inference validity not checked".to_string()
+        }
         ReplayVerdict::Accepted {
             elapsed_ms, detail, ..
         } => format!(
@@ -331,12 +343,16 @@ fn emit_cross_plain(
 
 fn print_verdict_line(v: &ReplayVerdict) {
     let badge = match v {
+        ReplayVerdict::StructuralOnly { .. } => "?",
         ReplayVerdict::Accepted { .. } => "✓",
         ReplayVerdict::Rejected { .. } => "✗",
         ReplayVerdict::ToolMissing { .. } => "—",
         ReplayVerdict::Error { .. } => "!",
     };
     let detail = match v {
+        ReplayVerdict::StructuralOnly { .. } => {
+            "structural inspection only; inference validity not checked".to_string()
+        }
         ReplayVerdict::Accepted { elapsed_ms, .. } => format!("({}ms)", elapsed_ms),
         ReplayVerdict::Rejected { reason, .. } => reason.as_str().to_string(),
         ReplayVerdict::ToolMissing { .. } => "tool not on PATH".to_string(),

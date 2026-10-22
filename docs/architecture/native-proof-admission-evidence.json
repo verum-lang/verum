@@ -1,0 +1,42 @@
+{
+  "task": "T1772",
+  "baseline": "ce4776f8a7d4e6db0e0c62d4827ada7070ff2ccb",
+  "checks": {
+    "portable": [
+      "86 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.41s",
+      "0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+      "4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+      "2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.37s",
+      "0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+    ],
+    "kernel": [
+      "1302 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.25s"
+    ],
+    "smt_adapter": [
+      "58 passed; 0 failed; 0 ignored; 0 measured; 732 filtered out; finished in 0.00s"
+    ],
+    "smt_authority": [
+      "1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+    ]
+  },
+  "additional_checks": [
+    "portable all-target Clippy with -D warnings",
+    "compiler CLI cargo check with repository LLVM and no automatic precompile",
+    "check-internal-refs"
+  ],
+  "corrected_defects": [
+    "SMT structural inspection previously returned Accepted without checking inference validity",
+    "Exhausted weak-head normalization replaced the actual lambda domain by Universe(0)"
+  ],
+  "recovered_validation_failures": [
+    "macOS rejects RLIMIT_AS; worker policy now states and implements sampled RSS termination on macOS, OS address-space limits where supported",
+    "Private CLI checkout initially attempted unnecessary LLVM auto-build; stopped its process tree and used existing repository LLVM",
+    "Inherited native module documentation/closure lint errors corrected without suppressing Clippy"
+  ],
+  "existing_ignored_test": "cross_format_gate::tests::msfs_requires_all_five_formats \u2014 target lanes not implemented; not changed or counted as passed",
+  "boundaries": [
+    "Native judgment checking does not establish faithful MSFS source elaboration or prose alignment",
+    "Differential/property tests do not establish a universal soundness theorem",
+    "macOS RSS threshold is sampled, not a hard instantaneous memory cap"
+  ]
+}
