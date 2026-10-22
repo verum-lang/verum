@@ -1,69 +1,14 @@
-//! MSFS-grounded reflection tower for kernel meta-soundness.
+//! Legacy reflection-structure diagnostics.
 //!
-//! ## The actual mathematical situation
+//! The stage flags, finite index samples, universe budgets and bibliography in
+//! this module are inspectable data. They neither implement the cited category
+//! theory nor provide proofs of reflection, soundness or stabilization. A finite
+//! stability walk cannot establish a claim over every universe level.
 //!
-//! Naive proof-theoretic intuition treats the reflection tower as
-//! an unbounded ordinal hierarchy: REF^0 → REF^1 → REF^2 → … with
-//! each level a strictly stronger theory than the last (Feferman
-//! 1962 transfinite progressions, Pohlers 2009 ordinal analysis).
-//! That intuition is wrong for any classifier-grade meta-theory,
-//! and **MSFS** (Sereda 2026, *The Moduli Space of Formal Systems*)
-//! proves it.
-//!
-//! Two MSFS theorems collapse the tower:
-//!
-//!   * **Theorem 9.6 (Meta-classification stabilisation)**.  For
-//!     every `k ≥ 1`, the meta-iteration stack `𝔐^(Cls·k)` realises
-//!     the SAME `(∞,∞)`-theory as `𝔐^(Cls)`.  Iterated reflection
-//!     stabilises at the theory level; only the set-theoretic
-//!     universe ascends `κ_1 < κ_2 < ⋯`.  The two stacks are *not*
-//!     identified as set-theoretic objects but record the same
-//!     theory-moduli (Barwick–Schommer-Pries unicity).
-//!
-//!   * **Theorem 8.2 (Reflective tower boundedness)**.  For every
-//!     Rich-metatheory `S`,
-//!     `Con(reflective tower over S) = Con(S) + κ_inacc` —
-//!     exactly one additional inaccessible cardinal.  No
-//!     unbounded consistency-strength ascent is possible; the
-//!     tower's set-theoretic instantiation is bounded by ONE extra
-//!     strongly-inaccessible.
-//!
-//! Both theorems are machine-verified in the MSFS corpus:
-//!
-//!   * Theorem 9.6 → `09_meta_classification/theorems_9_3_9_4_9_6.vr`
-//!     dispatched via existing `kernel_truncate_to_level` +
-//!     `kernel_straightening_equivalence` intrinsics.
-//!   * Theorem 8.2 → `08_bypass_paths/theorems_8_1_to_8_8.vr`
-//!     reduces to Theorem 5.1 (AFN-T α).
-//!
-//! ## What the tower actually looks like
-//!
-//! Three structural facts (not five literature citations):
-//!
-//! | Stage             | Discharge route                                                |
-//! |-------------------|----------------------------------------------------------------|
-//! | `REF^0` — base    | per-rule footprint (zfc_self_recognition::kernel_meta_soundness_holds) |
-//! | `REF^≥1` — stable | Theorem 9.6(b) — same theory at every k≥1, universe-ascent only |
-//! | `REF^ω` — bounded | Theorem 8.2 — Con-ascent bounded by one extra κ_inacc          |
-//!
-//! Adding more "levels" (REF^2, REF^3, REF^4) is a category error
-//! given the MSFS facts: every k ≥ 1 IS REF^1 at the theory level.
-//! What changes between `k=1` and `k=2` is the Grothendieck
-//! universe of instantiation (`κ_1` → `κ_2`), not the theory.
-//!
-//! ## Why "no layering" is load-bearing
-//!
-//! Verum already ships full machine-verified MSFS Theorems 9.6 and
-//! 8.2 in the corpus, with `MetaStabilisationWitness` defined in
-//! `core/math/meta_cls.vr` and the underlying intrinsics
-//! (`kernel_truncate_to_level`, `kernel_straightening_equivalence`)
-//! wired in [`crate::intrinsic_dispatch`]. The kernel-side
-//! reflection tower must not duplicate citations — it must surface
-//! the SAME theorems' verdicts at the meta-soundness audit boundary.
-//!
-//! This module is intentionally thin: it indexes the existing MSFS
-//! infrastructure under the reflection-tower lens used by the
-//! kernel-discharge audit gate.
+//! `proof_verdict` is therefore always `StructuralOnly`; positive structural
+//! observations remain available separately. Mathematical certification requires
+//! an exact formal statement and native proof replay outside this diagnostic API.
+//! Historical citation labels below are provenance, not verified theorem status.
 
 use crate::intrinsic_dispatch::{IntrinsicValue, dispatch_intrinsic};
 use crate::zfc_self_recognition::{KernelRuleId, kernel_meta_soundness_holds, required_meta_theory};
@@ -72,31 +17,22 @@ use crate::zfc_self_recognition::{KernelRuleId, kernel_meta_soundness_holds, req
 // MSFS citation — bound to the corpus
 // =============================================================================
 
-/// MSFS results the reflection tower rests on.  Each variant
-/// carries a `corpus_path()` pointing at the machine-verified
-/// `.vr` file in the MSFS corpus where the theorem is proved.
-///
-/// **Naming convention.** Variants encoding MSFS theorem numbers
-/// (e.g. `MsfsTheorem_9_6_MetaStabilisation`) use underscores to
-/// preserve the published theorem index (9.6, 8.2, 5.1). The
-/// `non_camel_case_types` allow is intentional — the canonical
-/// citation form trumps Rust style here.
+/// Historical bibliography labels retained for diagnostic provenance.
+/// No path or theorem number is resolved to a verified proof by this module.
 #[allow(non_camel_case_types)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum MsfsCitation {
-    /// Per-rule footprint enumeration in
-    /// `verum_kernel::zfc_self_recognition` — the algorithmic
-    /// witness for `kernel_self_soundness_in_meta_universe`.
+    /// Declared per-rule footprint metadata.
     BaseFootprint,
-    /// MSFS Theorem 9.6 (Meta-classification stabilisation):
+    /// Historical claim labelled MSFS Theorem 9.6 (Meta-classification stabilisation):
     /// `𝔐^(Cls·k) ≃_2 𝔐^(Cls)` for every `k ≥ 1` (theory-level
     /// idempotence; set-theoretic universe-ascent).
     MsfsTheorem_9_6_MetaStabilisation,
-    /// MSFS Theorem 8.2 (Reflective tower boundedness):
+    /// Historical claim labelled MSFS Theorem 8.2 (Reflective tower boundedness):
     /// `Con(tower over S) = Con(S) + κ_inacc` — exactly one
     /// additional inaccessible.
     MsfsTheorem_8_2_ReflectiveTowerBoundedness,
-    /// MSFS Theorem 5.1 (AFN-T α — Boundary Lemma): the absolute
+    /// Historical claim labelled MSFS Theorem 5.1 (AFN-T α — Boundary Lemma): the absolute
     /// foundation stratum `𝓛_Abs` is empty.  The reflection tower
     /// CANNOT escape into `𝓛_Abs` because no Rich-metatheory
     /// admits a candidate satisfying (F_S) ∧ (Π_4) ∧ (Π_3-max)
@@ -117,8 +53,7 @@ impl MsfsCitation {
         }
     }
 
-    /// Path (relative to the MSFS corpus root) of the
-    /// machine-verified theorem file.
+    /// Historical path relative to the MSFS corpus root; not a proof lookup.
     pub fn corpus_path(&self) -> &'static str {
         match self {
             MsfsCitation::BaseFootprint => "kernel/zfc_self_recognition.rs",
@@ -142,17 +77,17 @@ impl MsfsCitation {
                  (kernel_meta_soundness_footprint)"
             }
             MsfsCitation::MsfsTheorem_9_6_MetaStabilisation => {
-                "MSFS Theorem 9.6 — Meta-classification stabilisation. \
+                "Historical unchecked claim: MSFS Theorem 9.6 — Meta-classification stabilisation. \
                  𝔐^(Cls·k) ≃_2 𝔐^(Cls) for k ≥ 1 (theory-level idempotence; \
                  set-theoretic universe-ascent only)"
             }
             MsfsCitation::MsfsTheorem_8_2_ReflectiveTowerBoundedness => {
-                "MSFS Theorem 8.2 — Reflective tower boundedness. \
+                "Historical unchecked claim: MSFS Theorem 8.2 — Reflective tower boundedness. \
                  Con(tower over S) = Con(S) + κ_inacc (exactly one extra \
                  strongly-inaccessible cardinal)"
             }
             MsfsCitation::MsfsTheorem_5_1_AfntAlpha => {
-                "MSFS Theorem 5.1 (AFN-T α — Boundary Lemma) — 𝓛_Abs = ∅. \
+                "Historical unchecked claim: MSFS Theorem 5.1 (AFN-T α — Boundary Lemma) — 𝓛_Abs = ∅. \
                  The absolute foundation stratum is empty: no Rich-metatheory \
                  admits a candidate satisfying (F_S) ∧ (Π_4) ∧ (Π_3-max). \
                  The reflection tower cannot escape into 𝓛_Abs."
@@ -162,30 +97,20 @@ impl MsfsCitation {
 }
 
 // =============================================================================
-// ReflectionStage — exactly three structural facts
+// ReflectionStage — four legacy claim descriptors
 // =============================================================================
 
-/// The structurally-distinct stages MSFS supports for the
-/// reflection tower. Naive proof-theory adds five-plus levels;
-/// MSFS Theorem 9.6 collapses all `k ≥ 1` to one theory, and
-/// Theorem 5.1 (AFN-T α) closes the boundary.
+/// Legacy stage descriptors. Their labels record mathematical claims, not
+/// proofs that those claims hold or that these descriptors exhaust reflection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReflectionStage {
     /// `REF^0` — the base level. Per-rule footprint over ZFC + 2·κ.
     Base,
-    /// `REF^≥1` — every finite k ≥ 1 instantiates the same
-    /// `(∞,∞)`-theory as `REF^1` (MSFS Theorem 9.6(b)). The
-    /// universe ascends `κ_k` with `k`; the theory does not.
+    /// Descriptor for the historical finite-stability claim.
     StableUnderUniverseAscent,
-    /// `REF^ω` — the limit. Set-theoretic instantiation bounded
-    /// by `Con(S) + κ_inacc` (MSFS Theorem 8.2). No unbounded
-    /// consistency-strength ascent.
+    /// Descriptor for the historical additional-universe bound claim.
     BoundedByOneInaccessible,
-    /// `REF^Abs` — the absolute boundary. By MSFS Theorem 5.1
-    /// (AFN-T α), `𝓛_Abs = ∅`: no extension of the reflection
-    /// tower can reach a stratum simultaneously formally definable,
-    /// non-reducible, and maximally generative.  This stage closes
-    /// the tower from above.
+    /// Descriptor for the historical absolute-boundary claim.
     AbsoluteBoundaryEmpty,
 }
 
@@ -210,7 +135,7 @@ impl ReflectionStage {
         }
     }
 
-    /// MSFS citation backing this stage's discharge.
+    /// Historical reference attached to this stage descriptor.
     pub fn citation(&self) -> MsfsCitation {
         match self {
             ReflectionStage::Base => MsfsCitation::BaseFootprint,
@@ -224,9 +149,7 @@ impl ReflectionStage {
         }
     }
 
-    /// Full canonical stage list — four structural facts: three
-    /// constructive (base, stable, bounded) plus one boundary
-    /// closure (absolute-empty by AFN-T α).
+    /// The four legacy descriptors in their stable report order.
     pub fn full_list() -> [ReflectionStage; 4] {
         [
             ReflectionStage::Base,
@@ -241,61 +164,29 @@ impl ReflectionStage {
 // Discharge predicates
 // =============================================================================
 
-/// Algorithmic discharge for `REF^0`: the per-rule footprint must
-/// be bounded by ZFC + 2 strongly-inaccessibles.  Thin delegation
-/// to the canonical [`kernel_meta_soundness_holds`] in
-/// `zfc_self_recognition` — single source of truth for the
-/// base-stage verdict.  Pre-consolidation, the predicate was
-/// duplicated here as a one-liner; post-consolidation it is the
-/// same function under a tower-aware name.
+/// Legacy numeric footprint predicate; the name does not grant proof authority.
 pub fn base_discharges() -> bool {
     kernel_meta_soundness_holds()
 }
 
-/// Algorithmic discharge for `REF^≥1`: per MSFS Theorem 9.6(b),
-/// every meta-iterate `𝔐^(Cls·k)` for `k ≥ 1` realises the same
-/// `(∞,∞)`-theory.  The kernel-side check reduces to: the base
-/// discharges (so REF^1 is well-founded) — universe-ascent does
-/// not change the theory-level discharge.
-///
-/// This is the load-bearing reduction: WITHOUT MSFS Theorem 9.6
-/// we would need a separate discharge per universe-index k. WITH
-/// it, the verdict is "REF^1 is the same theory as the base, so
-/// REF^≥1 reduces to base_discharges".
+/// Reuses the base footprint flag. No equivalence or stability theorem is proved.
 pub fn stable_under_universe_ascent_discharges() -> bool {
     base_discharges()
 }
 
-/// Algorithmic discharge for `REF^ω`: per MSFS Theorem 8.2, the
-/// set-theoretic instantiation is bounded by `Con(S) + κ_inacc`,
-/// i.e. the kernel rule footprint must be bounded by ZFC + 3
-/// strongly-inaccessibles (the standard 2 plus the one extra
-/// `κ_inacc` the theorem licenses).
-///
-/// For the current kernel rule roster (which uses `κ_1` and `κ_2`
-/// only — see [`required_meta_theory`]), this is vacuously true.
+/// Checks a declared finite budget against the legacy ceiling three.
+/// This arithmetic comparison does not bound the consistency strength of a theory.
 pub fn omega_bounded_discharges() -> bool {
     let max_inaccessible = max_inaccessible_required();
-    // The bound is 2 + 1 = 3 strongly-inaccessibles per Theorem 8.2.
+    // Legacy ceiling: 2 + 1 = 3; no consistency-strength theorem is checked.
     max_inaccessible <= 3
 }
 
-/// Algorithmic discharge for `REF^Abs`: per MSFS Theorem 5.1
-/// (AFN-T α — Boundary Lemma), the absolute foundation stratum
-/// `𝓛_Abs` is empty.  No reflection-tower extension can reach a
-/// candidate satisfying (F_S) ∧ (Π_4) ∧ (Π_3-max) simultaneously.
-///
-/// The discharge is unconditional: the theorem proves emptiness
-/// uniformly across every Rich-metatheory `S` and every
-/// categorical level `n ∈ ℕ ∪ {∞}` (five-axis absoluteness).
-/// The kernel's role is to surface the boundary at audit time —
-/// the actual mathematical content lives in MSFS §5–§7 + the
-/// machine-verified `theorem_5_1.vr` in the MSFS corpus.
+/// Legacy boundary-claim flag. The constant records an assertion; it neither
+/// constructs a proof nor validates the cited mathematical theorem.
 pub fn absolute_boundary_empty_discharges() -> bool {
-    // The boundary is uniformly empty by Theorem 5.1; the kernel
-    // never instantiates an `𝓛_Abs` candidate.  The discharge is
-    // load-bearing IF AND ONLY IF Theorem 5.1 holds in the corpus
-    // (which it does — machine-verified).
+    // Preserve the legacy assertion as observable data; proof_verdict does
+    // not allow this flag to authorize a theorem.
     true
 }
 
@@ -321,32 +212,11 @@ fn max_inaccessible_required() -> u32 {
 // Constructive MetaStabilisationWitness mirror
 // =============================================================================
 //
-// Rust-side mirror of the `MetaStabilisationWitness` protocol from
-// `core/math/meta_cls.vr`.  The Verum-side protocol carries three
-// boolean accessors:
-//   * `a_m_cls_is_meta_cls()` — (M1)..(M5) inheritance.
-//   * `b_pi_inf_inf_plus_1_equivalent()` — Π_(∞,∞) ↪ Π_(∞,∞+1)
-//     equivalence (Theorem A.7 stabilisation).
-//   * `b_universe_ascent_with_theory_idempotence()` — meta-iteration
-//     stabilises at the theory level while ascending κ_k.
-//
-// The mirror lets the kernel CONSTRUCT a witness for any
-// universe-index k and feed it through the MSFS-verified
-// `kernel_truncate_to_level` + `kernel_straightening_equivalence`
-// intrinsics. This is the load-bearing constructive content of
-// the reflection-tower audit: not just citation of Theorem 9.6
-// but actual algorithmic execution of its witness conditions.
-//
-// **Soundness**: the mirror's boolean accessors are computed from
-// the same kernel-rule footprint that drives `base_discharges`.
-// When the witness's three accessors all hold, the corresponding
-// Verum-side `msfs_theorem_9_6_meta_classification_stabilization`
-// theorem (machine-verified at `09_meta_classification/
-// theorems_9_3_9_4_9_6.vr`) discharges with the same verdict.
+// The historical names below are retained for compatibility with diagnostic
+// consumers. The underlying values are scalar descriptors, not proof objects.
 
-/// Constructive witness for `MetaStabilisationWitness` at a given
-/// universe-index `k`. Produced by [`synthesize_witness`]; consumed
-/// by [`discharge_at_universe_index`] and the audit gate.
+/// Legacy boolean descriptor at one universe index. Despite the historical
+/// type name, these flags are not categorical structures, maps or equivalences.
 #[derive(Debug, Clone)]
 pub struct ConstructiveMetaStabilisationWitness {
     /// The universe-index this witness instantiates. `k = 0` is
@@ -374,36 +244,21 @@ impl ConstructiveMetaStabilisationWitness {
     }
 }
 
-/// Synthesize a constructive witness at universe-index `k`.
-///
-/// **Construction**:
-///   * `a_m_cls_is_meta_cls_holds`: true iff the base footprint
-///     discharges (the kernel rules' meta-theoretic requirements
-///     fit ZFC + 2·κ).  This is what gives `𝔐^(Cls)` its (M1)–(M5)
-///     inheritance.
-///   * `b_pi_inf_inf_plus_1_equivalent`: true at every finite
-///     `k ≥ 1`. By MSFS Theorem A.7 (Bergner–Lurie stabilisation
-///     applied to accessible-presheaf categories), the inclusion
-///     `Π_(∞,∞) ↪ Π_(∞,∞+1)` is an equivalence at every finite
-///     iteration depth. The verdict is unconditional on `k` for
-///     `k ≥ 1`; `k = 0` is the base (no iteration applied yet).
-///   * `b_universe_ascent_with_theory_idempotence`: true at every
-///     `k ≥ 1`. MSFS Corollary 9.7 (`cor:iteration-closure`)
-///     records exactly this fact.
+/// Build the legacy descriptor: the declared footprint flag and two tests
+/// for a positive index. The construction does not prove the properties named
+/// by those flags.
 pub fn synthesize_witness(k: u32) -> ConstructiveMetaStabilisationWitness {
     ConstructiveMetaStabilisationWitness {
         universe_index: k,
         a_m_cls_is_meta_cls_holds: base_discharges(),
-        // Stabilisation kicks in at k ≥ 1; k = 0 is the base.
+        // Legacy descriptor convention: k >= 1 selects the positive-index branch.
         b_pi_inf_inf_plus_1_equivalent: k >= 1,
         b_universe_ascent_with_theory_idempotence: k >= 1,
     }
 }
 
-/// One stage's full discharge route, including which kernel
-/// intrinsics fired and the resulting verdicts. The audit-gate
-/// surfaces this so reviewers see the actual MSFS-verified
-/// dispatch chain, not just the theorem citation.
+/// Observations from a numeric dispatch chain at one index. Historical type
+/// names are retained for API compatibility; this value carries no proof term.
 #[derive(Debug, Clone)]
 pub struct ConstructiveDischarge {
     /// Universe-index this discharge applies to.
@@ -423,25 +278,13 @@ pub struct ConstructiveDischarge {
     pub holds: bool,
 }
 
-/// **Constructive discharge at a given universe-index `k`.**
-///
-/// The architecturally-fundamental capability: for any user-
-/// specified `k`, the kernel synthesizes a `MetaStabilisationWitness`,
-/// routes it through the MSFS-machine-verified dispatch chain
-/// (`kernel_truncate_to_level` + `kernel_straightening_equivalence`),
-/// and returns the resulting verdict with full provenance.
-///
-/// Audit consumers can call this at any `k ≥ 0` — `k = 0` returns
-/// the base footprint verdict; `k ≥ 1` returns the stabilised
-/// theory-level verdict via Theorem 9.6.  No production proof
-/// assistant currently exposes this constructive per-index discharge.
+/// Evaluate legacy scalar diagnostics at one index and preserve their outputs.
+/// The conjunction is a diagnostic flag, not a discharge of reflection or
+/// meta-classification obligations.
 pub fn discharge_at_universe_index(k: u32) -> ConstructiveDischarge {
     let witness = synthesize_witness(k);
 
-    // Dispatch through the existing MSFS-verified intrinsics. Both
-    // arms already exist in `intrinsic_dispatch` (lines 163, 305)
-    // and are exercised by the canonical-certificate audit — we
-    // reuse, not duplicate.
+    // These scalar intrinsics report numeric observations, not equivalences.
     let truncate = dispatch_intrinsic(
         "kernel_truncate_to_level",
         &[IntrinsicValue::Int(k as i64), IntrinsicValue::Int(0)],
@@ -480,16 +323,11 @@ pub fn discharge_at_universe_index(k: u32) -> ConstructiveDischarge {
 }
 
 // =============================================================================
-// Multi-level stability walk — recursive descent meta-meta-soundness
+// Finite descriptor comparison
 // =============================================================================
 
-/// Aggregate verdict from walking `discharge_at_universe_index`
-/// across `[0, max_lift]`.  Surfaces:
-///   * `max_walked` — highest level walked (== max_lift on success).
-///   * `all_stable` — true iff witness pattern is invariant for
-///     every k ≥ 1 (MSFS Theorem 9.6(b) idempotence).
-///   * `divergence_at` — first k where invariance broke (None when
-///     all_stable holds).
+/// Comparison of the descriptor flags at finitely many indices. It reports
+/// only the inspected interval, without a universally quantified conclusion.
 #[derive(Debug, Clone)]
 pub struct StabilityVerdict {
     /// Highest universe-ascent index `k` the walk reached.
@@ -504,25 +342,31 @@ pub struct StabilityVerdict {
 }
 
 impl StabilityVerdict {
-    /// True iff the walk completed and every level was stable.
-    pub fn is_load_bearing(&self) -> bool {
+    /// True iff the finite diagnostic walk completed without divergence.
+    /// This does not establish stability at all universe levels.
+    pub fn is_structurally_stable(&self) -> bool {
         self.all_stable && self.divergence_at.is_none()
+    }
+
+    /// The finite walk carries observations, not a universally quantified proof.
+    pub fn proof_verdict(&self) -> crate::verdict::VerificationVerdict {
+        use crate::verdict::{DischargeMethod, Evidence, VerificationVerdict};
+        VerificationVerdict::StructuralOnly {
+            method: DischargeMethod::MetaModeStability { max_lift: self.max_walked },
+            evidence: Evidence::from_summary("Finite reflection diagnostic without theorem replay")
+                .with("structurally_stable", self.is_structurally_stable().to_string()),
+        }
+    }
+
+    /// Compatibility query for proof consumers; structural stability cannot discharge a theorem.
+    pub fn is_load_bearing(&self) -> bool {
+        self.proof_verdict().is_discharged()
     }
 }
 
-/// **Walk multi-level stability up to `max_lift`.**
-///
-/// The recursive-descent meta-meta-soundness check.  For every
-/// `k ∈ [0, max_lift]`, computes [`discharge_at_universe_index`]
-/// and verifies the witness pattern is invariant for `k ≥ 1`
-/// (MSFS Theorem 9.6(b) idempotence — every meta-iteration of
-/// the classifier produces the same `(∞,∞)`-theory; only the
-/// universe ascends).
-///
-/// `max_lift = 0` walks only the base level; `max_lift = N` walks
-/// `0..=N`.  Default for the audit gate is `max_lift = 10` —
-/// sufficient to verify deep stability without inflating audit
-/// time.
+/// Compare descriptor flags for indices in `0..=max_lift` against index one.
+/// This finite computation does not establish mathematical idempotence,
+/// reflection, soundness, or stability beyond the sampled interval.
 pub fn walk_stability_up_to(max_lift: u32) -> StabilityVerdict {
     let canonical = discharge_at_universe_index(1);
     let canonical_summary = format!(
@@ -536,9 +380,9 @@ pub fn walk_stability_up_to(max_lift: u32) -> StabilityVerdict {
     for k in 0..=max_lift {
         let d = discharge_at_universe_index(k);
         // For k = 0 the witness's b_* fields are false by
-        // construction (REF^0 base; idempotence kicks in at k≥1).
+        // construction (the legacy positive-index convention).
         // For k ≥ 1 the witness pattern MUST equal the canonical
-        // (Theorem 9.6(b)).
+        // (the descriptor convention).
         if k >= 1 {
             let stable = d.witness.a_m_cls_is_meta_cls_holds
                 == canonical.witness.a_m_cls_is_meta_cls_holds
@@ -570,7 +414,7 @@ pub fn walk_stability_up_to(max_lift: u32) -> StabilityVerdict {
 // TowerReport — audit-gate carrier
 // =============================================================================
 
-/// One stage's discharge verdict + MSFS citation provenance.
+/// One stage descriptor, its legacy reference, and a numeric diagnostic flag.
 #[derive(Debug, Clone)]
 pub struct StageVerdict {
     /// Human-readable stage name (`"Base"`, `"Stable"`, …).
@@ -585,7 +429,8 @@ pub struct StageVerdict {
     pub discharges: bool,
 }
 
-/// Audit-gate report for the MSFS-grounded reflection tower.
+/// Structural observations and bibliography from the legacy reflection model.
+/// Proof authority is reported separately and is never inferred from these flags.
 #[derive(Debug, Clone)]
 pub struct ReflectionTowerReport {
     /// Per-stage discharge verdicts in canonical order.
@@ -593,41 +438,56 @@ pub struct ReflectionTowerReport {
     /// Maximum inaccessible-index required by any kernel rule.
     /// Drives the `REF^ω` bound check via Theorem 8.2.
     pub max_inaccessible_required: u32,
-    /// **Constructive per-index discharges** — sampled at
-    /// `k ∈ {0, 1, 2, 3, 7, 42}` to demonstrate the per-index
-    /// machine-verified dispatch.  The point isn't enumeration:
-    /// MSFS Theorem 9.6(b) proves all `k ≥ 1` produce the same
-    /// theory, so spot-checking at non-trivial indices exposes any
-    /// regression in the constructive witness synthesis.
+    /// Scalar observations sampled at `k ∈ {0, 1, 2, 3, 7, 42}`.
     pub sampled_constructive_discharges: Vec<ConstructiveDischarge>,
-    /// **Multi-level stability verdict** (default `max_lift = 10`).
-    /// Algorithmically walks `[0, max_lift]` confirming idempotence
-    /// — recursive-descent meta-meta-soundness.  Surfaces the first
-    /// divergence index when stability breaks.
+    /// Finite descriptor comparison, with the first observed divergence.
     pub stability_verdict: StabilityVerdict,
 }
 
 impl ReflectionTowerReport {
-    /// True iff every stage discharges, every sampled constructive
-    /// per-index discharge holds, AND multi-level stability
-    /// (recursive-descent meta-meta-soundness) holds.  Audit-gate
-    /// failure predicate.
-    pub fn is_load_bearing(&self) -> bool {
+    /// True iff the inspected flags are mutually consistent and positive.
+    /// This is a property of the diagnostic data, not of the cited theories.
+    pub fn is_structurally_consistent(&self) -> bool {
         self.stage_verdicts.iter().all(|v| v.discharges)
             && self
                 .sampled_constructive_discharges
                 .iter()
                 .all(|d| d.holds)
-            && self.stability_verdict.is_load_bearing()
+            && self.stability_verdict.is_structurally_stable()
     }
 
-    /// Number of stages that discharged.
+    /// No report component binds the cited theorem to a checked proof term.
+    pub fn proof_verdict(&self) -> crate::verdict::VerificationVerdict {
+        use crate::verdict::{DischargeMethod, Evidence, VerificationVerdict};
+        VerificationVerdict::StructuralOnly {
+            method: DischargeMethod::MetaModeStability { max_lift: self.stability_verdict.max_walked },
+            evidence: Evidence::from_summary("Reflection flags and references require statement-bound proof replay")
+                .with("structurally_consistent", self.is_structurally_consistent().to_string()),
+        }
+    }
+
+    /// True only for a proof discharge, never for numeric flags or citations.
+    pub fn is_load_bearing(&self) -> bool {
+        self.proof_verdict().is_discharged()
+    }
+
+    /// Number of stages with proof authority; this diagnostic API carries none.
     pub fn discharged_count(&self) -> usize {
+        0
+    }
+
+    /// Number of sampled indices with proof authority; this API carries none.
+    pub fn constructive_discharged_count(&self) -> usize {
+        0
+    }
+
+    /// Number of stages whose diagnostic predicate returned true.
+    pub fn structurally_positive_stage_count(&self) -> usize {
         self.stage_verdicts.iter().filter(|v| v.discharges).count()
     }
 
     /// Number of sampled per-index discharges that held.
-    pub fn constructive_discharged_count(&self) -> usize {
+    pub fn structurally_positive_sample_count(&self) -> usize {
         self.sampled_constructive_discharges
             .iter()
             .filter(|d| d.holds)
@@ -635,9 +495,8 @@ impl ReflectionTowerReport {
     }
 }
 
-/// Build the full reflection-tower report.  Walks the canonical
-/// 3-stage list, runs each stage's discharge predicate, and
-/// records the MSFS-citation provenance.
+/// Evaluate the four legacy stage descriptors, sample selected indices and
+/// record finite stability observations alongside their historical references.
 pub fn build_tower_report() -> ReflectionTowerReport {
     let stage_verdicts: Vec<StageVerdict> = ReflectionStage::full_list()
         .iter()
@@ -660,16 +519,12 @@ pub fn build_tower_report() -> ReflectionTowerReport {
             }
         })
         .collect();
-    // Sample non-trivial indices: 0 = base, 1 = first iteration,
-    // 2 / 3 / 7 / 42 = arbitrary higher levels demonstrating the
-    // theory-level idempotence (MSFS Theorem 9.6(b) — all k ≥ 1
-    // yield the same verdict modulo universe-ascent).
+    // Finite, reproducible sample of the scalar descriptor.
     let sampled_constructive_discharges: Vec<ConstructiveDischarge> = [0, 1, 2, 3, 7, 42]
         .iter()
         .map(|&k| discharge_at_universe_index(k))
         .collect();
-    // Multi-level stability walk — default max_lift = 10 walks
-    // [0, 10] verifying idempotence per MSFS Theorem 9.6(b).
+    // Compare only the finite interval [0, 10].
     let stability_verdict = walk_stability_up_to(10);
     ReflectionTowerReport {
         stage_verdicts,
@@ -761,15 +616,8 @@ mod tests {
     }
 
     #[test]
-    fn citations_point_to_machine_verified_corpus_paths() {
-        // Pin: every MSFS citation has a corpus_path that names the
-        // .vr file where the theorem is machine-verified.  Pre-fix
-        // the tower used generic Feferman/Pohlers/Schütte literature
-        // citations that pointed at NO machine-verified artefact —
-        // a load-bearing weakness, since the audit gate's claim
-        // "level k discharges via Pohlers 2009" was un-checkable.
-        // Post-fix every citation points at a MSFS corpus file the
-        // kernel can cross-reference.
+    fn citations_retain_historical_corpus_paths() {
+        // Bibliographic identifiers stay inspectable without proof authority.
         for c in [
             MsfsCitation::BaseFootprint,
             MsfsCitation::MsfsTheorem_9_6_MetaStabilisation,
@@ -819,11 +667,11 @@ mod tests {
     }
 
     #[test]
-    fn build_tower_report_is_load_bearing() {
+    fn build_tower_report_is_structurally_consistent() {
         let r = build_tower_report();
         assert_eq!(r.stage_verdicts.len(), 4);
-        assert!(r.is_load_bearing());
-        assert_eq!(r.discharged_count(), 4);
+        assert!(r.is_structurally_consistent());
+        assert_eq!(r.structurally_positive_stage_count(), 4);
     }
 
     #[test]
@@ -865,9 +713,7 @@ mod tests {
 
     #[test]
     fn synthesize_witness_idempotence_at_arbitrary_k() {
-        // Architectural pin: MSFS Theorem 9.6(b) idempotence — all
-        // k ≥ 1 produce the SAME witness (modulo universe-index).
-        // The witness fields b_* + a_m_cls match across k=1, 2, 7, 999.
+        // Compare the actual scalar flags at the selected indices.
         let w1 = synthesize_witness(1);
         let w2 = synthesize_witness(2);
         let w7 = synthesize_witness(7);
@@ -893,13 +739,10 @@ mod tests {
     }
 
     #[test]
-    fn discharge_at_universe_index_one_holds_constructively() {
-        // The headline architectural pin: k=1 must constructively
-        // discharge through the MSFS-machine-verified intrinsics.
-        // The existing kernel_truncate_to_level + kernel_straightening_equivalence
-        // dispatcher arms must agree with the synthesized witness.
+    fn discharge_at_universe_index_one_has_positive_diagnostics() {
+        // Positive scalar predicates must remain inspectable.
         let d = discharge_at_universe_index(1);
-        assert!(d.holds, "REF^1 constructive discharge must hold under current kernel");
+        assert!(d.holds, "REF^1 diagnostic predicate must hold under the legacy model");
         assert!(d.witness.holds());
         assert!(d.truncate_to_level_holds);
         assert!(d.straightening_equivalence_holds);
@@ -907,9 +750,7 @@ mod tests {
 
     #[test]
     fn discharge_at_arbitrary_universe_indices_are_idempotent() {
-        // Constructive idempotence: k=1, 2, 3, 7, 42, 999 all produce
-        // the SAME final verdict because the MSFS theorem proves
-        // theory-level invariance under universe-ascent.
+        // The selected numeric observations coincide.
         let verdicts: Vec<bool> = [1u32, 2, 3, 7, 42, 999]
             .iter()
             .map(|&k| discharge_at_universe_index(k).holds)
@@ -918,7 +759,7 @@ mod tests {
         for v in verdicts.iter().skip(1) {
             assert_eq!(
                 *v, first,
-                "all k ≥ 1 must agree (Theorem 9.6 theory-level idempotence)",
+                "selected numeric descriptors must agree",
             );
         }
     }
@@ -932,8 +773,8 @@ mod tests {
             "report must sample 6 universe-indices: 0, 1, 2, 3, 7, 42",
         );
         // Every sampled discharge must hold.
-        assert!(r.is_load_bearing());
-        assert_eq!(r.constructive_discharged_count(), 6);
+        assert!(r.is_structurally_consistent());
+        assert_eq!(r.structurally_positive_sample_count(), 6);
     }
 
     // ----- Multi-level stability walk -----
@@ -950,39 +791,30 @@ mod tests {
 
     #[test]
     fn walk_stability_holds_for_default_max_lift_10() {
-        // Headline soundness pin: walking [0, 10] under the current
-        // kernel rule roster verifies idempotence at every k≥1.
-        // MSFS Theorem 9.6(b) holds constructively.
+        // The selected finite sample must be reported accurately.
         let v = walk_stability_up_to(10);
-        assert!(v.is_load_bearing(), "stability walk must hold; got {:?}", v);
+        assert!(v.is_structurally_stable(), "stability walk must hold; got {:?}", v);
         assert_eq!(v.max_walked, 10);
         assert!(v.divergence_at.is_none());
     }
 
     #[test]
     fn walk_stability_at_arbitrary_high_lift() {
-        // Pin: walking up to 100 still holds — Theorem 9.6(b) is
-        // unbounded in finite k.  No divergence at any depth.
+        // Extend the finite diagnostic sample; no universal claim follows.
         let v = walk_stability_up_to(100);
-        assert!(v.is_load_bearing());
+        assert!(v.is_structurally_stable());
     }
 
     #[test]
     fn build_tower_report_includes_stability_verdict() {
         let r = build_tower_report();
-        assert!(r.stability_verdict.is_load_bearing());
+        assert!(r.stability_verdict.is_structurally_stable());
         assert_eq!(r.stability_verdict.max_walked, 10);
     }
 
     #[test]
     fn architectural_pin_msfs_grounding_not_generic_proof_theory() {
-        // Documentation pin: every reflection-stage citation must be
-        // an MSFS-internal theorem (or the base-footprint algorithm),
-        // not a generic proof-theory reference (Feferman 1962,
-        // Pohlers 2009, Beklemishev 2003, Schütte 1965). The
-        // MSFS-grounded surface uses the corpus's machine-verified
-        // theorems (9.6 + 8.2) which already cover the full tower
-        // semantics.
+        // Preserve provenance labels, independently of proof status.
         for stage in ReflectionStage::full_list() {
             let c = stage.citation();
             let path = c.corpus_path();

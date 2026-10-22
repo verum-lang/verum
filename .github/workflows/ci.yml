@@ -329,6 +329,12 @@ jobs:
           -p verum_diagnostics -p verum_error -p verum_protocol_types
           -p verum_fast_parser
 
+      # T1774: this targeted kernel boundary is independent of the legacy
+      # architectural-attestation tests excluded from the broad pure-tier job.
+      - name: Diagnostic evidence cannot authorize proofs
+        timeout-minutes: 5
+        run: cargo test --locked -p verum_kernel --test diagnostic_proof_authority
+
       - name: Portable native proof replay and process isolation
         timeout-minutes: 5
         run: cargo test --locked -p verum_proof --features process
@@ -714,6 +720,10 @@ jobs:
       - name: Project run tier selection
         timeout-minutes: 5
         run: cargo test --locked --release -p verum_cli --test run_manifest_tier
+
+      - name: Audit CLI proof authority
+        timeout-minutes: 5
+        run: cargo test --locked --release -p verum_cli --test audit_proof_authority
 
       # T0927: `verum check` answered core/logic/kripke.vr with 0 errors on
       # some runs and 20 on others, from one binary on one unedited file, and

@@ -1,47 +1,11 @@
-//! Kernel intrinsic dispatch — string-name → kernel-function bridge.
+//! Legacy diagnostic intrinsic dispatch: names and scalar arguments to observations.
 //!
-//! ## What this delivers
-//!
-//! The 15 ∞-cat + foundation kernel modules
-//! (yoneda, cartesian_fibration, adjoint_functor, whitehead,
-//! reflective_subcategory, limits_colimits, truncation,
-//! factorisation, pronk_fractions, infinity_topos,
-//! zfc_self_recognition, godel_coding, tactics_industrial,
-//! cross_format_gate, mechanisation_roadmap) ship as typed Rust
-//! APIs. Downstream callers — the compiler's elaborator, the proof-
-//! body verifier, audit tooling — need a **uniform string-name
-//! dispatch** so a `.vr` `apply kernel_grothendieck_construction(...)`
-//! can be translated into a kernel function call.
-//!
-//! This module ships:
-//!
-//! 1. [`IntrinsicValue`] — a small typed enum carrying the
-//! argument and result shapes the kernel intrinsics consume
-//! (`Bool`, `Int`, `Text`, `OrdinalLevel`, `WitnessFlag`).
-//! 2. [`dispatch_intrinsic`] — the single entry point. Given a
-//! `kernel_*` name and an argument list, returns the kernel's
-//! result as another `IntrinsicValue`.
-//! 3. [`available_intrinsics`] — enumeration of dispatchable names
-//! for diagnostics + `verum audit --kernel-intrinsics`.
-//!
-//! current surface ships the **decision-predicate intrinsics** — the
-//! Boolean witness flags that `core/proof/kernel_bridge.vr`'s
-//! `kernel_*() -> Bool` axioms ultimately resolve to. V1 promotion
-//! will surface the typed-record intrinsics (returning
-//! `GrothendieckConstruction` etc. as opaque handle IDs).
-//!
-//! ## What this UNBLOCKS
-//!
-//! - `core/proof/kernel_bridge.vr` axioms become **functional**
-//! instead of tautological — their `ensures` clauses bind to
-//! [`dispatch_intrinsic`] outputs at proof-check time.
-//! - The compiler's `@framework_axiom` admission for `kernel_*`
-//! names can validate *what* the kernel actually computes,
-//! replacing the V0 trust-the-name pattern with a V1
-//! re-checkable witness.
-//! - `verum audit --kernel-intrinsics` produces a structured
-//! listing of every kernel-callable name + its current
-//! decidability status.
+//! These callbacks compute boolean/integer properties or attach references. Their
+//! input and output types carry no exact logical judgment or native proof term.
+//! `Computed` and `Cited` describe provenance, not proof authority: both map to
+//! `VerificationVerdict::StructuralOnly` through `IntrinsicValue::proof_verdict`.
+//! A positive result must never discharge an arbitrary theorem or axiom. Native
+//! proof certification uses statement-bound replay in `verum_proof`.
 
 use serde::{Deserialize, Serialize};
 
@@ -83,25 +47,16 @@ pub enum IntrinsicValue {
     Unit,
 }
 
-/// What stands behind a [`IntrinsicValue::Decision`].
-///
-/// The trust base of a proof kernel is only meaningful if it is
-/// legible: an audit that reports "40 discharged" without saying how
-/// many were executed and how many were taken on citation is
-/// reporting a number, not a status. Two states are enough and they
-/// are exhaustive — either this kernel ran the check that decides the
-/// question, or it is relying on something outside itself, in which
-/// case it must say what.
+/// Provenance of a diagnostic decision, independent of proof authority.
+/// Neither variant contains a checked proof term for the caller's proposition.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum Evidence {
     /// The kernel executed the check that decides this verdict.
     #[default]
     Computed,
-    /// Accepted on a proof that lives outside this kernel — a
-    /// published result, a foreign prover's theorem, or a Verum-side
-    /// lemma the kernel does not re-check here. `source` names it;
-    /// an empty source is rejected by `cited`.
+    /// Reference to an external claim or unchecked Verum lemma. This is
+    /// bibliography, not acceptance of its statement or proof.
     Cited {
         /// Where the proof actually lives.
         source: String,
@@ -124,6 +79,27 @@ impl Evidence {
 }
 
 impl IntrinsicValue {
+    /// Classify the proof authority of this diagnostic. Intrinsic arguments and
+    /// citation text do not contain a statement-bound native proof term. Even
+    /// `holds: true` therefore remains structural evidence. Use native judgment
+    /// replay to establish a proposition; do not convert this flag into a proof.
+    pub fn proof_verdict(&self, name: &'static str) -> crate::verdict::VerificationVerdict {
+        use crate::verdict::{DischargeMethod, Evidence, VerificationVerdict};
+        let mut evidence = Evidence::from_summary("Intrinsic observation without statement-bound proof replay");
+        if let Some(value) = self.as_bool() {
+            evidence = evidence.with("diagnostic_holds", value.to_string());
+        }
+        if let Self::Decision { evidence: provenance, reason, .. } = self {
+            evidence = evidence.with("provenance", provenance.tag()).with("reason", reason);
+            if let crate::intrinsic_dispatch::Evidence::Cited { source } = provenance {
+                evidence = evidence.with("citation", source);
+            }
+        }
+        VerificationVerdict::StructuralOnly {
+            method: DischargeMethod::KernelIntrinsic { name }, evidence,
+        }
+    }
+
     /// Extract the decision verdict when the value carries one.
     /// Returns `Some(b)` for `Bool(b)` and the `holds` field of
     /// `Decision { holds, .. }`; `None` otherwise.

@@ -7068,7 +7068,7 @@ pub fn audit_apply_graph_with_format(format: AuditFormat) -> Result<()> {
     for (theorem_name, source_path) in &theorem_sources {
         let comp = walk_transitive(&graph, theorem_name, MAX_DEPTH);
         let load_bearing = comp.is_l4_load_bearing();
-        if !load_bearing {
+        if !comp.has_resolved_dependencies() {
             leaking_theorems += 1;
         }
         rows.push(ApplyGraphRow {
@@ -7081,6 +7081,8 @@ pub fn audit_apply_graph_with_format(format: AuditFormat) -> Result<()> {
             framework_axiom: comp.framework_axiom,
             placeholder_axiom: comp.placeholder_axiom,
             unresolved: comp.unresolved,
+            dependencies_resolved: comp.has_resolved_dependencies(),
+            proof_status: comp.proof_verdict().tag(),
             load_bearing,
             placeholder_leaves: comp
                 .leaves
@@ -7102,6 +7104,9 @@ pub fn audit_apply_graph_with_format(format: AuditFormat) -> Result<()> {
     let payload = serde_json::json!({
         "schema_version": 1,
         "command": "audit-apply-graph",
+        "proof_status": "structural_only",
+        "load_bearing": false,
+        "unverified_theorems": rows.len(),
         "modules_scanned": parsed_files,
         "modules_skipped": skipped_files,
         "theorems_walked": rows.len(),
@@ -7120,13 +7125,10 @@ pub fn audit_apply_graph_with_format(format: AuditFormat) -> Result<()> {
         }
     }
 
-    if leaking_theorems > 0 {
+    if !rows.is_empty() {
         return Err(crate::error::CliError::VerificationFailed(format!(
-            "apply-graph: {} theorem(s) have non-L4 transitive apply-chains \
-             (placeholder_axiom or unresolved leaves) — chain leaks listed in \
-             {}",
-            leaking_theorems,
-            json_path.display(),
+            "apply-graph: {} theorem(s) require proof replay; {} have unresolved or placeholder dependencies — see {}",
+            rows.len(), leaking_theorems, json_path.display(),
         )));
     }
     Ok(())
@@ -7141,10 +7143,10 @@ struct ApplyGraphRow {
     framework_axiom: usize,
     placeholder_axiom: usize,
     unresolved: usize,
+    dependencies_resolved: bool,
+    proof_status: &'static str,
     load_bearing: bool,
- /// Empty when `load_bearing == true`. Otherwise lists every
- /// leaf-class hit that breaks the L4 property, with the chain
- /// of intermediate symbols leading to it.
+ /// Placeholder or unresolved dependency chains, independently of proof status.
     placeholder_leaves: Vec<ApplyGraphLeakHit>,
 }
 
@@ -7201,16 +7203,16 @@ fn print_apply_graph_plain(
     );
     if leaking_theorems == 0 {
         println!();
-        println!("  ✓ all theorems are L4 load-bearing — every transitive leaf is");
-        println!("    kernel_strict or framework_axiom (no placeholders, no unresolveds).");
+        println!("  All dependency names resolve; proof status remains structural_only.");
+        println!("  Kernel prefixes and framework citations do not verify proof applications.");
         return;
     }
     println!();
     println!(
-        "  ✗ {} theorem(s) have non-L4 transitive chains:",
+        "  {} theorem(s) have unresolved or placeholder dependencies; all require proof replay:",
         leaking_theorems,
     );
-    for row in rows.iter().filter(|r| !r.load_bearing) {
+    for row in rows.iter().filter(|r| !r.dependencies_resolved) {
         println!("    - {} (in {})", row.theorem, row.source.display(),);
         println!(
             "        {} kernel_strict · {} framework · {} placeholder · {} unresolved",
@@ -10911,7 +10913,6 @@ fn render_kernel_discharge_json(
     files_scanned: usize,
     files_parsed: usize,
     files_skipped: usize,
-    discharge_count: usize,
     unrecognised_count: usize,
     cites: &[DischargeCite],
     dep_listings: &std::collections::BTreeMap<
@@ -10921,11 +10922,14 @@ fn render_kernel_discharge_json(
     theorem_sources: &std::collections::BTreeMap<String, PathBuf>,
 ) -> String {
     let mut out = String::from("{\n");
-    out.push_str("  \"schema_version\": 2,\n");
+    out.push_str("  \"schema_version\": 3,\n");
     out.push_str(&format!("  \"files_scanned\": {},\n", files_scanned));
     out.push_str(&format!("  \"files_parsed\": {},\n", files_parsed));
     out.push_str(&format!("  \"files_skipped\": {},\n", files_skipped));
-    out.push_str(&format!("  \"discharge_count\": {},\n", discharge_count));
+    // Recognition/citation is useful provenance, never a theorem certificate.
+    out.push_str("  \"discharge_count\": 0,\n");
+    out.push_str("  \"proof_status\": \"structural_only\",\n");
+    out.push_str(&format!("  \"citation_count\": {},\n", cites.len()));
     out.push_str(&format!(
         "  \"unrecognised_count\": {},\n",
         unrecognised_count
@@ -10999,18 +11003,10 @@ fn render_kernel_discharge_json(
     out
 }
 
-/// `verum audit --kernel-discharged-axioms` — walks every `.vr` file in the
-/// project, finds every `@kernel_discharge("<intrinsic_name>")` attribute,
-/// and verifies that every cited dispatcher name appears in
-/// `verum_kernel::intrinsic_dispatch::available_intrinsics()`.
-///
-/// This is the **machine-checked cross-link** between the host stdlib's
-/// paper-cited `@axiom` declarations and the algorithmic V0 kernel surfaces:
-/// when an axiom carries `@kernel_discharge(...)`, we audit-prove (a) the
-/// named dispatcher exists, (b) the trusted-base-shrinkage gain is
-/// observable in the report.
-///
-/// Exits non-zero on any unmatched citation.
+/// Inspect `@kernel_discharge` references and their provenance. Recognition of
+/// an intrinsic does not establish the annotated statement. Reports preserve
+/// all citations, count zero proof discharges, and fail the proof gate whenever
+/// such obligations remain without statement-bound replay.
 pub fn audit_kernel_discharged_axioms(format: AuditFormat) -> Result<()> {
     use verum_ast::expr::ExprKind;
     use verum_ast::literal::{LiteralKind, StringLit};
@@ -11200,7 +11196,6 @@ pub fn audit_kernel_discharged_axioms(format: AuditFormat) -> Result<()> {
         vr_files.len(),
         parsed_files,
         skipped_files,
-        total,
         unrecognised,
         &cites,
         &dep_listings,
@@ -11222,9 +11217,9 @@ pub fn audit_kernel_discharged_axioms(format: AuditFormat) -> Result<()> {
             );
             for cite in &cites {
                 let status = if cite.recognised {
-                    "✓ ok"
+                    "structural only"
                 } else {
-                    "✗ MISSING"
+                    "missing intrinsic"
                 };
                 println!(
                     "  {:<48}  {:<46}  {}",
@@ -11275,11 +11270,10 @@ pub fn audit_kernel_discharged_axioms(format: AuditFormat) -> Result<()> {
         }
     }
 
-    if unrecognised > 0 || !malformed.is_empty() {
+    if total > 0 || !malformed.is_empty() {
         return Err(crate::error::CliError::VerificationFailed(format!(
-            "@kernel_discharge audit: {} unrecognised + {} malformed citations",
-            unrecognised,
-            malformed.len()
+            "@kernel_discharge audit: {} citations require statement-bound proof replay; {} unrecognised + {} malformed",
+            total, unrecognised, malformed.len()
         )));
     }
     Ok(())
@@ -13743,22 +13737,14 @@ fn resolve_bare_against_cog_ns(
 // Reflection-tower audit (#158) — Feferman 1989 / Pohlers / Beklemishev
 // =============================================================================
 
-/// `verum audit --reflection-tower` — walks every level in
-/// `verum_kernel::reflection_tower::reflection_tower()`, runs each
-/// level's algorithmic discharge, and surfaces the citation +
-/// verdict. Fails the gate if any finite level fails to discharge.
-///
-/// **Architectural role**: the base meta-soundness audit
-/// (`--self-recognition`) is rank-1 (kernel sound in
-/// Verum + κ_meta). This gate exposes the full ordinal-indexed
-/// reflection tower (REF^0..REF^4 + REF^ω) with each level's
-/// published-proof citation. The tower's stability (every finite
-/// level discharges) is the load-bearing soundness contract.
+/// Inspect legacy reflection flags and bibliography without granting proof
+/// authority. Structural consistency is reported separately. This proof gate
+/// remains unsatisfied until its actual mathematical obligations are replayed.
 pub fn audit_reflection_tower_with_format(format: AuditFormat) -> Result<()> {
     use verum_kernel::reflection_tower::build_tower_report;
 
     if matches!(format, AuditFormat::Plain) {
-        ui::step("Reflection tower — MSFS-grounded meta-soundness");
+        ui::step("Reflection tower — structural diagnostics (no proof replay)");
     }
 
     let report = build_tower_report();
@@ -13777,7 +13763,9 @@ pub fn audit_reflection_tower_with_format(format: AuditFormat) -> Result<()> {
                 "stage_tag": v.stage_tag,
                 "msfs_citation": v.citation_tag,
                 "verum_corpus_path": v.corpus_path,
-                "discharges": v.discharges,
+                "diagnostic_holds": v.discharges,
+                "proof_status": "structural_only",
+                "discharges": false,
             })
         })
         .collect();
@@ -13796,7 +13784,9 @@ pub fn audit_reflection_tower_with_format(format: AuditFormat) -> Result<()> {
                 },
                 "kernel_truncate_to_level_holds": d.truncate_to_level_holds,
                 "kernel_straightening_equivalence_holds": d.straightening_equivalence_holds,
-                "holds": d.holds,
+                "diagnostic_holds": d.holds,
+                "proof_status": "structural_only",
+                "discharges": false,
             })
         })
         .collect();
@@ -13824,15 +13814,19 @@ pub fn audit_reflection_tower_with_format(format: AuditFormat) -> Result<()> {
                 "zfc_axioms": req.zfc_axioms.iter().map(|a| a.name()).collect::<Vec<_>>(),
                 "inaccessibles": req.inaccessibles.iter().map(|k| k.name()).collect::<Vec<_>>(),
                 "citation": req.citation.as_str(),
-                "provable_in_zfc_plus_2_inacc": is_zfc_plus_2_inacc_provable(*rule),
+                "declared_footprint_within_ceiling": is_zfc_plus_2_inacc_provable(*rule),
             })
         })
         .collect();
 
     let payload = serde_json::json!({
-        "schema_version": 3,
+        "schema_version": 4,
         "kernel_version": env!("CARGO_PKG_VERSION"),
-        "discipline": "kernel_reflection_tower_msfs_grounded",
+        "discipline": "reflection_structure_inspection",
+        "proof_status": report.proof_verdict().tag(),
+        "structurally_consistent": report.is_structurally_consistent(),
+        "structurally_positive_stage_count": report.structurally_positive_stage_count(),
+        "structurally_positive_sample_count": report.structurally_positive_sample_count(),
         "msfs_paper": "Sereda 2026 — The Moduli Space of Formal Systems",
         "load_bearing": report.is_load_bearing(),
         "max_inaccessible_required": report.max_inaccessible_required,
@@ -13843,7 +13837,7 @@ pub fn audit_reflection_tower_with_format(format: AuditFormat) -> Result<()> {
  // Per-rule meta-theoretic footprint (subsumes the legacy
  // `audit --self-recognition` payload as a sub-view).
         "base_footprint": {
-            "provable_in_zfc_plus_2_inacc": provable_in_zfc_plus_2_inacc,
+            "declared_footprint_within_ceiling": provable_in_zfc_plus_2_inacc,
             "zfc_axioms_required": zfc_required.iter().map(|a| a.name()).collect::<Vec<_>>(),
             "inaccessibles_required": inacc_required.iter().map(|k| k.name()).collect::<Vec<_>>(),
             "rules": per_rule_footprint,
@@ -13857,16 +13851,15 @@ pub fn audit_reflection_tower_with_format(format: AuditFormat) -> Result<()> {
     match format {
         AuditFormat::Plain => {
             println!();
-            println!("Reflection tower — MSFS-grounded meta-soundness");
+            println!("Reflection tower — structural diagnostics (no proof replay)");
             println!("───────────────────────────────────────────────");
             println!(
-                "  Four structural facts (MSFS Theorems 9.6 + 8.2 + 5.1; \
-                 three interior stages + AFN-T α boundary):",
+                "  Legacy reflection claims and cited references; these observations are not certificates:",
             );
             println!();
             println!(
                 "  {:<10}  {:<9}  {:<48}  Corpus path",
-                "Stage", "Discharge", "MSFS citation",
+                "Stage", "Diagnostic", "Reference",
             );
             println!(
                 "  {}  {}  {}  {}",
@@ -13885,7 +13878,7 @@ pub fn audit_reflection_tower_with_format(format: AuditFormat) -> Result<()> {
             }
             println!();
             println!(
-                "  Constructive per-index discharges (sampled at k = 0, 1, 2, 3, 7, 42):",
+                "  Numeric observations (sampled at k = 0, 1, 2, 3, 7, 42):",
             );
             println!(
                 "  {:<6}  {:<7}  {:<14}  {:<14}  {:<14}  {}",
@@ -13921,15 +13914,12 @@ pub fn audit_reflection_tower_with_format(format: AuditFormat) -> Result<()> {
             println!();
             if report.is_load_bearing() {
                 println!(
-                    "{} MSFS-grounded reflection tower load-bearing: \
-                     every stage discharges + every sampled per-index constructive \
-                     witness fed through MSFS-machine-verified intrinsics agrees.",
+                    "{} Reflection obligations have replayed proofs.",
                     "✓".green(),
                 );
             } else {
                 println!(
-                    "{} Reflection tower NOT load-bearing — at least one stage or \
-                     constructive discharge failed.",
+                    "{} Structural-only report: no reflection theorem has a statement-bound proof replay.",
                     "✗".red(),
                 );
             }
@@ -13944,8 +13934,7 @@ pub fn audit_reflection_tower_with_format(format: AuditFormat) -> Result<()> {
     if !report.is_load_bearing() {
         return Err(crate::error::CliError::Custom(
             format!(
-                "reflection-tower audit: at least one finite level failed to \
-                 discharge — see {}",
+                "reflection-tower audit: structural_only; theorem proofs require statement-bound replay — see {}",
                 report_path.display(),
             )
             .into(),

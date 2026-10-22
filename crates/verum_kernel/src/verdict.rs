@@ -60,6 +60,14 @@ use std::collections::BTreeMap;
 /// discharging.
 #[derive(Debug, Clone)]
 pub enum VerificationVerdict {
+    /// Structural inspection or citation provenance without a replayed proof of
+    /// the stated proposition. A positive diagnostic is not theorem discharge.
+    StructuralOnly {
+        /// Inspection that produced the diagnostic.
+        method: DischargeMethod,
+        /// Diagnostic observations, retained without granting proof authority.
+        evidence: Evidence,
+    },
     /// The artifact was discharged by `method`.
     /// `evidence` carries method-specific witness (proof term hash,
     /// SMT certificate, kernel intrinsic reason, etc.).
@@ -101,6 +109,7 @@ impl VerificationVerdict {
  /// Stable diagnostic tag for audit-report rendering.
     pub fn tag(&self) -> &'static str {
         match self {
+            VerificationVerdict::StructuralOnly { .. } => "structural_only",
             VerificationVerdict::Discharged { .. } => "discharged",
             VerificationVerdict::Rejected { .. } => "rejected",
             VerificationVerdict::Pending { .. } => "pending",
@@ -136,6 +145,7 @@ impl VerificationVerdict {
  /// produced the verdict; `None` for `Conflicted`.
     pub fn primary_method(&self) -> Option<&DischargeMethod> {
         match self {
+            VerificationVerdict::StructuralOnly { method, .. } => Some(method),
             VerificationVerdict::Discharged { method, .. } => Some(method),
             VerificationVerdict::Rejected { method, .. } => Some(method),
             VerificationVerdict::Pending { method, .. } => Some(method),
@@ -158,6 +168,8 @@ impl VerificationVerdict {
 /// kernel doesn't introduce per-subsystem method enums.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum DischargeMethod {
+    /// Symbol resolution and dependency classification, without proof replay.
+    DependencyInspection,
     /// Z3 / CVC5 / portfolio SMT discharge — `@verify(formal)` and
     /// stronger ladder strategies.
     Smt {
@@ -258,6 +270,7 @@ impl DischargeMethod {
  /// Stable diagnostic tag — short identifier used in audit JSON.
     pub fn tag(&self) -> &'static str {
         match self {
+            DischargeMethod::DependencyInspection => "dependency_inspection",
             DischargeMethod::Smt { .. } => "smt",
             DischargeMethod::KernelChecker { .. } => "kernel_checker",
             DischargeMethod::KernelIntrinsic { .. } => "kernel_intrinsic",
@@ -449,9 +462,11 @@ impl MultiVerdict {
         let mut accepting: Vec<DischargeMethod> = Vec::new();
         let mut rejecting: Vec<DischargeMethod> = Vec::new();
         let mut pending: Vec<DischargeMethod> = Vec::new();
+        let mut structural: Vec<DischargeMethod> = Vec::new();
 
         for v in &self.verdicts {
             match v {
+                VerificationVerdict::StructuralOnly { method, .. } => structural.push(method.clone()),
                 VerificationVerdict::Discharged { method, .. } => {
                     accepting.push(method.clone())
                 }
@@ -467,6 +482,17 @@ impl MultiVerdict {
             }
         }
 
+        // An audit aggregate is a conjunction of obligations. An unrelated
+        // accepted proof cannot upgrade unverified structural observations.
+        if !structural.is_empty() && (accepting.is_empty() || rejecting.is_empty()) {
+            return VerificationVerdict::StructuralOnly {
+                method: structural[0].clone(),
+                evidence: Evidence::from_summary("Aggregate includes inspections without proof replay")
+                    .with("structural_methods", structural.len().to_string())
+                    .with("accepted_methods", accepting.len().to_string())
+                    .with("rejected_methods", rejecting.len().to_string()),
+            };
+        }
         match (accepting.is_empty(), rejecting.is_empty()) {
             (false, true) => {
  // Unanimous accept. Pending methods are noted in
@@ -592,6 +618,10 @@ mod tests {
     #[test]
     fn verdict_tags_distinct() {
         let probes = [
+            VerificationVerdict::StructuralOnly {
+                method: DischargeMethod::DependencyInspection,
+                evidence: Evidence::default(),
+            },
             VerificationVerdict::Discharged {
                 method: DischargeMethod::Smt {
                     backend: SmtBackend::Z3,
@@ -616,7 +646,7 @@ mod tests {
             },
         ];
         let tags: std::collections::BTreeSet<_> = probes.iter().map(|v| v.tag()).collect();
-        assert_eq!(tags.len(), 4);
+        assert_eq!(tags.len(), 5);
     }
 
     #[test]
@@ -626,6 +656,7 @@ mod tests {
  // implementation can plug into the canonical verdict
  // without disturbing the existing audit-tag space.
         let probes = [
+            DischargeMethod::DependencyInspection,
             DischargeMethod::Smt {
                 backend: SmtBackend::Z3,
             },
@@ -663,7 +694,7 @@ mod tests {
         let tags: std::collections::BTreeSet<_> = probes.iter().map(|m| m.tag()).collect();
         assert_eq!(
             tags.len(),
-            14,
+            15,
             "every DischargeMethod variant must have a distinct tag",
         );
     }

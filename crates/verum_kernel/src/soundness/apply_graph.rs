@@ -1,71 +1,11 @@
-//! # Apply-graph traversal — transitive bridge-discharge classifier
+//! Dependency inspection for transitive `apply` chains.
 //!
-//! Task #150 / MSFS-L4.13 — the load-bearing piece that converts the
-//! L3 → L4 promotion claim ("every step transitively reduces to
-//! Verum kernel rules ∪ ZFC ∪ paper-cited external references") from
-//! a *property of the immediate `apply` callsite* into a *property
-//! of the entire transitive proof chain*.
-//!
-//! ## Why transitive matters
-//!
-//! Pre-#150 the bridge-discharge pre-pass at
-//! `verum_compiler::phases::bridge_discharge_check::validate_proof_body_bridges`
-//! walked *only the immediate apply callsites* in a theorem's proof
-//! body. Apply-targets that were not `kernel_*_strict` bridges were
-//! silently skipped — the discharge claim "this proof transitively
-//! grounds out in kernel-discharged bridges" was treated *on faith*
-//! once the chain went through any intermediate `_full` form.
-//!
-//! Concretely: the standard MSFS pattern after the #143 audit refactor
-//! is `corpus_thm.proof { apply stdlib_full(args); }` where
-//! `stdlib_full.proof { apply kernel_strict_bridge_1(...); apply
-//! kernel_strict_bridge_2(...); }`. The pre-#150 pre-pass saw only
-//! `apply stdlib_full(args)`, recognised it wasn't kernel-prefixed,
-//! and accepted it. A `stdlib_full` that bottomed out at a
-//! placeholder axiom would pass the gate without raising any signal.
-//!
-//! Post-#150 the apply-graph walker resolves each apply-target against
-//! the workspace-wide symbol table, recursively walks into its proof
-//! body, and classifies the apply-graph's *leaves*. The leaf taxonomy
-//! is:
-//!
-//!  * [`LeafKind::KernelStrict`] — apply-target is a `kernel_*_strict`
-//!  bridge that goes through `verum_kernel::dispatch_intrinsic`.
-//!  The L4 trust base.
-//!  * [`LeafKind::FrameworkAxiom`] — apply-target is an axiom carrying
-//!  a `@framework(name, "citation")` attribute pointing to an
-//!  external work (Lurie HTT, Adámek-Rosický, etc.). Acceptable
-//!  for L4 if the citation is to an authoritative external source.
-//!  * [`LeafKind::PlaceholderAxiom`] — apply-target is an axiom with
-//!  no `@framework` attribute and no kernel-strict prefix. An
-//!  internal stand-in awaiting promotion. *This is the leaf class
-//!  a transitive L4 claim must drive to zero.*
-//!  * [`LeafKind::Unresolved`] — apply-target couldn't be located in
-//!  the symbol table. Indicates either a workspace-discovery gap
-//!  or a built-in-kernel-rule reference outside the corpus.
-//!
-//! The composition `(kernel_strict, framework_axiom, placeholder_axiom,
-//! unresolved)` for a theorem's transitive apply-graph is the L4
-//! certificate. A non-zero `placeholder_axiom` count means the L4
-//! claim is *not yet load-bearing* for that theorem — every chain
-//! continues to a stand-in that still requires elimination.
-//!
-//! ## Architecture
-//!
-//! Three layers:
-//!
-//!  1. `ApplyTarget` — one resolved apply-callsite reference.
-//!  2. [`SymbolEntry`] / [`ApplyGraph`] — workspace-wide symbol
-//!  lookup table with each entry classified at construction time.
-//!  3. [`walk_transitive`] — DFS over the graph from a root theorem,
-//!  classifying every leaf and accumulating the
-//!  [`LeafComposition`]. Cycle detection via the visited set
-//!  so mutual recursion (or self-reference) doesn't loop forever.
-//!
-//! The walker is *pure* (no I/O, no Z3 invocation, no kernel re-check
-//! round-trip) — graph traversal + hashmap lookup. Microsecond-scale
-//! per theorem so the audit gate can walk the entire MSFS corpus
-//! (37 theorems × max-depth 8) in milliseconds.
+//! The walker classifies names and attributes and detects unresolved or placeholder
+//! leaves. It does not elaborate applications, check their premises, or replay
+//! proof terms. Resolved dependencies and bibliography are therefore structural
+//! evidence only, even when every leaf has a kernel prefix or framework citation.
+//! `has_resolved_dependencies` reports that useful inspection; `is_l4_load_bearing`
+//! cannot promote it to proof authority. Native judgment replay is separate.
 
 use std::collections::{BTreeMap, HashSet};
 
@@ -82,14 +22,9 @@ use verum_ast::expr::{Expr, ExprKind};
 /// themselves; they decompose into the leaves of their children.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum LeafKind {
-    /// `kernel_*_strict` bridge — the trust base. The dispatcher
-    /// (in `verum_kernel::intrinsic_dispatch`) is the algorithmic
-    /// witness for these.
+    /// A name classified as a kernel bridge; no application has been checked.
     KernelStrict,
-    /// Axiom carrying a `@framework(name, "citation")` attribute —
-    /// trusted via external authoritative reference (Lurie HTT,
-    /// Adámek-Rosický, etc.). Acceptable for L4 only if the
-    /// citation resolves to a real external proof.
+    /// Axiom with a framework citation, not a replayed proof.
     FrameworkAxiom,
     /// Plain axiom — no framework citation, not a kernel bridge.
     /// An *internal stand-in* awaiting promotion to a theorem with
@@ -133,10 +68,8 @@ pub struct LeafHit {
     pub chain: Vec<String>,
 }
 
-/// Composition of leaf classes for one transitive walk. The L4
-/// promotion claim is "every leaf is `KernelStrict` or
-/// `FrameworkAxiom`" — i.e., `placeholder_axiom == 0` AND
-/// `unresolved == 0`.
+/// Composition of dependency classes for one transitive walk.
+/// The counts describe coverage, not a verified proof of the root theorem.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct LeafComposition {
     /// Number of leaves classified as `KernelStrict`.
@@ -153,10 +86,25 @@ pub struct LeafComposition {
 }
 
 impl LeafComposition {
-    /// `true` iff every leaf is in the L4-acceptable set
-    /// (kernel_strict ∪ framework_axiom).
-    pub fn is_l4_load_bearing(&self) -> bool {
+    /// True iff the graph has no unresolved or placeholder leaves.
+    /// Kernel-prefix and framework classes are still unverified dependencies.
+    pub fn has_resolved_dependencies(&self) -> bool {
         self.placeholder_axiom == 0 && self.unresolved == 0
+    }
+
+    /// Name resolution and bibliography do not type-check proof applications.
+    pub fn proof_verdict(&self) -> crate::verdict::VerificationVerdict {
+        use crate::verdict::{DischargeMethod, Evidence, VerificationVerdict};
+        VerificationVerdict::StructuralOnly {
+            method: DischargeMethod::DependencyInspection,
+            evidence: Evidence::from_summary("Apply-graph classification without proof replay")
+                .with("dependencies_resolved", self.has_resolved_dependencies().to_string()),
+        }
+    }
+
+    /// Compatibility query: graph coverage alone never provides L4 proof authority.
+    pub fn is_l4_load_bearing(&self) -> bool {
+        self.proof_verdict().is_discharged()
     }
 
     /// Total leaf count across all classes.
@@ -192,7 +140,7 @@ pub enum SymbolEntry {
         apply_targets: Vec<String>,
     },
     /// A `kernel_*_strict` bridge or any axiom whose name starts
-    /// with `kernel_` — the L4 trust base.
+    /// with `kernel_`; a naming classification only.
     KernelBridge,
     /// An axiom carrying a `@framework(...)` attribute pointing to
     /// an external authoritative reference.
@@ -845,7 +793,7 @@ mod tests {
         let comp = walk_transitive(&g, "thm_a", 8);
         assert_eq!(comp.kernel_strict, 1);
         assert_eq!(comp.placeholder_axiom, 0);
-        assert!(comp.is_l4_load_bearing());
+        assert!(comp.has_resolved_dependencies());
     }
 
     #[test]
@@ -863,11 +811,11 @@ mod tests {
         let comp = walk_transitive(&g, "thm_a", 8);
         assert_eq!(comp.placeholder_axiom, 1);
         assert_eq!(comp.kernel_strict, 0);
-        assert!(!comp.is_l4_load_bearing());
+        assert!(!comp.has_resolved_dependencies());
     }
 
     #[test]
-    fn framework_axiom_is_l4_load_bearing() {
+    fn framework_axiom_is_a_resolved_dependency() {
         // External-citation axioms (Lurie HTT, etc.) are L4-acceptable.
         let g = graph_with(vec![
             (
@@ -880,7 +828,7 @@ mod tests {
         ]);
         let comp = walk_transitive(&g, "thm_a", 8);
         assert_eq!(comp.framework_axiom, 1);
-        assert!(comp.is_l4_load_bearing());
+        assert!(comp.has_resolved_dependencies());
     }
 
     #[test]
@@ -908,7 +856,7 @@ mod tests {
         let comp = walk_transitive(&g, "corpus_thm", 8);
         assert_eq!(comp.kernel_strict, 2);
         assert_eq!(comp.placeholder_axiom, 0);
-        assert!(comp.is_l4_load_bearing());
+        assert!(comp.has_resolved_dependencies());
     }
 
     #[test]
@@ -933,7 +881,7 @@ mod tests {
         ]);
         let comp = walk_transitive(&g, "corpus_thm", 8);
         assert_eq!(comp.placeholder_axiom, 1);
-        assert!(!comp.is_l4_load_bearing());
+        assert!(!comp.has_resolved_dependencies());
         // The chain captures the whole path so the report can pinpoint
         // which intermediate node leaks.
         assert_eq!(
@@ -956,7 +904,7 @@ mod tests {
         )]);
         let comp = walk_transitive(&g, "thm_a", 8);
         assert_eq!(comp.unresolved, 1);
-        assert!(!comp.is_l4_load_bearing());
+        assert!(!comp.has_resolved_dependencies());
     }
 
     #[test]
@@ -976,7 +924,7 @@ mod tests {
         let comp = walk_transitive(&g, "thm_a", 8);
         assert_eq!(comp.kernel_strict, 1);
         assert_eq!(comp.unresolved, 0);
-        assert!(comp.is_l4_load_bearing());
+        assert!(comp.has_resolved_dependencies());
     }
 
     #[test]
@@ -1051,7 +999,7 @@ mod tests {
         assert_eq!(comp.framework_axiom, 1);
         assert_eq!(comp.placeholder_axiom, 1);
         assert_eq!(comp.total(), 3);
-        assert!(!comp.is_l4_load_bearing());
+        assert!(!comp.has_resolved_dependencies());
     }
 
     #[test]
@@ -1107,7 +1055,7 @@ mod tests {
     }
 
     #[test]
-    fn foreign_framework_apply_chain_is_l4_load_bearing() {
+    fn foreign_framework_apply_chain_has_resolved_dependencies() {
         // Pattern: theorem applies a foreign-framework target by name
         // (no workspace declaration). The walker's name-based
         // fallback must recognise the prefix and classify as
@@ -1122,8 +1070,8 @@ mod tests {
         assert_eq!(comp.framework_axiom, 1);
         assert_eq!(comp.unresolved, 0);
         assert!(
-            comp.is_l4_load_bearing(),
-            "framework-cited apply chain must keep L4 load-bearing verdict",
+            comp.has_resolved_dependencies(),
+            "framework-cited apply chain retains dependency classification",
         );
     }
 
