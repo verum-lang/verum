@@ -339,6 +339,12 @@ jobs:
         timeout-minutes: 5
         run: cargo test --locked -p verum_proof --features process
 
+      # Source correspondence tests live in tests/, so the workspace's
+      # --lib --bins job does not cover this proof-admission boundary.
+      - name: Exact Verum source elaboration and proof admission
+        timeout-minutes: 5
+        run: cargo test --locked -p verum_source_proof
+
       # verum_codegen + verum_integration_tests tier: measured green
       # locally 2026-08-07 (85 tests across 7 targets, 12.5s wall).
       #
