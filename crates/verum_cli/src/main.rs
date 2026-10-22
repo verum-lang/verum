@@ -1917,48 +1917,48 @@ enum Commands {
         format: String,
     },
 
-    /// Export proofs to an external assistant's format
+    /// Export typed IR or an ontology; unsupported foreign proof targets fail before writing
     #[command(display_order = 400)]
     Export {
- /// Target format: `dedukti` | `coq` | `lean` | `metamath`
- /// | `typed-ir` (the canonical versioned typed-AST artefact —
- /// the general external-backend seam).
+ /// Target format: `typed-ir` (versioned typed AST) or `owl2-fs`
+ /// (ontology). Foreign proof targets `dedukti`, `coq`, `lean`,
+ /// `agda`, and `metamath` are recognized but rejected: exact
+ /// statement-preserving proof translation is unavailable.
         #[clap(long, value_name = "FORMAT")]
         to: String,
- /// Source file for single-file formats (`typed-ir`). The
- /// proof-certificate formats walk the whole project and
- /// ignore this.
+ /// Required source file for `typed-ir`. Ontology export walks
+ /// the project and does not use this argument.
         #[clap(value_name = "FILE")]
         input: Option<std::path::PathBuf>,
  /// Output file path (defaults to
  /// `certificates/<format>/export.<ext>`).
         #[clap(long, short, value_name = "PATH")]
         output: Option<std::path::PathBuf>,
- /// Emit a per-declaration provenance JSON sidecar at
- /// `<output>.provenance.json`. The sidecar lists every
- /// exported declaration with its kind / source-file /
- /// framework citation / discharge_strategy; downstream
- /// tools use it to drive SMT replay or fill in proof terms.
- /// Statement-level export (sorry / Admitted / `?`) is
- /// unchanged when this flag is absent.
+ /// Emit an ontology provenance sidecar at
+ /// `<output>.provenance.json`. Provenance records attribution,
+ /// not a checked theorem. This flag does not enable foreign
+ /// proof export and is not used by `typed-ir`.
         #[clap(long)]
         with_provenance: bool,
     },
 
-    /// Alias for `export --to <format>`
+    /// Alias for `export`, with the same format restrictions and proof refusal
     #[command(display_order = 401)]
     ExportProofs {
- /// Target format: `dedukti` | `coq` | `lean` | `metamath`.
+ /// Target: `typed-ir` or `owl2-fs`. Foreign proof targets
+ /// `dedukti`, `coq`, `lean`, `agda`, and `metamath` fail before
+ /// creating or replacing output files.
         #[clap(long, value_name = "FORMAT")]
         to: String,
- /// Source file for single-file formats (`typed-ir`).
+ /// Required source file for `typed-ir`; unused by ontology export.
         #[clap(value_name = "FILE")]
         input: Option<std::path::PathBuf>,
  /// Output file path (defaults to
  /// `certificates/<format>/export.<ext>`).
         #[clap(long, short, value_name = "PATH")]
         output: Option<std::path::PathBuf>,
- /// See `Export::with_provenance`.
+ /// Emit ontology provenance, not proof authority. Does not
+ /// enable unsupported formats; unused by `typed-ir`.
         #[clap(long)]
         with_provenance: bool,
     },
