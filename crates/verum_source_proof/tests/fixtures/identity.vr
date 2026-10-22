@@ -1,0 +1,2 @@
+module scoped_identity;
+public theorem identity<universe u>(A: Type(u), x: A): A proof = x;

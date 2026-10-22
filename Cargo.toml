@@ -22,6 +22,7 @@ members = [
     # LCF-style trusted kernel — the sole proof-term checker in the TCB.
     "crates/verum_kernel",
     "crates/verum_proof",
+    "crates/verum_source_proof",
     # Shared typed-IR sitting between AST and kernel; pipeline contract.
     "crates/verum_core",
     "crates/verum_integration_tests",

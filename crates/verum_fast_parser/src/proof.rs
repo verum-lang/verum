@@ -145,7 +145,7 @@ impl<'a> RecursiveParser<'a> {
     /// 2. Proposition-based: `theorem name(params): proposition { tactic }`
     fn parse_theorem_like(
         &mut self,
-        attrs: Vec<verum_ast::attr::Attribute>,
+        mut attrs: Vec<verum_ast::attr::Attribute>,
         vis: verum_ast::decl::Visibility,
         kind_fn: fn(TheoremDecl) -> ItemKind,
         start_pos: usize,
@@ -235,47 +235,15 @@ impl<'a> RecursiveParser<'a> {
             let mut reqs = Vec::new();
             let mut enss = Vec::new();
             loop {
-                // Skip bare `@attr` / `@attr(args)` attributes sprinkled
-                // between the parameter list and the contract clauses —
-                // the stdlib (e.g. `core/math/day_convolution.vr`) writes
-                //  theorem foo(…)
-                //  @verify(formal)
-                //  ensures …
-                //  proof by auto;
-                // The attribute is a documentation/tactic hint here, not
-                // a decl attribute, so we discard it rather than fail.
+                // Contract-position attributes are part of the declaration.
+                // Erasing them would let proof admission silently ignore a
+                // requested logical regime or verification contract.
                 if self.stream.check(&TokenKind::At) {
-                    self.stream.advance(); // consume `@`
-                    // Consume identifier name (attribute name).
-                    if self.is_ident() {
-                        let _ = self.consume_ident_or_any_keyword();
+                    let parsed = self.parse_attributes()?;
+                    if parsed.is_empty() {
+                        return Err(ParseError::invalid_syntax("expected a theorem attribute", self.stream.current_span()));
                     }
-                    // Optional argument list `(…)` — track paren depth.
-                    if self.stream.check(&TokenKind::LParen) {
-                        let mut depth = 0_i32;
-                        loop {
-                            if !self.tick() || self.is_aborted() {
-                                break;
-                            }
-                            match self.stream.peek_kind() {
-                                Some(TokenKind::LParen) => {
-                                    depth += 1;
-                                    self.stream.advance();
-                                }
-                                Some(TokenKind::RParen) => {
-                                    depth -= 1;
-                                    self.stream.advance();
-                                    if depth == 0 {
-                                        break;
-                                    }
-                                }
-                                None => break,
-                                _ => {
-                                    self.stream.advance();
-                                }
-                            }
-                        }
-                    }
+                    attrs.extend(parsed);
                     continue;
                 }
                 // requires clause

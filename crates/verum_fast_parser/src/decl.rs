@@ -204,8 +204,18 @@ impl<'a> RecursiveParser<'a> {
     pub fn parse_item(&mut self) -> ParseResult<Item> {
         // Guard against deeply nested module { module { ... } } causing stack overflow
         self.enter_recursion()?;
-        let result = self.parse_item_inner();
+        let start = self.stream.position();
+        let mut result = self.parse_item_inner();
         self.exit_recursion();
+        // A proof declaration's exact source binding includes its attributes and
+        // visibility, which the inner proof parser has already consumed.
+        if let Ok(item) = &mut result
+            && let ItemKind::Theorem(decl) | ItemKind::Lemma(decl) | ItemKind::Corollary(decl) = &mut item.kind
+        {
+            let span = self.stream.make_span(start);
+            item.span = span;
+            decl.span = span;
+        }
         result
     }
 

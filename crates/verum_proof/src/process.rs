@@ -31,7 +31,7 @@ fn refused(code: &str, message: &str) -> Report {
 /// Limits must be installed in the single-threaded child, before decoding input.
 /// CPU/address-space/file/stack limits are OS limits, not proof-theoretic fuel.
 #[cfg(unix)]
-fn limits() -> std::io::Result<()> {
+pub fn install_worker_limits() -> std::io::Result<()> {
     use nix::sys::resource::{Resource, getrlimit, setrlimit};
     for (resource, limit) in [
         (Resource::RLIMIT_CORE, 0),
@@ -48,7 +48,7 @@ fn limits() -> std::io::Result<()> {
     Ok(())
 }
 #[cfg(not(unix))]
-fn limits() -> std::io::Result<()> {
+pub fn install_worker_limits() -> std::io::Result<()> {
     Err(std::io::Error::new(
         std::io::ErrorKind::Unsupported,
         "native proof worker needs supported process limits",
@@ -57,7 +57,7 @@ fn limits() -> std::io::Result<()> {
 
 /// Call before initializing any async runtime. stdout is one bounded JSON report.
 pub fn worker() -> std::io::Result<()> {
-    let report = if limits().is_err() {
+    let report = if install_worker_limits().is_err() {
         refused(
             "sandbox_unavailable",
             "The worker could not install its required process limits.",
@@ -89,20 +89,79 @@ pub fn replay(executable: &Path, bytes: &[u8]) -> Report {
 
 /// The caller may lower the wall budget but cannot raise the default ceiling.
 pub fn replay_with_deadline(executable: &Path, bytes: &[u8], wall: Duration) -> Report {
-    if bytes.len() > MAX_BYTES {
+    let response = match run_worker_with_deadline(executable, WORKER_ARG, bytes, wall) {
+        Ok(bytes) => bytes,
+        Err(diagnostic) => {
+            return Report {
+                profile: PROFILE.into(),
+                checker: checker_identity(),
+                accepted: false,
+                diagnostic: Some(diagnostic),
+            };
+        }
+    };
+    let report: Report = match serde_json::from_slice(&response) {
+        Ok(report) => report,
+        Err(_) => {
+            return refused(
+                "worker_protocol",
+                "The worker returned an invalid response.",
+            );
+        }
+    };
+    if report.profile != PROFILE
+        || report.checker != checker_identity()
+        || report.accepted == report.diagnostic.is_some()
+    {
         return refused(
-            "byte_limit",
-            "Native judgment exceeds the input byte budget.",
+            "worker_protocol",
+            "The worker returned an inconsistent result or a different checker identity.",
         );
     }
-    let run = || -> std::io::Result<Report> {
+    report
+}
+
+fn failure(code: &str, message: &str) -> Diagnostic {
+    Diagnostic {
+        code: code.into(),
+        stage: "process".into(),
+        message: message.into(),
+    }
+}
+
+/// Run a trusted configured worker with untrusted bounded input. This does not
+/// interpret or authenticate its output: each protocol must validate that itself.
+/// Neither the executable nor its argument may come from submitted proof data.
+/// The worker must install `install_worker_limits` before parsing input.
+pub fn run_worker(
+    executable: &Path,
+    trusted_worker_arg: &str,
+    bytes: &[u8],
+) -> Result<Vec<u8>, Diagnostic> {
+    run_worker_with_deadline(executable, trusted_worker_arg, bytes, WALL_LIMIT)
+}
+
+/// As `run_worker`, with a caller budget that can only lower the wall ceiling.
+pub fn run_worker_with_deadline(
+    executable: &Path,
+    trusted_worker_arg: &str,
+    bytes: &[u8],
+    wall: Duration,
+) -> Result<Vec<u8>, Diagnostic> {
+    if bytes.len() > MAX_BYTES {
+        return Err(failure(
+            "byte_limit",
+            "Proof input exceeds the input byte budget.",
+        ));
+    }
+    let run = || -> std::io::Result<Result<Vec<u8>, Diagnostic>> {
         let mut input = tempfile::tempfile()?;
         input.write_all(bytes)?;
         input.seek(SeekFrom::Start(0))?;
         let mut output = tempfile::tempfile()?;
         let mut child = Running(
             Command::new(executable)
-                .arg(WORKER_ARG)
+                .arg(trusted_worker_arg)
                 .env_clear()
                 .stdin(Stdio::from(input))
                 .stdout(Stdio::from(output.try_clone()?))
@@ -115,18 +174,18 @@ pub fn replay_with_deadline(executable: &Path, bytes: &[u8], wall: Duration) -> 
         loop {
             if let Some(status) = child.0.try_wait()? {
                 if !status.success() {
-                    return Ok(refused(
+                    return Ok(Err(failure(
                         "worker_failed",
-                        "The isolated checker exited without a valid proof result; a resource limit or runtime failure may have interrupted it.",
-                    ));
+                        "The isolated checker exited without a valid result; a resource limit or runtime failure may have interrupted it.",
+                    )));
                 }
                 break;
             }
             if start.elapsed() >= wall.min(WALL_LIMIT) {
-                return Ok(refused(
+                return Ok(Err(failure(
                     "wall_limit",
                     "The isolated checker exhausted its wall-clock budget.",
-                ));
+                )));
             }
             // macOS does not enforce RLIMIT_AS. Sample RSS on every platform;
             // this is a termination threshold, not an instantaneous allocation cap.
@@ -141,10 +200,10 @@ pub fn replay_with_deadline(executable: &Path, bytes: &[u8], wall: Duration) -> 
                 .process(pid)
                 .is_some_and(|p| p.memory() > MEMORY_BYTES)
             {
-                return Ok(refused(
+                return Ok(Err(failure(
                     "memory_limit",
                     "The isolated checker exceeded its resident-memory termination threshold.",
-                ));
+                )));
             }
             std::thread::sleep(Duration::from_millis(5));
         }
@@ -152,27 +211,17 @@ pub fn replay_with_deadline(executable: &Path, bytes: &[u8], wall: Duration) -> 
         let mut response = Vec::new();
         output.take(OUTPUT_BYTES + 1).read_to_end(&mut response)?;
         if response.len() as u64 > OUTPUT_BYTES {
-            return Ok(refused(
+            return Ok(Err(failure(
                 "worker_protocol",
                 "The worker exceeded its output budget.",
-            ));
+            )));
         }
-        let report: Report = serde_json::from_slice(&response).map_err(std::io::Error::other)?;
-        if report.profile != PROFILE
-            || report.checker != checker_identity()
-            || report.accepted == report.diagnostic.is_some()
-        {
-            return Ok(refused(
-                "worker_protocol",
-                "The worker returned an inconsistent result or a different checker identity.",
-            ));
-        }
-        Ok(report)
+        Ok(Ok(response))
     };
     run().unwrap_or_else(|_| {
-        refused(
+        Err(failure(
             "worker_unavailable",
-            "The isolated checker could not be started or returned an invalid response.",
-        )
+            "The isolated checker could not be started or its response could not be read.",
+        ))
     })
 }

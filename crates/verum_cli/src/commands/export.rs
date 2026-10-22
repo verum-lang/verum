@@ -1,28 +1,8 @@
-// `verum export` — certificate and cross-prover exchange.
-//
-
-// Walks every `.vr` file in the current project, collects every
-// theorem / lemma / axiom / corollary declaration (plus its
-// `@framework(name, "citation")` attribution if present), and emits
-// a per-format file containing one entry per declaration.
-//
-
-// Supported formats:
-//  dedukti neutral exchange format — `<name> : <ty>.` statements.
-//  coq `Axiom` / `Theorem ... Admitted.` scaffolds.
-//  lean `axiom` / `theorem ... := sorry` scaffolds.
-//
-
-// The current MVP emits each declaration's STATEMENT — proof bodies
-// are admitted (`Admitted.` / `sorry` / `(;;)` depending on target).
-// The statement carries the `@framework` citation as an inline
-// comment so external reviewers see the provenance without needing
-// the separate audit report.
-//
-
-// Full proof-term export (re-derivation through `verum_kernel` and
-// serialisation of the resulting CoreTerm) is a follow-up — it
-// requires the SMT proof-replay path which lands per-backend.
+// `verum export`: typed IR and ontology export remain available. Historical
+// foreign proof renderers below are retained for rendering regression tests,
+// but are not certificate generators: their collected Declaration loses the
+// original statement and cannot be admitted as proof evidence (T1773).
+// Foreign proof export is fail-closed before discovering or creating files.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -290,10 +270,14 @@ pub fn run(options: ExportOptions) -> Result<()> {
     if options.format == ExportFormat::TypedIr {
         return run_typed_ir(options);
     }
-    ui::step(&format!(
-        "Exporting to {} certificate",
-        options.format.as_str()
-    ));
+    if options.format != ExportFormat::Owl2Fs {
+        return Err(CliError::FeatureNotImplemented {
+            feature: Text::from(format!("source-faithful {} proof certificate export", options.format.as_str())),
+            planned_version: Text::from("unassigned"),
+            workaround: Text::from("The legacy renderer does not preserve the exact source statement. No output was written. Use the explicit verum-source-pi-id/1 source replay profile for supported native judgments."),
+        });
+    }
+    ui::step("Exporting OWL 2 ontology");
 
     let manifest_dir = Manifest::find_manifest_dir()?;
     let vr_files = discover_vr_files(&manifest_dir);

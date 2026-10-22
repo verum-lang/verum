@@ -5690,6 +5690,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "verum_source_proof"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "verum_ast",
+ "verum_common",
+ "verum_fast_parser",
+ "verum_proof",
+]
+
+[[package]]
 name = "verum_stdlib_precompiler"
 version = "0.1.0"
 dependencies = [

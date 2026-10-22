@@ -1,0 +1,2 @@
+module scoped_composition;
+public theorem composition<universe u, universe v, universe w>(A: Type(u), B: Type(v), C: Type(w), f: fn(A) -> B, g: fn(B) -> C, a: A): C proof = g(f(a));

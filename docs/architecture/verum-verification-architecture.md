@@ -437,14 +437,30 @@ The `SmtCertificate` clause uses `dp(w)` only after `K-SmtRecheck` has succeeded
   Γ ⊢ FrameworkAxiom(name, citation, body) : body
 ```
 
-**Soundness side-condition.** The kernel admits `FrameworkAxiom(name, citation, body)` only when `body : Prop` (i.e. the axiom asserts a proposition, not a non-trivial inhabitant of a `Type_n`). This is non-negotiable: a framework axiom of type `Nat → Nat` would let a user postulate an arbitrary computable function and break strong normalisation; restricting bodies to `Prop` keeps the postulate at the propositional layer where SN is preserved by the standard "axioms-stuck" reduction strategy (a `FrameworkAxiom` term is a kernel-irreducible normal form and cannot fire β/ι/cube reductions inside a Prop-eliminator). The `K-FwAx` rule's premise `body : Prop` makes this condition syntactic — the kernel rejects an axiom whose body is not a proposition with `E_FW_AXIOM_NOT_PROP`.
+**Admission policy and logical assumptions.** Restricting this particular
+framework rule to `Prop` is an interface policy, not a theorem that typed
+postulates in `Type` destroy normalization. An irreducible constant of type
+`Nat → Nat` introduces no reduction rule and therefore does not by itself create
+an infinite reduction sequence. Its computational meaning and the consistency
+of the extended theory are separate obligations. Typed postulates and their
+logical dependencies must be recorded explicitly; a citation is provenance,
+not a proof. See the [Lean axiom reference](https://lean-lang.org/doc/reference/latest/Axioms/)
+and [Rocq conversion rules](https://docs.rocq-prover.org/master/refman/proofs/writing-proofs/equality.html).
 
-**Subsingleton (proof-irrelevance) requirement.** `body : Prop` alone is **not sufficient** for subject reduction: a framework axiom whose body has *two distinct extensional inhabitants* breaks equality reasoning — the axiom term is a normal form yet has multiple distinct values, so equality between two instances of the axiom is undecidable. The kernel additionally requires `body` to be a **subsingleton** (proof-irrelevant): `∀ p q : body. p ≡ q` must hold definitionally. Two acceptance criteria:
+**Proof irrelevance is a logical rule.** Closedness of a proposition does not
+establish that its inhabitants are definitionally equal. Nor does admitting an
+irreducible constant at a non-subsingleton type alone violate subject reduction.
+A proof-irrelevant `Prop` must specify its equality and elimination rules
+explicitly; intensional identity types do not acquire UIP merely from having no
+free variables. Framework compatibility must be checked against the actual
+assumptions and rules, rather than inferred from a closed-proposition heuristic.
+See [Lean's proposition rules](https://lean-lang.org/doc/reference/latest/The-Type-System/Propositions/).
 
-  1. **Closed-proposition route** (statically checkable): `body` mentions no free type variables. Closed propositions in `Prop` are forced unique by the framework lineage's intended interpretation (every model in the framework's R-S sees the same set of inhabitants). The kernel checks this by walking `body` for unbound type-vars; if none, the axiom is admitted.
-  2. **UIP route** (axiom of uniqueness of identity proofs): `body` mentions free type-vars but the framework explicitly imports `core.math.frameworks.uip` and the elaborator records the import; the kernel then admits the axiom under the UIP regime. Mixing UIP with `core.math.frameworks.univalence` is rejected by the framework-conflict checker (#197).
-
-A non-subsingleton axiom (e.g., `axiom choice<T>: ∀(s: NonEmpty<T>). T` with two distinct inhabitants depending on which element of `s` is selected) is rejected with `E_FW_AXIOM_NOT_SUBSINGLETON`. Acceptable form: `axiom choice<T>: ∀(s: NonEmpty<T>). exists (t: T). t ∈ s` — the existential-only form is propositional + subsingleton-by-construction.
+The portable `verum-native/1` checker does **not** implement `K-FwAx`, an
+impredicative `Prop`, or citation-based admission. Its source profile below closes
+every explicit typed premise under a Pi binder and introduces no global axioms.
+The larger `CoreTerm` framework route and the portable native route must not be
+reported as having the same implemented admission surface.
 
 **K-SmtRecheck** (certificate verification):
 
@@ -4866,3 +4882,85 @@ Workflow:
 *Документ — живой; обновляется при каждом новом расширении Diakrisis-корпуса.*
 *Последнее обновление: после закрытия VVA foundational tasks 1-12.*
 *Curator: theoretical foundations team в координации с Verum kernel team.*
+
+
+## Scoped source proof admission (`verum-source-pi-id/1`)
+
+The `verum_source_proof` host crate connects actual Verum source to the portable
+native checker. It depends on the production `FastParser`, AST and lexer, not
+LLVM, a solver, or a replacement proof syntax. It promotes the scoped elaboration
+contract of T1771; native checking remains `verum_proof` (T1772). This is an
+explicit opt-in logical profile, not a claim that arbitrary runtime functions
+are total proof transformers.
+
+Within this profile:
+
+- `Type(u)` denotes the native predicative universe at explicit level `u`;
+  `Type` means level zero. Universe variables require declared universe binders.
+- Typed theorem parameters and typed `forall` binders denote dependent Pi
+  quantification. Immutable typed closures denote lambda abstraction.
+- `fn(A, B) -> C` is a curried pure Pi type. Existing rank-2 syntax with explicitly
+  typed meta indices, such as `fn<x: meta A>(P(x)) -> Q(x)`, adds a dependent Pi
+  binder for `x`. This interpretation neither executes nor certifies runtime
+  functions, effects or arbitrary meta computation.
+- An explicitly bound family `P: fn(A) -> Type(u)` can occur as `P(x)` in a type.
+  The head is checked as a function and its application must inhabit a universe.
+- `Path<A>(x, y)` and source `x == y` denote **intensional identity** in this
+  profile. This is not a certification of cubical path operations or decidable
+  runtime equality; no proof irrelevance, UIP or extensionality is added.
+- `requires P` adds an explicit typed premise. Proof terms, `exact`, `assumption`
+  and `reflexivity` are supported. Defaults, effects, implicit generic insertion,
+  unimplemented attributes and other proof forms are rejected as unsupported.
+  In particular, a structured `show P` statement is never used as a witness of P.
+
+Each binder receives a stable identity before a single conversion to de Bruijn
+indices. A domain is lowered under its preceding telescope only; the conclusion
+is lowered under the complete telescope. The ordered domain list reconstructs
+the exact closed statement with Pi and the witness prefix with lambda. Free
+names are errors, never automatically generalized into `Type(0)` axioms. A source
+module may contain several declarations; the request selects a unique top-level
+theorem, lemma or corollary. Other declarations and imports are **not** available
+as proof assumptions. Supporting imported proofs later requires an explicit,
+source-bound dependency closure; names and persistent name-only caches do not
+supply that evidence.
+
+The strict JSON request is an envelope around the existing language:
+
+```json
+{"profile":"verum-source-pi-id/1","source":"theorem identity(a:Type,x:a):a proof=x;","declaration":"identity"}
+```
+
+`verum-source-replay --worker` reads this envelope on standard input. It returns
+`SourceReport` with:
+
+- `source.sha256`: SHA-256 of the exact UTF-8 source bytes, and the selected name;
+- `source.span`: nonempty UTF-8 byte offsets and SHA-256 of the complete selected
+  declaration, including visibility and attributes;
+- `elaborator`: content identity of the source frontend, grammar and elaborator;
+- `telescope`: ordered binder identities, names, roles and native domains;
+- `conclusion` and `universe_bindings`: the open conclusion and explicit mapping
+  of declared levels to kernel level variables;
+- `judgment`: the source-derived closed native statement and certificate;
+- `native`: the separate native admission report and checker identity.
+
+Only `status: verified` carries an accepted native report and a judgment.
+`unsupported` means missing profile coverage; `rejected` means invalid source or
+an ill-typed proof; `inconclusive` and `unavailable` report resource or execution
+limits. None licenses a theorem. Hashes identify content and implementations;
+they are neither signatures nor proofs of the source translator's correctness.
+The frontend translation remains an explicit part of the source-admission trust
+boundary, separately testable from both native checking algorithms.
+
+Untrusted requests run in a fresh child through
+`verum_proof::process::run_worker`. The source child installs the same CPU,
+stack, output and supported address-space limits before parsing. The supervisor
+bounds wall time, input and output bytes, and samples resident memory; the latter
+is a termination threshold, not an instantaneous macOS memory cap. Resource
+exhaustion is inconclusive. The library entry point is for already isolated or
+trusted use, not in-process verification of hostile server requests.
+
+Foreign-prover certificate export remains unsupported until it preserves this
+exact typed statement and all assumptions. Historical renderers that emit
+`Prop`, `sorry`, `Admitted` or target axioms cannot establish correspondence with
+the source theorem. CLI proof export now fails before creating output files;
+independent typed-IR and OWL ontology export retain their own contracts.
