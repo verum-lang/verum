@@ -1930,8 +1930,8 @@ enum Commands {
  /// the project and does not use this argument.
         #[clap(value_name = "FILE")]
         input: Option<std::path::PathBuf>,
- /// Output file path (defaults to
- /// `certificates/<format>/export.<ext>`).
+ /// Output file path. Defaults to `<source>.vtir` for typed IR
+ /// or `certificates/owl2-fs/export.ofn` for the ontology.
         #[clap(long, short, value_name = "PATH")]
         output: Option<std::path::PathBuf>,
  /// Emit an ontology provenance sidecar at
@@ -1953,8 +1953,8 @@ enum Commands {
  /// Required source file for `typed-ir`; unused by ontology export.
         #[clap(value_name = "FILE")]
         input: Option<std::path::PathBuf>,
- /// Output file path (defaults to
- /// `certificates/<format>/export.<ext>`).
+ /// Output file path. Defaults to `<source>.vtir` for typed IR
+ /// or `certificates/owl2-fs/export.ofn` for the ontology.
         #[clap(long, short, value_name = "PATH")]
         output: Option<std::path::PathBuf>,
  /// Emit ontology provenance, not proof authority. Does not
