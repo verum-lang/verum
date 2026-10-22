@@ -106,6 +106,15 @@ fn repeated_failure_preserves_user_selected_existing_output() {
             .output()
             .unwrap();
         assert!(!result.status.success());
+        let diagnostic = format!(
+            "{}{}",
+            String::from_utf8_lossy(&result.stdout),
+            String::from_utf8_lossy(&result.stderr)
+        );
+        assert!(
+            diagnostic.contains("exact source statement"),
+            "{diagnostic}"
+        );
         assert_eq!(
             fs::read_to_string(&output).unwrap(),
             "pre-existing reviewed result"
