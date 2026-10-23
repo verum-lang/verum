@@ -9236,6 +9236,10 @@ impl VbcCodegen {
     /// Returns None when the base name is unknown or a bare type parameter.
     fn type_name_to_type_ref_mono(&self, name: &str) -> Option<crate::types::TypeRef> {
         let name = name.trim();
+        if name.starts_with('&') {
+            let ty = verum_fast_parser::Parser::new(name).parse_type().ok()?;
+            return self.explicit_type_witness(&ty, None);
+        }
         if name.starts_with("fn(") || name.starts_with("fn (") {
             let ty = verum_fast_parser::Parser::new(name).parse_type().ok()?;
             if !matches!(&ty.kind, verum_ast::ty::TypeKind::Function { contexts, calling_convention, .. }
@@ -17421,12 +17425,43 @@ impl VbcCodegen {
     /// Read a method result through the same finite Deref route used to
     /// compile its receiver. Substitute the resolved owner's arguments before
     /// the result becomes the receiver of the next call.
+    /// The source signature retains references erased by the runtime ABI.
+    /// Substitute the selected owner's declared generic slots before exposing
+    /// the result to bindings or to another call in a method chain.
+    pub(super) fn declared_method_result_type(
+        &self,
+        receiver: &str,
+        method: &str,
+        explicit: &verum_common::List<verum_ast::ty::GenericArg>,
+    ) -> Option<crate::types::TypeRef> {
+        let mut owner = Self::method_receiver_type_name(receiver).to_string();
+        for _ in 0..self.method_receiver_deref_count(&owner, method) {
+            owner = self.user_deref_target_type_name(&owner)?.to_string();
+        }
+        let key = self.registered_receiver_method(&owner, method)?;
+        let info = self.ctx.lookup_qualified_function(&key)?;
+        let crate::types::TypeRef::Function { return_type, .. } = info.callable_signature.as_ref()? else {
+            return None;
+        };
+        if explicit.len() > info.explicit_type_param_ids.len() { return None; }
+        let mut substitution = self.callable_owner_substitution(&owner)?;
+        for (arg, id) in explicit.iter().zip(&info.explicit_type_param_ids) {
+            let ty = arg.type_for_declared_slot()?;
+            substitution.bind((*id)?, self.explicit_type_witness(&ty, None)?);
+        }
+        let result = substitution.apply(return_type);
+        (!result.is_generic()).then_some(result)
+    }
+
     fn resolved_method_return_type_name(
         &self,
         receiver: &str,
         method: &str,
         explicit: &verum_common::List<verum_ast::ty::GenericArg>,
     ) -> Option<String> {
+        if let Some(result) = self.declared_method_result_type(receiver, method, explicit) {
+            if let Some(name) = self.callable_type_name(&result) { return Some(name.to_string()); }
+        }
         let mut receiver = Self::method_receiver_type_name(receiver).to_string();
         for _ in 0..self.method_receiver_deref_count(&receiver, method) {
             receiver = self.user_deref_target_type_name(&receiver)?.to_string();

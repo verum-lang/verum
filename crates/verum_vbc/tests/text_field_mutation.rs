@@ -93,7 +93,7 @@ fn indexed_packed_primitive_read_preserves_its_layout() {
 
 fn check_with_declarations(declarations: &str, body: &str, expected: &str) {
     let source = format!(
-        "module text_field_mutation; {HELPERS}\n{declarations}\nfn probe() -> Text {{ {body} }}"
+        "module text_field_mutation; mount core.base.maybe.Maybe; {HELPERS}\n{declarations}\nfn probe() -> Text {{ {body} }}"
     );
     let consumer = Parser::new(&source)
         .parse_module()
@@ -142,10 +142,14 @@ fn check_with_declarations(declarations: &str, body: &str, expected: &str) {
         3,
         "canonical module, record and inherent impl"
     );
+    let mut maybe = Parser::new(include_str!("../../../core/base/maybe.vr"))
+        .parse_module().expect("actual Maybe grammar");
+    maybe.items.retain(|item| matches!(&item.kind, ItemKind::Module(_))
+        || matches!(&item.kind, ItemKind::Type(declaration) if declaration.name.name.as_str() == "Maybe"));
     let mut codegen = VbcCodegen::with_config(CodegenConfig::new("text_field_mutation"));
     codegen.register_builtin_variants();
     codegen
-        .collect_unit_declarations(&[&ast, &consumer])
+        .collect_unit_declarations(&[&maybe, &ast, &consumer])
         .expect("actual declaration registration");
     let functions = codegen.export_functions();
     for name in methods {
@@ -448,6 +452,86 @@ fn a_mutable_reference_alias_keeps_the_variant_place() {
     "#,
         "seed suffix",
     );
+}
+
+#[test]
+fn a_returned_mutable_reference_keeps_the_variant_place() {
+    check_with_declarations(r#"
+        fn borrowed<'a>(value: &'a mut Maybe<Text>) -> &'a mut Maybe<Text> { value }
+    "#, r#"
+        let mut value: Maybe<Text> = Maybe.Some("seed");
+        let reference = borrowed(&mut value);
+        match reference { Maybe.Some(word) => word.push_str(" suffix"), _ => {}, }
+        match value { Maybe.Some(word) => word, _ => "missing", }
+    "#, "seed suffix");
+}
+
+#[test]
+fn a_generic_unwrapped_mutable_reference_keeps_the_variant_place() {
+    check_with_declarations(r#"
+        type Envelope<T> is { value: T };
+        implement<T> Envelope<T> { fn take(self) -> T { self.value } }
+        fn borrowed<'a>(value: &'a mut Maybe<Text>) -> Envelope<&'a mut Maybe<Text>> {
+            Envelope { value: value }
+        }
+    "#, r#"
+        let mut value: Maybe<Text> = Maybe.Some("seed");
+        let reference = borrowed(&mut value).take();
+        match reference { Maybe.Some(word) => word.push_str(" suffix"), _ => {}, }
+        match value { Maybe.Some(word) => word, _ => "missing", }
+    "#, "seed suffix");
+}
+
+#[test]
+fn generic_reference_results_survive_named_intermediates_and_aliases() {
+    check_with_declarations(r#"
+        type Envelope<T> is { value: T };
+        implement<T> Envelope<T> { fn take(self) -> T { self.value } }
+        fn borrowed<'a>(value: &'a mut Maybe<Text>) -> Envelope<&'a mut Maybe<Text>> {
+            Envelope { value: value }
+        }
+    "#, r#"
+        let mut value: Maybe<Text> = Maybe.Some("seed");
+        let envelope = borrowed(&mut value);
+        let reference = envelope.take();
+        let alias = reference;
+        match alias { Maybe.Some(word) => {
+            let forwarded = word;
+            forwarded.push_str(" suffix");
+        }, _ => {}, }
+        match value { Maybe.Some(word) => word, _ => "missing", }
+    "#, "seed suffix");
+}
+
+#[test]
+fn generic_reference_results_preserve_checked_mutability() {
+    check_with_declarations(r#"
+        type Envelope<T> is { value: T };
+        implement<T> Envelope<T> { fn take(self) -> T { self.value } }
+        fn borrowed(value: &checked mut Maybe<Text>) -> Envelope<&checked mut Maybe<Text>> {
+            Envelope { value: value }
+        }
+    "#, r#"
+        let mut value: Maybe<Text> = Maybe.Some("seed");
+        let reference = borrowed(&checked mut value).take();
+        match reference { Maybe.Some(word) => word.push_str(" suffix"), _ => {}, }
+        match value { Maybe.Some(word) => word, _ => "missing", }
+    "#, "seed suffix");
+}
+
+#[test]
+fn generic_immutable_reference_results_can_be_read() {
+    check_with_declarations(r#"
+        type Envelope<T> is { value: T };
+        implement<T> Envelope<T> { fn take(self) -> T { self.value } }
+        fn borrowed(value: &Maybe<Text>) -> Envelope<&Maybe<Text>> {
+            Envelope { value: value }
+        }
+    "#, r#"
+        let value: Maybe<Text> = Maybe.Some("seed");
+        let reference = borrowed(&value).take();
+        match reference { Maybe.Some(word) => *word, _ => "missing", }
+    "#, "seed");
 }
 
 #[test]

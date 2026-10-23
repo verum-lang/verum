@@ -407,6 +407,8 @@ impl VbcCodegen {
         if self.ctx.lookup_var(name).is_none()
             || self.ctx.reference_bindings.contains(name)
             || self.ctx.is_raw_pointer(reg)
+            || self.ctx.registers.value_uses.active.get(&reg).is_some_and(|fact|
+                matches!(fact.declaration_type, Some(crate::types::TypeRef::Reference { .. })))
         {
             return false;
         }

@@ -62,7 +62,15 @@ impl VbcCodegen {
                     _ => CbgrTier::Tier0,
                 },
             }),
-            ExprKind::Call { .. } | ExprKind::MethodCall { .. } => {
+            ExprKind::MethodCall { receiver, method, type_args, .. } => {
+                let selected = emitted.and_then(|(reg, start, end)|
+                    self.copy_selected_call_result(reg, start, end));
+                if selected.as_ref().is_some_and(|ty| !ty.is_generic()) { return selected; }
+                let owner = self.extract_expr_type_name(receiver)?;
+                self.declared_method_result_type(&owner, method.name.as_str(), type_args)
+                    .or(selected)
+            }
+            ExprKind::Call { .. } => {
                 let (reg, start, end) = emitted?;
                 self.copy_selected_call_result(reg, start, end)
             }

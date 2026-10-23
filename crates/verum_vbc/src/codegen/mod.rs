@@ -19158,15 +19158,16 @@ impl VbcCodegen {
                 // splitters; `(T)` is unambiguous for our consumers.
                 Some(format!("({})", elems.join(", ")))
             }
-            TypeKind::Reference { mutable, inner } => {
+            TypeKind::Reference { mutable, inner }
+            | TypeKind::CheckedReference { mutable, inner } => {
                 let inner_name = self.extract_type_name_at(inner, false)?;
                 if top {
                     // Top-level `-> &T` flattens (dispatch contract).
                     Some(inner_name)
-                } else if *mutable {
-                    Some(format!("&mut {}", inner_name))
                 } else {
-                    Some(format!("&{}", inner_name))
+                    let tier = if matches!(ty.kind, TypeKind::CheckedReference { .. }) { "checked " } else { "" };
+                    let mutable = if *mutable { "mut " } else { "" };
+                    Some(format!("&{tier}{mutable}{inner_name}"))
                 }
             }
             TypeKind::Slice(inner) => {
