@@ -340,6 +340,114 @@ fn disjoint_nominal_targets_share_a_protocol() {
             .unwrap();
     }
     assert_eq!(checker.impls.len(), 256);
-    assert_eq!(checker.registration_overlap_comparisons, 256 * 255 / 2);
-    eprintln!("256 nominal targets, 32640 coherence comparisons: {:?}", started.elapsed());
+    assert_eq!(checker.registration_overlap_comparisons, 0);
+    eprintln!("256 nominal targets, zero coherence comparisons: {:?}", started.elapsed());
+}
+
+#[test]
+fn nominal_index_survives_disabled_coherence_and_cloning() {
+    let mut checker = ProtocolChecker::new_empty();
+    checker.set_coherence_mode(CoherenceMode::Off);
+    let generic = nominal_target(
+        "owner.Item",
+        List::from_iter([Type::Var(TypeVar::fresh())]),
+        1,
+    );
+    checker
+        .register_impl(implementation("Selected", generic))
+        .unwrap();
+    let mut cloned = checker.clone();
+    cloned.set_coherence_mode(CoherenceMode::Strict);
+    cloned
+        .register_impl(implementation(
+            "Selected",
+            nominal_target("other.Item", List::from_iter([Type::Int]), 2),
+        ))
+        .unwrap();
+    assert_eq!(cloned.registration_overlap_comparisons, 0);
+    assert!(matches!(
+        cloned.register_impl(implementation(
+            "Selected",
+            nominal_target("owner.Item", List::from_iter([Type::Int]), 3)
+        )),
+        Err(CoherenceError::OverlappingImplementations { .. }),
+    ));
+    assert_eq!(cloned.registration_overlap_comparisons, 1);
+    assert_eq!(checker.impls.len(), 1);
+}
+
+#[test]
+fn nominal_candidates_match_full_scan_warnings_in_insertion_order() {
+    let mut checker = ProtocolChecker::new_empty();
+    checker.set_coherence_mode(CoherenceMode::Off);
+    let variable = Type::Var(TypeVar::with_id(23));
+    for (offset, target) in [
+        nominal_target(
+            "owner.Item",
+            List::from_iter([variable.clone(), Type::Bool]),
+            10,
+        ),
+        variable.clone(),
+        nominal_target("other.Item", List::from_iter([Type::Int, Type::Bool]), 20),
+        Type::Tuple(List::from_iter([variable.clone()])),
+        nominal_target(
+            "owner.Item",
+            List::from_iter([Type::Int, variable.clone()]),
+            30,
+        ),
+        nominal_target("owner.Item", List::from_iter([variable]), 40),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let mut entry = implementation("Selected", target);
+        entry.span = Span::new(offset as u32, offset as u32 + 1, FileId::new(1));
+        checker.register_impl(entry).unwrap();
+    }
+    checker.set_coherence_mode(CoherenceMode::Lenient);
+    let entry = implementation(
+        "Selected",
+        nominal_target("owner.Item", List::from_iter([Type::Int, Type::Bool]), 50),
+    );
+    let expected: List<_> = checker
+        .impls
+        .iter()
+        .filter_map(|existing| checker.check_overlap(&entry, existing).err())
+        .collect();
+    checker.register_impl(entry).unwrap();
+    let actual = checker.drain_coherence_warnings();
+    assert_eq!(format!("{actual:?}"), format!("{:?}", expected.as_slice()));
+    assert_eq!(actual.len(), 2);
+    assert_eq!(checker.registration_overlap_comparisons, 4);
+}
+
+#[test]
+fn nonnominal_and_special_path_targets_keep_conservative_candidates() {
+    let mut checker = ProtocolChecker::new_empty();
+    let mut path = Path::single(Ident::new("Item", Span::default()));
+    path.segments.insert(0, PathSegment::SelfValue);
+    let special = Type::Named {
+        path,
+        args: List::new(),
+    };
+    checker
+        .register_impl(implementation("Selected", special.clone()))
+        .unwrap();
+    checker
+        .register_impl(implementation(
+            "Selected",
+            nominal_target("owner.Item", List::new(), 1),
+        ))
+        .unwrap();
+    let before = checker.registration_overlap_comparisons;
+    assert!(matches!(
+        checker.register_impl(implementation("Selected", special)),
+        Err(CoherenceError::OverlappingImplementations { .. })
+    ));
+    assert_eq!(checker.registration_overlap_comparisons, before + 1);
+    // A new nonnominal target still visits both prior nominal candidates.
+    checker
+        .register_impl(implementation("Selected", Type::Var(TypeVar::fresh())))
+        .unwrap();
+    assert_eq!(checker.registration_overlap_comparisons, before + 3);
 }

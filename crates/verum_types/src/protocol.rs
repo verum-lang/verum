@@ -1507,6 +1507,55 @@ fn trygate_trace() -> bool {
 }
 
 
+/// Coherence candidates retain insertion order so the first refusal and the
+/// order of lenient warnings agree with a full implementation scan.
+#[derive(Clone, Default)]
+struct ImplOverlapIndex {
+    all: List<usize>,
+    nominal: Map<(List<Text>, usize), List<usize>>,
+    other: List<usize>,
+}
+
+impl ImplOverlapIndex {
+    fn nominal_head(target: &Type) -> Option<(List<Text>, usize)> {
+        let Type::Named { path, args } = target else {
+            return None;
+        };
+        let segments = path
+            .segments
+            .iter()
+            .map(|segment| match segment {
+                verum_ast::ty::PathSegment::Name(name) => Some(name.name.clone()),
+                _ => None,
+            })
+            .collect::<Option<List<Text>>>()?;
+        Some((segments, args.len()))
+    }
+
+    fn insert(&mut self, target: &Type, index: usize) {
+        self.all.push(index);
+        match Self::nominal_head(target) {
+            Some(head) => self.nominal.entry(head).or_default().push(index),
+            None => self.other.push(index),
+        }
+    }
+
+    fn candidates(&self, target: &Type) -> List<usize> {
+        let Some(head) = Self::nominal_head(target) else {
+            return self.all.clone();
+        };
+        // Different nominal constructors or arities cannot unify. Keep every
+        // nonnominal target (including variables) for the existing checker.
+        // Arguments inside a constructor remain unconstrained by this index.
+        let mut candidates = self.other.clone();
+        if let Some(nominal) = self.nominal.get(&head) {
+            candidates.extend(nominal.iter().copied());
+        }
+        candidates.sort_unstable();
+        candidates
+    }
+}
+
 /// Protocol checking and resolution engine
 #[derive(Clone)]
 
@@ -1518,9 +1567,8 @@ pub struct ProtocolChecker {
     /// Implementation index for fast lookup
     /// Map from (type, protocol) to implementation
     impl_index: Map<(Text, Text), usize>,
-    /// Insertion-ordered overlap candidates for each exact protocol identity.
-    /// Arguments stay in `check_overlap`: generic arguments can still overlap.
-    impls_by_protocol: Map<Text, List<usize>>,
+    /// Overlap candidates by protocol and proven nominal target constructor.
+    impls_by_protocol: Map<Text, ImplOverlapIndex>,
     #[cfg(test)]
     registration_overlap_comparisons: usize,
     /// Derivable protocols (can be automatically derived)
@@ -5205,20 +5253,20 @@ impl ProtocolChecker {
     ///  * `Off`: both checks are skipped entirely.
     #[track_caller]
     pub fn register_impl(&mut self, impl_: ProtocolImpl) -> Result<(), CoherenceError> {
-        // Use the same identity as check_overlap, without narrowing by target
-        // type or protocol arguments: either can contain overlapping variables.
+        // The protocol identity is the same one used by check_overlap.
+        // Only proven disjoint nominal target constructors are filtered out.
         let protocol_identity = self.make_protocol_key(&impl_.protocol);
         match self.coherence_mode {
             CoherenceMode::Strict => {
                 // Current behaviour — both checks are hard errors.
                 self.check_orphan_rule(&impl_)?;
                 if let Some(candidates) = self.impls_by_protocol.get(&protocol_identity) {
-                    for &index in candidates {
+                    for index in candidates.candidates(&impl_.for_type) {
                         #[cfg(test)]
                         {
                             self.registration_overlap_comparisons += 1;
                         }
-                        self.check_overlap(&impl_, &self.impls[index])?;
+                        self.check_overlap_same_protocol(&impl_, &self.impls[index])?;
                     }
                 }
             }
@@ -5228,12 +5276,12 @@ impl ProtocolChecker {
                 }
                 let mut overlap_warnings = List::new();
                 if let Some(candidates) = self.impls_by_protocol.get(&protocol_identity) {
-                    for &index in candidates {
+                    for index in candidates.candidates(&impl_.for_type) {
                         #[cfg(test)]
                         {
                             self.registration_overlap_comparisons += 1;
                         }
-                        if let Err(e) = self.check_overlap(&impl_, &self.impls[index]) {
+                        if let Err(e) = self.check_overlap_same_protocol(&impl_, &self.impls[index]) {
                             overlap_warnings.push(e);
                         }
                     }
@@ -5296,7 +5344,7 @@ impl ProtocolChecker {
         self.impls_by_protocol
             .entry(protocol_identity)
             .or_default()
-            .push(idx);
+            .insert(&impl_.for_type, idx);
         self.impls.push(impl_);
 
         // Invalidate implementation cache since we added a new impl
@@ -11711,6 +11759,15 @@ impl ProtocolChecker {
         if self.make_protocol_key(&impl1.protocol) != self.make_protocol_key(&impl2.protocol) {
             return Ok(()); // Different protocols don't overlap
         }
+
+        self.check_overlap_same_protocol(impl1, impl2)
+    }
+
+    fn check_overlap_same_protocol(
+        &self,
+        impl1: &ProtocolImpl,
+        impl2: &ProtocolImpl,
+    ) -> Result<(), CoherenceError> {
 
         // CRITICAL FIX: Check if protocol_args are different
         // Sub<Duration> and Sub<Instant> for the same type are NOT overlapping
