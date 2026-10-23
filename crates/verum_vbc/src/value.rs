@@ -817,14 +817,16 @@ impl Value {
         Value(NAN_BITS | (TAG_POINTER << TAG_SHIFT) | addr)
     }
 
-    /// Creates a small string value (up to 6 bytes).
+    /// Creates a small string value (up to 6 non-NUL bytes).
     ///
-    /// Returns `None` if the string doesn't fit (> 6 bytes).
-    /// Layout: bits 47-44 = length (4 bits), bits 0-47 = 6 bytes of string data
+    /// The 48-bit payload holds six bytes with zero padding, without a length
+    /// field. Text containing NUL must use the length-bearing heap encoding;
+    /// otherwise trailing NUL bytes become indistinguishable from padding.
+    /// Returns `None` when the input requires that encoding.
     #[inline]
     pub fn from_small_string(s: &str) -> Option<Self> {
         let bytes = s.as_bytes();
-        if bytes.len() > 6 {
+        if bytes.len() > 6 || bytes.contains(&0) {
             return None;
         }
 
@@ -1424,7 +1426,8 @@ impl Value {
             self.tag()
         );
         let payload = self.0 & PAYLOAD_MASK;
-        // Extract 6 bytes and find length by looking for first zero
+        // Extract all six bytes. Inline strings contain no NUL, so the last
+        // nonzero byte identifies their length; remaining bytes are padding.
         let mut bytes = [0u8; 6];
         let mut len = 0;
         for (i, byte_slot) in bytes.iter_mut().enumerate() {
