@@ -161,6 +161,21 @@ fn moved(cs: &[String]) -> bool {
 }
 
 #[test]
+fn unit_payload_patterns_introduce_no_bindings_in_both_walkers() {
+    let cs = complaints(r#"
+type Outcome is | Done(()) | Failed(Int);
+fn consume_unit(outcome: Outcome) -> Int {
+    match outcome { Outcome.Done(()) => 0, Outcome.Failed(reason) => reason }
+}
+fn inferred(outcome: Outcome) -> Int {
+    let result = match outcome { Outcome.Done(()) => 0, Outcome.Failed(reason) => reason };
+    result
+}
+"#);
+    assert!(cs.is_empty(), "unit payload pattern is valid: {cs:?}");
+}
+
+#[test]
 fn match_arms_may_each_consume_the_same_affine_value() {
     let code = format!(
         "{DECLS}

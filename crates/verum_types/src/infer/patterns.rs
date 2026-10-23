@@ -2792,6 +2792,9 @@ impl TypeChecker {
             }
 
             PatternKind::Tuple(patterns) => {
+                if patterns.is_empty() && matches!(ty, Type::Unit) {
+                    return Ok(List::new());
+                }
                 if let Type::Tuple(types) = ty {
                     if patterns.len() != types.len() {
                         return Err(TypeError::Other(verum_common::Text::from(format!(
