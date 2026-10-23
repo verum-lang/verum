@@ -63,6 +63,9 @@ pub struct SourceReport {
     pub conclusion: Option<Term>,
     pub universe_bindings: Vec<UniverseBinding>,
     pub diagnostic: Option<Diagnostic>,
+    /// Half-open UTF-8 source range; an empty range denotes an insertion point.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diagnostic_span: Option<SourceSpan>,
 }
 
 pub fn sha256(bytes: &[u8]) -> String {
@@ -72,6 +75,23 @@ pub fn elaborator_identity() -> &'static str {
     env!("VERUM_SOURCE_ELABORATOR")
 }
 impl SourceReport {
+    fn at_source(mut self, source: &str, span: verum_common::span::Span) -> Self {
+        if let Some(text) = source.get(span.start as usize..span.end as usize) {
+            self.diagnostic_span = Some(SourceSpan {
+                start: span.start,
+                end: span.end,
+                sha256: sha256(text.as_bytes()),
+            });
+        } else {
+            self.status = "inconclusive".into();
+            self.diagnostic = Some(Diagnostic {
+                stage: "protocol".into(),
+                code: "invalid_diagnostic_span".into(),
+                message: "The diagnostic range does not address exact UTF-8 source bytes.".into(),
+            });
+        }
+        self
+    }
     pub fn failure(status: &str, stage: &str, code: &str, message: &str) -> Self {
         Self {
             profile: PROFILE.into(),
@@ -87,6 +107,7 @@ impl SourceReport {
             telescope: Vec::new(),
             conclusion: None,
             universe_bindings: Vec::new(),
+            diagnostic_span: None,
             diagnostic: Some(Diagnostic {
                 code: code.into(),
                 stage: stage.into(),
@@ -141,14 +162,28 @@ pub fn replay(bytes: &[u8]) -> SourceReport {
         .parse_module_str(&request.source, verum_common::span::FileId::new(0))
     {
         Ok(module) => module,
-        Err(_) => {
+        Err(errors) => {
+            let Some(error) = errors.first() else {
+                return failure(
+                    "inconclusive",
+                    "parse",
+                    "empty_parser_failure",
+                    "The parser failed without a diagnostic.",
+                    &source,
+                );
+            };
             return failure(
                 "rejected",
                 "parse",
                 "source_parse_error",
-                "The production Verum parser rejected the source module.",
+                &format!(
+                    "First of {} parser diagnostics: {}",
+                    errors.len(),
+                    error.kind
+                ),
                 &source,
-            );
+            )
+            .at_source(&request.source, error.span);
         }
     };
     let mut selected = module.items.iter().filter_map(|item| match &item.kind {
@@ -208,10 +243,11 @@ pub fn replay(bytes: &[u8]) -> SourceReport {
             &source,
         );
     }
-    let artifact = match scoped::elaborate(theorem, PROFILE) {
+    let artifact = match scoped::elaborate_diagnostic(theorem, PROFILE) {
         Ok(artifact) => artifact,
         Err(error) => {
-            let (status, stage, code, message) = match error {
+            let location = error.span.unwrap_or(item.span);
+            let (status, stage, code, message) = match error.error {
                 scoped::Error::Unsupported(m) => (
                     "unsupported",
                     "elaboration",
@@ -221,7 +257,8 @@ pub fn replay(bytes: &[u8]) -> SourceReport {
                 scoped::Error::Scope(m) => ("rejected", "scope", "unbound_or_duplicate_binder", m),
                 scoped::Error::Rejected(m) => ("rejected", "elaboration", "ill_typed_source", m),
             };
-            return failure(status, stage, code, &message, &source);
+            return failure(status, stage, code, &message, &source)
+                .at_source(&request.source, location);
         }
     };
     let statement = match scoped::lower(&artifact.scoped_type, &mut Vec::new()) {
@@ -307,5 +344,6 @@ pub fn replay(bytes: &[u8]) -> SourceReport {
             .map(|(source, kernel)| UniverseBinding { source, kernel })
             .collect(),
         diagnostic: None,
+        diagnostic_span: None,
     }
 }

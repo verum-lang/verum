@@ -32,3 +32,26 @@ A head-reduction pause must retain every binder annotation. The old exhausted-fu
 - The compiler kernel tests exercise compatibility after extraction.
 - Noesis CLI/HTTP/MCP tests execute this same checker, change a proof without reusing the old result, export/restore history, and reject authority attached merely to prose.
 - The public workflow includes the process-enabled portable suite; integration tests are not replaced by parser-only fixtures.
+
+## Source diagnostics
+
+The source worker retains the primary production-parser diagnostic or the innermost
+known elaboration range. `diagnostic_span` is an optional half-open UTF-8 byte range
+with a SHA-256 of the exact fragment; the report also binds the complete source and
+selected declaration. An empty range denotes an insertion point. This is distinct
+from the selected declaration span, because a parse error can occur elsewhere in
+the module. Invalid producer coordinates yield an inconclusive protocol result.
+Successful reports omit the field, as do historical reports without source locations.
+This additive metadata does not change the logical profile or replay authority.
+
+Consumers validate bounds, UTF-8 scalar boundaries, complete input identity and
+fragment digest before navigation. A UI must map bytes to its actual text projection,
+including CRLF normalization, without searching for matching words or clipping
+invalid offsets. Old source locations cannot control a newly edited draft. Parser
+error kinds are rendered without fabricated line/column values; clients derive
+positions from the bound source. Primary diagnostics do not promise exhaustive error
+recovery or a minimal semantic explanation.
+
+Parenthesized expressions elaborate to the enclosed term. The same native statement
+and certificate are required with or without grouping; an ill-typed grouped proof
+still fails both-kernel admission. Grouping does not add an inference rule.

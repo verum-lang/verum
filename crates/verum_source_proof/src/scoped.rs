@@ -4,7 +4,7 @@ use verum_ast::decl::{FunctionParamKind, ProofBody, TacticExpr, TheoremDecl};
 use verum_ast::pattern::{Pattern, PatternKind};
 use verum_ast::ty::{GenericParamKind, Type, TypeKind, UniverseLevelExpr};
 use verum_ast::{BinOp, Expr, ExprKind, Path, PathSegment};
-use verum_common::Maybe;
+use verum_common::{Maybe, span::Span};
 use verum_proof::proof_checker::{self as k, Certificate, Context, Level, Term};
 
 pub const PROFILE: &str = "verum-source-pi-id/1";
@@ -68,6 +68,7 @@ struct Elab {
     next: u64,
     stack: Vec<Binding>,
     levels: BTreeMap<String, String>,
+    error_span: Option<Span>,
 }
 fn unsupported(s: impl Into<String>) -> Error {
     Error::Unsupported(s.into())
@@ -165,7 +166,14 @@ impl Elab {
             UniverseLevelExpr::Succ(a) => Level::Succ(Box::new(self.level(a)?)),
         })
     }
+    fn locate(&mut self, error: Error, span: Span) -> Error {
+        self.error_span.get_or_insert(span);
+        error
+    }
     fn ty(&mut self, t: &Type) -> Result<Ir> {
+        self.ty_inner(t).map_err(|error| self.locate(error, t.span))
+    }
+    fn ty_inner(&mut self, t: &Type) -> Result<Ir> {
         let ir = match &t.kind {
             TypeKind::Universe { level } => Ir::Universe(match level {
                 Maybe::None => Level::Concrete(0),
@@ -305,7 +313,14 @@ impl Elab {
         Ok(ir)
     }
     fn expr(&mut self, e: &Expr) -> Result<Ir> {
+        self.expr_inner(e)
+            .map_err(|error| self.locate(error, e.span))
+    }
+    fn expr_inner(&mut self, e: &Expr) -> Result<Ir> {
         match &e.kind {
+            // Grouping does not add a logical rule: elaborate the enclosed term
+            // and retain its source range if it fails.
+            ExprKind::Paren(inner) => self.expr(inner),
             ExprKind::Path(p) => self.lookup(path_name(p)?),
             ExprKind::TypeExpr(t) => self.ty(t),
             ExprKind::Call {
@@ -532,7 +547,26 @@ pub fn lower(t: &Ir, frame: &mut Vec<BinderId>) -> Result<Term> {
     })
 }
 /// Caller must explicitly select this proof-only profile; it is not the global runtime fn semantics.
+/// Diagnostics preserve the innermost source range without changing logical errors.
+#[derive(Debug)]
+pub struct LocatedError {
+    pub error: Error,
+    pub span: Option<Span>,
+}
 pub fn elaborate(theorem: &TheoremDecl, profile: &str) -> Result<Artifact> {
+    elaborate_diagnostic(theorem, profile).map_err(|located| located.error)
+}
+pub fn elaborate_diagnostic(
+    theorem: &TheoremDecl,
+    profile: &str,
+) -> std::result::Result<Artifact, LocatedError> {
+    let mut e = Elab::default();
+    elaborate_in(theorem, profile, &mut e).map_err(|error| LocatedError {
+        error,
+        span: e.error_span,
+    })
+}
+fn elaborate_in(theorem: &TheoremDecl, profile: &str, e: &mut Elab) -> Result<Artifact> {
     if profile != PROFILE {
         return Err(unsupported(
             "explicit proof-only Pi/Id profile selection required",
@@ -557,7 +591,6 @@ pub fn elaborate(theorem: &TheoremDecl, profile: &str) -> Result<Artifact> {
             "multiple or separate ensures and explicit propositions require conjunction elaboration; none may be discarded",
         ));
     }
-    let mut e = Elab::default();
     let mut names = BTreeSet::new();
     let mut levels = Vec::new();
     for g in &theorem.generics {
@@ -606,7 +639,8 @@ pub fn elaborate(theorem: &TheoremDecl, profile: &str) -> Result<Artifact> {
         e.bind(None, p, true)?;
     }
     let goal = e.expr(&theorem.proposition)?;
-    e.require_type(&goal)?;
+    e.require_type(&goal)
+        .map_err(|error| e.locate(error, theorem.proposition.span))?;
     let proof = match &theorem.proof {
         Maybe::Some(p) => e.proof(p, &goal)?,
         _ => return Err(unsupported("proof body missing")),
@@ -630,16 +664,25 @@ pub fn elaborate(theorem: &TheoremDecl, profile: &str) -> Result<Artifact> {
     let mut metadata = BTreeMap::new();
     metadata.insert("profile".into(), PROFILE.into());
     metadata.insert("declaration".into(), theorem.name.as_str().into());
+    let proof_span = match &theorem.proof {
+        Maybe::Some(ProofBody::Term(term) | ProofBody::Tactic(TacticExpr::Exact(term))) => {
+            Some(term.span)
+        }
+        _ => None,
+    };
     let certificate = Certificate {
         term: lower(&scoped_proof, &mut Vec::new())?,
         claimed_type: lower(&scoped_type, &mut Vec::new())?,
         metadata,
     };
-    certificate
-        .verify()
-        .map_err(|x| Error::Rejected(format!("substitution kernel: {x:?}")))?;
-    verum_proof::proof_checker_nbe::verify_certificate(&certificate)
-        .map_err(|x| Error::Rejected(format!("NbE kernel: {x:?}")))?;
+    certificate.verify().map_err(|x| {
+        e.error_span = e.error_span.or(proof_span);
+        Error::Rejected(format!("substitution kernel: {x:?}"))
+    })?;
+    verum_proof::proof_checker_nbe::verify_certificate(&certificate).map_err(|x| {
+        e.error_span = e.error_span.or(proof_span);
+        Error::Rejected(format!("NbE kernel: {x:?}"))
+    })?;
     Ok(Artifact {
         certificate,
         telescope,
