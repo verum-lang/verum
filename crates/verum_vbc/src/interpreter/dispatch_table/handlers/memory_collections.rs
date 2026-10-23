@@ -2924,6 +2924,12 @@ pub(crate) fn value_copy(
         return Ok(value);
     }
 
+    // Representation belongs to the allocation's producer. Synthetic variant
+    // IDs can overlap semantic container IDs; their payload is never a spine.
+    if header.flags.contains(heap::ObjectFlags::VARIANT) {
+        return copy_object_data(state, src_ptr, type_id, data_size, heap::ObjectFlags::VARIANT);
+    }
+
     // **SHARED-COPY-LAYOUT-1 (T1161)** — this arm assumes the
     // INTERCEPTION's object shape, so it must stand down with the rest
     // of the interception.
@@ -3014,50 +3020,78 @@ pub(crate) fn value_copy(
         return Ok(value);
     }
 
-    let slots = |i: usize| -> i64 {
-        // SAFETY: caller-verified tracked object; slot `i` is within
-        // the header slots each container layout declares below.
-        unsafe { (*((src_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value).add(i))).as_i64() }
+    let slot_size = std::mem::size_of::<Value>();
+    let header_slots = data_size / slot_size;
+    let known_container = match type_id {
+        TypeId::LIST => Some(header_slots == 3),
+        // Opcode/runtime maps have three slots; source maps also carry the
+        // fourth tombstone slot. Copy only fields the producer allocated.
+        TypeId::MAP | TypeId::SET => Some(matches!(header_slots, 3 | 4)),
+        TypeId::DEQUE => Some(header_slots == 4),
+        _ => None,
+    };
+    if known_container == Some(false) || (known_container.is_some() && data_size % slot_size != 0) {
+        return Err(InterpreterError::InvalidOperand { message: "invalid container copy header".into() });
+    }
+    let slots = |i: usize| -> InterpreterResult<usize> {
+        // SAFETY: the exact container header size was checked above.
+        let value = unsafe { *((src_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value).add(i)) };
+        if !value.is_int() || value.as_i64() < 0 {
+            return Err(InterpreterError::InvalidOperand { message: "invalid container copy extent".into() });
+        }
+        usize::try_from(value.as_i64()).map_err(|_| InterpreterError::InvalidOperand {
+            message: "container copy extent overflow".into(),
+        })
     };
 
     match type_id {
         // [len, cap, backing] — copy `len` live elements.
         TypeId::LIST => {
-            let len = slots(0).max(0) as usize;
-            let cap = slots(1).max(len as i64).max(1) as usize;
+            let len = slots(0)?;
+            let cap = slots(1)?;
             copy_container_spine(state, src_ptr, TypeId::LIST, TypeId::LIST, 3, 2, cap, len)
         }
         // [count, cap, entries, tombstones] — `cap * 2` (key, value)
         // slots whose hash POSITIONS must survive, so the whole region
         // copies.
         TypeId::MAP | TypeId::SET => {
-            let cap = slots(1).max(1) as usize;
-            copy_container_spine(state, src_ptr, type_id, TypeId::UNIT, 4, 2, cap * 2, cap * 2)
+            let cap = slots(1)?;
+            if slots(0)? > cap {
+                return Err(InterpreterError::InvalidOperand { message: "container length exceeds capacity".into() });
+            }
+            let entries = cap.checked_mul(2).ok_or_else(|| InterpreterError::InvalidOperand {
+                message: "container copy extent overflow".into(),
+            })?;
+            copy_container_spine(state, src_ptr, type_id, TypeId::UNIT, header_slots, 2, entries, entries)
         }
         // [data, head, len, cap] — a ring; head/len index into the
         // buffer, so the whole `cap` ring copies verbatim.
         TypeId::DEQUE => {
-            let cap = slots(3).max(1) as usize;
+            let cap = slots(3)?;
+            if slots(2)? > cap {
+                return Err(InterpreterError::InvalidOperand { message: "container length exceeds capacity".into() });
+            }
             copy_container_spine(state, src_ptr, TypeId::DEQUE, TypeId::UNIT, 4, 0, cap, cap)
         }
         // Records, variants, tuples: a fresh object carrying the same
         // slots.
-        _ => {
-            let representation = header.flags & heap::ObjectFlags::VARIANT;
-            let new_obj = state.heap.alloc(type_id, data_size)?;
-            // SAFETY: fresh object; retain representation, not borrow/GC/lifetime state.
-            unsafe { (*new_obj.as_ptr()).flags |= representation };
-            state.record_allocation();
-            let src_data = unsafe { src_ptr.add(heap::OBJECT_HEADER_SIZE) };
-            let dst_data = new_obj.data_ptr();
-            // SAFETY: `data_size` bytes are the source object's own
-            // payload; the destination was allocated at that size.
-            unsafe {
-                std::ptr::copy_nonoverlapping(src_data, dst_data, data_size);
-            }
-            Ok(Value::from_ptr(new_obj.as_ptr() as *mut u8))
-        }
+        _ => copy_object_data(state, src_ptr, type_id, data_size, heap::ObjectFlags::empty()),
     }
+}
+
+fn copy_object_data(
+    state: &mut InterpreterState, source: *const u8, type_id: TypeId, size: usize,
+    representation: heap::ObjectFlags,
+) -> InterpreterResult<Value> {
+    let object = state.heap.alloc(type_id, size)?;
+    state.record_allocation();
+    // SAFETY: both tracked allocations have `size` payload bytes. Only the
+    // producer's representation survives, never borrow/GC/lifetime state.
+    unsafe {
+        (*object.as_ptr()).flags |= representation;
+        std::ptr::copy_nonoverlapping(source.add(heap::OBJECT_HEADER_SIZE), object.data_ptr(), size);
+    }
+    Ok(Value::from_ptr(object.as_ptr() as *mut u8))
 }
 
 /// Copies a container's header slots and gives the copy a backing
@@ -3078,14 +3112,35 @@ pub(crate) fn copy_container_spine(
     backing_alloc: usize,
     copy_slots: usize,
 ) -> InterpreterResult<Value> {
+    let slot_size = std::mem::size_of::<Value>();
+    if copy_slots > backing_alloc || backing_slot >= header_slots {
+        return Err(InterpreterError::InvalidOperand { message: "container copy exceeds capacity".into() });
+    }
+    let allocation_bytes = backing_alloc.max(1).checked_mul(slot_size)
+        .ok_or_else(|| InterpreterError::InvalidOperand { message: "container copy size overflow".into() })?;
     let src_data = unsafe { src_obj.add(heap::OBJECT_HEADER_SIZE) as *const Value };
+    // A zero-capacity source may use an integer/raw null sentinel. There is
+    // nothing to read from it, so do not interpret it as an object pointer.
+    let src_backing = if copy_slots == 0 { None } else {
+        let backing = unsafe { *src_data.add(backing_slot) };
+        if !backing.is_ptr() || backing.is_nil()
+            || !state.heap.contains(backing.as_ptr::<heap::ObjectHeader>()) {
+            return Err(InterpreterError::InvalidOperand { message: "invalid container copy backing".into() });
+        }
+        let pointer = backing.as_ptr::<u8>();
+        let header = unsafe { &*pointer.cast::<heap::ObjectHeader>() };
+        if copy_slots > header.size as usize / slot_size {
+            return Err(InterpreterError::InvalidOperand { message: "container copy exceeds backing allocation".into() });
+        }
+        Some(pointer)
+    };
     let obj = state
         .heap
         .alloc(type_id, header_slots * std::mem::size_of::<Value>())?;
     state.record_allocation();
     let new_data =
         unsafe { (obj.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE) as *mut Value };
-    let backing = state.heap.alloc_array(backing_type, backing_alloc.max(1))?;
+    let backing = state.heap.alloc(backing_type, allocation_bytes)?;
     state.record_allocation();
     // SAFETY: fresh allocations of the exact sizes above; the source is
     // a validated container object; backing arrays are header-carrying
@@ -3095,10 +3150,9 @@ pub(crate) fn copy_container_spine(
             *new_data.add(i) = *src_data.add(i);
         }
         *new_data.add(backing_slot) = Value::from_ptr(backing.as_ptr() as *mut u8);
-        let src_backing = (*src_data.add(backing_slot)).as_ptr::<u8>();
         let dst_elems =
             (backing.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE) as *mut Value;
-        if !src_backing.is_null() && copy_slots > 0 {
+        if let Some(src_backing) = src_backing {
             let src_elems = src_backing.add(heap::OBJECT_HEADER_SIZE) as *const Value;
             std::ptr::copy_nonoverlapping(src_elems, dst_elems, copy_slots);
         }
@@ -3570,6 +3624,90 @@ mod value_copy_contract {
             1,
             "writing through the copy must not reach the source"
         );
+    }
+
+    #[test]
+    fn variant_representation_overrides_container_and_wrapper_type_ids() {
+        for type_id in [TypeId::LIST, TypeId::MAP, TypeId::SET, TypeId::DEQUE,
+                        TypeId::TEXT, TypeId::SHARED] {
+            let mut st = state();
+            let object = st.heap.alloc_variant(type_id, 3, 2).unwrap();
+            unsafe {
+                let fields = object.data_ptr().add(8) as *mut Value;
+                *fields = Value::from_i64(17);
+                *fields.add(1) = Value::from_i64(29);
+            }
+            let source = Value::from_ptr(object.as_ptr() as *mut u8);
+            let copy = value_copy(&mut st, source).expect("variant copy");
+            assert_ne!(copy, source, "{type_id:?} variant must own its fields");
+            let header = unsafe { &*copy.as_ptr::<heap::ObjectHeader>() };
+            assert!(header.flags.contains(heap::ObjectFlags::VARIANT));
+            let original = unsafe { std::slice::from_raw_parts(object.data_ptr(), 24) };
+            let copied = unsafe {
+                std::slice::from_raw_parts(copy.as_ptr::<u8>().add(heap::OBJECT_HEADER_SIZE), 24)
+            };
+            assert_eq!(copied, original, "{type_id:?}");
+        }
+    }
+
+    #[test]
+    fn zero_capacity_map_copy_never_reads_its_sentinel_backing() {
+        let mut st = state();
+        let object = st.heap.alloc(TypeId::MAP, 4 * std::mem::size_of::<Value>()).unwrap();
+        unsafe {
+            let slots = object.data_ptr() as *mut Value;
+            for index in 0..4 { *slots.add(index) = Value::from_i64(0); }
+        }
+        let source = Value::from_ptr(object.as_ptr() as *mut u8);
+        let copy = value_copy(&mut st, source).expect("empty map copy");
+        assert_ne!(copy, source);
+        let copied = unsafe { copy.as_ptr::<u8>().add(heap::OBJECT_HEADER_SIZE) as *const Value };
+        assert_eq!(unsafe { *copied }, Value::from_i64(0));
+        assert_eq!(unsafe { *copied.add(1) }, Value::from_i64(0));
+    }
+
+    #[test]
+    fn map_and_set_copies_preserve_actual_header_size_and_independent_slots() {
+        for (type_id, headers) in [(TypeId::MAP, 3), (TypeId::MAP, 4), (TypeId::SET, 3)] {
+            let mut st = state();
+            let source = st.heap.alloc(type_id, headers * 8).unwrap();
+            let backing = st.heap.alloc_array(TypeId::UNIT, 4).unwrap();
+            unsafe {
+                let head = source.data_ptr() as *mut Value;
+                *head = Value::from_i64(1);
+                *head.add(1) = Value::from_i64(2);
+                *head.add(2) = Value::from_ptr(backing.as_ptr() as *mut u8);
+                if headers == 4 { *head.add(3) = Value::from_i64(1); }
+                for index in 0..4 { *(backing.data_ptr() as *mut Value).add(index) = Value::from_i64(index as i64); }
+            }
+            let copy = value_copy(&mut st, Value::from_ptr(source.as_ptr() as *mut u8)).unwrap();
+            let header = unsafe { &*copy.as_ptr::<heap::ObjectHeader>() };
+            assert_eq!(header.size as usize, headers * 8);
+            let head = unsafe { copy.as_ptr::<u8>().add(heap::OBJECT_HEADER_SIZE) as *const Value };
+            let copied_backing = unsafe { (*head.add(2)).as_ptr::<u8>() };
+            assert_ne!(copied_backing, backing.as_ptr() as *mut u8);
+            let slots = unsafe { copied_backing.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
+            for index in 0..4 { assert_eq!(unsafe { *slots.add(index) }, Value::from_i64(index as i64)); }
+            unsafe { *slots = Value::from_i64(99); }
+            assert_eq!(unsafe { *(backing.data_ptr() as *const Value) }, Value::from_i64(0));
+        }
+    }
+
+    #[test]
+    fn invalid_container_extents_are_refused_before_copying() {
+        for (headers, capacity, backing_length) in [(2, 2, 4), (3, 3, 4), (3, -1, 4)] {
+            let mut st = state();
+            let source = st.heap.alloc(TypeId::MAP, headers * 8).unwrap();
+            let backing = st.heap.alloc_array(TypeId::UNIT, backing_length).unwrap();
+            unsafe {
+                let head = source.data_ptr() as *mut Value;
+                *head = Value::from_i64(1);
+                *head.add(1) = Value::from_i64(capacity);
+                if headers >= 3 { *head.add(2) = Value::from_ptr(backing.as_ptr() as *mut u8); }
+            }
+            assert!(matches!(value_copy(&mut st, Value::from_ptr(source.as_ptr() as *mut u8)),
+                Err(InterpreterError::InvalidOperand { .. })));
+        }
     }
 
     /// A `Shared<T>` copy is the SAME carrier with one more owner —
