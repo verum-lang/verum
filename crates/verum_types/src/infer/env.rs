@@ -8704,7 +8704,12 @@ impl TypeChecker {
         owner: &str,
     ) -> Result<()> {
         let saved = std::mem::replace(&mut self.current_module_path, owner.into());
+        // Fields and variant payloads are source signatures too. Resolve their
+        // names through this declaration's private mounts, never through an
+        // unrelated binding in the importing module.
+        let saved_scope = std::mem::replace(&mut self.resolving_source_signature, true);
         let result = self.register_type_declaration(decl);
+        self.resolving_source_signature = saved_scope;
         self.current_module_path = saved;
         result
     }
