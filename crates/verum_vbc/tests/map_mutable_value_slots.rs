@@ -1,8 +1,9 @@
 //! T1196: mutable Map access must alias the value slot owned by its runtime carrier.
 //!
 //! Compile the complete production Map module and its caller without filtering or
-//! replacing the Slot/get_mut declarations. The mount loader supplies dependency
-//! declarations. Callers use real map literals (NewMap) to select the runtime
+//! replacing the Slot/get_mut declarations. Primitive bodies are also compiled,
+//! so collection helpers execute the real Clone implementations. The mount
+//! loader supplies other dependency declarations. Callers use real map literals (NewMap) to select the runtime
 //! carrier; source-only Map.new takes a different route from the ordinary
 //! archive compiler. No production body is filtered or replaced. Each executed
 //! case must reach its own scalar oracle. This is a
@@ -19,6 +20,7 @@ use verum_vbc::interpreter::Interpreter;
 use verum_vbc::module::VbcModule;
 
 const PRODUCTION_MAP: &str = include_str!("../../../core/collections/map.vr");
+const PRODUCTION_PRIMITIVES: &str = include_str!("../../../core/base/primitives.vr");
 const CALLER: &str = r#"
 module mutable_map_values;
 mount core.collections.map.Map;
@@ -186,6 +188,61 @@ fn grow_after_borrow_ends() -> Int {
     match values.get(65) { Maybe.Some(value) => value, _ => -1 }
 }
 
+fn key_and_value_iterators() -> Int {
+    let values: Map<Int, Int> = { 1: 11, 17: 19 };
+    let mut keys = values.keys();
+    let first = match keys.next() { Maybe.Some(key) => key, _ => -1000 };
+    let second = match keys.next() { Maybe.Some(key) => key, _ => -2000 };
+    assert(keys.next() is Maybe.None);
+    assert(keys.next() is Maybe.None);
+    assert(first != second);
+    let mut items = values.values();
+    let left = match items.next() { Maybe.Some(item) => item, _ => -3000 };
+    let right = match items.next() { Maybe.Some(item) => item, _ => -4000 };
+    assert(items.next() is Maybe.None);
+    assert(left != right);
+    (first + second) * 100 + left + right
+}
+
+fn collected_keys_and_values() -> Int {
+    let mut values: Map<Int, Int> = { 1: 11, 17: 19 };
+    let keys = values.keys_list();
+    let items = values.values_list();
+    assert_eq(keys.len(), 2);
+    assert_eq(items.len(), 2);
+    assert_eq(keys[0] + keys[1], 18);
+    assert_eq(items[0] + items[1], 30);
+    values.clear();
+    assert_eq(values.keys_list().len(), 0);
+    assert_eq(values.values_list().len(), 0);
+    let mut empty_keys = values.keys();
+    let mut empty_values = values.values();
+    assert(empty_keys.next() is Maybe.None);
+    assert(empty_values.next() is Maybe.None);
+    1830
+}
+
+fn record_values_and_fresh_empty_iterators() -> Int {
+    let values: Map<Int, Cell> = {
+        1: Cell { padding: 101, value: 7 },
+        17: Cell { padding: 303, value: 19 },
+    };
+    let mut items = values.values();
+    let first = match items.next() { Maybe.Some(value) => value, _ => panic("first value") };
+    let second = match items.next() { Maybe.Some(value) => value, _ => panic("second value") };
+    assert_eq(first.padding + second.padding, 404);
+    assert_eq(first.value + second.value, 26);
+    assert(items.next() is Maybe.None);
+    let empty: Map<Int, Cell> = Map.new();
+    let mut keys = empty.keys();
+    let mut items = empty.values();
+    assert(keys.next() is Maybe.None);
+    assert(items.next() is Maybe.None);
+    assert_eq(empty.keys_list().len(), 0);
+    assert_eq(empty.values_list().len(), 0);
+    40426
+}
+
 "#;
 
 fn source() -> Arc<VbcModule> {
@@ -204,6 +261,15 @@ fn source() -> Arc<VbcModule> {
                     concat!(env!("CARGO_MANIFEST_DIR"), "/../../core"),
                 )
                 .expect("complete production Map source with declared dependencies");
+            let primitives = Parser::new(PRODUCTION_PRIMITIVES)
+                .parse_module()
+                .expect("production primitive implementations");
+            codegen
+                .collect_unit_declarations(&[&primitives])
+                .expect("primitive declarations");
+            codegen
+                .compile_unit_items(&[&primitives], ItemFailurePolicy::Strict)
+                .expect("complete primitive bodies, including Int.clone");
             codegen
                 .collect_unit_declarations(&[&caller])
                 .expect("caller declarations");
@@ -333,6 +399,18 @@ fn check(name: &str, expected: i64) {
 #[test]
 fn existing_owned_lookup_control() {
     check("read_control", 719);
+}
+#[test]
+fn keys_and_values_preserve_the_source_iterator_contract() {
+    check("key_and_value_iterators", 1830);
+}
+#[test]
+fn source_collection_helpers_consume_key_and_value_iterators() {
+    check("collected_keys_and_values", 1830);
+}
+#[test]
+fn iterators_preserve_record_values_and_handle_unallocated_maps() {
+    check("record_values_and_fresh_empty_iterators", 40426);
 }
 #[test]
 fn scalar_replacement_writes_the_original_value_slot() {

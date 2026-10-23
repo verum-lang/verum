@@ -8382,36 +8382,9 @@ pub(super) fn dispatch_primitive_method(
                     };
                     return Ok(Some(result));
                 }
-                "keys" if is_map => {
-                    // Map.keys() -> List<K>
-                    let header_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
-                    let capacity = unsafe { (*header_ptr.add(1)).as_i64() } as usize;
-                    let entries_data = map_entries_data(header_ptr, capacity);
-                    let mut keys = Vec::new();
-                    for i in 0..capacity {
-                        let k = unsafe { *entries_data.add(i * 2) };
-                        if !k.is_unit() {
-                            keys.push(k);
-                        }
-                    }
-                    let result = alloc_list_from_values(state, keys)?;
-                    return Ok(Some(result));
-                }
-                "values" if is_map => {
-                    // Map.values() -> List<V>
-                    let header_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
-                    let capacity = unsafe { (*header_ptr.add(1)).as_i64() } as usize;
-                    let entries_data = map_entries_data(header_ptr, capacity);
-                    let mut vals = Vec::new();
-                    for i in 0..capacity {
-                        let k = unsafe { *entries_data.add(i * 2) };
-                        if !k.is_unit() {
-                            vals.push(unsafe { *entries_data.add(i * 2 + 1) });
-                        }
-                    }
-                    let result = alloc_list_from_values(state, vals)?;
-                    return Ok(Some(result));
-                }
+                // keys()/values() use their source MapKeys/MapValues wrappers,
+                // whose inner iterator is supplied by the iter() bridge above.
+                // Returning a List here violates their declared result layout.
                 "entries" if is_map => {
                     // Map.entries() -> List<(K, V)>
                     let header_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
