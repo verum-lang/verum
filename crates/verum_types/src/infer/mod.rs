@@ -1124,6 +1124,8 @@ pub struct TypeChecker {
     /// dropped whenever the metadata handle is replaced, because a per-glob
     /// scan would be O(stdlib_total) on every nested re-export hop.
     metadata_own_surface: std::cell::RefCell<Option<Map<Text, List<Text>>>>,
+    /// Exact type-name to declaring-module suggestions for one metadata snapshot.
+    metadata_declaring_modules: std::cell::OnceCell<Map<Text, List<Text>>>,
     /// Set of (module_path, item_name) pairs currently being resolved via
     /// re-export chains (`resolve_export_kind_with_reexports` /
     /// `find_function_with_source_module`). Prevents unbounded recursion when

@@ -983,6 +983,7 @@ impl TypeChecker {
             glob_imports_in_progress: std::collections::HashSet::new(),
             glob_imports_stack: Vec::new(),
             metadata_own_surface: std::cell::RefCell::new(None),
+            metadata_declaring_modules: std::cell::OnceCell::new(),
             reexport_resolution_in_progress: std::collections::HashSet::new(),
             pending_extracted_type_bounds: Map::new(),
             imported_names: Map::new(),
@@ -1144,6 +1145,7 @@ impl TypeChecker {
         self.install_metadata_nominal_identity(&metadata);
         self.core_metadata = Maybe::Some(metadata);
         self.metadata_own_surface = std::cell::RefCell::new(None);
+        self.metadata_declaring_modules = std::cell::OnceCell::new();
         self.metadata_impls_by_owner = Maybe::None;
         self.stdlib_tail_registered.clear();
     }
@@ -4034,6 +4036,7 @@ impl TypeChecker {
             glob_imports_in_progress: std::collections::HashSet::new(),
             glob_imports_stack: Vec::new(),
             metadata_own_surface: std::cell::RefCell::new(None),
+            metadata_declaring_modules: std::cell::OnceCell::new(),
             reexport_resolution_in_progress: std::collections::HashSet::new(),
             pending_extracted_type_bounds: Map::new(),
             imported_names: Map::new(),
