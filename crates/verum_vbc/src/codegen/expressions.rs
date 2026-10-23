@@ -47,6 +47,22 @@ use verum_ast::{
     PathSegment, UnOp,
 };
 
+/// The borrow belongs to this pattern binding, never to expressions in its body.
+/// Tuple expressions may mix owned values and references.
+#[derive(Clone, Default)]
+enum PatternBindingMode {
+    #[default]
+    Value,
+    Borrowed(crate::types::Mutability, CbgrTier),
+    Tuple(verum_common::List<PatternBindingMode>),
+}
+
+impl PatternBindingMode {
+    fn is_borrowed(&self) -> bool {
+        matches!(self, Self::Borrowed(..))
+    }
+}
+
 /// Resolves numeric type aliases to their base type.
 ///
 /// Verum uses semantic type names (Int8, Int16, Int32, UInt64, etc.) as primary types,
@@ -12507,6 +12523,15 @@ impl VbcCodegen {
         if path.segments.len() != 1 {
             return false;
         }
+        if let Some(binding) = self.ctx.lookup_var(&path.to_string())
+            && let Some(fact) = self.ctx.registers.value_uses.active.get(&binding.reg)
+            && matches!(
+                fact.declaration_type,
+                Some(crate::types::TypeRef::Reference { .. })
+            )
+        {
+            return true;
+        }
         match &path.segments[0] {
             PathSegment::Name(id) => self.ctx.reference_bindings.contains(id.name.as_str()),
             PathSegment::SelfValue => self.ctx.reference_bindings.contains("self"),
@@ -18419,7 +18444,7 @@ impl VbcCodegen {
                         // bind, exactly as `compile_match` does.
                         let bind_prev = self
                             .enter_scrutinee_type_for_bind(scrutinee_expr, std::iter::once(pattern));
-                        self.compile_pattern_bind(pattern, scrutinee)?;
+                        self.compile_pattern_bind_from_expr(pattern, scrutinee, scrutinee_expr)?;
                         self.exit_scrutinee_type_for_bind(bind_prev);
                         continue;
                     }
@@ -18466,7 +18491,7 @@ impl VbcCodegen {
                     // exactly as `compile_match` does.
                     let bind_prev =
                         self.enter_scrutinee_type_for_bind(value, std::iter::once(pattern));
-                    self.compile_pattern_bind(pattern, scrutinee)?;
+                    self.compile_pattern_bind_from_expr(pattern, scrutinee, value)?;
                     self.exit_scrutinee_type_for_bind(bind_prev);
                 }
             }
@@ -18839,7 +18864,7 @@ impl VbcCodegen {
         // as `compile_match` does.
         let bind_prev =
             self.enter_scrutinee_type_for_bind(scrutinee_expr, std::iter::once(pattern));
-        self.compile_pattern_bind(pattern, scrutinee)?;
+        self.compile_pattern_bind_from_expr(pattern, scrutinee, scrutinee_expr)?;
         self.exit_scrutinee_type_for_bind(bind_prev);
 
         // Compile body
@@ -19491,7 +19516,7 @@ impl VbcCodegen {
             // This ensures pattern-bound variables (like `v` in `Some(v)`) are
             // available when evaluating the guard expression.
             self.ctx.enter_scope();
-            self.compile_pattern_bind(&arm.pattern, scrutinee_reg)?;
+            self.compile_pattern_bind_from_expr(&arm.pattern, scrutinee_reg, scrutinee)?;
 
             // Check guard if present (pattern variables are now available)
             if let Some(ref guard) = arm.guard {
@@ -20665,12 +20690,19 @@ impl VbcCodegen {
                         self.ctx.define_label(&rec_end);
                     }
                 } else {
-                    // Plain record/struct pattern: use string-based type check
-                    let type_id = self.intern_string(&type_name);
-                    self.ctx.emit(Instruction::IsVar {
+                    // Record patterns test nominal identity, never a string-table
+                    // index interpreted as a variant discriminant.
+                    let type_id = self
+                        .get_well_known_type_id(&type_name.replace("::", "."))
+                        .ok_or_else(|| {
+                            CodegenError::unsupported_expr(format!(
+                                "record pattern `{type_name}` has no registered runtime type"
+                            ))
+                        })?;
+                    self.ctx.emit(Instruction::IsType {
                         dst: result,
                         value: scrutinee,
-                        tag: type_id,
+                        type_id: type_id.0,
                     });
                 }
 
@@ -21378,11 +21410,105 @@ impl VbcCodegen {
         }
     }
 
-    /// Binds pattern variables.
+    fn pattern_binding_mode(&self, expression: &Expr) -> PatternBindingMode {
+        use crate::types::{Mutability, TypeRef};
+        match &expression.kind {
+            ExprKind::Paren(inner) => self.pattern_binding_mode(inner),
+            ExprKind::Tuple(elements) => PatternBindingMode::Tuple(
+                elements
+                    .iter()
+                    .map(|e| self.pattern_binding_mode(e))
+                    .collect(),
+            ),
+            ExprKind::Unary { op, .. } => match op {
+                UnOp::Ref => PatternBindingMode::Borrowed(Mutability::Immutable, CbgrTier::Tier0),
+                UnOp::RefMut => PatternBindingMode::Borrowed(Mutability::Mutable, CbgrTier::Tier0),
+                UnOp::RefChecked => {
+                    PatternBindingMode::Borrowed(Mutability::Immutable, CbgrTier::Tier1)
+                }
+                UnOp::RefCheckedMut => {
+                    PatternBindingMode::Borrowed(Mutability::Mutable, CbgrTier::Tier1)
+                }
+                _ => PatternBindingMode::Value,
+            },
+            _ => {
+                let declaration = if let ExprKind::Path(path) = &expression.kind
+                    && path.segments.len() == 1
+                {
+                    let name = path.to_string();
+                    self.ctx
+                        .lookup_var(&name)
+                        .and_then(|binding| self.ctx.registers.value_uses.active.get(&binding.reg))
+                        .and_then(|fact| fact.declaration_type.clone())
+                } else {
+                    None
+                };
+                let ty = declaration.or_else(|| {
+                    self.extract_expr_type_name(expression)
+                        .and_then(|name| self.type_name_to_type_ref_mono(&name))
+                });
+                if let Some(TypeRef::Reference {
+                    mutability, tier, ..
+                }) = ty
+                {
+                    PatternBindingMode::Borrowed(mutability, tier)
+                } else if self.is_reference_binding_operand(expression) {
+                    // Legacy generic parameters still carry reference provenance
+                    // in the function's declaration registry.
+                    PatternBindingMode::Borrowed(Mutability::Immutable, CbgrTier::Tier0)
+                } else {
+                    PatternBindingMode::Value
+                }
+            }
+        }
+    }
+
+    fn record_pattern_borrow(
+        &mut self,
+        reg: Reg,
+        mode: &PatternBindingMode,
+        type_name: Option<&str>,
+    ) {
+        if let PatternBindingMode::Borrowed(mutability, tier) = mode
+            && let Some(inner) = type_name.and_then(|name| self.type_name_to_type_ref_mono(name))
+        {
+            self.ctx.registers.value_uses.set_type(
+                reg,
+                crate::types::TypeRef::Reference {
+                    inner: Box::new(inner),
+                    mutability: *mutability,
+                    tier: *tier,
+                },
+                verum_common::ResourceDiscipline::Unrestricted,
+            );
+        }
+    }
+
+    /// Preserve the scrutinee's borrow while destructuring its payloads.
+    pub(crate) fn compile_pattern_bind_from_expr(
+        &mut self,
+        pattern: &verum_ast::Pattern,
+        scrutinee: Reg,
+        expression: &Expr,
+    ) -> CodegenResult<()> {
+        let mode = self.pattern_binding_mode(expression);
+        self.compile_pattern_bind_mode(pattern, scrutinee, &mode)
+    }
+
+    /// Binds an owned value. Refutable source bindings use the expression-aware entry.
     pub(crate) fn compile_pattern_bind(
         &mut self,
         pattern: &verum_ast::Pattern,
         scrutinee: Reg,
+    ) -> CodegenResult<()> {
+        self.compile_pattern_bind_mode(pattern, scrutinee, &PatternBindingMode::Value)
+    }
+
+    fn compile_pattern_bind_mode(
+        &mut self,
+        pattern: &verum_ast::Pattern,
+        scrutinee: Reg,
+        mode: &PatternBindingMode,
     ) -> CodegenResult<()> {
         use verum_ast::PatternKind;
 
@@ -21399,16 +21525,26 @@ impl VbcCodegen {
             } => {
                 let var_reg = self.ctx.define_var(&name.name, *mutable);
                 if let Some(binding) = self.ctx.lookup_var_mut(&name.name) {
-                    binding.is_pattern_alias = *by_ref || subpattern.is_some();
+                    binding.is_pattern_alias = *by_ref || mode.is_borrowed() || subpattern.is_some();
                 }
+                let explicit_mode = PatternBindingMode::Borrowed(
+                    if *mutable {
+                        crate::types::Mutability::Mutable
+                    } else {
+                        crate::types::Mutability::Immutable
+                    },
+                    CbgrTier::Tier0,
+                );
+                let binding_mode = if *by_ref { &explicit_mode } else { mode };
+                let binding_type = self.ctx.match_scrutinee_type.clone();
+                self.record_pattern_borrow(var_reg, binding_mode, binding_type.as_deref());
                 // A fresh declaration must not inherit a shadowed array's
                 // count. T1615 keys this by binding identity so the outer
                 // declaration's facts survive its temporary shadow.
                 self.ctx.forget_fixed_array_count(&name.name);
-                // When by_ref is true, the scrutinee is already a pointer to the value
-                // (from GetVariantDataRef). We bind this pointer directly - it acts as
-                // a mutable reference that can be dereferenced with * and written through.
-                // When by_ref is false, we copy the value.
+                // Explicit ref bindings and borrowed scrutinees already address
+                // the payload slot. Preserve that address; owned bindings copy
+                // the value instead.
                 self.ctx.emit(Instruction::Mov {
                     dst: var_reg,
                     src: scrutinee,
@@ -21423,7 +21559,7 @@ impl VbcCodegen {
                 }
                 // Recursively bind subpattern variables (e.g., x @ Circle { radius } binds both x and radius)
                 if let verum_common::Maybe::Some(sub_pat) = subpattern {
-                    self.compile_pattern_bind(sub_pat, scrutinee)?;
+                    self.compile_pattern_bind_mode(sub_pat, scrutinee, mode)?;
                 }
             }
 
@@ -21464,12 +21600,17 @@ impl VbcCodegen {
                         .take()
                         .or_else(|| self.ctx.match_tuple_element_types.clone());
                     let prev_st = self.ctx.match_scrutinee_type.clone();
+                    let owned_mode = PatternBindingMode::Value;
                     for (i, elem) in elements.iter().enumerate() {
                         let elem_reg = Reg(first_elem.0 + i as u16);
                         if let Some(ref types) = elem_types {
                             self.ctx.match_scrutinee_type = types.get(i).cloned().flatten();
                         }
-                        self.compile_pattern_bind(elem, elem_reg)?;
+                        let element_mode = match mode {
+                            PatternBindingMode::Tuple(modes) => modes.get(i).unwrap_or(&owned_mode),
+                            _ => mode,
+                        };
+                        self.compile_pattern_bind_mode(elem, elem_reg, element_mode)?;
                         // Record a simple `let (a, b) = …` element's type so
                         // downstream method dispatch on the bound name resolves
                         // (RECORD-LET-REF-TYPE-LOSS). Only fires for a genuine
@@ -21497,7 +21638,7 @@ impl VbcCodegen {
             }
 
             PatternKind::Paren(inner) => {
-                self.compile_pattern_bind(inner, scrutinee)?;
+                self.compile_pattern_bind_mode(inner, scrutinee, mode)?;
             }
 
             PatternKind::Variant { path, data, .. } => {
@@ -21630,7 +21771,7 @@ impl VbcCodegen {
                                 if let Some(ref t) = inner_ty {
                                     self.ctx.match_scrutinee_type = Some(t.clone());
                                 }
-                                self.compile_pattern_bind(inner_pat, scrutinee)?;
+                                self.compile_pattern_bind_mode(inner_pat, scrutinee, mode)?;
                                 self.ctx.match_scrutinee_type = prev_st;
                                 return Ok(());
                             }
@@ -21643,7 +21784,7 @@ impl VbcCodegen {
                                         dst: deref_reg,
                                         ref_reg: scrutinee,
                                     });
-                                    self.compile_pattern_bind(inner_pat, deref_reg)?;
+                                    self.compile_pattern_bind_mode(inner_pat, deref_reg, mode)?;
                                 }
                             } else {
                                 for (i, pat) in patterns.iter().enumerate() {
@@ -21652,7 +21793,7 @@ impl VbcCodegen {
                                     }
                                     let field_reg = self.ctx.alloc_temp();
                                     // Check if this pattern needs a reference (ref or ref mut)
-                                    let needs_ref = Self::pattern_needs_ref(pat);
+                                    let needs_ref = mode.is_borrowed() || Self::pattern_needs_ref(pat);
                                     if needs_ref {
                                         // Use GetVariantDataRef to get pointer to field
                                         self.ctx.emit(Instruction::GetVariantDataRef {
@@ -21827,7 +21968,8 @@ impl VbcCodegen {
                                         &mut self.ctx.match_scrutinee_type,
                                         field_type.clone(),
                                     );
-                                    let bind_result = self.compile_pattern_bind(pat, field_reg);
+                                    let bind_result =
+                                        self.compile_pattern_bind_mode(pat, field_reg, mode);
                                     self.ctx.match_scrutinee_type = previous_scrutinee_type;
                                     bind_result?;
 
@@ -21905,14 +22047,14 @@ impl VbcCodegen {
                                 // what the pattern table on the language site
                                 // teaches, so the documented spelling was the
                                 // silent one.
-                                let field_needs_ref = match &field.pattern {
-                                    verum_common::Maybe::Some(inner) => {
-                                        Self::pattern_needs_ref(inner)
-                                    }
-                                    // Shorthand `{ field }` binds by value; there
-                                    // is no `ref` to honour.
-                                    verum_common::Maybe::None => false,
-                                };
+                                let field_needs_ref = mode.is_borrowed()
+                                    || match &field.pattern {
+                                        verum_common::Maybe::Some(inner) => {
+                                            Self::pattern_needs_ref(inner)
+                                        }
+                                        // Shorthand inherits the scrutinee mode.
+                                        verum_common::Maybe::None => false,
+                                    };
                                 if field_needs_ref {
                                     self.ctx.emit(Instruction::GetVariantDataRef {
                                         dst: field_reg,
@@ -21927,10 +22069,18 @@ impl VbcCodegen {
                                     });
                                 }
 
+                                let field_type = payload_types
+                                    .as_ref()
+                                    .and_then(|types| types.get(field_idx as usize))
+                                    .cloned();
+                                let previous_type = std::mem::replace(
+                                    &mut self.ctx.match_scrutinee_type,
+                                    field_type.clone(),
+                                );
                                 // Bind the field value
                                 if let verum_common::Maybe::Some(ref inner_pattern) = field.pattern
                                 {
-                                    self.compile_pattern_bind(inner_pattern, field_reg)?;
+                                    self.compile_pattern_bind_mode(inner_pattern, field_reg, mode)?;
                                     // Track type for inner pattern if it's an identifier
                                     if let Some(ref types) = payload_types
                                         && let Some(type_name) = types.get(field_idx as usize)
@@ -21946,6 +22096,10 @@ impl VbcCodegen {
                                 } else {
                                     // Shorthand: { field } means { field: field }
                                     let var_reg = self.ctx.define_var(&field_name, false);
+                                    self.record_pattern_borrow(var_reg, mode, field_type.as_deref());
+                                    if let Some(binding) = self.ctx.lookup_var_mut(&field_name) {
+                                        binding.is_pattern_alias = mode.is_borrowed();
+                                    }
                                     self.ctx.emit(Instruction::Mov {
                                         dst: var_reg,
                                         src: field_reg,
@@ -21963,6 +22117,7 @@ impl VbcCodegen {
                                     }
                                 }
 
+                                self.ctx.match_scrutinee_type = previous_type;
                                 self.ctx.free_temp(field_reg);
                             }
                         }
@@ -21980,7 +22135,7 @@ impl VbcCodegen {
                 // from any alternative (they all should bind the same variables)
                 // For correctness, we try each until one succeeds in matching
                 if let Some(first) = alternatives.first() {
-                    self.compile_pattern_bind(first, scrutinee)?;
+                    self.compile_pattern_bind_mode(first, scrutinee, mode)?;
                 }
             }
 
@@ -22087,22 +22242,43 @@ impl VbcCodegen {
                     let field_name = field.name.name.to_string();
                     let field_reg = self.ctx.alloc_temp();
 
+                    let needs_ref = mode.is_borrowed()
+                        || field.pattern.as_ref().is_some_and(Self::pattern_needs_ref);
                     if is_variant {
                         // Record variant: resolve actual field position from type layout
                         let field_idx = self.resolve_field_index(Some(&field_key), &field_name);
-                        self.ctx.emit(Instruction::GetVariantData {
-                            dst: field_reg,
-                            variant: scrutinee,
-                            field: field_idx,
+                        self.ctx.emit(if needs_ref {
+                            Instruction::GetVariantDataRef {
+                                dst: field_reg,
+                                variant: scrutinee,
+                                field: field_idx,
+                            }
+                        } else {
+                            Instruction::GetVariantData {
+                                dst: field_reg,
+                                variant: scrutinee,
+                                field: field_idx,
+                            }
                         });
                     } else {
                         // Plain record: extract field by type-specific position
                         let field_idx = self.resolve_field_index(Some(&field_key), &field_name);
-                        self.ctx.emit(Instruction::GetF {
-                            dst: field_reg,
-                            obj: scrutinee,
-                            field_idx,
-                        });
+                        if needs_ref {
+                            let mut operands = Vec::new();
+                            Self::write_reg(&mut operands, field_reg.0);
+                            Self::write_reg(&mut operands, scrutinee.0);
+                            crate::encoding::encode_varint(field_idx as u64, &mut operands);
+                            self.ctx.emit(Instruction::CbgrExtended {
+                                sub_op: crate::instruction::CbgrSubOpcode::RefField as u8,
+                                operands,
+                            });
+                        } else {
+                            self.ctx.emit(Instruction::GetF {
+                                dst: field_reg,
+                                obj: scrutinee,
+                                field_idx,
+                            });
+                        }
                     }
 
                     // Determine field type for type registration
@@ -22118,8 +22294,12 @@ impl VbcCodegen {
                             .map(|s| s.to_string())
                     };
 
+                    let previous_type = std::mem::replace(
+                        &mut self.ctx.match_scrutinee_type,
+                        field_type_name.clone(),
+                    );
                     if let verum_common::Maybe::Some(ref inner_pattern) = field.pattern {
-                        self.compile_pattern_bind(inner_pattern, field_reg)?;
+                        self.compile_pattern_bind_mode(inner_pattern, field_reg, mode)?;
                         // Track type for inner pattern if it's an identifier
                         if let Some(ref ft) = field_type_name
                             && let PatternKind::Ident { name, .. } = &inner_pattern.kind
@@ -22133,6 +22313,10 @@ impl VbcCodegen {
                     } else {
                         // Shorthand: { x } means bind x to the field value
                         let var_reg = self.ctx.define_var(&field_name, false);
+                        self.record_pattern_borrow(var_reg, mode, field_type_name.as_deref());
+                        if let Some(binding) = self.ctx.lookup_var_mut(&field_name) {
+                            binding.is_pattern_alias = mode.is_borrowed();
+                        }
                         self.ctx.emit(Instruction::Mov {
                             dst: var_reg,
                             src: field_reg,
@@ -22147,6 +22331,7 @@ impl VbcCodegen {
                         }
                     }
 
+                    self.ctx.match_scrutinee_type = previous_type;
                     self.ctx.free_temp(field_reg);
                 }
             }

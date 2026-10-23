@@ -1546,7 +1546,14 @@ impl VbcCodegen {
                 )
             });
             let initialized_from_ref = value.is_some_and(|v| match &v.kind {
-                verum_ast::ExprKind::Unary { op: verum_ast::UnOp::Ref, .. } => true,
+                verum_ast::ExprKind::Unary {
+                    op:
+                        verum_ast::UnOp::Ref
+                        | verum_ast::UnOp::RefMut
+                        | verum_ast::UnOp::RefChecked
+                        | verum_ast::UnOp::RefCheckedMut,
+                    ..
+                } => true,
                 // `let s = r` propagates r's reference-ness to s.
                 verum_ast::ExprKind::Path(path) => matches!(
                     path.segments.as_slice(),
@@ -1962,7 +1969,7 @@ impl VbcCodegen {
         // as `compile_match` does — otherwise the payload binding loses
         // its type and a field access on it mis-resolves.
         let bind_prev = self.enter_scrutinee_type_for_bind(value, std::iter::once(pattern));
-        self.compile_pattern_bind(pattern, value_reg)?;
+        self.compile_pattern_bind_from_expr(pattern, value_reg, value)?;
         self.exit_scrutinee_type_for_bind(bind_prev);
 
         Ok(None)

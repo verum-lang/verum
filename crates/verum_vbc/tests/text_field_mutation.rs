@@ -14,13 +14,29 @@ use verum_vbc::interpreter::Interpreter;
 
 const HELPERS: &str = r#"
 type Fields is { padding: Int, word: Text, untouched: Text };
+type OptionalFields is { padding: Int, description: Maybe<Text>, untouched: Text };
+type Message is Named { padding: Int, word: Text, untouched: Text } | Empty;
+fn append_optional(source: &mut Maybe<Text>) {
+    match source { Maybe.Some(word) => word.push_str(" suffix"), Maybe.None => {}, }
+}
+fn append_optional_field(source: &mut OptionalFields) {
+    match &mut source.description {
+        Maybe.Some(word) => word.push_str(" suffix"), Maybe.None => {},
+    }
+}
 fn append(source: &mut Text) { source.push_str(" suffix"); }
 fn forward(source: &mut Text) { append(source); }
 fn append_lambda(source: &mut Text) { source.push_byte(206); source.push_byte(187); }
 "#;
 
 fn check(body: &str, expected: &str) {
-    let source = format!("module text_field_mutation; {HELPERS}\nfn probe() -> Text {{ {body} }}");
+    check_with_declarations("", body, expected);
+}
+
+fn check_with_declarations(declarations: &str, body: &str, expected: &str) {
+    let source = format!(
+        "module text_field_mutation; {HELPERS}\n{declarations}\nfn probe() -> Text {{ {body} }}"
+    );
     let consumer = Parser::new(&source)
         .parse_module()
         .expect("fixture grammar");
@@ -275,5 +291,323 @@ fn field_reserve_then_append_updates_same_origin() {
         fields.word
     "#,
         "seedλ",
+    );
+}
+
+#[test]
+fn mutable_maybe_local_payload_updates_owner() {
+    check(
+        r#"
+        let mut value: Maybe<Text> = Maybe.Some("seed");
+        match &mut value { Maybe.Some(word) => word.push_str(" suffix"), Maybe.None => {}, }
+        match value { Maybe.Some(word) => word, Maybe.None => "missing", }
+        "#,
+        "seed suffix",
+    );
+}
+
+#[test]
+fn forwarded_mutable_maybe_payload_updates_owner() {
+    check(
+        r#"
+        let mut value: Maybe<Text> = Maybe.Some("registry λ🙂");
+        append_optional(&mut value);
+        match value { Maybe.Some(word) => word, Maybe.None => "missing", }
+        "#,
+        "registry λ🙂 suffix",
+    );
+}
+
+#[test]
+fn mutable_maybe_field_payload_updates_owner() {
+    check(
+        r#"
+        let mut fields = OptionalFields {
+            padding: 17, description: Maybe.Some("registry λ🙂"), untouched: "sentinel",
+        };
+        match &mut fields.description {
+            Maybe.Some(word) => word.push_str(" suffix"), Maybe.None => {},
+        }
+        assert(fields.padding == 17); assert(fields.untouched == "sentinel");
+        match fields.description { Maybe.Some(word) => word, Maybe.None => "missing", }
+        "#,
+        "registry λ🙂 suffix",
+    );
+}
+
+#[test]
+fn forwarded_mutable_maybe_field_payload_updates_owner() {
+    check(
+        r#"
+        let mut fields = OptionalFields {
+            padding: 17, description: Maybe.Some("registry λ🙂"), untouched: "sentinel",
+        };
+        append_optional_field(&mut fields);
+        assert(fields.padding == 17); assert(fields.untouched == "sentinel");
+        match fields.description { Maybe.Some(word) => word, Maybe.None => "missing", }
+        "#,
+        "registry λ🙂 suffix",
+    );
+}
+
+#[test]
+fn mutable_none_field_does_not_change_adjacent_values() {
+    check(
+        r#"
+        let mut fields = OptionalFields {
+            padding: 17, description: Maybe.None, untouched: "sentinel",
+        };
+        append_optional_field(&mut fields);
+        assert(fields.padding == 17); assert(fields.untouched == "sentinel");
+        match fields.description { Maybe.Some(_) => "unexpected", Maybe.None => "empty", }
+        "#,
+        "empty",
+    );
+}
+
+#[test]
+fn immutable_maybe_payload_can_be_read_and_copied() {
+    check(
+        r#"
+        let value: Maybe<Text> = Maybe.Some("registry λ🙂");
+        match &value {
+            Maybe.Some(word) => { assert(word == "registry λ🙂"); *word },
+            Maybe.None => "missing",
+        }
+    "#,
+        "registry λ🙂",
+    );
+}
+
+#[test]
+fn a_mutable_reference_alias_keeps_the_variant_place() {
+    check(
+        r#"
+        let mut value: Maybe<Text> = Maybe.Some("seed");
+        let borrowed = &mut value;
+        match borrowed { Maybe.Some(word) => word.push_str(" suffix"), _ => {}, }
+        match value { Maybe.Some(word) => word, _ => "missing", }
+    "#,
+        "seed suffix",
+    );
+}
+
+#[test]
+fn nested_mutable_variant_pattern_keeps_the_inner_place() {
+    check(
+        r#"
+        let mut value: Maybe<Maybe<Text>> = Maybe.Some(Maybe.Some("registry λ🙂"));
+        match &mut value {
+            Maybe.Some(Maybe.Some(word)) => word.push_str(" suffix"), _ => {},
+        }
+        match value { Maybe.Some(Maybe.Some(word)) => word, _ => "missing", }
+    "#,
+        "registry λ🙂 suffix",
+    );
+}
+
+#[test]
+fn nested_match_retains_the_inferred_payload_borrow() {
+    check(
+        r#"
+        let mut value: Maybe<Maybe<Text>> = Maybe.Some(Maybe.Some("registry λ🙂"));
+        match &mut value {
+            Maybe.Some(inner) => {
+                match inner { Maybe.Some(word) => word.push_str(" suffix"), _ => {}, }
+            },
+            _ => {},
+        }
+        match value { Maybe.Some(Maybe.Some(word)) => word, _ => "missing", }
+    "#,
+        "registry λ🙂 suffix",
+    );
+}
+
+#[test]
+fn named_variant_field_mutation_keeps_adjacent_fields() {
+    check(
+        r#"
+        let mut value = Message.Named { padding: 17, word: "registry λ🙂", untouched: "sentinel" };
+        match &mut value { Message.Named { word, .. } => word.push_str(" suffix"), _ => {}, }
+        match value {
+            Message.Named { padding, word, untouched } => {
+                assert(padding == 17); assert(untouched == "sentinel"); word
+            },
+            _ => "missing",
+        }
+    "#,
+        "registry λ🙂 suffix",
+    );
+}
+
+#[test]
+fn mixed_tuple_scrutinee_preserves_each_binding_mode() {
+    check(
+        r#"
+        let mut value: Maybe<Text> = Maybe.Some("seed");
+        let other: Maybe<Text> = Maybe.Some("unchanged");
+        match (&mut value, other) {
+            (Maybe.Some(word), Maybe.Some(untouched)) => {
+                word.push_str(" suffix"); assert(untouched == "unchanged");
+            },
+            _ => {},
+        }
+        match value { Maybe.Some(word) => word, _ => "missing", }
+    "#,
+        "seed suffix",
+    );
+}
+
+#[test]
+fn if_let_preserves_the_payload_borrow() {
+    check(
+        r#"
+        let mut value: Maybe<Text> = Maybe.Some("seed");
+        if let Maybe.Some(word) = &mut value { word.push_str(" suffix"); }
+        match value { Maybe.Some(word) => word, _ => "missing", }
+    "#,
+        "seed suffix",
+    );
+}
+
+#[test]
+fn while_let_preserves_the_payload_borrow() {
+    check(
+        r#"
+        let mut value: Maybe<Text> = Maybe.Some("seed");
+        while let Maybe.Some(word) = &mut value { word.push_str(" suffix"); break; }
+        match value { Maybe.Some(word) => word, _ => "missing", }
+    "#,
+        "seed suffix",
+    );
+}
+
+#[test]
+fn let_else_preserves_the_payload_borrow() {
+    check(
+        r#"
+        let mut value: Maybe<Text> = Maybe.Some("seed");
+        let Maybe.Some(word) = &mut value else { return "missing"; };
+        word.push_str(" suffix");
+        match value { Maybe.Some(word) => word, _ => "missing", }
+    "#,
+        "seed suffix",
+    );
+}
+
+#[test]
+fn owned_pattern_in_borrowed_arm_keeps_its_own_mode() {
+    check(
+        r#"
+        let mut value: Maybe<Text> = Maybe.Some("seed");
+        match &mut value {
+            Maybe.Some(word) => {
+                let mut owned: Maybe<Text> = Maybe.Some("owned");
+                match owned { Maybe.Some(mut word) => word.push_str(" lost"), _ => {}, }
+                match owned { Maybe.Some(word) => assert(word == "owned"), _ => assert(false), }
+                word.push_str(" suffix");
+            },
+            _ => {},
+        }
+        match value { Maybe.Some(word) => word, _ => "missing", }
+    "#,
+        "seed suffix",
+    );
+}
+
+#[test]
+fn borrowed_plain_record_pattern_updates_its_field() {
+    check(
+        r#"
+        let mut fields = Fields { padding: 17, word: "seed", untouched: "sentinel" };
+        match &mut fields { Fields { word, .. } => word.push_str(" suffix"), }
+        assert(fields.padding == 17); assert(fields.untouched == "sentinel"); fields.word
+    "#,
+        "seed suffix",
+    );
+}
+
+#[test]
+fn nested_record_payload_keeps_its_borrowed_field() {
+    check(
+        r#"
+        let mut value: Maybe<Fields> = Maybe.Some(Fields { padding: 17, word: "seed", untouched: "sentinel" });
+        match &mut value { Maybe.Some(Fields { word, .. }) => word.push_str(" suffix"), _ => {}, }
+        match value {
+            Maybe.Some(fields) => { assert(fields.padding == 17); assert(fields.untouched == "sentinel"); fields.word },
+            _ => "missing",
+        }
+    "#,
+        "seed suffix",
+    );
+}
+
+#[test]
+fn explicit_reference_pattern_retains_owned_payload_binding() {
+    check(
+        r#"
+        let mut value: Maybe<Text> = Maybe.Some("seed");
+        match &mut value { &mut Maybe.Some(mut word) => word.push_str(" local"), _ => {}, }
+        match value { Maybe.Some(word) => word, _ => "missing", }
+    "#,
+        "seed",
+    );
+}
+
+#[test]
+fn a_scoped_variant_keeps_priority_over_a_same_named_record() {
+    check_with_declarations(
+        "type Selection is Fields { word: Text } | Empty;",
+        r#"
+        let mut selected = Selection.Fields { word: "seed" };
+        match &mut selected { Fields { word } => word.push_str(" suffix"), _ => {}, }
+        match selected { Selection.Fields { word } => word, _ => "missing", }
+        "#,
+        "seed suffix",
+    );
+}
+
+#[test]
+fn nested_match_retains_an_explicit_payload_borrow() {
+    check(
+        r#"
+        let mut value: Maybe<Maybe<Text>> = Maybe.Some(Maybe.Some("seed"));
+        match value {
+            Maybe.Some(ref mut inner) => {
+                match inner { Maybe.Some(word) => word.push_str(" suffix"), _ => {}, }
+            },
+            _ => {},
+        }
+        match value { Maybe.Some(Maybe.Some(word)) => word, _ => "missing", }
+    "#,
+        "seed suffix",
+    );
+}
+
+#[test]
+fn explicit_mutable_plain_record_field_borrow_updates_owner() {
+    check(
+        r#"
+        let mut fields = Fields { padding: 17, word: "seed", untouched: "sentinel" };
+        match fields { Fields { word: ref mut word, .. } => word.push_str(" suffix"), _ => {}, }
+        assert(fields.padding == 17); assert(fields.untouched == "sentinel"); fields.word
+    "#,
+        "seed suffix",
+    );
+}
+
+#[test]
+fn explicit_immutable_plain_record_field_borrow_copies_on_dereference() {
+    check(
+        r#"
+        let fields = Fields { padding: 17, word: "seed", untouched: "sentinel" };
+        let copied = match fields {
+            Fields { word: ref word, .. } => { let mut copy = *word; copy.push_str(" suffix"); copy },
+            _ => "missing",
+        };
+        assert(fields.padding == 17); assert(fields.untouched == "sentinel"); assert(fields.word == "seed");
+        copied
+    "#,
+        "seed suffix",
     );
 }
