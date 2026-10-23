@@ -55,6 +55,106 @@ fn commit(t: Tx) -> Int { t.id }
 fn rollback(t: Tx) -> Int { 0 - t.id }
 "#;
 
+#[test]
+fn consumed_pattern_payload_does_not_poison_a_later_copy_pattern() {
+    let code = format!(
+        r#"{DECLS}
+type Offer is | Ticket(Tx) | Missing;
+type Answer is | Number(Int) | Missing;
+fn finish(offer: Offer, answer: Answer) -> Int {{
+    let ticket = match offer {{ Offer.Ticket(value) => value, _ => return 0 }};
+    let first = commit(ticket);
+    let second = match answer {{ Answer.Number(value) => value, _ => 0 }};
+    first + second
+}}
+"#
+    );
+    let cs = complaints(&code);
+    assert!(cs.is_empty(), "arm-local ownership must not escape: {cs:?}");
+}
+
+#[test]
+fn copy_pattern_can_shadow_an_outer_affine_binding() {
+    let code = format!(
+        r#"{DECLS}
+type Answer is | Number(Int) | Missing;
+fn finish(value: Tx, answer: Answer) -> Int {{
+    let second = match answer {{ Answer.Number(value) => value, _ => 0 }};
+    commit(value) + second
+}}
+"#
+    );
+    let cs = complaints(&code);
+    assert!(
+        cs.is_empty(),
+        "shadowing must preserve the outer obligation: {cs:?}"
+    );
+}
+
+#[test]
+fn copy_pattern_cannot_revive_an_already_consumed_outer_binding() {
+    let code = format!(
+        r#"{DECLS}
+type Answer is | Number(Int) | Missing;
+fn finish(value: Tx, answer: Answer) -> Int {{
+    let first = commit(value);
+    let second = match answer {{ Answer.Number(value) => value, _ => 0 }};
+    first + second + commit(value)
+}}
+"#
+    );
+    let cs = complaints(&code);
+    assert!(
+        moved(&cs),
+        "the original consumption must survive shadowing: {cs:?}"
+    );
+}
+
+#[test]
+fn match_pattern_names_are_inaccessible_after_the_arm() {
+    let cs = complaints(
+        r#"
+type Answer is | Number(Int) | Missing;
+fn finish(answer: Answer) -> Int {
+    let second: Int = match answer { Answer.Number(local) => local, _ => 0 };
+    local
+}
+"#,
+    );
+    assert!(
+        cs.iter().any(|error| error.contains("local")),
+        "pattern leaked: {cs:?}"
+    );
+}
+
+#[test]
+fn linear_pattern_payload_keeps_its_exactly_once_obligation() {
+    let prefix = r#"
+type linear Permit is { id: Int };
+type Offer is | Granted(Permit) | Missing;
+fn consume(permit: Permit) -> Int { permit.id }
+"#;
+    let valid = format!(
+        r#"{prefix}
+fn finish(offer: Offer) -> Int {{
+    match offer {{ Offer.Granted(permit) => consume(permit), _ => 0 }}
+}}
+"#
+    );
+    assert!(complaints(&valid).is_empty());
+    let leaking = format!(
+        r#"{prefix}
+fn finish(offer: Offer) -> Int {{
+    match offer {{ Offer.Granted(permit) => 1, _ => 0 }}
+}}
+"#
+    );
+    let cs = complaints(&leaking);
+    assert!(
+        cs.iter().any(|error| error.contains("exactly once")),
+        "linear pattern was forgotten: {cs:?}"
+    );
+}
 fn moved(cs: &[String]) -> bool {
     cs.iter()
         .any(|c| c.contains("used after") || c.contains("moved"))

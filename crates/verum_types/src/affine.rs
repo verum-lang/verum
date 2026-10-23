@@ -174,7 +174,47 @@ struct AffineBinding {
     moved_indices: Set<usize>,
 }
 
+/// Outer bindings temporarily hidden by a match arm's own pattern names.
+pub(crate) struct PatternScope {
+    hidden: Map<Text, Maybe<AffineBinding>>,
+    pre_loop_bindings: Set<Text>,
+    linear_exempt: Set<Text>,
+}
+
 impl AffineTracker {
+    pub(crate) fn enter_pattern_scope(&mut self, names: impl Iterator<Item = Text>) -> PatternScope {
+        let mut scope = PatternScope {
+            hidden: Map::new(),
+            pre_loop_bindings: self.pre_loop_bindings.clone(),
+            linear_exempt: self.linear_exempt.clone(),
+        };
+        for name in names {
+            if !scope.hidden.contains_key(&name) {
+                scope.hidden.insert(name.clone(), self.bindings.remove(&name));
+                self.pre_loop_bindings.remove(&name);
+                self.linear_exempt.remove(&name);
+            }
+        }
+        scope
+    }
+
+    pub(crate) fn exit_pattern_scope(&mut self, scope: PatternScope, end: Span) -> List<TypeError> {
+        let mut errors = List::new();
+        for (name, hidden) in scope.hidden {
+            if let Some(binding) = self.bindings.remove(&name) {
+                if binding.resource_kind == ResourceKind::Linear && !binding.definitely_consumed {
+                    errors.push(TypeError::LinearNotConsumed {
+                        name: name.clone(), binding_span: binding.binding_span, scope_end: end,
+                    });
+                }
+            }
+            if let Some(binding) = hidden { self.bindings.insert(name, binding); }
+        }
+        self.pre_loop_bindings = scope.pre_loop_bindings;
+        self.linear_exempt = scope.linear_exempt;
+        errors
+    }
+
     /// Create a new affine tracker
     pub fn new() -> Self {
         Self {

@@ -727,11 +727,7 @@ impl TypeChecker {
                 let mut affine_per_arm: Vec<crate::affine::AffineAlternatives> = Vec::new();
                 for arm in arms.iter() {
                     self.affine_tracker.restore_alternatives(&affine_at_match);
-                    self.bind_pattern(&arm.pattern, &scrutinee_ty)?;
-                    if let Some(ref guard) = arm.guard {
-                        self.check_expr(guard, &Type::bool())?;
-                    }
-                    let arm_result = self.check_expr(&arm.body, expected)?;
+                    let arm_result = self.infer_scoped_match_arm(arm, &scrutinee_ty, None, Some(expected))?;
                     // An arm that diverges never reaches the code after the
                     // match, so what it consumed cannot reach it either.
                     if !self.is_never_type(&arm_result.ty) {
@@ -5982,6 +5978,41 @@ impl TypeChecker {
                     }
     }
 
+    fn infer_scoped_match_arm(
+        &mut self,
+        arm: &verum_ast::pattern::MatchArm,
+        scrutinee_ty: &Type,
+        scrutinee_name: Option<&Text>,
+        expected: Option<&Type>,
+    ) -> Result<InferResult> {
+        let bindings = self.collect_pattern_bindings(&arm.pattern, scrutinee_ty)?;
+        let ownership = self.affine_tracker.enter_pattern_scope(bindings.into_iter().map(|(name, _)| name));
+        self.ctx.enter_scope();
+        self.refinement_evidence.push_scope();
+        let result = (|| {
+            if let Some(name) = scrutinee_name {
+                self.add_pattern_evidence(&arm.pattern, name.clone(), arm.pattern.span);
+            }
+            self.bind_pattern(&arm.pattern, scrutinee_ty)?;
+            if let Some(guard) = &arm.guard {
+                self.check_expr(guard, &Type::bool())?;
+                self.refinement_evidence.add_evidence_from_condition(guard, guard.span);
+            }
+            match expected {
+                Some(ty) => self.check_expr(&arm.body, ty),
+                None => self.synth_expr(&arm.body),
+            }
+        })();
+        let linear_errors = self.affine_tracker.exit_pattern_scope(ownership, arm.body.span);
+        self.refinement_evidence.pop_scope();
+        self.ctx.exit_scope();
+        // Restore lexical state even when the arm failed. Outer consumption
+        // remains in the tracker; only arm-owned pattern names leave scope.
+        let inferred = result?;
+        if let Some(error) = linear_errors.into_iter().next() { return Err(error); }
+        Ok(inferred)
+    }
+
     fn infer_match_expr(&mut self, expr: &Expr) -> Result<InferResult> {
         use crate::refinement_evidence::{PathCondition, PathConditionKind};
         let ExprKind::Match { expr: scrutinee, arms } = &expr.kind
@@ -6076,35 +6107,10 @@ impl TypeChecker {
                     // First pass: check all arms and collect their types
                     for arm in arms.iter() {
                         self.affine_tracker.restore_alternatives(&affine_at_match);
-                        self.ctx.enter_scope();
-                        self.refinement_evidence.push_scope();
-
-                        // Add pattern evidence for this arm
-                        if let Maybe::Some(ref var_name) = scrutinee_var {
-                            self.add_pattern_evidence(
-                                &arm.pattern,
-                                var_name.clone(),
-                                arm.pattern.span,
-                            );
-                        }
-
-                        // CRITICAL: Bind pattern variables BEFORE checking guard
-                        // Guards can reference pattern bindings (e.g., `Some(x) if x > 0`)
-                        // CRITICAL FIX: Apply unifier to scrutinee type before pattern binding.
-                        // When the scrutinee comes from a generic method call (e.g., `Validated.validate_all(items)`),
-                        // the returned type may contain type variables that were unified with concrete types
-                        // during argument checking. Without applying the unifier here, patterns like
-                        // `Valid(values)` would bind `values` to a type variable instead of the concrete type.
                         let resolved_scrut_ty = self.unifier.apply(&scrut_ty);
-                        self.bind_pattern(&arm.pattern, &resolved_scrut_ty)?;
-
-                        // Handle guard expression evidence (now pattern bindings are in scope)
-                        if let Maybe::Some(ref guard) = arm.guard {
-                            self.check_expr(guard, &Type::bool())?;
-                            self.refinement_evidence
-                                .add_evidence_from_condition(guard, guard.span);
-                        }
-                        let arm_result = self.synth_expr(&arm.body)?;
+                        let arm_result = self.infer_scoped_match_arm(
+                            arm, &resolved_scrut_ty, scrutinee_var.as_ref(), None,
+                        )?;
                         let is_arm_never = self.is_never_type(&arm_result.ty);
 
                         // Track this arm's type for later unification
@@ -6115,8 +6121,6 @@ impl TypeChecker {
                             result_ty = arm_result.ty;
                         }
 
-                        self.refinement_evidence.pop_scope();
-                        self.ctx.exit_scope();
                         // An arm of type Never — `panic()`, `return` — does
                         // not reach the code after the match, so what it
                         // consumed cannot reach it either. The arm's own type
