@@ -12803,7 +12803,7 @@ impl VbcCodegen {
         }
 
         self.compile_method_on_adjusted_value(
-            value, target.as_str(), receiver.span, method, args, resolved_target, type_args,
+            value, target.as_str(), receiver.span, method, args, resolved_target, type_args, false,
         )
     }
 
@@ -12818,6 +12818,7 @@ impl VbcCodegen {
         args: &verum_common::List<Expr>,
         resolved_target: Option<&verum_ast::expr::ResolvedCallTarget>,
         type_args: &verum_common::List<verum_ast::ty::GenericArg>,
+        receiver_is_borrowed: bool,
     ) -> CodegenResult<Option<Reg>> {
         // Reserve the result outside the local scope: a method interception
         // may return its receiver register directly, so carry it before exit.
@@ -12836,7 +12837,9 @@ impl VbcCodegen {
         self.ctx
             .register_variable_type(&binding, self.type_name_to_var_type(target));
         let adjusted = Expr::ident(verum_ast::Ident::new(binding.clone(), span));
-        let result = self.compile_method_call(&adjusted, method, args, resolved_target, type_args);
+        let result = self.compile_method_call_inner(
+            &adjusted, method, args, resolved_target, type_args, receiver_is_borrowed,
+        );
         if let Ok(Some(reg)) = &result {
             self.ctx.emit(Instruction::Mov {
                 dst: result_value,
@@ -12868,6 +12871,18 @@ impl VbcCodegen {
         args: &verum_common::List<Expr>,
         resolved_target: Option<&verum_ast::expr::ResolvedCallTarget>,
         type_args: &verum_common::List<verum_ast::ty::GenericArg>,
+    ) -> CodegenResult<Option<Reg>> {
+        self.compile_method_call_inner(receiver, method, args, resolved_target, type_args, false)
+    }
+
+    fn compile_method_call_inner(
+        &mut self,
+        receiver: &Expr,
+        method: &verum_ast::Ident,
+        args: &verum_common::List<Expr>,
+        resolved_target: Option<&verum_ast::expr::ResolvedCallTarget>,
+        type_args: &verum_common::List<verum_ast::ty::GenericArg>,
+        receiver_is_borrowed: bool,
     ) -> CodegenResult<Option<Reg>> {
         // ──────────────────────────────────────────────────────────
         // Resolve callback parameter types from the same owner used for
@@ -13069,7 +13084,25 @@ impl VbcCodegen {
             let target = self.ctx.array_element_type_name(name.name.as_str())
                 .map_or_else(|| "Slice".to_string(), |element| format!("Slice<{element}>"));
             return self.compile_method_on_adjusted_value(
-                slice, &target, receiver.span, method, args, resolved_target, type_args,
+                slice, &target, receiver.span, method, args, resolved_target, type_args, false,
+            );
+        }
+
+        // An indexed Value receiver borrows its element slot, not the
+        // temporary produced by GetE. Reuse explicit-borrow lowering so base
+        // and index expressions run once and storage layout stays authoritative.
+        if matches!(&array_receiver.kind, ExprKind::Index { expr: base, index }
+            if !matches!(index.kind, ExprKind::Range { .. })
+                && self.packed_index_element_size(base).is_none())
+            && let Some(receiver_type) = self.extract_expr_type_name(array_receiver)
+            && let Some(key) = self.registered_receiver_method(&receiver_type, method.name.as_str())
+            && self.ctx.lookup_qualified_function(&key).is_some_and(|info| info.takes_self_mut_ref)
+        {
+            let borrowed = self.compile_unary(UnOp::RefMut, array_receiver)?
+                .or_internal("indexed method receiver has no borrow")?;
+            let target = format!("&mut {}", Self::method_receiver_type_name(&receiver_type));
+            return self.compile_method_on_adjusted_value(
+                borrowed, &target, receiver.span, method, args, resolved_target, type_args, true,
             );
         }
 
@@ -16432,7 +16465,12 @@ impl VbcCodegen {
             }
         }
         let actual_receiver =
-            if let Some(func_info) = self.ctx.lookup_function(&effective_method_name) {
+            if receiver_is_borrowed {
+                // The synthetic receiver already addresses the indexed slot.
+                // Borrowing its temporary again would replace that reference
+                // when a method assigns to *self, leaving the element intact.
+                receiver_reg
+            } else if let Some(func_info) = self.ctx.lookup_function(&effective_method_name) {
                 if func_info.takes_self_mut_ref {
                     // Create a mutable reference to the receiver.
                     //
@@ -28461,6 +28499,39 @@ impl VbcCodegen {
         Ok(Some(dst))
     }
 
+    /// Storage geometry shared by raw element addressing and method borrowing.
+    fn packed_index_element_size(&self, base: &Expr) -> Option<usize> {
+        if let ExprKind::Path(path) = &base.kind {
+            if path.segments.len() == 1 {
+                if let PathSegment::Name(ident) = &path.segments[0] {
+                    self.ctx.get_typed_array_elem_size(&ident.name)
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        } else if let ExprKind::Field { expr: recv, field } = &base.kind {
+            // PACKED-FIELD-INIT-DYNCOUNT-1 (#37): `&mut self.buffer[i] as
+            // *mut Byte` on a field DECLARED as a fixed-size primitive
+            // array. The array lives packed in the field slot (see the
+            // field-init routing in `compile_record`), so its element
+            // address must come from `ByteArrayElementAddr` /
+            // `TypedArrayElementAddr`, not the generic list-element ref.
+            self.packed_field_receiver_type(recv).and_then(|owner| {
+                // Byte-array fields only — matching the packed field-init
+                // routing in `compile_record` (typed-array fields stay
+                // heap-List, so a `TypedArrayElementAddr` on them would
+                // mismatch the runtime object type).
+                self.field_array_spec(&owner, field.name.as_str())
+                    .filter(|(sz, _, _)| *sz == 1)
+                    .map(|(sz, _, _)| sz)
+            })
+        } else {
+            None
+        }
+    }
+
     /// Tries to compile an array element address pattern: `&mut arr[idx] as *mut T`
     ///
     /// When casting a reference to an array element to a raw pointer, we need the actual
@@ -28508,37 +28579,7 @@ impl VbcCodegen {
             _ => return Ok(None),
         };
 
-        // Check if base is a variable that is a byte array or typed array
-        // Returns None if not tracked, Some(1) for byte arrays, Some(n) for typed arrays
-        let elem_size = if let ExprKind::Path(path) = &base.kind {
-            if path.segments.len() == 1 {
-                if let PathSegment::Name(ident) = &path.segments[0] {
-                    self.ctx.get_typed_array_elem_size(&ident.name)
-                } else {
-                    None
-                }
-            } else {
-                None
-            }
-        } else if let ExprKind::Field { expr: recv, field } = &base.kind {
-            // PACKED-FIELD-INIT-DYNCOUNT-1 (#37): `&mut self.buffer[i] as
-            // *mut Byte` on a field DECLARED as a fixed-size primitive
-            // array. The array lives packed in the field slot (see the
-            // field-init routing in `compile_record`), so its element
-            // address must come from `ByteArrayElementAddr` /
-            // `TypedArrayElementAddr`, not the generic list-element ref.
-            self.packed_field_receiver_type(recv).and_then(|owner| {
-                // Byte-array fields only — matching the packed field-init
-                // routing in `compile_record` (typed-array fields stay
-                // heap-List, so a `TypedArrayElementAddr` on them would
-                // mismatch the runtime object type).
-                self.field_array_spec(&owner, field.name.as_str())
-                    .filter(|(sz, _, _)| *sz == 1)
-                    .map(|(sz, _, _)| sz)
-            })
-        } else {
-            None
-        };
+        let elem_size = self.packed_index_element_size(base);
 
         let elem_size = match elem_size {
             Some(size) => size,

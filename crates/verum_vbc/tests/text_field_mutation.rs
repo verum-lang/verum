@@ -33,6 +33,64 @@ fn check(body: &str, expected: &str) {
     check_with_declarations("", body, expected);
 }
 
+#[test]
+fn indexed_text_receiver_mutation_reaches_its_element() {
+    check(r#"
+        let mut words = ["original long text", "unchanged"];
+        words[0].push_str(" suffix");
+        assert(words[1] == "unchanged");
+        words[0]
+    "#, "original long text suffix");
+}
+
+#[test]
+fn nested_indexed_text_receiver_mutation_reaches_its_element() {
+    check_with_declarations(r#"
+        type Words is { items: [Text; 2] };
+        fn append_word(words: &mut Words) { (words.items[0]).push_str(" suffix"); }
+    "#, r#"
+        let mut words = Words { items: ["original long text", "unchanged"] };
+        append_word(&mut words);
+        assert(words.items[1] == "unchanged");
+        words.items[0]
+    "#, "original long text suffix");
+}
+
+#[test]
+fn indexed_mutable_receiver_evaluates_its_index_once() {
+    check_with_declarations(r#"
+        fn index(calls: &mut Int) -> Int { *calls = *calls + 1; 0 }
+    "#, r#"
+        let mut calls = 0;
+        let mut words = ["original long text"];
+        words[index(&mut calls)].push_str(" suffix");
+        assert(calls == 1);
+        words[0]
+    "#, "original long text suffix");
+}
+
+#[test]
+fn indexed_user_method_replaces_the_element() {
+    check_with_declarations(r#"
+        type Entry is { word: Text };
+        implement Entry { fn replace(&mut self) { *self = Entry { word: "replacement" }; } }
+    "#, r#"
+        let mut entries = [Entry { word: "original" }, Entry { word: "unchanged" }];
+        entries[0].replace();
+        assert(entries[1].word == "unchanged");
+        entries[0].word
+    "#, "replacement");
+}
+
+#[test]
+fn indexed_packed_primitive_read_preserves_its_layout() {
+    check(r#"
+        let numbers: [Int; 2] = [4, 9];
+        assert(numbers[1] == 9);
+        numbers[0].to_text()
+    "#, "4");
+}
+
 fn check_with_declarations(declarations: &str, body: &str, expected: &str) {
     let source = format!(
         "module text_field_mutation; {HELPERS}\n{declarations}\nfn probe() -> Text {{ {body} }}"
