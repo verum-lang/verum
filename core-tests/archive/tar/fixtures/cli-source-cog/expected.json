@@ -1,0 +1,32 @@
+{
+  "compressed": {
+    "path": "archive.vr",
+    "sha256": "1641cd4640ea51391fe321386742faf05f6214164044341c25b1b86210917952",
+    "size": 313
+  },
+  "entries": [
+    {
+      "path": "Verum.toml",
+      "sha256": "7fa05c59642edb1bb94aafb78c5349c30ae97252efe422f59fbc20830b8bd93d",
+      "size": 87
+    },
+    {
+      "path": "src/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/binary.dat",
+      "sha256": "d6602612a6534826e99744c062a396ea9712f188cc28603f432ee817670aede1",
+      "size": 7
+    },
+    {
+      "path": "src/short.bin",
+      "sha256": "f4e20074cff4faf310f63ae8e9ce49828390205c8ea46a5ac7a590e27ff4d8f1",
+      "size": 8
+    }
+  ],
+  "producer": "verum_cli::cog::create_cog_tarball",
+  "profile": "source files with GNU long-name extension",
+  "scope": "actual CLI producer bytes; shared Verum decoding remains a separate gate",
+  "tar": {
+    "path": "archive.tar",
+    "sha256": "725882b126da1685c512a7b98ef71ae1c0b85f17b740b0fd2ce0830eb505ba09",
+    "size": 5120
+  }
+}

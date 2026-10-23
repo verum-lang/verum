@@ -105,7 +105,7 @@
 module core.archive;
 
 mount collections.{List, Map};
-mount base.{Result, Ok, Err, Maybe, Some, None, Text};
+mount base.{Result, Maybe, Text};
 
 // Re-export the tar adapter so callers `mount core.archive.*` and have
 // it in scope.
@@ -118,6 +118,8 @@ public mount archive.tar.{
     entry_for_file as tar_entry_for_file,
     entry_for_directory as tar_entry_for_directory,
     entry_for_symlink as tar_entry_for_symlink,
+    entry_for_symlink_with_mode as tar_entry_for_symlink_with_mode,
+    entry_for_hardlink as tar_entry_for_hardlink,
 };
 
 // =============================================================================
@@ -218,39 +220,37 @@ public type Archive is protocol {
 // Universal entry adapters (TarEntry ↔ ArchiveEntry)
 // =============================================================================
 
-public fn tar_entry_to_universal(t: &TarEntry) -> ArchiveEntry {
-    let kind = match &t.entry_type {
+/// Convert a regular file, directory, symlink or hardlink to the universal model.
+/// This conversion returns Result: device, FIFO and PAX header kinds have no
+/// universal representation and return ArchiveError.InvalidEntry. UID/GID and
+/// owner names are not carried by ArchiveEntry.
+public fn tar_entry_to_universal(t: &TarEntry) -> Result<ArchiveEntry, ArchiveError> {
+    let kind = match t.entry_type() {
         EntryType.RegularFile     => ArchiveEntryKind.ArchiveRegularFile,
         EntryType.Directory       => ArchiveEntryKind.ArchiveDirectory,
         EntryType.Symlink(target) => ArchiveEntryKind.ArchiveSymlink(target.clone()),
         EntryType.Hardlink(target) => ArchiveEntryKind.ArchiveHardlink(target.clone()),
-        _ => ArchiveEntryKind.ArchiveRegularFile,  // device/fifo/pax fallback
+        _ => return Result.Err(ArchiveError.InvalidEntry(
+            "tar entry kind has no universal archive representation".to_text(),
+        )),
     };
-    ArchiveEntry {
-        path: t.path.clone(),
-        mode: t.mode,
-        mtime: t.mtime,
+    Result.Ok(ArchiveEntry {
+        path: t.path().clone(),
+        mode: t.mode(),
+        mtime: t.mtime(),
         kind: kind,
-        content: t.content.clone(),
-    }
+        content: t.content().clone(),
+    })
 }
 
+/// Preserve the universal path, mode, time, file bytes and link target through
+/// TarEntry's public constructors. Format-specific owner IDs/names use defaults.
 public fn universal_to_tar_entry(e: &ArchiveEntry) -> TarEntry {
-    let entry_type = match &e.kind {
-        ArchiveRegularFile        => EntryType.RegularFile,
-        ArchiveDirectory          => EntryType.Directory,
-        ArchiveSymlink(target)    => EntryType.Symlink(target.clone()),
-        ArchiveHardlink(target)   => EntryType.Hardlink(target.clone()),
-    };
-    TarEntry {
-        path: e.path.clone(),
-        mode: e.mode,
-        uid: Maybe.Some(0), gid: Maybe.Some(0),
-        size: e.content.len(),
-        mtime: e.mtime,
-        entry_type: entry_type,
-        uname: "".to_text(), gname: "".to_text(),
-        content: e.content.clone(),
+    match &e.kind {
+        ArchiveRegularFile => tar_entry_for_file(e.path.clone(), e.content.clone(), e.mode, e.mtime),
+        ArchiveDirectory => tar_entry_for_directory(e.path.clone(), e.mode, e.mtime),
+        ArchiveSymlink(target) => tar_entry_for_symlink_with_mode(e.path.clone(), target.clone(), e.mode, e.mtime),
+        ArchiveHardlink(target) => tar_entry_for_hardlink(e.path.clone(), target.clone(), e.mode, e.mtime),
     }
 }
 
@@ -284,7 +284,7 @@ implement Archive for TarFormat {
                 let mut out: List<ArchiveEntry> = List.new();
                 let mut i = 0;
                 while i < tar_entries.len() {
-                    out.push(tar_entry_to_universal(tar_entries.get(i).unwrap()));
+                    out.push(tar_entry_to_universal(tar_entries.get(i).unwrap())?);
                     i = i + 1;
                 }
                 Result.Ok(out)

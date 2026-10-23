@@ -1,0 +1,72 @@
+// Borrowed TarEntry accessors preserve stored binary bytes and entry kinds.
+mount core.archive.tar.{
+    EntryType, TarEntry, entry_for_file, entry_for_directory, entry_for_symlink,
+    read_archive, write_archive,
+};
+mount core.collections.list.List;
+
+fn binary_content() -> List<Byte> {
+    let mut bytes: List<Byte> = List.new();
+    bytes.push(0x00_u8);
+    bytes.push(0xFF_u8);
+    bytes.push(0x42_u8);
+    bytes.push(0x80_u8);
+    bytes.push(0x7F_u8);
+    bytes.push(0xFE_u8);
+    bytes.push(0x00_u8);
+    bytes
+}
+
+fn assert_binary_entry(entry: &TarEntry) {
+    let path: &Text = entry.path();
+    assert(*path == "nested/binary.bin");
+    let kind: &EntryType = entry.entry_type();
+    assert(kind is EntryType.RegularFile);
+    let bytes: &List<Byte> = entry.content();
+    assert(bytes.len() == 7);
+    assert(bytes[0] == 0x00_u8);
+    assert(bytes[1] == 0xFF_u8);
+    assert(bytes[2] == 0x42_u8);
+    assert(bytes[3] == 0x80_u8);
+    assert(bytes[4] == 0x7F_u8);
+    assert(bytes[5] == 0xFE_u8);
+    assert(bytes[6] == 0x00_u8);
+}
+
+@test
+fn constructor_exposes_binary_content_without_text_conversion() {
+    let entry = entry_for_file("nested/binary.bin".to_text(), binary_content(), 0o644, 0);
+    assert_binary_entry(&entry);
+}
+
+@test
+fn directory_and_symlink_kinds_remain_distinct() {
+    let directory = entry_for_directory("nested/".to_text(), 0o755, 0);
+    assert(*directory.path() == "nested/");
+    assert(directory.entry_type() is EntryType.Directory);
+    assert(directory.content().is_empty());
+    let link = entry_for_symlink("shortcut".to_text(), "nested/binary.bin".to_text(), 0);
+    assert(*link.path() == "shortcut");
+    assert(link.content().is_empty());
+    match link.entry_type() {
+        EntryType.Symlink(target) => assert(*target == "nested/binary.bin"),
+        _ => panic("expected the stored symlink kind and target"),
+    }
+}
+
+@test
+fn writer_reader_roundtrip_preserves_binary_entry_views() {
+    let mut entries: List<TarEntry> = List.new();
+    entries.push(entry_for_file("nested/binary.bin".to_text(), binary_content(), 0o644, 0));
+    let encoded = write_archive(&entries).unwrap();
+    let decoded = read_archive(encoded.as_slice()).unwrap();
+    assert(decoded.len() == 1);
+    assert_binary_entry(&decoded[0]);
+}
+
+fn main() {
+    constructor_exposes_binary_content_without_text_conversion();
+    directory_and_symlink_kinds_remain_distinct();
+    writer_reader_roundtrip_preserves_binary_entry_views();
+    print("tar-entry-api: 3 passed");
+}

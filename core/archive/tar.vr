@@ -66,7 +66,7 @@
 module core.archive.tar;
 
 mount collections.{List, Map};
-mount base.{Result, Ok, Err, Maybe, Some, None, Text};
+mount base.{Result, Maybe, Text};
 
 // =============================================================================
 // Constants
@@ -132,6 +132,23 @@ public type TarEntry is {
     content: List<Byte>,
 };
 
+implement TarEntry {
+    /// Borrow the stored archive path. This does not validate or normalize it.
+    public fn path(&self) -> &Text { &self.path }
+
+    /// Borrow the entry kind, including a link target when present.
+    public fn entry_type(&self) -> &EntryType { &self.entry_type }
+
+    /// Borrow the stored content bytes without copying or decoding them as text.
+    public fn content(&self) -> &List<Byte> { &self.content }
+
+    /// Copy the stored POSIX mode bits without changing or applying them.
+    public fn mode(&self) -> Int { self.mode }
+
+    /// Copy the stored modification time in Unix seconds.
+    public fn mtime(&self) -> Int { self.mtime }
+}
+
 // =============================================================================
 // Errors
 // =============================================================================
@@ -154,7 +171,7 @@ implement Display for TarError {
             BadMagic                  => f.write_str("tar: bad ustar magic"),
             InvalidNumeric(field)     => f.write_str(f"tar: invalid octal in {field}".as_str()),
             InvalidChecksum           => f.write_str("tar: header checksum mismatch"),
-            UnsupportedTypeflag(b)    => f.write_str(f"tar: unsupported typeflag 0x{b:02x}".as_str()),
+            UnsupportedTypeflag(b)    => f.write_str(f"tar: unsupported typeflag {b}".as_str()),
             NameTooLong               => f.write_str("tar: path exceeds USTAR + PAX limits"),
             PaxParseError(msg)        => f.write_str(f"tar: PAX parse error: {msg}".as_str()),
             InvalidUtf8               => f.write_str("tar: non-UTF-8 path or name"),
@@ -168,10 +185,468 @@ implement Debug for TarError {
 }
 
 // =============================================================================
+// Strict, bounded USTAR / GNU / local-PAX reader
+// =============================================================================
+
+/// Explicit resource policy for read_archive_strict. All limits must be
+/// nonnegative; zero forbids use of that resource. An empty archive needs
+/// only an input budget of at least 1024 bytes. Limits do not grant filesystem
+/// access and do not validate publication paths, duplicates or manifests.
+public type TarReadLimits is {
+    public max_input_bytes: Int,
+    public max_entries: Int,
+    public max_entry_bytes: Int,
+    public max_total_content_bytes: Int,
+    public max_extensions: Int,
+    public max_extension_bytes: Int,
+    public max_text_bytes: Int,
+    public max_trailing_padding_bytes: Int,
+};
+
+public type TarReadLimit is
+      InputBytes | EntryCount | EntryBytes | TotalContentBytes
+    | ExtensionCount | ExtensionBytes | TextBytes | TrailingPaddingBytes;
+
+public type TarReadError is
+      Format(TarError)
+    | InvalidLimits
+    | LimitExceeded(TarReadLimit)
+    | InvalidPadding
+    | MissingTerminator
+    | InvalidTerminator
+    | TrailingData
+    | InvalidExtension(Text)
+    | ConflictingExtension(Text)
+    | OrphanExtension
+    | UnsupportedPaxKey(Text);
+
+implement Display for TarReadError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Format(error) => error.fmt(f),
+            InvalidLimits => f.write_str("tar: strict limits must be nonnegative"),
+            LimitExceeded(_) => f.write_str("tar: strict resource limit exceeded"),
+            InvalidPadding => f.write_str("tar: nonzero payload padding"),
+            MissingTerminator => f.write_str("tar: two zero end blocks are required"),
+            InvalidTerminator => f.write_str("tar: isolated zero end block"),
+            TrailingData => f.write_str("tar: trailing input is not whole zero blocks"),
+            InvalidExtension(detail) => f.write_str(f"tar: invalid extension: {detail}".as_str()),
+            ConflictingExtension(detail) => f.write_str(f"tar: conflicting extension: {detail}".as_str()),
+            OrphanExtension => f.write_str("tar: extension has no following entry"),
+            UnsupportedPaxKey(key) => f.write_str(f"tar: unsupported PAX key: {key}".as_str()),
+        }
+    }
+}
+
+implement Debug for TarReadError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> { self.fmt(f) }
+}
+
+type StrictTarHeader is {
+    path: Text, mode: Int, uid: Int, gid: Int, size: Int, mtime: Int,
+    kind: Byte, linkname: Text, uname: Text, gname: Text,
+};
+
+/// Read a complete, bounded archive using an explicit supported profile.
+///
+/// Supports exact USTAR and GNU headers, regular files, directories, symbolic
+/// and hard links, GNU L/K names, and one local PAX x header per entry. Accepted
+/// PAX keys are path, linkpath, size, uid, gid, uname, gname and integer mtime.
+/// PAX size controls the final entry payload, never an extension's own body.
+/// Numbers must be nonnegative and fit Int; binary GNU fields are checked.
+/// Binary fields with the GNU sign bit set are refused, including ambiguous
+/// positive 8-byte encodings that reuse that bit.
+/// Names must be UTF-8, with no embedded NUL in extension values.
+///
+/// Refuses global PAX, sparse/device/FIFO/unknown entries, unknown PAX keys,
+/// fractional/negative numbers, duplicate extensions and competing GNU/PAX
+/// path or link overrides. It does not silently choose between those carriers.
+/// Every payload has complete zero padding; two zero end blocks are required,
+/// followed only by bounded whole zero blocks. No entries are returned before
+/// the entire input has passed these checks. The permissive read_archive API
+/// and existing writer retain their separate behavior.
+public fn read_archive_strict(
+    bytes: &[Byte], limits: &TarReadLimits,
+) -> Result<List<TarEntry>, TarReadError> {
+    strict_validate_limits(limits)?;
+    if bytes.len() > limits.max_input_bytes {
+        return Result.Err(TarReadError.LimitExceeded(TarReadLimit.InputBytes));
+    }
+    let mut entries: List<TarEntry> = List.new();
+    let mut pos = 0;
+    let mut total_content = 0;
+    let mut extension_count = 0;
+    let mut extension_bytes = 0;
+    let mut pending_pax: Map<Text, Text> = Map.new();
+    let mut has_pax = false;
+    let mut long_path: Maybe<Text> = Maybe.None;
+    let mut long_link: Maybe<Text> = Maybe.None;
+    let mut pending = false;
+
+    while pos < bytes.len() {
+        if bytes.len() - pos < HEADER_SIZE {
+            return Result.Err(TarReadError.Format(TarError.TruncatedArchive));
+        }
+        if is_zero_block(bytes, pos) {
+            if pending { return Result.Err(TarReadError.OrphanExtension); }
+            if bytes.len() - pos < 2 * BLOCK_SIZE {
+                return Result.Err(TarReadError.MissingTerminator);
+            }
+            if !is_zero_block(bytes, pos + BLOCK_SIZE) {
+                return Result.Err(TarReadError.InvalidTerminator);
+            }
+            let trailing_start = pos + 2 * BLOCK_SIZE;
+            let trailing_size = bytes.len() - trailing_start;
+            if trailing_size % BLOCK_SIZE != 0 {
+                return Result.Err(TarReadError.TrailingData);
+            }
+            if trailing_size > limits.max_trailing_padding_bytes {
+                return Result.Err(TarReadError.LimitExceeded(TarReadLimit.TrailingPaddingBytes));
+            }
+            let mut i = trailing_start;
+            while i < bytes.len() {
+                if bytes[i] != 0_u8 { return Result.Err(TarReadError.TrailingData); }
+                i = i + 1;
+            }
+            return Result.Ok(entries);
+        }
+
+        let mut header = strict_read_header(bytes, pos, limits)?;
+        let data_start = pos + HEADER_SIZE;
+        let extension = header.kind == 0x4C_u8 || header.kind == 0x4B_u8 || header.kind == 0x78_u8;
+        if extension {
+            if extension_count >= limits.max_extensions {
+                return Result.Err(TarReadError.LimitExceeded(TarReadLimit.ExtensionCount));
+            }
+            if header.size > limits.max_extension_bytes - extension_bytes {
+                return Result.Err(TarReadError.LimitExceeded(TarReadLimit.ExtensionBytes));
+            }
+            extension_count = extension_count + 1;
+            extension_bytes = extension_bytes + header.size;
+            // Extension headers always use their own raw size, even if an
+            // earlier local PAX header contains a size for the final entry.
+            let (data_end, next) = strict_payload_span(bytes, data_start, header.size)?;
+            if header.kind == 0x78_u8 {
+                if has_pax {
+                    return Result.Err(TarReadError.ConflictingExtension("duplicate local PAX header".to_text()));
+                }
+                pending_pax = strict_parse_pax(bytes, data_start, data_end, limits)?;
+                has_pax = true;
+            } else if header.kind == 0x4C_u8 {
+                if long_path is Maybe.Some {
+                    return Result.Err(TarReadError.ConflictingExtension("duplicate GNU long name".to_text()));
+                }
+                long_path = Maybe.Some(strict_long_text(bytes, data_start, data_end, limits)?);
+            } else {
+                if long_link is Maybe.Some {
+                    return Result.Err(TarReadError.ConflictingExtension("duplicate GNU long link".to_text()));
+                }
+                long_link = Maybe.Some(strict_long_text(bytes, data_start, data_end, limits)?);
+            }
+            pending = true;
+            pos = next;
+            continue;
+        }
+
+        if entries.len() >= limits.max_entries {
+            return Result.Err(TarReadError.LimitExceeded(TarReadLimit.EntryCount));
+        }
+        if let Maybe.Some(path) = long_path {
+            if pending_pax.get(&"path".to_text()) is Maybe.Some {
+                return Result.Err(TarReadError.ConflictingExtension("GNU and PAX path".to_text()));
+            }
+            header.path = path;
+        }
+        if let Maybe.Some(linkname) = long_link {
+            if pending_pax.get(&"linkpath".to_text()) is Maybe.Some {
+                return Result.Err(TarReadError.ConflictingExtension("GNU and PAX linkpath".to_text()));
+            }
+            if header.kind != 0x31_u8 && header.kind != 0x32_u8 {
+                return Result.Err(TarReadError.InvalidExtension("GNU link for a non-link entry".to_text()));
+            }
+            header.linkname = linkname;
+        }
+        strict_apply_pax(&mut header, &pending_pax)?;
+        let regular = header.kind == 0_u8 || header.kind == 0x30_u8;
+        if !regular && header.size != 0 {
+            return Result.Err(TarReadError.InvalidExtension("non-file entry has a payload".to_text()));
+        }
+        if header.size > limits.max_entry_bytes {
+            return Result.Err(TarReadError.LimitExceeded(TarReadLimit.EntryBytes));
+        }
+        if header.size > limits.max_total_content_bytes - total_content {
+            return Result.Err(TarReadError.LimitExceeded(TarReadLimit.TotalContentBytes));
+        }
+        let (data_end, next) = strict_payload_span(bytes, data_start, header.size)?;
+        let mut content: List<Byte> = List.new();
+        let mut i = data_start;
+        while i < data_end { content.push(bytes[i]); i = i + 1; }
+        total_content = total_content + header.size;
+        let kind = match header.kind {
+            0_u8 | 0x30_u8 => EntryType.RegularFile,
+            0x35_u8 => EntryType.Directory,
+            0x31_u8 => EntryType.Hardlink(header.linkname),
+            0x32_u8 => EntryType.Symlink(header.linkname),
+            _ => return Result.Err(TarReadError.Format(TarError.UnsupportedTypeflag(header.kind))),
+        };
+        entries.push(TarEntry {
+            path: header.path, mode: header.mode,
+            uid: Maybe.Some(header.uid), gid: Maybe.Some(header.gid),
+            size: header.size, mtime: header.mtime, entry_type: kind,
+            uname: header.uname, gname: header.gname, content: content,
+        });
+        pending_pax = Map.new();
+        has_pax = false;
+        long_path = Maybe.None;
+        long_link = Maybe.None;
+        pending = false;
+        pos = next;
+    }
+    if pending { Result.Err(TarReadError.OrphanExtension) }
+    else { Result.Err(TarReadError.MissingTerminator) }
+}
+
+fn strict_validate_limits(limits: &TarReadLimits) -> Result<(), TarReadError> {
+    if limits.max_input_bytes < 0 || limits.max_entries < 0 || limits.max_entry_bytes < 0
+        || limits.max_total_content_bytes < 0 || limits.max_extensions < 0
+        || limits.max_extension_bytes < 0 || limits.max_text_bytes < 0
+        || limits.max_trailing_padding_bytes < 0 {
+        return Result.Err(TarReadError.InvalidLimits);
+    }
+    Result.Ok(())
+}
+
+fn strict_payload_span(bytes: &[Byte], start: Int, size: Int) -> Result<(Int, Int), TarReadError> {
+    // All additions follow a subtraction-based availability check. No rounded
+    // size is computed before checking the source range.
+    if size < 0 || start > bytes.len() || size > bytes.len() - start {
+        return Result.Err(TarReadError.Format(TarError.UnexpectedEof));
+    }
+    let end = start + size;
+    let padding = (BLOCK_SIZE - size % BLOCK_SIZE) % BLOCK_SIZE;
+    if padding > bytes.len() - end {
+        return Result.Err(TarReadError.Format(TarError.UnexpectedEof));
+    }
+    let next = end + padding;
+    let mut i = end;
+    while i < next {
+        if bytes[i] != 0_u8 { return Result.Err(TarReadError.InvalidPadding); }
+        i = i + 1;
+    }
+    Result.Ok((end, next))
+}
+
+fn strict_read_header(bytes: &[Byte], pos: Int, limits: &TarReadLimits) -> Result<StrictTarHeader, TarReadError> {
+    // The caller has already established the complete 512-byte header range.
+    let mut i = 0;
+    while i < 5 {
+        if bytes[pos + 257 + i] != USTAR_MAGIC[i] {
+            return Result.Err(TarReadError.Format(TarError.BadMagic));
+        }
+        i = i + 1;
+    }
+    let ustar = bytes[pos + 262] == 0_u8 && bytes[pos + 263] == 0x30_u8 && bytes[pos + 264] == 0x30_u8;
+    let gnu = bytes[pos + 262] == 0x20_u8 && bytes[pos + 263] == 0x20_u8 && bytes[pos + 264] == 0_u8;
+    if !ustar && !gnu { return Result.Err(TarReadError.Format(TarError.BadMagic)); }
+    let stored = strict_number(bytes, pos + 148, 8, false)?;
+    if stored != compute_checksum(bytes, pos) {
+        return Result.Err(TarReadError.Format(TarError.InvalidChecksum));
+    }
+    let kind = bytes[pos + 156];
+    if kind != 0_u8 && kind != 0x30_u8 && kind != 0x31_u8 && kind != 0x32_u8
+        && kind != 0x35_u8 && kind != 0x78_u8 && !(gnu && (kind == 0x4C_u8 || kind == 0x4B_u8)) {
+        return Result.Err(TarReadError.Format(TarError.UnsupportedTypeflag(kind)));
+    }
+    let mut path = strict_header_text(bytes, pos, NAME_LEN, limits)?;
+    if ustar {
+        // GNU uses this region for other metadata, not a path prefix.
+        let prefix = strict_header_text(bytes, pos + 345, PREFIX_LEN, limits)?;
+        if !prefix.is_empty() {
+            if prefix.as_bytes().len() >= limits.max_text_bytes
+                || path.as_bytes().len() > limits.max_text_bytes - prefix.as_bytes().len() - 1 {
+                return Result.Err(TarReadError.LimitExceeded(TarReadLimit.TextBytes));
+            }
+            path = prefix.concat(&"/".to_text()).concat(&path);
+        }
+    }
+    Result.Ok(StrictTarHeader {
+        path: path, mode: strict_number(bytes, pos + 100, 8, false)?,
+        uid: strict_number(bytes, pos + 108, 8, gnu)?,
+        gid: strict_number(bytes, pos + 116, 8, gnu)?,
+        size: strict_number(bytes, pos + 124, 12, gnu)?,
+        mtime: strict_number(bytes, pos + 136, 12, gnu)?,
+        kind: kind, linkname: strict_header_text(bytes, pos + 157, NAME_LEN, limits)?,
+        uname: strict_header_text(bytes, pos + 265, 32, limits)?,
+        gname: strict_header_text(bytes, pos + 297, 32, limits)?,
+    })
+}
+
+fn strict_number(bytes: &[Byte], start: Int, length: Int, binary: Bool) -> Result<Int, TarReadError> {
+    let mut acc = 0;
+    let mut i = 0;
+    if bytes[start] & 0x80_u8 != 0_u8 {
+        // Refuse the signed-negative GNU representation. Positive 8-byte
+        // fields with its sign bit set are outside this profile as well.
+        if !binary || bytes[start] & 0x40_u8 != 0_u8 {
+            return Result.Err(TarReadError.Format(TarError.InvalidNumeric("binary".to_text())));
+        }
+        while i < length {
+            let digit = if i == 0 { (bytes[start] & 0x7F_u8) as Int }
+                        else { bytes[start + i] as Int };
+            if acc > (Int.MAX - digit) / 256 {
+                return Result.Err(TarReadError.Format(TarError.InvalidNumeric("binary overflow".to_text())));
+            }
+            acc = acc * 256 + digit;
+            i = i + 1;
+        }
+        return Result.Ok(acc);
+    }
+    while i < length && bytes[start + i] == 0x20_u8 { i = i + 1; }
+    while i < length {
+        let b = bytes[start + i];
+        if b == 0_u8 || b == 0x20_u8 { break; }
+        if b < 0x30_u8 || b > 0x37_u8 {
+            return Result.Err(TarReadError.Format(TarError.InvalidNumeric("octal".to_text())));
+        }
+        let digit = (b - 0x30_u8) as Int;
+        if acc > (Int.MAX - digit) / 8 {
+            return Result.Err(TarReadError.Format(TarError.InvalidNumeric("octal overflow".to_text())));
+        }
+        acc = acc * 8 + digit;
+        i = i + 1;
+    }
+    while i < length {
+        if bytes[start + i] != 0_u8 && bytes[start + i] != 0x20_u8 {
+            return Result.Err(TarReadError.Format(TarError.InvalidNumeric("octal suffix".to_text())));
+        }
+        i = i + 1;
+    }
+    Result.Ok(acc)
+}
+
+fn strict_header_text(bytes: &[Byte], start: Int, width: Int, limits: &TarReadLimits) -> Result<Text, TarReadError> {
+    let mut end = start;
+    while end - start < width && bytes[end] != 0_u8 { end = end + 1; }
+    strict_text(bytes, start, end, limits)
+}
+
+fn strict_text(bytes: &[Byte], start: Int, end: Int, limits: &TarReadLimits) -> Result<Text, TarReadError> {
+    if end - start > limits.max_text_bytes {
+        return Result.Err(TarReadError.LimitExceeded(TarReadLimit.TextBytes));
+    }
+    let mut i = start;
+    while i < end {
+        if bytes[i] == 0_u8 {
+            return Result.Err(TarReadError.InvalidExtension("embedded NUL".to_text()));
+        }
+        i = i + 1;
+    }
+    match slice_text(bytes, start, end) {
+        Result.Ok(value) => Result.Ok(value),
+        Result.Err(error) => Result.Err(TarReadError.Format(error)),
+    }
+}
+
+fn strict_long_text(bytes: &[Byte], start: Int, end: Int, limits: &TarReadLimits) -> Result<Text, TarReadError> {
+    if end <= start || bytes[end - 1] != 0_u8 {
+        return Result.Err(TarReadError.InvalidExtension("GNU long name needs one final NUL".to_text()));
+    }
+    strict_text(bytes, start, end - 1, limits)
+}
+
+fn strict_decimal(bytes: &[Byte], start: Int, end: Int) -> Result<Int, TarReadError> {
+    if start == end { return Result.Err(TarReadError.Format(TarError.InvalidNumeric("decimal".to_text()))); }
+    let mut value = 0;
+    let mut i = start;
+    while i < end {
+        let b = bytes[i];
+        if b < 0x30_u8 || b > 0x39_u8 {
+            return Result.Err(TarReadError.Format(TarError.InvalidNumeric("decimal".to_text())));
+        }
+        let digit = (b - 0x30_u8) as Int;
+        if value > (Int.MAX - digit) / 10 {
+            return Result.Err(TarReadError.Format(TarError.InvalidNumeric("decimal overflow".to_text())));
+        }
+        value = value * 10 + digit;
+        i = i + 1;
+    }
+    Result.Ok(value)
+}
+
+fn strict_parse_pax(bytes: &[Byte], start: Int, end: Int, limits: &TarReadLimits) -> Result<Map<Text, Text>, TarReadError> {
+    if start == end { return Result.Err(TarReadError.InvalidExtension("empty PAX header".to_text())); }
+    let mut out: Map<Text, Text> = Map.new();
+    let mut pos = start;
+    while pos < end {
+        let mut space = pos;
+        while space < end && bytes[space] != 0x20_u8 { space = space + 1; }
+        if space == end { return Result.Err(TarReadError.InvalidExtension("PAX record length delimiter".to_text())); }
+        let length = match strict_decimal(bytes, pos, space) {
+            Result.Ok(value) => value,
+            Result.Err(_) => return Result.Err(TarReadError.InvalidExtension("PAX record length".to_text())),
+        };
+        let prefix_width = space - pos;
+        if length > end - pos || length <= prefix_width || length - prefix_width <= 3 {
+            return Result.Err(TarReadError.InvalidExtension("PAX record range".to_text()));
+        }
+        let record_end = pos + length;
+        if bytes[record_end - 1] != 0x0A_u8 {
+            return Result.Err(TarReadError.InvalidExtension("PAX record newline".to_text()));
+        }
+        let value_end = record_end - 1;
+        let key_start = space + 1;
+        let mut eq = key_start;
+        while eq < value_end && bytes[eq] != 0x3D_u8 { eq = eq + 1; }
+        if eq == key_start || eq >= value_end - 1 {
+            return Result.Err(TarReadError.InvalidExtension("PAX key/value".to_text()));
+        }
+        let key = strict_text(bytes, key_start, eq, limits)?;
+        if key != "path" && key != "linkpath" && key != "size" && key != "uid"
+            && key != "gid" && key != "uname" && key != "gname" && key != "mtime" {
+            return Result.Err(TarReadError.UnsupportedPaxKey(key));
+        }
+        if out.get(&key) is Maybe.Some {
+            return Result.Err(TarReadError.ConflictingExtension(key));
+        }
+        let value = strict_text(bytes, eq + 1, value_end, limits)?;
+        out.insert(key, value);
+        pos = record_end;
+    }
+    Result.Ok(out)
+}
+
+fn strict_apply_pax(header: &mut StrictTarHeader, pax: &Map<Text, Text>) -> Result<(), TarReadError> {
+    if let Maybe.Some(path) = pax.get(&"path".to_text()) { header.path = path.clone(); }
+    if let Maybe.Some(linkname) = pax.get(&"linkpath".to_text()) {
+        if header.kind != 0x31_u8 && header.kind != 0x32_u8 {
+            return Result.Err(TarReadError.InvalidExtension("PAX linkpath for a non-link entry".to_text()));
+        }
+        header.linkname = linkname.clone();
+    }
+    if let Maybe.Some(size) = pax.get(&"size".to_text()) {
+        header.size = strict_decimal(size.as_bytes(), 0, size.as_bytes().len())?;
+    }
+    if let Maybe.Some(uid) = pax.get(&"uid".to_text()) {
+        header.uid = strict_decimal(uid.as_bytes(), 0, uid.as_bytes().len())?;
+    }
+    if let Maybe.Some(gid) = pax.get(&"gid".to_text()) {
+        header.gid = strict_decimal(gid.as_bytes(), 0, gid.as_bytes().len())?;
+    }
+    if let Maybe.Some(mtime) = pax.get(&"mtime".to_text()) {
+        header.mtime = strict_decimal(mtime.as_bytes(), 0, mtime.as_bytes().len())?;
+    }
+    if let Maybe.Some(uname) = pax.get(&"uname".to_text()) { header.uname = uname.clone(); }
+    if let Maybe.Some(gname) = pax.get(&"gname".to_text()) { header.gname = gname.clone(); }
+    Result.Ok(())
+}
+
+// =============================================================================
 // Reader
 // =============================================================================
 
-/// Read a complete tar archive into a list of entries.
+/// Read USTAR/PAX entries using the legacy permissive framing behavior.
+/// Missing end blocks and some incomplete tails are tolerated; use
+/// read_archive_strict with explicit limits when the complete input matters.
 public fn read_archive(bytes: &[Byte]) -> Result<List<TarEntry>, TarError> {
     let mut entries: List<TarEntry> = List.new();
     let mut pos = 0;
@@ -194,7 +669,7 @@ public fn read_archive(bytes: &[Byte]) -> Result<List<TarEntry>, TarError> {
         if data_end > bytes.len() {
             return Result.Err(TarError.UnexpectedEof);
         }
-        match &header.entry_type {
+        match header.entry_type {
             PaxExtendedHeader => {
                 pending_pax = parse_pax(bytes, data_start, data_end)?;
             }
@@ -304,7 +779,7 @@ fn apply_pax(
         if let Maybe.Some(n) = parse_decimal(m) { header.mtime = n; }
     }
     // Copy content slice for regular files.
-    match &header.entry_type {
+    match header.entry_type {
         RegularFile => {
             let mut content: List<Byte> = List.new();
             let mut i = data_start;
@@ -407,9 +882,9 @@ fn slice_text(bytes: &[Byte], start: Int, end: Int) -> Result<Text, TarError> {
     let mut buf: List<Byte> = List.new();
     let mut i = start;
     while i < end { buf.push(bytes[i]); i = i + 1; }
-    match Text.from_bytes(&buf) {
-        Maybe.Some(t) => Result.Ok(t),
-        Maybe.None    => Result.Err(TarError.InvalidUtf8),
+    match Text.from_utf8(buf.as_slice()) {
+        Result.Ok(t) => Result.Ok(t),
+        Result.Err(_) => Result.Err(TarError.InvalidUtf8),
     }
 }
 
@@ -561,7 +1036,7 @@ fn split_path_for_ustar(bytes: &[Byte]) -> (Text, Text) {
     if bytes.len() <= NAME_LEN {
         let mut name: List<Byte> = List.new();
         let mut i = 0; while i < bytes.len() { name.push(bytes[i]); i = i + 1; }
-        return (Text.from_bytes(&name).unwrap_or(Text.new()), Text.new());
+        return (Text.from_utf8(name.as_slice()).unwrap_or(Text.new()), Text.new());
     }
     // Find best split.
     let mut split = -1;
@@ -577,15 +1052,15 @@ fn split_path_for_ustar(bytes: &[Byte]) -> (Text, Text) {
         // Truncate to first 100 bytes; PAX extension carries full path.
         let mut name: List<Byte> = List.new();
         let mut k = 0; while k < NAME_LEN { name.push(bytes[k]); k = k + 1; }
-        return (Text.from_bytes(&name).unwrap_or(Text.new()), Text.new());
+        return (Text.from_utf8(name.as_slice()).unwrap_or(Text.new()), Text.new());
     }
     let mut prefix: List<Byte> = List.new();
     let mut k = 0; while k < split { prefix.push(bytes[k]); k = k + 1; }
     let mut name: List<Byte> = List.new();
     let mut j = split + 1; while j < bytes.len() { name.push(bytes[j]); j = j + 1; }
     (
-        Text.from_bytes(&name).unwrap_or(Text.new()),
-        Text.from_bytes(&prefix).unwrap_or(Text.new()),
+        Text.from_utf8(name.as_slice()).unwrap_or(Text.new()),
+        Text.from_utf8(prefix.as_slice()).unwrap_or(Text.new()),
     )
 }
 
@@ -700,15 +1175,37 @@ public fn entry_for_directory(path: Text, mode: Int, mtime: Int) -> TarEntry {
     }
 }
 
+/// Construct a symlink with the conventional 0o777 mode.
 public fn entry_for_symlink(path: Text, target: Text, mtime: Int) -> TarEntry {
+    entry_for_symlink_with_mode(path, target, 0o777, mtime)
+}
+
+/// Construct a symlink while preserving an explicitly supplied mode.
+public fn entry_for_symlink_with_mode(path: Text, target: Text, mode: Int, mtime: Int) -> TarEntry {
     TarEntry {
         path: path,
-        mode: 0o777,
+        mode: mode,
         uid: Maybe.Some(0),
         gid: Maybe.Some(0),
         size: 0,
         mtime: mtime,
         entry_type: EntryType.Symlink(target),
+        uname: "".to_text(),
+        gname: "".to_text(),
+        content: List.new(),
+    }
+}
+
+/// Construct a hardlink entry. The target is stored without filesystem access.
+public fn entry_for_hardlink(path: Text, target: Text, mode: Int, mtime: Int) -> TarEntry {
+    TarEntry {
+        path: path,
+        mode: mode,
+        uid: Maybe.Some(0),
+        gid: Maybe.Some(0),
+        size: 0,
+        mtime: mtime,
+        entry_type: EntryType.Hardlink(target),
         uname: "".to_text(),
         gname: "".to_text(),
         content: List.new(),

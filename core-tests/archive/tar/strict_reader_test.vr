@@ -1,0 +1,459 @@
+// Strict profile controls. This fixture tests shared tar parsing only.
+// Actual CLI-produced archives are a separate interoperability input.
+mount core.archive.tar.{
+    EntryType, TarEntry, TarError, TarReadError, TarReadLimit, TarReadLimits,
+    read_archive, read_archive_strict, write_archive, entry_for_file,
+};
+mount core.collections.list.List;
+mount core.base.result.Result;
+
+fn limits() -> TarReadLimits {
+    TarReadLimits {
+        max_input_bytes: 65536, max_entries: 8, max_entry_bytes: 8192,
+        max_total_content_bytes: 16384, max_extensions: 8,
+        max_extension_bytes: 4096, max_text_bytes: 1024,
+        max_trailing_padding_bytes: 1024,
+    }
+}
+
+fn zeros(n: Int) -> List<Byte> {
+    let mut out: List<Byte> = List.new();
+    let mut i = 0;
+    while i < n { out.push(0_u8); i = i + 1; }
+    out
+}
+
+fn append(out: &mut List<Byte>, data: &List<Byte>) {
+    let mut i = 0;
+    while i < data.len() { out.push(data[i]); i = i + 1; }
+}
+
+fn text_bytes(value: &Text) -> List<Byte> {
+    let mut out: List<Byte> = List.new();
+    let raw = value.as_bytes();
+    let mut i = 0;
+    while i < raw.len() { out.push(raw[i]); i = i + 1; }
+    out
+}
+
+fn text_at(out: &mut List<Byte>, offset: Int, value: &Text) {
+    let raw = value.as_bytes();
+    let mut i = 0;
+    while i < raw.len() { out.set(offset + i, raw[i]); i = i + 1; }
+}
+
+fn octal_at(out: &mut List<Byte>, offset: Int, width: Int, value: Int) {
+    let mut remaining = value;
+    let mut i = width - 2;
+    while i >= 0 {
+        out.set(offset + i, 0x30_u8 + ((remaining % 8) as Byte));
+        remaining = remaining / 8;
+        i = i - 1;
+    }
+    out.set(offset + width - 1, 0_u8);
+}
+
+fn checksum(out: &mut List<Byte>) {
+    let mut i = 148;
+    while i < 156 { out.set(i, 0x20_u8); i = i + 1; }
+    let mut sum = 0;
+    i = 0;
+    while i < 512 { sum = sum + (out[i] as Int); i = i + 1; }
+    octal_at(out, 148, 7, sum);
+    out.set(155, 0x20_u8);
+}
+
+fn header(gnu: Bool, path: &Text, kind: Byte, size: Int) -> List<Byte> {
+    let mut out = zeros(512);
+    text_at(&mut out, 0, path);
+    octal_at(&mut out, 100, 8, 0o644);
+    octal_at(&mut out, 108, 8, 0);
+    octal_at(&mut out, 116, 8, 0);
+    octal_at(&mut out, 124, 12, size);
+    octal_at(&mut out, 136, 12, 0);
+    out.set(156, kind);
+    if gnu {
+        text_at(&mut out, 257, &"ustar ".to_text());
+        out.set(263, 0x20_u8);
+    } else {
+        text_at(&mut out, 257, &"ustar".to_text());
+        text_at(&mut out, 263, &"00".to_text());
+    }
+    checksum(&mut out);
+    out
+}
+
+fn member(out: &mut List<Byte>, raw_header: &List<Byte>, data: &List<Byte>) {
+    append(out, raw_header);
+    append(out, data);
+    let padding = (512 - data.len() % 512) % 512;
+    append(out, &zeros(padding));
+}
+
+fn finish(out: &mut List<Byte>) { append(out, &zeros(1024)); }
+
+fn archive(data: &List<Byte>) -> List<Byte> {
+    let mut out = zeros(0);
+    member(&mut out, &header(true, &"file".to_text(), 0x30_u8, data.len()), data);
+    finish(&mut out);
+    out
+}
+
+fn pax(key: &Text, value: &Text) -> List<Byte> {
+    let body = key.concat(&"=".to_text()).concat(value).concat(&"\n".to_text());
+    let mut length = body.as_bytes().len() + 2;
+    loop {
+        let next = length.to_text().as_bytes().len() + 1 + body.as_bytes().len();
+        if next == length { break; }
+        length = next;
+    }
+    text_bytes(&length.to_text().concat(&" ".to_text()).concat(&body))
+}
+
+fn extension(out: &mut List<Byte>, kind: Byte, data: &List<Byte>) {
+    member(out, &header(true, &"././@LongLink".to_text(), kind, data.len()), data);
+}
+
+fn failure(bytes: &List<Byte>, policy: &TarReadLimits) -> TarReadError {
+    match read_archive_strict(bytes.as_slice(), policy) {
+        Result.Err(error) => error,
+        Result.Ok(_) => panic("strict tar unexpectedly accepted the input"),
+    }
+}
+
+@test
+fn empty_archive_and_zero_budgets() {
+    let empty = zeros(1024);
+    let mut policy = limits();
+    policy.max_entries = 0;
+    policy.max_entry_bytes = 0;
+    policy.max_total_content_bytes = 0;
+    policy.max_extensions = 0;
+    policy.max_extension_bytes = 0;
+    policy.max_text_bytes = 0;
+    policy.max_trailing_padding_bytes = 0;
+    assert(read_archive_strict(empty.as_slice(), &policy).unwrap().is_empty());
+    policy.max_input_bytes = -1;
+    assert(failure(&empty, &policy) is TarReadError.InvalidLimits);
+    policy = limits(); policy.max_entries = -1;
+    assert(failure(&empty, &policy) is TarReadError.InvalidLimits);
+    policy = limits(); policy.max_entry_bytes = -1;
+    assert(failure(&empty, &policy) is TarReadError.InvalidLimits);
+    policy = limits(); policy.max_total_content_bytes = -1;
+    assert(failure(&empty, &policy) is TarReadError.InvalidLimits);
+    policy = limits(); policy.max_extensions = -1;
+    assert(failure(&empty, &policy) is TarReadError.InvalidLimits);
+    policy = limits(); policy.max_extension_bytes = -1;
+    assert(failure(&empty, &policy) is TarReadError.InvalidLimits);
+    policy = limits(); policy.max_text_bytes = -1;
+    assert(failure(&empty, &policy) is TarReadError.InvalidLimits);
+    policy = limits(); policy.max_trailing_padding_bytes = -1;
+    assert(failure(&empty, &policy) is TarReadError.InvalidLimits);
+}
+
+@test
+fn gnu_and_ustar_layouts_preserve_binary_content() {
+    let data: List<Byte> = [0_u8, 0xFF_u8, 0x80_u8, 0x42_u8, 0_u8];
+    let mut out = zeros(0);
+    let mut raw = header(true, &"binary".to_text(), 0x30_u8, data.len());
+    // GNU's bytes at 345 are not a USTAR path prefix, even if not UTF-8.
+    raw.set(345, 0xFF_u8); checksum(&mut raw);
+    member(&mut out, &raw, &data);
+    let mut ustar = header(false, &"second".to_text(), 0x30_u8, 0);
+    text_at(&mut ustar, 345, &"nested".to_text()); checksum(&mut ustar);
+    member(&mut out, &ustar, &zeros(0)); finish(&mut out);
+    let entries = read_archive_strict(out.as_slice(), &limits()).unwrap();
+    assert(entries.len() == 2);
+    assert(*entries[0].path() == "binary");
+    assert(entries[0].content().len() == 5);
+    assert(entries[0].content()[1] == 0xFF_u8);
+    assert(entries[0].content()[2] == 0x80_u8);
+    assert(*entries[1].path() == "nested/second");
+}
+
+@test
+fn gnu_long_name_and_link_are_consumed_once() {
+    let name = "a/long/archive/name".to_text();
+    let target = "the/link/target".to_text();
+    let mut long_name = text_bytes(&name); long_name.push(0_u8);
+    let mut long_link = text_bytes(&target); long_link.push(0_u8);
+    let mut out = zeros(0);
+    extension(&mut out, 0x4C_u8, &long_name);
+    extension(&mut out, 0x4B_u8, &long_link);
+    member(&mut out, &header(true, &"short".to_text(), 0x32_u8, 0), &zeros(0));
+    member(&mut out, &header(true, &"next".to_text(), 0x35_u8, 0), &zeros(0));
+    finish(&mut out);
+    let entries = read_archive_strict(out.as_slice(), &limits()).unwrap();
+    assert(*entries[0].path() == name);
+    match entries[0].entry_type() {
+        EntryType.Symlink(value) => assert(*value == target),
+        _ => panic("long link kind was lost"),
+    }
+    assert(*entries[1].path() == "next");
+    assert(entries[1].entry_type() is EntryType.Directory);
+    assert(entries[1].content().is_empty());
+}
+
+@test
+fn pax_size_frames_final_data_and_not_intermediate_extensions() {
+    let mut out = zeros(0);
+    extension(&mut out, 0x78_u8, &pax(&"size".to_text(), &"3".to_text()));
+    let mut name = text_bytes(&"long-name".to_text()); name.push(0_u8);
+    // The PAX size 3 must not truncate this intermediate GNU L body.
+    extension(&mut out, 0x4C_u8, &name);
+    let data: List<Byte> = [0x00_u8, 0xFE_u8, 0x7F_u8];
+    // Deliberately disagree with the final physical header size.
+    member(&mut out, &header(true, &"ignored".to_text(), 0x30_u8, 1), &data);
+    member(&mut out, &header(true, &"next".to_text(), 0x30_u8, 0), &zeros(0));
+    finish(&mut out);
+    let entries = read_archive_strict(out.as_slice(), &limits()).unwrap();
+    assert(entries.len() == 2);
+    assert(*entries[0].path() == "long-name");
+    assert(entries[0].content().len() == 3);
+    assert(entries[0].content()[1] == 0xFE_u8);
+    assert(*entries[1].path() == "next");
+}
+
+@test
+fn complete_stream_and_padding_are_required() {
+    let empty = zeros(0);
+    assert(failure(&empty, &limits()) is TarReadError.MissingTerminator);
+    assert(failure(&zeros(512), &limits()) is TarReadError.MissingTerminator);
+    let mut one_zero = zeros(512);
+    append(&mut one_zero, &archive(&zeros(0)));
+    assert(failure(&one_zero, &limits()) is TarReadError.InvalidTerminator);
+    let mut extra = zeros(1024); extra.push(0_u8);
+    assert(failure(&extra, &limits()) is TarReadError.TrailingData);
+    extra = zeros(1536); extra.set(1200, 1_u8);
+    assert(failure(&extra, &limits()) is TarReadError.TrailingData);
+    assert(read_archive_strict(zeros(1536).as_slice(), &limits()).unwrap().is_empty());
+    let mut padded = archive(&[0x42_u8]); padded.set(513, 1_u8);
+    assert(failure(&padded, &limits()) is TarReadError.InvalidPadding);
+    let mut truncated = header(true, &"file".to_text(), 0x30_u8, 2);
+    truncated.push(0_u8);
+    assert(failure(&truncated, &limits()) is TarReadError.Format(TarError.UnexpectedEof));
+    truncated = header(true, &"file".to_text(), 0x30_u8, 1);
+    truncated.push(0_u8);
+    assert(failure(&truncated, &limits()) is TarReadError.Format(TarError.UnexpectedEof));
+    assert(failure(&zeros(511), &limits()) is TarReadError.Format(TarError.TruncatedArchive));
+    // Legacy permissive EOF behavior is an explicitly separate contract.
+    assert(read_archive(zeros(0).as_slice()).unwrap().is_empty());
+}
+
+@test
+fn all_resource_budgets_are_enforced() {
+    let input = archive(&[1_u8, 2_u8]);
+    let mut policy = limits(); policy.max_input_bytes = input.len() - 1;
+    assert(failure(&input, &policy) is TarReadError.LimitExceeded(TarReadLimit.InputBytes));
+    policy = limits(); policy.max_entries = 0;
+    assert(failure(&input, &policy) is TarReadError.LimitExceeded(TarReadLimit.EntryCount));
+    policy = limits(); policy.max_entry_bytes = 1;
+    assert(failure(&input, &policy) is TarReadError.LimitExceeded(TarReadLimit.EntryBytes));
+    policy = limits(); policy.max_total_content_bytes = 1;
+    assert(failure(&input, &policy) is TarReadError.LimitExceeded(TarReadLimit.TotalContentBytes));
+    policy = limits(); policy.max_text_bytes = 3;
+    assert(failure(&input, &policy) is TarReadError.LimitExceeded(TarReadLimit.TextBytes));
+    policy = limits(); policy.max_trailing_padding_bytes = 511;
+    assert(failure(&zeros(1536), &policy) is TarReadError.LimitExceeded(TarReadLimit.TrailingPaddingBytes));
+    let mut extended = zeros(0);
+    let body = pax(&"path".to_text(), &"file".to_text());
+    extension(&mut extended, 0x78_u8, &body);
+    append(&mut extended, &input);
+    policy = limits(); policy.max_extensions = 0;
+    assert(failure(&extended, &policy) is TarReadError.LimitExceeded(TarReadLimit.ExtensionCount));
+    policy = limits(); policy.max_extension_bytes = body.len() - 1;
+    assert(failure(&extended, &policy) is TarReadError.LimitExceeded(TarReadLimit.ExtensionBytes));
+    let mut many = zeros(0);
+    member(&mut many, &header(true, &"a".to_text(), 0x30_u8, 2), &[1_u8, 2_u8]);
+    member(&mut many, &header(true, &"b".to_text(), 0x30_u8, 2), &[3_u8, 4_u8]); finish(&mut many);
+    policy = limits(); policy.max_total_content_bytes = 3;
+    assert(failure(&many, &policy) is TarReadError.LimitExceeded(TarReadLimit.TotalContentBytes));
+    let mut repeated = zeros(0);
+    extension(&mut repeated, 0x78_u8, &body);
+    member(&mut repeated, &header(true, &"a".to_text(), 0x30_u8, 0), &zeros(0));
+    extension(&mut repeated, 0x78_u8, &body);
+    member(&mut repeated, &header(true, &"b".to_text(), 0x30_u8, 0), &zeros(0)); finish(&mut repeated);
+    policy = limits(); policy.max_extensions = 1;
+    assert(failure(&repeated, &policy) is TarReadError.LimitExceeded(TarReadLimit.ExtensionCount));
+    policy = limits(); policy.max_extension_bytes = body.len();
+    assert(failure(&repeated, &policy) is TarReadError.LimitExceeded(TarReadLimit.ExtensionBytes));
+}
+
+@test
+fn numeric_formats_checksum_and_versions_are_checked() {
+    let mut raw = header(true, &"file".to_text(), 0x30_u8, 0);
+    // Positive GNU base256 uid 2,097,152, plus a binary mtime.
+    let mut i = 108; while i < 116 { raw.set(i, 0_u8); i = i + 1; }
+    raw.set(108, 0x80_u8); raw.set(113, 0x20_u8);
+    i = 136; while i < 148 { raw.set(i, 0_u8); i = i + 1; }
+    raw.set(136, 0x80_u8); raw.set(143, 0x02_u8);
+    checksum(&mut raw);
+    let mut out = raw.clone(); finish(&mut out);
+    assert(read_archive_strict(out.as_slice(), &limits()).unwrap().len() == 1);
+    raw.set(124, 0xFF_u8); checksum(&mut raw);
+    out = raw.clone(); finish(&mut out);
+    assert(failure(&out, &limits()) is TarReadError.Format(TarError.InvalidNumeric));
+    raw = header(true, &"file".to_text(), 0x30_u8, 0);
+    raw.set(124, 0x80_u8); raw.set(125, 1_u8); checksum(&mut raw);
+    out = raw.clone(); finish(&mut out);
+    assert(failure(&out, &limits()) is TarReadError.Format(TarError.InvalidNumeric));
+    out = archive(&zeros(0)); out.set(0, 0x62_u8);
+    assert(failure(&out, &limits()) is TarReadError.Format(TarError.InvalidChecksum));
+    raw = header(false, &"file".to_text(), 0x30_u8, 0);
+    raw.set(264, 0x31_u8); checksum(&mut raw); out = raw.clone(); finish(&mut out);
+    assert(failure(&out, &limits()) is TarReadError.Format(TarError.BadMagic));
+}
+
+@test
+fn malformed_duplicate_and_orphan_extensions_are_refused() {
+    let malformed: List<Text> = ["", "5 a=b", "6 a=b!", "999 path=x\n", "0 path=x\n", "-1 path=x\n", "999999999999999999999 path=x\n"];
+    let mut i = 0;
+    while i < malformed.len() {
+        let mut out = zeros(0);
+        extension(&mut out, 0x78_u8, &text_bytes(&malformed[i]));
+        append(&mut out, &archive(&zeros(0)));
+        assert(failure(&out, &limits()) is TarReadError.InvalidExtension);
+        i = i + 1;
+    }
+    let mut duplicate = pax(&"path".to_text(), &"first".to_text());
+    append(&mut duplicate, &pax(&"path".to_text(), &"second".to_text()));
+    let mut out = zeros(0); extension(&mut out, 0x78_u8, &duplicate); append(&mut out, &archive(&zeros(0)));
+    assert(failure(&out, &limits()) is TarReadError.ConflictingExtension);
+    out = zeros(0); extension(&mut out, 0x78_u8, &pax(&"path".to_text(), &"first".to_text())); finish(&mut out);
+    assert(failure(&out, &limits()) is TarReadError.OrphanExtension);
+    out = zeros(0); extension(&mut out, 0x4C_u8, &[0x61_u8]); append(&mut out, &archive(&zeros(0)));
+    assert(failure(&out, &limits()) is TarReadError.InvalidExtension);
+    out = zeros(0); extension(&mut out, 0x4C_u8, &[0x61_u8, 0_u8, 0x62_u8, 0_u8]); append(&mut out, &archive(&zeros(0)));
+    assert(failure(&out, &limits()) is TarReadError.InvalidExtension);
+    out = zeros(0); extension(&mut out, 0x4C_u8, &[0xFF_u8, 0_u8]); append(&mut out, &archive(&zeros(0)));
+    assert(failure(&out, &limits()) is TarReadError.Format(TarError.InvalidUtf8));
+}
+
+@test
+fn ambiguous_and_unsupported_metadata_is_refused() {
+    let mut out = zeros(0);
+    extension(&mut out, 0x78_u8, &pax(&"path".to_text(), &"pax-name".to_text()));
+    extension(&mut out, 0x4C_u8, &[0x61_u8, 0_u8]); append(&mut out, &archive(&zeros(0)));
+    assert(failure(&out, &limits()) is TarReadError.ConflictingExtension);
+    out = zeros(0); extension(&mut out, 0x78_u8, &pax(&"linkpath".to_text(), &"pax-target".to_text()));
+    extension(&mut out, 0x4B_u8, &[0x61_u8, 0_u8]);
+    member(&mut out, &header(true, &"link".to_text(), 0x31_u8, 0), &zeros(0)); finish(&mut out);
+    assert(failure(&out, &limits()) is TarReadError.ConflictingExtension);
+    out = zeros(0); extension(&mut out, 0x67_u8, &pax(&"path".to_text(), &"global".to_text())); append(&mut out, &archive(&zeros(0)));
+    assert(failure(&out, &limits()) is TarReadError.Format(TarError.UnsupportedTypeflag));
+    out = zeros(0); extension(&mut out, 0x78_u8, &pax(&"GNU.sparse.size".to_text(), &"10000".to_text())); append(&mut out, &archive(&zeros(0)));
+    assert(failure(&out, &limits()) is TarReadError.UnsupportedPaxKey);
+    let kinds: List<Byte> = [0x53_u8, 0x33_u8, 0x34_u8, 0x36_u8, 0xFF_u8];
+    let mut i = 0;
+    while i < kinds.len() {
+        out = header(true, &"file".to_text(), kinds[i], 0); finish(&mut out);
+        assert(failure(&out, &limits()) is TarReadError.Format(TarError.UnsupportedTypeflag)); i = i + 1;
+    }
+}
+
+@test
+fn local_pax_writer_output_and_binary_data_roundtrip() {
+    let mut name = Text.new();
+    let mut i = 0; while i < 300 { name = name.concat(&"p".to_text()); i = i + 1; }
+    let content: List<Byte> = [0_u8, 0xFF_u8, 0x80_u8, 1_u8];
+    let entries: List<TarEntry> = [entry_for_file(name.clone(), content.clone(), 0o644, 0)];
+    let encoded = write_archive(&entries).unwrap();
+    let decoded = read_archive_strict(encoded.as_slice(), &limits()).unwrap();
+    assert(decoded.len() == 1);
+    assert(*decoded[0].path() == name);
+    assert(decoded[0].content().len() == 4);
+    assert(decoded[0].content()[1] == 0xFF_u8);
+    assert(decoded[0].content()[2] == 0x80_u8);
+}
+
+@test
+fn effective_pax_size_changes_the_next_header_boundary() {
+    let effective_sizes: List<Int> = [513, 1];
+    let physical_sizes: List<Int> = [1, 513];
+    let mut i = 0;
+    while i < effective_sizes.len() {
+        let size = effective_sizes[i];
+        let mut data = zeros(size);
+        data.set(size - 1, 0xFE_u8);
+        let mut out = zeros(0);
+        extension(&mut out, 0x78_u8, &pax(&"size".to_text(), &size.to_text()));
+        member(&mut out, &header(true, &"first".to_text(), 0x30_u8, physical_sizes[i]), &data);
+        member(&mut out, &header(true, &"second".to_text(), 0x30_u8, 0), &zeros(0));
+        finish(&mut out);
+        let entries = read_archive_strict(out.as_slice(), &limits()).unwrap();
+        assert(entries.len() == 2);
+        assert(entries[0].content().len() == size);
+        assert(entries[0].content()[size - 1] == 0xFE_u8);
+        assert(*entries[1].path() == "second");
+        i = i + 1;
+    }
+}
+
+@test
+fn repeated_or_reversed_extension_authority_is_refused() {
+    let kinds: List<Byte> = [0x78_u8, 0x4C_u8, 0x4B_u8];
+    let mut i = 0;
+    while i < kinds.len() {
+        let body = if kinds[i] == 0x78_u8 { pax(&"path".to_text(), &"name".to_text()) }
+                   else { let bytes: List<Byte> = [0x61_u8, 0_u8]; bytes };
+        let mut out = zeros(0);
+        extension(&mut out, kinds[i], &body);
+        extension(&mut out, kinds[i], &body);
+        append(&mut out, &archive(&zeros(0)));
+        assert(failure(&out, &limits()) is TarReadError.ConflictingExtension);
+        i = i + 1;
+    }
+    let mut out = zeros(0);
+    extension(&mut out, 0x4C_u8, &[0x61_u8, 0_u8]);
+    extension(&mut out, 0x78_u8, &pax(&"path".to_text(), &"pax-name".to_text()));
+    append(&mut out, &archive(&zeros(0)));
+    assert(failure(&out, &limits()) is TarReadError.ConflictingExtension);
+    out = zeros(0);
+    extension(&mut out, 0x4B_u8, &[0x61_u8, 0_u8]);
+    extension(&mut out, 0x78_u8, &pax(&"linkpath".to_text(), &"pax-target".to_text()));
+    member(&mut out, &header(true, &"link".to_text(), 0x31_u8, 0), &zeros(0));
+    finish(&mut out);
+    assert(failure(&out, &limits()) is TarReadError.ConflictingExtension);
+}
+
+@test
+fn pax_numbers_and_non_file_payloads_are_not_silently_normalized() {
+    let invalid: List<Text> = ["-1", "1.5", "9223372036854775808", "12x"];
+    let mut i = 0;
+    while i < invalid.len() {
+        let mut out = zeros(0);
+        extension(&mut out, 0x78_u8, &pax(&"size".to_text(), &invalid[i]));
+        append(&mut out, &archive(&zeros(0)));
+        assert(failure(&out, &limits()) is TarReadError.Format(TarError.InvalidNumeric));
+        i = i + 1;
+    }
+    let mut out = zeros(0);
+    member(&mut out, &header(true, &"directory".to_text(), 0x35_u8, 1), &[0_u8]);
+    finish(&mut out);
+    assert(failure(&out, &limits()) is TarReadError.InvalidExtension);
+    out = zeros(0);
+    extension(&mut out, 0x4B_u8, &[0x61_u8, 0_u8]);
+    append(&mut out, &archive(&zeros(0)));
+    assert(failure(&out, &limits()) is TarReadError.InvalidExtension);
+    out = zeros(0);
+    extension(&mut out, 0x78_u8, &pax(&"linkpath".to_text(), &"link".to_text()));
+    append(&mut out, &archive(&zeros(0)));
+    assert(failure(&out, &limits()) is TarReadError.InvalidExtension);
+}
+
+fn main() {
+    empty_archive_and_zero_budgets();
+    gnu_and_ustar_layouts_preserve_binary_content();
+    gnu_long_name_and_link_are_consumed_once();
+    pax_size_frames_final_data_and_not_intermediate_extensions();
+    complete_stream_and_padding_are_required();
+    all_resource_budgets_are_enforced();
+    numeric_formats_checksum_and_versions_are_checked();
+    malformed_duplicate_and_orphan_extensions_are_refused();
+    ambiguous_and_unsupported_metadata_is_refused();
+    local_pax_writer_output_and_binary_data_roundtrip();
+    effective_pax_size_changes_the_next_header_boundary();
+    repeated_or_reversed_extension_authority_is_refused();
+    pax_numbers_and_non_file_payloads_are_not_silently_normalized();
+    print("tar-strict-reader: 13 passed");
+}

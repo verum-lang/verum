@@ -1,0 +1,127 @@
+// The generic adapter uses public TarEntry views; all storage remains private.
+mount core.archive.{
+    Archive, ArchiveEntry, ArchiveError, TarFormat,
+    tar_entry_to_universal, universal_to_tar_entry,
+};
+mount core.archive.tar.{
+    EntryType, TarEntry, entry_for_file, entry_for_directory, entry_for_symlink,
+    entry_for_symlink_with_mode, entry_for_hardlink, read_archive, write_archive,
+};
+mount core.collections.list.List;
+mount core.base.result.Result;
+
+fn binary_content() -> List<Byte> {
+    let bytes: List<Byte> = [0x00_u8, 0xFF_u8, 0x42_u8, 0x80_u8, 0x7F_u8, 0xFE_u8, 0x00_u8];
+    bytes
+}
+
+fn assert_same_entry(actual: &TarEntry, expected: &TarEntry) {
+    assert(*actual.path() == *expected.path());
+    assert(actual.mode() == expected.mode());
+    assert(actual.mtime() == expected.mtime());
+    assert(actual.content().len() == expected.content().len());
+    let mut i = 0;
+    while i < expected.content().len() {
+        assert(actual.content()[i] == expected.content()[i]);
+        i = i + 1;
+    }
+    match expected.entry_type() {
+        EntryType.RegularFile => assert(actual.entry_type() is EntryType.RegularFile),
+        EntryType.Directory => assert(actual.entry_type() is EntryType.Directory),
+        EntryType.Symlink(target) => match actual.entry_type() {
+            EntryType.Symlink(found) => assert(*found == *target),
+            _ => panic("symlink kind lost"),
+        },
+        EntryType.Hardlink(target) => match actual.entry_type() {
+            EntryType.Hardlink(found) => assert(*found == *target),
+            _ => panic("hardlink kind lost"),
+        },
+        _ => panic("unsupported expected entry"),
+    }
+}
+
+@test
+fn generic_roundtrip_preserves_binary_metadata_and_link_targets() {
+    let mut tar_entries: List<TarEntry> = List.new();
+    tar_entries.push(entry_for_file("nested/binary.bin".to_text(), binary_content(), 0o640, 123));
+    tar_entries.push(entry_for_directory("nested/".to_text(), 0o750, 127));
+    tar_entries.push(entry_for_symlink_with_mode("symbolic".to_text(), "nested/binary.bin".to_text(), 0o700, 131));
+    tar_entries.push(entry_for_hardlink("hard".to_text(), "nested/binary.bin".to_text(), 0o600, 137));
+    let mut entries: List<ArchiveEntry> = List.new();
+    let mut i = 0;
+    while i < tar_entries.len() {
+        let converted = tar_entry_to_universal(&tar_entries[i]).unwrap();
+        assert_same_entry(&universal_to_tar_entry(&converted), &tar_entries[i]);
+        entries.push(converted);
+        i = i + 1;
+    }
+    let format = TarFormat {};
+    let bytes = format.pack(&entries).unwrap();
+    let decoded = format.unpack(bytes.as_slice()).unwrap();
+    assert(decoded.len() == tar_entries.len());
+    i = 0;
+    while i < decoded.len() {
+        assert_same_entry(&universal_to_tar_entry(&decoded[i]), &tar_entries[i]);
+        i = i + 1;
+    }
+}
+
+@test
+fn original_symlink_constructor_keeps_its_default_mode() {
+    let link = entry_for_symlink("link".to_text(), "target".to_text(), 149);
+    assert(link.mode() == 0o777);
+    assert(link.mtime() == 149);
+    let converted = tar_entry_to_universal(&link).unwrap();
+    assert_same_entry(&universal_to_tar_entry(&converted), &link);
+}
+
+fn replace_kind(bytes: &mut List<Byte>, offset: Int, kind: Byte) {
+    bytes.set(offset + 156, kind);
+    let mut i = 148;
+    while i < 156 { bytes.set(offset + i, 0x20_u8); i = i + 1; }
+    let mut sum = 0;
+    i = 0;
+    while i < 512 { sum = sum + (bytes[offset + i] as Int); i = i + 1; }
+    i = 5;
+    while i >= 0 {
+        bytes.set(offset + 148 + i, 0x30_u8 + ((sum % 8) as Byte));
+        sum = sum / 8;
+        i = i - 1;
+    }
+    bytes.set(offset + 154, 0_u8);
+    bytes.set(offset + 155, 0x20_u8);
+}
+
+@test
+fn unsupported_kinds_refuse_conversion_and_partial_generic_output() {
+    let kinds: List<Byte> = [0x33_u8, 0x34_u8, 0x36_u8];
+    let format = TarFormat {};
+    let mut i = 0;
+    while i < kinds.len() {
+        let mut entries: List<TarEntry> = List.new();
+        entries.push(entry_for_file("valid-first".to_text(), List.new(), 0o640, 151));
+        entries.push(entry_for_file("unsupported-second".to_text(), List.new(), 0o600, 157));
+        let mut bytes = write_archive(&entries).unwrap();
+        // Empty first entry: the second header starts at byte 512.
+        replace_kind(&mut bytes, 512, kinds[i]);
+        let decoded = read_archive(bytes.as_slice()).unwrap();
+        assert(decoded.len() == 2);
+        assert(tar_entry_to_universal(&decoded[0]) is Result.Ok(_));
+        match tar_entry_to_universal(&decoded[1]) {
+            Result.Err(ArchiveError.InvalidEntry(_)) => {},
+            _ => panic("unsupported tar kind became a generic regular file"),
+        }
+        match format.unpack(bytes.as_slice()) {
+            Result.Err(ArchiveError.InvalidEntry(_)) => {},
+            _ => panic("generic unpack exposed a partial or mislabeled result"),
+        }
+        i = i + 1;
+    }
+}
+
+fn main() {
+    generic_roundtrip_preserves_binary_metadata_and_link_targets();
+    original_symlink_constructor_keeps_its_default_mode();
+    unsupported_kinds_refuse_conversion_and_partial_generic_output();
+    print("tar-adapter-api: 3 passed");
+}
