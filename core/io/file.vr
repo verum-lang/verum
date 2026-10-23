@@ -362,8 +362,18 @@ implement File {
 implement Read for File {
     fn read(&mut self, buf: &mut [Byte]) -> IoResult<Int> {
         let fd = FileDesc.from_raw(self.fd);
-        match sys_read(fd, buf) {
-            Result.Ok(n) => Result.Ok(n),
+        // A logical byte slice may use Value slots internally. The OS needs
+        // packed bytes; copy only the bytes it actually initialized back into
+        // the caller's slice. Read permits a short result.
+        let mut packed: [Byte; 4096] = [0_u8; 4096];
+        let count = if buf.len() < 4096 { buf.len() } else { 4096 };
+        match sys_read(fd, &mut packed[..count]) {
+            Result.Ok(n) => {
+                if n < 0 || n > count { return Result.Err(StreamError.Other("invalid file read count")); }
+                let mut index = 0;
+                while index < n { buf[index] = packed[index]; index = index + 1; }
+                Result.Ok(n)
+            },
             Result.Err(e) => Result.Err(StreamError.from_raw_os_error(e.code)),
         }
     }
@@ -372,8 +382,17 @@ implement Read for File {
 implement Write for File {
     fn write(&mut self, buf: &[Byte]) -> IoResult<Int> {
         let fd = FileDesc.from_raw(self.fd);
-        match sys_write(fd, buf) {
-            Result.Ok(n) => Result.Ok(n),
+        // Never reinterpret a language Value slot as an OS byte. A bounded
+        // packed buffer also gives Write its normal short-write semantics.
+        let mut packed: [Byte; 4096] = [0_u8; 4096];
+        let count = if buf.len() < 4096 { buf.len() } else { 4096 };
+        let mut index = 0;
+        while index < count { packed[index] = buf[index]; index = index + 1; }
+        match sys_write(fd, &packed[..count]) {
+            Result.Ok(n) => {
+                if n < 0 || n > count { return Result.Err(StreamError.Other("invalid file write count")); }
+                Result.Ok(n)
+            },
             Result.Err(e) => Result.Err(StreamError.from_raw_os_error(e.code)),
         }
     }
