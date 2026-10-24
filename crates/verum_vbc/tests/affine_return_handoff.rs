@@ -249,15 +249,8 @@ fn make(counter: &mut Count, flag: Bool) -> Outcome {
 }
 
 #[test]
-fn aggregate_and_call_uses_of_named_affine_locals_cannot_bypass_the_guard() {
+fn selected_result_and_call_uses_of_named_affine_locals_cannot_bypass_the_guard() {
     for source in [
-        r#"
-type Outcome is Ready(Watch) | Failed(Int);
-fn make(counter: &mut Count) -> Outcome {
-    let held: Watch = Watch { counter, digit: 1 };
-    return Outcome.Ready(held);
-}
-"#,
         r#"
 fn make(counter: &mut Count, flag: Bool) -> Watch {
     let held: Watch = Watch { counter, digit: 1 };

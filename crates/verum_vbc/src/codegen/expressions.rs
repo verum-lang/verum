@@ -7756,11 +7756,7 @@ impl VbcCodegen {
                 let arg_val = self.compile_expr(arg)?.ok_or_else(|| {
                     CodegenError::internal("variant constructor arg has no value")
                 })?;
-                self.ctx.emit(Instruction::SetVariantData {
-                    variant: result,
-                    field: i as u32,
-                    value: arg_val,
-                });
+                self.emit_variant_argument(result, i as u32, arg, arg_val);
                 self.ctx.free_temp(arg_val);
             }
             return Ok(Some(result));
@@ -11193,6 +11189,16 @@ impl VbcCodegen {
         Ok(Some(result))
     }
 
+    /// All source constructor routes share the same payload ownership boundary.
+    fn emit_variant_argument(&mut self, variant: Reg, field: u32, expr: &Expr, value: Reg) {
+        let store = Instruction::SetVariantData { variant, field, value };
+        if self.consumes_named_place(expr, value) {
+            self.ctx.emit_transferring_store(store, value);
+        } else {
+            self.ctx.emit(store);
+        }
+    }
+
     /// Compiles a variant constructor call (e.g., Some(v), Ok(v), None, Err(e)).
     ///
     /// This is called when a function is not found but the name looks like
@@ -11811,11 +11817,7 @@ impl VbcCodegen {
             if let Some(key) = variant_key.as_deref() {
                 self.emit_field_refinement_assert(data_val, key, "0");
             }
-            self.ctx.emit(Instruction::SetVariantData {
-                variant: result,
-                field: 0,
-                value: data_val,
-            });
+            self.emit_variant_argument(result, 0, &args[0], data_val);
             self.ctx.free_temp(data_val);
             for i in 1..args.len() {
                 let next_val = self.compile_expr(&args[i])?.ok_or_else(|| {
@@ -11824,11 +11826,7 @@ impl VbcCodegen {
                 if let Some(key) = variant_key.as_deref() {
                     self.emit_field_refinement_assert(next_val, key, &i.to_string());
                 }
-                self.ctx.emit(Instruction::SetVariantData {
-                    variant: result,
-                    field: i as u32,
-                    value: next_val,
-                });
+                self.emit_variant_argument(result, i as u32, &args[i], next_val);
                 self.ctx.free_temp(next_val);
             }
         }
@@ -12136,11 +12134,7 @@ impl VbcCodegen {
                 self.ctx.current_return_type_name = prev;
             }
 
-            self.ctx.emit(Instruction::SetVariantData {
-                variant: result,
-                field: 0,
-                value: data_val,
-            });
+            self.emit_variant_argument(result, 0, &args[0], data_val);
 
             self.ctx.free_temp(data_val);
 
@@ -12164,11 +12158,7 @@ impl VbcCodegen {
                     self.ctx.current_return_type_name = prev;
                 }
 
-                self.ctx.emit(Instruction::SetVariantData {
-                    variant: result,
-                    field: (i + 1) as u32,
-                    value: arg_val,
-                });
+                self.emit_variant_argument(result, (i + 1) as u32, arg, arg_val);
 
                 self.ctx.free_temp(arg_val);
             }
@@ -18102,11 +18092,7 @@ impl VbcCodegen {
                 let arg_val = self.compile_expr(arg)?.ok_or_else(|| {
                     CodegenError::internal("variant constructor arg has no value")
                 })?;
-                self.ctx.emit(Instruction::SetVariantData {
-                    variant: result,
-                    field: i as u32,
-                    value: arg_val,
-                });
+                self.emit_variant_argument(result, i as u32, arg, arg_val);
                 self.ctx.free_temp(arg_val);
             }
             return Ok(Some(result));
@@ -18648,7 +18634,7 @@ impl VbcCodegen {
                 ), expr.span));
             }
             let compiled = self.compile_expr_with_demand(expr, ResultDemand::CallableReturn);
-            let uses_named_affine = self.ctx.registers.value_uses.finish_return_use_capture();
+            let return_uses = self.ctx.registers.value_uses.finish_return_use_capture();
             let reg = compiled?.or_internal("return value has no value")?;
             let reg = self.materialize_list_return(reg)?;
 
@@ -18664,7 +18650,7 @@ impl VbcCodegen {
                 self.emit_return_refinement_assert(reg, Some(&ret_ty), &fn_name);
             }
 
-            if !self.emit_direct_affine_return(expr, reg, uses_named_affine)? {
+            if !self.emit_direct_affine_return(expr, reg, return_uses)? {
                 self.ctx.emit(Instruction::Ret { value: reg });
             }
         } else {
@@ -26216,12 +26202,15 @@ impl VbcCodegen {
 
                 self.pop_field_type_context(saved_field_type);
 
-                // Clone for value semantics (same reason as plain record fields)
-                let cloned_reg = self.ctx.alloc_temp();
-                self.ctx.emit(Instruction::Clone {
-                    dst: cloned_reg,
-                    src: value_reg,
-                });
+                let transfer = match &field.value {
+                    Some(expr) => self.consumes_named_place(expr, value_reg),
+                    None => self.consumes_named_binding(field.name.name.as_str(), value_reg),
+                };
+                let cloned_reg = if transfer { value_reg } else {
+                    let owned = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::Clone { dst: owned, src: value_reg });
+                    owned
+                };
 
                 let field_name_str: &str = field.name.name.as_str();
                 let positional_idx = declared_order
@@ -26230,13 +26219,15 @@ impl VbcCodegen {
                     .map(|p| p as u32)
                     .unwrap_or(literal_idx as u32);
 
-                self.ctx.emit(Instruction::SetVariantData {
+                let store = Instruction::SetVariantData {
                     variant: result,
                     field: positional_idx,
                     value: cloned_reg,
-                });
+                };
+                if transfer { self.ctx.emit_transferring_store(store, value_reg); }
+                else { self.ctx.emit(store); }
 
-                self.ctx.free_temp(cloned_reg);
+                if cloned_reg != value_reg { self.ctx.free_temp(cloned_reg); }
                 if field.value.is_some() {
                     self.ctx.free_temp(value_reg);
                 }
@@ -26549,7 +26540,11 @@ impl VbcCodegen {
                 //
                 // Only PLACES copy: a field initialized from a literal,
                 // a call or a nested literal already owns its value.
-                let is_place = match &field.value {
+                let transfer = match &field.value {
+                    Some(expr) => self.consumes_named_place(expr, value_reg),
+                    None => self.consumes_named_binding(field.name.name.as_str(), value_reg),
+                };
+                let is_place = !transfer && match &field.value {
                     Some(expr) => self.binds_a_copy_of_a_place(expr, value_reg, copy_type.as_ref())?,
                     // Shorthand (`Point { x, y }`) names its source
                     // without an expression node.
@@ -26567,11 +26562,13 @@ impl VbcCodegen {
                     value_reg
                 };
 
-                self.ctx.emit(Instruction::SetF {
+                let store = Instruction::SetF {
                     obj: result,
                     field_idx,
                     value: stored,
-                });
+                };
+                if transfer { self.ctx.emit_transferring_store(store, value_reg); }
+                else { self.ctx.emit(store); }
                 if stored != value_reg {
                     self.ctx.free_temp(stored);
                 }
@@ -26667,12 +26664,15 @@ impl VbcCodegen {
             // Clone for value semantics — same exception as
             // `compile_record` for raw pointers (the pointer's
             // contents may not be a valid ObjectHeader).
-            if self.ctx.is_raw_pointer(value_reg) {
-                self.ctx.emit(Instruction::SetF {
+            let transfer = self.consumes_named_place(arg_expr, value_reg);
+            if transfer || self.ctx.is_raw_pointer(value_reg) {
+                let store = Instruction::SetF {
                     obj: result,
                     field_idx,
                     value: value_reg,
-                });
+                };
+                if transfer { self.ctx.emit_transferring_store(store, value_reg); }
+                else { self.ctx.emit(store); }
                 self.ctx.free_temp(value_reg);
             } else {
                 let cloned_reg = self.ctx.alloc_temp();

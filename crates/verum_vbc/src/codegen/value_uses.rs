@@ -18,6 +18,12 @@ pub(super) struct BindingFact {
     pub declaration_type: Maybe<TypeRef>,
     pub discipline: ResourceDiscipline,
 }
+#[derive(Debug, Clone, Copy, Default)]
+pub(super) struct ReturnUseCapture {
+    pub unhandled: bool,
+    pub transferred: bool,
+}
+
 #[derive(Debug, Clone, Default)]
 pub(super) struct ValueUseRecorder {
     next_binding: u32,
@@ -30,7 +36,7 @@ pub(super) struct ValueUseRecorder {
     // Scoped guards observe actual source identities while their bindings are
     // live. They are independent of the optional receipt budget and never
     // grant ownership permission. Nested functions reset/restore this recorder.
-    return_use_capture: List<bool>,
+    return_use_capture: List<ReturnUseCapture>,
 }
 impl ValueUseRecorder {
     pub fn allocate(&mut self, reg: Reg) -> BindingId {
@@ -69,11 +75,14 @@ impl ValueUseRecorder {
         if self.return_use_capture.len() >= 128 {
             return false;
         }
-        self.return_use_capture.push(false);
+        self.return_use_capture.push(ReturnUseCapture::default());
         true
     }
-    pub fn finish_return_use_capture(&mut self) -> bool {
-        self.return_use_capture.pop().unwrap_or(true)
+    pub fn finish_return_use_capture(&mut self) -> ReturnUseCapture {
+        self.return_use_capture.pop().unwrap_or(ReturnUseCapture {
+            unhandled: true,
+            transferred: false,
+        })
     }
     fn capture_affine_operand(&mut self, reg: Reg) {
         if !self.return_use_capture.is_empty()
@@ -89,11 +98,11 @@ impl ValueUseRecorder {
                 })
         {
             for captured in &mut self.return_use_capture {
-                *captured = true;
+                captured.unhandled = true;
             }
         }
     }
-    fn capture_return_inputs(&mut self, instruction: &Instruction) {
+    fn capture_return_inputs(&mut self, instruction: &Instruction, transferred: Maybe<Reg>) {
         if self.return_use_capture.is_empty() {
             return;
         }
@@ -105,7 +114,16 @@ impl ValueUseRecorder {
             }
             Instruction::Clone { src, .. } => self.capture_affine_operand(*src),
             Instruction::SetF { value, .. } | Instruction::SetVariantData { value, .. } => {
-                self.capture_affine_operand(*value);
+                // The owning store emitter clears this exact source immediately
+                // after installation. Its operand is no longer an outstanding
+                // named return obligation; other operands remain guarded.
+                if transferred == Some(*value) {
+                    for captured in &mut self.return_use_capture {
+                        captured.transferred = true;
+                    }
+                } else {
+                    self.capture_affine_operand(*value);
+                }
             }
             Instruction::Call { args, .. }
             | Instruction::CallG { args, .. }
@@ -171,7 +189,12 @@ impl ValueUseRecorder {
         });
     }
     pub fn observe(&mut self, instruction: &Instruction, index: usize) {
-        self.capture_return_inputs(instruction);
+        self.observe_with_transfer(instruction, index, None);
+    }
+    pub(super) fn observe_with_transfer(
+        &mut self, instruction: &Instruction, index: usize, transferred: Maybe<Reg>,
+    ) {
+        self.capture_return_inputs(instruction, transferred);
         match instruction {
             Instruction::Mov { dst, src } => {
                 let fact = self.fact(*src);
@@ -236,7 +259,12 @@ impl super::VbcCodegen {
         let [verum_ast::ty::PathSegment::Name(name)] = path.segments.as_slice() else {
             return false;
         };
-        let Some(binding) = self.ctx.lookup_var(name.as_str()) else {
+        self.consumes_named_binding(name.as_str(), reg)
+    }
+
+    /// Shorthand fields use the same exact binding contract as expression fields.
+    pub(super) fn consumes_named_binding(&self, name: &str, reg: Reg) -> bool {
+        let Some(binding) = self.ctx.lookup_var(name) else {
             return false;
         };
         if binding.reg != reg
@@ -246,7 +274,7 @@ impl super::VbcCodegen {
                 binding.kind,
                 super::RegisterKind::Local | super::RegisterKind::Parameter
             )
-            || self.ctx.reference_bindings.contains(name.as_str())
+            || self.ctx.reference_bindings.contains(name)
             || self.ctx.is_raw_pointer(reg)
         {
             return false;
@@ -262,16 +290,15 @@ impl super::VbcCodegen {
                 ResourceDiscipline::Affine | ResourceDiscipline::Linear
             )
     }
-    /// The first complete return handoff is a direct, exact affine local.
-    /// An observed named affine use through a parameter, aggregate or selected
-    /// result needs its own consuming producer and is refused. Fresh or unknown
-    /// result origins retain their existing route without new permission.
+    /// Transfer a direct affine local or a fresh aggregate whose owning stores
+    /// already consumed their inputs. Unproven selected results and calls remain
+    /// refused. Both routes discharge the remaining lexical locals on this edge.
     /// No native destructor is enabled here.
     pub(super) fn emit_direct_affine_return(
         &mut self,
         expr: &verum_ast::Expr,
         source: Reg,
-        uses_named_affine: bool,
+        capture: ReturnUseCapture,
     ) -> super::CodegenResult<bool> {
         let constrained = |mode| {
             matches!(
@@ -297,17 +324,16 @@ impl super::VbcCodegen {
         // fresh sum/record result must not be rejected merely because one of
         // its possible components is affine. Only a use of an existing named
         // source obligation enters this bounded return handoff.
-        if !fact.is_some_and(|fact| constrained(fact.discipline)) {
-            if !declared_affine || !uses_named_affine {
-                return Ok(false);
-            }
+        if !fact.is_some_and(|fact| constrained(fact.discipline)) && !capture.transferred {
+            if !declared_affine || !capture.unhandled { return Ok(false); }
         }
         let bindings = self.ctx.registers.function_exit_bindings();
         let exact_local = bindings.iter().any(|(_, binding)| {
             binding.reg == source && fact.is_some_and(|fact| fact.id == binding.binding_id)
         });
-        if !exact_local
-            || !self.consumes_named_place(expr, source)
+        let direct_local = exact_local && self.consumes_named_place(expr, source);
+        let fresh_aggregate = capture.transferred && !capture.unhandled && fact.is_none();
+        if (!direct_local && !fresh_aggregate)
             || self.ctx.has_pending_defers()
             || bindings.iter().any(|(name, binding)| {
                 binding.is_cell
@@ -316,7 +342,7 @@ impl super::VbcCodegen {
             })
         {
             return Err(super::CodegenError::with_span(super::CodegenErrorKind::UnsupportedExpr(
-                "affine return requires a direct local value with no deferred, aliased or escaping cleanup; parameter, aggregate and selected-result handoffs are not yet implemented".into(),
+                "affine return requires a direct local value with no deferred, aliased or escaping cleanup; parameter and selected-result handoffs are not yet implemented".into(),
             ), expr.span));
         }
 

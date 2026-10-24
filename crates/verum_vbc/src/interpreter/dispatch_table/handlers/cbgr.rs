@@ -1619,10 +1619,16 @@ pub(in super::super) fn handle_drop_ref(
                         .unwrap_or_default();
                     if !fields.is_empty() {
                         // Check each field for droppable types
-                        for field in &fields {
+                        for (slot, field) in fields.iter().enumerate() {
+                            // Interpreter records use contiguous Value slots,
+                            // just like New/SetF/GetF. Descriptor offsets may
+                            // describe another layout and are not slot addresses.
                             // Get the field type ID
-                            let field_type_id = match &field.type_ref {
-                                crate::types::TypeRef::Concrete(tid) => Some(*tid),
+                            // ABI erasure may turn an owned field into PTR, or
+                            // a reference into its referent. Only the original
+                            // declaration establishes an owned component.
+                            let field_type_id = match &field.declaration_type {
+                                Some(crate::types::TypeRef::Concrete(tid)) => Some(*tid),
                                 _ => None,
                             };
 
@@ -1642,7 +1648,7 @@ pub(in super::super) fn handle_drop_ref(
                                     // Struct layout: [ObjectHeader][field0][field1][...]
                                     let field_ptr = unsafe {
                                         obj_ptr
-                                            .add(heap::OBJECT_HEADER_SIZE + field.offset as usize)
+                                            .add(heap::OBJECT_HEADER_SIZE + slot * std::mem::size_of::<Value>())
                                             as *const Value
                                     };
                                     let field_val = unsafe { *field_ptr };

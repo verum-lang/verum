@@ -1623,10 +1623,12 @@ impl VbcCodegen {
                 self.publish_binding_type(name.name.as_str(), ty);
             } else if let Some(inferred) = inferred_copy_type {
                 if let Some(reg) = self.ctx.lookup_var(name.name.as_str()).map(|v| v.reg) {
-                    // A type fact does not grant a new transfer or destruction
-                    // obligation to an inferred local.
-                    let discipline = source_value_fact.as_ref().map(|fact| fact.discipline)
-                        .unwrap_or(verum_common::ResourceDiscipline::Unknown);
+                    // The initializer's exact declaration is also authoritative
+                    // for an inferred binding. Requiring a written annotation
+                    // would make `let h = Handle { ... }` copy an affine handle.
+                    let discipline = crate::resource_discipline::resource_discipline_with(&inferred, |id| {
+                        self.type_index_of(id).and_then(|index| self.types.get(index))
+                    });
                     if matches!(inferred, crate::types::TypeRef::Reference { .. }) {
                         self.ctx.reference_bindings.insert(name.name.to_string());
                     }

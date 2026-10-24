@@ -74,7 +74,7 @@ fn mandatory_return_guard_survives_optional_receipt_exhaustion() {
         },
         MAX_VALUE_USES + 1,
     );
-    assert!(recorder.finish_return_use_capture());
+    assert!(recorder.finish_return_use_capture().unhandled);
     assert!(recorder.uses.is_empty());
 }
 
@@ -106,11 +106,11 @@ fn return_capture_bound_and_recycled_binding_cannot_reuse_affine_identity() {
         0,
     );
     for _ in 0..128 {
-        assert!(!recorder.finish_return_use_capture());
+        assert!(!recorder.finish_return_use_capture().unhandled);
     }
     assert!(recorder.return_use_capture.is_empty());
     assert!(recorder.begin_return_use_capture());
-    assert!(!recorder.finish_return_use_capture());
+    assert!(!recorder.finish_return_use_capture().unhandled);
 }
 
 #[test]
@@ -135,7 +135,7 @@ fn nested_function_capture_is_separate_and_outer_capture_is_restored() {
         },
         0,
     );
-    assert!(registers.value_uses.finish_return_use_capture());
+    assert!(registers.value_uses.finish_return_use_capture().unhandled);
 }
 
 #[test]
@@ -175,7 +175,7 @@ fn direct_return_declines_name_only_escaping_even_for_a_shadowed_local() {
             codegen.ctx.current_fn_escaping_vars.insert(name.into());
         }
         let expr = Parser::new("returned").parse_expr().unwrap();
-        let result = codegen.emit_direct_affine_return(&expr, returned, false);
+        let result = codegen.emit_direct_affine_return(&expr, returned, super::ReturnUseCapture::default());
         if escaping == Some("held") {
             assert!(
                 result.is_err(),
@@ -211,5 +211,5 @@ fn return_expression_error_restores_the_capture_stack() {
             .is_empty()
     );
     assert!(codegen.ctx.registers.value_uses.begin_return_use_capture());
-    assert!(!codegen.ctx.registers.value_uses.finish_return_use_capture());
+    assert!(!codegen.ctx.registers.value_uses.finish_return_use_capture().unhandled);
 }

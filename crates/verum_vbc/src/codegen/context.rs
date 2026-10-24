@@ -2200,8 +2200,30 @@ impl CodegenContext {
 
     /// Emits an instruction, recording the current source span for debug info.
     pub fn emit(&mut self, instr: Instruction) {
+        self.emit_with_transfer(instr, None);
+    }
+
+    /// An owning aggregate store and source invalidation are one producer action.
+    /// Callers select it only from the exact source declaration, never receipts.
+    pub(super) fn emit_transferring_store(&mut self, instr: Instruction, source: Reg) {
+        assert!(matches!(
+            &instr,
+            Instruction::SetF { value, .. } | Instruction::SetVariantData { value, .. }
+                if *value == source
+        ));
+        self.emit_with_transfer(instr, Some(source));
+        self.emit(Instruction::LoadUnit { dst: source });
+    }
+
+    fn emit_with_transfer(&mut self, instr: Instruction, transferred: Option<Reg>) {
         self.array_result_facts.observe(&instr);
-        self.registers.value_uses.observe(&instr, self.instructions.len());
+        if transferred.is_some() {
+            self.registers.value_uses.observe_with_transfer(
+                &instr, self.instructions.len(), transferred,
+            );
+        } else {
+            self.registers.value_uses.observe(&instr, self.instructions.len());
+        }
         self.instructions.push(instr);
         self.instruction_spans.push(self.current_span);
         self.stats.instructions_generated += 1;
