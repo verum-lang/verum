@@ -19,6 +19,18 @@ pub(super) fn identity(module: &VbcModule, ty: &TypeDescriptor) -> Option<String
     Some(crate::module::qualify_module_name(owner, name))
 }
 
+// Shadowed imports retain their fully qualified declared name. Normalize only
+// against that descriptor's own owner, exactly as archive type import does.
+// Otherwise preallocation can invent a nominal ID for a canonical carrier while
+// descriptor import installs the reserved ID, leaving every copied reference dangling.
+fn declared_name<'a>(module: &'a VbcModule, ty: &TypeDescriptor) -> Option<&'a str> {
+    let name = module.strings.get(ty.name)?;
+    let owner = ty.origin_module
+        .and_then(|id| module.strings.get(id))
+        .unwrap_or(&module.name);
+    Some(name.strip_prefix(owner).and_then(|tail| tail.strip_prefix('.')).unwrap_or(name))
+}
+
 fn type_ids(ty: &TypeRef, ids: &mut Vec<TypeId>) {
     match ty {
         TypeRef::Concrete(id) => ids.push(*id),
@@ -374,20 +386,22 @@ impl VbcCodegen {
             let (mi, ti) = catalog[&key];
             let module = available[mi];
             let ty = &module.types[ti];
-            let mut ids = descriptor_ids(ty);
+            add_dependencies(mi, &key, descriptor_ids(ty), &mut selected, &mut pending)?;
             for (fi, function) in module.functions.iter().enumerate() {
                 if function.parent_type == Some(ty.id) {
                     function_sites.insert((mi, fi));
-                    ids.extend(function_ids(function));
+                    let method = function_identity(module, function).ok_or_else(|| {
+                        CodegenError::internal("bootstrap method has no source identity")
+                    })?;
+                    add_dependencies(mi, &method, function_ids(function), &mut selected, &mut pending)?;
                 }
             }
-            add_dependencies(mi, &key, ids, &mut selected, &mut pending)?;
         }
         let mut target_ids = HashMap::new();
         for key in &selected {
             let (mi, ti) = catalog[key];
             let source = &available[mi].types[ti];
-            let leaf = available[mi].strings.get(source.name).unwrap();
+            let leaf = declared_name(available[mi], source).unwrap();
             let id = source.canonical_scalar_type_id(leaf)
                 .or_else(|| source.canonical_record_type_id(
                     leaf,
@@ -452,9 +466,8 @@ impl VbcCodegen {
             let mut ty = module.types[ti].clone();
             // Retain this fact from the original descriptor: unresolved glue
             // becomes None below, but that loss cannot authorize absorption.
-            let carrier_eligible = key.rsplit('.').next().is_some_and(|leaf| {
-                module.types[ti].is_impl_only_scalar_carrier(leaf)
-            });
+            let carrier_eligible = declared_name(module, &module.types[ti])
+                .is_some_and(|name| module.types[ti].is_impl_only_scalar_carrier(name));
             let remap = &maps[mi];
             let tr = |value: &TypeRef| remap_type_ref_archive(value, remap);
             copy_remapped_data_type_carriers(&module.types[ti], &mut ty, remap);
@@ -494,9 +507,7 @@ impl VbcCodegen {
             let origin = crate::types::StringId(self.ctx.intern_string_raw(owner));
             // Scalar aliases share an ID, but their named carriers retain
             // separate source metadata (for example Byte and UInt8).
-            let scalar_name = module
-                .strings
-                .get(ty.name)
+            let scalar_name = declared_name(module, &ty)
                 .filter(|name| ty.canonical_scalar_type_id(name).is_some())
                 .map(|name| crate::types::StringId(self.ctx.intern_string_raw(name)));
             if let Some(imported) = self.types.iter_mut().find(|imported| {
@@ -518,7 +529,7 @@ impl VbcCodegen {
             self.ctx
                 .type_generic_params
                 .insert(key.clone(), params.clone());
-            let leaf = module.strings.get(ty.name).unwrap();
+            let leaf = declared_name(module, &ty).unwrap();
             if self.type_name_to_id.get(leaf) == Some(&local) {
                 self.ctx.type_generic_params.insert(leaf.to_owned(), params);
             }

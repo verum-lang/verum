@@ -647,3 +647,35 @@ fn carrier_eligibility_survives_finalize_and_clears_on_codegen_reset() {
         .expect("repeated runtime finalization");
     assert_record_and_extensions(&again);
 }
+
+#[test]
+fn bootstrap_reimport_preserves_qualified_text_carrier_references() {
+    let source = wire(&declaration(OWNER));
+    let relay = Parser::new(
+        "module relay; mount core.text.text.Text as RuntimeText; \
+         type Text is { tag: Int }; public type Message is { body: RuntimeText };",
+    ).parse_module().unwrap();
+    let mut first = VbcCodegen::with_config(CodegenConfig::new("relay"));
+    first.import_bootstrap_nominal_dependencies(&[&relay], &[&source]).unwrap();
+    first.collect_unit_declarations(&[&relay]).unwrap();
+    let relay = wire(&first.compile_function_bodies(&relay).unwrap());
+    assert!(relay.types.iter().any(|ty| ty.id == TypeId::TEXT
+        && relay.strings.get(ty.name) == Some("core.text.text.Text")));
+
+    let consumer = Parser::new(
+        "module consumer; mount relay.Message; fn accept(value: Message) -> Int { 1 }",
+    ).parse_module().unwrap();
+    let mut second = VbcCodegen::with_config(CodegenConfig::new("consumer"));
+    second.import_bootstrap_nominal_dependencies(&[&consumer], &[&relay]).unwrap();
+    second.collect_unit_declarations(&[&consumer]).unwrap();
+    let imported = wire(&second.compile_function_bodies(&consumer).unwrap());
+    let message = imported.types.iter().find(|ty|
+        imported.strings.get(ty.name) == Some("Message")).unwrap();
+    assert_eq!(message.fields[0].type_ref,
+        verum_vbc::types::TypeRef::Concrete(TypeId::TEXT));
+    assert!(imported.get_type(TypeId::TEXT).is_some());
+
+    let mut third = VbcCodegen::with_config(CodegenConfig::new("third"));
+    third.import_bootstrap_nominal_dependencies(&[&consumer], &[&imported])
+        .expect("reimport must not encounter a dangling carrier reference");
+}
