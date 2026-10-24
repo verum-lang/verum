@@ -196,3 +196,28 @@ fn weft_extracted_parameter_storage_remains_private_in_source_and_archive() {
         false,
     );
 }
+
+#[test]
+fn postgres_query_results_are_public_in_source_and_archive() {
+    let source = include_str!("../../../core/database/postgres/connection.vr");
+    for name in ["PgSimpleQueryResult", "PgTypedQueryResult", "PgSimpleQueryArenaResult"] {
+        data_field_policy(
+            source,
+            "core.database.postgres.connection",
+            name,
+            &["command_tag", "row_description", "rows"],
+            true,
+        );
+    }
+}
+
+#[test]
+fn postgres_prepared_statement_identity_remains_private() {
+    data_field_policy(
+        include_str!("../../../core/database/postgres/connection.vr"),
+        "core.database.postgres.connection",
+        "PgPreparedStatement",
+        &["name", "sql", "param_oids", "row_description"],
+        false,
+    );
+}

@@ -1944,9 +1944,9 @@ public fn cancel_running_query_at(
 }
 
 public type PgSimpleQueryResult is {
-    command_tag: Text,
-    row_description: Maybe<RowDescription>,
-    rows: List<List<WireValue>>,
+    public command_tag: Text,
+    public row_description: Maybe<RowDescription>,
+    public rows: List<List<WireValue>>,
 };
 
 /// Result shape for `execute_prepared_typed` — every column
@@ -1955,9 +1955,9 @@ public type PgSimpleQueryResult is {
 /// `List<TypedValue>` per result row, position-aligned with
 /// `row_description.columns`.
 public type PgTypedQueryResult is {
-    command_tag: Text,
-    row_description: Maybe<RowDescription>,
-    rows: List<List<TypedValue>>,
+    public command_tag: Text,
+    public row_description: Maybe<RowDescription>,
+    public rows: List<List<TypedValue>>,
 };
 
 fn vec_repeat_int(value: Int, n: Int) -> List<Int> {
@@ -2017,9 +2017,9 @@ fn append_all(dst: &mut List<Byte>, src: &[Byte]) {
 /// Lifetime contract — callers materialising rows past the
 /// arena reset must `to_owned()` first via the `Row` protocol.
 public type PgSimpleQueryArenaResult is {
-    command_tag: Text,
-    row_description: Maybe<RowDescription>,
-    rows: List<ArenaWireRow>,
+    public command_tag: Text,
+    public row_description: Maybe<RowDescription>,
+    public rows: List<ArenaWireRow>,
 };
 
 // -----------------------------------------------------------------------------
