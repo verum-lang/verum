@@ -2959,7 +2959,7 @@ impl VbcCodegen {
     /// Enter an inline module without losing the enclosing file's owner.
     fn scope_to_inline_module(&mut self, name: &str) -> Option<String> {
         let previous = self.ctx.current_source_module.clone();
-        let parent = previous.as_deref().unwrap_or_else(|| self.count_root());
+        let parent = previous.as_deref().unwrap_or("");
         self.ctx.current_source_module = Some(if parent.is_empty() {
             name.to_string()
         } else {
