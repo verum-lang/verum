@@ -29,8 +29,20 @@ fn probe() -> Int { match ROOT.item { Choice.Empty => 42, Choice.Value(_) => 0 }
 
 #[test]
 fn declaration_interface_supplies_forward_constructor_witnesses() {
+    check_forward_constructor(false);
+}
+
+#[test]
+fn declaration_interface_preserves_reexported_constructor_witnesses() {
+    check_forward_constructor(true);
+}
+
+fn check_forward_constructor(reexported: bool) {
     let provider = Parser::new(PROVIDER).parse_module().unwrap();
-    let consumer = Parser::new(CONSUMER).parse_module().unwrap();
+    let source = if reexported {
+        CONSUMER.replace("core.provider.Holder", "core.exports.Holder")
+    } else { CONSUMER.to_owned() };
+    let consumer = Parser::new(&source).parse_module().unwrap();
     let mut declarations = VbcCodegen::with_config(CodegenConfig::new("core.provider"));
     let interface = declarations
         .collect_declaration_interface(&[&provider])
@@ -55,7 +67,9 @@ fn declaration_interface_supplies_forward_constructor_witnesses() {
     let mut codegen = VbcCodegen::with_config(CodegenConfig::new("core.consumer"));
     codegen.import_functions(&functions);
     codegen
-        .import_bootstrap_nominal_dependencies(&[&consumer], &[&interface])
+        .import_bootstrap_nominal_dependencies_with_resolver(&[&consumer], &[&interface], |name| {
+            Some(if name == "core.exports.Holder" { "core.provider.Holder" } else { name }.into())
+        })
         .unwrap();
     codegen.collect_unit_declarations(&[&consumer]).unwrap();
     codegen

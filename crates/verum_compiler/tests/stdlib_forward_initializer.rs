@@ -10,6 +10,15 @@ use verum_vbc::{
 
 #[test]
 fn forward_generic_constructor_retains_nested_unit_witness_in_archive() {
+    check_forward_constructor(false);
+}
+
+#[test]
+fn reexported_forward_constructor_retains_nested_unit_witness_in_archive() {
+    check_forward_constructor(true);
+}
+
+fn check_forward_constructor(reexported: bool) {
     let root = tempfile::tempdir().unwrap();
     let core = root.path().join("core");
     fs::create_dir_all(core.join("provider")).unwrap();
@@ -25,10 +34,18 @@ fn forward_generic_constructor_retains_nested_unit_witness_in_archive() {
     "#,
     )
     .unwrap();
+    let provider = if reexported {
+        fs::create_dir_all(core.join("provider/inner")).unwrap();
+        fs::write(core.join("provider/mod.vr"),
+            "module core.provider; public module inner; public mount .inner.Holder;").unwrap();
+        core.join("provider/inner/mod.vr")
+    } else {
+        core.join("provider/mod.vr")
+    };
+    let owner = if reexported { "core.provider.inner" } else { "core.provider" };
     fs::write(
-        core.join("provider/mod.vr"),
-        r#"
-        module core.provider;
+        provider,
+        format!("module {owner};") + r#"
         public type Holder<T> is { item: T };
         implement<T> Holder<T> {
             public fn new(item: T) -> Holder<T> { Holder { item: item } }
@@ -45,7 +62,7 @@ fn forward_generic_constructor_retains_nested_unit_witness_in_archive() {
     let result = CompilationPipeline::new_core(&mut session, config)
         .compile_core()
         .unwrap();
-    assert_eq!(result.modules_compiled, 2);
+    assert_eq!(result.modules_compiled, if reexported { 3 } else { 2 });
     assert!(result.errors.is_empty(), "{:?}", result.errors);
     let archive = read_archive_from_file(&output).unwrap();
     let module = archive.load_module("core").unwrap();

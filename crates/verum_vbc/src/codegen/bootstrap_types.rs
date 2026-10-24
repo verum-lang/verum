@@ -441,9 +441,14 @@ impl VbcCodegen {
             }
             target_ids.insert(key.clone(), id);
         }
+        let mut method_exports = HashMap::<String, Vec<String>>::new();
         for (written, declared) in resolved_exports {
             if let Some(id) = target_ids.get(declared.as_str()) {
-                self.type_name_to_id.insert(written.into_string(), *id);
+                self.type_name_to_id.insert(written.to_string(), *id);
+                if written != declared {
+                    method_exports.entry(declared.into_string()).or_default()
+                        .push(written.into_string());
+                }
             }
         }
         let maps: Vec<HashMap<u32, u32>> = available
@@ -537,10 +542,24 @@ impl VbcCodegen {
         // FunctionInfo is another pool-owned TypeRef carrier: leaving its
         // return in the source pool would undo the type import on a call chain.
         let mut signatures = Map::new();
+        let mut callable_exports = Vec::new();
         for (mi, fi) in function_sites {
             let module = available[mi];
             let function = &module.functions[fi];
             if let Some(id) = self.bootstrap_function_id(module, function.id.0) {
+                // A type re-export also names its declaration-owned methods.
+                // Keep their actual FunctionInfo identity and generic roster;
+                // synthesizing an external stub here would erase CallG witnesses.
+                if let Some(parent) = function.parent_type
+                    .and_then(|parent| source_keys.get(&(mi, parent)))
+                    && let Some(exports) = method_exports.get(parent)
+                    && let Some(canonical) = function_identity(module, function)
+                    && let Some(member) = canonical.strip_prefix(&format!("{parent}."))
+                {
+                    for written in exports {
+                        callable_exports.push((format!("{written}.{member}"), canonical.clone()));
+                    }
+                }
                 let result = remap_type_ref_archive(&function.return_type, &maps[mi]);
                 // Bootstrap consumers compile before imported bodies exist in
                 // `self.functions`. Preserve the same declaration-owned input
@@ -573,6 +592,11 @@ impl VbcCodegen {
             }
         }
         apply_function_signatures(self.ctx.functions.values_mut(), &signatures);
+        for (export, canonical) in callable_exports {
+            if let Some(info) = self.ctx.lookup_qualified_function(&canonical).cloned() {
+                self.ctx.register_function_authoritative(export, info);
+            }
+        }
         Ok(selected.len())
     }
 
