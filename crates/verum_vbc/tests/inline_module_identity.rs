@@ -2,6 +2,7 @@
 
 use verum_fast_parser::Parser;
 use verum_vbc::codegen::{CodegenConfig, VbcCodegen};
+use verum_vbc::interpreter::Interpreter;
 
 #[test]
 fn inline_factories_keep_their_file_owner_in_all_compile_paths() {
@@ -46,5 +47,15 @@ public fn after() -> Int { Factory.make(40) + Factory.Nested.make(1) }
                 Some(owner)
             );
         }
+        let entry = module
+            .functions
+            .iter()
+            .find(|function| module.get_string(function.name) == Some("app.factory.after"))
+            .unwrap()
+            .id;
+        let result = Interpreter::new(std::sync::Arc::new(module))
+            .execute_function(entry)
+            .expect("factory calls execute");
+        assert_eq!(result.as_i64(), 44, "lenient={lenient}");
     }
 }
