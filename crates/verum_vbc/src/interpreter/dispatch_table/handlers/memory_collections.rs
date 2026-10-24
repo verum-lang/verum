@@ -3116,9 +3116,18 @@ pub(crate) fn copy_container_spine(
     if copy_slots > backing_alloc || backing_slot >= header_slots {
         return Err(InterpreterError::InvalidOperand { message: "container copy exceeds capacity".into() });
     }
+    let src_data = unsafe { src_obj.add(heap::OBJECT_HEADER_SIZE) as *const Value };
+    if backing_alloc == 0 {
+        let absent = unsafe { *src_data.add(backing_slot) };
+        if !absent.is_nil() && !(absent.is_int() && absent.as_i64() == 0) {
+            return Err(InterpreterError::InvalidOperand { message: "zero capacity has a backing allocation".into() });
+        }
+        // Capacity and backing must stay consistent. An empty source owns no
+        // backing allocation, and a copy must not manufacture one either.
+        return copy_object_data(state, src_obj, type_id, header_slots * slot_size, heap::ObjectFlags::empty());
+    }
     let allocation_bytes = backing_alloc.max(1).checked_mul(slot_size)
         .ok_or_else(|| InterpreterError::InvalidOperand { message: "container copy size overflow".into() })?;
-    let src_data = unsafe { src_obj.add(heap::OBJECT_HEADER_SIZE) as *const Value };
     // A zero-capacity source may use an integer/raw null sentinel. There is
     // nothing to read from it, so do not interpret it as an object pointer.
     let src_backing = if copy_slots == 0 { None } else {

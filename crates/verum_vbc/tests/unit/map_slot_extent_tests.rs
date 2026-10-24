@@ -133,6 +133,8 @@ fn empty_source_constructor_encodings_return_none_without_a_backing_read() {
                 .unwrap()
                 .is_none()
         );
+        let copy = super::super::memory_collections::value_copy(&mut state, map).unwrap();
+        assert!(map_value_slot(&state, copy, Value::from_i64(1)).unwrap().is_none());
     }
     let mut state = state();
     let entries = backing(&mut state, TypeId::UNIT, 0);
