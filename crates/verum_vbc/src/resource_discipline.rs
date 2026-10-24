@@ -72,15 +72,14 @@ fn resource_discipline_inner<'a>(
         | TypeRef::Rank2Function { .. }
         | TypeRef::ConstValue(_) => return Unknown,
     };
-    let Some(descriptor) = resolve(id) else {
-        // PTR is also the legacy unresolved-type placeholder. Its numeric
-        // carrier cannot distinguish a proven raw view from a lost owner.
-        return if id.is_builtin() && id != TypeId::PTR && id != TypeId::RESERVED {
-            Unrestricted
-        } else {
-            Unknown
-        };
-    };
+    // Intrinsic primitives have a language-defined discipline. Registering
+    // their methods may create a descriptor with no resource modifier; that
+    // metadata must not erase the primitive contract (including inside an
+    // affine handle). PTR and RESERVED still carry no ownership authority.
+    if id.is_builtin() && id != TypeId::PTR && id != TypeId::RESERVED {
+        return if args.is_empty() { Unrestricted } else { Unknown };
+    }
+    let Some(descriptor) = resolve(id) else { return Unknown; };
     let mut mode = descriptor.resource_discipline;
     if mode == Unknown || active.contains(ty) {
         return Unknown;

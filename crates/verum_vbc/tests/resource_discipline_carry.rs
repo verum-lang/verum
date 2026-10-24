@@ -346,3 +346,31 @@ fn actual_function_specialization_preserves_instantiated_resource_arguments() {
         );
     }
 }
+
+#[test]
+fn builtin_method_descriptors_do_not_erase_intrinsic_primitive_discipline() {
+    let mut module = compile("type affine Socket is { fd: Int, enabled: Bool };");
+    for raw in 0..TypeId::FIRST_USER {
+        let id = TypeId(raw);
+        if id == TypeId::PTR || id == TypeId::RESERVED { continue; }
+        module.types.push(TypeDescriptor {
+            id,
+            kind: verum_vbc::types::TypeKind::Primitive,
+            // Inherent/protocol method registration may create a descriptor
+            // without a source resource modifier for this intrinsic type.
+            resource_discipline: D::Unknown,
+            ..TypeDescriptor::default()
+        });
+    }
+    for module in [module.clone(), roundtrip(&module)] {
+        assert_eq!(effective(&module, "Socket"), D::Affine);
+        for raw in 0..TypeId::FIRST_USER {
+            let id = TypeId(raw);
+            let expected = if id == TypeId::PTR || id == TypeId::RESERVED { D::Unknown } else { D::Unrestricted };
+            assert_eq!(module.resource_discipline(&TypeRef::Concrete(id)), expected, "{id:?}");
+        }
+        assert_eq!(module.resource_discipline(&TypeRef::Instantiated {
+            base: TypeId::INT, args: vec![TypeRef::Concrete(TypeId::BOOL)],
+        }), D::Unknown, "a primitive cannot acquire generic arguments");
+    }
+}
