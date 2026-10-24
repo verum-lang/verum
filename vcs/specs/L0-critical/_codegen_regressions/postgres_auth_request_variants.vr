@@ -1,0 +1,30 @@
+// @test: run-interpreter
+// @level: L0
+// @tags: database, postgres, variants, archive
+// @description: Baked PostgreSQL authentication decoders preserve named sum constructors.
+// @expected-stdout: postgres authentication decode: ok
+// @expected-exit: 0
+
+mount core.database.postgres.wire.backend.{parse_auth_request, AuthRequest};
+fn main() {
+    let initial: List<Byte> = [0, 0, 0, 10, 83, 67, 82, 65, 77, 45, 83, 72, 65, 45, 50, 53, 54, 0, 0];
+    let request = parse_auth_request(initial).unwrap();
+    match request {
+        AuthRequest.AuthSasl { mechanisms } => {
+            assert_eq(mechanisms.len(), 1);
+            assert_eq(mechanisms[0], "SCRAM-SHA-256");
+        },
+        _ => panic("initial auth packet did not decode as SASL"),
+    }
+    let continuation: List<Byte> = [0, 0, 0, 11, 120];
+    match parse_auth_request(continuation).unwrap() {
+        AuthRequest.AuthSaslContinue { server_data } => assert_eq(server_data[0], 120),
+        _ => panic("continue auth packet variant"),
+    }
+    let final_packet: List<Byte> = [0, 0, 0, 12, 121];
+    match parse_auth_request(final_packet).unwrap() {
+        AuthRequest.AuthSaslFinal { server_data } => assert_eq(server_data[0], 121),
+        _ => panic("final auth packet variant"),
+    }
+    print("postgres authentication decode: ok");
+}

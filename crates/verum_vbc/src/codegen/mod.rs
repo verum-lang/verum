@@ -22422,6 +22422,18 @@ impl VbcCodegen {
         if name.is_empty() || name.contains('.') || name.contains('<') {
             return None;
         }
+        // A local declaration outranks imported bare field-layout aliases.
+        // Inline modules can retain a separate early-registration simple key;
+        // the descriptor under the exact source owner is authoritative.
+        if let Some(owner) = self.ctx.current_source_module.as_deref() {
+            let local = format!("{owner}.{name}");
+            if self.type_name_to_id.get(&local)
+                .and_then(|id| self.type_by_id(*id))
+                .is_some_and(|ty| ty.kind == crate::types::TypeKind::Record)
+            {
+                return Some(local);
+            }
+        }
         if self.record_key_is_authoritative(name) {
             return None;
         }

@@ -25982,40 +25982,9 @@ impl VbcCodegen {
         // hazard where user-reordered field literals would silently
         // permute payload slots.
         let mut descriptor_match: Option<(String, Vec<String>)> = None;
-        // **Record-vs-variant disambiguation by FIELD-NAME SET**.
-        //
-        // Pre-fix: the literal `Cell { value: v }` (where Cell is
-        // `core.base.cell.Cell`, a Record with field `value`) was
-        // miscompiled as `Expr.Cell { … }` (variant from
-        // `core.security.zk.stark.air` with fields `column, offset`)
-        // because both register under simple name `Cell` and the
-        // first-wins collision gave the variant ctor the simple-name
-        // slot in `ctx.functions`.  The variant_tag chain below
-        // accepted the colliding variant unconditionally, emitted
-        // MakeVariant tag=1, and produced a heap object with type_id
-        // 0x8001 — every subsequent `.value` field access hit the
-        // variant auto-deref at `handle_get_field:297`, reading
-        // payload[0] instead of the record's value field.
-        //
-        // Fundamental fix: when the literal's path is a bare simple
-        // name (single segment) AND the simple name is ALSO a known
-        // record type whose declared fields are a SUPERSET of the
-        // literal's field names, the literal IS that record — not the
-        // colliding variant.  The check is positive (must match the
-        // literal's fields) so it's safe for both shapes:
-        //   * `Cell { value: v }` against record `Cell { value: T }`
-        //     and variant `Expr.Cell { column, offset }`: record fields
-        //     {value} ⊇ {value} ✓, variant fields {column, offset} ⊉
-        //     {value} ✗ → record wins.
-        //   * `Cell { column: 0, offset: 0 }` in air.vr against the
-        //     same pair: record fields {value} ⊉ {column, offset} ✗,
-        //     variant fields {column, offset} ⊇ {column, offset} ✓
-        //     → variant wins (the existing chain handles this case
-        //     because the record-fields check fails here).
-        //
-        // The disambiguator only fires when the path is single-
-        // segment AND collides — qualified `Parent.Variant` literals
-        // and non-colliding bare ctors keep their existing resolution.
+        // Named variant payloads also have field layouts. Only a declared
+        // Record descriptor can give a colliding bare record literal priority
+        // over a variant; a payload layout cannot establish a separate type.
         let path_is_qualified = variant_name.contains("::") || variant_name.contains('.');
         // META-GROUP-XMODULE-1: mount-aware record-type re-key. When the
         // bare literal name lost the cross-module simple-name race (the
@@ -26038,9 +26007,15 @@ impl VbcCodegen {
             .map(|f| f.name.name.as_str())
             .collect();
         let simple_resolves_to_record = !path_is_qualified
-            && self.type_field_layouts.get(record_key.as_str()).is_some_and(|decl| {
-                literal_field_names.iter().all(|n| decl.iter().any(|d| d == n))
-            });
+            && self.type_name_to_id.get(record_key.as_str())
+                .and_then(|id| self.type_by_id(*id))
+                .filter(|ty| ty.kind == crate::types::TypeKind::Record)
+                .is_some_and(|ty| literal_field_names.iter().all(|name| {
+                    ty.fields.iter().any(|field| {
+                        self.ctx.strings.get(field.name.0 as usize).map(String::as_str)
+                            == Some(*name)
+                    })
+                }));
         // Bare record-variant CONSTRUCTION scoping (mirror of the
         // record-PATTERN fix), computed BEFORE the simple-resolves-to-record
         // check so a genuine variant of the enclosing impl/return type WINS
