@@ -3254,6 +3254,18 @@ pub(in super::super) fn handle_call_method(
                 }
             }
         }
+        // A concrete Clone implementation has priority. Otherwise use the
+        // same value-copy operation as ordinary clone calls, before the
+        // name-only fallback can select another type's implementation.
+        if found_func_id.is_none() && method_name == "clone" && args.count == 0 {
+            if let Some(result) = dispatch_primitive_method(
+                state, &classify_target, &method_name, &args,
+            )? {
+                state.set_reg(dst, result);
+                return Ok(DispatchResult::Continue);
+            }
+        }
+
         // ── CTX-UNIT-RECEIVER-DISPATCH-1 (T0245) ─────────────────────
         // A UNIT receiver under dyn dispatch has NO ObjectHeader, so the
         // typed lookups above degrade to `Unit.<method>` and historically
