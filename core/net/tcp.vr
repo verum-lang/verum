@@ -18,10 +18,9 @@
 // # Performance Characteristics
 //
 
-// - Zero-copy I/O via direct syscalls
-// - Minimal allocations on hot path
-// - ~2ns context access for async operations
-// - Direct kernel interaction without FFI overhead
+// - Native platform socket operations
+// - Bounded byte marshalling at the socket ABI
+// - Cooperative readiness polling for asynchronous operations
 //
 
 // =============================================================================
@@ -780,25 +779,46 @@ implement TcpStream {
 
 implement Read for TcpStream {
     fn read(&mut self, buf: &mut [Byte]) -> Result<Int, IoError> {
-        @cfg(any(target_os = "linux", target_os = "windows")) {
-            // Use recv with MSG_NOSIGNAL to prevent SIGPIPE on closed connection
-            return recv(self.fd, buf, MSG_NOSIGNAL).map_err(|e| IoError.from_os(e));
-        }
-        @cfg(target_os = "macos") {
-            // macOS uses SO_NOSIGPIPE set at socket creation time
-            return sys_recv(self.fd, buf, 0).map_err(|e| IoError.from_os(e));
+        if buf.len() == 0 { return Result.Ok(0); }
+        // Logical byte slices may use interpreter Value slots. Receive into
+        // packed storage and copy back only the bytes initialized by the OS.
+        let mut packed: [Byte; 4096] = [0_u8; 4096];
+        let count = if buf.len() < 4096 { buf.len() } else { 4096 };
+        @cfg(any(target_os = "linux", target_os = "windows"))
+        let result = recv(self.fd, &mut packed[..count], MSG_NOSIGNAL);
+        @cfg(target_os = "macos")
+        let result = sys_recv(self.fd, &mut packed[..count], 0);
+        match result {
+            Result.Ok(n) => {
+                if n < 0 || n > count { return Result.Err(IoError.Other("invalid socket read count")); }
+                let mut index = 0;
+                while index < n { buf[index] = packed[index]; index = index + 1; }
+                Result.Ok(n)
+            },
+            Result.Err(error) => Result.Err(IoError.from_os(error)),
         }
     }
 }
 
 implement Write for TcpStream {
     fn write(&mut self, buf: &[Byte]) -> Result<Int, IoError> {
-        @cfg(any(target_os = "linux", target_os = "windows")) {
-            // Use send with MSG_NOSIGNAL to prevent SIGPIPE
-            return send(self.fd, buf, MSG_NOSIGNAL).map_err(|e| IoError.from_os(e));
-        }
-        @cfg(target_os = "macos") {
-            return sys_send(self.fd, buf, 0).map_err(|e| IoError.from_os(e));
+        if buf.len() == 0 { return Result.Ok(0); }
+        // The socket ABI consumes contiguous bytes, independent of the
+        // language container's storage. Write permits a bounded short result.
+        let mut packed: [Byte; 4096] = [0_u8; 4096];
+        let count = if buf.len() < 4096 { buf.len() } else { 4096 };
+        let mut index = 0;
+        while index < count { packed[index] = buf[index]; index = index + 1; }
+        @cfg(any(target_os = "linux", target_os = "windows"))
+        let result = send(self.fd, &packed[..count], MSG_NOSIGNAL);
+        @cfg(target_os = "macos")
+        let result = sys_send(self.fd, &packed[..count], 0);
+        match result {
+            Result.Ok(n) => {
+                if n < 0 || n > count { return Result.Err(IoError.Other("invalid socket write count")); }
+                Result.Ok(n)
+            },
+            Result.Err(error) => Result.Err(IoError.from_os(error)),
         }
     }
 
