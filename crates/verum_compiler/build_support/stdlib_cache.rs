@@ -91,6 +91,7 @@ pub(crate) fn compute_archive_key<'a>(
         // call site that consults the archived FunctionInfo.
         "crates/verum_vbc/src/codegen/mod.rs",
         "crates/verum_vbc/src/codegen/bootstrap_types.rs",
+        "crates/verum_vbc/src/codegen/declaration_interface.rs",
         "crates/verum_vbc/src/codegen/parsed_field_types.rs",
         "crates/verum_vbc/src/codegen/value_uses.rs",
         "crates/verum_vbc/src/codegen/place_copies.rs",

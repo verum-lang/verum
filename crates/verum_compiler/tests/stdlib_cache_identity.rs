@@ -88,6 +88,22 @@ fn dereference_copy_semantics_invalidate_the_archive_without_schema_changes() {
 }
 
 #[test]
+fn forward_declaration_witnesses_invalidate_the_archive_without_schema_changes() {
+    const PATH: &str = "crates/verum_vbc/src/codegen/declaration_interface.rs";
+    const SOURCE: &str = include_str!("../../verum_vbc/src/codegen/declaration_interface.rs");
+    let root = tempfile::tempdir().unwrap();
+    let preserved = "descriptor.semantic_params = Some(semantic.clone());";
+    assert_eq!(SOURCE.matches(preserved).count(), 1);
+    write(root.path(), PATH, SOURCE.replace(preserved, "descriptor.semantic_params = None;"));
+    let before = key(root.path(), SCHEMA, CORE).0;
+    write(root.path(), PATH, SOURCE);
+    let (after, dependencies) = key(root.path(), SCHEMA, CORE);
+    assert_ne!(before, after, "forward ownership witnesses are an archive producer input");
+    assert_eq!(after, key(root.path(), SCHEMA, CORE).0);
+    assert_eq!(dependencies.iter().filter(|path| **path == root.path().join(PATH)).count(), 1);
+}
+
+#[test]
 fn missing_parser_input_is_tracked_and_differs_from_an_empty_file() {
     let root = tempfile::tempdir().unwrap();
     let (missing, dependencies) = key(root.path(), SCHEMA, CORE);
