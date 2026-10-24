@@ -202,7 +202,7 @@ pub(super) fn resolve_type_methods(
         }
         match instruction {
             I::Nop => {}
-            I::LoadI { dst, .. } | I::TypeLayout { dst, .. } => {
+            I::LoadI { dst, .. } | I::TypeResource { dst, .. } | I::TypeLayout { dst, .. } => {
                 values.insert(dst.0, TypeRef::Concrete(TypeId::INT));
                 tokens.remove(&dst.0);
             }

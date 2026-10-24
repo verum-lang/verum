@@ -1823,6 +1823,7 @@ fn symbol_count(files: &[(String, Vec<u8>)]) -> usize {
 /// the cached bake.  Format: free-form ASCII;
 /// readable strings make `git log` of this constant tell the story.
 pub(crate) const PRECOMPILE_SCHEMA_VERSION: &str =
+    // v55: VBC2.26 adds declaration-based resource queries with generic witnesses.
     // v54: VBC2.25 and metadata carry complete declared field visibility.
     // Missing legacy policy is Unknown; bincode sidecars must be rebuilt.
     // v53: VBC2.24 carries source body presence; a legacy RetV stub cannot
@@ -1846,7 +1847,7 @@ pub(crate) const PRECOMPILE_SCHEMA_VERSION: &str =
     // cache — measured: the scan was added, the build reported
     // "precompile cache HIT", and the new field stayed empty while the
     // reader had nothing to read. Bumping here is what invalidates it.
-    "v54-2026-10-10-declared-field-visibility";
+    "v55-declared-resource-query";
 
 /// T3: blake3 hash of every `core/**/*.vr` file's content, sorted
 /// by relative path, mixed with [`PRECOMPILE_SCHEMA_VERSION`].

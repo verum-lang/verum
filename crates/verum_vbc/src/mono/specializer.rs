@@ -595,7 +595,7 @@ impl<'a> BytecodeSpecializer<'a> {
                     _ => {}
                 }
             }
-            I::LoadT { type_ref, .. } | I::TypeLayout { type_ref, .. } => {
+            I::TypeResource { type_ref, .. } | I::LoadT { type_ref, .. } | I::TypeLayout { type_ref, .. } => {
                 *type_ref = self.substitution.apply(type_ref);
             }
             // NewG carries RUNTIME type-argument REGISTERS on the wire
@@ -802,6 +802,7 @@ impl<'a> BytecodeSpecializer<'a> {
         match instr {
             I::Mov { dst, .. }
             | I::LoadI { dst, .. }
+            | I::TypeResource { dst, .. }
             | I::TypeLayout { dst, .. }
             | I::LoadK { dst, .. }
             | I::Call { dst, .. }

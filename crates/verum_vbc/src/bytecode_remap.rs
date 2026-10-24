@@ -69,7 +69,7 @@ pub trait IdRemap {
 /// archive merge in lockstep.
 pub fn rewrite_instruction_ids(instr: &mut Instruction, remap: &dyn IdRemap) {
     match instr {
-        Instruction::TypeLayout { type_ref, .. } | Instruction::LoadT { type_ref, .. } => {
+        Instruction::TypeResource { type_ref, .. } | Instruction::TypeLayout { type_ref, .. } | Instruction::LoadT { type_ref, .. } => {
             rewrite_type_ref_ids(type_ref, remap);
         }
         Instruction::SetCallWitness { type_args } => {

@@ -2550,6 +2550,13 @@ fn lower_instruction_impl<'ctx>(
             Ok(())
         }
 
+        Instruction::TypeResource { dst, type_ref } => {
+            let module = ctx.vbc_module().or_internal("TypeResource requires declaration metadata")?;
+            let mode = module.resource_discipline(type_ref);
+            ctx.set_register(dst.0, ctx.types().i64_type().const_int(mode as u8 as u64, false).into());
+            Ok(())
+        }
+
         Instruction::TypeLayout { dst, type_ref, property } => {
             let module = ctx.vbc_module().or_internal("TypeLayout requires declaration metadata")?;
             if let Some(value) = verum_vbc::type_layout::query(module, type_ref, *property) {
@@ -31634,6 +31641,9 @@ fn lower_extended<'ctx>(
             // No-op anchor — encoders shouldn't emit, but tolerate.
             Ok(())
         }
+        Some(ExtendedSubOpcode::TypeResource) => Err(LlvmLoweringError::unsupported(
+            "TypeResource requires the canonical decoded instruction",
+        )),
         Some(ExtendedSubOpcode::TypeLayout) => Err(LlvmLoweringError::unsupported(
             "TypeLayout requires the canonical decoded instruction",
         )),

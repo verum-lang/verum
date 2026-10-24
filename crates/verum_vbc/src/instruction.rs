@@ -9803,6 +9803,8 @@ pub enum ExtendedSubOpcode {
     SetCallWitness = 0x02,
     /// Layout query: `[0x1F][0x05][dst:reg][property:u8][TypeRef]`.
     TypeLayout = 0x05,
+    /// Declared resource query: `[0x1F][0x06][dst:reg][TypeRef]`.
+    TypeResource = 0x06,
 
     /// Process termination — reads one `Int` register and terminates
     /// the process with that exit code. Format: `[0x1F][0x10][reg:u16]`.
@@ -10055,6 +10057,7 @@ impl ExtendedSubOpcode {
             0x01 => Some(Self::MakeVariantTyped),
             0x02 => Some(Self::SetCallWitness),
             0x05 => Some(Self::TypeLayout),
+            0x06 => Some(Self::TypeResource),
             0x10 => Some(Self::ProcessExit),
             0x20 => Some(Self::ScriptEngineNew),
             0x21 => Some(Self::ScriptEngineFree),
@@ -10139,6 +10142,7 @@ impl ExtendedSubOpcode {
             Self::MakeVariantTyped => "EXT_MAKE_VARIANT_TYPED",
             Self::SetCallWitness => "EXT_SET_CALL_WITNESS",
             Self::TypeLayout => "EXT_TYPE_LAYOUT",
+            Self::TypeResource => "EXT_TYPE_RESOURCE",
             Self::GetFieldNamed => "EXT_GET_FIELD_NAMED",
             Self::SetFieldNamed => "EXT_SET_FIELD_NAMED",
             Self::ProcessExit => "EXT_PROCESS_EXIT",
@@ -10639,6 +10643,14 @@ pub enum Instruction {
         type_ref: TypeRef,
         /// The requested layout property.
         property: LayoutProperty,
+    },
+    /// Query resource discipline from exact declarations and generic witnesses.
+    /// Returns the ResourceDiscipline wire value; Unknown grants no permission.
+    TypeResource {
+        /// Destination integer register.
+        dst: Reg,
+        /// Declaration-owned type, substituted by the frame or monomorphizer.
+        type_ref: TypeRef,
     },
     /// Load small immediate (-64..63).
     LoadSmallI {

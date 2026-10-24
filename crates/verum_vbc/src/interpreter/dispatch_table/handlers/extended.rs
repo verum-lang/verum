@@ -153,6 +153,14 @@ pub(in super::super) fn handle_extended(
             // older interpreters.
             Ok(DispatchResult::Continue)
         }
+        Some(ExtendedSubOpcode::TypeResource) => {
+            let dst = read_reg(state)?;
+            let ty = super::bytecode_io::read_type_ref(state)?;
+            let ty = state.resolve_generic_witness(&ty);
+            let mode = state.module.resource_discipline(&ty);
+            state.set_reg(dst, crate::value::Value::from_i64(mode as u8 as i64));
+            Ok(DispatchResult::Continue)
+        }
         Some(ExtendedSubOpcode::TypeLayout) => {
             let dst = read_reg(state)?;
             let raw = read_u8(state)?;
