@@ -196,6 +196,8 @@ pub struct CodegenContext {
     /// Two consumers, two needs, so two fields — changing what the
     /// existing one holds would move a defect rather than fix one.
     pub current_return_type_full: Option<String>,
+    /// Exact declaration type for a contextual generic result.
+    pub expected_value_type: Option<TypeRef>,
 
     /// Inner generic args of the current function's return type, when
     /// known.  For `fn f() -> Result<T, ConnectionError>` this carries
@@ -1024,6 +1026,8 @@ pub struct ClosureCompilationContext {
     pub current_return_type_name: Option<String>,
     /// Saved alongside its sibling — same reason, same lifetime.
     pub current_return_type_full: Option<String>,
+    /// Exact declaration type for a contextual generic result.
+    pub expected_value_type: Option<TypeRef>,
     /// Saved reference-binding names (for the `*reference` Deref lowering).
     pub reference_bindings: std::collections::HashSet<String>,
     /// Array layout facts belong to the saved function's declaration IDs.
@@ -1689,6 +1693,7 @@ impl CodegenContext {
             function_return_type_name: None,
             current_return_type_name: None,
             current_return_type_full: None,
+            expected_value_type: None,
             current_impl_type_name: None,
             current_return_type_inner: None,
             constants: Vec::new(),
@@ -2780,6 +2785,7 @@ impl CodegenContext {
         self.active_pattern_cache.clear();
         self.clear_all_raw_pointers();
 
+        self.expected_value_type = None;
         self.current_function = Some(name.to_string());
         self.in_function = true;
         self.return_type = return_type;
@@ -2807,6 +2813,7 @@ impl CodegenContext {
         self.try_recover_depth = 0;
         self.current_return_type_name = None;
         self.current_return_type_full = None;
+        self.expected_value_type = None;
         self.current_return_type_inner = None;
         self.current_impl_type_name = None;
 
@@ -2854,8 +2861,7 @@ impl CodegenContext {
     }
 
     /// Atomically save+override the variant-disambiguation context
-    /// `(current_return_type_name, current_return_type_inner)`,
-    /// returning the old pair so a caller can restore it.
+    /// and its exact expected type, returning the saved state for restoration.
     ///
     /// Single-source-of-truth helper for the half-dozen
     /// expression-compile sites that temporarily override the
@@ -2868,7 +2874,8 @@ impl CodegenContext {
     pub fn push_disambig_context(
         &mut self,
         new_name: Option<String>,
-    ) -> (Option<String>, Option<Vec<String>>) {
+    ) -> (Option<String>, Option<Vec<String>>, Option<TypeRef>) {
+        let prev_expected = self.expected_value_type.take();
         let prev_name = self.current_return_type_name.take();
         let prev_inner = self.current_return_type_inner.take();
         self.current_return_type_name = new_name;
@@ -2884,13 +2891,14 @@ impl CodegenContext {
         // the field is already bounded to its initializer by
         // `compile_let`, which is the only writer.
         self.current_return_type_full = None;
-        (prev_name, prev_inner)
+        (prev_name, prev_inner, prev_expected)
     }
 
     /// Restore the variant-disambiguation context saved by
     /// [`push_disambig_context`](Self::push_disambig_context).
-    pub fn pop_disambig_context(&mut self, saved: (Option<String>, Option<Vec<String>>)) {
-        let (name, inner) = saved;
+    pub fn pop_disambig_context(&mut self, saved: (Option<String>, Option<Vec<String>>, Option<TypeRef>)) {
+        let (name, inner, expected) = saved;
+        self.expected_value_type = expected;
         self.current_return_type_name = name;
         self.current_return_type_inner = inner;
     }
@@ -4742,6 +4750,7 @@ impl CodegenContext {
             try_recover_depth: self.try_recover_depth,
             current_return_type_name: self.current_return_type_name.clone(),
             current_return_type_full: self.current_return_type_full.clone(),
+            expected_value_type: self.expected_value_type.clone(),
             reference_bindings: self.reference_bindings.clone(),
             byte_array_vars: self.byte_array_vars.clone(),
             fixed_array_counts: self.fixed_array_counts.clone(),
@@ -4761,6 +4770,7 @@ impl CodegenContext {
         self.try_recover_depth = saved.try_recover_depth;
         self.current_return_type_name = saved.current_return_type_name;
         self.current_return_type_full = saved.current_return_type_full;
+        self.expected_value_type = saved.expected_value_type;
         self.labels = saved.labels;
         self.forward_jumps = saved.forward_jumps;
         self.loop_stack = saved.loop_stack;

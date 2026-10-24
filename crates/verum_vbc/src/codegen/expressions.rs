@@ -8754,6 +8754,18 @@ impl VbcCodegen {
                     return None;
                 }
                 d.params.iter().map(|p| p.type_ref.clone()).collect()
+            } else if let Some(params) = self.ctx.semantic_fn_params.get(&crate::module::FunctionId(func_id)) {
+                // Deferred initializers can call a source declaration before
+                // its body is emitted. Its semantic signature already owns
+                // the generic slots; compilation order cannot erase them.
+                let params = params.iter().cloned().collect::<Option<Vec<_>>>()?;
+                let declaration = self.ctx.lookup_function_by_id(crate::module::FunctionId(func_id))?;
+                if declaration.type_param_ids.is_empty()
+                    && !params.iter().any(|ty| ty.is_generic())
+                    && !declaration.return_type.as_ref().is_some_and(|ty| ty.is_generic()) {
+                    return None;
+                }
+                params
             } else if let Some(trs) = self.ctx.archive_fn_param_types.get(&func_id) {
                 // T0330: archive-loaded callee — its descriptor is not in
                 // `self.functions` during user-fn codegen (bodies merge in
@@ -8925,28 +8937,19 @@ impl VbcCodegen {
         // type in `current_return_type_name`. Additive — `bind_generic` only
         // fills UNBOUND params (`or_insert`) and `type_name_to_type_ref_mono`
         // returns None for unknown/param names, so a stale hint changes nothing.
-        if let (Some(ret_tr), Some(expected_name)) = (
-            self.functions
-                .iter()
-                .find(|f| f.descriptor.id.0 == func_id)
-                .map(|f| f.descriptor.return_type.clone()),
-            // T1228: prefer the FULL annotation. The sibling field is
-            // unwrapped for containers (`List<Int>` -> `Int`) to serve the
-            // bare-variant disambiguator, and binding a return-only param
-            // against the ELEMENT type leaves the collection parameter
-            // `Generic` — measured on `Range.collect`, whose seed printed
-            // `type_args=[Generic(0), Concrete(Int)]`. Falls back to the
-            // hint so a non-container annotation, where the two agree,
-            // keeps today's behaviour exactly.
-            self.ctx
-                .current_return_type_full
-                .clone()
-                .or_else(|| self.ctx.current_return_type_name.clone()),
-        ) && ret_tr.is_generic()
-            && let Some(expected_tr) =
-                self.type_name_to_type_ref_mono(&strip_ref(&expected_name))
-        {
-            bind_generic(&ret_tr, &expected_tr, &mut bindings);
+        let expected = self.ctx.expected_value_type.clone().or_else(|| {
+            self.ctx.current_return_type_full.as_ref()
+                .or(self.ctx.current_return_type_name.as_ref())
+                .and_then(|name| self.type_name_to_type_ref_mono(&strip_ref(name)))
+        });
+        if let (Some(ret_tr), Some(expected_tr)) = (
+            self.functions.iter().find(|f| f.descriptor.id.0 == func_id)
+                .map(|f| &f.descriptor.return_type)
+                .or_else(|| self.ctx.lookup_function_by_id(crate::module::FunctionId(func_id))
+                    .and_then(|info| info.return_type.as_ref())),
+            expected,
+        ) && ret_tr.is_generic() {
+            bind_generic(ret_tr, &expected_tr, &mut bindings);
         }
         // An enclosing expected result cannot turn an untyped callback into
         // a concrete ABI storage type. Only its proven signature binds that slot.
@@ -9363,7 +9366,14 @@ impl VbcCodegen {
             // the alias name (it contains '<'), so recursion terminates.
             self.type_name_to_type_ref_mono(&full.clone())
         } else {
-            self.nominal_type_id(name).map(crate::types::TypeRef::Concrete)
+            // A bare generic constructor names a template, not a complete
+            // type witness. Its missing arguments must come from a declared
+            // context, never an erased nominal type.
+            let id = self.nominal_type_id(name)?;
+            if self.type_by_id(id).is_some_and(|ty| !ty.type_params.is_empty()) {
+                return None;
+            }
+            Some(crate::types::TypeRef::Concrete(id))
         }
     }
 
@@ -25484,7 +25494,7 @@ impl VbcCodegen {
         &mut self,
         type_name: &str,
         field_name: &str,
-    ) -> (Option<String>, Option<Vec<String>>) {
+    ) -> (Option<String>, Option<Vec<String>>, Option<crate::types::TypeRef>) {
         if let Some(ft) = self.field_type_name(type_name, field_name) {
             // Strip any generic args — variants register under the base name.
             let base = ft.split('<').next().unwrap_or(ft).to_string();
@@ -25495,11 +25505,12 @@ impl VbcCodegen {
             (
                 self.ctx.current_return_type_name.clone(),
                 self.ctx.current_return_type_inner.clone(),
+                self.ctx.expected_value_type.take(),
             )
         }
     }
 
-    fn pop_field_type_context(&mut self, saved: (Option<String>, Option<Vec<String>>)) {
+    fn pop_field_type_context(&mut self, saved: (Option<String>, Option<Vec<String>>, Option<crate::types::TypeRef>)) {
         self.ctx.pop_disambig_context(saved);
     }
 

@@ -1269,8 +1269,8 @@ pub struct VbcCodegen {
     static_init_functions: Vec<FunctionId>,
 
     /// Pending @thread_local static initializations.
-    /// Stored as (name, init_expr, tls_slot) for compilation as TlsSet in global constructors.
-    pending_tls_inits: Vec<(String, verum_ast::Expr, u16)>,
+    /// Retain the declaration type and owner until the initializer is lowered.
+    pending_tls_inits: Vec<(String, verum_ast::Expr, u16, verum_ast::Type, Option<String>)>,
 }
 
 /// Configuration for code generation.
@@ -10675,7 +10675,7 @@ impl VbcCodegen {
                     // emits `__tls_init_<mangled>` and registers it in
                     // static_init_functions → module.global_ctors.
                     self.pending_tls_inits
-                        .push((mangled, static_decl.value.clone(), slot));
+                        .push((mangled, static_decl.value.clone(), slot, static_decl.ty.clone(), self.ctx.current_source_module.clone()));
                 } else if is_thread_local {
                     // Assign a TLS slot for this variable
                     let name = static_decl.name.name.to_string();
@@ -10741,7 +10741,7 @@ impl VbcCodegen {
 
                     // Queue the init expression for compilation as a TLS initializer
                     self.pending_tls_inits
-                        .push((name, static_decl.value.clone(), slot));
+                        .push((name, static_decl.value.clone(), slot, static_decl.ty.clone(), self.ctx.current_source_module.clone()));
                 } else {
                     self.register_constant_with_value(
                         &static_decl.name.name,
@@ -13817,6 +13817,10 @@ impl VbcCodegen {
         let saved_impl = self.ctx.current_impl_type_name.replace(type_name.to_owned());
         let return_type = func.return_type.as_ref()
             .map(|ty| self.resolve_field_type_ref(ty, &signature_scope));
+        let semantic_params = self.source_semantic_parameters(
+            func, &signature_scope, &dense, &Self::ordered_generic_param_ids(&dense, &shadow),
+        );
+        self.ctx.semantic_fn_params.insert(id, semantic_params);
         let callable_signature = self.source_callable_signature(
             func, &signature_scope, &dense, &Self::ordered_generic_param_ids(&dense, &shadow),
         );
@@ -17731,7 +17735,8 @@ impl VbcCodegen {
     fn compile_pending_tls_inits(&mut self) -> CodegenResult<()> {
         let tls_inits = std::mem::take(&mut self.pending_tls_inits);
 
-        for (name, init_expr, slot) in tls_inits {
+        for (name, init_expr, slot, declared_type, source_module) in tls_inits {
+            let saved_source_module = std::mem::replace(&mut self.ctx.current_source_module, source_module);
             let init_name = format!("__tls_init_{}", name);
             let func_id = FunctionId(self.next_func_id);
             self.next_func_id = self.next_func_id.saturating_add(1);
@@ -17739,8 +17744,16 @@ impl VbcCodegen {
             // Begin compiling the init function
             self.ctx.begin_function(&init_name, &[], None);
 
-            // Compile the initializer expression
-            if let Ok(Some(result_reg)) = self.compile_expr(&init_expr) {
+            // The annotation belongs to this static, even when a different
+            // module was compiled between registration and deferred lowering.
+            let type_name = Self::extract_type_name_from_ast(&declared_type);
+            let saved_disambig = self.ctx.push_disambig_context(Some(type_name.clone()));
+            self.ctx.current_return_type_full = Some(type_name);
+            self.ctx.expected_value_type = self.semantic_formal_type(&declared_type, &Default::default(), &[]);
+            let initialized = self.compile_expr(&init_expr);
+            self.ctx.pop_disambig_context(saved_disambig);
+            self.ctx.current_return_type_full = None;
+            if let Ok(Some(result_reg)) = initialized {
                 // Store result in TLS slot
                 let slot_reg = self.ctx.alloc_temp();
                 self.ctx.emit(Instruction::LoadI {
@@ -17809,6 +17822,7 @@ impl VbcCodegen {
 
             // Register as global constructor so it runs before main()
             self.static_init_functions.push(func_id);
+            self.ctx.current_source_module = saved_source_module;
         }
 
         Ok(())
