@@ -139,6 +139,41 @@ async fn probe() -> Int { answer().await }
 }
 
 #[test]
+fn keyword_tasks_do_not_borrow_a_same_named_library_future() {
+    assert_eq!(run(r#"
+type TaskHandle is { value: Int };
+implement Future for TaskHandle {
+    type Output = Int;
+    fn poll(&mut self, _cx: &mut Context) -> Poll<Int> { Poll.Ready(self.value) }
+}
+async fn probe() -> Int {
+    let handle = spawn { 7 };
+    let declared = TaskHandle { value: 9 };
+    handle.await + declared.await
+}
+"#), 16);
+}
+
+#[test]
+fn collected_keyword_tasks_do_not_select_a_nominal_future() {
+    assert_eq!(run(r#"
+type TaskHandle is { value: Int };
+implement Future for TaskHandle {
+    type Output = Int;
+    fn poll(&mut self, _cx: &mut Context) -> Poll<Int> { Poll.Ready(self.value) }
+}
+async fn probe() -> Int {
+    let mut pending = List.new();
+    pending.push(spawn { 7 });
+    pending.push(spawn { 9 });
+    let mut total = 0;
+    for handle in pending { total = total + handle.await; }
+    total
+}
+"#), 16);
+}
+
+#[test]
 fn await_substitutes_multiple_parameters_in_a_nested_output() {
     assert_eq!(
         run(r#"

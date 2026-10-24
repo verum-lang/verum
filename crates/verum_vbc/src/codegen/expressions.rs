@@ -26852,19 +26852,19 @@ impl VbcCodegen {
         // path.  Handle-ness is decided by TWO signals: the syntactic
         // `spawn {…}.await` form AND the carried type fact for
         // variable-held handles (`let h = spawn f(); h.await` — the
-        // extract_expr_type_name Spawn arm records "TaskHandle" at the
+        // extract_expr_type_name Spawn arm records "$TaskHandle" at the
         // let-binding).  Shape-only gating passed the RAW sentinel into
         // the surrounding code: match arms ran IsVar/GetVariantData on an
         // int and every spawn-result match printed the catch-all arm with
         // a nil payload (test_async_errors "Spawn N Error: nil", #51).
         //
-        // `Future` counts as well as `TaskHandle`, and leaving it out was
+        // `Future` counts as well as `$TaskHandle`, and leaving it out was
         // a silent wrong answer that WRITING THE TYPE DOWN caused:
         //
         //     let h = spawn(async { one(1).await });        // 2
         //     let h: Future<Int> = spawn(async { … });      // garbage
         //
-        // The annotation replaced the recorded `TaskHandle` with the
+        // The annotation replaced the recorded `$TaskHandle` with the
         // declared `Future<Int>`, the gate stopped recognising a handle,
         // and the raw sentinel was passed through as the result. Being
         // more explicit about a type must not change what a program
@@ -26874,7 +26874,7 @@ impl VbcCodegen {
         // async-fn call, which must NOT be awaited, does not have it.
         let is_handle_type = |t: &str| {
             let base = t.split('<').next().unwrap_or(t);
-            base == "TaskHandle" || base == "Future"
+            base == "$TaskHandle" || base == "Future"
         };
         if let Some(type_name) = self
             .extract_expr_type_name(inner)
@@ -26893,7 +26893,9 @@ impl VbcCodegen {
                 .filter(|info| info.param_count == 2)
                 .map(|info| info.id.0)
                 .ok_or_else(|| {
-                    CodegenError::internal("Future implementation has no callable poll")
+                    CodegenError::internal(format!(
+                        "Future implementation for `{type_name}` has no callable `{owner}.poll`"
+                    ))
                 })?;
             return self.compile_protocol_future_await(task_reg, poll_id);
         }
@@ -30486,13 +30488,13 @@ impl VbcCodegen {
                     };
                 }
                 // A handle-typed inner means the await RESULT is the
-                // task's payload type, which the bare "TaskHandle"
+                // task's payload type, which the bare "$TaskHandle"
                 // marker does not carry — return None (honest unknown)
                 // instead of leaking the marker onto the awaited value
-                // (a `let r = h.await;` typed as TaskHandle would emit
+                // (a `let r = h.await;` typed as $TaskHandle would emit
                 // a second runtime Await on a non-handle downstream).
                 match t.as_deref().map(|s| s.split('<').next().unwrap_or(s)) {
-                    Some("TaskHandle") => None,
+                    Some("$TaskHandle") => None,
                     Some("Future") => t
                         .as_deref()
                         .and_then(|name| Self::split_generic_args(name).into_iter().next()),
@@ -30505,7 +30507,9 @@ impl VbcCodegen {
             // let-binding — `compile_await` consults it to emit the
             // runtime `Await` opcode for variable-held handles
             // (`h.await`), not only the syntactic `spawn {…}.await`.
-            ExprKind::Spawn { .. } => Some("TaskHandle".to_string()),
+            // `$` cannot occur in a source type identifier: this marker cannot
+            // resolve to an unrelated library or user-defined Future record.
+            ExprKind::Spawn { .. } => Some("$TaskHandle".to_string()),
             // If/else expression: infer type from then branch
             ExprKind::If { then_branch, .. } => self.extract_type_from_block(then_branch),
             // Match expression: infer type from first arm body with a known
