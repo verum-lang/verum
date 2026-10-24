@@ -26887,17 +26887,29 @@ impl VbcCodegen {
             // archive-local (T0277). Resolve the implementing owner's poll
             // in the current module; arity alone cannot establish identity.
             let owner = self.resolve_type_alias(Self::strip_generic_args(&type_name));
-            let poll_id = self
+            let poll = self
                 .ctx
                 .lookup_function_in_scope(&format!("{owner}.poll"))
                 .filter(|info| info.param_count == 2)
-                .map(|info| info.id.0)
+                .cloned()
                 .ok_or_else(|| {
                     CodegenError::internal(format!(
                         "Future implementation for `{type_name}` has no callable `{owner}.poll`"
                     ))
                 })?;
-            return self.compile_protocol_future_await(task_reg, poll_id);
+            // The poll declaration owns its result layout. Constructor aliases
+            // in the awaiting module are neither required nor authoritative;
+            // a local homonym can even assign Ready a different variant tag.
+            let poll_result = match poll.return_type {
+                Some(crate::types::TypeRef::Concrete(id))
+                | Some(crate::types::TypeRef::Instantiated { base: id, .. }) => id,
+                _ => {
+                    return Err(CodegenError::internal(format!(
+                        "Future implementation for `{type_name}` has no nominal poll result type"
+                    )));
+                }
+            };
+            return self.compile_protocol_future_await(task_reg, poll.id.0, poll_result);
         }
 
         let needs_runtime_await = matches!(inner.kind, ExprKind::Spawn { .. })
@@ -27048,6 +27060,7 @@ impl VbcCodegen {
         &mut self,
         future: Reg,
         poll_id: u32,
+        poll_result: crate::types::TypeId,
     ) -> CodegenResult<Option<Reg>> {
         let resolve = |canonical: &str, short: &str| {
             self.ctx
@@ -27058,8 +27071,13 @@ impl VbcCodegen {
         };
         let noop_id = resolve("core.async.waker.noop_waker", "noop_waker")?;
         let context_id = resolve("core.async.waker.Context.from_waker", "Context.from_waker")?;
-        let ready_tag =
-            self.lookup_stdlib_variant_tag("Ready", "Poll.Ready", "Poll", None, "Future await")?;
+        let ready_tag = self.lookup_stdlib_variant_tag(
+            "Ready",
+            "Poll.Ready",
+            "poll result",
+            Some(poll_result),
+            "Future await",
+        )?;
 
         let result = self.ctx.alloc_temp();
         let waker = self.ctx.alloc_temp();

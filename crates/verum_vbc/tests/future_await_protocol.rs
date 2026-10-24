@@ -140,7 +140,8 @@ async fn probe() -> Int { answer().await }
 
 #[test]
 fn keyword_tasks_do_not_borrow_a_same_named_library_future() {
-    assert_eq!(run(r#"
+    assert_eq!(
+        run(r#"
 type TaskHandle is { value: Int };
 implement Future for TaskHandle {
     type Output = Int;
@@ -151,12 +152,15 @@ async fn probe() -> Int {
     let declared = TaskHandle { value: 9 };
     handle.await + declared.await
 }
-"#), 16);
+"#),
+        16
+    );
 }
 
 #[test]
 fn collected_keyword_tasks_do_not_select_a_nominal_future() {
-    assert_eq!(run(r#"
+    assert_eq!(
+        run(r#"
 type TaskHandle is { value: Int };
 implement Future for TaskHandle {
     type Output = Int;
@@ -170,7 +174,9 @@ async fn probe() -> Int {
     for handle in pending { total = total + handle.await; }
     total
 }
-"#), 16);
+"#),
+        16
+    );
 }
 
 #[test]
@@ -306,4 +312,147 @@ async fn probe() -> Int {
 "#),
         7
     );
+}
+
+#[test]
+fn qualified_future_poll_result_does_not_need_a_caller_mount() {
+    let source = r#"
+type Waker is { marker: Int };
+type Context is { waker: &Waker };
+implement Context {
+    fn from_waker(waker: &Waker) -> Context { Context { waker: waker } }
+}
+fn noop_waker() -> Waker { Waker { marker: 0 } }
+module library {
+    public type Poll<T> is Pending | Ready(T);
+    public type Future is protocol {
+        type Output;
+        fn poll(&mut self, cx: &mut Context) -> Poll<Self.Output>;
+    };
+    public type Answer is { value: Int };
+    implement Future for Answer {
+        type Output = Int;
+        fn poll(&mut self, _cx: &mut Context) -> Poll<Int> { Poll.Ready(self.value) }
+    }
+    public fn answer() -> Answer { Answer { value: 42 } }
+}
+module consumer {
+    mount library.answer;
+    public async fn probe() -> Int { answer().await }
+}
+"#;
+    let ast = Parser::new(source).parse_module().expect("grammar");
+    let module = VbcCodegen::new()
+        .compile_module(&ast)
+        .expect("qualified future await");
+    let entry = module
+        .functions
+        .iter()
+        .find(|f| module.get_string(f.name) == Some("consumer.probe"))
+        .expect("consumer probe")
+        .id;
+    let result = Interpreter::new(Arc::new(module))
+        .execute_function(entry)
+        .expect("await");
+    assert_eq!(result.as_i64(), 42);
+}
+
+#[test]
+fn archived_future_await_uses_the_poll_result_descriptor() {
+    use verum_common::Map;
+    use verum_vbc::codegen::context::FunctionInfo;
+    use verum_vbc::module::FunctionId;
+
+    let ast = Parser::new(&format!(
+        "module library;\n{ENV}\n{}",
+        r#"
+public type Answer is { value: Int };
+implement Future for Answer {
+    type Output = Int;
+    fn poll(&mut self, _cx: &mut Context) -> Poll<Int> { Poll.Ready(self.value) }
+}
+"#
+    ))
+    .parse_module()
+    .unwrap();
+    let module = VbcCodegen::with_config(CodegenConfig::new("library"))
+        .compile_module(&ast)
+        .unwrap();
+    let encoded = verum_vbc::serialize::serialize_module(&module).unwrap();
+    let module = verum_vbc::deserialize::deserialize_module(&encoded).unwrap();
+    for local_homonym in [false, true] {
+        let mut consumer = VbcCodegen::with_config(CodegenConfig::new("consumer"));
+        let homonym = if local_homonym {
+            "type Poll<T> is Pending | Ready(T);"
+        } else {
+            ""
+        };
+        let caller = Parser::new(&format!(
+            r#"
+module consumer;
+{homonym}
+async fn probe() -> Int {{
+    let future = library.Answer {{ value: 42 }};
+    future.await
+}}
+"#
+        ))
+        .parse_module()
+        .unwrap();
+        consumer.collect_unit_declarations(&[&caller]).unwrap();
+        // Import the serialized callable descriptors, as the application
+        // loader does. Constructor aliases are deliberately absent.
+        let mut remap = Map::new();
+        for (index, function) in module.functions.iter().enumerate() {
+            let id = FunctionId(7000 + index as u32);
+            let name = module.get_string(function.name).unwrap();
+            let name = name.strip_prefix("library.").unwrap_or(name);
+            let info = FunctionInfo {
+                id,
+                param_count: function.params.len(),
+                return_type: Some(function.return_type.clone()),
+                return_type_name: function
+                    .return_type_name
+                    .and_then(|id| module.get_string(id))
+                    .map(str::to_owned),
+                ..Default::default()
+            };
+            consumer
+                .ctx_mut()
+                .register_function(name.to_owned(), info.clone());
+            consumer
+                .ctx_mut()
+                .register_function(format!("library.{name}"), info);
+            remap.insert(function.id.0, id);
+        }
+        consumer.import_archive_module_types(&module);
+        consumer.merge_archive_function_bodies(&module, &remap.into());
+        let compiled = consumer
+            .compile_function_bodies(&caller)
+            .expect("archive Future await");
+        let probe = compiled
+            .functions
+            .iter()
+            .find(|f| compiled.get_string(f.name) == Some("consumer.probe"))
+            .expect("consumer probe");
+        assert!(
+            probe
+                .instructions
+                .as_deref()
+                .unwrap()
+                .iter()
+                .any(|instruction| {
+                    matches!(
+                        instruction,
+                        verum_vbc::instruction::Instruction::IsVar { tag: 0, .. }
+                    )
+                }),
+            "library Ready is tag zero, regardless of caller Poll"
+        );
+        let entry = probe.id;
+        let result = Interpreter::new(Arc::new(compiled))
+            .execute_function(entry)
+            .expect("archived Future executes");
+        assert_eq!(result.as_i64(), 42);
+    }
 }
