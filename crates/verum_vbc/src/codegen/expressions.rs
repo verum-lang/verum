@@ -25035,9 +25035,24 @@ impl VbcCodegen {
                 return None;
             }
             let field = descriptor.fields.first()?;
+            let inner_ref = field.declaration_type.as_ref().unwrap_or(&field.type_ref);
+            if let crate::types::TypeRef::Generic(parameter) = inner_ref
+                && let Some(inner) = Self::split_generic_args(name).get(parameter.0 as usize)
+            {
+                return Some(inner.clone());
+            }
+            let parameters: Vec<String> = descriptor.type_params.iter()
+                .filter_map(|parameter| self.ctx.strings.get(parameter.name.0 as usize).cloned())
+                .collect();
+            if !parameters.is_empty() && name.contains('<')
+                && let Some(declared) = self.ctx.strings.get(field.type_name.0 as usize)
+                && let Some(inner) = super::parsed_field_types::instantiate(name, &parameters, declared)
+            {
+                return Some(inner);
+            }
             return self.type_ref_to_field_name(
-                field.declaration_type.as_ref().unwrap_or(&field.type_ref),
-            );
+                inner_ref,
+            ).or_else(|| self.ctx.newtype_inner_type.get(base).cloned());
         }
         self.ctx.newtype_inner_type.get(base).cloned()
     }

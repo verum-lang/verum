@@ -75,6 +75,18 @@ fn explicit_transparent_field_borrow_replaces_the_same_slot() {
 }
 
 #[test]
+fn generic_transparent_projection_keeps_its_instantiated_inner_type() {
+    check_with_declarations(r#"
+        type Wrapped<T> is (T);
+        type Envelope is { value: Wrapped<Text> };
+    "#, r#"
+        let mut record = Envelope { value: Wrapped("original long text") };
+        record.value.0.push_str(" suffix");
+        record.value.0
+    "#, "original long text suffix");
+}
+
+#[test]
 fn indexed_text_receiver_mutation_reaches_its_element() {
     check(r#"
         let mut words = ["original long text", "unchanged"];
