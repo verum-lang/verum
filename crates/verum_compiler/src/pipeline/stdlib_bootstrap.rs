@@ -848,6 +848,23 @@ one module and therefore never seeded",
             }
         }
 
+        // Cyclic core dependencies need declaration-owned signatures before a
+        // provider's body exists. These modules are metadata only: scoped type
+        // IDs pass through the normal importer, never into executable archives.
+        let mut declaration_interfaces = Vec::with_capacity(all_parsed_modules.len());
+        for (name, files) in &all_parsed_modules {
+            let mut declarations = VbcCodegen::with_config(
+                verum_vbc::codegen::CodegenConfig::new(name)
+                    .with_optimization_level(config.optimization_level)
+                    .with_target(target.clone()),
+            );
+            let sources: Vec<_> = files.iter().map(|(_, ast)| ast).collect();
+            declaration_interfaces.push(
+                declarations.collect_declaration_interface(&sources)
+                    .map_err(|error| anyhow::anyhow!("collecting interface for {name}: {error}"))?,
+            );
+        }
+
         for (idx, (module_name, ast_modules_with_paths)) in all_parsed_modules.iter().enumerate() {
             let module_start = std::time::Instant::now();
             let module = modules_to_compile
@@ -877,6 +894,7 @@ one module and therefore never seeded",
                 &config,
                 &target,
                 &later_modules,
+                &declaration_interfaces,
             )?;
             functions_compiled += funcs;
 
@@ -1035,11 +1053,9 @@ one module and therefore never seeded",
     ///   * `is_transparent_wrapper = false` (these are real bodies,
     ///     not synthetic newtype constructors).
     ///
-    /// The pre-register is gated to the closed canonical-stdlib set
-    /// — adding a new canonical type requires editing the
-    /// `is_canonical_stdlib_type` predicate below, which keeps the
-    /// blast radius bounded and avoids accidental shadowing of
-    /// user-defined types that share names with stdlib types.
+    /// Public inherent methods retain their declaring source module. Only
+    /// canonical prelude types additionally receive a legacy short alias;
+    /// other declarations cannot claim those aliases by registration order.
     fn pre_register_canonical_static_methods(
         &mut self,
         all_modules: &[(String, Vec<(PathBuf, verum_ast::Module)>)],
@@ -1049,11 +1065,8 @@ one module and therefore never seeded",
         use verum_vbc::codegen::FunctionInfo;
         use verum_vbc::module::FunctionId;
 
-        // Closed set of canonical-stdlib type names whose inherent
-        // methods we pre-register globally.  Other types' methods
-        // stay strictly module-scoped per the existing first-wins
-        // semantics — this set is the minimum needed to close the
-        // observed lenient-skip cascade.
+        // Existing short aliases for the prelude. Qualified declarations
+        // are registered independently for every source-owned type.
         fn is_canonical_stdlib_type(name: &str) -> bool {
             matches!(
                 name,
@@ -1265,9 +1278,11 @@ one module and therefore never seeded",
                         self.global_function_registry.insert(qualified, info);
                         stubs_registered += 1;
                     }
-                    if !is_canonical_stdlib_type(target_type_name.as_str()) {
-                        continue;
-                    }
+                    // Every source-owned method needs a forward declaration.
+                    // Only the canonical prelude set also receives a legacy
+                    // short alias; unrelated nominal types stay qualified.
+                    let source_owner = VbcCodegen::resolve_full_module_path(ast_module, _module_name)
+                        .unwrap_or_else(|| _module_name.clone());
                     // Walk the impl block's items, register each
                     // `public fn` as a stub.
                     for impl_item in impl_decl.items.iter() {
@@ -1280,11 +1295,10 @@ one module and therefore never seeded",
                         }
                         let method_name = func.name.name.to_string();
                         let qualified = format!("{}.{}", target_type_name, method_name);
-                        // If already registered (overlap between
-                        // multiple impl-block declarations of the
-                        // same method across files — rare but
-                        // possible), keep the first registration.
-                        if self.global_function_registry.contains_key(&qualified) {
+                        let source_qualified = verum_vbc::module::qualify_module_name(
+                            &source_owner, &qualified,
+                        );
+                        if self.global_function_registry.contains_key(&source_qualified) {
                             continue;
                         }
                         // Assign a fresh per-stub FunctionId from a
@@ -1405,16 +1419,10 @@ one module and therefore never seeded",
                             );
                         }
                         self.global_function_registry
-                            .insert(qualified, info.clone());
-                        // Also register simple-name (first-wins) so
-                        // bare `Text.new()` / `List.from(...)` call
-                        // sites that consult the simple-name slot
-                        // (the `Type.method` codegen path eventually
-                        // tries both) find the stub.
-                        // Note: avoid simple-name re-register to keep
-                        // first-wins discipline — the producing
-                        // module's `register_function` will populate
-                        // the simple-name slot itself.
+                            .insert(source_qualified, info.clone());
+                        if is_canonical_stdlib_type(target_type_name.as_str()) {
+                            self.global_function_registry.entry(qualified).or_insert(info);
+                        }
                         stubs_registered += 1;
                     }
                 }
@@ -1422,7 +1430,7 @@ one module and therefore never seeded",
         }
         if std::env::var("VERUM_TRACE_STUB").is_ok() {
             eprintln!(
-                "[task #16 stage-1] pre-registered {} canonical-stdlib static-method stubs",
+                "[task #16 stage-1] pre-registered {} source-qualified static-method stubs",
                 stubs_registered
             );
         }
@@ -2428,6 +2436,7 @@ one module and therefore never seeded",
         config: &CoreConfig,
         target: &verum_ast::cfg::TargetConfig,
         later_modules: &std::collections::HashSet<&str>,
+        declaration_interfaces: &[verum_vbc::VbcModule],
     ) -> Result<(verum_vbc::VbcModule, usize)> {
         use verum_vbc::codegen::CodegenConfig;
 
@@ -2497,6 +2506,10 @@ one module and therefore never seeded",
         // Pool-owned nominal signatures accompany the existing text/layout
         // registry. Import only this source unit's dependency closure.
         let mut prior_modules: Vec<_> = self.compiled_stdlib_modules.values().collect();
+        prior_modules.extend(declaration_interfaces.iter().filter(|interface| {
+            interface.name != module.name
+                && !self.compiled_stdlib_modules.contains_key(&interface.name)
+        }));
         prior_modules.sort_by(|a, b| a.name.cmp(&b.name));
         // Source exports, including re-export aliases, choose the declaring
         // descriptor. Archive bundle names are not namespace authority.

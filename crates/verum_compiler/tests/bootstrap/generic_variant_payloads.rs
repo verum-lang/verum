@@ -75,6 +75,7 @@ fn bootstrap(prior: &[(&str, &str)], source: &str) -> (VbcModule, VbcArchive) {
                 &config,
                 &verum_ast::cfg::TargetConfig::host(),
                 &Default::default(),
+                &[],
             )
             .expect("the real bootstrap producer accepts the source unit");
         builder.add_module(owner, &module, &[]).unwrap();

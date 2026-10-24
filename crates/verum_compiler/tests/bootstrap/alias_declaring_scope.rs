@@ -98,6 +98,7 @@ fn bootstrap(files: &[(&str, &str)], root_reexport: bool) -> (VbcModule, VbcArch
                 &config,
                 &verum_ast::cfg::TargetConfig::host(),
                 &Default::default(),
+                &[],
             )
             .expect("actual bootstrap producer accepts the source unit");
         builder.add_module(bundle, &module, &[]).unwrap();
@@ -424,11 +425,11 @@ fn inline_owners_keep_explicit_and_empty_mount_scopes_in_both_file_orders() {
             let foreign_id = declaration(module, "foreign.result", "Result").id;
             assert_ne!(foreign_id, TypeId::RESULT);
             assert_eq!(
-                target(module, "selected", "Selected"),
+                target(module, "fixture.inline_mounts.selected", "Selected"),
                 expected(foreign_id, TypeId::BOOL),
                 "an inline owner keeps its own explicit mount",
             );
-            for (owner, leaf) in [("untouched", "Plain"), (ALIAS.0, "IoResult")] {
+            for (owner, leaf) in [("fixture.inline_empty.untouched", "Plain"), (ALIAS.0, "IoResult")] {
                 assert_eq!(
                     target(module, owner, leaf),
                     expected(TypeId::RESULT, TypeId::INT),

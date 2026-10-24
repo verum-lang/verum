@@ -64,6 +64,7 @@ mod statements;
 mod value_uses;
 mod place_copies;
 mod formal_parameters;
+mod declaration_interface;
 mod field_visibility;
 
 #[cfg(test)]
@@ -1271,6 +1272,7 @@ pub struct VbcCodegen {
     /// Pending @thread_local static initializations.
     /// Retain the declaration type and owner until the initializer is lowered.
     pending_tls_inits: Vec<(String, verum_ast::Expr, u16, verum_ast::Type, Option<String>)>,
+    collecting_declaration_interface: bool,
 }
 
 /// Configuration for code generation.
@@ -2492,6 +2494,7 @@ impl VbcCodegen {
             static_init_functions: Vec::new(),
             // Pending @thread_local static initializations
             pending_tls_inits: Vec::new(),
+            collecting_declaration_interface: false,
             propagate_test_attr: true,
             current_return_ast_type: None,
             current_fn_lookup_name: None,
@@ -8173,9 +8176,9 @@ impl VbcCodegen {
                     }
                 }
             }
-            let module_key = declared_owner
+            let module_key = declared_owner.clone()
                 .unwrap_or_else(|| format!("file:{:?}", module.file_id));
-            self.claim_declared_type_items(&module.items, &module_key);
+            self.claim_declared_type_items(&module.items, &module_key, declared_owner.as_deref());
         }
         for module in files {
             self.register_declared_type_aliases(module);
@@ -8190,15 +8193,23 @@ impl VbcCodegen {
 
     /// Inline declarations participate in the same unit prepass as file types.
     /// Every declaring owner has an ID before any field or body refers to it.
-    fn claim_declared_type_items(&mut self, items: &[verum_ast::Item], owner: &str) {
-        self.source_type_mounts.entry(owner.into()).or_default();
+    fn claim_declared_type_items(
+        &mut self, items: &[verum_ast::Item], owner: &str, source_owner: Option<&str>,
+    ) {
+        self.source_type_mounts
+            .entry(source_owner.unwrap_or(&self.config.module_name).into()).or_default();
         for item in items {
             if !self.should_compile_item(item) { continue; }
             match &item.kind {
                 ItemKind::Type(declaration) => self.claim_user_type_name(owner, declaration.name.name.as_str()),
                 ItemKind::Module(module) => {
                     if let Some(items) = &module.items {
-                        self.claim_declared_type_items(items, module.name.name.as_str());
+                        // Match scope_to_inline_module: a file-owned child
+                        // keeps its parent; an anonymous root remains bare.
+                        let child = source_owner.filter(|owner| !owner.is_empty())
+                            .map(|owner| format!("{owner}.{}", module.name.name))
+                            .unwrap_or_else(|| module.name.name.to_string());
+                        self.claim_declared_type_items(items, &child, Some(&child));
                     }
                 }
                 _ => {}
@@ -11274,6 +11285,7 @@ impl VbcCodegen {
         if !self.ctx.prefer_existing_functions && !name.contains('.') && !name.contains("::") {
             self.ctx.unit_declared_fns.insert(name.clone());
         }
+        self.capture_declaration_interface(func, &info, &name, None, &dense, &shadow);
         self.ctx.register_function(name.clone(), info.clone());
         if self.nested_function_scope.is_empty() {
             self.ctx.register_source_function(&name, &info);
@@ -13871,6 +13883,7 @@ impl VbcCodegen {
         } else {
             format!("{}#impl{}", qualified_name, ordinal)
         };
+        self.capture_declaration_interface(func, &info, &registration_key, Some(type_name), &dense, &shadow);
         self.ctx.register_function(registration_key, info);
 
         Ok(())

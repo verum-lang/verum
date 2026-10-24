@@ -51,6 +51,7 @@ fn source_publication_replaces_stubs_and_keeps_existing_real_entries() {
             &config,
             &verum_ast::cfg::TargetConfig::host(),
             &Default::default(),
+            &[],
         )
         .expect("small source-driven bootstrap unit");
     assert!(count >= 2);

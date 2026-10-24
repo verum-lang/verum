@@ -76,6 +76,7 @@ fn archive(reverse: bool) -> VbcArchive {
                 &config,
                 &verum_ast::cfg::TargetConfig::host(),
                 &Default::default(),
+                &[],
             )
             .expect("actual bootstrap accepts fixture source");
         builder
