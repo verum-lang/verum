@@ -366,16 +366,30 @@ impl TypeChecker {
             return None;
         }
         if owner_is_qualified {
-            let owner = Self::metadata_function_owner(fd, &metadata)?;
-            if Self::metadata_declaring_key(owner) != requested_owner {
-                return None;
-            }
-            let defining_module = owner.origin_module_path.as_ref()
-                .filter(|module| !module.is_empty()).unwrap_or(&owner.module_path);
-            if defining_module != &self.current_module_path
-                && (!owner.is_public || !fd.is_public)
-            {
-                return None;
+            if fd.parent_type.is_none() {
+                // A same-named companion module owns free factory functions,
+                // not inherent methods. Validate the complete declaration path;
+                // a bare compatibility index cannot borrow another module's fn.
+                let module = fd.origin_module_path.as_ref()
+                    .filter(|module| !module.is_empty()).unwrap_or(&fd.module_path);
+                let declared = verum_common::qualified_name::qualify_module_name(module, &fd.name);
+                if declared.as_str() != qualified_name
+                    || (module != &self.current_module_path && !fd.is_public)
+                {
+                    return None;
+                }
+            } else {
+                let owner = Self::metadata_function_owner(fd, &metadata)?;
+                if Self::metadata_declaring_key(owner) != requested_owner {
+                    return None;
+                }
+                let defining_module = owner.origin_module_path.as_ref()
+                    .filter(|module| !module.is_empty()).unwrap_or(&owner.module_path);
+                if defining_module != &self.current_module_path
+                    && (!owner.is_public || !fd.is_public)
+                {
+                    return None;
+                }
             }
         }
         let scheme = Self::scheme_from_function_descriptor(fd, &metadata);

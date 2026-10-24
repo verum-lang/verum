@@ -3488,6 +3488,20 @@ impl TypeChecker {
                     }
                     ExportKind::Type | ExportKind::Protocol => {
                         self.import_type_export(&*module_info, item_name, register_name, &resolved_module_path, registry, import_span, exported.source_module)?;
+                        // A type export can also carry a public companion module.
+                        // The export table keeps the type facet on collisions;
+                        // retain the namespace facet under the same declaring owner.
+                        for item in &module_info.ast.items {
+                            if let verum_ast::ItemKind::Module(module) = &item.kind
+                                && module.name.name.as_str() == item_name
+                                && module.visibility == verum_ast::decl::Visibility::Public
+                            {
+                                let owner: Text = format!("{resolved_module_path}.{item_name}").into();
+                                self.inline_modules.insert(owner.clone(), module.clone());
+                                self.inline_modules.insert(register_name.into(), module.clone());
+                                self.module_aliases.insert(register_name.into(), owner);
+                            }
+                        }
                         // Bug C (type facet) — umbrella re-export of a TYPE
                         // whose defining module's IMPL BLOCK (associated
                         // consts + methods) would otherwise be dropped. The
@@ -3601,7 +3615,9 @@ impl TypeChecker {
                         // checker's `inline_modules` map is empty for cross-file modules.
                         for ast_item in &module_info.ast.items {
                             if let verum_ast::ItemKind::Module(mod_decl) = &ast_item.kind {
-                                if mod_decl.name.name.as_str() == item_name {
+                                if mod_decl.name.name.as_str() == item_name
+                                    && mod_decl.visibility == verum_ast::decl::Visibility::Public
+                                {
                                     let short_name = verum_common::Text::from(register_name);
                                     let full_path = verum_common::Text::from(format!(
                                         "{}.{}",
@@ -3694,7 +3710,9 @@ impl TypeChecker {
                                         if let verum_ast::ItemKind::Module(mod_decl) =
                                             &ast_item.kind
                                         {
-                                            if mod_decl.name.name.as_str() == item_name {
+                                            if mod_decl.name.name.as_str() == item_name
+                                                && mod_decl.visibility == verum_ast::decl::Visibility::Public
+                                            {
                                                 return Some(mod_decl.clone());
                                             }
                                         }
@@ -4960,7 +4978,9 @@ impl TypeChecker {
                                                 if let verum_ast::ItemKind::Module(mod_decl) =
                                                     &ast_item.kind
                                                 {
-                                                    if mod_decl.name.name.as_str() == item_name {
+                                                    if mod_decl.name.name.as_str() == item_name
+                                                        && mod_decl.visibility == verum_ast::decl::Visibility::Public
+                                                    {
                                                         return Some(mod_decl.clone());
                                                     }
                                                 }
@@ -5187,6 +5207,7 @@ impl TypeChecker {
                                                         &ast_item.kind
                                                     {
                                                         if mod_decl.name.name.as_str() == item_name
+                                                            && mod_decl.visibility == verum_ast::decl::Visibility::Public
                                                         {
                                                             return Some(mod_decl.clone());
                                                         }
@@ -25739,6 +25760,9 @@ bake to have this verified.",
             && path.segments.len() == 1
             && let Some(verum_ast::ty::PathSegment::Name(ident)) = path.segments.first()
             && let Some(module_path) = self.module_aliases.get(&ident.name).cloned()
+            && !self.ctx.env.is_locally_bound(ident.name.as_str())
+            // Source namespaces use the inline resolver's visibility and arity checks.
+            && !self.inline_modules.contains_key(&ident.name)
         {
             let method_name = method.name.as_str();
             let qualified: Text = format!("{}.{}", module_path, method_name).into();
@@ -25899,7 +25923,9 @@ bake to have this verified.",
             if let Some(items) = items_opt {
                 for item in items.iter() {
                     if let verum_ast::ItemKind::Function(func_decl) = &item.kind {
-                        if func_decl.name.name.as_str() == method_name {
+                        if func_decl.name.name.as_str() == method_name
+                            && func_decl.visibility == verum_ast::decl::Visibility::Public
+                        {
                             let func_type = self.infer_function_type(func_decl)?;
                             if let Type::Function {
                                 params,
