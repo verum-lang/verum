@@ -7150,39 +7150,15 @@ impl TypeChecker {
                                     {
                                         Some(resolution) => resolution.output,
                                         None => {
-                                            // Also handle JoinHandle<T> as an awaitable type
-                                            match &resolved_ty {
-                                                Type::Generic { name, args }
-                                                    if name.as_str() == "JoinHandle"
-                                                        && args.len() == 1 =>
-                                                {
-                                                    args[0].clone()
-                                                }
-                                                Type::Named { path, args } if args.len() == 1 => {
-                                                    if let Some(ident) = path.as_ident() {
-                                                        if ident.as_str() == "JoinHandle" {
-                                                            args[0].clone()
-                                                        } else {
-                                                            // In async context, be lenient for unknown awaitable types
-                                                            resolved_ty.clone()
-                                                        }
-                                                    } else {
-                                                        resolved_ty.clone()
-                                                    }
-                                                }
-                                                _ => {
-                                                    // In async context, be lenient - type may implement Future
-                                                    if self.in_async_context {
-                                                        resolved_ty.clone()
-                                                    } else {
-                                                        return Err(TypeError::Other(
-                                                            verum_common::Text::from(format!(
-                                                                "select arm future must be a Future type, got: {}",
-                                                                future_result.ty
-                                                            )),
-                                                        ));
-                                                    }
-                                                }
+                                            if self.in_async_context {
+                                                resolved_ty.clone()
+                                            } else {
+                                                return Err(TypeError::Other(
+                                                    verum_common::Text::from(format!(
+                                                        "select arm future must be a Future type, got: {}",
+                                                        future_result.ty
+                                                    )),
+                                                ));
                                             }
                                         }
                                     }
@@ -12467,13 +12443,6 @@ impl TypeChecker {
         // Protocol-based Future resolution
         // Await desugaring: ".await" desugars to polling Future protocol until completion
         // =========================================================================
-        // Also handle JoinHandle<T> as a special awaitable type
-        if let Type::Generic { name, args } = &inner_result.ty {
-            if name.as_str() == "JoinHandle" && args.len() == 1 {
-                return Ok(InferResult::new(args[0].clone()));
-            }
-        }
-
         match self
             .protocol_checker
             .read()
@@ -12649,10 +12618,11 @@ impl TypeChecker {
             _ => inner_result.ty.clone(),
         };
 
-        // JoinHandle represented as Generic type
-        Ok(InferResult::new(Type::Generic {
-            name: verum_common::Text::from("JoinHandle"),
-            args: vec![output_ty].into(),
+        // Keyword tasks are intrinsic futures. Borrowing a library type's
+        // unqualified name loses carrier identity in aggregates and can select
+        // an unrelated nominal record's Future implementation at await sites.
+        Ok(InferResult::new(Type::Future {
+            output: Box::new(output_ty),
         }))
     }
 

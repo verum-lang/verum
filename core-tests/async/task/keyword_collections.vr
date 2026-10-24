@@ -1,0 +1,17 @@
+module keyword_collections;
+async fn main() {
+    let mut pending = List.new();
+    pending.push(spawn { Result<Int, Text>.Ok(7) });
+    pending.push(spawn { Result<Int, Text>.Err("evidence") });
+    let mut values: List<Int> = List.new();
+    let mut failures = 0;
+    for task in pending {
+        match task.await {
+            Ok(value) => values.push(value),
+            Err(reason) => { assert_eq(reason, "evidence"); failures = failures + 1; }
+        }
+    }
+    assert_eq(values, [7]);
+    assert_eq(failures, 1);
+    print("inferred task collection: ok");
+}
