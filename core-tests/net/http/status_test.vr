@@ -23,6 +23,15 @@ mount core.net.http.{
 };
 mount core.base.maybe.{Maybe, Some, None};
 
+@test
+fn response_status_observes_construction_and_replacement() {
+    let response = Response.new(StatusCode.created());
+    assert_eq(response.status_code().code(), 201);
+    let replaced = response.status(StatusCode.not_found());
+    assert_eq(replaced.status_code().code(), 404);
+    assert(replaced.is_error());
+}
+
 // =============================================================================
 // Section 1: StatusCode — construction + code accessor
 // =============================================================================

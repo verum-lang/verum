@@ -633,6 +633,11 @@ implement Response {
         }
     }
 
+    /// Get the response status code.
+    public fn status_code(&self) -> StatusCode {
+        self.status
+    }
+
     /// Get the response body as text (UTF-8).
     public fn body_text(&self) -> Text {
         Text.from_utf8_lossy(&self.body)
