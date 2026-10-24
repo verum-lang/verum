@@ -15877,6 +15877,19 @@ impl VbcCodegen {
                         param_count
                     );
                     self.ctx.register_function(qualified_name, info.clone());
+                    // Field declarations carry their source-qualified nominal
+                    // type. Publish the same constructor under that identity so
+                    // expected-type resolution cannot fall back to a sibling's
+                    // bare variant or reject a known field owner as ambiguous.
+                    if let Some(owner) = self.ctx.current_source_module.as_deref() {
+                        let parent = format!("{owner}.{type_name}");
+                        let mut qualified = info.clone();
+                        qualified.parent_type_name = Some(parent.clone());
+                        qualified.return_type_name = Some(parent.clone());
+                        self.ctx.register_function(
+                            format!("{parent}.{variant_name}"), qualified,
+                        );
+                    }
 
                     // 2. Handle simple name registration with collision detection.
                     //
