@@ -299,7 +299,7 @@ implement Future for AsyncIoReady {
 /// - Use non-blocking I/O with the async runtime for connection multiplexing
 /// - Consider SO_REUSEPORT for multi-threaded accept scaling
 /// - Access raw fd via as_raw_fd() for advanced socket options
-public type TcpStream is {
+public type affine TcpStream is {
     fd: FileDesc,
     peer_addr: SocketAddr,
 };
@@ -1027,11 +1027,16 @@ implement<'a> Future for AsyncWriteFut<'a> {
 
 implement Drop for TcpStream {
     fn drop(&mut self) {
+        // Disarm before releasing the descriptor: a later cleanup must not
+        // close a descriptor that the operating system has already reused.
+        let owned_fd = self.fd;
+        self.fd = -1;
+        if owned_fd < 0 { return; }
         @cfg(any(target_os = "linux", target_os = "windows")) {
-            let _ = close(self.fd);
+            let _ = close(owned_fd);
         }
         @cfg(target_os = "macos") {
-            let _ = sys_close(self.fd);
+            let _ = sys_close(owned_fd);
         }
     }
 }

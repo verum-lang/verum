@@ -1,0 +1,33 @@
+// @test: run-interpreter
+// @level: L2
+// @tags: database, postgres, integration
+// @description: Failed authentication, TLS refusal and explicit close release sockets.
+module postgres_socket_lifetime.main;
+mount core.base.env.var;
+mount core.database.postgres.config.{PgConfig, PgTlsMode};
+mount core.database.postgres.connection.connect;
+mount core.time.Time;
+
+fn main() {
+    let password = var(&"VERUM_PG_TEST_PASSWORD").unwrap_or("spindle_app_pw");
+    let host = var(&"VERUM_PG_TEST_HOST").unwrap_or("127.0.0.1");
+    let port = var(&"VERUM_PG_TEST_PORT").unwrap_or("55432").parse_int().unwrap();
+    let user = var(&"VERUM_PG_TEST_USER").unwrap_or("spindle_app");
+    let database = var(&"VERUM_PG_TEST_DATABASE").unwrap_or("spindle_test");
+    let config = PgConfig.new(host, port, user, password, database)
+        .with_tls(PgTlsMode.PtmDisable).with_connect_timeout_ms(5000);
+    let mut wrong_password = config.clone();
+    wrong_password.password = "deliberately-invalid-lifetime-test-password";
+    let required_tls = config.clone().with_tls(PgTlsMode.PtmRequire);
+    let mut index = 0;
+    while index < 4 {
+        assert(connect(&wrong_password).is_err());
+        assert(connect(&required_tls).is_err());
+        let mut connection = connect(&config).unwrap();
+        connection.query_all(&"SELECT 1").unwrap();
+        connection.close().unwrap();
+        index = index + 1;
+    }
+    print("postgres lifetime: connections closed; inspecting process descriptors");
+    Time.sleep_secs(10);
+}
