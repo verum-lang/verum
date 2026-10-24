@@ -454,7 +454,7 @@ pub(super) fn peel_heap_cell(
     state: &super::super::super::state::InterpreterState,
     value: Value,
 ) -> Value {
-    if !value.is_ptr() || value.is_nil() {
+    if !value.is_regular_ptr() || value.is_nil() {
         return value;
     }
     let base_ptr = value.as_ptr::<u8>();

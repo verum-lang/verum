@@ -1,0 +1,27 @@
+// @test: run-interpreter
+// @level: L2
+// @tier: 0
+// @tags: json, registry, reference, T1806
+// @description: Nested JSON array elements retain their variant identity through iterator references.
+// @expected-stdout: nested-json: ok
+// @expected-exit: 0
+// @timeout: 180000
+
+mount core.encoding.json.{JsonValue, json_object, json_array, json_string, json_int, stringify, stringify_pretty};
+
+fn main() {
+    let mut fields: Map<Text, JsonValue> = Map.new();
+    fields.insert("name", json_string("widget"));
+    let object = json_object(fields);
+    assert_eq(stringify(&object), "{\"name\":\"widget\"}");
+    let array = json_array([object]);
+    assert_eq(stringify(&array), "[{\"name\":\"widget\"}]");
+
+    let mut root: Map<Text, JsonValue> = Map.new();
+    root.insert("results", array);
+    let value = json_object(root);
+    assert_eq(stringify(&value), "{\"results\":[{\"name\":\"widget\"}]}");
+    assert_eq(stringify_pretty(&value), "{\n  \"results\": [\n    {\n      \"name\": \"widget\"\n    }\n  ]\n}");
+    assert_eq(stringify(&json_array([json_int(1), json_string("x")])), "[1,\"x\"]");
+    print("nested-json: ok");
+}

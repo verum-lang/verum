@@ -5,7 +5,7 @@ use super::super::super::heap;
 use super::super::super::state::InterpreterState;
 use super::super::DispatchResult;
 use super::bytecode_io::*;
-use super::cbgr_helpers::{decode_cbgr_ref, is_cbgr_ref, peel_heap_cell, resolve_arg_value};
+use super::cbgr_helpers::{decode_cbgr_ref, is_cbgr_ref, peel_heap_cell, resolve_arg_value, resolve_receiver};
 use crate::instruction::Reg;
 use crate::types::TypeId;
 use crate::value::Value;
@@ -13,6 +13,12 @@ use crate::value::Value;
 // ============================================================================
 // Pattern Matching + Variant Operations
 // ============================================================================
+
+/// Tag and payload readers share the receiver contract with field access.
+/// In particular, iterator ThinRefs name Value slots, not object addresses.
+fn variant_value(state: &InterpreterState, value: Value) -> Value {
+    peel_heap_cell(state, resolve_receiver(state, value))
+}
 
 /// AsVar (0x91) - Extract variant payload by field index.
 ///
@@ -24,34 +30,7 @@ pub(in super::super) fn handle_as_var(
     let variant_reg = read_reg(state)?;
     let field_idx = read_varint(state)? as usize;
 
-    let mut variant = state.get_reg(variant_reg);
-
-    // **Task #7 fix 2026-05-24** — auto-deref through CBGR refs
-    // and heap-interior pointers, same as `handle_match_tag` /
-    // `handle_get_variant_data`.  See those handlers for full
-    // rationale on `match &Maybe<Heap<T>>` shape.
-    let mut deref_depth = 0;
-    while is_cbgr_ref(&variant) && deref_depth < 8 {
-        let (abs_index, _generation) = decode_cbgr_ref(variant);
-        let dereffed = state.registers.get_absolute(abs_index);
-        if dereffed.to_bits() == variant.to_bits() {
-            break;
-        }
-        variant = dereffed;
-        deref_depth += 1;
-    }
-    if variant.is_ptr() && !variant.is_nil() {
-        let ptr_addr = variant.as_ptr::<u8>() as usize;
-        if state.cbgr_mutable_ptrs.contains(&ptr_addr) {
-            // SAFETY: see `handle_match_tag` mirror site.
-            let inner = unsafe { *(variant.as_ptr::<Value>()) };
-            variant = inner;
-        }
-    }
-
-    // Peel a `Heap<T>` cell before the payload read, as the tag-read twin
-    // does — see `peel_heap_cell`.
-    variant = peel_heap_cell(state, variant);
+    let variant = variant_value(state, state.get_reg(variant_reg));
 
     // #54: marker-tagged (FatRef/ThinRef) values are NOT payload-readable
     // heap objects — reading at marker+offset SIGSEGVs; nil-result mirrors
@@ -371,52 +350,9 @@ pub(in super::super) fn handle_get_variant_data(
     let variant_reg = read_reg(state)?;
     let field = read_varint(state)? as usize;
 
-    let mut variant = state.get_reg(variant_reg);
+    let variant = variant_value(state, state.get_reg(variant_reg));
 
-    // Auto-deref through register-based references (CBGR encoding)
-    let mut deref_depth = 0;
-    while is_cbgr_ref(&variant) && deref_depth < 8 {
-        let (abs_index, _generation) = decode_cbgr_ref(variant);
-        let dereffed = state.registers.get_absolute(abs_index);
-        if dereffed.to_bits() == variant.to_bits() {
-            break;
-        }
-        variant = dereffed;
-        deref_depth += 1;
-    }
-
-    // **Task #7 fix 2026-05-24** — auto-deref through heap-interior
-    // pointers tracked in `cbgr_mutable_ptrs`.  Mirror of the same
-    // logic in `handle_match_tag` — see that handler's comment for
-    // the full rationale.  Without this, destructure-binding
-    // `Some(payload)` against `&Maybe<...>` reads the Value at the
-    // wrong offset (`field_offset` into the heap-interior pointer
-    // target instead of the actual variant), producing garbage
-    // payload values that downstream code interprets with wrong
-    // type info (e.g. via `resolve_field_index`'s global-intern
-    // fallback that lands on the wrong type's field layout).
-    if variant.is_ptr() && !variant.is_nil() {
-        let ptr_addr = variant.as_ptr::<u8>() as usize;
-        if state.cbgr_mutable_ptrs.contains(&ptr_addr) {
-            if crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::TraceGvd) {
-                eprintln!("[gvd] INTERIOR-DEREF ptr={:#x} (in cbgr_mutable_ptrs)", ptr_addr);
-            }
-            // SAFETY: heap-interior pointer tracked in
-            // `cbgr_mutable_ptrs` points into a live heap object's
-            // data area; reading 8 bytes yields the stored Value
-            // (the actual variant pointer for `Some(payload)`).
-            let inner = unsafe { *(variant.as_ptr::<Value>()) };
-            variant = inner;
-        }
-    }
-
-    // Peel a `Heap<T>` cell so the payload is read from the boxed variant
-    // rather than from the cell — the tag-read twin has done this since
-    // T0163 and this reader was left behind, which read every payload of a
-    // `Heap`-boxed variant out of bounds. See `peel_heap_cell`.
-    variant = peel_heap_cell(state, variant);
-
-    if variant.is_ptr() && !variant.is_nil() {
+    if variant.is_regular_ptr() && !variant.is_nil() {
         let base_ptr = variant.as_ptr::<u8>();
         if !base_ptr.is_null() {
             let payload_offset = heap::OBJECT_HEADER_SIZE + 8;
@@ -458,52 +394,9 @@ pub(in super::super) fn handle_get_variant_data_ref(
     let variant_reg = read_reg(state)?;
     let field = read_varint(state)? as usize;
 
-    let mut variant = state.get_reg(variant_reg);
+    let variant = variant_value(state, state.get_reg(variant_reg));
 
-    // Auto-deref through register-based references (CBGR encoding)
-    let mut deref_depth = 0;
-    while is_cbgr_ref(&variant) && deref_depth < 8 {
-        let (abs_index, _generation) = decode_cbgr_ref(variant);
-        let dereffed = state.registers.get_absolute(abs_index);
-        if dereffed.to_bits() == variant.to_bits() {
-            break;
-        }
-        variant = dereffed;
-        deref_depth += 1;
-    }
-
-    // **T0557 (2026-07-21)** — auto-deref through a heap-interior
-    // pointer tracked in `cbgr_mutable_ptrs`, EXACTLY as the by-value
-    // sibling `handle_get_variant_data` (Task #7 fix, 2026-05-24) and
-    // `handle_match_tag` already do.  Without it, a `ref` payload
-    // binding whose scrutinee is ITSELF an interior `ref` (the nested
-    // `match &Maybe<FromItem> { Some(ref fi) => match fi { FiT(ref t)
-    // => &t.field } }` shape in l5_sql/planner.plan_from_for_select)
-    // computes `field_ptr = interior_ptr + OBJECT_HEADER_SIZE + 8` on
-    // the OUTER variant's payload slot instead of the inner variant
-    // object.  The resulting binding is garbage; the first field access
-    // on it (`&t.field` → RefField, or `t.field` → GetF) then panics
-    // "RefField: field 0 (offset 0+8=8) exceeds object data size 0/1"
-    // or null-derefs.  The `Some(fi)` by-value form was unaffected
-    // because it copies the inner pointer out of the slot.  Blocks the
-    // sqlite l7_api end-to-end suite (T0469 stage 0.5).
-    if variant.is_ptr() && !variant.is_nil() {
-        let ptr_addr = variant.as_ptr::<u8>() as usize;
-        if state.cbgr_mutable_ptrs.contains(&ptr_addr) {
-            // SAFETY: a pointer tracked in `cbgr_mutable_ptrs` points
-            // into a live heap object's data area; reading 8 bytes
-            // yields the stored Value (the actual inner variant ptr).
-            let inner = unsafe { *(variant.as_ptr::<Value>()) };
-            variant = inner;
-        }
-    }
-
-    // Peel a `Heap<T>` cell — same omission the by-value twin carried; a
-    // `ref` binding into a `Heap`-boxed variant would otherwise hand out a
-    // pointer past the end of the cell allocation. See `peel_heap_cell`.
-    variant = peel_heap_cell(state, variant);
-
-    if variant.is_ptr() && !variant.is_nil() {
+    if variant.is_regular_ptr() && !variant.is_nil() {
         let base_ptr = variant.as_ptr::<u8>();
         if !base_ptr.is_null() {
             // Payload starts at OBJECT_HEADER_SIZE + 8 (after tag + padding)
@@ -609,70 +502,10 @@ pub(in super::super) fn handle_match_tag(
     let value_reg = read_reg(state)?;
     let expected_tag = read_varint(state)? as u32;
 
-    let mut value = state.get_reg(value_reg);
-
-    // Auto-deref through register-based references (CBGR encoding)
-    let mut deref_depth = 0;
-    while is_cbgr_ref(&value) && deref_depth < 8 {
-        let (abs_index, _generation) = decode_cbgr_ref(value);
-        let dereffed = state.registers.get_absolute(abs_index);
-        if dereffed.to_bits() == value.to_bits() {
-            break;
-        }
-        value = dereffed;
-        deref_depth += 1;
-    }
-
-    // **Task #7 fix 2026-05-24** — auto-deref through HEAP-INTERIOR
-    // pointers tracked in `state.cbgr_mutable_ptrs`.
-    //
-    // `&record.field` / `&xs[i]` codegen emits `RefField` /
-    // `RefListElement` which produces a heap-interior pointer
-    // (`Value::from_ptr(elem_ptr)`) and tracks it in
-    // `state.cbgr_mutable_ptrs`.  The pointer points INTO the
-    // containing record's data area at the field's offset — the
-    // slot holds a `Value` (typically a pointer to the actual
-    // variant object).
-    //
-    // Pre-fix, `handle_match_tag` treated that heap-interior pointer
-    // AS IF it were the variant pointer itself, reading
-    // `variant_tag(ptr) = *(ptr + 32)` from the WRONG location
-    // (32 bytes past the field slot, which lands in adjacent record
-    // memory and produces a near-zero garbage tag → always took the
-    // `None` arm).  Live failure mode: `match &c.root { Some(_) =>
-    // …, None => … }` for `c.root: Maybe<Heap<RecordWithGenericParams>>`
-    // dispatched to `None` even when `c.root.is_some()` returned
-    // `true`.
-    //
-    // Fix: when value is a pointer AND the pointer is in
-    // `cbgr_mutable_ptrs`, read the `Value` at that location and
-    // re-point to it.  Mirrors the regular `Deref` handler's third
-    // arm at `cbgr.rs:232`.  Bounded to one level — heap-interior
-    // pointers are produced ONLY by single `&` operators, never
-    // chained, so a single re-point is sufficient.
-    if value.is_ptr() && !value.is_nil() {
-        let ptr_addr = value.as_ptr::<u8>() as usize;
-        if state.cbgr_mutable_ptrs.contains(&ptr_addr) {
-            // SAFETY: heap-interior pointer (tracked in
-            // `cbgr_mutable_ptrs`) points into a live heap object's
-            // data area; reading 8 bytes yields the stored Value
-            // (typically a variant pointer or a nil for None).
-            let inner = unsafe { *(value.as_ptr::<Value>()) };
-            value = inner;
-        }
-    }
-
-    // **T0163/T0147/T0109 — Heap<T> CBGR-cell peel.** `&*Heap<T>` reaches here
-    // as the cell's DATA pointer, which addresses the inner boxed `Value` —
-    // NOT a variant object. Reading the tag at `data_ptr + OBJECT_HEADER_SIZE`
-    // lands inside the inner Value / padding and yields ~0, so every
-    // `&*Heap<P>` read as the first variant (`Zero`); `alpha_eq`'s recursion
-    // into `Heap<Process>` bodies then matched `(Zero,Zero)` and
-    // short-circuited all comparisons. See `peel_heap_cell`.
-    value = peel_heap_cell(state, value);
+    let value = variant_value(state, state.get_reg(value_reg));
 
     // Check if value is a pointer to a variant object
-    let matches = if value.is_ptr() && !value.is_nil() {
+    let matches = if value.is_regular_ptr() && !value.is_nil() {
         let base_ptr = value.as_ptr::<u8>();
         if !base_ptr.is_null() {
             // SAFETY: base_ptr is non-null and points at a live
@@ -697,7 +530,7 @@ pub(in super::super) fn handle_match_tag(
     };
 
     if crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::TraceMatchtag) {
-        let vt = if value.is_ptr() && !value.is_nil() {
+        let vt = if value.is_regular_ptr() && !value.is_nil() {
             let p = value.as_ptr::<u8>();
             if !p.is_null() { unsafe { heap::variant_tag(p) as i64 } } else { -1 }
         } else if value.is_nil() { -2 } else { -3 };
@@ -723,40 +556,11 @@ pub(in super::super) fn handle_get_tag(
     let dst = read_reg(state)?;
     let value_reg = read_reg(state)?;
 
-    let mut value = state.get_reg(value_reg);
-
-    // **Task #7 fix 2026-05-24** — symmetric with `handle_match_tag`.
-    // Auto-deref through register-based CBGR refs AND heap-interior
-    // pointers in `cbgr_mutable_ptrs`.  See `handle_match_tag` for
-    // the full rationale.
-    let mut deref_depth = 0;
-    while is_cbgr_ref(&value) && deref_depth < 8 {
-        let (abs_index, _generation) = decode_cbgr_ref(value);
-        let dereffed = state.registers.get_absolute(abs_index);
-        if dereffed.to_bits() == value.to_bits() {
-            break;
-        }
-        value = dereffed;
-        deref_depth += 1;
-    }
-    if value.is_ptr() && !value.is_nil() {
-        let ptr_addr = value.as_ptr::<u8>() as usize;
-        if state.cbgr_mutable_ptrs.contains(&ptr_addr) {
-            // SAFETY: see `handle_match_tag`'s mirror site.
-            let inner = unsafe { *(value.as_ptr::<Value>()) };
-            value = inner;
-        }
-    }
-
-    // **T0163/T0147/T0109 — Heap<T> CBGR-cell peel** (mirror of the sibling
-    // handle_match_tag site above): `&*Heap<T>` is the cell's data pointer;
-    // peel to the inner boxed value so the tag is read from the boxed variant,
-    // not the Heap wrapper. See `peel_heap_cell`.
-    value = peel_heap_cell(state, value);
+    let value = variant_value(state, state.get_reg(value_reg));
 
     // Extract tag from variant object
     // Variant layout: ObjectHeader + [tag:u32][padding:u32][payload:Value]
-    if value.is_ptr() && !value.is_nil() {
+    if value.is_regular_ptr() && !value.is_nil() {
         let base_ptr = value.as_ptr::<u8>();
         if !base_ptr.is_null() {
             unsafe {
