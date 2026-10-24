@@ -190,7 +190,7 @@ fn unresolved_generic_never_becomes_copy_permission() {
     assert!(
         receipts
             .iter()
-            .all(|u| u.declaration_type.is_none() && u.event.operation == Op::Unknown)
+            .all(|u| matches!(u.declaration_type, Some(verum_vbc::TypeRef::Generic(_))) && u.event.operation == Op::Unknown)
     );
 }
 
@@ -378,7 +378,7 @@ fn generic_parameter_shadowing_a_nominal_never_publishes_the_nominal() {
         assert!(
             receipts
                 .iter()
-                .all(|u| u.declaration_type.is_none() && u.event.operation == Op::Unknown),
+                .all(|u| matches!(u.declaration_type, Some(verum_vbc::TypeRef::Generic(_))) && u.event.operation == Op::Unknown),
             "{receipts:?}"
         );
     }

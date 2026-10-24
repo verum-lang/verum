@@ -179,13 +179,12 @@ fn probe() -> Int {
 }
 
 #[test]
-fn unresolved_shared_generic_and_reference_inputs_do_not_get_source_clears() {
+fn unresolved_shared_and_reference_inputs_do_not_get_source_clears() {
     use verum_vbc::{Instruction, bytecode::decode_instructions, instruction::Reg};
     // Shared here has no imported descriptor: this is an unknown-owner negative,
     // not proof of the actual standard-library retain/release implementation.
     for source in [
         "fn probe(original: Shared<Int>) -> Shared<Int> { let copied = original; original }",
-        "fn probe<T>(original: T) -> T { let copied = original; original }",
         "type affine Token is { value: Int }; fn probe(original: &Token) -> &Token { let copied = original; original }",
         "type affine Token is { value: Int }; fn probe(original: *const Token) -> *const Token { let copied = original; original }",
     ] {

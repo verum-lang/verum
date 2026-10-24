@@ -20271,7 +20271,13 @@ impl VbcCodegen {
             if by_value_record {
                 // Param i occupies register i (`alloc_parameters`).
                 let reg = Reg(i as u16);
-                self.ctx.emit(Instruction::Clone { dst: reg, src: reg });
+                if self.consumes_named_binding(param_name, reg) {
+                    // The caller hands over this affine value.
+                } else if let Some(ty) = self.generic_named_binding(param_name, reg) {
+                    self.emit_generic_parameter_copy(reg, ty);
+                } else {
+                    self.ctx.emit(Instruction::Clone { dst: reg, src: reg });
+                }
             }
         }
 

@@ -2215,6 +2215,13 @@ impl CodegenContext {
         self.emit(Instruction::LoadUnit { dst: source });
     }
 
+    /// A receiving argument/local slot takes ownership before the source clears.
+    pub(super) fn emit_transferring_value(&mut self, destination: Reg, source: Reg) {
+        assert_ne!(destination, source);
+        self.emit_with_transfer(Instruction::Mov { dst: destination, src: source }, Some(source));
+        self.emit(Instruction::LoadUnit { dst: source });
+    }
+
     fn emit_with_transfer(&mut self, instr: Instruction, transferred: Option<Reg>) {
         self.array_result_facts.observe(&instr);
         if transferred.is_some() {

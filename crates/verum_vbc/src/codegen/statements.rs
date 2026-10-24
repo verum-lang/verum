@@ -1601,7 +1601,10 @@ impl VbcCodegen {
                 by_ref: false,
                 ..
             }) && value.is_some_and(|expr| self.consumes_named_place(expr, reg));
-            let bound = match value {
+            let generic = value.and_then(|expr| self.generic_named_place(expr, reg));
+            let bound = if let Some(ty) = generic {
+                self.emit_generic_value_handoff(reg, ty, true)
+            } else { match value {
                 Some(expr) if !transfer && self.binds_a_copy_of_a_place(expr, reg, inferred_copy_type.as_ref())? => {
                     let owned = self.ctx.alloc_temp();
                     self.ctx.emit(Instruction::Clone {
@@ -1611,7 +1614,7 @@ impl VbcCodegen {
                     owned
                 }
                 _ => reg,
-            };
+            }};
             self.compile_pattern_bind(pattern, bound)?;
             if transfer {
                 self.ctx.emit(Instruction::LoadUnit { dst: reg });

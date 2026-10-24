@@ -11194,6 +11194,10 @@ impl VbcCodegen {
         let store = Instruction::SetVariantData { variant, field, value };
         if self.consumes_named_place(expr, value) {
             self.ctx.emit_transferring_store(store, value);
+        } else if let Some(ty) = self.generic_named_place(expr, value) {
+            let received = self.emit_generic_value_handoff(value, ty, true);
+            self.ctx.emit(Instruction::SetVariantData { variant, field, value: received });
+            self.ctx.free_temp(received);
         } else {
             self.ctx.emit(store);
         }
@@ -26206,7 +26210,13 @@ impl VbcCodegen {
                     Some(expr) => self.consumes_named_place(expr, value_reg),
                     None => self.consumes_named_binding(field.name.name.as_str(), value_reg),
                 };
-                let cloned_reg = if transfer { value_reg } else {
+                let generic = match &field.value {
+                    Some(expr) => self.generic_named_place(expr, value_reg),
+                    None => self.generic_named_binding(field.name.name.as_str(), value_reg),
+                };
+                let cloned_reg = if let Some(ty) = generic {
+                    self.emit_generic_value_handoff(value_reg, ty, true)
+                } else if transfer { value_reg } else {
                     let owned = self.ctx.alloc_temp();
                     self.ctx.emit(Instruction::Clone { dst: owned, src: value_reg });
                     owned
@@ -26544,14 +26554,20 @@ impl VbcCodegen {
                     Some(expr) => self.consumes_named_place(expr, value_reg),
                     None => self.consumes_named_binding(field.name.name.as_str(), value_reg),
                 };
-                let is_place = !transfer && match &field.value {
+                let generic = match &field.value {
+                    Some(expr) => self.generic_named_place(expr, value_reg),
+                    None => self.generic_named_binding(field.name.name.as_str(), value_reg),
+                };
+                let is_place = !transfer && generic.is_none() && match &field.value {
                     Some(expr) => self.binds_a_copy_of_a_place(expr, value_reg, copy_type.as_ref())?,
                     // Shorthand (`Point { x, y }`) names its source
                     // without an expression node.
                     None => self
                         .copies_from_named_place(field.name.name.as_str(), value_reg),
                 };
-                let stored = if is_place {
+                let stored = if let Some(ty) = generic {
+                    self.emit_generic_value_handoff(value_reg, ty, true)
+                } else if is_place {
                     let owned = self.ctx.alloc_temp();
                     self.ctx.emit(Instruction::Clone {
                         dst: owned,
@@ -26665,7 +26681,12 @@ impl VbcCodegen {
             // `compile_record` for raw pointers (the pointer's
             // contents may not be a valid ObjectHeader).
             let transfer = self.consumes_named_place(arg_expr, value_reg);
-            if transfer || self.ctx.is_raw_pointer(value_reg) {
+            if let Some(ty) = self.generic_named_place(arg_expr, value_reg) {
+                let received = self.emit_generic_value_handoff(value_reg, ty, true);
+                self.ctx.emit(Instruction::SetF { obj: result, field_idx, value: received });
+                self.ctx.free_temp(received);
+                self.ctx.free_temp(value_reg);
+            } else if transfer || self.ctx.is_raw_pointer(value_reg) {
                 let store = Instruction::SetF {
                     obj: result,
                     field_idx,

@@ -107,6 +107,9 @@ impl ValueUseRecorder {
             return;
         }
         match instruction {
+            Instruction::Mov { src, .. } if transferred == Some(*src) => {
+                for captured in &mut self.return_use_capture { captured.transferred = true; }
+            }
             // A named destination is handled by the existing local producer.
             // A temporary can feed a selected result, aggregate or call instead.
             Instruction::Mov { dst, src } if !self.active.contains_key(dst) => {
@@ -262,33 +265,82 @@ impl super::VbcCodegen {
         self.consumes_named_binding(name.as_str(), reg)
     }
 
+    /// A generic source retains its exact declared parameter identity.
+    /// The frame witness selects copy or transfer; missing witnesses grant neither.
+    pub(super) fn generic_named_place(&self, expr: &verum_ast::Expr, reg: Reg) -> Maybe<TypeRef> {
+        let verum_ast::ExprKind::Path(path) = &Self::normalized_place(expr).kind else { return None; };
+        let [verum_ast::ty::PathSegment::Name(name)] = path.segments.as_slice() else { return None; };
+        self.generic_named_binding(name.as_str(), reg)
+    }
+    pub(super) fn generic_named_binding(&self, name: &str, reg: Reg) -> Maybe<TypeRef> {
+        let ty = self.named_binding_fact(name, reg)?.declaration_type.as_ref()?;
+        ty.is_generic().then(|| ty.clone())
+    }
+
+    /// An exact type witness, not an object header, decides the generic branch.
+    /// Unknown is refused before either a copy or an ownership handoff occurs.
+    fn resource_is_unrestricted(&mut self, ty: TypeRef) -> Reg {
+        use crate::instruction::CompareOp;
+        let mode = self.ctx.registers.alloc_fresh();
+        self.ctx.emit(Instruction::TypeResource { dst: mode, type_ref: ty });
+        let constant = self.ctx.registers.alloc_fresh();
+        let predicate = self.ctx.registers.alloc_fresh();
+        self.ctx.emit(Instruction::LoadI { dst: constant, value: ResourceDiscipline::Unknown as u8 as i64 });
+        self.ctx.emit(Instruction::CmpI { dst: predicate, op: CompareOp::Ne, a: mode, b: constant });
+        let message_id = self.intern_string("generic ownership requires a resolved declaration witness");
+        self.ctx.emit(Instruction::Assert { cond: predicate, message_id });
+        self.ctx.emit(Instruction::LoadI { dst: constant, value: ResourceDiscipline::Unrestricted as u8 as i64 });
+        self.ctx.emit(Instruction::CmpI { dst: predicate, op: CompareOp::Eq, a: mode, b: constant });
+        self.ctx.free_temp(mode);
+        self.ctx.free_temp(constant);
+        predicate
+    }
+
+    /// Establish a receiving value before clearing an affine source. The shared
+    /// VBC producer emits the same branch for interpretation and specialization.
+    pub(super) fn emit_generic_value_handoff(&mut self, source: Reg, ty: TypeRef, copy: bool) -> Reg {
+        let result = self.ctx.registers.alloc_fresh();
+        let unrestricted = self.resource_is_unrestricted(ty);
+        let copy_label = self.ctx.new_label("resource_copy");
+        let done = self.ctx.new_label("resource_received");
+        self.ctx.emit_forward_jump(&copy_label, |offset| Instruction::JmpIf { cond: unrestricted, offset });
+        self.ctx.emit_transferring_value(result, source);
+        self.ctx.emit_forward_jump(&done, |offset| Instruction::Jmp { offset });
+        self.ctx.define_label(&copy_label);
+        self.ctx.emit(if copy { Instruction::Clone { dst: result, src: source } }
+            else { Instruction::Mov { dst: result, src: source } });
+        self.ctx.define_label(&done);
+        self.ctx.free_temp(unrestricted);
+        result
+    }
+
+    pub(super) fn emit_generic_parameter_copy(&mut self, source: Reg, ty: TypeRef) {
+        let unrestricted = self.resource_is_unrestricted(ty);
+        let done = self.ctx.new_label("resource_parameter");
+        self.ctx.emit_forward_jump(&done, |offset| Instruction::JmpNot { cond: unrestricted, offset });
+        self.ctx.emit(Instruction::Clone { dst: source, src: source });
+        self.ctx.define_label(&done);
+        self.ctx.free_temp(unrestricted);
+    }
+
+    /// Both generic and concrete transfers require the same active declaration.
+    /// Borrowed aliases, captured cells and raw views never acquire its ownership.
+    fn named_binding_fact(&self, name: &str, reg: Reg) -> Maybe<&BindingFact> {
+        let binding = self.ctx.lookup_var(name)?;
+        if binding.reg != reg || binding.is_cell || binding.is_pattern_alias
+            || !matches!(binding.kind, super::RegisterKind::Local | super::RegisterKind::Parameter)
+            || self.ctx.reference_bindings.contains(name) || self.ctx.is_raw_pointer(reg) {
+            return None;
+        }
+        let fact = self.ctx.registers.value_uses.active.get(&reg)?;
+        (fact.id == binding.binding_id && fact.declaration_type.is_some()
+            && !matches!(fact.declaration_type, Some(TypeRef::Reference { .. }))).then_some(fact)
+    }
+
     /// Shorthand fields use the same exact binding contract as expression fields.
     pub(super) fn consumes_named_binding(&self, name: &str, reg: Reg) -> bool {
-        let Some(binding) = self.ctx.lookup_var(name) else {
-            return false;
-        };
-        if binding.reg != reg
-            || binding.is_cell
-            || binding.is_pattern_alias
-            || !matches!(
-                binding.kind,
-                super::RegisterKind::Local | super::RegisterKind::Parameter
-            )
-            || self.ctx.reference_bindings.contains(name)
-            || self.ctx.is_raw_pointer(reg)
-        {
-            return false;
-        }
-        let Some(fact) = self.ctx.registers.value_uses.active.get(&reg) else {
-            return false;
-        };
-        fact.id == binding.binding_id
-            && fact.declaration_type.is_some()
-            && !matches!(fact.declaration_type, Some(TypeRef::Reference { .. }))
-            && matches!(
-                fact.discipline,
-                ResourceDiscipline::Affine | ResourceDiscipline::Linear
-            )
+        self.named_binding_fact(name, reg).is_some_and(|fact| matches!(fact.discipline,
+            ResourceDiscipline::Affine | ResourceDiscipline::Linear))
     }
     /// Transfer a direct affine local or a fresh aggregate whose owning stores
     /// already consumed their inputs. Unproven selected results and calls remain
@@ -422,6 +474,7 @@ impl super::VbcCodegen {
                 return false;
             }
             match ty {
+                TypeRef::Generic(_) => true,
                 TypeRef::Concrete(id) => {
                     *id != crate::types::TypeId::PTR && *id != crate::types::TypeId::RESERVED
                 }
