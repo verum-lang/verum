@@ -4899,6 +4899,16 @@ impl VbcCodegen {
     }
 
     fn compile_unary(&mut self, op: UnOp, inner: &Expr) -> CodegenResult<Option<Reg>> {
+        // A transparent projection denotes the same storage as its wrapper.
+        // Borrow the original place so replacing a scalar/Text value reaches
+        // the containing record or collection, rather than a temporary Mov.
+        if matches!(op, UnOp::Ref | UnOp::RefMut)
+            && let ExprKind::TupleIndex { expr: base, index: 0 } = &inner.kind
+            && self.extract_expr_type_name(base)
+                .and_then(|name| self.transparent_inner_type_name(&name)).is_some()
+        {
+            return self.compile_unary(op, base);
+        }
         if std::env::var("VERUM_TRACE_UNARY_REF").is_ok()
             && matches!(op, UnOp::Ref | UnOp::RefMut)
         {
@@ -13095,9 +13105,12 @@ impl VbcCodegen {
         // An indexed Value receiver borrows its element slot, not the
         // temporary produced by GetE. Reuse explicit-borrow lowering so base
         // and index expressions run once and storage layout stays authoritative.
-        if matches!(&array_receiver.kind, ExprKind::Index { expr: base, index }
+        if (matches!(&array_receiver.kind, ExprKind::Index { expr: base, index }
             if !matches!(index.kind, ExprKind::Range { .. })
                 && self.packed_index_element_size(base).is_none())
+            || matches!(&array_receiver.kind, ExprKind::TupleIndex { expr: base, index: 0 }
+                if self.extract_expr_type_name(base)
+                    .and_then(|name| self.transparent_inner_type_name(&name)).is_some()))
             && let Some(receiver_type) = self.extract_expr_type_name(array_receiver)
             && let Some(key) = self.registered_receiver_method(&receiver_type, method.name.as_str())
             && self.ctx.lookup_qualified_function(&key).is_some_and(|info| info.takes_self_mut_ref)
@@ -25013,6 +25026,22 @@ impl VbcCodegen {
     }
 
     /// Compiles tuple index.
+    fn transparent_inner_type_name(&self, name: &str) -> Option<String> {
+        let base = Self::strip_generic_args(Self::method_receiver_type_name(name));
+        if let Some(id) = self.nominal_type_id(base)
+            && let Some(descriptor) = self.type_by_id(id)
+        {
+            if !descriptor.is_transparent_wrapper {
+                return None;
+            }
+            let field = descriptor.fields.first()?;
+            return self.type_ref_to_field_name(
+                field.declaration_type.as_ref().unwrap_or(&field.type_ref),
+            );
+        }
+        self.ctx.newtype_inner_type.get(base).cloned()
+    }
+
     fn compile_tuple_index(&mut self, base: &Expr, index: u32) -> CodegenResult<Option<Reg>> {
         if std::env::var("VERUM_TRACE_TUPLE_IDX").is_ok() {
             let inferred = self.infer_expr_type_name(base);
@@ -25043,7 +25072,7 @@ impl VbcCodegen {
         // old behaviour — this narrows the branch, it does not widen it.
         if index == 0
             && let Some(type_name) = self.infer_expr_type_name(base)
-            && self.ctx.newtype_names.contains(&type_name)
+            && self.transparent_inner_type_name(&type_name).is_some()
         {
             let base_is_ref = Self::expr_ident_name(base)
                 .is_some_and(|n| self.ctx.reference_bound_vars.contains(&n));
@@ -29308,9 +29337,9 @@ impl VbcCodegen {
             ExprKind::TupleIndex { expr: base, index } => {
                 let base_type = self.extract_expr_type_name(base)?;
                 if *index == 0
-                    && let Some(inner) = self.ctx.newtype_inner_type.get(&base_type)
+                    && let Some(inner) = self.transparent_inner_type_name(&base_type)
                 {
-                    return Some(inner.clone());
+                    return Some(inner);
                 }
                 VbcCodegen::tuple_element_type_name(&base_type, *index as usize)
             }
@@ -31260,9 +31289,9 @@ impl VbcCodegen {
             ExprKind::TupleIndex { expr: base, index } => {
                 let base_type = self.infer_expr_type_name(base)?;
                 if *index == 0
-                    && let Some(inner) = self.ctx.newtype_inner_type.get(&base_type)
+                    && let Some(inner) = self.transparent_inner_type_name(&base_type)
                 {
-                    return Some(inner.clone());
+                    return Some(inner);
                 }
                 VbcCodegen::tuple_element_type_name(&base_type, *index as usize)
             }
@@ -32266,9 +32295,9 @@ impl VbcCodegen {
             ExprKind::TupleIndex { expr: base, index } => {
                 if *index == 0
                     && let Some(base_type) = self.infer_expr_type_name(base)
-                    && let Some(inner) = self.ctx.newtype_inner_type.get(&base_type)
+                    && let Some(inner) = self.transparent_inner_type_name(&base_type)
                 {
-                    return self.type_name_to_type_kind(inner);
+                    return self.type_name_to_type_kind(&inner);
                 }
                 None
             }

@@ -34,6 +34,47 @@ fn check(body: &str, expected: &str) {
 }
 
 #[test]
+fn transparent_text_field_projection_selects_its_declared_mutator() {
+    check_with_declarations(r#"
+        type Digest is (Text);
+        type Envelope is { digest: Digest };
+        type Stranger is { count: Int };
+        implement Stranger { fn push_str(&mut self, text: &Text) { panic("wrong owner"); } }
+    "#, r#"
+        let mut record = Envelope { digest: Digest("original long text") };
+        record.digest.0.push_str(" suffix");
+        record.digest.0
+    "#, "original long text suffix");
+}
+
+#[test]
+fn transparent_indexed_projection_borrows_once() {
+    check_with_declarations(r#"
+        type Wrapped is (Text);
+        fn index(calls: &mut Int) -> Int { *calls = *calls + 1; 0 }
+    "#, r#"
+        let mut calls = 0;
+        let mut values = [Wrapped("original long text"), Wrapped("unchanged")];
+        values[index(&mut calls)].0.push_str(" suffix");
+        assert(calls == 1);
+        assert(values[1].0 == "unchanged");
+        values[0].0
+    "#, "original long text suffix");
+}
+
+#[test]
+fn explicit_transparent_field_borrow_replaces_the_same_slot() {
+    check_with_declarations(r#"
+        type Wrapped is (Text);
+        type Envelope is { value: Wrapped };
+    "#, r#"
+        let mut record = Envelope { value: Wrapped("original long text") };
+        append(&mut record.value.0);
+        record.value.0
+    "#, "original long text suffix");
+}
+
+#[test]
 fn indexed_text_receiver_mutation_reaches_its_element() {
     check(r#"
         let mut words = ["original long text", "unchanged"];
