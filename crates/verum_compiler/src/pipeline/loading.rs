@@ -796,8 +796,9 @@ impl<'s> CompilationPipeline<'s> {
                 }
             }
             // A manifest counts only if it is NEAR the entry: at the
-            // entry's own directory, or one level above it (the `src/`
-            // layout). Anything further away is not this file's project.
+            // entry's own directory, one level above it, or the root of
+            // its src/ tree. A distant repository manifest does not make an
+            // unrelated specification or script part of that repository's cog.
             //
             // This repository has a `verum.toml` at its root, so without the
             // distance rule every `.vr` file anywhere under it would be
@@ -805,7 +806,11 @@ impl<'s> CompilationPipeline<'s> {
             // single spec file went from 2.03s to 245s, and conformance
             // specs began loading their neighbours as sibling modules.
             let found = match &root {
-                Some(r) => *r == immediate_dir || Some(r.as_path()) == immediate_dir.parent(),
+                Some(r) => {
+                    *r == immediate_dir
+                        || Some(r.as_path()) == immediate_dir.parent()
+                        || immediate_dir.starts_with(r.join("src"))
+                }
                 None => false,
             };
             (root.unwrap_or(immediate_dir.clone()), found)
@@ -887,7 +892,15 @@ impl<'s> CompilationPipeline<'s> {
         // from the manifest), so the two commands see the same files. The
         // module PREFIX still comes from the manifest's cog name below —
         // that is what `mount` is written against and it is unaffected.
-        let enumerate_from = if mod_file.exists() {
+        // A root module describes the cog; it does not turn tests, examples
+        // or tools beside src/ into application modules. Select the source
+        // tree before applying the root-layout convention. Nested source
+        // entry points use that same tree so sibling mounts remain available.
+        let source_root = input_dir.join("src");
+        let uses_source_tree = manifest_found && immediate_dir.starts_with(&source_root);
+        let enumerate_from = if uses_source_tree {
+            source_root
+        } else if mod_file.exists() {
             input_dir.clone()
         } else {
             immediate_dir.clone()
@@ -929,6 +942,11 @@ impl<'s> CompilationPipeline<'s> {
         let canonical_input = input_path.canonicalize().ok();
         let mut project_files = List::new();
         Self::discover_vr_files_recursive(&enumerate_from, &canonical_input, &mut project_files)?;
+        if uses_source_tree && mod_file.is_file() {
+            // Retain declarations in the cog root without walking its siblings.
+            project_files.push(mod_file);
+            project_files.sort();
+        }
 
         if trace_load {
             eprintln!(

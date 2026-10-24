@@ -183,3 +183,46 @@ fn a_nested_directory_is_still_a_module_segment() {
         "a real subdirectory MUST contribute its segment: {paths:?}"
     );
 }
+
+#[test]
+fn a_root_module_does_not_pull_tests_and_examples_into_src() {
+    let root = scaffold("source-tree-boundary", "demo", true);
+    write(
+        &root.join("tests/negative.vr"),
+        "module demo.tests.negative; fn main() { missing(); }",
+    );
+    write(
+        &root.join("examples/other.vr"),
+        "module demo.examples.other; fn main() { missing(); }",
+    );
+    write(
+        &root.join("src/nested/helper.vr"),
+        "module demo.nested.helper; public fn value() -> Int { 7 }",
+    );
+    let paths = derived_module_paths(&root, true);
+    assert_eq!(paths, ["demo", "demo.helper", "demo.nested.helper"]);
+}
+
+#[test]
+fn a_nested_source_entry_keeps_the_source_tree_boundary() {
+    use verum_compiler::{CompilationPipeline, CompilerOptions, Session};
+    let root = scaffold("nested-source-entry", "demo", true);
+    std::fs::remove_file(root.join("mod.vr")).unwrap();
+    write(
+        &root.join("src/bin/main.vr"),
+        "module demo.bin.main; mount demo.helper.answer; fn main() { answer(); }",
+    );
+    write(
+        &root.join("tests/negative.vr"),
+        "module demo.tests.negative; fn main() { missing(); }",
+    );
+    let mut session = Session::new(CompilerOptions {
+        input: root.join("src/bin/main.vr"),
+        ..Default::default()
+    });
+    let mut pipeline = CompilationPipeline::new(&mut session);
+    pipeline.load_project_modules_for_testing().unwrap();
+    let mut paths = pipeline.loaded_project_module_paths_for_testing();
+    paths.sort();
+    assert_eq!(paths, ["demo.helper", "demo.main"]);
+}
