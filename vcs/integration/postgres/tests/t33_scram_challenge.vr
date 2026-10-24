@@ -1,0 +1,43 @@
+// @test: run-interpreter
+// @level: L2
+// @tags: database, postgres, scram
+// @description: SCRAM proofs and server verification against independent SHA256/HMAC/PBKDF2 vectors.
+module scram_challenge.main;
+mount core.database.postgres.auth.scram.{scram_client_new, ChannelBinding};
+
+fn check(binding: ChannelBinding, first: Text, final_message: Text, signature: Text) {
+    let mut client = scram_client_new("user", "pencil", binding, "abcdefghijklmnopqrstuvwx");
+    let initial = client.client_first_message();
+    assert_eq(Text.from_utf8(initial.as_slice()).unwrap(), first);
+    let response = client.server_first_to_client_final("r=abcdefghijklmnopqrstuvwxservernonce,s=c2FsdA==,i=4096".as_bytes()).unwrap();
+    assert_eq(Text.from_utf8(response.as_slice()).unwrap(), final_message);
+    client.verify_server_final(signature.as_bytes()).unwrap();
+    assert(client.is_authenticated());
+}
+
+fn main() {
+    check(ChannelBinding.CbNone, "n,,n=user,r=abcdefghijklmnopqrstuvwx", "c=biws,r=abcdefghijklmnopqrstuvwxservernonce,p=9k58glVyP3FjFbVnxirUUsWgPVmOu8nJ0YauFXE3Uew=", "v=rTa7cCd9cKAhZ1/ELvcGjfISu9KjjRDe3ZAMQk+MqwU=");
+    check(ChannelBinding.CbTlsServerEndPoint([0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31]), "p=tls-server-end-point,,n=user,r=abcdefghijklmnopqrstuvwx", "c=cD10bHMtc2VydmVyLWVuZC1wb2ludCwsAAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=,r=abcdefghijklmnopqrstuvwxservernonce,p=c/C+gHeXlrK5moTrVr9Gx8Ux2zwlNpoB0Pii7qGCa7A=", "v=fDdQV9Ri6NRsUq5J4dZkOgbwJGqBwY/u9A/TqqFvp6k=");
+    let invalid: List<Text> = [
+        "",
+        "r=abcdefghijklmnopqrstuvwx,s=c2FsdA==,i=4096",
+        "r=wrongnonce,s=c2FsdA==,i=4096",
+        "r=abcdefghijklmnopqrstuvwx server,s=c2FsdA==,i=4096",
+        "m=required,r=abcdefghijklmnopqrstuvwxservernonce,s=c2FsdA==,i=4096",
+        "s=c2FsdA==,r=abcdefghijklmnopqrstuvwxservernonce,i=4096",
+        "r=abcdefghijklmnopqrstuvwxservernonce,s=c2FsdA==,i=4096,r=duplicate",
+        "r=abcdefghijklmnopqrstuvwxservernonce,s=c2FsdA==,i=4096,m=required",
+        "r=abcdefghijklmnopqrstuvwxservernonce,s=c2FsdA==,i=4096,",
+        "r=abcdefghijklmnopqrstuvwxservernonce,s=c2FsdA==,i=0",
+        "r=abcdefghijklmnopqrstuvwxservernonce,s=c2FsdA==,i=10000001",
+        "r=abcdefghijklmnopqrstuvwxservernonce,s=invalid!,i=4096",
+        "r=abcdefghijklmnopqrstuvwxservernonce,s=c2FsdA==,i=9999999999999999999999999",
+    ];
+    for challenge in invalid.iter() {
+        let mut client = scram_client_new("user", "pencil", ChannelBinding.CbNone, "abcdefghijklmnopqrstuvwx");
+        let _ = client.client_first_message();
+        assert(client.server_first_to_client_final(challenge.as_bytes()).is_err());
+        assert(client.has_failed());
+    }
+    print("SCRAM: independent proofs, server verification and malformed challenges passed");
+}

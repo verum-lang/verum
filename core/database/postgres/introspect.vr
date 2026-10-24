@@ -275,7 +275,7 @@ fn parse_index_cols(def: &Text) -> List<Text> {
         col_buf.push(bytes[j]);
         j = j + 1;
     }
-    let cols_text = Text.from_bytes(&col_buf).unwrap_or("".clone());
+    let cols_text = Text.from_utf8(col_buf.as_slice()).unwrap_or("".clone());
     split_by_comma_trim_quotes(&cols_text)
 }
 
@@ -299,7 +299,7 @@ fn parse_index_where(def: &Text) -> Maybe<Text> {
                 tail.push(bytes[j]);
                 j = j + 1;
             }
-            return Maybe.Some(Text.from_bytes(&tail).unwrap_or("".clone()));
+            return Maybe.Some(Text.from_utf8(tail.as_slice()).unwrap_or("".clone()));
         }
         i = i + 1;
     }
@@ -327,7 +327,7 @@ fn split_by_comma_trim_quotes(s: &Text) -> List<Text> {
                 col.push(bytes[j]);
                 j = j + 1;
             }
-            let raw = Text.from_bytes(&col).unwrap_or("".clone());
+            let raw = Text.from_utf8(col.as_slice()).unwrap_or("".clone());
             out.push(trim_and_strip_quotes(&raw));
             start = i + 1;
         }
@@ -349,7 +349,7 @@ fn trim_and_strip_quotes(s: &Text) -> Text {
     let mut out: List<Byte> = List.new();
     let mut k = start;
     while k < end { out.push(bytes[k]); k = k + 1; }
-    Text.from_bytes(&out).unwrap_or("".clone())
+    Text.from_utf8(out.as_slice()).unwrap_or("".clone())
 }
 
 // -----------------------------------------------------------------------------

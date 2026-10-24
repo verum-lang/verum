@@ -78,7 +78,7 @@ fn take_first_two(s: &Text) -> Text {
         out.push(bytes[i]);
         i = i + 1;
     }
-    Text.from_bytes(&out).unwrap_or("".clone())
+    Text.from_utf8(out.as_slice()).unwrap_or("".clone())
 }
 
 fn parse_optional_int(s: &Text) -> Maybe<Int> {

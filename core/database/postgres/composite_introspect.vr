@@ -352,7 +352,7 @@ fn sub_text(s: &Text, start: Int, end: Int) -> Text {
         out.push(bytes[i]);
         i = i + 1;
     }
-    Text.from_bytes(&out).unwrap_or("".clone())
+    Text.from_utf8(out.as_slice()).unwrap_or("".clone())
 }
 
 /// Standard SQL string-literal quoting: wrap in single quotes,
@@ -375,7 +375,7 @@ fn quote_literal(s: &Text) -> Text {
         i = i + 1;
     }
     out.push(0x27 as Byte);
-    Text.from_bytes(&out).unwrap_or("".clone())
+    Text.from_utf8(out.as_slice()).unwrap_or("".clone())
 }
 
 fn int_to_text(n: Int) -> Text {
