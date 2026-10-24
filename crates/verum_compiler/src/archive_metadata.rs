@@ -1499,7 +1499,9 @@ fn register_module_metadata(
                 .unwrap_or(module_name);
             let declaring_parent = join_module_path(parent_owner, parent_name.as_str());
             let declaring_key: Text = format!("{declaring_parent}.{simple_method_name}").into();
-            meta.functions.entry(declaring_key).or_insert_with(|| descriptor.clone());
+            meta.functions
+                .entry(declaring_key)
+                .or_insert_with(|| descriptor.clone());
             // Also alias the descriptor under the qualified key so
             // `register_inherent_methods_from_metadata`'s
             // `metadata.functions.get("Text.with_capacity")` finds it.
@@ -1510,6 +1512,11 @@ fn register_module_metadata(
                 meta.functions.insert(qualified_key, descriptor.clone());
             }
         } else if !module_path.is_empty() {
+            // The archive entry may aggregate several source files. Preserve
+            // the declaring file and inline-module owner as a lookup key.
+            let declaring_key: Text =
+                join_module_path(fn_module_path.as_str(), simple_name.as_str()).into();
+            meta.functions.entry(declaring_key).or_insert_with(|| descriptor.clone());
             // Free function — register under MODULE-qualified key
             // ALWAYS, even when the simple-name slot is taken by an
             // earlier first-wins registration.  Required so

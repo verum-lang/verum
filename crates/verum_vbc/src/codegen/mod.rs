@@ -2956,6 +2956,18 @@ impl VbcCodegen {
             .map(|m| crate::types::StringId(self.ctx.intern_string_raw(&m)))
     }
 
+    /// Enter an inline module without losing the enclosing file's owner.
+    fn scope_to_inline_module(&mut self, name: &str) -> Option<String> {
+        let previous = self.ctx.current_source_module.clone();
+        let parent = previous.as_deref().unwrap_or_else(|| self.count_root());
+        self.ctx.current_source_module = Some(if parent.is_empty() {
+            name.to_string()
+        } else {
+            format!("{parent}.{name}")
+        });
+        previous
+    }
+
     /// The ONE constructor for a function descriptor in codegen.
     ///
     /// FN-ORIGIN-MODULE (v2.13): `origin_module` must be stamped at
@@ -4677,7 +4689,7 @@ impl VbcCodegen {
             names: &mut std::collections::HashMap<String, String>,
         ) {
             let join = |path: &verum_ast::ty::Path| {
-                let path = path.to_string();
+                let path = path.to_string().replace("::", ".");
                 if prefix.is_empty() {
                     path
                 } else {
@@ -5855,8 +5867,7 @@ impl VbcCodegen {
                     let module_name = mod_decl.name.name.to_string();
                     let count_scope = self.child_count_module_scope(&module_name);
                     let previous_count_scope = self.count_module_scope.replace(count_scope);
-                    let prev_source = self.ctx.current_source_module.clone();
-                    self.ctx.current_source_module = Some(module_name);
+                    let prev_source = self.scope_to_inline_module(&module_name);
                     for sub_item in items.iter() {
                         if let Err(e) = self.compile_item_lenient(sub_item) {
                             let class = e.skip_class();
@@ -10809,8 +10820,7 @@ impl VbcCodegen {
                     let module_name = mod_decl.name.name.to_string();
                     let count_scope = self.child_count_module_scope(&module_name);
                     let previous_count_scope = self.count_module_scope.replace(count_scope);
-                    let prev_source = self.ctx.current_source_module.clone();
-                    self.ctx.current_source_module = Some(module_name);
+                    let prev_source = self.scope_to_inline_module(&module_name);
                     // LENIENT — see parallel arm in compile_item for rationale.
                     for item in items.iter() {
                         if let Err(e) = self.collect_declarations(item) {
@@ -19518,8 +19528,7 @@ impl VbcCodegen {
                     let module_name = mod_decl.name.name.to_string();
                     let count_scope = self.child_count_module_scope(&module_name);
                     let previous_count_scope = self.count_module_scope.replace(count_scope);
-                    let prev_source = self.ctx.current_source_module.clone();
-                    self.ctx.current_source_module = Some(module_name);
+                    let prev_source = self.scope_to_inline_module(&module_name);
                     // LENIENT — a single inner-fn compile failure must
                     // NOT abort the outer module's compilation (would
                     // drop top-level fn main, surfacing as "No main
@@ -20633,6 +20642,13 @@ impl VbcCodegen {
         self.trace_id_adoption(func_info.id.0, &descriptor_name);
         descriptor.id = func_info.id;
         descriptor.has_source_body = func.body.is_some();
+        if impl_type_name.is_none() {
+            descriptor.visibility = if matches!(func.visibility, verum_ast::Visibility::Public) {
+                crate::types::Visibility::Public
+            } else {
+                crate::types::Visibility::Private
+            };
+        }
         // RETNAME-CARRY-1 — carry the source-level return-type name.
         descriptor.return_type_name = func_info
             .return_type_name

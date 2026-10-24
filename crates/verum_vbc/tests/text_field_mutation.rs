@@ -48,6 +48,26 @@ fn transparent_text_field_projection_selects_its_declared_mutator() {
 }
 
 #[test]
+fn transparent_field_mutations_preserve_neighboring_fields_after_a_factory_call() {
+    check_with_declarations(r#"
+        type PackageName is (Text);
+        type Digest is (Text);
+        type Manifest is { name: PackageName, version: Text, artefact: Digest, published_at: Int };
+        fn snapshot() -> Manifest {
+            Manifest { name: PackageName("original long name"), version: "unchanged version",
+                artefact: Digest("original long digest"), published_at: 42 }
+        }
+    "#, r#"
+        let mut record = snapshot();
+        record.name.0.push_str(" suffix");
+        record.artefact.0.push_str(" suffix");
+        record.published_at = 100;
+        if record.name.0.len() == 25 && record.artefact.0.len() == 27
+            && record.version.len() == 17 && record.published_at == 100 { "ok" } else { "bad" }
+    "#, "ok");
+}
+
+#[test]
 fn transparent_indexed_projection_borrows_once() {
     check_with_declarations(r#"
         type Wrapped is (Text);

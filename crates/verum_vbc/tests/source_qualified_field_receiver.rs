@@ -7,6 +7,34 @@ use verum_fast_parser::Parser;
 use verum_vbc::codegen::{CodegenConfig, VbcCodegen};
 use verum_vbc::instruction::Instruction;
 
+#[test]
+fn multi_segment_mounts_keep_canonical_field_owners() {
+    for imports in [
+        "mount app.authority.{PackageName as Name}; mount app.evidence.Digest;",
+        "mount app.{authority.{PackageName as Name}, evidence.Digest};",
+    ] {
+        let ast = Parser::new(&format!(
+            "module consumer; {imports} type Envelope is {{ name: Name, digest: Digest }};"
+        ))
+        .parse_module()
+        .expect("grammar");
+        let cg = VbcCodegen::with_config(CodegenConfig::new("consumer"));
+        let fields = cg.declared_field_type_names(&ast, "consumer");
+        for (field, owner) in [
+            ("name", "app.authority.PackageName"),
+            ("digest", "app.evidence.Digest"),
+        ] {
+            assert_eq!(
+                fields
+                    .get(&("consumer.Envelope".into(), field.into()))
+                    .map(String::as_str),
+                Some(owner),
+                "{imports}"
+            );
+        }
+    }
+}
+
 fn body_targets(source: &str) -> Vec<Vec<String>> {
     let mut sources = Vec::new();
     let mut registries = Vec::new();
