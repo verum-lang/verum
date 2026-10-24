@@ -323,6 +323,37 @@ impl super::VbcCodegen {
         self.ctx.free_temp(unrestricted);
     }
 
+    /// The selected callable's semantic parameter declaration establishes a
+    /// by-value destination. ABI carriers and method spellings cannot grant it.
+    pub(super) fn emit_owned_call_argument(
+        &mut self,
+        callable: &super::FunctionInfo,
+        index: usize,
+        argument: &verum_ast::Expr,
+        source: Reg,
+    ) -> Reg {
+        let generic = self.generic_named_place(argument, source);
+        let concrete = self.consumes_named_place(argument, source);
+        if generic.is_none() && !concrete { return source; }
+        let owns = !callable.is_async && !callable.is_generator
+            && callable.intrinsic_name.is_none()
+            && (callable.has_source_body || self.functions.iter().any(|f|
+                f.descriptor.id == callable.id && f.descriptor.has_source_body))
+            && self.ctx.semantic_fn_params.get(&callable.id)
+            .and_then(|params| params.get(index)).and_then(|ty| ty.as_ref())
+            .is_some_and(|ty| !matches!(ty, TypeRef::Reference { .. }));
+        if !owns { return source; }
+        if let Some(ty) = generic {
+            return self.emit_generic_value_handoff(source, ty, false);
+        }
+        if concrete {
+            let received = self.ctx.registers.alloc_fresh();
+            self.ctx.emit_transferring_value(received, source);
+            return received;
+        }
+        source
+    }
+
     /// Both generic and concrete transfers require the same active declaration.
     /// Borrowed aliases, captured cells and raw views never acquire its ownership.
     fn named_binding_fact(&self, name: &str, reg: Reg) -> Maybe<&BindingFact> {

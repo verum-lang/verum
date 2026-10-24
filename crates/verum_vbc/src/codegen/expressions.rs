@@ -8152,6 +8152,9 @@ impl VbcCodegen {
                     if let Some(saved) = saved {
                         self.ctx.pop_disambig_context(saved);
                     }
+                    let arg_val = if is_ffi_call { arg_val } else {
+                        self.emit_owned_call_argument(&func_info, i, arg, arg_val)
+                    };
                     arg_results.push(arg_val);
                 }
             }
