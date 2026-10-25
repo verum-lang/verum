@@ -1,0 +1,32 @@
+// @test: run-interpreter
+// @level: L2
+// @tags: database, postgres
+// @description: Tagged and startup frames borrow their captured writers.
+module postgres_frame_callbacks.main;
+mount core.database.common.types.WireBuf;
+mount core.database.postgres.wire.frame.{frame, frame_untagged};
+
+fn main() {
+    let text = "ok";
+    let tagged = frame(81 as Byte, |buf: &mut WireBuf| { buf.put_cstr(&text); });
+    let untagged = frame_untagged(|buf: &mut WireBuf| { buf.put_cstr(&text); });
+    assert_eq(tagged.len(), 8);
+    assert_eq(untagged.len(), 7);
+    assert_eq(tagged[0] as Int, 81);
+    assert_eq(untagged[0] as Int, 0);
+    assert_eq(untagged[1] as Int, 0);
+    assert_eq(untagged[2] as Int, 0);
+    assert_eq(untagged[3] as Int, 7);
+    assert_eq(untagged[4] as Int, 111);
+    assert_eq(untagged[5] as Int, 107);
+    assert_eq(untagged[6] as Int, 0);
+    let mut index = 0;
+    while index < untagged.len() {
+        assert_eq(tagged[index + 1], untagged[index]);
+        index = index + 1;
+    }
+    let empty = frame(88 as Byte, |_buf: &mut WireBuf| {});
+    assert_eq(empty.len(), 5);
+    assert_eq(empty[4] as Int, 4);
+    print("postgres frames: captured and empty writers passed");
+}

@@ -22,8 +22,9 @@
 )
 module core.database.postgres.wire.frame;
 
-mount base.{Result, Ok, Err, Text, Maybe, None, Some};
-mount collections.List;
+mount core.base.result.Result;
+mount core.base.maybe.Maybe;
+mount core.collections.list.List;
 mount core.database.common.types.{WireBuf, WireReader};
 
 // -----------------------------------------------------------------------------
@@ -88,8 +89,16 @@ public fn frame<F: fn(&mut WireBuf) -> ()>(
     tag: Byte,
     write_payload: F,
 ) -> List<Byte> {
+    frame_with_writer(tag, &write_payload)
+}
+
+// Framing invokes its writer synchronously and never stores or copies it.
+fn frame_with_writer<F: fn(&mut WireBuf) -> ()>(
+    tag: Byte,
+    write_payload: &F,
+) -> List<Byte> {
     let mut payload = WireBuf.new();
-    write_payload(&mut payload);
+    (*write_payload)(&mut payload);
 
     let mut out: List<Byte> = List.new();
     if tag != (0 as Byte) {
@@ -113,7 +122,7 @@ public fn frame<F: fn(&mut WireBuf) -> ()>(
 
 /// Convenience for un-tagged frames (Startup-class).
 public fn frame_untagged<F: fn(&mut WireBuf) -> ()>(write_payload: F) -> List<Byte> {
-    frame((0 as Byte), write_payload)
+    frame_with_writer((0 as Byte), &write_payload)
 }
 
 // -----------------------------------------------------------------------------
