@@ -1119,6 +1119,10 @@ pub struct VbcCodegen {
     /// it — locals shadow imports (LOCAL-TYPE-SHADOW-1).
     archive_claimed_type_ids: std::collections::HashSet<u32>,
 
+    /// Provenance of remapped declaration data. A transitive archive copy
+    /// cannot replace the descriptor emitted by its declaring module.
+    archive_data_sources: Map<TypeId, u8>,
+
     /// TYPE-REMAP-QUALIFIED-ONLY-1 (#45): bare simple type name → the
     /// module-qualified key of its FIRST archive registrant.  Lets
     /// `register_archive_type_qualified` recognise when a SECOND,
@@ -2301,6 +2305,7 @@ impl VbcCodegen {
             // ast_type_to_type_ref and type_ref_for_type_kind can do a single lookup
             // instead of hardcoded match arms.
             archive_claimed_type_ids: std::collections::HashSet::new(),
+            archive_data_sources: Map::new(),
             type_name_first_qualifier: std::collections::HashMap::new(),
             ambiguous_bare_type_names: std::collections::HashSet::new(),
             sibling_impl_counters: std::collections::HashMap::new(),
@@ -9306,6 +9311,7 @@ impl VbcCodegen {
         self.functions.clear();
         self.types.clear();
         self.type_index.clear();
+        self.archive_data_sources.clear();
         self.ineligible_record_carriers.clear();
         self.next_func_id = 0;
         self.next_type_id = 0;
@@ -27272,7 +27278,31 @@ impl VbcCodegen {
                 continue;
             };
             if let Some(index) = self.type_index_of(crate::types::TypeId(local)) {
+                let owner = source
+                    .origin_module
+                    .and_then(|id| module.strings.get(id))
+                    .unwrap_or(&module.name);
+                let local_declaration = owner == module.name
+                    || owner
+                        .strip_prefix(module.name.as_str())
+                        .is_some_and(|suffix| suffix.starts_with('.'));
+                // A promoted name retains a previous imported carrier when
+                // the source declaration claims its own unqualified name.
+                let direct_name = module
+                    .strings
+                    .get(source.name)
+                    .is_some_and(|name| !name.contains('.'));
+                let priority = u8::from(local_declaration) * 2 + u8::from(direct_name);
+                let local = crate::types::TypeId(local);
+                if self
+                    .archive_data_sources
+                    .get(&local)
+                    .is_some_and(|previous| *previous > priority)
+                {
+                    continue;
+                }
                 copy_remapped_data_type_carriers(source, &mut self.types[index], &type_id_remap);
+                self.archive_data_sources.insert(local, priority);
             }
         }
         // Optional source spellings may be absent in older descriptors. The
