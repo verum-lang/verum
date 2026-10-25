@@ -16,8 +16,9 @@ fn main() {
     let database = var(&"VERUM_PG_TEST_DATABASE").unwrap_or("spindle_test");
     let config = PgConfig.new(host, port, user, password, database)
         .with_tls(PgTlsMode.PtmDisable).with_connect_timeout_ms(5000);
-    let mut wrong_password = config.clone();
-    wrong_password.password = "deliberately-invalid-lifetime-test-password";
+    let wrong_password = PgConfig.new(host, port, user,
+        "deliberately-invalid-lifetime-test-password", database)
+        .with_tls(PgTlsMode.PtmDisable).with_connect_timeout_ms(5000);
     let required_tls = config.clone().with_tls(PgTlsMode.PtmRequire);
     let mut index = 0;
     while index < 4 {
