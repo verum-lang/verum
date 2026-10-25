@@ -27278,21 +27278,7 @@ impl VbcCodegen {
                 continue;
             };
             if let Some(index) = self.type_index_of(crate::types::TypeId(local)) {
-                let owner = source
-                    .origin_module
-                    .and_then(|id| module.strings.get(id))
-                    .unwrap_or(&module.name);
-                let local_declaration = owner == module.name
-                    || owner
-                        .strip_prefix(module.name.as_str())
-                        .is_some_and(|suffix| suffix.starts_with('.'));
-                // A promoted name retains a previous imported carrier when
-                // the source declaration claims its own unqualified name.
-                let direct_name = module
-                    .strings
-                    .get(source.name)
-                    .is_some_and(|name| !name.contains('.'));
-                let priority = u8::from(local_declaration) * 2 + u8::from(direct_name);
+                let priority = bootstrap_types::declaration_priority(module, source);
                 let local = crate::types::TypeId(local);
                 if self
                     .archive_data_sources

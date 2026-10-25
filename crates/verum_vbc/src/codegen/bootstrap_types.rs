@@ -19,6 +19,19 @@ pub(super) fn identity(module: &VbcModule, ty: &TypeDescriptor) -> Option<String
     Some(crate::module::qualify_module_name(owner, name))
 }
 
+/// A declaration in its owning bundle outranks transitive copies. Within that
+/// bundle, collection retains an imported carrier under its qualified name
+/// when installing the source declaration under its unqualified name.
+pub(super) fn declaration_priority(module: &VbcModule, ty: &TypeDescriptor) -> u8 {
+    let owner = ty.origin_module
+        .and_then(|id| module.strings.get(id))
+        .unwrap_or(&module.name);
+    let local = owner == module.name || owner.strip_prefix(module.name.as_str())
+        .is_some_and(|suffix| suffix.starts_with('.'));
+    let direct = module.strings.get(ty.name).is_some_and(|name| !name.contains('.'));
+    u8::from(local) * 2 + u8::from(direct)
+}
+
 // Shadowed imports retain their fully qualified declared name. Normalize only
 // against that descriptor's own owner, exactly as archive type import does.
 // Otherwise preallocation can invent a nominal ID for a canonical carrier while
@@ -249,9 +262,11 @@ impl VbcCodegen {
                 source_keys.insert((mi, ty.id), key.clone());
                 // Prefer the defining unit over an imported copy. Resolve ties
                 // independently of the caller's module iteration order.
-                if catalog
-                    .get(&key)
-                    .is_none_or(|&(old, _)| score(mi, &key) > score(old, &key))
+                if catalog.get(&key).is_none_or(|&(old, old_type)| {
+                    (declaration_priority(module, ty), score(mi, &key))
+                        > (declaration_priority(available[old], &available[old].types[old_type]),
+                            score(old, &key))
+                })
                 {
                     catalog.insert(key, (mi, ti));
                 }
