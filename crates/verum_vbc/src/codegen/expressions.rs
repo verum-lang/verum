@@ -9248,6 +9248,9 @@ impl VbcCodegen {
     /// Returns None when the base name is unknown or a bare type parameter.
     fn type_name_to_type_ref_mono(&self, name: &str) -> Option<crate::types::TypeRef> {
         let name = name.trim();
+        if name == "()" {
+            return Some(crate::types::TypeRef::Concrete(crate::types::TypeId::UNIT));
+        }
         if name.starts_with('&') {
             let ty = verum_fast_parser::Parser::new(name).parse_type().ok()?;
             return self.explicit_type_witness(&ty, None);
@@ -25495,10 +25498,14 @@ impl VbcCodegen {
         type_name: &str,
         field_name: &str,
     ) -> (Option<String>, Option<Vec<String>>, Option<crate::types::TypeRef>) {
-        if let Some(ft) = self.field_type_name(type_name, field_name) {
-            // Strip any generic args — variants register under the base name.
-            let base = ft.split('<').next().unwrap_or(ft).to_string();
-            self.ctx.push_disambig_context(Some(base))
+        if let Some(ft) = self.field_access_type_name(type_name, field_name) {
+            // Variant lookup uses the base; generic constructors require the
+            // complete declared field type, including nested arguments.
+            let base = ft.split('<').next().unwrap_or(&ft).to_string();
+            let expected = self.type_name_to_type_ref_mono(&ft);
+            let saved = self.ctx.push_disambig_context(Some(base));
+            self.ctx.expected_value_type = expected;
+            saved
         } else {
             // Field type unknown — keep existing context as-is (no
             // override, no disturbance to `current_return_type_inner`).
