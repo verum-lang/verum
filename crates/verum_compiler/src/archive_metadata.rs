@@ -183,8 +183,28 @@ pub fn archive_to_core_metadata(archive: &VbcArchive) -> CoreMetadata {
         register_module_metadata(&module, &entry.name, &mut meta);
     }
     resolve_opaque_type_ids_in_alias_targets(&mut meta, &archive_type_names);
+    attach_declared_methods(&mut meta);
 
     meta
+}
+
+/// Assemble rosters after every declaration has arrived. Imported descriptors
+/// and lookup aliases share methods only when their declaring owner agrees.
+fn attach_declared_methods(meta: &mut CoreMetadata) {
+    let mut methods = std::collections::BTreeMap::<Text, std::collections::BTreeSet<Text>>::new();
+    for function in meta.functions.values() {
+        if let Some(parent) = &function.parent_type {
+            let name = function.name.as_str().rsplit('.').next().unwrap_or(function.name.as_str());
+            methods.entry(parent.clone()).or_default().insert(name.into());
+        }
+    }
+    for ty in meta.types.values_mut() {
+        // Synthetic scalar catalogues have no declaration owner.
+        if ty.module_path.is_empty() && ty.origin_module_path.is_none() { continue; }
+        let owner = ty.origin_module_path.as_ref().unwrap_or(&ty.module_path);
+        let key: Text = join_module_path(owner.as_str(), ty.name.as_str()).into();
+        ty.methods = methods.get(&key).map(|names| names.iter().cloned().collect()).unwrap_or_default();
+    }
 }
 
 /// T0525 — restore the NAME of a cross-module alias target.
@@ -982,7 +1002,15 @@ fn register_module_metadata(
             .types
             .get(&type_name)
             .is_some_and(|existing| repairs_degraded(existing, &descriptor));
-        if !simple_slot_was_occupied || simple_needs_repair {
+        // A built-in record's declared owner outranks an impl-only scalar
+        // carrier or a foreign same-spelled type in its unqualified slot.
+        let canonical_record = ty.kind == TypeKind::Record
+            && verum_common::well_known_types::WellKnownType::from_name(type_name.as_str())
+                .and_then(|known| known.canonical_archive_modules().first().copied())
+                == Some(ty_module_path.as_str())
+            && meta.types.get(&type_name).is_none_or(|existing|
+                existing.origin_module_path.as_ref().unwrap_or(&existing.module_path) != &ty_module_path);
+        if !simple_slot_was_occupied || simple_needs_repair || canonical_record {
             meta.types.insert(type_name.clone(), descriptor);
         }
         // Declaration-order list records each SIMPLE name once —
@@ -1463,32 +1491,6 @@ fn register_module_metadata(
             } else {
                 simple_name.clone()
             };
-            // THREE-MIRRORS FIX (T0690/R1, found via Shared.clone erosion):
-            // a type lives in meta.types under up to THREE keys — bare,
-            // module-qualified and (v2.12) file-qualified — each holding
-            // its OWN descriptor CLONE. Pushing the method onto the bare
-            // key only left the qualified copies method-less; whichever
-            // key the checker's type-load happened to use then reported
-            // 'no such inherent method', the lookup fell to the bare
-            // protocol scheme, and Self-erosion typed a.clone() as the
-            // PAYLOAD (Shared<Int> -> Int). One method fact, EVERY key.
-            let mut method_keys: Vec<Text> = vec![parent_name.clone()];
-            if !module_name.is_empty() {
-                method_keys.push(format!("{}.{}", module_name, parent_name).into());
-            }
-            if let Some(td) = meta.types.get(parent_name) {
-                if let Maybe::Some(om) = &td.origin_module_path {
-                    let om = om.clone();
-                    method_keys.push(format!("{}.{}", om, parent_name).into());
-                }
-            }
-            for key in method_keys {
-                if let Some(td) = meta.types.get_mut(&key) {
-                    if !td.methods.iter().any(|m| m == &simple_method_name) {
-                        td.methods.push(simple_method_name.clone());
-                    }
-                }
-            }
             // Preserve the declaring type in a collision-immune method key.
             // A bare Container.new slot cannot distinguish alpha.Container from
             // beta.Container, even when both type descriptors survived import.
