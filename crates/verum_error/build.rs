@@ -27,8 +27,29 @@ fn main() {
 
     // Invalidate on HEAD changes so the git SHA stays fresh.
     println!("cargo:rerun-if-changed=build.rs");
-    println!("cargo:rerun-if-changed=../../.git/HEAD");
+    watch_git_inputs();
     println!("cargo:rerun-if-env-changed=PROFILE");
+}
+
+fn watch_git_inputs() {
+    // Git resolves worktree indirection and packed/loose branch references.
+    // Source archives have no Git metadata: watching a missing path makes
+    // Cargo rerun this timestamp-producing script on every invocation.
+    let branch = run("git", &["symbolic-ref", "--quiet", "HEAD"]);
+    for input in [Some("HEAD".to_owned()), Some("packed-refs".to_owned()), branch.clone()]
+        .into_iter().flatten()
+    {
+        let Some(path) = run("git", &["rev-parse", "--git-path", &input]) else { continue; };
+        let path = std::path::Path::new(&path);
+        if path.is_file() {
+            println!("cargo:rerun-if-changed={}", path.display());
+        } else if branch.as_deref() == Some(input.as_str()) {
+            // A packed branch can acquire a loose ref on its next commit.
+            if let Some(parent) = path.ancestors().skip(1).find(|p| p.is_dir()) {
+                println!("cargo:rerun-if-changed={}", parent.display());
+            }
+        }
+    }
 }
 
 fn emit(key: &str, value: String) {

@@ -11,7 +11,7 @@ use std::{
 
 fn main() {
     println!("cargo:rerun-if-env-changed=VERUM_LLVM_DIR");
-    println!("cargo:rerun-if-changed=../../../llvm/install/bin/llvm-config");
+    println!("cargo:rerun-if-changed=build.rs");
 
     // Find LLVM installation
     let llvm_dir = get_llvm_install_dir();
@@ -25,6 +25,7 @@ fn main() {
     } else {
         llvm_dir.join("bin/llvm-config")
     };
+    println!("cargo:rerun-if-changed={}", llvm_config.display());
 
     // Get include directory
     let include_dir = run_llvm_config(&llvm_config, "--includedir");
