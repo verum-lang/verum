@@ -11911,7 +11911,10 @@ impl VbcCodegen {
         if !name.contains('.') && !name.contains("::") {
             self.ctx.unit_declared_fns.insert(name.clone());
         }
-        self.ctx.register_function(name, info);
+        self.ctx.register_function(name.clone(), info.clone());
+        // An extern is a source declaration even when a foreign overload owns
+        // the ambient name/arity slots during bootstrap.
+        self.ctx.register_source_function(&name, &info);
         Ok(())
     }
 
