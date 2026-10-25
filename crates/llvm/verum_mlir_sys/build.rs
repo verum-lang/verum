@@ -19,7 +19,6 @@ fn main() {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=wrapper.h");
     println!("cargo:rerun-if-env-changed=VERUM_LLVM_DIR");
-    println!("cargo:rerun-if-changed=../../../llvm/install/bin/llvm-config");
 
     // Find LLVM installation - local llvm/install/ is PRIMARY
     let llvm_dir = get_llvm_install_dir();
@@ -38,6 +37,7 @@ fn main() {
     } else {
         llvm_dir.join("bin/llvm-config")
     };
+    println!("cargo:rerun-if-changed={}", llvm_config.display());
     if !llvm_config.exists() {
         let build_cmd = if cfg!(windows) {
             r#"cd llvm && .\build.bat"#
