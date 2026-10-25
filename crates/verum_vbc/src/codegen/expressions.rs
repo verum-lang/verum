@@ -11295,33 +11295,27 @@ impl VbcCodegen {
         }
         let recv_ty = recv_ty_opt?;
         let recv_ty = recv_ty.trim();
+        let recv_ty = self.alias_instantiation_targets.get(recv_ty)
+            .map(String::as_str).unwrap_or(recv_ty);
         // Structural declarations own their WHOLE element witness. In
         // [Cell<Int>], nominal angle extraction would incorrectly select Int.
         let derived = if let Some(element) = Self::structural_receiver_element(recv_ty) {
             self.explicit_type_witness(&element, None).map(|element| vec![element])
         } else {
-            match self.type_name_to_type_ref_mono(recv_ty) {
-                Some(crate::types::TypeRef::Instantiated { args, .. }) if !args.is_empty() => {
-                    Some(args)
-                }
-                _ => {
-                    let args = VbcCodegen::split_generic_args(recv_ty);
-                    if args.is_empty() {
-                        None
-                    } else {
-                        args.iter()
-                            .map(|a| self.type_name_to_type_ref_mono(a))
-                            .collect::<Option<Vec<_>>>()
-                    }
-                }
+            // Unlike inference placeholders, declared caller parameters are
+            // valid witnesses. Resolve each argument with its exact caller ID;
+            // unknown names must not acquire a positional Generic placeholder.
+            let ty = verum_fast_parser::Parser::new(recv_ty).parse_type().ok()?;
+            let mut witness = self.explicit_type_witness(&ty, None)?;
+            while let crate::types::TypeRef::Reference { inner, .. } = witness {
+                witness = *inner;
+            }
+            match witness {
+                crate::types::TypeRef::Instantiated { args, .. } => Some(args),
+                _ => None,
             }
         };
-        derived.filter(|ta| {
-            !ta.is_empty()
-                && ta
-                    .iter()
-                    .any(|t| !matches!(t, crate::types::TypeRef::Generic(_)))
-        })
+        derived.filter(|ta| !ta.is_empty())
     }
 
     fn compile_resolved_call_target_with_receiver(
@@ -15542,161 +15536,6 @@ impl VbcCodegen {
             }
         }
 
-        // Compile arguments into consecutive registers (after receiver).
-        // Phase 1: compile all arg expressions (may allocate non-consecutive regs)
-        // Phase 2: allocate consecutive fresh regs and move values into them
-        //
-        // **Closure expected-return-type plumbing (#26 residual).**
-        //
-        // Method dispatch here resolves at runtime via CallM, so the
-        // FunctionInfo isn't known precisely.  Do a best-effort bare-
-        // name probe so a closure argument body can still see the right
-        // disambig context when the resolved target has fn-typed params.
-        // The probe uses `args.len() + 1` (account for `self`) and prefers
-        // a scope-aware lookup, falling back to bare.
-        //
-        // When the probe finds a FunctionInfo whose
-        // `param_closure_return_type_names[i + 1]` carries a `Some(name)`,
-        // push `name` as `current_return_type_name` before compiling
-        // arg `i` — exactly the same mechanism as
-        // `compile_static_method_call` / `compile_call` use for the
-        // statically-resolved path.
-        let closure_disambig_lookup = self
-            .ctx
-            .lookup_function_with_arity_in_scope(method.name.as_str(), args.len() + 1)
-            .or_else(|| {
-                self.ctx
-                    .lookup_function_with_arity(method.name.as_str(), args.len() + 1)
-            })
-            .or_else(|| {
-                // Bare-name probe didn't match; sometimes the impl-block
-                // method is only registered under a qualified key
-                // (`I.reduce_with` / `Iterator.reduce_with`) without a
-                // bare alias.  Suffix-probe via `.<method>` so the
-                // closure-disambig hook still sees the FunctionInfo.
-                let suffix = format!(".{}", method.name.as_str());
-                self.ctx
-                    .find_function_by_suffix(&suffix)
-                    .filter(|fi| fi.param_count == args.len() + 1)
-            })
-            .cloned();
-
-        // **Empty-param_closure_return_type_names fallback** (fundamental
-        // fix for the bare-variant cross-module dispatch defect class).
-        //
-        // Multiple stdlib paths register FunctionInfo with
-        // `param_closure_return_type_names: Vec::new()` (intrinsic-only,
-        // variant-ctor, stub, archive-loaded paths — 18+ sites in
-        // `crates/verum_vbc/src/codegen/mod.rs`).  When the
-        // `lookup_function_with_arity` first-wins probe finds one of
-        // these EMPTY-vec variants of the named method, the subsequent
-        // `param_closure_return_type_names.get(i+1)` returns None and
-        // the disambig context is NEVER pushed — so closure-body bare
-        // `Some` / `None` fall through to first-wins cross-module
-        // shadow resolution and pick wrong-type variants.  Pinned by
-        // `core-tests/base/iterator/regression_test.vr::regression_bare_none_in_closure_body`.
-        //
-        // Fallback: if the looked-up entry has empty
-        // `param_closure_return_type_names`, scan
-        // `ctx.functions` for any other registration of the same
-        // arity + simple-name with a NON-empty
-        // `param_closure_return_type_names` and prefer that.
-        let closure_disambig_lookup = closure_disambig_lookup.or_else(|| None).map(|fi| {
-            if fi.param_closure_return_type_names.is_empty() {
-                let target_arity = args.len() + 1;
-                let simple_name = method.name.as_str();
-                let dot_suffix = format!(".{}", simple_name);
-                let richer = self
-                    .ctx
-                    .functions
-                    .iter()
-                    .find(|(name, info)| {
-                        info.param_count == target_arity
-                            && !info.param_closure_return_type_names.is_empty()
-                            && (name.as_str() == simple_name
-                                || name.ends_with(&dot_suffix))
-                    })
-                    .map(|(_, info)| info.clone());
-                richer.unwrap_or(fi)
-            } else {
-                fi
-            }
-        });
-        let stores_arguments = matches!(method.name.as_str(), "push" | "push_back" | "push_front" | "append" | "insert" | "add" | "enqueue" | "send");
-        let mut copy_arguments = verum_common::List::new();
-        let args_start = if !args.is_empty() {
-            let mut arg_vals: Vec<Reg> = Vec::with_capacity(args.len());
-            for (i, arg) in args.iter().enumerate() {
-                // Skip self (param index 0): callsite `args` already
-                // excludes the receiver — so closure arg at callsite
-                // index `i` is at function param index `i + 1`.
-                let saved_disambig = if matches!(arg.kind, ExprKind::Closure { .. })
-                    && let Some(ref fi) = closure_disambig_lookup
-                    && let Some(Some(ret_name)) =
-                        fi.param_closure_return_type_names.get(i + 1)
-                {
-                    self.set_closure_return_type_hint(arg, ret_name);
-                    Some(self.ctx.push_disambig_context(Some(ret_name.clone())))
-                } else {
-                    None
-                };
-                let copy_start = self.ctx.instructions.len();
-                let arg_val = self
-                    .compile_expr(arg)?
-                    .or_internal("method arg has no value")?;
-                let copy_type = self.copy_source_type(arg, arg_val, copy_start, self.ctx.instructions.len());
-                copy_arguments.push(stores_arguments && self.binds_a_copy_of_a_place(arg, arg_val, copy_type.as_ref())?);
-                if let Some(saved) = saved_disambig {
-                    self.ctx.pop_disambig_context(saved);
-                }
-                arg_vals.push(arg_val);
-            }
-
-            // Allocate consecutive fresh registers
-            let first = self.ctx.registers.alloc_fresh();
-            for _ in 1..args.len() {
-                self.ctx.registers.alloc_fresh();
-            }
-
-            // Move compiled values into consecutive registers
-            for (i, arg_val) in arg_vals.iter().enumerate() {
-                let dst = Reg(first.0 + i as u16);
-                if *arg_val != dst {
-                    self.ctx.emit(Instruction::Mov { dst, src: *arg_val });
-                    self.ctx.free_temp(*arg_val);
-                }
-            }
-
-            // A CONTAINER OWNS WHAT IT HOLDS (T0832).
-            //
-            // `xs.push(item)` stores a value into `xs`; `item` goes on
-            // living under its own name, so the two must not be the same
-            // object. Measured before this: `xs.push(item); item.v = 7`
-            // reported `xs[0].v == 7`.
-            //
-            // These methods are handled here rather than by the callee
-            // prologue that covers user functions, because they are
-            // intercepted by the runtime and have no Verum body to carry
-            // a prologue. The list is the take-ownership surface: every
-            // one of them stores its argument rather than reading it.
-            if stores_arguments {
-                for i in 0..args.len() {
-                    let reg = Reg(first.0 + i as u16);
-                    if copy_arguments[i] {
-                        self.ctx.emit(Instruction::Clone {
-                            dst: reg,
-                            src: reg,
-                        });
-                    }
-                }
-            }
-            first
-        } else {
-            Reg(0)
-        };
-
-        let result = self.ctx.alloc_temp();
-
         // Check receiver type to prefix method name for correct dispatch.
         // For primitive types (Byte, Int32, UInt64), use type$ prefix.
         // For named struct types (MapFlags, MemProt, etc.), use Type:: prefix.
@@ -16446,6 +16285,212 @@ impl VbcCodegen {
         };
         let method_id = self.intern_string(&effective_method_name);
 
+        // `lookup_function_with_arity` handles overload sets via the
+        // `name#arity` suffix convention (`compile_static_method_call`
+        // uses the same pathway).  +1 for the receiver `self` slot.
+        // Computed BEFORE the devirt split (CONST-GENERIC-VALUE-CARRY-1):
+        // the generic-witness sidecar derivation below needs the resolved
+        // callee id on BOTH emission paths — the devirt Call upgrades to
+        // CallG when witnesses derive, the CallM path stages them via
+        // SetCallWitness.
+        let resolved_method = self
+            .ctx
+            .lookup_function_with_arity(&effective_method_name, args.len() + 1)
+            .filter(|fi| fi.param_count == args.len() + 1)
+            .cloned();
+        let resolvable_fid = resolved_method.as_ref()
+            .filter(|fi| {
+                fi.id.0 != u32::MAX
+                    && fi.id.0 != u32::MAX / 2
+                    && fi.variant_tag.is_none()
+                    && fi.intrinsic_name.is_none()
+            })
+            .map(|info| info.id.0);
+
+        let devirt_func_id: Option<u32> = if effective_method_name.starts_with("dyn:")
+            || effective_method_name.starts_with("byte$")
+            || effective_method_name.starts_with("int32$")
+            || effective_method_name.starts_with("uint64$")
+            || !effective_method_name.contains('.')
+            || type_prefix_intercepted_by_runtime(&effective_method_name)
+            // SAME-NAME-PARENT-TIEBREAK-1 (task #50): devirt is legal
+            // ONLY when the name resolves to a single real body — for
+            // duplicate-named stdlib types (two `Rational.mul`s) a
+            // static pick guesses; CallM's runtime resolver tiebreaks
+            // by the receiver's header TypeId.
+            || self
+                .ctx
+                .ambiguous_function_names
+                .contains(effective_method_name.as_str())
+        {
+            None
+        } else {
+            resolvable_fid
+        };
+
+        // Compile arguments into consecutive registers (after receiver).
+        // Phase 1: compile all arg expressions (may allocate non-consecutive regs)
+        // Phase 2: allocate consecutive fresh regs and move values into them
+        //
+        // **Closure expected-return-type plumbing (#26 residual).**
+        //
+        // Method dispatch here resolves at runtime via CallM, so the
+        // FunctionInfo isn't known precisely.  Do a best-effort bare-
+        // name probe so a closure argument body can still see the right
+        // disambig context when the resolved target has fn-typed params.
+        // The probe uses `args.len() + 1` (account for `self`) and prefers
+        // a scope-aware lookup, falling back to bare.
+        //
+        // When the probe finds a FunctionInfo whose
+        // `param_closure_return_type_names[i + 1]` carries a `Some(name)`,
+        // push `name` as `current_return_type_name` before compiling
+        // arg `i` — exactly the same mechanism as
+        // `compile_static_method_call` / `compile_call` use for the
+        // statically-resolved path.
+        let closure_disambig_lookup = self
+            .ctx
+            .lookup_function_with_arity_in_scope(method.name.as_str(), args.len() + 1)
+            .or_else(|| {
+                self.ctx
+                    .lookup_function_with_arity(method.name.as_str(), args.len() + 1)
+            })
+            .or_else(|| {
+                // Bare-name probe didn't match; sometimes the impl-block
+                // method is only registered under a qualified key
+                // (`I.reduce_with` / `Iterator.reduce_with`) without a
+                // bare alias.  Suffix-probe via `.<method>` so the
+                // closure-disambig hook still sees the FunctionInfo.
+                let suffix = format!(".{}", method.name.as_str());
+                self.ctx
+                    .find_function_by_suffix(&suffix)
+                    .filter(|fi| fi.param_count == args.len() + 1)
+            })
+            .cloned();
+
+        // **Empty-param_closure_return_type_names fallback** (fundamental
+        // fix for the bare-variant cross-module dispatch defect class).
+        //
+        // Multiple stdlib paths register FunctionInfo with
+        // `param_closure_return_type_names: Vec::new()` (intrinsic-only,
+        // variant-ctor, stub, archive-loaded paths — 18+ sites in
+        // `crates/verum_vbc/src/codegen/mod.rs`).  When the
+        // `lookup_function_with_arity` first-wins probe finds one of
+        // these EMPTY-vec variants of the named method, the subsequent
+        // `param_closure_return_type_names.get(i+1)` returns None and
+        // the disambig context is NEVER pushed — so closure-body bare
+        // `Some` / `None` fall through to first-wins cross-module
+        // shadow resolution and pick wrong-type variants.  Pinned by
+        // `core-tests/base/iterator/regression_test.vr::regression_bare_none_in_closure_body`.
+        //
+        // Fallback: if the looked-up entry has empty
+        // `param_closure_return_type_names`, scan
+        // `ctx.functions` for any other registration of the same
+        // arity + simple-name with a NON-empty
+        // `param_closure_return_type_names` and prefer that.
+        let closure_disambig_lookup = closure_disambig_lookup.or_else(|| None).map(|fi| {
+            if fi.param_closure_return_type_names.is_empty() {
+                let target_arity = args.len() + 1;
+                let simple_name = method.name.as_str();
+                let dot_suffix = format!(".{}", simple_name);
+                let richer = self
+                    .ctx
+                    .functions
+                    .iter()
+                    .find(|(name, info)| {
+                        info.param_count == target_arity
+                            && !info.param_closure_return_type_names.is_empty()
+                            && (name.as_str() == simple_name
+                                || name.ends_with(&dot_suffix))
+                    })
+                    .map(|(_, info)| info.clone());
+                richer.unwrap_or(fi)
+            } else {
+                fi
+            }
+        });
+        let stores_arguments = matches!(method.name.as_str(), "push" | "push_back" | "push_front" | "append" | "insert" | "add" | "enqueue" | "send");
+        let mut copy_arguments = verum_common::List::new();
+        let args_start = if !args.is_empty() {
+            let mut arg_vals: Vec<Reg> = Vec::with_capacity(args.len());
+            for (i, arg) in args.iter().enumerate() {
+                // Skip self (param index 0): callsite `args` already
+                // excludes the receiver — so closure arg at callsite
+                // index `i` is at function param index `i + 1`.
+                let saved_disambig = if matches!(arg.kind, ExprKind::Closure { .. })
+                    && let Some(ref fi) = closure_disambig_lookup
+                    && let Some(Some(ret_name)) =
+                        fi.param_closure_return_type_names.get(i + 1)
+                {
+                    self.set_closure_return_type_hint(arg, ret_name);
+                    Some(self.ctx.push_disambig_context(Some(ret_name.clone())))
+                } else {
+                    None
+                };
+                let copy_start = self.ctx.instructions.len();
+                let arg_val = self
+                    .compile_expr(arg)?
+                    .or_internal("method arg has no value")?;
+                let copy_type = self.copy_source_type(arg, arg_val, copy_start, self.ctx.instructions.len());
+                // Only the declaration selected for direct dispatch can grant
+                // an owned destination. Dynamic/builtin dispatch keeps its
+                // existing argument contract.
+                let arg_val = if let Some(callable) = resolved_method.as_ref()
+                    .filter(|_| devirt_func_id.is_some()) {
+                    self.emit_owned_call_argument(callable, i + 1, arg, arg_val)
+                } else { arg_val };
+                copy_arguments.push(stores_arguments && self.binds_a_copy_of_a_place(arg, arg_val, copy_type.as_ref())?);
+                if let Some(saved) = saved_disambig {
+                    self.ctx.pop_disambig_context(saved);
+                }
+                arg_vals.push(arg_val);
+            }
+
+            // Allocate consecutive fresh registers
+            let first = self.ctx.registers.alloc_fresh();
+            for _ in 1..args.len() {
+                self.ctx.registers.alloc_fresh();
+            }
+
+            // Move compiled values into consecutive registers
+            for (i, arg_val) in arg_vals.iter().enumerate() {
+                let dst = Reg(first.0 + i as u16);
+                if *arg_val != dst {
+                    self.ctx.emit(Instruction::Mov { dst, src: *arg_val });
+                    self.ctx.free_temp(*arg_val);
+                }
+            }
+
+            // A CONTAINER OWNS WHAT IT HOLDS (T0832).
+            //
+            // `xs.push(item)` stores a value into `xs`; `item` goes on
+            // living under its own name, so the two must not be the same
+            // object. Measured before this: `xs.push(item); item.v = 7`
+            // reported `xs[0].v == 7`.
+            //
+            // These methods are handled here rather than by the callee
+            // prologue that covers user functions, because they are
+            // intercepted by the runtime and have no Verum body to carry
+            // a prologue. The list is the take-ownership surface: every
+            // one of them stores its argument rather than reading it.
+            if stores_arguments {
+                for i in 0..args.len() {
+                    let reg = Reg(first.0 + i as u16);
+                    if copy_arguments[i] {
+                        self.ctx.emit(Instruction::Clone {
+                            dst: reg,
+                            src: reg,
+                        });
+                    }
+                }
+            }
+            first
+        } else {
+            Reg(0)
+        };
+
+        let result = self.ctx.alloc_temp();
+
+
         // Check if the method takes &mut self (mutable reference to self).
         // If so, we need to create a CBGR reference to the receiver and pass that
         // instead of the value directly. This enables `*self = value` inside the
@@ -16458,7 +16503,7 @@ impl VbcCodegen {
         if let Ok(w) = std::env::var("VERUM_TRACE_SELFMUT")
             && effective_method_name.contains(w.as_str())
         {
-            match self.ctx.lookup_function(&effective_method_name) {
+            match resolved_method.as_ref() {
                 Some(fi) => eprintln!(
                     "[selfmut] key='{}' id={} takes_self_mut_ref={} params={}",
                     effective_method_name, fi.id.0, fi.takes_self_mut_ref, fi.param_count,
@@ -16472,7 +16517,7 @@ impl VbcCodegen {
                 // Borrowing its temporary again would replace that reference
                 // when a method assigns to *self, leaving the element intact.
                 receiver_reg
-            } else if let Some(func_info) = self.ctx.lookup_function(&effective_method_name) {
+            } else if let Some(func_info) = resolved_method.as_ref() {
                 if func_info.takes_self_mut_ref {
                     // Create a mutable reference to the receiver.
                     //
@@ -16572,47 +16617,6 @@ impl VbcCodegen {
             }
         }
 
-        // `lookup_function_with_arity` handles overload sets via the
-        // `name#arity` suffix convention (`compile_static_method_call`
-        // uses the same pathway).  +1 for the receiver `self` slot.
-        // Computed BEFORE the devirt split (CONST-GENERIC-VALUE-CARRY-1):
-        // the generic-witness sidecar derivation below needs the resolved
-        // callee id on BOTH emission paths — the devirt Call upgrades to
-        // CallG when witnesses derive, the CallM path stages them via
-        // SetCallWitness.
-        let resolvable_fid: Option<u32> = self
-            .ctx
-            .lookup_function_with_arity(&effective_method_name, args.len() + 1)
-            .filter(|fi| {
-                fi.param_count == args.len() + 1
-                    && fi.id.0 != u32::MAX
-                    && fi.id.0 != u32::MAX / 2
-                    && fi.variant_tag.is_none()
-                    && fi.intrinsic_name.is_none()
-            })
-            .map(|fi| fi.id.0);
-
-        let devirt_func_id: Option<u32> = if effective_method_name.starts_with("dyn:")
-            || effective_method_name.starts_with("byte$")
-            || effective_method_name.starts_with("int32$")
-            || effective_method_name.starts_with("uint64$")
-            || !effective_method_name.contains('.')
-            || type_prefix_intercepted_by_runtime(&effective_method_name)
-            // SAME-NAME-PARENT-TIEBREAK-1 (task #50): devirt is legal
-            // ONLY when the name resolves to a single real body — for
-            // duplicate-named stdlib types (two `Rational.mul`s) a
-            // static pick guesses; CallM's runtime resolver tiebreaks
-            // by the receiver's header TypeId.
-            || self
-                .ctx
-                .ambiguous_function_names
-                .contains(effective_method_name.as_str())
-        {
-            None
-        } else {
-            resolvable_fid
-        };
-
         // #44-B generic-witness derivation (hoisted above the devirt split
         // for CONST-GENERIC-VALUE-CARRY-1 — see the CallM-branch comment
         // below for the full derivation contract).
@@ -16651,12 +16655,7 @@ impl VbcCodegen {
             // body's out-of-range LoadT(Generic) loads nil and keeps the
             // legacy fallback.
             .or_else(|| self.derive_receiver_witnesses(receiver))
-            .filter(|ta| {
-                !ta.is_empty()
-                    && ta
-                        .iter()
-                        .any(|t| !matches!(t, crate::types::TypeRef::Generic(_)))
-            });
+            .filter(|ta| !ta.is_empty());
 
         // T0701 (return-only method witnesses): a protocol method whose
         // generic appears ONLY in its return (`partition<C: Default +
