@@ -229,7 +229,7 @@ fn connect_with_optional_replication(
     replication: Maybe<Text>,
 ) -> Result<PgConnection, DbError> {
     let target = format_host_port(&config.host, config.port);
-    let mut tcp = match TcpStream.connect(target.as_str()) {
+    let mut tcp: TcpStream = match TcpStream.connect(target.as_str()) {
         Result.Ok(s)  => s,
         Result.Err(_) => {
             return Result.Err(DbError.ConnectionFailed {
@@ -251,6 +251,7 @@ fn connect_with_optional_replication(
         _ => {
             let req = ssl_request();
             if write_all_tcp(&mut tcp, req.as_slice()).is_err() {
+                tcp.drop();
                 return Result.Err(DbError.ConnectionFailed {
                     source: core.database.common.error.ConnectionErrorKind.CekServerTerminated,
                     adapter: AdPostgres,
@@ -263,6 +264,7 @@ fn connect_with_optional_replication(
             let verdict = match tcp.read(one_byte.as_mut_slice()) {
                 Result.Ok(n) if n == 1 => one_byte[0],
                 _ => {
+                    tcp.drop();
                     return Result.Err(DbError.ConnectionFailed {
                         source: core.database.common.error.ConnectionErrorKind.CekServerTerminated,
                         adapter: AdPostgres,
@@ -293,6 +295,7 @@ fn connect_with_optional_replication(
             } else if v == 0x4E {
                 // 'N' — server declined TLS. Per the mode:
                 if !config.tls_mode.permits_plaintext_fallback() {
+                    tcp.drop();
                     return Result.Err(DbError.Adapter(AdapterSpecific {
                         adapter: AdPostgres,
                         code: "TLS_REJECTED_BY_SERVER".clone(),
@@ -304,6 +307,7 @@ fn connect_with_optional_replication(
                 // with the same TCP socket.
                 PsPlain(tcp)
             } else {
+                tcp.drop();
                 return Result.Err(DbError.Adapter(AdapterSpecific {
                     adapter: AdPostgres,
                     code: "SSLREQUEST_PROTOCOL_VIOLATION".clone(),
@@ -341,10 +345,16 @@ fn connect_with_optional_replication(
         Maybe.None       => {}
     }
     let payload = startup(&params);
-    write_all(&mut conn.stream, payload.as_slice())?;
+    if let Result.Err(error) = write_all(&mut conn.stream, payload.as_slice()) {
+        conn.stream.tcp_mut().drop();
+        return Result.Err(error);
+    }
 
     conn.state = PcsAuthenticating;
-    drive_until_ready(&mut conn, config)?;
+    if let Result.Err(error) = drive_until_ready(&mut conn, config) {
+        conn.stream.tcp_mut().drop();
+        return Result.Err(error);
+    }
     Result.Ok(conn)
 }
 
@@ -1847,6 +1857,8 @@ implement PgConnection {
         let payload = terminate();
         let _ = write_all(&mut self.stream, payload.as_slice());
         self.state = PcsClosed;
+        // Terminate closes the server session; release our socket as well.
+        self.stream.tcp_mut().drop();
         Result.Ok(())
     }
 }

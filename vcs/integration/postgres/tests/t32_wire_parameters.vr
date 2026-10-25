@@ -1,0 +1,67 @@
+// @test: run-interpreter
+// @level: L2
+// @tags: database, postgres, integration
+// @description: SCRAM, multi-chunk binary parameters and query-error recovery.
+module postgres_wire_parameters.main;
+mount core.base.env.var;
+mount core.database.postgres.config.{PgConfig, PgTlsMode};
+mount core.database.postgres.connection.connect;
+mount core.database.postgres.wire.typed.TypedValue;
+mount core.database.common.types.WireValue;
+
+fn main() {
+    let password = var(&"VERUM_PG_TEST_PASSWORD").unwrap_or("spindle_app_pw");
+    let host = var(&"VERUM_PG_TEST_HOST").unwrap_or("127.0.0.1");
+    let port = var(&"VERUM_PG_TEST_PORT").unwrap_or("55432").parse_int().unwrap();
+    let user = var(&"VERUM_PG_TEST_USER").unwrap_or("spindle_app");
+    let database = var(&"VERUM_PG_TEST_DATABASE").unwrap_or("spindle_test");
+    let config = PgConfig.new(host, port, user, password, database)
+        .with_tls(PgTlsMode.PtmDisable).with_connect_timeout_ms(5000);
+    let mut connection = connect(&config).unwrap();
+    print("postgres: SCRAM connection ready");
+    let statement = connection.prepare(&"SELECT $1::bytea, $2::text, $3::bigint, $4::text").unwrap();
+    let mut binary: List<Byte> = List.new();
+    let mut index = 0;
+    while index < 10003 { binary.push((index % 256) as Byte); index = index + 1; }
+    let text = "quote ' ; -- café";
+    let params: List<Maybe<TypedValue>> = [
+        Maybe.Some(TypedValue.TvBytea(binary)),
+        Maybe.Some(TypedValue.TvText(text)),
+        Maybe.Some(TypedValue.TvInt8(9223372036854775806)),
+        Maybe.None,
+    ];
+    let result = connection.execute_prepared_typed(&statement, &params).unwrap();
+    assert_eq(result.rows.len(), 1);
+    assert_eq(result.rows[0].len(), 4);
+    match &result.rows[0][0] {
+        TypedValue.TvBytea(bytes) => {
+            assert_eq(bytes.len(), 10003);
+            let mut index = 0;
+            while index < bytes.len() {
+                assert_eq(bytes[index], (index % 256) as Byte);
+                index = index + 1;
+            }
+        },
+        _ => panic("bytea result type"),
+    }
+    match &result.rows[0][1] {
+        TypedValue.TvText(value) => assert_eq(value, "quote ' ; -- café"),
+        _ => panic("text result type"),
+    }
+    match result.rows[0][2] {
+        TypedValue.TvInt8(value) => assert_eq(value, 9223372036854775806),
+        _ => panic("integer result type"),
+    }
+    assert(result.rows[0][3] is TypedValue.TvNull);
+    connection.close_prepared(&statement).unwrap();
+    print("postgres: bound binary/text/integer/null roundtrip passed");
+    assert(connection.query_all(&"SELECT 1 / 0").is_err());
+    let rows = connection.query_all(&"SELECT 42").unwrap();
+    assert_eq(rows.len(), 1);
+    match &rows[0][0] {
+        WireValue.WvPresent { bytes, .. } => assert_eq(Text.from_utf8(bytes.as_slice()).unwrap(), "42"),
+        WireValue.WvNull => panic("unexpected null"),
+    }
+    connection.close().unwrap();
+    print("postgres: SQL error recovery and close passed");
+}
