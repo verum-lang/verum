@@ -929,6 +929,16 @@ pub(crate) fn call_function_sync(
     func_id: FunctionId,
     args: &[Value],
 ) -> InterpreterResult<Value> {
+    call_function_sync_with_witnesses(state, func_id, args, None)
+}
+
+/// Nested execution with the caller's already-resolved declaration witnesses.
+pub(crate) fn call_function_sync_with_witnesses(
+    state: &mut InterpreterState,
+    func_id: FunctionId,
+    args: &[Value],
+    witnesses: Option<Box<[crate::types::TypeRef]>>,
+) -> InterpreterResult<Value> {
     let func = state
         .module
         .get_function(func_id)
@@ -967,6 +977,10 @@ pub(crate) fn call_function_sync(
 
     for (i, val) in args.iter().enumerate() {
         state.registers.set(new_base, Reg(i as u16), *val);
+    }
+
+    if let Some(witnesses) = witnesses {
+        state.call_stack.set_generic_witnesses(witnesses);
     }
 
     state.set_pc(0);
