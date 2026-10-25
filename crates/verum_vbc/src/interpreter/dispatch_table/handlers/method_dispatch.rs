@@ -2770,7 +2770,9 @@ pub(in super::super) fn handle_call_method(
             let argv: Vec<Value> = (0..args.count)
                 .map(|i| state.registers.get(caller_base, Reg(args.start.0 + i as u16)))
                 .collect();
-            let result = super::super::call_function_sync(state, fid, &argv)?;
+            let result = super::super::call_function_sync_with_witnesses(
+                state, fid, &argv, call_witness_sidecar.take(),
+            )?;
             state.set_reg(dst, result);
             return Ok(DispatchResult::Continue);
         }
@@ -5173,7 +5175,9 @@ pub(in super::super) fn handle_call_method(
             ) {
                 eprintln!("[static-call] DISPATCH {} argc={}", qualified, args.count);
             }
-            let result = super::super::call_function_sync(state, fid, &argv)?;
+            let result = super::super::call_function_sync_with_witnesses(
+                state, fid, &argv, call_witness_sidecar.take(),
+            )?;
             state.set_reg(dst, result);
             return Ok(DispatchResult::Continue);
         }

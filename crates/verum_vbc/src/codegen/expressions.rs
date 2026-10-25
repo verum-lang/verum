@@ -13815,9 +13815,16 @@ impl VbcCodegen {
             && let Some(ref tn) = static_receiver_type
             && (tn == "Heap" || tn == "Shared")
         {
+            let constructor = self.ctx.lookup_function(&format!("{tn}.new"))
+                .map(|info| info.id.0);
+            let inferred = constructor.and_then(|id| self.record_generic_instantiation(id, args));
             let inner = self
                 .compile_expr(&args[0])?
                 .or_internal("wrapper .new arg has no value")?;
+            let inferred = inferred.or_else(|| {
+                self.generic_named_place(&args[0], inner).map(|ty| vec![ty])
+            });
+            let witnesses = self.apply_explicit_generic_args(constructor, type_args, inferred)?;
 
             // Load receiver type name as a small string the interpreter recognizes.
             let receiver_reg = self.ctx.alloc_temp();
@@ -13841,6 +13848,11 @@ impl VbcCodegen {
             // The guard above bound `tn` to "Heap" or "Shared" — the
             // receiver type, free for the asking (T0753).
             let method_id = self.call_method_id(Some(tn.as_str()), "new");
+            // Preserve builtin dispatch while also supplying the declaration
+            // witness if CallM selects the generic source constructor body.
+            if let Some(type_args) = witnesses {
+                self.ctx.emit(Instruction::SetCallWitness { type_args });
+            }
             self.ctx.emit(Instruction::CallM {
                 dst: result,
                 receiver: receiver_reg,
