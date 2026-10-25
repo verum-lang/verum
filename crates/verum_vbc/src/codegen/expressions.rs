@@ -47,6 +47,8 @@ use verum_ast::{
     PathSegment, UnOp,
 };
 
+type FieldWriteback = (Reg, u32, bool, verum_common::Text);
+
 /// The borrow belongs to this pattern binding, never to expressions in its body.
 /// Tuple expressions may mix owned values and references.
 #[derive(Clone, Default)]
@@ -14860,59 +14862,20 @@ impl VbcCodegen {
             return Ok(result);
         }
 
-        // **Field-receiver writeback target capture** (closes task #11
-        // for the chained `b.inner.<&mut-self method>()` case).
-        //
-        // When the call's receiver is a field-access expression
-        // (`b.inner.take()` lowers to GetF tmp + call), the mutation
-        // performed inside an `&mut self` method via
-        // `*self = value` writes through the CBGR ref created by the
-        // `RefMut` instruction below — but that ref points at the
-        // *temporary* register holding the extracted field value, NOT
-        // at the field slot in the parent record.  Without a
-        // post-call writeback, `b.inner.take()` correctly returns
-        // `Some(x)` but leaves `b.inner` unchanged (the "leaves None
-        // in its place" Maybe.take invariant silently fails).
-        //
-        // The fix captures `(base_reg, field_idx)` upfront so we can
-        // commit the post-call receiver_reg back via `SetF` after the
-        // method body returns.  Only fires when the method actually
-        // takes `&mut self` (decided below alongside the existing
-        // RefMut emission) — for `&self` / value methods, no
-        // mutation can have happened and the writeback is skipped.
-        let field_writeback_target: Option<(Reg, u32, bool, String)> = match &receiver.kind {
+        // Read and writeback share one field projection, including its declared
+        // Deref chain. Re-evaluating the base duplicates side effects; retaining
+        // the original wrapper instead corrupts it when the field is replaced.
+        let mut field_writeback_target = None;
+        let receiver_reg = match &receiver.kind {
             ExprKind::Field { expr: base, field } => {
-                // Resolve the base's type to find the canonical field
-                // index.  Falls back to None when the type can't be
-                // resolved (e.g. generic receivers, opaque pointers),
-                // in which case the writeback is skipped and the
-                // existing value-semantics behaviour is preserved.
-                let base_type = self.infer_expr_type_name(base);
-                // #42: flagged resolve — a GUESSED index must not bake a
-                // positional write-back (the CAP-AUDIT cross-type-slot
-                // class); the by-name write resolves exactly at runtime.
-                let (field_idx, guessed) = self.resolve_field_index_flagged(
-                    base_type.as_deref(),
-                    field.name.as_str(),
-                );
-                // resolve_field_index returns `u32::MAX` when the
-                // field isn't found — treat that as "no writeback".
-                if field_idx == u32::MAX {
-                    None
-                } else {
-                    let base_reg = self
-                        .compile_expr(base)?
-                        .or_internal("field-receiver base has no value")?;
-                    Some((base_reg, field_idx, guessed, field.name.to_string()))
-                }
+                self.ctx.stats.expressions_compiled += 1;
+                self.ctx.set_current_span(receiver.span);
+                self.compile_field_access_with_writeback(
+                    base, field.name.as_str(), Some(&mut field_writeback_target),
+                )?
             }
-            _ => None,
-        };
-
-        // Compile receiver as value
-        let receiver_reg = self
-            .compile_expr(receiver)?
-            .or_internal("method receiver has no value")?;
+            _ => self.compile_expr(receiver)?,
+        }.or_internal("method receiver has no value")?;
 
         // Raw-pointer method interception — when the receiver register is
         // tagged `raw_pointer` (set by `compile_cast` for `… as &unsafe T`,
@@ -23995,6 +23958,15 @@ impl VbcCodegen {
     }
 
     fn compile_field_access(&mut self, base: &Expr, field: &str) -> CodegenResult<Option<Reg>> {
+        self.compile_field_access_with_writeback(base, field, None)
+    }
+
+    fn compile_field_access_with_writeback(
+        &mut self,
+        base: &Expr,
+        field: &str,
+        writeback: Option<&mut Option<FieldWriteback>>,
+    ) -> CodegenResult<Option<Reg>> {
         if std::env::var("VERUM_DEBUG_FIELDS2").is_ok() {
             let fn_name = self.ctx.current_function.as_deref().unwrap_or("<unknown>");
             tracing::debug!("[CFA] fn '{}': field '{}'", fn_name, field);
@@ -24026,7 +23998,11 @@ impl VbcCodegen {
                 obj: ctx_value_reg,
                 field_idx,
             });
-            self.ctx.free_temp(ctx_value_reg);
+            if let Some(writeback) = writeback {
+                *writeback = Some((ctx_value_reg, field_idx, false, field.into()));
+            } else {
+                self.ctx.free_temp(ctx_value_reg);
+            }
             return Ok(Some(result));
         }
 
@@ -25039,7 +25015,11 @@ impl VbcCodegen {
             }
         }
 
-        self.ctx.free_temp(base_reg);
+        if let Some(writeback) = writeback.filter(|_| field_idx != u32::MAX) {
+            *writeback = Some((base_reg, field_idx, idx_guessed, field.into()));
+        } else {
+            self.ctx.free_temp(base_reg);
+        }
         Ok(Some(result))
     }
 
