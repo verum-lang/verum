@@ -388,7 +388,11 @@ impl VbcCodegen {
             let ty = &module.types[ti];
             add_dependencies(mi, &key, descriptor_ids(ty), &mut selected, &mut pending)?;
             for (fi, function) in module.functions.iter().enumerate() {
-                if function.parent_type == Some(ty.id) {
+                // A cyclic bootstrap can retain an imported carrier and a
+                // local definition of the same nominal declaration. Both IDs
+                // map to one consumer type; recover methods through that same
+                // declaration identity instead of only the selected carrier ID.
+                if function.parent_type.and_then(|id| source_keys.get(&(mi, id))) == Some(&key) {
                     function_sites.insert((mi, fi));
                     let method = function_identity(module, function).ok_or_else(|| {
                         CodegenError::internal("bootstrap method has no source identity")

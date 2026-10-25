@@ -29,24 +29,43 @@ fn probe() -> Int { match ROOT.item { Choice.Empty => 42, Choice.Value(_) => 0 }
 
 #[test]
 fn declaration_interface_supplies_forward_constructor_witnesses() {
-    check_forward_constructor(false);
+    check_forward_constructor(false, false);
 }
 
 #[test]
 fn declaration_interface_preserves_reexported_constructor_witnesses() {
-    check_forward_constructor(true);
+    check_forward_constructor(true, false);
 }
 
-fn check_forward_constructor(reexported: bool) {
+#[test]
+fn duplicate_nominal_carrier_retains_constructor_witnesses() {
+    check_forward_constructor(false, true);
+}
+
+#[test]
+fn reexported_duplicate_nominal_carrier_retains_constructor_witnesses() {
+    check_forward_constructor(true, true);
+}
+
+fn check_forward_constructor(reexported: bool, duplicate_parent: bool) {
     let provider = Parser::new(PROVIDER).parse_module().unwrap();
     let source = if reexported {
         CONSUMER.replace("core.provider.Holder", "core.exports.Holder")
     } else { CONSUMER.to_owned() };
     let consumer = Parser::new(&source).parse_module().unwrap();
     let mut declarations = VbcCodegen::with_config(CodegenConfig::new("core.provider"));
-    let interface = declarations
+    let mut interface = declarations
         .collect_declaration_interface(&[&provider])
         .unwrap();
+    if duplicate_parent {
+        // A cyclic bootstrap can retain an imported carrier before compiling
+        // the same declaration locally. Its methods still name the local ID.
+        let mut imported = interface.types.iter()
+            .find(|ty| interface.strings.get(ty.name) == Some("Holder"))
+            .unwrap().clone();
+        imported.id = TypeId(interface.types.iter().map(|ty| ty.id.0).max().unwrap() + 1);
+        interface.types.insert(0, imported);
+    }
     assert!(interface.bytecode.is_empty());
     assert!(interface.global_ctors.is_empty());
     assert!(interface.functions.iter().all(|f| f.bytecode_length == 0));

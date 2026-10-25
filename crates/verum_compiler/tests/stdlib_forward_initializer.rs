@@ -10,15 +10,25 @@ use verum_vbc::{
 
 #[test]
 fn forward_generic_constructor_retains_nested_unit_witness_in_archive() {
-    check_forward_constructor(false);
+    check_forward_constructor(false, false);
 }
 
 #[test]
 fn reexported_forward_constructor_retains_nested_unit_witness_in_archive() {
-    check_forward_constructor(true);
+    check_forward_constructor(true, false);
 }
 
-fn check_forward_constructor(reexported: bool) {
+#[test]
+fn file_module_forward_constructor_retains_nested_unit_witness_in_archive() {
+    check_forward_constructor(false, true);
+}
+
+#[test]
+fn reexported_file_module_constructor_retains_nested_unit_witness_in_archive() {
+    check_forward_constructor(true, true);
+}
+
+fn check_forward_constructor(reexported: bool, file_module: bool) {
     let root = tempfile::tempdir().unwrap();
     let core = root.path().join("core");
     fs::create_dir_all(core.join("provider")).unwrap();
@@ -34,15 +44,23 @@ fn check_forward_constructor(reexported: bool) {
     "#,
     )
     .unwrap();
-    let provider = if reexported {
-        fs::create_dir_all(core.join("provider/inner")).unwrap();
+    let provider = if reexported || file_module {
         fs::write(core.join("provider/mod.vr"),
             "module core.provider; public module inner; public mount .inner.Holder;").unwrap();
-        core.join("provider/inner/mod.vr")
+        if file_module {
+            if !reexported {
+                let source = fs::read_to_string(&input).unwrap();
+                fs::write(&input, source.replace("mount core.provider.Holder", "mount core.provider.inner.Holder")).unwrap();
+            }
+            core.join("provider/inner.vr")
+        } else {
+            fs::create_dir_all(core.join("provider/inner")).unwrap();
+            core.join("provider/inner/mod.vr")
+        }
     } else {
         core.join("provider/mod.vr")
     };
-    let owner = if reexported { "core.provider.inner" } else { "core.provider" };
+    let owner = if reexported || file_module { "core.provider.inner" } else { "core.provider" };
     fs::write(
         provider,
         format!("module {owner};") + r#"
@@ -62,7 +80,7 @@ fn check_forward_constructor(reexported: bool) {
     let result = CompilationPipeline::new_core(&mut session, config)
         .compile_core()
         .unwrap();
-    assert_eq!(result.modules_compiled, if reexported { 3 } else { 2 });
+    assert_eq!(result.modules_compiled, if reexported && !file_module { 3 } else { 2 });
     assert!(result.errors.is_empty(), "{:?}", result.errors);
     let archive = read_archive_from_file(&output).unwrap();
     let module = archive.load_module("core").unwrap();
