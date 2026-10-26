@@ -50,6 +50,10 @@ pub enum KernelError {
     #[error("unknown inductive type: {0}")]
     UnknownInductive(Text),
 
+    /// An eliminator lacks the declaration or branches needed for its rule.
+    #[error("invalid inductive elimination: {0}")]
+    InvalidEliminator(Text),
+
     /// Attempted re-registration of an axiom that already exists.
     #[error("duplicate axiom registration: {0}")]
     DuplicateAxiom(Text),

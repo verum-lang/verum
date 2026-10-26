@@ -81,7 +81,7 @@ fn bool_eliminator_type_has_motive_two_cases_and_scrutinee_pi() {
     assert!(matches!(
         case_true_dom.as_ref(),
         CoreTerm::App(f, a) if matches!(f.as_ref(), CoreTerm::Var(n) if n.as_str() == "motive")
-            && matches!(a.as_ref(), CoreTerm::Var(n) if n.as_str() == "True")
+            && matches!(a.as_ref(), CoreTerm::Constructor { inductive, name, args, .. } if inductive.as_str() == "Bool" && name.as_str() == "True" && args.is_empty())
     ));
 
     // Second branch: case_False.
@@ -154,7 +154,7 @@ fn nat_succ_case_takes_pi_argument() {
         panic!()
     };
     assert_eq!(case_succ_b.as_str(), "case_Succ");
-    // succ_dom: Π (a0 : Nat) . motive(Succ(a0))
+    // succ_dom: Π (a0 : Nat) . Π (ih0 : motive(a0)) . motive(Succ(a0))
     let CoreTerm::Pi {
         binder: a0,
         domain: a0_ty,
@@ -168,16 +168,34 @@ fn nat_succ_case_takes_pi_argument() {
         a0_ty.as_ref(),
         CoreTerm::Inductive { path, .. } if path.as_str() == "Nat"
     ));
+    // The recursive slot carries its induction hypothesis before the goal.
+    let CoreTerm::Pi {
+        domain: hypothesis,
+        codomain: goal,
+        ..
+    } = succ_goal.as_ref()
+    else {
+        panic!("Succ branch must receive its induction hypothesis");
+    };
+    assert!(matches!(hypothesis.as_ref(), CoreTerm::App(_, arg)
+        if matches!(arg.as_ref(), CoreTerm::Var(name) if name.as_str() == "a0")));
     // goal: motive(Succ(a0))
-    let CoreTerm::App(motive, succ_app) = succ_goal.as_ref() else {
+    let CoreTerm::App(motive, succ_app) = goal.as_ref() else {
         panic!()
     };
     assert!(matches!(motive.as_ref(), CoreTerm::Var(n) if n.as_str() == "motive"));
-    let CoreTerm::App(succ_var, a0_var) = succ_app.as_ref() else {
+    let CoreTerm::Constructor {
+        inductive,
+        name,
+        args,
+        ..
+    } = succ_app.as_ref()
+    else {
         panic!()
     };
-    assert!(matches!(succ_var.as_ref(), CoreTerm::Var(n) if n.as_str() == "Succ"));
-    assert!(matches!(a0_var.as_ref(), CoreTerm::Var(n) if n.as_str() == "a0"));
+    assert_eq!(inductive.as_str(), "Nat");
+    assert_eq!(name.as_str(), "Succ");
+    assert_eq!(args.as_slice(), &[CoreTerm::Var(Text::from("a0"))]);
 }
 
 // =============================================================================
@@ -562,12 +580,20 @@ fn register_admits_back_compat_inductives_without_path_ctors() {
 fn nullary_ctor_case_type_is_motive_app() {
     let motive = CoreTerm::Var(Text::from("motive"));
     let ctor = nullary("Leaf");
-    let ty = point_constructor_case_type(&motive, &ctor);
+    let ty = point_constructor_case_type(
+        &motive,
+        &RegisteredInductive::new(
+            Text::from("Tree"),
+            List::new(),
+            List::from_iter([ctor.clone()]),
+        ),
+        &ctor,
+    );
     assert!(matches!(
         ty,
         CoreTerm::App(f, a)
             if matches!(f.as_ref(), CoreTerm::Var(n) if n.as_str() == "motive")
-                && matches!(a.as_ref(), CoreTerm::Var(n) if n.as_str() == "Leaf")
+                && matches!(a.as_ref(), CoreTerm::Constructor { inductive, name, args, .. } if inductive.as_str() == "Tree" && name.as_str() == "Leaf" && args.is_empty())
     ));
 }
 
@@ -583,7 +609,15 @@ fn binary_ctor_case_type_chains_pi() {
         name: Text::from("Pair"),
         arg_types: List::from_iter(vec![int_ty.clone(), int_ty]),
     };
-    let ty = point_constructor_case_type(&motive, &ctor);
+    let ty = point_constructor_case_type(
+        &motive,
+        &RegisteredInductive::new(
+            Text::from("Tree"),
+            List::new(),
+            List::from_iter([ctor.clone()]),
+        ),
+        &ctor,
+    );
     // Π (a0 : Int) . Π (a1 : Int) . motive(Pair(a0, a1))
     let CoreTerm::Pi {
         binder, codomain, ..
@@ -604,15 +638,24 @@ fn binary_ctor_case_type_chains_pi() {
         panic!()
     };
     assert!(matches!(motive_ref.as_ref(), CoreTerm::Var(n) if n.as_str() == "motive"));
-    let CoreTerm::App(pair_a0, a1) = pair_app.as_ref() else {
+    let CoreTerm::Constructor {
+        inductive,
+        name,
+        args,
+        ..
+    } = pair_app.as_ref()
+    else {
         panic!()
     };
-    let CoreTerm::App(pair, a0) = pair_a0.as_ref() else {
-        panic!()
-    };
-    assert!(matches!(pair.as_ref(), CoreTerm::Var(n) if n.as_str() == "Pair"));
-    assert!(matches!(a0.as_ref(), CoreTerm::Var(n) if n.as_str() == "a0"));
-    assert!(matches!(a1.as_ref(), CoreTerm::Var(n) if n.as_str() == "a1"));
+    assert_eq!(inductive.as_str(), "Tree");
+    assert_eq!(name.as_str(), "Pair");
+    assert_eq!(
+        args.as_slice(),
+        &[
+            CoreTerm::Var(Text::from("a0")),
+            CoreTerm::Var(Text::from("a1"))
+        ]
+    );
 }
 
 // =============================================================================

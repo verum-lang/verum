@@ -55,7 +55,8 @@ use crate::{Context, CoreTerm, CoreType, KernelError, UniverseLevel};
 ///  reduction on top).
 /// * `Transp` — returns path's right-hand endpoint type.
 /// * `Glue` — lives in carrier's universe.
-/// * `Elim` — shape-level; returns `motive(scrutinee)`.
+/// * `Elim` — checks a registered ordinary inductive and all dependent branches,
+///   including recursive hypotheses; returns `motive(scrutinee)`.
 ///
 /// The **only** constructor that still returns
 /// [`KernelError::NotImplemented`] is `SmtProof` — its dedicated
@@ -191,6 +192,55 @@ fn infer_inner_with_coord(
             Maybe::None => Err(KernelError::UnboundVariable(name.clone())),
         },
 
+        CoreTerm::Constructor {
+            inductive,
+            name,
+            params,
+            args,
+        } => {
+            let registry =
+                inductives.ok_or_else(|| KernelError::UnknownInductive(inductive.clone()))?;
+            let declaration = registry
+                .get(inductive.as_str())
+                .ok_or_else(|| KernelError::UnknownInductive(inductive.clone()))?;
+            validate_inductive_parameters(ctx, declaration, params, axioms, registry)?;
+            let constructor = declaration
+                .constructors
+                .iter()
+                .find(|ctor| &ctor.name == name)
+                .ok_or_else(|| {
+                    KernelError::InvalidEliminator(Text::from(
+                        "constructor is not owned by this declaration",
+                    ))
+                })?;
+            if args.len() != constructor.arg_types.len() {
+                return Err(KernelError::InvalidEliminator(Text::from(
+                    "constructor field count does not match its declaration",
+                )));
+            }
+            let instantiated = validate_constructor_signature(
+                ctx,
+                declaration,
+                constructor,
+                params,
+                axioms,
+                registry,
+            )?;
+            for (argument, expected) in args.iter().zip(instantiated.arg_types.iter()) {
+                let actual = infer_inner(ctx, argument, axioms, inductives)?;
+                if !convertible_in(&actual, expected, axioms, inductives) {
+                    return Err(KernelError::TypeMismatch {
+                        expected: shape_of(expected),
+                        actual: shape_of(&actual),
+                    });
+                }
+            }
+            Ok(CoreTerm::Inductive {
+                path: inductive.clone(),
+                args: params.clone(),
+            })
+        }
+
         // Universe `Type(n)` inhabits `Type(n+1)`; `Prop` inhabits `Type(0)`.
         //
 
@@ -262,7 +312,11 @@ fn infer_inner_with_coord(
         // PathTy fix; same monotone strengthening (only widens
         // acceptance, never weakens).
         CoreTerm::App(f, arg) => {
-            let f_ty = infer_inner(ctx, f, axioms, inductives)?;
+            let f_ty = normalize_in(
+                &infer_inner(ctx, f, axioms, inductives)?,
+                axioms,
+                inductives,
+            );
             match f_ty {
                 CoreTerm::Pi {
                     binder,
@@ -270,7 +324,7 @@ fn infer_inner_with_coord(
                     codomain,
                 } => {
                     let arg_ty = infer_inner(ctx, arg, axioms, inductives)?;
-                    if !crate::support::definitional_eq(&arg_ty, &domain) {
+                    if !convertible_in(&arg_ty, &domain, axioms, inductives) {
                         return Err(KernelError::TypeMismatch {
                             expected: shape_of(&domain),
                             actual: shape_of(&arg_ty),
@@ -361,14 +415,14 @@ fn infer_inner_with_coord(
             let carrier_univ = infer_inner(ctx, carrier, axioms, inductives)?;
             let carrier_level = universe_level(&carrier_univ)?;
             let lhs_ty = infer_inner(ctx, lhs, axioms, inductives)?;
-            if !crate::support::definitional_eq(&lhs_ty, carrier) {
+            if !convertible_in(&lhs_ty, carrier, axioms, inductives) {
                 return Err(KernelError::TypeMismatch {
                     expected: shape_of(carrier),
                     actual: shape_of(&lhs_ty),
                 });
             }
             let rhs_ty = infer_inner(ctx, rhs, axioms, inductives)?;
-            if !crate::support::definitional_eq(&rhs_ty, carrier) {
+            if !convertible_in(&rhs_ty, carrier, axioms, inductives) {
                 return Err(KernelError::TypeMismatch {
                     expected: shape_of(carrier),
                     actual: shape_of(&rhs_ty),
@@ -593,7 +647,7 @@ fn infer_inner_with_coord(
         // type is T, (b) Quotient(T, ~) is well-formed.
         CoreTerm::QuotIntro { value, base, equiv } => {
             let value_ty = infer_inner(ctx, value, axioms, inductives)?;
-            if !crate::support::definitional_eq(&value_ty, base) {
+            if !convertible_in(&value_ty, base, axioms, inductives) {
                 return Err(KernelError::TypeMismatch {
                     expected: shape_of(base),
                     actual: shape_of(&value_ty),
@@ -661,75 +715,96 @@ fn infer_inner_with_coord(
         // callers (verification driver, gradual-verification
         // pipeline) propagate honest universe levels through the
         // typing judgment.
-        CoreTerm::Inductive { path, .. } => {
-            let level = match inductives {
-                Some(reg) => match reg.universe_for(path.as_str()) {
-                    Some(l) => l.clone(),
-                    None => UniverseLevel::Concrete(0),
-                },
+        CoreTerm::Inductive { path, args } => {
+            let level = match inductives.and_then(|registry| registry.get(path.as_str())) {
+                Some(declaration) => {
+                    validate_inductive_parameters(
+                        ctx,
+                        declaration,
+                        args,
+                        axioms,
+                        inductives.unwrap(),
+                    )?;
+                    declaration.universe.clone()
+                }
                 None => UniverseLevel::Concrete(0),
             };
             Ok(CoreTerm::Universe(level))
         }
 
-        // Elim: an induction-principle application
-        // `elim e motive cases`. The result inhabits `motive` applied
-        // to the scrutinee.
-        //
-
-        // V0 (bring-up — pre-V8): only inferred motive's type, then
-        // returned `App(motive, scrutinee)` syntactically without
-        // verifying motive was a function or that scrutinee fit its
-        // domain. Soundness-leaky: an Elim with motive `42` (Int) or
-        // a motive whose domain is `Bool` and a scrutinee of type
-        // `Int` would return a malformed result that the App rule
-        // surfaced only on later use.
-        //
-
-        // V1 (this revision) — adopt the same *well-formedness*
-        // check the App rule does:
-        //
-
-        //  1. motive's TYPE must be a Π (motive is a function from
-        //  some domain to some universe).
-        //  2. scrutinee's type must structurally match the Π's
-        //  domain.
-        //
-
-        // The *result type* is still the syntactic application
-        // `motive scrutinee` — semantically motive(scrutinee), with
-        // β-reduction left to downstream definitional equality.
-        // Returning the codomain[binder := scrutinee] would be the
-        // type's TYPE (i.e., universe), not the type itself; the
-        // App-typing rule on this returned term will compute
-        // codomain[binder := scrutinee] when required. Per-case
-        // exhaustiveness + typing remains the dedicated Elim-rule
-        // pass's job.
-        //
-
-        // M-VVA Sub-2.3 (definitional_eq lifting, 2026-04-28): use
-        // β-/ι-/δ-aware `definitional_eq_with_axioms` instead of
-        // `structural_eq` so an Elim whose scrutinee type is a β-redex
-        // is accepted when its normal form matches the motive's
-        // domain. structural_eq misses (λx.T) y vs T[y/x]; the lift is
-        // monotone (only widens the accept set) per support.rs:579-582.
+        // Elimination is justified by the registered declaration and every
+        // branch. Checking only motive/scrutinee admits an arbitrary goal.
         CoreTerm::Elim {
-            scrutinee, motive, ..
+            scrutinee,
+            motive,
+            cases,
         } => {
-            let motive_ty = infer_inner(ctx, motive, axioms, inductives)?;
-            match motive_ty {
-                CoreTerm::Pi { domain, .. } => {
-                    let scrut_ty = infer_inner(ctx, scrutinee, axioms, inductives)?;
-                    if !crate::support::definitional_eq_with_axioms(&scrut_ty, &domain, axioms) {
-                        return Err(KernelError::TypeMismatch {
-                            expected: shape_of(&domain),
-                            actual: shape_of(&scrut_ty),
-                        });
-                    }
-                    Ok(CoreTerm::App(motive.clone(), scrutinee.clone()))
-                }
-                other => Err(KernelError::NotAFunction(shape_of(&other))),
+            let motive_ty = normalize_in(
+                &infer_inner(ctx, motive, axioms, inductives)?,
+                axioms,
+                inductives,
+            );
+            let CoreTerm::Pi {
+                domain, codomain, ..
+            } = motive_ty
+            else {
+                return Err(KernelError::NotAFunction(shape_of(&motive_ty)));
+            };
+            let scrut_ty = infer_inner(ctx, scrutinee, axioms, inductives)?;
+            if !convertible_in(&scrut_ty, &domain, axioms, inductives) {
+                return Err(KernelError::TypeMismatch {
+                    expected: shape_of(&domain),
+                    actual: shape_of(&scrut_ty),
+                });
             }
+            universe_level(&normalize_in(&codomain, axioms, inductives))?;
+            let head = normalize_in(&scrut_ty, axioms, inductives);
+            let CoreTerm::Inductive { path, args } = &head else {
+                return Err(KernelError::InvalidEliminator(Text::from(
+                    "scrutinee has no registered inductive declaration",
+                )));
+            };
+            let declaration = inductives
+                .and_then(|registry| registry.get(path.as_str()))
+                .ok_or_else(|| KernelError::UnknownInductive(path.clone()))?;
+            if !declaration.path_constructors.is_empty() {
+                return Err(KernelError::InvalidEliminator(Text::from(
+                    "higher inductive elimination requires checked path coherence",
+                )));
+            }
+            if args.len() != declaration.params.len()
+                || cases.len() != declaration.constructors.len()
+            {
+                return Err(KernelError::InvalidEliminator(Text::from(
+                    "parameter and branch counts must match the inductive declaration",
+                )));
+            }
+            for (case, constructor) in cases.iter().zip(declaration.constructors.iter()) {
+                validate_constructor_signature(
+                    ctx,
+                    declaration,
+                    constructor,
+                    args,
+                    axioms,
+                    inductives.unwrap(),
+                )?;
+                let expected = crate::inductive::instantiated_constructor_case_type(
+                    motive,
+                    declaration,
+                    constructor,
+                    args,
+                );
+                let kind = infer_inner(ctx, &expected, axioms, inductives)?;
+                universe_level(&normalize_in(&kind, axioms, inductives))?;
+                let actual = infer_inner(ctx, case, axioms, inductives)?;
+                if !convertible_in(&actual, &expected, axioms, inductives) {
+                    return Err(KernelError::TypeMismatch {
+                        expected: shape_of(&expected),
+                        actual: shape_of(&actual),
+                    });
+                }
+            }
+            Ok(CoreTerm::App(motive.clone(), scrutinee.clone()))
         }
 
         // An `SmtProof` node is replayed via `replay_smt_cert` at type
@@ -820,6 +895,120 @@ fn infer_inner_with_coord(
     }
 }
 
+fn normalize_in(
+    term: &CoreTerm,
+    axioms: &AxiomRegistry,
+    inductives: Option<&crate::InductiveRegistry>,
+) -> CoreTerm {
+    match inductives {
+        Some(registry) => crate::support::normalize_full(term, axioms, registry),
+        None => crate::support::normalize_with_axioms(term, axioms),
+    }
+}
+
+fn convertible_in(
+    a: &CoreTerm,
+    b: &CoreTerm,
+    axioms: &AxiomRegistry,
+    inductives: Option<&crate::InductiveRegistry>,
+) -> bool {
+    a == b
+        || crate::equivalence::alpha_equivalent(
+            &normalize_in(a, axioms, inductives),
+            &normalize_in(b, axioms, inductives),
+        )
+}
+
+fn validate_constructor_signature(
+    ctx: &Context,
+    declaration: &crate::RegisteredInductive,
+    constructor: &crate::ConstructorSig,
+    params: &[CoreTerm],
+    axioms: &AxiomRegistry,
+    registry: &crate::InductiveRegistry,
+) -> Result<crate::ConstructorSig, KernelError> {
+    let instantiated = declaration.instantiate_constructor(constructor, params);
+    for (index, (raw, field)) in constructor
+        .arg_types
+        .iter()
+        .zip(instantiated.arg_types.iter())
+        .enumerate()
+    {
+        // Check the declaration before parameter substitution: a caller's type
+        // argument is not a new recursive occurrence in the declaration. But a
+        // transparent definition may expose a hidden negative occurrence.
+        registry.check_field_positivity(
+            declaration,
+            constructor,
+            index,
+            &normalize_in(raw, axioms, Some(registry)),
+        )?;
+        validate_inductive_field(ctx, field, declaration, axioms, registry)?;
+    }
+    Ok(instantiated)
+}
+
+/// Parameter universes are bounded by the declaration's universe. The current
+/// declaration schema has no independent parameter-universe telescope.
+fn validate_inductive_parameters(
+    ctx: &Context,
+    declaration: &crate::RegisteredInductive,
+    params: &[CoreTerm],
+    axioms: &AxiomRegistry,
+    registry: &crate::InductiveRegistry,
+) -> Result<(), KernelError> {
+    if params.len() != declaration.params.len() {
+        return Err(KernelError::InvalidEliminator(Text::from(
+            "inductive parameter count does not match its declaration",
+        )));
+    }
+    for parameter in params {
+        validate_inductive_field(ctx, parameter, declaration, axioms, registry)?;
+    }
+    Ok(())
+}
+
+fn validate_inductive_field(
+    ctx: &Context,
+    field: &CoreTerm,
+    declaration: &crate::RegisteredInductive,
+    axioms: &AxiomRegistry,
+    registry: &crate::InductiveRegistry,
+) -> Result<(), KernelError> {
+    let kind = infer_inner(ctx, field, axioms, Some(registry))?;
+    let level = universe_level(&normalize_in(&kind, axioms, Some(registry)))?;
+    if level_at_most(&level, &declaration.universe) {
+        Ok(())
+    } else {
+        Err(KernelError::InvalidEliminator(Text::from(
+            "constructor field or parameter exceeds the declared universe",
+        )))
+    }
+}
+
+// A conservative order on the existing level syntax. Unresolved constraints
+// are refused; no symbolic universe comparison is guessed from a name.
+fn level_at_most(left: &UniverseLevel, right: &UniverseLevel) -> bool {
+    if left == right {
+        return true;
+    }
+    match (left, right) {
+        (UniverseLevel::Prop, _) => true,
+        (UniverseLevel::Concrete(a), UniverseLevel::Concrete(b)) => a <= b,
+        (UniverseLevel::Max(a, b), _) => level_at_most(a, right) && level_at_most(b, right),
+        (_, UniverseLevel::Max(a, b)) => level_at_most(left, a) || level_at_most(left, b),
+        (UniverseLevel::Succ(a), UniverseLevel::Succ(b)) => level_at_most(a, b),
+        (UniverseLevel::Succ(a), UniverseLevel::Concrete(b)) if *b > 0 => {
+            level_at_most(a, &UniverseLevel::Concrete(b - 1))
+        }
+        (UniverseLevel::Concrete(a), UniverseLevel::Succ(b)) if *a > 0 => {
+            level_at_most(&UniverseLevel::Concrete(a - 1), b)
+        }
+        (UniverseLevel::Concrete(0), UniverseLevel::Succ(_)) => true,
+        _ => false,
+    }
+}
+
 /// Backwards-compatible shape-only query — returns the kernel's
 /// coarse [`CoreType`] head view. Prefer [`infer`] when full type
 /// information is needed.
@@ -850,6 +1039,28 @@ pub fn verify_full(
 ) -> Result<(), KernelError> {
     let actual = infer(ctx, term, axioms)?;
     if crate::support::definitional_eq_with_axioms(&actual, expected, axioms) {
+        Ok(())
+    } else {
+        Err(KernelError::TypeMismatch {
+            expected: shape_of(expected),
+            actual: shape_of(&actual),
+        })
+    }
+}
+
+/// Verify an ordinary inductive proof using its explicit declaration registry.
+/// Both the goal's formation and the term's branch obligations are checked.
+pub fn verify_with_inductives(
+    ctx: &Context,
+    term: &CoreTerm,
+    expected: &CoreTerm,
+    axioms: &AxiomRegistry,
+    inductives: &crate::InductiveRegistry,
+) -> Result<(), KernelError> {
+    let kind = infer_with_inductives(ctx, expected, axioms, inductives)?;
+    universe_level(&crate::support::normalize_full(&kind, axioms, inductives))?;
+    let actual = infer_with_inductives(ctx, term, axioms, inductives)?;
+    if convertible_in(&actual, expected, axioms, Some(inductives)) {
         Ok(())
     } else {
         Err(KernelError::TypeMismatch {

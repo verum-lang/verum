@@ -58,6 +58,12 @@ use crate::{CoreTerm, KernelError, UniverseLevel};
 pub fn m_depth(term: &CoreTerm) -> usize {
     match term {
         CoreTerm::Var(_) => 0,
+        CoreTerm::Constructor { params, args, .. } => params
+            .iter()
+            .chain(args.iter())
+            .map(m_depth)
+            .max()
+            .unwrap_or(0),
         CoreTerm::Universe(lvl) => match lvl {
             UniverseLevel::Concrete(n) => *n as usize,
             UniverseLevel::Prop => 0,
@@ -317,6 +323,11 @@ pub fn m_depth_omega(term: &CoreTerm) -> OrdinalDepth {
     match term {
         // Atomic / variable — md^ω = 0.
         CoreTerm::Var(_) => OrdinalDepth::finite(0),
+        CoreTerm::Constructor { params, args, .. } => params
+            .iter()
+            .chain(args.iter())
+            .map(m_depth_omega)
+            .fold(OrdinalDepth::finite(0), ord_max),
         CoreTerm::Universe(_) => OrdinalDepth::finite(0),
 
         // Modal operators — the load-bearing recursion.

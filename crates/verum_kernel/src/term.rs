@@ -29,15 +29,28 @@ use crate::{FrameworkId, SmtCertificate};
 /// [`Glue`]: CoreTerm::Glue
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum CoreTerm {
-    /// A de Bruijn / name variable reference.
+    /// A local variable reference, resolved by lexical name.
     Var(Text),
+
+    /// A saturated point constructor owned by one inductive declaration.
+    /// Global constructor identity is separate from local variable spelling.
+    Constructor {
+        /// Qualified name of the owning inductive declaration.
+        inductive: Text,
+        /// Constructor name within that declaration.
+        name: Text,
+        /// Instantiated type parameters, in declaration order.
+        params: List<CoreTerm>,
+        /// Constructor fields, in declaration order.
+        args: List<CoreTerm>,
+    },
 
     /// Universe `Type(i)` for level `i`, or `Prop` (propositional universe).
     Universe(UniverseLevel),
 
     /// Dependent function type: `Pi (x : dom) . codom`.
     Pi {
-        /// The bound name (used for pretty-printing; kernel uses de Bruijn).
+        /// The lexical binder name; conversion compares binding positions.
         binder: Text,
         /// Domain type.
         domain: Heap<CoreTerm>,
@@ -374,6 +387,104 @@ pub enum CoreTerm {
     /// Reference: Schreiber U. 2013. *Differential Cohomology in a
     /// Cohesive ∞-Topos.* §3.4.
     Sharp(Heap<CoreTerm>),
+}
+
+impl CoreTerm {
+    /// Visit every immediate term child, preserving declaration metadata.
+    /// The exhaustive match keeps structural checks complete as syntax grows.
+    pub(crate) fn visit_children(&self, mut visit: impl FnMut(&CoreTerm)) {
+        use CoreTerm::*;
+        match self {
+            Var(_) | Universe(_) | SmtProof(_) => {}
+            Constructor { params, args, .. } => {
+                params.iter().chain(args.iter()).for_each(&mut visit)
+            }
+            Pi {
+                domain, codomain, ..
+            } => {
+                visit(domain);
+                visit(codomain);
+            }
+            Lam { domain, body, .. } => {
+                visit(domain);
+                visit(body);
+            }
+            Sigma { fst_ty, snd_ty, .. } => {
+                visit(fst_ty);
+                visit(snd_ty);
+            }
+            Refine {
+                base, predicate, ..
+            } => {
+                visit(base);
+                visit(predicate);
+            }
+            App(a, b) | Pair(a, b) | Quotient { base: a, equiv: b } => {
+                visit(a);
+                visit(b);
+            }
+            Fst(a) | Snd(a) | Refl(a) | EpsilonOf(a) | AlphaOf(a) | ModalBox(a)
+            | ModalDiamond(a) | Shape(a) | Flat(a) | Sharp(a) => visit(a),
+            PathTy {
+                carrier: a,
+                lhs: b,
+                rhs: c,
+            }
+            | HComp {
+                phi: a,
+                walls: b,
+                base: c,
+            }
+            | Transp {
+                path: a,
+                regular: b,
+                value: c,
+            }
+            | QuotIntro {
+                value: a,
+                base: b,
+                equiv: c,
+            }
+            | QuotElim {
+                scrutinee: a,
+                motive: b,
+                case: c,
+            } => {
+                visit(a);
+                visit(b);
+                visit(c);
+            }
+            PathOver {
+                motive: a,
+                path: b,
+                lhs: c,
+                rhs: d,
+            }
+            | Glue {
+                carrier: a,
+                phi: b,
+                fiber: c,
+                equiv: d,
+            } => {
+                visit(a);
+                visit(b);
+                visit(c);
+                visit(d);
+            }
+            Inductive { args, .. } => args.iter().for_each(&mut visit),
+            Elim {
+                scrutinee,
+                motive,
+                cases,
+            } => {
+                visit(scrutinee);
+                visit(motive);
+                cases.iter().for_each(&mut visit);
+            }
+            ModalBigAnd(args) => args.iter().for_each(|term| visit(term)),
+            Axiom { ty, .. } => visit(ty),
+        }
+    }
 }
 
 /// A structural view of a type used by [`crate::check`] diagnostics.

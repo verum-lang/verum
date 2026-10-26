@@ -24,6 +24,30 @@ fn compare<'a>(
                 _ => false,
             }
         }
+        (
+            Constructor {
+                inductive: ai,
+                name: an,
+                params: ap,
+                args: aa,
+            },
+            Constructor {
+                inductive: bi,
+                name: bn,
+                params: bp,
+                args: ba,
+            },
+        ) => {
+            ai == bi
+                && an == bn
+                && ap.len() == bp.len()
+                && aa.len() == ba.len()
+                && ap
+                    .iter()
+                    .zip(bp.iter())
+                    .chain(aa.iter().zip(ba.iter()))
+                    .all(|(a, b)| compare(a, b, bound))
+        }
         (Universe(a), Universe(b)) => a == b,
         (
             Pi {
