@@ -1,0 +1,87 @@
+import Lean
+
+/- Nonnegative rational model using positive natural denominators. Comparisons
+   use exact cross multiplication; normalization is unnecessary for these laws.
+   This is proof data, not a replacement for a native arbitrary-precision library. -/
+namespace ExactMass
+set_option warningAsError true
+
+structure Fraction where
+  numerator : Nat
+  denominator : Nat
+  positive : 0 < denominator
+  deriving DecidableEq
+
+def zero : Fraction := ⟨0, 1, by decide⟩
+def one : Fraction := ⟨1, 1, by decide⟩
+def unit (denominator : Nat) (positive : 0 < denominator) : Fraction :=
+  ⟨1, denominator, positive⟩
+def Equal (a b : Fraction) : Prop := a.numerator * b.denominator = b.numerator * a.denominator
+def AtMost (a b : Fraction) : Prop := a.numerator * b.denominator ≤ b.numerator * a.denominator
+instance (a b : Fraction) : Decidable (Equal a b) := inferInstanceAs (Decidable (_ = _))
+instance (a b : Fraction) : Decidable (AtMost a b) := inferInstanceAs (Decidable (_ ≤ _))
+def add (a b : Fraction) : Fraction :=
+  ⟨a.numerator * b.denominator + b.numerator * a.denominator,
+    a.denominator * b.denominator, Nat.mul_pos a.positive b.positive⟩
+def mul (a b : Fraction) : Fraction :=
+  ⟨a.numerator * b.numerator, a.denominator * b.denominator, Nat.mul_pos a.positive b.positive⟩
+
+theorem le_refl (a : Fraction) : AtMost a a := Nat.le_refl _
+theorem eq_refl (a : Fraction) : Equal a a := rfl
+theorem eq_symm {a b : Fraction} (h : Equal a b) : Equal b a := h.symm
+theorem eq_le {a b : Fraction} (h : Equal a b) : AtMost a b := Nat.le_of_eq h
+theorem le_antisymm {a b : Fraction} (h : AtMost a b) (k : AtMost b a) : Equal a b :=
+  Nat.le_antisymm h k
+theorem zero_le (a : Fraction) : AtMost zero a := by simp [AtMost, zero]
+
+theorem le_trans {a b c : Fraction} (h : AtMost a b) (k : AtMost b c) : AtMost a c := by
+  apply Nat.le_of_mul_le_mul_right (c := b.denominator) _ b.positive
+  have h' := Nat.mul_le_mul_right c.denominator h
+  have k' := Nat.mul_le_mul_right a.denominator k
+  simp only [Nat.mul_comm, Nat.mul_left_comm] at h' k' ⊢
+  exact Nat.le_trans h' k'
+
+theorem eq_trans {a b c : Fraction} (h : Equal a b) (k : Equal b c) : Equal a c :=
+  le_antisymm (le_trans (eq_le h) (eq_le k)) (le_trans (eq_le (eq_symm k)) (eq_le (eq_symm h)))
+
+theorem add_comm (a b : Fraction) : Equal (add a b) (add b a) := by
+  simp [Equal, add, Nat.mul_comm, Nat.add_comm]
+
+theorem add_assoc (a b c : Fraction) : Equal (add (add a b) c) (add a (add b c)) := by
+  simp [Equal, add, Nat.mul_add, Nat.mul_comm, Nat.mul_left_comm, Nat.add_assoc, Nat.add_comm]
+
+theorem add_zero (a : Fraction) : Equal (add a zero) a := by simp [Equal, add, zero]
+
+theorem add_mono_left (c : Fraction) {a b : Fraction} (h : AtMost a b) : AtMost (add c a) (add c b) := by
+  have scaled := Nat.mul_le_mul_right (c.denominator * c.denominator) h
+  have result := Nat.add_le_add_left scaled (c.numerator * a.denominator * c.denominator * b.denominator)
+  simpa only [AtMost, add, Nat.add_mul, Nat.mul_add, Nat.mul_assoc,
+    Nat.mul_comm, Nat.mul_left_comm] using result
+
+theorem add_mono_right (c : Fraction) {a b : Fraction} (h : AtMost a b) : AtMost (add a c) (add b c) :=
+  le_trans (eq_le (add_comm a c)) (le_trans (add_mono_left c h) (eq_le (add_comm c b)))
+
+theorem add_congr_left (c : Fraction) {a b : Fraction} (h : Equal a b) : Equal (add c a) (add c b) :=
+  le_antisymm (add_mono_left c (eq_le h)) (add_mono_left c (eq_le (eq_symm h)))
+
+theorem add_congr_right (c : Fraction) {a b : Fraction} (h : Equal a b) : Equal (add a c) (add b c) :=
+  le_antisymm (add_mono_right c (eq_le h)) (add_mono_right c (eq_le (eq_symm h)))
+
+theorem le_add (a b : Fraction) : AtMost a (add a b) :=
+  le_trans (eq_le (eq_symm (add_zero a))) (add_mono_left a (zero_le b))
+
+theorem mul_comm (a b : Fraction) : Equal (mul a b) (mul b a) := by simp [Equal, mul, Nat.mul_comm]
+theorem mul_one (a : Fraction) : Equal (mul a one) a := by simp [Equal, mul, one]
+theorem mul_zero (a : Fraction) : Equal (mul a zero) zero := by simp [Equal, mul, zero]
+
+theorem mul_add (a b c : Fraction) : Equal (mul a (add b c)) (add (mul a b) (mul a c)) := by
+  simp [Equal, add, mul, Nat.mul_add, Nat.mul_comm, Nat.mul_left_comm]
+
+theorem mul_mono_right (c : Fraction) {a b : Fraction} (h : AtMost a b) : AtMost (mul a c) (mul b c) := by
+  have result := Nat.mul_le_mul_right (c.numerator * c.denominator) h
+  simpa only [AtMost, mul, Nat.mul_assoc, Nat.mul_comm, Nat.mul_left_comm] using result
+
+theorem mul_congr_right (c : Fraction) {a b : Fraction} (h : Equal a b) : Equal (mul a c) (mul b c) :=
+  le_antisymm (mul_mono_right c (eq_le h)) (mul_mono_right c (eq_le (eq_symm h)))
+
+end ExactMass

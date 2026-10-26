@@ -27,3 +27,4 @@ import VerumExternalReplay.ObserverLifecycleControls
 import VerumExternalReplay.AcquiredObserverControls
 import VerumExternalReplay.CommonDescriptionCost
 import VerumExternalReplay.ObserverRetirementControls
+import VerumExternalReplay.EnumerableMass
