@@ -13,6 +13,7 @@
 //!  performs inference — it only checks.
 
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
 use verum_common::{List, Maybe, Text};
 
 use crate::CoreTerm;
@@ -125,6 +126,7 @@ pub fn check_coord_cite(
 #[derive(Debug, Clone, Default)]
 pub struct Context {
     bindings: List<(Text, CoreTerm)>,
+    dimensions: BTreeSet<Text>,
 }
 
 impl Context {
@@ -132,7 +134,28 @@ impl Context {
     pub fn new() -> Self {
         Self {
             bindings: List::new(),
+            dimensions: BTreeSet::new(),
         }
+    }
+
+    /// Extend the separate dimension namespace. Explicit core dimension
+    /// names must be fresh; an elaborator can alpha-rename before introduction.
+    pub fn extend_dimension(&self, name: Text) -> Result<Self, crate::KernelError> {
+        let mut fresh = self.clone();
+        if !fresh.dimensions.insert(name.clone()) {
+            return Err(crate::KernelError::DuplicateDimension(name));
+        }
+        Ok(fresh)
+    }
+
+    /// Check the free dimensions of a canonical interval expression.
+    pub fn check_interval(&self, interval: &crate::IntervalExpr) -> Result<(), crate::KernelError> {
+        for dimension in interval.dimensions() {
+            if !self.dimensions.contains(&dimension) {
+                return Err(crate::KernelError::UnboundDimension(dimension));
+            }
+        }
+        Ok(())
     }
 
     /// Extend the context with a new typed binding. Shadowing is

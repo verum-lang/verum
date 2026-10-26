@@ -157,16 +157,9 @@ impl FaceFormula {
     /// applied while streaming clauses, avoiding a retained Cartesian-product
     /// buffer when conjunction generates redundant products.
     pub fn from_clauses(clauses: impl IntoIterator<Item = Clause>) -> Self {
-        let mut minimal: List<Clause> = List::new();
-        for clause in clauses {
-            if minimal.iter().any(|existing| clause.implies(existing)) {
-                continue;
-            }
-            minimal.retain(|existing| !existing.implies(&clause));
-            minimal.push(clause);
+        Self {
+            clauses: crate::antichain::minimal(clauses, Clause::implies),
         }
-        minimal.sort_unstable();
-        Self { clauses: minimal }
     }
 
     /// Read-only access to the sorted, minimal clauses.

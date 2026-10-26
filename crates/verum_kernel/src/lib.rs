@@ -251,16 +251,14 @@ pub use diakrisis_bridge::{BridgeAdmit, BridgeAudit, BridgeId};
 
 pub use universe_ascent::{KappaTier, check_universe_ascent_v2};
 
-/// Cubical cofibration calculus — face-formula algebra + interval
-/// subsumption decision procedure (M-VVA-FU Sub-2.4-cubical, V1
-/// shipped 2026-04-28). Per VVA spec L579 the cubical cofibration
-/// calculus was deferred; this module provides:
-///  * `FaceLit` — atomic literal `(i = 0)` / `(i = 1)`.
-///  * `Clause` — DNF clause (conjunction of literals).
-///  * `FaceFormula` — full DNF with ⊤/⊥/AND/OR + decidable
-///  `implies` (subsumption via per-clause set inclusion).
-/// This algebra is not yet connected to the named HComp / Glue typing
-/// rules; it does not establish their cofibration-coherence obligations.
+mod antichain;
+
+/// De Morgan interval expressions, separate from fibrant terms and faces.
+pub mod interval;
+pub use interval::{IntervalExpr, IntervalLiteral};
+
+/// Canonical endpoint-face algebra with decidable implication. This does
+/// not establish the boundary-coherence obligations of HComp or Glue.
 pub mod cofibration;
 pub use cofibration::{Clause, FaceFormula, FaceLit};
 

@@ -25,6 +25,14 @@ pub enum KernelError {
     #[error("unbound variable: {0}")]
     UnboundVariable(Text),
 
+    /// A free interval dimension has no declaration in the dimension context.
+    #[error("unbound interval dimension: {0}")]
+    UnboundDimension(Text),
+
+    /// Explicit core dimension binders must use fresh names.
+    #[error("duplicate interval dimension: {0}")]
+    DuplicateDimension(Text),
+
     /// Application where the function part is not a Π-type.
     #[error("application expected a Pi type, got {0:?}")]
     NotAFunction(CoreType),
