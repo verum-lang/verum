@@ -28,12 +28,12 @@ datatype CoreTerm =
   | PathOver CoreTerm CoreTerm CoreTerm CoreTerm
   | Refl CoreTerm
   | HComp CoreTerm CoreTerm CoreTerm
-  | Transp CoreTerm CoreTerm CoreTerm
+  | Transport CoreTerm CoreTerm
   | Glue CoreTerm CoreTerm CoreTerm CoreTerm
   | Refine CoreTerm string CoreTerm
   | Quotient CoreTerm CoreTerm
   | QuotIntro CoreTerm CoreTerm CoreTerm
-  | QuotElim CoreTerm CoreTerm CoreTerm
+  | QuotElim CoreTerm CoreTerm CoreTerm CoreTerm
   | InductiveT string "CoreTerm list"
   | Elim CoreTerm CoreTerm "CoreTerm list"
   | SmtProof string
@@ -105,6 +105,10 @@ type_synonym Ctx = "(string \<times> CoreTerm) list"
 (* Capture-avoiding substitution.  Opaque oracle. *)
 consts subst :: "string \<Rightarrow> CoreTerm \<Rightarrow> CoreTerm \<Rightarrow> CoreTerm"
 
+(* Abstract binder hygiene; this schema does not prove Rust checker correspondence. *)
+definition QuotientFresh :: "string \<Rightarrow> CoreTerm list \<Rightarrow> bool" where
+"QuotientFresh name terms = (\<forall>term\<in>set terms. \<forall>value. subst name value term = term)"
+
 (* Generic side-condition oracle for K_Pos / K_FwAx. *)
 consts side_conditions_hold :: "bool"
 
@@ -146,7 +150,7 @@ axiomatization where T_refl: "\<lbrakk>\<Gamma> \<turnstile> a : A\<rbrakk> \<Lo
 
 axiomatization where T_hcomp: "\<lbrakk>\<Gamma> \<turnstile> T : Universe i; \<Gamma> \<turnstile> base : T\<rbrakk> \<Longrightarrow> \<Gamma> \<turnstile> HComp phi walls base : T"
 
-axiomatization where T_transp: "\<lbrakk>\<Gamma> \<turnstile> target : Universe i\<rbrakk> \<Longrightarrow> \<Gamma> \<turnstile> Transp path regular value : target"
+axiomatization where T_transp: "\<lbrakk>\<Gamma> \<turnstile> source : Universe i; \<Gamma> \<turnstile> target : Universe i; \<Gamma> \<turnstile> path : PathTy (Universe i) source target; \<Gamma> \<turnstile> value : source\<rbrakk> \<Longrightarrow> \<Gamma> \<turnstile> Transport path value : target"
 
 axiomatization where T_glue: "\<lbrakk>\<Gamma> \<turnstile> carrier : Universe i\<rbrakk> \<Longrightarrow> \<Gamma> \<turnstile> Glue carrier phi fiber equivP : Universe i"
 
@@ -158,11 +162,11 @@ axiomatization where T_refine_intro: "\<lbrakk>\<Gamma> \<turnstile> a : base; \
 
 axiomatization where T_refine_erase: "\<lbrakk>\<Gamma> \<turnstile> a : Refine base x predicate\<rbrakk> \<Longrightarrow> \<Gamma> \<turnstile> a : base"
 
-axiomatization where T_quot_form: "\<lbrakk>\<Gamma> \<turnstile> base : Universe i\<rbrakk> \<Longrightarrow> \<Gamma> \<turnstile> Quotient base equivP : Universe i"
+axiomatization where T_quot_form: "\<lbrakk>QuotientFresh ''x'' [base]; \<Gamma> \<turnstile> base : Universe i; \<Gamma> \<turnstile> equivP : Pi ''x'' base (Pi ''y'' base (Universe j))\<rbrakk> \<Longrightarrow> \<Gamma> \<turnstile> Quotient base equivP : Universe (max i j)"
 
-axiomatization where T_quot_intro: "\<lbrakk>\<Gamma> \<turnstile> value : base\<rbrakk> \<Longrightarrow> \<Gamma> \<turnstile> QuotIntro value base equivP : Quotient base equivP"
+axiomatization where T_quot_intro: "\<lbrakk>\<Gamma> \<turnstile> Quotient base equivP : Universe i; \<Gamma> \<turnstile> value : base\<rbrakk> \<Longrightarrow> \<Gamma> \<turnstile> QuotIntro value base equivP : Quotient base equivP"
 
-axiomatization where T_quot_elim: "\<lbrakk>\<Gamma> \<turnstile> scrutinee : Quotient base equivP; \<Gamma> \<turnstile> motive : Pi ''x'' base (Universe i); \<Gamma> \<turnstile> case_fn : Pi ''x'' base (App motive (Var ''x''))\<rbrakk> \<Longrightarrow> \<Gamma> \<turnstile> QuotElim scrutinee motive case_fn : App motive scrutinee"
+axiomatization where T_quot_elim: "\<lbrakk>QuotientFresh ''q'' [result]; QuotientFresh ''x'' [base, equivP, result, case_fn]; QuotientFresh ''y'' [base, equivP, result, case_fn]; QuotientFresh ''r'' [base, equivP, result, case_fn]; motive = Lam ''q'' (Quotient base equivP) result; \<Gamma> \<turnstile> Quotient base equivP : Universe j; \<Gamma> \<turnstile> result : Universe i; \<Gamma> \<turnstile> scrutinee : Quotient base equivP; \<Gamma> \<turnstile> case_fn : Pi ''x'' base result; \<Gamma> \<turnstile> respect : Pi ''x'' base (Pi ''y'' base (Pi ''r'' (App (App equivP (Var ''x'')) (Var ''y'')) (PathTy result (App case_fn (Var ''x'')) (App case_fn (Var ''y'')))))\<rbrakk> \<Longrightarrow> \<Gamma> \<turnstile> QuotElim scrutinee motive case_fn respect : App motive scrutinee"
 
 axiomatization where T_inductive: "\<And>(path :: string) (args :: CoreTerm list). \<Gamma> \<turnstile> InductiveT path args : Universe i"
 
@@ -273,10 +277,13 @@ lemma K_HComp_sound:
   shows "\<Gamma> \<turnstile> HComp phi walls base : T"
   using assms by (rule T_hcomp)
 
-(* K_Transp — category Cubical — premise arity 1 — side-condition: false *)
+(* K_Transp — category Cubical — premise arity 4 — side-condition: false *)
 lemma K_Transp_sound:
-  assumes "\<Gamma> \<turnstile> target : Universe i"
-  shows "\<Gamma> \<turnstile> Transp path regular value : target"
+  assumes "\<Gamma> \<turnstile> source : Universe i"
+      and "\<Gamma> \<turnstile> target : Universe i"
+      and "\<Gamma> \<turnstile> path : PathTy (Universe i) source target"
+      and "\<Gamma> \<turnstile> value : source"
+  shows "\<Gamma> \<turnstile> Transport path value : target"
   using assms by (rule T_transp)
 
 (* K_Glue — category Cubical — premise arity 1 — side-condition: false *)
@@ -310,24 +317,34 @@ lemma K_Refine_Erase_sound:
   assumes "\<Gamma> \<turnstile> a : Refine base x predicate" shows "\<Gamma> \<turnstile> a : base"
   using assms by (rule T_refine_erase)
 
-(* K_Quot_Form — category Quotient — premise arity 2 — side-condition: true *)
+(* K_Quot_Form — category Quotient — premise arity 3 — side-condition: true *)
 lemma K_Quot_Form_sound:
-  assumes "\<Gamma> \<turnstile> base : Universe i"
-  shows "\<Gamma> \<turnstile> Quotient base equivP : Universe i"
+  assumes "QuotientFresh ''x'' [base]"
+  and "\<Gamma> \<turnstile> base : Universe i"
+  and "\<Gamma> \<turnstile> equivP : Pi ''x'' base (Pi ''y'' base (Universe j))"
+  shows "\<Gamma> \<turnstile> Quotient base equivP : Universe (max i j)"
   using assms by (rule T_quot_form)
 
-(* K_Quot_Intro — category Quotient — premise arity 3 — side-condition: false *)
+(* K_Quot_Intro — category Quotient — premise arity 2 — side-condition: false *)
 lemma K_Quot_Intro_sound:
-  assumes "\<Gamma> \<turnstile> value : base"
+  assumes "\<Gamma> \<turnstile> Quotient base equivP : Universe i"
+  and "\<Gamma> \<turnstile> value : base"
   shows "\<Gamma> \<turnstile> QuotIntro value base equivP : Quotient base equivP"
   using assms by (rule T_quot_intro)
 
-(* K_Quot_Elim — category Quotient — premise arity 3 — side-condition: true *)
+(* K_Quot_Elim — category Quotient — premise arity 10 — side-condition: true *)
 lemma K_Quot_Elim_sound:
-  assumes "\<Gamma> \<turnstile> scrutinee : Quotient base equivP"
-  and "\<Gamma> \<turnstile> motive : Pi ''x'' base (Universe i)"
-  and "\<Gamma> \<turnstile> case_fn : Pi ''x'' base (App motive (Var ''x''))"
-  shows "\<Gamma> \<turnstile> QuotElim scrutinee motive case_fn : App motive scrutinee"
+  assumes "QuotientFresh ''q'' [result]"
+  and "QuotientFresh ''x'' [base, equivP, result, case_fn]"
+  and "QuotientFresh ''y'' [base, equivP, result, case_fn]"
+  and "QuotientFresh ''r'' [base, equivP, result, case_fn]"
+  and "motive = Lam ''q'' (Quotient base equivP) result"
+  and "\<Gamma> \<turnstile> Quotient base equivP : Universe j"
+  and "\<Gamma> \<turnstile> result : Universe i"
+  and "\<Gamma> \<turnstile> scrutinee : Quotient base equivP"
+  and "\<Gamma> \<turnstile> case_fn : Pi ''x'' base result"
+  and "\<Gamma> \<turnstile> respect : Pi ''x'' base (Pi ''y'' base (Pi ''r'' (App (App equivP (Var ''x'')) (Var ''y'')) (PathTy result (App case_fn (Var ''x'')) (App case_fn (Var ''y'')))))"
+  shows "\<Gamma> \<turnstile> QuotElim scrutinee motive case_fn respect : App motive scrutinee"
   using assms by (rule T_quot_elim)
 
 (* K_Inductive — category Inductive — premise arity 0 — side-condition: false *)

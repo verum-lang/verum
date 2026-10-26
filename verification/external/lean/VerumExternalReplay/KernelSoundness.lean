@@ -34,12 +34,12 @@ inductive CoreTerm : Type where
   | PathOver (motive path lhs rhs : CoreTerm)
   | Refl (value : CoreTerm)
   | HComp (phi walls base : CoreTerm)
-  | Transp (path regular value : CoreTerm)
+  | Transport (path value : CoreTerm)
   | Glue (carrier phi fiber equiv : CoreTerm)
   | Refine (base : CoreTerm) (binder : String) (predicate : CoreTerm)
   | Quotient (base equiv : CoreTerm)
   | QuotIntro (value base equiv : CoreTerm)
-  | QuotElim (scrutinee motive case_fn : CoreTerm)
+  | QuotElim (scrutinee motive case_fn respect : CoreTerm)
   | Inductive_ (path : String) (args : List CoreTerm)
   | Elim (scrutinee motive : CoreTerm) (cases : List CoreTerm)
   | SmtProof (solver_tag : String)
@@ -115,6 +115,11 @@ abbrev Ctx := List (String × CoreTerm)
 
 /-- Capture-avoiding substitution.  Opaque oracle. -/
 opaque subst (x : String) (replacement body : CoreTerm) : CoreTerm
+
+/-- Explicit binder hygiene for this abstract quotient schema.
+The rule-closure theorem is not a proof of Rust checker correspondence. -/
+def QuotientFresh (name : String) (terms : List CoreTerm) : Prop :=
+∀ term ∈ terms, ∀ value, subst name value term = term
 
 /-- Generic side-condition oracle for K_Pos / K_FwAx (see below). -/
 opaque side_conditions_hold : Prop
@@ -194,10 +199,13 @@ inductive Typing : Ctx → CoreTerm → CoreTerm → Prop where
         Typing Γ base T →
         Typing Γ (CoreTerm.HComp phi walls base) T
   | t_transp :
-      ∀ {Γ : Ctx} {path regular value target : CoreTerm} {i : Nat},
-        Typing Γ target (CoreTerm.Universe i) →
-        Typing Γ (CoreTerm.Transp path regular value) target
-  | t_glue :
+∀ {Γ : Ctx} {path value source target : CoreTerm} {i : Nat},
+Typing Γ source (CoreTerm.Universe i) →
+Typing Γ target (CoreTerm.Universe i) →
+Typing Γ path (CoreTerm.PathTy (CoreTerm.Universe i) source target) →
+Typing Γ value source →
+Typing Γ (CoreTerm.Transport path value) target
+| t_glue :
       ∀ {Γ : Ctx} {carrier phi fiber equiv : CoreTerm} {i : Nat},
         Typing Γ carrier (CoreTerm.Universe i) →
         Typing Γ (CoreTerm.Glue carrier phi fiber equiv) (CoreTerm.Universe i)
@@ -224,21 +232,32 @@ inductive Typing : Ctx → CoreTerm → CoreTerm → Prop where
         Typing Γ a (CoreTerm.Refine base x predicate)
   -- ===== Quotient (3) — 2 no-IOU + 1 with-IOU =====
   | t_quot_form :
-      ∀ {Γ : Ctx} {base equiv : CoreTerm} {i : Nat},
-        Typing Γ base (CoreTerm.Universe i) →
-        Typing Γ (CoreTerm.Quotient base equiv) (CoreTerm.Universe i)
-  | t_quot_intro :
-      ∀ {Γ : Ctx} {value base equiv : CoreTerm},
-        Typing Γ value base →
-        Typing Γ (CoreTerm.QuotIntro value base equiv) (CoreTerm.Quotient base equiv)
-  | t_quot_elim :
-      ∀ {Γ : Ctx} {scrutinee motive case_fn base equiv : CoreTerm} {i : Nat},
-        Typing Γ scrutinee (CoreTerm.Quotient base equiv) →
-        Typing Γ motive (CoreTerm.Pi "x" base (CoreTerm.Universe i)) →
-        Typing Γ case_fn (CoreTerm.Pi "x" base (CoreTerm.App motive (CoreTerm.Var "x"))) →
-        Typing Γ (CoreTerm.QuotElim scrutinee motive case_fn) (CoreTerm.App motive scrutinee)
-  -- ===== Inductive (3) — 1 placeholder + 2 with-IOU =====
-  | t_inductive :
+∀ {Γ : Ctx} {base equiv : CoreTerm} {i j : Nat},
+QuotientFresh "x" [base] →
+Typing Γ base (CoreTerm.Universe i) →
+Typing Γ equiv (CoreTerm.Pi "x" base (CoreTerm.Pi "y" base (CoreTerm.Universe j))) →
+Typing Γ (CoreTerm.Quotient base equiv) (CoreTerm.Universe (max i j))
+| t_quot_intro :
+∀ {Γ : Ctx} {value base equiv : CoreTerm} {i : Nat},
+Typing Γ (CoreTerm.Quotient base equiv) (CoreTerm.Universe i) →
+Typing Γ value base →
+Typing Γ (CoreTerm.QuotIntro value base equiv) (CoreTerm.Quotient base equiv)
+| t_quot_elim :
+∀ {Γ : Ctx} {scrutinee motive case_fn respect base equiv result : CoreTerm} {i j : Nat},
+QuotientFresh "q" [result] →
+QuotientFresh "x" [base, equiv, result, case_fn] →
+QuotientFresh "y" [base, equiv, result, case_fn] →
+QuotientFresh "r" [base, equiv, result, case_fn] →
+motive = CoreTerm.Lam "q" (CoreTerm.Quotient base equiv) result →
+Typing Γ (CoreTerm.Quotient base equiv) (CoreTerm.Universe j) →
+Typing Γ result (CoreTerm.Universe i) →
+Typing Γ scrutinee (CoreTerm.Quotient base equiv) →
+Typing Γ case_fn (CoreTerm.Pi "x" base result) →
+Typing Γ respect (CoreTerm.Pi "x" base (CoreTerm.Pi "y" base (CoreTerm.Pi "r"
+(CoreTerm.App (CoreTerm.App equiv (CoreTerm.Var "x")) (CoreTerm.Var "y"))
+(CoreTerm.PathTy result (CoreTerm.App case_fn (CoreTerm.Var "x")) (CoreTerm.App case_fn (CoreTerm.Var "y")))))) →
+Typing Γ (CoreTerm.QuotElim scrutinee motive case_fn respect) (CoreTerm.App motive scrutinee)
+| t_inductive :
       ∀ {Γ : Ctx} {path : String} {args : List CoreTerm} {i : Nat},
         Typing Γ (CoreTerm.Inductive_ path args) (CoreTerm.Universe i)
   | t_pos :
@@ -415,11 +434,14 @@ theorem K_HComp_sound :
       Typing Γ (CoreTerm.HComp phi walls base) T :=
   @Typing.t_hcomp
 
-/-- `K_Transp` — category `Cubical` — premise arity `1` — side-condition: `false` -/
+/-- `K_Transp` — category `Cubical` — premise arity `4` — side-condition: `false` -/
 theorem K_Transp_sound :
-  ∀ {Γ : Ctx} {path regular value target : CoreTerm} {i : Nat},
-      Typing Γ target (CoreTerm.Universe i) →
-      Typing Γ (CoreTerm.Transp path regular value) target :=
+  ∀ {Γ : Ctx} {path value source target : CoreTerm} {i : Nat},
+        Typing Γ source (CoreTerm.Universe i) →
+        Typing Γ target (CoreTerm.Universe i) →
+        Typing Γ path (CoreTerm.PathTy (CoreTerm.Universe i) source target) →
+        Typing Γ value source →
+        Typing Γ (CoreTerm.Transport path value) target :=
   @Typing.t_transp
 
 /-- `K_Glue` — category `Cubical` — premise arity `1` — side-condition: `false` -/
@@ -461,27 +483,39 @@ theorem K_Refine_Erase_sound :
       Typing Γ a base :=
   @Typing.t_refine_erase
 
-/-- `K_Quot_Form` — category `Quotient` — premise arity `2` — side-condition: `true` -/
+/-- `K_Quot_Form` — category `Quotient` — premise arity `3` — side-condition: `true` -/
 theorem K_Quot_Form_sound :
-  ∀ {Γ : Ctx} {base equiv : CoreTerm} {i : Nat},
-      Typing Γ base (CoreTerm.Universe i) →
-      Typing Γ (CoreTerm.Quotient base equiv) (CoreTerm.Universe i) :=
+  ∀ {Γ : Ctx} {base equiv : CoreTerm} {i j : Nat},
+        QuotientFresh "x" [base] →
+        Typing Γ base (CoreTerm.Universe i) →
+        Typing Γ equiv (CoreTerm.Pi "x" base (CoreTerm.Pi "y" base (CoreTerm.Universe j))) →
+        Typing Γ (CoreTerm.Quotient base equiv) (CoreTerm.Universe (max i j)) :=
   @Typing.t_quot_form
 
-/-- `K_Quot_Intro` — category `Quotient` — premise arity `3` — side-condition: `false` -/
+/-- `K_Quot_Intro` — category `Quotient` — premise arity `2` — side-condition: `false` -/
 theorem K_Quot_Intro_sound :
-  ∀ {Γ : Ctx} {value base equiv : CoreTerm},
-      Typing Γ value base →
-      Typing Γ (CoreTerm.QuotIntro value base equiv) (CoreTerm.Quotient base equiv) :=
+  ∀ {Γ : Ctx} {value base equiv : CoreTerm} {i : Nat},
+        Typing Γ (CoreTerm.Quotient base equiv) (CoreTerm.Universe i) →
+        Typing Γ value base →
+        Typing Γ (CoreTerm.QuotIntro value base equiv) (CoreTerm.Quotient base equiv) :=
   @Typing.t_quot_intro
 
-/-- `K_Quot_Elim` — category `Quotient` — premise arity `3` — side-condition: `true` -/
+/-- `K_Quot_Elim` — category `Quotient` — premise arity `10` — side-condition: `true` -/
 theorem K_Quot_Elim_sound :
-  ∀ {Γ : Ctx} {scrutinee motive case_fn base equiv : CoreTerm} {i : Nat},
-      Typing Γ scrutinee (CoreTerm.Quotient base equiv) →
-      Typing Γ motive (CoreTerm.Pi "x" base (CoreTerm.Universe i)) →
-      Typing Γ case_fn (CoreTerm.Pi "x" base (CoreTerm.App motive (CoreTerm.Var "x"))) →
-      Typing Γ (CoreTerm.QuotElim scrutinee motive case_fn) (CoreTerm.App motive scrutinee) :=
+  ∀ {Γ : Ctx} {scrutinee motive case_fn respect base equiv result : CoreTerm} {i j : Nat},
+        QuotientFresh "q" [result] →
+        QuotientFresh "x" [base, equiv, result, case_fn] →
+        QuotientFresh "y" [base, equiv, result, case_fn] →
+        QuotientFresh "r" [base, equiv, result, case_fn] →
+        motive = CoreTerm.Lam "q" (CoreTerm.Quotient base equiv) result →
+        Typing Γ (CoreTerm.Quotient base equiv) (CoreTerm.Universe j) →
+        Typing Γ result (CoreTerm.Universe i) →
+        Typing Γ scrutinee (CoreTerm.Quotient base equiv) →
+        Typing Γ case_fn (CoreTerm.Pi "x" base result) →
+        Typing Γ respect (CoreTerm.Pi "x" base (CoreTerm.Pi "y" base (CoreTerm.Pi "r"
+          (CoreTerm.App (CoreTerm.App equiv (CoreTerm.Var "x")) (CoreTerm.Var "y"))
+          (CoreTerm.PathTy result (CoreTerm.App case_fn (CoreTerm.Var "x")) (CoreTerm.App case_fn (CoreTerm.Var "y")))))) →
+        Typing Γ (CoreTerm.QuotElim scrutinee motive case_fn respect) (CoreTerm.App motive scrutinee) :=
   @Typing.t_quot_elim
 
 /-- `K_Inductive` — category `Inductive` — premise arity `0` — side-condition: `false` -/
@@ -612,15 +646,15 @@ def Soundness : KernelRule → Prop
   | KernelRule.K_Path_Over_Form => ∀ {Γ : Ctx} {motive p a b A : CoreTerm} {x : String} {i : Nat}, Typing Γ A (CoreTerm.Universe i) → Typing Γ motive (CoreTerm.Pi x A (CoreTerm.Universe i)) → Typing Γ (CoreTerm.PathOver motive p a b) (CoreTerm.Universe i)
   | KernelRule.K_Refl_Intro => ∀ {Γ : Ctx} {a A : CoreTerm}, Typing Γ a A → Typing Γ (CoreTerm.Refl a) (CoreTerm.PathTy A a a)
   | KernelRule.K_HComp => ∀ {Γ : Ctx} {phi walls base T : CoreTerm} {i : Nat}, Typing Γ T (CoreTerm.Universe i) → Typing Γ base T → Typing Γ (CoreTerm.HComp phi walls base) T
-  | KernelRule.K_Transp => ∀ {Γ : Ctx} {path regular value target : CoreTerm} {i : Nat}, Typing Γ target (CoreTerm.Universe i) → Typing Γ (CoreTerm.Transp path regular value) target
+  | KernelRule.K_Transp => ∀ {Γ : Ctx} {path value source target : CoreTerm} {i : Nat},   Typing Γ source (CoreTerm.Universe i) →   Typing Γ target (CoreTerm.Universe i) →   Typing Γ path (CoreTerm.PathTy (CoreTerm.Universe i) source target) →   Typing Γ value source →   Typing Γ (CoreTerm.Transport path value) target
   | KernelRule.K_Glue => ∀ {Γ : Ctx} {carrier phi fiber equiv : CoreTerm} {i : Nat}, Typing Γ carrier (CoreTerm.Universe i) → Typing Γ (CoreTerm.Glue carrier phi fiber equiv) (CoreTerm.Universe i)
   | KernelRule.K_Refine => ∀ {Γ : Ctx} {base predicate : CoreTerm} {x : String} {i : Nat}, Typing Γ base (CoreTerm.Universe i) → Typing Γ predicate (CoreTerm.Pi x base (CoreTerm.Universe 0)) → Typing Γ (CoreTerm.Refine base x predicate) (CoreTerm.Universe i)
   | KernelRule.K_Refine_Omega => ∀ {Γ : Ctx} {base predicate : CoreTerm} {x : String} {i : Nat}, Typing Γ base (CoreTerm.Universe i) → Typing Γ predicate (CoreTerm.Pi x base (CoreTerm.Universe 0)) → Typing Γ (CoreTerm.Refine base x predicate) (CoreTerm.Universe i)
   | KernelRule.K_Refine_Intro => ∀ {Γ : Ctx} {a base predicate : CoreTerm} {x : String} {i : Nat}, Typing Γ a base → Typing Γ base (CoreTerm.Universe i) → Typing Γ predicate (CoreTerm.Pi x base (CoreTerm.Universe 0)) → Typing Γ a (CoreTerm.Refine base x predicate)
   | KernelRule.K_Refine_Erase => ∀ {Γ : Ctx} {a base : CoreTerm} {x : String} {predicate : CoreTerm}, Typing Γ a (CoreTerm.Refine base x predicate) → Typing Γ a base
-  | KernelRule.K_Quot_Form => ∀ {Γ : Ctx} {base equiv : CoreTerm} {i : Nat}, Typing Γ base (CoreTerm.Universe i) → Typing Γ (CoreTerm.Quotient base equiv) (CoreTerm.Universe i)
-  | KernelRule.K_Quot_Intro => ∀ {Γ : Ctx} {value base equiv : CoreTerm}, Typing Γ value base → Typing Γ (CoreTerm.QuotIntro value base equiv) (CoreTerm.Quotient base equiv)
-  | KernelRule.K_Quot_Elim => ∀ {Γ : Ctx} {scrutinee motive case_fn base equiv : CoreTerm} {i : Nat}, Typing Γ scrutinee (CoreTerm.Quotient base equiv) → Typing Γ motive (CoreTerm.Pi "x" base (CoreTerm.Universe i)) → Typing Γ case_fn (CoreTerm.Pi "x" base (CoreTerm.App motive (CoreTerm.Var "x"))) → Typing Γ (CoreTerm.QuotElim scrutinee motive case_fn) (CoreTerm.App motive scrutinee)
+  | KernelRule.K_Quot_Form => ∀ {Γ : Ctx} {base equiv : CoreTerm} {i j : Nat},   QuotientFresh "x" [base] →   Typing Γ base (CoreTerm.Universe i) →   Typing Γ equiv (CoreTerm.Pi "x" base (CoreTerm.Pi "y" base (CoreTerm.Universe j))) →   Typing Γ (CoreTerm.Quotient base equiv) (CoreTerm.Universe (max i j))
+  | KernelRule.K_Quot_Intro => ∀ {Γ : Ctx} {value base equiv : CoreTerm} {i : Nat},   Typing Γ (CoreTerm.Quotient base equiv) (CoreTerm.Universe i) →   Typing Γ value base →   Typing Γ (CoreTerm.QuotIntro value base equiv) (CoreTerm.Quotient base equiv)
+  | KernelRule.K_Quot_Elim => ∀ {Γ : Ctx} {scrutinee motive case_fn respect base equiv result : CoreTerm} {i j : Nat},   QuotientFresh "q" [result] →   QuotientFresh "x" [base, equiv, result, case_fn] →   QuotientFresh "y" [base, equiv, result, case_fn] →   QuotientFresh "r" [base, equiv, result, case_fn] →   motive = CoreTerm.Lam "q" (CoreTerm.Quotient base equiv) result →   Typing Γ (CoreTerm.Quotient base equiv) (CoreTerm.Universe j) →   Typing Γ result (CoreTerm.Universe i) →   Typing Γ scrutinee (CoreTerm.Quotient base equiv) →   Typing Γ case_fn (CoreTerm.Pi "x" base result) →   Typing Γ respect (CoreTerm.Pi "x" base (CoreTerm.Pi "y" base (CoreTerm.Pi "r"     (CoreTerm.App (CoreTerm.App equiv (CoreTerm.Var "x")) (CoreTerm.Var "y"))     (CoreTerm.PathTy result (CoreTerm.App case_fn (CoreTerm.Var "x")) (CoreTerm.App case_fn (CoreTerm.Var "y")))))) →   Typing Γ (CoreTerm.QuotElim scrutinee motive case_fn respect) (CoreTerm.App motive scrutinee)
   | KernelRule.K_Inductive => ∀ {Γ : Ctx} {path : String} {args : List CoreTerm} {i : Nat}, Typing Γ (CoreTerm.Inductive_ path args) (CoreTerm.Universe i)
   | KernelRule.K_Pos => side_conditions_hold → True
   | KernelRule.K_Elim => ∀ {Γ : Ctx} {scrutinee motive scrutinee_ty : CoreTerm} {cases : List CoreTerm} {i : Nat}, Typing Γ scrutinee scrutinee_ty → Typing Γ motive (CoreTerm.Pi "x" scrutinee_ty (CoreTerm.Universe i)) → Typing Γ (CoreTerm.Elim scrutinee motive cases) (CoreTerm.App motive scrutinee)

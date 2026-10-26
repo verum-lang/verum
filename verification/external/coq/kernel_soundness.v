@@ -35,12 +35,12 @@ Inductive CoreTerm : Type :=
   | PathOver (motive path lhs rhs : CoreTerm)
   | Refl (value : CoreTerm)
   | HComp (phi walls base : CoreTerm)
-  | Transp (path regular value : CoreTerm)
+  | Transport (path value : CoreTerm)
   | Glue (carrier phi fiber equiv : CoreTerm)
   | Refine (base : CoreTerm) (binder : string) (predicate : CoreTerm)
   | Quotient (base equiv : CoreTerm)
   | QuotIntro (value base equiv : CoreTerm)
-  | QuotElim (scrutinee motive case_fn : CoreTerm)
+  | QuotElim (scrutinee motive case_fn respect : CoreTerm)
   | Inductive_ (path : string) (args : list CoreTerm)
   | Elim (scrutinee motive : CoreTerm) (cases : list CoreTerm)
   | SmtProof (solver_tag : string)
@@ -109,6 +109,10 @@ Inductive KernelRule : Type :=
 Definition Ctx : Type := list (string * CoreTerm).
 
 Parameter subst : string -> CoreTerm -> CoreTerm -> CoreTerm.
+
+(* Binder hygiene for the abstract schema; not Rust checker correspondence. *)
+Definition QuotientFresh (name : string) (terms : list CoreTerm) : Prop :=
+forall term, In term terms -> forall value, subst name value term = term.
 
 Parameter side_conditions_hold : Prop.
 
@@ -181,10 +185,13 @@ Inductive Typing : Ctx -> CoreTerm -> CoreTerm -> Prop :=
         Typing Gamma base T ->
         Typing Gamma (HComp phi walls base) T
   | T_transp :
-      forall (Gamma : Ctx) (path regular value target : CoreTerm) (i : nat),
-        Typing Gamma target (Universe i) ->
-        Typing Gamma (Transp path regular value) target
-  | T_glue :
+forall (Gamma : Ctx) (path value source target : CoreTerm) (i : nat),
+Typing Gamma source (Universe i) ->
+Typing Gamma target (Universe i) ->
+Typing Gamma path (PathTy (Universe i) source target) ->
+Typing Gamma value source ->
+Typing Gamma (Transport path value) target
+| T_glue :
       forall (Gamma : Ctx) (carrier phi fiber equiv : CoreTerm) (i : nat),
         Typing Gamma carrier (Universe i) ->
         Typing Gamma (Glue carrier phi fiber equiv) (Universe i)
@@ -211,21 +218,32 @@ Inductive Typing : Ctx -> CoreTerm -> CoreTerm -> Prop :=
         Typing Gamma a (Refine base x predicate)
   (* ===== Quotient (3) ===== *)
   | T_quot_form :
-      forall (Gamma : Ctx) (base equiv : CoreTerm) (i : nat),
-        Typing Gamma base (Universe i) ->
-        Typing Gamma (Quotient base equiv) (Universe i)
-  | T_quot_intro :
-      forall (Gamma : Ctx) (value base equiv : CoreTerm),
-        Typing Gamma value base ->
-        Typing Gamma (QuotIntro value base equiv) (Quotient base equiv)
-  | T_quot_elim :
-      forall (Gamma : Ctx) (scrutinee motive case_fn base equiv : CoreTerm) (i : nat),
-        Typing Gamma scrutinee (Quotient base equiv) ->
-        Typing Gamma motive (Pi "x" base (Universe i)) ->
-        Typing Gamma case_fn (Pi "x" base (App motive (Var "x"))) ->
-        Typing Gamma (QuotElim scrutinee motive case_fn) (App motive scrutinee)
-  (* ===== Inductive (3) ===== *)
-  | T_inductive :
+forall (Gamma : Ctx) (base equiv : CoreTerm) (i j : nat),
+QuotientFresh "x" [base] ->
+Typing Gamma base (Universe i) ->
+Typing Gamma equiv (Pi "x" base (Pi "y" base (Universe j))) ->
+Typing Gamma (Quotient base equiv) (Universe (Nat.max i j))
+| T_quot_intro :
+forall (Gamma : Ctx) (value base equiv : CoreTerm) (i : nat),
+Typing Gamma (Quotient base equiv) (Universe i) ->
+Typing Gamma value base ->
+Typing Gamma (QuotIntro value base equiv) (Quotient base equiv)
+| T_quot_elim :
+forall (Gamma : Ctx) (scrutinee motive case_fn respect base equiv result : CoreTerm) (i j : nat),
+QuotientFresh "q" [result] ->
+QuotientFresh "x" [base; equiv; result; case_fn] ->
+QuotientFresh "y" [base; equiv; result; case_fn] ->
+QuotientFresh "r" [base; equiv; result; case_fn] ->
+motive = Lam "q" (Quotient base equiv) result ->
+Typing Gamma (Quotient base equiv) (Universe j) ->
+Typing Gamma result (Universe i) ->
+Typing Gamma scrutinee (Quotient base equiv) ->
+Typing Gamma case_fn (Pi "x" base result) ->
+Typing Gamma respect (Pi "x" base (Pi "y" base (Pi "r"
+(App (App equiv (Var "x")) (Var "y"))
+(PathTy result (App case_fn (Var "x")) (App case_fn (Var "y")))))) ->
+Typing Gamma (QuotElim scrutinee motive case_fn respect) (App motive scrutinee)
+| T_inductive :
       forall (Gamma : Ctx) (path : string) (args : list CoreTerm) (i : nat),
         Typing Gamma (Inductive_ path args) (Universe i)
   | T_pos :
@@ -404,11 +422,14 @@ Lemma K_HComp_sound :
     Typing Gamma (HComp phi walls base) T.
 Proof. exact T_hcomp. Qed.
 
-(* K_Transp — category Cubical — premise arity 1 — side-condition: false *)
+(* K_Transp — category Cubical — premise arity 4 — side-condition: false *)
 Lemma K_Transp_sound :
-  forall (Gamma : Ctx) (path regular value target : CoreTerm) (i : nat),
-    Typing Gamma target (Universe i) ->
-    Typing Gamma (Transp path regular value) target.
+  forall (Gamma : Ctx) (path value source target : CoreTerm) (i : nat),
+        Typing Gamma source (Universe i) ->
+        Typing Gamma target (Universe i) ->
+        Typing Gamma path (PathTy (Universe i) source target) ->
+        Typing Gamma value source ->
+        Typing Gamma (Transport path value) target.
 Proof. exact T_transp. Qed.
 
 (* K_Glue — category Cubical — premise arity 1 — side-condition: false *)
@@ -449,29 +470,40 @@ Lemma K_Refine_Erase_sound :
     Typing Gamma a (Refine base x predicate) -> Typing Gamma a base.
 Proof. exact T_refine_erase. Qed.
 
-(* K_Quot_Form — category Quotient — premise arity 2 — side-condition: true *)
+(* K_Quot_Form — category Quotient — premise arity 3 — side-condition: true *)
 Lemma K_Quot_Form_sound :
-  forall (Gamma : Ctx) (base equiv : CoreTerm) (i : nat),
-    Typing Gamma base (Universe i) -> Typing Gamma (Quotient base equiv) (Universe i).
+  forall (Gamma : Ctx) (base equiv : CoreTerm) (i j : nat),
+        QuotientFresh "x" [base] ->
+        Typing Gamma base (Universe i) ->
+        Typing Gamma equiv (Pi "x" base (Pi "y" base (Universe j))) ->
+        Typing Gamma (Quotient base equiv) (Universe (Nat.max i j)).
 Proof. exact T_quot_form. Qed.
 
-(* K_Quot_Intro — category Quotient — premise arity 3 — side-condition: false *)
+(* K_Quot_Intro — category Quotient — premise arity 2 — side-condition: false *)
 Lemma K_Quot_Intro_sound :
-  forall (Gamma : Ctx) (value base equiv : CoreTerm),
-    Typing Gamma value base ->
-    Typing Gamma (QuotIntro value base equiv) (Quotient base equiv).
+  forall (Gamma : Ctx) (value base equiv : CoreTerm) (i : nat),
+        Typing Gamma (Quotient base equiv) (Universe i) ->
+        Typing Gamma value base ->
+        Typing Gamma (QuotIntro value base equiv) (Quotient base equiv).
 Proof. exact T_quot_intro. Qed.
 
-(* K_Quot_Elim — category Quotient — premise arity 3 — side-condition: true *)
+(* K_Quot_Elim — category Quotient — premise arity 10 — side-condition: true *)
 Lemma K_Quot_Elim_sound :
-  forall (Gamma : Ctx) (scrutinee motive case_fn base equiv : CoreTerm) (i : nat),
-    Typing Gamma scrutinee (Quotient base equiv) ->
-    Typing Gamma motive (Pi "x"%string base (Universe i)) ->
-    Typing Gamma case_fn (Pi "x"%string base (App motive (Var "x"%string))) ->
-    Typing Gamma (QuotElim scrutinee motive case_fn) (App motive scrutinee).
-Proof.
-intros; apply T_quot_elim with (base := base) (equiv := equiv) (i := i); assumption.
-Qed.
+  forall (Gamma : Ctx) (scrutinee motive case_fn respect base equiv result : CoreTerm) (i j : nat),
+        QuotientFresh "q" [result] ->
+        QuotientFresh "x" [base; equiv; result; case_fn] ->
+        QuotientFresh "y" [base; equiv; result; case_fn] ->
+        QuotientFresh "r" [base; equiv; result; case_fn] ->
+        motive = Lam "q" (Quotient base equiv) result ->
+        Typing Gamma (Quotient base equiv) (Universe j) ->
+        Typing Gamma result (Universe i) ->
+        Typing Gamma scrutinee (Quotient base equiv) ->
+        Typing Gamma case_fn (Pi "x" base result) ->
+        Typing Gamma respect (Pi "x" base (Pi "y" base (Pi "r"
+          (App (App equiv (Var "x")) (Var "y"))
+          (PathTy result (App case_fn (Var "x")) (App case_fn (Var "y")))))) ->
+        Typing Gamma (QuotElim scrutinee motive case_fn respect) (App motive scrutinee).
+Proof. exact T_quot_elim. Qed.
 
 (* K_Inductive — category Inductive — premise arity 0 — side-condition: false *)
 Lemma K_Inductive_sound :
@@ -603,15 +635,15 @@ Definition Soundness (rule : KernelRule) : Prop :=
   | K_Path_Over_Form => forall (Gamma : Ctx) (motive p a b A : CoreTerm) (x : string) (i : nat), Typing Gamma A (Universe i) -> Typing Gamma motive (Pi x A (Universe i)) -> Typing Gamma (PathOver motive p a b) (Universe i)
   | K_Refl_Intro => forall (Gamma : Ctx) (a A : CoreTerm), Typing Gamma a A -> Typing Gamma (Refl a) (PathTy A a a)
   | K_HComp => forall (Gamma : Ctx) (phi walls base T : CoreTerm) (i : nat), Typing Gamma T (Universe i) -> Typing Gamma base T -> Typing Gamma (HComp phi walls base) T
-  | K_Transp => forall (Gamma : Ctx) (path regular value target : CoreTerm) (i : nat), Typing Gamma target (Universe i) -> Typing Gamma (Transp path regular value) target
+  | K_Transp => forall (Gamma : Ctx) (path value source target : CoreTerm) (i : nat),     Typing Gamma source (Universe i) ->     Typing Gamma target (Universe i) ->     Typing Gamma path (PathTy (Universe i) source target) ->     Typing Gamma value source ->     Typing Gamma (Transport path value) target
   | K_Glue => forall (Gamma : Ctx) (carrier phi fiber equiv : CoreTerm) (i : nat), Typing Gamma carrier (Universe i) -> Typing Gamma (Glue carrier phi fiber equiv) (Universe i)
   | K_Refine => forall (Gamma : Ctx) (base predicate : CoreTerm) (x : string) (i : nat), Typing Gamma base (Universe i) -> Typing Gamma predicate (Pi x base (Universe 0)) -> Typing Gamma (Refine base x predicate) (Universe i)
   | K_Refine_Omega => forall (Gamma : Ctx) (base predicate : CoreTerm) (x : string) (i : nat), Typing Gamma base (Universe i) -> Typing Gamma predicate (Pi x base (Universe 0)) -> Typing Gamma (Refine base x predicate) (Universe i)
   | K_Refine_Intro => forall (Gamma : Ctx) (a base predicate : CoreTerm) (x : string) (i : nat), Typing Gamma a base -> Typing Gamma base (Universe i) -> Typing Gamma predicate (Pi x base (Universe 0)) -> Typing Gamma a (Refine base x predicate)
   | K_Refine_Erase => forall (Gamma : Ctx) (a base : CoreTerm) (x : string) (predicate : CoreTerm), Typing Gamma a (Refine base x predicate) -> Typing Gamma a base
-  | K_Quot_Form => forall (Gamma : Ctx) (base equiv : CoreTerm) (i : nat), Typing Gamma base (Universe i) -> Typing Gamma (Quotient base equiv) (Universe i)
-  | K_Quot_Intro => forall (Gamma : Ctx) (value base equiv : CoreTerm), Typing Gamma value base -> Typing Gamma (QuotIntro value base equiv) (Quotient base equiv)
-  | K_Quot_Elim => forall (Gamma : Ctx) (scrutinee motive case_fn base equiv : CoreTerm) (i : nat), Typing Gamma scrutinee (Quotient base equiv) -> Typing Gamma motive (Pi "x"%string base (Universe i)) -> Typing Gamma case_fn (Pi "x"%string base (App motive (Var "x"%string))) -> Typing Gamma (QuotElim scrutinee motive case_fn) (App motive scrutinee)
+  | K_Quot_Form => forall (Gamma : Ctx) (base equiv : CoreTerm) (i j : nat),     QuotientFresh "x" [base] ->     Typing Gamma base (Universe i) ->     Typing Gamma equiv (Pi "x" base (Pi "y" base (Universe j))) ->     Typing Gamma (Quotient base equiv) (Universe (Nat.max i j))
+  | K_Quot_Intro => forall (Gamma : Ctx) (value base equiv : CoreTerm) (i : nat),     Typing Gamma (Quotient base equiv) (Universe i) ->     Typing Gamma value base ->     Typing Gamma (QuotIntro value base equiv) (Quotient base equiv)
+  | K_Quot_Elim => forall (Gamma : Ctx) (scrutinee motive case_fn respect base equiv result : CoreTerm) (i j : nat),     QuotientFresh "q" [result] ->     QuotientFresh "x" [base; equiv; result; case_fn] ->     QuotientFresh "y" [base; equiv; result; case_fn] ->     QuotientFresh "r" [base; equiv; result; case_fn] ->     motive = Lam "q" (Quotient base equiv) result ->     Typing Gamma (Quotient base equiv) (Universe j) ->     Typing Gamma result (Universe i) ->     Typing Gamma scrutinee (Quotient base equiv) ->     Typing Gamma case_fn (Pi "x" base result) ->     Typing Gamma respect (Pi "x" base (Pi "y" base (Pi "r"       (App (App equiv (Var "x")) (Var "y"))       (PathTy result (App case_fn (Var "x")) (App case_fn (Var "y")))))) ->     Typing Gamma (QuotElim scrutinee motive case_fn respect) (App motive scrutinee)
   | K_Inductive => forall (Gamma : Ctx) (path : string) (args : list CoreTerm) (i : nat), Typing Gamma (Inductive_ path args) (Universe i)
   | K_Pos => side_conditions_hold -> True
   | K_Elim => forall (Gamma : Ctx) (scrutinee motive scrutinee_ty : CoreTerm) (cases : list CoreTerm) (i : nat), Typing Gamma scrutinee scrutinee_ty -> Typing Gamma motive (Pi "x"%string scrutinee_ty (Universe i)) -> Typing Gamma (Elim scrutinee motive cases) (App motive scrutinee)

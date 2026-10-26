@@ -48,12 +48,12 @@ data CoreTerm : Set where
   PathOver     : CoreTerm → CoreTerm → CoreTerm → CoreTerm → CoreTerm
   Refl         : CoreTerm → CoreTerm
   HComp        : CoreTerm → CoreTerm → CoreTerm → CoreTerm
-  Transp       : CoreTerm → CoreTerm → CoreTerm → CoreTerm
+  Transport    : CoreTerm → CoreTerm → CoreTerm
   Glue         : CoreTerm → CoreTerm → CoreTerm → CoreTerm → CoreTerm
   Refine       : CoreTerm → String → CoreTerm → CoreTerm
   Quotient     : CoreTerm → CoreTerm → CoreTerm
   QuotIntro    : CoreTerm → CoreTerm → CoreTerm → CoreTerm
-  QuotElim     : CoreTerm → CoreTerm → CoreTerm → CoreTerm
+  QuotElim     : CoreTerm → CoreTerm → CoreTerm → CoreTerm → CoreTerm
   InductiveT   : String → List CoreTerm → CoreTerm
   Elim         : CoreTerm → CoreTerm → List CoreTerm → CoreTerm
   SmtProof     : String → CoreTerm
@@ -216,7 +216,7 @@ postulate
 postulate
   K-HComp-sound : Set
 
--- K_Transp — category Cubical — premise arity 1 — side-condition: false
+-- K_Transp — category Cubical — premise arity 4 — side-condition: false
 -- status: Proved (postulated at this layer)
 postulate
   K-Transp-sound : Set
@@ -246,17 +246,17 @@ postulate
 postulate
   K-Refine-Erase-sound : Set
 
--- K_Quot_Form — category Quotient — premise arity 2 — side-condition: true
+-- K_Quot_Form — category Quotient — premise arity 3 — side-condition: true
 -- status: Proved (postulated at this layer)
 postulate
   K-Quot-Form-sound : Set
 
--- K_Quot_Intro — category Quotient — premise arity 3 — side-condition: false
+-- K_Quot_Intro — category Quotient — premise arity 2 — side-condition: false
 -- status: Proved (postulated at this layer)
 postulate
   K-Quot-Intro-sound : Set
 
--- K_Quot_Elim — category Quotient — premise arity 3 — side-condition: true
+-- K_Quot_Elim — category Quotient — premise arity 10 — side-condition: true
 -- status: Proved (postulated at this layer)
 postulate
   K-Quot-Elim-sound : Set

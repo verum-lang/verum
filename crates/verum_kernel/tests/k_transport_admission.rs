@@ -136,6 +136,37 @@ fn transport_round_trips_but_legacy_regularity_payloads_are_refused() {
 }
 
 #[test]
+fn checked_in_schemas_match_the_production_exporter() {
+    use verum_kernel::soundness::{
+        SoundnessExporter, agda::AgdaBackend, coq::CoqBackend, isabelle::IsabelleBackend,
+        lean::LeanBackend,
+    };
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../verification/external");
+    let exporter = SoundnessExporter::new();
+    for (path, generated) in [
+        (
+            "lean/VerumExternalReplay/KernelSoundness.lean",
+            exporter.emit(&LeanBackend::new()),
+        ),
+        ("coq/kernel_soundness.v", exporter.emit(&CoqBackend::new())),
+        (
+            "isabelle/KernelSoundness.thy",
+            exporter.emit(&IsabelleBackend::new()),
+        ),
+        (
+            "agda/KernelSoundness.agda",
+            exporter.emit(&AgdaBackend::new()),
+        ),
+    ] {
+        assert_eq!(
+            std::fs::read_to_string(root.join(path)).unwrap(),
+            generated,
+            "checked-in schema is stale: {path}"
+        );
+    }
+}
+
+#[test]
 #[ignore = "requires Lean and Coq executables to check the generated rule schemas"]
 fn transport_export_schemas_typecheck() {
     use std::{fs, process::Command};
