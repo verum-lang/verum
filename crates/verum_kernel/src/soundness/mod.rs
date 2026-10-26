@@ -405,13 +405,12 @@ pub fn canonical_rules() -> Vec<RuleSpec> {
         spec(
             "K_Transp",
             Cubical,
-            1,
+            4,
             false,
-            // Discharged: single structural premise fixes the
-            // result type's universe-form.  The transport path's
-            // endpoint identity at i=1 (the regularity condition)
-            // remains the kernel's runtime contract.
-            proved("exact T_transp.", "  exact @Typing.t_transp _ _ _ _ _ _"),
+            // Ordinary transport: source and target are types, path connects
+            // them, and value inhabits source. This schema does not prove
+            // correctness of the Rust checker or generalized cubical transport.
+            proved("exact T_transp.", "  exact @Typing.t_transp"),
         ),
         spec(
             "K_Glue",

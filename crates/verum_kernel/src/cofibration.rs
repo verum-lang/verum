@@ -21,8 +21,9 @@
 //! satisfy *cofibration coherence*: the wall family must be defined
 //! exactly on `φ`, and the result's restriction to `φ` must agree
 //! with the wall. Pre-Sub-2.4 the kernel admitted any well-typed φ;
-//! post-Sub-2.4 the kernel rejects walls whose support does not
-//! match φ's coverage (interval subsumption).
+//! the named HComp / Glue rules still need to connect this algebra to
+//! typed interval contexts and boundary agreement checks. This module
+//! alone does not certify those terms.
 //!
 //! References:
 //!  * Cohen, Coquand, Huber, Mörtberg (CCHM), "Cubical Type Theory:

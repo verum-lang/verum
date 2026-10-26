@@ -264,9 +264,8 @@ fn transport_checks_source_value_and_rejects_nonpaths() {
     let context = Context::new()
         .extend(Text::from("A"), universe(0))
         .extend(Text::from("x"), a.clone());
-    let transport = |path, value| CoreTerm::Transp {
+    let transport = |path, value| CoreTerm::Transport {
         path: Heap::new(path),
-        regular: Heap::new(universe(0)),
         value: Heap::new(value),
     };
     let path = CoreTerm::Refl(Heap::new(a.clone()));

@@ -16,7 +16,7 @@ use crate::{FrameworkId, SmtCertificate};
 ///
 /// This is the minimum syntactic surface the kernel needs in order to
 /// proof-check every Verum feature: dependent functions (Π), dependent
-/// pairs (Σ), cubical path types with [`HComp`] / [`Transp`] / [`Glue`],
+/// pairs (Σ), cubical path types with [`HComp`] / [`Transport`] / [`Glue`],
 /// refinement types with SMT-discharged predicates, user / stdlib /
 /// higher inductive types, and framework axioms.
 ///
@@ -25,7 +25,7 @@ use crate::{FrameworkId, SmtCertificate};
 /// `verum_types` before they reach the kernel.
 ///
 /// [`HComp`]: CoreTerm::HComp
-/// [`Transp`]: CoreTerm::Transp
+/// [`Transport`]: CoreTerm::Transport
 /// [`Glue`]: CoreTerm::Glue
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum CoreTerm {
@@ -162,12 +162,13 @@ pub enum CoreTerm {
         base: Heap<CoreTerm>,
     },
 
-    /// Cubical transport: `transp(p, r, t)`.
-    Transp {
-        /// Path in `Type`.
+    /// Ordinary transport along evidence `path : Path<Type>(A, B)`.
+    /// A source value in `A` is transported to `B`; only `Refl(A)` reduces
+    /// to the source value. Generalized cubical transport requires a
+    /// separate typed interval and constancy judgment, not a marker term.
+    Transport {
+        /// Checked path between types.
         path: Heap<CoreTerm>,
-        /// Regularity interval endpoint.
-        regular: Heap<CoreTerm>,
         /// Source value.
         value: Heap<CoreTerm>,
     },
@@ -391,7 +392,10 @@ impl CoreTerm {
                 visit(base);
                 visit(predicate);
             }
-            App(a, b) | Pair(a, b) | Quotient { base: a, equiv: b } => {
+            App(a, b)
+            | Pair(a, b)
+            | Transport { path: a, value: b }
+            | Quotient { base: a, equiv: b } => {
                 visit(a);
                 visit(b);
             }
@@ -406,11 +410,6 @@ impl CoreTerm {
                 phi: a,
                 walls: b,
                 base: c,
-            }
-            | Transp {
-                path: a,
-                regular: b,
-                value: c,
             }
             | QuotIntro {
                 value: a,

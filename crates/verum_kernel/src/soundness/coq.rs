@@ -75,7 +75,7 @@ impl SoundnessBackend for CoqBackend {
            | PathOver (motive path lhs rhs : CoreTerm)\n  \
            | Refl (value : CoreTerm)\n  \
            | HComp (phi walls base : CoreTerm)\n  \
-           | Transp (path regular value : CoreTerm)\n  \
+           | Transport (path value : CoreTerm)\n  \
            | Glue (carrier phi fiber equiv : CoreTerm)\n  \
            | Refine (base : CoreTerm) (binder : string) (predicate : CoreTerm)\n  \
            | Quotient (base equiv : CoreTerm)\n  \
@@ -367,10 +367,13 @@ Inductive Typing : Ctx -> CoreTerm -> CoreTerm -> Prop :=\n  \
         Typing Gamma T (Universe i) ->\n        \
         Typing Gamma base T ->\n        \
         Typing Gamma (HComp phi walls base) T\n  \
-  | T_transp :\n      \
-      forall (Gamma : Ctx) (path regular value target : CoreTerm) (i : nat),\n        \
-        Typing Gamma target (Universe i) ->\n        \
-        Typing Gamma (Transp path regular value) target\n  \
+  | T_transp :\n\
+      forall (Gamma : Ctx) (path value source target : CoreTerm) (i : nat),\n\
+        Typing Gamma source (Universe i) ->\n\
+        Typing Gamma target (Universe i) ->\n\
+        Typing Gamma path (PathTy (Universe i) source target) ->\n\
+        Typing Gamma value source ->\n\
+        Typing Gamma (Transport path value) target\n\
   | T_glue :\n      \
       forall (Gamma : Ctx) (carrier phi fiber equiv : CoreTerm) (i : nat),\n        \
         Typing Gamma carrier (Universe i) ->\n        \
@@ -649,11 +652,14 @@ fn rule_signature_coq(rule_name: &str) -> Option<String> {
               Proof. exact T_hcomp. Qed.",
         ),
         "K_Transp" => Some(
-            "Lemma K_Transp_sound :\n  \
-              forall (Gamma : Ctx) (path regular value target : CoreTerm) (i : nat),\n    \
-                Typing Gamma target (Universe i) ->\n    \
-                Typing Gamma (Transp path regular value) target.\n\
-              Proof. exact T_transp. Qed.",
+            r#"Lemma K_Transp_sound :
+      forall (Gamma : Ctx) (path value source target : CoreTerm) (i : nat),
+        Typing Gamma source (Universe i) ->
+        Typing Gamma target (Universe i) ->
+        Typing Gamma path (PathTy (Universe i) source target) ->
+        Typing Gamma value source ->
+        Typing Gamma (Transport path value) target.
+Proof. exact T_transp. Qed."#,
         ),
         "K_Glue" => Some(
             "Lemma K_Glue_sound :\n  \

@@ -53,7 +53,7 @@ use crate::{Context, CoreTerm, CoreType, KernelError, UniverseLevel};
 ///   its parameters against the declared universe.
 /// * `HComp` — returns base's type (bring-up; full cubical
 ///  reduction on top).
-/// * `Transp` — returns path's right-hand endpoint type.
+/// * `Transport` — returns path's right-hand endpoint type.
 /// * `Glue` — lives in carrier's universe.
 /// * `Elim` — checks a registered ordinary inductive and all dependent branches,
 ///   including recursive hypotheses; returns `motive(scrutinee)`.
@@ -501,31 +501,10 @@ impl Inference<'_> {
                 self.infer(ctx, base)
             }
 
-            // Transp: `transp(p, r, t)` where `p : Path<Type>(A, B)`,
-            // `r : I` (regularity endpoint), `t : A` — result inhabits
-            // `B`, the path's right-hand endpoint.
-            //
-
-            // Checks performed:
-            //  * `path` is well-typed and its type is `PathTy { lhs, rhs }`
-            //  (not just some arbitrary term).
-            //  * `regular` is well-typed (interval-subsumption deferred).
-            //  * `value` is well-typed; result type is the path's `rhs`.
-            //
-
-            // On a non-PathTy path type (e.g. a neutral whose head is
-            // still an unsolved type-meta), we conservatively fall back
-            // to the `value`'s own type — the alternative would be
-            // rejecting every proof-in-progress transp, which blocks
-            // bring-up. The full cubical pass will tighten this to a
-            // hard error.
-            CoreTerm::Transp {
-                path,
-                regular,
-                value,
-            } => {
+            // Ordinary path transport has no interval/regularity argument.
+            // Its target is justified by path evidence, never a variable name.
+            CoreTerm::Transport { path, value } => {
                 let path_ty = normalize_in(&self.infer(ctx, path)?, axioms, inductives);
-                let _ = self.infer(ctx, regular)?;
                 match path_ty {
                     CoreTerm::PathTy { carrier, lhs, rhs } => {
                         universe_level(&normalize_in(&carrier, axioms, inductives))?;

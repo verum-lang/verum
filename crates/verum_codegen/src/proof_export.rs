@@ -668,6 +668,7 @@ pub mod metamath {
 fn constructor_name(t: &CoreTerm) -> &'static str {
     match t {
         CoreTerm::Var(_) => "Var",
+        CoreTerm::Constructor { .. } => "Constructor",
         CoreTerm::Universe(_) => "Universe",
         CoreTerm::Pi { .. } => "Pi",
         CoreTerm::Lam { .. } => "Lam",
@@ -680,7 +681,7 @@ fn constructor_name(t: &CoreTerm) -> &'static str {
         CoreTerm::Refl(_) => "Refl",
         CoreTerm::PathOver { .. } => "PathOver",
         CoreTerm::HComp { .. } => "HComp",
-        CoreTerm::Transp { .. } => "Transp",
+        CoreTerm::Transport { .. } => "Transport",
         CoreTerm::Glue { .. } => "Glue",
         CoreTerm::Refine { .. } => "Refine",
         CoreTerm::Quotient { .. } => "Quotient",

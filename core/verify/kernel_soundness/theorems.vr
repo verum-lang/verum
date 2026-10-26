@@ -277,9 +277,9 @@ public pure fn lemma_status(r: KernelRule) -> LemmaStatus {
         //  target-type well-formedness + base-value typing; CCHM
         //  hcomp regularity + Kan-filling remain the kernel's runtime
         //  contract.)
-        // (KTransp Proved above — single structural premise pins
-        //  the result type's universe; transport-along-path regularity
-        //  remains the kernel's runtime contract.)
+        // (KTransp states ordinary path transport: source and target are
+        //  types, the path connects them, and the value inhabits source.
+        //  Generalized cubical regularity is outside this rule.)
         // (KGlue Proved above — single structural premise pins the
         //  carrier type's universe; phi/fiber/equiv compositional
         //  structure remains the kernel's runtime contract.)
@@ -632,7 +632,7 @@ public pure fn lean_proof_text(r: KernelRule) -> Text {
             "  exact @Typing.t_hcomp _ _ _ _ _ _ _"
         ),
         KernelRule.KTransp => Text.from(
-            "  exact @Typing.t_transp _ _ _ _ _ _"
+            "  exact @Typing.t_transp"
         ),
         KernelRule.KGlue => Text.from(
             "  exact @Typing.t_glue _ _ _ _ _ _ _"

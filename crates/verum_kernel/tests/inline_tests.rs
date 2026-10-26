@@ -883,28 +883,22 @@ fn transp_returns_path_rhs_type() {
     let tt = tt_axiom(&mut reg);
     let ctx = Context::new().extend(Text::from("r"), unit_ty());
     let path = CoreTerm::Refl(Heap::new(unit_ty()));
-    let tr = CoreTerm::Transp {
+    let tr = CoreTerm::Transport {
         path: Heap::new(path),
-        regular: Heap::new(CoreTerm::Var(Text::from("r"))),
         value: Heap::new(tt),
     };
     let ty = infer_fixture(&ctx, &tr, &reg).unwrap();
     assert_eq!(ty, unit_ty());
 }
 
-/// Transp with an unbound regular endpoint is rejected.
+/// Transport with an unbound path is rejected.
 #[test]
-fn transp_rejects_unbound_regular() {
+fn transport_rejects_unbound_path() {
     let mut reg = AxiomRegistry::new();
     let tt = tt_axiom(&mut reg);
-    let path = CoreTerm::PathTy {
-        carrier: Heap::new(CoreTerm::Universe(UniverseLevel::Concrete(0))),
-        lhs: Heap::new(unit_ty()),
-        rhs: Heap::new(unit_ty()),
-    };
-    let tr = CoreTerm::Transp {
+    let path = var("missing_path");
+    let tr = CoreTerm::Transport {
         path: Heap::new(path),
-        regular: Heap::new(CoreTerm::Var(Text::from("r_unbound"))),
         value: Heap::new(tt),
     };
     let err = infer_fixture(&Context::new(), &tr, &reg).unwrap_err();
@@ -1484,7 +1478,7 @@ fn refl(x: CoreTerm) -> CoreTerm {
 
 #[test]
 fn face_marker_helpers_recognise_canonical_constants() {
-    // `is_face_top` / `is_face_bot` / `is_interval_one` are the
+    // `is_face_top` / `is_face_bot` are the
     // V0 marker conventions the cubical reducer dispatches on.
     assert!(is_face_top(&var("⊤")));
     assert!(is_face_top(&var("1")));
@@ -1498,13 +1492,9 @@ fn face_marker_helpers_recognise_canonical_constants() {
     assert!(is_face_bot(&var("false")));
     assert!(is_face_bot(&var("i0")));
 
-    assert!(is_interval_one(&var("i1")));
-    assert!(is_interval_one(&var("1")));
-
     // Anything not on the canonical list is neither.
     assert!(!is_face_top(&var("phi")));
     assert!(!is_face_bot(&var("phi")));
-    assert!(!is_interval_one(&var("phi")));
 }
 
 #[test]
@@ -1554,25 +1544,22 @@ fn cubical_hcomp_with_neutral_phi_left_residual() {
 }
 
 #[test]
-fn cubical_transp_fill_when_regular_is_i1() {
-    // catalogue rule `transp-fill`:
-    // `transp A 1 a ↪ a` — regularity endpoint i1 ⇒ identity.
-    let tr = CoreTerm::Transp {
+fn transport_neutral_path_does_not_reduce() {
+    // A neutral type equality does not justify identity computation.
+    let tr = CoreTerm::Transport {
         path: Heap::new(var("path")),
-        regular: Heap::new(var("i1")),
         value: Heap::new(var("a")),
     };
     let n = normalize(&tr);
-    assert_eq!(n, var("a"));
+    assert_eq!(n, tr);
 }
 
 #[test]
 fn cubical_transp_on_refl_when_path_is_reflexive() {
     // catalogue rule `transp-on-refl`:
     // `transp (refl _) _ a ↪ a`.
-    let tr = CoreTerm::Transp {
+    let tr = CoreTerm::Transport {
         path: Heap::new(refl(var("A"))),
-        regular: Heap::new(var("phi")),
         value: Heap::new(var("a")),
     };
     let n = normalize(&tr);
@@ -1580,21 +1567,19 @@ fn cubical_transp_on_refl_when_path_is_reflexive() {
 }
 
 #[test]
-fn cubical_transp_const_when_path_is_constant_lambda() {
-    // catalogue rule `transp-const`:
-    // `transp (λ _ → A) φ a ↪ a` — constant line of types.
+fn transport_does_not_reduce_an_unchecked_constant_function() {
+    // Ordinary functions are not path evidence in the named calculus.
     let constant_path = CoreTerm::Lam {
         binder: Text::from("i"),
         domain: Heap::new(unit_ty()),
         body: Heap::new(var("A")),
     };
-    let tr = CoreTerm::Transp {
+    let tr = CoreTerm::Transport {
         path: Heap::new(constant_path),
-        regular: Heap::new(var("phi")),
         value: Heap::new(var("a")),
     };
     let n = normalize(&tr);
-    assert_eq!(n, var("a"));
+    assert_eq!(n, tr);
 }
 
 #[test]
@@ -1605,14 +1590,13 @@ fn cubical_transp_does_not_reduce_when_path_uses_binder() {
         domain: Heap::new(unit_ty()),
         body: Heap::new(CoreTerm::App(Heap::new(var("P")), Heap::new(var("i")))),
     };
-    let tr = CoreTerm::Transp {
+    let tr = CoreTerm::Transport {
         path: Heap::new(dependent_path),
-        regular: Heap::new(var("phi")),
         value: Heap::new(var("a")),
     };
     let n = normalize(&tr);
     assert!(
-        matches!(n, CoreTerm::Transp { .. }),
+        matches!(n, CoreTerm::Transport { .. }),
         "transp on dependent path must not reduce: got {:?}",
         n
     );
@@ -1673,12 +1657,11 @@ fn task_98_normalize_hits_every_canonical_face_form() {
             "hcomp-id-when-empty-system",
         ),
         (
-            CoreTerm::Transp {
-                path: Heap::new(var("p")),
-                regular: Heap::new(var("i1")),
+            CoreTerm::Transport {
+                path: Heap::new(refl(var("A"))),
                 value: Heap::new(var("a")),
             },
-            "transp-fill",
+            "transport-reflexivity",
         ),
         (
             CoreTerm::Glue {

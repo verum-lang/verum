@@ -107,6 +107,7 @@ fn compare<'a>(
         }
         (App(a, b), App(x, y))
         | (Pair(a, b), Pair(x, y))
+        | (Transport { path: a, value: b }, Transport { path: x, value: y })
         | (Quotient { base: a, equiv: b }, Quotient { base: x, equiv: y }) => {
             compare(a, x, bound) && compare(b, y, bound)
         }
@@ -142,18 +143,6 @@ fn compare<'a>(
                 phi: x,
                 walls: y,
                 base: z,
-            },
-        )
-        | (
-            Transp {
-                path: a,
-                regular: b,
-                value: c,
-            },
-            Transp {
-                path: x,
-                regular: y,
-                value: z,
             },
         )
         | (

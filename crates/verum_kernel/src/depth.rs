@@ -41,7 +41,7 @@ use crate::{CoreTerm, KernelError, UniverseLevel};
 ///  the universe level is reported as depth to align with the
 ///  stratification of the depth hierarchy).
 ///  * `Pi`, `Lam`, `Sigma`, `App`, `Pair`, `Fst`, `Snd`, `PathTy`,
-///  `Refl`, `HComp`, `Transp`, `Glue`, `Elim` — maximum of their
+///  `Refl`, `HComp`, `Transport`, `Glue`, `Elim` — maximum of their
 ///  sub-terms (structural, no depth bump).
 ///  * `Refine { base, predicate }` — maximum of `dp(base)` and
 ///  `dp(predicate)`.
@@ -97,11 +97,7 @@ pub fn m_depth(term: &CoreTerm) -> usize {
             .max(m_depth(rhs)),
         CoreTerm::Refl(a) => m_depth(a),
         CoreTerm::HComp { phi, walls, base } => m_depth(phi).max(m_depth(walls)).max(m_depth(base)),
-        CoreTerm::Transp {
-            path,
-            regular,
-            value,
-        } => m_depth(path).max(m_depth(regular)).max(m_depth(value)),
+        CoreTerm::Transport { path, value } => m_depth(path).max(m_depth(value)),
         CoreTerm::Glue {
             carrier,
             phi,
@@ -382,14 +378,7 @@ pub fn m_depth_omega(term: &CoreTerm) -> OrdinalDepth {
             m_depth_omega(phi),
             ord_max(m_depth_omega(walls), m_depth_omega(base)),
         ),
-        CoreTerm::Transp {
-            path,
-            regular,
-            value,
-        } => ord_max(
-            m_depth_omega(path),
-            ord_max(m_depth_omega(regular), m_depth_omega(value)),
-        ),
+        CoreTerm::Transport { path, value } => ord_max(m_depth_omega(path), m_depth_omega(value)),
         CoreTerm::Glue {
             carrier,
             phi,

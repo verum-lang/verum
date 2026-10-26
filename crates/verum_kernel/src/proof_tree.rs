@@ -695,7 +695,7 @@ pub enum KernelRule {
     KReflIntro,
     /// Cubical homogeneous composition `hcomp φ walls base`.
     KHComp,
-    /// Cubical transport `transp(p, r, t)`.
+    /// Ordinary path transport `Transport(path, value)` (stable rule ID).
     KTransp,
     /// Glue type `Glue<A>(φ, T, e)` for computational univalence.
     KGlue,
@@ -1265,15 +1265,8 @@ fn inference_rule_and_premises(
             }
             KernelRule::KHComp
         }
-        CoreTerm::Transp {
-            path,
-            regular,
-            value,
-        } => {
+        CoreTerm::Transport { path, value } => {
             if let Some(p) = record_inference(ctx, path, axioms) {
-                premises.push(p);
-            }
-            if let Some(p) = record_inference(ctx, regular, axioms) {
                 premises.push(p);
             }
             if let Some(p) = record_inference(ctx, value, axioms) {

@@ -92,7 +92,7 @@ impl SoundnessBackend for LeanBackend {
                | PathOver (motive path lhs rhs : CoreTerm)\n  \
                | Refl (value : CoreTerm)\n  \
                | HComp (phi walls base : CoreTerm)\n  \
-               | Transp (path regular value : CoreTerm)\n  \
+               | Transport (path value : CoreTerm)\n  \
                | Glue (carrier phi fiber equiv : CoreTerm)\n  \
                | Refine (base : CoreTerm) (binder : String) (predicate : CoreTerm)\n  \
                | Quotient (base equiv : CoreTerm)\n  \
@@ -395,10 +395,13 @@ inductive Typing : Ctx → CoreTerm → CoreTerm → Prop where\n\
         Typing Γ T (CoreTerm.Universe i) →\n        \
         Typing Γ base T →\n        \
         Typing Γ (CoreTerm.HComp phi walls base) T\n  \
-  | t_transp :\n      \
-      ∀ {Γ : Ctx} {path regular value target : CoreTerm} {i : Nat},\n        \
-        Typing Γ target (CoreTerm.Universe i) →\n        \
-        Typing Γ (CoreTerm.Transp path regular value) target\n  \
+  | t_transp :\n\
+      ∀ {Γ : Ctx} {path value source target : CoreTerm} {i : Nat},\n\
+        Typing Γ source (CoreTerm.Universe i) →\n\
+        Typing Γ target (CoreTerm.Universe i) →\n\
+        Typing Γ path (CoreTerm.PathTy (CoreTerm.Universe i) source target) →\n\
+        Typing Γ value source →\n\
+        Typing Γ (CoreTerm.Transport path value) target\n\
   | t_glue :\n      \
       ∀ {Γ : Ctx} {carrier phi fiber equiv : CoreTerm} {i : Nat},\n        \
         Typing Γ carrier (CoreTerm.Universe i) →\n        \
@@ -647,9 +650,14 @@ fn rule_signature_lean(rule_name: &str) -> Option<String> {
               Typing Γ (CoreTerm.HComp phi walls base) T :=\n  @Typing.t_hcomp",
         ),
         "K_Transp" => Some(
-            "theorem K_Transp_sound :\n    ∀ {Γ : Ctx} {path regular value target : CoreTerm} {i : Nat},\n      \
-              Typing Γ target (CoreTerm.Universe i) →\n      \
-              Typing Γ (CoreTerm.Transp path regular value) target :=\n  @Typing.t_transp",
+            r#"theorem K_Transp_sound :
+      ∀ {Γ : Ctx} {path value source target : CoreTerm} {i : Nat},
+        Typing Γ source (CoreTerm.Universe i) →
+        Typing Γ target (CoreTerm.Universe i) →
+        Typing Γ path (CoreTerm.PathTy (CoreTerm.Universe i) source target) →
+        Typing Γ value source →
+        Typing Γ (CoreTerm.Transport path value) target :=
+  @Typing.t_transp"#,
         ),
         "K_Glue" => Some(
             "theorem K_Glue_sound :\n    ∀ {Γ : Ctx} {carrier phi fiber equiv : CoreTerm} {i : Nat},\n      \

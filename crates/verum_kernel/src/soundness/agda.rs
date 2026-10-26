@@ -117,7 +117,7 @@ impl SoundnessBackend for AgdaBackend {
                PathOver     : CoreTerm → CoreTerm → CoreTerm → CoreTerm → CoreTerm\n  \
                Refl         : CoreTerm → CoreTerm\n  \
                HComp        : CoreTerm → CoreTerm → CoreTerm → CoreTerm\n  \
-               Transp       : CoreTerm → CoreTerm → CoreTerm → CoreTerm\n  \
+               Transport    : CoreTerm → CoreTerm → CoreTerm\n  \
                Glue         : CoreTerm → CoreTerm → CoreTerm → CoreTerm → CoreTerm\n  \
                Refine       : CoreTerm → String → CoreTerm → CoreTerm\n  \
                Quotient     : CoreTerm → CoreTerm → CoreTerm\n  \

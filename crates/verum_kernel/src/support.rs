@@ -208,13 +208,8 @@ pub fn substitute(term: &CoreTerm, name: &str, value: &CoreTerm) -> CoreTerm {
             walls: Heap::new(substitute(walls, name, value)),
             base: Heap::new(substitute(base, name, value)),
         },
-        CoreTerm::Transp {
-            path,
-            regular,
-            value: v,
-        } => CoreTerm::Transp {
+        CoreTerm::Transport { path, value: v } => CoreTerm::Transport {
             path: Heap::new(substitute(path, name, value)),
-            regular: Heap::new(substitute(regular, name, value)),
             value: Heap::new(substitute(v, name, value)),
         },
         CoreTerm::Glue {
@@ -417,7 +412,7 @@ impl<'a> NormaliseCtx<'a> {
 ///   * QuotElim β                 — always
 ///   * PathOver-reflexive         — only actual reflexivity evidence
 ///   * HComp face-bot / face-top  — always
-///   * Transp i1 / Refl / const   — always
+///   * Transport Refl           — reflexive path evidence
 ///   * Glue face-bot / face-top   — always
 ///   * δ at Axiom                 — when `ctx.axioms.is_some()`
 ///   * HIT-elim β at Elim         — when `ctx.inductives.is_some()`
@@ -591,32 +586,15 @@ fn normalize_core(term: &CoreTerm, ctx: &mut NormaliseCtx<'_>) -> CoreTerm {
             }
         }
 
-        // Transp identity reductions:
-        //   transp A 1 a ↪ a              (transp-fill)
-        //   transp refl _ a ↪ a           (transp-on-refl)
-        //   transp (λ_. A) _ a ↪ a        (transp-const, binder unused)
-        CoreTerm::Transp {
-            path,
-            regular,
-            value,
-        } => {
+        // Ordinary path transport computes only from reflexive evidence.
+        CoreTerm::Transport { path, value } => {
             let path_n = normalize_core(path, ctx);
-            let regular_n = normalize_core(regular, ctx);
             let value_n = normalize_core(value, ctx);
-            if is_interval_one(&regular_n) {
-                return value_n;
-            }
             if let CoreTerm::Refl(_) = &path_n {
                 return value_n;
             }
-            if let CoreTerm::Lam { binder, body, .. } = &path_n
-                && !body_uses_binder(body, binder.as_str())
-            {
-                return value_n;
-            }
-            CoreTerm::Transp {
+            CoreTerm::Transport {
                 path: Heap::new(path_n),
-                regular: Heap::new(regular_n),
                 value: Heap::new(value_n),
             }
         }
@@ -798,7 +776,7 @@ fn normalize_core(term: &CoreTerm, ctx: &mut NormaliseCtx<'_>) -> CoreTerm {
 ///   * Σ-projection β at Fst/Snd       — `Fst(a, _) → a` etc.
 ///   * QuotElim β                      — `quot_elim([t]_~, _, c) → c(t)`
 ///   * PathOver-reflexive               — reflexivity evidence reduces to PathTy
-///   * Cubical reductions               — HComp / Transp / Glue face rules
+///   * Cubical reductions               — HComp / Glue face rules; reflexive Transport
 ///
 /// Used by [`definitional_eq`] (the main consumer) and by the
 /// PathTy formation rule per `verification-architecture.md` §4.4.
@@ -831,26 +809,9 @@ pub fn normalize_full(
 // =============================================================================
 //
 
-// The cubical primitives (`HComp` / `Transp` / `Glue`) are
-// parameterised by a face formula `phi` and an interval endpoint
-// `regular`. Pre-this-module those were just opaque `CoreTerm`s
-// — even when `phi = ⊥` (no face constrained) the kernel
-// preserved `HComp` instead of reducing to its base. That broke
-// the Kan-fibrancy contract: cubical reductions documented in
-// `verum_verification::cubical::canonical_rules` were *named* but
-// not actually performed.
-//
-
-// Hardening: recognise the canonical face / interval marker terms
-// at the kernel level and wire each catalogue rule into
-// `normalize_core` below. The marker convention is the same
-// the cubical surface uses (`⊤` / `⊥` / `i0` / `i1` plus their
-// ASCII aliases) — this is the *kernel-level* implementation of the
-// face-formula convention.
-//
-
-// Rule citations match `cubical::canonical_rules` names so the
-// catalogue ↔ kernel correspondence is explicit.
+// HComp and Glue still use legacy face markers. These conventions do not
+// establish a typed cofibration judgment. Ordinary Transport is separate and
+// never interprets variable names as interval endpoints.
 
 /// True iff `term` is the canonical face-top marker (`⊤` / `1` /
 /// `top` / `true`). Used by reductions that fire when `phi = ⊤`.
@@ -868,38 +829,6 @@ pub fn is_face_bot(term: &CoreTerm) -> bool {
         CoreTerm::Var(name) => matches!(name.as_str(), "⊥" | "0" | "bot" | "false" | "i0"),
         _ => false,
     }
-}
-
-/// True iff `term` is the interval endpoint `i1` (the cubical
-/// "everything-known" point). Equivalent to `is_face_top` for the
-/// V0 marker convention but exposed separately so the
-/// `transp-fill` rule cites the precise cubical constant.
-pub fn is_interval_one(term: &CoreTerm) -> bool {
-    match term {
-        CoreTerm::Var(name) => matches!(name.as_str(), "i1" | "1" | "true"),
-        _ => false,
-    }
-}
-
-/// True iff `binder` occurs free in `body`. Respects shadowing
-/// introduced by inner binders (Pi / Lam / Sigma / Refine /
-/// PathOver-motive).  Used by the cubical `transp-const` rule:
-/// when the path-of-types is a constant lambda (binder unused in
-/// body) transport reduces to the identity.
-///
-/// Routes through [`var_occurs_free`] — both functions implement
-/// identical semantics with identical binder discipline.  Before
-/// the dedup, this carried a nested copy of the recursion with a
-/// `_ => true` conservative fallback; the canonical helper now
-/// covers every variant exhaustively, so the precision the cubical
-/// `transp-const` rule sees is strictly better (variants previously
-/// answering "true" pessimistically now give the precise answer,
-/// which means the rule fires more aggressively where it's
-/// genuinely warranted — sound, since the precise answer is always
-/// at most the conservative one).
-#[inline]
-fn body_uses_binder(body: &CoreTerm, binder: &str) -> bool {
-    var_occurs_free(body, binder)
 }
 
 /// ε-invariant token (Diakrisis Actic
@@ -1184,14 +1113,8 @@ pub fn var_occurs_free(term: &CoreTerm, name: &str) -> bool {
                 || var_occurs_free(walls, name)
                 || var_occurs_free(base, name)
         }
-        CoreTerm::Transp {
-            path,
-            regular,
-            value,
-        } => {
-            var_occurs_free(path, name)
-                || var_occurs_free(regular, name)
-                || var_occurs_free(value, name)
+        CoreTerm::Transport { path, value } => {
+            var_occurs_free(path, name) || var_occurs_free(value, name)
         }
         CoreTerm::Glue {
             carrier,
@@ -1366,13 +1289,8 @@ fn free_vars_rec(
             free_vars_rec(walls, bound, out);
             free_vars_rec(base, bound, out);
         }
-        CoreTerm::Transp {
-            path,
-            regular,
-            value,
-        } => {
+        CoreTerm::Transport { path, value } => {
             free_vars_rec(path, bound, out);
-            free_vars_rec(regular, bound, out);
             free_vars_rec(value, bound, out);
         }
         CoreTerm::Glue {

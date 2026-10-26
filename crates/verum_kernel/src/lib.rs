@@ -259,8 +259,8 @@ pub use universe_ascent::{KappaTier, check_universe_ascent_v2};
 ///  * `Clause` — DNF clause (conjunction of literals).
 ///  * `FaceFormula` — full DNF with ⊤/⊥/AND/OR + decidable
 ///  `implies` (subsumption via per-clause set inclusion).
-/// Wired into HComp / Transp / Glue rules in `infer.rs` for
-/// cofibration-coherence checking.
+/// This algebra is not yet connected to the named HComp / Glue typing
+/// rules; it does not establish their cofibration-coherence obligations.
 pub mod cofibration;
 pub use cofibration::{Clause, FaceFormula, FaceLit};
 
@@ -735,7 +735,7 @@ mod equivalence;
 pub mod support;
 pub use support::{
     EpsInvariant, NORMALIZE_STEP_LIMIT, convert_eps_to_md_omega, definitional_eq,
-    definitional_eq_with_axioms, free_vars, is_face_bot, is_face_top, is_interval_one, normalize,
+    definitional_eq_with_axioms, free_vars, is_face_bot, is_face_top, normalize,
     normalize_with_axioms, normalize_with_inductives, replay_smt_cert,
     replay_smt_cert_with_obligation, shape_of, structural_eq, substitute, substitute_all,
 };

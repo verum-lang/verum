@@ -78,7 +78,7 @@ impl SoundnessBackend for IsabelleBackend {
            | PathOver CoreTerm CoreTerm CoreTerm CoreTerm\n  \
            | Refl CoreTerm\n  \
            | HComp CoreTerm CoreTerm CoreTerm\n  \
-           | Transp CoreTerm CoreTerm CoreTerm\n  \
+           | Transport CoreTerm CoreTerm\n  \
            | Glue CoreTerm CoreTerm CoreTerm CoreTerm\n  \
            | Refine CoreTerm string CoreTerm\n  \
            | Quotient CoreTerm CoreTerm\n  \
@@ -716,10 +716,13 @@ fn rule_signature_isabelle(rule_name: &str) -> Option<String> {
               using assms by (rule T_hcomp)",
         ),
         "K_Transp" => Some(
-            "lemma K_Transp_sound:\n  \
-              assumes \"\\<Gamma> \\<turnstile> target : Universe i\"\n  \
-              shows \"\\<Gamma> \\<turnstile> Transp path regular value : target\"\n  \
-              using assms by (rule T_transp)",
+            r#"lemma K_Transp_sound:
+  assumes "\<Gamma> \<turnstile> source : Universe i"
+      and "\<Gamma> \<turnstile> target : Universe i"
+      and "\<Gamma> \<turnstile> path : PathTy (Universe i) source target"
+      and "\<Gamma> \<turnstile> value : source"
+  shows "\<Gamma> \<turnstile> Transport path value : target"
+  using assms by (rule T_transp)"#,
         ),
         "K_Glue" => Some(
             "lemma K_Glue_sound:\n  \
