@@ -220,6 +220,7 @@ jobs:
             --output observer-export.lean --report observer-export-acceptance.json
           python3 -m unittest discover -s verification/external/lean -p test_observer_export.py
           python3 -m unittest discover -s verification/external/lean -p test_lifecycle_export.py
+          python3 -m unittest discover -s verification/external/lean -p test_joint_export.py
           python3 verification/external/lean/check_lifecycle_export.py \
             --export verification/external/lean/fixtures/observer-lifecycle-v1.json \
             --sha256 d81cc445752ee9e95a59fbd8915d02802211a810d6ce182b80025ab482260199 \

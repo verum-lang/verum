@@ -9,6 +9,9 @@ OPS = ('Append At Last Length EventInput EventRaw EventAction EventAge QueryInpu
        'QueryRaw QueryAge QueryAction Pair First Second Equal Select Add Rem Next Refused').split()
 POSE_OPS = 'Unit Zero EmptyTrace Identity EventPose QueryPose'.split()
 ERRORS = 'Arity Sort Missing Overflow TraceCapacity Allocation'.split()
+MODELS = ['TypedPrograms', 'FiniteCode', 'FiniteExecution', 'FiniteExecutionProjection',
+          'ObserverAdmission', 'AcquiredObserver', 'ObserverOwnership', 'ExactNames',
+          'ConservativeRefinement', 'ExactTransports', 'PartialObservers', 'ObserverInstallation']
 
 
 def validate_adapter(data):
@@ -226,6 +229,20 @@ def budget(item):
     return f'⟨{limit}, {remaining}, 0, {dispatches}, {boolean(item["poisoned"])}⟩'
 
 
+def cut_registry(definitions, claim):
+    owners, states, state_definitions = {}, {}, {}
+    def register(c):
+        cut(c); require(c['definition'] in definitions, 'Unknown definition identity')
+        owner = c['owner']
+        require(owners.setdefault(owner, c['definition']) == c['definition'], 'Owner definition changed')
+        require(state_definitions.setdefault(c['state'], c['definition']) == c['definition'],
+                'State definition changed')
+        encoded = value(c['value'])
+        if c['state'] in states: claim(f'({states[c["state"]]} : Value) = {encoded}')
+        else: states[c['state']] = encoded
+    return register, owners, states
+
+
 def emit(data):
     fields(data, 'schema definitions ownership naming installation refusals')
     require(data['schema'] == 'synarc-observer-lifecycle-v1', 'Unknown lifecycle schema')
@@ -244,16 +261,7 @@ def emit(data):
         require(type(name) is str and name and name not in names, 'Missing or duplicate observation name')
         names.add(name)
 
-    owners, states, state_definitions = {}, {}, {}
-    def register(c):
-        cut(c); require(c['definition'] in definitions, 'Unknown definition identity')
-        owner = c['owner']
-        require(owners.setdefault(owner, c['definition']) == c['definition'], 'Owner definition changed')
-        require(state_definitions.setdefault(c['state'], c['definition']) == c['definition'],
-                'State definition changed')
-        encoded = value(c['value'])
-        if c['state'] in states: claim(f'({states[c["state"]]} : Value) = {encoded}')
-        else: states[c['state']] = encoded
+    register, owners, states = cut_registry(definitions, claim)
 
     for d in sequence(data['definitions']):
         fields(d, 'identity initial update read update_binding read_binding semantics')
@@ -516,9 +524,7 @@ def emit_classification(rows, claim, named):
 
 
 def main():
-    replay_main(emit=emit, modules=['TypedPrograms', 'FiniteCode', 'FiniteExecution',
-        'FiniteExecutionProjection', 'ObserverAdmission', 'AcquiredObserver', 'ObserverOwnership',
-        'ExactNames', 'ConservativeRefinement', 'ExactTransports', 'PartialObservers', 'ObserverInstallation'],
+    replay_main(emit=emit, modules=MODELS,
         producers=[Path(__file__).resolve()], description=__doc__,
         scope='Finite supplied lifecycle observations checked against ownership, acquired-program, '
               'installation and exact naming models for the explicitly declared 64-bit '
