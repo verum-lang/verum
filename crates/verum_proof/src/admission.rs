@@ -68,15 +68,15 @@ fn code(error: &CheckError) -> &'static str {
         | CheckError::KernelV0StrictIntrinsicDisagreement { .. } => "unsupported_kernel_extension",
     }
 }
-fn size(judgment: &Judgment) -> Result<(), &'static str> {
+fn admit_structure(judgment: &Judgment) -> Result<(), &'static str> {
     enum Node<'a> {
-        Term(&'a Term),
+        Term(&'a Term, usize),
         Level(&'a Level),
     }
     let mut queue = vec![
-        (Node::Term(&judgment.statement), 0),
-        (Node::Term(&judgment.certificate.term), 0),
-        (Node::Term(&judgment.certificate.claimed_type), 0),
+        (Node::Term(&judgment.statement, 0), 0),
+        (Node::Term(&judgment.certificate.term, 0), 0),
+        (Node::Term(&judgment.certificate.claimed_type, 0), 0),
     ];
     let mut count = 0;
     while let Some((node, depth)) = queue.pop() {
@@ -85,7 +85,7 @@ fn size(judgment: &Judgment) -> Result<(), &'static str> {
             return Err("structural_limit");
         }
         match node {
-            Node::Term(t) => match t {
+            Node::Term(t, binders) => match t {
                 Term::Data {
                     level,
                     constructors,
@@ -96,7 +96,7 @@ fn size(judgment: &Judgment) -> Result<(), &'static str> {
                     for field in constructors.iter().flatten() {
                         count += 1;
                         if let DataField::Value(ty) = field {
-                            queue.push((Node::Term(ty), depth + 1));
+                            queue.push((Node::Term(ty, binders), depth + 1));
                         }
                     }
                     if count > MAX_NODES {
@@ -104,9 +104,9 @@ fn size(judgment: &Judgment) -> Result<(), &'static str> {
                     }
                 }
                 Term::Construct { data, args, .. } => {
-                    queue.push((Node::Term(data), depth + 1));
+                    queue.push((Node::Term(data, binders), depth + 1));
                     for term in args {
-                        queue.push((Node::Term(term), depth + 1));
+                        queue.push((Node::Term(term, binders), depth + 1));
                     }
                 }
                 Term::Induct {
@@ -114,25 +114,31 @@ fn size(judgment: &Judgment) -> Result<(), &'static str> {
                     motive,
                     cases,
                 } => {
-                    queue.push((Node::Term(scrutinee), depth + 1));
-                    queue.push((Node::Term(motive), depth + 1));
+                    queue.push((Node::Term(scrutinee, binders), depth + 1));
+                    queue.push((Node::Term(motive, binders), depth + 1));
                     for term in cases {
-                        queue.push((Node::Term(term), depth + 1));
+                        queue.push((Node::Term(term, binders), depth + 1));
                     }
                 }
                 Term::Universe(l) => queue.push((Node::Level(l), depth + 1)),
-                Term::Var(_) => {}
+                Term::Var(index) => {
+                    if *index >= binders {
+                        return Err("unbound_variable");
+                    }
+                }
                 Term::Let { value: a, body: b }
                 | Term::Pi(a, b)
                 | Term::Lam(a, b)
-                | Term::App(a, b)
-                | Term::Sigma(a, b)
-                | Term::Pair(a, b) => {
-                    queue.push((Node::Term(a), depth + 1));
-                    queue.push((Node::Term(b), depth + 1));
+                | Term::Sigma(a, b) => {
+                    queue.push((Node::Term(a, binders), depth + 1));
+                    queue.push((Node::Term(b, binders + 1), depth + 1));
+                }
+                Term::App(a, b) | Term::Pair(a, b) => {
+                    queue.push((Node::Term(a, binders), depth + 1));
+                    queue.push((Node::Term(b, binders), depth + 1));
                 }
                 Term::Fst(a) | Term::Snd(a) | Term::Refl(a) => {
-                    queue.push((Node::Term(a), depth + 1))
+                    queue.push((Node::Term(a, binders), depth + 1))
                 }
                 Term::Id {
                     ty: a,
@@ -145,7 +151,7 @@ fn size(judgment: &Judgment) -> Result<(), &'static str> {
                     scrutinee: c,
                 } => {
                     for t in [a, b, c] {
-                        queue.push((Node::Term(t), depth + 1));
+                        queue.push((Node::Term(t, binders), depth + 1));
                     }
                 }
             },
@@ -256,11 +262,15 @@ pub fn replay(bytes: &[u8]) -> Report {
             "The requested logical profile is not supported by this checker.",
         );
     }
-    if let Err(code) = size(&judgment) {
+    if let Err(code) = admit_structure(&judgment) {
         return rejected(
             "admission",
             code,
-            "Native judgment exceeds the node or depth budget.",
+            if code == "unbound_variable" {
+                "A closed native judgment contains a variable outside its binder scope."
+            } else {
+                "Native judgment exceeds the node or depth budget."
+            },
         );
     }
     if judgment.statement != judgment.certificate.claimed_type {

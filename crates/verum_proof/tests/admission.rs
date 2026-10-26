@@ -139,3 +139,164 @@ fn json_preflight_bounds_nesting_without_interpreting_quoted_delimiters() {
         "invalid_certificate"
     );
 }
+
+fn scope_boundary_terms() -> Vec<Term> {
+    use verum_proof::proof_checker::{DataField, Level};
+    let u = Term::universe(0);
+    let free = Term::var(0);
+    let data = Term::Data {
+        name: "Unit".into(),
+        level: Level::Concrete(0),
+        constructors: vec![vec![]],
+    };
+    let unit = Term::Construct {
+        data: Box::new(data.clone()),
+        constructor: 0,
+        args: vec![],
+    };
+    vec![
+        free.clone(),
+        Term::lam(free.clone(), Term::var(0)),
+        Term::pi(free.clone(), u.clone()),
+        Term::sigma(free.clone(), u.clone()),
+        Term::Let {
+            value: Box::new(free.clone()),
+            body: Box::new(u.clone()),
+        },
+        // The body has one binder; index one is still free.
+        Term::lam(u.clone(), Term::var(1)),
+        Term::Let {
+            value: Box::new(u.clone()),
+            body: Box::new(Term::var(1)),
+        },
+        Term::Data {
+            name: "Field".into(),
+            level: Level::Concrete(0),
+            constructors: vec![vec![DataField::Value(Box::new(free.clone()))]],
+        },
+        Term::Construct {
+            data: Box::new(data.clone()),
+            constructor: 0,
+            args: vec![free.clone()],
+        },
+        Term::Induct {
+            scrutinee: Box::new(unit),
+            motive: Box::new(Term::lam(data, u.clone())),
+            cases: vec![free.clone()],
+        },
+        Term::pair(u.clone(), free.clone()),
+        Term::fst(free.clone()),
+        Term::snd(free.clone()),
+        Term::id_ty(u.clone(), u.clone(), free.clone()),
+        Term::refl(free.clone()),
+        Term::j(u.clone(), free.clone(), u.clone()),
+        // No reduction may erase an out-of-scope argument.
+        Term::app(Term::lam(u.clone(), u.clone()), Term::var(usize::MAX)),
+    ]
+}
+
+#[test]
+fn scope_is_checked_before_reduction_at_every_binding_boundary() {
+    let free = Term::var(0);
+    for term in scope_boundary_terms() {
+        let mut judgment = identity();
+        judgment.certificate.term = term;
+        let report = check(&judgment);
+        let diagnostic = report.diagnostic.unwrap();
+        assert_eq!(diagnostic.code, "unbound_variable");
+        assert_eq!(diagnostic.stage, "admission");
+    }
+    for claimed in [false, true] {
+        let mut judgment = identity();
+        if claimed {
+            judgment.certificate.claimed_type = free.clone();
+        } else {
+            judgment.statement = free.clone();
+        }
+        assert_eq!(
+            check(&judgment).diagnostic.unwrap().code,
+            "unbound_variable"
+        );
+    }
+}
+
+#[test]
+fn captured_datatype_fields_and_nested_local_binders_remain_admissible() {
+    use verum_proof::proof_checker::{DataField, Level};
+    let data = Term::Data {
+        name: "Capture".into(),
+        level: Level::Concrete(0),
+        constructors: vec![vec![DataField::Value(Box::new(Term::var(0)))]],
+    };
+    let statement = Term::pi(Term::universe(0), Term::universe(0));
+    let judgment = Judgment {
+        profile: PROFILE.into(),
+        statement: statement.clone(),
+        certificate: Certificate {
+            term: Term::lam(Term::universe(0), data),
+            claimed_type: statement,
+            metadata: Default::default(),
+        },
+    };
+    assert!(check(&judgment).accepted);
+    let mut judgment = identity();
+    judgment.certificate.term = Term::lam(
+        Term::universe(0),
+        Term::lam(
+            Term::var(0),
+            Term::Let {
+                value: Box::new(Term::var(0)),
+                body: Box::new(Term::var(0)),
+            },
+        ),
+    );
+    assert!(check(&judgment).accepted);
+}
+
+#[test]
+#[ignore = "requires VERUM_LEAN_REPLAY pointing to the independent checker"]
+fn independent_checker_rejects_unbound_variables_at_all_boundaries() {
+    let replay =
+        std::env::var_os("VERUM_LEAN_REPLAY").expect("build the independent checker first");
+    let good = identity();
+    let terms = scope_boundary_terms();
+    let mut rows: Vec<_> = terms
+        .iter()
+        .enumerate()
+        .map(|(id, term)| {
+            serde_json::json!({
+                "id": id.to_string(), "term": term, "claimed_type": good.statement,
+            })
+        })
+        .collect();
+    rows.push(
+        serde_json::json!({ "id":"closed", "term":good.certificate.term,
+        "claimed_type":good.statement }),
+    );
+    let path = std::env::temp_dir().join(format!("verum-scope-{}.json", std::process::id()));
+    std::fs::write(
+        &path,
+        serde_json::to_vec(&serde_json::json!({"schema_version":1,"certificates":rows})).unwrap(),
+    )
+    .unwrap();
+    let output = std::process::Command::new(replay)
+        .arg(&path)
+        .output()
+        .unwrap();
+    std::fs::remove_file(path).unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let verdicts = report["verdicts"].as_array().unwrap();
+    assert_eq!(verdicts.len(), terms.len() + 1);
+    for (i, verdict) in verdicts[..terms.len()].iter().enumerate() {
+        assert_eq!(verdict["id"], i.to_string());
+        assert_eq!(verdict["ok"], false);
+        assert_eq!(verdict["error"], "UnboundVariable");
+    }
+    assert_eq!(verdicts.last().unwrap()["id"], "closed");
+    assert_eq!(verdicts.last().unwrap()["ok"], true);
+}

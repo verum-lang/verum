@@ -261,6 +261,53 @@ def Level.shiftedBy (l : Level) (by_ : Nat) : Level :=
 -- Term-level operations
 -- =============================================================================
 
+/- Scope validation is total and independent of type inference/reduction.
+A variable's index is checked at its actual binder depth. Constructor fields,
+arguments and induction cases have no implicit term binders. -/
+mutual
+
+def scopeError (bound : Nat) (t : Term) : Option Nat :=
+  match t with
+  | .var i => if i < bound then none else some i
+  | .universe _ => none
+  | .letE value body => (scopeError bound value).or (scopeError (bound + 1) body)
+  | .pi a b | .lam a b | .sigma a b => (scopeError bound a).or (scopeError (bound + 1) b)
+  | .app a b | .pair a b => (scopeError bound a).or (scopeError bound b)
+  | .fst value | .snd value | .refl value => scopeError bound value
+  | .identity a b c | .transport a b c =>
+    (scopeError bound a).or ((scopeError bound b).or (scopeError bound c))
+  | .data _ _ constructors => scopeConstructors bound constructors
+  | .construct data _ args => (scopeError bound data).or (scopeTerms bound args)
+  | .induct value motive cases =>
+    (scopeError bound value).or ((scopeError bound motive).or (scopeTerms bound cases))
+termination_by sizeOf t
+
+def scopeTerms (bound : Nat) (terms : List Term) : Option Nat :=
+  match terms with
+  | [] => none
+  | term :: rest => (scopeError bound term).or (scopeTerms bound rest)
+termination_by sizeOf terms
+
+def scopeFields (bound : Nat) (fields : List (Option Term)) : Option Nat :=
+  match fields with
+  | [] => none
+  | none :: rest => scopeFields bound rest
+  | some term :: rest => (scopeError bound term).or (scopeFields bound rest)
+termination_by sizeOf fields
+
+def scopeConstructors (bound : Nat) (constructors : List (List (Option Term))) : Option Nat :=
+  match constructors with
+  | [] => none
+  | fields :: rest => (scopeFields bound fields).or (scopeConstructors bound rest)
+termination_by sizeOf constructors
+
+end
+
+def checkScope (bound : Nat) (t : Term) : Except CheckError Unit :=
+  match scopeError bound t with
+  | none => .ok ()
+  | some index => .error (.unbound_variable index)
+
 /- One total traversal owns the binding discipline for renaming and
     substitution. Constructor value fields, arguments and induction branches
     introduce no implicit binders; let bodies, Pi, Lam and Sigma introduce one.
@@ -658,6 +705,8 @@ end
 
 /-- Check the expected type's formation before entering checking mode. -/
 partial def check (Γ : Ctx) (t expected : Term) : Except CheckError Unit := do
+  checkScope Γ.length expected
+  checkScope Γ.length t
   match infer Γ expected with
   | .ok kind =>
     let some _ := expectUniverse kind | throw (.not_a_type expected)
@@ -671,6 +720,8 @@ partial def check (Γ : Ctx) (t expected : Term) : Except CheckError Unit := do
 
 /-- Verify a closed `(term, claimed_type)` certificate. -/
 def verifyCertificate (term claimedType : Term) : Except CheckError Unit := do
+  checkScope 0 claimedType
+  checkScope 0 term
   match infer [] claimedType with
   | .ok kind =>
     let some _ := expectUniverse kind | throw (.claimed_type_not_a_type claimedType kind)

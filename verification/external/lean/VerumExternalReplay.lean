@@ -9,6 +9,7 @@
 import VerumExternalReplay.KernelSoundness
 import VerumExternalReplay.ReferenceChecker
 import VerumExternalReplay.TermOperations
+import VerumExternalReplay.TermScope
 import VerumExternalReplay.ConservativeRefinement
 import VerumExternalReplay.ReceiptCredit
 import VerumExternalReplay.DiagnosticFactorization
