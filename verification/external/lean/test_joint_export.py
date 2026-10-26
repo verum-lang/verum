@@ -53,6 +53,30 @@ class JointExtractionTests(unittest.TestCase):
     def test_joint_model_replays(self):
         self.replay(joint_fixture())
 
+    def test_long_history_composes_every_transition(self):
+        data = joint_fixture()
+        row = data['history']['events'][0]
+        data['history']['events'] = [copy.deepcopy(row) for _ in range(300)]
+        for key in ('before', 'fork_before'):
+            data['transition'][key]['value']['value'] = 897
+        for key in ('fork_after', 'live_after'):
+            data['transition'][key]['value']['value'] = 900
+        data['replay']['value']['value'] = 900
+        for changed in (False, True):
+            altered = copy.deepcopy(data)
+            if changed:
+                # A middle event contributes to both prefix and complete replay;
+                # checking only the final event would miss this mutation.
+                altered['history']['events'][150]['values'][0]['value']['input'] = 4
+            source, _ = emit(altered)
+            with tempfile.TemporaryDirectory(prefix='verum-long-joint-replay-') as directory:
+                # These closed batches contain all fold claims. The earlier
+                # metadata checks already have independent extraction controls.
+                for i, (part, _) in enumerate(list(batches(source))[-2:]):
+                    path = Path(directory) / f'fold{i}.lean'; path.write_text(part)
+                    affected = ': joint_before = ' in part or ': joint_replay = ' in part
+                    check(path, 'Tactic `rfl` failed:' if changed and affected else None)
+
     def test_changed_observations_rejected(self):
         for change in ('initial', 'report', 'receipt', 'look', 'prefix', 'transition', 'fork', 'live', 'replay'):
             data = joint_fixture()

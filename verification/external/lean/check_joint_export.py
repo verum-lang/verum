@@ -102,8 +102,7 @@ def emit(data):
         proof = f'unfold {name}{initial_definition} {prefix}_update {prefix}_update_binding\n'
         if not entries: proof += '  rfl'
         else:
-            proof += '  simp only [PartialObservers.fold]\n  unfold AcquiredObserver.run\n'
-            proof += '  simp [FiniteCode.bind, List.mapM, List.mapM.loop]\n  reduce_finite_code'
+            proof += f'  reduce_observer_fold {len(entries)}'
         claim(f'{name} = some {lifecycle.value(result)}', proof)
     fold('joint_before', events[:-1], f'{prefix}_initial', before['value'])
     fold('joint_transition', [actual], lifecycle.value(before['value']), fork_after['value'])

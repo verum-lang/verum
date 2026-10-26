@@ -1,3 +1,4 @@
+import Lean
 import VerumExternalReplay.ConservativeRefinement
 import VerumExternalReplay.ExactTransports
 import VerumExternalReplay.TypedPrograms
@@ -17,6 +18,24 @@ structure Observer (E : Type u) (Z : Type v) (R : Type w) where
 def fold (step : Z → E → Option Z) : List E → Z → Option Z
   | [], z => some z
   | e :: es, z => (step z e).bind (fold step es)
+
+-- Compose one checked transition without expanding the remaining history.
+theorem fold_cons_success (step : Z → E → Option Z) (event : E) (events : List E)
+    (state next : Z) (result : Option Z) (transition : step state event = some next)
+    (tail : fold step events next = result) : fold step (event :: events) state = result := by
+  rw [fold, transition]
+  exact tail
+
+/-- Normalize each transition with proof-producing `cbv`, then compose its
+kernel-checked equality. An iterative tactic avoids both recursive tactic
+expansion and accumulating unevaluated prior states. The final equality still
+checks the exact remaining history and result; the count is not an admission.
+No native evaluation axiom or increased proof limit is used. -/
+elab "reduce_observer_fold" count:num : tactic => do
+  for _ in [:count.getNat] do
+    Lean.Elab.Tactic.evalTactic (← `(tactic| apply PartialObservers.fold_cons_success))
+    Lean.Elab.Tactic.evalTactic (← `(tactic| (solve | (conv => lhs; cbv) <;> rfl)))
+  Lean.Elab.Tactic.evalTactic (← `(tactic| rfl))
 
 def online (step : Z → E → Option Z) (events : List E) (current : Option Z) : Option Z :=
   events.foldl (fun state event => state.bind (fun z => step z event)) current
