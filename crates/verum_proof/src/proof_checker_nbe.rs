@@ -886,13 +886,7 @@ fn infer_value(ctx: &NbeContext, term: &Term) -> Result<Value, CheckError> {
             }
             for (field, argument) in fields.iter().zip(args) {
                 let expected = field.as_ref().unwrap_or(&declaration);
-                let actual = infer_value(ctx, argument)?;
-                if !def_eq(&actual, expected, ctx.level()) {
-                    return Err(CheckError::TypeMismatch {
-                        expected: quote(expected, ctx.level()),
-                        actual: quote(&actual, ctx.level()),
-                    });
-                }
+                check_value(ctx, argument, expected)?;
             }
             Ok(declaration)
         }
@@ -935,7 +929,7 @@ fn infer_value(ctx: &NbeContext, term: &Term) -> Result<Value, CheckError> {
                     index,
                     fields,
                 );
-                check(ctx, case, &expected)?;
+                check_value(ctx, case, &eval(&expected, ctx.env()))?;
             }
             Ok(apply_value(
                 eval(motive, ctx.env()),
@@ -995,13 +989,7 @@ fn infer_value(ctx: &NbeContext, term: &Term) -> Result<Value, CheckError> {
                     return Err(CheckError::NotAFunction(quote(&other, ctx.level())));
                 }
             };
-            let x_ty = infer_value(ctx, x)?;
-            if !def_eq(&dom, &x_ty, ctx.level()) {
-                return Err(CheckError::DomainMismatch {
-                    expected: quote(&dom, ctx.level()),
-                    actual: quote(&x_ty, ctx.level()),
-                });
-            }
+            check_domain_value(ctx, x, &dom)?;
             let x_value = eval(x, ctx.env());
             Ok(codom.apply(x_value))
         }
@@ -1071,20 +1059,8 @@ fn infer_value(ctx: &NbeContext, term: &Term) -> Result<Value, CheckError> {
             let n =
                 expect_universe(&ty_kind).ok_or_else(|| CheckError::NotAType((**ty).clone()))?;
             let ty_value = eval(ty, ctx.env());
-            let lhs_ty = infer_value(ctx, lhs)?;
-            if !def_eq(&lhs_ty, &ty_value, ctx.level()) {
-                return Err(CheckError::DomainMismatch {
-                    expected: quote(&ty_value, ctx.level()),
-                    actual: quote(&lhs_ty, ctx.level()),
-                });
-            }
-            let rhs_ty = infer_value(ctx, rhs)?;
-            if !def_eq(&rhs_ty, &ty_value, ctx.level()) {
-                return Err(CheckError::DomainMismatch {
-                    expected: quote(&ty_value, ctx.level()),
-                    actual: quote(&rhs_ty, ctx.level()),
-                });
-            }
+            check_domain_value(ctx, lhs, &ty_value)?;
+            check_domain_value(ctx, rhs, &ty_value)?;
             Ok(Value::VUniverse(n))
         }
 
@@ -1133,13 +1109,7 @@ fn infer_value(ctx: &NbeContext, term: &Term) -> Result<Value, CheckError> {
             // The base must inhabit `motive(a_lhs)`.
             let motive_value = eval(motive, ctx.env());
             let expected_base_ty = apply_value(motive_value.clone(), (*a_lhs).clone());
-            let actual_base_ty = infer_value(ctx, base)?;
-            if !def_eq(&actual_base_ty, &expected_base_ty, ctx.level()) {
-                return Err(CheckError::DomainMismatch {
-                    expected: quote(&expected_base_ty, ctx.level()),
-                    actual: quote(&actual_base_ty, ctx.level()),
-                });
-            }
+            check_domain_value(ctx, base, &expected_base_ty)?;
 
             // Result: motive applied to the path's RIGHT endpoint.
             Ok(apply_value(motive_value, *a_rhs))
@@ -1153,13 +1123,82 @@ fn infer_value(ctx: &NbeContext, term: &Term) -> Result<Value, CheckError> {
 /// implementations MUST agree on every well-typed certificate;
 /// disagreements are bugs in either side.
 pub fn check(ctx: &NbeContext, term: &Term, expected: &Term) -> Result<(), CheckError> {
+    match infer_value(ctx, expected) {
+        Ok(kind) => {
+            expect_universe(&kind).ok_or_else(|| CheckError::NotAType(expected.clone()))?;
+        }
+        Err(CheckError::UniverseOverflow { .. }) if matches!(expected, Term::Universe(_)) => {}
+        Err(error) => return Err(error),
+    }
+    check_value(ctx, term, &eval(expected, ctx.env()))
+}
+
+fn check_domain_value(ctx: &NbeContext, term: &Term, expected: &Value) -> Result<(), CheckError> {
+    check_value(ctx, term, expected).map_err(|error| match error {
+        CheckError::TypeMismatch { expected, actual } => {
+            CheckError::DomainMismatch { expected, actual }
+        }
+        other => other,
+    })
+}
+
+// Expected types are semantic values. Dependent families are instantiated by
+// closure application, independently of the substitution checker's algorithm.
+fn check_value(ctx: &NbeContext, term: &Term, expected: &Value) -> Result<(), CheckError> {
+    if let Term::Let { value, body } = term {
+        let ty = infer_value(ctx, value)?;
+        return check_value(&ctx.define(ty, eval(value, ctx.env())), body, expected);
+    }
+    match (term, expected) {
+        (
+            Term::Lam(domain, body),
+            Value::VPi {
+                domain: expected_domain,
+                codomain,
+            },
+        ) => {
+            let kind = infer_value(ctx, domain)?;
+            expect_universe(&kind).ok_or_else(|| CheckError::NotAType((**domain).clone()))?;
+            let actual_domain = eval(domain, ctx.env());
+            if !def_eq(&actual_domain, expected_domain, ctx.level()) {
+                return Err(CheckError::TypeMismatch {
+                    expected: quote(expected_domain, ctx.level()),
+                    actual: (**domain).clone(),
+                });
+            }
+            let fresh = Value::VNeutral(Neutral::NVar(ctx.level()));
+            return check_value(&ctx.extend(actual_domain), body, &codomain.apply(fresh));
+        }
+        (Term::Pair(first, second), Value::VSigma { domain, codomain }) => {
+            check_value(ctx, first, domain)?;
+            return check_value(ctx, second, &codomain.apply(eval(first, ctx.env())));
+        }
+        (Term::Refl(value), Value::VId { ty, lhs, rhs }) => {
+            check_domain_value(ctx, value, ty)?;
+            let actual = eval(value, ctx.env());
+            if def_eq(&actual, lhs, ctx.level()) && def_eq(&actual, rhs, ctx.level()) {
+                return Ok(());
+            }
+            return Err(CheckError::TypeMismatch {
+                expected: quote(expected, ctx.level()),
+                actual: quote(
+                    &Value::VId {
+                        ty: ty.clone(),
+                        lhs: Box::new(actual.clone()),
+                        rhs: Box::new(actual),
+                    },
+                    ctx.level(),
+                ),
+            });
+        }
+        _ => {}
+    }
     let inferred = infer_value(ctx, term)?;
-    let expected_value = eval(expected, ctx.env());
-    if def_eq(&inferred, &expected_value, ctx.level()) {
+    if def_eq(&inferred, expected, ctx.level()) {
         Ok(())
     } else {
         Err(CheckError::TypeMismatch {
-            expected: expected.clone(),
+            expected: quote(expected, ctx.level()),
             actual: quote(&inferred, ctx.level()),
         })
     }
@@ -1208,7 +1247,7 @@ pub fn verify_certificate(cert: &crate::proof_checker::Certificate) -> Result<()
         }
         Err(other) => return Err(other),
     }
-    check(&ctx, &cert.term, &cert.claimed_type)
+    check_value(&ctx, &cert.term, &eval(&cert.claimed_type, ctx.env()))
 }
 
 // =============================================================================

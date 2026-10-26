@@ -1555,7 +1555,7 @@ pub fn infer(ctx: &Context, term: &Term) -> Result<Term, CheckError> {
                     DataField::Value(ty) => ty.as_ref(),
                     DataField::Recursive => &declaration,
                 };
-                check(ctx, argument, expected)?;
+                check_against(ctx, argument, expected)?;
             }
             Ok(declaration)
         }
@@ -1589,7 +1589,7 @@ pub fn infer(ctx: &Context, term: &Term) -> Result<Term, CheckError> {
             }
             for (index, (fields, case)) in constructors.iter().zip(cases).enumerate() {
                 let expected = induction_case_type(&declaration, motive, index, fields);
-                check(ctx, case, &expected)?;
+                check_against(ctx, case, &expected)?;
             }
             Ok(Term::app((**motive).clone(), (**scrutinee).clone()))
         }
@@ -1655,13 +1655,7 @@ pub fn infer(ctx: &Context, term: &Term) -> Result<Term, CheckError> {
                 Term::Pi(a, b) => (a, b),
                 other => return Err(CheckError::NotAFunction(other)),
             };
-            let x_ty = infer(ctx, x)?;
-            if !def_eq(&dom, &x_ty) {
-                return Err(CheckError::DomainMismatch {
-                    expected: *dom,
-                    actual: x_ty,
-                });
-            }
+            check_domain(ctx, x, &dom)?;
             Ok(subst(*codom, 0, x))
         }
 
@@ -1679,8 +1673,8 @@ pub fn infer(ctx: &Context, term: &Term) -> Result<Term, CheckError> {
         Term::Pair(a, b) => {
             let a_ty = infer(ctx, a)?;
             let b_ty = infer(ctx, b)?;
-            // B[a/0]: the second component type may depend on the first value.
-            // We form Sigma(a_ty, b_ty_shifted) where b_ty is shifted under the binder.
+            // Synthesis only knows the second component's type at this value.
+            // A dependent family is supplied by checking mode, not guessed.
             let b_ty_shifted = shift_up(b_ty, 1, 0);
             Ok(Term::Sigma(Box::new(a_ty), Box::new(b_ty_shifted)))
         }
@@ -1715,20 +1709,8 @@ pub fn infer(ctx: &Context, term: &Term) -> Result<Term, CheckError> {
             let ty_kind = infer(ctx, ty)?;
             let n =
                 expect_universe(&ty_kind).ok_or_else(|| CheckError::NotAType((**ty).clone()))?;
-            let lhs_ty = infer(ctx, lhs)?;
-            if !def_eq(&lhs_ty, ty) {
-                return Err(CheckError::DomainMismatch {
-                    expected: (**ty).clone(),
-                    actual: lhs_ty,
-                });
-            }
-            let rhs_ty = infer(ctx, rhs)?;
-            if !def_eq(&rhs_ty, ty) {
-                return Err(CheckError::DomainMismatch {
-                    expected: (**ty).clone(),
-                    actual: rhs_ty,
-                });
-            }
+            check_domain(ctx, lhs, ty)?;
+            check_domain(ctx, rhs, ty)?;
             Ok(Term::Universe(n))
         }
 
@@ -1789,13 +1771,7 @@ pub fn infer(ctx: &Context, term: &Term) -> Result<Term, CheckError> {
             // The base must inhabit `motive(a_lhs)` — the motive
             // applied to the path's LEFT endpoint.
             let expected_base_ty = whnf(Term::App(motive.clone(), a_lhs.clone()));
-            let actual_base_ty = infer(ctx, base)?;
-            if !def_eq(&actual_base_ty, &expected_base_ty) {
-                return Err(CheckError::DomainMismatch {
-                    expected: expected_base_ty,
-                    actual: actual_base_ty,
-                });
-            }
+            check_domain(ctx, base, &expected_base_ty)?;
 
             // Result: motive applied to the path's RIGHT endpoint.
             Ok(Term::App(motive.clone(), a_rhs))
@@ -1846,11 +1822,68 @@ pub(crate) fn induction_case_type(
     result
 }
 
-/// Check that `term` has type `expected`. Wraps `infer` + `def_eq`.
-/// This is the load-bearing entry point for `verum check-proof`:
-/// the .vproof file says "this term has this type", and we either
-/// agree or reject.
+/// Check a term against a well-formed expected type. Introduction forms use
+/// that type directly; synthesizing a nondependent product cannot reconstruct
+/// the family of a dependent pair.
 pub fn check(ctx: &Context, term: &Term, expected: &Term) -> Result<(), CheckError> {
+    match infer(ctx, expected) {
+        Ok(kind) => {
+            expect_universe(&kind).ok_or_else(|| CheckError::NotAType(expected.clone()))?;
+        }
+        Err(CheckError::UniverseOverflow { .. }) if matches!(expected, Term::Universe(_)) => {}
+        Err(error) => return Err(error),
+    }
+    check_against(ctx, term, expected)
+}
+
+fn check_domain(ctx: &Context, term: &Term, expected: &Term) -> Result<(), CheckError> {
+    check_against(ctx, term, expected).map_err(|error| match error {
+        CheckError::TypeMismatch { expected, actual } => {
+            CheckError::DomainMismatch { expected, actual }
+        }
+        other => other,
+    })
+}
+
+// Internal callers establish the expected type's formation judgment before
+// descending. Keep the public boundary's validation out of recursive checks.
+fn check_against(ctx: &Context, term: &Term, expected: &Term) -> Result<(), CheckError> {
+    if let Term::Let { value, body } = term {
+        infer(ctx, value)?;
+        return check_against(ctx, &subst((**body).clone(), 0, value), expected);
+    }
+    match (term, whnf(expected.clone())) {
+        (Term::Lam(domain, body), Term::Pi(expected_domain, codomain)) => {
+            let kind = infer(ctx, domain)?;
+            expect_universe(&kind).ok_or_else(|| CheckError::NotAType((**domain).clone()))?;
+            if !def_eq(domain, &expected_domain) {
+                return Err(CheckError::TypeMismatch {
+                    expected: *expected_domain,
+                    actual: (**domain).clone(),
+                });
+            }
+            return check_against(&ctx.extend((**domain).clone()), body, &codomain);
+        }
+        (Term::Pair(first, second), Term::Sigma(domain, family)) => {
+            check_against(ctx, first, &domain)?;
+            return check_against(ctx, second, &subst(*family, 0, first));
+        }
+        (Term::Refl(value), Term::Id { ty, lhs, rhs }) => {
+            check_domain(ctx, value, &ty)?;
+            if def_eq(value, &lhs) && def_eq(value, &rhs) {
+                return Ok(());
+            }
+            return Err(CheckError::TypeMismatch {
+                expected: expected.clone(),
+                actual: Term::Id {
+                    ty,
+                    lhs: value.clone(),
+                    rhs: value.clone(),
+                },
+            });
+        }
+        _ => {}
+    }
     let inferred = infer(ctx, term)?;
     if def_eq(&inferred, expected) {
         Ok(())
@@ -1942,7 +1975,7 @@ impl Certificate {
             Err(other) => return Err(other),
         }
         // Step 2 — term has the claimed type.
-        check(&ctx, &self.term, &self.claimed_type)
+        check_against(&ctx, &self.term, &self.claimed_type)
     }
 }
 

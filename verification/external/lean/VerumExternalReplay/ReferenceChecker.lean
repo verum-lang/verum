@@ -488,6 +488,8 @@ def inductionCaseType (data motive : Term) (ctor : Nat) (fields : List (Option T
   let value := Term.construct (shiftUp depth 0 data) ctor (positions.map (fun i => .var (depth - 1 - i)))
   return domains.foldr Term.pi (.app (shiftUp depth 0 motive) value)
 
+mutual
+
 /-- Bidirectional type inference for the structural fragment. -/
 partial def infer (Γ : Ctx) (t : Term) : Except CheckError Term :=
   match t with
@@ -511,8 +513,7 @@ partial def infer (Γ : Ctx) (t : Term) : Except CheckError Term :=
     unless fields.length == args.length do throw (.invalid_inductive "constructor field arity mismatch")
     for (field, arg) in fields.zip args do
       let expected := field.getD declaration
-      let actual ← infer Γ arg
-      unless defEq actual expected do throw (.type_mismatch expected actual)
+      checkAgainst Γ arg expected
     return declaration
   | .induct value motive cases => do
     let declaration := whnf (← infer Γ value)
@@ -525,8 +526,7 @@ partial def infer (Γ : Ctx) (t : Term) : Except CheckError Term :=
     unless cases.length == constructors.length do throw (.invalid_inductive "induction case count mismatch")
     for (index, (fields, branch)) in (constructors.zip cases).zipIdx |>.map (fun (pair,i) => (i,pair)) do
       let expected := inductionCaseType declaration motive index fields
-      let actual ← infer Γ branch
-      unless defEq actual expected do throw (.type_mismatch expected actual)
+      checkAgainst Γ branch expected
     return .app motive value
   | .var i =>
     match lookupCtx Γ i with
@@ -564,18 +564,11 @@ partial def infer (Γ : Ctx) (t : Term) : Except CheckError Term :=
         match infer (a :: Γ) body with
         | .error e => .error e
         | .ok bodyTy => .ok (.pi a bodyTy)
-  | .app f x =>
-    match infer Γ f with
-    | .error e => .error e
-    | .ok fTy =>
-      match whnf fTy with
-      | .pi dom codom =>
-        match infer Γ x with
-        | .error e => .error e
-        | .ok xTy =>
-          if defEq dom xTy then .ok (subst 0 x codom)
-          else .error (.domain_mismatch dom xTy)
-      | other => .error (.not_a_function other)
+  | .app f x => do
+    let fTy ← infer Γ f
+    let .pi dom codom := whnf fTy | throw (.not_a_function (whnf fTy))
+    checkDomain Γ x dom
+    return subst 0 x codom
   -- T-Sigma-Form: Σ(x : A). B : Universe(max(level(A), level(B))).
   | .sigma a b =>
     match infer Γ a with
@@ -621,8 +614,7 @@ partial def infer (Γ : Ctx) (t : Term) : Except CheckError Term :=
     let kind ← infer Γ a
     let some level := expectUniverse kind | .error (.not_a_type a)
     for endpoint in [x, y] do
-      let actual ← infer Γ endpoint
-      unless defEq a actual do throw (.domain_mismatch a actual)
+      checkDomain Γ endpoint a
     return .universe level
   | .refl x => do
     let ty ← infer Γ x
@@ -634,27 +626,61 @@ partial def infer (Γ : Ctx) (t : Term) : Except CheckError Term :=
     let .pi domain codomain := whnf motiveTy | .error (.not_a_valid_j_motive motive)
     unless defEq domain carrier do throw (.domain_mismatch carrier domain)
     let some _ := expectUniverse codomain | .error (.not_a_valid_j_motive motive)
-    let baseTy ← infer Γ base
-    let expected := whnf (.app motive lhs)
-    unless defEq baseTy expected do throw (.domain_mismatch expected baseTy)
+    checkDomain Γ base (.app motive lhs)
     return .app motive rhs
 
-/-- Check that `t` has type `expected` in `Γ`. -/
-partial def check (Γ : Ctx) (t expected : Term) : Except CheckError Unit :=
-  match infer Γ t with
-  | .error e => .error e
-  | .ok inferred =>
-    if defEq inferred expected then .ok ()
-    else .error (.type_mismatch expected inferred)
+/-- Check introductions using an already formed expected type. -/
+partial def checkAgainst (Γ : Ctx) (t expected : Term) : Except CheckError Unit := do
+  if let .letE value body := t then
+    let _ ← infer Γ value
+    return ← checkAgainst Γ (subst 0 value body) expected
+  match t, whnf expected with
+  | .lam domain body, .pi expectedDomain codomain =>
+    let kind ← infer Γ domain
+    let some _ := expectUniverse kind | throw (.not_a_type domain)
+    unless defEq domain expectedDomain do throw (.type_mismatch expectedDomain domain)
+    checkAgainst (domain :: Γ) body codomain
+  | .pair first second, .sigma domain family =>
+    checkAgainst Γ first domain
+    checkAgainst Γ second (subst 0 first family)
+  | .refl value, .identity carrier lhs rhs =>
+    checkDomain Γ value carrier
+    unless defEq value lhs && defEq value rhs do
+      throw (.type_mismatch expected (.identity carrier value value))
+  | _, _ =>
+    let inferred ← infer Γ t
+    unless defEq inferred expected do throw (.type_mismatch expected inferred)
+
+partial def checkDomain (Γ : Ctx) (t expected : Term) : Except CheckError Unit :=
+  match checkAgainst Γ t expected with
+  | .error (.type_mismatch wanted actual) => .error (.domain_mismatch wanted actual)
+  | result => result
+
+end
+
+/-- Check the expected type's formation before entering checking mode. -/
+partial def check (Γ : Ctx) (t expected : Term) : Except CheckError Unit := do
+  match infer Γ expected with
+  | .ok kind =>
+    let some _ := expectUniverse kind | throw (.not_a_type expected)
+  | .error (.universe_overflow _) =>
+    -- A literal universe remains a type at the wire-level ceiling.
+    -- Overflow inside a compound type cannot establish its formation.
+    if let .universe _ := expected then pure ()
+    else throw (.not_a_type expected)
+  | .error error => throw error
+  checkAgainst Γ t expected
 
 /-- Verify a closed `(term, claimed_type)` certificate. -/
-def verifyCertificate (term claimedType : Term) : Except CheckError Unit :=
+def verifyCertificate (term claimedType : Term) : Except CheckError Unit := do
   match infer [] claimedType with
-  | .error e => .error e
   | .ok kind =>
-    match expectUniverse kind with
-    | none => .error (.claimed_type_not_a_type claimedType kind)
-    | some _ => check [] term claimedType
+    let some _ := expectUniverse kind | throw (.claimed_type_not_a_type claimedType kind)
+  | .error (.universe_overflow n) =>
+    if let .universe _ := claimedType then pure ()
+    else throw (.universe_overflow n)
+  | .error error => throw error
+  checkAgainst [] term claimedType
 
 end VerumKernel
 

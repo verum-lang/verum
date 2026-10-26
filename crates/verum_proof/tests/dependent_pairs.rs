@@ -1,0 +1,248 @@
+use verum_proof::proof_checker::{Certificate, DataField, Level, Term};
+
+fn witness_type() -> Term {
+    // A : U, x : A |- Sigma(y : A). Id(A, x, y).
+    Term::sigma(
+        Term::var(1),
+        Term::id_ty(Term::var(2), Term::var(1), Term::var(0)),
+    )
+}
+fn witness() -> Term {
+    Term::pair(Term::var(0), Term::refl(Term::var(0)))
+}
+fn close(term: Term, claimed: Term) -> Certificate {
+    Certificate {
+        term: Term::lam(Term::universe(0), Term::lam(Term::var(0), term)),
+        claimed_type: Term::pi(Term::universe(0), Term::pi(Term::var(0), claimed)),
+        metadata: Default::default(),
+    }
+}
+fn battery() -> Vec<(&'static str, Certificate, bool)> {
+    let bit = Term::Data {
+        name: "Bit".into(),
+        level: Level::Concrete(0),
+        constructors: vec![vec![], vec![]],
+    };
+    let zero = Term::Construct {
+        data: Box::new(bit.clone()),
+        constructor: 0,
+        args: vec![],
+    };
+    let holder = Term::Data {
+        name: "Evidence".into(),
+        level: Level::Concrete(0),
+        constructors: vec![vec![DataField::Value(Box::new(witness_type()))]],
+    };
+    let lifted = Term::sigma(
+        Term::var(2),
+        Term::id_ty(Term::var(3), Term::var(2), Term::var(0)),
+    );
+    let mut cases = vec![
+        ("dependent_pair", close(witness(), witness_type()), true),
+        (
+            "let_body",
+            close(
+                Term::Let {
+                    value: Box::new(Term::var(0)),
+                    body: Box::new(witness()),
+                },
+                witness_type(),
+            ),
+            true,
+        ),
+        (
+            "application_argument",
+            close(
+                Term::app(
+                    Term::lam(witness_type(), Term::fst(Term::var(0))),
+                    witness(),
+                ),
+                Term::var(1),
+            ),
+            true,
+        ),
+        (
+            "constructor_field",
+            close(
+                Term::Construct {
+                    data: Box::new(holder.clone()),
+                    constructor: 0,
+                    args: vec![witness()],
+                },
+                holder,
+            ),
+            true,
+        ),
+        (
+            "induction_branch",
+            close(
+                Term::Induct {
+                    scrutinee: Box::new(zero),
+                    motive: Box::new(Term::lam(bit, lifted)),
+                    cases: vec![witness(), witness()],
+                },
+                witness_type(),
+            ),
+            true,
+        ),
+        (
+            "identity_elimination_base",
+            close(
+                Term::j(
+                    Term::lam(
+                        Term::var(1),
+                        Term::sigma(
+                            Term::var(2),
+                            Term::id_ty(Term::var(3), Term::var(1), Term::var(0)),
+                        ),
+                    ),
+                    witness(),
+                    Term::refl(Term::var(0)),
+                ),
+                witness_type(),
+            ),
+            true,
+        ),
+        (
+            "reflexive_dependent_pair",
+            close(
+                Term::refl(witness()),
+                Term::id_ty(witness_type(), witness(), witness()),
+            ),
+            true,
+        ),
+        (
+            "malformed_family",
+            close(witness(), Term::sigma(Term::var(1), Term::var(0))),
+            false,
+        ),
+    ];
+    let mut wrong_annotation = close(witness(), witness_type());
+    if let Term::Lam(_, inner) = &mut wrong_annotation.term {
+        if let Term::Lam(domain, _) = inner.as_mut() {
+            *domain = Box::new(Term::universe(0));
+        }
+    }
+    cases.push(("wrong_domain_annotation", wrong_annotation, false));
+    // A, x:A, y:A |- (y,refl x) cannot prove Id(A,x,y) for arbitrary x,y.
+    cases.push((
+        "substituted_witness",
+        Certificate {
+            term: Term::lam(
+                Term::universe(0),
+                Term::lam(
+                    Term::var(0),
+                    Term::lam(
+                        Term::var(1),
+                        Term::pair(Term::var(0), Term::refl(Term::var(1))),
+                    ),
+                ),
+            ),
+            claimed_type: Term::pi(
+                Term::universe(0),
+                Term::pi(
+                    Term::var(0),
+                    Term::pi(
+                        Term::var(1),
+                        Term::sigma(
+                            Term::var(2),
+                            Term::id_ty(Term::var(3), Term::var(2), Term::var(0)),
+                        ),
+                    ),
+                ),
+            ),
+            metadata: Default::default(),
+        },
+        false,
+    ));
+    cases.push((
+        "literal_universe_ceiling",
+        Certificate {
+            term: Term::universe(u32::MAX - 1),
+            claimed_type: Term::universe(u32::MAX),
+            metadata: Default::default(),
+        },
+        true,
+    ));
+    cases.push((
+        "overflowing_term",
+        Certificate {
+            term: Term::universe(u32::MAX),
+            claimed_type: Term::universe(0),
+            metadata: Default::default(),
+        },
+        false,
+    ));
+    cases
+}
+
+#[test]
+fn expected_families_reach_every_introduction_boundary() {
+    for (name, cert, expected) in battery() {
+        let substitution = cert.verify();
+        assert_eq!(
+            substitution.is_ok(),
+            expected,
+            "substitution {name}: {substitution:?}"
+        );
+        let nbe = verum_proof::proof_checker_nbe::verify_certificate(&cert);
+        assert_eq!(nbe.is_ok(), expected, "NbE {name}: {nbe:?}");
+    }
+}
+
+#[test]
+fn public_check_does_not_admit_malformed_expected_families() {
+    let context = verum_proof::proof_checker::Context::new()
+        .extend(Term::universe(0))
+        .extend(Term::var(0));
+    let malformed = Term::sigma(Term::var(1), Term::var(0));
+    assert!(verum_proof::proof_checker::check(&context, &witness(), &malformed).is_err());
+    let nbe_context = verum_proof::proof_checker_nbe::NbeContext::new().extend(
+        verum_proof::proof_checker_nbe::Value::VUniverse(Level::Concrete(0)),
+    );
+    let a = verum_proof::proof_checker_nbe::eval(&Term::var(0), nbe_context.env());
+    let nbe_context = nbe_context.extend(a);
+    assert!(verum_proof::proof_checker_nbe::check(&nbe_context, &witness(), &malformed).is_err());
+}
+
+#[test]
+#[ignore = "requires VERUM_LEAN_REPLAY pointing to the built independent checker"]
+fn independent_lean_replays_dependent_pairs_and_causal_rejections() {
+    let replay =
+        std::env::var_os("VERUM_LEAN_REPLAY").expect("build the independent checker first");
+    let cases = battery();
+    let rows: Vec<_> = cases
+        .iter()
+        .map(|(id, cert, _)| {
+            serde_json::json!({
+                "id": id, "term": cert.term, "claimed_type": cert.claimed_type,
+            })
+        })
+        .collect();
+    let directory =
+        std::env::temp_dir().join(format!("verum-dependent-pairs-{}", std::process::id()));
+    std::fs::create_dir_all(&directory).unwrap();
+    let path = directory.join("battery.json");
+    std::fs::write(
+        &path,
+        serde_json::to_vec(&serde_json::json!({"schema_version":1,"certificates":rows})).unwrap(),
+    )
+    .unwrap();
+    let output = std::process::Command::new(replay)
+        .arg(&path)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let verdicts: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let verdicts = verdicts["verdicts"].as_array().unwrap();
+    assert_eq!(verdicts.len(), cases.len());
+    for (verdict, (name, _, expected)) in verdicts.iter().zip(cases) {
+        assert_eq!(verdict["id"], name);
+        assert_eq!(verdict["ok"], expected, "{name}: {verdict}");
+    }
+    std::fs::remove_dir_all(directory).unwrap();
+}
