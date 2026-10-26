@@ -128,6 +128,34 @@ fn battery() -> Vec<(&'static str, Certificate, bool)> {
     };
     cases.extend([
         (
+            "transparent_value_retains_captured_binder",
+            close(
+                defined(
+                    Term::var(0),
+                    Term::lam(Term::var(2), Term::refl(Term::var(1))),
+                ),
+                Term::pi(
+                    Term::var(1),
+                    Term::id_ty(Term::var(2), Term::var(1), Term::var(1)),
+                ),
+            ),
+            true,
+        ),
+        (
+            "transparent_value_cannot_capture_later_binder",
+            close(
+                defined(
+                    Term::var(0),
+                    Term::lam(Term::var(2), Term::refl(Term::var(1))),
+                ),
+                Term::pi(
+                    Term::var(1),
+                    Term::id_ty(Term::var(2), Term::var(1), Term::var(0)),
+                ),
+            ),
+            false,
+        ),
+        (
             "transparent_pair",
             close(defined(witness(), Term::var(0)), witness_type()),
             true,

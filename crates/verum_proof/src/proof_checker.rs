@@ -646,9 +646,9 @@ pub enum Term {
 }
 
 impl Term {
-    /// Map each immediate data child together with its local binder count.
-    /// Dependent fields see earlier fields; all other children use the ambient frame.
-    fn map_data_terms(self, mut map: impl FnMut(Term, usize) -> Term) -> Term {
+    /// Map every immediate child with its local binder count. Declaration
+    /// indices and constructor fields retain their own dependent telescopes.
+    fn map_children(self, mut map: impl FnMut(Term, usize) -> Term) -> Term {
         match self {
             Term::Data {
                 name,
@@ -711,7 +711,36 @@ impl Term {
                 motive: Box::new(map(*motive, 0)),
                 cases: cases.into_iter().map(|t| map(t, 0)).collect(),
             },
-            _ => unreachable!("map_data_terms requires a data node"),
+            Term::Let { value, body } => Term::Let {
+                value: Box::new(map(*value, 0)),
+                body: Box::new(map(*body, 1)),
+            },
+            Term::Pi(a, b) => Term::pi(map(*a, 0), map(*b, 1)),
+            Term::Lam(a, b) => Term::lam(map(*a, 0), map(*b, 1)),
+            Term::Sigma(a, b) => Term::sigma(map(*a, 0), map(*b, 1)),
+            Term::App(a, b) => Term::app(map(*a, 0), map(*b, 0)),
+            Term::Pair(a, b) => Term::pair(map(*a, 0), map(*b, 0)),
+            Term::Fst(a) => Term::fst(map(*a, 0)),
+            Term::Snd(a) => Term::snd(map(*a, 0)),
+            Term::Refl(a) => Term::refl(map(*a, 0)),
+            Term::Id { ty, lhs, rhs } => Term::id_ty(map(*ty, 0), map(*lhs, 0), map(*rhs, 0)),
+            Term::J {
+                motive,
+                base,
+                scrutinee,
+            } => Term::J {
+                motive: Box::new(map(*motive, 0)),
+                base: Box::new(map(*base, 0)),
+                scrutinee: Box::new(map(*scrutinee, 0)),
+            },
+            leaf @ (Term::Var(_) | Term::Universe(_)) => leaf,
+        }
+    }
+
+    fn map_variables(self, depth: usize, map: &mut impl FnMut(usize, usize) -> Term) -> Term {
+        match self {
+            Term::Var(index) => map(index, depth),
+            term => term.map_children(|child, binders| child.map_variables(depth + binders, map)),
         }
     }
 
@@ -809,6 +838,13 @@ impl Term {
 pub struct Context {
     /// Inner-first stack of variable types.
     types: Vec<Term>,
+    definitions: Vec<Option<std::sync::Arc<Definition>>>,
+}
+
+#[derive(Debug)]
+struct Definition {
+    source: Term,
+    expanded: std::sync::OnceLock<Term>,
 }
 
 impl Context {
@@ -838,7 +874,54 @@ impl Context {
     pub fn extend(&self, ty: Term) -> Self {
         let mut out = self.clone();
         out.types.push(ty);
+        out.definitions.push(None);
         out
+    }
+
+    /// A checked transparent local definition. Keep its proof body shared;
+    /// substitution is needed in types and conversion, not at every proof use.
+    fn define(&self, ty: Term, value: &Term) -> Self {
+        let mut out = self.extend(ty);
+        *out.definitions.last_mut().unwrap() = Some(std::sync::Arc::new(Definition {
+            source: value.clone(),
+            expanded: std::sync::OnceLock::new(),
+        }));
+        out
+    }
+
+    fn definition(&self, index: usize) -> Option<Term> {
+        let position = self.definitions.len().checked_sub(index.checked_add(1)?)?;
+        self.definitions[position]
+            .as_ref()
+            .map(|term| shift_up(term.source.clone(), index + 1, 0))
+    }
+
+    /// Expand aliases in a single binder-aware traversal. Definitions are
+    /// acyclic: their source lives in the prefix preceding their own binding.
+    /// Memoized expansion is only syntax, never a cached typing assertion.
+    fn expand(&self, term: Term) -> Term {
+        fn expand_in(term: Term, definitions: &[Option<std::sync::Arc<Definition>>]) -> Term {
+            term.map_variables(0, &mut |index, depth| {
+                let Some(relative) = index.checked_sub(depth) else {
+                    return Term::var(index);
+                };
+                let Some(position) = definitions.len().checked_sub(relative + 1) else {
+                    return Term::var(index);
+                };
+                let Some(definition) = &definitions[position] else {
+                    return Term::var(index);
+                };
+                let expanded = definition
+                    .expanded
+                    .get_or_init(|| expand_in(definition.source.clone(), &definitions[..position]));
+                shift_up(expanded.clone(), relative + 1 + depth, 0)
+            })
+        }
+        if self.definitions.iter().all(Option::is_none) {
+            term
+        } else {
+            expand_in(term, &self.definitions)
+        }
     }
 
     /// Number of bound variables.
@@ -887,7 +970,7 @@ pub(crate) fn shift_up(term: Term, amount: usize, cutoff: usize) -> Term {
             body: Box::new(shift_up(*body, amount, cutoff + 1)),
         },
         data @ (Term::Data { .. } | Term::Construct { .. } | Term::Induct { .. }) => {
-            data.map_data_terms(|child, binders| shift_up(child, amount, cutoff + binders))
+            data.map_children(|child, binders| shift_up(child, amount, cutoff + binders))
         }
         Term::Var(i) => {
             if i >= cutoff {
@@ -955,7 +1038,7 @@ fn subst(term: Term, target: usize, replacement: &Term) -> Term {
             body: Box::new(subst(*body, target + 1, replacement)),
         },
         data @ (Term::Data { .. } | Term::Construct { .. } | Term::Induct { .. }) => {
-            data.map_data_terms(|child, binders| subst(child, target + binders, replacement))
+            data.map_children(|child, binders| subst(child, target + binders, replacement))
         }
         Term::Var(i) => {
             use std::cmp::Ordering;
@@ -1186,6 +1269,12 @@ fn whnf_fuel(mut term: Term, mut fuel: usize) -> (Term, usize) {
 /// function equality. Brings the proof-term checker to textbook
 /// CIC parity within the < 1000 LOC trust-base budget.
 fn def_eq(a: &Term, b: &Term) -> bool {
+    // Conversion is reflexive before reduction. Shared local definitions often
+    // produce identical large types; normalizing both copies wastes work and
+    // can duplicate recursive eliminations. Formation is checked by callers.
+    if a == b {
+        return true;
+    }
     let a = whnf(a.clone());
     let b = whnf(b.clone());
     def_eq_whnf(&a, &b)
@@ -1459,7 +1548,7 @@ fn shift_down(term: Term, amount: usize, cutoff: usize) -> Term {
             body: Box::new(shift_down(*body, amount, cutoff + 1)),
         },
         data @ (Term::Data { .. } | Term::Construct { .. } | Term::Induct { .. }) => {
-            data.map_data_terms(|child, binders| shift_down(child, amount, cutoff + binders))
+            data.map_children(|child, binders| shift_down(child, amount, cutoff + binders))
         }
         Term::Var(i) => {
             if i >= cutoff + amount {
@@ -1639,10 +1728,15 @@ pub enum CheckError {
 ///  swap T1 for T2 in any judgement; used implicitly in
 ///  T-App-Elim to match argument types).
 pub fn infer(ctx: &Context, term: &Term) -> Result<Term, CheckError> {
+    infer_inner(ctx, term).map(|ty| ctx.expand(ty))
+}
+
+fn infer_inner(ctx: &Context, term: &Term) -> Result<Term, CheckError> {
     match term {
         Term::Let { value, body } => {
-            infer(ctx, value)?;
-            infer(ctx, &subst((**body).clone(), 0, value))
+            let ty = infer(ctx, value)?;
+            let result = infer(&ctx.define(ty, value), body)?;
+            Ok(subst(result, 0, value))
         }
 
         Term::Data {
@@ -1695,7 +1789,7 @@ pub fn infer(ctx: &Context, term: &Term) -> Result<Term, CheckError> {
             args,
         } => {
             infer(ctx, data)?;
-            let declaration = whnf((**data).clone());
+            let declaration = whnf(ctx.expand((**data).clone()));
             let Term::Data { constructors, .. } = &declaration else {
                 return Err(CheckError::InvalidInductive(
                     "constructor owner is not a data declaration".into(),
@@ -1740,7 +1834,9 @@ pub fn infer(ctx: &Context, term: &Term) -> Result<Term, CheckError> {
             else {
                 unreachable!()
             };
-            infer(ctx, &declaration)?;
+            // Scrutinee inference has already established this owner's
+            // formation. Rechecking its complete signature at every use
+            // duplicates validation of all captured dependent definitions.
             let mut motive_kind = infer(ctx, motive)?;
             for ty in indices {
                 let Term::Pi(domain, result) = whnf(motive_kind) else {
@@ -2133,14 +2229,32 @@ fn check_domain(ctx: &Context, term: &Term, expected: &Term) -> Result<(), Check
 // descending. Keep the public boundary's validation out of recursive checks.
 fn check_against(ctx: &Context, term: &Term, expected: &Term) -> Result<(), CheckError> {
     if let Term::Let { value, body } = term {
-        infer(ctx, value)?;
-        return check_against(ctx, &subst((**body).clone(), 0, value), expected);
+        let ty = infer(ctx, value)?;
+        return check_against(
+            &ctx.define(ty, value),
+            body,
+            &shift_up(expected.clone(), 1, 0),
+        );
     }
+    let expected = ctx.expand(expected.clone());
+    if let Term::Var(index) = term {
+        let actual = ctx
+            .lookup(*index)
+            .ok_or(CheckError::UnboundVariable(*index))?;
+        if def_eq(&ctx.expand(actual), &expected) {
+            return Ok(());
+        }
+        // A synthesized product may be less precise than an expected family.
+        if let Some(source) = ctx.definition(*index) {
+            return check_against(ctx, &source, &expected);
+        }
+    }
+    let expected = &expected;
     match (term, whnf(expected.clone())) {
         (Term::Lam(domain, body), Term::Pi(expected_domain, codomain)) => {
             let kind = infer(ctx, domain)?;
             expect_universe(&kind).ok_or_else(|| CheckError::NotAType((**domain).clone()))?;
-            if !def_eq(domain, &expected_domain) {
+            if !def_eq(&ctx.expand((**domain).clone()), &expected_domain) {
                 return Err(CheckError::TypeMismatch {
                     expected: *expected_domain,
                     actual: (**domain).clone(),
@@ -2154,7 +2268,9 @@ fn check_against(ctx: &Context, term: &Term, expected: &Term) -> Result<(), Chec
         }
         (Term::Refl(value), Term::Id { ty, lhs, rhs }) => {
             check_domain(ctx, value, &ty)?;
-            if def_eq(value, &lhs) && def_eq(value, &rhs) {
+            if def_eq(&ctx.expand((**value).clone()), &lhs)
+                && def_eq(&ctx.expand((**value).clone()), &rhs)
+            {
                 return Ok(());
             }
             return Err(CheckError::TypeMismatch {

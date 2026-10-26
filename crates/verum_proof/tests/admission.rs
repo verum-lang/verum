@@ -129,7 +129,7 @@ fn wire_wrappers_do_not_reduce_the_logical_term_depth_budget() {
             },
         }
     };
-    let bytes = serde_json::to_vec(&make(30)).unwrap();
+    let bytes = serde_json::to_vec(&make(verum_proof::admission::MAX_DEPTH - 2)).unwrap();
     assert!(
         serde_json::from_slice::<Judgment>(&bytes).is_err(),
         "fixture must exceed serde's wrapper-based default"
@@ -138,14 +138,14 @@ fn wire_wrappers_do_not_reduce_the_logical_term_depth_budget() {
         replay(&bytes).accepted,
         "logical depth is safely inside the advertised limit"
     );
-    let too_deep = replay(&serde_json::to_vec(&make(65)).unwrap());
+    let too_deep = replay(&serde_json::to_vec(&make(verum_proof::admission::MAX_DEPTH + 1)).unwrap());
     assert!(!too_deep.accepted);
     assert_eq!(too_deep.diagnostic.unwrap().code, "structural_limit");
 }
 
 #[test]
 fn json_preflight_bounds_nesting_without_interpreting_quoted_delimiters() {
-    let nested = format!("{}0{}", "[".repeat(1024), "]".repeat(1024));
+    let nested = format!("{}0{}", "[".repeat(4096), "]".repeat(4096));
     assert_eq!(
         replay(nested.as_bytes()).diagnostic.unwrap().code,
         "json_depth_limit"

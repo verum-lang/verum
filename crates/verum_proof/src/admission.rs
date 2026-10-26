@@ -7,8 +7,12 @@ use serde::{Deserialize, Serialize};
 
 pub const PROFILE: &str = "verum-native/1";
 pub const MAX_BYTES: usize = 1024 * 1024;
-pub const MAX_NODES: usize = 4096;
-pub const MAX_DEPTH: usize = 64;
+// Structural bounds protect decoding and traversal, not normalization. General
+// dependent program proofs contain thousands of nodes even with shared local
+// definitions. The isolated worker independently retains its CPU, memory and
+// wall-clock ceilings; reaching those ceilings never counts as a proof verdict.
+pub const MAX_NODES: usize = 65_536;
+pub const MAX_DEPTH: usize = 128;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

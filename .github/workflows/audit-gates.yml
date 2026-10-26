@@ -189,6 +189,12 @@ jobs:
             --lean verification/external/lean/.lake/build/bin/verum_replay_checker \
             --report dependent-constructors-acceptance.json
 
+      - name: Native typed-program substitution and splicing replay
+        run: |
+          python3 verification/certificates/check_typed_programs.py \
+            --native target/release/verum-proof \
+            --lean verification/external/lean/.lake/build/bin/verum_replay_checker \
+            --report native-typed-programs-acceptance.json
       - name: Indexed family source and certificate replay
         run: |
           python3 verification/certificates/check_indexed_induction.py \
@@ -244,6 +250,7 @@ jobs:
             typed-programs-acceptance.json
             dependent-constructors-acceptance.json
             indexed-induction-acceptance.json
+            native-typed-programs-acceptance.json
           retention-days: 14
 
   # ---------------------------------------------------------------------------

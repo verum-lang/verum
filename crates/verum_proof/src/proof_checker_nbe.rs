@@ -1450,6 +1450,17 @@ fn check_domain_value(ctx: &NbeContext, term: &Term, expected: &Value) -> Result
 // closure application, independently of the substitution checker's algorithm.
 fn check_value(ctx: &NbeContext, term: &Term, expected: &Value) -> Result<(), CheckError> {
     if let Term::Var(index) = term {
+        // A local definition already has a checked type. Reuse that judgment
+        // when conversion suffices; unfolding and rechecking every proof use
+        // can make a sequence of small lemmas exponentially expensive.
+        let actual = ctx
+            .lookup(*index)
+            .ok_or(CheckError::UnboundVariable(*index))?;
+        if def_eq(actual, expected, ctx.level()) {
+            return Ok(());
+        }
+        // Bidirectional introductions may require a more precise expected
+        // family than their synthesized type (notably dependent pairs).
         if let Some(source) = ctx.definition(*index) {
             return check_value(ctx, &source, expected);
         }
