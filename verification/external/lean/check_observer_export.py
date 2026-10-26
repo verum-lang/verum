@@ -246,7 +246,13 @@ def observer_error(data):
         return '(.work ' + phase + ' ' + point + ' ' + work_error(data['error']) + ' ' + \
             option(data['execution'], observation) + ')'
     if tag == 'Execution':
-        fields(data, 'kind phase report meter_error counter_capacity')
+        # Legacy frozen exports predate this field. If present, it is retained
+        # as a separate checked projection claim by emit, never discarded.
+        fields(data, 'kind phase report meter_error counter_capacity' +
+               (' primitive_refusal' if 'primitive_refusal' in data else ''))
+        if 'primitive_refusal' in data:
+            require(data['primitive_refusal'] in ('None', 'Some(Undefined)', 'Some(Resource)'),
+                    'Unknown primitive refusal classification')
         return '(.execution ' + phase + ' ' + observation(data['report']) + ' ' + \
             option(data['meter_error'], work_error) + ' ' + boolean(data['counter_capacity']) + ')'
     require(tag == 'MissingRootOutput', 'Unknown observer refusal')
@@ -439,6 +445,18 @@ def emit(data):
         claim(f'primitive_{i}', 'apply ' + operation(p['operation']) + ' ' +
               array(value(a) for a in sequence(p['arguments'])) + ' = ' + expected)
     extra_counts = emit_controls(data['controls'], lines, claim) if has_controls else {}
+    def classifications(node):
+        if type(node) is dict:
+            if 'primitive_refusal' in node:
+                require(node.get('kind') == 'Execution', 'Primitive classification outside execution')
+                expected = {'None': 'none', 'Some(Undefined)': 'some false',
+                            'Some(Resource)': 'some true'}[node['primitive_refusal']]
+                claim('classification_' + str(len(claims)),
+                      f'CheckedPairs.primitiveRefusal {observation(node["report"])} = {expected}')
+            for child in node.values(): classifications(child)
+        elif type(node) is list:
+            for child in node: classifications(child)
+    if has_controls: classifications(data['controls'])
     # Every generated theorem's axiom roster is audited by the driver.
     lines += ['#print axioms ' + name for name in claims]
     lines.append('end FrozenObserverExport')

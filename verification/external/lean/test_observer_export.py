@@ -79,6 +79,22 @@ class ExtractionTests(unittest.TestCase):
     def setUp(self):
         self.data = load(FIXTURE)
 
+    def test_primitive_classification_is_checked_not_dropped(self):
+        data = load(ROOT / 'fixtures/observer-runtime-controls-v1.json')
+        source, counts = emit(data)
+        self.assertEqual(counts['claims'], 218)
+        for row in data['controls']['observer']:
+            for record in row.values():
+                if type(record) is dict and record.get('primitive_refusal') == 'Some(Undefined)':
+                    record['primitive_refusal'] = 'Some(Resource)'
+        source = emit(data)[0]
+        parts = [b for b in source.strip().split('\n\n') if
+                 not b.startswith(('theorem ', '#print axioms ')) or
+                 b.startswith(('theorem classification_', '#print axioms classification_'))]
+        with tempfile.TemporaryDirectory(prefix='verum-classification-control-') as tmp:
+            path = Path(tmp) / 'wrong.lean'; path.write_text('\n\n'.join(parts) + '\n')
+            check(path, 'Tactic `rfl` failed:')
+
     def test_frozen_fixture_identity(self):
         receipt = load(FIXTURE.with_suffix('.provenance.json'))
         self.assertEqual(sha256(FIXTURE), receipt['export_sha256'])

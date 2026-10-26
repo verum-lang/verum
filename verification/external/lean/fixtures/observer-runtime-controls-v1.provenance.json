@@ -1,17 +1,32 @@
 {
-  "scope": "Actual finite Rust observer runtime boundary export; hashes identify the frozen sources/binary, not authenticated physical provenance or universal implementation proof.",
-  "export_sha256": "24a0ebd25a431ea20b4a691c8793525d47af9f8fe136f30dd48a0e66914100b5",
+  "scope": "Finite canonical observer export from v6c; observer contract stages passed, overall run failed self-description regression. Not general lifecycle acceptance or authenticated provenance.",
+  "export_sha256": "9925524cd22fbae2cbbb6f32fb522a90b3ea6c0c6c5f86c428ada980052898a6",
   "head": "d7b0830299a51b753b961c72e2995509fdb76252",
-  "source_map_sha256": "47257bdec10703378b74a44a05e0b45f7c9ef6283035bcd07823aecf92dd1a9b",
+  "source_map_sha256": "b0142437c4a9f2e8926bde25bbcd9a93e73edfe5e3783efb6ba72f4f55557820",
   "source_sha256": {
-    "rust/crates/synarc-kan/src/program.rs": "62a543cfa620376eaafca07466da532d05eb19aa822415069caba80861adb6af",
-    "rust/crates/synarc-kan/src/program/observer.rs": "286ed8b7348d54364a76761740b184cb40b1ac46ee208537a102f30728a359d9",
-    "rust/crates/synarc-kan/src/organism/observer_program.rs": "f73a43af8a3aac16675e93e72abb6dae6ecc779a80a7ddca4b2270f675097e4c",
-    "rust/crates/synarc-kan/src/organism/observer_program/courts.rs": "8aed223ed343dda76e395ffc3cb5328a6c97202739bf3fd411b35a049d90f3d0"
+    "rust/crates/synarc-kan/src/program.rs": "620bca66508e0fde5c21d3a2a2ff01ce35075e54ddc1bdf82e210fc7b0168d0d",
+    "rust/crates/synarc-kan/src/program/observer.rs": "470e033e90d16f89faf0dc73e637da47ca79ab8240081851c335dd1c25bfdfdb",
+    "rust/crates/synarc-kan/src/organism/observer_program.rs": "c6e87160105da28e2939faf95eac720eb9ba8f476c783ea1ec04475f1ef64d14",
+    "rust/crates/synarc-kan/src/organism/observer_program/courts.rs": "627f5cf3d3d2a1b8a9e9278e4d6fac2f8a05427b4ce60dcc6ab46acb0b9515c7"
   },
-  "rust_binary_sha256": "eb5ffc7ab0c3098cb34ebeb00bdd28e977bb1ba735c72fd7c9ec51cb4ed69403",
-  "binary_format": "Mach-O 64-bit",
+  "rust_binary_sha256": "6c8e52ec5353495f1a3c514f120add65de168f6d0e69b164b1562c3720ebdfd5",
   "word_bits": 64,
   "meter": "ExportWork: bounded structural work, refusal leaves used unchanged",
-  "court_log_sha256": "a2fa44b662a7be8c933cb2a94dff704ef0e4f15b7777814f8c5f758d9843df64"
+  "receipt_sha256": "673321dc1ace86f35a67a5584c1a2c8ad4e15a6b592ac3400804d607c317d4aa",
+  "receipt_status": "failed",
+  "stage_status": {
+    "typecheck": "passed",
+    "build": "passed",
+    "generic-observer": "passed",
+    "acquired-runtime": "passed",
+    "canonical-observer": "passed",
+    "reelection-contracts": "passed",
+    "observer-execution": "passed",
+    "observer-transport": "passed",
+    "installation": "passed",
+    "owned-history": "passed",
+    "physical-experiment": "passed",
+    "composition": "passed",
+    "self-description-regression": "failed"
+  }
 }

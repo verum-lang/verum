@@ -213,7 +213,7 @@ jobs:
         run: |
           python3 verification/external/lean/check_observer_export.py \
             --export verification/external/lean/fixtures/observer-runtime-controls-v1.json \
-            --sha256 24a0ebd25a431ea20b4a691c8793525d47af9f8fe136f30dd48a0e66914100b5 \
+            --sha256 9925524cd22fbae2cbbb6f32fb522a90b3ea6c0c6c5f86c428ada980052898a6 \
             --provenance verification/external/lean/fixtures/observer-runtime-controls-v1.provenance.json \
             --output observer-export.lean --report observer-export-acceptance.json
           python3 -m unittest discover -s verification/external/lean -p test_observer_export.py

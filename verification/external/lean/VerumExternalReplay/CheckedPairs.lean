@@ -1,4 +1,5 @@
 import VerumExternalReplay.FiniteCode
+import VerumExternalReplay.FiniteExecution
 
 /-! Concrete semantic boundary for the CheckedPairsV1 export. All arithmetic is
 64-bit; byte packing discards high bits. This definition is independent of the
@@ -68,6 +69,14 @@ def partialApply (op : Op) (args : List Value) : Option Value := (apply op args)
 
 abbrev Code := FiniteCode.Code Op Value
 def run := FiniteCode.run partialApply
+
+-- The CheckedPairs adapter classifies every primitive domain error as
+-- undefined. Resource refusals originate in the machine or its meter instead.
+-- `some true` would mean Resource; none means no primitive refusal occurred.
+def primitiveRefusal (report : FiniteExecution.Observation Value Refusal) : Option Bool :=
+  report.halt.bind fun halt => match halt.reason with
+    | .primitive _ => some false
+    | _ => none
 
 -- These universal equations specify the boundary independently of examples.
 theorem checkedAdd_exact (x y : UInt64) :

@@ -1084,6 +1084,7 @@
           "kind": "Execution",
           "meter_error": null,
           "phase": "Update",
+          "primitive_refusal": "None",
           "report": {
             "call_attempts": 0,
             "dispatch_attempts": 0,
@@ -1279,6 +1280,7 @@
           "kind": "Execution",
           "meter_error": null,
           "phase": "Update",
+          "primitive_refusal": "None",
           "report": {
             "call_attempts": 0,
             "dispatch_attempts": 0,
@@ -1474,6 +1476,7 @@
           "kind": "Execution",
           "meter_error": null,
           "phase": "Update",
+          "primitive_refusal": "None",
           "report": {
             "call_attempts": 0,
             "dispatch_attempts": 0,
@@ -1970,6 +1973,7 @@
           "kind": "Execution",
           "meter_error": null,
           "phase": "Read",
+          "primitive_refusal": "Some(Undefined)",
           "report": {
             "call_attempts": 0,
             "dispatch_attempts": 1,
@@ -2014,6 +2018,7 @@
           "kind": "Execution",
           "meter_error": null,
           "phase": "Update",
+          "primitive_refusal": "Some(Undefined)",
           "report": {
             "call_attempts": 0,
             "dispatch_attempts": 1,
