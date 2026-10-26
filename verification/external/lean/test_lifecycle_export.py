@@ -1,5 +1,6 @@
 """Synthetic extractor controls, explicitly not native execution evidence."""
 import copy
+import json
 from pathlib import Path
 import tempfile
 import unittest
@@ -74,6 +75,19 @@ class LifecycleExtractionTests(unittest.TestCase):
 
     def test_model_fixture_replays(self):
         self.replay(model_fixture())
+
+    def test_frozen_refusal_fixes(self):
+        data = json.loads((Path(__file__).resolve().parent /
+                          'fixtures/observer-lifecycle-v1.json').read_text())
+        _, counts = emit(data)
+        self.assertEqual(counts, dict(definitions=1, ownership=14, naming=5,
+                                      installation=4, refusals=4, claims=189))
+        data['ownership'] = []; data['naming'] = []; data['installation'] = []
+        self.replay(data)
+        for name in ('canonical_zero_work', 'canonical_zero_dispatch', 'acquired_trace_capacity'):
+            wrong = copy.deepcopy(data)
+            next(row for row in wrong['refusals'] if row['name'] == name)['classification'] = 'Undefined'
+            with self.subTest(refusal=name): self.replay(wrong, True)
 
     def test_model_corruptions_rejected(self):
         # Independent observations are changed; expected model behavior is not.

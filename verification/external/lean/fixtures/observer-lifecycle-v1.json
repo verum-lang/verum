@@ -1,0 +1,6629 @@
+{
+  "definitions": [
+    {
+      "identity": 0,
+      "initial": {
+        "events": [],
+        "kind": "Trace"
+      },
+      "read": {
+        "library": [],
+        "output": 2,
+        "steps": [
+          {
+            "arguments": [
+              {
+                "Input": 0
+              },
+              {
+                "Literal": {
+                  "kind": "Nat",
+                  "value": 0
+                }
+              }
+            ],
+            "operation": {
+              "Primitive": "At"
+            }
+          },
+          {
+            "arguments": [
+              {
+                "Register": 0
+              }
+            ],
+            "operation": {
+              "Primitive": "EventRaw"
+            }
+          },
+          {
+            "arguments": [
+              {
+                "Register": 1
+              }
+            ],
+            "operation": {
+              "Primitive": "Next"
+            }
+          }
+        ]
+      },
+      "read_binding": {
+        "interface": {
+          "epoch": "1",
+          "owner": null,
+          "raw_space": "1",
+          "shape": "Query"
+        },
+        "slots": [
+          "State",
+          {
+            "External": 0
+          }
+        ],
+        "width": 1
+      },
+      "semantics": {
+        "kind": "AcquiredV1",
+        "max_trace": 16
+      },
+      "update": {
+        "library": [
+          {
+            "library": [],
+            "output": 0,
+            "steps": [
+              {
+                "arguments": [
+                  {
+                    "Input": 0
+                  },
+                  {
+                    "Input": 1
+                  }
+                ],
+                "operation": {
+                  "Primitive": "Append"
+                }
+              }
+            ]
+          }
+        ],
+        "output": 0,
+        "steps": [
+          {
+            "arguments": [
+              {
+                "Input": 0
+              },
+              {
+                "Input": 1
+              }
+            ],
+            "operation": {
+              "Call": 0
+            }
+          }
+        ]
+      },
+      "update_binding": {
+        "interface": {
+          "epoch": "1",
+          "owner": null,
+          "raw_space": "1",
+          "shape": "Event"
+        },
+        "slots": [
+          "State",
+          {
+            "External": 0
+          }
+        ],
+        "width": 1
+      }
+    }
+  ],
+  "installation": [
+    {
+      "admission": {
+        "definition": 0,
+        "kind": "Validated",
+        "owner": 0
+      },
+      "cut": 7,
+      "history": {
+        "events": [
+          {
+            "interface": {
+              "epoch": "1",
+              "owner": null,
+              "raw_space": "1",
+              "shape": "Event"
+            },
+            "values": [
+              {
+                "kind": "Event",
+                "value": {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 9,
+                  "life_age": 0,
+                  "owner": null,
+                  "raw": 9,
+                  "raw_space": "1"
+                }
+              }
+            ]
+          },
+          {
+            "interface": {
+              "epoch": "1",
+              "owner": null,
+              "raw_space": "1",
+              "shape": "Event"
+            },
+            "values": [
+              {
+                "kind": "Event",
+                "value": {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 7,
+                  "life_age": 1,
+                  "owner": null,
+                  "raw": 7,
+                  "raw_space": "1"
+                }
+              }
+            ]
+          },
+          {
+            "interface": {
+              "epoch": "1",
+              "owner": null,
+              "raw_space": "1",
+              "shape": "Event"
+            },
+            "values": [
+              {
+                "kind": "Event",
+                "value": {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 7,
+                  "life_age": 2,
+                  "owner": null,
+                  "raw": 7,
+                  "raw_space": "1"
+                }
+              }
+            ]
+          },
+          {
+            "interface": {
+              "epoch": "1",
+              "owner": null,
+              "raw_space": "1",
+              "shape": "Event"
+            },
+            "values": [
+              {
+                "kind": "Event",
+                "value": {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 9,
+                  "life_age": 3,
+                  "owner": null,
+                  "raw": 9,
+                  "raw_space": "1"
+                }
+              }
+            ]
+          },
+          {
+            "interface": {
+              "epoch": "1",
+              "owner": null,
+              "raw_space": "1",
+              "shape": "Event"
+            },
+            "values": [
+              {
+                "kind": "Event",
+                "value": {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 9,
+                  "life_age": 4,
+                  "owner": null,
+                  "raw": 9,
+                  "raw_space": "1"
+                }
+              }
+            ]
+          },
+          {
+            "interface": {
+              "epoch": "1",
+              "owner": null,
+              "raw_space": "1",
+              "shape": "Event"
+            },
+            "values": [
+              {
+                "kind": "Event",
+                "value": {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 7,
+                  "life_age": 5,
+                  "owner": null,
+                  "raw": 7,
+                  "raw_space": "1"
+                }
+              }
+            ]
+          },
+          {
+            "interface": {
+              "epoch": "1",
+              "owner": null,
+              "raw_space": "1",
+              "shape": "Event"
+            },
+            "values": [
+              {
+                "kind": "Event",
+                "value": {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 0,
+                  "life_age": 6,
+                  "owner": null,
+                  "raw": 0,
+                  "raw_space": "1"
+                }
+              }
+            ]
+          }
+        ],
+        "origin": {
+          "epoch": "1",
+          "lineage": {
+            "authority": 130,
+            "birth": 0
+          },
+          "ordinal": 0
+        },
+        "owner": 0
+      },
+      "installed": {
+        "definition": 0,
+        "owner": 0,
+        "state": 0,
+        "value": {
+          "events": [
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 0,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 1,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 2,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 3,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 4,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 5,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 0,
+              "life_age": 6,
+              "owner": null,
+              "raw": 0,
+              "raw_space": "1"
+            }
+          ],
+          "kind": "Trace"
+        }
+      },
+      "kind": "success",
+      "known_histories": [],
+      "name": "installed_receiver",
+      "replay": {
+        "definition": 0,
+        "owner": 1,
+        "state": 1,
+        "value": {
+          "events": [
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 0,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 1,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 2,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 3,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 4,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 5,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 0,
+              "life_age": 6,
+              "owner": null,
+              "raw": 0,
+              "raw_space": "1"
+            }
+          ],
+          "kind": "Trace"
+        }
+      }
+    },
+    {
+      "admission": {
+        "definition": 0,
+        "kind": "Validated",
+        "owner": 0
+      },
+      "current_after": {
+        "definition": 0,
+        "owner": 0,
+        "state": 0,
+        "value": {
+          "events": [
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 0,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 1,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 2,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 3,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 4,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 5,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 0,
+              "life_age": 6,
+              "owner": null,
+              "raw": 0,
+              "raw_space": "1"
+            }
+          ],
+          "kind": "Trace"
+        }
+      },
+      "current_before": {
+        "definition": 0,
+        "owner": 0,
+        "state": 0,
+        "value": {
+          "events": [
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 0,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 1,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 2,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 3,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 4,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 5,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 0,
+              "life_age": 6,
+              "owner": null,
+              "raw": 0,
+              "raw_space": "1"
+            }
+          ],
+          "kind": "Trace"
+        }
+      },
+      "cut": 8,
+      "history": {
+        "events": [
+          {
+            "interface": {
+              "epoch": "1",
+              "owner": null,
+              "raw_space": "1",
+              "shape": "Event"
+            },
+            "values": [
+              {
+                "kind": "Event",
+                "value": {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 9,
+                  "life_age": 0,
+                  "owner": null,
+                  "raw": 9,
+                  "raw_space": "1"
+                }
+              }
+            ]
+          },
+          {
+            "interface": {
+              "epoch": "1",
+              "owner": null,
+              "raw_space": "1",
+              "shape": "Event"
+            },
+            "values": [
+              {
+                "kind": "Event",
+                "value": {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 7,
+                  "life_age": 1,
+                  "owner": null,
+                  "raw": 7,
+                  "raw_space": "1"
+                }
+              }
+            ]
+          },
+          {
+            "interface": {
+              "epoch": "1",
+              "owner": null,
+              "raw_space": "1",
+              "shape": "Event"
+            },
+            "values": [
+              {
+                "kind": "Event",
+                "value": {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 7,
+                  "life_age": 2,
+                  "owner": null,
+                  "raw": 7,
+                  "raw_space": "1"
+                }
+              }
+            ]
+          },
+          {
+            "interface": {
+              "epoch": "1",
+              "owner": null,
+              "raw_space": "1",
+              "shape": "Event"
+            },
+            "values": [
+              {
+                "kind": "Event",
+                "value": {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 9,
+                  "life_age": 3,
+                  "owner": null,
+                  "raw": 9,
+                  "raw_space": "1"
+                }
+              }
+            ]
+          },
+          {
+            "interface": {
+              "epoch": "1",
+              "owner": null,
+              "raw_space": "1",
+              "shape": "Event"
+            },
+            "values": [
+              {
+                "kind": "Event",
+                "value": {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 9,
+                  "life_age": 4,
+                  "owner": null,
+                  "raw": 9,
+                  "raw_space": "1"
+                }
+              }
+            ]
+          },
+          {
+            "interface": {
+              "epoch": "1",
+              "owner": null,
+              "raw_space": "1",
+              "shape": "Event"
+            },
+            "values": [
+              {
+                "kind": "Event",
+                "value": {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 7,
+                  "life_age": 5,
+                  "owner": null,
+                  "raw": 7,
+                  "raw_space": "1"
+                }
+              }
+            ]
+          },
+          {
+            "interface": {
+              "epoch": "1",
+              "owner": null,
+              "raw_space": "1",
+              "shape": "Event"
+            },
+            "values": [
+              {
+                "kind": "Event",
+                "value": {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 0,
+                  "life_age": 6,
+                  "owner": null,
+                  "raw": 0,
+                  "raw_space": "1"
+                }
+              }
+            ]
+          }
+        ],
+        "origin": {
+          "epoch": "1",
+          "lineage": {
+            "authority": 130,
+            "birth": 0
+          },
+          "ordinal": 0
+        },
+        "owner": 0
+      },
+      "incomplete": true,
+      "kind": "failure",
+      "known_histories": [],
+      "name": "install_bad_cut",
+      "reason": {
+        "cut": 8,
+        "events": 7,
+        "kind": "CutBeyondHistory"
+      },
+      "request": {
+        "admission": {
+          "definition": 0,
+          "kind": "Validated",
+          "owner": 0
+        },
+        "cut": 8,
+        "history": {
+          "events": [
+            {
+              "interface": {
+                "epoch": "1",
+                "owner": null,
+                "raw_space": "1",
+                "shape": "Event"
+              },
+              "values": [
+                {
+                  "kind": "Event",
+                  "value": {
+                    "action": 0,
+                    "episode": 0,
+                    "epoch": "1",
+                    "input": 9,
+                    "life_age": 0,
+                    "owner": null,
+                    "raw": 9,
+                    "raw_space": "1"
+                  }
+                }
+              ]
+            },
+            {
+              "interface": {
+                "epoch": "1",
+                "owner": null,
+                "raw_space": "1",
+                "shape": "Event"
+              },
+              "values": [
+                {
+                  "kind": "Event",
+                  "value": {
+                    "action": 0,
+                    "episode": 0,
+                    "epoch": "1",
+                    "input": 7,
+                    "life_age": 1,
+                    "owner": null,
+                    "raw": 7,
+                    "raw_space": "1"
+                  }
+                }
+              ]
+            },
+            {
+              "interface": {
+                "epoch": "1",
+                "owner": null,
+                "raw_space": "1",
+                "shape": "Event"
+              },
+              "values": [
+                {
+                  "kind": "Event",
+                  "value": {
+                    "action": 0,
+                    "episode": 0,
+                    "epoch": "1",
+                    "input": 7,
+                    "life_age": 2,
+                    "owner": null,
+                    "raw": 7,
+                    "raw_space": "1"
+                  }
+                }
+              ]
+            },
+            {
+              "interface": {
+                "epoch": "1",
+                "owner": null,
+                "raw_space": "1",
+                "shape": "Event"
+              },
+              "values": [
+                {
+                  "kind": "Event",
+                  "value": {
+                    "action": 0,
+                    "episode": 0,
+                    "epoch": "1",
+                    "input": 9,
+                    "life_age": 3,
+                    "owner": null,
+                    "raw": 9,
+                    "raw_space": "1"
+                  }
+                }
+              ]
+            },
+            {
+              "interface": {
+                "epoch": "1",
+                "owner": null,
+                "raw_space": "1",
+                "shape": "Event"
+              },
+              "values": [
+                {
+                  "kind": "Event",
+                  "value": {
+                    "action": 0,
+                    "episode": 0,
+                    "epoch": "1",
+                    "input": 9,
+                    "life_age": 4,
+                    "owner": null,
+                    "raw": 9,
+                    "raw_space": "1"
+                  }
+                }
+              ]
+            },
+            {
+              "interface": {
+                "epoch": "1",
+                "owner": null,
+                "raw_space": "1",
+                "shape": "Event"
+              },
+              "values": [
+                {
+                  "kind": "Event",
+                  "value": {
+                    "action": 0,
+                    "episode": 0,
+                    "epoch": "1",
+                    "input": 7,
+                    "life_age": 5,
+                    "owner": null,
+                    "raw": 7,
+                    "raw_space": "1"
+                  }
+                }
+              ]
+            },
+            {
+              "interface": {
+                "epoch": "1",
+                "owner": null,
+                "raw_space": "1",
+                "shape": "Event"
+              },
+              "values": [
+                {
+                  "kind": "Event",
+                  "value": {
+                    "action": 0,
+                    "episode": 0,
+                    "epoch": "1",
+                    "input": 0,
+                    "life_age": 6,
+                    "owner": null,
+                    "raw": 0,
+                    "raw_space": "1"
+                  }
+                }
+              ]
+            }
+          ],
+          "origin": {
+            "epoch": "1",
+            "lineage": {
+              "authority": 130,
+              "birth": 0
+            },
+            "ordinal": 0
+          },
+          "owner": 0
+        }
+      }
+    },
+    {
+      "admission": {
+        "definition": 0,
+        "kind": "Validated",
+        "owner": 0
+      },
+      "current_after": {
+        "definition": 0,
+        "owner": 0,
+        "state": 0,
+        "value": {
+          "events": [
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 0,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 1,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 2,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 3,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 4,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 5,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 0,
+              "life_age": 6,
+              "owner": null,
+              "raw": 0,
+              "raw_space": "1"
+            }
+          ],
+          "kind": "Trace"
+        }
+      },
+      "current_before": {
+        "definition": 0,
+        "owner": 0,
+        "state": 0,
+        "value": {
+          "events": [
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 0,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 1,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 2,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 3,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 4,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 5,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 0,
+              "life_age": 6,
+              "owner": null,
+              "raw": 0,
+              "raw_space": "1"
+            }
+          ],
+          "kind": "Trace"
+        }
+      },
+      "cut": 1,
+      "history": {
+        "events": [
+          {
+            "kind": "Gap"
+          }
+        ],
+        "origin": {
+          "epoch": "1",
+          "lineage": {
+            "authority": 130,
+            "birth": 0
+          },
+          "ordinal": 0
+        },
+        "owner": 1
+      },
+      "incomplete": true,
+      "kind": "failure",
+      "known_histories": [],
+      "name": "install_gap",
+      "reason": {
+        "event": 0,
+        "kind": "Gap"
+      },
+      "request": {
+        "admission": {
+          "definition": 0,
+          "kind": "Validated",
+          "owner": 0
+        },
+        "cut": 1,
+        "history": {
+          "events": [
+            {
+              "kind": "Gap"
+            }
+          ],
+          "origin": {
+            "epoch": "1",
+            "lineage": {
+              "authority": 130,
+              "birth": 0
+            },
+            "ordinal": 0
+          },
+          "owner": 1
+        }
+      }
+    },
+    {
+      "admission": {
+        "definition": 0,
+        "kind": "Validated",
+        "owner": 0
+      },
+      "current_after": {
+        "definition": 0,
+        "owner": 0,
+        "state": 0,
+        "value": {
+          "events": [
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 0,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 1,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 2,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 3,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 4,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 5,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 0,
+              "life_age": 6,
+              "owner": null,
+              "raw": 0,
+              "raw_space": "1"
+            }
+          ],
+          "kind": "Trace"
+        }
+      },
+      "current_before": {
+        "definition": 0,
+        "owner": 0,
+        "state": 0,
+        "value": {
+          "events": [
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 0,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 1,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 2,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 3,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 4,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 5,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 0,
+              "life_age": 6,
+              "owner": null,
+              "raw": 0,
+              "raw_space": "1"
+            }
+          ],
+          "kind": "Trace"
+        }
+      },
+      "cut": 1,
+      "history": {
+        "events": [
+          {
+            "kind": "Gap"
+          }
+        ],
+        "origin": {
+          "epoch": "1",
+          "lineage": {
+            "authority": 2,
+            "birth": 0
+          },
+          "ordinal": 0
+        },
+        "owner": 2
+      },
+      "incomplete": true,
+      "kind": "failure",
+      "known_histories": [
+        {
+          "history": {
+            "events": [
+              {
+                "interface": {
+                  "epoch": "1",
+                  "owner": null,
+                  "raw_space": "1",
+                  "shape": "Event"
+                },
+                "values": [
+                  {
+                    "kind": "Event",
+                    "value": {
+                      "action": 0,
+                      "episode": 0,
+                      "epoch": "1",
+                      "input": 7,
+                      "life_age": 0,
+                      "owner": null,
+                      "raw": 7,
+                      "raw_space": "1"
+                    }
+                  }
+                ]
+              },
+              {
+                "interface": {
+                  "epoch": "1",
+                  "owner": null,
+                  "raw_space": "1",
+                  "shape": "Event"
+                },
+                "values": [
+                  {
+                    "kind": "Event",
+                    "value": {
+                      "action": 0,
+                      "episode": 0,
+                      "epoch": "1",
+                      "input": 9,
+                      "life_age": 1,
+                      "owner": null,
+                      "raw": 9,
+                      "raw_space": "1"
+                    }
+                  }
+                ]
+              },
+              {
+                "interface": {
+                  "epoch": "1",
+                  "owner": null,
+                  "raw_space": "1",
+                  "shape": "Event"
+                },
+                "values": [
+                  {
+                    "kind": "Event",
+                    "value": {
+                      "action": 0,
+                      "episode": 0,
+                      "epoch": "1",
+                      "input": 7,
+                      "life_age": 2,
+                      "owner": null,
+                      "raw": 7,
+                      "raw_space": "1"
+                    }
+                  }
+                ]
+              },
+              {
+                "interface": {
+                  "epoch": "1",
+                  "owner": null,
+                  "raw_space": "1",
+                  "shape": "Event"
+                },
+                "values": [
+                  {
+                    "kind": "Event",
+                    "value": {
+                      "action": 0,
+                      "episode": 0,
+                      "epoch": "1",
+                      "input": 9,
+                      "life_age": 3,
+                      "owner": null,
+                      "raw": 9,
+                      "raw_space": "1"
+                    }
+                  }
+                ]
+              },
+              {
+                "interface": {
+                  "epoch": "1",
+                  "owner": null,
+                  "raw_space": "1",
+                  "shape": "Event"
+                },
+                "values": [
+                  {
+                    "kind": "Event",
+                    "value": {
+                      "action": 0,
+                      "episode": 0,
+                      "epoch": "1",
+                      "input": 9,
+                      "life_age": 4,
+                      "owner": null,
+                      "raw": 9,
+                      "raw_space": "1"
+                    }
+                  }
+                ]
+              },
+              {
+                "interface": {
+                  "epoch": "1",
+                  "owner": null,
+                  "raw_space": "1",
+                  "shape": "Event"
+                },
+                "values": [
+                  {
+                    "kind": "Event",
+                    "value": {
+                      "action": 0,
+                      "episode": 0,
+                      "epoch": "1",
+                      "input": 7,
+                      "life_age": 5,
+                      "owner": null,
+                      "raw": 7,
+                      "raw_space": "1"
+                    }
+                  }
+                ]
+              },
+              {
+                "interface": {
+                  "epoch": "1",
+                  "owner": null,
+                  "raw_space": "1",
+                  "shape": "Event"
+                },
+                "values": [
+                  {
+                    "kind": "Event",
+                    "value": {
+                      "action": 0,
+                      "episode": 0,
+                      "epoch": "1",
+                      "input": 0,
+                      "life_age": 6,
+                      "owner": null,
+                      "raw": 0,
+                      "raw_space": "1"
+                    }
+                  }
+                ]
+              }
+            ],
+            "origin": {
+              "epoch": "1",
+              "lineage": {
+                "authority": 2,
+                "birth": 0
+              },
+              "ordinal": 0
+            },
+            "owner": 3
+          },
+          "phase": "training"
+        }
+      ],
+      "name": "install_conflict",
+      "reason": {
+        "event": 0,
+        "kind": "HistoryChanged"
+      },
+      "request": {
+        "admission": {
+          "definition": 0,
+          "kind": "Validated",
+          "owner": 0
+        },
+        "cut": 1,
+        "history": {
+          "events": [
+            {
+              "kind": "Gap"
+            }
+          ],
+          "origin": {
+            "epoch": "1",
+            "lineage": {
+              "authority": 2,
+              "birth": 0
+            },
+            "ordinal": 0
+          },
+          "owner": 2
+        }
+      }
+    }
+  ],
+  "naming": [
+    {
+      "after": {
+        "capacity": 128,
+        "entries": [
+          {
+            "input": 9,
+            "value": {
+              "kind": "Outcome",
+              "value": {
+                "key": 9,
+                "kind": "Next"
+              }
+            }
+          }
+        ],
+        "epoch": "2",
+        "owner": 0
+      },
+      "before": {
+        "capacity": 128,
+        "entries": [
+          {
+            "input": 9,
+            "value": {
+              "kind": "Outcome",
+              "value": {
+                "key": 9,
+                "kind": "Next"
+              }
+            }
+          }
+        ],
+        "epoch": "2",
+        "owner": 0
+      },
+      "budget_after": {
+        "dispatch_limit": null,
+        "dispatches": 24,
+        "poisoned": false,
+        "work_remaining": 9980411
+      },
+      "budget_before": {
+        "dispatch_limit": null,
+        "dispatches": 24,
+        "poisoned": false,
+        "work_remaining": 9980412
+      },
+      "input": 9,
+      "name": "name_first",
+      "result": {
+        "kind": "Ok",
+        "name": 0
+      },
+      "value": {
+        "kind": "Outcome",
+        "value": {
+          "key": 9,
+          "kind": "Next"
+        }
+      }
+    },
+    {
+      "after": {
+        "capacity": 128,
+        "entries": [
+          {
+            "input": 9,
+            "value": {
+              "kind": "Outcome",
+              "value": {
+                "key": 9,
+                "kind": "Next"
+              }
+            }
+          }
+        ],
+        "epoch": "2",
+        "owner": 0
+      },
+      "before": {
+        "capacity": 128,
+        "entries": [
+          {
+            "input": 9,
+            "value": {
+              "kind": "Outcome",
+              "value": {
+                "key": 9,
+                "kind": "Next"
+              }
+            }
+          }
+        ],
+        "epoch": "2",
+        "owner": 0
+      },
+      "budget_after": {
+        "dispatch_limit": null,
+        "dispatches": 24,
+        "poisoned": false,
+        "work_remaining": 9980410
+      },
+      "budget_before": {
+        "dispatch_limit": null,
+        "dispatches": 24,
+        "poisoned": false,
+        "work_remaining": 9980411
+      },
+      "input": 9,
+      "name": "name_repeat_fork",
+      "result": {
+        "kind": "Ok",
+        "name": 0
+      },
+      "value": {
+        "kind": "Outcome",
+        "value": {
+          "key": 9,
+          "kind": "Next"
+        }
+      }
+    },
+    {
+      "after": {
+        "capacity": 128,
+        "entries": [
+          {
+            "input": 9,
+            "value": {
+              "kind": "Outcome",
+              "value": {
+                "key": 9,
+                "kind": "Next"
+              }
+            }
+          },
+          {
+            "input": 7,
+            "value": {
+              "kind": "Outcome",
+              "value": {
+                "key": 9,
+                "kind": "Next"
+              }
+            }
+          }
+        ],
+        "epoch": "2",
+        "owner": 0
+      },
+      "before": {
+        "capacity": 128,
+        "entries": [
+          {
+            "input": 9,
+            "value": {
+              "kind": "Outcome",
+              "value": {
+                "key": 9,
+                "kind": "Next"
+              }
+            }
+          }
+        ],
+        "epoch": "2",
+        "owner": 0
+      },
+      "budget_after": {
+        "dispatch_limit": null,
+        "dispatches": 24,
+        "poisoned": false,
+        "work_remaining": 9980408
+      },
+      "budget_before": {
+        "dispatch_limit": null,
+        "dispatches": 24,
+        "poisoned": false,
+        "work_remaining": 9980410
+      },
+      "input": 7,
+      "name": "name_distinct_fork",
+      "result": {
+        "kind": "Ok",
+        "name": 1
+      },
+      "value": {
+        "kind": "Outcome",
+        "value": {
+          "key": 9,
+          "kind": "Next"
+        }
+      }
+    },
+    {
+      "after": {
+        "capacity": 128,
+        "entries": [
+          {
+            "input": 9,
+            "value": {
+              "kind": "Outcome",
+              "value": {
+                "key": 9,
+                "kind": "Next"
+              }
+            }
+          },
+          {
+            "input": 7,
+            "value": {
+              "kind": "Outcome",
+              "value": {
+                "key": 9,
+                "kind": "Next"
+              }
+            }
+          }
+        ],
+        "epoch": "2",
+        "owner": 0
+      },
+      "before": {
+        "capacity": 128,
+        "entries": [
+          {
+            "input": 9,
+            "value": {
+              "kind": "Outcome",
+              "value": {
+                "key": 9,
+                "kind": "Next"
+              }
+            }
+          },
+          {
+            "input": 7,
+            "value": {
+              "kind": "Outcome",
+              "value": {
+                "key": 9,
+                "kind": "Next"
+              }
+            }
+          }
+        ],
+        "epoch": "2",
+        "owner": 0
+      },
+      "budget_after": {
+        "dispatch_limit": null,
+        "dispatches": 24,
+        "poisoned": false,
+        "work_remaining": 9980406
+      },
+      "budget_before": {
+        "dispatch_limit": null,
+        "dispatches": 24,
+        "poisoned": false,
+        "work_remaining": 9980408
+      },
+      "input": 7,
+      "name": "name_distinct_repeat",
+      "result": {
+        "kind": "Ok",
+        "name": 1
+      },
+      "value": {
+        "kind": "Outcome",
+        "value": {
+          "key": 9,
+          "kind": "Next"
+        }
+      }
+    },
+    {
+      "after": {
+        "capacity": 128,
+        "entries": [
+          {
+            "input": 9,
+            "value": {
+              "kind": "Outcome",
+              "value": {
+                "key": 9,
+                "kind": "Next"
+              }
+            }
+          },
+          {
+            "input": 7,
+            "value": {
+              "kind": "Outcome",
+              "value": {
+                "key": 9,
+                "kind": "Next"
+              }
+            }
+          }
+        ],
+        "epoch": "2",
+        "owner": 0
+      },
+      "before": {
+        "capacity": 128,
+        "entries": [
+          {
+            "input": 9,
+            "value": {
+              "kind": "Outcome",
+              "value": {
+                "key": 9,
+                "kind": "Next"
+              }
+            }
+          },
+          {
+            "input": 7,
+            "value": {
+              "kind": "Outcome",
+              "value": {
+                "key": 9,
+                "kind": "Next"
+              }
+            }
+          }
+        ],
+        "epoch": "2",
+        "owner": 0
+      },
+      "budget_after": {
+        "dispatch_limit": null,
+        "dispatches": 0,
+        "poisoned": false,
+        "work_remaining": 0
+      },
+      "budget_before": {
+        "dispatch_limit": null,
+        "dispatches": 0,
+        "poisoned": false,
+        "work_remaining": 0
+      },
+      "input": 9,
+      "name": "name_zero_work",
+      "result": {
+        "kind": "Err",
+        "reason": {
+          "kind": "External",
+          "reason": "Work"
+        }
+      },
+      "value": {
+        "kind": "Outcome",
+        "value": {
+          "key": 9,
+          "kind": "Next"
+        }
+      }
+    }
+  ],
+  "ownership": [
+    {
+      "after": {
+        "definition": 0,
+        "owner": 2,
+        "state": 0,
+        "value": {
+          "events": [
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 0,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 1,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 2,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 3,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 4,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 5,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 0,
+              "life_age": 6,
+              "owner": null,
+              "raw": 0,
+              "raw_space": "1"
+            }
+          ],
+          "kind": "Trace"
+        }
+      },
+      "before": {
+        "definition": 0,
+        "owner": 0,
+        "state": 0,
+        "value": {
+          "events": [
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 0,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 1,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 2,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 3,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 4,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 5,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 0,
+              "life_age": 6,
+              "owner": null,
+              "raw": 0,
+              "raw_space": "1"
+            }
+          ],
+          "kind": "Trace"
+        }
+      },
+      "kind": "fork",
+      "name": "fork_receiver"
+    },
+    {
+      "after": {
+        "definition": 0,
+        "owner": 3,
+        "state": 0,
+        "value": {
+          "events": [
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 0,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 1,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 2,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 3,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 4,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 5,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 0,
+              "life_age": 6,
+              "owner": null,
+              "raw": 0,
+              "raw_space": "1"
+            }
+          ],
+          "kind": "Trace"
+        }
+      },
+      "before": {
+        "definition": 0,
+        "owner": 2,
+        "state": 0,
+        "value": {
+          "events": [
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 0,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 1,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 2,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 3,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 4,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 5,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 0,
+              "life_age": 6,
+              "owner": null,
+              "raw": 0,
+              "raw_space": "1"
+            }
+          ],
+          "kind": "Trace"
+        }
+      },
+      "kind": "fork",
+      "name": "fork_source"
+    },
+    {
+      "budget_after": {
+        "dispatch_limit": null,
+        "dispatches": 16,
+        "poisoned": false,
+        "work_remaining": 9980468
+      },
+      "budget_before": {
+        "dispatch_limit": null,
+        "dispatches": 14,
+        "poisoned": false,
+        "work_remaining": 9980484
+      },
+      "current_after": {
+        "definition": 0,
+        "owner": 2,
+        "state": 0,
+        "value": {
+          "events": [
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 0,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 1,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 2,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 3,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 4,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 5,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 0,
+              "life_age": 6,
+              "owner": null,
+              "raw": 0,
+              "raw_space": "1"
+            }
+          ],
+          "kind": "Trace"
+        }
+      },
+      "current_before": {
+        "definition": 0,
+        "owner": 2,
+        "state": 0,
+        "value": {
+          "events": [
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 0,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 1,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 2,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 3,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 4,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 5,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 0,
+              "life_age": 6,
+              "owner": null,
+              "raw": 0,
+              "raw_space": "1"
+            }
+          ],
+          "kind": "Trace"
+        }
+      },
+      "input": {
+        "interface": {
+          "epoch": "1",
+          "owner": null,
+          "raw_space": "1",
+          "shape": "Event"
+        },
+        "values": [
+          {
+            "kind": "Event",
+            "value": {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 0,
+              "life_age": 6,
+              "owner": null,
+              "raw": 0,
+              "raw_space": "1"
+            }
+          }
+        ]
+      },
+      "kind": "prepare",
+      "name": "prepare_first",
+      "result": {
+        "execution": {
+          "call_attempts": 1,
+          "dispatch_attempts": 2,
+          "expanded_attempts": 1,
+          "halt": null,
+          "registers": [
+            {
+              "events": [
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 9,
+                  "life_age": 0,
+                  "owner": null,
+                  "raw": 9,
+                  "raw_space": "1"
+                },
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 7,
+                  "life_age": 1,
+                  "owner": null,
+                  "raw": 7,
+                  "raw_space": "1"
+                },
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 7,
+                  "life_age": 2,
+                  "owner": null,
+                  "raw": 7,
+                  "raw_space": "1"
+                },
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 9,
+                  "life_age": 3,
+                  "owner": null,
+                  "raw": 9,
+                  "raw_space": "1"
+                },
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 9,
+                  "life_age": 4,
+                  "owner": null,
+                  "raw": 9,
+                  "raw_space": "1"
+                },
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 7,
+                  "life_age": 5,
+                  "owner": null,
+                  "raw": 7,
+                  "raw_space": "1"
+                },
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 0,
+                  "life_age": 6,
+                  "owner": null,
+                  "raw": 0,
+                  "raw_space": "1"
+                },
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 0,
+                  "life_age": 6,
+                  "owner": null,
+                  "raw": 0,
+                  "raw_space": "1"
+                }
+              ],
+              "kind": "Trace"
+            }
+          ],
+          "stop": "Complete"
+        },
+        "kind": "Ok",
+        "prepared": {
+          "after": {
+            "state": 2,
+            "value": {
+              "events": [
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 9,
+                  "life_age": 0,
+                  "owner": null,
+                  "raw": 9,
+                  "raw_space": "1"
+                },
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 7,
+                  "life_age": 1,
+                  "owner": null,
+                  "raw": 7,
+                  "raw_space": "1"
+                },
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 7,
+                  "life_age": 2,
+                  "owner": null,
+                  "raw": 7,
+                  "raw_space": "1"
+                },
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 9,
+                  "life_age": 3,
+                  "owner": null,
+                  "raw": 9,
+                  "raw_space": "1"
+                },
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 9,
+                  "life_age": 4,
+                  "owner": null,
+                  "raw": 9,
+                  "raw_space": "1"
+                },
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 7,
+                  "life_age": 5,
+                  "owner": null,
+                  "raw": 7,
+                  "raw_space": "1"
+                },
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 0,
+                  "life_age": 6,
+                  "owner": null,
+                  "raw": 0,
+                  "raw_space": "1"
+                },
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 0,
+                  "life_age": 6,
+                  "owner": null,
+                  "raw": 0,
+                  "raw_space": "1"
+                }
+              ],
+              "kind": "Trace"
+            }
+          },
+          "before": {
+            "definition": 0,
+            "owner": 2,
+            "state": 0,
+            "value": {
+              "events": [
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 9,
+                  "life_age": 0,
+                  "owner": null,
+                  "raw": 9,
+                  "raw_space": "1"
+                },
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 7,
+                  "life_age": 1,
+                  "owner": null,
+                  "raw": 7,
+                  "raw_space": "1"
+                },
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 7,
+                  "life_age": 2,
+                  "owner": null,
+                  "raw": 7,
+                  "raw_space": "1"
+                },
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 9,
+                  "life_age": 3,
+                  "owner": null,
+                  "raw": 9,
+                  "raw_space": "1"
+                },
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 9,
+                  "life_age": 4,
+                  "owner": null,
+                  "raw": 9,
+                  "raw_space": "1"
+                },
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 7,
+                  "life_age": 5,
+                  "owner": null,
+                  "raw": 7,
+                  "raw_space": "1"
+                },
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 0,
+                  "life_age": 6,
+                  "owner": null,
+                  "raw": 0,
+                  "raw_space": "1"
+                }
+              ],
+              "kind": "Trace"
+            }
+          }
+        }
+      }
+    },
+    {
+      "budget_after": {
+        "dispatch_limit": null,
+        "dispatches": 18,
+        "poisoned": false,
+        "work_remaining": 9980452
+      },
+      "budget_before": {
+        "dispatch_limit": null,
+        "dispatches": 16,
+        "poisoned": false,
+        "work_remaining": 9980468
+      },
+      "current_after": {
+        "definition": 0,
+        "owner": 2,
+        "state": 0,
+        "value": {
+          "events": [
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 0,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 1,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 2,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 3,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 4,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 5,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 0,
+              "life_age": 6,
+              "owner": null,
+              "raw": 0,
+              "raw_space": "1"
+            }
+          ],
+          "kind": "Trace"
+        }
+      },
+      "current_before": {
+        "definition": 0,
+        "owner": 2,
+        "state": 0,
+        "value": {
+          "events": [
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 0,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 1,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 2,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 3,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 4,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 5,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 0,
+              "life_age": 6,
+              "owner": null,
+              "raw": 0,
+              "raw_space": "1"
+            }
+          ],
+          "kind": "Trace"
+        }
+      },
+      "input": {
+        "interface": {
+          "epoch": "1",
+          "owner": null,
+          "raw_space": "1",
+          "shape": "Event"
+        },
+        "values": [
+          {
+            "kind": "Event",
+            "value": {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 0,
+              "life_age": 6,
+              "owner": null,
+              "raw": 0,
+              "raw_space": "1"
+            }
+          }
+        ]
+      },
+      "kind": "prepare",
+      "name": "prepare_sibling",
+      "result": {
+        "execution": {
+          "call_attempts": 1,
+          "dispatch_attempts": 2,
+          "expanded_attempts": 1,
+          "halt": null,
+          "registers": [
+            {
+              "events": [
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 9,
+                  "life_age": 0,
+                  "owner": null,
+                  "raw": 9,
+                  "raw_space": "1"
+                },
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 7,
+                  "life_age": 1,
+                  "owner": null,
+                  "raw": 7,
+                  "raw_space": "1"
+                },
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 7,
+                  "life_age": 2,
+                  "owner": null,
+                  "raw": 7,
+                  "raw_space": "1"
+                },
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 9,
+                  "life_age": 3,
+                  "owner": null,
+                  "raw": 9,
+                  "raw_space": "1"
+                },
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 9,
+                  "life_age": 4,
+                  "owner": null,
+                  "raw": 9,
+                  "raw_space": "1"
+                },
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 7,
+                  "life_age": 5,
+                  "owner": null,
+                  "raw": 7,
+                  "raw_space": "1"
+                },
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 0,
+                  "life_age": 6,
+                  "owner": null,
+                  "raw": 0,
+                  "raw_space": "1"
+                },
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 0,
+                  "life_age": 6,
+                  "owner": null,
+                  "raw": 0,
+                  "raw_space": "1"
+                }
+              ],
+              "kind": "Trace"
+            }
+          ],
+          "stop": "Complete"
+        },
+        "kind": "Ok",
+        "prepared": {
+          "after": {
+            "state": 3,
+            "value": {
+              "events": [
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 9,
+                  "life_age": 0,
+                  "owner": null,
+                  "raw": 9,
+                  "raw_space": "1"
+                },
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 7,
+                  "life_age": 1,
+                  "owner": null,
+                  "raw": 7,
+                  "raw_space": "1"
+                },
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 7,
+                  "life_age": 2,
+                  "owner": null,
+                  "raw": 7,
+                  "raw_space": "1"
+                },
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 9,
+                  "life_age": 3,
+                  "owner": null,
+                  "raw": 9,
+                  "raw_space": "1"
+                },
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 9,
+                  "life_age": 4,
+                  "owner": null,
+                  "raw": 9,
+                  "raw_space": "1"
+                },
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 7,
+                  "life_age": 5,
+                  "owner": null,
+                  "raw": 7,
+                  "raw_space": "1"
+                },
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 0,
+                  "life_age": 6,
+                  "owner": null,
+                  "raw": 0,
+                  "raw_space": "1"
+                },
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 0,
+                  "life_age": 6,
+                  "owner": null,
+                  "raw": 0,
+                  "raw_space": "1"
+                }
+              ],
+              "kind": "Trace"
+            }
+          },
+          "before": {
+            "definition": 0,
+            "owner": 2,
+            "state": 0,
+            "value": {
+              "events": [
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 9,
+                  "life_age": 0,
+                  "owner": null,
+                  "raw": 9,
+                  "raw_space": "1"
+                },
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 7,
+                  "life_age": 1,
+                  "owner": null,
+                  "raw": 7,
+                  "raw_space": "1"
+                },
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 7,
+                  "life_age": 2,
+                  "owner": null,
+                  "raw": 7,
+                  "raw_space": "1"
+                },
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 9,
+                  "life_age": 3,
+                  "owner": null,
+                  "raw": 9,
+                  "raw_space": "1"
+                },
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 9,
+                  "life_age": 4,
+                  "owner": null,
+                  "raw": 9,
+                  "raw_space": "1"
+                },
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 7,
+                  "life_age": 5,
+                  "owner": null,
+                  "raw": 7,
+                  "raw_space": "1"
+                },
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 0,
+                  "life_age": 6,
+                  "owner": null,
+                  "raw": 0,
+                  "raw_space": "1"
+                }
+              ],
+              "kind": "Trace"
+            }
+          }
+        }
+      }
+    },
+    {
+      "current_after": {
+        "definition": 0,
+        "owner": 3,
+        "state": 0,
+        "value": {
+          "events": [
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 0,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 1,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 2,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 3,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 4,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 5,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 0,
+              "life_age": 6,
+              "owner": null,
+              "raw": 0,
+              "raw_space": "1"
+            }
+          ],
+          "kind": "Trace"
+        }
+      },
+      "current_before": {
+        "definition": 0,
+        "owner": 3,
+        "state": 0,
+        "value": {
+          "events": [
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 0,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 1,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 2,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 3,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 4,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 5,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 0,
+              "life_age": 6,
+              "owner": null,
+              "raw": 0,
+              "raw_space": "1"
+            }
+          ],
+          "kind": "Trace"
+        }
+      },
+      "kind": "commit",
+      "name": "commit_foreign",
+      "prepared": {
+        "after": {
+          "state": 2,
+          "value": {
+            "events": [
+              {
+                "action": 0,
+                "episode": 0,
+                "epoch": "1",
+                "input": 9,
+                "life_age": 0,
+                "owner": null,
+                "raw": 9,
+                "raw_space": "1"
+              },
+              {
+                "action": 0,
+                "episode": 0,
+                "epoch": "1",
+                "input": 7,
+                "life_age": 1,
+                "owner": null,
+                "raw": 7,
+                "raw_space": "1"
+              },
+              {
+                "action": 0,
+                "episode": 0,
+                "epoch": "1",
+                "input": 7,
+                "life_age": 2,
+                "owner": null,
+                "raw": 7,
+                "raw_space": "1"
+              },
+              {
+                "action": 0,
+                "episode": 0,
+                "epoch": "1",
+                "input": 9,
+                "life_age": 3,
+                "owner": null,
+                "raw": 9,
+                "raw_space": "1"
+              },
+              {
+                "action": 0,
+                "episode": 0,
+                "epoch": "1",
+                "input": 9,
+                "life_age": 4,
+                "owner": null,
+                "raw": 9,
+                "raw_space": "1"
+              },
+              {
+                "action": 0,
+                "episode": 0,
+                "epoch": "1",
+                "input": 7,
+                "life_age": 5,
+                "owner": null,
+                "raw": 7,
+                "raw_space": "1"
+              },
+              {
+                "action": 0,
+                "episode": 0,
+                "epoch": "1",
+                "input": 0,
+                "life_age": 6,
+                "owner": null,
+                "raw": 0,
+                "raw_space": "1"
+              },
+              {
+                "action": 0,
+                "episode": 0,
+                "epoch": "1",
+                "input": 0,
+                "life_age": 6,
+                "owner": null,
+                "raw": 0,
+                "raw_space": "1"
+              }
+            ],
+            "kind": "Trace"
+          }
+        },
+        "before": {
+          "definition": 0,
+          "owner": 2,
+          "state": 0,
+          "value": {
+            "events": [
+              {
+                "action": 0,
+                "episode": 0,
+                "epoch": "1",
+                "input": 9,
+                "life_age": 0,
+                "owner": null,
+                "raw": 9,
+                "raw_space": "1"
+              },
+              {
+                "action": 0,
+                "episode": 0,
+                "epoch": "1",
+                "input": 7,
+                "life_age": 1,
+                "owner": null,
+                "raw": 7,
+                "raw_space": "1"
+              },
+              {
+                "action": 0,
+                "episode": 0,
+                "epoch": "1",
+                "input": 7,
+                "life_age": 2,
+                "owner": null,
+                "raw": 7,
+                "raw_space": "1"
+              },
+              {
+                "action": 0,
+                "episode": 0,
+                "epoch": "1",
+                "input": 9,
+                "life_age": 3,
+                "owner": null,
+                "raw": 9,
+                "raw_space": "1"
+              },
+              {
+                "action": 0,
+                "episode": 0,
+                "epoch": "1",
+                "input": 9,
+                "life_age": 4,
+                "owner": null,
+                "raw": 9,
+                "raw_space": "1"
+              },
+              {
+                "action": 0,
+                "episode": 0,
+                "epoch": "1",
+                "input": 7,
+                "life_age": 5,
+                "owner": null,
+                "raw": 7,
+                "raw_space": "1"
+              },
+              {
+                "action": 0,
+                "episode": 0,
+                "epoch": "1",
+                "input": 0,
+                "life_age": 6,
+                "owner": null,
+                "raw": 0,
+                "raw_space": "1"
+              }
+            ],
+            "kind": "Trace"
+          }
+        }
+      },
+      "result": {
+        "kind": "Err",
+        "prepared": {
+          "after": {
+            "state": 2,
+            "value": {
+              "events": [
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 9,
+                  "life_age": 0,
+                  "owner": null,
+                  "raw": 9,
+                  "raw_space": "1"
+                },
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 7,
+                  "life_age": 1,
+                  "owner": null,
+                  "raw": 7,
+                  "raw_space": "1"
+                },
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 7,
+                  "life_age": 2,
+                  "owner": null,
+                  "raw": 7,
+                  "raw_space": "1"
+                },
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 9,
+                  "life_age": 3,
+                  "owner": null,
+                  "raw": 9,
+                  "raw_space": "1"
+                },
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 9,
+                  "life_age": 4,
+                  "owner": null,
+                  "raw": 9,
+                  "raw_space": "1"
+                },
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 7,
+                  "life_age": 5,
+                  "owner": null,
+                  "raw": 7,
+                  "raw_space": "1"
+                },
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 0,
+                  "life_age": 6,
+                  "owner": null,
+                  "raw": 0,
+                  "raw_space": "1"
+                },
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 0,
+                  "life_age": 6,
+                  "owner": null,
+                  "raw": 0,
+                  "raw_space": "1"
+                }
+              ],
+              "kind": "Trace"
+            }
+          },
+          "before": {
+            "definition": 0,
+            "owner": 2,
+            "state": 0,
+            "value": {
+              "events": [
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 9,
+                  "life_age": 0,
+                  "owner": null,
+                  "raw": 9,
+                  "raw_space": "1"
+                },
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 7,
+                  "life_age": 1,
+                  "owner": null,
+                  "raw": 7,
+                  "raw_space": "1"
+                },
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 7,
+                  "life_age": 2,
+                  "owner": null,
+                  "raw": 7,
+                  "raw_space": "1"
+                },
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 9,
+                  "life_age": 3,
+                  "owner": null,
+                  "raw": 9,
+                  "raw_space": "1"
+                },
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 9,
+                  "life_age": 4,
+                  "owner": null,
+                  "raw": 9,
+                  "raw_space": "1"
+                },
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 7,
+                  "life_age": 5,
+                  "owner": null,
+                  "raw": 7,
+                  "raw_space": "1"
+                },
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 0,
+                  "life_age": 6,
+                  "owner": null,
+                  "raw": 0,
+                  "raw_space": "1"
+                }
+              ],
+              "kind": "Trace"
+            }
+          }
+        },
+        "reason": "ForeignInstance"
+      }
+    },
+    {
+      "current_after": {
+        "definition": 0,
+        "owner": 2,
+        "state": 2,
+        "value": {
+          "events": [
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 0,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 1,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 2,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 3,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 4,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 5,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 0,
+              "life_age": 6,
+              "owner": null,
+              "raw": 0,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 0,
+              "life_age": 6,
+              "owner": null,
+              "raw": 0,
+              "raw_space": "1"
+            }
+          ],
+          "kind": "Trace"
+        }
+      },
+      "current_before": {
+        "definition": 0,
+        "owner": 2,
+        "state": 0,
+        "value": {
+          "events": [
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 0,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 1,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 2,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 3,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 4,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 5,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 0,
+              "life_age": 6,
+              "owner": null,
+              "raw": 0,
+              "raw_space": "1"
+            }
+          ],
+          "kind": "Trace"
+        }
+      },
+      "kind": "commit",
+      "name": "commit_valid",
+      "prepared": {
+        "after": {
+          "state": 2,
+          "value": {
+            "events": [
+              {
+                "action": 0,
+                "episode": 0,
+                "epoch": "1",
+                "input": 9,
+                "life_age": 0,
+                "owner": null,
+                "raw": 9,
+                "raw_space": "1"
+              },
+              {
+                "action": 0,
+                "episode": 0,
+                "epoch": "1",
+                "input": 7,
+                "life_age": 1,
+                "owner": null,
+                "raw": 7,
+                "raw_space": "1"
+              },
+              {
+                "action": 0,
+                "episode": 0,
+                "epoch": "1",
+                "input": 7,
+                "life_age": 2,
+                "owner": null,
+                "raw": 7,
+                "raw_space": "1"
+              },
+              {
+                "action": 0,
+                "episode": 0,
+                "epoch": "1",
+                "input": 9,
+                "life_age": 3,
+                "owner": null,
+                "raw": 9,
+                "raw_space": "1"
+              },
+              {
+                "action": 0,
+                "episode": 0,
+                "epoch": "1",
+                "input": 9,
+                "life_age": 4,
+                "owner": null,
+                "raw": 9,
+                "raw_space": "1"
+              },
+              {
+                "action": 0,
+                "episode": 0,
+                "epoch": "1",
+                "input": 7,
+                "life_age": 5,
+                "owner": null,
+                "raw": 7,
+                "raw_space": "1"
+              },
+              {
+                "action": 0,
+                "episode": 0,
+                "epoch": "1",
+                "input": 0,
+                "life_age": 6,
+                "owner": null,
+                "raw": 0,
+                "raw_space": "1"
+              },
+              {
+                "action": 0,
+                "episode": 0,
+                "epoch": "1",
+                "input": 0,
+                "life_age": 6,
+                "owner": null,
+                "raw": 0,
+                "raw_space": "1"
+              }
+            ],
+            "kind": "Trace"
+          }
+        },
+        "before": {
+          "definition": 0,
+          "owner": 2,
+          "state": 0,
+          "value": {
+            "events": [
+              {
+                "action": 0,
+                "episode": 0,
+                "epoch": "1",
+                "input": 9,
+                "life_age": 0,
+                "owner": null,
+                "raw": 9,
+                "raw_space": "1"
+              },
+              {
+                "action": 0,
+                "episode": 0,
+                "epoch": "1",
+                "input": 7,
+                "life_age": 1,
+                "owner": null,
+                "raw": 7,
+                "raw_space": "1"
+              },
+              {
+                "action": 0,
+                "episode": 0,
+                "epoch": "1",
+                "input": 7,
+                "life_age": 2,
+                "owner": null,
+                "raw": 7,
+                "raw_space": "1"
+              },
+              {
+                "action": 0,
+                "episode": 0,
+                "epoch": "1",
+                "input": 9,
+                "life_age": 3,
+                "owner": null,
+                "raw": 9,
+                "raw_space": "1"
+              },
+              {
+                "action": 0,
+                "episode": 0,
+                "epoch": "1",
+                "input": 9,
+                "life_age": 4,
+                "owner": null,
+                "raw": 9,
+                "raw_space": "1"
+              },
+              {
+                "action": 0,
+                "episode": 0,
+                "epoch": "1",
+                "input": 7,
+                "life_age": 5,
+                "owner": null,
+                "raw": 7,
+                "raw_space": "1"
+              },
+              {
+                "action": 0,
+                "episode": 0,
+                "epoch": "1",
+                "input": 0,
+                "life_age": 6,
+                "owner": null,
+                "raw": 0,
+                "raw_space": "1"
+              }
+            ],
+            "kind": "Trace"
+          }
+        }
+      },
+      "result": {
+        "kind": "Ok",
+        "receipt": {
+          "after": {
+            "definition": 0,
+            "owner": 2,
+            "state": 2,
+            "value": {
+              "events": [
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 9,
+                  "life_age": 0,
+                  "owner": null,
+                  "raw": 9,
+                  "raw_space": "1"
+                },
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 7,
+                  "life_age": 1,
+                  "owner": null,
+                  "raw": 7,
+                  "raw_space": "1"
+                },
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 7,
+                  "life_age": 2,
+                  "owner": null,
+                  "raw": 7,
+                  "raw_space": "1"
+                },
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 9,
+                  "life_age": 3,
+                  "owner": null,
+                  "raw": 9,
+                  "raw_space": "1"
+                },
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 9,
+                  "life_age": 4,
+                  "owner": null,
+                  "raw": 9,
+                  "raw_space": "1"
+                },
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 7,
+                  "life_age": 5,
+                  "owner": null,
+                  "raw": 7,
+                  "raw_space": "1"
+                },
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 0,
+                  "life_age": 6,
+                  "owner": null,
+                  "raw": 0,
+                  "raw_space": "1"
+                },
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 0,
+                  "life_age": 6,
+                  "owner": null,
+                  "raw": 0,
+                  "raw_space": "1"
+                }
+              ],
+              "kind": "Trace"
+            }
+          },
+          "before": {
+            "definition": 0,
+            "owner": 2,
+            "state": 0,
+            "value": {
+              "events": [
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 9,
+                  "life_age": 0,
+                  "owner": null,
+                  "raw": 9,
+                  "raw_space": "1"
+                },
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 7,
+                  "life_age": 1,
+                  "owner": null,
+                  "raw": 7,
+                  "raw_space": "1"
+                },
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 7,
+                  "life_age": 2,
+                  "owner": null,
+                  "raw": 7,
+                  "raw_space": "1"
+                },
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 9,
+                  "life_age": 3,
+                  "owner": null,
+                  "raw": 9,
+                  "raw_space": "1"
+                },
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 9,
+                  "life_age": 4,
+                  "owner": null,
+                  "raw": 9,
+                  "raw_space": "1"
+                },
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 7,
+                  "life_age": 5,
+                  "owner": null,
+                  "raw": 7,
+                  "raw_space": "1"
+                },
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 0,
+                  "life_age": 6,
+                  "owner": null,
+                  "raw": 0,
+                  "raw_space": "1"
+                }
+              ],
+              "kind": "Trace"
+            }
+          }
+        }
+      }
+    },
+    {
+      "current_after": {
+        "definition": 0,
+        "owner": 2,
+        "state": 2,
+        "value": {
+          "events": [
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 0,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 1,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 2,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 3,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 4,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 5,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 0,
+              "life_age": 6,
+              "owner": null,
+              "raw": 0,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 0,
+              "life_age": 6,
+              "owner": null,
+              "raw": 0,
+              "raw_space": "1"
+            }
+          ],
+          "kind": "Trace"
+        }
+      },
+      "current_before": {
+        "definition": 0,
+        "owner": 2,
+        "state": 2,
+        "value": {
+          "events": [
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 0,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 1,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 2,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 3,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 4,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 5,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 0,
+              "life_age": 6,
+              "owner": null,
+              "raw": 0,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 0,
+              "life_age": 6,
+              "owner": null,
+              "raw": 0,
+              "raw_space": "1"
+            }
+          ],
+          "kind": "Trace"
+        }
+      },
+      "kind": "commit",
+      "name": "commit_stale",
+      "prepared": {
+        "after": {
+          "state": 3,
+          "value": {
+            "events": [
+              {
+                "action": 0,
+                "episode": 0,
+                "epoch": "1",
+                "input": 9,
+                "life_age": 0,
+                "owner": null,
+                "raw": 9,
+                "raw_space": "1"
+              },
+              {
+                "action": 0,
+                "episode": 0,
+                "epoch": "1",
+                "input": 7,
+                "life_age": 1,
+                "owner": null,
+                "raw": 7,
+                "raw_space": "1"
+              },
+              {
+                "action": 0,
+                "episode": 0,
+                "epoch": "1",
+                "input": 7,
+                "life_age": 2,
+                "owner": null,
+                "raw": 7,
+                "raw_space": "1"
+              },
+              {
+                "action": 0,
+                "episode": 0,
+                "epoch": "1",
+                "input": 9,
+                "life_age": 3,
+                "owner": null,
+                "raw": 9,
+                "raw_space": "1"
+              },
+              {
+                "action": 0,
+                "episode": 0,
+                "epoch": "1",
+                "input": 9,
+                "life_age": 4,
+                "owner": null,
+                "raw": 9,
+                "raw_space": "1"
+              },
+              {
+                "action": 0,
+                "episode": 0,
+                "epoch": "1",
+                "input": 7,
+                "life_age": 5,
+                "owner": null,
+                "raw": 7,
+                "raw_space": "1"
+              },
+              {
+                "action": 0,
+                "episode": 0,
+                "epoch": "1",
+                "input": 0,
+                "life_age": 6,
+                "owner": null,
+                "raw": 0,
+                "raw_space": "1"
+              },
+              {
+                "action": 0,
+                "episode": 0,
+                "epoch": "1",
+                "input": 0,
+                "life_age": 6,
+                "owner": null,
+                "raw": 0,
+                "raw_space": "1"
+              }
+            ],
+            "kind": "Trace"
+          }
+        },
+        "before": {
+          "definition": 0,
+          "owner": 2,
+          "state": 0,
+          "value": {
+            "events": [
+              {
+                "action": 0,
+                "episode": 0,
+                "epoch": "1",
+                "input": 9,
+                "life_age": 0,
+                "owner": null,
+                "raw": 9,
+                "raw_space": "1"
+              },
+              {
+                "action": 0,
+                "episode": 0,
+                "epoch": "1",
+                "input": 7,
+                "life_age": 1,
+                "owner": null,
+                "raw": 7,
+                "raw_space": "1"
+              },
+              {
+                "action": 0,
+                "episode": 0,
+                "epoch": "1",
+                "input": 7,
+                "life_age": 2,
+                "owner": null,
+                "raw": 7,
+                "raw_space": "1"
+              },
+              {
+                "action": 0,
+                "episode": 0,
+                "epoch": "1",
+                "input": 9,
+                "life_age": 3,
+                "owner": null,
+                "raw": 9,
+                "raw_space": "1"
+              },
+              {
+                "action": 0,
+                "episode": 0,
+                "epoch": "1",
+                "input": 9,
+                "life_age": 4,
+                "owner": null,
+                "raw": 9,
+                "raw_space": "1"
+              },
+              {
+                "action": 0,
+                "episode": 0,
+                "epoch": "1",
+                "input": 7,
+                "life_age": 5,
+                "owner": null,
+                "raw": 7,
+                "raw_space": "1"
+              },
+              {
+                "action": 0,
+                "episode": 0,
+                "epoch": "1",
+                "input": 0,
+                "life_age": 6,
+                "owner": null,
+                "raw": 0,
+                "raw_space": "1"
+              }
+            ],
+            "kind": "Trace"
+          }
+        }
+      },
+      "result": {
+        "kind": "Err",
+        "prepared": {
+          "after": {
+            "state": 3,
+            "value": {
+              "events": [
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 9,
+                  "life_age": 0,
+                  "owner": null,
+                  "raw": 9,
+                  "raw_space": "1"
+                },
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 7,
+                  "life_age": 1,
+                  "owner": null,
+                  "raw": 7,
+                  "raw_space": "1"
+                },
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 7,
+                  "life_age": 2,
+                  "owner": null,
+                  "raw": 7,
+                  "raw_space": "1"
+                },
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 9,
+                  "life_age": 3,
+                  "owner": null,
+                  "raw": 9,
+                  "raw_space": "1"
+                },
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 9,
+                  "life_age": 4,
+                  "owner": null,
+                  "raw": 9,
+                  "raw_space": "1"
+                },
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 7,
+                  "life_age": 5,
+                  "owner": null,
+                  "raw": 7,
+                  "raw_space": "1"
+                },
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 0,
+                  "life_age": 6,
+                  "owner": null,
+                  "raw": 0,
+                  "raw_space": "1"
+                },
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 0,
+                  "life_age": 6,
+                  "owner": null,
+                  "raw": 0,
+                  "raw_space": "1"
+                }
+              ],
+              "kind": "Trace"
+            }
+          },
+          "before": {
+            "definition": 0,
+            "owner": 2,
+            "state": 0,
+            "value": {
+              "events": [
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 9,
+                  "life_age": 0,
+                  "owner": null,
+                  "raw": 9,
+                  "raw_space": "1"
+                },
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 7,
+                  "life_age": 1,
+                  "owner": null,
+                  "raw": 7,
+                  "raw_space": "1"
+                },
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 7,
+                  "life_age": 2,
+                  "owner": null,
+                  "raw": 7,
+                  "raw_space": "1"
+                },
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 9,
+                  "life_age": 3,
+                  "owner": null,
+                  "raw": 9,
+                  "raw_space": "1"
+                },
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 9,
+                  "life_age": 4,
+                  "owner": null,
+                  "raw": 9,
+                  "raw_space": "1"
+                },
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 7,
+                  "life_age": 5,
+                  "owner": null,
+                  "raw": 7,
+                  "raw_space": "1"
+                },
+                {
+                  "action": 0,
+                  "episode": 0,
+                  "epoch": "1",
+                  "input": 0,
+                  "life_age": 6,
+                  "owner": null,
+                  "raw": 0,
+                  "raw_space": "1"
+                }
+              ],
+              "kind": "Trace"
+            }
+          }
+        },
+        "reason": "StaleState"
+      }
+    },
+    {
+      "budget_after": {
+        "dispatch_limit": null,
+        "dispatches": 21,
+        "poisoned": false,
+        "work_remaining": 9980436
+      },
+      "budget_before": {
+        "dispatch_limit": null,
+        "dispatches": 18,
+        "poisoned": false,
+        "work_remaining": 9980452
+      },
+      "current_after": {
+        "definition": 0,
+        "owner": 2,
+        "state": 2,
+        "value": {
+          "events": [
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 0,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 1,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 2,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 3,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 4,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 5,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 0,
+              "life_age": 6,
+              "owner": null,
+              "raw": 0,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 0,
+              "life_age": 6,
+              "owner": null,
+              "raw": 0,
+              "raw_space": "1"
+            }
+          ],
+          "kind": "Trace"
+        }
+      },
+      "current_before": {
+        "definition": 0,
+        "owner": 2,
+        "state": 2,
+        "value": {
+          "events": [
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 0,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 1,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 2,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 3,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 4,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 5,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 0,
+              "life_age": 6,
+              "owner": null,
+              "raw": 0,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 0,
+              "life_age": 6,
+              "owner": null,
+              "raw": 0,
+              "raw_space": "1"
+            }
+          ],
+          "kind": "Trace"
+        }
+      },
+      "input": {
+        "interface": {
+          "epoch": "1",
+          "owner": null,
+          "raw_space": "1",
+          "shape": "Query"
+        },
+        "values": [
+          {
+            "kind": "Query",
+            "value": {
+              "action": null,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 7,
+              "owner": null,
+              "pose": null,
+              "raw": 9,
+              "raw_space": "1"
+            }
+          }
+        ]
+      },
+      "kind": "read",
+      "name": "read_current",
+      "result": {
+        "cut": {
+          "definition": 0,
+          "owner": 2,
+          "state": 2,
+          "value": {
+            "events": [
+              {
+                "action": 0,
+                "episode": 0,
+                "epoch": "1",
+                "input": 9,
+                "life_age": 0,
+                "owner": null,
+                "raw": 9,
+                "raw_space": "1"
+              },
+              {
+                "action": 0,
+                "episode": 0,
+                "epoch": "1",
+                "input": 7,
+                "life_age": 1,
+                "owner": null,
+                "raw": 7,
+                "raw_space": "1"
+              },
+              {
+                "action": 0,
+                "episode": 0,
+                "epoch": "1",
+                "input": 7,
+                "life_age": 2,
+                "owner": null,
+                "raw": 7,
+                "raw_space": "1"
+              },
+              {
+                "action": 0,
+                "episode": 0,
+                "epoch": "1",
+                "input": 9,
+                "life_age": 3,
+                "owner": null,
+                "raw": 9,
+                "raw_space": "1"
+              },
+              {
+                "action": 0,
+                "episode": 0,
+                "epoch": "1",
+                "input": 9,
+                "life_age": 4,
+                "owner": null,
+                "raw": 9,
+                "raw_space": "1"
+              },
+              {
+                "action": 0,
+                "episode": 0,
+                "epoch": "1",
+                "input": 7,
+                "life_age": 5,
+                "owner": null,
+                "raw": 7,
+                "raw_space": "1"
+              },
+              {
+                "action": 0,
+                "episode": 0,
+                "epoch": "1",
+                "input": 0,
+                "life_age": 6,
+                "owner": null,
+                "raw": 0,
+                "raw_space": "1"
+              },
+              {
+                "action": 0,
+                "episode": 0,
+                "epoch": "1",
+                "input": 0,
+                "life_age": 6,
+                "owner": null,
+                "raw": 0,
+                "raw_space": "1"
+              }
+            ],
+            "kind": "Trace"
+          }
+        },
+        "execution": {
+          "call_attempts": 0,
+          "dispatch_attempts": 3,
+          "expanded_attempts": 3,
+          "halt": null,
+          "registers": [
+            {
+              "kind": "Event",
+              "value": {
+                "action": 0,
+                "episode": 0,
+                "epoch": "1",
+                "input": 9,
+                "life_age": 0,
+                "owner": null,
+                "raw": 9,
+                "raw_space": "1"
+              }
+            },
+            {
+              "kind": "Nat",
+              "value": 9
+            },
+            {
+              "kind": "Outcome",
+              "value": {
+                "key": 9,
+                "kind": "Next"
+              }
+            }
+          ],
+          "stop": "Complete"
+        },
+        "kind": "Ok",
+        "value": {
+          "kind": "Outcome",
+          "value": {
+            "key": 9,
+            "kind": "Next"
+          }
+        }
+      }
+    },
+    {
+      "budget_after": {
+        "dispatch_limit": null,
+        "dispatches": 24,
+        "poisoned": false,
+        "work_remaining": 9980420
+      },
+      "budget_before": {
+        "dispatch_limit": null,
+        "dispatches": 21,
+        "poisoned": false,
+        "work_remaining": 9980436
+      },
+      "current_after": {
+        "definition": 0,
+        "owner": 2,
+        "state": 0,
+        "value": {
+          "events": [
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 0,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 1,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 2,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 3,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 4,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 5,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 0,
+              "life_age": 6,
+              "owner": null,
+              "raw": 0,
+              "raw_space": "1"
+            }
+          ],
+          "kind": "Trace"
+        }
+      },
+      "current_before": {
+        "definition": 0,
+        "owner": 2,
+        "state": 0,
+        "value": {
+          "events": [
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 0,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 1,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 2,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 3,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 4,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 5,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 0,
+              "life_age": 6,
+              "owner": null,
+              "raw": 0,
+              "raw_space": "1"
+            }
+          ],
+          "kind": "Trace"
+        }
+      },
+      "input": {
+        "interface": {
+          "epoch": "1",
+          "owner": null,
+          "raw_space": "1",
+          "shape": "Query"
+        },
+        "values": [
+          {
+            "kind": "Query",
+            "value": {
+              "action": null,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 7,
+              "owner": null,
+              "pose": null,
+              "raw": 9,
+              "raw_space": "1"
+            }
+          }
+        ]
+      },
+      "kind": "read",
+      "name": "read_retained",
+      "result": {
+        "cut": {
+          "definition": 0,
+          "owner": 2,
+          "state": 0,
+          "value": {
+            "events": [
+              {
+                "action": 0,
+                "episode": 0,
+                "epoch": "1",
+                "input": 9,
+                "life_age": 0,
+                "owner": null,
+                "raw": 9,
+                "raw_space": "1"
+              },
+              {
+                "action": 0,
+                "episode": 0,
+                "epoch": "1",
+                "input": 7,
+                "life_age": 1,
+                "owner": null,
+                "raw": 7,
+                "raw_space": "1"
+              },
+              {
+                "action": 0,
+                "episode": 0,
+                "epoch": "1",
+                "input": 7,
+                "life_age": 2,
+                "owner": null,
+                "raw": 7,
+                "raw_space": "1"
+              },
+              {
+                "action": 0,
+                "episode": 0,
+                "epoch": "1",
+                "input": 9,
+                "life_age": 3,
+                "owner": null,
+                "raw": 9,
+                "raw_space": "1"
+              },
+              {
+                "action": 0,
+                "episode": 0,
+                "epoch": "1",
+                "input": 9,
+                "life_age": 4,
+                "owner": null,
+                "raw": 9,
+                "raw_space": "1"
+              },
+              {
+                "action": 0,
+                "episode": 0,
+                "epoch": "1",
+                "input": 7,
+                "life_age": 5,
+                "owner": null,
+                "raw": 7,
+                "raw_space": "1"
+              },
+              {
+                "action": 0,
+                "episode": 0,
+                "epoch": "1",
+                "input": 0,
+                "life_age": 6,
+                "owner": null,
+                "raw": 0,
+                "raw_space": "1"
+              }
+            ],
+            "kind": "Trace"
+          }
+        },
+        "execution": {
+          "call_attempts": 0,
+          "dispatch_attempts": 3,
+          "expanded_attempts": 3,
+          "halt": null,
+          "registers": [
+            {
+              "kind": "Event",
+              "value": {
+                "action": 0,
+                "episode": 0,
+                "epoch": "1",
+                "input": 9,
+                "life_age": 0,
+                "owner": null,
+                "raw": 9,
+                "raw_space": "1"
+              }
+            },
+            {
+              "kind": "Nat",
+              "value": 9
+            },
+            {
+              "kind": "Outcome",
+              "value": {
+                "key": 9,
+                "kind": "Next"
+              }
+            }
+          ],
+          "stop": "Complete"
+        },
+        "kind": "Ok",
+        "value": {
+          "kind": "Outcome",
+          "value": {
+            "key": 9,
+            "kind": "Next"
+          }
+        }
+      }
+    },
+    {
+      "budget_after": {
+        "dispatch_limit": null,
+        "dispatches": 24,
+        "poisoned": false,
+        "work_remaining": 9980416
+      },
+      "budget_before": {
+        "dispatch_limit": null,
+        "dispatches": 24,
+        "poisoned": false,
+        "work_remaining": 9980420
+      },
+      "current_after": {
+        "definition": 0,
+        "owner": 2,
+        "state": 2,
+        "value": {
+          "events": [
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 0,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 1,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 2,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 3,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 4,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 5,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 0,
+              "life_age": 6,
+              "owner": null,
+              "raw": 0,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 0,
+              "life_age": 6,
+              "owner": null,
+              "raw": 0,
+              "raw_space": "1"
+            }
+          ],
+          "kind": "Trace"
+        }
+      },
+      "current_before": {
+        "definition": 0,
+        "owner": 2,
+        "state": 2,
+        "value": {
+          "events": [
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 0,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 1,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 2,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 3,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 4,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 5,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 0,
+              "life_age": 6,
+              "owner": null,
+              "raw": 0,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 0,
+              "life_age": 6,
+              "owner": null,
+              "raw": 0,
+              "raw_space": "1"
+            }
+          ],
+          "kind": "Trace"
+        }
+      },
+      "input": {
+        "interface": {
+          "epoch": "1",
+          "owner": null,
+          "raw_space": "1",
+          "shape": "Event"
+        },
+        "values": []
+      },
+      "kind": "prepare",
+      "name": "prepare_wrong_width",
+      "result": {
+        "kind": "Err",
+        "reason": {
+          "classification": "Undefined",
+          "kind": "Binding",
+          "phase": "Update",
+          "reason": {
+            "actual": 0,
+            "expected": 1,
+            "kind": "Width"
+          }
+        }
+      }
+    },
+    {
+      "budget_after": {
+        "dispatch_limit": null,
+        "dispatches": 24,
+        "poisoned": false,
+        "work_remaining": 9980412
+      },
+      "budget_before": {
+        "dispatch_limit": null,
+        "dispatches": 24,
+        "poisoned": false,
+        "work_remaining": 9980416
+      },
+      "current_after": {
+        "definition": 0,
+        "owner": 2,
+        "state": 2,
+        "value": {
+          "events": [
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 0,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 1,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 2,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 3,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 4,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 5,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 0,
+              "life_age": 6,
+              "owner": null,
+              "raw": 0,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 0,
+              "life_age": 6,
+              "owner": null,
+              "raw": 0,
+              "raw_space": "1"
+            }
+          ],
+          "kind": "Trace"
+        }
+      },
+      "current_before": {
+        "definition": 0,
+        "owner": 2,
+        "state": 2,
+        "value": {
+          "events": [
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 0,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 1,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 2,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 3,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 4,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 5,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 0,
+              "life_age": 6,
+              "owner": null,
+              "raw": 0,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 0,
+              "life_age": 6,
+              "owner": null,
+              "raw": 0,
+              "raw_space": "1"
+            }
+          ],
+          "kind": "Trace"
+        }
+      },
+      "input": {
+        "interface": {
+          "epoch": "1",
+          "owner": null,
+          "raw_space": "1",
+          "shape": "Query"
+        },
+        "values": []
+      },
+      "kind": "read",
+      "name": "read_wrong_width",
+      "result": {
+        "kind": "Err",
+        "reason": {
+          "classification": "Undefined",
+          "kind": "Binding",
+          "phase": "Read",
+          "reason": {
+            "actual": 0,
+            "expected": 1,
+            "kind": "Width"
+          }
+        }
+      }
+    },
+    {
+      "after": {
+        "definition": 0,
+        "owner": 4,
+        "state": 0,
+        "value": {
+          "events": [
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 0,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 1,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 2,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 3,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 4,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 5,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 0,
+              "life_age": 6,
+              "owner": null,
+              "raw": 0,
+              "raw_space": "1"
+            }
+          ],
+          "kind": "Trace"
+        }
+      },
+      "before": {
+        "definition": 0,
+        "owner": 0,
+        "state": 0,
+        "value": {
+          "events": [
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 0,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 1,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 2,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 3,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 4,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 5,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 0,
+              "life_age": 6,
+              "owner": null,
+              "raw": 0,
+              "raw_space": "1"
+            }
+          ],
+          "kind": "Trace"
+        }
+      },
+      "kind": "fork",
+      "name": "fork_runtime"
+    },
+    {
+      "budget_after": {
+        "dispatch_limit": null,
+        "dispatches": 0,
+        "poisoned": false,
+        "work_remaining": 0
+      },
+      "budget_before": {
+        "dispatch_limit": null,
+        "dispatches": 0,
+        "poisoned": false,
+        "work_remaining": 0
+      },
+      "current_after": {
+        "definition": 0,
+        "owner": 2,
+        "state": 2,
+        "value": {
+          "events": [
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 0,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 1,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 2,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 3,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 4,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 5,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 0,
+              "life_age": 6,
+              "owner": null,
+              "raw": 0,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 0,
+              "life_age": 6,
+              "owner": null,
+              "raw": 0,
+              "raw_space": "1"
+            }
+          ],
+          "kind": "Trace"
+        }
+      },
+      "current_before": {
+        "definition": 0,
+        "owner": 2,
+        "state": 2,
+        "value": {
+          "events": [
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 0,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 1,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 2,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 3,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 4,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 5,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 0,
+              "life_age": 6,
+              "owner": null,
+              "raw": 0,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 0,
+              "life_age": 6,
+              "owner": null,
+              "raw": 0,
+              "raw_space": "1"
+            }
+          ],
+          "kind": "Trace"
+        }
+      },
+      "input": {
+        "interface": {
+          "epoch": "1",
+          "owner": null,
+          "raw_space": "1",
+          "shape": "Event"
+        },
+        "values": [
+          {
+            "kind": "Event",
+            "value": {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 0,
+              "life_age": 6,
+              "owner": null,
+              "raw": 0,
+              "raw_space": "1"
+            }
+          }
+        ]
+      },
+      "kind": "prepare",
+      "name": "prepare_zero_work",
+      "result": {
+        "kind": "Err",
+        "reason": {
+          "classification": "Resource",
+          "error": null,
+          "execution": null,
+          "kind": "Work",
+          "phase": "Update",
+          "point": "InputBinding"
+        }
+      }
+    },
+    {
+      "budget_after": {
+        "dispatch_limit": null,
+        "dispatches": 0,
+        "poisoned": false,
+        "work_remaining": 0
+      },
+      "budget_before": {
+        "dispatch_limit": null,
+        "dispatches": 0,
+        "poisoned": false,
+        "work_remaining": 0
+      },
+      "current_after": {
+        "definition": 0,
+        "owner": 2,
+        "state": 2,
+        "value": {
+          "events": [
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 0,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 1,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 2,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 3,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 4,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 5,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 0,
+              "life_age": 6,
+              "owner": null,
+              "raw": 0,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 0,
+              "life_age": 6,
+              "owner": null,
+              "raw": 0,
+              "raw_space": "1"
+            }
+          ],
+          "kind": "Trace"
+        }
+      },
+      "current_before": {
+        "definition": 0,
+        "owner": 2,
+        "state": 2,
+        "value": {
+          "events": [
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 0,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 1,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 2,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 3,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 4,
+              "owner": null,
+              "raw": 9,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 7,
+              "life_age": 5,
+              "owner": null,
+              "raw": 7,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 0,
+              "life_age": 6,
+              "owner": null,
+              "raw": 0,
+              "raw_space": "1"
+            },
+            {
+              "action": 0,
+              "episode": 0,
+              "epoch": "1",
+              "input": 0,
+              "life_age": 6,
+              "owner": null,
+              "raw": 0,
+              "raw_space": "1"
+            }
+          ],
+          "kind": "Trace"
+        }
+      },
+      "input": {
+        "interface": {
+          "epoch": "1",
+          "owner": null,
+          "raw_space": "1",
+          "shape": "Query"
+        },
+        "values": [
+          {
+            "kind": "Query",
+            "value": {
+              "action": null,
+              "episode": 0,
+              "epoch": "1",
+              "input": 9,
+              "life_age": 7,
+              "owner": null,
+              "pose": null,
+              "raw": 9,
+              "raw_space": "1"
+            }
+          }
+        ]
+      },
+      "kind": "read",
+      "name": "read_zero_work",
+      "result": {
+        "kind": "Err",
+        "reason": {
+          "classification": "Resource",
+          "error": null,
+          "execution": null,
+          "kind": "Work",
+          "phase": "Read",
+          "point": "InputBinding"
+        }
+      }
+    }
+  ],
+  "refusals": [
+    {
+      "budget_after": {
+        "dispatch_limit": null,
+        "dispatches": 0,
+        "poisoned": false,
+        "work_remaining": 0
+      },
+      "budget_before": {
+        "dispatch_limit": null,
+        "dispatches": 0,
+        "poisoned": false,
+        "work_remaining": 0
+      },
+      "classification": "Resource",
+      "counter_capacity": false,
+      "domain": "canonical",
+      "kind": "classification",
+      "meter_error": true,
+      "name": "canonical_zero_work",
+      "primitive_error": null,
+      "primitive_refusal": null,
+      "reason_kind": "Work",
+      "stop": null
+    },
+    {
+      "budget_after": {
+        "dispatch_limit": 0,
+        "dispatches": 0,
+        "poisoned": false,
+        "work_remaining": 989
+      },
+      "budget_before": {
+        "dispatch_limit": 0,
+        "dispatches": 0,
+        "poisoned": false,
+        "work_remaining": 1000
+      },
+      "classification": "Resource",
+      "counter_capacity": false,
+      "domain": "canonical",
+      "kind": "classification",
+      "meter_error": false,
+      "name": "canonical_zero_dispatch",
+      "primitive_error": null,
+      "primitive_refusal": null,
+      "reason_kind": "Execution",
+      "stop": "Budget"
+    },
+    {
+      "budget_after": {
+        "dispatch_limit": null,
+        "dispatches": 1,
+        "poisoned": false,
+        "work_remaining": 9980395
+      },
+      "budget_before": {
+        "dispatch_limit": null,
+        "dispatches": 0,
+        "poisoned": false,
+        "work_remaining": 9980404
+      },
+      "classification": "Undefined",
+      "counter_capacity": false,
+      "domain": "acquired",
+      "kind": "classification",
+      "meter_error": false,
+      "name": "acquired_semantic_missing",
+      "primitive_error": "Missing",
+      "primitive_refusal": "Undefined",
+      "reason_kind": "Execution",
+      "stop": "Undefined"
+    },
+    {
+      "budget_after": {
+        "dispatch_limit": null,
+        "dispatches": 5,
+        "poisoned": false,
+        "work_remaining": 9980364
+      },
+      "budget_before": {
+        "dispatch_limit": null,
+        "dispatches": 3,
+        "poisoned": false,
+        "work_remaining": 9980379
+      },
+      "classification": "Resource",
+      "counter_capacity": false,
+      "domain": "acquired",
+      "kind": "classification",
+      "meter_error": false,
+      "name": "acquired_trace_capacity",
+      "primitive_error": "TraceCapacity",
+      "primitive_refusal": "Resource",
+      "reason_kind": "Execution",
+      "stop": "Undefined"
+    }
+  ],
+  "schema": "synarc-observer-lifecycle-v1"
+}
