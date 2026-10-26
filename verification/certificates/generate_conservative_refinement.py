@@ -8,68 +8,21 @@ finite execution sample, or theorem name authorizes a typing rule.
 import argparse
 import json
 from pathlib import Path
+from portable_terms import (
+    RECURSIVE, app, arrow, bind, congruence, cons, construct, data, factor, first, identity, induct, j, lam, list_map, list_type, local, lower, nil, pair, pi, refl, second, sigma, singleton, symm, transitive, tt, unit, universe, value_field, var,
+)
 
 
-def var(name): return ('Var', name)
-def universe(): return ('Universe',)
-def pi(name, domain, body): return ('Pi', name, domain, body)
-def lam(name, domain, body): return ('Lam', name, domain, body)
-def local(name, value, body): return ('Let', name, value, body)
-def app(function, *arguments):
-    for argument in arguments: function = ('App', function, argument)
-    return function
-
-def bind(kind, parameters, body):
-    for name, domain in reversed(parameters): body = kind(name, domain, body)
-    return body
-
-def identity(carrier, left, right): return ('Id', carrier, left, right)
-def refl(value): return ('Refl', value)
-def j(motive, base, path): return ('J', motive, base, path)
-def pair(left, right): return ('Pair', left, right)
-def first(value): return ('Fst', value)
-def second(value): return ('Snd', value)
-def sigma(name, domain, body): return ('Sigma', name, domain, body)
-def data(name, constructors): return ('Data', name, constructors)
-def value_field(term): return ('Value', term)
-RECURSIVE = ('Recursive',)
-def construct(declaration, constructor, *arguments): return ('Construct', declaration, constructor, arguments)
-def induct(scrutinee, motive, *cases): return ('Induct', scrutinee, motive, cases)
-def list_type(element): return data('List', [[], [value_field(element), RECURSIVE]])
-def nil(element): return construct(list_type(element), 0)
-def cons(element, head, tail): return construct(list_type(element), 1, head, tail)
-def singleton(element, item): return cons(element, item, nil(element))
 def outcome(state):
     return data('Outcome', [[value_field(state)], [value_field(state), value_field(var('Terminal'))], [value_field(var('Reason'))]])
 def next_state(state, value): return construct(outcome(state), 0, value)
 def stop(state, value, terminal): return construct(outcome(state), 1, value, terminal)
 def refuse(state, reason): return construct(outcome(state), 2, reason)
 def execution(state): return sigma('_states', list_type(state), outcome(state))
-def unit(): return data('Unit', [[]])
-def tt(): return construct(unit(), 0)
 
 
-def arrow(domain, codomain): return pi('_', domain, codomain)
 def step_type(state): return arrow(state, arrow(var('Action'), outcome(state)))
 def prepend(state, head, tail): return pair(cons(state, head, first(tail)), second(tail))
-
-
-def symm(carrier, left, right, path):
-    return j(lam('sym_endpoint', carrier, identity(carrier, var('sym_endpoint'), left)), refl(left), path)
-
-
-def congruence(source, target, function, left, right, path):
-    return j(lam('cong_endpoint', source, identity(target, app(function, left), app(function, var('cong_endpoint')))), refl(app(function, left)), path)
-
-
-def transitive(carrier, left, middle, right, first_path, second_path):
-    return j(lam('trans_endpoint', carrier, identity(carrier, left, var('trans_endpoint'))), first_path, second_path)
-
-
-def list_map(source, target, function, items):
-    return induct(items, lam('map_subject', list_type(source), list_type(target)), nil(target),
-        bind(lam, [('map_head', source), ('map_tail', list_type(source)), ('map_ih', list_type(target))],
-             cons(target, app(function, var('map_head')), var('map_ih'))))
 
 
 def outcome_map(project, result):
@@ -233,30 +186,6 @@ def observations_proof():
         transitive(list_type(obs), left, middle, right, trace_path, map_path))
 
 
-def lower(term, context=()):
-    kind = term[0]
-    if kind == 'Var':
-        if term[1] not in context: raise ValueError(f'unbound generator variable: {term[1]}')
-        return {'Var': context.index(term[1])}
-    if kind == 'Universe': return {'Universe': {'Concrete': 0}}
-    if kind == 'Let':
-        return {'Let': {'value': lower(term[2], context), 'body': lower(term[3], (term[1],) + context)}}
-    if kind in ('Pi', 'Lam', 'Sigma'):
-        _, name, domain, body = term
-        return {kind: [lower(domain, context), lower(body, (name,) + context)]}
-    if kind in ('App', 'Pair'): return {kind: [lower(term[1], context), lower(term[2], context)]}
-    if kind in ('Refl', 'Fst', 'Snd'): return {kind: lower(term[1], context)}
-    if kind == 'Id': return {'Id': dict(zip(('ty', 'lhs', 'rhs'), (lower(x, context) for x in term[1:])))}
-    if kind == 'J': return {'J': dict(zip(('motive', 'base', 'scrutinee'), (lower(x, context) for x in term[1:])))}
-    if kind == 'Data':
-        return {'Data': {'name': term[1], 'level': {'Concrete': 0}, 'constructors': [
-            [('Recursive' if field[0] == 'Recursive' else {'Value': lower(field[1], context)}) for field in fields]
-            for fields in term[2]]}}
-    if kind == 'Construct': return {'Construct': {'data': lower(term[1], context), 'constructor': term[2], 'args': [lower(x, context) for x in term[3]]}}
-    if kind == 'Induct': return {'Induct': {'scrutinee': lower(term[1], context), 'motive': lower(term[2], context), 'cases': [lower(x, context) for x in term[3]]}}
-    raise ValueError(kind)
-
-
 def mutate_proof(proof, mutation):
     """Alter proof-bearing code only; keep the independently generated goal."""
     count = 0
@@ -334,12 +263,6 @@ def certificate(observations=False, mutation=None):
         ('ExecutionS', execution(s)), ('ExecutionR', execution(r)), ('Unit', unit()),
     ]]
     if observations: aliases.append(('ListObservation', list_type(var('Observation'))))
-    def factor(value, available):
-        for name, expression in available:
-            if value == expression: return var(name)
-        if isinstance(value, tuple): return tuple(factor(item, available) for item in value)
-        if isinstance(value, list): return [factor(item, available) for item in value]
-        return value
     for name, ty, body in reversed(definitions):
         proof = local(name, body, proof)
         statement = local(name, body, statement)
