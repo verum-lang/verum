@@ -5,11 +5,10 @@
 //! distinct motive images. This file pins:
 //!
 //!  • PathOver typing rule (K-PathOver-Form): motive must be a Pi
-//!  B → U, path must be a PathTy, endpoints must type-check;
+//!  B → U, path must inhabit PathTy, endpoints inhabit their fibers;
 //!  result inhabits the same universe as motive's codomain.
-//!  • Degenerate-case reduction: PathOver(motive, p, lhs, rhs)
-//!  where `p`'s endpoints coincide structurally collapses to
-//!  homogeneous PathTy(motive(b₀), lhs, rhs).
+//!  • Reflexive reduction: PathOver(motive, Refl(base), lhs, rhs)
+//!  reduces to homogeneous PathTy(motive(base), lhs, rhs).
 //!  • Substitution + free-vars compatibility under PathOver.
 //!  • Eliminator integration: heterogeneous-endpoint HITs (Susp,
 //!  Interval) emit PathOver branches; closed-loop HITs (S¹)
@@ -48,8 +47,12 @@ fn pathover_typing_admits_well_formed() {
     };
     // path = Refl(Zero) which has type Path<Nat>(Zero, Zero).
     let path = CoreTerm::Refl(Heap::new(var("Zero")));
-    let lhs = type0();
-    let rhs = type0();
+    // Nat inhabits the constant fiber Type_0; Type_0 itself does not.
+    let lhs = CoreTerm::Inductive {
+        path: Text::from("Nat"),
+        args: List::new(),
+    };
+    let rhs = lhs.clone();
     let term = CoreTerm::PathOver {
         motive: Heap::new(motive),
         path: Heap::new(path),
@@ -117,11 +120,8 @@ fn pathover_typing_rejects_non_pi_motive() {
 }
 
 #[test]
-fn pathover_typing_admits_arbitrary_path_shape_in_v3_0() {
-    // V3.0 weak typing rule: path slot accepts (a) a term of type
-    // PathTy (proper case) or (b) a PathTy term used as path-shape
-    // annotation by the HIT eliminator emitter. The strict "path
-    // is a PathTy-typed term" check is V3.1 follow-up.
+fn pathover_typing_rejects_arbitrary_path_values() {
+    // A type annotation or arbitrary inhabitant is not path evidence.
     let motive = CoreTerm::Lam {
         binder: Text::from("_"),
         domain: Heap::new(type0()),
@@ -138,35 +138,27 @@ fn pathover_typing_admits_arbitrary_path_shape_in_v3_0() {
         .extend(Text::from("x"), type0())
         .extend(Text::from("y"), type0());
     let axioms = AxiomRegistry::new();
-    let ty = infer(&ctx, &term, &axioms).expect("V3.0 admits any well-typed path slot");
-    assert!(matches!(ty, CoreTerm::Universe(_)));
+    assert!(infer(&ctx, &term, &axioms).is_err());
 }
 
 // =============================================================================
-// Degenerate-case reduction: closed-loop path → PathTy collapse
+// Reflexive reduction: actual Refl evidence → PathTy
 // =============================================================================
 
 #[test]
-fn pathover_normalize_collapses_closed_loop_to_pathty() {
-    // PathOver(motive, PathTy(B, base, base), lhs, rhs)
+fn pathover_normalize_reduces_reflexivity_to_pathty() {
+    // PathOver(motive, Refl(base), lhs, rhs)
     //  ↦ PathTy(motive(base), lhs, rhs)
     let motive = var("M");
     let term = CoreTerm::PathOver {
         motive: Heap::new(motive.clone()),
-        path: Heap::new(CoreTerm::PathTy {
-            carrier: Heap::new(var("B")),
-            lhs: Heap::new(var("base")),
-            rhs: Heap::new(var("base")),
-        }),
+        path: Heap::new(CoreTerm::Refl(Heap::new(var("base")))),
         lhs: Heap::new(var("lhs_image")),
         rhs: Heap::new(var("rhs_image")),
     };
     let normal = normalize(&term);
     let CoreTerm::PathTy { carrier, lhs, rhs } = &normal else {
-        panic!(
-            "closed-loop PathOver must collapse to PathTy; got {:?}",
-            normal
-        );
+        panic!("reflexive PathOver must reduce to PathTy; got {:?}", normal);
     };
     // carrier = M(base)
     let CoreTerm::App(f, a) = carrier.as_ref() else {
@@ -204,18 +196,14 @@ fn pathover_collapse_works_under_inductive_aware_normaliser() {
     let inds = InductiveRegistry::new();
     let term = CoreTerm::PathOver {
         motive: Heap::new(var("M")),
-        path: Heap::new(CoreTerm::PathTy {
-            carrier: Heap::new(var("B")),
-            lhs: Heap::new(var("p")),
-            rhs: Heap::new(var("p")),
-        }),
+        path: Heap::new(CoreTerm::Refl(Heap::new(var("p")))),
         lhs: Heap::new(var("a")),
         rhs: Heap::new(var("b")),
     };
     let normal = normalize_with_inductives(&term, &inds);
     assert!(
         matches!(normal, CoreTerm::PathTy { .. }),
-        "inductive-aware normaliser must also collapse closed-loop PathOver; got {:?}",
+        "inductive-aware normaliser must also reduce reflexive PathOver; got {:?}",
         normal
     );
 }

@@ -442,58 +442,40 @@ impl Inference<'_> {
                 })
             }
 
-            // K-PathOver-Form:
-            //
-
-            //  Γ ⊢ motive : B → U Γ ⊢ p : Path<B>(b₀, b₁)
-            //  Γ ⊢ lhs : motive(b₀) Γ ⊢ rhs : motive(b₁)
-            //  ───────────────────────────────────────────────
-            //  Γ ⊢ PathOver(motive, p, lhs, rhs) : U
-            //
-
-            // Conservative shape-only validation today: motive must be
-            // a Pi (B → U), path must be a PathTy. The endpoint-image
-            // check (`lhs : motive(b₀)`, `rhs : motive(b₁)`) is the
-            // tighter V3.1 contract — V3.0 admits the form whenever
-            // both endpoints are well-typed, leaving the precise
-            // motive-image check to the elaborator's down-stream
-            // type-equation solver.
+            // A dependent path requires actual base-path evidence and endpoints
+            // in the two fibers of the same checked family.
             CoreTerm::PathOver {
                 motive,
                 path,
                 lhs,
                 rhs,
             } => {
-                // motive must be Pi B → U so that motive(b) inhabits a universe.
-                let motive_ty = self.infer(ctx, motive)?;
-                let result_universe = match &motive_ty {
-                    CoreTerm::Pi { codomain, .. } => match codomain.as_ref() {
-                        CoreTerm::Universe(level) => level.clone(),
-                        other => {
-                            return Err(KernelError::TypeMismatch {
-                                expected: shape_of(&CoreTerm::Universe(
-                                    crate::UniverseLevel::Concrete(0),
-                                )),
-                                actual: shape_of(other),
-                            });
-                        }
-                    },
-                    other => return Err(KernelError::NotAFunction(shape_of(other))),
+                let path_ty = normalize_in(&self.infer(ctx, path)?, axioms, inductives);
+                let CoreTerm::PathTy {
+                    carrier,
+                    lhs: start,
+                    rhs: end,
+                } = path_ty
+                else {
+                    return Err(KernelError::TypeMismatch {
+                        expected: CoreType::Path,
+                        actual: shape_of(&path_ty),
+                    });
                 };
-                // V3.0 weak path / endpoint check — the path slot is
-                // either (a) a term of type PathTy<B>(b₀, b₁) (proper
-                // user-written PathOver) or (b) a path-shape annotation
-                // (a PathTy term used by the HIT eliminator emitter as
-                // a stand-in for the path-constructor itself; the
-                // emitter doesn't have access to a typed first-class
-                // constructor reference). Both shapes pass the kernel
-                // typing rule; the tighter "path is a PathTy-typed
-                // term, NOT a PathTy-shaped type expression" check is
-                // V3.1 follow-up alongside path-ctor β-rule.
-                let _ = self.infer(ctx, path)?;
-                let _ = self.infer(ctx, lhs)?;
-                let _ = self.infer(ctx, rhs)?;
-                Ok(CoreTerm::Universe(result_universe))
+                let motive_ty = normalize_in(&self.infer(ctx, motive)?, axioms, inductives);
+                let CoreTerm::Pi {
+                    domain, codomain, ..
+                } = motive_ty
+                else {
+                    return Err(KernelError::NotAFunction(shape_of(&motive_ty)));
+                };
+                require_conversion(&domain, &carrier, axioms, inductives)?;
+                let level = universe_level(&normalize_in(&codomain, axioms, inductives))?;
+                let left_fiber = CoreTerm::App(motive.clone(), start);
+                let right_fiber = CoreTerm::App(motive.clone(), end);
+                require_conversion(&self.infer(ctx, lhs)?, &left_fiber, axioms, inductives)?;
+                require_conversion(&self.infer(ctx, rhs)?, &right_fiber, axioms, inductives)?;
+                Ok(CoreTerm::Universe(level))
             }
             // HComp: `hcomp φ walls base` produces the i1-face of the
             // composition cube whose base is `base` (its i0-face) and

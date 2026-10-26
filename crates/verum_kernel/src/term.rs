@@ -125,13 +125,10 @@ pub enum CoreTerm {
     ///  Γ ⊢ PathOver(motive, p, lhs, rhs) : U
     /// ```
     ///
-    /// **Degenerate-case reduction:** when `lhs == rhs` structurally
-    /// AND the endpoint-images of `p` coincide (e.g., closed loops
-    /// like `Loop : Base ↝ Base` in S¹), `PathOver(motive, p, lhs,
-    /// rhs)` is definitionally equal to `PathTy(motive(b₀), lhs,
-    /// rhs)` — the kernel exposes both and the typechecker
-    /// computes the conversion when the homogeneous shape is
-    /// expected by a downstream check.
+    /// **Reflexive reduction:** `PathOver(motive, Refl(base), lhs, rhs)`
+    /// reduces to `PathTy(motive(base), lhs, rhs)`. A neutral loop whose
+    /// endpoints happen to coincide does not authorize this conversion.
+    /// The path field carries evidence, never a path-type annotation.
     ///
     /// References:
     /// * HoTT Book §6.2 (Function spaces over identifications).

@@ -415,7 +415,7 @@ impl<'a> NormaliseCtx<'a> {
 ///   * β at App                   — always
 ///   * Σ-projection at Fst/Snd    — always
 ///   * QuotElim β                 — always
-///   * PathOver-degenerate        — always (closed-loop collapse)
+///   * PathOver-reflexive         — only actual reflexivity evidence
 ///   * HComp face-bot / face-top  — always
 ///   * Transp i1 / Refl / const   — always
 ///   * Glue face-bot / face-top   — always
@@ -533,8 +533,8 @@ fn normalize_core(term: &CoreTerm, ctx: &mut NormaliseCtx<'_>) -> CoreTerm {
             rhs: Heap::new(normalize_core(rhs, ctx)),
         },
 
-        // PathOver — degenerate-case rewrite to homogeneous PathTy
-        // when the constructor-path's endpoints coincide.
+        // PathOver over reflexivity reduces to a homogeneous path. Equal
+        // endpoints alone do not identify a nontrivial loop with reflexivity.
         CoreTerm::PathOver {
             motive,
             path,
@@ -545,12 +545,8 @@ fn normalize_core(term: &CoreTerm, ctx: &mut NormaliseCtx<'_>) -> CoreTerm {
             let rhs_n = normalize_core(rhs, ctx);
             let path_n = normalize_core(path, ctx);
             let motive_n = normalize_core(motive, ctx);
-            if let CoreTerm::PathTy {
-                lhs: pl, rhs: pr, ..
-            } = &path_n
-                && structural_eq(pl, pr)
-            {
-                let carrier = CoreTerm::App(Heap::new(motive_n.clone()), pl.clone());
+            if let CoreTerm::Refl(point) = &path_n {
+                let carrier = CoreTerm::App(Heap::new(motive_n.clone()), point.clone());
                 return CoreTerm::PathTy {
                     carrier: Heap::new(normalize_core(&carrier, ctx)),
                     lhs: Heap::new(lhs_n),
@@ -801,7 +797,7 @@ fn normalize_core(term: &CoreTerm, ctx: &mut NormaliseCtx<'_>) -> CoreTerm {
 ///   * β-redexes at App                — `(λx. body) arg → body[arg/x]`
 ///   * Σ-projection β at Fst/Snd       — `Fst(a, _) → a` etc.
 ///   * QuotElim β                      — `quot_elim([t]_~, _, c) → c(t)`
-///   * PathOver-degenerate              — closed-loop collapse to PathTy
+///   * PathOver-reflexive               — reflexivity evidence reduces to PathTy
 ///   * Cubical reductions               — HComp / Transp / Glue face rules
 ///
 /// Used by [`definitional_eq`] (the main consumer) and by the
