@@ -12,7 +12,7 @@ def main():
     parser.add_argument('--report', type=Path, required=True)
     args = parser.parse_args()
     modules = ['TypedPrograms', 'FiniteCode', 'CheckedPairs', 'FiniteExecution',
-               'ObserverAdmission', 'ObserverInterfaces', 'FiniteExecutionControls']
+               'ObserverAdmission', 'ObserverInterfaces', 'FiniteExecutionProjection', 'FiniteExecutionControls']
     sources = [ROOT / 'VerumExternalReplay' / (m + '.lean') for m in modules]
     sources += [Path(__file__).resolve(), ROOT / 'check_typed_programs.py',
                 ROOT / 'lean-toolchain', ROOT / 'lakefile.toml']
@@ -20,11 +20,13 @@ def main():
     require_success(run('lake', 'build', 'VerumExternalReplay.FiniteExecutionControls',
                         'VerumExternalReplay.ObserverInterfaces'))
     positive = check(ROOT / 'VerumExternalReplay/FiniteExecutionControls.lean')
+    projection = check(ROOT / 'VerumExternalReplay/FiniteExecutionProjection.lean')
     header = '''import VerumExternalReplay.FiniteExecutionControls
 open CheckedPairs FiniteExecution ObserverAdmission FiniteExecutionControls
 set_option warningAsError true
 '''
     controls = {
+        'budget_stop_does_not_imply_undefined': ('FiniteCode.run (FiniteExecutionProjection.partialApply apply) (add 2 3) [] = none', 'budget_does_not_refute_value.2'),
         'budget_is_not_undefined': ('(execute apply (add 18446744073709551615 1) ⟨some 0, 1000⟩ []).stop = .undefined', 'dispatch_refusal'),
         'refused_dispatch_is_not_counted': ('(execute apply (add 18446744073709551615 1) ⟨some 0, 1000⟩ []).usage.dispatch = 1', 'dispatch_refusal'),
         'exact_callee_path': ('(execute apply noCalleeOutput ⟨none, 1000⟩ []).halt = some ⟨[0], .missingCalleeOutput⟩', 'child_output_position'),
@@ -44,7 +46,8 @@ set_option warningAsError true
         raise RuntimeError('Operational model sources changed during verification')
     args.report.write_text(json.dumps({'scope': 'Finite operational and observer admission model controls; '
         'foreign implementation conformance requires frozen actual observations',
-        'sources': before, 'positive': positive, 'negative': negative}, indent=2) + '\n')
+        'sources': before, 'positive': positive, 'universal_projection': projection,
+        'negative': negative}, indent=2) + '\n')
     print(f'Operational model checked; {len(negative)} intended proof rejections')
 
 

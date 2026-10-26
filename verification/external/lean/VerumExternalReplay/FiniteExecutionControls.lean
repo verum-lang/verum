@@ -1,5 +1,6 @@
 import VerumExternalReplay.CheckedPairs
 import VerumExternalReplay.ObserverAdmission
+import VerumExternalReplay.FiniteExecutionProjection
 
 namespace FiniteExecutionControls
 open CheckedPairs FiniteExecution ObserverAdmission
@@ -34,6 +35,19 @@ theorem dispatch_refusal : execute apply (add 18446744073709551615 1) ⟨some 0,
 theorem work_refusal : execute apply (add 18446744073709551615 1) ⟨none, 0⟩ [] =
     ⟨.budget, [], ⟨0, 0, 0, 0⟩, some ⟨[0], .allowance⟩, some ⟨0, 0, 1⟩⟩ := by
   unfold add; reduce_execution
+
+theorem budget_does_not_refute_value :
+    (execute apply (add 2 3) ⟨some 0, 1000⟩ []).stop = .budget ∧
+    FiniteCode.run (FiniteExecutionProjection.partialApply apply) (add 2 3) [] = some (.nat 5) := by
+  constructor
+  · unfold add; reduce_execution
+  · unfold add; reduce_finite_code
+
+theorem universal_projection_applied :
+    FiniteCode.run (FiniteExecutionProjection.partialApply apply) lexical [] = some (.nat 5) := by
+  have h := FiniteExecutionProjection.execute_projection apply lexical ⟨some 8, 1000⟩ [] 0
+  rw [lexical_receipt] at h
+  exact h (by decide)
 
 def pack : Code := .mk [⟨.primitive .packByte, [.input 0, .input 1], none⟩] none []
 def binding : Binding Nat := ⟨7, 2, [.external 0, .external 1]⟩
