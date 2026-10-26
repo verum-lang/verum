@@ -203,6 +203,8 @@ jobs:
             --report native-partial-observers-acceptance.json
           python3 verification/external/lean/check_partial_observers.py \
             --report partial-observers-acceptance.json
+          python3 verification/external/lean/check_finite_code.py \
+            --report finite-code-acceptance.json
 
       - name: Indexed family source and certificate replay
         run: |
