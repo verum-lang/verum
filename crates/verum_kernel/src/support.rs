@@ -979,32 +979,45 @@ pub fn convert_eps_to_md_omega(eps: &EpsInvariant) -> crate::OrdinalDepth {
     }
 }
 
-/// definitional (β-aware) equality on [`CoreTerm`] values.
-///
-/// Normalises both sides via [`normalize`] and then performs
-/// structural comparison. Two terms compare equal under
-/// `definitional_eq` iff they have the same β-normal form.
-///
-/// This is the right equality for typing-rule conversion
-/// checks: PathTy endpoint matching, App domain matching, etc.
-/// Replacing [`structural_eq`] with this is monotone (only
-/// widens the accept set — every pair admitted by structural_eq
-/// is admitted by definitional_eq) and sound (the SN-fragment
-/// invariant guarantees normal forms are unique up to α).
+/// Substitute a declaration's parameters simultaneously. Fresh intermediate
+/// names prevent one replacement from rewriting another replacement's free
+/// variables; ordinary substitution remains the capture-avoidance authority.
+pub fn substitute_all(term: &CoreTerm, replacements: &[(Text, CoreTerm)]) -> CoreTerm {
+    let mut used = free_vars(term);
+    for (name, value) in replacements {
+        used.insert(name.clone());
+        used.extend(free_vars(value));
+    }
+    let mut result = term.clone();
+    let mut staged = List::new();
+    for (name, value) in replacements {
+        let mut index = 0;
+        let fresh = loop {
+            let candidate = Text::from(format!("{name}_subst{index}"));
+            if used.insert(candidate.clone()) { break candidate; }
+            index += 1;
+        };
+        result = substitute(&result, name.as_str(), &CoreTerm::Var(fresh.clone()));
+        staged.push((fresh, value));
+    }
+    for (name, value) in staged {
+        result = substitute(&result, name.as_str(), value);
+    }
+    result
+}
+
+/// Definitional equality modulo normalization and alpha-renaming.
+/// Free variables retain their identity; bound variables are compared by
+/// lexical binding position, including shadowing.
 pub fn definitional_eq(a: &CoreTerm, b: &CoreTerm) -> bool {
-    // Fast-path: same structural hash → trivially equal. Same
-    // optimization as `definitional_eq_with_axioms` (#43); skips
-    // both normalize calls when terms are syntactically identical.
-    // Dominant case during mount-core typechecking where the same
-    // Type / Bool / Maybe<T> appears repeatedly.
-    if crate::normalize_cache::StructuralHash::of(a)
-        == crate::normalize_cache::StructuralHash::of(b)
-    {
+    // A structural comparison is both cheaper than formatting/hashing the
+    // entire trees and exact: a digest match is not an equality proof.
+    if a == b {
         return true;
     }
     let a_norm = normalize(a);
     let b_norm = normalize(b);
-    a_norm == b_norm
+    crate::equivalence::alpha_equivalent(&a_norm, &b_norm)
 }
 
 /// δ-reduction-aware normaliser. Unfolds transparent
@@ -1111,33 +1124,12 @@ pub fn definitional_eq_with_axioms(
     b: &CoreTerm,
     axioms: &crate::AxiomRegistry,
 ) -> bool {
-    // Fast-path: structural hash equality short-circuits the
-    // double-normalize dance for trivially-equal terms (#100, task #43).
-    //
-
-    // In practice mount-core typechecking calls definitional_eq with
-    // the SAME term on both sides constantly — `Int =? Int`,
-    // `Bool =? Bool`, refinement-pred bodies that haven't been
-    // β-reduced yet but are structurally identical. Skipping both
-    // normalize calls saves O(N) tree walk + substitution per
-    // skipped pair; when both inputs are the same Rust `&CoreTerm`
-    // this is a near-zero op (the hash result is cached implicitly
-    // because `format!` produces the same bytes).
-    //
-
-    // Axiom-registry independence: if structural_eq holds, normalize
-    // would produce the same result regardless of axioms (δ-reduction
-    // is a function of the term and the axiom set; identical terms
-    // always δ-reduce identically given the same registry). So we
-    // don't need to fold the axiom fingerprint into the fast path.
-    if crate::normalize_cache::StructuralHash::of(a)
-        == crate::normalize_cache::StructuralHash::of(b)
-    {
+    if a == b {
         return true;
     }
     let a_norm = normalize_with_axioms(a, axioms);
     let b_norm = normalize_with_axioms(b, axioms);
-    a_norm == b_norm
+    crate::equivalence::alpha_equivalent(&a_norm, &b_norm)
 }
 
 /// Early-exit free-variable test (#100, task #44).

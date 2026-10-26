@@ -725,6 +725,8 @@ pub use differential::{
     differential_test_rule, run_differential_test, run_differential_test_with_verum,
 };
 
+mod equivalence;
+
 /// Supporting kernel operations — `shape_of`, `substitute`,
 /// `structural_eq`, `replay_smt_cert`. Split . The
 /// kernel's "infrastructure layer": these don't implement a
@@ -735,7 +737,7 @@ pub use support::{
     EpsInvariant, NORMALIZE_STEP_LIMIT, convert_eps_to_md_omega, definitional_eq,
     definitional_eq_with_axioms, free_vars, is_face_bot, is_face_top, is_interval_one, normalize,
     normalize_with_axioms, normalize_with_inductives, replay_smt_cert,
-    replay_smt_cert_with_obligation, shape_of, structural_eq, substitute,
+    replay_smt_cert_with_obligation, shape_of, structural_eq, substitute, substitute_all,
 };
 
 /// NormalizeCache (#100, task #42) — DashMap memo for normalize
