@@ -83,7 +83,7 @@
 /// K-Universe-Ascent rule + K-Refine-omega rule shipped
 /// B-series soundness
 /// fixes. Bump on every kernel-rule addition.
-pub const VVA_VERSION: &str = "2.6.0";
+pub const VVA_VERSION: &str = "3.0.0";
 
 pub mod proof_checker;
 pub mod proof_checker_nbe; // NbE-based second algorithmic kernel
@@ -762,7 +762,7 @@ pub use axiom::{
 /// shells callers use to gate proof admission.
 pub mod infer;
 pub use infer::{
-    check, infer, infer_with_full_context, infer_with_inductives, verify, verify_full,
+    check, infer, infer_with_full_context, infer_with_inductives, verify, verify_full, verify_with_inductives,
 };
 
 /// Core syntactic surface — `CoreTerm`, `CoreType`, `UniverseLevel`.

@@ -1,22 +1,6 @@
-//! HIT path-constructor β-rule
-//! tests.
-//!
-//! Per `K-Elim` extension: when the eliminator's scrutinee is a
-//! bare path-ctor reference (a 1-cell or higher cell of the
-//! surrounding inductive), the eliminator β-reduces to the
-//! corresponding case branch directly. The case is the user-
-//! supplied path-image — already shaped as a `PathOver` /
-//! homogeneous `PathTy` value of the right type per the
-//! eliminator-emit convention.
-//!
-//! Coverage:
-//!  • S¹ Loop reduces to case_Loop (closed-loop branch).
-//!  • Interval Seg reduces to case_Seg (heterogeneous PathOver).
-//!  • Suspension merid reduces to case_merid.
-//!  • Path-ctor β fires AFTER point-ctor cases in the case list
-//!  (cases.len() = point_count + path_count layout).
-//!  • Out-of-range scrutinee leaves the term neutral.
-//!  • Mixed: nested point + path β within a single normalisation.
+//! Path names are local variables, not evidence of a checked higher cell.
+//! Until path introduction and coherence are represented and checked, a bare
+//! variable must remain neutral even when it shares a declaration's path name.
 
 use verum_common::{Heap, List, Text};
 use verum_kernel::{
@@ -44,7 +28,7 @@ fn elim(scrutinee: CoreTerm, cases: Vec<CoreTerm>) -> CoreTerm {
 }
 
 #[test]
-fn s1_loop_path_ctor_beta_reduces_to_case_loop() {
+fn s1_loop_spelling_does_not_reduce_a_local_variable() {
     // S¹ = Base | Loop : Base ↝ Base
     // cases = [case_Base, case_Loop]
     let mut reg = InductiveRegistry::new();
@@ -62,15 +46,14 @@ fn s1_loop_path_ctor_beta_reduces_to_case_loop() {
 
     let term = elim(var("Loop"), vec![var("case_Base"), var("case_Loop")]);
     let normal = normalize_with_inductives(&term, &reg);
-    assert!(
-        matches!(&normal, CoreTerm::Var(n) if n.as_str() == "case_Loop"),
-        "S¹ elim(Loop) must β-reduce to case_Loop; got {:?}",
-        normal
+    assert_eq!(
+        normal, term,
+        "path spelling cannot establish constructor identity"
     );
 }
 
 #[test]
-fn interval_seg_path_ctor_beta_reduces_to_case_seg() {
+fn interval_segment_spelling_does_not_reduce_a_local_variable() {
     // Interval = Zero | One | Seg : Zero ↝ One
     // cases = [case_Zero, case_One, case_Seg]
     let mut reg = InductiveRegistry::new();
@@ -91,15 +74,14 @@ fn interval_seg_path_ctor_beta_reduces_to_case_seg() {
         vec![var("case_Zero"), var("case_One"), var("case_Seg")],
     );
     let normal = normalize_with_inductives(&term, &reg);
-    assert!(
-        matches!(&normal, CoreTerm::Var(n) if n.as_str() == "case_Seg"),
-        "Interval elim(Seg) must β-reduce to case_Seg; got {:?}",
-        normal
+    assert_eq!(
+        normal, term,
+        "path spelling cannot establish constructor identity"
     );
 }
 
 #[test]
-fn suspension_merid_path_ctor_beta_reduces_to_case_merid() {
+fn suspension_meridian_spelling_does_not_reduce_a_local_variable() {
     // Suspension = North | South | merid : North ↝ South
     let mut reg = InductiveRegistry::new();
     let susp = RegisteredInductive::new(
@@ -119,17 +101,15 @@ fn suspension_merid_path_ctor_beta_reduces_to_case_merid() {
         vec![var("case_north"), var("case_south"), var("case_merid")],
     );
     let normal = normalize_with_inductives(&term, &reg);
-    assert!(
-        matches!(&normal, CoreTerm::Var(n) if n.as_str() == "case_merid"),
-        "Susp elim(merid) must β-reduce to case_merid; got {:?}",
-        normal
+    assert_eq!(
+        normal, term,
+        "path spelling cannot establish constructor identity"
     );
 }
 
 #[test]
-fn path_ctor_beta_picks_correct_index_among_multiple_paths() {
-    // HIT with multiple path ctors: cases must select the right
-    // one by declaration order.
+fn multiple_path_names_remain_local_variables() {
+    // Multiple declared paths do not turn local variables into path constructors.
     //
 
     // Torus-like: Base | loop_a : Base↝Base | loop_b : Base↝Base
@@ -156,18 +136,16 @@ fn path_ctor_beta_picks_correct_index_among_multiple_paths() {
 
     let term_a = elim(var("loop_a"), cases.clone());
     let normal_a = normalize_with_inductives(&term_a, &reg);
-    assert!(
-        matches!(&normal_a, CoreTerm::Var(n) if n.as_str() == "case_loop_a"),
-        "elim(loop_a) must β-reduce to case_loop_a; got {:?}",
-        normal_a
+    assert_eq!(
+        normal_a, term_a,
+        "path spelling cannot establish constructor identity"
     );
 
     let term_b = elim(var("loop_b"), cases.clone());
     let normal_b = normalize_with_inductives(&term_b, &reg);
-    assert!(
-        matches!(&normal_b, CoreTerm::Var(n) if n.as_str() == "case_loop_b"),
-        "elim(loop_b) must β-reduce to case_loop_b; got {:?}",
-        normal_b
+    assert_eq!(
+        normal_b, term_b,
+        "path spelling cannot establish constructor identity"
     );
 }
 
@@ -223,7 +201,7 @@ fn path_ctor_beta_unrelated_var_stays_neutral() {
 }
 
 #[test]
-fn path_ctor_beta_fires_after_point_ctor_offset_layout() {
+fn path_name_does_not_select_a_branch_by_roster_offset() {
     // HIT with TWO point ctors and ONE path ctor:
     //  cases = [point0, point1, path0]
     // Path-ctor case index = point_count (2) + path_idx (0) = 2.
@@ -240,14 +218,12 @@ fn path_ctor_beta_fires_after_point_ctor_offset_layout() {
     ));
     reg.register(interval).unwrap();
 
-    // The path case is at index 2 — verify β picks it, not the
-    // point cases at 0 or 1.
+    // The old spelling-based reduction incorrectly selected index 2 here.
     let cases = vec![var("p0"), var("p1"), var("path_seg")];
     let term = elim(var("Seg"), cases);
     let normal = normalize_with_inductives(&term, &reg);
-    assert!(
-        matches!(&normal, CoreTerm::Var(n) if n.as_str() == "path_seg"),
-        "path β must select cases[point_count + path_idx]; got {:?}",
-        normal
+    assert_eq!(
+        normal, term,
+        "path spelling cannot establish constructor identity"
     );
 }

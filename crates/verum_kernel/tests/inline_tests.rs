@@ -971,14 +971,8 @@ fn glue_rejects_non_universe_carrier() {
     assert!(res.is_err());
 }
 
-/// `elim e motive cases : motive e` — shape-level Elim rule.
-///
-/// Elim now requires motive's TYPE be a Π and scrutinee's type to match the Π's
-/// domain. Result remains the syntactic `App(motive, scrutinee)`
-/// (β-reduction is downstream's job; returning the codomain would
-/// give the type's TYPE — i.e., a universe — instead).
 #[test]
-fn elim_types_to_motive_applied_to_scrutinee() {
+fn elim_requires_a_registered_inductive_declaration() {
     let mut reg = AxiomRegistry::new();
     let tt = tt_axiom(&mut reg);
     // motive : Unit → Type(0) — represented as λ(u:Unit). Unit
@@ -992,14 +986,8 @@ fn elim_types_to_motive_applied_to_scrutinee() {
         motive: Heap::new(motive.clone()),
         cases: List::new(),
     };
-    let ty = infer(&Context::new(), &e, &reg).unwrap();
-    match ty {
-        CoreTerm::App(f, a) => {
-            assert_eq!(*f, motive);
-            assert_eq!(*a, tt);
-        }
-        _ => panic!("expected App (motive scrutinee)"),
-    }
+    assert!(matches!(infer(&Context::new(), &e, &reg),
+        Err(verum_kernel::KernelError::UnknownInductive(_))));
 }
 
 /// V1 — Elim with a non-Π-typed motive must reject. Pre-V1 the

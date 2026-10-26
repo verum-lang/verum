@@ -862,11 +862,9 @@ impl KernelRule {
                 "V1",
                 Some("Stratified universe ascent"),
             ),
-            KernelRule::KRoundTrip => m(
-                "K-Round-Trip",
-                "V0",
-                Some("OC / DC translation round-trip"),
-            ),
+            KernelRule::KRoundTrip => {
+                m("K-Round-Trip", "V0", Some("OC / DC translation round-trip"))
+            }
             KernelRule::KEpsilonOf => m("K-EpsilonOf", "V0", EPS_ALPHA),
             KernelRule::KAlphaOf => m("K-AlphaOf", "V0", EPS_ALPHA),
             KernelRule::KModalBox => m("K-ModalBox", "V0", MODAL),
@@ -1106,8 +1104,8 @@ impl Ord for KernelRule {
 ///
 /// This is a **best-effort** typing-derivation tracer:
 ///
-///  • Every CoreTerm constructor maps to a unique
-///  [`KernelRule`] (by spec §4.4a's 1-to-1 correspondence).
+///  • Supported constructors map to a [`KernelRule`]. Registered inductive
+///  constructors require declaration-aware tracing and return `None` here.
 ///  • For composite constructors (App / Pair / Refl / etc.)
 ///  the function recurses to build premise sub-trees.
 ///  • The conclusion is the term being typed; the inferred_ty
@@ -1117,9 +1115,8 @@ impl Ord for KernelRule {
 ///  tree (the caller can re-run `infer` to get the precise
 ///  error).
 ///
-/// Spec coverage in V1: every rule in §4.4a maps to a node.
-/// Refinement-of-refinement-of-X recursively generates K-Refine
-/// nested premises, faithfully recording the typing path.
+/// This is diagnostic structure, not independent proof replay. In particular,
+/// it does not certify the registered-inductive checking API.
 pub fn record_inference(
     ctx: &crate::Context,
     term: &CoreTerm,
@@ -1129,7 +1126,7 @@ pub fn record_inference(
         Ok(t) => t,
         Err(_) => return None,
     };
-    let (rule, premises) = inference_rule_and_premises(ctx, term, axioms);
+    let (rule, premises) = inference_rule_and_premises(ctx, term, axioms)?;
     Some(KernelProofNode {
         rule,
         conclusion: term.clone(),
@@ -1151,10 +1148,14 @@ fn inference_rule_and_premises(
     ctx: &crate::Context,
     term: &CoreTerm,
     axioms: &crate::AxiomRegistry,
-) -> (KernelRule, List<KernelProofNode>) {
+) -> Option<(KernelRule, List<KernelProofNode>)> {
     let mut premises: List<KernelProofNode> = List::new();
     let rule = match term {
         CoreTerm::Var(_) => KernelRule::KVar,
+        // This registry-free tracing API cannot reconstruct an inductive
+        // declaration's derivation. It must not label a constructor as a
+        // local-variable rule or claim external replay coverage.
+        CoreTerm::Constructor { .. } => return None,
         CoreTerm::Universe(_) => KernelRule::KUniv,
         CoreTerm::Pi {
             domain, codomain, ..
@@ -1435,7 +1436,7 @@ fn inference_rule_and_premises(
             KernelRule::KSharp
         }
     };
-    (rule, premises)
+    Some((rule, premises))
 }
 
 #[cfg(test)]

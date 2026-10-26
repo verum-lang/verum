@@ -88,17 +88,41 @@ fn tree_is_strictly_positive() {
 }
 
 #[test]
-fn rose_tree_under_named_inductive_is_strictly_positive() {
-    // type Rose<A> = Node(A, List<Rose<A>>)
-    // Containing the type inside a parametrised List is OK because the
-    // walker descends into Inductive args and List itself is strictly
-    // positive in its arg.
+fn rose_tree_uses_the_registered_containers_checked_variance() {
     let rose_a = ind_with("Rose", vec![CoreTerm::Var(Text::from("A"))]);
-    let list_of_rose = ind_with("List", vec![rose_a]);
-    assert!(
-        check_strict_positivity("Rose", &list_of_rose, &ctx("Node", 1)).is_ok(),
-        "Rose under List<…> is strictly positive"
-    );
+    let list_of_rose = ind_with("Container", vec![rose_a]);
+    // An unregistered container's spelling provides no variance evidence.
+    assert!(check_strict_positivity("Rose", &list_of_rose, &ctx("Node", 1)).is_err());
+    let mut registry = InductiveRegistry::new();
+    registry
+        .register(RegisteredInductive::new(
+            Text::from("Container"),
+            List::from_iter([Text::from("Item")]),
+            List::from_iter([
+                ConstructorSig {
+                    name: Text::from("Nil"),
+                    arg_types: List::new(),
+                },
+                ConstructorSig {
+                    name: Text::from("Cons"),
+                    arg_types: List::from_iter([
+                        CoreTerm::Var(Text::from("Item")),
+                        ind_with("Container", vec![CoreTerm::Var(Text::from("Item"))]),
+                    ]),
+                },
+            ]),
+        ))
+        .unwrap();
+    registry
+        .register(RegisteredInductive::new(
+            Text::from("Rose"),
+            List::from_iter([Text::from("A")]),
+            List::from_iter([ConstructorSig {
+                name: Text::from("Node"),
+                arg_types: List::from_iter([CoreTerm::Var(Text::from("A")), list_of_rose]),
+            }]),
+        ))
+        .unwrap();
 }
 
 #[test]
@@ -261,4 +285,53 @@ fn arrow_in_codomain_position_is_admitted() {
         check_strict_positivity("Curried", &arr, &ctx("Curry", 0)).is_ok(),
         "Curried in arrow codomain (positive position) is admitted"
     );
+}
+
+#[test]
+fn familiar_container_names_do_not_hide_negative_parameter_variance() {
+    let mut registry = InductiveRegistry::new();
+    // This declaration is contravariant despite the name "List".
+    registry
+        .register(RegisteredInductive::new(
+            Text::from("List"),
+            List::from_iter([Text::from("A")]),
+            List::from_iter([ConstructorSig {
+                name: Text::from("Wrap"),
+                arg_types: List::from_iter([pi(CoreTerm::Var(Text::from("A")), ind("Result"))]),
+            }]),
+        ))
+        .unwrap();
+    let bad = RegisteredInductive::new(
+        Text::from("Bad"),
+        List::new(),
+        List::from_iter([ConstructorSig {
+            name: Text::from("Intro"),
+            arg_types: List::from_iter([ind_with("List", vec![ind("Bad")])]),
+        }]),
+    );
+    assert!(matches!(
+        registry.register(bad),
+        Err(KernelError::PositivityViolation { .. })
+    ));
+}
+
+#[test]
+fn opaque_type_application_does_not_assume_parameter_positivity() {
+    let application = CoreTerm::App(
+        Heap::new(CoreTerm::Var(Text::from("F"))),
+        Heap::new(ind("Bad")),
+    );
+    assert!(check_strict_positivity("Bad", &application, &ctx("Intro", 0)).is_err());
+}
+
+#[test]
+fn negative_occurrences_cannot_hide_in_previously_opaque_children() {
+    let hidden = CoreTerm::ModalBox(Heap::new(ind("Bad")));
+    assert!(check_strict_positivity("Bad", &pi(hidden, type0()), &ctx("Intro", 0)).is_err());
+    let hidden_endpoint = CoreTerm::PathTy {
+        carrier: Heap::new(type0()),
+        lhs: Heap::new(ind("Bad")),
+        rhs: Heap::new(ind("Bad")),
+    };
+    assert!(check_strict_positivity("Bad", &hidden_endpoint, &ctx("Intro", 0)).is_err());
 }

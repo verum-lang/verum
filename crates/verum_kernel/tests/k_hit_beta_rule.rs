@@ -35,6 +35,21 @@ fn var(name: &str) -> CoreTerm {
     CoreTerm::Var(Text::from(name))
 }
 
+fn ctor(parent: &str, name: &str, args: List<CoreTerm>) -> CoreTerm {
+    CoreTerm::Constructor {
+        inductive: Text::from(parent),
+        name: Text::from(name),
+        params: List::new(),
+        args,
+    }
+}
+fn zero() -> CoreTerm {
+    ctor("Nat", "Zero", List::new())
+}
+fn succ(value: CoreTerm) -> CoreTerm {
+    ctor("Nat", "Succ", List::from_iter([value]))
+}
+
 fn app(f: CoreTerm, a: CoreTerm) -> CoreTerm {
     CoreTerm::App(Heap::new(f), Heap::new(a))
 }
@@ -62,7 +77,7 @@ fn bool_elim_beta_reduces_true_to_first_case() {
     reg.register(bool_ind).unwrap();
 
     let term = elim(
-        var("True"),
+        ctor("Bool", "True", List::new()),
         var("motive"),
         vec![var("case_T"), var("case_F")],
     );
@@ -85,7 +100,7 @@ fn bool_elim_beta_reduces_false_to_second_case() {
     .unwrap();
 
     let term = elim(
-        var("False"),
+        ctor("Bool", "False", List::new()),
         var("motive"),
         vec![var("case_T"), var("case_F")],
     );
@@ -152,7 +167,7 @@ fn nat_elim_beta_reduces_zero_to_zero_case() {
     reg.register(nat_inductive()).unwrap();
 
     let term = elim(
-        var("Zero"),
+        zero(),
         var("motive"),
         vec![var("case_zero"), var("case_succ")],
     );
@@ -173,7 +188,7 @@ fn nat_elim_beta_reduces_succ_with_recursor_call() {
     reg.register(nat_inductive()).unwrap();
 
     let term = elim(
-        app(var("Succ"), var("Zero")),
+        succ(zero()),
         var("motive"),
         vec![var("case_zero"), var("case_succ")],
     );
@@ -186,7 +201,9 @@ fn nat_elim_beta_reduces_succ_with_recursor_call() {
         panic!("expected inner App, got {:?}", outer_f.as_ref());
     };
     assert!(matches!(inner_f.as_ref(), CoreTerm::Var(n) if n.as_str() == "case_succ"));
-    assert!(matches!(inner_a.as_ref(), CoreTerm::Var(n) if n.as_str() == "Zero"));
+    assert!(
+        matches!(inner_a.as_ref(), CoreTerm::Constructor { inductive, name, args, .. } if inductive.as_str() == "Nat" && name.as_str() == "Zero" && args.is_empty())
+    );
     // Outer arg must be the recursor call's β-reduction = case_zero.
     assert!(
         matches!(outer_a.as_ref(), CoreTerm::Var(n) if n.as_str() == "case_zero"),
@@ -204,7 +221,7 @@ fn nat_elim_beta_reduces_succ_succ_with_two_recursor_calls() {
     reg.register(nat_inductive()).unwrap();
 
     let term = elim(
-        app(var("Succ"), app(var("Succ"), var("Zero"))),
+        succ(succ(zero())),
         var("motive"),
         vec![var("case_zero"), var("case_succ")],
     );
@@ -219,7 +236,7 @@ fn nat_elim_beta_reduces_succ_succ_with_two_recursor_calls() {
     };
     assert!(matches!(inner_f.as_ref(), CoreTerm::Var(n) if n.as_str() == "case_succ"));
     assert!(
-        matches!(inner_a.as_ref(), CoreTerm::App(_, _)),
+        matches!(inner_a.as_ref(), CoreTerm::Constructor { name, args, .. } if name.as_str() == "Succ" && args.len() == 1),
         "outer arg₀ should be Succ(Zero) literal"
     );
     // outer_a is the recursor-call image: App(App(case_succ, Zero), case_zero)
@@ -233,7 +250,9 @@ fn nat_elim_beta_reduces_succ_succ_with_two_recursor_calls() {
         panic!();
     };
     assert!(matches!(rec_f_inner.as_ref(), CoreTerm::Var(n) if n.as_str() == "case_succ"));
-    assert!(matches!(rec_f_arg.as_ref(), CoreTerm::Var(n) if n.as_str() == "Zero"));
+    assert!(
+        matches!(rec_f_arg.as_ref(), CoreTerm::Constructor { inductive, name, args, .. } if inductive.as_str() == "Nat" && name.as_str() == "Zero" && args.is_empty())
+    );
     assert!(matches!(rec_a.as_ref(), CoreTerm::Var(n) if n.as_str() == "case_zero"));
 }
 
@@ -258,7 +277,7 @@ fn s1_elim_beta_reduces_base_to_first_case() {
     reg.register(s1).unwrap();
 
     let term = elim(
-        var("Base"),
+        ctor("S1", "Base", List::new()),
         var("motive"),
         vec![var("case_base"), var("case_loop")],
     );
@@ -287,20 +306,21 @@ fn elim_with_too_few_cases_remains_neutral() {
     .unwrap();
 
     // Only ONE case provided where Bool needs two — keep neutral.
-    let term = elim(var("True"), var("motive"), vec![var("only_case")]);
-    let normal = normalize_with_inductives(&term, &reg);
-    // Cases.len() = 1, but ctor_idx of True = 0 < 1, so the rule
-    // SHOULD fire (only out-of-bounds case is when ctor_idx >= cases.len()).
-    // True is at idx 0, cases has 1 entry, so 0 < 1 ⇒ β fires.
-    assert!(
-        matches!(&normal, CoreTerm::Var(n) if n.as_str() == "only_case"),
-        "True is at idx 0 < cases.len()=1 so β must fire to only_case; got {:?}",
-        normal
+    let term = elim(
+        ctor("Bool", "True", List::new()),
+        var("motive"),
+        vec![var("only_case")],
     );
+    let normal = normalize_with_inductives(&term, &reg);
+    assert_eq!(normal, term, "an incomplete case family must stay neutral");
 
     // Now the actual mismatch case: scrutinee is False (idx 1) with
     // only one case → out of bounds → neutral.
-    let term = elim(var("False"), var("motive"), vec![var("only_case")]);
+    let term = elim(
+        ctor("Bool", "False", List::new()),
+        var("motive"),
+        vec![var("only_case")],
+    );
     let normal = normalize_with_inductives(&term, &reg);
     assert!(
         matches!(&normal, CoreTerm::Elim { .. }),

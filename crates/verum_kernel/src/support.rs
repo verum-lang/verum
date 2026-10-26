@@ -40,12 +40,7 @@ pub fn shape_of(term: &CoreTerm) -> CoreType {
 /// each itself linear in tree size.  In practice the loop exits in
 /// the first iteration because the synthetic-suffix names rarely
 /// collide with user-source identifiers.
-fn fresh_binder_name(
-    base: &str,
-    value: &CoreTerm,
-    body: &CoreTerm,
-    blocked_name: &str,
-) -> Text {
+fn fresh_binder_name(base: &str, value: &CoreTerm, body: &CoreTerm, blocked_name: &str) -> Text {
     let mut counter: u64 = 0;
     loop {
         let candidate = format!("{}_α{}", base, counter);
@@ -126,6 +121,17 @@ pub fn substitute(term: &CoreTerm, name: &str, value: &CoreTerm) -> CoreTerm {
         CoreTerm::Var(n) if n.as_str() == name => value.clone(),
         CoreTerm::Var(_) => term.clone(),
         CoreTerm::Universe(_) => term.clone(),
+        CoreTerm::Constructor {
+            inductive,
+            name: constructor,
+            params,
+            args,
+        } => CoreTerm::Constructor {
+            inductive: inductive.clone(),
+            name: constructor.clone(),
+            params: params.iter().map(|t| substitute(t, name, value)).collect(),
+            args: args.iter().map(|t| substitute(t, name, value)).collect(),
+        },
 
         CoreTerm::Pi {
             binder,
@@ -426,6 +432,17 @@ fn normalize_core(term: &CoreTerm, ctx: &mut NormaliseCtx<'_>) -> CoreTerm {
     ctx.budget -= 1;
     match term {
         CoreTerm::Var(_) | CoreTerm::Universe(_) | CoreTerm::SmtProof(_) => term.clone(),
+        CoreTerm::Constructor {
+            inductive,
+            name,
+            params,
+            args,
+        } => CoreTerm::Constructor {
+            inductive: inductive.clone(),
+            name: name.clone(),
+            params: params.iter().map(|t| normalize_core(t, ctx)).collect(),
+            args: args.iter().map(|t| normalize_core(t, ctx)).collect(),
+        },
 
         // δ-reduction at Axiom — fires only when the axiom
         // registry is supplied and the postulate has an attached
@@ -711,27 +728,28 @@ fn normalize_core(term: &CoreTerm, ctx: &mut NormaliseCtx<'_>) -> CoreTerm {
                 //   case_C(a1, [rec(a1)], a2, [rec(a2)], …)
                 // with a recursor call inserted after every
                 // recursive argument.
-                if let Some((ctor_name, ctor_args)) = decompose_app_spine(&scrut_norm)
-                    && let Some((parent, ctor_idx)) = inds.lookup_point_ctor(ctor_name.as_str())
-                    && ctor_idx < cases.iter().count()
+                if let CoreTerm::Constructor {
+                    inductive,
+                    name,
+                    params,
+                    args,
+                } = &scrut_norm
+                    && let Some(parent) = inds.get(inductive.as_str())
+                    && let Some(ctor_idx) = parent
+                        .constructors
+                        .iter()
+                        .position(|ctor| &ctor.name == name)
+                    && cases.len() == parent.constructors.len() + parent.path_constructors.len()
+                    && params.len() == parent.params.len()
+                    && args.len() == parent.constructors[ctor_idx].arg_types.len()
                 {
-                    let case_body = cases.iter().nth(ctor_idx).unwrap().clone();
-                    let ctor_sig = parent.constructors.iter().nth(ctor_idx).unwrap();
-                    let parent_name = parent.name.clone();
-                    let mut beta = case_body;
-                    for (arg_idx, arg_ty) in ctor_sig.arg_types.iter().enumerate() {
-                        let arg = ctor_args.get(arg_idx).cloned().unwrap_or_else(|| {
-                            CoreTerm::Var(Text::from(
-                                format!("<missing-arg-{}>", arg_idx).as_str(),
-                            ))
-                        });
+                    let ctor_sig = &parent.constructors[ctor_idx];
+                    let mut beta = cases[ctor_idx].clone();
+                    for (arg, arg_ty) in args.iter().zip(ctor_sig.arg_types.iter()) {
                         beta = CoreTerm::App(Heap::new(beta), Heap::new(arg.clone()));
-                        if matches!(
-                            arg_ty,
-                            CoreTerm::Inductive { path, .. } if path == &parent_name
-                        ) {
+                        if parent.is_direct_recursive_argument(arg_ty) {
                             let rec_call = CoreTerm::Elim {
-                                scrutinee: Heap::new(arg),
+                                scrutinee: Heap::new(arg.clone()),
                                 motive: motive.clone(),
                                 cases: cases.clone(),
                             };
@@ -739,18 +757,6 @@ fn normalize_core(term: &CoreTerm, ctx: &mut NormaliseCtx<'_>) -> CoreTerm {
                         }
                     }
                     return normalize_core(&beta, ctx);
-                }
-                // Path-constructor β: bare Var matches a registered
-                // path ctor → return the corresponding case branch.
-                if let CoreTerm::Var(scrut_name) = &scrut_norm
-                    && let Some((parent, path_idx)) = inds.lookup_path_ctor(scrut_name.as_str())
-                {
-                    let point_count = parent.constructors.iter().count();
-                    let case_idx = point_count + path_idx;
-                    if case_idx < cases.iter().count() {
-                        let case_body = cases.iter().nth(case_idx).unwrap().clone();
-                        return normalize_core(&case_body, ctx);
-                    }
                 }
             }
             // No β fired — neutral form, descend into children.
@@ -1062,9 +1068,8 @@ pub fn normalize_with_axioms(term: &CoreTerm, axioms: &crate::AxiomRegistry) -> 
 ///
 /// The eliminator β-rule fires when an `Elim { scrutinee, motive,
 /// cases }` term is encountered with a scrutinee of the form
-/// `App-chain(Var(C), arg1, ..., argn)` where `C` matches the
-/// i-th point ctor of some registered inductive `T` AND
-/// `cases.len() == T.constructors.len()`. The rewrite produces
+/// `Constructor { inductive: T, name: C, params, args }`. Both rosters
+/// must match the declaration, including the complete point/path case list. The rewrite produces
 /// `App-chain(c_i, arg1, ..., argm, recursor-calls)` where each
 /// *recursive* argument (those whose ctor `arg_types[j]` is
 /// `Inductive { path: T, .. }` for the same parent inductive) is
@@ -1091,32 +1096,10 @@ pub fn normalize_with_inductives(
     normalize_core(term, &mut ctx)
 }
 
-/// Walk an `App` spine, returning `(head_var_name, args_in_order)`
-/// when the head is a `Var`. Returns `None` for any other shape.
-/// The args list is in **applied** order (left-to-right).
-fn decompose_app_spine(term: &CoreTerm) -> Option<(Text, Vec<CoreTerm>)> {
-    let mut spine: Vec<CoreTerm> = Vec::new();
-    let mut head = term;
-    loop {
-        match head {
-            CoreTerm::App(f, a) => {
-                spine.push((**a).clone());
-                head = f;
-            }
-            CoreTerm::Var(name) => {
-                spine.reverse();
-                return Some((name.clone(), spine));
-            }
-            _ => return None,
-        }
-    }
-}
-
-
 /// δ-reduction-aware definitional equality.
 ///
 /// Normalises both sides via [`normalize_with_axioms`] (β + δ)
-/// and compares structurally. Two terms compare equal iff they
+/// and compares modulo alpha-renaming. Two terms compare equal iff they
 /// have the same βδ-normal form against the supplied axiom
 /// registry.
 pub fn definitional_eq_with_axioms(
@@ -1149,6 +1132,10 @@ pub fn definitional_eq_with_axioms(
 pub fn var_occurs_free(term: &CoreTerm, name: &str) -> bool {
     match term {
         CoreTerm::Var(n) => n.as_str() == name,
+        CoreTerm::Constructor { params, args, .. } => params
+            .iter()
+            .chain(args.iter())
+            .any(|t| var_occurs_free(t, name)),
         CoreTerm::Universe(_) | CoreTerm::SmtProof(_) => false,
         CoreTerm::Pi {
             binder,
@@ -1255,9 +1242,7 @@ pub fn var_occurs_free(term: &CoreTerm, name: &str) -> bool {
 
         // Inductive: qualified path is a global identifier (not a
         // free variable); only generic args need scanning.
-        CoreTerm::Inductive { args, .. } => {
-            args.iter().any(|a| var_occurs_free(a, name))
-        }
+        CoreTerm::Inductive { args, .. } => args.iter().any(|a| var_occurs_free(a, name)),
 
         // Elim: scrutinee + motive + every case.
         CoreTerm::Elim {
@@ -1279,14 +1264,10 @@ pub fn var_occurs_free(term: &CoreTerm, name: &str) -> bool {
 
         // Modal operators: descend through the boxed/diamonded term.
         CoreTerm::ModalBox(t) | CoreTerm::ModalDiamond(t) => var_occurs_free(t, name),
-        CoreTerm::ModalBigAnd(args) => {
-            args.iter().any(|a| var_occurs_free(a, name))
-        }
+        CoreTerm::ModalBigAnd(args) => args.iter().any(|a| var_occurs_free(a, name)),
 
         // Cohesive modalities: descend through inner.
-        CoreTerm::Shape(t) | CoreTerm::Flat(t) | CoreTerm::Sharp(t) => {
-            var_occurs_free(t, name)
-        }
+        CoreTerm::Shape(t) | CoreTerm::Flat(t) | CoreTerm::Sharp(t) => var_occurs_free(t, name),
     }
 }
 
@@ -1437,6 +1418,11 @@ fn free_vars_rec(
             free_vars_rec(scrutinee, bound, out);
             free_vars_rec(motive, bound, out);
             free_vars_rec(case, bound, out);
+        }
+        CoreTerm::Constructor { params, args, .. } => {
+            for t in params.iter().chain(args.iter()) {
+                free_vars_rec(t, bound, out);
+            }
         }
         CoreTerm::Inductive { args, .. } => {
             // The `path` is a global qualified name (e.g.
@@ -2009,11 +1995,19 @@ mod substitute_capture_tests {
         // substitute(Π(x: A, x → x), "x", v) — x is shadowed by Π's
         // binder; codomain stays untouched, only the domain is
         // affected (binder doesn't shadow there).
-        let term = pi("x", var("A"), CoreTerm::App(Heap::new(var("x")), Heap::new(var("x"))));
+        let term = pi(
+            "x",
+            var("A"),
+            CoreTerm::App(Heap::new(var("x")), Heap::new(var("x"))),
+        );
         let v = var("REPLACEMENT");
         let result = substitute(&term, "x", &v);
         match result {
-            CoreTerm::Pi { binder, domain, codomain } => {
+            CoreTerm::Pi {
+                binder,
+                domain,
+                codomain,
+            } => {
                 assert_eq!(binder.as_str(), "x", "binder unchanged");
                 // domain has no `x` to shadow — but no `x` to substitute either.
                 // (Domain holds A, so substitution doesn't fire.)
@@ -2040,7 +2034,11 @@ mod substitute_capture_tests {
         let v = var("x");
         let result = substitute(&term, "A", &v);
         match result {
-            CoreTerm::Pi { binder, domain, codomain } => {
+            CoreTerm::Pi {
+                binder,
+                domain,
+                codomain,
+            } => {
                 assert_ne!(
                     binder.as_str(),
                     "x",
@@ -2067,11 +2065,19 @@ mod substitute_capture_tests {
         // (free reference would be different).
         // Build a body that references the OUTER A and the inner x:
         // body = App(Var("A"), Var("x"))
-        let term = lam("x", var("A"), CoreTerm::App(Heap::new(var("A")), Heap::new(var("x"))));
+        let term = lam(
+            "x",
+            var("A"),
+            CoreTerm::App(Heap::new(var("A")), Heap::new(var("x"))),
+        );
         let v = var("x");
         let result = substitute(&term, "A", &v);
         match result {
-            CoreTerm::Lam { binder, domain, body } => {
+            CoreTerm::Lam {
+                binder,
+                domain,
+                body,
+            } => {
                 assert_ne!(
                     binder.as_str(),
                     "x",
@@ -2108,7 +2114,11 @@ mod substitute_capture_tests {
         let v = var("y");
         let result = substitute(&term, "A", &v);
         match result {
-            CoreTerm::Sigma { binder, fst_ty, snd_ty } => {
+            CoreTerm::Sigma {
+                binder,
+                fst_ty,
+                snd_ty,
+            } => {
                 assert_ne!(binder.as_str(), "y");
                 assert_eq!(*fst_ty, var("y"), "first component is the value");
                 match &*snd_ty {
@@ -2140,7 +2150,11 @@ mod substitute_capture_tests {
         let v = var("x");
         let result = substitute(&term, "A", &v);
         match result {
-            CoreTerm::Refine { base, binder, predicate } => {
+            CoreTerm::Refine {
+                base,
+                binder,
+                predicate,
+            } => {
                 assert_eq!(*base, var("x"));
                 assert_ne!(binder.as_str(), "x");
                 match &*predicate {
@@ -2162,11 +2176,19 @@ mod substitute_capture_tests {
         // substitute(Π(x: A, x → A), "A", v) where x is NOT free
         //   in v.  Binder unchanged; A → v in both domain and
         //   codomain.
-        let term = pi("x", var("A"), CoreTerm::App(Heap::new(var("x")), Heap::new(var("A"))));
+        let term = pi(
+            "x",
+            var("A"),
+            CoreTerm::App(Heap::new(var("x")), Heap::new(var("A"))),
+        );
         let v = var("y"); // y, not x — no capture risk
         let result = substitute(&term, "A", &v);
         match result {
-            CoreTerm::Pi { binder, domain, codomain } => {
+            CoreTerm::Pi {
+                binder,
+                domain,
+                codomain,
+            } => {
                 assert_eq!(binder.as_str(), "x", "binder unchanged in no-conflict case");
                 assert_eq!(*domain, var("y"));
                 match &*codomain {
@@ -2195,7 +2217,11 @@ mod substitute_capture_tests {
             (pi("x", var("A"), var("x")), "A", var("x"), &["x"]),
             // Lam case.
             (
-                lam("z", var("A"), CoreTerm::App(Heap::new(var("A")), Heap::new(var("z")))),
+                lam(
+                    "z",
+                    var("A"),
+                    CoreTerm::App(Heap::new(var("A")), Heap::new(var("z"))),
+                ),
                 "A",
                 var("z"),
                 &["z"],

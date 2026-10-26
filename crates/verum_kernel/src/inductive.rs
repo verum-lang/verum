@@ -152,9 +152,9 @@ impl PathCtorSig {
 pub struct RegisteredInductive {
     /// Type name, e.g. `"Nat"`, `"List"`.
     pub name: Text,
-    /// Type-parameter names (their universe levels are checked at
-    /// elaboration; the kernel only needs the names for the
-    /// constructor body to reference them).
+    /// Type-parameter names. Instantiated parameters must inhabit a universe
+    /// no higher than this declaration's universe. Field types reference them
+    /// lexically; they cannot capture unrelated caller bindings.
     pub params: List<Text>,
     /// Constructors of this inductive.
     pub constructors: List<ConstructorSig>,
@@ -244,13 +244,38 @@ impl InductiveRegistry {
         if self.entries.iter().any(|e| e.name == decl.name) {
             return Err(KernelError::DuplicateInductive(decl.name));
         }
+        for (i, parameter) in decl.params.iter().enumerate() {
+            if decl.params.iter().take(i).any(|other| other == parameter) {
+                return Err(KernelError::DuplicateInductive(parameter.clone()));
+            }
+        }
+        for (i, constructor) in decl.constructors.iter().enumerate() {
+            if decl
+                .constructors
+                .iter()
+                .take(i)
+                .any(|other| other.name == constructor.name)
+            {
+                return Err(KernelError::DuplicateInductive(constructor.name.clone()));
+            }
+        }
         for ctor in decl.constructors.iter() {
             for (i, arg_ty) in ctor.arg_types.iter().enumerate() {
-                check_strict_positivity(
-                    decl.name.as_str(),
+                check_positive(
+                    PositiveTarget::Inductive(decl.name.as_str()),
                     arg_ty,
                     &PositivityCtx::root(ctor.name.as_str(), i),
+                    Some(self),
+                    &mut List::new(),
                 )?;
+                if crate::free_vars(arg_ty)
+                    .iter()
+                    .any(|name| !decl.params.contains(name))
+                {
+                    return Err(KernelError::InvalidEliminator(Text::from(
+                        "constructor field types may only reference declared parameters",
+                    )));
+                }
             }
         }
         // path-constructor namespace check: path ctor
@@ -293,6 +318,22 @@ impl InductiveRegistry {
             .iter()
             .find(|&e| e.name.as_str() == name)
             .map(|v| v as _)
+    }
+
+    pub(crate) fn check_field_positivity(
+        &self,
+        declaration: &RegisteredInductive,
+        constructor: &ConstructorSig,
+        index: usize,
+        field: &CoreTerm,
+    ) -> Result<(), KernelError> {
+        check_positive(
+            PositiveTarget::Inductive(declaration.name.as_str()),
+            field,
+            &PositivityCtx::root(constructor.name.as_str(), index),
+            Some(self),
+            &mut List::new(),
+        )
     }
 
     /// Enumerate every registered inductive.
@@ -406,35 +447,12 @@ impl<'a> PositivityCtx<'a> {
 /// term tree. Used to detect `T` appearing in negative positions
 /// (the left-hand side of an arrow); strict positivity forbids this.
 fn name_appears_in(target: &str, ty: &CoreTerm) -> bool {
-    match ty {
-        CoreTerm::Inductive { path, args } => {
-            if path.as_str() == target {
-                return true;
-            }
-            for a in args.iter() {
-                if name_appears_in(target, a) {
-                    return true;
-                }
-            }
-            false
-        }
-        CoreTerm::Pi {
-            domain, codomain, ..
-        } => name_appears_in(target, domain) || name_appears_in(target, codomain),
-        CoreTerm::Sigma { fst_ty, snd_ty, .. } => {
-            name_appears_in(target, fst_ty) || name_appears_in(target, snd_ty)
-        }
-        CoreTerm::App(f, a) => name_appears_in(target, f) || name_appears_in(target, a),
-        CoreTerm::Lam { domain, body, .. } => {
-            name_appears_in(target, domain) || name_appears_in(target, body)
-        }
-        CoreTerm::Refine {
-            base, predicate, ..
-        } => name_appears_in(target, base) || name_appears_in(target, predicate),
-        CoreTerm::PathTy { carrier, .. } => name_appears_in(target, carrier),
-        // Atoms and SMT certificates carry no nested types.
-        _ => false,
+    if matches!(ty, CoreTerm::Inductive { path, .. } if path.as_str() == target) {
+        return true;
     }
+    let mut appears = false;
+    ty.visit_children(|child| appears |= name_appears_in(target, child));
+    appears
 }
 
 /// The strict-positivity walker for `K-Pos`. Returns Ok iff
@@ -444,85 +462,212 @@ fn name_appears_in(target: &str, ty: &CoreTerm) -> bool {
 /// - On `Pi(domain, codomain)`: `target` must NOT appear in `domain`
 ///  (the negative position); `codomain` must itself be strictly
 ///  positive in `target`.
-/// - On `Inductive(name, args)`: when `name == target`, the recursive
-///  reference is admitted (this IS the strict-positive site). When
-///  `name != target`, every `arg` must itself be strictly positive
-///  in `target` — this catches indirect non-positive recursion via
-///  parametrised types like `BadCons(SomeFn(Bad), ...)`.
-/// - On `Sigma`, `App`, `Refine`, `Lambda`: descend into both halves;
-///  strict positivity is closed under products and dependent pairs.
-/// - On atoms: vacuously OK.
+/// - Direct recursive references and dependent products are checked structurally.
+/// - Nested recursion requires parameter variance checked from the container's
+///   registered declaration. This registry-free entry refuses that obligation;
+///   [`InductiveRegistry::register`] supplies the declaration environment.
+/// - Opaque type applications do not establish positivity. Terms without a
+///   recursive occurrence are vacuously positive.
 pub fn check_strict_positivity(
     target: &str,
     ty: &CoreTerm,
     ctx: &PositivityCtx,
 ) -> Result<(), KernelError> {
+    check_positive(
+        PositiveTarget::Inductive(target),
+        ty,
+        ctx,
+        None,
+        &mut List::new(),
+    )
+}
+
+#[derive(Clone, Copy)]
+enum PositiveTarget<'a> {
+    Inductive(&'a str),
+    Parameter(&'a str),
+}
+
+impl<'a> PositiveTarget<'a> {
+    fn name(self) -> &'a str {
+        match self {
+            Self::Inductive(name) | Self::Parameter(name) => name,
+        }
+    }
+    fn occurs(self, term: &CoreTerm) -> bool {
+        match self {
+            Self::Inductive(name) => name_appears_in(name, term),
+            Self::Parameter(name) => crate::support::var_occurs_free(term, name),
+        }
+    }
+    fn shadowed_by(self, binder: &Text) -> bool {
+        matches!(self, Self::Parameter(name) if name == binder.as_str())
+    }
+}
+
+fn check_positive(
+    target: PositiveTarget<'_>,
+    ty: &CoreTerm,
+    ctx: &PositivityCtx<'_>,
+    registry: Option<&InductiveRegistry>,
+    active: &mut List<(Text, usize)>,
+) -> Result<(), KernelError> {
+    if !target.occurs(ty) {
+        return Ok(());
+    }
     match ty {
+        CoreTerm::Var(_) if matches!(target, PositiveTarget::Parameter(_)) => Ok(()),
         CoreTerm::Pi {
-            domain, codomain, ..
+            binder,
+            domain,
+            codomain,
         } => {
-            // Negative position: target must not appear here.
-            if name_appears_in(target, domain) {
-                return Err(KernelError::PositivityViolation {
-                    type_name: Text::from(target),
-                    constructor: Text::from(ctx.constructor),
-                    position: Text::from(
-                        format!("{} → left of an arrow (negative position)", ctx.breadcrumb,)
-                            .as_str(),
-                    ),
-                });
+            if target.occurs(domain) {
+                return Err(positivity_error(
+                    target.name(),
+                    ctx,
+                    "left of an arrow (negative position)",
+                ));
             }
-            // Codomain: must be strictly positive in target.
-            check_strict_positivity(target, codomain, &ctx.nested("codomain of Π"))
+            if target.shadowed_by(binder) {
+                Ok(())
+            } else {
+                check_positive(
+                    target,
+                    codomain,
+                    &ctx.nested("codomain of Π"),
+                    registry,
+                    active,
+                )
+            }
         }
 
         CoreTerm::Inductive { path, args } => {
-            // Self-recursive reference is the strict-positive use we
-            // are admitting; args may also mention `target` but ONLY
-            // strictly positively (caught by recursion below).
-            //
-
-            // For non-self inductives: every argument must itself be
-            // strictly positive in `target`. This catches `BadList =
-            // Cons(SomeFn(target), BadList)` where SomeFn is a
-            // parametrised type that smuggles `target` into a
-            // negative position via its own constructor signature.
-            let _ = path; // self vs other distinction is handled below
-            for (i, a) in args.iter().enumerate() {
-                check_strict_positivity(target, a, &ctx.nested(&format!("Inductive arg #{}", i)))?;
+            for (index, arg) in args.iter().enumerate() {
+                if !target.occurs(arg) {
+                    continue;
+                }
+                let declaration = registry.and_then(|registry| registry.get(path.as_str()));
+                if !declaration.is_some_and(|declaration| {
+                    args.len() == declaration.params.len()
+                        && parameter_is_positive(declaration, index, registry.unwrap(), active)
+                }) {
+                    return Err(positivity_error(
+                        target.name(),
+                        ctx,
+                        "nested recursion requires checked parameter variance",
+                    ));
+                }
+                check_positive(
+                    target,
+                    arg,
+                    &ctx.nested("strictly positive parameter"),
+                    registry,
+                    active,
+                )?;
             }
             Ok(())
         }
-
-        CoreTerm::Sigma { fst_ty, snd_ty, .. } => {
-            check_strict_positivity(target, fst_ty, &ctx.nested("Σ.fst"))?;
-            check_strict_positivity(target, snd_ty, &ctx.nested("Σ.snd"))
-        }
-
-        CoreTerm::App(f, a) => {
-            check_strict_positivity(target, f, &ctx.nested("App.func"))?;
-            check_strict_positivity(target, a, &ctx.nested("App.arg"))
+        CoreTerm::Sigma {
+            binder,
+            fst_ty,
+            snd_ty,
+        } => {
+            check_positive(target, fst_ty, &ctx.nested("Σ.fst"), registry, active)?;
+            if target.shadowed_by(binder) {
+                Ok(())
+            } else {
+                check_positive(target, snd_ty, &ctx.nested("Σ.snd"), registry, active)
+            }
         }
 
         CoreTerm::Refine {
-            base, predicate, ..
+            binder,
+            base,
+            predicate,
         } => {
-            check_strict_positivity(target, base, &ctx.nested("Refine.base"))?;
-            check_strict_positivity(target, predicate, &ctx.nested("Refine.predicate"))
+            if !target.shadowed_by(binder) && target.occurs(predicate) {
+                return Err(positivity_error(
+                    target.name(),
+                    ctx,
+                    "recursive occurrence in a refinement predicate",
+                ));
+            }
+            check_positive(
+                target,
+                base,
+                &ctx.nested("refinement base"),
+                registry,
+                active,
+            )
         }
-
-        CoreTerm::PathTy { carrier, .. } => {
-            check_strict_positivity(target, carrier, &ctx.nested("PathTy.carrier"))
+        CoreTerm::PathTy { carrier, lhs, rhs } => {
+            if target.occurs(lhs) || target.occurs(rhs) {
+                return Err(positivity_error(
+                    target.name(),
+                    ctx,
+                    "recursive occurrence in path endpoints",
+                ));
+            }
+            check_positive(
+                target,
+                carrier,
+                &ctx.nested("path carrier"),
+                registry,
+                active,
+            )
         }
+        // Opaque type functions need a checked variance rule. Merely walking
+        // their arguments would incorrectly assume they preserve positivity.
+        _ => Err(positivity_error(
+            target.name(),
+            ctx,
+            "recursive occurrence under an unchecked type former",
+        )),
+    }
+}
 
-        CoreTerm::Lam { domain, body, .. } => {
-            check_strict_positivity(target, domain, &ctx.nested("Lam.domain"))?;
-            check_strict_positivity(target, body, &ctx.nested("Lam.body"))
-        }
+fn parameter_is_positive(
+    declaration: &RegisteredInductive,
+    index: usize,
+    registry: &InductiveRegistry,
+    active: &mut List<(Text, usize)>,
+) -> bool {
+    let Some(parameter) = declaration.params.get(index) else {
+        return false;
+    };
+    if !declaration.path_constructors.is_empty() {
+        return false;
+    }
+    let key = (declaration.name.clone(), index);
+    // A recursive variance equation is admissible only if all its other
+    // occurrences pass the strict-positive walk. Each distinct equation is
+    // visited once on this path; negative occurrences never use this shortcut.
+    if active.contains(&key) {
+        return true;
+    }
+    active.push(key);
+    let positive = declaration.constructors.iter().all(|ctor| {
+        ctor.arg_types.iter().enumerate().all(|(i, ty)| {
+            check_positive(
+                PositiveTarget::Parameter(parameter.as_str()),
+                ty,
+                &PositivityCtx::root(ctor.name.as_str(), i),
+                Some(registry),
+                active,
+            )
+            .is_ok()
+        })
+    });
+    active.pop();
+    positive
+}
 
-        // Universes / Var / Axiom / SmtProof / Elim — atoms with no
-        // nested types whose body could re-introduce the name.
-        _ => Ok(()),
+fn positivity_error(target: &str, ctx: &PositivityCtx<'_>, reason: &str) -> KernelError {
+    KernelError::PositivityViolation {
+        type_name: Text::from(target),
+        constructor: Text::from(ctx.constructor),
+        position: Text::from(format!("{} → {reason}", ctx.breadcrumb)),
     }
 }
 
@@ -758,7 +903,7 @@ pub fn eliminator_type(decl: &RegisteredInductive) -> CoreTerm {
 
     // Point-constructor branches.
     for ctor in iter_rev(&decl.constructors) {
-        let case_ty = point_constructor_case_type(&motive_var, &ctor);
+        let case_ty = point_constructor_case_type(&motive_var, decl, &ctor);
         acc = CoreTerm::Pi {
             binder: Text::from(format!("case_{}", ctor.name.as_str()).as_str()),
             domain: Heap::new(case_ty),
@@ -787,21 +932,72 @@ pub fn eliminator_type(decl: &RegisteredInductive) -> CoreTerm {
 /// Π (a₁ : A₁) … (aₙ : Aₙ) . motive(C(a₁, …, aₙ))
 /// ```
 ///
-/// Nullary ctors collapse to `motive(C)` (no Π binders).
-pub fn point_constructor_case_type(motive_var: &CoreTerm, ctor: &ConstructorSig) -> CoreTerm {
-    // Build the constructor application: App_chain(Var(C), a₁, …, aₙ).
-    let mut ctor_app = CoreTerm::Var(ctor.name.clone());
-    for (i, _arg_ty) in ctor.arg_types.iter().enumerate() {
-        let arg_name = Text::from(format!("a{}", i).as_str());
-        ctor_app = CoreTerm::App(Heap::new(ctor_app), Heap::new(CoreTerm::Var(arg_name)));
+/// Each direct recursive argument is immediately followed by its induction
+/// hypothesis, exactly as in the eliminator reduction rule. Nullary constructors
+/// require a proof of `motive(C)`.
+pub fn point_constructor_case_type(
+    motive_var: &CoreTerm,
+    parent: &RegisteredInductive,
+    ctor: &ConstructorSig,
+) -> CoreTerm {
+    let params: List<_> = parent.params.iter().cloned().map(CoreTerm::Var).collect();
+    instantiated_constructor_case_type(motive_var, parent, ctor, &params)
+}
+
+/// Branch typing and constructor typing instantiate the same declaration.
+pub(crate) fn instantiated_constructor_case_type(
+    motive_var: &CoreTerm,
+    parent: &RegisteredInductive,
+    ctor: &ConstructorSig,
+    params: &[CoreTerm],
+) -> CoreTerm {
+    let declared = ctor;
+    let instantiated = parent.instantiate_constructor(ctor, params);
+    let ctor = &instantiated;
+    let mut used = crate::support::free_vars(motive_var);
+    for ty in &ctor.arg_types {
+        used.extend(crate::support::free_vars(ty));
     }
+    used.insert(ctor.name.clone());
+    let mut fresh = |stem: &str| {
+        let mut name = Text::from(stem);
+        let mut suffix = 0;
+        while used.contains(&name) {
+            suffix += 1;
+            name = Text::from(format!("{stem}_{suffix}"));
+        }
+        used.insert(name.clone());
+        name
+    };
+    let arguments: List<Text> = (0..ctor.arg_types.len())
+        .map(|i| fresh(&format!("a{i}")))
+        .collect();
+    let hypotheses: List<Text> = (0..ctor.arg_types.len())
+        .map(|i| fresh(&format!("ih{i}")))
+        .collect();
+    let ctor_app = CoreTerm::Constructor {
+        inductive: parent.name.clone(),
+        name: ctor.name.clone(),
+        params: params.iter().cloned().collect(),
+        args: arguments.iter().cloned().map(CoreTerm::Var).collect(),
+    };
     // Goal: motive(C(a₁,…,aₙ)).
     let mut acc = CoreTerm::App(Heap::new(motive_var.clone()), Heap::new(ctor_app));
     // Wrap in Π binders, right-to-left.
     let arg_count = ctor.arg_types.iter().count();
     for (rev_i, arg_ty) in ctor.arg_types.iter().rev().enumerate() {
         let i = arg_count - 1 - rev_i;
-        let arg_name = Text::from(format!("a{}", i).as_str());
+        let arg_name = arguments[i].clone();
+        if parent.is_direct_recursive_argument(&declared.arg_types[i]) {
+            acc = CoreTerm::Pi {
+                binder: hypotheses[i].clone(),
+                domain: Heap::new(CoreTerm::App(
+                    Heap::new(motive_var.clone()),
+                    Heap::new(CoreTerm::Var(arg_name.clone())),
+                )),
+                codomain: Heap::new(acc),
+            };
+        }
         acc = CoreTerm::Pi {
             binder: arg_name,
             domain: Heap::new(arg_ty.clone()),
@@ -809,6 +1005,34 @@ pub fn point_constructor_case_type(motive_var: &CoreTerm, ctor: &ConstructorSig)
         };
     }
     acc
+}
+
+impl RegisteredInductive {
+    pub(crate) fn instantiate_constructor(
+        &self,
+        ctor: &ConstructorSig,
+        params: &[CoreTerm],
+    ) -> ConstructorSig {
+        let replacements: List<_> = self
+            .params
+            .iter()
+            .cloned()
+            .zip(params.iter().cloned())
+            .collect();
+        ConstructorSig {
+            name: ctor.name.clone(),
+            arg_types: ctor
+                .arg_types
+                .iter()
+                .map(|ty| crate::substitute_all(ty, &replacements))
+                .collect(),
+        }
+    }
+
+    /// One declaration owns the recursive slots in typing and reduction.
+    pub(crate) fn is_direct_recursive_argument(&self, ty: &CoreTerm) -> bool {
+        matches!(ty, CoreTerm::Inductive { path, .. } if path == &self.name)
+    }
 }
 
 /// recursor's image at a path-constructor endpoint.
