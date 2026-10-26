@@ -229,3 +229,170 @@ fn dimension_scope_is_explicit_and_separate_from_term_bindings() {
     assert!(empty.check_interval(&i).is_err());
     assert!(empty.lookup("i").is_none());
 }
+
+#[test]
+fn face_substitution_commutes_with_interval_endpoint_projection() {
+    let i = IntervalExpr::variable("i");
+    let j = IntervalExpr::variable("j");
+    let replacements = [
+        IntervalExpr::zero(),
+        IntervalExpr::one(),
+        i.reverse(),
+        j.clone(),
+        i.meet(&j.reverse()),
+        i.join(&i.reverse()),
+    ];
+    for expression in all_expressions().values() {
+        for endpoint in [false, true] {
+            let face = expression.endpoint_face(endpoint);
+            for replacement in &replacements {
+                assert_eq!(
+                    face.substitute("i", replacement),
+                    expression
+                        .substitute("i", replacement)
+                        .endpoint_face(endpoint)
+                );
+                for x in 0..3 {
+                    for y in 0..3 {
+                        let point = [x, y];
+                        assert_eq!(
+                            face_holds(&face.substitute("i", replacement), point),
+                            face_holds(&face, [chain_value(replacement, point), y])
+                        );
+                    }
+                }
+            }
+            assert_eq!(
+                face.substitute("i", &IntervalExpr::zero()),
+                face.restrict("i", false)
+            );
+            assert_eq!(
+                face.substitute("i", &IntervalExpr::one()),
+                face.restrict("i", true)
+            );
+        }
+    }
+}
+
+#[test]
+fn scoped_face_assumptions_accumulate_without_leaking_into_parent_contexts() {
+    let context = Context::default()
+        .extend_dimension("i".into())
+        .unwrap()
+        .extend_dimension("j".into())
+        .unwrap();
+    let i0 = FaceFormula::at_zero("i");
+    let j1 = FaceFormula::at_one("j");
+    let restricted = context.assume_face(&i0).unwrap().assume_face(&j1).unwrap();
+    assert!(context.face_assumption().is_top());
+    assert!(!context.entails_face(&i0).unwrap());
+    assert!(restricted.entails_face(&i0.and(&j1)).unwrap());
+    assert!(!restricted.entails_face(&FaceFormula::at_one("i")).unwrap());
+    assert_eq!(restricted.face_assumption().dimensions().len(), 2);
+    assert!(
+        restricted
+            .intervals_equal(&IntervalExpr::variable("i"), &IntervalExpr::zero())
+            .unwrap()
+    );
+    assert!(
+        restricted
+            .intervals_equal(&IntervalExpr::variable("j"), &IntervalExpr::one())
+            .unwrap()
+    );
+    assert!(
+        context
+            .assume_face(&FaceFormula::at_zero("missing"))
+            .is_err()
+    );
+    assert!(
+        context
+            .entails_face(&FaceFormula::at_zero("missing"))
+            .is_err()
+    );
+}
+
+#[test]
+fn interval_equality_checks_each_face_and_keeps_free_interiors() {
+    let i = IntervalExpr::variable("i");
+    let j = IntervalExpr::variable("j");
+    let boundary = FaceFormula::at_zero("i").or(&FaceFormula::at_one("i"));
+    let context = Context::new()
+        .extend_dimension("i".into())
+        .unwrap()
+        .extend_dimension("j".into())
+        .unwrap();
+    assert!(
+        !context
+            .intervals_equal(&i.join(&i.reverse()), &IntervalExpr::one())
+            .unwrap()
+    );
+    let restricted = context.assume_face(&boundary).unwrap();
+    assert!(
+        restricted
+            .intervals_equal(&i.join(&i.reverse()), &IntervalExpr::one())
+            .unwrap()
+    );
+    assert!(
+        !restricted
+            .intervals_equal(&i, &IntervalExpr::zero())
+            .unwrap()
+    );
+    assert!(
+        !restricted
+            .intervals_equal(&j.join(&j.reverse()), &IntervalExpr::one())
+            .unwrap()
+    );
+    let impossible = restricted
+        .assume_face(&FaceFormula::at_zero("i").and(&FaceFormula::at_one("i")))
+        .unwrap();
+    assert!(impossible.intervals_equal(&i, &j).unwrap());
+    assert!(
+        impossible
+            .intervals_equal(&IntervalExpr::variable("missing"), &j)
+            .is_err()
+    );
+    assert!(
+        impossible
+            .assume_face(&FaceFormula::at_zero("missing"))
+            .is_err()
+    );
+    assert!(
+        impossible
+            .entails_face(&FaceFormula::at_zero("missing"))
+            .is_err()
+    );
+}
+
+#[test]
+fn equality_under_faces_matches_all_four_element_valuations() {
+    let expressions = all_expressions();
+    let faces = [
+        FaceFormula::top(),
+        FaceFormula::bottom(),
+        FaceFormula::at_zero("i"),
+        FaceFormula::at_one("j"),
+        FaceFormula::at_zero("i").or(&FaceFormula::at_one("i")),
+        FaceFormula::at_zero("i").or(&FaceFormula::at_one("j")),
+        FaceFormula::at_zero("i").and(&FaceFormula::at_one("j")),
+    ];
+    for face in &faces {
+        let mask = (0..16u8).fold(0u32, |mask, index| {
+            let point = [index & 3, index >> 2];
+            let satisfies = face.clauses().iter().any(|clause| {
+                clause
+                    .literals()
+                    .iter()
+                    .all(|lit| point[coordinate(lit.var.as_str())] == if lit.end { 3 } else { 0 })
+            });
+            mask | (if satisfies { 3 } else { 0 } << (2 * index))
+        });
+        for (left_values, left) in &expressions {
+            for (right_values, right) in &expressions {
+                assert_eq!(
+                    left.equivalent_on(right, face),
+                    left_values & mask == right_values & mask
+                );
+            }
+        }
+    }
+}

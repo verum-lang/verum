@@ -6,7 +6,7 @@
 //! contradictions, duplicate clauses and absorbed clauses, so structural
 //! equality agrees with semantic equivalence in this face algebra.
 //!
-//! This algebra does not certify cubical terms: typed dimension contexts,
+//! This algebra does not certify cubical terms: dimension binding in terms,
 //! partial elements, boundary agreement and gluing equivalences remain distinct
 //! obligations. Named HComp and Glue are refused until those judgments exist.
 
@@ -203,6 +203,33 @@ impl FaceFormula {
                     .collect(),
             })
         }))
+    }
+
+    /// Substitute a general interval expression for a dimension. An endpoint
+    /// constraint becomes the replacement's corresponding endpoint face.
+    /// The replacement is not recursively substituted into itself.
+    pub fn substitute(&self, variable: &str, replacement: &crate::IntervalExpr) -> Self {
+        let zero = std::cell::OnceCell::new();
+        let one = std::cell::OnceCell::new();
+        self.clauses.iter().fold(Self::bottom(), |sum, clause| {
+            let product = clause.lits.iter().fold(Self::top(), |product, literal| {
+                if literal.var.as_str() == variable {
+                    let endpoint = if literal.end { &one } else { &zero };
+                    product.and(endpoint.get_or_init(|| replacement.endpoint_face(literal.end)))
+                } else {
+                    product.and(&Self::lit(literal.clone()))
+                }
+            });
+            sum.or(&product)
+        })
+    }
+
+    /// Free dimensions in the canonical formula.
+    pub fn dimensions(&self) -> BTreeSet<Text> {
+        self.clauses
+            .iter()
+            .flat_map(|clause| clause.lits.iter().map(|literal| literal.var.clone()))
+            .collect()
     }
 
     /// **Subsumption decision: `self ⇒ other`.**

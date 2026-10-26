@@ -138,6 +138,33 @@ impl IntervalExpr {
             .collect()
     }
 
+    /// Restrict an interval expression to one consistent conjunction of
+    /// endpoint constraints. Dimensions absent from the clause remain free.
+    pub fn restrict(&self, clause: &crate::Clause) -> Self {
+        clause
+            .literals()
+            .iter()
+            .fold(self.clone(), |expression, literal| {
+                expression.substitute(
+                    literal.var.as_str(),
+                    &if literal.end {
+                        Self::one()
+                    } else {
+                        Self::zero()
+                    },
+                )
+            })
+    }
+
+    /// Equality under a face assumption requires free De Morgan equality
+    /// after restriction to every disjunct. An empty face is vacuous; merely
+    /// agreeing on both endpoints of a free dimension is not sufficient.
+    pub fn equivalent_on(&self, other: &Self, face: &FaceFormula) -> bool {
+        face.clauses()
+            .iter()
+            .all(|clause| self.restrict(clause) == other.restrict(clause))
+    }
+
     /// The face where this expression equals the selected endpoint.
     /// Meet/join interchange when projecting the zero endpoint; involuted
     /// generators switch endpoints. This is the bridge to the face algebra.

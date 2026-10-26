@@ -123,10 +123,17 @@ pub fn check_coord_cite(
 ///
 /// Each binding maps a name to its declared type. The kernel never
 /// performs inference — it only checks.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct Context {
     bindings: List<(Text, CoreTerm)>,
     dimensions: BTreeSet<Text>,
+    face_assumption: crate::FaceFormula,
+}
+
+impl Default for Context {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Context {
@@ -135,6 +142,7 @@ impl Context {
         Self {
             bindings: List::new(),
             dimensions: BTreeSet::new(),
+            face_assumption: crate::FaceFormula::top(),
         }
     }
 
@@ -150,12 +158,56 @@ impl Context {
 
     /// Check the free dimensions of a canonical interval expression.
     pub fn check_interval(&self, interval: &crate::IntervalExpr) -> Result<(), crate::KernelError> {
-        for dimension in interval.dimensions() {
+        self.check_dimensions(interval.dimensions())
+    }
+
+    fn check_dimensions(
+        &self,
+        dimensions: impl IntoIterator<Item = Text>,
+    ) -> Result<(), crate::KernelError> {
+        for dimension in dimensions {
             if !self.dimensions.contains(&dimension) {
                 return Err(crate::KernelError::UnboundDimension(dimension));
             }
         }
         Ok(())
+    }
+
+    /// Check all free dimensions in a canonical face formula. Surface
+    /// syntax must additionally be scoped before normalization erases names.
+    pub fn check_face(&self, face: &crate::FaceFormula) -> Result<(), crate::KernelError> {
+        self.check_dimensions(face.dimensions())
+    }
+
+    /// Conjoin a scoped face assumption without changing the original context.
+    pub fn assume_face(&self, face: &crate::FaceFormula) -> Result<Self, crate::KernelError> {
+        self.check_face(face)?;
+        let mut fresh = self.clone();
+        fresh.face_assumption = fresh.face_assumption.and(face);
+        Ok(fresh)
+    }
+
+    /// Current conjunction of face assumptions; the empty context assumes top.
+    pub fn face_assumption(&self) -> &crate::FaceFormula {
+        &self.face_assumption
+    }
+
+    /// Decide a scoped face under the context's assumptions.
+    pub fn entails_face(&self, face: &crate::FaceFormula) -> Result<bool, crate::KernelError> {
+        self.check_face(face)?;
+        Ok(self.face_assumption.implies(face))
+    }
+
+    /// Decide interval equality under each face of this context. Scope is
+    /// checked even when contradictory assumptions make the equality vacuous.
+    pub fn intervals_equal(
+        &self,
+        left: &crate::IntervalExpr,
+        right: &crate::IntervalExpr,
+    ) -> Result<bool, crate::KernelError> {
+        self.check_interval(left)?;
+        self.check_interval(right)?;
+        Ok(left.equivalent_on(right, &self.face_assumption))
     }
 
     /// Extend the context with a new typed binding. Shadowing is
