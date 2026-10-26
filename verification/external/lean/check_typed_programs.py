@@ -65,15 +65,19 @@ def main():
         "wrong_output": "compiled.run target (input 4) = some 9",
         "captured_register": "captured.run target (input 3) = "
                              "(increment.splice continuation).run target (input 3)",
-        "changed_literal": "(returnLiteral.translate changedLiteral expansion).run target empty = "
+        "changed_literal": "(returnLiteral.translate id changedLiteral expansion).run target empty = "
                            "returnLiteral.run source empty",
-        "inexact_primitive_value": "(shared.translate (fun x => x) inaccurateExpansion).run "
+        "inexact_primitive_value": "(shared.translate id (fun x => x) inaccurateExpansion).run "
                                    "target (input 4) = shared.run source (input 4)",
-        "inexact_primitive_failure": "(shared.translate (fun x => x) inaccurateExpansion).run "
+        "inexact_primitive_failure": "(shared.translate id (fun x => x) inaccurateExpansion).run "
                                      "target (input 0) = shared.run source (input 0)",
         "noninjective_result_reflection": "(some 1 : Option Nat).map (fun _ => 0) = some 0 ↔ "
                                           "(some 1 : Option Nat) = some 2",
     }
+    equations["merged_register_positions"] = "Merged.compiled.run Merged.new Merged.swapped = some 5"
+    equations["target_only_failure"] = (
+        "Merged.compiled.run Merged.new "
+        "(Env.relabel Merged.sorts Merged.embed (Merged.inputs false 4)) = some 5")
     negatives = {}
     with tempfile.TemporaryDirectory(prefix="verum-typed-programs-") as directory:
         directory = Path(directory)
@@ -86,7 +90,7 @@ def main():
         negatives[path.stem] = check(path, "Type mismatch")
         mutations = {
             "literal_evidence_removed": ("| literal l => exact literal_exact l", "| literal _ => rfl"),
-            "continuation_evidence_removed": ("rw [← Env.map_cons, ih]", "rfl"),
+            "continuation_evidence_removed": ("exact ih (env.cons x)", "rfl"),
         }
         source = MODULE.read_text()
         for name, (old, new) in mutations.items():

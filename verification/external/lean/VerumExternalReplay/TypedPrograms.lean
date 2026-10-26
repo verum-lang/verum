@@ -5,8 +5,8 @@ Primitive implementations are arbitrary pure partial functions. Translation
 expands each primitive into a finite target program. The local correspondence
 premise includes exact partial definedness; it is not inferred from examples.
 
-Source and target share an arbitrary universe of sort labels, with separate
-value carriers. There are no effects, loops, resource bounds or implicit
+Source and target have arbitrary sort universes and a possibly noninjective
+sort translation, with separate value carriers. There are no effects, loops, resource bounds or implicit
 assumptions of injectivity. Result reflection below explicitly requires an
 injective value translation; the exact execution equation does not.
 
@@ -15,7 +15,7 @@ certificate or a correspondence proof for the Verum compiler/runtime.
 -/
 namespace TypedPrograms
 set_option warningAsError true
-universe u v w
+universe u v w u'
 variable {Ty : Type u}
 
 inductive Ref : List Ty → Ty → Type u where
@@ -48,15 +48,34 @@ def Env.cons {V : Ty → Type v} (x : V t) (env : Env V Γ) : Env V (t :: Γ)
   | _, .here => x
   | _, .there r => env r
 
-def Env.map {V : Ty → Type v} {W : Ty → Type w}
-    (j : ∀ {t}, V t → W t) (env : Env V Γ) : Env W Γ := fun r => j (env r)
+/-- Relabeling preserves register positions even when distinct sorts merge. -/
+def Ref.relabel {TargetTy : Type u'} (ρ : Ty → TargetTy) : Ref Γ t → Ref (Γ.map ρ) (ρ t)
+  | .here => .here
+  | .there r => .there (r.relabel ρ)
 
-theorem Env.map_cons {V : Ty → Type v} {W : Ty → Type w}
-    (j : ∀ {t}, V t → W t) (env : Env V Γ) (x : V s) :
-    (fun {t} (r : Ref (s :: Γ) t) => Env.map j (Env.cons x env) r) =
-      (fun {t} (r : Ref (s :: Γ) t) => Env.cons (j x) (Env.map j env) r) := by
-  funext t r
-  cases r <;> rfl
+def HList.relabel {TargetTy : Type u'} {F : Ty → Type v} {G : TargetTy → Type w}
+    (ρ : Ty → TargetTy) (f : ∀ {t}, F t → G (ρ t)) : HList F Γ → HList G (Γ.map ρ)
+  | .nil => .nil
+  | .cons x xs => .cons (f x) (xs.relabel ρ f)
+
+def Env.relabel {TargetTy : Type u'} {V : Ty → Type v} {W : TargetTy → Type w}
+    (ρ : Ty → TargetTy) (j : ∀ {t}, V t → W (ρ t)) {Γ : List Ty}
+    (env : Env V Γ) : Env W (Γ.map ρ) :=
+  match Γ with
+  | [] => fun r => nomatch r
+  | _ :: _ => Env.cons (j (env .here)) (Env.relabel ρ j (fun r => env (.there r)))
+
+theorem Env.get_relabel {TargetTy : Type u'} {V : Ty → Type v} {W : TargetTy → Type w}
+    (ρ : Ty → TargetTy) (j : ∀ {t}, V t → W (ρ t)) (env : Env V Γ) (r : Ref Γ t) :
+    Env.relabel ρ j env (r.relabel ρ) = j (env r) := by
+  induction r with
+  | here => rfl
+  | there r ih => exact ih (fun r => env (.there r))
+
+theorem Env.relabel_cons {TargetTy : Type u'} {V : Ty → Type v} {W : TargetTy → Type w}
+    (ρ : Ty → TargetTy) (j : ∀ {t}, V t → W (ρ t)) (env : Env V Γ) (x : V s) :
+    (fun {t} (r : Ref ((s :: Γ).map ρ) t) => Env.relabel ρ j (Env.cons x env) r) =
+      (fun {t} (r : Ref ((s :: Γ).map ρ) t) => Env.cons (j x) (Env.relabel ρ j env) r) := rfl
 
 inductive Arg (Lit : Ty → Type v) (Γ : List Ty) (t : Ty) : Type (max u v) where
   | reg : Ref Γ t → Arg Lit Γ t
@@ -182,75 +201,88 @@ theorem Program.run_splice (p : Program Prim Lit Γ s) (k : Program Prim Lit (s 
 end Substitution
 
 section Translation
-variable {Source Target : List Ty → Ty → Type v} {SLit TLit : Ty → Type v}
-variable (literal : ∀ {t}, SLit t → TLit t)
-variable (expand : ∀ {params t}, Source params t → Program Target TLit params t)
+variable {TargetTy : Type u'}
+variable {Source : List Ty → Ty → Type v} {Target : List TargetTy → TargetTy → Type v}
+variable {SLit : Ty → Type v} {TLit : TargetTy → Type v}
+variable (ρ : Ty → TargetTy)
+variable (literal : ∀ {t}, SLit t → TLit (ρ t))
+variable (expand : ∀ {params t}, Source params t → Program Target TLit (params.map ρ) (ρ t))
 
-def Arg.translate : Arg SLit Γ t → Arg TLit Γ t
-  | .reg r => .reg r
+def Arg.translate : Arg SLit Γ t → Arg TLit (Γ.map ρ) (ρ t)
+  | .reg r => .reg (r.relabel ρ)
   | .literal l => .literal (literal l)
 
-def Program.translate (p : Program Source SLit Γ t) : Program Target TLit Γ t :=
+def Program.translate (p : Program Source SLit Γ t) : Program Target TLit (Γ.map ρ) (ρ t) :=
   match p with
-  | .ret a => .ret (a.translate literal)
+  | .ret a => .ret (a.translate ρ literal)
   | .call op args rest =>
-      ((expand op).subst (args.map (Arg.translate literal)).get).splice
-        (rest.translate)
+      ((expand op).subst (args.relabel ρ (Arg.translate ρ literal)).get).splice rest.translate
 
-variable {V W : Ty → Type w} (S : Semantics Source SLit V) (T : Semantics Target TLit W)
-variable (j : ∀ {t}, V t → W t)
+variable {V : Ty → Type w} {W : TargetTy → Type w}
+variable (S : Semantics Source SLit V) (T : Semantics Target TLit W)
+variable (j : ∀ {t}, V t → W (ρ t))
 variable (literal_exact : ∀ {t} (l : SLit t), T.literal (literal l) = j (S.literal l))
 variable (primitive_exact : ∀ {params t} (op : Source params t) (xs : HList V params),
-  (expand op).run T (xs.map j).get = (S.primitive op xs).map j)
+  (expand op).run T (xs.relabel ρ j).get = (S.primitive op xs).map j)
 
 include literal_exact
 
 theorem Arg.eval_translate (a : Arg SLit Γ t) (env : Env V Γ) :
-    (a.translate literal).eval T (env.map j) = j (a.eval S env) := by
+    (a.translate ρ literal).eval T (Env.relabel ρ j env) = j (a.eval S env) := by
   cases a with
-  | reg r => rfl
+  | reg r => exact Env.get_relabel ρ j env r
   | literal l => exact literal_exact l
 
+theorem eval_translated_args (args : HList (Arg SLit Γ) params) (env : Env V Γ) :
+    (args.relabel ρ (Arg.translate ρ literal)).map (Arg.eval T (Env.relabel ρ j env)) =
+      (args.map (Arg.eval S env)).relabel ρ j := by
+  induction args with
+  | nil => rfl
+  | cons a args ih =>
+      simp only [HList.relabel, HList.map, Arg.eval_translate ρ literal S T j literal_exact, ih]
+
 theorem translated_args (args : HList (Arg SLit Γ) params) (env : Env V Γ) :
-    (fun {t} (r : Ref params t) =>
-      ((args.map (Arg.translate literal)).get r).eval T (env.map j)) =
-      (fun {_} r => ((args.map (Arg.eval S env)).map j).get r) := by
+    (fun {t} (r : Ref (params.map ρ) t) =>
+      ((args.relabel ρ (Arg.translate ρ literal)).get r).eval T (Env.relabel ρ j env)) =
+      (fun {_} r => ((args.map (Arg.eval S env)).relabel ρ j).get r) := by
   funext t r
-  simp only [HList.get_map, Arg.eval_translate literal S T j literal_exact]
+  have h := congrArg (fun xs : HList W (params.map ρ) => xs.get r)
+    (eval_translated_args ρ literal S T j literal_exact args env)
+  simpa only [HList.get_map] using h
 
 include primitive_exact
 
 theorem Program.run_translate (p : Program Source SLit Γ t) (env : Env V Γ) :
-    (p.translate literal expand).run T (env.map j) = (p.run S env).map j := by
+    (p.translate ρ literal expand).run T (Env.relabel ρ j env) = (p.run S env).map j := by
   induction p with
   | ret a =>
-      simp only [Program.translate, Program.run, Arg.eval_translate literal S T j literal_exact,
-        Option.map_some]
+      simp only [Program.translate, Program.run,
+        Arg.eval_translate ρ literal S T j literal_exact, Option.map_some]
   | call op args rest ih =>
       rw [Program.translate, Program.run_splice, Program.run_subst,
-        translated_args literal S T j literal_exact, primitive_exact]
+        translated_args ρ literal S T j literal_exact, primitive_exact]
       simp only [Program.run]
       cases h : S.primitive op (args.map (Arg.eval S env)) with
       | none => rfl
       | some x =>
           simp only [Option.map_some, Option.bind_some]
-          rw [← Env.map_cons, ih]
+          exact ih (env.cons x)
 
 theorem Program.undefinedness_reflected (p : Program Source SLit Γ t) (env : Env V Γ) :
-    (p.translate literal expand).run T (env.map j) = none ↔ p.run S env = none := by
-  rw [p.run_translate literal expand S T j literal_exact primitive_exact]
+    (p.translate ρ literal expand).run T (Env.relabel ρ j env) = none ↔ p.run S env = none := by
+  rw [p.run_translate ρ literal expand S T j literal_exact primitive_exact]
   simp
 
 theorem Program.definedness_reflected (p : Program Source SLit Γ t) (env : Env V Γ) :
-    ((p.translate literal expand).run T (env.map j)).isSome = (p.run S env).isSome := by
-  rw [p.run_translate literal expand S T j literal_exact primitive_exact]
+    ((p.translate ρ literal expand).run T (Env.relabel ρ j env)).isSome = (p.run S env).isSome := by
+  rw [p.run_translate ρ literal expand S T j literal_exact primitive_exact]
   simp
 
 theorem Program.result_reflected (p : Program Source SLit Γ t) (env : Env V Γ)
     (injective : Function.Injective (@j t)) (value : V t) :
-    (p.translate literal expand).run T (env.map j) = some (j value) ↔
+    (p.translate ρ literal expand).run T (Env.relabel ρ j env) = some (j value) ↔
       p.run S env = some value := by
-  rw [p.run_translate literal expand S T j literal_exact primitive_exact]
+  rw [p.run_translate ρ literal expand S T j literal_exact primitive_exact]
   cases p.run S env with
   | none => simp
   | some x => simp only [Option.map_some, Option.some.injEq]; exact injective.eq_iff
