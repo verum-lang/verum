@@ -78,7 +78,7 @@ fn battery() -> Vec<(&'static str, Certificate, bool)> {
             close(
                 Term::Induct {
                     scrutinee: Box::new(zero),
-                    motive: Box::new(Term::lam(bit, lifted)),
+                    motive: Box::new(Term::lam(bit, lifted.clone())),
                     cases: vec![witness(), witness()],
                 },
                 witness_type(),
@@ -117,6 +117,102 @@ fn battery() -> Vec<(&'static str, Certificate, bool)> {
             false,
         ),
     ];
+    let defined = |value: Term, body: Term| Term::Let {
+        value: Box::new(value),
+        body: Box::new(body),
+    };
+    cases.extend([
+        (
+            "transparent_pair",
+            close(defined(witness(), Term::var(0)), witness_type()),
+            true,
+        ),
+        (
+            "transparent_alias_chain",
+            close(
+                defined(witness(), defined(Term::var(0), Term::var(0))),
+                witness_type(),
+            ),
+            true,
+        ),
+        (
+            "transparent_under_binder",
+            close(
+                defined(witness(), Term::lam(Term::var(2), Term::var(1))),
+                Term::pi(Term::var(1), lifted.clone()),
+            ),
+            true,
+        ),
+        (
+            "transparent_argument",
+            close(
+                defined(
+                    witness(),
+                    Term::app(Term::lam(lifted, Term::fst(Term::var(0))), Term::var(0)),
+                ),
+                Term::var(1),
+            ),
+            true,
+        ),
+        // Normalizing a definition before checking would erase this application
+        // and incorrectly refine its explicitly nondependent result type.
+        (
+            "application_is_not_transparent_alias",
+            close(
+                defined(
+                    Term::app(
+                        Term::lam(
+                            Term::sigma(
+                                Term::var(1),
+                                Term::id_ty(Term::var(2), Term::var(1), Term::var(1)),
+                            ),
+                            Term::var(0),
+                        ),
+                        witness(),
+                    ),
+                    Term::var(0),
+                ),
+                witness_type(),
+            ),
+            false,
+        ),
+        // A discarded definition still must be checked before any evaluation.
+        (
+            "ill_typed_unused_definition",
+            close(
+                defined(
+                    Term::app(Term::lam(Term::var(1), Term::var(0)), Term::universe(0)),
+                    Term::pair(Term::var(1), Term::refl(Term::var(1))),
+                ),
+                witness_type(),
+            ),
+            false,
+        ),
+        // Assumptions retain their stated types; only local definitions unfold.
+        (
+            "nondependent_assumption",
+            close(
+                Term::lam(
+                    Term::sigma(
+                        Term::var(1),
+                        Term::id_ty(Term::var(2), Term::var(1), Term::var(1)),
+                    ),
+                    Term::var(0),
+                ),
+                Term::pi(
+                    Term::sigma(
+                        Term::var(1),
+                        Term::id_ty(Term::var(2), Term::var(1), Term::var(1)),
+                    ),
+                    Term::sigma(
+                        Term::var(2),
+                        Term::id_ty(Term::var(3), Term::var(2), Term::var(0)),
+                    ),
+                ),
+            ),
+            false,
+        ),
+    ]);
     let mut wrong_annotation = close(witness(), witness_type());
     if let Term::Lam(_, inner) = &mut wrong_annotation.term {
         if let Term::Lam(domain, _) = inner.as_mut() {

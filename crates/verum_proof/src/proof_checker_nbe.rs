@@ -770,11 +770,19 @@ fn def_eq_neutral(a: &Neutral, b: &Neutral, level: usize) -> bool {
 /// the binder's domain (as a value).
 #[derive(Debug, Clone, Default)]
 pub struct NbeContext {
-    /// Stack of binder types as values, outermost-first.
-    types: Vec<Arc<Value>>,
+    /// Checked bindings, outermost-first. Definitions retain their source so
+    /// expected families can reach introductions without reducing arbitrary
+    /// applications or discarding their type annotations.
+    bindings: Vec<Binding>,
     /// Stack of binder values (used as the env for eval).
-    /// Each entry is a fresh neutral at the binder's level.
+    /// Assumptions are fresh neutrals; definitions are checked values.
     env: Env,
+}
+
+#[derive(Debug, Clone)]
+struct Binding {
+    ty: Arc<Value>,
+    definition: Option<Arc<Term>>,
 }
 
 impl NbeContext {
@@ -792,31 +800,45 @@ impl NbeContext {
     /// type.  The new binder's value is a fresh neutral at the
     /// current level.
     pub fn extend(&self, domain_value: Value) -> Self {
-        let mut new_types = self.types.clone();
-        new_types.push(Arc::new(domain_value));
+        let mut bindings = self.bindings.clone();
+        bindings.push(Binding {
+            ty: Arc::new(domain_value),
+            definition: None,
+        });
         let mut new_env = self.env.clone();
         new_env.push(Arc::new(Value::VNeutral(Neutral::NVar(self.env.len()))));
         Self {
-            types: new_types,
+            bindings,
             env: new_env,
         }
     }
 
     /// Extend with a checked transparent definition rather than a neutral.
-    fn define(&self, ty: Value, value: Value) -> Self {
+    fn define(&self, ty: Value, value: Value, source: &Term) -> Self {
         let mut extended = self.clone();
-        extended.types.push(Arc::new(ty));
+        extended.bindings.push(Binding {
+            ty: Arc::new(ty),
+            definition: Some(Arc::new(source.clone())),
+        });
         extended.env.push(Arc::new(value));
         extended
     }
 
     /// Look up the type of variable at de Bruijn index `i`.
     pub fn lookup(&self, i: usize) -> Option<&Value> {
-        let len = self.types.len();
+        let len = self.bindings.len();
         if i >= len {
             return None;
         }
-        Some(self.types[len - 1 - i].as_ref())
+        Some(self.bindings[len - 1 - i].ty.as_ref())
+    }
+
+    /// Unfold only a checked local definition. Its source predates its own
+    /// binder and every subsequent binder, so weaken across exactly i + 1.
+    fn definition(&self, i: usize) -> Option<Term> {
+        let position = self.bindings.len().checked_sub(i.checked_add(1)?)?;
+        let source = self.bindings[position].definition.as_ref()?;
+        Some(crate::proof_checker::shift_up((**source).clone(), i + 1, 0))
     }
 
     /// The current evaluation environment.
@@ -841,7 +863,7 @@ fn infer_value(ctx: &NbeContext, term: &Term) -> Result<Value, CheckError> {
     match term {
         Term::Let { value, body } => {
             let ty = infer_value(ctx, value)?;
-            infer_value(&ctx.define(ty, eval(value, ctx.env())), body)
+            infer_value(&ctx.define(ty, eval(value, ctx.env()), value), body)
         }
 
         Term::Data {
@@ -1145,9 +1167,18 @@ fn check_domain_value(ctx: &NbeContext, term: &Term, expected: &Value) -> Result
 // Expected types are semantic values. Dependent families are instantiated by
 // closure application, independently of the substitution checker's algorithm.
 fn check_value(ctx: &NbeContext, term: &Term, expected: &Value) -> Result<(), CheckError> {
+    if let Term::Var(index) = term {
+        if let Some(source) = ctx.definition(*index) {
+            return check_value(ctx, &source, expected);
+        }
+    }
     if let Term::Let { value, body } = term {
         let ty = infer_value(ctx, value)?;
-        return check_value(&ctx.define(ty, eval(value, ctx.env())), body, expected);
+        return check_value(
+            &ctx.define(ty, eval(value, ctx.env()), value),
+            body,
+            expected,
+        );
     }
     match (term, expected) {
         (
