@@ -261,90 +261,87 @@ def Level.shiftedBy (l : Level) (by_ : Nat) : Level :=
 -- Term-level operations
 -- =============================================================================
 
-/-- Shift up: every `var i` with `i ≥ cutoff` becomes `var (i + amount)`.
-    Mirrors `proof_checker::shift_up`.  Universe levels pass through
-    unchanged — they're not term binders.  Σ extends Π's binder
-    discipline; Pair/Fst/Snd are non-binding. -/
-partial def shiftUp (amount : Nat) (cutoff : Nat) (t : Term) : Term :=
-  match t with
-  | .letE value body => .letE (shiftUp amount cutoff value) (shiftUp amount (cutoff+1) body)
-  | .data name level constructors => .data name level (constructors.map (fun fields => fields.map (Option.map (shiftUp amount cutoff))))
-  | .construct data ctor args => .construct (shiftUp amount cutoff data) ctor (args.map (shiftUp amount cutoff))
-  | .induct value motive cases => .induct (shiftUp amount cutoff value) (shiftUp amount cutoff motive) (cases.map (shiftUp amount cutoff))
-  | .var i        => if i ≥ cutoff then .var (i + amount) else .var i
-  | .universe l   => .universe l
-  | .pi a b       => .pi (shiftUp amount cutoff a) (shiftUp amount (cutoff + 1) b)
-  | .lam a body   => .lam (shiftUp amount cutoff a) (shiftUp amount (cutoff + 1) body)
-  | .app f x      => .app (shiftUp amount cutoff f) (shiftUp amount cutoff x)
-  | .sigma a b    => .sigma (shiftUp amount cutoff a) (shiftUp amount (cutoff + 1) b)
-  | .pair a b     => .pair (shiftUp amount cutoff a) (shiftUp amount cutoff b)
-  | .fst p        => .fst (shiftUp amount cutoff p)
-  | .snd p        => .snd (shiftUp amount cutoff p)
-  | .identity a x y => .identity (shiftUp amount cutoff a) (shiftUp amount cutoff x) (shiftUp amount cutoff y)
-  | .refl x => .refl (shiftUp amount cutoff x)
-  | .transport p h e => .transport (shiftUp amount cutoff p) (shiftUp amount cutoff h) (shiftUp amount cutoff e)
+/- One total traversal owns the binding discipline for renaming and
+    substitution. Constructor value fields, arguments and induction branches
+    introduce no implicit binders; let bodies, Pi, Lam and Sigma introduce one.
+    The explicit nested-list helpers expose decreasing structural recursion. -/
+mutual
 
-/-- Shift down — inverse of `shiftUp`. -/
-partial def shiftDown (amount : Nat) (cutoff : Nat) (t : Term) : Term :=
+def mapVars (replace : Nat → Nat → Term) (cutoff : Nat) (t : Term) : Term :=
   match t with
-  | .letE value body => .letE (shiftDown amount cutoff value) (shiftDown amount (cutoff+1) body)
-  | .data name level constructors => .data name level (constructors.map (fun fields => fields.map (Option.map (shiftDown amount cutoff))))
-  | .construct data ctor args => .construct (shiftDown amount cutoff data) ctor (args.map (shiftDown amount cutoff))
-  | .induct value motive cases => .induct (shiftDown amount cutoff value) (shiftDown amount cutoff motive) (cases.map (shiftDown amount cutoff))
-  | .var i =>
-    if i ≥ cutoff + amount then .var (i - amount)
-    else if i < cutoff then .var i
-    else .var i
+  | .letE value body => .letE (mapVars replace cutoff value) (mapVars replace (cutoff+1) body)
+  | .data name level constructors => .data name level (mapConstructors replace cutoff constructors)
+  | .construct data ctor args => .construct (mapVars replace cutoff data) ctor (mapTerms replace cutoff args)
+  | .induct value motive cases => .induct (mapVars replace cutoff value) (mapVars replace cutoff motive) (mapTerms replace cutoff cases)
+  | .var i        => replace cutoff i
   | .universe l   => .universe l
-  | .pi a b       => .pi (shiftDown amount cutoff a) (shiftDown amount (cutoff + 1) b)
-  | .lam a body   => .lam (shiftDown amount cutoff a) (shiftDown amount (cutoff + 1) body)
-  | .app f x      => .app (shiftDown amount cutoff f) (shiftDown amount cutoff x)
-  | .sigma a b    => .sigma (shiftDown amount cutoff a) (shiftDown amount (cutoff + 1) b)
-  | .pair a b     => .pair (shiftDown amount cutoff a) (shiftDown amount cutoff b)
-  | .fst p        => .fst (shiftDown amount cutoff p)
-  | .snd p        => .snd (shiftDown amount cutoff p)
-  | .identity a x y => .identity (shiftDown amount cutoff a) (shiftDown amount cutoff x) (shiftDown amount cutoff y)
-  | .refl x => .refl (shiftDown amount cutoff x)
-  | .transport p h e => .transport (shiftDown amount cutoff p) (shiftDown amount cutoff h) (shiftDown amount cutoff e)
+  | .pi a b       => .pi (mapVars replace cutoff a) (mapVars replace (cutoff + 1) b)
+  | .lam a body   => .lam (mapVars replace cutoff a) (mapVars replace (cutoff + 1) body)
+  | .app f x      => .app (mapVars replace cutoff f) (mapVars replace cutoff x)
+  | .sigma a b    => .sigma (mapVars replace cutoff a) (mapVars replace (cutoff + 1) b)
+  | .pair a b     => .pair (mapVars replace cutoff a) (mapVars replace cutoff b)
+  | .fst p        => .fst (mapVars replace cutoff p)
+  | .snd p        => .snd (mapVars replace cutoff p)
+  | .identity a x y => .identity (mapVars replace cutoff a) (mapVars replace cutoff x) (mapVars replace cutoff y)
+  | .refl x => .refl (mapVars replace cutoff x)
+  | .transport p h e => .transport (mapVars replace cutoff p) (mapVars replace cutoff h) (mapVars replace cutoff e)
+termination_by sizeOf t
 
-/-- Substitute `replacement` for `var target` in `t`. -/
-partial def subst (target : Nat) (replacement : Term) (t : Term) : Term :=
-  match t with
-  | .letE value body => .letE (subst target replacement value) (subst (target+1) replacement body)
-  | .data name level constructors => .data name level (constructors.map (fun fields => fields.map (Option.map (subst target replacement))))
-  | .construct data ctor args => .construct (subst target replacement data) ctor (args.map (subst target replacement))
-  | .induct value motive cases => .induct (subst target replacement value) (subst target replacement motive) (cases.map (subst target replacement))
-  | .var i =>
+def mapTerms (replace : Nat → Nat → Term) (cutoff : Nat) (terms : List Term) : List Term :=
+  match terms with
+  | [] => []
+  | term :: rest => mapVars replace cutoff term :: mapTerms replace cutoff rest
+termination_by sizeOf terms
+
+def mapFields (replace : Nat → Nat → Term) (cutoff : Nat)
+    (fields : List (Option Term)) : List (Option Term) :=
+  match fields with
+  | [] => []
+  | none :: rest => none :: mapFields replace cutoff rest
+  | some term :: rest => some (mapVars replace cutoff term) :: mapFields replace cutoff rest
+termination_by sizeOf fields
+
+def mapConstructors (replace : Nat → Nat → Term) (cutoff : Nat)
+    (constructors : List (List (Option Term))) : List (List (Option Term)) :=
+  match constructors with
+  | [] => []
+  | fields :: rest => mapFields replace cutoff fields :: mapConstructors replace cutoff rest
+termination_by sizeOf constructors
+
+end
+
+/-- Raise every variable at or above the cutoff; universe levels are unchanged. -/
+def shiftUp (amount cutoff : Nat) (t : Term) : Term :=
+  mapVars (fun cutoff i => if i ≥ cutoff then .var (i + amount) else .var i) cutoff t
+
+/-- Lower variables above the removed interval. Variables inside it are left
+    unchanged: this is a total operation, not a scoping validator. -/
+def shiftDown (amount cutoff : Nat) (t : Term) : Term :=
+  mapVars (fun cutoff i => if i ≥ cutoff + amount then .var (i - amount) else .var i) cutoff t
+
+/-- Substitute at the target and discharge that binder. -/
+def subst (target : Nat) (replacement : Term) (t : Term) : Term :=
+  mapVars (fun target i =>
     if i = target then shiftUp target 0 replacement
     else if i > target then .var (i - 1)
-    else .var i
-  | .universe l => .universe l
-  | .pi a b     => .pi (subst target replacement a) (subst (target + 1) replacement b)
-  | .lam a body => .lam (subst target replacement a) (subst (target + 1) replacement body)
-  | .app f x    => .app (subst target replacement f) (subst target replacement x)
-  | .sigma a b  => .sigma (subst target replacement a) (subst (target + 1) replacement b)
-  | .pair a b   => .pair (subst target replacement a) (subst target replacement b)
-  | .fst p      => .fst (subst target replacement p)
-  | .snd p      => .snd (subst target replacement p)
-  | .identity a x y => .identity (subst target replacement a) (subst target replacement x) (subst target replacement y)
-  | .refl x => .refl (subst target replacement x)
-  | .transport p h e => .transport (subst target replacement p) (subst target replacement h) (subst target replacement e)
+    else .var i) target t
 
 /-- Fuel ceiling for whnf. -/
 def whnfFuelCeiling : Nat := 1 <<< 20
 
 /-- Fuel-bounded whnf — handles β-reduction at App and Σ-projection
     at Fst/Snd. -/
-partial def whnfFuel (fuel : Nat) (t : Term) : Term :=
-  if fuel = 0 then t
-  else
+def whnfFuel (fuel : Nat) (t : Term) : Term :=
+  match fuel with
+  | 0 => t
+  | fuel + 1 =>
     match t with
-    | .letE value body => whnfFuel (fuel-1) (subst 0 value body)
+    | .letE value body => whnfFuel fuel (subst 0 value body)
     | .induct value motive cases =>
-      let head := whnfFuel (fuel - 1) value
+      let head := whnfFuel fuel value
       match head with
       | .construct data ctor args =>
-        match whnfFuel (fuel - 1) data with
+        match whnfFuel fuel data with
         | .data _ _ constructors =>
           match constructors[ctor]?, cases[ctor]? with
           | some fields, some branch =>
@@ -354,31 +351,32 @@ partial def whnfFuel (fuel : Nat) (t : Term) : Term :=
                 match field with
                 | none => .app next (.induct arg motive cases)
                 | some _ => next) branch
-              whnfFuel (fuel - 1) applied
+              whnfFuel fuel applied
             else .induct head motive cases
           | _, _ => .induct head motive cases
         | _ => .induct head motive cases
       | _ => .induct head motive cases
     | .app f x =>
-      let f' := whnfFuel (fuel - 1) f
+      let f' := whnfFuel fuel f
       match f' with
-      | .lam _ body => whnfFuel (fuel - 1) (subst 0 x body)
+      | .lam _ body => whnfFuel fuel (subst 0 x body)
       | other       => .app other x
     | .fst p =>
-      let p' := whnfFuel (fuel - 1) p
+      let p' := whnfFuel fuel p
       match p' with
-      | .pair a _ => whnfFuel (fuel - 1) a
+      | .pair a _ => whnfFuel fuel a
       | other     => .fst other
     | .snd p =>
-      let p' := whnfFuel (fuel - 1) p
+      let p' := whnfFuel fuel p
       match p' with
-      | .pair _ b => whnfFuel (fuel - 1) b
+      | .pair _ b => whnfFuel fuel b
       | other     => .snd other
     | .transport p h e =>
-      match whnfFuel (fuel - 1) e with
-      | .refl _ => whnfFuel (fuel - 1) h
+      match whnfFuel fuel e with
+      | .refl _ => whnfFuel fuel h
       | other => .transport p h other
     | other => other
+termination_by fuel
 
 /-- Public whnf. -/
 def whnf (t : Term) : Term := whnfFuel whnfFuelCeiling t

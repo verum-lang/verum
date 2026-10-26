@@ -8,5 +8,6 @@
 -- hence `lake build`.
 import VerumExternalReplay.KernelSoundness
 import VerumExternalReplay.ReferenceChecker
+import VerumExternalReplay.TermOperations
 import VerumExternalReplay.ConservativeRefinement
 import VerumExternalReplay.ReceiptCredit
