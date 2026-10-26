@@ -107,7 +107,7 @@ def main():
     checker_files += sorted(path for path in (lean_prefix / "lib/lean").iterdir()
                             if path.is_file() and path.suffix in {".dylib", ".so", ".dll"})
     report = {
-        "scope": "Direct Lean typed finite program theorem; native indexed syntax/lowering remains open",
+        "scope": "Direct Lean typed finite program theorem; native certificates and compiler/runtime correspondence are separate obligations",
         "lean_version": require_success(run("lake", "env", "lean", "--version")),
         "checker_sha256": {str(path.relative_to(lean_prefix)): sha256(path) for path in checker_files},
         "source_sha256": before, "positive": positive, "negative": negatives,

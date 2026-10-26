@@ -737,7 +737,11 @@ impl Term {
         }
     }
 
-    fn map_variables(self, depth: usize, map: &mut impl FnMut(usize, usize) -> Term) -> Term {
+    pub(crate) fn map_variables(
+        self,
+        depth: usize,
+        map: &mut impl FnMut(usize, usize) -> Term,
+    ) -> Term {
         match self {
             Term::Var(index) => map(index, depth),
             term => term.map_children(|child, binders| child.map_variables(depth + binders, map)),
@@ -834,11 +838,28 @@ impl Term {
 
 /// Type-checking context: stack of types corresponding to bound
 /// variables, with index 0 being the most-recent binder.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Default)]
 pub struct Context {
-    /// Inner-first stack of variable types.
-    types: Vec<Term>,
-    definitions: Vec<Option<std::sync::Arc<Definition>>>,
+    /// Shared binding-site types and optional checked definitions.
+    bindings: Vec<ContextBinding>,
+    /// Preserve the public slice view without materializing it during checking.
+    types_view: std::sync::OnceLock<Vec<Term>>,
+}
+
+#[derive(Debug, Clone)]
+struct ContextBinding {
+    ty: std::sync::Arc<Term>,
+    closed: bool,
+    definition: Option<std::sync::Arc<Definition>>,
+}
+
+impl Clone for Context {
+    fn clone(&self) -> Self {
+        Self {
+            bindings: self.bindings.clone(),
+            types_view: std::sync::OnceLock::new(),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -858,14 +879,14 @@ impl Context {
     /// Crucially: the returned type is shifted up by `i + 1` so the
     /// caller sees it in the OUTER context's de Bruijn frame.
     pub fn lookup(&self, i: usize) -> Option<Term> {
-        // The types vec is innermost-first, so var(0) is types[len-1],
-        // var(1) is types[len-2], etc.
-        let len = self.types.len();
-        if i >= len {
-            return None;
-        }
-        let raw = self.types[len - 1 - i].clone();
-        Some(shift_up(raw, i + 1, 0))
+        let position = self.bindings.len().checked_sub(i.checked_add(1)?)?;
+        let binding = &self.bindings[position];
+        let raw = (*binding.ty).clone();
+        Some(if binding.closed {
+            raw
+        } else {
+            shift_up(raw, i + 1, 0)
+        })
     }
 
     /// Extend the context with a new binder of type `ty` (the new
@@ -873,8 +894,13 @@ impl Context {
     /// is unchanged for compositionality.
     pub fn extend(&self, ty: Term) -> Self {
         let mut out = self.clone();
-        out.types.push(ty);
-        out.definitions.push(None);
+        let ty = self.expand(ty);
+        let closed = !contains_free(&ty, 0, None);
+        out.bindings.push(ContextBinding {
+            ty: std::sync::Arc::new(ty),
+            closed,
+            definition: None,
+        });
         out
     }
 
@@ -882,7 +908,7 @@ impl Context {
     /// substitution is needed in types and conversion, not at every proof use.
     fn define(&self, ty: Term, value: &Term) -> Self {
         let mut out = self.extend(ty);
-        *out.definitions.last_mut().unwrap() = Some(std::sync::Arc::new(Definition {
+        out.bindings.last_mut().unwrap().definition = Some(std::sync::Arc::new(Definition {
             source: value.clone(),
             expanded: std::sync::OnceLock::new(),
         }));
@@ -890,8 +916,9 @@ impl Context {
     }
 
     fn definition(&self, index: usize) -> Option<Term> {
-        let position = self.definitions.len().checked_sub(index.checked_add(1)?)?;
-        self.definitions[position]
+        let position = self.bindings.len().checked_sub(index.checked_add(1)?)?;
+        self.bindings[position]
+            .definition
             .as_ref()
             .map(|term| shift_up(term.source.clone(), index + 1, 0))
     }
@@ -900,15 +927,18 @@ impl Context {
     /// acyclic: their source lives in the prefix preceding their own binding.
     /// Memoized expansion is only syntax, never a cached typing assertion.
     fn expand(&self, term: Term) -> Term {
-        fn expand_in(term: Term, definitions: &[Option<std::sync::Arc<Definition>>]) -> Term {
+        fn expand_in(term: Term, definitions: &[ContextBinding]) -> Term {
             term.map_variables(0, &mut |index, depth| {
                 let Some(relative) = index.checked_sub(depth) else {
                     return Term::var(index);
                 };
-                let Some(position) = definitions.len().checked_sub(relative + 1) else {
+                let Some(position) = relative
+                    .checked_add(1)
+                    .and_then(|count| definitions.len().checked_sub(count))
+                else {
                     return Term::var(index);
                 };
-                let Some(definition) = &definitions[position] else {
+                let Some(definition) = &definitions[position].definition else {
                     return Term::var(index);
                 };
                 let expanded = definition
@@ -917,16 +947,26 @@ impl Context {
                 shift_up(expanded.clone(), relative + 1 + depth, 0)
             })
         }
-        if self.definitions.iter().all(Option::is_none) {
+        if self
+            .bindings
+            .iter()
+            .all(|binding| binding.definition.is_none())
+            || !contains_free_by(&term, 0, &|index| {
+                index
+                    .checked_add(1)
+                    .and_then(|count| self.bindings.len().checked_sub(count))
+                    .is_some_and(|position| self.bindings[position].definition.is_some())
+            })
+        {
             term
         } else {
-            expand_in(term, &self.definitions)
+            expand_in(term, &self.bindings)
         }
     }
 
     /// Number of bound variables.
     pub fn depth(&self) -> usize {
-        self.types.len()
+        self.bindings.len()
     }
 
     /// Raw inner-first slice of binder types — types are stored in
@@ -941,15 +981,22 @@ impl Context {
     /// `lookup` applies the appropriate frame-shift; this slice does
     /// not.
     pub fn types(&self) -> &[Term] {
-        &self.types
+        self.types_view.get_or_init(|| {
+            self.bindings
+                .iter()
+                .map(|binding| (*binding.ty).clone())
+                .collect()
+        })
     }
 
     /// Iterate raw binder types from outer to inner — the order in
     /// which they were `extend`ed.  Equivalent to
     /// `self.types().iter()`.  Provided as a convenience for
     /// rebuilding a context one extension at a time.
-    pub fn iter_outer_to_inner(&self) -> std::slice::Iter<'_, Term> {
-        self.types.iter()
+    pub fn iter_outer_to_inner(
+        &self,
+    ) -> impl ExactSizeIterator<Item = &Term> + DoubleEndedIterator {
+        self.bindings.iter().map(|binding| binding.ty.as_ref())
     }
 }
 
@@ -1375,6 +1422,11 @@ fn def_eq_whnf(a: &Term, b: &Term) -> bool {
         // (typically a bound variable or neutral application).
         (Term::Sigma(a1, b1), Term::Sigma(a2, b2)) => def_eq(a1, a2) && def_eq(b1, b2),
         (Term::Pair(a1, b1), Term::Pair(a2, b2)) => def_eq(a1, a2) && def_eq(b1, b2),
+        // Sigma eta: a value is determined by its two projections. As with
+        // function eta, conversion callers first establish the common type.
+        (Term::Pair(first, second), other) | (other, Term::Pair(first, second)) => {
+            def_eq(first, &Term::fst(other.clone())) && def_eq(second, &Term::snd(other.clone()))
+        }
         (Term::Fst(p1), Term::Fst(p2)) => def_eq(p1, p2),
         (Term::Snd(p1), Term::Snd(p2)) => def_eq(p1, p2),
         // Identity types: three-component structural
@@ -1471,8 +1523,34 @@ fn eta_match(lam_body: &Term, other: &Term) -> bool {
 /// expression contains `Var` (those are LEVEL variables, not the
 /// term variable being inspected).
 fn is_free_in(term: &Term, target: usize) -> bool {
+    contains_free(term, 0, Some(target))
+}
+
+/// Detect an ambient variable without allocating or rebuilding the term.
+/// `None` asks whether the term is open at all; `Some` selects one index.
+fn contains_free(term: &Term, depth: usize, wanted: Option<usize>) -> bool {
+    contains_free_by(term, depth, &|index| {
+        wanted.is_none_or(|wanted| index == wanted)
+    })
+}
+
+pub(crate) fn contains_free_by(term: &Term, depth: usize, wanted: &impl Fn(usize) -> bool) -> bool {
+    let here = |term| contains_free_by(term, depth, wanted);
     match term {
-        Term::Let { value, body } => is_free_in(value, target) || is_free_in(body, target + 1),
+        Term::Var(index) => index.checked_sub(depth).is_some_and(|index| wanted(index)),
+        Term::Universe(_) => false,
+        Term::Let { value, body } => here(value) || contains_free_by(body, depth + 1, wanted),
+        Term::Pi(a, b) | Term::Lam(a, b) | Term::Sigma(a, b) => {
+            here(a) || contains_free_by(b, depth + 1, wanted)
+        }
+        Term::App(a, b) | Term::Pair(a, b) => here(a) || here(b),
+        Term::Fst(term) | Term::Snd(term) | Term::Refl(term) => here(term),
+        Term::Id { ty, lhs, rhs } => here(ty) || here(lhs) || here(rhs),
+        Term::J {
+            motive,
+            base,
+            scrutinee,
+        } => here(motive) || here(base) || here(scrutinee),
         Term::Data {
             indices,
             constructors,
@@ -1481,59 +1559,30 @@ fn is_free_in(term: &Term, target: usize) -> bool {
             indices
                 .iter()
                 .enumerate()
-                .any(|(i, ty)| is_free_in(ty, target + i))
+                .any(|(index, ty)| contains_free_by(ty, depth + index, wanted))
                 || constructors.iter().any(|constructor| {
-                    constructor
-                        .indices
+                    constructor.indices.iter().any(|term| {
+                        contains_free_by(term, depth + constructor.fields.len(), wanted)
+                    }) || constructor
+                        .fields
                         .iter()
-                        .any(|t| is_free_in(t, target + constructor.fields.len()))
-                        || constructor
-                            .fields
-                            .iter()
-                            .enumerate()
-                            .any(|(index, field)| match field {
-                                DataField::Value(t) => is_free_in(t, target),
-                                DataField::Dependent(t) => is_free_in(t, target + index),
-                                DataField::Recursive => false,
-                                DataField::RecursiveAt(indices) => {
-                                    indices.iter().any(|t| is_free_in(t, target + index))
-                                }
-                            })
+                        .enumerate()
+                        .any(|(index, field)| match field {
+                            DataField::Value(ty) => here(ty),
+                            DataField::Dependent(ty) => contains_free_by(ty, depth + index, wanted),
+                            DataField::Recursive => false,
+                            DataField::RecursiveAt(indices) => indices
+                                .iter()
+                                .any(|term| contains_free_by(term, depth + index, wanted)),
+                        })
                 })
         }
-        Term::Construct { data, args, .. } => {
-            is_free_in(data, target) || args.iter().any(|t| is_free_in(t, target))
-        }
+        Term::Construct { data, args, .. } => here(data) || args.iter().any(here),
         Term::Induct {
             scrutinee,
             motive,
             cases,
-        } => {
-            is_free_in(scrutinee, target)
-                || is_free_in(motive, target)
-                || cases.iter().any(|t| is_free_in(t, target))
-        }
-        Term::Var(i) => *i == target,
-        Term::Universe(_) => false,
-        Term::Pi(a, b) => is_free_in(a, target) || is_free_in(b, target + 1),
-        Term::Lam(a, body) => is_free_in(a, target) || is_free_in(body, target + 1),
-        Term::App(f, x) => is_free_in(f, target) || is_free_in(x, target),
-        Term::Sigma(a, b) => is_free_in(a, target) || is_free_in(b, target + 1),
-        Term::Pair(a, b) => is_free_in(a, target) || is_free_in(b, target),
-        Term::Fst(p) | Term::Snd(p) => is_free_in(p, target),
-        // Identity types: non-binding everywhere — no
-        // shift on `target`.
-        Term::Id { ty, lhs, rhs } => {
-            is_free_in(ty, target) || is_free_in(lhs, target) || is_free_in(rhs, target)
-        }
-        Term::Refl(value) => is_free_in(value, target),
-        Term::J {
-            motive,
-            base,
-            scrutinee,
-        } => {
-            is_free_in(motive, target) || is_free_in(base, target) || is_free_in(scrutinee, target)
-        }
+        } => here(scrutinee) || here(motive) || cases.iter().any(here),
     }
 }
 
@@ -1728,6 +1777,13 @@ pub enum CheckError {
 ///  swap T1 for T2 in any judgement; used implicitly in
 ///  T-App-Elim to match argument types).
 pub fn infer(ctx: &Context, term: &Term) -> Result<Term, CheckError> {
+    // Binding types were expanded when installed. Returning their already
+    // checked type must not traverse the complete alias environment again.
+    if let Term::Var(index) = term {
+        return ctx
+            .lookup(*index)
+            .ok_or(CheckError::UnboundVariable(*index));
+    }
     infer_inner(ctx, term).map(|ty| ctx.expand(ty))
 }
 
@@ -2241,7 +2297,7 @@ fn check_against(ctx: &Context, term: &Term, expected: &Term) -> Result<(), Chec
         let actual = ctx
             .lookup(*index)
             .ok_or(CheckError::UnboundVariable(*index))?;
-        if def_eq(&ctx.expand(actual), &expected) {
+        if def_eq(&actual, &expected) {
             return Ok(());
         }
         // A synthesized product may be less precise than an expected family.

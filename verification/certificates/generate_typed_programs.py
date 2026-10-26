@@ -7,10 +7,11 @@ continuations. Substitution and splicing preserve their entire optional result.
 
 Every helper below builds ordinary portable terms, not checker rules. Definitions
 are checked transparent lets. Neither metadata nor the names of these proofs
-confer authority. This module does not yet prove the full macro-translation
-contract or any compiler/runtime correspondence.
+confer authority. The macro theorem allows arbitrary sort mappings and target-local sorts,
+conditional on exact primitive and literal correspondence. It does not establish
+correspondence with the Verum compiler/runtime or source-language elaboration.
 """
-from portable_terms import RECURSIVE, app, arrow, bind, congruence, construct, data, dependent_field, first, identity, indexed_constructor, induct, lam, list_type, local, lower, pair, pi, recursive_field, refl, second, sigma, symm, transitive, tt, unit, universe, value_field, var
+from portable_terms import RECURSIVE, app, arrow, bind, congruence, construct, data, dependent_field, first, identity, indexed_constructor, induct, j, lam, list_type, local, lower, pair, pi, recursive_field, refl, second, sigma, symm, transitive, tt, unit, universe, value_field, var
 
 
 # Typed contexts, references, heterogeneous environments and execution
@@ -303,6 +304,222 @@ rows.append(judgment('general-program-splicing-preservation',v('runSplice'),bind
 
 
 
+
+# Arbitrary-sort macro translation and exact execution preservation
+ID=lambda c:ap(v('identitySubst'),S,Lit,c)
+id_params=[('S',universe()),('Lit',arrow(S,universe()))]
+id_def=bind(lam,id_params+[('ctx',L(S))],induct(g,lam('ctx',L(S),SUB(g,g)),tt(),
+ bind(lam,[('head',S),('tail',L(S)),('ih',SUB(tail,tail))],lift_sub(tail,tail,h,ih))))
+definitions.append(('identitySubst',id_def))
+rows.append(judgment('typed-identity-substitution',v('identitySubst'),bind(pi,id_params+[('ctx',L(S))],SUB(g,g))))
+id_law=lambda c,e:identity(HL(S,V,c),ES(c,c,ID(c),e),e)
+id_motive=lambda c:pi('xs',HL(S,V,c),id_law(c,xs))
+id_nil=lam('xs',unit(),induct(xs,lam('u',unit(),identity(unit(),tt(),v('u'))),refl(tt())))
+id_mid=pair(first(xs),ES(tail,tail,ID(tail),second(xs)))
+id_cons=bind(lam,[('head',S),('tail',L(S)),('ih',id_motive(tail)),('xs',HL(S,V,C(S,h,tail)))],
+ transitive(HL(S,V,C(S,h,tail)),ES(C(S,h,tail),C(S,h,tail),ID(C(S,h,tail)),xs),id_mid,xs,
+ ap(v('evalLift'),S,Lit,V,lit,tail,tail,ID(tail),h,second(xs),first(xs)),
+ congruence(HL(S,V,tail),HL(S,V,C(S,h,tail)),lam('new_tail',HL(S,V,tail),pair(first(xs),v('new_tail'))),
+ ES(tail,tail,ID(tail),second(xs)),second(xs),ap(ih,second(xs)))))
+id_proof=bind(lam,base_eval+[('ctx',L(S))],induct(g,lam('ctx',L(S),id_motive(g)),id_nil,id_cons))
+definitions.append(('evalIdentitySubst',id_proof))
+rows.append(judgment('general-identity-substitution',v('evalIdentitySubst'),bind(pi,base_eval+[('ctx',L(S))],id_motive(g))))
+
+# Arbitrary source/target sort maps and target macros.
+Q,TL,W,tlit,tprim,lmap,expand,jval=map(v,('TargetPrim','TargetLit','W','targetLiteral','targetPrimitive','literalMap','expand','j'))
+trans_params=[('S',universe()),('T',universe()),('rho',arrow(S,T)),
+ ('Prim',arrow(L(S),arrow(S,universe()))),('TargetPrim',arrow(L(T),arrow(T,universe()))),
+ ('Lit',arrow(S,universe())),('TargetLit',arrow(T,universe())),
+ ('literalMap',pi('t',S,arrow(ap(Lit,t),ap(TL,ap(rho,t))))),
+ ('expand',bind(pi,[('params',L(S)),('s',S),('op',ap(P,paramsv,s))],PR(T,Q,TL,MAP(paramsv),ap(rho,s))))]
+TA=lambda c,t,a:ap(v('translateArg'),S,T,rho,Lit,TL,lmap,c,t,a)
+ta_params=trans_params[:3]+trans_params[5:8]
+ta_ret=lam('r',RF(S,g,t),construct(ARG(T,TL,MAP(g),ap(rho,t)),0,RR(g,t,r)))
+ta_lit=lam('l',ap(Lit,t),construct(ARG(T,TL,MAP(g),ap(rho,t)),1,ap(lmap,t,v('l'))))
+ta_def=bind(lam,ta_params+[('ctx',L(S)),('t',S),('arg',ARG(S,Lit,g,t))],induct(aa,lam('_arg',ARG(S,Lit,g,t),ARG(T,TL,MAP(g),ap(rho,t))),ta_ret,ta_lit))
+definitions.append(('translateArg',ta_def))
+translate_args=lambda c,ps,aa:ap(v('mapH'),S,T,rho,AF(S,Lit,c),AF(T,TL,MAP(c)),bind(lam,[('t',S),('arg',ARG(S,Lit,c,t))],TA(c,t,v('arg'))),ps,aa)
+type_trans=lambda c,t:PR(T,Q,TL,MAP(c),ap(rho,t))
+trans_ret=bind(lam,[('ctx',L(S)),('t',S),('arg',ARG(S,Lit,g,t))],construct(ap(v('Program'),T,Q,TL),0,MAP(g),ap(rho,t),TA(g,t,aa)))
+macro=lambda c,ps,s,op,aa:ap(v('subst'),T,Q,TL,MAP(ps),ap(rho,s),ap(expand,ps,s,op),MAP(c),translate_args(c,ps,aa))
+target_id=lambda c:ap(v('identitySubst'),T,TL,c)
+trans_call=bind(lam,[('ctx',L(S)),('t',S),('params',L(S)),('s',S),('op',ap(P,paramsv,s)),('args',HL(S,AF(S,Lit,g),paramsv)),('rest',PR(S,P,Lit,C(S,s,g),t)),('ih',type_trans(C(S,s,g),t))],
+ ap(v('spliceInto'),T,Q,TL,MAP(g),ap(rho,s),macro(g,paramsv,s,op,args),MAP(g),ap(rho,t),target_id(MAP(g)),ih))
+trans_def=bind(lam,trans_params+[('ctx',L(S)),('t',S),('p',PR(S,P,Lit,g,t))],induct(p,bind(lam,[('ctx',L(S)),('t',S),('p',PR(S,P,Lit,g,t))],type_trans(g,t)),trans_ret,trans_call))
+definitions.append(('translate',trans_def))
+rows.append(judgment('typed-arbitrary-sort-macro-translation',v('translate'),bind(pi,trans_params+[('ctx',L(S)),('t',S),('p',PR(S,P,Lit,g,t))],type_trans(g,t))))
+
+# Evaluation transport for individual arguments and heterogeneous argument lists.
+MAP_ENV=lambda c,e:ap(v('mapH'),S,T,rho,V,W,jval,c,e)
+TEA=lambda c,t,a,e:ap(v('evalArg'),T,TL,W,tlit,c,t,a,e)
+lexact=v('literalExact')
+lexact_type=bind(pi,[('t',S),('l',ap(Lit,t))],identity(ap(W,ap(rho,t)),ap(tlit,ap(rho,t),ap(lmap,t,v('l'))),ap(jval,t,ap(lit,t,v('l')))))
+argproof_params=ta_params+[('V',arrow(S,universe())),('W',arrow(T,universe())),
+ ('literal',pi('t',S,arrow(ap(Lit,t),ap(V,t)))),('targetLiteral',pi('t',T,arrow(ap(TL,t),ap(W,t)))),
+ ('j',pi('t',S,arrow(ap(V,t),ap(W,ap(rho,t))))),('literalExact',lexact_type)]
+ta_law=lambda c,t,a,e:identity(ap(W,ap(rho,t)),TEA(MAP(c),ap(rho,t),TA(c,t,a),MAP_ENV(c,e)),ap(jval,t,EA(c,t,a,e)))
+ta_motive=lambda c,t,a:pi('xs',HL(S,V,c),ta_law(c,t,a,xs))
+definitions.append(('lookupRelabel',lookup_proof))
+ta_proof=bind(lam,argproof_params+[('ctx',L(S)),('t',S),('arg',ARG(S,Lit,g,t))],induct(aa,
+ lam('arg',ARG(S,Lit,g,t),ta_motive(g,t,aa)),
+ bind(lam,[('r',RF(S,g,t)),('xs',HL(S,V,g))],ap(v('lookupRelabel'),S,T,rho,V,W,jval,g,t,r,xs)),
+ bind(lam,[('l',ap(Lit,t)),('xs',HL(S,V,g))],ap(lexact,t,v('l')))))
+definitions.append(('evalTranslatedArg',ta_proof))
+rows.append(judgment('general-translated-argument-evaluation',v('evalTranslatedArg'),bind(pi,argproof_params+[('ctx',L(S)),('t',S),('arg',ARG(S,Lit,g,t))],ta_motive(g,t,aa))))
+argproof_actual=[S,T,rho,Lit,TL,lmap,V,W,lit,tlit,jval,lexact]
+TEA_ARGS=lambda c,ps,aa,e:ap(v('hmap'),T,AF(T,TL,c),W,bind(lam,[('t',T),('arg',ARG(T,TL,c,t))],TEA(c,t,v('arg'),e)),ps,aa)
+arg_left=lambda ps,aa:TEA_ARGS(MAP(g),MAP(ps),translate_args(g,ps,aa),MAP_ENV(g,xs))
+arg_right=lambda ps,aa:MAP_ENV(ps,EA_ARGS(g,ps,aa,xs))
+args_law=lambda ps,aa:identity(HL(T,W,MAP(ps)),arg_left(ps,aa),arg_right(ps,aa))
+aas=v('arguments')
+args_motive=lambda ps:pi('arguments',HL(S,AF(S,Lit,g),ps),args_law(ps,aas))
+args_cons=bind(lam,[('head',S),('tail',L(S)),('ih',args_motive(tail)),('arguments',HL(S,AF(S,Lit,g),C(S,h,tail)))],
+ pair_paths(ap(W,ap(rho,h)),HL(T,W,MAP(tail)),HL(T,W,MAP(C(S,h,tail))),
+ TEA(MAP(g),ap(rho,h),TA(g,h,first(aas)),MAP_ENV(g,xs)),ap(jval,h,EA(g,h,first(aas),xs)),
+ arg_left(tail,second(aas)),arg_right(tail,second(aas)),
+ ap(v('evalTranslatedArg'),*argproof_actual,g,h,first(aas),xs),ap(ih,second(aas))))
+args_proof=bind(lam,argproof_params+[('ctx',L(S)),('xs',HL(S,V,g)),('params',L(S))],induct(paramsv,lam('params',L(S),args_motive(paramsv)),lam('arguments',unit(),refl(tt())),args_cons))
+definitions.append(('evalTranslatedArgs',args_proof))
+rows.append(judgment('general-translated-argument-list-evaluation',v('evalTranslatedArgs'),bind(pi,argproof_params+[('ctx',L(S)),('xs',HL(S,V,g)),('params',L(S))],args_motive(paramsv))))
+
+# Exact optional-result transport for arbitrary target macro expansions.
+A,B,fn,option=map(v,('A','B','f','option'))
+definitions.append(('optionMap',bind(lam,[('A',universe()),('B',universe()),('f',arrow(A,B)),('option',OPT(A))],
+ induct(option,lam('_option',OPT(A),OPT(B)),construct(OPT(B),0),lam('value',A,construct(OPT(B),1,ap(fn,v('value'))))))))
+OM=lambda a,b,f,o:ap(v('optionMap'),a,b,f,o)
+TRUN=lambda c,t,p,e:ap(v('run'),T,Q,TL,W,tlit,tprim,c,t,p,e)
+TR=lambda c,t,p:ap(v('translate'),S,T,rho,P,Q,Lit,TL,lmap,expand,c,t,p)
+pexact=v('primitiveExact')
+pexact_type=bind(pi,[('params',L(S)),('s',S),('op',ap(P,paramsv,s)),('values',HL(S,V,paramsv))],
+ identity(OPT(ap(W,ap(rho,s))),TRUN(MAP(paramsv),ap(rho,s),ap(expand,paramsv,s,op),MAP_ENV(paramsv,v('values'))),
+ OM(ap(V,s),ap(W,ap(rho,s)),ap(jval,s),ap(prim,paramsv,s,op,v('values')))))
+translation_sem_params=trans_params+[
+ ('V',arrow(S,universe())),('W',arrow(T,universe())),
+ ('literal',pi('t',S,arrow(ap(Lit,t),ap(V,t)))),
+ ('primitive',bind(pi,[('params',L(S)),('s',S),('op',ap(P,paramsv,s)),('args',HL(S,V,paramsv))],OPT(ap(V,s)))),
+ ('targetLiteral',pi('t',T,arrow(ap(TL,t),ap(W,t)))),
+ ('targetPrimitive',bind(pi,[('params',L(T)),('s',T),('op',ap(Q,paramsv,s)),('args',HL(T,W,paramsv))],OPT(ap(W,s)))),
+ ('j',pi('t',S,arrow(ap(V,t),ap(W,ap(rho,t))))),('literalExact',lexact_type),('primitiveExact',pexact_type)]
+translation_sem_actual=[S,T,rho,P,Q,Lit,TL,lmap,expand,V,W,lit,prim,tlit,tprim,jval,lexact,pexact]
+macro_left=TRUN(MAP(g),ap(rho,s),macro(g,paramsv,s,op,args),MAP_ENV(g,xs))
+macro_env1=TEA_ARGS(MAP(g),MAP(paramsv),translate_args(g,paramsv,args),MAP_ENV(g,xs))
+macro_env2=MAP_ENV(paramsv,EA_ARGS(g,paramsv,args,xs))
+macro_mid1=TRUN(MAP(paramsv),ap(rho,s),ap(expand,paramsv,s,op),macro_env1)
+macro_mid2=TRUN(MAP(paramsv),ap(rho,s),ap(expand,paramsv,s,op),macro_env2)
+source_outcome=ap(prim,paramsv,s,op,EA_ARGS(g,paramsv,args,xs))
+macro_right=OM(ap(V,s),ap(W,ap(rho,s)),ap(jval,s),source_outcome)
+macro_path1=ap(v('runSubst'),T,Q,TL,W,tlit,tprim,MAP(paramsv),ap(rho,s),ap(expand,paramsv,s,op),MAP(g),translate_args(g,paramsv,args),MAP_ENV(g,xs))
+macro_path2=congruence(HL(T,W,MAP(paramsv)),OPT(ap(W,ap(rho,s))),
+ lam('mapped_env',HL(T,W,MAP(paramsv)),TRUN(MAP(paramsv),ap(rho,s),ap(expand,paramsv,s,op),v('mapped_env'))),macro_env1,macro_env2,
+ ap(v('evalTranslatedArgs'),*argproof_actual,g,xs,paramsv,args))
+macro_proof=bind(lam,translation_sem_params+[('ctx',L(S)),('params',L(S)),('s',S),('op',ap(P,paramsv,s)),('args',HL(S,AF(S,Lit,g),paramsv)),('xs',HL(S,V,g))],
+ transitive(OPT(ap(W,ap(rho,s))),macro_left,macro_mid1,macro_right,macro_path1,
+ transitive(OPT(ap(W,ap(rho,s))),macro_mid1,macro_mid2,macro_right,macro_path2,ap(pexact,paramsv,s,op,EA_ARGS(g,paramsv,args,xs)))))
+definitions.append(('evalExpandedMacro',macro_proof))
+rows.append(judgment('general-expanded-macro-evaluation',v('evalExpandedMacro'),bind(pi,translation_sem_params+[('ctx',L(S)),('params',L(S)),('s',S),('op',ap(P,paramsv,s)),('args',HL(S,AF(S,Lit,g),paramsv)),('xs',HL(S,V,g))],identity(OPT(ap(W,ap(rho,s))),macro_left,macro_right))))
+
+translation_law=lambda c,t,p,e:identity(OPT(ap(W,ap(rho,t))),TRUN(MAP(c),ap(rho,t),TR(c,t,p),MAP_ENV(c,e)),OM(ap(V,t),ap(W,ap(rho,t)),ap(jval,t),RUN(c,t,p,e)))
+translation_motive=lambda c,t,p:pi('xs',HL(S,V,c),translation_law(c,t,p,xs))
+translation_ret=bind(lam,[('ctx',L(S)),('t',S),('arg',ARG(S,Lit,g,t)),('xs',HL(S,V,g))],
+ congruence(ap(W,ap(rho,t)),OPT(ap(W,ap(rho,t))),lam('value',ap(W,ap(rho,t)),construct(OPT(ap(W,ap(rho,t))),1,v('value'))),
+ TEA(MAP(g),ap(rho,t),TA(g,t,aa),MAP_ENV(g,xs)),ap(jval,t,EA(g,t,aa,xs)),ap(v('evalTranslatedArg'),*argproof_actual,g,t,aa,xs)))
+translated_rest=TR(C(S,s,g),t,rest)
+translated_context=C(T,ap(rho,s),MAP(g))
+current_env=MAP_ENV(g,xs)
+reconstructed_env=TEA_ARGS(MAP(g),MAP(g),target_id(MAP(g)),current_env)
+continuation=lambda env,value:TRUN(translated_context,ap(rho,t),translated_rest,pair(value,env))
+bind_macro=lambda outcome,env:obind(ap(W,ap(rho,s)),ap(W,ap(rho,t)),outcome,lambda value:continuation(env,value))
+spliced=ap(v('spliceInto'),T,Q,TL,MAP(g),ap(rho,s),macro(g,paramsv,s,op,args),MAP(g),ap(rho,t),target_id(MAP(g)),translated_rest)
+translation_left=TRUN(MAP(g),ap(rho,t),spliced,current_env)
+translation_mid1=bind_macro(macro_left,reconstructed_env)
+translation_mid2=bind_macro(macro_left,current_env)
+translation_mid3=bind_macro(macro_right,current_env)
+translation_right=OM(ap(V,t),ap(W,ap(rho,t)),ap(jval,t),obind(ap(V,s),ap(V,t),source_outcome,lambda value:RUN(C(S,s,g),t,rest,pair(value,xs))))
+translation_path1=ap(v('runSplice'),T,Q,TL,W,tlit,tprim,MAP(g),ap(rho,s),macro(g,paramsv,s,op,args),MAP(g),ap(rho,t),target_id(MAP(g)),translated_rest,current_env)
+translation_path2=congruence(HL(T,W,MAP(g)),OPT(ap(W,ap(rho,t))),lam('env',HL(T,W,MAP(g)),bind_macro(macro_left,v('env'))),reconstructed_env,current_env,
+ ap(v('evalIdentitySubst'),T,TL,W,tlit,MAP(g),current_env))
+translation_path3=congruence(OPT(ap(W,ap(rho,s))),OPT(ap(W,ap(rho,t))),lam('outcome',OPT(ap(W,ap(rho,s))),bind_macro(v('outcome'),current_env)),macro_left,macro_right,
+ ap(v('evalExpandedMacro'),*translation_sem_actual,g,paramsv,s,op,args,xs))
+result_law=lambda outcome:identity(OPT(ap(W,ap(rho,t))),bind_macro(OM(ap(V,s),ap(W,ap(rho,s)),ap(jval,s),outcome),current_env),
+ OM(ap(V,t),ap(W,ap(rho,t)),ap(jval,t),obind(ap(V,s),ap(V,t),outcome,lambda value:RUN(C(S,s,g),t,rest,pair(value,xs)))))
+translation_path4=induct(source_outcome,lam('outcome',OPT(ap(V,s)),result_law(v('outcome'))),refl(construct(OPT(ap(W,ap(rho,t))),0)),lam('x',ap(V,s),ap(ih,pair(x,xs))))
+translation_call=bind(lam,[('ctx',L(S)),('t',S),('params',L(S)),('s',S),('op',ap(P,paramsv,s)),('args',HL(S,AF(S,Lit,g),paramsv)),('rest',PR(S,P,Lit,C(S,s,g),t)),('ih',translation_motive(C(S,s,g),t,rest)),('xs',HL(S,V,g))],
+ transitive(OPT(ap(W,ap(rho,t))),translation_left,translation_mid1,translation_right,translation_path1,
+ transitive(OPT(ap(W,ap(rho,t))),translation_mid1,translation_mid2,translation_right,translation_path2,
+ transitive(OPT(ap(W,ap(rho,t))),translation_mid2,translation_mid3,translation_right,translation_path3,translation_path4))))
+translation_proof=bind(lam,translation_sem_params+[('ctx',L(S)),('t',S),('p',PR(S,P,Lit,g,t))],induct(p,
+ bind(lam,[('ctx',L(S)),('t',S),('p',PR(S,P,Lit,g,t))],translation_motive(g,t,p)),translation_ret,translation_call))
+definitions.append(('runTranslate',translation_proof))
+rows.append(judgment('general-arbitrary-sort-macro-preservation',v('runTranslate'),bind(pi,translation_sem_params+[('ctx',L(S)),('t',S),('p',PR(S,P,Lit,g,t))],translation_motive(g,t,p))))
+
+
+
+# Definedness reflection is a consequence of the exact optional-result law;
+# it requires no injectivity of the value translation.
+definedness = data('Definedness', [[], []])
+absent, present = construct(definedness, 0), construct(definedness, 1)
+definitions.append(('isSome', bind(lam, [('A', universe()), ('option', OPT(A))],
+    induct(option, lam('_option', OPT(A), definedness), absent, lam('value', A, present)))))
+IS = lambda a, o: ap(v('isSome'), a, o)
+is_map_law = lambda o: identity(definedness, IS(B, OM(A, B, fn, o)), IS(A, o))
+is_map_proof = bind(lam, [('A', universe()), ('B', universe()), ('f', arrow(A, B)), ('option', OPT(A))],
+    induct(option, lam('option', OPT(A), is_map_law(option)), refl(absent), lam('value', A, refl(present))))
+definitions.append(('isSomeMap', is_map_proof))
+rows.append(judgment('general-optional-definedness-transport', v('isSomeMap'),
+    bind(pi, [('A', universe()), ('B', universe()), ('f', arrow(A, B)), ('option', OPT(A))], is_map_law(option))))
+source_result = RUN(g, t, p, xs)
+target_result = TRUN(MAP(g), ap(rho, t), TR(g, t, p), MAP_ENV(g, xs))
+mapped_result = OM(ap(V, t), ap(W, ap(rho, t)), ap(jval, t), source_result)
+definedness_law = identity(definedness, IS(ap(W, ap(rho, t)), target_result), IS(ap(V, t), source_result))
+definedness_params = translation_sem_params + [('ctx', L(S)), ('t', S), ('p', PR(S, P, Lit, g, t)), ('xs', HL(S, V, g))]
+definedness_proof = bind(lam, definedness_params,
+    transitive(definedness, IS(ap(W, ap(rho, t)), target_result), IS(ap(W, ap(rho, t)), mapped_result), IS(ap(V, t), source_result),
+        congruence(OPT(ap(W, ap(rho, t))), definedness, lam('outcome', OPT(ap(W, ap(rho, t))), IS(ap(W, ap(rho, t)), v('outcome'))),
+            target_result, mapped_result, ap(v('runTranslate'), *translation_sem_actual, g, t, p, xs)),
+        ap(v('isSomeMap'), ap(V, t), ap(W, ap(rho, t)), ap(jval, t), source_result)))
+definitions.append(('translationDefinedness', definedness_proof))
+rows.append(judgment('general-macro-definedness-preserved-and-reflected', v('translationDefinedness'), bind(pi, definedness_params, definedness_law)))
+
+
+# Result reflection requires injectivity; exact execution preservation does not.
+impossible = data('Impossible', [])
+definitions.append(('optionAbsentType', bind(lam, [('A', universe()), ('option', OPT(A))],
+    induct(option, lam('_option', OPT(A), universe()), unit(), lam('value', A, impossible)))))
+definitions.append(('optionDefault', bind(lam, [('A', universe()), ('default', A), ('option', OPT(A))],
+    induct(option, lam('_option', OPT(A), A), v('default'), lam('value', A, v('value'))))))
+inj, value, observed = map(v, ('injective', 'value', 'observed'))
+injective_type = bind(pi, [('left', A), ('right', A), ('equal', identity(B, ap(fn, v('left')), ap(fn, v('right'))))], identity(A, v('left'), v('right')))
+reflect_observed = lambda o, a: identity(OPT(B), OM(A, B, fn, o), construct(OPT(B), 1, ap(fn, a)))
+reflect_goal = lambda o, a: identity(OPT(A), o, construct(OPT(A), 1, a))
+reflect_motive = lambda o: bind(pi, [('value', A), ('observed', reflect_observed(o, value))], reflect_goal(o, value))
+none_a = construct(OPT(A), 0)
+none_b = construct(OPT(B), 0)
+contradiction = j(lam('outcome', OPT(B), ap(v('optionAbsentType'), B, v('outcome'))), tt(), observed)
+reflect_none = bind(lam, [('value', A), ('observed', reflect_observed(none_a, value))],
+    induct(contradiction, lam('_impossible', impossible, reflect_goal(none_a, value))))
+projected_equality = congruence(OPT(B), B, lam('outcome', OPT(B), ap(v('optionDefault'), B, ap(fn, value), v('outcome'))),
+    construct(OPT(B), 1, ap(fn, x)), construct(OPT(B), 1, ap(fn, value)), observed)
+reflect_some = bind(lam, [('x', A), ('value', A), ('observed', reflect_observed(construct(OPT(A), 1, x), value))],
+    congruence(A, OPT(A), lam('new_value', A, construct(OPT(A), 1, v('new_value'))), x, value, ap(inj, x, value, projected_equality)))
+reflect_params = [('A', universe()), ('B', universe()), ('f', arrow(A, B)), ('injective', injective_type), ('option', OPT(A))]
+reflect_proof = bind(lam, reflect_params, induct(option, lam('option', OPT(A), reflect_motive(option)), reflect_none, reflect_some))
+definitions.append(('optionMapReflect', reflect_proof))
+rows.append(judgment('general-optional-result-reflection', v('optionMapReflect'), bind(pi, reflect_params, reflect_motive(option))))
+
+value_injective = bind(pi, [('left', ap(V, t)), ('right', ap(V, t)),
+    ('equal', identity(ap(W, ap(rho, t)), ap(jval, t, v('left')), ap(jval, t, v('right'))))],
+    identity(ap(V, t), v('left'), v('right')))
+observed_result = identity(OPT(ap(W, ap(rho, t))), target_result, construct(OPT(ap(W, ap(rho, t))), 1, ap(jval, t, value)))
+source_result_identity = identity(OPT(ap(V, t)), source_result, construct(OPT(ap(V, t)), 1, value))
+result_reflection_params = definedness_params + [('injective', value_injective), ('value', ap(V, t)), ('observed', observed_result)]
+result_reflection_path = transitive(OPT(ap(W, ap(rho, t))), mapped_result, target_result,
+    construct(OPT(ap(W, ap(rho, t))), 1, ap(jval, t, value)),
+    symm(OPT(ap(W, ap(rho, t))), target_result, mapped_result, ap(v('runTranslate'), *translation_sem_actual, g, t, p, xs)), observed)
+result_reflection_proof = bind(lam, result_reflection_params,
+    ap(v('optionMapReflect'), ap(V, t), ap(W, ap(rho, t)), ap(jval, t), inj, source_result, value, result_reflection_path))
+definitions.append(('translationResultReflection', result_reflection_proof))
+rows.append(judgment('general-macro-result-reflection-with-injectivity', v('translationResultReflection'), bind(pi, result_reflection_params, source_result_identity)))
+
 def cases():
     result = [(row['id'], {'term': row['term'], 'claimed_type': row['claimed_type'], 'metadata': {}}, True) for row in rows]
     altered = [('discard-register-lookup-induction', bind(lam, params + [('ctx', L(S)), ('t', S), ('r', RF(S, g, t)), ('xs', HL(S, F, g))], refl(ap(jt, t, GET(S, F, g, t, xs, r)))), lookup_claim), ('discard-program-substitution-proof', bind(lam, sem_params + [('ctx', L(S)), ('t', S), ('p', PR(S, P, Lit, g, t)), ('dest', L(S)), ('sub', SUB(g, D)), ('xs', HL(S, V, D))], refl(RUN(g, t, p, ES(g, D, sub, xs)))), bind(pi, sem_params + [('ctx', L(S)), ('t', S), ('p', PR(S, P, Lit, g, t))], rs_motive(g, t, p))), ('discard-program-splicing-proof', bind(lam, sem_params + [('ctx', L(S)), ('t', S), ('p', PR(S, P, Lit, g, t)), ('dest', L(S)), ('z', S), ('sub', SUB(D, g)), ('k', PR(S, P, Lit, C(S, t, D), z)), ('xs', HL(S, V, g))], refl(sp_right(g, t, p, D, z, sub, k, xs))), bind(pi, sem_params + [('ctx', L(S)), ('t', S), ('p', PR(S, P, Lit, g, t))], sp_motive(g, t, p)))]
@@ -340,4 +557,64 @@ def cases():
                     context, sort, program, pair(false, tt()))
         row = judgment(label, refl(expected), identity(OPT(booleans), actual, expected))
         result.append((label, {'term': row['term'], 'claimed_type': row['claimed_type'], 'metadata': {}}, accepted))
+    full_goal = bind(pi, translation_sem_params + [('ctx', L(S)), ('t', S), ('p', PR(S, P, Lit, g, t))], translation_motive(g, t, p))
+    unconditional_goal = bind(pi, translation_sem_params[:-1] + [('ctx', L(S)), ('t', S), ('p', PR(S, P, Lit, g, t))], translation_motive(g, t, p))
+    forged_translation = bind(lam, translation_sem_params + [('ctx', L(S)), ('t', S), ('p', PR(S, P, Lit, g, t)), ('xs', HL(S, V, g))],
+        refl(OM(ap(V, t), ap(W, ap(rho, t)), ap(jval, t), RUN(g, t, p, xs))))
+    for label, proof, goal in [
+        ('discard-general-macro-preservation-evidence', forged_translation, full_goal),
+        ('omit-primitive-correspondence-premise', v('runTranslate'), unconditional_goal),
+        ('claim-unconditional-macro-evaluation', v('evalExpandedMacro'),
+         bind(pi, translation_sem_params[:-1] + [('ctx', L(S)), ('params', L(S)), ('s', S), ('op', ap(P, paramsv, s)), ('args', HL(S, AF(S, Lit, g), paramsv)), ('xs', HL(S, V, g))],
+              identity(OPT(ap(W, ap(rho, s))), macro_left, macro_right))),
+    ]:
+        row = judgment(label, proof, goal)
+        result.append((label, {'term': row['term'], 'claimed_type': row['claimed_type'], 'metadata': {}}, False))
+    # Both source sorts map to the first target sort. The target macro creates
+    # a register of the second target sort, outside that image, before returning
+    # a false literal. Splicing must bind the macro result, not that local value.
+    tags = data('SortTag', [[], []])
+    tag0, tag1 = construct(tags, 0), construct(tags, 1)
+    scalar = data('Scalar', [[], []])
+    scalar0, scalar1 = construct(scalar, 0), construct(scalar, 1)
+    collapse = lam('_tag', tags, tag0)
+    carriers = lam('_tag', tags, scalar)
+    primitive_family = bind(lam, [('_ps', L(tags)), ('_tag', tags)], unit())
+    evaluate_literal = bind(lam, [('_tag', tags), ('_value', scalar)], v('_value'))
+    program_owner = ap(v('Program'), tags, primitive_family, carriers)
+    empty_context = N(tags)
+    source_context = C(tags, tag1, empty_context)
+    source_reference = construct(ap(v('Ref'), tags), 0, empty_context, tag1)
+    source_return = construct(program_owner, 0, source_context, tag1,
+                              construct(ARG(tags, carriers, source_context, tag1), 0, source_reference))
+    source_program = construct(program_owner, 1, empty_context, tag1, empty_context, tag1, tt(), tt(), source_return)
+    expanded_context = ap(v('mapList'), tags, tags, collapse, v('_ps'))
+    intermediate_context = C(tags, tag1, expanded_context)
+    macro_return = construct(program_owner, 0, intermediate_context, tag0,
+                            construct(ARG(tags, carriers, intermediate_context, tag0), 1, scalar0))
+    expansion = bind(lam, [('_ps', L(tags)), ('_tag', tags), ('_op', unit())],
+                     construct(program_owner, 1, expanded_context, tag0, empty_context, tag1, tt(), tt(), macro_return))
+    compiled = ap(v('translate'), tags, tags, collapse, primitive_family, primitive_family,
+                  carriers, carriers, evaluate_literal, expansion, empty_context, tag1, source_program)
+    failure = construct(OPT(scalar), 0)
+    false_result = construct(OPT(scalar), 1, scalar0)
+    true_result = construct(OPT(scalar), 1, scalar1)
+    for label, instruction, expected, accepted in [
+        ('macro-with-sort-outside-translation-image', true_result, false_result, True),
+        ('reject-captured-macro-local-register', true_result, true_result, False),
+        ('failed-unused-macro-instruction-remains-failure', failure, failure, True),
+        ('reject-skipped-failed-macro-instruction', failure, false_result, False),
+    ]:
+        target_semantics = bind(lam, [('_ps', L(tags)), ('_tag', tags), ('_op', unit()),
+                                     ('_args', HL(tags, carriers, v('_ps')))], instruction)
+        actual = ap(v('run'), tags, primitive_family, carriers, carriers, evaluate_literal, target_semantics,
+                    empty_context, tag0, compiled, tt())
+        row = judgment(label, refl(expected), identity(OPT(scalar), actual, expected))
+        result.append((label, {'term': row['term'], 'claimed_type': row['claimed_type'], 'metadata': {}}, accepted))
+    row = judgment('discard-definedness-preservation-evidence',
+        bind(lam, definedness_params, refl(IS(ap(V, t), source_result))), bind(pi, definedness_params, definedness_law))
+    result.append((row['id'], {'term': row['term'], 'claimed_type': row['claimed_type'], 'metadata': {}}, False))
+    row = judgment('omit-result-injectivity-premise', v('translationResultReflection'),
+        bind(pi, definedness_params + [('value', ap(V, t)), ('observed', observed_result)], source_result_identity))
+    result.append((row['id'], {'term': row['term'], 'claimed_type': row['claimed_type'], 'metadata': {}}, False))
     return result

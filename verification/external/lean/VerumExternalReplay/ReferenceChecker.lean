@@ -573,6 +573,7 @@ partial def defEqWhnf : Term → Term → Bool
   -- before reaching here.
   | .sigma a1 b1,  .sigma a2 b2  => defEq a1 a2 && defEq b1 b2
   | .pair a1 b1,   .pair a2 b2   => defEq a1 a2 && defEq b1 b2
+  | .pair a b, other | other, .pair a b => defEq a (.fst other) && defEq b (.snd other)
   | .fst p1,       .fst p2       => defEq p1 p2
   | .snd p1,       .snd p2       => defEq p1 p2
   | .identity a x y, .identity b u v => defEq a b && defEq x u && defEq y v

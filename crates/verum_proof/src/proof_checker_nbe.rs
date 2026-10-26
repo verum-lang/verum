@@ -60,7 +60,7 @@ use std::sync::Arc;
 ///
 /// **Invariant**: closures are first-class semantic values; readback
 /// to a syntactic Lam produces a fresh-de-Bruijn body via [`quote`].
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Closure {
     /// Environment captured at closure-construction time. Outer-first
     /// (level 0 is the outermost binder).
@@ -70,6 +70,46 @@ pub struct Closure {
 }
 
 impl Closure {
+    /// Capture only referenced environment slots, preserving their order and
+    /// rebasing free indices. Local field/index telescopes remain untouched.
+    /// Unused enclosing proofs must not make two identical closures different
+    /// or keep an entire certificate environment alive.
+    fn capture(body: &Term, env: &Env, local_binders: usize) -> Self {
+        let positions = std::cell::RefCell::new(std::collections::BTreeSet::new());
+        crate::proof_checker::contains_free_by(body, local_binders, &|index| {
+            if let Some(position) = index
+                .checked_add(1)
+                .and_then(|count| env.len().checked_sub(count))
+            {
+                positions.borrow_mut().insert(position);
+            }
+            false // Visit every free occurrence, without short-circuiting.
+        });
+        let positions: Vec<_> = positions.into_inner().into_iter().collect();
+        let body = if positions.len() == env.len() {
+            body.clone()
+        } else {
+            body.clone()
+                .map_variables(local_binders, &mut |index, depth| {
+                    let Some(position) = index
+                        .checked_sub(depth)
+                        .and_then(|i| i.checked_add(1))
+                        .and_then(|count| env.len().checked_sub(count))
+                    else {
+                        return Term::var(index);
+                    };
+                    let retained = positions
+                        .binary_search(&position)
+                        .expect("collected free variable");
+                    Term::var(depth + positions.len() - 1 - retained)
+                })
+        };
+        Self {
+            env: positions.iter().map(|index| env[*index].clone()).collect(),
+            body: Arc::new(body),
+        }
+    }
+
     fn apply_fields(&self, previous: &[Value]) -> Value {
         let mut env = self.env.clone();
         env.extend(previous.iter().cloned().map(Arc::new));
@@ -87,7 +127,7 @@ impl Closure {
 
 /// Field domains retain their binding frame until previous constructor
 /// arguments are available. Recursive fields are positive by construction.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FieldValue {
     Value(Closure),
     Dependent(Closure),
@@ -95,7 +135,7 @@ pub enum FieldValue {
     RecursiveAt(Vec<Closure>),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConstructorValue {
     pub fields: Vec<FieldValue>,
     pub indices: Vec<Closure>,
@@ -135,7 +175,8 @@ impl FieldValue {
 ///   * `VApp` represents NEUTRAL application — `n x` where `n` is a
 ///     stuck term (e.g. a free variable applied to args).
 ///     Neutrals can't be reduced further.
-#[derive(Debug, Clone)]
+/// Structural equality compares representations; use [`def_eq`] for conversion.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Value {
     VData {
         name: String,
@@ -194,7 +235,7 @@ pub enum Value {
 
 /// Neutral term — a stuck reduction. Represents level-indexed free
 /// variables and applications headed by neutrals.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Neutral {
     NInduct {
         scrutinee: Box<Value>,
@@ -264,14 +305,15 @@ pub fn eval(term: &Term, env: &Env) -> Value {
             indices,
             constructors,
         } => {
-            let capture = |t: &Term| Closure {
-                env: env.clone(),
-                body: Arc::new(t.clone()),
-            };
+            let capture = |t: &Term, binders| Closure::capture(t, env, binders);
             Value::VData {
                 name: name.clone(),
                 level: level.clone(),
-                indices: indices.iter().map(capture).collect(),
+                indices: indices
+                    .iter()
+                    .enumerate()
+                    .map(|(index, ty)| capture(ty, index))
+                    .collect(),
                 arguments: Vec::new(),
                 constructors: constructors
                     .iter()
@@ -279,16 +321,23 @@ pub fn eval(term: &Term, env: &Env) -> Value {
                         fields: constructor
                             .fields
                             .iter()
-                            .map(|field| match field {
-                                DataField::Value(ty) => FieldValue::Value(capture(ty)),
-                                DataField::Dependent(ty) => FieldValue::Dependent(capture(ty)),
-                                DataField::Recursive => FieldValue::Recursive,
-                                DataField::RecursiveAt(indices) => {
-                                    FieldValue::RecursiveAt(indices.iter().map(capture).collect())
+                            .enumerate()
+                            .map(|(index, field)| match field {
+                                DataField::Value(ty) => FieldValue::Value(capture(ty, 0)),
+                                DataField::Dependent(ty) => {
+                                    FieldValue::Dependent(capture(ty, index))
                                 }
+                                DataField::Recursive => FieldValue::Recursive,
+                                DataField::RecursiveAt(indices) => FieldValue::RecursiveAt(
+                                    indices.iter().map(|ty| capture(ty, index)).collect(),
+                                ),
                             })
                             .collect(),
-                        indices: constructor.indices.iter().map(capture).collect(),
+                        indices: constructor
+                            .indices
+                            .iter()
+                            .map(|ty| capture(ty, constructor.fields.len()))
+                            .collect(),
                     })
                     .collect(),
             }
@@ -336,10 +385,7 @@ pub fn eval(term: &Term, env: &Env) -> Value {
             let dom_val = eval(domain, env);
             Value::VPi {
                 domain: Box::new(dom_val),
-                codomain: Closure {
-                    env: env.clone(),
-                    body: Arc::new((**body).clone()),
-                },
+                codomain: Closure::capture(body, env, 1),
             }
         }
 
@@ -347,10 +393,7 @@ pub fn eval(term: &Term, env: &Env) -> Value {
             let dom_val = eval(domain, env);
             Value::VLam {
                 domain: Box::new(dom_val),
-                body: Closure {
-                    env: env.clone(),
-                    body: Arc::new((**body).clone()),
-                },
+                body: Closure::capture(body, env, 1),
             }
         }
 
@@ -364,10 +407,7 @@ pub fn eval(term: &Term, env: &Env) -> Value {
             let dom_val = eval(domain, env);
             Value::VSigma {
                 domain: Box::new(dom_val),
-                codomain: Closure {
-                    env: env.clone(),
-                    body: Arc::new((**body).clone()),
-                },
+                codomain: Closure::capture(body, env, 1),
             }
         }
 
@@ -683,6 +723,12 @@ fn quote_neutral(neutral: &Neutral, level: usize) -> Term {
 /// to the same term.  NbE collapses α/β/η equivalence into pure
 /// syntactic comparison after normalisation.
 pub fn def_eq(a: &Value, b: &Value, level: usize) -> bool {
+    // Equal semantic representations already denote the same value. Arc's
+    // equality preserves shared environments; in particular, do not repeatedly
+    // reopen identical proof closures merely to rediscover reflexivity.
+    if a == b {
+        return true;
+    }
     match (a, b) {
         (
             Value::VData {
@@ -834,6 +880,11 @@ pub fn def_eq(a: &Value, b: &Value, level: usize) -> bool {
 
         (Value::VPair(a1, b1), Value::VPair(a2, b2)) => {
             def_eq(a1, a2, level) && def_eq(b1, b2, level)
+        }
+
+        (Value::VPair(first, second), other) | (other, Value::VPair(first, second)) => {
+            def_eq(first, &apply_fst(other.clone()), level)
+                && def_eq(second, &apply_snd(other.clone()), level)
         }
 
         (
@@ -1273,15 +1324,28 @@ fn infer_value(ctx: &NbeContext, term: &Term) -> Result<Value, CheckError> {
             Ok(Value::VUniverse(n.max_with(m)))
         }
 
-        Term::Lam(domain, body) => {
-            let dom_ty = infer_value(ctx, domain)?;
-            expect_universe(&dom_ty).ok_or_else(|| CheckError::NotAType((**domain).clone()))?;
-            let dom_value = eval(domain, ctx.env());
-            let extended = ctx.extend(dom_value.clone());
-            let body_ty_value = infer_value(&extended, body)?;
-            // Build the result type: Π(x : domain). body_ty
-            let body_ty_term = quote(&body_ty_value, extended.level());
-            let result = Term::Pi(domain.clone(), Box::new(body_ty_term));
+        Term::Lam(..) => {
+            // Infer a lambda telescope in its progressively extended context,
+            // then read back the final codomain once. Quoting at every binder
+            // repeatedly normalizes the whole remaining dependent signature.
+            let mut domains = Vec::new();
+            let mut extended = ctx.clone();
+            let mut body = term;
+            while let Term::Lam(domain, inner) = body {
+                let kind = infer_value(&extended, domain)?;
+                expect_universe(&kind).ok_or_else(|| CheckError::NotAType((**domain).clone()))?;
+                let value = eval(domain, extended.env());
+                extended = extended.extend(value);
+                domains.push(domain);
+                body = inner;
+            }
+            let body_type = infer_value(&extended, body)?;
+            let result = domains
+                .into_iter()
+                .rev()
+                .fold(quote(&body_type, extended.level()), |codomain, domain| {
+                    Term::Pi(domain.clone(), Box::new(codomain))
+                });
             Ok(eval(&result, ctx.env()))
         }
 
@@ -1581,6 +1645,7 @@ pub fn verify_certificate(cert: &crate::proof_checker::Certificate) -> Result<()
 #[cfg(test)]
 mod tests {
     use super::*;
+
     use crate::proof_checker::Certificate;
 
     /// Build the polymorphic-identity certificate (same as

@@ -302,6 +302,71 @@ fn battery() -> Vec<(&'static str, Certificate, bool)> {
         },
         false,
     ));
+    // A : U, B : A -> U, p : Sigma(A,B). Eta is dependent and
+    // symmetric; changing a component is not eta conversion.
+    let family = Term::pi(Term::var(0), Term::universe(0));
+    let product = Term::sigma(Term::var(1), Term::app(Term::var(1), Term::var(0)));
+    let product_under_p = Term::sigma(Term::var(2), Term::app(Term::var(2), Term::var(0)));
+    let rebuilt = Term::pair(Term::fst(Term::var(0)), Term::snd(Term::var(0)));
+    for (name, left, right) in [
+        ("dependent_product_eta", rebuilt.clone(), Term::var(0)),
+        ("dependent_product_eta_reverse", Term::var(0), rebuilt),
+    ] {
+        cases.push((
+            name,
+            Certificate {
+                term: Term::lam(
+                    Term::universe(0),
+                    Term::lam(
+                        family.clone(),
+                        Term::lam(product.clone(), Term::refl(Term::var(0))),
+                    ),
+                ),
+                claimed_type: Term::pi(
+                    Term::universe(0),
+                    Term::pi(
+                        family.clone(),
+                        Term::pi(
+                            product.clone(),
+                            Term::id_ty(product_under_p.clone(), left, right),
+                        ),
+                    ),
+                ),
+                metadata: Default::default(),
+            },
+            true,
+        ));
+    }
+    // For a nondependent pair of arbitrary A values, swapping projections
+    // and dropping the second projection must both be rejected.
+    for (name, rebuilt) in [
+        (
+            "product_eta_cannot_swap",
+            Term::pair(Term::snd(Term::var(0)), Term::fst(Term::var(0))),
+        ),
+        (
+            "product_eta_cannot_duplicate",
+            Term::pair(Term::fst(Term::var(0)), Term::fst(Term::var(0))),
+        ),
+    ] {
+        let product = Term::sigma(Term::var(0), Term::var(1));
+        let product_under_p = Term::sigma(Term::var(1), Term::var(2));
+        cases.push((
+            name,
+            Certificate {
+                term: Term::lam(
+                    Term::universe(0),
+                    Term::lam(product.clone(), Term::refl(Term::var(0))),
+                ),
+                claimed_type: Term::pi(
+                    Term::universe(0),
+                    Term::pi(product, Term::id_ty(product_under_p, rebuilt, Term::var(0))),
+                ),
+                metadata: Default::default(),
+            },
+            false,
+        ));
+    }
     cases
 }
 

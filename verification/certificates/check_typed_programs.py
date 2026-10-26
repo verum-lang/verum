@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Replay native typed-program substitution/splicing laws and changed evidence."""
+"""Replay native typed-program macro preservation and its exact-result corollaries."""
 from pathlib import Path
 import certificate_runner
 import generate_typed_programs
