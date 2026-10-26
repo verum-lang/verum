@@ -13,3 +13,4 @@ import VerumExternalReplay.TermScope
 import VerumExternalReplay.ConservativeRefinement
 import VerumExternalReplay.ReceiptCredit
 import VerumExternalReplay.DiagnosticFactorization
+import VerumExternalReplay.ExactTransports

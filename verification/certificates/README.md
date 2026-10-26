@@ -15,7 +15,7 @@ python3 verification/certificates/check_dispatch_contract.py \
 ```
 
 The report binds verdicts to exact judgments, checker identities, executable
-hashes and producer sources. CI runs the dispatch, candidate-locality, diagnostic-fibre and finite-refinement
+hashes and producer sources. CI runs the dispatch, candidate-locality, diagnostic-fibre, exact-transport and finite-refinement
 batteries. Rejection controls change the policy or evidence while retaining
 the property being checked; admission-limit rejection is not a passing control.
 
@@ -111,3 +111,20 @@ that the complete retained representation is equal and the intended historical
 query differs. Omitting a field from the projection does not prove information
 loss for the full representation. The theorem makes no claim about the correctness
 of SYNARC's concrete histories, eviction/merge operations or causal-rank oracle.
+
+## Composition of exact partial-execution transports
+
+`check_exact_transports.py` checks composition of `Option.map`, exact one-step
+transport composition, definedness reflection and composition of injective
+embeddings. The seven rejection controls retain their original claimed types
+while omitting an embedding, transport/injectivity premise or preserving the
+wrong definedness tag. `VerumExternalReplay.ExactTransports` independently proves
+the mathematical statements in Lean with guarded axiom audits.
+
+For arbitrary executions `f`, `g`, `h` and embeddings `i`, `j`, the premises are
+`g(i(x)) = map(i, f(x))` and `h(j(y)) = map(j, g(y))`. Their composition gives
+`h(j(i(x))) = map(j ∘ i, f(x))`. Definedness is preserved and reflected even
+without injectivity; injectivity of the composite requires both injectivity
+premises. These results compose supplied one-step contracts. They do not prove
+that an acquisition grammar, extension, learner or Rust implementation satisfies
+those contracts, or establish empirical generalization or physical execution.
