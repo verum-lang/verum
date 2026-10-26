@@ -152,7 +152,8 @@ pub enum CoreTerm {
         rhs: Heap<CoreTerm>,
     },
 
-    /// Cubical homogeneous composition: `hcomp φ walls base`.
+    /// Cubical composition syntax, retained for diagnostics. Named inference
+    /// refuses it until interval, partial-element and boundary judgments exist.
     HComp {
         /// Face / interval formula.
         phi: Heap<CoreTerm>,
@@ -173,7 +174,8 @@ pub enum CoreTerm {
         value: Heap<CoreTerm>,
     },
 
-    /// Glue type: `Glue<A>(φ, T, e)` for computational univalence.
+    /// Gluing syntax, retained for diagnostics. Named inference refuses it
+    /// until partial families and equivalence coherence are checked.
     Glue {
         /// Carrier type.
         carrier: Heap<CoreTerm>,

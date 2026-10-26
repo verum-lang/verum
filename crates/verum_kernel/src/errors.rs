@@ -37,6 +37,12 @@ pub enum KernelError {
     #[error("path eliminator expected a Path type, got {0:?}")]
     NotAPath(CoreType),
 
+    /// The named calculus cannot yet express the required cubical judgments.
+    #[error(
+        "{operation} requires checked interval contexts, partial elements and cubical coherence; this named operation is not supported"
+    )]
+    UnsupportedCubical { operation: Text },
+
     /// Type-mismatch between checked term and expected type.
     #[error("type mismatch: expected {expected:?}, got {actual:?}")]
     TypeMismatch {

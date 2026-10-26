@@ -842,11 +842,9 @@ fn refine_formation_returns_base_universe() {
     assert_eq!(ty, CoreTerm::Universe(UniverseLevel::Concrete(0)));
 }
 
-/// `hcomp φ walls tt : Unit`. The strengthened rule requires
-/// phi/walls to be well-typed; bind them in the context so
-/// inference succeeds.
+/// Typable children do not supply the missing cubical judgments.
 #[test]
-fn hcomp_infers_base_type() {
+fn hcomp_requires_checked_cubical_judgments() {
     let mut reg = AxiomRegistry::new();
     let tt = tt_axiom(&mut reg);
     let ctx = Context::new()
@@ -857,12 +855,12 @@ fn hcomp_infers_base_type() {
         walls: Heap::new(CoreTerm::Var(Text::from("walls"))),
         base: Heap::new(tt),
     };
-    let ty = infer_fixture(&ctx, &hc, &reg).unwrap();
-    assert_eq!(ty, unit_ty());
+    assert!(matches!(
+        infer_fixture(&ctx, &hc, &reg),
+        Err(KernelError::UnsupportedCubical { .. })
+    ));
 }
 
-/// HComp with an ill-typed `phi` is rejected — the strengthened
-/// rule no longer swallows subterm errors.
 #[test]
 fn hcomp_rejects_unbound_phi() {
     let mut reg = AxiomRegistry::new();
@@ -873,7 +871,7 @@ fn hcomp_rejects_unbound_phi() {
         base: Heap::new(tt),
     };
     let err = infer_fixture(&Context::new(), &hc, &reg).unwrap_err();
-    assert!(matches!(err, KernelError::UnboundVariable(_)));
+    assert!(matches!(err, KernelError::UnsupportedCubical { .. }));
 }
 
 /// `transp path r tt` — returns the path's right endpoint type.
@@ -905,9 +903,9 @@ fn transport_rejects_unbound_path() {
     assert!(matches!(err, KernelError::UnboundVariable(_)));
 }
 
-/// `Glue<Unit>(…)` inhabits the universe of its carrier.
+/// A well-formed carrier alone does not authorize a gluing type.
 #[test]
-fn glue_returns_carrier_universe() {
+fn glue_requires_checked_cubical_judgments() {
     let ax = AxiomRegistry::new();
     let ctx = Context::new()
         .extend(Text::from("phi"), unit_ty())
@@ -919,11 +917,12 @@ fn glue_returns_carrier_universe() {
         fiber: Heap::new(CoreTerm::Var(Text::from("fiber"))),
         equiv: Heap::new(CoreTerm::Var(Text::from("equiv"))),
     };
-    let ty = infer_fixture(&ctx, &g, &ax).unwrap();
-    assert_eq!(ty, CoreTerm::Universe(UniverseLevel::Concrete(0)));
+    assert!(matches!(
+        infer_fixture(&ctx, &g, &ax),
+        Err(KernelError::UnsupportedCubical { .. })
+    ));
 }
 
-/// Glue whose equiv is ill-typed — rejected.
 #[test]
 fn glue_rejects_unbound_equiv() {
     let ax = AxiomRegistry::new();
@@ -937,7 +936,7 @@ fn glue_rejects_unbound_equiv() {
         equiv: Heap::new(CoreTerm::Var(Text::from("equiv_unbound"))),
     };
     let err = infer_fixture(&ctx, &g, &ax).unwrap_err();
-    assert!(matches!(err, KernelError::UnboundVariable(_)));
+    assert!(matches!(err, KernelError::UnsupportedCubical { .. }));
 }
 
 /// Glue whose carrier is not in a universe is rejected.
@@ -1477,44 +1476,18 @@ fn refl(x: CoreTerm) -> CoreTerm {
 }
 
 #[test]
-fn face_marker_helpers_recognise_canonical_constants() {
-    // `is_face_top` / `is_face_bot` are the
-    // V0 marker conventions the cubical reducer dispatches on.
-    assert!(is_face_top(&var("⊤")));
-    assert!(is_face_top(&var("1")));
-    assert!(is_face_top(&var("top")));
-    assert!(is_face_top(&var("true")));
-    assert!(is_face_top(&var("i1")));
-
-    assert!(is_face_bot(&var("⊥")));
-    assert!(is_face_bot(&var("0")));
-    assert!(is_face_bot(&var("bot")));
-    assert!(is_face_bot(&var("false")));
-    assert!(is_face_bot(&var("i0")));
-
-    // Anything not on the canonical list is neither.
-    assert!(!is_face_top(&var("phi")));
-    assert!(!is_face_bot(&var("phi")));
-}
-
-#[test]
-fn cubical_hcomp_id_when_empty_system_reduces_to_base() {
-    // catalogue rule `hcomp-id-when-empty-system`:
-    // `hcomp {φ = ⊥} u a ↪ a`.
+fn unchecked_hcomp_bottom_stays_residual() {
     let hc = CoreTerm::HComp {
         phi: Heap::new(var("⊥")),
         walls: Heap::new(var("walls")),
         base: Heap::new(var("a")),
     };
     let n = normalize(&hc);
-    assert_eq!(n, var("a"));
+    assert_eq!(n, hc);
 }
 
 #[test]
-fn cubical_hcomp_id_when_phi_top_with_lambda_walls_applies_to_i1() {
-    // catalogue rule `hcomp-id-when-φ-equals-1`:
-    // `hcomp {φ = ⊤} u a ↪ u i1 1=1`. When walls is a lambda we
-    // β-reduce on the spot.
+fn unchecked_hcomp_top_stays_residual() {
     let walls = CoreTerm::Lam {
         binder: Text::from("i"),
         domain: Heap::new(unit_ty()),
@@ -1526,8 +1499,7 @@ fn cubical_hcomp_id_when_phi_top_with_lambda_walls_applies_to_i1() {
         base: Heap::new(var("a")),
     };
     let n = normalize(&hc);
-    // After β: substituted body is `i1`.
-    assert_eq!(n, var("i1"));
+    assert_eq!(n, hc);
 }
 
 #[test]
@@ -1603,9 +1575,7 @@ fn cubical_transp_does_not_reduce_when_path_uses_binder() {
 }
 
 #[test]
-fn cubical_glue_on_false_face_reduces_to_carrier() {
-    // catalogue rule `glue-on-false-face`:
-    // `Glue A {⊥} T e ↪ A`.
+fn unchecked_glue_bottom_stays_residual() {
     let g = CoreTerm::Glue {
         carrier: Heap::new(var("A")),
         phi: Heap::new(var("⊥")),
@@ -1613,14 +1583,11 @@ fn cubical_glue_on_false_face_reduces_to_carrier() {
         equiv: Heap::new(var("e")),
     };
     let n = normalize(&g);
-    assert_eq!(n, var("A"));
+    assert_eq!(n, g);
 }
 
 #[test]
-fn cubical_glue_on_true_face_reduces_to_fiber() {
-    // catalogue rule `glue-on-true-face`:
-    // `Glue A {⊤} T e ↪ T 1=1`. T is neutral (Var), so we
-    // expect the fibre returned as-is.
+fn unchecked_glue_top_stays_residual() {
     let g = CoreTerm::Glue {
         carrier: Heap::new(var("A")),
         phi: Heap::new(var("⊤")),
@@ -1628,7 +1595,7 @@ fn cubical_glue_on_true_face_reduces_to_fiber() {
         equiv: Heap::new(var("e")),
     };
     let n = normalize(&g);
-    assert_eq!(n, var("T"));
+    assert_eq!(n, g);
 }
 
 #[test]
@@ -1644,41 +1611,10 @@ fn cubical_glue_with_neutral_phi_left_residual() {
 }
 
 #[test]
-fn task_98_normalize_hits_every_canonical_face_form() {
-    // Pin: every documented kernel-side cubical reduction
-    // (#98 hardening) actually fires under `normalize`.
-    let cases: &[(CoreTerm, &str)] = &[
-        (
-            CoreTerm::HComp {
-                phi: Heap::new(var("⊥")),
-                walls: Heap::new(var("u")),
-                base: Heap::new(var("a")),
-            },
-            "hcomp-id-when-empty-system",
-        ),
-        (
-            CoreTerm::Transport {
-                path: Heap::new(refl(var("A"))),
-                value: Heap::new(var("a")),
-            },
-            "transport-reflexivity",
-        ),
-        (
-            CoreTerm::Glue {
-                carrier: Heap::new(var("A")),
-                phi: Heap::new(var("⊥")),
-                fiber: Heap::new(var("T")),
-                equiv: Heap::new(var("e")),
-            },
-            "glue-on-false-face",
-        ),
-    ];
-    for (term, rule) in cases {
-        let n = normalize(term);
-        assert_ne!(
-            &n, term,
-            "rule `{}` did not fire — normalize was a no-op on {:?}",
-            rule, term
-        );
-    }
+fn only_checked_path_transport_computes() {
+    let term = CoreTerm::Transport {
+        path: Heap::new(refl(var("A"))),
+        value: Heap::new(var("a")),
+    };
+    assert_eq!(normalize(&term), var("a"));
 }

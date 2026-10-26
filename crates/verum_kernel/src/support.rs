@@ -411,9 +411,7 @@ impl<'a> NormaliseCtx<'a> {
 ///   * Σ-projection at Fst/Snd    — always
 ///   * QuotElim β                 — always
 ///   * PathOver-reflexive         — only actual reflexivity evidence
-///   * HComp face-bot / face-top  — always
 ///   * Transport Refl           — reflexive path evidence
-///   * Glue face-bot / face-top   — always
 ///   * δ at Axiom                 — when `ctx.axioms.is_some()`
 ///   * HIT-elim β at Elim         — when `ctx.inductives.is_some()`
 ///   * path-constructor β at Elim — when `ctx.inductives.is_some()`
@@ -558,33 +556,13 @@ fn normalize_core(term: &CoreTerm, ctx: &mut NormaliseCtx<'_>) -> CoreTerm {
 
         CoreTerm::Refl(x) => CoreTerm::Refl(Heap::new(normalize_core(x, ctx))),
 
-        // HComp face reductions:
-        //   hcomp {⊥} u a ↪ a            (empty face system)
-        //   hcomp {⊤} u a ↪ u i1 1=1     (whole face constrained)
-        CoreTerm::HComp { phi, walls, base } => {
-            let phi_n = normalize_core(phi, ctx);
-            let walls_n = normalize_core(walls, ctx);
-            let base_n = normalize_core(base, ctx);
-            if is_face_bot(&phi_n) {
-                return base_n;
-            }
-            if is_face_top(&phi_n) {
-                if let CoreTerm::Lam { binder, body, .. } = &walls_n {
-                    let i1_term = CoreTerm::Var(Text::from("i1"));
-                    let applied = substitute(body, binder.as_str(), &i1_term);
-                    return normalize_core(&applied, ctx);
-                }
-                return CoreTerm::App(
-                    Heap::new(walls_n),
-                    Heap::new(CoreTerm::Var(Text::from("i1"))),
-                );
-            }
-            CoreTerm::HComp {
-                phi: Heap::new(phi_n),
-                walls: Heap::new(walls_n),
-                base: Heap::new(base_n),
-            }
-        }
+        // Preserve unchecked cubical syntax. A variable spelling cannot
+        // justify a face judgment or authorize a definitional conversion.
+        CoreTerm::HComp { phi, walls, base } => CoreTerm::HComp {
+            phi: Heap::new(normalize_core(phi, ctx)),
+            walls: Heap::new(normalize_core(walls, ctx)),
+            base: Heap::new(normalize_core(base, ctx)),
+        },
 
         // Ordinary path transport computes only from reflexive evidence.
         CoreTerm::Transport { path, value } => {
@@ -599,37 +577,17 @@ fn normalize_core(term: &CoreTerm, ctx: &mut NormaliseCtx<'_>) -> CoreTerm {
             }
         }
 
-        // Glue face reductions:
-        //   Glue A {⊥} T e ↪ A     (no face constrained)
-        //   Glue A {⊤} T e ↪ T 1=1 (whole face constrained)
         CoreTerm::Glue {
             carrier,
             phi,
             fiber,
             equiv,
-        } => {
-            let carrier_n = normalize_core(carrier, ctx);
-            let phi_n = normalize_core(phi, ctx);
-            let fiber_n = normalize_core(fiber, ctx);
-            let equiv_n = normalize_core(equiv, ctx);
-            if is_face_bot(&phi_n) {
-                return carrier_n;
-            }
-            if is_face_top(&phi_n) {
-                if let CoreTerm::Lam { binder, body, .. } = &fiber_n {
-                    let unit_witness = CoreTerm::Var(Text::from("1=1"));
-                    let applied = substitute(body, binder.as_str(), &unit_witness);
-                    return normalize_core(&applied, ctx);
-                }
-                return fiber_n;
-            }
-            CoreTerm::Glue {
-                carrier: Heap::new(carrier_n),
-                phi: Heap::new(phi_n),
-                fiber: Heap::new(fiber_n),
-                equiv: Heap::new(equiv_n),
-            }
-        }
+        } => CoreTerm::Glue {
+            carrier: Heap::new(normalize_core(carrier, ctx)),
+            phi: Heap::new(normalize_core(phi, ctx)),
+            fiber: Heap::new(normalize_core(fiber, ctx)),
+            equiv: Heap::new(normalize_core(equiv, ctx)),
+        },
 
         CoreTerm::Refine {
             base,
@@ -776,7 +734,7 @@ fn normalize_core(term: &CoreTerm, ctx: &mut NormaliseCtx<'_>) -> CoreTerm {
 ///   * Σ-projection β at Fst/Snd       — `Fst(a, _) → a` etc.
 ///   * QuotElim β                      — `quot_elim([t]_~, _, c) → c(t)`
 ///   * PathOver-reflexive               — reflexivity evidence reduces to PathTy
-///   * Cubical reductions               — HComp / Glue face rules; reflexive Transport
+///   * Ordinary path transport          — reflexive Transport
 ///
 /// Used by [`definitional_eq`] (the main consumer) and by the
 /// PathTy formation rule per `verification-architecture.md` §4.4.
@@ -802,33 +760,6 @@ pub fn normalize_full(
         inductives: Some(inductives),
     };
     normalize_core(term, &mut ctx)
-}
-
-// =============================================================================
-// Cubical face / interval helpers (#98 hardening)
-// =============================================================================
-//
-
-// HComp and Glue still use legacy face markers. These conventions do not
-// establish a typed cofibration judgment. Ordinary Transport is separate and
-// never interprets variable names as interval endpoints.
-
-/// True iff `term` is the canonical face-top marker (`⊤` / `1` /
-/// `top` / `true`). Used by reductions that fire when `phi = ⊤`.
-pub fn is_face_top(term: &CoreTerm) -> bool {
-    match term {
-        CoreTerm::Var(name) => matches!(name.as_str(), "⊤" | "1" | "top" | "true" | "i1"),
-        _ => false,
-    }
-}
-
-/// True iff `term` is the canonical face-bot marker (`⊥` / `0` /
-/// `bot` / `false`). Used by reductions that fire when `phi = ⊥`.
-pub fn is_face_bot(term: &CoreTerm) -> bool {
-    match term {
-        CoreTerm::Var(name) => matches!(name.as_str(), "⊥" | "0" | "bot" | "false" | "i0"),
-        _ => false,
-    }
 }
 
 /// ε-invariant token (Diakrisis Actic

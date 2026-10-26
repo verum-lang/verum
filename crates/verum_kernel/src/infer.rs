@@ -51,10 +51,8 @@ use crate::{Context, CoreTerm, CoreType, KernelError, UniverseLevel};
 ///  primitive is canonically registered).
 /// * `Inductive` — requires an explicitly registered declaration and checks
 ///   its parameters against the declared universe.
-/// * `HComp` — returns base's type (bring-up; full cubical
-///  reduction on top).
+/// * `HComp` / `Glue` — refused pending typed cubical boundary judgments.
 /// * `Transport` — returns path's right-hand endpoint type.
-/// * `Glue` — lives in carrier's universe.
 /// * `Elim` — checks a registered ordinary inductive and all dependent branches,
 ///   including recursive hypotheses; returns `motive(scrutinee)`.
 ///
@@ -477,29 +475,12 @@ impl Inference<'_> {
                 require_conversion(&self.infer(ctx, rhs)?, &right_fiber, axioms, inductives)?;
                 Ok(CoreTerm::Universe(level))
             }
-            // HComp: `hcomp φ walls base` produces the i1-face of the
-            // composition cube whose base is `base` (its i0-face) and
-            // sides are `walls` (the family indexed by φ). The result
-            // inhabits the same type as `base` — composition does not
-            // change the carrier.
-            //
-
-            // Checks performed:
-            //  * `phi` is well-typed — conservative, no interval
-            //  subsumption yet; full cofibration-calculus lands with
-            //  the dedicated cubical-kernel pass (task #89-adjacent).
-            //  * `walls` is well-typed as some family.
-            //  * `base` is well-typed; its type is returned.
-            //
-
-            // Rejected shapes: ill-typed subterms surface the underlying
-            // `KernelError` rather than being swallowed, so a spurious
-            // composition cannot sneak into the TCB.
-            CoreTerm::HComp { phi, walls, base } => {
-                let _ = self.infer(ctx, phi)?;
-                let _ = self.infer(ctx, walls)?;
-                self.infer(ctx, base)
-            }
+            // Mere typability of the children cannot establish partial-element
+            // support or boundary coherence. Refuse until those judgments are
+            // represented in the named calculus.
+            CoreTerm::HComp { .. } => Err(KernelError::UnsupportedCubical {
+                operation: Text::from("HComp"),
+            }),
 
             // Ordinary path transport has no interval/regularity argument.
             // Its target is justified by path evidence, never a variable name.
@@ -520,37 +501,9 @@ impl Inference<'_> {
                 }
             }
 
-            // Glue: `Glue<A>(φ, T, e) : Type_n` where A is the carrier
-            // type in `Type_n`, φ is the face formula, T is the partial
-            // type family on φ, and e is the equivalence family between
-            // T and A on φ.
-            //
-
-            // Checks performed:
-            //  * `carrier` is in a universe; its level determines the
-            //  Glue type's universe.
-            //  * `phi`, `fiber`, `equiv` are each well-typed under the
-            //  current context.
-            //
-
-            // Full univalence computation (Glue-beta, φ-equiv coherence,
-            // unglue) lands in the cubical-kernel follow-up — at this
-            // phase the kernel certifies that the Glue constructor was
-            // assembled from well-typed pieces and is a type at the
-            // right universe level.
-            CoreTerm::Glue {
-                carrier,
-                phi,
-                fiber,
-                equiv,
-            } => {
-                let carrier_univ = self.infer(ctx, carrier)?;
-                let carrier_level = universe_level(&carrier_univ)?;
-                let _ = self.infer(ctx, phi)?;
-                let _ = self.infer(ctx, fiber)?;
-                let _ = self.infer(ctx, equiv)?;
-                Ok(CoreTerm::Universe(carrier_level))
-            }
+            CoreTerm::Glue { .. } => Err(KernelError::UnsupportedCubical {
+                operation: Text::from("Glue"),
+            }),
 
             // Refine: {x : base | predicate}. base must inhabit a universe,
             // predicate must check under the extended ctx (bound to Bool at
