@@ -264,9 +264,7 @@ pub fn bridge_fidelity(assertion: &SepAssertion) -> BridgeFidelity {
         SepAssertion::Sep { left, right } | SepAssertion::And { left, right } => {
             // Bijective only when both sub-trees are bijective.
             match (bridge_fidelity(left), bridge_fidelity(right)) {
-                (BridgeFidelity::Bijective, BridgeFidelity::Bijective) => {
-                    BridgeFidelity::Bijective
-                }
+                (BridgeFidelity::Bijective, BridgeFidelity::Bijective) => BridgeFidelity::Bijective,
                 _ => BridgeFidelity::LossyButTotal,
             }
         }
@@ -288,40 +286,18 @@ pub fn bridge_fidelity(assertion: &SepAssertion) -> BridgeFidelity {
 
 /// Translate a kernel `Term` into a placeholder AST `Expr`.
 ///
-/// **Strategy**: encode the term's structural class as a
-/// synthetic Path identifier (`__verum_kernel_term_<class>_<index>`)
-/// so the SMT side has a stable expression handle without claiming
-/// the term has full source-level structure. The placeholder
-/// preserves the kernel-term's IDENTITY (different terms produce
-/// different placeholders) which is what the Z3 encoder needs.
+/// Encode the complete structural term as an opaque, identifier-safe handle.
+/// Different applications, datatype declarations and constructor payloads must
+/// not collapse to the same head-only symbol. This is an injective encoding of
+/// the serialized syntax, not a claim about its mathematical interpretation.
 fn term_to_expr_placeholder(term: &Term, role: &str) -> Expr {
+    use std::fmt::Write;
     let span = Span::dummy();
-    let placeholder_name = match term {
-        Term::Var(i) => format!("__verum_kernel_var_{role}_{i}"),
-        Term::Universe(level) => {
-            // Use the Level Display impl for a deterministic,
-            // identifier-safe rendering (e.g. `__verum_kernel_univ_role_0`
-            // for Concrete(0); `__verum_kernel_univ_role_succ(u)` for
-            // symbolic carriers).  The parentheses and commas in
-            // symbolic forms are kept inside the placeholder body —
-            // SMT solvers tolerate them in path identifiers, and
-            // structural distinctness across levels is preserved.
-            format!("__verum_kernel_univ_{role}_{level}")
-        }
-        Term::Pi { .. } => format!("__verum_kernel_pi_{role}"),
-        Term::Lam { .. } => format!("__verum_kernel_lam_{role}"),
-        Term::App { .. } => format!("__verum_kernel_app_{role}"),
-        // Different terms still produce different placeholder names
-        // through the rest of the encoding pipeline; the distinction
-        // we need at this layer is only that Σ ≠ Π and Pair ≠ App.
-        Term::Sigma { .. } => format!("__verum_kernel_sigma_{role}"),
-        Term::Pair { .. } => format!("__verum_kernel_pair_{role}"),
-        Term::Id { .. } => format!("__verum_kernel_id_{role}"),
-        Term::Refl(_) => format!("__verum_kernel_refl_{role}"),
-        Term::J { .. } => format!("__verum_kernel_j_{role}"),
-        Term::Fst { .. } => format!("__verum_kernel_fst_{role}"),
-        Term::Snd { .. } => format!("__verum_kernel_snd_{role}"),
-    };
+    let serialized = serde_json::to_vec(term).expect("kernel term syntax is serializable");
+    let mut placeholder_name = Text::from(format!("__verum_kernel_term_{role}_"));
+    for byte in serialized {
+        write!(&mut placeholder_name, "{byte:02x}").expect("writing to Text cannot fail");
+    }
     Expr::new(
         ExprKind::Path(Path::new(
             List::from(vec![PathSegment::Name(Ident::new(
@@ -369,7 +345,6 @@ impl HeapPredicateAndForTest for HeapPredicate {
 // IntLit was imported for potential numeric-literal placeholders; not
 // used in V1 (all placeholders are Path / Text literal shapes), so
 // drop the import.
-
 
 // =============================================================================
 // Tests
@@ -499,7 +474,10 @@ mod tests {
         // Pin: every SMT-only variant lowers to a unique kernel Named tag.
         let probes: Vec<(SepAssertion, &str)> = vec![
             (SepAssertion::or(SepAssertion::Emp, SepAssertion::Emp), "or"),
-            (SepAssertion::wand(SepAssertion::Emp, SepAssertion::Emp), "wand"),
+            (
+                SepAssertion::wand(SepAssertion::Emp, SepAssertion::Emp),
+                "wand",
+            ),
             (
                 SepAssertion::exists(Text::from("x"), SepAssertion::Emp),
                 "exists",
@@ -541,7 +519,10 @@ mod tests {
 
     #[test]
     fn bridge_fidelity_pure_emp_is_bijective() {
-        assert_eq!(bridge_fidelity(&SepAssertion::Emp), BridgeFidelity::Bijective);
+        assert_eq!(
+            bridge_fidelity(&SepAssertion::Emp),
+            BridgeFidelity::Bijective
+        );
     }
 
     #[test]

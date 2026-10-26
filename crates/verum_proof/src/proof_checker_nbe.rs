@@ -46,7 +46,8 @@
 //!     `BothAccept` / `BothReject` / `Disagreement` /
 //!     `NotYetSelfHosting` (the last unused once this lands).
 
-use crate::proof_checker::{CheckError, Level, Term};
+use crate::proof_checker::{CheckError, DataField, Level, Term};
+use std::sync::Arc;
 
 // =============================================================================
 // Semantic domain — the load-bearing distinguishing feature of NbE
@@ -65,7 +66,7 @@ pub struct Closure {
     /// (level 0 is the outermost binder).
     pub env: Env,
     /// Body to evaluate when the closure is applied.
-    pub body: Term,
+    pub body: Arc<Term>,
 }
 
 impl Closure {
@@ -73,7 +74,7 @@ impl Closure {
     /// the argument and evaluate the body.
     pub fn apply(&self, arg: Value) -> Value {
         let mut new_env = self.env.clone();
-        new_env.push(arg);
+        new_env.push(Arc::new(arg));
         eval(&self.body, &new_env)
     }
 }
@@ -94,6 +95,17 @@ impl Closure {
 ///     Neutrals can't be reduced further.
 #[derive(Debug, Clone)]
 pub enum Value {
+    VData {
+        name: String,
+        level: Level,
+        constructors: Vec<Vec<Option<Value>>>,
+    },
+    VConstruct {
+        data: Box<Value>,
+        constructor: usize,
+        args: Vec<Value>,
+    },
+
     /// Universe at the given [`Level`] — concrete or polymorphic.
     /// The carrier shape mirrors `Term::Universe`'s post-    /// universe-polymorphic representation.
     VUniverse(Level),
@@ -140,6 +152,12 @@ pub enum Value {
 /// variables and applications headed by neutrals.
 #[derive(Debug, Clone)]
 pub enum Neutral {
+    NInduct {
+        scrutinee: Box<Value>,
+        motive: Box<Value>,
+        cases: Vec<Value>,
+    },
+
     /// Free variable at the given level. Levels are stable under
     /// binder addition (unlike indices).
     NVar(usize),
@@ -177,7 +195,9 @@ pub enum Neutral {
 /// Environment — outer-first list of values. Pushed at binder
 /// entry (eval extends env on Pi/Lam recursion); read by index
 /// during Var evaluation.
-pub type Env = Vec<Value>;
+// Environment clones share immutable values. A closure may capture earlier
+// closures; deep-cloning those graphs makes nested definitions exponential.
+pub type Env = Vec<Arc<Value>>;
 
 // =============================================================================
 // Eval — Term → Value
@@ -188,6 +208,51 @@ pub type Env = Vec<Value>;
 /// the env state at the binding site.
 pub fn eval(term: &Term, env: &Env) -> Value {
     match term {
+        Term::Let { value, body } => {
+            let mut extended = env.clone();
+            extended.push(Arc::new(eval(value, env)));
+            eval(body, &extended)
+        }
+
+        Term::Data {
+            name,
+            level,
+            constructors,
+        } => Value::VData {
+            name: name.clone(),
+            level: level.clone(),
+            constructors: constructors
+                .iter()
+                .map(|fields| {
+                    fields
+                        .iter()
+                        .map(|field| match field {
+                            DataField::Value(ty) => Some(eval(ty, env)),
+                            DataField::Recursive => None,
+                        })
+                        .collect()
+                })
+                .collect(),
+        },
+        Term::Construct {
+            data,
+            constructor,
+            args,
+        } => Value::VConstruct {
+            data: Box::new(eval(data, env)),
+            constructor: *constructor,
+            args: args.iter().map(|t| eval(t, env)).collect(),
+        },
+        Term::Induct {
+            scrutinee,
+            motive,
+            cases,
+        } => apply_induct(
+            eval(scrutinee, env),
+            eval(motive, env),
+            cases.iter().map(|t| eval(t, env)).collect(),
+        ),
+
         Term::Universe(level) => Value::VUniverse(level.clone()),
 
         Term::Var(i) => {
@@ -205,7 +270,7 @@ pub fn eval(term: &Term, env: &Env) -> Value {
                 // for robustness on partial terms used in tests.
                 return Value::VNeutral(Neutral::NVar(*i));
             }
-            env[len - 1 - *i].clone()
+            env[len - 1 - *i].as_ref().clone()
         }
 
         Term::Pi(domain, body) => {
@@ -214,7 +279,7 @@ pub fn eval(term: &Term, env: &Env) -> Value {
                 domain: Box::new(dom_val),
                 codomain: Closure {
                     env: env.clone(),
-                    body: (**body).clone(),
+                    body: Arc::new((**body).clone()),
                 },
             }
         }
@@ -225,7 +290,7 @@ pub fn eval(term: &Term, env: &Env) -> Value {
                 domain: Box::new(dom_val),
                 body: Closure {
                     env: env.clone(),
-                    body: (**body).clone(),
+                    body: Arc::new((**body).clone()),
                 },
             }
         }
@@ -242,7 +307,7 @@ pub fn eval(term: &Term, env: &Env) -> Value {
                 domain: Box::new(dom_val),
                 codomain: Closure {
                     env: env.clone(),
-                    body: (**body).clone(),
+                    body: Arc::new((**body).clone()),
                 },
             }
         }
@@ -266,6 +331,42 @@ pub fn eval(term: &Term, env: &Env) -> Value {
             scrutinee,
         } => apply_j(eval(motive, env), eval(base, env), eval(scrutinee, env)),
     }
+}
+
+/// Structural induction computes only from the constructor's own declaration.
+/// Malformed or neutral heads stay distinct instead of choosing a default case.
+pub fn apply_induct(scrutinee: Value, motive: Value, cases: Vec<Value>) -> Value {
+    if let Value::VConstruct {
+        data,
+        constructor,
+        args,
+    } = &scrutinee
+    {
+        if let Value::VData { constructors, .. } = data.as_ref() {
+            if let (Some(fields), Some(case)) =
+                (constructors.get(*constructor), cases.get(*constructor))
+            {
+                if fields.len() == args.len() {
+                    let mut result = case.clone();
+                    for (field, argument) in fields.iter().zip(args) {
+                        result = apply_value(result, argument.clone());
+                        if field.is_none() {
+                            result = apply_value(
+                                result,
+                                apply_induct(argument.clone(), motive.clone(), cases.clone()),
+                            );
+                        }
+                    }
+                    return result;
+                }
+            }
+        }
+    }
+    Value::VNeutral(Neutral::NInduct {
+        scrutinee: Box::new(scrutinee),
+        motive: Box::new(motive),
+        cases,
+    })
 }
 
 /// Path induction on a value.  Reduces `J(_, base, refl) → base`;
@@ -342,6 +443,36 @@ pub fn apply_snd(p: Value) -> Value {
 /// de Bruijn indices for Lam bodies.
 pub fn quote(value: &Value, level: usize) -> Term {
     match value {
+        Value::VData {
+            name,
+            level: data_level,
+            constructors,
+        } => Term::Data {
+            name: name.clone(),
+            level: data_level.clone(),
+            constructors: constructors
+                .iter()
+                .map(|fields| {
+                    fields
+                        .iter()
+                        .map(|field| match field {
+                            Some(ty) => DataField::Value(Box::new(quote(ty, level))),
+                            None => DataField::Recursive,
+                        })
+                        .collect()
+                })
+                .collect(),
+        },
+        Value::VConstruct {
+            data,
+            constructor,
+            args,
+        } => Term::Construct {
+            data: Box::new(quote(data, level)),
+            constructor: *constructor,
+            args: args.iter().map(|t| quote(t, level)).collect(),
+        },
+
         Value::VUniverse(level) => Term::Universe(level.clone()),
 
         Value::VPi { domain, codomain } => {
@@ -387,6 +518,16 @@ pub fn quote(value: &Value, level: usize) -> Term {
 /// current binding depth.
 fn quote_neutral(neutral: &Neutral, level: usize) -> Term {
     match neutral {
+        Neutral::NInduct {
+            scrutinee,
+            motive,
+            cases,
+        } => Term::Induct {
+            scrutinee: Box::new(quote(scrutinee, level)),
+            motive: Box::new(quote(motive, level)),
+            cases: cases.iter().map(|t| quote(t, level)).collect(),
+        },
+
         Neutral::NVar(k) => {
             // Level → index conversion: level k at depth `level`
             // becomes index `level - 1 - k`.
@@ -431,6 +572,48 @@ fn quote_neutral(neutral: &Neutral, level: usize) -> Term {
 /// syntactic comparison after normalisation.
 pub fn def_eq(a: &Value, b: &Value, level: usize) -> bool {
     match (a, b) {
+        (
+            Value::VData {
+                name: an,
+                level: al,
+                constructors: ac,
+            },
+            Value::VData {
+                name: bn,
+                level: bl,
+                constructors: bc,
+            },
+        ) => {
+            an == bn
+                && crate::proof_checker::level_eq(al, bl)
+                && ac.len() == bc.len()
+                && ac.iter().zip(bc).all(|(a, b)| {
+                    a.len() == b.len()
+                        && a.iter().zip(b).all(|(a, b)| match (a, b) {
+                            (Some(a), Some(b)) => def_eq(a, b, level),
+                            (None, None) => true,
+                            _ => false,
+                        })
+                })
+        }
+        (
+            Value::VConstruct {
+                data: ad,
+                constructor: ai,
+                args: aa,
+            },
+            Value::VConstruct {
+                data: bd,
+                constructor: bi,
+                args: ba,
+            },
+        ) => {
+            ai == bi
+                && def_eq(ad, bd, level)
+                && aa.len() == ba.len()
+                && aa.iter().zip(ba).all(|(a, b)| def_eq(a, b, level))
+        }
+
         (Value::VUniverse(n), Value::VUniverse(m)) => crate::proof_checker::level_eq(n, m),
 
         (
@@ -534,6 +717,24 @@ fn eta_match(body: &Closure, other: &Value, level: usize) -> bool {
 
 fn def_eq_neutral(a: &Neutral, b: &Neutral, level: usize) -> bool {
     match (a, b) {
+        (
+            Neutral::NInduct {
+                scrutinee: a,
+                motive: am,
+                cases: ac,
+            },
+            Neutral::NInduct {
+                scrutinee: b,
+                motive: bm,
+                cases: bc,
+            },
+        ) => {
+            def_eq(a, b, level)
+                && def_eq(am, bm, level)
+                && ac.len() == bc.len()
+                && ac.iter().zip(bc).all(|(a, b)| def_eq(a, b, level))
+        }
+
         (Neutral::NVar(i), Neutral::NVar(j)) => i == j,
         (Neutral::NApp(f1, x1), Neutral::NApp(f2, x2)) => {
             def_eq_neutral(f1, f2, level) && def_eq(x1, x2, level)
@@ -570,7 +771,7 @@ fn def_eq_neutral(a: &Neutral, b: &Neutral, level: usize) -> bool {
 #[derive(Debug, Clone, Default)]
 pub struct NbeContext {
     /// Stack of binder types as values, outermost-first.
-    types: Vec<Value>,
+    types: Vec<Arc<Value>>,
     /// Stack of binder values (used as the env for eval).
     /// Each entry is a fresh neutral at the binder's level.
     env: Env,
@@ -592,13 +793,21 @@ impl NbeContext {
     /// current level.
     pub fn extend(&self, domain_value: Value) -> Self {
         let mut new_types = self.types.clone();
-        new_types.push(domain_value);
+        new_types.push(Arc::new(domain_value));
         let mut new_env = self.env.clone();
-        new_env.push(Value::VNeutral(Neutral::NVar(self.env.len())));
+        new_env.push(Arc::new(Value::VNeutral(Neutral::NVar(self.env.len()))));
         Self {
             types: new_types,
             env: new_env,
         }
+    }
+
+    /// Extend with a checked transparent definition rather than a neutral.
+    fn define(&self, ty: Value, value: Value) -> Self {
+        let mut extended = self.clone();
+        extended.types.push(Arc::new(ty));
+        extended.env.push(Arc::new(value));
+        extended
     }
 
     /// Look up the type of variable at de Bruijn index `i`.
@@ -607,7 +816,7 @@ impl NbeContext {
         if i >= len {
             return None;
         }
-        Some(&self.types[len - 1 - i])
+        Some(self.types[len - 1 - i].as_ref())
     }
 
     /// The current evaluation environment.
@@ -630,6 +839,110 @@ pub fn infer(ctx: &NbeContext, term: &Term) -> Result<Term, CheckError> {
 /// roundtrips during recursive checking).
 fn infer_value(ctx: &NbeContext, term: &Term) -> Result<Value, CheckError> {
     match term {
+        Term::Let { value, body } => {
+            let ty = infer_value(ctx, value)?;
+            infer_value(&ctx.define(ty, eval(value, ctx.env())), body)
+        }
+
+        Term::Data {
+            level,
+            constructors,
+            ..
+        } => {
+            for field in constructors.iter().flatten() {
+                if let DataField::Value(ty) = field {
+                    let kind = infer_value(ctx, ty)?;
+                    let field_level = expect_universe(&kind)
+                        .ok_or_else(|| CheckError::NotAType((**ty).clone()))?;
+                    if !crate::proof_checker::level_eq(&field_level.max_with(level.clone()), level)
+                    {
+                        return Err(CheckError::InvalidInductive(
+                            "field exceeds declaration universe".into(),
+                        ));
+                    }
+                }
+            }
+            Ok(Value::VUniverse(level.clone().normalize()))
+        }
+        Term::Construct {
+            data,
+            constructor,
+            args,
+        } => {
+            infer_value(ctx, data)?;
+            let declaration = eval(data, ctx.env());
+            let Value::VData { constructors, .. } = &declaration else {
+                return Err(CheckError::InvalidInductive(
+                    "constructor owner is not a data declaration".into(),
+                ));
+            };
+            let fields = constructors
+                .get(*constructor)
+                .ok_or_else(|| CheckError::InvalidInductive("unknown constructor".into()))?;
+            if fields.len() != args.len() {
+                return Err(CheckError::InvalidInductive(
+                    "constructor field arity mismatch".into(),
+                ));
+            }
+            for (field, argument) in fields.iter().zip(args) {
+                let expected = field.as_ref().unwrap_or(&declaration);
+                let actual = infer_value(ctx, argument)?;
+                if !def_eq(&actual, expected, ctx.level()) {
+                    return Err(CheckError::TypeMismatch {
+                        expected: quote(expected, ctx.level()),
+                        actual: quote(&actual, ctx.level()),
+                    });
+                }
+            }
+            Ok(declaration)
+        }
+        Term::Induct {
+            scrutinee,
+            motive,
+            cases,
+        } => {
+            let declaration = infer_value(ctx, scrutinee)?;
+            let raw_declaration = quote(&declaration, ctx.level());
+            let Term::Data { constructors, .. } = &raw_declaration else {
+                return Err(CheckError::InvalidInductive(
+                    "induction requires a data scrutinee".into(),
+                ));
+            };
+            infer_value(ctx, &raw_declaration)?;
+            let motive_kind = infer_value(ctx, motive)?;
+            let Value::VPi { domain, codomain } = motive_kind else {
+                return Err(CheckError::InvalidInductive(
+                    "induction motive is not a family".into(),
+                ));
+            };
+            if !def_eq(&domain, &declaration, ctx.level())
+                || expect_universe(&codomain.apply(Value::VNeutral(Neutral::NVar(ctx.level()))))
+                    .is_none()
+            {
+                return Err(CheckError::InvalidInductive(
+                    "induction motive domain or universe mismatch".into(),
+                ));
+            }
+            if cases.len() != constructors.len() {
+                return Err(CheckError::InvalidInductive(
+                    "induction case count mismatch".into(),
+                ));
+            }
+            for (index, (fields, case)) in constructors.iter().zip(cases).enumerate() {
+                let expected = crate::proof_checker::induction_case_type(
+                    &raw_declaration,
+                    motive,
+                    index,
+                    fields,
+                );
+                check(ctx, case, &expected)?;
+            }
+            Ok(apply_value(
+                eval(motive, ctx.env()),
+                eval(scrutinee, ctx.env()),
+            ))
+        }
+
         Term::Var(i) => ctx
             .lookup(*i)
             .cloned()
@@ -1065,7 +1378,7 @@ mod tests {
         // the load-bearing piece.
         let closure = Closure {
             env: vec![],
-            body: Term::Var(0),
+            body: Arc::new(Term::Var(0)),
         };
         let result = closure.apply(Value::VUniverse(Level::Concrete(0)));
         match result {

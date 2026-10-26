@@ -2,7 +2,7 @@
 //! Source-language elaboration, prose interpretation and SMT traces are not admitted here.
 //! Execute untrusted replay in a resource-limited worker; structural limits do not bound
 //! normalization cost or replace a wall-clock/process memory budget.
-use crate::proof_checker::{Certificate, CheckError, Level, Term};
+use crate::proof_checker::{Certificate, CheckError, DataField, Level, Term};
 use serde::{Deserialize, Serialize};
 
 pub const PROFILE: &str = "verum-native/1";
@@ -52,6 +52,7 @@ pub fn checker_identity() -> String {
 }
 fn code(error: &CheckError) -> &'static str {
     match error {
+        CheckError::InvalidInductive(_) => "invalid_inductive",
         CheckError::UnboundVariable(_) => "unbound_variable",
         CheckError::NotAType(_) | CheckError::ClaimedTypeNotAType { .. } => "not_a_type",
         CheckError::NotAFunction(_) => "not_a_function",
@@ -85,9 +86,44 @@ fn size(judgment: &Judgment) -> Result<(), &'static str> {
         }
         match node {
             Node::Term(t) => match t {
+                Term::Data {
+                    level,
+                    constructors,
+                    ..
+                } => {
+                    queue.push((Node::Level(level), depth + 1));
+                    count += constructors.len();
+                    for field in constructors.iter().flatten() {
+                        count += 1;
+                        if let DataField::Value(ty) = field {
+                            queue.push((Node::Term(ty), depth + 1));
+                        }
+                    }
+                    if count > MAX_NODES {
+                        return Err("structural_limit");
+                    }
+                }
+                Term::Construct { data, args, .. } => {
+                    queue.push((Node::Term(data), depth + 1));
+                    for term in args {
+                        queue.push((Node::Term(term), depth + 1));
+                    }
+                }
+                Term::Induct {
+                    scrutinee,
+                    motive,
+                    cases,
+                } => {
+                    queue.push((Node::Term(scrutinee), depth + 1));
+                    queue.push((Node::Term(motive), depth + 1));
+                    for term in cases {
+                        queue.push((Node::Term(term), depth + 1));
+                    }
+                }
                 Term::Universe(l) => queue.push((Node::Level(l), depth + 1)),
                 Term::Var(_) => {}
-                Term::Pi(a, b)
+                Term::Let { value: a, body: b }
+                | Term::Pi(a, b)
                 | Term::Lam(a, b)
                 | Term::App(a, b)
                 | Term::Sigma(a, b)
@@ -126,6 +162,50 @@ fn size(judgment: &Judgment) -> Result<(), &'static str> {
     Ok(())
 }
 
+// The wire representation can add five JSON containers between consecutive
+// logical nodes (Data -> payload -> constructors -> fields -> Value). The
+// judgment envelope adds fewer than eight. Bound those containers before
+// recursive deserialization; the unchanged logical limits are checked next.
+const MAX_JSON_NESTING: usize = 5 * (MAX_DEPTH + 1) + 8;
+
+fn json_envelope(bytes: &[u8]) -> Result<(), &'static str> {
+    let mut containers = Vec::new();
+    let mut quoted = false;
+    let mut escaped = false;
+    for byte in bytes {
+        if quoted {
+            if escaped {
+                escaped = false;
+            } else if *byte == b'\\' {
+                escaped = true;
+            } else if *byte == b'"' {
+                quoted = false;
+            }
+            continue;
+        }
+        match byte {
+            b'"' => quoted = true,
+            b'{' | b'[' => {
+                if containers.len() == MAX_JSON_NESTING {
+                    return Err("json_depth_limit");
+                }
+                containers.push(*byte);
+            }
+            b'}' | b']' => {
+                let expected = if *byte == b'}' { b'{' } else { b'[' };
+                if containers.pop() != Some(expected) {
+                    return Err("invalid_certificate");
+                }
+            }
+            _ => {}
+        }
+    }
+    if quoted || !containers.is_empty() {
+        return Err("invalid_certificate");
+    }
+    Ok(())
+}
+
 /// Replay exactly the statement carried by a native judgment. A metadata name,
 /// filename, hash or citation cannot change the judgment being checked.
 pub fn replay(bytes: &[u8]) -> Report {
@@ -146,7 +226,20 @@ pub fn replay(bytes: &[u8]) -> Report {
             "Native judgment exceeds the input byte budget.",
         );
     }
-    let judgment: Judgment = match serde_json::from_slice(bytes) {
+    if let Err(code) = json_envelope(bytes) {
+        return rejected(
+            "decode",
+            code,
+            "Native judgment has malformed or excessive JSON nesting.",
+        );
+    }
+    let mut decoder = serde_json::Deserializer::from_slice(bytes);
+    // The iterative envelope check above owns the physical nesting bound.
+    // serde's unrelated default 128 counts wrappers rather than logical nodes.
+    decoder.disable_recursion_limit();
+    let decoded =
+        Judgment::deserialize(&mut decoder).and_then(|judgment| decoder.end().map(|_| judgment));
+    let judgment: Judgment = match decoded {
         Ok(j) => j,
         Err(_) => {
             return rejected(

@@ -80,11 +80,21 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::proof_checker::{Level, Term};
+use crate::proof_checker::{DataField, Level, Term};
+use verum_common::{List, Text};
 
 // =============================================================================
 // ReflectedTerm — serializable mirror of proof_checker::Term
 // =============================================================================
+
+/// One ordinary inductive field in reflected syntax.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ReflectedDataField {
+    /// A nonrecursive field with its explicit type.
+    Value(Box<ReflectedTerm>),
+    /// A direct recursive occurrence of the enclosing declaration.
+    Recursive,
+}
 
 /// Serializable mirror of `proof_checker::Term`.
 ///
@@ -98,6 +108,41 @@ use crate::proof_checker::{Level, Term};
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ReflectedTerm {
+    /// Complete structural identity of an ordinary inductive declaration.
+    Data {
+        /// Declaration name; identity also includes every field and universe.
+        name: Text,
+        /// The declaration's universe.
+        level: Level,
+        /// Constructor field telescopes.
+        constructors: List<List<ReflectedDataField>>,
+    },
+    /// Constructor owned by an explicit declaration.
+    Construct {
+        /// Declaration term.
+        data: Box<ReflectedTerm>,
+        /// Constructor index in declaration order.
+        constructor: usize,
+        /// Field values.
+        args: List<ReflectedTerm>,
+    },
+    /// Ordinary induction with explicit motive and complete branch family.
+    Induct {
+        /// The value being eliminated.
+        scrutinee: Box<ReflectedTerm>,
+        /// Dependent result family.
+        motive: Box<ReflectedTerm>,
+        /// Branch terms with recursive hypotheses in field order.
+        cases: List<ReflectedTerm>,
+    },
+    /// A transparent local definition; the body binds index zero.
+    Let {
+        /// The value checked before its use.
+        value: Box<ReflectedTerm>,
+        /// Body under the definition binder.
+        body: Box<ReflectedTerm>,
+    },
+
     /// Mirror of [`Term::Var`].
     Var {
         /// de Bruijn index — `0` is the innermost binder.
@@ -234,6 +279,51 @@ pub enum ReflectionError {
 impl From<&Term> for ReflectedTerm {
     fn from(term: &Term) -> Self {
         match term {
+            Term::Data {
+                name,
+                level,
+                constructors,
+            } => Self::Data {
+                name: Text::from(name.as_str()),
+                level: level.clone(),
+                constructors: constructors
+                    .iter()
+                    .map(|fields| {
+                        fields
+                            .iter()
+                            .map(|field| match field {
+                                DataField::Recursive => ReflectedDataField::Recursive,
+                                DataField::Value(ty) => {
+                                    ReflectedDataField::Value(Box::new(Self::from(ty.as_ref())))
+                                }
+                            })
+                            .collect()
+                    })
+                    .collect(),
+            },
+            Term::Construct {
+                data,
+                constructor,
+                args,
+            } => Self::Construct {
+                data: Box::new(Self::from(data.as_ref())),
+                constructor: *constructor,
+                args: args.iter().map(Self::from).collect(),
+            },
+            Term::Induct {
+                scrutinee,
+                motive,
+                cases,
+            } => Self::Induct {
+                scrutinee: Box::new(Self::from(scrutinee.as_ref())),
+                motive: Box::new(Self::from(motive.as_ref())),
+                cases: cases.iter().map(Self::from).collect(),
+            },
+            Term::Let { value, body } => Self::Let {
+                value: Box::new(Self::from(value.as_ref())),
+                body: Box::new(Self::from(body.as_ref())),
+            },
+
             Term::Var(i) => ReflectedTerm::Var { index: *i },
             Term::Universe(level) => ReflectedTerm::Universe {
                 level: level.clone(),
@@ -290,6 +380,50 @@ impl TryFrom<&ReflectedTerm> for Term {
 
     fn try_from(reflected: &ReflectedTerm) -> Result<Self, Self::Error> {
         match reflected {
+            ReflectedTerm::Data {
+                name,
+                level,
+                constructors,
+            } => Ok(Self::Data {
+                name: name.as_str().to_owned(),
+                level: level.clone(),
+                constructors: constructors
+                    .iter()
+                    .map(|fields| {
+                        fields
+                            .iter()
+                            .map(|field| match field {
+                                ReflectedDataField::Recursive => Ok(DataField::Recursive),
+                                ReflectedDataField::Value(ty) => Self::try_from(ty.as_ref())
+                                    .map(|t| DataField::Value(Box::new(t))),
+                            })
+                            .collect()
+                    })
+                    .collect::<Result<_, _>>()?,
+            }),
+            ReflectedTerm::Construct {
+                data,
+                constructor,
+                args,
+            } => Ok(Self::Construct {
+                data: Box::new(Self::try_from(data.as_ref())?),
+                constructor: *constructor,
+                args: args.iter().map(Self::try_from).collect::<Result<_, _>>()?,
+            }),
+            ReflectedTerm::Induct {
+                scrutinee,
+                motive,
+                cases,
+            } => Ok(Self::Induct {
+                scrutinee: Box::new(Self::try_from(scrutinee.as_ref())?),
+                motive: Box::new(Self::try_from(motive.as_ref())?),
+                cases: cases.iter().map(Self::try_from).collect::<Result<_, _>>()?,
+            }),
+            ReflectedTerm::Let { value, body } => Ok(Self::Let {
+                value: Box::new(Self::try_from(value.as_ref())?),
+                body: Box::new(Self::try_from(body.as_ref())?),
+            }),
+
             ReflectedTerm::Var { index } => Ok(Term::Var(*index)),
             ReflectedTerm::Universe { level } => Ok(Term::Universe(level.clone())),
             ReflectedTerm::Pi { domain, body } => Ok(Term::pi(
@@ -480,8 +614,12 @@ fn reflect_t_var() -> ReflectedKernelRule {
 fn reflect_t_univ() -> ReflectedKernelRule {
     // T-Univ: Universe(n) : Universe(n+1). V0 sketch pins n=0.
     let conclusion = ReflectedJudgment::closed(
-        ReflectedTerm::Universe { level: Level::Concrete(0) },
-        ReflectedTerm::Universe { level: Level::Concrete(1) },
+        ReflectedTerm::Universe {
+            level: Level::Concrete(0),
+        },
+        ReflectedTerm::Universe {
+            level: Level::Concrete(1),
+        },
     );
     ReflectedKernelRule {
         name: "T-Univ".to_string(),
@@ -495,19 +633,25 @@ fn reflect_t_pi_form() -> ReflectedKernelRule {
     // V0 sketch pins n = m = 0.
     let premise_a = ReflectedJudgment::closed(
         ReflectedTerm::Var { index: 0 },
-        ReflectedTerm::Universe { level: Level::Concrete(0) },
+        ReflectedTerm::Universe {
+            level: Level::Concrete(0),
+        },
     );
     let premise_b = ReflectedJudgment::at_depth(
         1,
         ReflectedTerm::Var { index: 0 },
-        ReflectedTerm::Universe { level: Level::Concrete(0) },
+        ReflectedTerm::Universe {
+            level: Level::Concrete(0),
+        },
     );
     let conclusion = ReflectedJudgment::closed(
         ReflectedTerm::Pi {
             domain: Box::new(ReflectedTerm::Var { index: 0 }),
             body: Box::new(ReflectedTerm::Var { index: 0 }),
         },
-        ReflectedTerm::Universe { level: Level::Concrete(0) },
+        ReflectedTerm::Universe {
+            level: Level::Concrete(0),
+        },
     );
     ReflectedKernelRule {
         name: "T-Pi-Form".to_string(),
@@ -616,6 +760,28 @@ pub fn is_reflected_well_formed(judgment: &ReflectedJudgment) -> bool {
 /// the outer call.
 fn debruijn_in_range(term: &ReflectedTerm, depth: usize) -> bool {
     match term {
+        ReflectedTerm::Data { constructors, .. } => {
+            constructors.iter().flatten().all(|field| match field {
+                ReflectedDataField::Recursive => true,
+                ReflectedDataField::Value(ty) => debruijn_in_range(ty, depth),
+            })
+        }
+        ReflectedTerm::Construct { data, args, .. } => {
+            debruijn_in_range(data, depth) && args.iter().all(|arg| debruijn_in_range(arg, depth))
+        }
+        ReflectedTerm::Induct {
+            scrutinee,
+            motive,
+            cases,
+        } => {
+            debruijn_in_range(scrutinee, depth)
+                && debruijn_in_range(motive, depth)
+                && cases.iter().all(|case| debruijn_in_range(case, depth))
+        }
+        ReflectedTerm::Let { value, body } => {
+            debruijn_in_range(value, depth) && debruijn_in_range(body, depth + 1)
+        }
+
         ReflectedTerm::Var { index } => *index < depth,
         ReflectedTerm::Universe { .. } => true,
         ReflectedTerm::Pi { domain, body } => {
@@ -724,8 +890,12 @@ mod tests {
     #[test]
     fn well_formed_closed_universe() {
         let j = ReflectedJudgment::closed(
-            ReflectedTerm::Universe { level: Level::Concrete(0) },
-            ReflectedTerm::Universe { level: Level::Concrete(1) },
+            ReflectedTerm::Universe {
+                level: Level::Concrete(0),
+            },
+            ReflectedTerm::Universe {
+                level: Level::Concrete(1),
+            },
         );
         assert!(is_reflected_well_formed(&j));
     }
@@ -747,7 +917,9 @@ mod tests {
         let j = ReflectedJudgment::at_depth(
             1,
             ReflectedTerm::Var { index: 2 },
-            ReflectedTerm::Universe { level: Level::Concrete(0) },
+            ReflectedTerm::Universe {
+                level: Level::Concrete(0),
+            },
         );
         assert!(!is_reflected_well_formed(&j));
     }
@@ -756,7 +928,9 @@ mod tests {
     fn malformed_var_out_of_range_in_type() {
         let j = ReflectedJudgment::at_depth(
             1,
-            ReflectedTerm::Universe { level: Level::Concrete(0) },
+            ReflectedTerm::Universe {
+                level: Level::Concrete(0),
+            },
             ReflectedTerm::Var { index: 5 },
         );
         assert!(!is_reflected_well_formed(&j));
@@ -767,10 +941,17 @@ mod tests {
         // λ. Var(0) — Var(0) refers to the lambda's own binder, so
         // it's legal even at outer depth 0.
         let body = ReflectedTerm::Lam {
-            domain: Box::new(ReflectedTerm::Universe { level: Level::Concrete(0) }),
+            domain: Box::new(ReflectedTerm::Universe {
+                level: Level::Concrete(0),
+            }),
             body: Box::new(ReflectedTerm::Var { index: 0 }),
         };
-        let j = ReflectedJudgment::closed(body, ReflectedTerm::Universe { level: Level::Concrete(0) });
+        let j = ReflectedJudgment::closed(
+            body,
+            ReflectedTerm::Universe {
+                level: Level::Concrete(0),
+            },
+        );
         assert!(is_reflected_well_formed(&j));
     }
 
@@ -778,10 +959,17 @@ mod tests {
     fn malformed_under_binder_index_too_large() {
         // λ. Var(3) with no surrounding context — Var(3) escapes.
         let body = ReflectedTerm::Lam {
-            domain: Box::new(ReflectedTerm::Universe { level: Level::Concrete(0) }),
+            domain: Box::new(ReflectedTerm::Universe {
+                level: Level::Concrete(0),
+            }),
             body: Box::new(ReflectedTerm::Var { index: 3 }),
         };
-        let j = ReflectedJudgment::closed(body, ReflectedTerm::Universe { level: Level::Concrete(0) });
+        let j = ReflectedJudgment::closed(
+            body,
+            ReflectedTerm::Universe {
+                level: Level::Concrete(0),
+            },
+        );
         assert!(!is_reflected_well_formed(&j));
     }
 
@@ -836,12 +1024,18 @@ mod tests {
     fn serde_roundtrip_judgment() {
         let j = ReflectedJudgment::closed(
             ReflectedTerm::Lam {
-                domain: Box::new(ReflectedTerm::Universe { level: Level::Concrete(0) }),
+                domain: Box::new(ReflectedTerm::Universe {
+                    level: Level::Concrete(0),
+                }),
                 body: Box::new(ReflectedTerm::Var { index: 0 }),
             },
             ReflectedTerm::Pi {
-                domain: Box::new(ReflectedTerm::Universe { level: Level::Concrete(0) }),
-                body: Box::new(ReflectedTerm::Universe { level: Level::Concrete(0) }),
+                domain: Box::new(ReflectedTerm::Universe {
+                    level: Level::Concrete(0),
+                }),
+                body: Box::new(ReflectedTerm::Universe {
+                    level: Level::Concrete(0),
+                }),
             },
         );
         let json = serde_json::to_string(&j).expect("serialise");

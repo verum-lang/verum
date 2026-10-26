@@ -447,11 +447,48 @@ pub(crate) fn lift_term_one_binder(term: Term) -> Term {
 // Minimal CoC AST
 // =============================================================================
 
+/// Constructor fields in the portable first-order inductive fragment.
+/// Recursive occurrences are explicit and strictly positive by construction.
+/// Value fields are types in the declaration's surrounding binder context;
+/// fields do not bind names in later field types. Indexed, nested and
+/// function-valued recursive positions are not part of this fragment.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub enum DataField {
+    Value(Box<Term>),
+    Recursive,
+}
+
 /// A proof term. Types ARE terms (CIC-style); a "type" is a term
 /// whose own type is some `Universe(level)`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub enum Term {
+    /// A complete first-order inductive declaration. The full declaration,
+    /// including captured type parameters, owns constructor identity.
+    Data {
+        name: String,
+        level: Level,
+        constructors: Vec<Vec<DataField>>,
+    },
+    /// A saturated constructor selected from its checked declaration.
+    Construct {
+        data: Box<Term>,
+        constructor: usize,
+        args: Vec<Term>,
+    },
+    /// Dependent induction. Each recursive field is followed immediately by
+    /// its induction hypothesis in the corresponding case function.
+    Induct {
+        scrutinee: Box<Term>,
+        motive: Box<Term>,
+        cases: Vec<Term>,
+    },
+
+    /// Checked local definition. `body` binds the computed value at index zero.
+    /// Unlike a lambda parameter, a local definition is transparent in types.
+    Let { value: Box<Term>, body: Box<Term> },
+
     /// de Bruijn-indexed variable referring to a context entry.
     /// Index 0 is the innermost binder.
     Var(usize),
@@ -541,6 +578,52 @@ pub enum Term {
 }
 
 impl Term {
+    /// Map the immediate term children of a data node. Data nodes introduce
+    /// no de Bruijn binders: captured parameters remain in the outer context.
+    fn map_data_terms(self, mut map: impl FnMut(Term) -> Term) -> Term {
+        match self {
+            Term::Data {
+                name,
+                level,
+                constructors,
+            } => Term::Data {
+                name,
+                level,
+                constructors: constructors
+                    .into_iter()
+                    .map(|fields| {
+                        fields
+                            .into_iter()
+                            .map(|field| match field {
+                                DataField::Value(t) => DataField::Value(Box::new(map(*t))),
+                                DataField::Recursive => DataField::Recursive,
+                            })
+                            .collect()
+                    })
+                    .collect(),
+            },
+            Term::Construct {
+                data,
+                constructor,
+                args,
+            } => Term::Construct {
+                data: Box::new(map(*data)),
+                constructor,
+                args: args.into_iter().map(map).collect(),
+            },
+            Term::Induct {
+                scrutinee,
+                motive,
+                cases,
+            } => Term::Induct {
+                scrutinee: Box::new(map(*scrutinee)),
+                motive: Box::new(map(*motive)),
+                cases: cases.into_iter().map(map).collect(),
+            },
+            _ => unreachable!("map_data_terms requires a data node"),
+        }
+    }
+
     /// Convenience: build `Var(i)`.
     pub fn var(i: usize) -> Self {
         Term::Var(i)
@@ -708,6 +791,13 @@ impl Context {
 /// term variables only.
 pub(crate) fn shift_up(term: Term, amount: usize, cutoff: usize) -> Term {
     match term {
+        Term::Let { value, body } => Term::Let {
+            value: Box::new(shift_up(*value, amount, cutoff)),
+            body: Box::new(shift_up(*body, amount, cutoff + 1)),
+        },
+        data @ (Term::Data { .. } | Term::Construct { .. } | Term::Induct { .. }) => {
+            data.map_data_terms(|child| shift_up(child, amount, cutoff))
+        }
         Term::Var(i) => {
             if i >= cutoff {
                 Term::Var(i + amount)
@@ -769,6 +859,13 @@ pub(crate) fn shift_up(term: Term, amount: usize, cutoff: usize) -> Term {
 /// free schematic parameters of the term.
 fn subst(term: Term, target: usize, replacement: &Term) -> Term {
     match term {
+        Term::Let { value, body } => Term::Let {
+            value: Box::new(subst(*value, target, replacement)),
+            body: Box::new(subst(*body, target + 1, replacement)),
+        },
+        data @ (Term::Data { .. } | Term::Construct { .. } | Term::Induct { .. }) => {
+            data.map_data_terms(|child| subst(child, target, replacement))
+        }
         Term::Var(i) => {
             use std::cmp::Ordering;
             match i.cmp(&target) {
@@ -857,6 +954,60 @@ fn whnf_fuel(mut term: Term, mut fuel: usize) -> (Term, usize) {
         }
         fuel -= 1;
         match term {
+            Term::Let { value, body } => {
+                term = subst(*body, 0, &value);
+            }
+
+            Term::Induct {
+                scrutinee,
+                motive,
+                cases,
+            } => {
+                let (head, remaining) = whnf_fuel(*scrutinee, fuel);
+                fuel = remaining;
+                if let Term::Construct {
+                    data,
+                    constructor,
+                    args,
+                } = &head
+                {
+                    let (declaration, remaining) = whnf_fuel((**data).clone(), fuel);
+                    fuel = remaining;
+                    if let Term::Data { constructors, .. } = declaration {
+                        if let (Some(fields), Some(case)) =
+                            (constructors.get(*constructor), cases.get(*constructor))
+                        {
+                            if fields.len() == args.len() && fuel > 0 {
+                                let mut result = case.clone();
+                                for (field, argument) in fields.iter().zip(args.iter()) {
+                                    result = Term::app(result, argument.clone());
+                                    if matches!(field, DataField::Recursive) {
+                                        result = Term::app(
+                                            result,
+                                            Term::Induct {
+                                                scrutinee: Box::new(argument.clone()),
+                                                motive: motive.clone(),
+                                                cases: cases.clone(),
+                                            },
+                                        );
+                                    }
+                                }
+                                term = result;
+                                continue;
+                            }
+                        }
+                    }
+                }
+                return (
+                    Term::Induct {
+                        scrutinee: Box::new(head),
+                        motive,
+                        cases,
+                    },
+                    fuel,
+                );
+            }
+
             Term::App(f, x) => {
                 let (f_whnf, fuel_after) = whnf_fuel(*f, fuel);
                 fuel = fuel_after;
@@ -948,6 +1099,65 @@ fn def_eq(a: &Term, b: &Term) -> bool {
 
 fn def_eq_whnf(a: &Term, b: &Term) -> bool {
     match (a, b) {
+        (
+            Term::Data {
+                name: an,
+                level: al,
+                constructors: ac,
+            },
+            Term::Data {
+                name: bn,
+                level: bl,
+                constructors: bc,
+            },
+        ) => {
+            an == bn
+                && level_eq(al, bl)
+                && ac.len() == bc.len()
+                && ac.iter().zip(bc).all(|(a, b)| {
+                    a.len() == b.len()
+                        && a.iter().zip(b).all(|(a, b)| match (a, b) {
+                            (DataField::Recursive, DataField::Recursive) => true,
+                            (DataField::Value(a), DataField::Value(b)) => def_eq(a, b),
+                            _ => false,
+                        })
+                })
+        }
+        (
+            Term::Construct {
+                data: ad,
+                constructor: ai,
+                args: aa,
+            },
+            Term::Construct {
+                data: bd,
+                constructor: bi,
+                args: ba,
+            },
+        ) => {
+            ai == bi
+                && def_eq(ad, bd)
+                && aa.len() == ba.len()
+                && aa.iter().zip(ba).all(|(a, b)| def_eq(a, b))
+        }
+        (
+            Term::Induct {
+                scrutinee: a,
+                motive: am,
+                cases: ac,
+            },
+            Term::Induct {
+                scrutinee: b,
+                motive: bm,
+                cases: bc,
+            },
+        ) => {
+            def_eq(a, b)
+                && def_eq(am, bm)
+                && ac.len() == bc.len()
+                && ac.iter().zip(bc).all(|(a, b)| def_eq(a, b))
+        }
+
         (Term::Var(i), Term::Var(j)) => i == j,
         // Universe definitional equality is decided by canonical
         // level normalisation: closed levels reduce to a single
@@ -1063,6 +1273,23 @@ fn eta_match(lam_body: &Term, other: &Term) -> bool {
 /// term variable being inspected).
 fn is_free_in(term: &Term, target: usize) -> bool {
     match term {
+        Term::Let { value, body } => is_free_in(value, target) || is_free_in(body, target + 1),
+        Term::Data { constructors, .. } => constructors.iter().flatten().any(|field| match field {
+            DataField::Value(t) => is_free_in(t, target),
+            DataField::Recursive => false,
+        }),
+        Term::Construct { data, args, .. } => {
+            is_free_in(data, target) || args.iter().any(|t| is_free_in(t, target))
+        }
+        Term::Induct {
+            scrutinee,
+            motive,
+            cases,
+        } => {
+            is_free_in(scrutinee, target)
+                || is_free_in(motive, target)
+                || cases.iter().any(|t| is_free_in(t, target))
+        }
         Term::Var(i) => *i == target,
         Term::Universe(_) => false,
         Term::Pi(a, b) => is_free_in(a, target) || is_free_in(b, target + 1),
@@ -1093,6 +1320,13 @@ fn is_free_in(term: &Term, target: usize) -> bool {
 /// index (caller bug).
 fn shift_down(term: Term, amount: usize, cutoff: usize) -> Term {
     match term {
+        Term::Let { value, body } => Term::Let {
+            value: Box::new(shift_down(*value, amount, cutoff)),
+            body: Box::new(shift_down(*body, amount, cutoff + 1)),
+        },
+        data @ (Term::Data { .. } | Term::Construct { .. } | Term::Induct { .. }) => {
+            data.map_data_terms(|child| shift_down(child, amount, cutoff))
+        }
         Term::Var(i) => {
             if i >= cutoff + amount {
                 Term::Var(i - amount)
@@ -1159,6 +1393,8 @@ fn shift_down(term: Term, amount: usize, cutoff: usize) -> Term {
 /// exact arm of `infer`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CheckError {
+    /// Malformed declaration, constructor ownership, or induction premises.
+    InvalidInductive(String),
     /// T-Var: variable index out of bounds (free variable).
     UnboundVariable(usize),
     /// T-Pi-Form / T-Lam-Intro: domain annotation isn't a type
@@ -1270,6 +1506,94 @@ pub enum CheckError {
 ///  T-App-Elim to match argument types).
 pub fn infer(ctx: &Context, term: &Term) -> Result<Term, CheckError> {
     match term {
+        Term::Let { value, body } => {
+            infer(ctx, value)?;
+            infer(ctx, &subst((**body).clone(), 0, value))
+        }
+
+        Term::Data {
+            level,
+            constructors,
+            ..
+        } => {
+            for field in constructors.iter().flatten() {
+                if let DataField::Value(ty) = field {
+                    let kind = infer(ctx, ty)?;
+                    let field_level = expect_universe(&kind)
+                        .ok_or_else(|| CheckError::NotAType((**ty).clone()))?;
+                    if !level_eq(&field_level.max_with(level.clone()), level) {
+                        return Err(CheckError::InvalidInductive(
+                            "field exceeds declaration universe".into(),
+                        ));
+                    }
+                }
+            }
+            Ok(Term::Universe(level.clone().normalize()))
+        }
+        Term::Construct {
+            data,
+            constructor,
+            args,
+        } => {
+            infer(ctx, data)?;
+            let declaration = whnf((**data).clone());
+            let Term::Data { constructors, .. } = &declaration else {
+                return Err(CheckError::InvalidInductive(
+                    "constructor owner is not a data declaration".into(),
+                ));
+            };
+            let fields = constructors
+                .get(*constructor)
+                .ok_or_else(|| CheckError::InvalidInductive("unknown constructor".into()))?;
+            if fields.len() != args.len() {
+                return Err(CheckError::InvalidInductive(
+                    "constructor field arity mismatch".into(),
+                ));
+            }
+            for (field, argument) in fields.iter().zip(args) {
+                let expected = match field {
+                    DataField::Value(ty) => ty.as_ref(),
+                    DataField::Recursive => &declaration,
+                };
+                check(ctx, argument, expected)?;
+            }
+            Ok(declaration)
+        }
+        Term::Induct {
+            scrutinee,
+            motive,
+            cases,
+        } => {
+            let declaration = whnf(infer(ctx, scrutinee)?);
+            let Term::Data { constructors, .. } = &declaration else {
+                return Err(CheckError::InvalidInductive(
+                    "induction requires a data scrutinee".into(),
+                ));
+            };
+            infer(ctx, &declaration)?;
+            let motive_kind = whnf(infer(ctx, motive)?);
+            let Term::Pi(domain, result) = motive_kind else {
+                return Err(CheckError::InvalidInductive(
+                    "induction motive is not a family".into(),
+                ));
+            };
+            if !def_eq(&domain, &declaration) || expect_universe(&result).is_none() {
+                return Err(CheckError::InvalidInductive(
+                    "induction motive domain or universe mismatch".into(),
+                ));
+            }
+            if cases.len() != constructors.len() {
+                return Err(CheckError::InvalidInductive(
+                    "induction case count mismatch".into(),
+                ));
+            }
+            for (index, (fields, case)) in constructors.iter().zip(cases).enumerate() {
+                let expected = induction_case_type(&declaration, motive, index, fields);
+                check(ctx, case, &expected)?;
+            }
+            Ok(Term::app((**motive).clone(), (**scrutinee).clone()))
+        }
+
         // T-Var
         Term::Var(i) => ctx.lookup(*i).ok_or(CheckError::UnboundVariable(*i)),
 
@@ -1477,6 +1801,49 @@ pub fn infer(ctx: &Context, term: &Term) -> Result<Term, CheckError> {
             Ok(Term::App(motive.clone(), a_rhs))
         }
     }
+}
+
+/// Generate a branch telescope from the declaration, preserving every captured
+/// binder and interleaving recursive fields with their dependent hypotheses.
+/// Both algorithms use this syntactic telescope, but infer and reduce it
+/// independently (substitution versus semantic closures).
+pub(crate) fn induction_case_type(
+    data: &Term,
+    motive: &Term,
+    constructor: usize,
+    fields: &[DataField],
+) -> Term {
+    let mut domains = Vec::new();
+    let mut positions = Vec::new();
+    for field in fields {
+        let depth = domains.len();
+        let domain = match field {
+            DataField::Value(ty) => shift_up((**ty).clone(), depth, 0),
+            DataField::Recursive => shift_up(data.clone(), depth, 0),
+        };
+        positions.push(depth);
+        domains.push(domain);
+        if matches!(field, DataField::Recursive) {
+            domains.push(Term::app(
+                shift_up(motive.clone(), depth + 1, 0),
+                Term::Var(0),
+            ));
+        }
+    }
+    let depth = domains.len();
+    let applied = Term::Construct {
+        data: Box::new(shift_up(data.clone(), depth, 0)),
+        constructor,
+        args: positions
+            .into_iter()
+            .map(|position| Term::Var(depth - 1 - position))
+            .collect(),
+    };
+    let mut result = Term::app(shift_up(motive.clone(), depth, 0), applied);
+    for domain in domains.into_iter().rev() {
+        result = Term::pi(domain, result);
+    }
+    result
 }
 
 /// Check that `term` has type `expected`. Wraps `infer` + `def_eq`.

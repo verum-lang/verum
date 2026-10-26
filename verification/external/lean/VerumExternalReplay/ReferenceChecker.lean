@@ -40,6 +40,10 @@ inductive Level : Type where
 /-- Native certificate terms: dependent functions and pairs, with
     intensional equality and transport. -/
 inductive Term : Type where
+  | data (name : String) (level : Level) (constructors : List (List (Option Term)))
+  | construct (data : Term) (constructor : Nat) (args : List Term)
+  | induct (scrutinee motive : Term) (cases : List Term)
+  | letE (value body : Term)
   | var      (i : Nat)
   | universe (lvl : Level)
   | pi       (dom : Term) (body : Term)
@@ -53,11 +57,12 @@ inductive Term : Type where
   | identity (ty lhs rhs : Term)
   | refl     (value : Term)
   | transport (motive base path : Term)
-  deriving DecidableEq, Inhabited, Repr
+  deriving Inhabited, Repr
 
 /-- Type-checking error — mirrors `proof_checker::CheckError` for
     the structural fragment. -/
 inductive CheckError : Type where
+  | invalid_inductive (message : String)
   | unbound_variable     (idx : Nat)
   | not_a_type           (t : Term)
   | not_a_function       (t : Term)
@@ -232,6 +237,10 @@ partial def Level.shiftedBy (l : Level) (by_ : Nat) : Level :=
     discipline; Pair/Fst/Snd are non-binding. -/
 partial def shiftUp (amount : Nat) (cutoff : Nat) (t : Term) : Term :=
   match t with
+  | .letE value body => .letE (shiftUp amount cutoff value) (shiftUp amount (cutoff+1) body)
+  | .data name level constructors => .data name level (constructors.map (fun fields => fields.map (Option.map (shiftUp amount cutoff))))
+  | .construct data ctor args => .construct (shiftUp amount cutoff data) ctor (args.map (shiftUp amount cutoff))
+  | .induct value motive cases => .induct (shiftUp amount cutoff value) (shiftUp amount cutoff motive) (cases.map (shiftUp amount cutoff))
   | .var i        => if i ≥ cutoff then .var (i + amount) else .var i
   | .universe l   => .universe l
   | .pi a b       => .pi (shiftUp amount cutoff a) (shiftUp amount (cutoff + 1) b)
@@ -248,6 +257,10 @@ partial def shiftUp (amount : Nat) (cutoff : Nat) (t : Term) : Term :=
 /-- Shift down — inverse of `shiftUp`. -/
 partial def shiftDown (amount : Nat) (cutoff : Nat) (t : Term) : Term :=
   match t with
+  | .letE value body => .letE (shiftDown amount cutoff value) (shiftDown amount (cutoff+1) body)
+  | .data name level constructors => .data name level (constructors.map (fun fields => fields.map (Option.map (shiftDown amount cutoff))))
+  | .construct data ctor args => .construct (shiftDown amount cutoff data) ctor (args.map (shiftDown amount cutoff))
+  | .induct value motive cases => .induct (shiftDown amount cutoff value) (shiftDown amount cutoff motive) (cases.map (shiftDown amount cutoff))
   | .var i =>
     if i ≥ cutoff + amount then .var (i - amount)
     else if i < cutoff then .var i
@@ -267,6 +280,10 @@ partial def shiftDown (amount : Nat) (cutoff : Nat) (t : Term) : Term :=
 /-- Substitute `replacement` for `var target` in `t`. -/
 partial def subst (target : Nat) (replacement : Term) (t : Term) : Term :=
   match t with
+  | .letE value body => .letE (subst target replacement value) (subst (target+1) replacement body)
+  | .data name level constructors => .data name level (constructors.map (fun fields => fields.map (Option.map (subst target replacement))))
+  | .construct data ctor args => .construct (subst target replacement data) ctor (args.map (subst target replacement))
+  | .induct value motive cases => .induct (subst target replacement value) (subst target replacement motive) (cases.map (subst target replacement))
   | .var i =>
     if i = target then shiftUp target 0 replacement
     else if i > target then .var (i - 1)
@@ -292,6 +309,26 @@ partial def whnfFuel (fuel : Nat) (t : Term) : Term :=
   if fuel = 0 then t
   else
     match t with
+    | .letE value body => whnfFuel (fuel-1) (subst 0 value body)
+    | .induct value motive cases =>
+      let head := whnfFuel (fuel - 1) value
+      match head with
+      | .construct data ctor args =>
+        match whnfFuel (fuel - 1) data with
+        | .data _ _ constructors =>
+          match constructors[ctor]?, cases[ctor]? with
+          | some fields, some branch =>
+            if fields.length == args.length then
+              let applied := (fields.zip args).foldl (fun body (field, arg) =>
+                let next := Term.app body arg
+                match field with
+                | none => .app next (.induct arg motive cases)
+                | some _ => next) branch
+              whnfFuel (fuel - 1) applied
+            else .induct head motive cases
+          | _, _ => .induct head motive cases
+        | _ => .induct head motive cases
+      | _ => .induct head motive cases
     | .app f x =>
       let f' := whnfFuel (fuel - 1) f
       match f' with
@@ -319,6 +356,10 @@ def whnf (t : Term) : Term := whnfFuel whnfFuelCeiling t
 /-- Is `var target` free in `t`? -/
 partial def isFreeIn (target : Nat) (t : Term) : Bool :=
   match t with
+  | .letE value body => isFreeIn target value || isFreeIn (target+1) body
+  | .data _ _ constructors => constructors.any (fun fields => fields.any (fun field => field.any (isFreeIn target)))
+  | .construct data _ args => isFreeIn target data || args.any (isFreeIn target)
+  | .induct value motive cases => isFreeIn target value || isFreeIn target motive || cases.any (isFreeIn target)
   | .var i        => i = target
   | .universe _   => false
   | .pi a b       => isFreeIn target a || isFreeIn (target + 1) b
@@ -341,6 +382,17 @@ partial def defEq (a b : Term) : Bool :=
   defEqWhnf aw bw
 
 partial def defEqWhnf : Term → Term → Bool
+
+  | .data an al ac, .data bn bl bc =>
+    an == bn && Level.eq al bl && ac.length == bc.length && (ac.zip bc).all (fun (a,b) =>
+      a.length == b.length && (a.zip b).all (fun (x,y) => match x,y with
+        | none, none => true
+        | some x, some y => defEq x y
+        | _, _ => false))
+  | .construct a ai aa, .construct b bi ba =>
+    ai == bi && defEq a b && aa.length == ba.length && (aa.zip ba).all (fun (x,y) => defEq x y)
+  | .induct a am ac, .induct b bm bc =>
+    defEq a b && defEq am bm && ac.length == bc.length && (ac.zip bc).all (fun (x,y) => defEq x y)
   | .var i,        .var j        => i = j
   -- Universe equality is decided structurally on canonical levels —
   -- mirrors `proof_checker::level_eq`.
@@ -390,9 +442,62 @@ def expectUniverse (t : Term) : Option Level :=
   | .universe l => some (Level.normalize l)
   | _           => none
 
+/-- Independently construct each case telescope from explicit recursive slots.
+    Captured parameters remain in the surrounding de Bruijn context. -/
+def inductionCaseType (data motive : Term) (ctor : Nat) (fields : List (Option Term)) : Term := Id.run do
+  let mut domains : List Term := []
+  let mut positions : List Nat := []
+  for field in fields do
+    let depth := domains.length
+    let domain := shiftUp depth 0 (field.getD data)
+    positions := positions ++ [depth]
+    domains := domains ++ [domain]
+    if field.isNone then
+      domains := domains ++ [.app (shiftUp (depth + 1) 0 motive) (.var 0)]
+  let depth := domains.length
+  let value := Term.construct (shiftUp depth 0 data) ctor (positions.map (fun i => .var (depth - 1 - i)))
+  return domains.foldr Term.pi (.app (shiftUp depth 0 motive) value)
+
 /-- Bidirectional type inference for the structural fragment. -/
 partial def infer (Γ : Ctx) (t : Term) : Except CheckError Term :=
   match t with
+  | .letE value body => do
+    let _ ← infer Γ value
+    infer Γ (subst 0 value body)
+  | .data _ level constructors => do
+    for fields in constructors do
+      for field in fields do
+        if let some ty := field then
+          let kind ← infer Γ ty
+          let some fieldLevel := expectUniverse kind | throw (.not_a_type ty)
+          unless Level.eq (Level.maxCanonical fieldLevel level) level do
+            throw (.invalid_inductive "field exceeds declaration universe")
+    return .universe (Level.normalize level)
+  | .construct data ctor args => do
+    let _ ← infer Γ data
+    let declaration := whnf data
+    let .data _ _ constructors := declaration | throw (.invalid_inductive "constructor owner is not a data declaration")
+    let some fields := constructors[ctor]? | throw (.invalid_inductive "unknown constructor")
+    unless fields.length == args.length do throw (.invalid_inductive "constructor field arity mismatch")
+    for (field, arg) in fields.zip args do
+      let expected := field.getD declaration
+      let actual ← infer Γ arg
+      unless defEq actual expected do throw (.type_mismatch expected actual)
+    return declaration
+  | .induct value motive cases => do
+    let declaration := whnf (← infer Γ value)
+    let .data _ _ constructors := declaration | throw (.invalid_inductive "induction requires a data scrutinee")
+    let _ ← infer Γ declaration
+    let motiveKind := whnf (← infer Γ motive)
+    let .pi domain result := motiveKind | throw (.invalid_inductive "induction motive is not a family")
+    unless defEq domain declaration && (expectUniverse result).isSome do
+      throw (.invalid_inductive "induction motive domain or universe mismatch")
+    unless cases.length == constructors.length do throw (.invalid_inductive "induction case count mismatch")
+    for (index, (fields, branch)) in (constructors.zip cases).zipIdx |>.map (fun (pair,i) => (i,pair)) do
+      let expected := inductionCaseType declaration motive index fields
+      let actual ← infer Γ branch
+      unless defEq actual expected do throw (.type_mismatch expected actual)
+    return .app motive value
   | .var i =>
     match lookupCtx Γ i with
     | some T => Except.ok T

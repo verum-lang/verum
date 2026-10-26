@@ -79,7 +79,32 @@ partial def levelFromJson (j : Json) : Except String Level :=
 partial def termFromJson (j : Json) : Except String Term := do
   let fields ← j.getObj?
   unless fields.toArray.size == 1 do throw "a term must contain exactly one constructor"
-  if let .ok v := j.getObjVal? "Var" then do
+  if let .ok v := j.getObjVal? "Data" then do
+    exactKeys v ["name", "level", "constructors"]
+    let name ← (← v.getObjVal? "name").getStr?
+    let level ← levelFromJson (← v.getObjVal? "level")
+    let constructors ← (← v.getObjVal? "constructors").getArr?
+    let fields ← constructors.toList.mapM fun constructor => do
+      let raw ← constructor.getArr?
+      raw.toList.mapM fun field => do
+        if let .ok "Recursive" := field.getStr? then return none
+        exactKeys field ["Value"]
+        return some (← termFromJson (← field.getObjVal? "Value"))
+    return .data name level fields
+  else if let .ok v := j.getObjVal? "Let" then do
+    exactKeys v ["value", "body"]
+    return .letE (← termFromJson (← v.getObjVal? "value")) (← termFromJson (← v.getObjVal? "body"))
+  else if let .ok v := j.getObjVal? "Construct" then do
+    exactKeys v ["data", "constructor", "args"]
+    return .construct (← termFromJson (← v.getObjVal? "data"))
+      (← (← v.getObjVal? "constructor").getNat?)
+      (← (← (← v.getObjVal? "args").getArr?).toList.mapM termFromJson)
+  else if let .ok v := j.getObjVal? "Induct" then do
+    exactKeys v ["scrutinee", "motive", "cases"]
+    return .induct (← termFromJson (← v.getObjVal? "scrutinee"))
+      (← termFromJson (← v.getObjVal? "motive"))
+      (← (← (← v.getObjVal? "cases").getArr?).toList.mapM termFromJson)
+  else if let .ok v := j.getObjVal? "Var" then do
     let n ← Json.getNat? v; Except.ok (Term.var n)
   else if let .ok v := j.getObjVal? "Universe" then do
     let l ← levelFromJson v; Except.ok (Term.universe l)
@@ -155,6 +180,7 @@ def runOne (cert : BatteryCert) : Json :=
     Json.mkObj [("id", Json.str cert.id), ("ok", Json.bool true)]
   | Except.error e =>
     let tag := match e with
+      | .invalid_inductive _       => "InvalidInductive"
       | .unbound_variable _        => "UnboundVariable"
       | .not_a_type _              => "NotAType"
       | .not_a_function _          => "NotAFunction"

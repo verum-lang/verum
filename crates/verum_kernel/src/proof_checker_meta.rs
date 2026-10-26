@@ -16,7 +16,7 @@
 //! and its witness through the same `Certificate::verify` boundary as normal
 //! mode. `check_with_universe_lift` is the lower-level contextual judgment API.
 
-use crate::proof_checker::{Certificate, CheckError, Context, Term, check};
+use crate::proof_checker::{Certificate, CheckError, Context, DataField, Term, check};
 
 // =============================================================================
 // Universe-shift transformation
@@ -40,6 +40,55 @@ pub fn shift_universes(term: &Term, lift: u32) -> Term {
         return term.clone();
     }
     match term {
+        Term::Data {
+            name,
+            level,
+            constructors,
+        } => Term::Data {
+            name: name.clone(),
+            level: level.clone().shifted_by(lift),
+            constructors: constructors
+                .iter()
+                .map(|fields| {
+                    fields
+                        .iter()
+                        .map(|field| match field {
+                            DataField::Value(ty) => {
+                                DataField::Value(Box::new(shift_universes(ty, lift)))
+                            }
+                            DataField::Recursive => DataField::Recursive,
+                        })
+                        .collect()
+                })
+                .collect(),
+        },
+        Term::Construct {
+            data,
+            constructor,
+            args,
+        } => Term::Construct {
+            data: Box::new(shift_universes(data, lift)),
+            constructor: *constructor,
+            args: args
+                .iter()
+                .map(|term| shift_universes(term, lift))
+                .collect(),
+        },
+        Term::Induct {
+            scrutinee,
+            motive,
+            cases,
+        } => Term::Induct {
+            scrutinee: Box::new(shift_universes(scrutinee, lift)),
+            motive: Box::new(shift_universes(motive, lift)),
+            cases: cases
+                .iter()
+                .map(|term| shift_universes(term, lift))
+                .collect(),
+        },
+        Term::Let { value, body } => Term::Let {
+            value: Box::new(shift_universes(value,lift)), body: Box::new(shift_universes(body,lift)),
+        },
         Term::Var(i) => Term::Var(*i),
         Term::Universe(level) => Term::Universe(level.clone().shifted_by(lift)),
         Term::Pi(a, b) => Term::Pi(
