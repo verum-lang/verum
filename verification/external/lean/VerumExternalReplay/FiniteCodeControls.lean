@@ -5,30 +5,35 @@ open CheckedPairs
 set_option warningAsError true
 
 def constant (n : UInt64) : Code :=
-  .mk [⟨.primitive .first, [.literal (.pair (.nat n) (.bool false))]⟩] none []
+  .mk [⟨.primitive .first, [.literal (.pair (.nat n) (.bool false))], none⟩] none []
 
-def lexical : Code := .mk [⟨.call 0, []⟩] none
-  [.mk [⟨.call 0, []⟩] none [constant 42], constant 99]
+def lexical : Code := .mk [⟨.call 0, [], none⟩] none
+  [.mk [⟨.call 0, [], none⟩] none [constant 42], constant 99]
 
 def registers : Code := .mk
-  [⟨.primitive .pair, [.input 1, .input 0]⟩,
-   ⟨.call 0, [.register 0, .input 0]⟩,
-   ⟨.primitive .pair, [.register 0, .register 1]⟩] none
-  [.mk [⟨.primitive .second, [.input 0]⟩] none []]
+  [⟨.primitive .pair, [.input 1, .input 0], none⟩,
+   ⟨.call 0, [.register 0, .input 0], none⟩,
+   ⟨.primitive .pair, [.register 0, .register 1], none⟩] none
+  [.mk [⟨.primitive .second, [.input 0], none⟩] none []]
 
-def unusedInput : Code := .mk [⟨.call 0, [.input 0]⟩] none [constant 42]
+def unusedInput : Code := .mk [⟨.call 0, [.input 0], none⟩] none [constant 42]
 def eager : Code := .mk
-  [⟨.call 0, []⟩, ⟨.primitive .rem, [.literal (.nat 1), .literal (.nat 0)]⟩]
+  [⟨.call 0, [], none⟩, ⟨.primitive .rem, [.literal (.nat 1), .literal (.nat 0)], none⟩]
   (some 0) [constant 42]
 def explicitOutput : Code := .mk
-  [⟨.call 0, []⟩, ⟨.call 1, []⟩] (some 0) [constant 42, constant 99]
+  [⟨.call 0, [], none⟩, ⟨.call 1, [], none⟩] (some 0) [constant 42, constant 99]
 def lastOutput : Code := .mk
-  [⟨.call 0, []⟩, ⟨.call 1, []⟩] none [constant 42, constant 99]
-def missingOutput : Code := .mk [⟨.call 0, []⟩] (some 1) [constant 42]
+  [⟨.call 0, [], none⟩, ⟨.call 1, [], none⟩] none [constant 42, constant 99]
+def missingOutput : Code := .mk [⟨.call 0, [], none⟩] (some 1) [constant 42]
 def emptyOutput : Code := .mk [] none []
-def missingCalleeOutput : Code := .mk [⟨.call 0, []⟩] none [emptyOutput]
-def missingCallee : Code := .mk [⟨.call 0, []⟩] none []
-def futureRegister : Code := .mk [⟨.primitive .first, [.register 0]⟩] none []
+def missingCalleeOutput : Code := .mk [⟨.call 0, [], none⟩] none [emptyOutput]
+def missingCallee : Code := .mk [⟨.call 0, [], none⟩] none []
+def futureRegister : Code := .mk [⟨.primitive .first, [.register 0], none⟩] none []
+def declaredHole : Code := .mk
+  [⟨.primitive .checkedAdd, [.literal (.nat 1)], some 2⟩] none []
+def ignoredOperand : Code := .mk
+  [⟨.primitive .select, [.literal (.bool true), .literal (.nat 11),
+    .literal (.nat 22), .input 99], some 3⟩] none []
 
 macro "reduce_code" : tactic => `(tactic| (unfold run; reduce_finite_code))
 
@@ -55,6 +60,10 @@ theorem missing_callee_fails : run missingCallee [] = none := by
   unfold missingCallee; reduce_code
 theorem future_register_fails : run futureRegister [] = none := by
   unfold futureRegister; reduce_code
+theorem declared_hole_refused : run declaredHole [] = none := by
+  unfold declaredHole; reduce_code
+theorem ignored_operand_good : run ignoredOperand [] = some (.nat 11) := by
+  unfold ignoredOperand; reduce_code
 theorem pack_truncates : apply .packByte [.nat 18446744073709551615, .nat 255] =
     .ok (.nat 18446744073709551615) := by rfl
 theorem byte_guard : apply .packByte [.nat 1, .nat 256] =

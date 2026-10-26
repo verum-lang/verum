@@ -26,6 +26,8 @@ def main():
         'unused_failure': 'run eager [] = some (.nat 42)',
         'explicit_output': 'run explicitOutput [] = some (.nat 99)',
         'empty_output': 'run emptyOutput [] = some (.nat 0)',
+        'declared_operand_hole': 'run declaredHole [] = some (.nat 1)',
+        'ignored_operand': 'run ignoredOperand [] = none',
         'packing_high_bits': 'apply .packByte [.nat 72057594037927936, .nat 0] = .ok (.nat 1)',
         'binding_order': 'FiniteCode.bind 2 [.external 1, .external 0] (Value.nat 0) [.nat 7, .nat 9] = some [.nat 7, .nat 9]',
     }
@@ -35,7 +37,8 @@ def main():
             path = Path(directory) / (name + '.lean')
             path.write_text(header + f'example : {equation} := by\n  '
                             'try simp only [lexical_exact, unused_input_fails, unused_failure_retained, '
-                            'explicit_output_exact, empty_output_fails]\n  rfl\n')
+                            'explicit_output_exact, empty_output_fails, declared_hole_refused, '
+                            'ignored_operand_good]\n  rfl\n')
             # Generated controls share a reduction roster; unused simp entries
             # are not proof failures and must not mask the intended rejection.
             path.write_text(path.read_text().replace('example :',

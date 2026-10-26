@@ -24,6 +24,8 @@ inductive Operation (O : Type u) where
 structure Step (O : Type u) (V : Type u) where
   operation : Operation O
   arguments : List (Operand V)
+  /-- Absent for owned Program data; explicit for a finite Code view. -/
+  declaredArity : Option Nat := none
 
 inductive Code (O : Type u) (V : Type u) where
   | mk : List (Step O V) → Option Nat → List (Code O V) → Code O V
@@ -71,6 +73,15 @@ def arguments (ins regs : List (Arg (Carrier V) Γ ())) :
       let rest ← arguments ins regs rest
       pure (a :: rest)
 
+def Step.arity (step : Step O V) : Nat := step.declaredArity.getD step.arguments.length
+
+def Step.operands (step : Step O V) : Option (List (Operand V)) :=
+  if step.arity ≤ step.arguments.length then some (step.arguments.take step.arity) else none
+
+theorem Step.owned_operands (op : Operation O) (args : List (Operand V)) :
+    (Step.mk op args none).operands = some args := by
+  simp [operands, arity]
+
 def steps (library : List ((n : Nat) → Target O V (Row n)))
     (output : Option Nat) (code : List (Step O V))
     (ins regs : List (Arg (Carrier V) Γ ())) : Target O V Γ :=
@@ -81,7 +92,7 @@ def steps (library : List ((n : Nat) → Target O V (Row n)))
       | some a => .ret a
       | none => fail
   | step :: rest =>
-      match arguments ins regs step.arguments with
+      match step.operands.bind (arguments ins regs) with
       | none => fail
       | some args =>
           let continuation := steps library output rest

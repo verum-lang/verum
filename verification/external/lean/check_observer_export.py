@@ -89,7 +89,7 @@ def code(obj, depth=0):
             require(kind == 'Call', 'Unknown dispatch')
             op = '.call ' + natural(data)
         instructions.append('⟨' + op + ', ' + array(operand(a) for a in
-                                                  sequence(step['arguments'])) + '⟩')
+                                                  sequence(step['arguments'])) + ', none⟩')
     output = 'none' if obj['output'] is None else '(some ' + natural(obj['output']) + ')'
     return '(.mk ' + array(instructions) + ' ' + output + ' ' + array(
         code(p, depth + 1) for p in sequence(obj['library'])) + ')'
