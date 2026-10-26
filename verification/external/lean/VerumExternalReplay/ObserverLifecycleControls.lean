@@ -1,5 +1,6 @@
 import VerumExternalReplay.ObserverOwnership
 import VerumExternalReplay.ExactNames
+import VerumExternalReplay.ObserverInstallation
 
 namespace ObserverLifecycleControls
 
@@ -53,5 +54,23 @@ theorem capacity_refuses_new_key :
     ExactNames.intern 1 named.1 (5, 556) = (named.1, none) := rfl
 theorem independent_tables_can_collide :
     named.2 = (ExactNames.intern 4 ([] : List (Nat × Nat)) (5, 556)).2 := rfl
+
+def receiver : ObserverInstallation.History Nat Nat := ⟨3, [some 2, some 4]⟩
+def retained : ObserverInstallation.History Nat Nat := ⟨3, [some 2]⟩
+def increment (state event : Nat) : Option Nat := some (state + event)
+theorem receiver_replays_from_initial :
+    ObserverInstallation.install increment 10 [retained] receiver 2 = some 16 := rfl
+theorem conflicting_history_is_refused :
+    ObserverInstallation.install increment 10 [⟨3, [some 9]⟩] receiver 2 = none := rfl
+theorem gap_is_not_an_identity_event :
+    ObserverInstallation.install increment 10 ([] : List (ObserverInstallation.History Nat Nat))
+      ⟨3, [some 2, none, some 4]⟩ 3 = none := rfl
+theorem omitted_suffix_is_not_replayed :
+    ObserverInstallation.install increment 10 [retained] receiver 1 = some 12 := rfl
+theorem unrelated_origin_is_not_compared :
+    ObserverInstallation.install increment 10 [⟨4, [some 9]⟩] receiver 2 = some 16 := rfl
+theorem global_cut_cannot_replace_relative :
+    ObserverInstallation.install increment 10 ([] : List (ObserverInstallation.History Nat Nat))
+      ⟨3, [some 4]⟩ 2 = none := rfl
 
 end ObserverLifecycleControls

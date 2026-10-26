@@ -12,8 +12,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--report', type=Path, required=True)
     args = parser.parse_args()
-    modules = ['ObserverOwnership', 'ExactNames', 'ObserverLifecycleControls']
-    sources = [ROOT / 'VerumExternalReplay' / (name + '.lean') for name in modules]
+    modules = ['ObserverOwnership', 'ExactNames', 'ObserverInstallation', 'ObserverLifecycleControls']
+    dependencies = ['PartialObservers', 'TypedPrograms', 'ConservativeRefinement', 'ExactTransports']
+    sources = [ROOT / 'VerumExternalReplay' / (name + '.lean') for name in modules + dependencies]
     sources += [Path(__file__).resolve(), ROOT / 'check_typed_programs.py',
                 ROOT / 'lean-toolchain', ROOT / 'lakefile.toml']
     before = {str(p.relative_to(ROOT)): sha256(p) for p in sources}
@@ -36,6 +37,11 @@ set_option warningAsError true
         'capacity_does_not_erase_existing': '(ExactNames.intern 1 named.1 (5, 300)).2 = none',
         'capacity_does_not_admit_new': '(ExactNames.intern 1 named.1 (5, 556)).2 = some 1',
         'independent_fork_tables_are_not_one_namespace': '(ExactNames.intern 4 ([] : List (Nat × Nat)) (5, 556)).2 = some 1',
+        'installation_does_not_use_donor_state': 'ObserverInstallation.install increment 10 [retained] receiver 2 = some 106',
+        'conflicting_origin_cannot_install': 'ObserverInstallation.install increment 10 [⟨3, [some 9]⟩] receiver 2 = some 16',
+        'gap_cannot_be_silently_skipped': 'ObserverInstallation.install increment 10 ([] : List (ObserverInstallation.History Nat Nat)) ⟨3, [some 2, none, some 4]⟩ 3 = some 16',
+        'future_event_cannot_enter_cut': 'ObserverInstallation.install increment 10 [retained] receiver 1 = some 16',
+        'global_cut_is_not_relative_cut': 'ObserverInstallation.install increment 10 ([] : List (ObserverInstallation.History Nat Nat)) ⟨3, [some 4]⟩ 2 = some 14',
     }
     negative = {}
     with tempfile.TemporaryDirectory(prefix='verum-observer-lifecycle-') as tmp:
@@ -58,7 +64,7 @@ set_option warningAsError true
     if before != {str(p.relative_to(ROOT)): sha256(p) for p in sources}:
         raise RuntimeError('Lifecycle model changed during verification')
     args.report.write_text(json.dumps({
-        'scope': 'Universal ownership-guard and exact shared-namespace model laws; '
+        'scope': 'Universal ownership-guard, semantic installation and exact shared-namespace model laws; '
                  'not frozen Rust lifecycle conformance or affine-memory verification',
         'sources': before, 'positive': positive, 'axioms': audit,
         'theorems': names, 'negative': negative}, indent=2) + '\n')
