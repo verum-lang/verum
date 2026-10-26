@@ -21,3 +21,5 @@ import VerumExternalReplay.TypedProgramControls
 import VerumExternalReplay.PartialObservers
 import VerumExternalReplay.PartialObserverControls
 import VerumExternalReplay.FiniteCodeControls
+import VerumExternalReplay.FiniteExecutionControls
+import VerumExternalReplay.ObserverInterfaces

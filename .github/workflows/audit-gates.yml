@@ -205,6 +205,8 @@ jobs:
             --report partial-observers-acceptance.json
           python3 verification/external/lean/check_finite_code.py \
             --report finite-code-acceptance.json
+          python3 verification/external/lean/check_finite_execution.py \
+            --report finite-execution-acceptance.json
       - name: Frozen observer export correspondence
         run: |
           python3 verification/external/lean/check_observer_export.py \
@@ -273,6 +275,7 @@ jobs:
             native-partial-observers-acceptance.json
             partial-observers-acceptance.json
             finite-code-acceptance.json
+            finite-execution-acceptance.json
             observer-export-acceptance.json
             observer-export*.lean
           retention-days: 14
