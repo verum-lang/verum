@@ -6,9 +6,32 @@ namespace AcquiredObserverControls
 open AcquiredObserver
 set_option warningAsError true
 
-def first : Event := ⟨1, 2, some ⟨3, 4⟩, 5, 6, 7, 8, 9⟩
-def last : Event := ⟨1, 2, some ⟨3, 4⟩, 10, 11, 12, 13, 14⟩
+def first : Event := ⟨1, 2, some ⟨3, 4⟩, 5, 6, 7, 8, 9, some 255⟩
+def last : Event := ⟨1, 2, some ⟨3, 4⟩, 10, 11, 12, 13, 14, none⟩
 def query : Query := ⟨1, 2, some ⟨3, 4⟩, 15, 16, 17, 18, some 19, some 20⟩
+
+theorem initializer_primitives :
+    apply 0 .unit [] = .ok .unit ∧
+    apply 0 .zero [] = .ok (.nat 0) ∧
+    apply 0 .emptyTrace [] = .ok (.trace []) ∧
+    apply 0 .identity [.pair (.trace [first]) (.nat 300)] =
+      .ok (.pair (.trace [first]) (.nat 300)) := ⟨rfl, rfl, rfl, rfl⟩
+
+theorem initializer_arity_is_exact :
+    apply 0 .unit [.unit] = .error .arity ∧
+    apply 0 .zero [.nat 0] = .error .arity ∧
+    apply 0 .emptyTrace [.trace []] = .error .arity ∧
+    apply 0 .identity [] = .error .arity := ⟨rfl, rfl, rfl, rfl⟩
+
+theorem pose_is_optional_and_preserved :
+    apply 0 .eventPose [.event first] = .ok (.nat 255) ∧
+    apply 0 .eventPose [.event last] = .error .missing ∧
+    apply 0 .queryPose [.query query] = .ok (.nat 19) ∧
+    apply 0 .queryPose [.query { query with pose := none }] = .error .missing ∧
+    apply 0 .eventPose [.query query] = .error .sort ∧
+    apply 0 .queryPose [.event first] = .error .sort ∧
+    apply 0 .equal [.event first, .event { first with pose := none }] = .ok (.bool false) :=
+  ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl⟩
 
 theorem trace_order_and_capacity :
     apply 2 .append [.trace [first], .event last] = .ok (.trace [first, last]) ∧

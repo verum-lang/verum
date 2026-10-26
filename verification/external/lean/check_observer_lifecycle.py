@@ -55,6 +55,9 @@ set_option warningAsError true
         'zero_allowance_is_resource': 'AcquiredObserver.executionClass .budget false none = .undefined',
         'names_require_comparison_work': 'ExactNames.metered 1 [300] 300 0 false = ([300], .ok 0, 0)',
         'names_preserve_capacity': 'ExactNames.metered 1 [300] 44 2 false = ([300, 44], .ok 1, 0)',
+        'missing_event_pose_is_not_zero': 'AcquiredObserver.apply 0 .eventPose [.event AcquiredObserverControls.last] = .ok (.nat 0)',
+        'event_pose_is_not_current_query_pose': 'AcquiredObserver.apply 0 .eventPose [.event AcquiredObserverControls.first] = .ok (.nat 19)',
+        'zero_initializer_takes_no_arguments': 'AcquiredObserver.apply 0 .zero [.unit] = .ok (.nat 0)',
     })
     with tempfile.TemporaryDirectory(prefix='verum-observer-lifecycle-') as tmp:
         for name, equation in equations.items():

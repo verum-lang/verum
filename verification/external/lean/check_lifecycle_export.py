@@ -7,7 +7,43 @@ from observer_export_replay import (ROOT, MAX64, array, boolean, fields, natural
 
 OPS = ('Append At Last Length EventInput EventRaw EventAction EventAge QueryInput '
        'QueryRaw QueryAge QueryAction Pair First Second Equal Select Add Rem Next Refused').split()
+POSE_OPS = 'Unit Zero EmptyTrace Identity EventPose QueryPose'.split()
 ERRORS = 'Arity Sort Missing Overflow TraceCapacity Allocation'.split()
+
+
+def validate_adapter(data):
+    """Version selects the representation; field absence never selects a version.
+
+    V1 embeds old events with no pose port as None. V2 requires the explicit
+    optional pose on every event, including literals and complete trace values.
+    Mixed semantic versions need a per-definition value domain and are refused.
+    """
+    versions = set()
+    for definition in sequence(data['definitions']):
+        require(type(definition) is dict and 'semantics' in definition, 'Missing semantic adapter')
+        fields(definition['semantics'], 'kind max_trace')
+        version = definition['semantics']['kind']
+        require(type(version) is str and version in ('AcquiredV1', 'AcquiredV2'), 'Unsupported semantic adapter')
+        versions.add(version)
+    require(len(versions) == 1, 'One explicit semantic adapter version is required')
+    version = next(iter(versions))
+    pending = [data]
+    while pending:
+        node = pending.pop()
+        if type(node) is list:
+            pending.extend(node)
+        elif type(node) is dict:
+            kind = node.get('kind')
+            if kind in ('Event', 'Trace'):
+                rows = [node.get('value')] if kind == 'Event' else sequence(node.get('events'))
+                for row in rows:
+                    require(type(row) is dict and ('pose' in row) == (version == 'AcquiredV2'),
+                            'Event pose fields do not match declared adapter version')
+            operation = node.get('operation')
+            if version == 'AcquiredV1' and type(operation) is dict:
+                require(operation.get('Primitive') not in POSE_OPS, 'Primitive requires AcquiredV2')
+            pending.extend(node.values())
+    return version
 
 
 def tag(name, allowed):
@@ -36,7 +72,7 @@ def source(item):
 
 
 def event(item, query=False):
-    keys = 'epoch raw_space owner raw input episode life_age action' + (' pose' if query else '')
+    keys = 'epoch raw_space owner raw input episode life_age action' + (' pose' if query or 'pose' in item else '')
     fields(item, keys)
     prefix = [wide(item['epoch']), wide(item['raw_space']), option(item['owner'], lineage),
               natural(item['raw']), natural(item['input'])]
@@ -45,7 +81,8 @@ def event(item, query=False):
         suffix = [natural(item['episode']), natural(item['life_age']),
                   option(item['pose'], byte), option(item['action'], byte)]
     else:
-        suffix = [byte(item['action']), natural(item['episode']), natural(item['life_age'])]
+        suffix = [byte(item['action']), natural(item['episode']), natural(item['life_age']),
+                  option(item.get('pose'), byte)]
     return '⟨' + ', '.join(prefix + suffix) + '⟩'
 
 
@@ -85,7 +122,7 @@ def code(item, depth=0):
         fields(step, 'operation arguments')
         kind, payload = variant(step['operation'])
         require(kind in ('Primitive', 'Call'), 'Unknown operation form')
-        operation = '.primitive ' + tag(payload, OPS) if kind == 'Primitive' else '.call ' + natural(payload)
+        operation = '.primitive ' + tag(payload, OPS + POSE_OPS) if kind == 'Primitive' else '.call ' + natural(payload)
         args = []
         for operand in sequence(step['arguments']):
             k, data = variant(operand)
@@ -192,6 +229,7 @@ def budget(item):
 def emit(data):
     fields(data, 'schema definitions ownership naming installation refusals')
     require(data['schema'] == 'synarc-observer-lifecycle-v1', 'Unknown lifecycle schema')
+    adapter = validate_adapter(data)
     lines = ['import VerumExternalReplay.AcquiredObserver', 'import VerumExternalReplay.ObserverOwnership',
              'import VerumExternalReplay.ExactNames', 'import VerumExternalReplay.ObserverInstallation',
              'open AcquiredObserver', 'set_option warningAsError true', 'namespace FrozenObserverExport']
@@ -221,7 +259,7 @@ def emit(data):
         fields(d, 'identity initial update read update_binding read_binding semantics')
         identity = natural(d['identity']); require(d['identity'] not in definitions, 'Duplicate definition')
         fields(d['semantics'], 'kind max_trace')
-        require(d['semantics']['kind'] == 'AcquiredV1', 'Unsupported semantic adapter')
+        require(d['semantics']['kind'] == adapter, 'Mixed semantic adapter versions')
         cap = natural(d['semantics']['max_trace']); prefix = 'd' + identity
         definitions[d['identity']] = (prefix, cap, d)
         lines.append(f'def {prefix}_initial : Value := {value(d["initial"])}')
@@ -483,7 +521,8 @@ def main():
         'ExactNames', 'ConservativeRefinement', 'ExactTransports', 'PartialObservers', 'ObserverInstallation'],
         producers=[Path(__file__).resolve()], description=__doc__,
         scope='Finite supplied lifecycle observations checked against ownership, acquired-program, '
-              'installation and exact naming models for the 64-bit AcquiredV1 adapter. '
+              'installation and exact naming models for the explicitly declared 64-bit '
+              'AcquiredV1 legacy or AcquiredV2 pose adapter. '
               'Not universal Rust ownership/memory correctness, '
               'authenticated provenance, learning correctness or default enrollment.')
 

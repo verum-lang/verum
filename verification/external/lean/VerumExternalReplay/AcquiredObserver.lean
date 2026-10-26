@@ -33,6 +33,7 @@ structure Event where
   action : UInt8
   episode : UInt64
   lifeAge : UInt64
+  pose : Option UInt8
   deriving DecidableEq
 
 structure Query where
@@ -70,8 +71,9 @@ inductive Value where
   deriving DecidableEq
 
 inductive Op where
+  | unit | zero | emptyTrace | identity
   | append | at | last | length | eventInput | eventRaw | eventAction | eventAge
-  | queryInput | queryRaw | queryAge | queryAction
+  | eventPose | queryInput | queryRaw | queryAge | queryAction | queryPose
   | pair | first | second | equal | select | add | rem | next | refused
   deriving DecidableEq
 
@@ -80,6 +82,7 @@ inductive Error where
   deriving DecidableEq
 
 def arity : Op → Nat
+  | .unit | .zero | .emptyTrace => 0
   | .append | .at | .pair | .equal | .add | .rem => 2
   | .select => 3
   | _ => 1
@@ -87,6 +90,10 @@ def arity : Op → Nat
 def apply (maxTrace : Nat) (op : Op) (args : List Value) : Except Error Value :=
   if args.length ≠ arity op then .error .arity else
   match op, args with
+  | .unit, [] => .ok .unit
+  | .zero, [] => .ok (.nat 0)
+  | .emptyTrace, [] => .ok (.trace [])
+  | .identity, [value] => .ok value
   | .append, [.trace events, .event event] =>
       if events.length + 1 ≥ 2^64 then .error .overflow
       else if events.length + 1 > maxTrace then .error .traceCapacity
@@ -104,9 +111,15 @@ def apply (maxTrace : Nat) (op : Op) (args : List Value) : Except Error Value :=
   | .eventRaw, [.event e] => .ok (.nat e.raw)
   | .eventAction, [.event e] => .ok (.action e.action)
   | .eventAge, [.event e] => .ok (.nat e.lifeAge)
+  | .eventPose, [.event e] => match e.pose with
+      | some p => .ok (.nat (UInt64.ofNat p.toNat))
+      | none => .error .missing
   | .queryInput, [.query q] => .ok (.nat q.input)
   | .queryRaw, [.query q] => .ok (.nat q.raw)
   | .queryAge, [.query q] => .ok (.nat q.lifeAge)
+  | .queryPose, [.query q] => match q.pose with
+      | some p => .ok (.nat (UInt64.ofNat p.toNat))
+      | none => .error .missing
   | .queryAction, [.query q] => match q.action with
       | some a => .ok (.action a)
       | none => .error .missing

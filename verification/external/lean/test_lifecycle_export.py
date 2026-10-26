@@ -55,6 +55,28 @@ def model_fixture():
         installation=installation, refusals=refusals)
 
 
+def event_value(pose):
+    return dict(kind='Event', value=dict(epoch='1', raw_space='1', owner=None,
+        raw=7, input=8, action=9, episode=10, life_age=11, pose=pose))
+
+
+def pose_read_fixture(operation, argument, result, arity=1):
+    data = model_fixture()
+    definition = data['definitions'][0]; definition['semantics']['kind'] = 'AcquiredV2'
+    definition['initial'] = argument
+    definition['read']['steps'] = [dict(operation=dict(Primitive=operation),
+        arguments=[dict(Input=0)] if arity else [])]
+    row = data['ownership'][-1]
+    row['current_before']['value'] = argument
+    row['result']['value'] = result; row['result']['execution']['registers'] = [result]
+    # Four binding units, one frame unit, two instruction units plus operands,
+    # then one root-output unit. This is a synthetic accounting control.
+    row['budget_after']['work_remaining'] = 92 - arity
+    data['ownership'] = [row]
+    for key in ('installation', 'naming', 'refusals'): data[key] = []
+    return data
+
+
 class LifecycleExtractionTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -75,6 +97,52 @@ class LifecycleExtractionTests(unittest.TestCase):
 
     def test_model_fixture_replays(self):
         self.replay(model_fixture())
+
+    def test_pose_adapter_primitives(self):
+        unit = dict(kind='Unit'); nat = lambda n: dict(kind='Nat', value=n)
+        event = event_value(255)
+        query = dict(kind='Query', value={**event['value'], 'pose': 0, 'action': None})
+        pair = dict(kind='Pair', first=event, second=query)
+        for op, arg, out, arity in [
+            ('Unit', unit, unit, 0), ('Zero', unit, nat(0), 0),
+            ('EmptyTrace', unit, dict(kind='Trace', events=[]), 0),
+            ('Identity', pair, pair, 1), ('EventPose', event, nat(255), 1),
+            ('QueryPose', query, nat(0), 1),
+        ]:
+            with self.subTest(operation=op): self.replay(pose_read_fixture(op, arg, out, arity))
+        wrong = pose_read_fixture('EventPose', event, nat(254))
+        self.replay(wrong, True)
+
+    def test_adapter_versions_are_explicit(self):
+        data = pose_read_fixture('EventPose', event_value(None), dict(kind='Nat', value=0))
+        self.replay(data, True)  # Missing pose cannot manufacture zero.
+        del data['definitions'][0]['initial']['value']['pose']
+        with self.assertRaisesRegex(ValueError, 'pose fields'): emit(data)
+        data = pose_read_fixture('EventPose', event_value(5), dict(kind='Nat', value=5))
+        data['definitions'][0]['semantics']['kind'] = 'AcquiredV1'
+        with self.assertRaises(ValueError): emit(data)
+        data = pose_read_fixture('Zero', dict(kind='Unit'), dict(kind='Nat', value=0), 0)
+        data['definitions'][0]['semantics']['kind'] = 'AcquiredV1'
+        with self.assertRaisesRegex(ValueError, 'requires AcquiredV2'): emit(data)
+        data['definitions'][0]['semantics']['kind'] = 'AcquiredV2'
+        data['definitions'][0]['read']['steps'][0]['operation']['Primitive'] = 'FuturePrimitive'
+        with self.assertRaisesRegex(ValueError, 'Unknown variant'): emit(data)
+        for pose in (-1, 256, True, '0'):
+            with self.subTest(pose=pose), self.assertRaises(ValueError): value(event_value(pose))
+
+    def test_pose_is_part_of_exact_namespace_key(self):
+        data = model_fixture(); data['definitions'][0]['semantics']['kind'] = 'AcquiredV2'
+        data['ownership'] = []; data['installation'] = []; data['refusals'] = []
+        a, b = data['naming']; first, second = event_value(None), event_value(0)
+        a['value'] = first; a['after']['entries'][0]['value'] = first
+        b['value'] = second; b['before']['entries'][0]['value'] = first
+        b['after']['entries'] = [dict(input=7, value=first), dict(input=7, value=second)]
+        for row in (a, b):
+            row['before']['capacity'] = row['after']['capacity'] = 2
+        b['result'] = dict(kind='Ok', name=1)
+        self.replay(data)
+        b['result']['name'] = 0
+        self.replay(data, True)
 
     def test_frozen_refusal_fixes(self):
         data = json.loads((Path(__file__).resolve().parent /
