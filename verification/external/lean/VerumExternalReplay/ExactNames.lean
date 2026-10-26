@@ -107,4 +107,33 @@ theorem sequential_injective (capacity : Nat) (keys : List K) (left right : K) (
   exact same_name_same_key _ name left right
     (preserves_lookup _ _ right left name (sound _ _ _ _ a)) (sound _ _ _ _ b)
 
+inductive Refusal where
+  | work | capacity | poisoned
+  deriving DecidableEq
+
+-- The native meter charges one unit before each comparison, then one before
+-- admitting a new entry. A shortage consumes the available comparison units;
+-- its failed charge does not mutate the table. Allocation failure is separate.
+def metered (capacity : Nat) (keys : List K) (key : K) (remaining : Nat)
+    (poisoned : Bool) : List K × Except Refusal Nat × Nat :=
+  if poisoned then (keys, .error .poisoned, remaining) else
+  let cost := if key ∈ keys then keys.idxOf key + 1 else keys.length + 1
+  if remaining < cost then (keys, .error .work, 0) else
+  let (after, name) := intern capacity keys key
+  (after, match name with | some n => .ok n | none => .error .capacity, remaining - cost)
+
+theorem metered_success_projects (capacity : Nat) (keys : List K) (key : K)
+    (remaining name : Nat) (poisoned : Bool)
+    (success : (metered capacity keys key remaining poisoned).2.1 = .ok name) :
+    intern capacity keys key = ((metered capacity keys key remaining poisoned).1, some name) := by
+  cases poisoned with
+  | true => simp [metered] at success
+  | false =>
+    by_cases short : remaining < (if key ∈ keys then keys.idxOf key + 1 else keys.length + 1)
+    · simp [metered, short] at success
+    · cases result : intern capacity keys key with
+      | mk after resultName =>
+        cases resultName <;> simp_all [metered]
+        simp [Nat.not_lt_of_ge short]
+
 end ExactNames

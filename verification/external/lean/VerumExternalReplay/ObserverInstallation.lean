@@ -44,6 +44,28 @@ def admitted [DecidableEq H] [DecidableEq E]
     (known : List (History H E)) (receiver : History H E) (cut : Nat) : Bool :=
   decide (cut ≤ receiver.events.length) && known.all (fun old => compatible old receiver cut)
 
+inductive StructuralRefusal where
+  | cutBeyondHistory : Nat → Nat → StructuralRefusal
+  | historyChanged : Nat → StructuralRefusal
+  | gap : Nat → StructuralRefusal
+  deriving DecidableEq
+
+-- Exact diagnostic order for the supplied immutable histories. Work refusal
+-- during these comparisons is a separate runtime observation.
+def firstDifference [DecidableEq E] : List E → List E → Option Nat
+  | a :: as, b :: bs => if a = b then (firstDifference as bs).map (· + 1) else some 0
+  | _, _ => none
+
+def structuralRefusal [DecidableEq H] [DecidableEq E]
+    (known : List (History H E)) (receiver : History H E) (cut : Nat) :
+    Option StructuralRefusal :=
+  if cut > receiver.events.length then some (.cutBeyondHistory cut receiver.events.length)
+  else match known.findSome? (fun old =>
+    if old.origin = receiver.origin then firstDifference old.events (receiver.events.take cut)
+    else none) with
+    | some event => some (.historyChanged event)
+    | none => ((receiver.events.take cut).findIdx? Option.isNone).map .gap
+
 def install [DecidableEq H] [DecidableEq E]
     (step : S → E → Option S) (initial : S) (known : List (History H E))
     (receiver : History H E) (cut : Nat) : Option S :=

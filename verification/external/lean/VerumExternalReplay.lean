@@ -24,3 +24,4 @@ import VerumExternalReplay.FiniteCodeControls
 import VerumExternalReplay.FiniteExecutionControls
 import VerumExternalReplay.ObserverInterfaces
 import VerumExternalReplay.ObserverLifecycleControls
+import VerumExternalReplay.AcquiredObserverControls

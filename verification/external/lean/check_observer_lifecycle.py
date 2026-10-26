@@ -12,15 +12,20 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--report', type=Path, required=True)
     args = parser.parse_args()
-    modules = ['ObserverOwnership', 'ExactNames', 'ObserverInstallation', 'ObserverLifecycleControls']
-    dependencies = ['PartialObservers', 'TypedPrograms', 'ConservativeRefinement', 'ExactTransports']
+    modules = ['ObserverOwnership', 'ExactNames', 'ObserverInstallation', 'ObserverLifecycleControls',
+               'AcquiredObserver', 'AcquiredObserverControls']
+    dependencies = ['PartialObservers', 'TypedPrograms', 'ConservativeRefinement', 'ExactTransports',
+                    'FiniteCode', 'FiniteExecution', 'FiniteExecutionProjection', 'ObserverAdmission']
     sources = [ROOT / 'VerumExternalReplay' / (name + '.lean') for name in modules + dependencies]
     sources += [Path(__file__).resolve(), ROOT / 'check_typed_programs.py',
                 ROOT / 'lean-toolchain', ROOT / 'lakefile.toml']
     before = {str(p.relative_to(ROOT)): sha256(p) for p in sources}
-    require_success(run('lake', 'build', 'VerumExternalReplay.ObserverLifecycleControls'))
+    require_success(run('lake', 'build', 'VerumExternalReplay.ObserverLifecycleControls',
+                        'VerumExternalReplay.AcquiredObserverControls'))
     positive = check(ROOT / 'VerumExternalReplay/ObserverLifecycleControls.lean')
+    acquired = check(ROOT / 'VerumExternalReplay/AcquiredObserverControls.lean')
     header = '''import VerumExternalReplay.ObserverLifecycleControls
+import VerumExternalReplay.AcquiredObserverControls
 open ObserverOwnership ObserverLifecycleControls
 set_option warningAsError true
 '''
@@ -44,6 +49,13 @@ set_option warningAsError true
         'global_cut_is_not_relative_cut': 'ObserverInstallation.install increment 10 ([] : List (ObserverInstallation.History Nat Nat)) ⟨3, [some 4]⟩ 2 = some 14',
     }
     negative = {}
+    equations.update({
+        'primitive_capacity_is_resource': 'AcquiredObserver.primitiveClass .traceCapacity = .undefined',
+        'primitive_missing_is_undefined': 'AcquiredObserver.primitiveClass .missing = .resource',
+        'zero_allowance_is_resource': 'AcquiredObserver.executionClass .budget false none = .undefined',
+        'names_require_comparison_work': 'ExactNames.metered 1 [300] 300 0 false = ([300], .ok 0, 0)',
+        'names_preserve_capacity': 'ExactNames.metered 1 [300] 44 2 false = ([300, 44], .ok 1, 0)',
+    })
     with tempfile.TemporaryDirectory(prefix='verum-observer-lifecycle-') as tmp:
         for name, equation in equations.items():
             path = Path(tmp) / (name + '.lean')
@@ -66,7 +78,7 @@ set_option warningAsError true
     args.report.write_text(json.dumps({
         'scope': 'Universal ownership-guard, semantic installation and exact shared-namespace model laws; '
                  'not frozen Rust lifecycle conformance or affine-memory verification',
-        'sources': before, 'positive': positive, 'axioms': audit,
+        'sources': before, 'positive': positive, 'acquired': acquired, 'axioms': audit,
         'theorems': names, 'negative': negative}, indent=2) + '\n')
     print(f'Lifecycle model checked: {len(names)} theorems, {len(negative)} intended rejections')
 
