@@ -373,6 +373,21 @@ def subst (target : Nat) (replacement : Term) (t : Term) : Term :=
     else if i > target then .var (i - 1)
     else .var i) target t
 
+/-- Apply a constructor branch without allocating a zipped field/argument list.
+    Recursive hypotheses follow their own field immediately. The reducer checks
+    arity first; truncation on malformed input matches `zip` exactly. -/
+def applyInductionCase (motive : Term) (cases : List Term)
+    (fields : List (Option Term)) (args : List Term) (branch : Term) : Term :=
+  match fields, args with
+  | field :: rest, arg :: tail =>
+    let next := Term.app branch arg
+    let applied := match field with
+      | none => Term.app next (.induct arg motive cases)
+      | some _ => next
+    applyInductionCase motive cases rest tail applied
+  | _, _ => branch
+termination_by structural fields
+
 /-- Fuel ceiling for whnf. -/
 def whnfFuelCeiling : Nat := 1 <<< 20
 
@@ -393,12 +408,7 @@ def whnfFuel (fuel : Nat) (t : Term) : Term :=
           match constructors[ctor]?, cases[ctor]? with
           | some fields, some branch =>
             if fields.length == args.length then
-              let applied := (fields.zip args).foldl (fun body (field, arg) =>
-                let next := Term.app body arg
-                match field with
-                | none => .app next (.induct arg motive cases)
-                | some _ => next) branch
-              whnfFuel fuel applied
+              whnfFuel fuel (applyInductionCase motive cases fields args branch)
             else .induct head motive cases
           | _, _ => .induct head motive cases
         | _ => .induct head motive cases

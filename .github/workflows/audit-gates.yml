@@ -160,7 +160,7 @@ jobs:
 
       - name: Reference term laws and native certificate replay
         run: |
-          (cd verification/external/lean && lake build verum_replay_checker VerumExternalReplay.TermOperations VerumExternalReplay.TermScope VerumExternalReplay.DiagnosticFactorization VerumExternalReplay.ExactTransports)
+          (cd verification/external/lean && lake build verum_replay_checker VerumExternalReplay.TermOperations VerumExternalReplay.TermScope VerumExternalReplay.ReductionScope VerumExternalReplay.DiagnosticFactorization VerumExternalReplay.ExactTransports)
           VERUM_LEAN_REPLAY="$GITHUB_WORKSPACE/verification/external/lean/.lake/build/bin/verum_replay_checker" \
             cargo test --locked -p verum_proof --test lean_replay --test induction_lean_replay --test universe_lean_replay --test dependent_pairs --test admission -- --include-ignored
 
