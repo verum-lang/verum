@@ -15,7 +15,7 @@ certificate or a correspondence proof for the Verum compiler/runtime.
 -/
 namespace TypedPrograms
 set_option warningAsError true
-universe u v w u'
+universe u v w u' v' w'
 variable {Ty : Type u}
 
 inductive Ref : List Ty → Ty → Type u where
@@ -58,21 +58,21 @@ def HList.relabel {TargetTy : Type u'} {F : Ty → Type v} {G : TargetTy → Typ
   | .nil => .nil
   | .cons x xs => .cons (f x) (xs.relabel ρ f)
 
-def Env.relabel {TargetTy : Type u'} {V : Ty → Type v} {W : TargetTy → Type w}
+def Env.relabel {TargetTy : Type u'} {V : Ty → Type v} {W : TargetTy → Type w'}
     (ρ : Ty → TargetTy) (j : ∀ {t}, V t → W (ρ t)) {Γ : List Ty}
     (env : Env V Γ) : Env W (Γ.map ρ) :=
   match Γ with
   | [] => fun r => nomatch r
   | _ :: _ => Env.cons (j (env .here)) (Env.relabel ρ j (fun r => env (.there r)))
 
-theorem Env.get_relabel {TargetTy : Type u'} {V : Ty → Type v} {W : TargetTy → Type w}
+theorem Env.get_relabel {TargetTy : Type u'} {V : Ty → Type v} {W : TargetTy → Type w'}
     (ρ : Ty → TargetTy) (j : ∀ {t}, V t → W (ρ t)) (env : Env V Γ) (r : Ref Γ t) :
     Env.relabel ρ j env (r.relabel ρ) = j (env r) := by
   induction r with
   | here => rfl
   | there r ih => exact ih (fun r => env (.there r))
 
-theorem Env.relabel_cons {TargetTy : Type u'} {V : Ty → Type v} {W : TargetTy → Type w}
+theorem Env.relabel_cons {TargetTy : Type u'} {V : Ty → Type v} {W : TargetTy → Type w'}
     (ρ : Ty → TargetTy) (j : ∀ {t}, V t → W (ρ t)) (env : Env V Γ) (x : V s) :
     (fun {t} (r : Ref ((s :: Γ).map ρ) t) => Env.relabel ρ j (Env.cons x env) r) =
       (fun {t} (r : Ref ((s :: Γ).map ρ) t) => Env.cons (j x) (Env.relabel ρ j env) r) := rfl
@@ -202,8 +202,8 @@ end Substitution
 
 section Translation
 variable {TargetTy : Type u'}
-variable {Source : List Ty → Ty → Type v} {Target : List TargetTy → TargetTy → Type v}
-variable {SLit : Ty → Type v} {TLit : TargetTy → Type v}
+variable {Source : List Ty → Ty → Type v} {Target : List TargetTy → TargetTy → Type v'}
+variable {SLit : Ty → Type v} {TLit : TargetTy → Type v'}
 variable (ρ : Ty → TargetTy)
 variable (literal : ∀ {t}, SLit t → TLit (ρ t))
 variable (expand : ∀ {params t}, Source params t → Program Target TLit (params.map ρ) (ρ t))
@@ -218,7 +218,7 @@ def Program.translate (p : Program Source SLit Γ t) : Program Target TLit (Γ.m
   | .call op args rest =>
       ((expand op).subst (args.relabel ρ (Arg.translate ρ literal)).get).splice rest.translate
 
-variable {V : Ty → Type w} {W : TargetTy → Type w}
+variable {V : Ty → Type w} {W : TargetTy → Type w'}
 variable (S : Semantics Source SLit V) (T : Semantics Target TLit W)
 variable (j : ∀ {t}, V t → W (ρ t))
 variable (literal_exact : ∀ {t} (l : SLit t), T.literal (literal l) = j (S.literal l))

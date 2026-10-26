@@ -367,6 +367,67 @@ fn battery() -> Vec<(&'static str, Certificate, bool)> {
             false,
         ));
     }
+    let alias_identity = |result| Term::Let {
+        value: Box::new(Term::universe(0)),
+        body: Box::new(Term::lam(
+            Term::var(0),
+            Term::Let {
+                value: Box::new(Term::var(0)),
+                body: Box::new(Term::lam(Term::var(0), result)),
+            },
+        )),
+    };
+    for (name, result, valid) in [
+        ("lazy_alias_type_preserves_prefix", Term::var(0), true),
+        (
+            "lazy_alias_cannot_capture_later_parameter",
+            Term::var(1),
+            false,
+        ),
+    ] {
+        cases.push((
+            name,
+            Certificate {
+                term: alias_identity(result),
+                claimed_type: Term::pi(Term::universe(0), Term::pi(Term::var(0), Term::var(1))),
+                metadata: Default::default(),
+            },
+            valid,
+        ));
+    }
+    let function = Term::pi(Term::var(0), Term::var(1));
+    let eta_alias = Term::lam(
+        Term::universe(0),
+        Term::lam(
+            function.clone(),
+            Term::Let {
+                value: Box::new(Term::var(0)),
+                body: Box::new(Term::refl(Term::lam(
+                    Term::var(2),
+                    Term::app(Term::var(1), Term::var(0)),
+                ))),
+            },
+        ),
+    );
+    cases.push((
+        "lazy_alias_function_eta_enters_its_binder",
+        Certificate {
+            term: eta_alias,
+            claimed_type: Term::pi(
+                Term::universe(0),
+                Term::pi(
+                    function,
+                    Term::id_ty(
+                        Term::pi(Term::var(1), Term::var(2)),
+                        Term::lam(Term::var(1), Term::app(Term::var(1), Term::var(0))),
+                        Term::var(0),
+                    ),
+                ),
+            ),
+            metadata: Default::default(),
+        },
+        true,
+    ));
     cases
 }
 

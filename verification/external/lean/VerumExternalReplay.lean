@@ -18,3 +18,5 @@ import VerumExternalReplay.DiagnosticFactorization
 import VerumExternalReplay.ExactTransports
 import VerumExternalReplay.TypedPrograms
 import VerumExternalReplay.TypedProgramControls
+import VerumExternalReplay.PartialObservers
+import VerumExternalReplay.PartialObserverControls
