@@ -1,0 +1,14 @@
+{
+  "scope": "Finite observations exported by the actual Rust observer; identities are a reproducibility anchor, not an authenticated execution or universal correspondence proof.",
+  "export_sha256": "c5a7fd3fd7bf5ac16fdff8263e7150b71278929755c496c9fc9fcc0009eab4e3",
+  "head": "d7b0830299a51b753b961c72e2995509fdb76252",
+  "source_map_sha256": "9fc3234de0f4fe7e228d54e7a3fa49047a11f7ddd215a6b28d6d7714988ac433",
+  "source_sha256": {
+    "rust/crates/synarc-kan/src/program.rs": "62a543cfa620376eaafca07466da532d05eb19aa822415069caba80861adb6af",
+    "rust/crates/synarc-kan/src/program/observer.rs": "8b84c7c375eaceb22dc0455e9d0bf039d2d6dea56e0488addc739d5d483360b0",
+    "rust/crates/synarc-kan/src/organism/observer_program.rs": "f73a43af8a3aac16675e93e72abb6dae6ecc779a80a7ddca4b2270f675097e4c",
+    "rust/crates/synarc-kan/src/organism/observer_program/courts.rs": "90252760d681f4dab4f2415beb253af4c80a54f424c15916b692acd2208f672f"
+  },
+  "rust_binary_sha256": "6e0de4247b7ff37676a0877b970971ff2a9df7d4e896f4fd366a1f83387c94df",
+  "court_log_sha256": "8dad32354527c86bf44deb091a0d6f74726e7ed57db867e06d99d4a5df0ce2ec"
+}
