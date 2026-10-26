@@ -36,6 +36,14 @@ import Lean.Data.Json
 open Lean (Json)
 open VerumKernel
 
+-- Constructor objects have exactly one tag; payload records have exactly
+-- their declared fields. Extra keys must not change which proof is replayed.
+def exactKeys (j : Json) (expected : List String) : Except String Unit := do
+  let fields ← j.getObj?
+  let keys := fields.toArray.toList.map Prod.fst
+  unless keys.length == expected.length && keys.all expected.contains do
+    throw "unexpected or missing certificate fields"
+
 -- Helper: extract a length-2 array from a Json value.
 def jsonPair? (j : Json) : Except String (Json × Json) :=
   match j with
@@ -68,7 +76,9 @@ partial def levelFromJson (j : Json) : Except String Level :=
   else
     Except.error s!"unrecognised Level encoding: {j.compress}"
 
-partial def termFromJson (j : Json) : Except String Term :=
+partial def termFromJson (j : Json) : Except String Term := do
+  let fields ← j.getObj?
+  unless fields.toArray.size == 1 do throw "a term must contain exactly one constructor"
   if let .ok v := j.getObjVal? "Var" then do
     let n ← Json.getNat? v; Except.ok (Term.var n)
   else if let .ok v := j.getObjVal? "Universe" then do
@@ -88,6 +98,26 @@ partial def termFromJson (j : Json) : Except String Term :=
     let a' ← termFromJson a
     let b' ← termFromJson b
     Except.ok (Term.app a' b')
+  else if let .ok v := j.getObjVal? "Sigma" then do
+    let (a, b) ← jsonPair? v
+    return .sigma (← termFromJson a) (← termFromJson b)
+  else if let .ok v := j.getObjVal? "Pair" then do
+    let (a, b) ← jsonPair? v
+    return .pair (← termFromJson a) (← termFromJson b)
+  else if let .ok v := j.getObjVal? "Fst" then
+    return .fst (← termFromJson v)
+  else if let .ok v := j.getObjVal? "Snd" then
+    return .snd (← termFromJson v)
+  else if let .ok v := j.getObjVal? "Id" then do
+    exactKeys v ["ty", "lhs", "rhs"]
+    return .identity (← termFromJson (← v.getObjVal? "ty"))
+      (← termFromJson (← v.getObjVal? "lhs")) (← termFromJson (← v.getObjVal? "rhs"))
+  else if let .ok v := j.getObjVal? "Refl" then
+    return .refl (← termFromJson v)
+  else if let .ok v := j.getObjVal? "J" then do
+    exactKeys v ["motive", "base", "scrutinee"]
+    return .transport (← termFromJson (← v.getObjVal? "motive"))
+      (← termFromJson (← v.getObjVal? "base")) (← termFromJson (← v.getObjVal? "scrutinee"))
   else
     Except.error s!"unrecognized Term variant in: {j.compress}"
 
@@ -129,6 +159,8 @@ def runOne (cert : BatteryCert) : Json :=
       | .not_a_type _              => "NotAType"
       | .not_a_function _          => "NotAFunction"
       | .not_a_sigma _             => "NotASigma"
+      | .not_an_identity _          => "NotAnIdentity"
+      | .not_a_valid_j_motive _     => "NotAValidJMotive"
       | .domain_mismatch _ _       => "DomainMismatch"
       | .type_mismatch _ _         => "TypeMismatch"
       | .universe_overflow _       => "UniverseOverflow"

@@ -527,8 +527,8 @@ pub enum Term {
     /// This is the simplified J that every dependent type theory
     /// admits.  The β-rule is `J(_, base, Refl(_)) → base`,
     /// established by [`whnf_fuel`].  symm / trans / transport /
-    /// cong / `Π`-extensionality are all derivable from J +
-    /// [`Term::Refl`].
+    /// cong are derivable from J + [`Term::Refl`]. Function
+    /// extensionality is not supplied by intensional equality alone.
     J {
         /// Motive `P : Π(_ : A). Universe(n)` — the predicate to
         /// transport across the path.
