@@ -233,6 +233,11 @@ jobs:
             --sha256 2f4715560e732e75fc664ac9d405445654aca07c5f18cf1e87ca4c316d448829 \
             --provenance verification/external/lean/fixtures/observer-lifecycle-v2.provenance.json \
             --output observer-lifecycle-v2-export.lean --report observer-lifecycle-v2-export-acceptance.json
+          python3 verification/external/lean/check_joint_export.py \
+            --export verification/external/lean/fixtures/observer-joint-v1.json \
+            --sha256 0b361f8c7ab1fdf7405fc29a8170fbe14740a224adf7a6fcc98e40531054b58e \
+            --provenance verification/external/lean/fixtures/observer-joint-v1.provenance.json \
+            --output observer-joint-export.lean --report observer-joint-export-acceptance.json
 
       - name: Indexed family source and certificate replay
         run: |
@@ -297,6 +302,9 @@ jobs:
             observer-lifecycle-acceptance.json
             observer-retirement-acceptance.json
             observer-export-acceptance.json
+            observer-joint-export-acceptance.json
+            observer-joint-export.lean
+            observer-joint-export-*/
             observer-export*.lean
             observer-export-*/
           retention-days: 14
