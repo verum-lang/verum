@@ -217,6 +217,7 @@ jobs:
             --provenance verification/external/lean/fixtures/observer-runtime-controls-v1.provenance.json \
             --output observer-export.lean --report observer-export-acceptance.json
           python3 -m unittest discover -s verification/external/lean -p test_observer_export.py
+          python3 -m unittest discover -s verification/external/lean -p test_lifecycle_export.py
 
       - name: Indexed family source and certificate replay
         run: |
