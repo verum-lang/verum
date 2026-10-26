@@ -182,6 +182,60 @@ struct Inference<'a> {
 }
 
 impl Inference<'_> {
+    /// Check an introduction using its formed expected type. Recursive checks
+    /// retain the exact registry and coordinate policy of the inference call.
+    fn check(
+        &self,
+        ctx: &Context,
+        term: &CoreTerm,
+        expected: &CoreTerm,
+    ) -> Result<(), KernelError> {
+        let axioms = self.axioms;
+        let inductives = self.inductives;
+        match (term, normalize_in(expected, axioms, inductives)) {
+            (
+                CoreTerm::Lam {
+                    binder,
+                    domain,
+                    body,
+                },
+                CoreTerm::Pi {
+                    binder: expected_binder,
+                    domain: expected_domain,
+                    codomain,
+                },
+            ) => {
+                let kind = self.infer(ctx, domain)?;
+                universe_level(&normalize_in(&kind, axioms, inductives))?;
+                require_conversion(domain, &expected_domain, axioms, inductives)?;
+                // Rename BOTH binders. Reusing the implementation's name could
+                // capture a free variable in the goal under context shadowing.
+                let fresh = fresh_term_name(ctx, "argument", &[term, expected], &[]);
+                let variable = CoreTerm::Var(fresh.clone());
+                let body = substitute(body, binder.as_str(), &variable);
+                let codomain = substitute(&codomain, expected_binder.as_str(), &variable);
+                self.check(&ctx.extend(fresh, (**domain).clone()), &body, &codomain)
+            }
+            (
+                CoreTerm::Pair(first, second),
+                CoreTerm::Sigma {
+                    binder,
+                    fst_ty,
+                    snd_ty,
+                },
+            ) => {
+                self.check(ctx, first, &fst_ty)?;
+                self.check(ctx, second, &substitute(&snd_ty, binder.as_str(), first))
+            }
+            (CoreTerm::Refl(value), CoreTerm::PathTy { carrier, lhs, rhs }) => {
+                self.check(ctx, value, &carrier)?;
+                require_conversion(value, &lhs, axioms, inductives)?;
+                require_conversion(value, &rhs, axioms, inductives)
+            }
+            _ => require_conversion(&self.infer(ctx, term)?, expected, axioms, inductives),
+        }
+    }
+
     fn infer(&self, ctx: &Context, term: &CoreTerm) -> Result<CoreTerm, KernelError> {
         let Self {
             axioms,
@@ -229,13 +283,7 @@ impl Inference<'_> {
                     registry,
                 )?;
                 for (argument, expected) in args.iter().zip(instantiated.arg_types.iter()) {
-                    let actual = self.infer(ctx, argument)?;
-                    if !convertible_in(&actual, expected, axioms, inductives) {
-                        return Err(KernelError::TypeMismatch {
-                            expected: shape_of(expected),
-                            actual: shape_of(&actual),
-                        });
-                    }
+                    self.check(ctx, argument, expected)?;
                 }
                 Ok(CoreTerm::Inductive {
                     path: inductive.clone(),
@@ -322,13 +370,7 @@ impl Inference<'_> {
                         domain,
                         codomain,
                     } => {
-                        let arg_ty = self.infer(ctx, arg)?;
-                        if !convertible_in(&arg_ty, &domain, axioms, inductives) {
-                            return Err(KernelError::TypeMismatch {
-                                expected: shape_of(&domain),
-                                actual: shape_of(&arg_ty),
-                            });
-                        }
+                        self.check(ctx, arg, &domain)?;
                         Ok(substitute(&codomain, binder.as_str(), arg))
                     }
                     other => Err(KernelError::NotAFunction(shape_of(&other))),
@@ -354,30 +396,21 @@ impl Inference<'_> {
                 )))
             }
 
-            // Σ-introduction: for now, Pair is introduced in a
-            // non-dependent position — we look up the expected Σ-type at
-            // the pair's syntactic position via App/Lam/assignment (not
-            // yet wired through), so at bring-up we conservatively require
-            // both components check in some type and synthesize a
-            // non-dependent Σ with binder `_`.
-            //
-
-            // A fully dependent `Pair (a, b) : Sigma (x : A) B` rule needs
-            // an expected-type channel (`check` mode), which lands with
-            // bidirectional elaboration. Until then we keep the simpler
-            // rule here and tag the restriction.
+            // Synthesis has no expected family, so it returns a product.
+            // Dependent introduction is handled by Inference::check. Even an
+            // unused product binder must not capture the component types.
             CoreTerm::Pair(fst, snd) => {
                 let fst_ty = self.infer(ctx, fst)?;
                 let snd_ty = self.infer(ctx, snd)?;
                 Ok(CoreTerm::Sigma {
-                    binder: Text::from("_"),
+                    binder: fresh_term_name(ctx, "pair", &[term, &fst_ty, &snd_ty], &[]),
                     fst_ty: Heap::new(fst_ty),
                     snd_ty: Heap::new(snd_ty),
                 })
             }
 
             CoreTerm::Fst(pair) => {
-                let pair_ty = self.infer(ctx, pair)?;
+                let pair_ty = normalize_in(&self.infer(ctx, pair)?, axioms, inductives);
                 match pair_ty {
                     CoreTerm::Sigma { fst_ty, .. } => Ok((*fst_ty).clone()),
                     other => Err(KernelError::NotAPair(shape_of(&other))),
@@ -385,7 +418,7 @@ impl Inference<'_> {
             }
 
             CoreTerm::Snd(pair) => {
-                let pair_ty = self.infer(ctx, pair)?;
+                let pair_ty = normalize_in(&self.infer(ctx, pair)?, axioms, inductives);
                 match pair_ty {
                     CoreTerm::Sigma { binder, snd_ty, .. } => {
                         // snd : snd_ty[binder := fst(pair)]
@@ -413,20 +446,8 @@ impl Inference<'_> {
             CoreTerm::PathTy { carrier, lhs, rhs } => {
                 let carrier_univ = self.infer(ctx, carrier)?;
                 let carrier_level = universe_level(&carrier_univ)?;
-                let lhs_ty = self.infer(ctx, lhs)?;
-                if !convertible_in(&lhs_ty, carrier, axioms, inductives) {
-                    return Err(KernelError::TypeMismatch {
-                        expected: shape_of(carrier),
-                        actual: shape_of(&lhs_ty),
-                    });
-                }
-                let rhs_ty = self.infer(ctx, rhs)?;
-                if !convertible_in(&rhs_ty, carrier, axioms, inductives) {
-                    return Err(KernelError::TypeMismatch {
-                        expected: shape_of(carrier),
-                        actual: shape_of(&rhs_ty),
-                    });
-                }
+                self.check(ctx, lhs, carrier)?;
+                self.check(ctx, rhs, carrier)?;
                 Ok(CoreTerm::Universe(carrier_level))
             }
 
@@ -471,8 +492,8 @@ impl Inference<'_> {
                 let level = universe_level(&normalize_in(&codomain, axioms, inductives))?;
                 let left_fiber = CoreTerm::App(motive.clone(), start);
                 let right_fiber = CoreTerm::App(motive.clone(), end);
-                require_conversion(&self.infer(ctx, lhs)?, &left_fiber, axioms, inductives)?;
-                require_conversion(&self.infer(ctx, rhs)?, &right_fiber, axioms, inductives)?;
+                self.check(ctx, lhs, &left_fiber)?;
+                self.check(ctx, rhs, &right_fiber)?;
                 Ok(CoreTerm::Universe(level))
             }
             // Mere typability of the children cannot establish partial-element
@@ -491,7 +512,7 @@ impl Inference<'_> {
                         universe_level(&normalize_in(&carrier, axioms, inductives))?;
                         universe_level(&normalize_in(&self.infer(ctx, &lhs)?, axioms, inductives))?;
                         universe_level(&normalize_in(&self.infer(ctx, &rhs)?, axioms, inductives))?;
-                        require_conversion(&self.infer(ctx, value)?, &lhs, axioms, inductives)?;
+                        self.check(ctx, value, &lhs)?;
                         Ok(*rhs)
                     }
                     other => Err(KernelError::TypeMismatch {
@@ -551,8 +572,7 @@ impl Inference<'_> {
 
             CoreTerm::QuotIntro { value, base, equiv } => {
                 self.infer_quotient_type(ctx, base, equiv)?;
-                let actual = self.infer(ctx, value)?;
-                require_conversion(&actual, base, axioms, inductives)?;
+                self.check(ctx, value, base)?;
                 Ok(CoreTerm::Quotient {
                     base: base.clone(),
                     equiv: equiv.clone(),
@@ -590,7 +610,7 @@ impl Inference<'_> {
                     case.as_ref(),
                     respect.as_ref(),
                 ];
-                let q = quotient_fresh_name(ctx, "q", &terms, &[]);
+                let q = fresh_term_name(ctx, "q", &terms, &[]);
                 let result = normalize_in(
                     &CoreTerm::App(motive.clone(), Heap::new(CoreTerm::Var(q.clone()))),
                     axioms,
@@ -606,9 +626,9 @@ impl Inference<'_> {
                     axioms,
                     inductives,
                 ))?;
-                let x = quotient_fresh_name(ctx, "x", &terms, &[q]);
-                let y = quotient_fresh_name(ctx, "y", &terms, &[x.clone()]);
-                let r = quotient_fresh_name(ctx, "r", &terms, &[x.clone(), y.clone()]);
+                let x = fresh_term_name(ctx, "x", &terms, &[q]);
+                let y = fresh_term_name(ctx, "y", &terms, &[x.clone()]);
+                let r = fresh_term_name(ctx, "r", &terms, &[x.clone(), y.clone()]);
                 let x_term = CoreTerm::Var(x.clone());
                 let y_term = CoreTerm::Var(y.clone());
                 let case_ty = CoreTerm::Pi {
@@ -616,7 +636,7 @@ impl Inference<'_> {
                     domain: base.clone(),
                     codomain: Heap::new(result.clone()),
                 };
-                require_conversion(&self.infer(ctx, case)?, &case_ty, axioms, inductives)?;
+                self.check(ctx, case, &case_ty)?;
                 let relation = CoreTerm::App(
                     Heap::new(CoreTerm::App(equiv.clone(), Heap::new(x_term.clone()))),
                     Heap::new(y_term.clone()),
@@ -645,7 +665,7 @@ impl Inference<'_> {
                     axioms,
                     inductives,
                 ))?;
-                require_conversion(&self.infer(ctx, respect)?, &respects, axioms, inductives)?;
+                self.check(ctx, respect, &respects)?;
                 Ok(CoreTerm::App(motive.clone(), scrutinee.clone()))
             }
 
@@ -725,13 +745,7 @@ impl Inference<'_> {
                     );
                     let kind = self.infer(ctx, &expected)?;
                     universe_level(&normalize_in(&kind, axioms, inductives))?;
-                    let actual = self.infer(ctx, case)?;
-                    if !convertible_in(&actual, &expected, axioms, inductives) {
-                        return Err(KernelError::TypeMismatch {
-                            expected: shape_of(&expected),
-                            actual: shape_of(&actual),
-                        });
-                    }
+                    self.check(ctx, case, &expected)?;
                 }
                 Ok(CoreTerm::App(motive.clone(), scrutinee.clone()))
             }
@@ -839,8 +853,8 @@ impl Inference<'_> {
         let inductives = self.inductives;
         let base_level =
             universe_level(&normalize_in(&self.infer(ctx, base)?, axioms, inductives))?;
-        let x = quotient_fresh_name(ctx, "x", &[base, equiv], &[]);
-        let y = quotient_fresh_name(ctx, "y", &[base, equiv], &[x.clone()]);
+        let x = fresh_term_name(ctx, "x", &[base, equiv], &[]);
+        let y = fresh_term_name(ctx, "y", &[base, equiv], &[x.clone()]);
         let extended = ctx
             .extend(x.clone(), base.clone())
             .extend(y.clone(), base.clone());
@@ -867,9 +881,9 @@ impl Inference<'_> {
     }
 }
 
-fn quotient_fresh_name(ctx: &Context, stem: &str, terms: &[&CoreTerm], reserved: &[Text]) -> Text {
+fn fresh_term_name(ctx: &Context, stem: &str, terms: &[&CoreTerm], reserved: &[Text]) -> Text {
     for index in 0u64.. {
-        let candidate = Text::from(format!("_quot_{stem}_{index}"));
+        let candidate = Text::from(format!("_kernel_{stem}_{index}"));
         if ctx.lookup(candidate.as_str()).is_none()
             && !reserved.contains(&candidate)
             && terms
@@ -1064,15 +1078,13 @@ pub fn verify_with_inductives(
 ) -> Result<(), KernelError> {
     let kind = infer_with_inductives(ctx, expected, axioms, inductives)?;
     universe_level(&crate::support::normalize_full(&kind, axioms, inductives))?;
-    let actual = infer_with_inductives(ctx, term, axioms, inductives)?;
-    if convertible_in(&actual, expected, axioms, Some(inductives)) {
-        Ok(())
-    } else {
-        Err(KernelError::TypeMismatch {
-            expected: shape_of(expected),
-            actual: shape_of(&actual),
-        })
+    Inference {
+        axioms,
+        inductives: Some(inductives),
+        current_coord: None,
+        allow_tier_jump: false,
     }
+    .check(ctx, term, expected)
 }
 
 /// Back-compat shape-head comparator kept for the coarse API.
