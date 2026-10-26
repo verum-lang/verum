@@ -55,26 +55,33 @@ def jsonPair? (j : Json) : Except String (Json × Json) :=
 -- Walk the Lean `Json` AST and reconstruct a `Term`.  Tries each
 -- variant key in order; the first present key determines the
 -- variant.  Pure function, returns Except.
-/-- Level decoding, both certificate spellings: the pre-FV-19 wire
-    wrote a bare number (`{"Universe": 0}`); the structured wire
-    writes the Level constructors. Mirrors the Rust side's
-    `Level::deserialize` compat exactly — accept old, accept new. -/
-partial def levelFromJson (j : Json) : Except String Level :=
-  if let .ok n := Json.getNat? j then
-    Except.ok (Level.concrete n)
-  else if let .ok v := j.getObjVal? "Concrete" then do
-    let n ← Json.getNat? v; Except.ok (Level.concrete n)
-  else if let .ok v := j.getObjVal? "Var" then do
-    let s ← Json.getStr? v; Except.ok (Level.var s)
-  else if let .ok v := j.getObjVal? "Succ" then do
-    let l ← levelFromJson v; Except.ok (Level.succ l)
-  else if let .ok v := j.getObjVal? "Max" then do
+/-- Concrete wire fields have the same width as native `u32` fields.
+    Larger mathematical levels use structured successors or offsets. -/
+def levelWireNat (j : Json) : Except String Nat := do
+  let n ← j.getNat?
+  if n ≤ Level.wireMax then return n
+  else throw "universe integer exceeds the wire range"
+
+/-- Decode both legacy bare levels and the exact structured level grammar. -/
+partial def levelFromJson (j : Json) : Except String Level := do
+  if let .ok _ := j.getNat? then
+    return .concrete (← levelWireNat j)
+  let fields ← j.getObj?
+  unless fields.toArray.size == 1 do throw "a level must contain exactly one constructor"
+  if let .ok v := j.getObjVal? "Concrete" then
+    return .concrete (← levelWireNat v)
+  else if let .ok v := j.getObjVal? "Var" then
+    return .var (← v.getStr?)
+  else if let .ok v := j.getObjVal? "Succ" then
+    return .succ (← levelFromJson v)
+  else if let .ok v := j.getObjVal? "Offset" then
+    let (base, by_) ← jsonPair? v
+    return .offset (← levelFromJson base) (← levelWireNat by_)
+  else if let .ok v := j.getObjVal? "Max" then
     let (a, b) ← jsonPair? v
-    let a' ← levelFromJson a
-    let b' ← levelFromJson b
-    Except.ok (Level.max a' b')
+    return .max (← levelFromJson a) (← levelFromJson b)
   else
-    Except.error s!"unrecognised Level encoding: {j.compress}"
+    throw "unrecognised level constructor"
 
 partial def termFromJson (j : Json) : Except String Term := do
   let fields ← j.getObj?

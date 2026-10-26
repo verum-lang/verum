@@ -19,7 +19,7 @@
     audit ledger this file is the load-bearing artefact for.
 
     **Universe polymorphism (FV-19)**: `Universe` carries a
-    structured `Level` (Concrete / Var / Succ / Max).  The Lean
+    structured `Level` (Concrete / Var / Succ / Max / Offset).  The Lean
     side uses `Nat` for storage but enforces the Rust `u32`
     concrete-level ceiling during inference. Equality is decided up to algebraic
     normalisation (idempotency, identity at zero, common-succ
@@ -35,6 +35,7 @@ inductive Level : Type where
   | var      (name : String)
   | succ     (l : Level)
   | max      (a b : Level)
+  | offset   (base : Level) (by_ : Nat)
   deriving DecidableEq, Inhabited, Repr
 
 /-- Native certificate terms: dependent functions and pairs, with
@@ -87,12 +88,36 @@ abbrev Ctx := List Term
 /-- Convenience: build the `Concrete(0)` level. -/
 def Level.zero : Level := Level.concrete 0
 
-/-- Build `succ(l)`, applying the algebraic rule `succ(C(n)) = C(n+1)`
-    when the inner level is concrete. -/
-partial def Level.succ' (l : Level) : Level :=
+/-- Maximum concrete wire integer. Expressions can denote larger levels exactly. -/
+def Level.wireMax : Nat := 4294967295
+
+/-- Keep shifts compact; neither arithmetic overflow nor the offset magnitude
+    may change the represented mathematical level. -/
+def Level.offsetNode (base : Level) (by_ : Nat) : Level :=
+  match by_ with
+  | 0 => base
+  | 1 => .succ base
+  | n => .offset base n
+
+partial def Level.addOffset (base : Level) (by_ : Nat) : Level :=
+  if by_ = 0 then base else
+  match base with
+  | .concrete n =>
+    if n + by_ ≤ Level.wireMax then .concrete (n + by_)
+    else Level.offsetNode (.concrete Level.wireMax) (by_ - (Level.wireMax - n))
+  | .succ inner =>
+    if by_ + 1 ≤ Level.wireMax then Level.addOffset inner (by_ + 1)
+    else Level.offsetNode base by_
+  | .offset inner prior =>
+    if prior + by_ ≤ Level.wireMax then Level.addOffset inner (prior + by_)
+    else Level.offsetNode base by_
+  | other => Level.offsetNode other by_
+
+/-- Successor after the caller has checked the concrete wire ceiling. -/
+def Level.succ' (l : Level) : Level :=
   match l with
   | .concrete n => .concrete (n + 1)
-  | other       => .succ other
+  | other => .succ other
 
 /-- Lexicographic structural ordering on canonical Levels.  Used by
     [`Level.maxCanonical`] to produce a deterministic Max-summand
@@ -103,12 +128,17 @@ partial def Level.lexCompare (a b : Level) : Ordering :=
     | .var _      => 1
     | .succ _     => 2
     | .max _ _    => 3
+    | .offset _ _ => 4
   match compare (rank a) (rank b) with
   | .eq =>
     match a, b with
     | .concrete x, .concrete y => compare x y
     | .var x,      .var y      => compare x y
     | .succ x,     .succ y     => Level.lexCompare x y
+    | .offset x n, .offset y m =>
+      match Level.lexCompare x y with
+      | .eq => compare n m
+      | order => order
     | .max xa xb,  .max ya yb  =>
       match Level.lexCompare xa ya with
       | .eq    => Level.lexCompare xb yb
@@ -116,17 +146,22 @@ partial def Level.lexCompare (a b : Level) : Ordering :=
     | _, _ => .eq
   | other => other
 
-/-- Number of `succ` constructors at the head of a level. -/
+/-- Common-prefix budget, capped at the wire integer width. This bound is
+    only a factoring budget; it never saturates a universe's value. -/
 partial def Level.succDepth : Level → Nat
-  | .succ inner => 1 + Level.succDepth inner
-  | _           => 0
+  | .succ inner => min Level.wireMax (1 + Level.succDepth inner)
+  | .offset inner by_ => min Level.wireMax (by_ + Level.succDepth inner)
+  | _ => 0
 
-/-- Strip up to `count` leading `succ` constructors. -/
+/-- Strip an available prefix by visiting syntax, never by counting to its value. -/
 partial def Level.stripSucc (l : Level) (count : Nat) : Level :=
   if count = 0 then l
   else match l with
     | .succ inner => Level.stripSucc inner (count - 1)
-    | other       => other
+    | .offset inner by_ =>
+      if by_ ≤ count then Level.stripSucc inner (count - by_)
+      else Level.addOffset inner (by_ - count)
+    | other => other
 
 /-- Flatten a (possibly-nested) `max` into a flat list of summands. -/
 partial def Level.flattenMax (l : Level) : List Level :=
@@ -157,10 +192,11 @@ partial def Level.assembleMax (concrete : Option Nat) (symbolic : List Level) : 
     (match concreteToKeep with
      | some n => [.concrete n]
      | none   => []) ++ symbolic
-  match all with
-  | []      => .concrete 0
-  | [x]     => x
-  | x :: rest => rest.foldr (fun y acc => .max y acc) x
+  match all.reverse with
+  | [] => .concrete 0
+  | last :: rest => rest.foldl (fun acc x => .max x acc) last
+
+mutual
 
 /-- Build the canonical form of `max(a, b)` assuming both are
     already individually normalised. -/
@@ -186,8 +222,8 @@ partial def Level.maxCanonical (a b : Level) : Level :=
     if common > 0 then
       let strippedConcrete := concreteMax.map (fun n => n - common)
       let strippedSymbolic := symbolicSorted.map (fun s => Level.stripSucc s common)
-      Nat.repeat Level.succ common
-        (Level.assembleMax strippedConcrete strippedSymbolic)
+      let inner := Level.normalize (Level.assembleMax strippedConcrete strippedSymbolic)
+      Level.addOffset inner common
     else
       Level.assembleMax concreteMax symbolicSorted
   else
@@ -198,15 +234,14 @@ partial def Level.normalize (l : Level) : Level :=
   match l with
   | .concrete _  => l
   | .var _       => l
-  | .succ inner =>
-    let n := Level.normalize inner
-    match n with
-    | .concrete k => .concrete (k + 1)
-    | other       => .succ other
+  | .succ inner => Level.addOffset (Level.normalize inner) 1
+  | .offset inner by_ => Level.addOffset (Level.normalize inner) by_
   | .max a b =>
     let aN := Level.normalize a
     let bN := Level.normalize b
     Level.maxCanonical aN bN
+
+end
 
 /-- Definitional equality on levels — normalise both sides and
     compare structurally. -/
@@ -218,14 +253,9 @@ def Level.eq (a b : Level) : Bool :=
     decision is made on the Rust side via `Level::checked_succ`. -/
 partial def Level.checkedSucc (l : Level) : Level := Level.succ' l
 
-/-- Lift a level by `by` levels — `concrete` adds, symbolic wraps in
-    `by` `succ`s.  Mirrors `Level::shifted_by` on the Rust side. -/
-partial def Level.shiftedBy (l : Level) (by_ : Nat) : Level :=
-  if by_ = 0 then l
-  else match l with
-    | .concrete n => .concrete (n + by_)
-    | other =>
-      Level.normalize (Nat.repeat Level.succ by_ other)
+/-- Compact exact lifting, with work bounded by the expression size. -/
+def Level.shiftedBy (l : Level) (by_ : Nat) : Level :=
+  if by_ = 0 then l else Level.addOffset (Level.normalize l) by_
 
 -- =============================================================================
 -- Term-level operations
